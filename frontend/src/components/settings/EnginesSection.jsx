@@ -20,12 +20,15 @@ const ENGINE_SECRETS = [
       + 'upstream image models, including the ones the two engines above call directly. '
       + 'Test only checks that a key is saved — OpenRouter bills per request, so nothing '
       + 'is sent until you generate.' },
+  { key: 'QWEN_API_KEY', label: 'DashScope API key', testTarget: 'qwen',
+    help: 'Powers the Qwen Image engine (Alibaba). Get a key at https://dashscope.console.aliyun.com/apiKey.' },
 ]
 
 const ENGINE_OPTIONS = [
   { id: 'nanobanana', label: 'Nano Banana (Gemini)' },
   { id: 'chatgpt', label: 'ChatGPT (OpenAI)' },
   { id: 'openrouter', label: 'OpenRouter' },
+  { id: 'qwen', label: 'Qwen Image (Alibaba)' },
   { id: 'klein', label: 'Klein (ComfyUI, local)' },
   { id: 'krea', label: 'Krea 2 Edit (ComfyUI, local)' },
 ]
@@ -650,6 +653,32 @@ function ImageModelsCard({ config, setField }) {
         <a href="https://openrouter.ai/models?output_modalities=image" target="_blank" rel="noreferrer"
           className="text-primary underline">openrouter.ai/models</a>.
       </ModelField>
+
+      <ModelField {...shared} id="engines-qwen_model" configKey="qwen_model"
+        label="Qwen Image model" placeholder="qwen-image-2.0-pro-2026-06-25">
+        Blank = <code className="break-all">qwen-image-2.0-pro-2026-06-25</code> — latest API-accessible Qwen Image model
+        from Alibaba. Qwen Image 3.0 (chat-only) is not available via API.
+      </ModelField>
+
+      <div {...shared} className="border-t border-border pt-3 space-y-3">
+        <label htmlFor="engines-qwen_region" className="block text-xs font-medium text-content">
+          Qwen region
+        </label>
+        <select
+          id="engines-qwen_region"
+          value={config.engines?.qwen_region || 'sg'}
+          onChange={(e) => setField('engines', 'qwen_region', e.target.value)}
+          className={INPUT_CLASS}
+        >
+          <option value="sg">Singapore (default, recommended)</option>
+          <option value="cn">China</option>
+          <option value="us">US</option>
+        </select>
+        <p className="text-[0.6875rem] text-content-subtle">
+          DashScope endpoint region. Choose the one closest to you or your API account region.
+        </p>
+      </div>
+
       <p className="border-t border-border pt-3 text-xs text-content-subtle">
         A model must accept your reference photos. One that only takes text will either be
         refused — the tile then says which model and why — or quietly ignore the references and
