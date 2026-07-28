@@ -49,6 +49,13 @@ _ENDPOINTS = {
     'us': 'https://dashscope-us.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
 }
 
+# Models available per region. qwen-image-2.0-pro-2026-06-25 only available in sg/us.
+_REGION_MODELS = {
+    'cn': [],  # China region uses different model IDs
+    'sg': ['qwen-image-2.0-pro-2026-06-25'],
+    'us': ['qwen-image-2.0-pro-2026-06-25'],
+}
+
 _NO_KEY = ('no DashScope API key saved — add QWEN_API_KEY in '
            'Settings > Image engines')
 
@@ -75,6 +82,13 @@ def _api_key():
 def _region():
     region = (cfg.get('engines.qwen_region') or '').strip().lower()
     return region if region in _ENDPOINTS else 'sg'
+
+
+def get_available_models(region: str | None = None) -> list[str]:
+    """Models available in a region. Defaults to current region."""
+    if region is None:
+        region = _region()
+    return _REGION_MODELS.get(region, [])
 
 
 def _endpoint():
@@ -128,6 +142,8 @@ def _raise_for_api_status(resp, *, model: str) -> None:
         return
     detail = _error_message(resp)
     suffix = f': {detail}' if detail else ''
+    region = _region()
+
     if status == 401:
         raise QwenImageFatal(f'DashScope rejected the API key (HTTP 401){suffix}')
     if status == 403:
@@ -140,6 +156,17 @@ def _raise_for_api_status(resp, *, model: str) -> None:
     if status == 429:
         raise QwenImageError(f'DashScope rate-limited (HTTP 429){suffix}')
     if status == 400:
+        if 'model not exist' in detail.lower():
+            available = get_available_models(region)
+            if available:
+                raise QwenImageFatal(
+                    f'Model "{model}" not available in region "{region}". '
+                    f'Available models: {", ".join(available)}. '
+                    f'Change region in Settings > Image engines > Qwen region')
+            else:
+                raise QwenImageFatal(
+                    f'No Qwen Image models available in region "{region}". '
+                    f'Switch to Singapore (sg) or US (us) region')
         if _blames_the_model(resp, detail):
             raise QwenImageFatal(
                 f'DashScope rejected model "{model}" (HTTP 400){suffix} — '

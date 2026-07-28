@@ -693,11 +693,24 @@ function ImageModelsCard({ config, setField, configDefaults }) {
           className="text-primary underline">openrouter.ai/models</a>.
       </ModelField>
 
-      <ModelField {...shared} id="engines-qwen_model" configKey="qwen_model"
-        label="Qwen Image model" placeholder="qwen-image-2.0-pro-2026-06-25">
-        Blank = <code className="break-all">qwen-image-2.0-pro-2026-06-25</code> — latest API-accessible Qwen Image model
-        from Alibaba. Qwen Image 3.0 (chat-only) is not available via API.
-      </ModelField>
+      <div {...shared} className="border-t border-border pt-3 space-y-2">
+        <label htmlFor="engines-qwen_model" className="block text-xs font-medium text-content">
+          Qwen Image model
+        </label>
+        <select
+          id="engines-qwen_model"
+          value={config.engines?.qwen_model || ''}
+          onChange={(e) => setField('engines', 'qwen_model', e.target.value)}
+          className={INPUT_CLASS}
+        >
+          <option value="">Default: qwen-image-2.0-pro-2026-06-25</option>
+          <option value="qwen-image-2.0-pro-2026-06-25">qwen-image-2.0-pro-2026-06-25 (Singapore/US)</option>
+        </select>
+        <p className="text-[0.6875rem] text-content-subtle">
+          ⚠️ Only available in Singapore (sg) or US (us) regions. China region does not support this model.
+          Change region in "Qwen region" below if model selection fails.
+        </p>
+      </div>
 
       <div {...shared} className="border-t border-border pt-3 space-y-3">
         <label htmlFor="engines-qwen_region" className="block text-xs font-medium text-content">
@@ -709,12 +722,13 @@ function ImageModelsCard({ config, setField, configDefaults }) {
           onChange={(e) => setField('engines', 'qwen_region', e.target.value)}
           className={INPUT_CLASS}
         >
-          <option value="sg">Singapore (default, recommended)</option>
-          <option value="cn">China</option>
-          <option value="us">US</option>
+          <option value="sg">Singapore (recommended, has models)</option>
+          <option value="us">US (has models)</option>
+          <option value="cn">China (no Qwen Image models)</option>
         </select>
         <p className="text-[0.6875rem] text-content-subtle">
-          DashScope endpoint region. Choose the one closest to you or your API account region.
+          ⚠️ DashScope region. Qwen Image only available in Singapore (sg) and US (us).
+          If "Model not exist" error occurs, switch to Singapore.
         </p>
       </div>
 
