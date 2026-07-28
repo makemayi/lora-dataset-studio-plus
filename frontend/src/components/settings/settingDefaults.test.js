@@ -174,6 +174,7 @@ const COVERED = [
   // have a way back to the shipped value.
   ['TrainingSection.jsx', 'face_mask', 'expand'],
   ['TrainingSection.jsx', 'face_mask', 'min_weight'],
+  ['LocalToolsSection.jsx', 'comfyui', 'object_info_timeout_s'],
   ['LocalToolsSection.jsx', 'ollama', 'vision_concurrency'],
   ['LocalToolsSection.jsx', 'ollama', 'vision_keep_warm_seconds'],
   ['ServerSection.jsx', 'server', 'port'],

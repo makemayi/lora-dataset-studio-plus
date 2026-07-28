@@ -237,8 +237,55 @@ test('a non-instant threshold offers to run the pass that would apply it', () =>
     assert.match(routes, new RegExp(`@bp\\.post\\('/bank/<int:bank_id>/${r.endpoint}'\\)`),
       `${r.endpoint} is a real route`);
   }
-  assert.match(panel, /onRunPass\?\.\(rerun\.endpoint\)/);
+  // The click goes through runPass(), which brackets onRunPass with the two
+  // things a 202 cannot provide on its own: the "starting/running" state and
+  // the figures the pass produced.
+  assert.match(panel, /onRun=\{\(\) => runPass\(rerun\.endpoint\)\}/);
+  assert.match(panel, /await onRunPass\?\.\(endpoint\)/);
   assert.match(ws, /onRunPass=\{\(endpoint\)/);
+});
+
+test('a re-run button cannot be pressed while a pass owns the bank', () => {
+  // A bank runs ONE job at a time, so this click could only ever have produced
+  // the server's "a scan job is already running on this bank". The gating and
+  // its wording live in bankPassRun.js (executable); this pins the WIRING —
+  // that the panel is actually fed the live job and actually disables on it.
+  assert.match(panel, /import \{[^}]*passButtonState[^}]*\} from '\.\/bankPassRun\.js'/s);
+  assert.match(panel, /disabled=\{state\.disabled\}/);
+  // A greyed-out control must SAY why, not merely be grey.
+  assert.match(panel, /aria-describedby=\{describedBy \|\| undefined\}/);
+  assert.match(panel, /title=\{why \|\| rerun\.note\}/);
+  // The workspace hands over the same snapshot its progress bar reads — no
+  // second poll, no fourth progress mechanism.
+  assert.match(ws, /activity=\{payload\?\.activity\}\s+offline=\{!connection\.online\}/);
+});
+
+test('an occupied-bank refusal is reworded ONCE, for every bank action', () => {
+  // act() is the single funnel for every mutating Bank click (the ✨ passes, the
+  // ↻ re-runs, 🗑 Delete rejected, ⬆ Promote, 🚀 Launch all). Rewording the 409
+  // there is what stops the server sentence reaching a toast anywhere in the
+  // bank — a per-button fix would have left eleven other buttons raw.
+  assert.match(ws, /busyRefusal\(\{ kind, activity: payload\?\.activity \}\)/);
+  assert.match(ws, /e\?\.status === 409 && kind/);
+  // The route has to label the refusal for that to be possible: the 409 often
+  // lands before the first progress poll, so its body is the only thing that
+  // knows which pass is in the way.
+  const routes = fs.readFileSync(
+    new URL('../../../../backend/app/routes/bank.py', import.meta.url), 'utf8');
+  assert.match(routes, /'busy_kind': e\.kind/);
+  assert.ok(!/jsonify\(\{'error': str\(e\)\}\), 409/.test(routes),
+    'every occupied-bank 409 must go through the labelled _busy() helper');
+});
+
+test('a finished re-run reports its figures, announced exactly once', () => {
+  assert.match(panel, /passOutcome\(/);
+  // The counts come from the payload summaries the duplicate chips already use.
+  assert.match(ws, /dupSummary=\{payload\?\.dup\}\s+semanticDupSummary=\{payload\?\.semantic_dup\}/);
+  // role="status" (not aria-live) on a node that appears once per run: announced
+  // when it lands, never re-announced as progress ticks.
+  assert.match(panel, /id=\{outcomeId\} role="status"/);
+  const live = [...panel.matchAll(/aria-live=/g)];
+  assert.equal(live.length, 1, 'still exactly one aria-live region in the panel');
 });
 
 test('the live preview never raises a notification of its own', () => {

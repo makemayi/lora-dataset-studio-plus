@@ -675,6 +675,105 @@ _OBJECT_INFO_TTL = 60
 _object_info_cache = {"data": None, "timestamp": 0, "key": None, "enums": None,
                       "files": None}
 
+# --- /object_info timeout budget --------------------------------------------
+# WHY ONLY THIS ONE IS A SETTING (the other ComfyUI timeouts in this file were
+# audited at the same time, and deliberately left alone):
+#
+#   /object_info   ~MB, and GROWS with the install — every node class and every
+#                  model file the user has. THE defect: any constant is wrong for
+#                  somebody, and wrong for exactly the people with the richest
+#                  ComfyUI. Fixed below.
+#   /prompt (10s)  request is the graph, response is one id. Size is bounded by
+#                  OUR workflow, not by the user's install. Also a WRITE: a longer
+#                  budget on a retry-capable path buys duplicate submissions, not
+#                  reliability.
+#   /history/<id>  one prompt's outputs. Bounded.
+#   /queue, /interrupt, /free   constant-size control calls.
+#   /view (60s, streamed)       an image download; already generous.
+#   capabilities._http_ok on /history (3s)  the reachability VERDICT. It has to
+#                  stay snappy — it runs on every capability poll and gates the
+#                  whole UI. Its problem was never the number, it was that a
+#                  3 s miss was reported as "ComfyUI isn't running"; it now asks
+#                  this probe (the one that waited long enough to know) instead.
+#
+# So: one honest knob, not five guessed ones.
+# Two DIFFERENT budgets, because "ComfyUI is off" and "ComfyUI is slow" are two
+# different failures and one number cannot serve both:
+#
+#   * CONNECT — how long we wait for the TCP handshake. A ComfyUI that isn't
+#     running refuses the connection instantly on loopback, and a wrong host /
+#     firewalled port fails here. This is the ONLY budget an absent ComfyUI ever
+#     pays, which is what makes the read budget below safe to make generous: the
+#     old single 8 s number had to be small *because* it was also the price of a
+#     stopped ComfyUI. Splitting them removes that trade-off entirely.
+#   * READ — how long ComfyUI may spend BUILDING the answer once it has accepted
+#     the connection. This is the number that has to scale with the install: the
+#     /object_info payload lists every node class and every model file, so it
+#     grows with the custom-node packs and the weights the user has installed.
+#     Configurable (`comfyui.object_info_timeout_s`) because no constant can be
+#     right for every install — that is the whole lesson of this bug.
+_OBJECT_INFO_CONNECT_TIMEOUT = 3
+_OBJECT_INFO_TIMEOUT_MIN = 5
+_OBJECT_INFO_TIMEOUT_MAX = 300
+
+# A FAILED probe is cached too, for a much shorter window than a successful one.
+# It used to be cached not at all ("fail-open, retried at once"), which is a fine
+# intention and a bad mechanism: nothing retried the SAME call, but every other
+# caller re-fired the full payload. On an install where /object_info takes 15 s,
+# the capability poll, the Studio preflight and each generate therefore each paid
+# it in full, back to back — and because ComfyUI builds that answer on its own
+# event loop, our own storm of probes is what kept the cheap `/history`
+# reachability check timing out. THAT is how a slow ComfyUI came to be reported
+# as a stopped one. One failure now silences the storm for a few seconds; every
+# consumer still fails OPEN, so this can only ever make the app decide FASTER,
+# never differently, and `clear_model_caches()` drops it on demand.
+_OBJECT_INFO_FAIL_TTL = 20
+# Outcome of the last real ATTEMPT (a cache hit is not an attempt and never
+# rewrites it). Doubles as the negative cache: `status != 'ok'` within
+# _OBJECT_INFO_FAIL_TTL of `timestamp`, for the same api address, is served
+# without a request.
+_object_info_last = {"timestamp": 0, "key": None, "status": "unknown", "waited": 0}
+
+
+def object_info_timeout() -> int:
+    """Seconds ComfyUI may spend answering /object_info, from
+    `comfyui.object_info_timeout_s`, clamped to 5-300.
+
+    Total by construction (never raises, never returns None): an unreadable or
+    absurd value falls back to the shipped default rather than disabling a probe
+    the whole app leans on."""
+    default = 45
+    try:
+        default = int((cfg.DEFAULTS.get('comfyui') or {}).get('object_info_timeout_s', 45))
+    except (TypeError, ValueError):      # pragma: no cover - DEFAULTS is ours
+        pass
+    raw = cfg.get('comfyui.object_info_timeout_s')
+    if raw is None or isinstance(raw, bool):
+        return default
+    try:
+        value = int(float(raw))
+    except (TypeError, ValueError):
+        logger.warning('ignoring unusable comfyui.object_info_timeout_s %r', raw)
+        return default
+    return max(_OBJECT_INFO_TIMEOUT_MIN, min(_OBJECT_INFO_TIMEOUT_MAX, value))
+
+
+def object_info_health() -> dict:
+    """What the LAST /object_info attempt did, so a caller can tell the two causes
+    apart instead of collapsing them into "ComfyUI isn't running":
+
+      status 'ok'          — answered.
+      status 'timeout'     — the connection was ACCEPTED and ComfyUI then took
+                             longer than `waited` seconds to produce the payload.
+                             It is running; it is slow at enumerating itself.
+      status 'unreachable' — nothing accepted the connection (or it died mid-read).
+      status 'unknown'     — never probed since startup / a cache clear.
+
+    `waited` is the read budget that was in force, so a message can quote the
+    number the user would raise."""
+    return {'status': _object_info_last['status'],
+            'waited': _object_info_last['waited'] or object_info_timeout()}
+
 # Widget inputs whose accepted values describe what a ComfyUI install CAN DO — a
 # capability that depends on its version and on the node packs it loaded — as
 # opposed to what it HAPPENS TO HAVE on disk (`ckpt_name`, `unet_name`,
@@ -818,35 +917,58 @@ def _distill_model_files(data):
     return out
 
 
-def _fetch_object_info(timeout=8):
+def _fetch_object_info(timeout=None):
     """(classes, enums, model_files) from ONE `GET /object_info`, all three served
     by the same short TTL cache — the payload is the heaviest probe in the app, so
     the checks below must never cost a second request. (None, None, None) on any
-    failure."""
+    failure.
+
+    `timeout` is the READ budget in seconds; None (the normal case) reads
+    `object_info_timeout()`. The connect budget is separate and fixed — see
+    _OBJECT_INFO_CONNECT_TIMEOUT."""
     addr = api_address()
     now = time.time()
     if (_object_info_cache["data"] is not None and _object_info_cache["key"] == addr
             and now - _object_info_cache["timestamp"] < _OBJECT_INFO_TTL):
         return (_object_info_cache["data"], _object_info_cache["enums"],
                 _object_info_cache["files"])
+    if (_object_info_last["status"] not in ('ok', 'unknown')
+            and _object_info_last["key"] == addr
+            and now - _object_info_last["timestamp"] < _OBJECT_INFO_FAIL_TTL):
+        # Negative cache: one failure answers the burst behind it. See
+        # _OBJECT_INFO_FAIL_TTL — every consumer of this already fails OPEN.
+        return None, None, None
+    read_budget = int(timeout) if timeout else object_info_timeout()
     try:
-        resp = requests.get(urljoin(addr, '/object_info'), timeout=timeout)
+        resp = requests.get(urljoin(addr, '/object_info'),
+                            timeout=(_OBJECT_INFO_CONNECT_TIMEOUT, read_budget))
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
-        logger.warning(f"fetch_object_info_classes failed: {e}")
-        # a failed probe is never cached (fail-open, retried at once)
+        # 'timeout' = the connection was accepted and ComfyUI then took too long to
+        # build the payload — it IS running, it is slow at enumerating itself. Any
+        # other failure means nothing answered. Collapsing the two is the bug this
+        # split exists to kill: a user was sent to check whether ComfyUI was started
+        # while it was, in fact, started and busy (j_o_e_l., Discord).
+        status = 'timeout' if isinstance(e, requests.exceptions.ReadTimeout) else 'unreachable'
+        _object_info_last.update(timestamp=now, key=addr, status=status,
+                                 waited=read_budget)
+        logger.warning('fetch_object_info failed (%s, %ss budget): %s',
+                       status, read_budget, e)
         return None, None, None
     if not isinstance(data, dict):
+        _object_info_last.update(timestamp=now, key=addr, status='unreachable',
+                                 waited=read_budget)
         return None, None, None
     classes, enums = set(data.keys()), _distill_object_info(data)
     files = _distill_model_files(data)
     _object_info_cache.update(data=classes, timestamp=now, key=addr, enums=enums,
                               files=files)
+    _object_info_last.update(timestamp=now, key=addr, status='ok', waited=read_budget)
     return classes, enums, files
 
 
-def fetch_object_info_classes(timeout=8):
+def fetch_object_info_classes(timeout=None):
     """Set of node `class_type` names the target ComfyUI exposes = the KEYS of
     `GET /object_info`. Used by the Studio preflight to tell a required CUSTOM
     node (e.g. the Krea rebalance / detail-daemon nodes a workflow
@@ -862,11 +984,15 @@ def fetch_object_info_classes(timeout=8):
     Studio run asks for it twice (grid preflight + per-run class resolution). The node
     set only changes when ComfyUI restarts or a pack is installed; the refresh-models
     button (`clear_model_caches`) drops the cache, so a freshly installed node is
-    visible on demand rather than after the TTL."""
+    visible on demand rather than after the TTL.
+
+    HOW LONG it may take is a setting, not a constant: 8.8 MB / ~5 s is one
+    install's number, and the payload grows with every node pack and every model
+    file the user adds. See `object_info_timeout()`."""
     return _fetch_object_info(timeout)[0]
 
 
-def fetch_object_info_model_files(timeout=8):
+def fetch_object_info_model_files(timeout=None):
     """{class_type: {input_name: frozenset(normalised names)}} for the model-FILE
     inputs of the loader classes we ship, from the SAME cached /object_info as the
     class and enum views — never a second request.
@@ -875,7 +1001,7 @@ def fetch_object_info_model_files(timeout=8):
     return _fetch_object_info(timeout)[2]
 
 
-def fetch_object_info_enums(timeout=8):
+def fetch_object_info_enums(timeout=None):
     """{class_type: {input_name: frozenset(accepted values)}} for the capability
     inputs (see `_VERSION_SENSITIVE_INPUTS`), from the SAME cached /object_info as
     `fetch_object_info_classes` — never a second request.
@@ -1598,6 +1724,9 @@ def clear_model_caches() -> None:
             c["key"] = None
         if "enums" in c:      # the enum view rides the same /object_info payload
             c["enums"] = None
+    # The NEGATIVE /object_info cache goes with them: "I just started ComfyUI /
+    # just changed the URL, refresh" must re-probe now, not in 20 s.
+    _object_info_last.update(timestamp=0, key=None, status='unknown', waited=0)
 
 
 def get_zimage_loras():

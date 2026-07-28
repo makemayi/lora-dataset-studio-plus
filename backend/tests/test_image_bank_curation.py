@@ -506,3 +506,194 @@ def test_diverse_differs_from_similar_on_same_pool(client, tmp_path, app):
     div_names = _names_of(app, bank_id, div['image_ids'])
     assert div_names & {'x0.jpg', 'x1.jpg'}                               # coverage grabs a far point
     assert _names_of(app, bank_id, sim['image_ids']) == {'a0.jpg', 'a1.jpg', 'a2.jpg'}
+
+
+# --- balance: coverage of the LABELS, not of the embedding space --------------
+# `select_diverse` answers "is my set varied?"; `select_balanced` answers "does my
+# set COVER what I want to generate?". Different questions, and on a lopsided bank
+# the first one returns the bank's own proportions — 8 body shots for 1 back view
+# — because framing is only a faint direction in CLIP space: two shots of the same
+# scene sit closer together than two body shots of different scenes. That is the
+# shape these fixtures reproduce.
+
+_MIX = ('body',) * 8 + ('bust',) * 6 + ('face',) * 2 + ('back',)   # per scene
+_FRAMING_AX = {'face': 0, 'bust': 1, 'body': 2, 'back': 3}
+
+
+def _set_framings(app, bank_id, by_name):
+    with app.app_context():
+        from app.extensions import db
+        from app.models import BankImage
+        for r in BankImage.query.filter_by(bank_id=bank_id).all():
+            fr = by_name.get(os.path.basename(r.relpath))
+            if fr is not None:
+                r.framing = fr
+        db.session.commit()
+
+
+def _framing_hist(app, bank_id, ids):
+    with app.app_context():
+        from app.models import BankImage
+        by_id = {r.id: r.framing
+                 for r in BankImage.query.filter_by(bank_id=bank_id).all()}
+        h = {k: 0 for k in ('face', 'bust', 'body', 'back')}
+        for i in ids:
+            if by_id.get(i) in h:
+                h[by_id[i]] += 1
+        return h
+
+
+def _lopsided_bank(client, tmp_path, app, mix=_MIX, scenes=5, outlier=None):
+    """One subject, ``scenes`` settings, framings distributed inside each scene in
+    a realistically lopsided mix. The SCENE dominates the embedding (0.4) and the
+    framing barely shows (0.05) — the measured shape of a mono-subject bank, where
+    everything is 0.6–0.9 similar and the label carries information the pixels
+    hardly separate. ``outlier`` adds one image orthogonal to the whole bank
+    (a meme, a screenshot) carrying that framing label."""
+    embs, framings = {}, {}
+    for s in range(scenes):
+        for j, fr in enumerate(mix):
+            v = [0.0] * 12
+            v[0] = 0.9                     # the subject, in every shot
+            v[1 + s] = 0.4                 # the scene — the dominant variation
+            v[6 + _FRAMING_AX[fr]] = 0.05  # the framing — faint, as measured
+            v[10] = 0.01 * j               # intra-scene wobble
+            v[11] = 0.004 * ((j * 7) % 5)
+            nm = f's{s}_{j:02d}_{fr}.jpg'
+            embs[nm] = _emb(*v)
+            framings[nm] = fr
+    if outlier:
+        v = [0.0] * 16
+        v[15] = 1.0                        # orthogonal to everything above
+        embs['zz_outlier.jpg'] = _emb(*v)
+        framings['zz_outlier.jpg'] = outlier
+    names = sorted(embs)
+    bank_id, _ = _mkbank(client, tmp_path, names)
+    _write_score_cache(app, bank_id, {k: embs[k] for k in names})
+    _set_framings(app, bank_id, framings)
+    return bank_id
+
+
+def test_diverse_alone_returns_the_banks_own_imbalance(client, tmp_path, app):
+    """RED, kept as the reason this feature exists: on the lopsided bank, asking
+    the DIVERSE selector for 20 images returns the bank's proportions — the rare
+    framing stays rare. Nothing is wrong with that answer; it just isn't the
+    answer to "cover my framings", which is why a second selector exists."""
+    bank_id = _lopsided_bank(client, tmp_path, app)
+    body = client.post(f'/api/bank/{bank_id}/select-diverse',
+                       json={'n': 20}).get_json()
+    h = _framing_hist(app, bank_id, body['image_ids'])
+    assert sum(h.values()) == 20
+    assert max(h.values()) - min(h.values()) >= 4     # visibly lopsided
+    assert h['back'] < 5 or h['face'] < 5             # the thin framings stay thin
+
+
+def test_balanced_spreads_over_the_framings(client, tmp_path, app):
+    """THE CENTRAL ASSERTION. Same bank, same 20 images asked for: an even split
+    over the four framings, 5 / 5 / 5 / 5 — while `select_diverse` above returns
+    the bank's own lopsided mix."""
+    bank_id = _lopsided_bank(client, tmp_path, app)
+    r = client.post(f'/api/bank/{bank_id}/select-balanced', json={'n': 20})
+    assert r.status_code == 200, r.get_json()
+    body = r.get_json()
+    assert body['axis'] == 'framing' and body['selected'] == 20
+    assert _framing_hist(app, bank_id, body['image_ids']) == \
+        {'face': 5, 'bust': 5, 'body': 5, 'back': 5}
+    # …and it SAYS so, per bucket, in plain numbers (what the panel reads out).
+    got = {b['framing']: (b['selected'], b['fair_share'], b['short'])
+           for b in body['buckets']}
+    assert got == {'face': (5, 5, False), 'bust': (5, 5, False),
+                   'body': (5, 5, False), 'back': (5, 5, False)}
+    assert body['unlabelled'] == 0 and body['shortfall'] == 0
+
+
+def test_balanced_reports_an_axis_it_cannot_satisfy(client, tmp_path, app):
+    """The impossible case: only 2 back views exist but an even split wants 5.
+    The bucket is filled to the brim, the deficit is REPORTED (selected < fair
+    share, short=True) and the freed picks go to the framings that have room —
+    never silently, and never as a smaller set than was asked for."""
+    mix = ('body',) * 9 + ('bust',) * 6 + ('face',) * 2     # no back in the mix
+    bank_id = _lopsided_bank(client, tmp_path, app, mix=mix)
+    with app.app_context():
+        from app.extensions import db
+        from app.models import BankImage
+        rows = sorted(BankImage.query.filter_by(bank_id=bank_id).all(),
+                      key=lambda r: r.id)
+        for r in rows[:2]:
+            r.framing = 'back'                              # exactly 2 back views
+        db.session.commit()
+    body = client.post(f'/api/bank/{bank_id}/select-balanced',
+                       json={'n': 20}).get_json()
+    back = next(b for b in body['buckets'] if b['framing'] == 'back')
+    assert (back['available'], back['selected'], back['fair_share'],
+            back['short']) == (2, 2, 5, True)
+    assert body['selected'] == 20                # topped up, not shrunk…
+    assert sum(b['selected'] for b in body['buckets']) == 20
+    assert [b['framing'] for b in body['buckets'] if b['short']] == ['back']  # …and named
+
+
+def test_balanced_is_deterministic(client, tmp_path, app):
+    bank_id = _lopsided_bank(client, tmp_path, app)
+    a = client.post(f'/api/bank/{bank_id}/select-balanced', json={'n': 13}).get_json()
+    b = client.post(f'/api/bank/{bank_id}/select-balanced', json={'n': 13}).get_json()
+    assert a['image_ids'] == b['image_ids'] == sorted(a['image_ids'])
+    assert a['buckets'] == b['buckets']
+
+
+def test_balanced_keeps_the_typicality_guard(client, tmp_path, app):
+    """ANTI-REGRESSION on the guard `select_diverse` was just given, now inside a
+    bucket: an image isolated from the WHOLE bank must stop winning on isolation
+    alone. Guard off picks the aberration first (max-min distance IS the criterion
+    that prefers isolated points); guard on leaves it out and takes real back
+    views instead. The bucket has room to choose — a bucket so thin that every
+    member is needed keeps the aberration, and rightly says so as a shortfall."""
+    mix = ('body',) * 8 + ('bust',) * 6 + ('face',) * 2 + ('back',) * 3
+    bank_id = _lopsided_bank(client, tmp_path, app, mix=mix, outlier='back')
+    odd_id = _id_of(app, bank_id, 'zz_outlier.jpg')
+    off = client.post(f'/api/bank/{bank_id}/select-balanced',
+                      json={'n': 20, 'typicality': 0}).get_json()
+    on = client.post(f'/api/bank/{bank_id}/select-balanced',
+                     json={'n': 20, 'typicality': 1}).get_json()
+    assert off['typicality'] == 0.0 and on['typicality'] == 1.0
+    assert len(off['image_ids']) == len(on['image_ids']) == 20
+    assert odd_id in off['image_ids']          # pure max-min loves the aberration
+    assert odd_id not in on['image_ids']       # …the guard does not
+
+
+def test_balanced_says_which_pass_is_missing_on_an_unlabelled_bank(client, tmp_path, app):
+    """A bank nobody has classified is the DEFAULT state, not an error: no empty
+    selection, no misleading one — the exact missing pass, with the numbers."""
+    names = [f'i{k}.jpg' for k in range(6)]
+    embs = {nm: _emb(*np.random.RandomState(k + 7).randn(5)) for k, nm in enumerate(names)}
+    bank_id, _ = _mkbank(client, tmp_path, names)
+    _write_score_cache(app, bank_id, embs)
+    r = client.post(f'/api/bank/{bank_id}/select-balanced', json={'n': 4})
+    assert r.status_code == 400
+    err = r.get_json()['error']
+    assert 'Framing pass' in err and '6' in err
+    assert 'Pick diverse' in err              # the selector that still works
+
+
+def test_balanced_hint_when_no_embeddings(client, tmp_path, app):
+    bank_id, _ = _mkbank(client, tmp_path, ['a.jpg'])
+    r = client.post(f'/api/bank/{bank_id}/select-balanced', json={'n': 4})
+    assert r.status_code == 400 and 'Score first' in r.get_json()['error']
+
+
+def test_balanced_person_axis_is_opt_in(client, tmp_path, app):
+    """The person axis crosses framing with face_cluster. Measured on a real bank
+    it is sparse (4.7% of rows, 561 clusters) — hence opt-in, never the default."""
+    bank_id = _lopsided_bank(client, tmp_path, app, scenes=3)
+    with app.app_context():
+        from app.extensions import db
+        from app.models import BankImage
+        rows = sorted(BankImage.query.filter_by(bank_id=bank_id).all(),
+                      key=lambda r: r.id)
+        for k, r in enumerate(rows):
+            r.face_cluster = 1 if k % 2 == 0 else 2
+        db.session.commit()
+    body = client.post(f'/api/bank/{bank_id}/select-balanced',
+                       json={'n': 16, 'axis': 'framing+person'}).get_json()
+    assert body['axis'] == 'framing+person'
+    assert {b['cluster'] for b in body['buckets']} == {1, 2}
+    assert len(body['buckets']) == 8                     # 4 framings × 2 people

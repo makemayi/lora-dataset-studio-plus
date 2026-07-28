@@ -2,8 +2,17 @@
 technical thread (crop-then-super-resolve biases training toward that local patch;
 the discrete face/bust/body/back tally treated a native close-up and a heavily
 enlarged crop as equivalent). face_crop_to_square_webp / crop_image now report the
-LANCZOS enlargement factor (size / box_side) so it can be persisted per image and
-surfaced per framing bucket via dataset_payload()['composition_upscaled'].
+ratio (size / box_side) so it can be persisted per image and surfaced per framing
+bucket via dataset_payload()['composition_upscaled'].
+
+Since manual crops stopped ENLARGING, the column has two producers with different
+pixels but the SAME meaning and the same remedy:
+  * the import head-crop still LANCZOS-enlarges its box to 1024 (ratio > 1 = invented
+    texture);
+  * a manual crop keeps its own pixels (ratio > 1 = a tile well under the training
+    resolution).
+Both are "this framing bucket is filled by cropping in, not by native shots", so the
+threshold, the column and the warning are shared — see the tail of this file.
 """
 import io
 
@@ -127,3 +136,33 @@ def test_dataset_payload_below_threshold_not_flagged(app):
         payload = svc.dataset_payload(LOCAL_USER, ds.id)
         assert payload['composition']['face'] == 1
         assert payload['composition_upscaled']['face'] == 0
+
+
+# --- the warning did NOT go silent when crops stopped enlarging ---------------
+def test_a_small_manual_crop_still_reaches_the_composition_warning(app):
+    """The arbitration, pinned end to end.
+
+    Capping the crop resize could have retired this warning by accident: if the
+    stored ratio had been capped along with the pixels it would never again cross
+    UPSCALE_WARN_THRESHOLD, and a warning that can no longer fire is a lie by
+    omission. It is kept because it stays TRUE — the tile really is far below the
+    training resolution — and because its remedy is unchanged: shoot/import native
+    shots for that framing instead of cropping in.
+
+    So: a small manual crop keeps its own pixels AND still lights the bucket."""
+    import os
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'Fay', 'zchar_fay')
+        d = svc._dataset_dir(ds.id)
+        os.makedirs(d, exist_ok=True)
+        buf = io.BytesIO(); Image.new('RGB', (1600, 1200), (90, 30, 30)).save(buf, 'PNG')
+        open(os.path.join(d, 'w.webp'), 'wb').write(buf.getvalue())
+        img = FaceDatasetImage(dataset_id=ds.id, filename='w.webp', status='keep',
+                               framing='face')
+        svc.db.session.add(img); svc.db.session.commit()
+
+        assert svc.crop_image(LOCAL_USER, img.id, 0, 0, 240, 180) is True
+        with Image.open(os.path.join(d, 'w.webp')) as im:
+            assert im.size == (240, 180), 'the crop was enlarged again'
+        payload = svc.dataset_payload(LOCAL_USER, ds.id)
+        assert payload['composition_upscaled']['face'] == 1

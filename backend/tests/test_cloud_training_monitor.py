@@ -791,6 +791,101 @@ def test_set_survives_a_transient_sqlite_write_lock(ct, app, monkeypatch):
         assert fresh.phase_detail == 'Job queued on the pod'
 
 
+def test_set_survives_a_write_lock_that_really_poisons_the_session(ct, app, monkeypatch):
+    """The retry must survive a lock raised by the REAL flush, not a stubbed commit.
+
+    Regression 2026-07-28, run #121: stubbing `db.session.commit` (as the test
+    above does) raises without ever putting the session into pending-rollback,
+    so the failure path could read `run.id` and the retry looked healthy. In
+    production the lock comes from the flush: the session is poisoned, the
+    instance's attributes were expired by the previous commit, and formatting
+    the retry's own log line fired a lazy load that raised PendingRollbackError
+    out of _set. The monitor thread died, the run stayed 'training' with no
+    error, and a rented RTX 5090 kept billing for ~36 min until a restart.
+
+    Refusing the UPDATE at the cursor reproduces that faithfully: the failure
+    goes through SQLAlchemy's real flush machinery.
+    """
+    import sqlite3
+
+    from sqlalchemy import event
+
+    monkeypatch.setattr(ct, '_sleep', lambda s: None)
+    with app.app_context():
+        run = ct.CloudTrainingRun(dataset_id=1, status='provisioning',
+                                  job_name='j', vast_label='lds-1')
+        ct.db.session.add(run)
+        ct.db.session.commit()        # expires every attribute, as in production
+        run_id = run.id
+        ct.db.session.expire(run)     # nothing left in __dict__ but the identity
+
+        engine = ct.db.session.get_bind()
+        refused = {'n': 0}
+
+        @event.listens_for(engine, 'before_cursor_execute')
+        def _refuse_the_first_updates(conn, cursor, statement, parameters,
+                                      context, executemany):
+            if statement.lstrip().upper().startswith('UPDATE') and refused['n'] < 2:
+                refused['n'] += 1
+                raise sqlite3.OperationalError('database is locked')
+
+        try:
+            ct._set(run, status='training', phase_detail='Job queued on the pod',
+                    remote_job_id='j-1')
+        finally:
+            event.remove(engine, 'before_cursor_execute', _refuse_the_first_updates)
+
+        assert refused['n'] == 2                  # two real refusals, then the write
+        fresh = ct.db.session.get(ct.CloudTrainingRun, run_id)
+        assert fresh.status == 'training'         # fields survived the rollbacks
+        assert fresh.remote_job_id == 'j-1'
+        assert fresh.phase_detail == 'Job queued on the pod'
+
+
+def test_set_leaves_a_usable_session_when_it_gives_up(ct, app, monkeypatch):
+    """A _set that raises must hand back a session its caller can still write on.
+
+    _monitor's failure path answers a raising _set by calling _finish() to mark
+    the run 'error' and destroy the pod. On 2026-07-28 that recovery inherited a
+    session in pending-rollback and failed too, which is why run #121 was left
+    'training' with error=None and a live pod instead of being closed.
+    """
+    import sqlite3
+
+    from sqlalchemy import event
+
+    monkeypatch.setattr(ct, '_sleep', lambda s: None)
+    with app.app_context():
+        run = ct.CloudTrainingRun(dataset_id=1, status='training',
+                                  job_name='j', vast_label='lds-1')
+        ct.db.session.add(run)
+        ct.db.session.commit()
+        run_id = run.id
+
+        engine = ct.db.session.get_bind()
+        refused = {'n': 0}
+
+        @event.listens_for(engine, 'before_cursor_execute')
+        def _refuse_every_update(conn, cursor, statement, parameters,
+                                 context, executemany):
+            if statement.lstrip().upper().startswith('UPDATE'):
+                refused['n'] += 1
+                raise sqlite3.OperationalError('database is locked')
+
+        try:
+            with pytest.raises(Exception):
+                ct._set(run, phase_detail='running: fetching transformer weights')
+        finally:
+            event.remove(engine, 'before_cursor_execute', _refuse_every_update)
+
+        assert refused['n'] == ct._COMMIT_RETRIES     # it really exhausted the budget
+        # The lock is gone; the caller's recovery write must now go through.
+        ct._set(run, status='error', error='pod unreachable')
+        fresh = ct.db.session.get(ct.CloudTrainingRun, run_id)
+        assert fresh.status == 'error'
+        assert fresh.error == 'pod unreachable'
+
+
 def test_set_still_raises_on_a_non_lock_database_error(ct, app, monkeypatch):
     """Only the transient lock is retried — a real failure must stay loud."""
     from sqlalchemy.exc import OperationalError

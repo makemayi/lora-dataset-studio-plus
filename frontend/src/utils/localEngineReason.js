@@ -22,6 +22,7 @@ import { comfyEnumUnavailableReason } from './comfyEnumSupport.js';
 // right reason (optional + auto-fetched, so naming it sends the user nowhere).
 import { kleinMissingLabels, KLEIN_ASSET_LABELS, KLEIN_REQUIRED_ASSETS } from './kleinAssets.js';
 import { brokenAssetReason, blockingInvalid } from './modelIntegrityWords.js';
+import { comfyuiDownReason } from './comfyuiStatus.js';
 
 /** Why Klein can't be picked, or null when it can. Ordered by what has to be
  *  fixed FIRST — a disabled engine and an unreachable ComfyUI both make the asset
@@ -41,10 +42,13 @@ import { brokenAssetReason, blockingInvalid } from './modelIntegrityWords.js';
  *  helper. */
 export function kleinUnavailableReason({
   enabledInSettings = true, comfyuiReachable = true,
-  missingAssets = [], unsupportedEnums = [], invalidAssets = [],
+  missingAssets = [], unsupportedEnums = [], invalidAssets = [], comfyui = null,
 } = {}) {
   if (!enabledInSettings) return '⚠ Klein is disabled in Settings (engines)';
-  if (!comfyuiReachable) return '⚠ Configure ComfyUI in Settings';
+  // Same two-causes split as Krea's: a ComfyUI that is up and slow to enumerate
+  // itself must not be reported as one to go and configure. See
+  // utils/comfyuiStatus.js.
+  if (!comfyuiReachable) return comfyuiDownReason(comfyui || { reachable: false });
   const enumHint = comfyEnumUnavailableReason(unsupportedEnums);
   if (enumHint) return enumHint;
   const words = kleinMissingLabels(missingAssets);
@@ -81,6 +85,7 @@ export function localEngineUnavailableReason(engine, caps, enabledEngines = null
     return kleinUnavailableReason({
       enabledInSettings: enabled('klein'),
       comfyuiReachable: !!comfy.reachable,
+      comfyui: comfy,
       missingAssets: comfy.klein_missing,
       unsupportedEnums: comfy.klein_unsupported_enums,
       invalidAssets: comfy.klein_invalid,
@@ -91,6 +96,7 @@ export function localEngineUnavailableReason(engine, caps, enabledEngines = null
     return kreaUnavailableReason({
       enabledInSettings: enabled('krea'),
       comfyuiReachable: !!comfy.reachable,
+      comfyui: comfy,
       missingAssets: comfy.krea_missing,
       missingNodes: comfy.krea_nodes_missing,
       invalidAssets: comfy.krea_invalid,

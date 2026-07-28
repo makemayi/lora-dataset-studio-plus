@@ -332,6 +332,9 @@ the selection bar offers two selectors that cost no extra GPU time:
   behaviour the button had before this setting existed. On a very large bank the
   first click takes a few seconds (it reads every image's neighbourhood once);
   the button says *Sampling…* while it does.
+- **⚖️ Balanced pick** — see [Pick a balanced set](#pick-a-balanced-set) below: the
+  same sampling, but spread evenly over your **framings** instead of taken off
+  the top of one ranking.
 - **🎯 Similar to selected** — select **one** image as a reference, and it ranks
   everything by how much it looks like that image and selects the closest N — the
   fast way to pull one person or one look out of a mixed export.
@@ -357,6 +360,10 @@ families want 20+"*. It's **advice only** — nothing is kept or rejected — an
 pure maths on data the passes already computed, so it costs no GPU. The
 framing-balance line needs the 📐 Framing pass to have run; without it the panel
 still covers person mix, style spread and resolution and hints to run framing.
+
+The advice becomes a gesture with **⚖️ Pick a balanced set…** at the bottom of
+the panel — see [Pick a balanced set](#pick-a-balanced-set).
+
 **🗑 Delete rejected from disk** (next to Promote) is the one exception to the
 "your source folder is never modified" rule, and it's opt-in. Once you're happy
 with your triage, it removes every image you marked ✕ rejected from its source
@@ -387,6 +394,43 @@ pass left **off by default** (it's the slowest GPU pass and a clean-up run
 rarely needs a description on every shot). Stop it any time — and when you come
 back, a saved report at the top of the bank tells you exactly what ran, what was
 skipped and why, with the headline counts.
+
+## Pick a balanced set
+
+Advice is only half the gesture, so **📊 Coverage advice** ends with **⚖️ Pick a
+balanced set…** (the same button sits in the **Curate** row). It answers a
+question no per-image score can ask: *does my set cover what I want to be able to
+generate?*
+
+Ask **🎨 Pick diverse** for 20 images out of a bank that is 47% full body, 35%
+bust, 12% face and 6% back views, and you get roughly those proportions — on a
+synthetic reproduction of exactly that shape it returned **0 face shots and 0
+back views**. The LoRA then renders one shot type well and the rest badly, and
+nothing ever said so. **⚖️ Balanced pick** returns **5 face, 5 bust, 5 body, 5
+back** out of the same pool, each bucket filled with the *same* most-varied
+sampling — and the same **Skip the odd ones out** guard — that 🎨 Pick diverse
+uses.
+
+- **Balance on** — **Framing** by default. It is the axis that carries real
+  information: on a one-subject bank, person groups are sparse and split into
+  many small, arbitrary clusters, so balancing on them spreads a selection over
+  noise. **Framing × person** is there for a dump that genuinely holds several
+  subjects.
+- **When an axis can't be satisfied**, it says so instead of quietly filling the
+  gap: *"Only 3 back images exist in this filter — an even split wanted 15"*. The
+  freed picks go to the buckets that have room, so asking for 60 still gives you
+  60 — the deficit is reported as a number, never hidden. If even that isn't
+  enough, it says how many you actually got and why.
+- **The result is always stated** — *"Selected 60 of 60 requested, spread over
+  framing: 15 face, 15 bust, 15 body, 15 back"* — as text, per bucket, next to
+  what each bucket had available. There is no chart you have to read.
+- **An unlabelled bank is the normal state**, not an error. Nothing has a framing
+  until the 📐 Framing pass has run, so the button says which pass is missing and
+  how many images it would bring in, rather than returning an empty or misleading
+  selection. 🎨 Pick diverse keeps working without it.
+
+Like the other selectors it honours the current filter and search, and it only
+**selects** — nothing is kept, rejected or deleted.
 
 ## Is this image really what it says it is?
 
@@ -594,6 +638,53 @@ app's own data folder, and deleting the new bank takes them with it.
 If the copy cannot be written — a full disk, a drive pulled out — the new bank is
 **discarded** rather than left holding half the shortlist and looking finished.
 You are told what happened and nothing has changed.
+## Undo the last bulk decision
+
+A bank lets you mark hundreds of images with one click: select the whole filter
+and press ✕, apply an auto-reject at a threshold, collapse every duplicate group,
+or run 🚀 Launch all. That is the point of a bank — and it is also the click you
+most want back when the threshold was wrong or the filter was not the one you
+thought.
+
+After any of those, an **↩ Undo** bar appears above the grid saying what
+happened and how many images it moved. Press it and every one of those images
+goes back to exactly what it was: its previous ✓/✕/undecided state *and* the
+reason it carried. Images the action never touched are not touched here either —
+if you had already kept a photo by hand and the bulk reject flipped it, undo puts
+it back to **kept**, not to undecided.
+
+The bar does not disappear on a timer, and it survives a page reload: the
+decision it takes back lives in the app's database, not in your browser tab. It
+stays until you use it, dismiss it, or run another bulk action.
+
+**Its limits, stated plainly.**
+
+- **One step.** Only the most recent bulk action is remembered. Run a second one
+  and it replaces the first — this is a net under the click you just made, not a
+  history of your session.
+- **Until the app restarts.** The memory is in the running app. Restart it and
+  the offer is gone; the decisions themselves are safely saved, as always.
+- **It never over-claims.** If some of the images have left the bank since (a
+  re-scan noticed the files were gone), or if you changed some of them yourself
+  in the meantime — in ▶ Review, or in another tab — those are *not* overwritten.
+  The result tells you exactly how many it restored out of how many, how many
+  are gone, and names the ones a newer decision now owns.
+
+**What is deliberately NOT offered.** Two bank actions have no undo, because a
+half-working one would be worse than none:
+
+- **🗑 Delete rejected** sends your source files to the recycle bin and drops
+  their rows with everything the passes had computed about them. Files in the
+  recycle bin are yours to restore, from your file manager — the app cannot do
+  it for you, and it will not pretend otherwise. This action also withdraws any
+  pending ↩ offer, since the images it pointed at are the ones just removed.
+- **⬆ Promote** copies images into a dataset (or a new bank) through the normal
+  import path. Un-promoting would mean deleting images in a dataset you may have
+  already captioned, cropped or trained on. Delete them there if you want them
+  gone.
+
+The 🔄 rotate button needs no undo entry: turn the other way and the image is
+byte-for-byte the original again.
 ## Sort a grid to review faster
 
 Filters answer *which images*; sorting answers *which one first*. Both grids
@@ -705,17 +796,54 @@ converted to something heavier to protect pixels that were already lossy.
 
 Two honest caveats:
 
-- **Cropping still resamples.** The crop is normalised to a 1024 px long side, and
-  a small box is enlarged to reach it (that is what the ⚠ upscale warning is
-  about). Only the *encoding* is lossless; the resize never can be. The watermark
-  **✂ auto-crop**, which only cuts and never resizes, is lossless end to end.
+- **A large crop still resamples.** A box longer than 1024 px is normalised *down*
+  to a 1024 px long side, and only the *encoding* is lossless — that downscale
+  never can be. A box at or under 1024 px is a pure cut, so it is lossless end to
+  end, as is the watermark **✂ auto-crop**, which only cuts and never resizes.
 - **Files get bigger.** A cropped photo that used to weigh ~200 KB now weighs
   ~950 KB. That is the price of not throwing pixels away. Thumbnails and the
   copies uploaded to a generation API are unaffected: they stay small on purpose.
 
+### A crop is never enlarged
+
+A crop used to be stretched *up* to a 1024 px long side as well: select 240×180
+and the file stored was 1024×768. That enlargement invented no detail — shrinking
+such a file back recovers the real crop almost exactly — and since the encoder
+went lossless it cost roughly **6× the bytes** for nothing. A crop now keeps its
+own size, and only comes *down* to 1024 px.
+
+Two consequences worth stating plainly:
+
+- **Your dataset can end up mixing image sizes.** That is fine — training buckets
+  images by size — but a tile cropped out of a small area really does carry less
+  detail than a native shot of the same framing, and it always did; it just used
+  to look like 1024 px.
+- **The composition meter says so.** The old ⚠ *Upscaled* line is now
+  ⚠ *Under training resolution*. It fires on the same measurement and means the
+  same thing it always meant: this framing bucket is filled by cropping far into
+  photos rather than by native shots — add native shots for it. (Images imported
+  with the automatic head-crop *are* still enlarged to 1024, so both shapes land
+  under the same warning.)
+
+Images cropped **before** this change keep the enlarged pixels they have.
+
 Images you cropped **before** this changed keep the pixels they have — nothing is
 re-processed retroactively, and re-cropping an already-degraded file cannot bring
 back what the old encoder removed.
+
+## Why a ↻ re-run button is greyed out
+
+A bank runs **one pass at a time**. While a ✨ Score, a 🔎 Quality scan or a
+🚀 Launch all is walking it, the ↻ buttons in this panel are disabled — and each
+one says which pass is holding the bank and how far it has got, for example
+*✨ Score pass is running on this bank — 137 / 412*. Wait for it to land, or
+press **Stop** in the ⏳ progress bar at the top of the bank; the buttons come
+back by themselves the moment the bank is free.
+
+When a re-run does start, the button reports what the pass produced right where
+you pressed it: **`Done — 12 duplicate groups · 34 images (was 9 · 26)`**. If
+your new value groups exactly the same images it says so — *unchanged* — rather
+than leaving you unable to tell a no-op from a pass that never ran.
 
 ## Rotate a sideways image
 

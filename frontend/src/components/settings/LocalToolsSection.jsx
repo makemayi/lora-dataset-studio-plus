@@ -192,6 +192,7 @@ export default function LocalToolsSection(props) {
           configDefaults } = props
   // Shipped values come from the server payload, never retyped here.
   const ollamaDefault = (key) => defaultValueAt(configDefaults, 'ollama', key)
+  const comfyDefault = (key) => defaultValueAt(configDefaults, 'comfyui', key)
   return (
     <div className="space-y-6">
       <Card
@@ -221,6 +222,34 @@ export default function LocalToolsSection(props) {
           help="Used to derive the output/input/models/loras folders unless overridden below."
         />
         <ComfyFolderOverrides config={config} setField={setField} />
+        <div>
+          <label htmlFor="comfyui-object-info-timeout" className="block text-sm font-medium text-content">
+            ComfyUI response timeout
+          </label>
+          <select
+            id="comfyui-object-info-timeout"
+            value={String(config.comfyui.object_info_timeout_s ?? comfyDefault('object_info_timeout_s'))}
+            onChange={(e) => setField('comfyui', 'object_info_timeout_s', Number(e.target.value))}
+            className={INPUT_CLASS}
+          >
+            <option value="15">15 seconds</option>
+            <option value="30">30 seconds</option>
+            <option value="45">45 seconds — recommended</option>
+            <option value="90">90 seconds</option>
+            <option value="180">3 minutes — very large install</option>
+          </select>
+          <p className="mt-1 text-xs text-content-muted">
+            How long ComfyUI may take to list its nodes and model files. That list
+            grows with every custom-node pack and every weight you install, so a
+            heavily-loaded ComfyUI can need 15 seconds or more — and when the app gave
+            up too early it wrongly reported ComfyUI as not running. Raise this if you
+            see “ComfyUI is answering too slowly”. A ComfyUI that is genuinely stopped
+            is detected in a couple of seconds either way, so a high value here costs
+            you nothing. Reported and measured by j_o_e_l. (Discord).
+          </p>
+          <ResetToDefault label="ComfyUI response timeout" section="comfyui" field="object_info_timeout_s"
+            config={config} configDefaults={configDefaults} setField={setField} />
+        </div>
         <SecretField field={HF_SECRET} {...props} />
       </Card>
 

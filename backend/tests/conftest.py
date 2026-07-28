@@ -51,16 +51,19 @@ def _reset_inmemory_registries():
     "the encoder is invoked exactly once" would then see zero calls and fail, and
     one proving "no ML python ⇒ 503" would silently get a cache hit and a 200.
     Both did, before this line existed."""
-    from app.services import bank_jobs, clip_text_encoder, dataset_activity
+    from app.services import bank_jobs, bank_undo, clip_text_encoder
+    from app.services import dataset_activity
     from app.services import image_bank_service, vision_keepalive
     dataset_activity.reset()
     bank_jobs.reset()
+    bank_undo.reset()
     image_bank_service.reset_folder_sync()
     vision_keepalive.forget_lease()
     clip_text_encoder.forget_memory_cache()
     yield
     dataset_activity.reset()
     bank_jobs.reset()
+    bank_undo.reset()
     image_bank_service.reset_folder_sync()
     vision_keepalive.forget_lease()
     clip_text_encoder.forget_memory_cache()

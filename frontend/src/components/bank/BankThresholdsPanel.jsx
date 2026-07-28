@@ -47,6 +47,10 @@ import {
   directionSummary, dirtyFields, effectLine, isValidValue, mergedBank,
   rerunFor, resetAllEdits, thresholdsInGroup,
 } from './bankThresholds.js'
+import {
+  ENDPOINT_JOB_KIND, busyLine, passButtonState, passOutcome, passSettled,
+  settledActivity, summaryKeyFor,
+} from './bankPassRun.js'
 
 // Debounce for the live effect count: long enough that typing "140" is one
 // request instead of three, short enough to still feel attached to the keystroke.
@@ -88,7 +92,67 @@ function Group({ group, open, onToggle, customised, children }) {
   )
 }
 
-export default function BankThresholdsPanel({ bankId, onSaved, onRunPass }) {
+/* How long to wait before believing "nothing is running" means our pass already
+   finished. A re-group over stored hashes can be done in well under the bank's
+   2 s progress poll, so the FIRST snapshot after the click can legitimately show
+   no job at all — and treating that as "finished" without waiting would report
+   the counts from before the pass. One poll interval plus a margin. */
+const SETTLE_GRACE_MS = 2500
+
+/** One "↻ re-run this pass" button, in three honest states.
+ *
+ *  IDLE and the bank is free — a normal button.
+ *  IDLE and a pass owns the bank — DISABLED, naming that pass and its progress.
+ *    A bank runs one job at a time, so this click could only ever have produced
+ *    a red refusal; a button that cannot work must not look like one.
+ *  OURS IS RUNNING — disabled, showing our own progress instead of a refusal.
+ *
+ *  And once it lands, the result IN FIGURES, because "12 groups · 34 images"
+ *  is the only thing that tells you whether the number you just changed did
+ *  anything. `role="status"` announces it once, when it appears — the reason
+ *  line next to it is plain text, since it changes on every progress tick and a
+ *  live region there would talk over the whole page. */
+function RerunButton({ rerun, field, activity, offline, phase, outcome, onRun }) {
+  const reasonId = `bank-th-${field}-rerun-why`
+  const outcomeId = `bank-th-${field}-rerun-outcome`
+  const state = passButtonState({ activity, offline, pending: phase !== 'idle' })
+  const label = phase === 'starting' ? 'Starting…'
+    : phase === 'running' ? 'Running…' : rerun.label
+  // While OUR pass is the one running, the line is progress, not a refusal.
+  const why = phase === 'running' ? `${busyLine({ activity })}…`
+    : phase === 'starting' ? null : state.reason
+  const describedBy = [why && reasonId, outcome && outcomeId].filter(Boolean).join(' ')
+  const tone = outcome?.tone === 'error' ? 'text-rose-300'
+    : outcome?.tone === 'warn' ? 'text-amber-300' : 'text-emerald-300'
+  return (
+    <div className="mt-1 space-y-1">
+      {/* flex-wrap, and the explanation on its OWN line: at 400 px the label,
+          the note and a progress sentence cannot share a row. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className={SMALL_BTN} onClick={onRun}
+          disabled={state.disabled}
+          // A greyed-out button must say WHY, not merely be grey — the reason
+          // is both its tooltip and its accessible description.
+          aria-describedby={describedBy || undefined}
+          title={why || rerun.note}>
+          {label}
+        </button>
+        <span className="text-[11px] text-content-subtle">{rerun.note}</span>
+      </div>
+      {why && <p id={reasonId} className="text-[11px] text-amber-300"><span aria-hidden>⏳ </span>{why}</p>}
+      {outcome && (
+        <p id={outcomeId} role="status" className={`text-[11px] font-medium ${tone}`}>
+          {outcome.text}
+        </p>
+      )}
+    </div>
+  )
+}
+
+export default function BankThresholdsPanel({
+  bankId, onSaved, onRunPass, activity = null, offline = false,
+  dupSummary = null, semanticDupSummary = null,
+}) {
   const toast = useToast()
   const [saved, setSaved] = useState(null)          // config.bank as stored
   const [configDefaults, setConfigDefaults] = useState(null)
@@ -100,6 +164,9 @@ export default function BankThresholdsPanel({ bankId, onSaved, onRunPass }) {
   const [baseFlags, setBaseFlags] = useState(null)  // counts at the SAVED values
   const [previewFlags, setPreviewFlags] = useState(null)
   const previewTimer = useRef(null)
+  const [starting, setStarting] = useState(null)    // endpoint whose POST is in flight
+  const [run, setRun] = useState(null)              // {endpoint, before, seen, armed}
+  const [outcome, setOutcome] = useState(null)      // {endpoint, tone, text}
 
   // Saved values and shipped defaults come from the SAME payload the Settings
   // page reads, so the two screens cannot disagree about either one.
@@ -151,6 +218,75 @@ export default function BankThresholdsPanel({ bankId, onSaved, onRunPass }) {
     }, PREVIEW_DEBOUNCE_MS)
     return () => { alive = false; clearTimeout(previewTimer.current) }
   }, [bankId, candidate, dirty.length, saved])
+
+  /* ── Running a pass from this panel ───────────────────────────────────────
+     The pass runs in the bank's ONE background thread and the POST returns 202
+     immediately, so "did it work, and what did it produce" has to be answered
+     from the payload the workspace is already polling — never from the POST.
+     Three small effects: arm a grace timer, notice our job while it is alive,
+     and report once it has landed. No new poll, no new progress mechanism. */
+
+  // Which payload summary answers for this endpoint (null for passes that have
+  // no count of their own — those quote the job's own closing detail instead).
+  const summaryFor = useCallback((endpoint) => {
+    const key = summaryKeyFor(endpoint)
+    if (key === 'dup') return dupSummary
+    if (key === 'semantic_dup') return semanticDupSummary
+    return null
+  }, [dupSummary, semanticDupSummary])
+
+  const runPass = useCallback(async (endpoint) => {
+    setOutcome(null)
+    setStarting(endpoint)
+    // The BEFORE half of "12 groups · 34 images (was 9 · 26)", captured while
+    // the old grouping is still on screen.
+    const before = summaryFor(endpoint)
+    let accepted = null
+    try {
+      accepted = await onRunPass?.(endpoint)
+    } finally {
+      setStarting(null)
+    }
+    // onRunPass returns null when the server refused (it has already said so, in
+    // our words). Nothing was started, so there is nothing to wait for.
+    if (accepted) setRun({ endpoint, before, seen: false, armed: false })
+  }, [onRunPass, summaryFor])
+
+  // (1) Arm. Until this fires, "no job in the payload" is not yet evidence that
+  // our pass is over — it may simply not have appeared in a snapshot yet.
+  useEffect(() => {
+    if (!run || run.armed) return undefined
+    const t = setTimeout(() => setRun((r) => (r && !r.armed ? { ...r, armed: true } : r)),
+      SETTLE_GRACE_MS)
+    return () => clearTimeout(t)
+  }, [run])
+
+  // (2) Notice our own job while it is alive — the strongest possible evidence
+  // that what we see afterwards is its result.
+  useEffect(() => {
+    if (!run || run.seen) return
+    if (activity && !activity.finished
+        && activity.kind === ENDPOINT_JOB_KIND[run.endpoint]) {
+      setRun((r) => (r ? { ...r, seen: true } : r))
+    }
+  }, [run, activity])
+
+  // (3) Report. Once we have either watched it run or waited out the grace, and
+  // the bank is no longer holding our pass, the counts on screen are final.
+  useEffect(() => {
+    if (!run || !(run.seen || run.armed)) return
+    if (!passSettled(activity, run.endpoint)) return
+    setOutcome({
+      endpoint: run.endpoint,
+      ...passOutcome({
+        endpoint: run.endpoint,
+        before: run.before,
+        after: summaryFor(run.endpoint),
+        activity: settledActivity(activity, run.endpoint),
+      }),
+    })
+    setRun(null)
+  }, [run, activity, summaryFor])
 
   // The (section, field) writer the shared ResetToDefault button expects. The
   // section is always ours, so a future per-bank layer changes THIS function
@@ -261,14 +397,12 @@ export default function BankThresholdsPanel({ bankId, onSaved, onRunPass }) {
                   {effect ? `${effect}. ${directionSummary(t)}` : directionSummary(t)}
                 </span>
                 {rerun && (
-                  <div className="mt-1 flex flex-wrap items-center gap-2">
-                    <button type="button" className={SMALL_BTN}
-                      onClick={() => onRunPass?.(rerun.endpoint)}
-                      title={rerun.note}>
-                      {rerun.label}
-                    </button>
-                    <span className="text-[11px] text-content-subtle">{rerun.note}</span>
-                  </div>
+                  <RerunButton rerun={rerun} field={t.field}
+                    activity={activity} offline={offline}
+                    phase={starting === rerun.endpoint ? 'starting'
+                      : run?.endpoint === rerun.endpoint ? 'running' : 'idle'}
+                    outcome={outcome?.endpoint === rerun.endpoint ? outcome : null}
+                    onRun={() => runPass(rerun.endpoint)} />
                 )}
                 <ResetToDefault
                   label={t.label}

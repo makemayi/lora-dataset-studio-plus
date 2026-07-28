@@ -391,7 +391,8 @@ def add_extra_ref(user_id, dataset_id, image_bytes) -> str:
 
 
 def crop_extra_ref(user_id, dataset_id, filename, x, y, w, h) -> bool:
-    """Manually crop ONE extra reference to (x,y,w,h), long side resized to 1024.
+    """Manually crop ONE extra reference to (x,y,w,h), long side capped at 1024
+    (never enlarged - a smaller box keeps its own pixels).
     The box is in the crop SOURCE's pixel space (what extra_ref_crop_source names,
     i.e. what the editor displayed) and the result overwrites the extra only — the
     original stays untouched, so re-crops widen as freely as they tighten.
@@ -1406,16 +1407,28 @@ def set_image_caption(user_id, image_id, caption, short=_UNSET):
 
 
 def _crop_resize_file(path, x, y, w, h, size=1024, dst=None):
-    """Crop the file at `path` to (x,y,w,h) and resize the crop so its LONG side
-    equals `size`, PRESERVING the box's aspect ratio: a square box keeps the
-    historical size x size output, a 2:3 box yields 683x1024 — no padding, no
-    distortion (ai-toolkit buckets handle non-square training images). Writes to
-    `dst` (default: overwrite `path`). Passing a distinct `dst` lets the reference
-    crop read the untouched full-frame ORIGINAL and write the derived crop — so a
-    re-crop can widen back out instead of only tightening the previous crop.
+    """Crop the file at `path` to (x,y,w,h) and normalise the crop's LONG side DOWN
+    to at most `size`, PRESERVING the box's aspect ratio: a 2000x1500 box yields
+    1024x768, a 2:3 box yields 683x1024 — no padding, no distortion (ai-toolkit
+    buckets handle non-square training images). Writes to `dst` (default: overwrite
+    `path`). Passing a distinct `dst` lets the reference crop read the untouched
+    full-frame ORIGINAL and write the derived crop — so a re-crop can widen back
+    out instead of only tightening the previous crop.
 
-    Returns (ok, upscale_ratio) — ratio is size / long_side_of_box (>1 means the
-    box was smaller than `size` and got enlarged), or None on failure.
+    A box SMALLER than `size` is left at its own size. The resize used to be
+    unconditional, so a 240x180 crop was blown up to 1024x768 — and that upscale
+    carried essentially nothing: shrinking the result back to 240 recovers the
+    original at 48.96 dB (max channel error 10), for 2.3x the bytes. Since the
+    encoder went lossless that is close to a megabyte of interpolated pixels per
+    small crop, and it hands the trainer a tile whose apparent resolution is a
+    fiction. Cropping in cannot create detail; it should not pretend to.
+
+    Returns (ok, upscale_ratio), or (False, None) on failure. The ratio is
+    unchanged in value and meaning — `size / long_side_of_box`, i.e. how far the
+    box sits under the training resolution (>1 = under it) — because it is a
+    STORED column (`FaceDatasetImage.upscale_ratio`) feeding the composition
+    warning, and capping it along with the pixels would silently retire that
+    warning. Only the pixels stopped pretending; the measurement did not move.
 
     ENCODING: the source format is preserved and written under
     `image_encoding.LOSSLESS`. This used to be an unconditional lossy WEBP q92, so
@@ -1430,12 +1443,10 @@ def _crop_resize_file(path, x, y, w, h, size=1024, dst=None):
     q100, while lossless stays byte-identical to the first crop. See the measurement
     table in `image_encoding`'s module docstring.
 
-    ⚠️ What this does NOT claim: only the ENCODING is lossless. The crop is
-    normalised to a `size` long side, so unless the box's long side is already
-    exactly that, it is resampled — and for a SMALLER box that means an upscale
-    which invents no detail (`upscale_ratio` records it, and the UI warns). The
-    watermark crop (`_apply_watermark_crop`), which never resizes, is the one place
-    where the whole operation is lossless."""
+    ⚠️ What this does NOT claim: only the ENCODING is lossless. A box longer than
+    `size` is still resampled down, which destroys information whatever the encoder
+    does. A box at or under `size` is now a pure cut, so it IS lossless end to end —
+    as is the watermark crop (`_apply_watermark_crop`), which never resizes."""
     if not os.path.exists(path):
         return False, None
     with Image.open(path) as opened:
@@ -1452,10 +1463,13 @@ def _crop_resize_file(path, x, y, w, h, size=1024, dst=None):
     if box[2] <= box[0] or box[3] <= box[1]:
         return False, None
     bw, bh = box[2] - box[0], box[3] - box[1]
+    # Normalise DOWN only: `long` is what we actually render, `size` stays the
+    # reference the reported ratio is measured against (see the docstring).
+    long = min(size, max(bw, bh))
     if bw >= bh:
-        out_w, out_h = size, max(1, round(size * bh / bw))
+        out_w, out_h = long, max(1, round(long * bh / bw))
     else:
-        out_w, out_h = max(1, round(size * bw / bh)), size
+        out_w, out_h = max(1, round(long * bw / bh)), long
     scale = size / max(bw, bh)
     out = io.BytesIO()
     image_encoding.save_edit(src.crop(box).resize((out_w, out_h), Image.LANCZOS),
@@ -1466,7 +1480,8 @@ def _crop_resize_file(path, x, y, w, h, size=1024, dst=None):
 
 
 def crop_image(user_id, image_id, x, y, w, h):
-    """Crop a dataset image to (x,y,w,h), resized to 1024 (no pad). Returns bool."""
+    """Crop a dataset image to (x,y,w,h), long side capped at 1024, no pad (a box
+    smaller than that keeps its own size). Returns bool."""
     img = _owned_image(user_id, image_id)
     if not img or not img.filename:
         return False
@@ -2495,7 +2510,8 @@ def _ref_crop_source_path(ds) -> str:
 
 
 def crop_reference(user_id, dataset_id, x, y, w, h):
-    """Manually crop the dataset reference to (x,y,w,h), resized to 1024. The box is
+    """Manually crop the dataset reference to (x,y,w,h), long side capped at 1024
+    (never enlarged). The box is
     in the ORIGINAL's pixel space (the editor shows the original), and we write the
     derived square to ref_filename WITHOUT touching the original — so the user can
     re-crop wider or tighter any number of times."""
@@ -3000,11 +3016,12 @@ def dataset_payload(user_id, dataset_id):
             .order_by(FaceDatasetImage.id.desc()).all())
     ref_size = image_pixel_size(_ref_path(ds)) if ds.ref_filename else None
     comp = {'face': 0, 'bust': 0, 'body': 0, 'back': 0}
-    # Combien, PAR bucket, sont des crops fortement agrandis (upscale_ratio >=
-    # UPSCALE_WARN_THRESHOLD) plutôt que du natif : le compte `comp` seul traite un
-    # gros plan natif et un gros plan upscalé x3 comme équivalents vis-à-vis de la
-    # cible — ce sous-compte permet à l'UI de signaler un dataset qui « remplit »
-    # sa cible face/bust surtout avec de la texture fabriquée par le resize.
+    # Combien, PAR bucket, viennent d'une box bien plus petite que la résolution
+    # d'entraînement (upscale_ratio >= UPSCALE_WARN_THRESHOLD) plutôt que d'une prise
+    # native : le compte `comp` seul traite un gros plan natif et un gros plan
+    # recadré x3 comme équivalents vis-à-vis de la cible — ce sous-compte permet à
+    # l'UI de signaler un dataset qui « remplit » sa cible face/bust surtout en
+    # recadrant (texture agrandie à l'import, ou tuile sous-résolue en manuel).
     comp_upscaled = {'face': 0, 'bust': 0, 'body': 0, 'back': 0}
     for i in imgs:
         # Composition counts only usable images: rejected and failed ones don't

@@ -493,7 +493,9 @@ def test_a_file_that_cannot_be_loaded_is_replaced_not_skipped(app, tmp_path, mon
     assert rc == 0
     assert not any('already present' in l for l in log)
     assert any('cannot be loaded' in l for l in log)
-    assert any('downloading a fresh copy' in l for l in log)
+    # It is replaced, but only by the copy that arrived — see
+    # test_setup_download_replace_order.py for the ordering that guarantees it.
+    assert any('until a fresh copy has actually downloaded' in l for l in log)
     with open(dest, 'rb') as f:
         assert f.read() == good        # the broken file is gone, the good one is in
 

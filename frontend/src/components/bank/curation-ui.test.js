@@ -26,11 +26,14 @@ test('each curation button feeds its OWN returned ids into the selection view', 
   // own ranked ids, the same view. (Its wording/limits contract lives in
   // bankTextSearch.test.js; here we only pin that it joins the family.)
   assert.match(ws, /\/api\/bank\/\$\{bankId\}\/search-text/);
+  // … and ⚖️ Balanced pick is the fourth: its own endpoint, its own spread ids,
+  // the same view. (Its readout contract lives in bankBalance.test.js.)
+  assert.match(ws, /\/api\/bank\/\$\{bankId\}\/select-balanced/);
   // Every handler must route through the same "show what you selected" helper —
-  // one call per selector. Bump this WITH the count when a fourth one lands; the
+  // one call per selector. Bump this WITH the count when a fifth one lands; the
   // guard is that no two of them share a code path, not that there are exactly N.
   const feeds = ws.match(/showCuratedSelection\(d\.image_ids\)/g) || [];
-  assert.equal(feeds.length, 3, 'each selector feeds its own result into the view');
+  assert.equal(feeds.length, 4, 'each selector feeds its own result into the view');
 });
 
 // "Most diverse" was computed as "most isolated" — the criterion that structurally

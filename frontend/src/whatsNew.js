@@ -64,11 +64,67 @@ export const WHATS_NEW = [
     to: '/settings/engines',
   },
   {
+    id: '2026-07-28-busy-database-no-longer-strands-a-paid-cloud-run',
+    date: '2026-07-28',
+    title: 'A busy database no longer strands a paid cloud run — for real this time',
+    blurb:
+      'Cloud runs are watched by a monitor that writes progress to the database every few seconds. When something else was writing heavily at that moment (a caption batch, a Bank import), that write could lose the lock — and the retry meant to absorb it crashed on its own error message instead, killing the monitor. The run then sat at "TRAINING" with no error, no progress and a rented GPU still billing, until the freeze watchdog or an app restart caught it up to 45 minutes later. The retry now works, and a run whose monitor does die is closed properly with its pod terminated instead of being left open.',
+    to: '/cloud',
+  },
+  {
+    id: '2026-07-28-comfyui-slow-is-not-comfyui-stopped',
+    date: '2026-07-28',
+    title: 'A busy ComfyUI is no longer reported as a stopped one',
+    blurb:
+      'The app gave ComfyUI 8 seconds to list its nodes and model files — and that list grows with every custom-node pack and every weight you install, so the richer your ComfyUI, the more likely it ran out of time. Krea 2 generations then refused with "ComfyUI isn\'t running" at a ComfyUI that was running perfectly. The budget is now 45 seconds and adjustable (Settings ▸ Local tools ▸ ComfyUI ▸ "ComfyUI response timeout"), and a slow ComfyUI and a stopped one no longer share one message: one tells you to raise the timeout, the other to start ComfyUI. A ComfyUI that is genuinely off is still detected in seconds, so nothing waits 45 seconds for nothing. Found, measured (~15 s on his install) and fixed by j_o_e_l. (Discord).',
+    to: '/settings/local-tools',
+  },
+  {
+    id: '2026-07-28-bank-undo-last-bulk-decision',
+    date: '2026-07-28',
+    title: 'Marked 400 bank images by mistake? Take it back.',
+    blurb:
+      'A bank\'s bulk actions — ✓/✕ over a whole filter, auto-reject at a threshold, collapsing duplicate groups, 🚀 Launch all — now leave an ↩ Undo bar above the grid. One press puts every image back exactly as it was, its state and its reason, without touching the images the action never moved. The bar waits for you instead of vanishing on a timer, and it survives a page reload. Limits stated on the bar itself: one step back, and only until the app restarts. 🗑 Delete rejected and ⬆ Promote deliberately offer nothing, because neither can be undone honestly — and if an undo cannot restore everything, it says how many it restored and names what it left alone.',
+    to: '/bank',
+  },
+  {
+    id: '2026-07-28-balanced-pick',
+    date: '2026-07-28',
+    title: 'Pick a set that covers your framings, not just the top of a ranking',
+    blurb:
+      'Asking for "the 60 most varied" of a bank that is mostly full-body shots gives you mostly full-body shots — on a realistic test pool it returned 0 face shots and 0 back views out of 20, and nothing said so. ⚖️ Balanced pick spreads the same sampling evenly over face / bust / body / back (optionally per person), tells you exactly what you got — "5 face, 5 bust, 5 body, 5 back" — and names any framing it could not fill instead of quietly padding with something else. It sits in the Curate row and at the bottom of 📊 Coverage advice, where the advice finally becomes a gesture.',
+    to: '/bank',
+  },
+  {
+    id: '2026-07-28-crops-keep-their-own-resolution',
+    date: '2026-07-28',
+    title: 'Cropping in no longer blows the crop up to 1024 px',
+    blurb:
+      'A crop used to be stretched to a 1024 px long side whatever its real size, so a 240×180 selection was stored as 1024×768. Those extra pixels carried nothing — shrinking such a file back recovers the real crop almost exactly — while costing about 6× the bytes now that crops are stored losslessly. A crop is now never enlarged beyond what you actually selected; anything LARGER than 1024 px is still normalised down to 1024, exactly as before. Two things to know: new crops are smaller images than old ones, so a dataset can end up mixing sizes — training handles that (it buckets by size), but the smallest tiles genuinely carry less detail. That is what the composition meter now says out loud: the old "⚠ Upscaled" line is now "⚠ Under training resolution", and it still flags a framing bucket you filled by cropping far into a photo instead of adding native shots. Images cropped BEFORE this keep the enlarged pixels they already have.',
+    to: '/datasets',
+  },
+  {
+    id: '2026-07-28-broken-model-replaced-only-once-the-new-one-arrives',
+    date: '2026-07-28',
+    title: 'A corrupted model file is only deleted once its replacement has landed',
+    blurb:
+      'Setup can now spot a model file that cannot be loaded (a login page saved under the model name, a truncated download) and re-fetch it. It used to delete the broken file first and download after — so an expired token, a re-gated repo or a host that was simply down left you with nothing at all instead of something broken. Now the download is opened and checked first, and the old file is only removed once real weights are actually on disk. Nothing is ever thrown away for a download that did not happen.',
+    to: '/setup',
+  },
+  {
+    id: '2026-07-28-bank-rerun-buttons-say-what-is-happening',
+    date: '2026-07-28',
+    title: 'The bank\'s ↻ re-run buttons finally tell you what is going on',
+    blurb:
+      'A bank runs one pass at a time, so pressing ↻ Re-group duplicates while a ✨ Score was still walking the bank could only ever produce a red "a scan job is already running on this bank" — a sentence with no progress and no way out. Those buttons are now disabled while another pass owns the bank, and each says which one and how far it has got ("✨ Score pass is running — 137 / 412"), pointing at Stop. When a re-run does go through, it reports what it produced right where you pressed it — "Done — 12 duplicate groups · 34 images (was 9 · 26)" — and says "unchanged" when your new value groups exactly the same images, instead of leaving you unable to tell a no-op from a pass that never ran. Every other occupied-bank refusal in the bank (Promote, 🗑 Delete rejected, 🚀 Launch all, the watermark passes) is now worded the same way.',
+    to: '/bank',
+  },
+  {
     id: '2026-07-28-cropping-no-longer-recompresses',
     date: '2026-07-28',
     title: 'Cropping no longer quietly re-compresses your image',
     blurb:
-      'Every crop was re-encoded to lossy WebP, so cropping a PNG degraded it — and left a .png file holding WebP bytes. Crop and the watermark cleaners now keep the file\'s own format and write it back without losing pixels, like ✂ Mirror and ↺ Rotate already did: crop the same shot ten times and the tenth is identical to the first. JPEG has no lossless mode, so it is re-saved at the highest practical quality instead of being converted to something heavier. Cropped files are noticeably bigger now — that is the price of keeping the pixels. Two honest limits: cropping still rescales the box to a 1024 px long side, and resampling can never be lossless (only the watermark ✂ auto-crop, which never resizes, is); and images you cropped BEFORE this keep the pixels they have — nothing is re-processed retroactively.',
+      'Every crop was re-encoded to lossy WebP, so cropping a PNG degraded it — and left a .png file holding WebP bytes. Crop and the watermark cleaners now keep the file\'s own format and write it back without losing pixels, like ✂ Mirror and ↺ Rotate already did: crop the same shot ten times and the tenth is identical to the first. JPEG has no lossless mode, so it is re-saved at the highest practical quality instead of being converted to something heavier. Cropped files are noticeably bigger now — that is the price of keeping the pixels. Two honest limits: a box longer than 1024 px is still rescaled down to it, and that resampling can never be lossless (only the watermark ✂ auto-crop, which never resizes, is); and images you cropped BEFORE this keep the pixels they have — nothing is re-processed retroactively.',
     to: '/datasets',
   },
   {

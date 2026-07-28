@@ -68,7 +68,7 @@ def test_crop_extra_ref_can_widen_back_out(app):
         # Tight crop first...
         assert svc.crop_extra_ref('local', ds.id, fn, 100, 100, 400, 400) is True
         with Image.open(path) as im:
-            assert im.size == (1024, 1024)
+            assert im.size == (400, 400)      # under the 1024 cap -> kept as cut
         # ...then a WIDER box in the original's pixel space. It only works because the
         # original was never overwritten.
         assert svc.crop_extra_ref('local', ds.id, fn, 0, 0, 2048, 1152) is True

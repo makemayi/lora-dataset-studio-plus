@@ -78,10 +78,15 @@ def test_legacy_variant_that_cannot_load_is_not_already_installed(app, tmp_path)
         legacy = os.path.join(os.path.dirname(dest),
                               si._MODEL_DOWNLOADS['klein_model']['legacy_names'][0])
         _gate_page(legacy)
-        assert si._variant_already_present('klein_model') is None
-        # Same tree the app installs into, and the resolver may prefer this name
-        # over the fresh download -> it is cleared, exactly as at `dest`.
-        assert not os.path.exists(legacy)
+        condemned = []
+        assert si._variant_already_present('klein_model', condemned) is None
+        # Same tree the app installs into, and the resolver may prefer this name over
+        # the fresh download -> it has to go. But NOT yet: it is only listed here, and
+        # _run_model_download removes it once the replacement actually landed (see
+        # test_setup_download_replace_order.py). Deleting it on the spot meant a 401
+        # left the user with nothing at all.
+        assert condemned == [legacy]
+        assert os.path.exists(legacy)
 
 
 def test_legacy_variant_that_loads_still_counts_as_installed(app, tmp_path):

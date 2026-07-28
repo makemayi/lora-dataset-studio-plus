@@ -14,10 +14,12 @@ export default function CompositionBar({ composition, upscaled, bodyFidelity = f
   const missing = Object.keys(TARGET)
     .map((k) => ({ k, n: Math.max(0, TARGET[k] - (c[k] || 0)) }))
     .filter((m) => m.n > 0);
-  // Buckets whose target is MET but mostly by heavily-upscaled crops rather than
-  // native shots: counting toward the ratio hides that the shot is fabricated
-  // texture (LANCZOS-enlarged from a small detected/fallback box), which biases
-  // training toward that crop's local detail instead of the intended framing mix.
+  // Buckets whose target is MET but mostly by cropping far into a photo rather than
+  // by native shots. Two shapes, one meaning: an import head-crop is LANCZOS-enlarged
+  // from a small box (fabricated texture), and a manual crop — which no longer
+  // enlarges — simply lands well under the training resolution. Either way the count
+  // hides that the framing mix is filled by close-cropping, which biases training
+  // toward that patch's local detail.
   const upscaleHeavy = Object.keys(TARGET)
     .map((k) => ({ k, n: u[k] || 0, of: c[k] || 0 }))
     .filter((m) => m.n > 0 && m.n >= Math.ceil(m.of / 2));
@@ -48,8 +50,8 @@ export default function CompositionBar({ composition, upscaled, bodyFidelity = f
       )}
       {upscaleHeavy.length > 0 && (
         <p className="m-0 text-amber-300/90 text-[0.6875rem]">
-          ⚠ Upscaled: {upscaleHeavy.map((m) => `${m.n}/${m.of} ${LABEL[m.k].toLowerCase()}`).join(' · ')}
-          <span className="text-content-subtle"> — these tiles are LANCZOS-enlarged crops (fabricated detail, not native resolution); add native shots for that framing instead of only cropping in</span>
+          ⚠ Under training resolution: {upscaleHeavy.map((m) => `${m.n}/${m.of} ${LABEL[m.k].toLowerCase()}`).join(' · ')}
+          <span className="text-content-subtle"> — these tiles were cropped in from a small area, so they carry far less real detail than a native shot at that framing; add native shots instead of only cropping in</span>
         </p>
       )}
     </div>

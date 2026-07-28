@@ -35,7 +35,20 @@ Run through this before calling a wave done:
    section, page or big button needs a topic (and its Guide anchor), or the
    contract test fails.
 5. **Docs**: update `docs/guide/settings-reference.md` when a setting is added
-   or changes meaning; README only at milestones.
+   or changes meaning.
+   **README — at every release, not "at milestones".** "Milestone" was never
+   defined, so it meant never: seven features shipped in one day while the
+   README still described the app as it was that morning, and one line promised
+   a capability the Docker image does not have. Two questions, every time:
+   - does a section now describe something **that is no longer true**? (a
+     changed default, a renamed action, a capability that moved) — that is a
+     debt, not a gap, and it is the expensive one;
+   - does the wave change **what the tool can do**? Only then does it earn a
+     line. The README is what a stranger reads to decide if this is for them,
+     not a changelog — What's-new already is one.
+   **Every limit stays visible.** A ranking is not a filter, an undo that skips
+   deletes says so, a search that ignores "without" says so. That distinction
+   is what separates a README from a brochure.
 6. **Credits.** Community-sourced ideas and fixes name their author in the
    commit message (and in-app where the feature surfaces, when appropriate).
 7. **Never rename catalog labels, config keys or What's-new ids** without an

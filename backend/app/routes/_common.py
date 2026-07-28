@@ -35,9 +35,16 @@ def _require_comfyui():
     """None if ComfyUI is reachable, else the (body, status) 409 to return.
     Shared by studio.py and datasets.py's lora-test routes that actually enqueue
     a ComfyUI job (run/resume) — read-only/history/DB-only routes stay ungated."""
-    if not capabilities.probe()['comfyui']['reachable']:
-        return jsonify({'error': 'ComfyUI is not reachable',
-                        'hint': 'Check the URL in Settings'}), 409
+    comfy = capabilities.probe()['comfyui']
+    if not comfy['reachable']:
+        # Two causes, two sentences: "not reachable / check the URL" was returned
+        # for a ComfyUI that was up and merely slow to enumerate itself, which sent
+        # the user to re-check a URL that was correct. capabilities publishes WHICH
+        # it is; the wording lives there so this 409 and the engine cards agree.
+        slow = comfy.get('status') == 'slow'
+        return jsonify({'error': ('ComfyUI is answering too slowly' if slow
+                                  else 'ComfyUI is not reachable'),
+                        'hint': comfy.get('hint') or 'Check the URL in Settings'}), 409
     return None
 
 

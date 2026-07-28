@@ -363,7 +363,22 @@ def _set(run, **fields):
 
     A failed commit leaves the session with a pending rollback and — once
     rolled back — the instance reverted to its stored values, so the fields are
-    re-applied on every attempt rather than set once up front."""
+    re-applied on every attempt rather than set once up front.
+
+    Rolling back is therefore the FIRST thing the failure path does, before
+    anything reads the instance and before the raise. Until a rollback happens,
+    the session refuses every operation with PendingRollbackError, and a
+    persistent instance whose attributes were expired by the previous commit
+    cannot even be read: touching `run.id` fires a lazy load, which needs the
+    session, which raises. That is not theoretical — it defeated this very
+    retry loop on 2026-07-28. The lock was hit, the failure path formatted its
+    log line, reading `run.id` raised PendingRollbackError out of _set, and the
+    monitor thread died in the exact way the retry was written to prevent. Run
+    #121 then sat at 'training' with no error and a live rented 5090, because
+    the caller's recovery path (_finish) inherited the same poisoned session and
+    failed too. The run id is read up front, off the healthy session, so the
+    log line cannot resurrect that failure."""
+    run_id = getattr(run, 'id', '?')
     for attempt in range(_COMMIT_RETRIES):
         for k, v in fields.items():
             setattr(run, k, v)
@@ -372,12 +387,12 @@ def _set(run, **fields):
             db.session.commit()
             return
         except Exception as e:                    # noqa: BLE001 - re-raised below
+            db.session.rollback()
             if attempt == _COMMIT_RETRIES - 1 or not _is_locked_error(e):
                 raise
             logger.warning('run %s: SQLite write lock busy (attempt %s/%s) — '
-                           'retrying the state write', getattr(run, 'id', '?'),
+                           'retrying the state write', run_id,
                            attempt + 1, _COMMIT_RETRIES)
-            db.session.rollback()
             _sleep(_COMMIT_RETRY_BASE_SECONDS * (2 ** attempt))
 
 

@@ -287,8 +287,9 @@ def test_replace_captions_ignores_non_kept_and_validates(app):
 # --- Non-square manual crop ------------------------------------------------------
 
 def test_crop_image_preserves_box_aspect(app):
-    """A 2:1 crop box must yield a 2:1 file (1024x512), not a distorted square;
-    a square box keeps the historical 1024x1024."""
+    """A 2:1 crop box must yield a 2:1 file, not a distorted square — and the box's
+    own size is kept when it is under the 1024 cap (a crop is normalised DOWN only,
+    never enlarged). A 2000-long box still comes back at 1024."""
     import os
     from app.services import face_dataset_service as svc
     from app.models import FaceDatasetImage
@@ -300,13 +301,18 @@ def test_crop_image_preserves_box_aspect(app):
         open(os.path.join(d, 'w.webp'), 'wb').write(buf.getvalue())
         img = FaceDatasetImage(dataset_id=ds.id, filename='w.webp', status='keep')
         svc.db.session.add(img); svc.db.session.commit()
-        assert svc.crop_image(LOCAL_USER, img.id, 0, 0, 1000, 500) is True
+        # over the cap -> normalised down, aspect kept
+        assert svc.crop_image(LOCAL_USER, img.id, 0, 0, 1500, 750) is True
         with Image.open(os.path.join(d, 'w.webp')) as im:
             assert im.size == (1024, 512)
-        # square box -> historical square output
+        # under the cap -> the box's own size, aspect kept
+        assert svc.crop_image(LOCAL_USER, img.id, 0, 0, 1000, 500) is True
+        with Image.open(os.path.join(d, 'w.webp')) as im:
+            assert im.size == (1000, 500)
+        # square box -> square output, still not enlarged
         assert svc.crop_image(LOCAL_USER, img.id, 0, 0, 400, 400) is True
         with Image.open(os.path.join(d, 'w.webp')) as im:
-            assert im.size == (1024, 1024)
+            assert im.size == (400, 400)
 
 
 def test_manual_crop_clears_all_watermark_metadata_after_pixel_change(app):

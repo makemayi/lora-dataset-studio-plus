@@ -8,10 +8,12 @@ they now share (`app.services.image_encoding`), pin that each one STATES its own
 encoding policy rather than inheriting a global default, and — just as importantly —
 pin that the throwaway derivatives were NOT dragged along with it.
 
-Note on wording: crop also RESIZES (the box is normalised to a 1024 long side, and it
-upscales a small box — that is what `upscale_ratio` records). Resampling is destructive
-by nature, so nothing here claims a lossless CROP. What is proven lossless is the
-ENCODING step: the bytes on disk decode back to exactly the crop+resize result.
+Note on wording: crop also RESIZES — a box LONGER than 1024 is normalised down to a
+1024 long side. It no longer ENLARGES a smaller box (that upscale invented no detail
+and cost 2.3x the bytes); `upscale_ratio` still records how far under the training
+resolution the box was. Downscaling is destructive by nature, so nothing here claims
+a lossless CROP. What is proven lossless is the ENCODING step: the bytes on disk
+decode back to exactly the crop+resize result.
 """
 import io
 
@@ -40,8 +42,8 @@ def _photo(w=400, h=300, seed=11):
     return im
 
 
-def _write(path, fmt):
-    im = _photo()
+def _write(path, fmt, w=400, h=300):
+    im = _photo(w, h)
     if fmt == 'JPEG':
         im.save(path, 'JPEG', quality=92, subsampling=0)
     elif fmt == 'WEBP':
@@ -52,11 +54,14 @@ def _write(path, fmt):
 
 
 def _reference_crop(path, box, size=1024):
-    """The crop+resize result BEFORE any encoder touches it — the honest baseline."""
+    """The crop+resize result BEFORE any encoder touches it — the honest baseline.
+
+    Mirrors the service's cap: the long side is normalised DOWN to `size`, never up."""
     with Image.open(path) as src:
         src.load()
         work = src.convert(image_encoding.resample_mode(src))
     bw, bh = box[2] - box[0], box[3] - box[1]
+    size = min(size, max(bw, bh))
     if bw >= bh:
         out = (size, max(1, round(size * bh / bw)))
     else:
@@ -70,7 +75,7 @@ def _decoded(path):
         return (im.format or '').upper(), im.convert('RGB').tobytes(), im.size
 
 
-def _seed_image(app, filename, fmt):
+def _seed_image(app, filename, fmt, w=400, h=300):
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
@@ -79,7 +84,7 @@ def _seed_image(app, filename, fmt):
         ds = svc.create_dataset(LOCAL_USER, f'Crop {filename}', f'crop-{filename}')
         import os
         path = os.path.join(svc._dataset_dir(ds.id), filename)
-        _write(path, fmt)
+        _write(path, fmt, w, h)
         row = FaceDatasetImage(dataset_id=ds.id, filename=filename,
                                source='import', status='keep')
         svc.db.session.add(row)
@@ -182,17 +187,18 @@ def test_cropped_file_extension_still_matches_its_real_content(app):
             f'{filename} now contains {detected} bytes')
 
 
-def test_crop_still_resizes_to_a_1024_long_side_and_reports_the_ratio(app):
-    """The encoding changed; the geometry must not.
+def test_a_small_crop_keeps_its_own_pixels_instead_of_being_enlarged(app):
+    """The resize used to be unconditional: a 240x180 box came out 1024x768.
 
-    It also PINS a truth worth stating out loud: the resize is unconditional. A
-    240x180 box is ENLARGED to 1024x768 — PIL only short-circuits `.resize()` when
-    the box's long side is already exactly 1024. So a crop never merely cuts, and
-    the enlargement invents no detail (measured: shrinking a 624->1024 upscale back
-    to 624 recovers the original at PSNR 49 dB, i.e. the extra pixels carried almost
-    nothing) while costing 2.3x the bytes. Whether that upscale should happen at all
-    is a training-geometry question — `upscale_ratio` and its ⚠ warning exist
-    because of it — and is deliberately NOT decided here."""
+    That enlargement carried almost nothing — shrinking the enlarged result back to
+    240 recovers the original at 48.96 dB (max channel error 10) — for 2.3x the bytes,
+    which since the lossless switch means ~1 MB of interpolated pixels per small crop.
+    A crop now never exceeds the size of what was actually cropped.
+
+    `upscale_ratio` is UNCHANGED in value and meaning as a stored number (target /
+    long side, i.e. how far under the training resolution this tile is); only the
+    pixels stop pretending. It is a stored column read by dataset_payload, so its
+    scale must not drift."""
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
@@ -202,6 +208,22 @@ def test_crop_still_resizes_to_a_1024_long_side_and_reports_the_ratio(app):
         assert svc.crop_image(LOCAL_USER, image_id, 40, 30, 240, 180) is True
         row = svc.db.session.get(FaceDatasetImage, image_id)
         assert row.upscale_ratio == pytest.approx(1024 / 240)
+    with Image.open(path) as im:
+        assert im.size == (240, 180)
+
+
+def test_a_crop_longer_than_1024_is_still_normalised_down(app):
+    """The guard-rail on the fix above: removing the ENLARGEMENT must not remove the
+    normalisation. A 2000x1500 box still lands on a 1024 long side, aspect preserved."""
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+
+    _ds, image_id, path = _seed_image(app, 'big.webp', 'WEBP', w=2400, h=1800)
+    with app.app_context():
+        assert svc.crop_image(LOCAL_USER, image_id, 100, 100, 2000, 1500) is True
+        row = svc.db.session.get(FaceDatasetImage, image_id)
+        assert row.upscale_ratio == pytest.approx(1024 / 2000)
     with Image.open(path) as im:
         assert im.size == (1024, 768)
 

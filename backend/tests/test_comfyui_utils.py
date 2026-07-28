@@ -288,8 +288,20 @@ def test_object_info_classes_cached_between_calls_and_droppable(app, monkeypatch
     """/object_info is the heaviest probe in the app (measured 8.8 MB / ~4.8 s on a
     node-rich install) and ONE Studio run asks for it twice (grid preflight + per-run
     class resolution). The short TTL cache must serve the second ask without a request,
-    a FAILED probe must never be cached (fail-open, retried at once), and the
-    refresh-models path must drop it so a freshly installed node pack shows up."""
+    a FAILED probe must be cached BRIEFLY (see below), and the refresh-models path must
+    drop both so a freshly installed node pack shows up.
+
+    The failure half used to assert the opposite ("failures are retried, never
+    cached"). That was a deliberate fail-open intention implemented as a storm: no
+    caller retried itself, but every OTHER caller re-fired the full multi-megabyte
+    payload, and on an install where it takes 15 s to build, our own probes kept
+    ComfyUI's event loop busy enough that the cheap 3 s /history reachability check
+    timed out — which is how "ComfyUI is slow" got reported as "ComfyUI isn't
+    running". One failure now answers the burst behind it for
+    `_OBJECT_INFO_FAIL_TTL` seconds. Nothing regresses: every consumer of this
+    already fails OPEN on None, so a cached failure can only make them decide
+    FASTER, never differently — and `clear_model_caches()` (refresh models,
+    settings save) drops it, which is the path a user takes after starting ComfyUI."""
     from app.utils import comfyui
     calls = []
 
@@ -324,7 +336,10 @@ def test_object_info_classes_cached_between_calls_and_droppable(app, monkeypatch
         monkeypatch.setattr(comfyui.requests, 'get', boom)
         assert comfyui.fetch_object_info_classes() is None
         assert comfyui.fetch_object_info_classes() is None
-        assert len(calls) == 4                     # failures are retried, never cached
+        assert len(calls) == 3                     # one failed probe answers the burst
+        comfyui.clear_model_caches()
+        assert comfyui.fetch_object_info_classes() is None
+        assert len(calls) == 4                     # ...and the clear re-probes at once
         comfyui.clear_model_caches()
 
 

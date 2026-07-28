@@ -49,11 +49,12 @@ def test_crop_reference_reads_original_not_the_cropped_ref(app):
         d, orig_fn, ref_fn = _seed_ref(
             ds, original=_webp((255, 0, 0), (600, 400)), cropped=_webp((0, 255, 0), (64, 64)))
         # A 400px-wide box is IMPOSSIBLE from the 64px green ref (would clamp to 64) —
-        # so a red 1024² result proves the crop was taken from the original.
+        # so a red 400² result proves the crop was taken from the original. (It is 400²
+        # and not 1024²: a crop under the cap keeps its own size.)
         assert svc.crop_reference('local', ds.id, 0, 0, 400, 400) is True
         im = Image.open(os.path.join(d, ref_fn)).convert('RGB')
-        assert im.size == (1024, 1024)
-        r, g, _b = im.getpixel((512, 512))
+        assert im.size == (400, 400)
+        r, g, _b = im.getpixel((200, 200))
         assert r > 200 and g < 60                       # red = from the original
         assert Image.open(os.path.join(d, orig_fn)).size == (600, 400)  # original untouched
 
@@ -65,8 +66,8 @@ def test_crop_reference_legacy_without_original_crops_ref_in_place(app):
         assert ds.ref_original_filename is None
         assert svc.crop_reference('local', ds.id, 0, 0, 128, 128) is True
         im = Image.open(os.path.join(d, ref_fn)).convert('RGB')
-        assert im.size == (1024, 1024)
-        _r, _g, b = im.getpixel((512, 512))
+        assert im.size == (128, 128)          # no longer enlarged to the cap
+        _r, _g, b = im.getpixel((64, 64))
         assert b > 200                                  # blue = the legacy ref itself
 
 

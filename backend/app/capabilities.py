@@ -49,11 +49,24 @@ _ZIMAGE_RE = re.compile(r'z[ -]?image', re.IGNORECASE)
 _MODEL_SUFFIXES = ('.safetensors', '.gguf', '.sft')
 
 
-def _http_ok(url, timeout=3) -> bool:
+def _http_ok(url, timeout=3, reason=None) -> bool:
+    """True when `url` answers with anything below 500.
+
+    `reason`, when a dict is passed, is FILLED with why a False was returned:
+    'timeout' (the server accepted the connection and then didn't answer in time —
+    it is up, it is slow) or 'unreachable' (nothing answered). It is an out-param
+    rather than a richer return type on purpose: this function is the single
+    network seam the whole test suite patches (`lambda *a, **k: False`), and a
+    stub that ignores the dict simply leaves the reason unknown instead of
+    breaking. Callers must treat an unfilled dict as "don't know"."""
     try:
         resp = requests.get(url, timeout=timeout)
         return resp.status_code < 500
-    except Exception:
+    except Exception as e:
+        if isinstance(reason, dict):
+            reason['why'] = ('timeout' if isinstance(e, requests.exceptions.Timeout)
+                             else 'unreachable')
+            reason['waited'] = timeout
         return False
 
 
@@ -137,12 +150,65 @@ def probe_qwen() -> dict:
     return {'ok': ok, 'detail': 'key set' if ok else 'key missing'}
 
 
+def _object_info_timeout() -> int:
+    """The /object_info read budget, published so the UI can quote it. Lazy import:
+    utils.comfyui imports config, not capabilities, and this keeps it that way."""
+    from .utils import comfyui as _cu
+    return _cu.object_info_timeout()
+
+
+def comfyui_down_message(status, waited) -> str:
+    """THE sentence for a ComfyUI that isn't answering. Two causes, two remedies —
+    never one fits-all line.
+
+    'ComfyUI isn't running' used to be said for BOTH, and it is a lie in one of
+    them: a heavily-customised ComfyUI is up and simply takes longer than the
+    budget to enumerate its nodes and models. Someone who has just started ComfyUI
+    and reads "it isn't running" goes and checks the one thing they already know is
+    true, and finds nothing (j_o_e_l., Discord — he then measured the real number
+    himself). So the slow case names the delay, says the server IS up, and points
+    at the knob that fixes it."""
+    if status == 'timeout':
+        return (f'ComfyUI took more than {waited}s to answer. It is running — it is '
+                f'slow to enumerate its nodes and model files, which is normal on an '
+                f'install with many custom nodes. Raise "ComfyUI response timeout" in '
+                f'Settings ▸ Local tools ▸ ComfyUI.')
+    return ('No answer from ComfyUI — nothing is listening at that address. Start '
+            'ComfyUI, or correct the ComfyUI API URL in Settings ▸ Local tools.')
+
+
 def probe_comfyui() -> dict:
+    """{ok, detail, status, hint}. `status` is 'ok' / 'slow' / 'unreachable' /
+    'unconfigured' — the two failure modes are published SEPARATELY so every
+    surface (Test button, engine cards, the 409 on a blocked generation) can say
+    the true one instead of the convenient one.
+
+    The verdict itself still rides on the cheap `/history` probe. When that one
+    can't tell us why (it is the patched seam in tests, and a 3 s budget is short
+    enough to trip on a busy server), the LAST /object_info attempt is consulted:
+    that probe knows the difference first-hand, because it is the one that spends
+    the long budget."""
     api_url = (cfg.get('comfyui.api_url') or '').rstrip('/')
     if not api_url:
-        return {'ok': False, 'detail': 'comfyui.api_url not configured'}
-    ok = _http_ok(f'{api_url}/history')
-    return {'ok': ok, 'detail': api_url if ok else f'unreachable: {api_url}'}
+        return {'ok': False, 'detail': 'comfyui.api_url not configured',
+                'status': 'unconfigured',
+                'hint': 'Set the ComfyUI API URL in Settings ▸ Local tools.'}
+    reason = {}
+    ok = _http_ok(f'{api_url}/history', reason=reason)
+    if ok:
+        return {'ok': True, 'detail': api_url, 'status': 'ok', 'hint': ''}
+    from .utils import comfyui as _cu
+    health = _cu.object_info_health()
+    why, waited = reason.get('why'), reason.get('waited', 3)
+    if why != 'timeout' and health['status'] == 'timeout':
+        # /history gave up after 3 s while the heavy probe proved the server is
+        # THERE and merely slow. Believe the probe that waited longer.
+        why, waited = 'timeout', health['waited']
+    status = 'slow' if why == 'timeout' else 'unreachable'
+    return {'ok': False, 'status': status,
+            'detail': (f'slow: {api_url} (>{waited}s)' if status == 'slow'
+                       else f'unreachable: {api_url}'),
+            'hint': comfyui_down_message('timeout' if status == 'slow' else 'down', waited)}
 
 
 def probe_ollama() -> dict:
@@ -1307,6 +1373,16 @@ def probe(force=False) -> dict:
         },
         'comfyui': {
             'reachable': comfy['ok'],
+            # WHY it isn't reachable, when it isn't: 'ok' | 'slow' | 'unreachable'
+            # | 'unconfigured'. `reachable` alone made every screen say "ComfyUI
+            # isn't running" at a ComfyUI that was running and busy; `hint` is the
+            # matching sentence, so the wording lives in ONE place instead of being
+            # re-invented per card. See probe_comfyui / comfyui_down_message.
+            'status': comfy.get('status', 'ok' if comfy['ok'] else 'unreachable'),
+            'hint': comfy.get('hint', ''),
+            # Read budget currently granted to the heavy /object_info enumeration,
+            # so a screen can quote the number the user would raise.
+            'object_info_timeout_s': _object_info_timeout(),
             'api_url': cfg.get('comfyui.api_url') or '',
             'base_dir': base_dir,
             'dir_configured': bool(base_dir),

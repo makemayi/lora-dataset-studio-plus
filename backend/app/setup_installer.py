@@ -1485,7 +1485,7 @@ def _download_present_in_extra(action) -> bool:
     return bool(usable)
 
 
-def _variant_already_present(action):
+def _variant_already_present(action, condemned=None):
     """Basename of a previously-accepted filename for `action` already on disk in the
     BASE dest folder (today: the pre-KV Klein UNET flux-2-klein-9b-fp8.safetensors),
     else None. When the default download filename changes, an install that fetched the
@@ -1498,9 +1498,11 @@ def _variant_already_present(action):
     name just as well as a good one, so accepting it on presence alone re-opened
     the dead end `dest` was fixed for. This folder is the app's own install tree
     (same tree `dest` lives in) and the resolver may well prefer the legacy name
-    over the fresh download, so a blocking-invalid variant is REMOVED here exactly
-    as it is at `dest` — via the same _replace_if_unloadable, so the deletion rule,
-    the log lines and the could-not-delete recovery are written once."""
+    over the fresh download, so an unloadable variant does have to go — but NOT
+    here and now. It sits at its own path, which `os.replace(part, dest)` will
+    never overwrite, so it is collected into `condemned` and deleted by the caller
+    once the fresh copy has actually landed. Deleting it up front turned a failed
+    download into "the user now has nothing at all"."""
     spec = _MODEL_DOWNLOADS[action]
     alts = spec.get('legacy_names') or ()
     if not alts:
@@ -1511,8 +1513,14 @@ def _variant_already_present(action):
         return None
     for name in alts:
         path = os.path.join(dest_dir, name)
-        if os.path.isfile(path) and not _replace_if_unloadable(action, path, spec):
+        if not os.path.isfile(path):
+            continue
+        reason = _unloadable_reason(action, path, spec)
+        if not reason:
             return name
+        _note(action, f'an earlier build is here under {name} but cannot be loaded: {reason}')
+        if condemned is not None:
+            condemned.append(path)
     return None
 
 
@@ -1560,7 +1568,12 @@ def _verify_downloaded_model(action, dest, spec, provider='hf') -> bool:
     named `.safetensors` that ComfyUI then dies on ("Expecting value: line 1
     column 1"). Header-only check, the same validator the readiness probe uses.
     A blocking verdict DELETES the file — leaving it would make every later probe
-    report the asset as installed. Advisory `too_small` is logged, not fatal."""
+    report the asset as installed. Advisory `too_small` is logged, not fatal.
+
+    Callers pass the `.part` file, BEFORE it takes the real name: a gate page that
+    already overwrote the previous copy would leave the user with strictly less
+    than they started with, which is the one outcome this whole path exists to
+    avoid."""
     try:
         from .services import model_integrity
         res = model_integrity.validate_model_file(dest, min_bytes=spec.get('min_bytes'))
@@ -1617,35 +1630,46 @@ def _krea_asset_already_installed(action) -> bool:
         return False
 
 
-def _replace_if_unloadable(action, dest, spec) -> bool:
-    """Is the file already at `dest` unusable weights, and did we clear the way for
-    a fresh download? True = it was blocking-invalid and has been removed, so the
-    caller must download; False = keep it (valid, only advisory-small, or the
-    checker itself could not answer).
+def _unloadable_reason(action, path, spec):
+    """Why the file at `path` is unusable weights, or None if it is keepable. PURE
+    CHECK — it deletes nothing, which is the whole point of splitting it out.
 
-    Deleting a user's file is not done lightly, hence the narrow rule: ONLY a
+    Condemning a user's file is not done lightly, hence the narrow rule: ONLY a
     blocking verdict (model_integrity: an HTML gate page, or a header the file is
     too short to satisfy), which is a file no loader can open under any
-    circumstances. A failing checker is never grounds to delete — it falls back to
-    the old skip."""
+    circumstances. Advisory `too_small` is the user's business. A failing checker
+    is never grounds to condemn either — no answer means keep."""
     try:
         from .services import model_integrity
-        res = model_integrity.validate_model_file(dest, min_bytes=spec.get('min_bytes'))
+        res = model_integrity.validate_model_file(path, min_bytes=spec.get('min_bytes'))
     except Exception:
         logger.debug('integrity check failed for %s', action, exc_info=True)
-        return False
+        return None
     if res['ok'] or not res['blocking']:
-        return False
-    _note(action, f"the file already here cannot be loaded: {res['reason']}")
-    try:
-        os.remove(dest)
-    except OSError as e:
-        # Say so instead of downloading into a path we could not clear: the write
-        # would fail, or worse, look like it worked.
-        _note(action, f'could not delete it ({e}) — remove it by hand, then retry: {dest}')
-        return False
-    _note(action, 'removed it — downloading a fresh copy')
-    return True
+        return None
+    return res['reason']
+
+
+def _drop_condemned(action, paths, keep=None):
+    """Delete files judged unloadable — called ONLY once something better is proven
+    to exist (a fresh download that landed, or another copy that does load). The
+    ordering IS the feature: a broken weight is useless but it surprises nobody,
+    while an empty folder after a re-download that never happened does.
+
+    `keep` is the path a successful download has just rewritten in place (via
+    os.replace) — condemning it was about the OLD bytes, which are already gone."""
+    kept = os.path.normcase(os.path.abspath(keep)) if keep else None
+    for path in paths:
+        if kept and os.path.normcase(os.path.abspath(path)) == kept:
+            continue
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            continue
+        except OSError as e:
+            _note(action, f'could not delete it ({e}) — remove it by hand: {path}')
+            continue
+        _note(action, f'removed the unusable file: {path}')
 
 
 def _run_model_download(action) -> int:
@@ -1657,6 +1681,8 @@ def _run_model_download(action) -> int:
     rc 1."""
     spec = _MODEL_DOWNLOADS[action]
     dest = _download_dest_path(action)
+    # Files judged unusable, deleted ONLY once a replacement exists (see below).
+    condemned = []
     if os.path.isfile(dest):
         # "Already present" used to end the story here, on ANY existing file. That
         # made the one remedy the app suggests for a corrupted weight — download it
@@ -1666,19 +1692,33 @@ def _run_model_download(action) -> int:
         # So the same validator the readiness probe uses gets asked first, and a
         # BLOCKING verdict (an HTML licence page, a truncated/garbage file) makes
         # this a replacement instead of a skip. The advisory `too_small` never
-        # deletes anything — a small-but-loadable file is the user's, not ours.
-        if not _replace_if_unloadable(action, dest, spec):
+        # condemns anything — a small-but-loadable file is the user's, not ours.
+        reason = _unloadable_reason(action, dest, spec)
+        if not reason:
             _append(action, f'already present: {dest}')
             return 0
-    variant = _variant_already_present(action)
+        _append(action, f'the file already here cannot be loaded: {reason}')
+        # It is NOT deleted now. `dest` is written by os.replace(part, dest) at the
+        # end of a successful download, which overwrites it atomically, so there is
+        # nothing to clear beforehand — and clearing it beforehand is exactly how a
+        # 401, an expired token or a dead host turned "you have a broken file" into
+        # "you have no file". It only goes if a good copy takes its place.
+        _append(action, 'it stays where it is until a fresh copy has actually downloaded')
+        condemned.append(dest)
+    variant = _variant_already_present(action, condemned)
     if variant:
+        # A loadable copy is proven present, so the condemned files can go now:
+        # nothing here depends on a download that may never happen.
+        _drop_condemned(action, condemned)
         _append(action, f'already present ({variant}) — an earlier build is '
                         'installed and still resolves; skipping download')
         return 0
     if _download_present_in_extra(action):
+        _drop_condemned(action, condemned)
         _append(action, 'already available via a configured extra_model_paths.yaml root - skipping download')
         return 0
     if _krea_asset_already_installed(action):
+        _drop_condemned(action, condemned)
         _append(action, 'already installed — the engine already resolves this asset from a '
                         'file you have; skipping download')
         return 0
@@ -1727,9 +1767,15 @@ def _run_model_download(action) -> int:
             _append(action, f'incomplete download ({done}/{total} bytes) - retry')
             os.remove(part)
             return 1
-        os.replace(part, dest)
-        if not _verify_downloaded_model(action, dest, spec, provider):
+        # Verify BEFORE the rename: a 200-with-a-login-page must not have already
+        # taken the place of whatever was there.
+        if not _verify_downloaded_model(action, part, spec, provider):
             return 1
+        os.replace(part, dest)
+        # The replacement is on disk and verified: NOW the old copies may go. `dest`
+        # itself was already overwritten atomically above, so it is spared here —
+        # removing it would delete the file we just downloaded.
+        _drop_condemned(action, condemned, keep=dest)
         _append(action, f'done -> {dest}')
         return 0
     except requests.RequestException as e:
