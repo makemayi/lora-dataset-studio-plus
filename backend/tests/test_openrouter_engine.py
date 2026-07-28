@@ -285,10 +285,11 @@ def test_the_engine_is_registered_without_disturbing_the_existing_two(app):
     """Engine ids and file tags are PERSISTED (dataset rows, filenames on disk):
     this locks that the new one was appended, never a rename or a reorder."""
     from app.services import face_dataset_service as svc
-    assert svc.API_ENGINES == ('nanobanana', 'chatgpt', 'openrouter')
+    assert svc.API_ENGINES == ('nanobanana', 'chatgpt', 'openrouter', 'qwen')
     assert svc._ENGINE_FILE_TAG['nanobanana'] == 'NBFace'
     assert svc._ENGINE_FILE_TAG['chatgpt'] == 'GPTFace'
     assert svc._ENGINE_FILE_TAG['openrouter'] == 'ORFace'
+    assert svc._ENGINE_FILE_TAG['qwen'] == 'QwenFace'
     from app.services import openrouter
     assert svc._api_generate_fn('openrouter') is openrouter.generate_variation
     # ...and the other two still resolve to THEIR own module.
