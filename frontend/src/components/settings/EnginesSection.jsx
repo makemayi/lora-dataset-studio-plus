@@ -23,7 +23,7 @@ const ENGINE_SECRETS = [
       + 'Test only checks that a key is saved — OpenRouter bills per request, so nothing '
       + 'is sent until you generate.' },
   { key: 'QWEN_API_KEY', label: 'DashScope API key', testTarget: 'qwen',
-    help: 'Powers the Qwen Image engine (Alibaba). Get a key at https://dashscope.console.aliyun.com/apiKey.' },
+    help: 'Powers the Qwen Image engine (Alibaba). Get a key at https://bailian.console.aliyun.com (百炼).' },
 ]
 
 const ENGINE_OPTIONS = [
