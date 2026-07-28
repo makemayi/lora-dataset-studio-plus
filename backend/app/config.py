@@ -298,6 +298,15 @@ DEFAULTS = {
         'identity_lora_strength': 1.0,
         # How hard the source latent is pushed back into the model each step.
         'ref_boost': 4.0,
+        # OPTIONAL second LoRA: a user's own character/person LoRA (e.g. trained
+        # on ai-toolkit), chained AFTER the identity-edit LoRA for extra
+        # likeness on top of Krea's baseline consistency. Blank = off — nothing
+        # about the graph changes from before this existed. Unlike identity_lora
+        # there is no auto-resolution: this names ONE specific file the user
+        # trained, so a typo should surface as ComfyUI's own "file not found"
+        # rather than silently falling back to a guess.
+        'character_lora': '',
+        'character_lora_strength': 0.8,
     },
     # Editable identity / quality prompts (feature request by @bbsorry / 雨田壹).
     # The identity "locks" that ride ahead of every generated variation used to be

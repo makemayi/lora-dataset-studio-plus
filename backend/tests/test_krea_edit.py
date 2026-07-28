@@ -432,6 +432,38 @@ def test_no_loader_value_is_ever_hardcoded_in_the_graph_builder():
                      'krea/id.safetensors'}
 
 
+def test_no_character_lora_leaves_the_graph_exactly_as_before():
+    """character_lora_name omitted (or blank) must be a complete no-op on the
+    graph shape — no install that never sets it should see anything change."""
+    g = _graph()
+    loras = [n for n in g.values() if n['class_type'] == 'LoraLoaderModelOnly']
+    assert len(loras) == 1, 'still a single-LoRA chain when no character LoRA is set'
+
+
+def test_character_lora_chains_after_the_identity_lora_into_the_patch():
+    """When set, the character LoRA is a SECOND LoraLoaderModelOnly wired after
+    the identity-edit one (closer to the sampler) — Krea2EditModelPatch reads
+    from the character LoRA's output, not the identity LoRA's."""
+    from app.services import krea_edit_helper as keh
+    g = keh.build_workflow('ref.png', 'a prompt', unet='Krea/base.safetensors',
+                           clip='te.safetensors', vae='vae.safetensors',
+                           lora_name='krea/id.safetensors', width=1024, height=1024,
+                           seed=7, character_lora_name='mychar/character.safetensors',
+                           character_lora_strength=0.65)
+    loras = [(k, n) for k, n in g.items() if n['class_type'] == 'LoraLoaderModelOnly']
+    assert len(loras) == 2
+    unet = next(k for k, n in g.items() if n['class_type'] == 'UNETLoader')
+    identity_key, identity = next((k, n) for k, n in loras
+                                   if n['inputs']['lora_name'] == 'krea/id.safetensors')
+    char_key, char = next((k, n) for k, n in loras
+                          if n['inputs']['lora_name'] == 'mychar/character.safetensors')
+    assert identity['inputs']['model'] == [unet, 0]
+    assert char['inputs']['model'] == [identity_key, 0]
+    assert char['inputs']['strength_model'] == 0.65
+    patch = next(n for n in g.values() if n['class_type'] == 'Krea2EditModelPatch')
+    assert patch['inputs']['model'] == [char_key, 0]
+
+
 # --- settings ---------------------------------------------------------------
 
 def test_grounding_is_clamped_and_snapped_and_junk_degrades_to_the_default(krea):
@@ -443,6 +475,22 @@ def test_grounding_is_clamped_and_snapped_and_junk_degrades_to_the_default(krea)
     assert keh.grounding_px() == keh.GROUNDING_PX_MAX
     config.save_config({'krea': {'grounding_px': 'a lot'}})
     assert keh.grounding_px() == 1024
+
+
+def test_character_lora_is_blank_by_default_and_off_means_off(krea):
+    keh, _base, _config = krea
+    assert keh._character_lora() == ''
+    assert keh._character_lora_strength() == 0.8
+
+
+def test_character_lora_strength_is_clamped(krea):
+    keh, _base, config = krea
+    config.save_config({'krea': {'character_lora': 'x.safetensors',
+                                 'character_lora_strength': 99}})
+    assert keh._character_lora() == 'x.safetensors'
+    assert keh._character_lora_strength() == 1.5
+    config.save_config({'krea': {'character_lora_strength': 'lots'}})
+    assert keh._character_lora_strength() == 0.8
 
 
 # --- prompt: negations the model ignores become positive directives ---------

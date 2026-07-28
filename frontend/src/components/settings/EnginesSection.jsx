@@ -333,6 +333,53 @@ function KreaCard({ config, setField, configDefaults }) {
         </p>
         <ResetToDefault label="Identity edit LoRA" section="krea" field="identity_lora" {...reset} />
       </div>
+
+      <div className="mt-3 sm:max-w-md border-t border-border pt-3">
+        <label htmlFor="krea-character-lora" className="block text-xs font-medium text-content">
+          Character LoRA (optional)
+        </label>
+        <input
+          id="krea-character-lora"
+          type="text"
+          value={krea.character_lora ?? ''}
+          placeholder="e.g. mychar/my_character_v1.safetensors"
+          onChange={(e) => setField('krea', 'character_lora', e.target.value)}
+          className={INPUT_CLASS}
+        />
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          A SECOND LoRA — your own trained character/person LoRA (e.g. from ai-toolkit) — chained
+          after the identity edit LoRA above for extra likeness on top of Krea&rsquo;s baseline
+          consistency. Path relative to ComfyUI&rsquo;s models/loras. Blank = off, the graph is
+          unchanged from before this existed. Unlike the identity edit LoRA there is no
+          auto-detection: this names one specific file you trained, so a typo surfaces as
+          ComfyUI&rsquo;s own &ldquo;file not found&rdquo; rather than silently using a guess.
+        </p>
+        <ResetToDefault label="Character LoRA" section="krea" field="character_lora" {...reset} />
+      </div>
+
+      {!!(krea.character_lora ?? '').trim() && (
+        <div className="mt-3 sm:max-w-md">
+          <label htmlFor="krea-character-lora-strength" className="block text-xs font-medium text-content">
+            Character LoRA strength ({Number(krea.character_lora_strength ?? dflt('character_lora_strength')).toFixed(2)})
+          </label>
+          <input
+            id="krea-character-lora-strength"
+            type="range"
+            min={0}
+            max={1.5}
+            step={0.05}
+            value={Number(krea.character_lora_strength ?? dflt('character_lora_strength'))}
+            onChange={(e) => setField('krea', 'character_lora_strength', Number(e.target.value))}
+            className="mt-1 w-full accent-violet-500"
+          />
+          <p className="mt-1 text-[0.6875rem] text-content-subtle">
+            {dflt('character_lora_strength')} is a reasonable starting point. Higher locks the
+            character harder but can fight the edit prompt (pose/outfit/scene changes stop
+            landing); lower lets the edit through more but weakens the likeness boost.
+          </p>
+          <ResetToDefault label="Character LoRA strength" section="krea" field="character_lora_strength" {...reset} />
+        </div>
+      )}
     </Card>
   )
 }
