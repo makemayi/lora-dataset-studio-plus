@@ -19,9 +19,9 @@
 /** Canonical engine order — drives the card order, the primary pick and the
  *  round-robin. Stable: it is also the order batches are BUILT in, and the LOCAL
  *  engines must come last at DISPATCH time (see engineBatches). */
-export const ENGINES = ['klein', 'krea', 'nanobanana', 'chatgpt', 'openrouter'];
+export const ENGINES = ['klein', 'krea', 'nanobanana', 'chatgpt', 'openrouter', 'qwen'];
 
-export const API_ENGINES = ['nanobanana', 'chatgpt', 'openrouter'];
+export const API_ENGINES = ['nanobanana', 'chatgpt', 'openrouter', 'qwen'];
 
 /** Engines that render on the user's own GPU through ComfyUI: free, slower,
  *  serialized on one GPU, and the ONLY ones allowed to receive 🔞 shots (the
@@ -35,6 +35,7 @@ export const ENGINE_LABELS = {
   nanobanana: 'Nano Banana Pro',
   chatgpt: 'ChatGPT',
   openrouter: 'OpenRouter',
+  qwen: 'Qwen Image',
 };
 
 /* Per-engine accent colour. Deliberately NOT green: green already means
@@ -93,6 +94,14 @@ export const ENGINE_ACCENTS = {
     pill: 'bg-fuchsia-500/25 text-fuchsia-200',
     dot: 'bg-fuchsia-400',
   },
+  qwen: {
+    card: 'border-rose-400/60 bg-rose-500/15 ring-1 ring-rose-400/40',
+    title: 'text-rose-200',
+    text: 'text-rose-300',
+    icon: 'text-rose-300',
+    pill: 'bg-rose-500/25 text-rose-200',
+    dot: 'bg-rose-400',
+  },
 };
 
 /** Pay-per-image rate. Klein is local GPU time, hence free; the ChatGPT
@@ -102,7 +111,7 @@ export const ENGINE_ACCENTS = {
  *  so a user who points it at a cheaper or dearer slug pays that instead. The
  *  engine card says so — a number here is better than no guard-rail at all, but
  *  it is the only rate in this table that the user can move. */
-export const ENGINE_RATES = { klein: 0, krea: 0, nanobanana: 0.15, chatgpt: 0.17, openrouter: 0.15 };
+export const ENGINE_RATES = { klein: 0, krea: 0, nanobanana: 0.15, chatgpt: 0.17, openrouter: 0.15, qwen: 0.08 };
 
 export const STORAGE_ENGINES = 'datasetGenerators';     // JSON list (new)
 export const STORAGE_PRIMARY = 'datasetGenerator';      // legacy string mirror — NEVER renamed

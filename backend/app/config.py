@@ -29,7 +29,8 @@ load_dotenv(ENV_PATH)
 # (Settings > Scraping & sources). Sources read their env var at request time,
 # and set_secrets() stamps os.environ on save, so changes apply without restart.
 SECRET_KEYS = ('GEMINI_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'HF_TOKEN',
-               'VAST_API_KEY', 'REDDIT_CLIENT_ID', 'CIVITAI_API_KEY', 'PEXELS_API_KEY')
+               'VAST_API_KEY', 'REDDIT_CLIENT_ID', 'CIVITAI_API_KEY', 'PEXELS_API_KEY',
+               'QWEN_API_KEY')
 
 DEFAULTS = {
     # host: '127.0.0.1' = this machine only ; '0.0.0.0' = reachable from the LAN
@@ -69,7 +70,7 @@ DEFAULTS = {
     # of which engines the app offered the last time the user picked, written by
     # save_config; [] means "no ledger yet".
     'engines': {'default': 'chatgpt',
-                'enabled': ['nanobanana', 'chatgpt', 'openrouter', 'klein', 'krea'],
+                'enabled': ['nanobanana', 'chatgpt', 'openrouter', 'qwen', 'klein', 'krea'],
                 'known': [],
                 # chatgpt_auth: 'auto' = subscription when connected, else API key.
                 'chatgpt_auth': 'auto',            # auto|api|subscription
@@ -85,17 +86,20 @@ DEFAULTS = {
                 # catalogue moves fast and a renamed/retired model must never
                 # require a new release. Default = the Nano Banana weights.
                 'openrouter_model': 'google/gemini-3-pro-image',
-                # Nano Banana / ChatGPT image models. Free text for the same
+                # Nano Banana / ChatGPT / Qwen image models. Free text for the same
                 # reason as OpenRouter's, but DEFAULTED TO BLANK, unlike it:
-                # NANOBANANA_MODEL and CHATGPT_IMAGE_MODEL environment variables
+                # environment variables (NANOBANANA_MODEL, CHATGPT_IMAGE_MODEL, QWEN_MODEL)
                 # already existed and some installs set them. A literal default
                 # here would be a non-blank cfg.get() that silently outranked
                 # that env var. Blank means "not chosen", so the documented
                 # order holds: setting > environment variable > built-in default
-                # (services/nanobanana.DEFAULT_MODEL and
-                # services/chatgpt_image.DEFAULT_IMAGE_MODEL).
+                # (services/nanobanana.DEFAULT_MODEL, services/chatgpt_image.DEFAULT_IMAGE_MODEL,
+                # services/qwen_image.DEFAULT_MODEL).
                 'nanobanana_model': '',
-                'chatgpt_image_model': ''},
+                'chatgpt_image_model': '',
+                'qwen_model': '',
+                # DashScope region configuration: 'sg' (Singapore, default), 'cn', or 'us'.
+                'qwen_region': 'sg'},
     'captioning': {'backend': 'auto'},                         # auto|joycaption|ollama|none
     'training': {'default_family': 'zimage'},
     # Concept face masking (opt-in per dataset, Advanced training options). Both

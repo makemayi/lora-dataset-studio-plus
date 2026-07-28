@@ -6352,8 +6352,8 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
 # APPEND-ONLY: both the engine ids and the file tags are persisted (dataset rows
 # record the engine, and the tag is baked into the filename on disk), so a value
 # here is never renamed or reordered.
-API_ENGINES = ('nanobanana', 'chatgpt', 'openrouter')
-_ENGINE_FILE_TAG = {'nanobanana': 'NBFace', 'chatgpt': 'GPTFace', 'openrouter': 'ORFace'}
+API_ENGINES = ('nanobanana', 'chatgpt', 'openrouter', 'qwen')
+_ENGINE_FILE_TAG = {'nanobanana': 'NBFace', 'chatgpt': 'GPTFace', 'openrouter': 'ORFace', 'qwen': 'QwenFace'}
 
 # The LOCAL engines — they render on the user's own GPU through ComfyUI, cost
 # nothing, and are the only ones allowed to receive NSFW shots. Klein is the
@@ -6371,7 +6371,7 @@ KNOWN_ENGINES = LOCAL_ENGINES + API_ENGINES
 # — the ids above are the persisted values. A contract test pins ids AND labels
 # across the two languages, so neither side can grow an engine on its own.
 API_ENGINE_LABELS = {'nanobanana': 'Nano Banana Pro', 'chatgpt': 'ChatGPT',
-                     'openrouter': 'OpenRouter'}
+                     'openrouter': 'OpenRouter', 'qwen': 'Qwen Image'}
 
 
 def engine_labels():
@@ -6420,6 +6420,8 @@ def _api_generate_fn(engine):
         from .chatgpt_image import generate_variation
     elif engine == 'openrouter':
         from .openrouter import generate_variation
+    elif engine == 'qwen':
+        from .qwen_image import generate_variation
     else:
         from .nanobanana import generate_variation
     return generate_variation
