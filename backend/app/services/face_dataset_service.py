@@ -6317,6 +6317,21 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
                 img.fail_reason = f'chatgpt: {e}'
                 db.session.commit()
                 return engine
+            except Exception as gen_err:
+                # Catch engine-specific errors (Qwen/OpenRouter/etc) that are fatal
+                # (no key, bad config) vs retryable (API rate limit, transient).
+                # EngineFatal marks it as non-retryable; others stay as failed/retryable.
+                from .qwen_image import QwenImageFatal
+                from .openrouter import OpenRouterFatal
+                from .nanobanana import NanoBananaFatal
+                if isinstance(gen_err, (QwenImageFatal, OpenRouterFatal, NanoBananaFatal)):
+                    out = None
+                    img.status = 'failed'
+                    img.fail_reason = f'{engine}: {gen_err}'
+                    db.session.commit()
+                    return engine
+                # For other exceptions, let them bubble up so the outer handler records them
+                raise
             if out:
                 fn = f"{user_id}_{_ENGINE_FILE_TAG[engine]}_{uuid.uuid4().hex[:8]}.webp"
                 write_image_atomic(os.path.join(_dataset_dir(img.dataset_id), fn),
