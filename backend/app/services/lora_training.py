@@ -142,8 +142,19 @@ def _machine_hf_token_files() -> list:
 def training_subprocess_env(hf_home=None) -> dict:
     """The environment the LOCAL ai-toolkit process is launched with.
 
-    `HF_HOME` routes base/adapter weights onto the configured disk and
-    `PYTHONIOENCODING` keeps unicode logs from dying on cp1252.
+    `HF_HOME` routes base/adapter weights onto the configured disk.
+    `PYTHONIOENCODING` keeps ai-toolkit's OWN stdout/stderr from dying on
+    cp1252/GBK. `PYTHONUTF8` is the wider net: unlike PYTHONIOENCODING (which
+    only covers a process's own top-level std streams), UTF-8 mode also
+    changes what `locale.getpreferredencoding()` reports process-wide — which
+    is what a NESTED subprocess capture defaults to when it doesn't pin an
+    encoding itself. Observed crash on a Chinese-Windows box: torch's own
+    `distributed.elastic.multiprocessing.redirects` reader thread died on a
+    non-UTF-8 byte from a worker it was capturing, which silently froze the
+    training log (the run looked "stuck", but was really just unobserved).
+    That crash is inside PyTorch's own code, not this app's or ai-toolkit's,
+    so this can reduce the odds without being a guaranteed fix for a
+    third-party library bug.
 
     Hugging Face authentication, in the order huggingface_hub itself resolves it:
 
@@ -164,7 +175,7 @@ def training_subprocess_env(hf_home=None) -> dict:
     Never logs, and never copies a token anywhere but into this env dict.
     """
     env = dict(os.environ, HF_HOME=str(hf_home if hf_home is not None else _hf_home()),
-               PYTHONIOENCODING='utf-8')
+               PYTHONIOENCODING='utf-8', PYTHONUTF8='1')
     token = (cfg.secret('HF_TOKEN') or '').strip()
     if token:
         env['HF_TOKEN'] = token

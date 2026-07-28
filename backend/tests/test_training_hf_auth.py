@@ -37,6 +37,12 @@ def test_env_still_routes_the_cache_and_forces_utf8(tmp_path, monkeypatch):
     env = _env(tmp_path / 'hf', monkeypatch)
     assert env['HF_HOME'] == str(tmp_path / 'hf')
     assert env['PYTHONIOENCODING'] == 'utf-8'
+    # Belt-and-suspenders alongside PYTHONIOENCODING: UTF-8 mode also covers a
+    # NESTED subprocess capture inside ai-toolkit's own dependency tree (a
+    # torch elastic-launcher reader thread crashed on a non-UTF-8 byte from a
+    # worker it was capturing, silently freezing the training log — the run
+    # looked "stuck" but was really just unobserved).
+    assert env['PYTHONUTF8'] == '1'
 
 
 # --- 1. the Settings token must reach the trainer EXPLICITLY -------------------
