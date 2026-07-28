@@ -445,6 +445,7 @@ export default function VariationCatalog({ onGenerate, busy, generating = null, 
   const isNB = engines.includes('nanobanana');
   const isGPT = engines.includes('chatgpt');
   const isOR = engines.includes('openrouter');
+  const isQwen = engines.includes('qwen');
   // Per-engine affordances (the Klein tuning panel, the Krea one) light up as
   // soon as that engine is part of the run — its shots really are rendered
   // locally.
@@ -485,6 +486,8 @@ export default function VariationCatalog({ onGenerate, busy, generating = null, 
   // this card used to state "gpt-image-2" flatly, which became a lie the moment
   // someone changed it. Blank = the engine's own default, named here.
   const [chatgptImageModel, setChatgptImageModel] = useState('');
+  // Qwen's model, also mirrored from Settings (Qwen Image 2.0 by default).
+  const [qwenModel, setQwenModel] = useState('');
   // Krea's consistency <-> prompt-adherence dial, mirrored from Settings.
   const [kreaGrounding, setKreaGrounding] = useState(1024);
   useEffect(() => {
@@ -496,6 +499,7 @@ export default function VariationCatalog({ onGenerate, busy, generating = null, 
         setChatgptAuth(d.config?.engines?.chatgpt_auth || 'auto');
         setOpenrouterModel((d.config?.engines?.openrouter_model || '').trim());
         setChatgptImageModel((d.config?.engines?.chatgpt_image_model || '').trim());
+        setQwenModel((d.config?.engines?.qwen_model || '').trim());
         // Optional generation-LoRA presets: names + chains for the picker.
         setLoraPresets(sanitizeGenerationLoraPresets(d.config?.klein?.generation_lora_presets));
         // Krea's one dial. It lives in Settings (it changes the meaning of every
@@ -509,10 +513,11 @@ export default function VariationCatalog({ onGenerate, busy, generating = null, 
   const nbAvailable = enabledEngines.includes('nanobanana') && caps.engines.nanobanana;
   const gptAvailable = enabledEngines.includes('chatgpt') && caps.engines.chatgpt;
   const orAvailable = enabledEngines.includes('openrouter') && caps.engines.openrouter;
+  const qwenAvailable = enabledEngines.includes('qwen') && caps.engines.qwen;
   const klAvailable = enabledEngines.includes('klein') && caps.engines.klein;
   const krAvailable = enabledEngines.includes('krea') && caps.engines.krea;
   const available = { klein: klAvailable, krea: krAvailable, nanobanana: nbAvailable,
-    chatgpt: gptAvailable, openrouter: orAvailable };
+    chatgpt: gptAvailable, openrouter: orAvailable, qwen: qwenAvailable };
 
   // The persisted selection can name engines that have since been disabled in
   // Settings (or lost their key/backend): drop those instead of trying to
@@ -523,11 +528,11 @@ export default function VariationCatalog({ onGenerate, busy, generating = null, 
     const usable = engines.filter((e) => available[e]);
     if (usable.length === engines.length) return;
     const first = nbAvailable ? 'nanobanana' : gptAvailable ? 'chatgpt'
-      : orAvailable ? 'openrouter' : klAvailable ? 'klein'
+      : orAvailable ? 'openrouter' : qwenAvailable ? 'qwen' : klAvailable ? 'klein'
       : krAvailable ? 'krea' : null;
     setEngines(usable.length ? usable : (first ? [first] : []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engines, nbAvailable, gptAvailable, orAvailable, klAvailable, krAvailable]);
+  }, [engines, nbAvailable, gptAvailable, orAvailable, qwenAvailable, klAvailable, krAvailable]);
   // Effective ChatGPT lane: the subscription (ChatGPT Plus/Pro image quota) vs the
   // pay-per-use API key. Mirrors the backend "auto = subscription when connected".
   const gptSub = caps.chatgpt_subscription || {};
@@ -992,6 +997,23 @@ export default function VariationCatalog({ onGenerate, busy, generating = null, 
             </span>
           ) : (
             <span className="text-amber-300 text-[0.625rem]">⚠ Add OPENROUTER_API_KEY in Settings</span>
+          )} />
+        <EngineCard id="qwen" checked={isQwen} available={qwenAvailable} generating={generating}
+          onToggle={toggleEngine} share={engineShare('qwen')}
+          icon={<span className={`w-9 h-9 flex items-center justify-center shrink-0 text-lg font-bold ${isQwen ? ENGINE_ACCENTS.qwen.icon : 'text-content-subtle'}`}>🌟</span>}
+          title={<>Qwen Image <span className="font-normal text-content-subtle">· API</span></>}
+          tags={[
+            <span key="gpu" className="px-1.5 py-px rounded-full bg-app/60 border border-border text-content-muted text-[0.625rem]">No GPU</span>,
+            <span key="price" className="px-1.5 py-px rounded-full bg-app/60 border border-border text-content-muted text-[0.625rem]">DashScope credits</span>,
+            <span key="sfw" className="px-1.5 py-px rounded-full bg-app/60 border border-border text-content-muted text-[0.625rem]">SFW</span>,
+          ]}
+          hint={qwenAvailable ? (
+            <span className={`text-[0.625rem] ${isQwen ? ENGINE_ACCENTS.qwen.text : 'text-content-subtle'}`}>
+              <span className="break-all">{qwenModel || 'qwen-image-2.0-pro-2026-06-25'}</span>
+              {' · '}{engineShare('qwen')} image(s), billed by Alibaba at $0.08/img
+            </span>
+          ) : (
+            <span className="text-amber-300 text-[0.625rem]">⚠ Add QWEN_API_KEY in Settings</span>
           )} />
       </div>
 

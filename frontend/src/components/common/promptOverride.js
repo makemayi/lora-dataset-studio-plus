@@ -59,7 +59,7 @@ export function promptBoxText(value, defaultText) {
 /** The engines whose prompts go through wrap_variation, i.e. every API engine.
  *  Listed once: an engine missing from here would silently be treated as Klein
  *  by activeExtraRefPromptKey and badge the wrong prompt box. */
-export const API_PROMPT_ENGINES = ['nanobanana', 'chatgpt', 'openrouter'];
+export const API_PROMPT_ENGINES = ['nanobanana', 'chatgpt', 'openrouter', 'qwen'];
 
 export const IDENTITY_PROMPT_FIELDS = [
   {
