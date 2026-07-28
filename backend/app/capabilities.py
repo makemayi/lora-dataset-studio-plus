@@ -1111,6 +1111,7 @@ def probe(force=False) -> dict:
     gemini = probe_gemini()
     openai_ = probe_openai()
     openrouter_ = probe_openrouter()
+    qwen_ = probe_qwen()
     face_scoring = probe_face_scoring()
     masks = probe_masks()
     bank_scoring = probe_bank_scoring()
@@ -1215,6 +1216,7 @@ def probe(force=False) -> dict:
             'nanobanana': gemini['ok'],
             'chatgpt': openai_['ok'],
             'openrouter': openrouter_['ok'],
+            'qwen': qwen_['ok'],
             'klein': klein_ready,
             'krea': krea_ready,
         },
