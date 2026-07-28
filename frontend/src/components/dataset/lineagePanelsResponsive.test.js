@@ -50,6 +50,30 @@ test('the checkpoint gallery cannot delete on an accidental tap', () => {
   assert.match(gallery, /data-testid="gallery-confirm-delete"[\s\S]{0,120}onClick=\{runDelete\}/);
 });
 
+/* 📌 An action nobody finds is an action that does not exist.
+   Pin-to-canvas shipped INSIDE the viewer: you had to open an image to discover
+   the board could hold it. The toolbar hint mentioned it, last in a seven-clause
+   line that `lg:hidden` removes entirely below a laptop. So the tile carries it
+   now — and that is only safe as long as it stays out of Select mode, which no
+   screenshot can show. */
+test('the run gallery offers 📌 on the thumbnail itself, never while arming a delete', () => {
+  // The visibility RULE is the tested helper, not an inline `&&` a rewrite loosens.
+  assert.match(gallery, /galleryTilePin\(\{ picking, canPin: typeof onPin === 'function' \}\)/);
+  assert.match(gallery, /data-testid="gallery-tile-pin"/);
+  assert.match(gallery, /\{showPin && \(/);
+  // A button cannot nest in a button: the tile is wrapped, and the wrapper takes
+  // no handler of its own (the image target must not grow or shrink).
+  assert.match(gallery, /<div key=\{img\.id\} className="relative">/);
+  // Bottom-right, because top-right is the 👍/👎 verdict — two thumb targets in
+  // one corner is how you reject an image you meant to pin.
+  assert.match(gallery, /data-testid="gallery-tile-pin"[\s\S]{0,600}absolute bottom-1 right-1/);
+  assert.match(gallery, /aria-label="Pin this image to the canvas"/);
+  // The badges are decoration; they must not eat the taps aimed at the tile.
+  assert.match(gallery, /pointer-events-none absolute right-0\.5 top-0\.5/);
+  // The viewer keeps its own, larger, labelled button — this is an addition.
+  assert.match(gallery, /data-testid="gallery-pin-image"/);
+});
+
 /* 👍 One reachable place for the whole gesture. Select used to sit in the header,
    two thumb-lengths from the Select all / Delete it leads to; on a phone that is
    the most expensive reach in the panel. It now opens the SAME pinned bar, which

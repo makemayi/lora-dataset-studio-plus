@@ -74,6 +74,34 @@ export function galleryActionBar({
   };
 }
 
+/** 📌 Does THIS thumbnail carry a "pin to canvas" affordance?
+ *
+ *  WHY THIS IS A DECISION AND NOT AN INLINE `&&`
+ *  ---------------------------------------------
+ *  Pinning an image onto the board shipped as an action inside the VIEWER: you
+ *  had to open an image to find out it could leave the modal. The person who
+ *  asked for the feature could not find it — and an action nobody finds is an
+ *  action that does not exist. The toolbar hint mentioned it, but it is a
+ *  seven-clause line that `lg:` hides on anything narrower than a laptop, with
+ *  the pin last in it.
+ *
+ *  So the action moves onto the tile, where the images are. Two rules keep the
+ *  tile from becoming a control panel, and both are the kind that a rewrite
+ *  quietly loosens — hence here, under test:
+ *
+ *   • NOT in Select mode. That mode exists to arm a batch delete, and its whole
+ *     safety story is "outside it a tap only zooms, inside it a tap only picks".
+ *     A third target on the tile while a delete is being armed is exactly the
+ *     mis-tap the mode was built to prevent.
+ *   • ONLY where a board exists to pin onto. The panel opens from the canvas
+ *     (which passes `onPin`) and from screens that have no board at all; there,
+ *     the button would promise something that cannot happen.
+ *
+ *  Returns a boolean. */
+export function galleryTilePin({ picking, canPin } = {}) {
+  return !!canPin && !picking;
+}
+
 /** The confirmation text for a batch — everything the click will do, in order of
  *  surprise. `mode` is the backend's announced destination ('trash' |
  *  'app_trash' | anything else), read from the gallery payload BEFORE the click.

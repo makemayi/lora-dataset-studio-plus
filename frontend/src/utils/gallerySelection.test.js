@@ -14,7 +14,7 @@ import test from 'node:test';
 
 import {
   allGalleryImageIds, galleryActionBar, galleryDeleteConfirmation, galleryDeleteSummary,
-  pruneGallerySelection, toggleGalleryImage,
+  galleryTilePin, pruneGallerySelection, toggleGalleryImage,
 } from './gallerySelection.js';
 
 const IMAGES = [{ id: 3 }, { id: 7 }, { id: 11 }];
@@ -124,6 +124,27 @@ test('the delete half only exists in Select mode, and is inert until a pick', ()
   assert.equal(galleryActionBar({
     status: 'ready', imageCount: 4, picking: true, selectedCount: 1, busy: true,
   }).deleteDisabled, true);
+});
+
+/* 📌 Pin to canvas, from the grid.
+ *
+ * The action shipped inside the VIEWER only: you had to open an image to learn
+ * it could leave the modal, and the person who asked for the feature never
+ * found it. It now sits on the tile — but a tile is also the target of a batch
+ * delete, and that collision is what is worth pinning. */
+test('a tile offers 📌 only outside Select mode, and only with a board to pin onto', () => {
+  assert.equal(galleryTilePin({ canPin: true }), true);
+
+  // Select mode arms a DELETE. Its safety story is "outside it a tap zooms,
+  // inside it a tap picks" — a third target while a delete is being armed is
+  // exactly the mis-tap the mode exists to prevent.
+  assert.equal(galleryTilePin({ canPin: true, picking: true }), false);
+
+  // No board (the panel also opens from screens that have no canvas): the
+  // button would promise something that cannot happen.
+  assert.equal(galleryTilePin({ canPin: false }), false);
+  assert.equal(galleryTilePin({}), false);
+  assert.equal(galleryTilePin(), false);
 });
 
 test('select-all flips to Clear exactly when everything listed is picked', () => {

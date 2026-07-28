@@ -1,6 +1,7 @@
 /**
  * Centralized API fetch client with global error interception via toast.
  */
+import { reportRequestFailure, reportRequestSuccess } from '../utils/connectionStatus';
 
 let toastRef = null;
 
@@ -69,14 +70,36 @@ export async function fetchWithCsrfRetry(url, options = {}) {
   return res;
 }
 
+/* The two sentences the network layer is allowed to say out loud. Exported so
+   the tests and the offline indicator quote the same strings. */
+export const CONNECTION_LOST_MESSAGE = 'Connection lost. Please check your network.';
+export const CONNECTION_BACK_MESSAGE = 'Back online.';
+
+/**
+ * @param {string} url
+ * @param {RequestInit & { background?: boolean }} options
+ *   `background: true` marks an AUTOMATIC, periodic request — a progress poll,
+ *   a live indicator. Its failure is expected weather, not news: it updates the
+ *   shared connection state (which drives the persistent "Offline —
+ *   reconnecting…" indicator) and says nothing. Everything else keeps today's
+ *   behaviour, so no existing call site changes meaning by staying silent about
+ *   the flag; only pollers opt in.
+ */
 export async function apiFetch(url, options = {}) {
+  const { background = false, ...init } = options;
   let res;
   try {
-    res = await fetchWithCsrfRetry(url, options);
+    res = await fetchWithCsrfRetry(url, init);
   } catch {
-    toastRef?.error('Connection lost. Please check your network.');
+    // One banner per outage, from the foreground only. Ten failed polls used to
+    // mean ten stacked banners covering the app on a phone.
+    if (reportRequestFailure({ background })) toastRef?.error(CONNECTION_LOST_MESSAGE);
     throw new Error('Network error');
   }
+
+  // Any response proves the server is reachable — a 500 closes the outage just
+  // as well as a 200. Announced exactly once, then quiet.
+  if (reportRequestSuccess()) toastRef?.success(CONNECTION_BACK_MESSAGE);
 
   if (!res.ok) {
     let msg = `HTTP ${res.status}`;
@@ -112,8 +135,15 @@ export async function apiFetch(url, options = {}) {
   return res.json();
 }
 
-export function postJson(url, body) {
+/* `opts` reaches apiFetch untouched — notably `{ background: true }`, which keeps
+   an automatic POST from announcing a failure the user did not ask for. A POST is
+   not always a user action: the threshold panel previews counts while a number is
+   being typed, and without this a server that blinked would speak once per keystroke.
+   It was silently dropped before (the signature took two arguments), so callers
+   passing it were passing nothing. */
+export function postJson(url, body, opts = {}) {
   return apiFetch(url, {
+    ...opts,
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

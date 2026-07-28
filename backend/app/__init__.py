@@ -197,6 +197,9 @@ _SCHEMA_ADDITIONS = (
     # Additive and independent of promoted_dataset_id — a database that never
     # gains it simply never shows the "promoted to a bank" badge.
     ('bank_image', 'promoted_bank_id', 'INTEGER'),
+    # Manual quarter-turn of a bank image (degrees clockwise, NULL = untouched).
+    # Additive: a database that never gains it simply has no rotated images.
+    ('bank_image', 'rotation', 'INTEGER'),
     ('image_bank', 'pipeline_report', 'TEXT'),
     # Cloud stop that cannot lie: the moment the user asked for a stop, kept in
     # the database so the supervisor can terminate a pod whose monitor thread

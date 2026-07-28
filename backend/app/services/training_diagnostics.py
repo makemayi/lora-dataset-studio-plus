@@ -19,6 +19,11 @@ with plain strings and simulated probe payloads:
   FIRST real kernel launch dies with "no kernel image is available for
   execution on the device" and ai-toolkit exits 1 with nothing useful said.
 
+* `interpreter_verdict` (+ `missing_module_in_log`, `is_windows_store_python`)
+  answers the question the panel never used to answer: WHICH Python was used.
+  An interpreter that exists and runs but has no torch is the worst shape of
+  all — everything looks configured, and the failure blames something else.
+
 Both return "I don't know" (kind `none` / `None`) rather than guessing: the
 absence of information is never reported as a diagnosis.
 
@@ -207,6 +212,164 @@ def gated_repo_verdict(log_text, token_configured=None) -> dict | None:
             f'The download of {name} was refused as NOT AUTHENTICATED (HTTP 401). Hugging Face '
             f'could not tell who was asking, so this says nothing about whether you have been '
             f'granted access — asking for access again will not fix it. {detail}'),
+    }
+
+
+# --- the interpreter itself ----------------------------------------------------
+# The worst failure shape of all, because everything LOOKS configured: a path
+# that exists, runs, and has none of ai-toolkit's dependencies. Every run then
+# dies on `ModuleNotFoundError: No module named 'torch'` — a sentence that says
+# nothing about WHICH Python was used, so the search goes everywhere except the
+# one setting at fault. Reported in full by strouder (GitHub #19): a
+# `aitoolkit.python` pointing at the Windows Store python.exe stub, with a
+# perfectly good `venv\Scripts\python.exe` sitting next to run.py the whole time.
+#
+# The remedy is not a stricter filter — conda, uv, portable `python_embeded` and
+# plain system Pythons are all legitimate here, and no name test tells them from
+# a stub. It is to SAY WHICH PATH, and to say it before the run rather than after.
+_MISSING_MODULE_RE = re.compile(
+    r"ModuleNotFoundError:\s*No module named ['\"]([\w.]+)['\"]")
+
+# `…\AppData\Local\Microsoft\WindowsApps\python.exe` is, on a default Windows 11,
+# the App Execution Alias that opens the Microsoft Store — it answers `python
+# --version`-ish prompts and has no site-packages anyone can install into for
+# ai-toolkit. It is NOT forbidden (a real Store Python does install there), it is
+# merely named as the likely explanation once the import has already failed.
+_WINDOWS_STORE_RE = re.compile(
+    r'[\\/]Microsoft[\\/]WindowsApps[\\/][^\\/]*python[^\\/]*$', re.IGNORECASE)
+
+WINDOWS_STORE_NOTE = (
+    'That path is the Windows Store "App Execution Alias" that Windows 11 puts on '
+    'PATH by default. It is usually a stub that opens the Microsoft Store rather '
+    'than a real Python, and nothing can be installed into it — which is exactly '
+    'what an ai-toolkit that "runs but has no torch" looks like.')
+
+INTERPRETER_TITLE = 'The Python configured for ai-toolkit cannot import torch'
+
+
+def missing_module_in_log(log_text) -> str:
+    """The module named by the LAST `ModuleNotFoundError` in a training log, or
+    '' when the log shows none. A fact read off the log — never a guess."""
+    lines = _clean_lines(log_text)
+    found = ''
+    for line in lines:
+        m = _MISSING_MODULE_RE.search(line)
+        if m:
+            found = m.group(1)
+    return found
+
+
+def is_windows_store_python(path) -> bool:
+    """Does this path look like the Windows Store python stub? Shape only; the
+    caller must already know the import failed before it says anything."""
+    return bool(path) and bool(_WINDOWS_STORE_RE.search(str(path).replace('/', '\\')))
+
+
+def interpreter_verdict(python, torch_ok, alternative='', module='torch') -> dict | None:
+    """Why a training run cannot start with the interpreter that is configured.
+
+    Returns None whenever `torch_ok` is not a proven False — True (fine) and
+    None (probe did not answer: cold-import timeout, no interpreter) are both
+    "nothing to say", never a refusal.
+
+    `alternative` is a DIFFERENT interpreter already known to work (typically the
+    `venv/` next to run.py that an explicit `aitoolkit.python` is shadowing);
+    pass '' when there is none. Both paths are home-redacted for pasting.
+
+    Returns {'python', 'module', 'windows_store', 'alternative', 'title',
+    'message'}."""
+    if torch_ok is not False:
+        return None
+    raw = str(python or '').strip()
+    store = is_windows_store_python(raw)
+    shown = redact_user_paths(raw) or '(no interpreter configured)'
+    alt = redact_user_paths(str(alternative or '').strip())
+    parts = [
+        f'ai-toolkit is set to run with {shown}, and that interpreter cannot '
+        f'`import {module}`. Training would die immediately on '
+        f'"ModuleNotFoundError: No module named \'{module}\'".',
+    ]
+    if store:
+        parts.append(WINDOWS_STORE_NOTE)
+    if alt:
+        parts.append(
+            f'A working interpreter WAS found in your ai-toolkit folder: {alt} — it '
+            f'imports {module} fine. Put that path in Settings ▸ Local tools ▸ '
+            '"Python interpreter", or clear that field entirely and the app will '
+            'find it by itself.')
+    else:
+        parts.append(
+            'Point Settings ▸ Local tools ▸ "Python interpreter" at the Python you '
+            'actually installed ai-toolkit\'s requirements into (its venv, or your '
+            'conda / uv / portable environment), or clear that field to let the app '
+            'auto-detect a venv next to run.py.')
+    # Said in every shape, because the OPPOSITE used to be said: the panel offered
+    # "the base model needs a Hugging Face token" for this exact failure, and the
+    # search went everywhere but the setting at fault.
+    parts.append('This is not a Hugging Face token problem and not a missing base '
+                 'model — nothing was downloaded, the interpreter never got that far.')
+    return {'python': shown, 'module': module, 'windows_store': store,
+            'alternative': alt, 'title': INTERPRETER_TITLE,
+            'message': ' '.join(parts)}
+
+
+# --- the Hugging Face fast-download accelerator --------------------------------
+# `HF_HUB_ENABLE_HF_TRANSFER=1` swaps huggingface_hub's plain HTTP download for a
+# Rust accelerator that must be installed separately (`hf_transfer`, and on newer
+# hubs the Xet backend `hf_xet`). With the flag on and the package missing, or
+# with the accelerator failing mid-transfer, downloads die — and they die looking
+# EXACTLY like a network problem, so people go and check their connection, their
+# firewall and their proxy. Reported by bobba84 (GitHub #18): a ComfyUI install
+# without `hf_xet`, fixed by setting the variable to 0.
+#
+# We do NOT set this variable anywhere: the app launches ai-toolkit with
+# `dict(os.environ, …)`, so it can only arrive from the machine — a shell profile,
+# ai-toolkit's own `.env`, or a ComfyUI launcher. We cannot fix somebody else's
+# environment; we can stop it from being mistaken for a network fault.
+_HF_TRANSFER_MARK_RE = re.compile(
+    r'hf_hub_enable_hf_transfer|hf_transfer|hf_xet|xetdownloaderror|'
+    r'consider disabling', re.IGNORECASE)
+# Something must have actually gone WRONG. The deprecation FutureWarning about
+# this very variable is the single most common line in an ai-toolkit log — firing
+# on it would recreate the exact "a warning shown as a cause" bug this module was
+# written to kill.
+_HF_TRANSFER_FAIL_RE = re.compile(
+    r'consider disabling hf_hub_enable_hf_transfer|'
+    r'package is not available|'
+    r'error while downloading|'
+    r'\b(?:hf_transfer|hf_xet)\b[^\n]{0,80}?(?:not available|not installed|'
+    r'importerror|failed)|'
+    r'(?:importerror|runtimeerror|xetdownloaderror)[^\n]{0,80}?'
+    r'\b(?:hf_transfer|hf_xet)\b', re.IGNORECASE)
+
+HF_TRANSFER_TITLE = 'The Hugging Face fast-download accelerator failed — not your network'
+
+
+def hf_transfer_verdict(log_text) -> dict | None:
+    """Did this download die because of the `HF_HUB_ENABLE_HF_TRANSFER` accelerator?
+
+    Returns None whenever the log shows no such failure — including a log that
+    merely mentions the variable in its deprecation warning. Otherwise
+    {'title', 'message'}, path- and token-redacted."""
+    lines = _clean_lines(log_text)
+    if not lines:
+        return None
+    text = '\n'.join(line for line in lines if not _WARNING_RE.search(line))
+    if not (_HF_TRANSFER_MARK_RE.search(text) and _HF_TRANSFER_FAIL_RE.search(text)):
+        return None
+    return {
+        'title': HF_TRANSFER_TITLE,
+        'message': (
+            'This download used the optional Hugging Face fast-download accelerator '
+            '(`HF_HUB_ENABLE_HF_TRANSFER=1`), which needs the `hf_transfer` / `hf_xet` '
+            'package installed in the SAME environment that downloads. When it is '
+            'missing or fails, the transfer aborts with an error that reads like a '
+            'connection problem — your network is probably fine. The app never sets '
+            'that variable: it comes from your shell, from ai-toolkit\'s `.env`, or '
+            'from a ComfyUI launcher. Two fixes, either one works: set '
+            '`HF_HUB_ENABLE_HF_TRANSFER=0` to fall back to the plain (slower, very '
+            'reliable) HTTP download, or install the accelerator with '
+            '`pip install hf_xet` in that environment and try again.'),
     }
 
 

@@ -25,6 +25,7 @@ import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { HelpBadge } from '../../help/HelpMode';
 import { requestHelpTip } from '../../help/helpTips';
 import { displayLabel } from '../../utils/labels';
+import { localEngineUnavailableReason } from '../../utils/localEngineReason.js';
 import {
   MAX_WATERMARK_REGIONS,
   buildWatermarkReviewState,
@@ -110,6 +111,10 @@ export default function WatermarkReviewLightbox({ datasetId, queue, caps, nonces
   // the ONLY engine that can clean an on-subject ('review') mark, so it makes those
   // actionable; LaMa stays the fast default. Greyed when Klein isn't ready.
   const kleinReady = caps?.watermark_klein !== false;
+  // ...and WHY not, in the same words every other Klein surface uses. `caps` is
+  // the whole payload here, so the shared reason can name the actual gap instead
+  // of the old catch-all that blamed ComfyUI + the weights in every case.
+  const kleinReason = kleinReady ? null : localEngineUnavailableReason('klein', caps);
   const [method, setMethod] = useState('lama');
   // Per-image crop-vs-inpaint choice (id -> 'crop' | 'inpaint'). Only offered when a
   // SAFE border crop exists for the image (watermark_route === 'crop') and no manual
@@ -660,7 +665,8 @@ export default function WatermarkReviewLightbox({ datasetId, queue, caps, nonces
               disabled={working || useCrop || !kleinReady}
               title={kleinReady
                 ? 'Klein: masked Flux.2 inpaint (crop-and-stitch). Cleans complex texture and marks ON the subject; only the mark changes.'
-                : 'Klein inpaint needs ComfyUI running + the Klein models installed (Setup ▸ ComfyUI).'}
+                : (kleinReason
+                  || 'Klein inpaint needs ComfyUI running + the Klein models installed (Setup ▸ ComfyUI).')}
               className={`px-2.5 py-1 rounded-md font-semibold disabled:opacity-40 ${kleinSelected
                 ? 'bg-amber-500/25 text-amber-100' : 'text-white/60 hover:text-white'}`}>
               Klein

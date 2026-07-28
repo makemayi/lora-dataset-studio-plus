@@ -83,7 +83,7 @@ function Facts({ img }) {
 }
 
 export default function BankReviewLightbox({
-  bankId, ids, startId = null, seedImages = [], onDecided, onClose,
+  bankId, ids, startId = null, seedImages = [], onDecided, onRotated, onClose,
 }) {
   const [session, setSession] = useState(() => createSession(ids, { startId }))
   const [meta, setMeta] = useState(() => {
@@ -139,6 +139,35 @@ export default function BankReviewLightbox({
     }
   }, [bankId, busy, onDecided, session])
 
+  // 🔄 Quarter turn of the image under the cursor (idea by 1Tomber, GitHub #17).
+  // It does NOT advance — a sideways photo is fixed and then judged, which is the
+  // whole point of noticing it here. The user's own file is never rewritten: the
+  // angle is stored and the app rebuilds its view from the pristine source.
+  const rotateCurrent = useCallback(async (degrees) => {
+    const target = currentId(session)
+    if (target == null || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      const d = await postJson(`/api/bank/${bankId}/rotate`, { ids: [target], degrees })
+      const angle = d?.rotations?.[target] ?? d?.rotations?.[String(target)] ?? 0
+      // A quarter turn transposes the frame; a half turn does not.
+      const quarter = Math.abs(degrees) % 180 !== 0
+      setMeta((prev) => (prev[target]
+        ? { ...prev,
+            [target]: { ...prev[target],
+              rotation: angle,
+              width: quarter ? prev[target].height : prev[target].width,
+              height: quarter ? prev[target].width : prev[target].height } }
+        : prev))
+      onRotated?.(target, angle)
+    } catch (e) {
+      setError(e?.message || 'Could not rotate that image — it was NOT changed.')
+    } finally {
+      setBusy(false)
+    }
+  }, [bankId, busy, onRotated, session])
+
   // Moving forward without judging IS a skip: it stays undecided in the DB and
   // is not proposed again in this session (→ and ⏭ are deliberately the same).
   const doSkip = useCallback(() => { setError(null); setSession((s) => skip(s)) }, [])
@@ -163,10 +192,14 @@ export default function BankReviewLightbox({
       else if (k === 'r') { e.preventDefault(); sendDecision('reject') }
       else if (k === 's' || e.key === 'ArrowRight') { e.preventDefault(); doSkip() }
       else if (e.key === 'ArrowLeft') { e.preventDefault(); goBack() }
+      // [ and ] turn the image without deciding anything. Deliberately NOT
+      // letters: every free letter here is one keystroke away from a decision.
+      else if (e.key === '[') { e.preventDefault(); rotateCurrent(-90) }
+      else if (e.key === ']') { e.preventDefault(); rotateCurrent(90) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, sendDecision, doSkip, goBack])
+  }, [onClose, sendDecision, doSkip, goBack, rotateCurrent])
 
   const shortcut = (label) => (
     <kbd className="ml-1 rounded border border-white/25 px-1 text-[10px] font-mono text-white/70">{label}</kbd>
@@ -220,7 +253,10 @@ export default function BankReviewLightbox({
         <div className="flex min-h-0 flex-1 items-center justify-center p-3">
           {/* key= forces a fresh <img> per image so a slow load never shows the
               previous shot under the new one's buttons. */}
-          <img key={id} src={`/api/bank/${bankId}/file/${id}`} alt={img?.name || `Bank image ${id}`}
+          {/* ?r= busts the browser cache after a turn — the bytes at this URL
+              change while the URL itself does not. */}
+          <img key={id} src={`/api/bank/${bankId}/file/${id}${img?.rotation ? `?r=${img.rotation}` : ''}`}
+            alt={img?.name || `Bank image ${id}`}
             className="max-h-full max-w-full select-none object-contain" />
         </div>
       )}
@@ -239,6 +275,18 @@ export default function BankReviewLightbox({
               className="rounded-lg border border-white/20 px-3 py-2 text-sm text-white disabled:opacity-35 hover:bg-white/10">
               ←
             </button>
+            <button type="button" onClick={() => rotateCurrent(-90)} disabled={busy}
+              aria-label="Rotate this image 90 degrees left"
+              title="Rotate 90° left ([) — decides nothing. Your own file is never modified: the turn is stored and applied to what you see and to what gets promoted."
+              className="rounded-lg border border-white/20 px-3 py-2 text-sm text-white disabled:opacity-35 hover:bg-white/10">
+              <span aria-hidden="true">↺</span><span className="sr-only">Rotate left</span>
+            </button>
+            <button type="button" onClick={() => rotateCurrent(90)} disabled={busy}
+              aria-label="Rotate this image 90 degrees right"
+              title="Rotate 90° right (]) — decides nothing. Your own file is never modified: the turn is stored and applied to what you see and to what gets promoted."
+              className="rounded-lg border border-white/20 px-3 py-2 text-sm text-white disabled:opacity-35 hover:bg-white/10">
+              <span aria-hidden="true">↻</span><span className="sr-only">Rotate right</span>
+            </button>
             <button type="button" onClick={() => sendDecision('keep')} disabled={busy}
               title="Keep this image and move on (K)"
               className="rounded-lg border border-emerald-400/60 bg-emerald-500/20 px-5 py-2 text-sm font-semibold text-emerald-100 disabled:opacity-50 hover:bg-emerald-500/30">
@@ -256,7 +304,7 @@ export default function BankReviewLightbox({
             </button>
           </div>
           <p className="text-center text-[11px] text-white/45">
-            K keep · R reject · S skip · ← → move without deciding · Esc close.
+            K keep · R reject · S skip · [ ] rotate · ← → move without deciding · Esc close.
             Decisions are saved one by one — closing loses nothing.
           </p>
         </div>

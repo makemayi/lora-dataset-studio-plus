@@ -411,8 +411,17 @@ def dataset_train_preflight(dataset_id):
     """Pre-launch sanity report (blockers + warnings): image floor per family,
     composition balance, caption quality, identity leaks, near-duplicates,
     untriaged images, VRAM. The TrainingPanel calls it before Train/Queue/
-    Schedule and turns warnings into ONE confirm."""
-    gate = _require_aitoolkit()
+    Schedule and turns warnings into ONE confirm.
+
+    `?lane=cloud` drops the rows that read THIS machine (GPU memory, torch build)
+    — they describe hardware that will not run a cloud job. Absent or `local`
+    returns the historical payload unchanged."""
+    # The gate follows the lane. A cloud-only install has no ai-toolkit, so the
+    # historical _require_aitoolkit() would 409 exactly where these warnings matter
+    # most (money is about to be spent) — and the caller treats a non-200 as "no
+    # objection", which would have made the whole cloud preflight a silent no-op.
+    lane = request.args.get('lane') or None
+    gate = _require_cloud() if lane == 'cloud' else _require_aitoolkit()
     if gate:
         return gate
     if not svc.get_dataset(LOCAL_USER, dataset_id):
@@ -421,7 +430,8 @@ def dataset_train_preflight(dataset_id):
         return jsonify({'ok': True, **lt.training_preflight(
             LOCAL_USER, dataset_id,
             train_type=request.args.get('train_type') or None,
-            variant=request.args.get('variant') or None)})
+            variant=request.args.get('variant') or None,
+            lane=lane)})
     except Exception as e:
         return _map_error(e)
 

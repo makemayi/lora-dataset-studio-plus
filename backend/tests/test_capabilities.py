@@ -1,4 +1,5 @@
 from unittest.mock import patch
+import os
 import pathlib
 import struct
 import pytest
@@ -361,6 +362,96 @@ def test_explicit_aitoolkit_python_makes_a_venv_less_install_valid(app, tmp_path
             'python': str(root / 'python_embeded' / 'python.exe')}})
         result = capabilities.probe_aitoolkit()
     assert result['ok'] is True
+
+
+# --- the interpreter can be there and still be useless (GitHub #19, strouder) ---
+
+def _explicit_and_venv(tmp_path):
+    """An ai-toolkit checkout with a working `venv/` AND an explicit
+    `aitoolkit.python` pointing somewhere else — the exact #19 shape."""
+    root = tmp_path / 'ai-toolkit'
+    (root / 'venv' / 'Scripts').mkdir(parents=True)
+    (root / 'venv' / 'bin').mkdir(parents=True)
+    (root / 'venv' / 'Scripts' / 'python.exe').write_text('fake')
+    (root / 'venv' / 'bin' / 'python').write_text('fake')
+    (root / 'run.py').write_text('fake')
+    stray = tmp_path / 'stray'
+    stray.mkdir()
+    exe = stray / ('python.exe' if os.name == 'nt' else 'python')
+    exe.write_text('fake')
+    return root, exe
+
+def _probe(**by_python):
+    """Fake `_cached_import_state`: decide per interpreter path. `torch` = has
+    torch, `alive` = runs at all but has no torch, `dead` = cannot be executed."""
+    def fake(key, python, expr):
+        kind = next((v for k, v in by_python.items() if k in python), 'dead')
+        if kind == 'dead':
+            return False                    # the seam reports False for everything
+        if expr == 'pass':
+            return True
+        return kind == 'torch'
+    return fake
+
+def test_a_torchless_interpreter_is_reported_with_the_venv_that_works(app, tmp_path):
+    """The offer that turns a dead end into one click."""
+    with app.app_context():
+        from app import capabilities, config
+        root, stray = _explicit_and_venv(tmp_path)
+        config.save_config({'aitoolkit': {'dir': str(root), 'python': str(stray)}})
+        with patch.object(capabilities, '_cached_import_state',
+                          side_effect=_probe(venv='torch', stray='alive')):
+            report = capabilities.aitoolkit_interpreter_report()
+    assert report['torch'] is False
+    assert 'venv' in report['alternative']
+
+def test_an_interpreter_that_cannot_run_at_all_is_UNKNOWN_not_torchless(app, tmp_path):
+    """"This file is not a working Python" is a different problem from "this
+    Python has no torch" — and a launch must never be refused on a guess."""
+    with app.app_context():
+        from app import capabilities, config
+        root, stray = _explicit_and_venv(tmp_path)
+        config.save_config({'aitoolkit': {'dir': str(root), 'python': str(stray)}})
+        with patch.object(capabilities, '_cached_import_state',
+                          side_effect=_probe(venv='torch')):   # stray -> dead
+            report = capabilities.aitoolkit_interpreter_report()
+    assert report['torch'] is None
+    assert report['alternative'] == ''
+
+def test_no_alternative_is_claimed_when_the_user_never_set_one(app, tmp_path):
+    """With no explicit override there is nothing to switch AWAY from — the
+    resolved interpreter IS the venv, so offering it would be nonsense."""
+    with app.app_context():
+        from app import capabilities, config
+        root, _stray = _explicit_and_venv(tmp_path)
+        config.save_config({'aitoolkit': {'dir': str(root), 'python': ''}})
+        with patch.object(capabilities, '_cached_import_state',
+                          side_effect=_probe(venv='alive')):
+            report = capabilities.aitoolkit_interpreter_report()
+    assert report['torch'] is False
+    assert report['alternative'] == ''
+
+def test_the_aitoolkit_test_button_fails_on_a_python_without_torch(app, tmp_path):
+    """RED before this wave: folder checks alone went green on the broken setup."""
+    with app.app_context():
+        from app import capabilities, config
+        root, stray = _explicit_and_venv(tmp_path)
+        config.save_config({'aitoolkit': {'dir': str(root), 'python': str(stray)}})
+        assert capabilities.probe_aitoolkit()['ok'] is True     # folders: fine
+        with patch.object(capabilities, '_cached_import_state',
+                          side_effect=_probe(venv='torch', stray='alive')):
+            result = capabilities.probe_aitoolkit_test()
+    assert result['ok'] is False
+    assert 'import torch' in result['detail']
+
+def test_the_test_button_stays_green_on_an_unanswered_probe(app, tmp_path):
+    """A cold-import timeout is not a failed test."""
+    with app.app_context():
+        from app import capabilities, config
+        root, stray = _explicit_and_venv(tmp_path)
+        config.save_config({'aitoolkit': {'dir': str(root), 'python': str(stray)}})
+        with patch.object(capabilities, '_cached_import_state', return_value=None):
+            assert capabilities.probe_aitoolkit_test()['ok'] is True
 
 def test_probe_comfyui_unreachable(app):
     with app.app_context():

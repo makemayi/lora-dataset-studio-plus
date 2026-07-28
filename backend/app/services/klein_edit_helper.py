@@ -408,6 +408,41 @@ def klein_invalid_assets():
     return out
 
 
+def klein_blocking_invalid(invalid=None) -> bool:
+    """Is a REQUIRED Klein asset present but unloadable? Advisory `too_small` does
+    not count — a small-but-loadable file is the user's, not ours."""
+    return any(i['blocking'] and i['asset'] in KLEIN_REQUIRED
+               for i in (klein_invalid_assets() if invalid is None else invalid))
+
+
+def klein_engine_ready(comfy_ok, *, missing=None, invalid=None, unsupported_enums=None) -> bool:
+    """THE Klein readiness verdict — ONE implementation, four conditions.
+
+    It lived inline in capabilities (as `klein_ready`, behind `engines.klein` and
+    `watermark_klein`) while watermark_klein.is_available() judged the same engine
+    on presence alone. Two sincere answers to one question is how a truncated
+    weight gets a green button on one screen and a refusal on the next — the exact
+    shape of the Setup incident (54e5011). The looser copy also decided a SILENT
+    fallback: the bank/dataset cleaner drops to LaMa when Klein is "unavailable",
+    so an over-permissive verdict meant asking ComfyUI to load a file it cannot
+    open instead of degrading cleanly.
+
+    Callers that already hold the raw ingredients (capabilities recomputes them for
+    its payload) pass them in; everyone else lets this fetch them. Each probe is
+    cheap: disk listdir for the assets, a header read + cache for integrity, a
+    cached /object_info for the widget values (which fails OPEN — an unreachable
+    ComfyUI is already answered by `comfy_ok`)."""
+    if not comfy_ok:
+        return False
+    enums = klein_unsupported_enums() if unsupported_enums is None else unsupported_enums
+    if enums:
+        return False
+    gaps = klein_missing_assets() if missing is None else missing
+    if any(a in gaps for a in KLEIN_REQUIRED):
+        return False
+    return not klein_blocking_invalid(invalid)
+
+
 # --- Custom-node preflight -------------------------------------------------
 # The class_types the shipped 'improve skin.json' historically pulled from custom
 # packs, mapped to the pack that ships each + its GitHub page. Setup installs

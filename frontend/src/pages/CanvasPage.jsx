@@ -5,9 +5,8 @@ import {
   readSelection, resolveSelection, toggleSelection, writeSelection,
 } from '../utils/canvasSelection';
 import { toOverrideMap } from '../utils/canvasPlacement';
-import {
-  defaultImageSpot, toImageNodeMap, visibleImageNodes,
-} from '../utils/canvasImageNodes';
+import { toImageNodeMap, visibleImageNodes } from '../utils/canvasImageNodes';
+import { placeImageBatch } from '../utils/canvasPinBatch';
 import CanvasDatasetFilter from '../components/canvas/CanvasDatasetFilter';
 import LineageCanvas from '../components/canvas/LineageCanvas';
 import { HelpBadge } from '../help/HelpMode';
@@ -157,7 +156,13 @@ export default function CanvasPage() {
        CLOSED pins are not touched: their remembered geometry is a promise
        ("re-open it where I closed it") and Tidy up is not the place to break
        it. The re-flow needs the laid-out lane, so it is done here against the
-       automatic tree the board is about to fall back to. */
+       automatic tree the board is about to fall back to.
+
+       It re-flows through the SAME function 📌 Pin all uses
+       (utils/canvasPinBatch), on purpose: two placers would be two chances to
+       disagree, and the one thing the user is promised on this board is that
+       nothing lands on top of anything. Before this, the re-flow only avoided
+       other PICTURES — it could park one squarely on a run card. */
     setImageNodes((cur) => {
       const next = { ...cur };
       for (const id of selected) {
@@ -165,18 +170,26 @@ export default function CanvasPage() {
         if (!map) continue;
         const tree = trees[id]?.tree;
         const graph = tree ? buildLineageGraph(tree) : null;
-        const taken = [];
+        const nodes = visibleImageNodes(map);
+        if (!nodes.length) continue;
+        const res = placeImageBatch({
+          graph,
+          existing: [],
+          images: nodes.map((n) => ({ id: n.imageId, dataset_id: id,
+            record_id: n.image?.record_id, step: n.image?.step })),
+          max: nodes.length,
+        });
         const lane = { ...map };
-        for (const node of visibleImageNodes(map)) {
-          const spot = defaultImageSpot(graph, node.image?.record_id,
-            node.image?.step, taken);
-          taken.push(spot);
-          lane[node.imageId] = { ...node, ...spot };
-          putJson(`/api/dataset/${id}/canvas/images`, {
-            nodes: [{ image_id: node.imageId, ...spot, visible: true }],
-          }).catch(() => {});
+        const rows = [];
+        for (const p of res.placed) {
+          lane[p.imageId] = { ...lane[p.imageId], x: p.x, y: p.y, w: p.w, h: p.h };
+          rows.push({ image_id: p.imageId, x: p.x, y: p.y, w: p.w, h: p.h, visible: true });
         }
         next[id] = lane;
+        // One write for the lane, not one per picture: a board carrying twenty
+        // pins used to fire twenty requests at the server that is probably also
+        // training something.
+        if (rows.length) putJson(`/api/dataset/${id}/canvas/images`, { nodes: rows }).catch(() => {});
       }
       return next;
     });

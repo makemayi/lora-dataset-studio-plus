@@ -203,7 +203,7 @@ function LogViewer() {
   const [lines, setLines] = useState([])
   const load = async () => {
     try {
-      const d = await apiFetch('/api/logs/tail?n=300')
+      const d = await apiFetch('/api/logs/tail?n=300', { background: true })
       setFile(d.file); setLines(d.lines || [])
     } catch { /* viewer is best-effort */ }
   }

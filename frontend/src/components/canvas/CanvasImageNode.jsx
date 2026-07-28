@@ -1,4 +1,5 @@
 import { nudgeImageNode } from '../../utils/canvasImageNodes';
+import { chromeScale } from '../../utils/canvasNodeChrome';
 import { imageFactsLine } from '../../utils/generatedImageFacts';
 
 /* 🖼 One generated image, pinned ON the board.
@@ -22,16 +23,29 @@ import { imageFactsLine } from '../../utils/generatedImageFacts';
    exception — it is hit-tested first on any pointer type, because a finger that
    lands on a 28-px corner handle can only mean one thing.
 
+   ⚠️ …and the size of those controls is NOT a board size. Reported from a phone:
+   "the cross does not close the preview". The handler was right — the board has
+   always refused to start a gesture from a node's own button — but the button
+   itself was ~16 board units on a board read at 65 %, so about ten pixels under
+   a finger, with the 🔍 immediately beside it. The controls are therefore
+   counter-scaled by the board zoom (utils/canvasNodeChrome.chromeScale) so they
+   keep a constant size on screen, and they are laid out as one cluster in the
+   corner rather than two glyphs crammed into a 12-px header row.
+
    ⌨ Keyboard. The node itself is focusable: arrows move it, Shift+arrows move
    it faster, +/− resize it, Esc closes it. Moving and resizing by mouse alone
    would put the whole feature out of reach of anyone who does not use one. The
    arithmetic is nudgeImageNode(), unit-tested; this file only routes keys. */
 
 export default function CanvasImageNode({ node, datasetId, laneName, onGeometry,
-  onClose, onOpen }) {
+  onClose, onOpen, boardScale = 1 }) {
   const img = node.image || {};
   const stepLabel = img.step == null ? 'step unknown' : `step ${img.step}`;
   const facts = imageFactsLine(img);
+  // The controls are drawn in SCREEN space: counter-scaled by the board zoom so
+  // a finger finds them at 24 % exactly as it does at 100 %.
+  const k = chromeScale(boardScale, node.w);
+  const chrome = { transform: `scale(${k})`, transformOrigin: 'top right' };
 
   const onKeyDown = (e) => {
     if (e.key === 'Escape') { e.stopPropagation(); onClose?.(node); return; }
@@ -64,21 +78,30 @@ export default function CanvasImageNode({ node, datasetId, laneName, onGeometry,
         <span className="min-w-0 flex-1 truncate text-content-muted text-[0.5625rem] font-semibold tabular-nums">
           {stepLabel}
         </span>
+      </header>
+      {/* The controls, as ONE cluster pinned to the node's corner and drawn at a
+          constant SCREEN size. Out of the header's flow on purpose: counter-
+          scaling something inside a 12-px row would either clip it or push the
+          label off. Each target is 28 units square with air between them — two
+          glyphs a pixel apart is how a miss on ✕ opened 🔍 instead. */}
+      <div style={chrome}
+        data-testid="canvas-image-controls"
+        className="absolute right-0 top-0 z-10 flex items-start gap-1 rounded-bl-lg bg-app/85 p-0.5 backdrop-blur-sm">
         {/* Opens the full record — every setting, the prompt, the copy buttons.
             The node is the picture; the facts stay one click away rather than
             being crammed onto a thumbnail. */}
         <button type="button" onClick={(e) => { e.stopPropagation(); onOpen?.(node); }}
           title="Open this image full-screen with all its settings"
           aria-label={`Open ${stepLabel} full-screen`}
-          className="shrink-0 rounded px-1 text-content-subtle text-[0.625rem] leading-none hover:text-content">🔍</button>
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-content-subtle text-[0.75rem] leading-none hover:bg-app hover:text-content">🔍</button>
         {/* ✕ closes the node and REMEMBERS where it was. Re-pinning the same
             image from its gallery brings it back here, this size. */}
         <button type="button" onClick={(e) => { e.stopPropagation(); onClose?.(node); }}
           data-testid="canvas-image-close"
           title="Close this image — re-opening it from its gallery puts it back here, at this size"
           aria-label={`Close the pinned image at ${stepLabel}`}
-          className="shrink-0 rounded px-1 text-content-subtle text-[0.75rem] leading-none hover:text-content">✕</button>
-      </header>
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-content-subtle text-[0.875rem] leading-none hover:bg-red-500/25 hover:text-content">✕</button>
+      </div>
       <div className="relative min-h-0 flex-1 bg-black/30">
         <img src={img.url} alt={`Generated at ${stepLabel}`} draggable={false}
           className="h-full w-full select-none object-contain" />
@@ -88,7 +111,8 @@ export default function CanvasImageNode({ node, datasetId, laneName, onGeometry,
           drag/pan decision, so a finger landing here always resizes. */}
       <span data-canvas-image-resize="" aria-hidden
         title="Drag to resize"
-        style={{ position: 'absolute', right: 0, bottom: 0, width: 28, height: 28 }}
+        style={{ position: 'absolute', right: 0, bottom: 0, width: 28, height: 28,
+          transform: `scale(${k})`, transformOrigin: 'bottom right' }}
         className="cursor-nwse-resize touch-none rounded-tl-md border-l border-t border-indigo-400/40 bg-app/80 text-content-subtle after:absolute after:bottom-1 after:right-1 after:text-[0.625rem] after:content-['◢']" />
     </div>
   );

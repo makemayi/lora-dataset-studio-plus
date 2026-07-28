@@ -64,6 +64,121 @@ export const WHATS_NEW = [
     to: '/settings/engines',
   },
   {
+    id: '2026-07-28-cropping-no-longer-recompresses',
+    date: '2026-07-28',
+    title: 'Cropping no longer quietly re-compresses your image',
+    blurb:
+      'Every crop was re-encoded to lossy WebP, so cropping a PNG degraded it — and left a .png file holding WebP bytes. Crop and the watermark cleaners now keep the file\'s own format and write it back without losing pixels, like ✂ Mirror and ↺ Rotate already did: crop the same shot ten times and the tenth is identical to the first. JPEG has no lossless mode, so it is re-saved at the highest practical quality instead of being converted to something heavier. Cropped files are noticeably bigger now — that is the price of keeping the pixels. Two honest limits: cropping still rescales the box to a 1024 px long side, and resampling can never be lossless (only the watermark ✂ auto-crop, which never resizes, is); and images you cropped BEFORE this keep the pixels they have — nothing is re-processed retroactively.',
+    to: '/datasets',
+  },
+  {
+    id: '2026-07-28-rotate-images-in-the-dataset-and-the-bank',
+    date: '2026-07-28',
+    title: 'Straighten a sideways photo — rotate 90° in the dataset and in the bank',
+    blurb:
+      'Idea by 1Tomber (GitHub #17). ↺ / ↻ turn an image a quarter turn: in the dataset from the image inspector, next to Mirror, and in the bank from the selection bar or straight inside ▶ Review ([ and ]). It costs the image nothing it does not have to: a dataset PNG or WEBP comes back pixel-for-pixel identical after four turns, and in the bank your own files are never rewritten at all — the turn is remembered and applied to what you see and to what gets promoted.',
+    to: '/datasets',
+  },
+  {
+    id: '2026-07-28-offline-is-not-empty',
+    date: '2026-07-28',
+    title: 'Losing the connection no longer looks like your job stopped',
+    blurb:
+      'Leaving a running pass and coming back on a phone used to greet you with ten stacked "Connection lost" banners over the whole app — and no progress bar, because the poll behind it had failed. The banners are now one line that counts repeats, automatic polls fail silently, and a single "Offline — reconnecting…" strip takes over: your progress stays on screen, marked as the last thing we heard. Passes always kept running on the server; now the screen says so, and says it again when the connection is back.',
+    to: '/bank',
+  },
+  {
+    id: '2026-07-28-bank-filter-thresholds-in-place',
+    date: '2026-07-28',
+    title: 'Tune every Bank filter without leaving the bank',
+    blurb:
+      'The twelve numbers behind the filter chips — blurry, small, duplicate, NSFW — were only editable in Settings, three screens from the bank you were triaging. They are now under the chips too, in 🎚 Filter thresholds: grouped by what they answer, each one saying which way catches MORE images (the duplicate distance and the semantic similarity move opposite ways), when it takes effect, and how many images the value you are typing would flag — before you save. Reset any one, or all of them, to the shipped defaults. Same setting as Settings, so it applies to every bank.',
+    to: '/bank',
+  },
+  {
+    id: '2026-07-28-canvas-pin-all-generated-images',
+    date: '2026-07-28',
+    title: 'One click puts every image a canvas run made onto the board',
+    blurb:
+      'A finished generation said “5 images ready” and left you to open each checkpoint’s gallery and pin the pictures one by one. The green bar now carries 📌 Pin all — the whole lot lands on the board in one go, each image in its own column under the checkpoint that made it, and nothing is ever placed on top of anything else. It says how many it put down, names anything it left out, and ↩ Undo takes them straight back off.',
+    to: '/canvas',
+  },
+  {
+    id: '2026-07-28-canvas-node-buttons-reachable-on-a-phone',
+    date: '2026-07-28',
+    title: 'The ✕ on a pinned image can be tapped again',
+    blurb:
+      'Closing a picture pinned on the LoRA Canvas did not work on a phone. The buttons were drawn at the board’s zoom, so on a board read at 65 % the cross was about ten pixels wide with the 🔍 right beside it — a near miss opened the full-screen view instead of closing the node. The ✕, the 🔍 and the resize corner now keep a real finger-sized target at every zoom level.',
+    to: '/canvas',
+  },
+  {
+    id: '2026-07-28-preflight-before-cloud-and-continue',
+    date: '2026-07-28',
+    title: 'The pre-training check now runs before a cloud run and before ▶ Continue',
+    blurb:
+      'Launching in the cloud went straight to a paid GPU without ever showing the pre-training review — so leaking captions, near-duplicate images and pictures still waiting on a ✓/✕ shipped to the pod unnoticed. ▶ Continue skipped it too, on both lanes. Both now open the same review, with its editable caption list and its reject-one-of-each pairs. Checks about your own GPU (memory, PyTorch build) are left out of a cloud launch: that card is not the one running the job.',
+    to: '/datasets',
+  },
+  {
+    id: '2026-07-28-zimage-finds-its-own-encoder-and-vae',
+    date: '2026-07-28',
+    title: 'Z-Image no longer asks you to rename your files',
+    blurb:
+      'The Test Studio demanded one exact spelling for the Z-Image text encoder and VAE — “z ae.safetensors” with a space, inside a folder capitalised “Z image”. Anything else, including ComfyUI’s own documented names, read as missing. The app now finds them itself: any capitalisation, any separator (z_ae, z ae, z-ae), any sub-folder, across every extra_model_paths root. If nothing is there it still tells you exactly what to place and where. Thanks to bobba84 (GitHub #18).',
+  },
+  {
+    id: '2026-07-28-zimage-base-keeps-its-own-settings',
+    date: '2026-07-28',
+    title: 'Z-Image Base starts on Base settings, not Turbo’s',
+    blurb:
+      'Selecting a non-distilled Z-Image Base in the Test Studio opened on CFG 1 and 8 steps — correct for the distilled Turbo build and ruinous for Base, which needs real guidance and far more steps. Each base model now proposes its own starting CFG and step count, and the pickers reach the values Base needs. Anything you had already chosen yourself is left exactly as it was. Thanks to bobba84 (GitHub #18).',
+  },
+  {
+    id: '2026-07-28-training-names-the-python-it-uses',
+    date: '2026-07-28',
+    title: 'Training now tells you WHICH Python it is about to run',
+    blurb:
+      'A path that exists, runs, and has no torch used to pass every check — then every run died on "No module named \'torch\'" while the panel suggested a missing base model or a Hugging Face token, two dead ends. The app now tries `import torch` on the interpreter you configured before it launches anything, and if it fails it refuses with the path on screen, points out a Windows Store python.exe when that is what you picked, and offers the working venv sitting next to run.py. The Test button in Settings ▸ Local tools checks the same thing, and a torch failure never mentions Hugging Face again. Reported in detail by strouder (GitHub #19).',
+    to: '/settings/local-tools',
+  },
+  {
+    id: '2026-07-28-a-failed-download-is-not-always-your-network',
+    date: '2026-07-28',
+    title: 'A download that dies is no longer blamed on your connection',
+    blurb:
+      'The optional Hugging Face fast-download accelerator (HF_HUB_ENABLE_HF_TRANSFER) needs the hf_xet package, and without it transfers abort with something that reads exactly like a network fault — so people go and check their firewall. The training failure panel now recognises it and names both fixes: set the variable to 0, or install hf_xet. The app never sets that variable itself; it comes from your shell or another tool. Reported by bobba84 (GitHub #18).',
+  },
+  {
+    id: '2026-07-28-guide-explains-the-two-folders',
+    date: '2026-07-28',
+    title: 'The Guide finally explains which folder does what',
+    blurb:
+      'A full-local install is three programs, two folders, two ports and two Python environments — and nothing said so, which cost one user hours of patching ai-toolkit\'s own web UI (port 8675) while the real problem was one setting here. Getting started now has a short table: the Studio and its .venv drive training and read config.json, ai-toolkit\'s venv is the one that needs torch, and its Next.js UI is unrelated. It also documents the Python versions that actually work — 3.11 for ai-toolkit, and 3.11.9 on Windows because later 3.11 releases ship no installer. Reported by strouder (GitHub #19).',
+    to: '/guide',
+  },
+  {
+    id: '2026-07-28-pin-to-canvas-from-the-thumbnail',
+    date: '2026-07-28',
+    title: 'Put a generated image on the board without opening it first',
+    blurb:
+      'Pinning a render onto the lineage board was only offered once you had opened it full-screen, so most people never learned the board could hold images at all. Every thumbnail in a run or checkpoint gallery now carries a 📌 of its own — one tap and it lands on the board next to the checkpoint that made it. It stays out of the way while you are selecting images to delete, so nothing new can be tapped by mistake.',
+  },
+  {
+    id: '2026-07-28-klein-refusals-name-the-cause',
+    date: '2026-07-28',
+    title: 'When Klein is greyed out, the app now tells you which thing is wrong',
+    blurb:
+      'The watermark cleaner and the small-image rescue used to answer every Klein refusal the same way — "needs ComfyUI running and the Klein models" — even when ComfyUI was running and the models were right there. They now show the same precise sentence the generation page does: the exact file that is missing, the file that is present but corrupted, the widget value your ComfyUI does not offer, or the engine being switched off in Settings. The cleaner also stops treating a broken weight as usable and silently handing it to ComfyUI.',
+  },
+  {
+    id: '2026-07-28-setup-checks-every-file-it-skips',
+    date: '2026-07-28',
+    title: 'Setup checks every file it decides not to re-download',
+    blurb:
+      'A download can be skipped because some other file already covers it — an earlier build under its old name, a copy in a folder you added through extra_model_paths, or a model you placed by hand. None of those were being opened before being vouched for, so a corrupted one sent you back into the same dead end by a different door. Each of them is now validated, and a file that cannot be loaded no longer counts as installed.',
+    to: '/setup',
+  },
+  {
     id: '2026-07-28-setup-stops-certifying-broken-models',
     date: '2026-07-28',
     title: 'Setup no longer says a model is installed when it cannot be loaded',

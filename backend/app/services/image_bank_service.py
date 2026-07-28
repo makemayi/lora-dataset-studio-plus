@@ -35,6 +35,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -130,23 +131,85 @@ def clean_image_path(bank_id, image_id) -> Path:
     return _clean_dir(bank_id) / f'{image_id}.webp'
 
 
+def _rotated_dir(bank_id) -> Path:
+    """Where manually TURNED copies live — the bank's own working directory,
+    next to clean/. Never inside the user's folder."""
+    return _bank_dir(bank_id) / 'rotated'
+
+
+def rotated_image_path(bank_id, image_id, rotation, source: str) -> Path:
+    """Where the turned copy of one image lives. Keyed on the angle AND on the
+    source's extension so a rotated PNG stays a PNG; keyed on the CLEAN state too
+    (via the source name) is unnecessary because every clean change drops the
+    whole derived set (see drop_derived)."""
+    ext = os.path.splitext(source)[1].lower() or '.png'
+    return _rotated_dir(bank_id) / f'{image_id}.r{int(rotation)}{ext}'
+
+
+def _ensure_rotated(bank_id, row: BankImage, source: str) -> str:
+    """Materialise (once) the turned copy of ``source`` and return its path.
+
+    ALWAYS built from the pristine source — never from a previously rotated copy
+    — so the angle is applied exactly once no matter how many times the user
+    clicked. Fails OPEN: an encoder problem serves the un-turned image rather
+    than a 404, because a bank must stay browsable."""
+    from .face_dataset_service import (normalize_rotation,
+                                       transformed_image_bytes, rotate_transform)
+    try:
+        turn = normalize_rotation(row.rotation)
+    except ValueError:
+        return source
+    if not turn:
+        return source
+    dst = rotated_image_path(bank_id, row.id, turn, source)
+    if dst.is_file():
+        return str(dst)
+    try:
+        payload = transformed_image_bytes(source, rotate_transform(turn))
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        # Two simultaneous GETs of the same turned image (grid + lightbox) each
+        # build it. A SHARED temp name would make one of them fail on Windows
+        # (the other still holds it) and degrade to serving the un-turned source;
+        # a unique one lets both win and the last atomic replace decide.
+        tmp = dst.with_name(f'{dst.name}.{os.getpid()}-{threading.get_ident()}.tmp')
+        try:
+            tmp.write_bytes(payload)
+            os.replace(tmp, dst)
+        finally:
+            if tmp.exists():
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+        return str(dst)
+    except (ValueError, OSError) as e:
+        logger.warning('bank image %s could not be rotated: %s', row.id, e)
+        return source
+
+
 def resolved_image_path(bank: ImageBank, row: BankImage) -> str | None:
     """THE path every reader must use: the watermark-cleaned version when one
-    exists, the untouched source otherwise.
+    exists, the untouched source otherwise — turned by the row's manual rotation
+    when it carries one.
 
-    A bank is a read-only view over a folder we must never write to, so cleaning
-    a watermark cannot rewrite the source — it writes a separate blob under the
-    bank's working directory. That only pays off if the READERS prefer it, so
-    there is exactly ONE resolver and all three known readers call it:
-    promotion (the blob handed to import_images), the grid thumbnail, and the
-    /bank/<id>/file route. A new reader calling abs_image_path() directly would
-    silently serve the watermarked original — test_bank_watermark_clean.py
-    asserts these three go through here."""
+    A bank is a read-only view over a folder we must never write to, so neither
+    cleaning a watermark nor turning an image can rewrite the source: both write
+    a separate blob under the bank's working directory. That only pays off if the
+    READERS prefer it, so there is exactly ONE resolver and all three known
+    readers call it: promotion (the blob handed to import_images), the grid
+    thumbnail, and the /bank/<id>/file route. A new reader calling
+    abs_image_path() directly would silently serve the watermarked original —
+    test_bank_watermark_clean.py asserts these three go through here."""
+    path = None
     if row.watermark_clean_method:
         cleaned = clean_image_path(bank.id, row.id)
         if cleaned.is_file():
-            return str(cleaned)
-    return abs_image_path(bank, row)
+            path = str(cleaned)
+    if path is None:
+        path = abs_image_path(bank, row)
+    if path is None or not getattr(row, 'rotation', None):
+        return path
+    return _ensure_rotated(bank.id, row, path)
 
 
 # --- CRUD -------------------------------------------------------------------
@@ -519,11 +582,19 @@ def _image_dict(row: BankImage, th: dict, promoted_by: dict | None = None) -> di
     # means the badge disappears when the user deletes the image in the dataset,
     # instead of advertising a copy that is gone.
     promoted = (promoted_by or {}).get(row.id, row.promoted_dataset_id)
+    # A quarter turn transposes what the user SEES. The columns keep the source's
+    # own numbers (a re-scan rewrites them from the file, which never changed), so
+    # the swap happens here, at read time — the payload can never drift out of
+    # sync with the stored angle.
+    rotation = int(row.rotation or 0) % 360
+    width, height = ((row.height, row.width) if rotation in (90, 270)
+                     else (row.width, row.height))
     return {
         'id': row.id,
         'name': os.path.basename(row.relpath),
         'relpath': row.relpath,
-        'width': row.width, 'height': row.height, 'file_size': row.file_size,
+        'rotation': rotation,
+        'width': width, 'height': height, 'file_size': row.file_size,
         'quality_state': row.quality_state,
         'blur_score': row.blur_score, 'noise_score': row.noise_score,
         'uniformity_score': row.uniformity_score,
@@ -828,6 +899,45 @@ def bank_payload(user_id, bank_id) -> dict | None:
     }
 
 
+def flag_preview(user_id, bank_id, overrides=None) -> dict | None:
+    """Per-flag image counts for a CANDIDATE threshold set — what the bank WOULD
+    look like at those numbers, without saving anything.
+
+    This is what turns tuning a threshold from a guess into a decision: the
+    quality scan persists RAW scores and every verdict is recomputed at read
+    time (see BankImage's docstring), so answering "how many images would a
+    sharpness floor of 140 flag?" is the same COUNT the payload already runs,
+    with a different dict. No decode, no pass, no write.
+
+    Only the read-time thresholds are meaningful here. The four grouping ones
+    (dup_distance, face/style/semantic similarity) are baked into stored group
+    ids by their pass, so a count against a candidate value would be a number
+    about the OLD grouping — the UI says "applies at the next pass" instead.
+
+    Unknown keys and junk values are ignored rather than 400: this is a live
+    preview firing on every keystroke, and a half-typed "0." must degrade to
+    "no change yet", never to an error toast."""
+    bank = get_bank(user_id, bank_id)
+    if not bank:
+        return None
+    th = thresholds()
+    for key, val in (overrides or {}).items():
+        if key not in cfg.DEFAULTS['bank']:
+            continue
+        try:
+            th[key] = float(val)
+        except (TypeError, ValueError):
+            continue
+    th['dup_distance'] = int(th['dup_distance'])
+    th['min_side'] = int(th['min_side'])
+    base = BankImage.query.filter_by(bank_id=bank_id)
+    flags = {}
+    for flag in _QUALITY_FLAGS + _SCORE_FLAGS:
+        crit = _flag_filter(flag, th)
+        flags[flag] = base.filter(crit).count() if crit is not None else 0
+    return {'flags': flags, 'thresholds': th, 'total': base.count()}
+
+
 def _load_pipeline_report(bank: ImageBank):
     """The persisted 'Launch all' summary (parsed), or None. A corrupt blob is
     swallowed — a broken report must never 500 the whole bank payload."""
@@ -1061,25 +1171,40 @@ def list_images(user_id, bank_id, status=None, flag=None, cluster=None,
 
 # --- thumbnails -------------------------------------------------------------
 def _thumb_path(bank_id, row: BankImage) -> Path:
-    """Where this image's thumbnail lives. A watermark-cleaned image gets its
-    OWN thumbnail file, named after the cleaning method: the cached source
-    thumbnail is never overwritten (so an undo instantly shows the original
-    again) and the grid can never serve a stale pre-clean crop. Deleting a
-    cached thumbnail in place would be the fragile version of this — on Windows
-    the file may still be held open by the response that just served it."""
+    """Where this image's thumbnail lives. A watermark-cleaned or manually
+    TURNED image gets its OWN thumbnail file, named after the cleaning method and
+    the angle: the cached source thumbnail is never overwritten (so an undo — or
+    a fourth quarter turn — instantly shows the original again) and the grid can
+    never serve a stale pre-clean crop or a sideways tile. Deleting a cached
+    thumbnail in place would be the fragile version of this — on Windows the file
+    may still be held open by the response that just served it."""
     suffix = f'.{row.watermark_clean_method}' if row.watermark_clean_method else ''
+    if getattr(row, 'rotation', None):
+        suffix += f'.r{int(row.rotation)}'
     return _thumbs_dir(bank_id) / f'{row.id}{suffix}.webp'
 
 
-def drop_clean_thumbs(bank_id, image_id) -> None:
-    """Best-effort removal of the cleaned thumbnails of one image (an undo or a
-    re-scan just invalidated them). A leftover is harmless — nothing points at
-    it once the row carries no clean method — so a locked file is not an error."""
-    for method in ('crop', 'lama', 'klein'):
+def drop_derived(bank_id, image_id) -> None:
+    """Best-effort removal of every DERIVED blob of one image — the cleaned and
+    turned thumbnails plus the turned full-size copies (an undo, a re-scan or a
+    new clean just invalidated them). The pristine `<id>.webp` thumbnail of the
+    untouched source is deliberately kept. A leftover is harmless — nothing
+    points at it once the row's state moved on — so a locked file is not an
+    error."""
+    for pattern, folder in ((f'{image_id}.*.webp', _thumbs_dir(bank_id)),
+                            (f'{image_id}.r*', _rotated_dir(bank_id))):
         try:
-            (_thumbs_dir(bank_id) / f'{image_id}.{method}.webp').unlink()
+            for stale in folder.glob(pattern):
+                try:
+                    stale.unlink()
+                except OSError:
+                    pass
         except OSError:
             pass
+
+
+#: Historical alias — external callers/tests may still name the narrow version.
+drop_clean_thumbs = drop_derived
 
 
 def ensure_thumb(bank: ImageBank, row: BankImage) -> Path | None:
@@ -1621,6 +1746,41 @@ def set_status(user_id, bank_id, ids, status) -> int:
             n += 1
     db.session.commit()
     return n
+
+
+def rotate_images(user_id, bank_id, ids, delta) -> dict:
+    """Turn a selection by ``delta`` degrees CLOCKWISE (idea by 1Tomber, #17).
+
+    The user's files are NEVER written to: the new angle is stored on the row and
+    the derived blobs (turned copy + thumbnail) are dropped so the ONE resolver
+    rebuilds them from the pristine source on the next read. That is what makes
+    the turn free of loss where it counts — a fourth quarter turn puts the row
+    back at 0 and every reader is served the original bytes again, byte for byte.
+
+    ``delta`` may be negative (-90 = turn left). Returns {'rotated': n,
+    'rotations': {image_id: angle}} so the grid can re-render without a refetch.
+    """
+    from .face_dataset_service import normalize_rotation
+    step = normalize_rotation(delta)
+    if step == 0:
+        raise ValueError('rotation must be 90, 180 or 270 degrees')
+    bank = get_bank(user_id, bank_id)
+    if not bank:
+        raise ValueError('bank not found')
+    ids = [int(i) for i in (ids or [])]
+    if not ids:
+        raise ValueError('select at least one image')
+    rotations = {}
+    for i0 in range(0, len(ids), _SQL_IN_CHUNK):
+        rows = BankImage.query.filter(
+            BankImage.bank_id == bank_id,
+            BankImage.id.in_(ids[i0:i0 + _SQL_IN_CHUNK])).all()
+        for r in rows:
+            r.rotation = (int(r.rotation or 0) + step) % 360 or None
+            drop_derived(bank_id, r.id)
+            rotations[r.id] = int(r.rotation or 0)
+    db.session.commit()
+    return {'rotated': len(rotations), 'rotations': rotations}
 
 
 def apply_flags(user_id, bank_id, flags) -> dict:
@@ -2766,7 +2926,7 @@ def _discard_clean_blob(bank_id, row) -> None:
         clean_image_path(bank_id, row.id).unlink()
     except OSError:
         pass
-    drop_clean_thumbs(bank_id, row.id)
+    drop_derived(bank_id, row.id)
     row.watermark_clean_method = None
 
 
@@ -2849,7 +3009,7 @@ def _watermark_crop_job(bank_id):
                 if _apply_watermark_crop(str(dst), box):
                     row.watermark_state = 'cleaned'
                     row.watermark_clean_method = 'crop'
-                    drop_clean_thumbs(bank_id, row.id)
+                    drop_derived(bank_id, row.id)
                     cropped += 1
                 else:
                     _discard_clean_blob(bank_id, row)
@@ -2961,7 +3121,7 @@ def _watermark_inpaint_job(bank_id, method):
                         if ok:
                             row.watermark_state = 'cleaned'
                             row.watermark_clean_method = 'klein'
-                            drop_clean_thumbs(bank_id, row.id)
+                            drop_derived(bank_id, row.id)
                             counts['klein'] += 1
                         else:
                             _discard_clean_blob(bank_id, row)
@@ -2990,7 +3150,7 @@ def _watermark_inpaint_job(bank_id, method):
                         if ok:
                             row.watermark_state = 'cleaned'
                             row.watermark_clean_method = 'lama'
-                            drop_clean_thumbs(bank_id, row.id)
+                            drop_derived(bank_id, row.id)
                             counts['inpainted'] += 1
                         else:
                             _discard_clean_blob(bank_id, row)

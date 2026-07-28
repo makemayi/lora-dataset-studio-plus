@@ -408,3 +408,200 @@ def test_the_crash_payload_carries_the_gated_verdict(tmp_path):
     payload = _crash_payload(str(log), dataset_id=1, rc=1)
     assert payload['hf_gated']['status'] == 401
     assert payload['hf_gated']['repo'] == 'krea/Krea-2-Turbo'
+
+
+# --- the interpreter itself (GitHub #19, strouder) -------------------------------
+# An `aitoolkit.python` pointing at a Python without torch: the path exists, it
+# runs, every folder check passes, and every run dies on
+# `ModuleNotFoundError: No module named 'torch'` while the panel blames a missing
+# base model or a Hugging Face token. The fix is not a stricter filter (conda, uv
+# and portable installs are all legitimate interpreters) — it is naming the path.
+TORCHLESS_LOG = (
+    'Traceback (most recent call last):\n'
+    '  File "D:\\AI\\ai-toolkit\\run.py", line 8, in <module>\n'
+    '    import torch\n'
+    "ModuleNotFoundError: No module named 'torch'\n"
+)
+
+STORE_PYTHON = 'C:\\Users\\somebody\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe'
+
+
+def test_a_missing_module_is_read_off_the_log():
+    from app.services.training_diagnostics import missing_module_in_log
+    assert missing_module_in_log(TORCHLESS_LOG) == 'torch'
+    # The LAST one wins, same rule as the traceback pick.
+    assert missing_module_in_log(
+        TORCHLESS_LOG + "ModuleNotFoundError: No module named 'diffusers'\n") == 'diffusers'
+
+
+def test_a_log_without_a_missing_module_claims_nothing():
+    from app.services.training_diagnostics import missing_module_in_log
+    for log in (FUTUREWARNING_LOG, '', None, 'RuntimeError: CUDA out of memory\n'):
+        assert missing_module_in_log(log) == '', log
+
+
+def test_the_interpreter_verdict_names_the_path():
+    """The whole point: the path, on screen, makes the mistake obvious."""
+    from app.services.training_diagnostics import interpreter_verdict
+    v = interpreter_verdict(STORE_PYTHON, False)
+    assert 'WindowsApps' in v['message'] and 'python.exe' in v['message']
+    # …but never the account name: this text gets pasted into public threads.
+    assert 'somebody' not in v['message']
+
+
+def test_a_windows_store_path_is_named_as_such_but_never_forbidden():
+    from app.services.training_diagnostics import (
+        WINDOWS_STORE_NOTE, interpreter_verdict, is_windows_store_python)
+    assert is_windows_store_python(STORE_PYTHON)
+    v = interpreter_verdict(STORE_PYTHON, False)
+    assert v['windows_store'] is True
+    assert WINDOWS_STORE_NOTE in v['message']
+    # A verdict only ever follows a PROVEN failed import — the shape alone blocks
+    # nothing (a real Python can be installed there).
+    assert interpreter_verdict(STORE_PYTHON, True) is None
+
+
+def test_conda_uv_and_portable_interpreters_are_not_called_store_stubs():
+    """Anti-regression: every accepted install shape stays unremarkable."""
+    from app.services.training_diagnostics import is_windows_store_python
+    for path in ('C:\\miniconda3\\envs\\aitk\\python.exe',
+                 'D:\\AI\\ai-toolkit\\python_embeded\\python.exe',
+                 'D:\\AI\\ai-toolkit\\.venv\\Scripts\\python3.11.exe',
+                 '/opt/uv/envs/aitk/bin/python',
+                 'C:\\Python311\\python.exe'):
+        assert not is_windows_store_python(path), path
+
+
+def test_a_working_venv_next_door_is_offered():
+    from app.services.training_diagnostics import interpreter_verdict
+    v = interpreter_verdict(STORE_PYTHON, False,
+                            alternative='D:\\AI\\ai-toolkit\\venv\\Scripts\\python.exe')
+    assert 'D:\\AI\\ai-toolkit\\venv\\Scripts\\python.exe' in v['message']
+    assert v['alternative'].endswith('python.exe')
+
+
+def test_an_unknown_probe_is_never_a_verdict():
+    """A cold `import torch` behind an antivirus times out; that is not a fact."""
+    from app.services.training_diagnostics import interpreter_verdict
+    assert interpreter_verdict(STORE_PYTHON, None) is None
+    assert interpreter_verdict(STORE_PYTHON, True) is None
+
+
+def test_the_verdict_does_not_mention_a_hugging_face_token():
+    """The false lead that cost hours, and that made the REAL gate ambiguous."""
+    from app.services.training_diagnostics import interpreter_verdict
+    for alt in ('', 'D:\\AI\\ai-toolkit\\venv\\Scripts\\python.exe'):
+        msg = interpreter_verdict(STORE_PYTHON, False, alternative=alt)['message'].lower()
+        # A token is mentioned only to RULE IT OUT — never as a thing to go get.
+        assert 'not a hugging face token problem' in msg
+        assert 'api keys' not in msg
+        assert 'huggingface.co' not in msg
+
+
+def test_the_crash_payload_carries_the_interpreter_verdict(tmp_path):
+    """End of the chain, exactly like the gated-repo one."""
+    from app import capabilities
+    from app.services.lora_training import _crash_payload
+    log = tmp_path / 'training.log'
+    log.write_text(TORCHLESS_LOG, encoding='utf-8')
+    with patch.object(capabilities, 'aitoolkit_interpreter_report',
+                      return_value={'python': STORE_PYTHON, 'torch': False,
+                                    'alternative': ''}):
+        payload = _crash_payload(str(log), dataset_id=1, rc=1)
+    assert payload['interpreter']['module'] == 'torch'
+    assert payload['interpreter']['windows_store'] is True
+    assert 'WindowsApps' in payload['interpreter']['message']
+
+
+def test_a_normal_crash_gets_no_interpreter_verdict(tmp_path):
+    from app.services.lora_training import _crash_payload
+    log = tmp_path / 'training.log'
+    log.write_text('RuntimeError: CUDA out of memory\n', encoding='utf-8')
+    payload = _crash_payload(str(log), dataset_id=1, rc=1)
+    assert 'interpreter' not in payload
+
+
+# --- the fast-download accelerator (GitHub #18, bobba84) ------------------------
+# `HF_HUB_ENABLE_HF_TRANSFER=1` without `hf_transfer`/`hf_xet` aborts downloads
+# with something that reads like a connection failure. The app never sets that
+# variable — it arrives from the machine — so recognising it IS the whole remedy.
+HF_TRANSFER_LOG = (
+    'Downloading krea/Krea-2-Raw ...\n'
+    'Error while downloading from https://cdn-lfs.hf.co/repos/aa/bb/model.safetensors: '
+    'HTTP Status 416\n'
+    'Consider disabling HF_HUB_ENABLE_HF_TRANSFER for better error handling.\n'
+)
+
+HF_TRANSFER_MISSING_LOG = (
+    "RuntimeError: Fast download using 'hf_transfer' is enabled "
+    "(HF_HUB_ENABLE_HF_TRANSFER=1) but 'hf_transfer' package is not available in "
+    "your environment.\n"
+)
+
+
+def test_a_dead_accelerator_is_named_and_not_blamed_on_the_network():
+    from app.services.training_diagnostics import hf_transfer_verdict
+    for log in (HF_TRANSFER_LOG, HF_TRANSFER_MISSING_LOG):
+        v = hf_transfer_verdict(log)
+        assert v is not None, log
+        assert 'HF_HUB_ENABLE_HF_TRANSFER=0' in v['message']
+        assert 'hf_xet' in v['message']
+        assert 'network is probably fine' in v['message']
+
+
+def test_the_deprecation_warning_alone_is_never_a_verdict():
+    """FUTUREWARNING_LOG mentions HF_HUB_ENABLE_HF_TRANSFER in a WARNING — the
+    exact "a warning shown as a cause" bug this module exists to prevent."""
+    from app.services.training_diagnostics import hf_transfer_verdict
+    for log in (FUTUREWARNING_LOG, '', None, GATED_401_LOG,
+                'RuntimeError: CUDA out of memory\n'):
+        assert hf_transfer_verdict(log) is None, log
+
+
+def test_the_crash_payload_carries_the_accelerator_verdict(tmp_path):
+    from app.services.lora_training import _crash_payload
+    log = tmp_path / 'training.log'
+    log.write_text(HF_TRANSFER_LOG, encoding='utf-8')
+    payload = _crash_payload(str(log), dataset_id=1, rc=1)
+    assert 'HF_HUB_ENABLE_HF_TRANSFER=0' in payload['hf_transfer']['message']
+
+
+# --- the launch gate: refuse BEFORE the run, naming the path --------------------
+
+def test_a_launch_is_refused_when_the_interpreter_cannot_import_torch(app):
+    """RED before this wave: the file existed, so `is_installed()` said yes, the
+    run started and ai-toolkit died on `No module named 'torch'`."""
+    import pytest
+    from app import capabilities
+    from app.services import lora_training as lt
+    with app.app_context():
+        with patch.object(capabilities, 'aitoolkit_interpreter_report',
+                          return_value={'python': STORE_PYTHON, 'torch': False,
+                                        'alternative': ''}):
+            with pytest.raises(RuntimeError) as err:
+                lt.assert_interpreter_ready()
+    assert 'WindowsApps' in str(err.value)          # the path is IN the refusal
+    # and the Hugging Face red herring is explicitly ruled out, not offered.
+    assert 'not a hugging face token problem' in str(err.value).lower()
+
+
+def test_a_launch_is_never_blocked_on_an_answer_we_do_not_have(app):
+    """True AND unknown both let the run through. A cold-import timeout must not
+    cost someone a training run."""
+    from app import capabilities
+    from app.services import lora_training as lt
+    with app.app_context():
+        for state in (True, None):
+            with patch.object(capabilities, 'aitoolkit_interpreter_report',
+                              return_value={'python': STORE_PYTHON, 'torch': state,
+                                            'alternative': ''}):
+                lt.assert_interpreter_ready()       # no raise
+
+
+def test_a_broken_probe_never_blocks_a_launch(app):
+    from app import capabilities
+    from app.services import lora_training as lt
+    with app.app_context():
+        with patch.object(capabilities, 'aitoolkit_interpreter_report',
+                          side_effect=OSError('probe exploded')):
+            lt.assert_interpreter_ready()           # no raise

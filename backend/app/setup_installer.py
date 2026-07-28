@@ -332,6 +332,13 @@ def _append(action, line):
         del log[:-_LOG_MAX]
 
 
+def _note(action, line):
+    """_append for the presence checks, which are ALSO called outside a run (the
+    install plan and the tests ask them directly). No run -> no log, no KeyError."""
+    if action in _runs:
+        _append(action, line)
+
+
 def _set_progress(action, done, total):
     """Publish a live byte-progress snapshot for a streaming download, separate
     from the text log (so a smooth % bar never spams the log). `total` may be 0
@@ -1420,6 +1427,27 @@ def _run_ml_capability(action) -> int:
                              '-c', str(_ML_REQUIREMENTS), *_flask_pillow_guard(python)])
 
 
+def _is_blocking_invalid(path, spec) -> bool:
+    """Is the file at `path` present but impossible to load (an HTML licence page, a
+    truncated/garbage download)? Advisory `too_small` is NOT counted, and a checker
+    that cannot answer says False — no skip is ever turned into a re-download on a
+    guess.
+
+    This is the "a file resolves, therefore the asset is installed" hole, and it had
+    FOUR doors. 54e5011 shut the one at `dest`; the other three below skip the
+    download because SOME OTHER file resolves (a legacy filename, a file under an
+    extra_model_paths root, a hand-placed Krea asset) and none of them looked at
+    that file either — so the corrupted-weight dead end simply came back through a
+    different door. Same validator, same rule, all four."""
+    try:
+        from .services import model_integrity
+        res = model_integrity.validate_model_file(path, min_bytes=spec.get('min_bytes'))
+    except Exception:
+        logger.debug('integrity check failed for %s', path, exc_info=True)
+        return False
+    return bool(res['blocking'])
+
+
 def _download_present_in_extra(action) -> bool:
     """Is the asset for `action` already on disk under an extra_model_paths.yaml
     root? We still DOWNLOAD into the base is-default tree (dest is unchanged, per the
@@ -1428,7 +1456,14 @@ def _download_present_in_extra(action) -> bool:
     filename AND any earlier default name (`legacy_names`): an install that fetched the
     pre-KV UNET into an extra root still resolves it by name, so it must not re-download.
     EXTRA roots only (base presence is the os.path.isfile(dest) + _variant_already_present
-    checks), so with no yaml this is a no-op and behaviour is identical."""
+    checks), so with no yaml this is a no-op and behaviour is identical.
+
+    A blocking-invalid file out there does NOT count as present — it is exactly the
+    file the loader would open, so skipping on it leaves the user in the dead end
+    they came to Setup to escape. Nothing under a user's own extra root is deleted
+    though: the download lands in the base dest as always, and the broken copy is
+    named in the log so it can be removed by hand (deleting inside a tree the app
+    does not own is a bigger promise than this function should make)."""
     spec = _MODEL_DOWNLOADS[action]
     dest_parts = spec['dest']                 # e.g. ('unet','klein','flux-2-...safetensors')
     comfy_type = dest_parts[0]                # 'unet'|'loras'|'text_encoders'|'vae'
@@ -1436,12 +1471,18 @@ def _download_present_in_extra(action) -> bool:
     names = (dest_parts[-1], *(spec.get('legacy_names') or ()))
     try:
         from .services import comfy_model_paths
-        return any(os.path.isfile(os.path.join(root, *subdirs, name))
-                   for root in comfy_model_paths.extra_roots(comfy_type)
-                   for name in names)
+        found = [os.path.join(root, *subdirs, name)
+                 for root in comfy_model_paths.extra_roots(comfy_type)
+                 for name in names
+                 if os.path.isfile(os.path.join(root, *subdirs, name))]
     except Exception:
         logger.debug('extra-path klein presence check failed for %s', action, exc_info=True)
         return False
+    usable = [p for p in found if not _is_blocking_invalid(p, spec)]
+    for p in found:
+        if p not in usable:
+            _note(action, f'ignoring an unusable copy under an extra_model_paths root: {p}')
+    return bool(usable)
 
 
 def _variant_already_present(action):
@@ -1451,7 +1492,15 @@ def _variant_already_present(action):
     old one stays valid — both variants resolve by name at generate time — so either
     counts as "already installed" instead of re-fetching ~10 GB. (extra_model_paths
     roots are covered by _download_present_in_extra, which accepts the same alternates.)
-    None when the spec lists no `legacy_names` (every other action)."""
+    None when the spec lists no `legacy_names` (every other action).
+
+    "Still resolves" has to mean "still LOADS": a truncated legacy UNET resolves by
+    name just as well as a good one, so accepting it on presence alone re-opened
+    the dead end `dest` was fixed for. This folder is the app's own install tree
+    (same tree `dest` lives in) and the resolver may well prefer the legacy name
+    over the fresh download, so a blocking-invalid variant is REMOVED here exactly
+    as it is at `dest` — via the same _replace_if_unloadable, so the deletion rule,
+    the log lines and the could-not-delete recovery are written once."""
     spec = _MODEL_DOWNLOADS[action]
     alts = spec.get('legacy_names') or ()
     if not alts:
@@ -1461,7 +1510,8 @@ def _variant_already_present(action):
     except Precondition:
         return None
     for name in alts:
-        if os.path.isfile(os.path.join(dest_dir, name)):
+        path = os.path.join(dest_dir, name)
+        if os.path.isfile(path) and not _replace_if_unloadable(action, path, spec):
             return name
     return None
 
@@ -1541,12 +1591,27 @@ def _krea_asset_already_installed(action) -> bool:
     engine's own resolvers already answer "is this installed?" for exactly the
     file a generate would load, so we ask them rather than test one hardcoded
     path. Klein keeps its filename-based checks above (its resolver accepts a
-    wider set and would suppress a legitimate first install)."""
+    wider set and would suppress a legitimate first install).
+
+    "The resolver finds it" is not "the loader can open it": krea_missing_assets()
+    answers presence, and a hand-placed file that is an HTML gate page or a
+    truncated download passes it. So the resolver's OWN integrity verdict
+    (krea_invalid_assets, blocking only — the same list capabilities greys the
+    engine on) vetoes the skip. Nothing is deleted: the file sits under a name and
+    a folder the user chose, and the download goes to the canonical dest anyway."""
     if action not in _KREA_DOWNLOADS:
         return False
     try:
         from .services import krea_edit_helper
-        return action not in krea_edit_helper.krea_missing_assets()
+        if action in krea_edit_helper.krea_missing_assets():
+            return False
+        broken = next((i for i in krea_edit_helper.krea_invalid_assets()
+                       if i['asset'] == action and i['blocking']), None)
+        if broken:
+            _note(action, f"the file already resolving for this asset cannot be loaded: "
+                          f"{broken['reason']}")
+            return False
+        return True
     except Exception:
         logger.debug('krea presence check failed for %s', action, exc_info=True)
         return False
@@ -1571,15 +1636,15 @@ def _replace_if_unloadable(action, dest, spec) -> bool:
         return False
     if res['ok'] or not res['blocking']:
         return False
-    _append(action, f"the file already here cannot be loaded: {res['reason']}")
+    _note(action, f"the file already here cannot be loaded: {res['reason']}")
     try:
         os.remove(dest)
     except OSError as e:
         # Say so instead of downloading into a path we could not clear: the write
         # would fail, or worse, look like it worked.
-        _append(action, f'could not delete it ({e}) — remove it by hand, then retry: {dest}')
+        _note(action, f'could not delete it ({e}) — remove it by hand, then retry: {dest}')
         return False
-    _append(action, 'removed it — downloading a fresh copy')
+    _note(action, 'removed it — downloading a fresh copy')
     return True
 
 

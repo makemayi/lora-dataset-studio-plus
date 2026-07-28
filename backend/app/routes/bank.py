@@ -92,6 +92,29 @@ def bank_get(bank_id):
     return jsonify(payload)
 
 
+@bp.post('/bank/<int:bank_id>/flag-preview')
+def bank_flag_preview(bank_id):
+    """How many images each flag WOULD hold at the thresholds in the body —
+    the live effect readout under the Bank's 🎚 threshold controls.
+
+    Read-only and cheap: verdicts are recomputed from persisted raw scores, so
+    this is one COUNT per flag, the same queries the workspace payload already
+    runs. Nothing is saved — the user still has to press Save.
+
+    POST (not GET) because it carries the UNSAVED candidate thresholds, exactly
+    like /settings/prompt-preview carries unsaved prompt text. A junk body
+    degrades to "the saved thresholds" instead of 400: a preview that answers
+    'error' while you are mid-keystroke is worth less than one that answers with
+    what is currently in effect."""
+    body = request.get_json(silent=True) or {}
+    overrides = body.get('thresholds')
+    out = banks.flag_preview(LOCAL_USER, bank_id,
+                             overrides if isinstance(overrides, dict) else None)
+    if out is None:
+        return jsonify({'error': 'not found'}), 404
+    return jsonify(out)
+
+
 @bp.delete('/bank/<int:bank_id>')
 def bank_delete(bank_id):
     if not banks.delete_bank(LOCAL_USER, bank_id):
@@ -466,6 +489,22 @@ def bank_images_status(bank_id):
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     return jsonify({'ok': True, 'changed': n})
+
+
+@bp.post('/bank/<int:bank_id>/rotate')
+def bank_rotate(bank_id):
+    """Turn {ids} by {degrees} CLOCKWISE (90/180/270, negative = left).
+
+    Idea by 1Tomber (GitHub #17). Synchronous and cheap: it writes ONE integer
+    per row — the user's own files are never touched, the turned copy is built
+    lazily by the resolver on the next read."""
+    data = request.get_json(silent=True) or {}
+    try:
+        result = banks.rotate_images(LOCAL_USER, bank_id, data.get('ids'),
+                                     data.get('degrees'))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, **result})
 
 
 @bp.post('/bank/<int:bank_id>/apply-flags')

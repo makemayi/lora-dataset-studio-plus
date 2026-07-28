@@ -10,4 +10,7 @@ psutil>=5.9.8
 huggingface-hub>=0.24     # Publish dataset to the HF Hub (pure-python, light): HfApi + upload_folder
 PyYAML>=6.0               # Parse ComfyUI's extra_model_paths.yaml (was only transitive via huggingface-hub); guarded import degrades gracefully if absent
 Send2Trash>=1.8           # Bank "Delete rejected from disk" -> OS trash instead of a hard delete (pure-python, tiny); guarded import degrades to os.remove if absent
-pytest>=8.0
+# Test dependencies are NOT here: this file is what every end user installs
+# (start.bat), and it shipped a test runner nobody runs. They live in
+# requirements-dev.txt, which is also exactly what CI installs -- see the header
+# there for the release this divergence cost.

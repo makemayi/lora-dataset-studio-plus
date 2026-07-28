@@ -372,7 +372,13 @@ def test_run_model_download_accepts_legacy_unet_variant(app, tmp_path, monkeypat
     """An install that fetched the pre-KV model (flux-2-klein-9b-fp8.safetensors)
     must NOT be told to re-download the KV build: the legacy filename sitting in
     models/unet/klein/ counts as already installed (both resolve by name), so the
-    network is never touched."""
+    network is never touched.
+
+    The fixture writes a REAL safetensors header now: "already installed" means the
+    loader can open it, so a garbage placeholder would (correctly) be treated as a
+    corrupted download and re-fetched — see test_setup_presence_integrity."""
+    import json
+    import struct
     from app import setup_installer, config
     base = _make_comfyui(tmp_path)
     def boom(*a, **k):
@@ -382,8 +388,9 @@ def test_run_model_download_accepts_legacy_unet_variant(app, tmp_path, monkeypat
         legacy = os.path.join(os.path.dirname(setup_installer._download_dest_path('klein_model')),
                               'flux-2-klein-9b-fp8.safetensors')
         os.makedirs(os.path.dirname(legacy), exist_ok=True)
+        _hdr = json.dumps({'w': {'dtype': 'F16', 'shape': [1], 'data_offsets': [0, 2]}}).encode()
         with open(legacy, 'wb') as f:
-            f.write(b'pre-KV klein unet')
+            f.write(struct.pack('<Q', len(_hdr)) + _hdr + b'\x00' * 64)
         monkeypatch.setattr(setup_installer.requests, 'get', boom)
         setup_installer._runs['klein_model'] = setup_installer._new_run()
         rc = setup_installer._run_model_download('klein_model')

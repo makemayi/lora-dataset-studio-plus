@@ -1,4 +1,5 @@
 import { canvasResultLabel, describeCanvasRun } from '../../utils/canvasRunResults';
+import { pinBatchLabel } from '../../utils/canvasPinBatch';
 
 /* 🎨 The board's own generation bar: what is being rendered, and where it went.
 
@@ -18,9 +19,14 @@ import { canvasResultLabel, describeCanvasRun } from '../../utils/canvasRunResul
    buttons wrap under it, and nothing here is ever the reason the page scrolls
    sideways. */
 export default function CanvasRunTracker({ run, targets, onStop, onResume, onOpenResult,
-  onOpenPanel, onDismiss }) {
+  onOpenPanel, onDismiss, pinCount = 0, pinBusy = false, pinSaid = '',
+  onPinAll, onUndoPinAll }) {
   const s = describeCanvasRun(run);
   if (s.phase === 'idle') return null;
+  // 📌 The one-click way onto the board. It says HOW MANY it will put down, and
+  // it is simply not rendered once there is nothing left to put down — a lit
+  // button that does nothing is a worse answer than no button.
+  const pinLabel = pinBatchLabel(pinCount);
 
   const working = s.phase === 'working';
   const tone = working
@@ -79,10 +85,41 @@ export default function CanvasRunTracker({ run, targets, onStop, onResume, onOpe
               </button>
             ))}
           </span>
+          {/* 📌 …or put the whole lot on the board at once. Beside Dismiss
+              because they are the two ends of the same sentence: take them, or
+              let them go. Placement is utils/canvasPinBatch — one column per
+              source checkpoint, in a band under the lane, guaranteed to overlap
+              nothing that is already there. */}
+          {pinLabel && (
+            <button type="button" onClick={onPinAll} disabled={pinBusy}
+              data-testid="canvas-pin-all"
+              title="Put every image this run produced on the board, each under the checkpoint that made it"
+              className="shrink-0 rounded-md border border-emerald-400/60 bg-emerald-500/20 px-2 py-0.5 font-semibold text-emerald-50 hover:bg-emerald-500/35 disabled:opacity-50">
+              {pinBusy ? '📌 Pinning…' : pinLabel}
+            </button>
+          )}
+          {onUndoPinAll && (
+            <button type="button" onClick={onUndoPinAll}
+              data-testid="canvas-pin-all-undo"
+              title="Take those images back off the board"
+              className="shrink-0 rounded-md border border-border bg-app/60 px-2 py-0.5 text-content-muted hover:text-content">
+              ↩ Undo
+            </button>
+          )}
           <button type="button" onClick={onDismiss}
             className="ml-auto shrink-0 text-content-subtle underline decoration-dotted hover:text-content">
             Dismiss
           </button>
+          {/* What actually happened, announced. A bulk action that reports
+              nothing is a bulk action you have to go and audit by hand — and if
+              some of the lot could NOT be placed, this is where it is said.
+              NOT its own live region: this bar already IS one (`role="status"`
+              on the wrapper), and a live region nested in a live region makes
+              screen readers announce the same sentence twice. */}
+          <span data-testid="canvas-pin-all-said"
+            className="basis-full text-content-muted">
+            {pinSaid}
+          </span>
         </>
       )}
     </div>

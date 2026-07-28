@@ -20,7 +20,7 @@ import {
   canvasCheckpointKey, describeCanvasLaunch, isCanvasCheckpointSelected,
   pruneCanvasSelection, refreshCanvasSelection, toggleCanvasCheckpoint,
 } from '../../utils/canvasGeneration';
-import { postJson } from '../../api/fetchClient';
+import { apiFetch, postJson } from '../../api/fetchClient';
 import LineageDetailPanel from '../dataset/LineageDetailPanel';
 import LineageDiffPanel from '../dataset/LineageDiffPanel';
 import CheckpointActionsPopover from '../dataset/CheckpointActionsPopover';
@@ -29,7 +29,11 @@ import GeneratedImageLightbox from '../shared/GeneratedImageLightbox';
 import { clampPopoverToViewport, POPOVER_H, POPOVER_W } from '../dataset/checkpointPopover.js';
 import { useCheckpointActions } from '../../hooks/useCheckpointActions';
 import { useCanvasRun } from '../../hooks/useCanvasRun';
-import { canvasRunDatasetIds, readyImageCount } from '../../utils/canvasRunResults';
+import { canvasRunDatasetIds, readyImageCount, runPinCandidates } from '../../utils/canvasRunResults';
+import { isNodeControlTarget, nodePointerIntent } from '../../utils/canvasNodeChrome';
+import {
+  pinBatchAnnouncement, pinBatchPendingAcrossLanes, placeImageBatch,
+} from '../../utils/canvasPinBatch';
 import { cardClickAction, runGalleryTarget } from '../../utils/canvasCardClick';
 import { loraFolderLabel } from '../../utils/checkpointBrowser';
 import { runIdentityLabel } from '../../utils/runIdentity';
@@ -180,7 +184,7 @@ function LaneGraph({ lane, isLit, onHover, onNodeClick, diffRole, noteOf, lifted
  *
  *  Its own <svg>, sized 1x1 and overflow-visible, because a pinned image may sit
  *  well outside the tree's box and the tree's <svg> is sized to the tree. */
-function LaneImages({ lane, nodes, onGeometry, onClose, onOpen }) {
+function LaneImages({ lane, nodes, onGeometry, onClose, onOpen, boardScale }) {
   if (!nodes.length) return null;
   const edges = imageNodeEdges(nodes, lane.graph);
   return (
@@ -191,7 +195,7 @@ function LaneImages({ lane, nodes, onGeometry, onClose, onOpen }) {
       {nodes.map((n) => (
         <CanvasImageNode key={n.imageId} node={n} datasetId={lane.datasetId}
           laneName={lane.name} onGeometry={onGeometry} onClose={onClose}
-          onOpen={onOpen} />
+          onOpen={onOpen} boardScale={boardScale} />
       ))}
     </div>
   );
@@ -455,8 +459,10 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
     /* A pinned image's own buttons (close, open) answer for themselves.
        Returning WITHOUT capturing the pointer is the point: a captured pointer
        retargets the click that follows to the frame, and the button would never
-       hear it -- the same trap the run cards had to work around. */
-    if (e.target.closest?.('[data-canvas-image] button')) return;
+       hear it -- the same trap the run cards had to work around. The rule lives
+       in utils/canvasNodeChrome so it is testable and cannot be lost in a
+       rewrite of this handler. */
+    if (isNodeControlTarget(e.target)) return;
     const imgEl = e.target.closest?.('[data-canvas-image]');
     if (imgEl) {
       const dsId = Number(imgEl.dataset.datasetId);
@@ -465,7 +471,7 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
       // The resize corner is hit-tested BEFORE the pan/drag decision, on every
       // pointer type: a finger landing on a 28-px corner handle can only mean
       // one thing, so it must not have to wait out a long press.
-      const resizing = !!e.target.closest?.('[data-canvas-image-resize]');
+      const resizing = nodePointerIntent(e.target, e.pointerType) === 'resize';
       if (resizing || e.pointerType !== 'touch') {
         frameRef.current?.setPointerCapture?.(e.pointerId);
         if (beginImage(dsId, imageId, resizing ? 'resize' : 'move', at0)) return;
@@ -863,6 +869,94 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
     onSaveImageNodes?.(dsId, [{ image_id: img.id, ...geo, visible: true, image: img }]);
   }, [imageNodes, onSaveImageNodes]);
 
+  /* 📌 Pin ALL of a finished run's images, in one click.
+     A lot spanning four checkpoints used to mean opening four galleries and
+     pinning five pictures one by one — the board's own generation, and the
+     board was the last place it landed.
+
+     What each image IS (its prompt, seed, sampler, the checkpoint that made it)
+     is read from the gallery route, one request per checkpoint the run was
+     launched on, so the node carries exactly the payload every other gallery
+     publishes rather than a second shape rebuilt from the run's cells. The
+     geometry is decided by utils/canvasPinBatch — the part where "nothing may
+     ever overlap anything" is a tested property and not a hope. */
+  const [pinAllState, setPinAllState] = useState(null); // {busy}|{said, undo}
+  const pinCandidates = useMemo(
+    () => runPinCandidates(tracker.run.data), [tracker.run.data]);
+  const pinPending = useMemo(
+    () => pinBatchPendingAcrossLanes(pinCandidates, imageNodes).pending,
+    [pinCandidates, imageNodes]);
+
+  const handlePinAll = useCallback(async () => {
+    const wanted = new Set(pinPending.map((c) => c.id));
+    if (!wanted.size) return;
+    setPinAllState({ busy: true });
+    // One read per checkpoint the run was launched on. Failures are per-target:
+    // a checkpoint whose gallery cannot be read costs its own pictures, not the
+    // whole gesture.
+    const byLane = new Map();
+    await Promise.all(trackerTargets.map(async (t) => {
+      try {
+        const d = await apiFetch(`/api/train/checkpoint/${t.recordId}/${t.step}/images`);
+        for (const img of (d?.images || [])) {
+          if (!wanted.has(img.id)) continue;
+          const dsId = img.dataset_id ?? t.datasetId;
+          if (!byLane.has(dsId)) byLane.set(dsId, []);
+          byLane.get(dsId).push(img);
+        }
+      } catch { /* reported by the count below: fewer pinned than asked for */ }
+    }));
+
+    let placedTotal = 0;
+    let skippedTotal = 0;
+    const undo = [];
+    for (const [dsId, images] of byLane) {
+      const lane = placedRef.current.find((l) => l.datasetId === dsId);
+      const laneMap = imageNodes?.[dsId] || {};
+      const res = placeImageBatch({
+        graph: lane?.graph,
+        existing: imagesRef.current[dsId] || [],
+        images,
+        remembered: laneMap,
+      });
+      if (!res.placed.length) continue;
+      placedTotal += res.placed.length;
+      skippedTotal += res.skipped.length;
+      onSaveImageNodes?.(dsId, res.placed.map((p) => ({
+        image_id: p.imageId, x: p.x, y: p.y, w: p.w, h: p.h,
+        visible: true, image: p.image,
+      })));
+      // What Undo has to put back: these rows, closed again, at the geometry
+      // they had BEFORE (a picture that had been closed keeps the spot it was
+      // closed at, so undoing does not quietly rewrite it).
+      undo.push({ datasetId: dsId, rows: res.placed.map((p) => {
+        const was = laneMap[p.imageId];
+        return { image_id: p.imageId, visible: false, image: p.image,
+          x: was?.x ?? p.x, y: was?.y ?? p.y, w: was?.w ?? p.w, h: was?.h ?? p.h };
+      }) });
+    }
+    const missing = wanted.size - placedTotal - skippedTotal;
+    setPinAllState({
+      said: pinBatchAnnouncement({
+        placed: new Array(placedTotal),
+        skipped: new Array(skippedTotal + Math.max(0, missing)),
+      }),
+      undo,
+    });
+  }, [pinPending, trackerTargets, imageNodes, onSaveImageNodes]);
+
+  /* The way back. Pinning thirty pictures with one tap and offering no way out
+     would be the board rearranging itself on the user's behalf; this closes
+     exactly the nodes that click opened, and nothing else. It is the ordinary
+     close (`visible: false`), so anything pinned by hand before is untouched
+     and every geometry promise still holds. */
+  const handleUndoPinAll = useCallback(() => {
+    for (const { datasetId, rows } of (pinAllState?.undo || [])) {
+      onSaveImageNodes?.(datasetId, rows);
+    }
+    setPinAllState(null);
+  }, [pinAllState, onSaveImageNodes]);
+
   // Closing KEEPS the geometry -- that is the whole promise. Only `visible` flips.
   const handleCloseImage = useCallback((node) => {
     const dsId = node?.image?.dataset_id;
@@ -980,7 +1074,12 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
         onResume={() => tracker.run.resume?.()}
         onOpenPanel={() => setPanelOpen(true)}
         onOpenResult={(t) => setGallery({ recordId: t.recordId, step: t.step })}
-        onDismiss={tracker.forget} />
+        pinCount={pinPending.length}
+        pinBusy={!!pinAllState?.busy}
+        pinSaid={pinAllState?.said || ''}
+        onPinAll={handlePinAll}
+        onUndoPinAll={pinAllState?.undo?.length ? handleUndoPinAll : null}
+        onDismiss={() => { setPinAllState(null); tracker.forget(); }} />
 
       <div
         ref={frameRef}
@@ -1006,7 +1105,8 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
                 <LaneHeader lane={lane} />
                 <LaneImages lane={lane} nodes={imagesByLane[lane.datasetId] || []}
                   onGeometry={handleImageGeometry} onClose={handleCloseImage}
-                  onOpen={(n) => setPinnedZoom(n.image)} />
+                  onOpen={(n) => setPinnedZoom(n.image)}
+                  boardScale={clampScale(view.scale)} />
                 <LaneGraph lane={lane} isLit={isLit} onHover={onHover}
                   onNodeClick={onNodeClick} diffRole={diffRole} noteOf={noteOf}
                   liftedId={drag && drag.datasetId === lane.datasetId ? drag.recordId : null}

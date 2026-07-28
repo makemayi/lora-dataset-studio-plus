@@ -7,6 +7,7 @@ import { CapabilitiesProvider, useCapabilities } from './context/CapabilitiesCon
 import { setToastRef } from './api/fetchClient'
 import ErrorBoundary from './components/common/ErrorBoundary'
 import { WhatsNewButton, WhatsNewModal } from './components/common/WhatsNew'
+import ConnectionBanner from './components/common/ConnectionBanner'
 import DatasetPage from './pages/DatasetPage'
 import BankPage from './pages/BankPage'
 import StudioPage from './pages/StudioPage'
@@ -57,7 +58,7 @@ function CheckUpdatesButton() {
     let alive = true
     const autoCheck = async () => {
       try {
-        const d = await apiFetch('/api/update/check?auto=1')
+        const d = await apiFetch('/api/update/check?auto=1', { background: true })
         if (!alive) return
         setAvailable(!!d?.update_available)
         // The dot always lights up; the banner only surfaces if the user
@@ -420,6 +421,9 @@ function Shell() {
       <NavBar />
       <OnboardingRedirect />
       <WhatsNewModal />
+      {/* Above the update banner: "can I reach the server at all" outranks
+          "there is a newer version". */}
+      <ConnectionBanner />
       <UpdateBanner />
       <main id="main-content" tabIndex={-1} className="mx-auto max-w-5xl px-4 py-6">
         <Outlet />

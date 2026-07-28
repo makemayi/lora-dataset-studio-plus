@@ -81,7 +81,8 @@ export default function CaptionOptionsPopover({ datasetId, onClose, onSaved }) {
     clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       let s;
-      try { s = await apiFetch('/api/ollama/pull'); } catch { clearInterval(pollRef.current); return; }
+      try { s = await apiFetch('/api/ollama/pull', { background: true }); }
+      catch { clearInterval(pollRef.current); return; }
       setPull(s);
       if (s.state === 'running') return;
       clearInterval(pollRef.current);

@@ -655,6 +655,107 @@ missing control can't be mistaken for a bug. Everything else in the lightbox —
 ✂ Crop, ⇄ Mirror, ✨ Upscale & improve — is unchanged and still acts on the
 image you opened.
 
+## Tune the Bank filter thresholds
+
+The filter chips (🌫 Blurry, 📐 Small, ≈ Duplicates…) are verdicts, and every
+verdict comes from a number. Those numbers used to live only in
+*Settings ▸ Captioning & quality*, three screens away from the bank you were
+triaging. They are now also under the chips themselves: open **🎚 Filter
+thresholds** above the grid.
+
+It is the **same setting in both places** — one value, seen twice — so anything
+you change here applies to **every bank**, and the panel says so at the top.
+
+The twelve knobs are grouped by the question they answer: **Image quality**,
+**Duplicates**, **Size & framing**, **Content**, **Style**. The first two are
+open by default; the rest fold away, and a folded group tells you how many of
+its values you have moved off the default.
+
+Three things each control tells you that a bare number cannot:
+
+- **Which way catches more.** "Stricter" is not a direction. *Duplicate
+  distance* is a distance in hash bits — **raise** it to catch more
+  near-duplicates. *Semantic duplicate similarity* is a similarity — **lower**
+  it to catch more. They sit side by side and they move opposite ways, so each
+  field spells its own direction out in a sentence next to the input.
+- **When it takes effect.** Eight of them re-sort the bank the moment you save,
+  because the scan stores raw measurements and the verdicts are recomputed on
+  every read — no rescan, ever. The other four are baked into stored groups by a
+  pass, so they carry a button that re-runs that pass on the spot. Re-grouping
+  duplicates is cheap: it walks the stored hashes and decodes nothing.
+- **How many images it would touch.** As you change a read-time value, the panel
+  asks the server how many images that number *would* flag and shows
+  `1 240 → 3 019 images flagged` before you save anything. Nothing is written
+  until you press **Save**.
+
+Every field has **↺ Reset to default** (it only appears when the value is not
+the default), and the header carries **↺ Reset all to defaults**. The defaults
+come from the server, so they are always the real shipped values.
+
+### What editing an image costs it
+
+Crop, ✂ Mirror, ↺ Rotate and the watermark cleaners **overwrite** the file the
+trainer will later copy verbatim, so whatever they discard is discarded for good.
+They all follow one rule: **keep the file's format and re-encode it without losing
+pixels.** A PNG stays a PNG, a WebP is rewritten losslessly (crop it ten times and the tenth
+is identical to the first), and the file keeps a name that matches what is inside
+it. JPEG is the exception nobody can fix — it has no lossless mode — so a JPEG is
+re-saved at the highest practical quality with no chroma subsampling rather than
+converted to something heavier to protect pixels that were already lossy.
+
+Two honest caveats:
+
+- **Cropping still resamples.** The crop is normalised to a 1024 px long side, and
+  a small box is enlarged to reach it (that is what the ⚠ upscale warning is
+  about). Only the *encoding* is lossless; the resize never can be. The watermark
+  **✂ auto-crop**, which only cuts and never resizes, is lossless end to end.
+- **Files get bigger.** A cropped photo that used to weigh ~200 KB now weighs
+  ~950 KB. That is the price of not throwing pixels away. Thumbnails and the
+  copies uploaded to a generation API are unaffected: they stay small on purpose.
+
+Images you cropped **before** this changed keep the pixels they have — nothing is
+re-processed retroactively, and re-cropping an already-degraded file cannot bring
+back what the old encoder removed.
+
+## Rotate a sideways image
+
+Scraped folders and phone exports are full of shots lying on their side. Both
+places you meet an image can turn it a quarter turn, and neither charges you for
+it. (Asked for by 1Tomber, GitHub issue #17.)
+
+**In a dataset**, open the image (click its tile) and use **↺ Rotate left** /
+**↻ Rotate right** in the bar under the picture, next to ⇄ Mirror. The file
+keeps its name, its caption, its status and its format — a PNG stays a PNG, a
+WEBP stays a WEBP. Four turns bring you back to exactly where you started:
+measured on the shipped encoder, a PNG and a WEBP come back **byte-identical**
+after going all the way round, so a mis-click costs nothing. The one exception
+is a JPEG, which the format itself forces to be re-encoded on every save: at the
+quality LDS writes (95, no chroma subsampling) that is around 46 dB PSNR — far
+below anything visible, and it barely grows with more turns — but it is not
+free, so it is worth knowing. Datasets normally hold WEBP, so this mostly
+concerns files restored from an old backup.
+
+Rotation is deliberately **not** part of ✂ Crop, even though that is where you
+might look for it first. Cropping **resamples** the image — it rescales the box
+you drew to a 1024 px long side — and resampling costs detail no matter how
+carefully the result is then saved. A quarter turn resamples nothing at all: it
+just moves existing pixels to new coordinates. Sending it through the crop lane
+would make it pay a price it does not owe.
+
+**In a bank**, your own folder is never written to — so a bank rotation does not
+touch your files at all. The turn is remembered against the image and applied to
+what the app shows you and to what it copies when you **⬆ Promote**; your
+original keeps its exact bytes, whatever you do. Select the images and use
+**↺ Rotate left** / **↻ Rotate right** in the selection bar to fix a whole
+sideways batch at once, or turn one image without leaving **▶ Review** with the
+↺ / ↻ buttons (keyboard: `[` and `]`). Rotating in Review never decides
+anything — the image stays under your cursor so you can judge it once it is the
+right way up.
+
+One caveat worth stating: the analysis passes (👤 Subject, ✨ Score, 📐 Framing)
+still read the original file, so turning an image does **not** re-run them. Turn
+first, then run the passes if you want them to see it upright.
+
 ## Clean the watermarks a bank found
 
 **🚩 Find watermarks** flags the images carrying an overlaid logo, URL or
@@ -886,10 +987,18 @@ one click. A run that predates a given setting simply shows no row for it: an
 absent line is honest, a dash is not.
 
 **📌 Pinning an image onto the board.** Comparing two checkpoints means looking
-at their pictures *at the same time*, which a full-screen viewer cannot do. From
-that viewer, **📌 Pin to canvas** drops the image onto the board as a node of its
-own, joined to the checkpoint that produced it by the same connector the board
-uses for "this run continued from that checkpoint".
+at their pictures *at the same time*, which a full-screen viewer cannot do. So
+**📌** drops an image onto the board as a node of its own, joined to the
+checkpoint that produced it by the same connector the board uses for "this run
+continued from that checkpoint".
+
+There are two ways in, and the first one is the one to remember: **every
+thumbnail in a run or checkpoint gallery carries a 📌 in its bottom-right
+corner** — one tap, no need to open the image at all. It is hidden while you are
+in **Select** mode (that mode is for arming a delete, and a second target there
+is a mis-tap waiting to happen). The same action is also in the full-screen
+viewer, spelled out as **📌 Pin to canvas**, for when you have already opened a
+picture and decide it belongs on the board.
 
 - **Move it** by dragging (on a phone: a long press picks it up, exactly like a
   run card). **Resize it** from the corner handle. **Close it** with **✕**.
@@ -906,8 +1015,38 @@ uses for "this run continued from that checkpoint".
   its connecting line.
 - Unticking a dataset takes its lane off the board, pinned images included; they
   come back with the lane, untouched.
-- **✦ Tidy up** does not throw pinned images away — it re-flows them beside their
-  cards, since the cards are what they were positioned against.
+- **✦ Tidy up** does not throw pinned images away — it re-flows them into the
+  same tidy band **📌 Pin all** uses, so a rebuild of the automatic tree can no
+  longer park a picture on top of a run card.
+- The **✕**, the **🔍** and the resize corner keep a finger-sized target **at
+  every zoom level**: they are drawn at a constant size on screen rather than at
+  the board's, so a board fitted to twenty runs is still one you can tap.
+
+**📌 Pin all — the whole lot in one gesture.** When a generation launched from
+the board finishes, the green bar says how many images are ready and names the
+checkpoints they joined. **📌 Pin all N to the board** puts every one of them on
+the board without opening a single gallery.
+
+- **Where they land.** In a band under the lane, **one column per checkpoint**,
+  each column under the checkpoint that produced it — so a lot spanning four runs
+  reads as four groups, and each picture still draws its own line back to its
+  pill. The band starts below everything already on the lane, which is what makes
+  the guarantee a real one: **nothing is ever placed on top of a run card, a
+  checkpoint pill or a picture you positioned yourself.**
+- **Big lots become a contact sheet.** A pair of renders lands full size; twenty
+  or thirty land as thumbnails, which is the size you actually compare that many
+  pictures at. Each one is still resizable afterwards like any other node.
+- **What is already on the board is left alone.** An image you have already
+  pinned is neither moved nor duplicated, and the button counts only what is
+  left — once everything is up, the button is simply not there any more. An
+  image you *closed* is offered again, and comes back where you closed it when
+  that spot is free.
+- **Nothing is stacked in silence.** One click places at most 40 pictures; if the
+  run made more, the bar says how many were left out and where to get them
+  (their checkpoint gallery). The count of what was actually pinned is announced
+  for screen readers too.
+- **↩ Undo** takes exactly the images that click added straight back off the
+  board, and nothing else.
 
 **Which checkpoints you can generate from, at a glance.** Every checkpoint pill
 carries its deployment state on its **left edge**: a **solid sky bar** means the

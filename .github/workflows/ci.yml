@@ -98,7 +98,7 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: backend/requirements-dev.txt
 
       - name: Enforce release asset policy
         run: python scripts/check_release_artifacts.py
@@ -106,15 +106,12 @@ jobs:
       - name: Test release asset guard
         run: python -m unittest discover -s scripts/tests -p 'test_*.py'
 
-      - name: Install backend dependencies
-        run: python -m pip install --disable-pip-version-check -r backend/requirements.txt
-
-      - name: Install the ML extras the watermark suite needs
-        # test_watermarks.py exercises real numpy/OpenCV pixel maths and the Telea
-        # fallback that runs when LaMa is absent. numpy and OpenCV are the only ML
-        # extras those tests touch, so installing just these two (never torch/LaMa)
-        # runs the 9 watermark tests for real while keeping "LaMa absent" true.
-        run: python -m pip install --disable-pip-version-check "numpy>=1.26,<2" "opencv-python-headless>=4.9"
+      - name: Install the test environment
+        # ONE file, and the same one a contributor installs — including the
+        # test-only numpy/OpenCV extras. Listing them inline here is what let CI
+        # and a dev machine differ silently until a release tag caught it;
+        # test_dev_requirements_contract.py now fails if this line drifts.
+        run: python -m pip install --disable-pip-version-check -r backend/requirements-dev.txt
 
       - name: Run backend tests
         run: python -m pytest backend/tests -q

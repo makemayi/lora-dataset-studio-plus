@@ -145,7 +145,7 @@ Settings:
 
 - **Reference grounding** → `krea.grounding_px`. Range `512`–`1536`, default **`1024`**. **The** dial of this engine: the resolution your reference is shown to the model's vision encoder at. **Lower** = it follows the shot description (more variety in pose, outfit and scene, looser likeness). **Higher** = it resembles the reference more closely, and starts copying the very pose and outfit you asked it to change. The node's own default is 768; 1024+ is recommended for people, and a character dataset is people.
 - **Sampler steps** → `krea.steps`. Default **`10`**, the value the model's own reference workflow uses. More is slower and rarely better on this pipeline.
-- **Base model file** → `krea.base_model`. Blank (default) = the app picks a Krea 2 **Turbo** then **Raw** build from your ComfyUI. Set it only if you own several. Checkpoints that merely carry "krea" in their name but are not Krea 2 bases are **skipped on purpose** — the identity LoRA renders pure noise on them, which looks like a broken app rather than a wrong file.
+- **Base model file** → `krea.base_model`. **This is the GENERATION setting only** — the checkpoint ComfyUI loads for Krea 2 Identity Edit. It has **nothing to do with LoRA training**, which never reads it: training pulls its base from Hugging Face and picks it from the **Krea 2 training base** dropdown in the training panel (**Raw**, the default and the official recommendation — you train on Raw and apply the LoRA on Turbo at inference). Nobody can accidentally train on Turbo by leaving this field alone. *(The naming confusion was raised by strouder, GitHub #19.)* Blank (default) = the app picks a Krea 2 **Turbo** then **Raw** build from your ComfyUI. Set it only if you own several. Checkpoints that merely carry "krea" in their name but are not Krea 2 bases are **skipped on purpose** — the identity LoRA renders pure noise on them, which looks like a broken app rather than a wrong file.
 - **Identity edit LoRA** → `krea.identity_lora`. Path relative to `models/loras`; if nothing is there under that name the app searches your LoRA folders for a `krea2_identity_edit` file, so a renamed download still works.
 - **Character LoRAs (optional, up to 5)** → `krea.character_loras`. A chain of your own trained character/person LoRAs (e.g. from ai-toolkit), applied IN ORDER after the identity edit LoRA above for extra likeness on top of Krea's baseline consistency. Each row is a `{file, strength}` pair (strength 0–1.5, default `0.8`); a blank row is simply skipped, so leaving all 5 rows empty (the default) is a complete no-op — the graph is byte-identical to before this setting existed. Unlike the identity edit LoRA there is no auto-detection: each names one specific file you trained, so a typo surfaces as ComfyUI's own "file not found" rather than silently using a guess. (Upgraded from an earlier single-slot `krea.character_lora` — an already-configured value migrates into row 1 automatically.)
 
@@ -291,8 +291,9 @@ The card shows Ollama's live state and, when the binary is installed but the ser
 
 ### ai-toolkit
 
-- **ai-toolkit directory** → `aitoolkit.dir`. The folder containing ai-toolkit's `run.py`. Default **empty**. **Test** validates it and unlocks training + JoyCaption captioning.
-- **Python interpreter (optional)** → `aitoolkit.python`. Default **empty = auto-detect** a `venv/` or `.venv/` next to `run.py`. Fill this with the full path to the interpreter ai-toolkit should run with whenever there is no venv folder for the app to find — **conda, uv, the system Python**, or a **portable / embedded build** that ships its own `python_embeded\python.exe` (several community install scripts do exactly that). Examples: `C:\miniconda3\envs\aitk\python.exe`, `C:\ai-toolkit\python_embeded\python.exe`. A venv is one way to give ai-toolkit a Python, not a requirement — when Setup finds a plausible interpreter inside the ai-toolkit folder, it offers to fill this in for you in one click.
+- **ai-toolkit directory** → `aitoolkit.dir`. The folder containing ai-toolkit's `run.py`. Default **empty**. **Test** validates it and unlocks training + JoyCaption captioning. **Test also runs `import torch` on the chosen interpreter** — a folder that looks right but is paired with a Python that has no training dependencies used to pass this check and then fail every run.
+- ⚠️ **This is ai-toolkit's folder and ai-toolkit's Python, not the Studio's.** The app you are using has its own `.venv`; the ai-toolkit folder has its own venv, the one carrying `torch`. The Next.js UI shipped inside ai-toolkit (`ui/`, port 8675) is unrelated — this app never launches or reads it. See [What is running on your machine](getting-started.md#architecture).
+- **Python interpreter (optional)** → `aitoolkit.python`. Default **empty = auto-detect** a `venv/` or `.venv/` next to `run.py`. Fill this with the full path to the interpreter ai-toolkit should run with whenever there is no venv folder for the app to find — **conda, uv, the system Python**, or a **portable / embedded build** that ships its own `python_embeded\python.exe` (several community install scripts do exactly that). Examples: `C:\miniconda3\envs\aitk\python.exe`, `C:\ai-toolkit\python_embeded\python.exe`. A venv is one way to give ai-toolkit a Python, not a requirement — when Setup finds a plausible interpreter inside the ai-toolkit folder, it offers to fill this in for you in one click. **Nothing ever fills this field on your behalf**: it is set by that one-click offer, or typed here. **A value here always wins over auto-detection**, so a wrong path silently shadows a perfectly good venv — which is why a training launch now refuses, naming the path, when the interpreter set here cannot `import torch`, and offers the working venv it found next to `run.py` instead (reported by strouder, GitHub #19). On Windows, watch out for `…\AppData\Local\Microsoft\WindowsApps\python.exe`: that is usually the Store alias, not a real Python. See also the [supported Python versions](getting-started.md#python-versions) — ai-toolkit wants 3.11.
 
 Under **Advanced: ai-toolkit overrides**, three optional path overrides (all default empty → derived from the ai-toolkit directory):
 
@@ -347,6 +348,14 @@ Thresholds for the **🗃️ Bank** quality flags. Every scanned image stores it
 **raw scores**, and the flags are recomputed against these values on every
 read — so changing a threshold re-sorts an already-scanned bank instantly,
 with **no rescan**. (The two exceptions are noted below.)
+
+> **The same twelve values are editable from the Bank itself** — open
+> **🎚 Filter thresholds** above the grid, under the filter chips they decide.
+> It is one setting seen in two places, not a copy: editing either one writes
+> `config.bank.<key>` and therefore applies to **every** bank. The Bank panel
+> additionally previews how many images a candidate value would flag before you
+> save, and groups the controls by intent. See
+> *Using the app → Tune the Bank filter thresholds*.
 
 - **Sharpness minimum** → `bank.sharpness_min`. Variance of the Laplacian (the classic focus measure) under this = flagged **🌫 blurry**. Default **`100`**. Raise it to be stricter about focus, lower it if artistic soft shots get flagged.
 - **Noise maximum** → `bank.noise_max`. High-frequency residual (RMS vs a Gaussian blur) over this = flagged **📺 noisy**. Default **`15`**. Heavily textured images (foliage, fabric) score high by nature — this is a flag to review, not a verdict.
@@ -558,6 +567,17 @@ These have no UI control — they're for advanced users editing `config.json` by
 | `klein.consistency_lora` | `klein/Flux2-Klein-9B-consistency-V2.safetensors` | The structure-anchoring LoRA on the Klein edit graph, relative to ComfyUI's LoRA folder. |
 | `klein.consistency_strength` | `0.5` | Its strength (0–1). Its own guide warns 0.8–1.0 can stop edits applying; `0` disables it entirely. |
 
+**Z-Image text encoder & VAE:**
+
+Both are **blank by default, and blank is the right value** — the app finds them itself. It scans every registered `vae` / `text_encoders` folder (including the ones your `extra_model_paths.yaml` adds), sub-folders included, ignoring capitalisation and separators: `z_ae`, `z ae`, `z-ae`, and ComfyUI's own `ae.safetensors` all resolve, and `qwen_3_4b.safetensors` is found whether it sits at the root of `text_encoders/` or inside a folder called `Z image`, `Z Image` or `z-image`. It never picks a `.gguf` (the loader nodes cannot open one) and never picks Krea's `qwen3vl_4b` or Klein's `qwen_3_8b`, which live in the same folder and would fail at sample time.
+
+Set one of these **only** to override that search — for instance if your ComfyUI is shared with FLUX.1, whose VAE is also called `ae.safetensors`, and the app picked the wrong one. A value you set here is used exactly as written and is never second-guessed; if the file isn't there, the error names *your* file rather than silently substituting another.
+
+| Key | Default | Role |
+|---|---|---|
+| `zimage.vae` | `''` | Pin the Z-Image VAE, relative to ComfyUI's VAE folder (e.g. `z_ae.safetensors`). Blank = auto-resolve. |
+| `zimage.text_encoder` | `''` | Pin the Z-Image text encoder, relative to ComfyUI's text-encoders folder (e.g. `Z image/qwen_3_4b.safetensors`). Blank = auto-resolve. |
+
 **Updates:**
 
 | Key | Default | Role |
@@ -622,6 +642,8 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `watermark.python` | Python interpreter used to run the LaMa watermark-inpainting subprocess (empty = reuse `masks.python`, then the current interpreter). |
 | `watermark.device` | LaMa processing device: `auto` (CUDA when available, otherwise CPU), `cuda`, or `cpu`. |
 | `watermark.allow_crop` | When `true` (default), a border watermark is cropped off; when `false`, it is repainted instead. Also editable in the Clean bar. |
+| `zimage.vae` | Pins the Z-Image VAE (blank = the app resolves it itself, any spelling, any sub-folder). |
+| `zimage.text_encoder` | Pins the Z-Image text encoder (blank = the app resolves it itself). |
 | `klein.consistency_lora` | Filename of the Klein consistency LoRA, relative to ComfyUI's LoRA folder. |
 | `klein.consistency_strength` | Strength (0–1) applied to the Klein consistency LoRA. |
 | `klein.generation_steps` | Sampler steps for Klein **generation** (variations, regenerate, small-image rescue). Default `5` = the value hardcoded in the shipped workflow; 1–50. Not the improve pass (`klein.improve_steps`). |

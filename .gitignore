@@ -1,5 +1,11 @@
 # secrets & local config — NEVER commit
 .env
+# Per-machine dev overrides, e.g. frontend/.env.local pointing `npm run dev` at a
+# throwaway backend instead of the real one (LDS_DEV_API_TARGET — see
+# frontend/README.md). `.env` above does NOT cover these: it matches that exact
+# name only.
+.env.local
+.env.*.local
 config.json
 
 # runtime data

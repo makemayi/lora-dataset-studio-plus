@@ -50,6 +50,7 @@ export default function DatasetLightbox({
   onClose,
   onCrop,
   onMirror,
+  onRotate,
   onImprove,
   busy = false,
   mirrorBusy = false,
@@ -111,6 +112,15 @@ export default function DatasetLightbox({
     event.stopPropagation();
     if (!onMirror || busy || mirrorBusy) return;
     await onMirror(img.id);
+  };
+
+  // 🔄 Quarter turns (idea by 1Tomber, GitHub #17). `mirrorBusy` is the shared
+  // "a pixel edit is running on this image" flag — both actions rewrite the same
+  // file, so neither may start while the other is in flight.
+  const rotate = (degrees) => async (event) => {
+    event.stopPropagation();
+    if (!onRotate || busy || mirrorBusy) return;
+    await onRotate(img.id, degrees);
   };
 
   return (
@@ -197,6 +207,25 @@ export default function DatasetLightbox({
             className="min-h-9 w-full sm:w-auto px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-45">
             {mirrorBusy ? '⇆ Mirroring…' : '⇆ Mirror horizontally'}
           </button>
+        )}
+        {onRotate && (
+          /* The pair shares ONE row even on a 400 px screen: two full-width
+             rows for two halves of the same gesture would push everything else
+             below the fold. Emoji stay aria-hidden — the label is the text. */
+          <div className="flex w-full items-stretch gap-2 sm:w-auto">
+            <button type="button" onClick={rotate(270)} disabled={busy || mirrorBusy}
+              aria-busy={mirrorBusy} aria-label={`Rotate ${alt} 90 degrees left`}
+              title="Rotate 90° left (counter-clockwise) — keeps the file's format; four turns come back round"
+              className="min-h-9 flex-1 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-45 sm:flex-none">
+              <span aria-hidden="true">↺</span> Rotate left
+            </button>
+            <button type="button" onClick={rotate(90)} disabled={busy || mirrorBusy}
+              aria-busy={mirrorBusy} aria-label={`Rotate ${alt} 90 degrees right`}
+              title="Rotate 90° right (clockwise) — keeps the file's format; four turns come back round"
+              className="min-h-9 flex-1 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-45 sm:flex-none">
+              <span aria-hidden="true">↻</span> Rotate right
+            </button>
+          </div>
         )}
         {onImprove && (
           <button type="button" onClick={improve} disabled={improveDisabled}

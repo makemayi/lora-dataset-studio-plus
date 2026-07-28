@@ -15,6 +15,30 @@ import math
 import os
 import sys
 
+#: The ONE encoding rule shared with the Flask side (mirror / rotate / crop / watermark crop):
+#: an edit of the working image keeps its format and is written without loss.
+IMAGE_ENCODING_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   os.pardir, 'app', 'services', 'image_encoding.py')
+
+
+def load_image_encoding():
+    """Load the shared encoding rule BY FILE PATH.
+
+    This worker cannot `from app.services import ...`: it runs under the dedicated ML
+    interpreter, where the Flask app package does not import. Putting that directory
+    on `sys.path` instead would shadow any same-named module torch or simple-lama
+    imports afterwards, so the file is loaded on its own. It depends on PIL only, and
+    a test pins both that fact and this bootstrap.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location('lds_image_encoding',
+                                                  IMAGE_ENCODING_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _log(msg):
     print(msg, file=sys.stderr, flush=True)
 
@@ -96,6 +120,7 @@ def main() -> int:
         os.environ['CUDA_VISIBLE_DEVICES'] = ''
     try:
         from PIL import Image
+        image_encoding = load_image_encoding()
         import torch
         from simple_lama_inpainting import SimpleLama
     except Exception as e:
@@ -119,7 +144,13 @@ def main() -> int:
                 mask = build_mask((W, H), job['bboxes'])
                 _log(f"[lama] inpaint {W}x{H} boxes={len(job['bboxes'])} device={actual_device}")
                 result = lama(img, mask)
-                result.convert('RGB').save(image_path, 'WEBP', quality=92)
+                # LaMa is non-generative: only the masked rectangle changes. Saving
+                # WEBP q92 re-compressed everything ELSE too, throwing away pixels the
+                # method had deliberately left alone.
+                image_encoding.save_edit(
+                    result.convert('RGB'), image_path,
+                    image_encoding.format_for_path(image_path),
+                    image_encoding.LOSSLESS)
                 results.append({'image_path': image_path, 'ok': True})
             except Exception as e:
                 results.append({'image_path': image_path, 'ok': False,

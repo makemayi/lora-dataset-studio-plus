@@ -51,6 +51,14 @@ def dying_run(app, tmp_path, monkeypatch):
 
     _stub_aitoolkit(tmp_path, app, _DYING_RUN_PY)
     monkeypatch.setattr(lt, '_watch_training', lambda *a, **k: None)
+    # These tests are about the run folder and the log the launch writes, and they
+    # need a REAL interpreter to spawn a real dying process. The interpreter guard
+    # would refuse that interpreter for the one thing this fixture does not care
+    # about — whether it can import torch — which is true of any CI runner and of
+    # most machines. Stub the guard, not the launch: its own coverage lives in
+    # test_capabilities.py and test_training_diagnostics.py, where the probe is
+    # what is under test rather than a precondition of it.
+    monkeypatch.setattr(lt, 'assert_interpreter_ready', lambda *a, **k: None)
 
     with app.app_context():
         ds = svc.create_dataset(LOCAL_USER, 'Dying', 'dyingtrig')

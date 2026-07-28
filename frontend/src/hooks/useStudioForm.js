@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { DEFAULT_STRENGTHS } from '../components/dataset/studio/constants';
+import { defaultCfgFor, defaultStepsFor, mixedModelDefaults } from '../utils/studioModelDefaults';
 
 const rollSeed = () => Math.floor(Math.random() * 2 ** 31);
 
@@ -65,8 +66,14 @@ export function useStudioForm(d, datasetId, family = null, { pinnedCheckpoints =
   // que la puce par défaut apparaisse pressée ; le backend mappe '' → défaut câblé.
   const effectiveModels = selModels ?? (d?.z_models?.length ? [d.z_models[0].value] : []);
   const effectiveAspects = selAspects ?? (d?.default_aspect ? [d.default_aspect] : ['9:16']);
-  const effectiveCfgs = selCfgs ?? (d?.default_cfg != null ? [d.default_cfg] : [1.0]);
-  const effectiveSteps = selSteps ?? (d?.default_steps != null ? [d.default_steps] : [8]);
+  // CFG/steps par MODÈLE DE BASE (bobba84, GitHub #18) : Z-Image Base n'est pas
+  // distillé et ne doit pas hériter des réglages Turbo (cfg 1, 8 steps), qui ruinent
+  // son rendu. `selCfgs`/`selSteps` non nuls = l'utilisateur a choisi → jamais
+  // réécrit ; le défaut par modèle ne s'applique qu'à l'axe encore intact.
+  const modelDefaultCfg = defaultCfgFor(d, effectiveModels);
+  const modelDefaultSteps = defaultStepsFor(d, effectiveModels);
+  const effectiveCfgs = selCfgs ?? [modelDefaultCfg];
+  const effectiveSteps = selSteps ?? [modelDefaultSteps];
   // Pass 2 (detail daemon) : SDXL uniquement. Z-Image → default_steps2 null → axe vide
   // (×1 dans le compteur, pas envoyé au backend).
   const effectiveSteps2 = selSteps2 ?? (d?.default_steps2 != null ? [d.default_steps2] : []);
@@ -115,6 +122,9 @@ export function useStudioForm(d, datasetId, family = null, { pinnedCheckpoints =
   return {
     selSts, seed, seedLocked, genCount, promptText, selModels,
     chosenCps, effectivePrompt, effectiveModels, effectiveAspects, effectiveCfgs, effectiveSteps, effectiveSteps2, total,
+    // Défauts DU MODÈLE sélectionné (pour l'étiquette « default … » des pickers).
+    modelDefaultCfg, modelDefaultSteps,
+    mixedModelDefaults: mixedModelDefaults(d, effectiveModels),
     setSelSts, setSeed, setSeedLocked, setGenCount, setPromptText,
     toggleCp, toggleSt, toggleAspect, toggleCfg, toggleStep, toggleStep2, toggleModel, rollSeed, nextSeed,
   };

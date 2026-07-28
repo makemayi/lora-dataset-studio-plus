@@ -88,16 +88,23 @@ export function cropLevelState(levels, { live = false } = {}) {
  * repaints those. An engine that isn't installed disables the button with the
  * install path spelled out — never a silent failure mid-pass. */
 export function inpaintLevelState(levels, {
-  live = false, method = 'auto', lamaReady = false, kleinReady = false,
+  live = false, method = 'auto', lamaReady = false, kleinReady = false, kleinReason = null,
 } = {}) {
   const c = levelCounts(levels);
   const wantsKlein = method === 'klein';
   const engineReady = wantsKlein ? kleinReady : lamaReady;
+  // `kleinReason` is the ONE shared sentence (utils/localEngineReason) naming the
+  // actual gap — a stopped ComfyUI, a named missing weight, a present-but-broken
+  // one, a widget value this install does not have. The catch-all below is only
+  // the fallback for a caller that has no capabilities payload to reason from;
+  // "needs ComfyUI running and the Klein models" sends a user with a corrupted
+  // 9.5 GB file to re-check the two things that were already fine.
   const reason = live
     ? 'A pass is already running on this bank — wait for it to finish.'
     : !engineReady
       ? (wantsKlein
-        ? 'Klein inpainting needs ComfyUI running and the Klein models (Setup ▸ ComfyUI).'
+        ? (kleinReason
+          || 'Klein inpainting needs ComfyUI running and the Klein models (Setup ▸ ComfyUI).')
         : 'LaMa inpainting is not installed yet (Setup ▸ Quality tools).')
       : c.flagged === 0
         ? (c.cropped > 0

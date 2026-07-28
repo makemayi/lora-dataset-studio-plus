@@ -46,6 +46,21 @@ export const GENERIC_CAUSES =
   + 'token (gated models like Krea 2, FLUX.1 and FLUX.2 Klein). Fix the cause '
   + 'above, then Train again.';
 
+// The SAME list minus the Hugging Face half. A Python that cannot import a
+// module never touched Hugging Face, so naming a token there is a false lead —
+// and it cost strouder (GitHub #19) hours, then made the REAL gated-model
+// message ambiguous when it finally appeared. Guesses only where we have no
+// facts, and never a guess we can already rule out.
+export const MODULE_CAUSES =
+  'This is an interpreter problem, not a model or Hugging Face problem: the '
+  + 'Python configured for ai-toolkit does not have its packages. Check '
+  + 'Settings ▸ Local tools ▸ "Python interpreter", then Train again.';
+
+// A missing module is visible in the excerpt itself even when the backend could
+// not attach the richer `interpreter` verdict (an older payload, a probe that
+// did not answer) — so the false lead is dropped on the log alone.
+const MODULE_ERROR_RE = /ModuleNotFoundError|No module named/i;
+
 /** error = the `training_error` payload ({rc, log_tail, excerpt?, gpu_arch?,
  *  hf_gated?}).
  *  Returns {title, excerpt, tone, note, causes, gpuArch, hfGated} or null when
@@ -68,14 +83,30 @@ export function failureView(error) {
   // separated 401 "not authenticated" from 403 "licence not accepted", which the
   // raw Hugging Face sentence conflates into one misleading line.
   const gated = error.hf_gated && error.hf_gated.message ? error.hf_gated : null;
+  // Which Python ai-toolkit was run with, when it provably could not import a
+  // module it needs. The one fact the log never carries and the panel never used
+  // to show (GitHub #19, strouder).
+  const interpreter = error.interpreter && error.interpreter.message
+    ? error.interpreter : null;
+  // The optional Hugging Face fast-download accelerator dying mid-transfer. It
+  // reads like a network fault and it is not one (GitHub #18, bobba84).
+  const hfTransfer = error.hf_transfer && error.hf_transfer.message
+    ? error.hf_transfer : null;
+  const moduleFailure = !!interpreter || MODULE_ERROR_RE.test(text);
+  let causes = GENERIC_CAUSES;
+  // A proven cause replaces the guesses.
+  if (gpu || gated || interpreter || hfTransfer) causes = '';
+  else if (moduleFailure) causes = MODULE_CAUSES;     // never the Hugging Face lead
   return {
     title,
     excerpt: text,
     tone: isCause ? 'error' : 'neutral',
     note: !text ? EMPTY_LOG_NOTE : (isCause ? FULL_LOG_NOTE : NO_ERROR_NOTE),
     // A proven cause takes the place of the generic guesswork list.
-    causes: (gpu || gated) ? '' : GENERIC_CAUSES,
+    causes,
     gpuArch: gpu,
     hfGated: gated,
+    interpreter,
+    hfTransfer,
   };
 }

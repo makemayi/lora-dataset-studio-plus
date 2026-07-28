@@ -312,6 +312,15 @@ DEFAULTS = {
         # one-time upgrade from the earlier single-slot krea.character_lora.
         'character_loras': [],
     },
+    # Z-Image pipeline — the two loader refs the shipped Test Studio workflow used
+    # to hardcode from the developer's own ComfyUI (reported by bobba84, GitHub #18).
+    # BLANK = "find it yourself": services/zimage_model_resolver scans every
+    # registered vae / text_encoders root, sub-folders included, case- and
+    # separator-insensitively (z_ae, z ae, z-ae, ae.safetensors; qwen_3_4b in any
+    # sub-folder). Set either to a filename to PIN it — a pinned value is used as-is
+    # and is never second-guessed, which is also the escape hatch when a shared
+    # ComfyUI carries several plausible files (a FLUX.1 `ae.safetensors`, say).
+    'zimage': {'vae': '', 'text_encoder': ''},
     # Editable identity / quality prompts (feature request by @bbsorry / 雨田壹).
     # The identity "locks" that ride ahead of every generated variation used to be
     # hardcoded and invisible; these overrides expose them without touching the
@@ -670,6 +679,22 @@ def comfyui_dir(kind: str):
     return resolve_comfyui_dir(kind, get('comfyui.base_dir') or '',
                                get(f'comfyui.{key}') or '')
 
+def aitoolkit_derived_python(root):
+    """The interpreter an ai-toolkit checkout carries, ignoring any explicit
+    `aitoolkit.python`. Both venv layouts exist: ai-toolkit's docs say `venv`,
+    plenty of setups use `.venv`. Pick whichever actually exists; when neither
+    does, return the historical default path so callers keep a concrete path to
+    name in their "invalid" details (never None)."""
+    root = Path(root)
+    for env_dir in ('venv', '.venv'):
+        p = (root / env_dir / 'Scripts' / 'python.exe' if os.name == 'nt'
+             else root / env_dir / 'bin' / 'python')
+        if p.exists():
+            return p
+    win = root / 'venv' / 'Scripts' / 'python.exe'
+    return win if os.name == 'nt' else root / 'venv' / 'bin' / 'python'
+
+
 def aitoolkit_path(kind: str):
     root = get('aitoolkit.dir') or ''
     if not root:
@@ -689,17 +714,14 @@ def aitoolkit_path(kind: str):
         explicit = (get('aitoolkit.python') or '').strip()
         if explicit:
             return Path(explicit)
-        # Both venv layouts exist: ai-toolkit's docs say `venv`, plenty of
-        # setups use `.venv`. Pick whichever actually exists.
-        for env_dir in ('venv', '.venv'):
-            p = (root / env_dir / 'Scripts' / 'python.exe' if os.name == 'nt'
-                 else root / env_dir / 'bin' / 'python')
-            if p.exists():
-                return p
-        # Nothing found: return the historical default path so callers keep a
-        # concrete path to name in their "invalid" details.
-        win = root / 'venv' / 'Scripts' / 'python.exe'
-        return win if os.name == 'nt' else root / 'venv' / 'bin' / 'python'
+        return aitoolkit_derived_python(root)
+    if kind == 'venv_python_derived':
+        # What the app WOULD run without the explicit override. Only useful when
+        # an explicit one is set and turns out to be broken: it is the working
+        # interpreter we can then offer to switch to (GitHub #19, strouder —
+        # a `aitoolkit.python` pointing at a torch-less Python silently beat a
+        # perfectly good venv sitting right next to run.py).
+        return aitoolkit_derived_python(root)
     if kind == 'jobs':
         return root / 'config' / 'generated'
     raise KeyError(kind)

@@ -20,7 +20,7 @@ test('dataset hook mirrors once, refreshes, and cache-busts only after success',
   assert.match(action, /if \(!d\.ok\)[\s\S]*return false;[\s\S]*await refresh\(\);[\s\S]*setNonces/);
   assert.match(action, /finally[\s\S]*mirroringRef\.current\.delete\(imageId\)/);
   assert.match(hook, /nonces, mirroringIds, refNonce/);
-  assert.match(hook, /setStatus, setCaption, mirrorImage, crop/);
+  assert.match(hook, /setStatus, setCaption, mirrorImage, rotateImage, crop/);
 });
 
 test('workspace wires mirror actions and keeps rescue previews read-only', () => {

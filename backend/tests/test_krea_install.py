@@ -193,12 +193,21 @@ def test_a_login_page_served_as_200_is_rejected_and_deleted(app, tmp_path, monke
 def test_a_krea_asset_the_user_already_placed_is_never_re_downloaded(app, tmp_path, monkeypatch):
     """Retrofit: someone who dropped the identity LoRA in loras/ under their own
     name must not watch 1.8 GB download again. The engine's resolver is the
-    authority on "installed", not one hardcoded path."""
+    authority on "installed", not one hardcoded path.
+
+    The fixture is REAL safetensors now, because the resolver's answer alone is no
+    longer enough: "it resolves" had to become "it loads" or a hand-placed HTML
+    gate page kept certifying itself (test_setup_presence_integrity). A one-byte
+    placeholder is, correctly, a corrupted download."""
+    import json
+    import struct
     from app import setup_installer, config
     base = _make_comfyui(tmp_path)
     mine = base / 'models' / 'loras' / 'my-stuff'
     mine.mkdir(parents=True)
-    (mine / 'krea2_identity_edit_renamed.safetensors').write_bytes(b'x')
+    _hdr = json.dumps({'w': {'dtype': 'F16', 'shape': [1], 'data_offsets': [0, 2]}}).encode()
+    (mine / 'krea2_identity_edit_renamed.safetensors').write_bytes(
+        struct.pack('<Q', len(_hdr)) + _hdr + b'\x00' * 64)
 
     def _boom(*a, **kw):
         raise AssertionError('a download was started for an asset already on disk')

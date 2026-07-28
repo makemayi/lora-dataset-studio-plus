@@ -4,9 +4,34 @@ React 18 + Vite + Tailwind SPA, served by Flask from `frontend/dist` at `/`.
 
 ```bash
 npm install
-npm run dev     # dev server on :5173, proxies /api to http://127.0.0.1:5000
+npm run dev     # dev server on :5173, proxies /api to http://127.0.0.1:5050
 npm run build   # outputs to dist/
 ```
+
+## ⚠ `npm run dev` talks to a REAL backend
+
+The dev server proxies `/api` to **`http://127.0.0.1:5050`** — which is where the
+app you actually use is listening. Writes go through: deletions, imports,
+training launches all land in real data, and nothing on screen says which backend
+answered.
+
+Point it at a throwaway instance with **`LDS_DEV_API_TARGET`**, in the shell or in
+`frontend/.env.local` (gitignored):
+
+```bash
+LDS_DEV_API_TARGET=http://127.0.0.1:5051 npm run dev
+```
+
+Start that instance with its own data directory so it cannot touch yours:
+
+```bash
+LDS_PORT=5051 LDS_DATA_DIR=/tmp/lds-dev python backend/run.py
+```
+
+The default is unchanged on purpose — it is what most people want — so this is
+opt-in, not a new required step. (`LDS_`, not `VITE_`: `VITE_*` variables are
+inlined into the client bundle, and a dev-server setting has no business shipping
+in built output.)
 
 ## Rollup optional-dependency gotcha
 

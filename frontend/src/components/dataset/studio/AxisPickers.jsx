@@ -10,6 +10,10 @@ export default function AxisPickers({
   aspects, effectiveAspects, onToggleAspect,
   cfgChoices, effectiveCfgs, onToggleCfg, defaultCfg,
   stepsChoices, effectiveSteps, onToggleStep, defaultSteps,
+  // Les bases sélectionnées n'ont PAS les mêmes défauts (ex. un Z-Image Turbo et un
+  // Z-Image Base dans le même balayage) : une seule paire CFG/steps ne peut pas
+  // convenir aux deux, on le DIT au lieu de faire semblant. (bobba84, GitHub #18)
+  mixedDefaults = false,
   // SDXL uniquement : 2e passe (detail daemon). Absent (null) pour Z-Image.
   steps2Choices, effectiveSteps2, onToggleStep2, defaultSteps2,
   fmt,
@@ -54,6 +58,15 @@ export default function AxisPickers({
             ))}
           </div>
         </div>
+      )}
+
+      {mixedDefaults && (
+        <p className="m-0 text-[0.625rem] leading-snug text-amber-300/80">
+          The selected base models want different sampler settings (a distilled
+          “Turbo” build runs at CFG 1 / 8 steps; a non-distilled “Base” build needs
+          higher guidance and far more steps). The CFG and steps axes below apply to
+          every base in the run — add the values both need, or run them separately.
+        </p>
       )}
 
       {Array.isArray(cfgChoices) && (

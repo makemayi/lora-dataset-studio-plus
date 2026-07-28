@@ -70,9 +70,18 @@ export default function StudioPreflightBanner({ missing, archMismatch, onDismiss
           </span>
           <ul className="m-0 flex flex-col gap-0.5">
             {files.map((f) => (
-              <li key={f.path} className="flex items-baseline gap-2">
-                <code className="text-red-100 text-[0.6875rem] break-all">{f.path}</code>
-                <span className="text-red-200/60 text-[0.625rem] whitespace-nowrap">({f.kind})</span>
+              <li key={f.path} className="flex flex-col gap-0.5">
+                <span className="flex flex-wrap items-baseline gap-x-2">
+                  <code className="text-red-100 text-[0.6875rem] break-all">{f.path}</code>
+                  <span className="text-red-200/60 text-[0.625rem]">({f.kind})</span>
+                </span>
+                {/* `hint` = ce que le résolveur a réellement cherché (noms acceptés,
+                    racines balayées). Sans lui, le chemin affiché se lit comme « ce
+                    nom exact est obligatoire », alors qu'une douzaine d'orthographes
+                    passent. (bobba84, GitHub #18) */}
+                {f.hint && (
+                  <span className="text-red-200/60 text-[0.625rem] leading-snug">{f.hint}</span>
+                )}
               </li>
             ))}
           </ul>

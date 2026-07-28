@@ -327,8 +327,9 @@ Directions, not dates. These are discussed openly on the project's Discord, and 
 - **Reference**
   - [Why this instead of ai-toolkit?](#why-this-instead-of-ai-toolkit)
   - [Feature matrix by backend](#feature-matrix-by-backend)
-  - [Run it your way](#run-it-your-way)
+  - [Run it your way](#run-it-your-way) — full local, API-only, **Docker**
   - [Setup & install](#setup--install)
+    - [Docker (API-only, no GPU)](#option-3--docker-api-only)
   - [Minimum requirements](#minimum-requirements)
   - [Configuration & settings reference](#configuration--settings-reference)
   - [Exposing the app beyond localhost](#exposing-the-app-beyond-localhost)
@@ -666,7 +667,9 @@ Not every feature needs every backend. The app degrades gracefully — API keys 
 
 ## Run it your way
 
-**API-only** — dataset creation, generation via Gemini/ChatGPT, import/scrape, manual curation/captions, backup and export. Runs on any machine with Python and no GPU; this is what the Docker image ships. No ComfyUI, ai-toolkit or local ML extras required.
+**API-only** — dataset creation, generation via Gemini/ChatGPT/OpenRouter, import, manual curation/captions, cloud training on vast.ai, publishing to Hugging Face, backup and export. Runs on any machine with Python and no GPU; this is what the Docker image ships. No ComfyUI, ai-toolkit or local ML extras required.
+
+The Docker image installs `backend/requirements.txt` only, so the scraper (`requirements-scrape.txt`) and the ML extras (`requirements-ml.txt`) are **not** in it — they can be installed from the app afterwards, but a container recreate wipes them. What the container cannot do at all is the ComfyUI half: Klein/Krea generation, the Test Studio, and deploying a trained LoRA. Local training needs ai-toolkit on the host.
 
 **Full local** — everything above plus Klein/Z-Image generation, captioning via JoyCaption, face scoring, masks, the Image bank scoring pass, training, and Test Studio. Requires ComfyUI and/or ai-toolkit running on the same host (or reachable over the network) and an NVIDIA GPU with 12 GB+ VRAM for Klein/Z-Image inference. Training VRAM depends on the model family — check the family's ai-toolkit preset before queuing a run. The face-scoring and masking helpers (`requirements-ml.txt`) run fine on CPU; they don't need the GPU.
 
@@ -793,7 +796,7 @@ Job configs, datasets, and outputs live under the ai-toolkit folder by default (
 
 This app talks to a running ComfyUI over its HTTP API and scans its `models/` folders to list checkpoints and LoRAs. Set **Settings → ComfyUI API URL** (default `http://127.0.0.1:8188`) and **ComfyUI install directory** (the folder containing `models/`, `output/`, `input/`). Each family's base model goes in the layout its scanner expects:
 
-- **Z-Image** → a sub-folder whose name contains **`z image`** (or `zimage`) under `models/unet` (or `models/diffusion_models`) — e.g. `models/unet/z image/bigLove_zt3.safetensors`. A file dropped **loose** in `models/unet` is *not* detected. The text encoder and VAE go at `models/text_encoders/Z image/qwen_3_4b.safetensors` and `models/vae/z ae.safetensors`.
+- **Z-Image** → a sub-folder whose name contains **`z image`** (or `zimage`) under `models/unet` (or `models/diffusion_models`) — e.g. `models/unet/z image/bigLove_zt3.safetensors`. A file dropped **loose** in `models/unet` is *not* detected. The text encoder and VAE are found wherever you keep them — any capitalisation, any separator, any sub-folder, `extra_model_paths.yaml` roots included — so both `models/text_encoders/Z image/qwen_3_4b.safetensors` and ComfyUI's own flat `models/text_encoders/qwen_3_4b.safetensors` + `models/vae/ae.safetensors` work as-is. No renaming required.
 - **SDXL** → `models/checkpoints` (a `Biglove/` sub-folder is also scanned).
 - **Krea 2** → the default UNET at the root of `models/unet`; any extra Krea checkpoints under a `krea` sub-folder.
 

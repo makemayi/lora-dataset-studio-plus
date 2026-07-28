@@ -22,7 +22,7 @@ export function useTrainingActivity() {
 
     const tick = async () => {
       try {
-        const data = await apiFetch('/api/train/activity')
+        const data = await apiFetch('/api/train/activity', { background: true })
         if (alive) setActivity(normalizeActivity(data))
       } catch {
         // Keep the last-known state on a transient error. Clearing it would

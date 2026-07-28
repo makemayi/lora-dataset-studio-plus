@@ -314,6 +314,17 @@ class BankImage(db.Model):
     jpeg_quality = db.Column(Float, nullable=True)
     origin = db.Column(String(8), nullable=True, index=True)
     origin_evidence = db.Column(String(24), nullable=True)
+    # Manual turn, in degrees CLOCKWISE: NULL/0 = untouched | 90 | 180 | 270.
+    # (Idea by 1Tomber, GitHub #17.) A bank is a READ-ONLY view over the user's
+    # own folder, so a rotation cannot rewrite their file — it is stored here and
+    # applied by the ONE resolver every reader goes through
+    # (image_bank_service.resolved_image_path), which materialises a turned copy
+    # in the bank's own working directory. That makes the turn free of loss where
+    # it matters: the source keeps its exact bytes, and the derived copy is always
+    # rebuilt from that pristine source, so ANY angle costs exactly one re-encode
+    # and four quarter turns cost zero (the row is back at 0 and the copy is
+    # dropped). Additive column — existing banks carry NULL and behave as before.
+    rotation = db.Column(Integer, nullable=True)
     # Triage decision — same words as dataset images (pending|keep|reject).
     # reject_reason: blur|noise|uniform|small|duplicate|unreadable|manual
     #                |low_aesthetic|nsfw|watermark (the V2 score-derived flags)

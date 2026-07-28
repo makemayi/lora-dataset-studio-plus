@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch, postJson } from '../../api/fetchClient';
 import {
   allGalleryImageIds, galleryActionBar, galleryDeleteConfirmation, galleryDeleteSummary,
-  pruneGallerySelection, toggleGalleryImage,
+  galleryTilePin, pruneGallerySelection, toggleGalleryImage,
 } from '../../utils/gallerySelection';
 import {
   checkpointNotes, defaultOpenGroups, galleryEndpoints, galleryHeading,
@@ -163,36 +163,69 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
 
   const tile = (img, altLabel) => {
     const isPicked = selected.has(img.id);
+    // 📌 straight from the grid. It used to exist ONLY inside the viewer, so the
+    // board's headline feature was behind "open an image and hope" — the person
+    // who asked for it never found it. The rule (never in Select mode, never
+    // without a board to pin onto) lives in gallerySelection so it is testable.
+    const showPin = galleryTilePin({ picking, canPin: typeof onPin === 'function' });
     return (
-      <button key={img.id} type="button"
-        data-testid={picking ? 'gallery-pick' : 'gallery-zoom'}
-        onClick={() => (picking
-          ? setSelected((cur) => toggleGalleryImage(cur, img.id))
-          : setZoom(img))}
-        aria-pressed={picking ? isPicked : undefined}
-        title={picking
-          ? (isPicked ? 'Selected — tap to unselect' : 'Tap to select')
-          : imageFactsLine(img)}
-        className={`relative aspect-square overflow-hidden rounded-md border ${isPicked
-          ? 'border-rose-400 ring-2 ring-rose-400/70'
-          : 'border-border hover:border-indigo-400/60'}`}>
-        <img src={img.url} alt={altLabel} loading="lazy"
-          className={`h-full w-full object-cover ${isPicked ? 'opacity-60' : ''}`} />
+      // A wrapper, because the tile itself is a <button> and a button cannot
+      // contain one. The wrapper carries no handler of its own: the image target
+      // stays exactly as big as it was, and the pin is the only new hit area.
+      <div key={img.id} className="relative">
+        <button type="button"
+          data-testid={picking ? 'gallery-pick' : 'gallery-zoom'}
+          onClick={() => (picking
+            ? setSelected((cur) => toggleGalleryImage(cur, img.id))
+            : setZoom(img))}
+          aria-pressed={picking ? isPicked : undefined}
+          title={picking
+            ? (isPicked ? 'Selected — tap to unselect' : 'Tap to select')
+            : imageFactsLine(img)}
+          className={`block aspect-square w-full overflow-hidden rounded-md border ${isPicked
+            ? 'border-rose-400 ring-2 ring-rose-400/70'
+            : 'border-border hover:border-indigo-400/60'}`}>
+          <img src={img.url} alt={altLabel} loading="lazy"
+            className={`h-full w-full object-cover ${isPicked ? 'opacity-60' : ''}`} />
+        </button>
         {picking && (
           // A 24-px tick, not a hairline checkbox: the target has to be hittable
           // with a thumb on a 400-px grid.
           <span aria-hidden
-            className={`absolute left-1 top-1 flex h-6 w-6 items-center justify-center rounded-full border text-[0.75rem] ${isPicked
+            className={`pointer-events-none absolute left-1 top-1 flex h-6 w-6 items-center justify-center rounded-full border text-[0.75rem] ${isPicked
               ? 'border-rose-300 bg-rose-500 text-white'
               : 'border-white/60 bg-black/50 text-transparent'}`}>✓</span>
         )}
         {img.rating === 1 && (
-          <span aria-hidden className="absolute right-0.5 top-0.5 text-[0.625rem]">👍</span>
+          <span aria-hidden
+            className="pointer-events-none absolute right-0.5 top-0.5 text-[0.625rem]">👍</span>
         )}
         {img.rating === -1 && (
-          <span aria-hidden className="absolute right-0.5 top-0.5 text-[0.625rem]">👎</span>
+          <span aria-hidden
+            className="pointer-events-none absolute right-0.5 top-0.5 text-[0.625rem]">👎</span>
         )}
-      </button>
+        {showPin && (
+          // BOTTOM-right, because top-right is where the 👍/👎 verdict sits and a
+          // thumb aiming for one must not find the other.
+          //
+          // The size is INVERTED from the usual responsive instinct, because the
+          // layout is: the phone bottom-sheet lays two columns across the whole
+          // screen (~170 px tiles) and is driven by a thumb, so 28 px there; from
+          // `sm` the panel becomes a 22-rem side drawer with THREE columns
+          // (~78 px tiles) driven by a mouse, where the same badge would cover a
+          // third of the picture it is meant to let you judge. Measured on both.
+          <button type="button" data-testid="gallery-tile-pin"
+            onClick={() => onPin(img)}
+            aria-label="Pin this image to the canvas"
+            title="📌 Pin to canvas — put this image on the board, beside the checkpoint that made it"
+            className="absolute bottom-1 right-1 flex h-7 w-7 items-center justify-center rounded-full
+                       border border-indigo-300/70 bg-black/60 text-[0.8125rem] text-indigo-100
+                       hover:bg-indigo-500/50 focus-visible:bg-indigo-500/50
+                       sm:bottom-0.5 sm:right-0.5 sm:h-5 sm:w-5 sm:text-[0.625rem]">
+            <span aria-hidden>📌</span>
+          </button>
+        )}
+      </div>
     );
   };
 

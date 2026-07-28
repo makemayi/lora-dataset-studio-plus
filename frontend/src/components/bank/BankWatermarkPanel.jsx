@@ -24,6 +24,7 @@ import {
   cropLevelState, findLevelState, hasCleanedImages, inpaintLevelState,
   levelCounts, progressSummary, rescanNote,
 } from './bankWatermark.js'
+import { localEngineUnavailableReason } from '../../utils/localEngineReason'
 
 // How many cleaned images the before/after strip offers. A sample is enough to
 // judge a pass; the grid holds the full set.
@@ -82,6 +83,10 @@ export default function BankWatermarkPanel({ bankId, live, onChanged }) {
     }
   }
 
+  // The ONE shared sentence for "why not Klein", the same one the generation
+  // picker and the ✦ Edit modal show — instead of a per-screen catch-all that
+  // blames ComfyUI and the weights whatever the real gap is.
+  const kleinReason = localEngineUnavailableReason('klein', caps)
   const find = findLevelState(levels, { live, visionReady: !!caps.ollama?.vision_model_ready })
   const crop = cropLevelState(levels, { live })
   const inpaint = inpaintLevelState(levels, {
@@ -89,6 +94,7 @@ export default function BankWatermarkPanel({ bankId, live, onChanged }) {
     method,
     lamaReady: !!caps.watermark_inpaint,
     kleinReady: !!caps.watermark_klein,
+    kleinReason,
   })
   const note = rescanNote(levels)
   const cleaned = hasCleanedImages(levels)
@@ -157,7 +163,7 @@ export default function BankWatermarkPanel({ bankId, live, onChanged }) {
             disabled={!caps.watermark_klein}
             title={caps.watermark_klein
               ? 'Klein: masked Flux.2 inpaint through ComfyUI. Slower, and the only engine that clears a mark ON the subject.'
-              : 'Klein inpainting needs ComfyUI running + the Klein models (Setup ▸ ComfyUI).'}
+              : (kleinReason || 'Klein inpainting needs ComfyUI running + the Klein models (Setup ▸ ComfyUI).')}
             className={`rounded-md px-2.5 py-1 font-semibold disabled:opacity-40 ${method === 'klein'
               ? 'bg-amber-500/25 text-amber-100' : 'text-content-subtle hover:text-content'}`}>
             Klein <span className="font-normal opacity-70">quality</span>

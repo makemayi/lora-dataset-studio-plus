@@ -7,6 +7,8 @@ route AND the LoRA test studio configure the ZTurbo workflow through ONE code
 path that stays in sync with the workflow JSON shape:
 
     node 1  = UNETLoader          (z_model)
+    node 2  = CLIPLoader          (text encoder — RESOLVED against disk)
+    node 3  = VAELoader           (VAE — RESOLVED against disk)
     node 4  = CLIPTextEncode      (positive prompt)
     node 6  = EmptySD3LatentImage (width/height/batch)
     node 7  = BasicScheduler      (z_steps)
@@ -28,6 +30,8 @@ logger = logging.getLogger(__name__)
 
 # ZTurbo workflow node ids (see WORKFLOW_ZTURBO_PATH JSON).
 ZT_NODE_UNET = "1"
+ZT_NODE_CLIP = "2"
+ZT_NODE_VAE = "3"
 ZT_NODE_PROMPT = "4"
 ZT_NODE_NEGATIVE = "5"   # CLIPTextEncode négatif (inerte à cfg=1, agit dès z_cfg>1)
 ZT_NODE_LATENT = "6"
@@ -37,10 +41,44 @@ ZT_NODE_SEED = "10"
 ZT_NODE_SAVE = "13"
 
 
+def _resolve_zimage_assets(workflow, z_vae=None, z_text_encoder=None):
+    """Rewrite nodes 2 (CLIPLoader) and 3 (VAELoader) to the text encoder / VAE the
+    target ComfyUI ACTUALLY has, instead of the filenames the shipped workflow was
+    captured with. See services/zimage_model_resolver — before this, the app demanded
+    that every user reproduce one developer's layout (`z ae.safetensors` with a SPACE,
+    `Z image/` with that exact capitalisation); reported by bobba84 (GitHub #18).
+
+    Unresolved -> the template value is LEFT IN PLACE and the node is tagged with an
+    `_meta.lds_missing_hint` describing what was searched for. The Studio preflight
+    reads that tag, so a genuine absence still says "place this file here" — plus,
+    now, what shapes of name would have been accepted. `_meta` is ignored by ComfyUI.
+    """
+    from ..services import zimage_model_resolver as zr
+    for node_id, key, resolve, selected, hint in (
+        (ZT_NODE_CLIP, 'clip_name', zr.resolve_zimage_text_encoder,
+         z_text_encoder, zr.text_encoder_missing_hint),
+        (ZT_NODE_VAE, 'vae_name', zr.resolve_zimage_vae, z_vae, zr.vae_missing_hint),
+    ):
+        node = workflow.get(node_id)
+        if not isinstance(node, dict) or key not in node.get('inputs', {}):
+            continue
+        try:
+            found = resolve(selected)
+        except Exception as e:      # a disk/parse hiccup must never break a launch
+            logger.warning("Z-Image %s resolution failed (%s) — keeping the workflow default", key, e)
+            continue
+        if found:
+            node['inputs'][key] = found
+            logger.info("Z-Image: %s -> %s", key, found)
+        else:
+            node.setdefault('_meta', {})['lds_missing_hint'] = hint()
+
+
 def apply_zimage_settings(workflow, *, z_steps=None, z_cfg=None, z_model=None,
                           z_loras=None, prompt=None, negative=None, seed=None, width=None,
                           height=None, batch_size=None, filename_prefix=None,
-                          allowed_models=None, allowed_loras=None):
+                          allowed_models=None, allowed_loras=None,
+                          z_vae=None, z_text_encoder=None):
     """Inject Z-Image (ZTurbo) parameters into ``workflow`` (mutated in place).
 
     Semantics mirror the historical /generate route block exactly:
@@ -48,6 +86,8 @@ def apply_zimage_settings(workflow, *, z_steps=None, z_cfg=None, z_model=None,
       - ``z_cfg`` clamped to [1.0, 15.0], written only if node 9 carries 'cfg';
       - ``z_model`` validated against ``allowed_models`` (defaults to
         ``get_zimage_models()``) before touching node 1 — path-injection guard;
+      - ``z_vae`` / ``z_text_encoder`` = an EXPLICIT file for nodes 3 / 2; blank
+        (the normal case) auto-resolves against disk — see ``_resolve_zimage_assets``;
       - ``z_loras`` = [{filename, strength}] whitelisted against
         ``allowed_loras`` (defaults to the real loras/z image/ folder) and
         chained via ``inject_zimage_loras``.
@@ -65,6 +105,10 @@ def apply_zimage_settings(workflow, *, z_steps=None, z_cfg=None, z_model=None,
     (or None) — both in the exact format the /generate history logging expects.
     """
     info = {'z_model_used': None, 'z_loras_used': None, 'loras_injected': 0}
+
+    # Text encoder + VAE resolved against disk FIRST (they are the two refs no
+    # caller ever supplied, so they used to ship the developer's own filenames).
+    _resolve_zimage_assets(workflow, z_vae=z_vae, z_text_encoder=z_text_encoder)
 
     if z_steps not in (None, ''):
         if ZT_NODE_STEPS in workflow and "steps" in workflow[ZT_NODE_STEPS].get("inputs", {}):

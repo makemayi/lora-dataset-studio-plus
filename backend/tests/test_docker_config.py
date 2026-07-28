@@ -52,9 +52,17 @@ def test_developer_entrypoints_track_server_default():
     vite = _read('frontend/vite.config.js')
 
     assert example['server']['port'] == port
-    proxy = re.search(r"['\"]\/api['\"]\s*:\s*['\"]http:\/\/127\.0\.0\.1:(\d+)", vite)
-    assert proxy, 'Vite must declare a loopback /api proxy'
-    assert int(proxy.group(1)) == port
+
+    # The proxy target is no longer a literal on the '/api' line — it is an
+    # env-var override falling back to a named default, so that `npm run dev`
+    # stops driving the real install by accident. What must still hold is the
+    # thing this test was written for: that FALLBACK has to track the backend's
+    # own default port, or the habit ("npm run dev", hit :5173) silently breaks.
+    assert re.search(r"['\"]\/api['\"]\s*:", vite), 'Vite must declare an /api proxy'
+    default = re.search(
+        r"DEFAULT_DEV_API_TARGET\s*=\s*['\"]http:\/\/127\.0\.0\.1:(\d+)", vite)
+    assert default, 'Vite must keep a named loopback default for /api'
+    assert int(default.group(1)) == port
 
 
 def test_docker_context_excludes_generated_artifacts():

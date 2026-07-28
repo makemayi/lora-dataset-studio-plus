@@ -20,6 +20,7 @@ import { clearScraperScanState, loadScraperScanState, saveScraperScanState } fro
 import { HelpBadge } from '../../help/HelpMode';
 import PexelsAttribution from './PexelsAttribution';
 import SettingsLink from '../common/SettingsLink';
+import { localEngineUnavailableReason } from '../../utils/localEngineReason';
 import {
   buildPexelsSearchUrl,
   isPexelsUrl,
@@ -64,6 +65,14 @@ const platformLabel = (platform) => PLATFORM_LABELS[platform]
 export default function ConceptSourcesPanel({ datasetId, onImport, busy }) {
   const toast = useToast();
   const { caps, refresh } = useCapabilities();
+  // Why Klein can't rescue anything here, in the SAME words every other screen
+  // uses for the same gap. Gated on the EXACT condition that disables the
+  // checkbox (`=== false`, not "not true"): capabilities arrive after the first
+  // paint, and a reason printed under a control that is still enabled would be
+  // the same kind of lie in reverse.
+  const kleinReason = caps.engines?.klein === false
+    ? localEngineUnavailableReason('klein', caps)
+    : null;
   const [restoredScan] = useState(() => loadScraperScanState(datasetId));
   const [sourceMode, setSourceMode] = useState(restoredScan.sourceMode);
   // `url` is only the editable URL-mode draft. Pagination uses activeScanUrl.
@@ -445,7 +454,12 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy }) {
           <span className="text-[0.6875rem] leading-relaxed text-content-subtle">
             Off by default. Only small images are sent to Klein. The original is preserved,
             and neither version enters training until you choose one in Curation.
-            {caps.engines?.klein === false ? ' Klein is not ready in this setup.' : ''}
+            {/* This used to be a bare "not ready in this setup" — a verdict with no
+                cause, so the one thing the sentence existed to give (what to do
+                next) was the one thing missing. The shared reason knows whether it
+                is a stopped ComfyUI, a named missing weight, a broken one, or a
+                widget value this install does not have. */}
+            {kleinReason ? ` ${kleinReason.replace(/^⚠\s*/, '')}` : ''}
           </span>
         </span>
       </label>

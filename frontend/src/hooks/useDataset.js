@@ -797,6 +797,36 @@ export function useDataset() {
     }
   }, [refresh, toast]);
 
+  // 🔄 Quarter turns (idea by 1Tomber, GitHub #17). Same busy set as the mirror
+  // on purpose: both rewrite the SAME file, so one running edit must grey out
+  // the other rather than letting two of them race on one image.
+  const rotateImage = useCallback(async (imageId, degrees) => {
+    if (mirroringRef.current.has(imageId)) return false;
+    mirroringRef.current.add(imageId);
+    setMirroringIds((previous) => new Set(previous).add(imageId));
+    try {
+      const d = await postJson(`/api/dataset/image/${imageId}/rotate`, { degrees });
+      if (!d.ok) {
+        toast.error(d.error || 'Could not rotate the image');
+        return false;
+      }
+      await refresh();
+      // The filename does not change, so force only this tile/lightbox/crop
+      // editor to request the rewritten pixels instead of its cached response.
+      setNonces((m) => ({ ...m, [imageId]: (m[imageId] || 0) + 1 }));
+      toast.success(degrees === 180 ? 'Image turned upside down'
+        : `Image rotated 90° ${degrees === 90 ? 'right' : 'left'}`);
+      return true;
+    } finally {
+      mirroringRef.current.delete(imageId);
+      setMirroringIds((previous) => {
+        const next = new Set(previous);
+        next.delete(imageId);
+        return next;
+      });
+    }
+  }, [refresh, toast]);
+
   const crop = useCallback(async (imageId, box) => {
     const d = await postJson(`/api/dataset/image/${imageId}/crop`, box);
     if (!d.ok) { toast.error(d.error || 'Unexpected error'); return; }
@@ -1255,7 +1285,7 @@ export function useDataset() {
            nonces, mirroringIds, refNonce, recaptioningIds, create, open,
            deleteDataset, updateSettings, setCurrentId, setRef, addExtraRef, removeExtraRef,
            generate, importFiles, scrapeImport, resolveSmallImageRescue, improveImage, reimproveImage, improveBatch, classify, caption, recaption, recaptionImages,
-           setStatus, setCaption, mirrorImage, crop, cropRef, cropExtraRef, recropRefAuto, editReference, keepEditedReference, discardEditedReference, setDatasetTrainType, setDatasetFidelity, deleteImage, batchImages, replaceCaptions, writeCaptionFiles, openDatasetFolder, cancelPending, cancelCaption, regenerate, analyzeFaces,
+           setStatus, setCaption, mirrorImage, rotateImage, crop, cropRef, cropExtraRef, recropRefAuto, editReference, keepEditedReference, discardEditedReference, setDatasetTrainType, setDatasetFidelity, deleteImage, batchImages, replaceCaptions, writeCaptionFiles, openDatasetFolder, cancelPending, cancelCaption, regenerate, analyzeFaces,
            findWatermarks, cleanWatermarks, cleanWatermarkImages, restoreWatermarkImage, dismissWatermarks, saveWatermarkRegions,
            purgeUnused, exportZip, exportBackup, exportZipFor, exportBackupFor, importBackup, importDatasetZip, importDatasetFolder,
            backupEverything, backupJob, downloadBackup, openBackupsFolder, dismissBackup, restoreJob, dismissRestore,

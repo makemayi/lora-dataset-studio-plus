@@ -7,7 +7,12 @@
 import { useEffect, useState } from 'react';
 
 export default function PreflightModal({ report, datasetId, ds, onResolve }) {
-  const { warnings = [], leak_images: leaks = [], dup_pairs: dups = [] } = report || {};
+  const { warnings = [], leak_images: leaks = [], dup_pairs: dups = [],
+          lane = 'local' } = report || {};
+  // A cloud run is about to spend money on a rented pod: say so, and say that the
+  // list is about the DATASET (the machine-specific rows — GPU memory, torch build
+  // — are dropped server-side for this lane; they describe a GPU that won't run it).
+  const inCloud = lane === 'cloud';
   const [rejected, setRejected] = useState({});   // imageId -> true (rejected in place)
   const imgUrl = (fn) => `/api/dataset/${datasetId}/img/${encodeURIComponent(fn)}`;
 
@@ -24,15 +29,25 @@ export default function PreflightModal({ report, datasetId, ds, onResolve }) {
   };
 
   return (
-    <div role="dialog" aria-modal="true" aria-label="Before training"
+    <div role="dialog" aria-modal="true"
+      aria-label={inCloud ? 'Before training in the cloud' : 'Before training'}
       className="fixed inset-0 z-[9990] bg-black/80 flex items-center justify-center p-3"
       onClick={(e) => { if (e.target === e.currentTarget) onResolve(false); }}>
       <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl border border-amber-400/40 bg-app p-4 flex flex-col gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-amber-300 font-semibold"><span aria-hidden>⚠️</span> Before training</span>
+        <div className="flex items-start gap-2">
+          <span className="text-amber-300 font-semibold text-sm">
+            <span aria-hidden>⚠️</span> Before training{inCloud ? ' in the cloud' : ''}
+          </span>
           <button type="button" onClick={() => onResolve(false)}
-            className="ml-auto text-content-subtle hover:text-content" aria-label="Cancel">✕</button>
+            className="ml-auto text-content-subtle hover:text-content shrink-0" aria-label="Cancel">✕</button>
         </div>
+        {inCloud && (
+          <p className="m-0 text-content-subtle text-[0.75rem]">
+            This run is billed per hour on a rented GPU — these are dataset issues that
+            would ship with it. Checks about this computer&apos;s GPU are skipped: it
+            won&apos;t run the job.
+          </p>
+        )}
 
         {/* Summary — the aggregate message, kept verbatim. */}
         {warnings.length > 0 && (

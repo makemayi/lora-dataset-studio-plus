@@ -44,9 +44,11 @@ The repo **ships the frontend prebuilt** in `frontend/dist/` (that folder is com
 ```bash
 cd frontend
 npm install
-npm run dev      # live-reload dev server; proxies /api to the running backend (see frontend/README.md)
+npm run dev      # live-reload dev server; proxies /api to the backend on :5050
 npm run build    # writes frontend/dist/
 ```
+
+⚠ **`npm run dev` drives a real backend.** `/api` is proxied to `http://127.0.0.1:5050` — your actual install — and write requests go through. Set `LDS_DEV_API_TARGET` (shell, or `frontend/.env.local`) to point it at a throwaway instance instead; see [frontend/README.md](frontend/README.md).
 
 **If you change anything under `frontend/src`, run `npm run build` and commit the regenerated `frontend/dist/` in the same PR** — otherwise people running from source won't see your change. There's no TypeScript/ESLint step; a clean `npm run build` is the bar.
 
@@ -55,8 +57,11 @@ npm run build    # writes frontend/dist/
 The backend has a large test suite (950+ tests) and it must stay green:
 
 ```bash
+pip install -r backend/requirements-dev.txt   # pytest + the two test-only ML extras
 python -m pytest backend/tests -q
 ```
+
+`requirements-dev.txt` is **exactly** what CI and the release job install — that is the point of it. A suite green against a different set of packages is not evidence about CI: a stray `pytest-flask` on one dev machine once made nine tests pass locally and fail on the release tag. (The suite runs with `-p no:flask` for that reason; you do not need to uninstall anything.)
 
 This is exactly what CI runs on a release tag, so run it locally before you open a PR. If you add or change behavior, add or update a test for it. The suite mocks external tools (ComfyUI, ai-toolkit, Ollama), so it runs without a GPU or any of those installed.
 
@@ -70,6 +75,31 @@ For the frontend, a successful `npm run build` is the check.
 - **Screenshots for any UI change** (before/after if you're changing something that exists).
 - **No secrets or local paths.** Don't commit API keys, tokens, `config.json`, `.env`, or absolute paths from your machine — and scrub them from screenshots, logs and PR descriptions too. `.gitignore` already covers the usual suspects; the diagnostic report is built to be paste-safe for the same reason.
 - Be kind. See the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Already running your own fork?
+
+Several people run a modified copy, and that is exactly what the MIT licence is
+for — take it wherever you need it, no permission required, no obligation to
+send anything back.
+
+But if you have fixed something along the way that would help everyone, we would
+genuinely like it. A fork usually carries two very different kinds of change:
+
+- **Your product decisions** — engines you removed, defaults you disagree with,
+  behaviour you shaped around your own workflow. Keep them. They are why you
+  forked, and upstreaming them would only make your next merge harder.
+- **The fixes underneath them** — a path that only resolved on your machine, a
+  message that named the wrong cause, a crash on a layout we never tested. Those
+  are ours too, and they are usually a small diff sitting inside a much larger
+  branch.
+
+You do not have to disentangle them yourself. **Open an issue describing what you
+fixed and point at the commit in your fork** — that is enough. If it is a
+one-file change you would rather just send, open the PR straight from your fork
+(GitHub keeps the base repo correct by default).
+
+Worth knowing: fixes reported this way get credited to you by name in the commit
+and in the release notes, same as anyone else.
 
 ## Getting oriented
 

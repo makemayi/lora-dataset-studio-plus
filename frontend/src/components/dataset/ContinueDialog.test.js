@@ -101,7 +101,9 @@ test('the Runs hub offers the picker too, with its own lane rule', () => {
 
 test('the dataset panel routes the chosen lane to the matching call', () => {
   // ONE dialog, two hooks — no third resume path, same guarded request helper
-  assert.match(panel, /const inCloud = payload\.lane === 'cloud'/);
+  // (the lane is normalised through preflightLane.js now — same rule, one place,
+  // because the preflight gate needs it too)
+  assert.match(panel, /const lane = laneOfPayload\(payload\);\s*\n\s*const inCloud = lane === 'cloud';/);
   assert.match(panel, /\(inCloud \? ds\.continueTrainingInCloud : ds\.continueTraining\)\(/);
   assert.match(panel, /lanes=\{continueLanes\}/);
   assert.match(panel, /where=\{laneOfStep\(continueInitialStep\)\}/);

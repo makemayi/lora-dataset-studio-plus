@@ -429,6 +429,85 @@ def probe_aitoolkit() -> dict:
             'has_run': False, 'python_candidates': []}
 
 
+def _torch_import_state(python: str):
+    """`import torch` on this interpreter: True / False / None (unknown).
+
+    Stricter than `_cached_import_state` about what counts as a FAILED IMPORT.
+    That helper's seam reports False for anything that goes wrong, including a
+    path that cannot be executed at all — and "this file is not a working Python"
+    is a different problem from "this Python has no torch", with a different
+    sentence and, above all, one we must not state as a fact when a training
+    launch hangs on it. So a failed import is confirmed by a second, trivial
+    `pass` probe: if the interpreter cannot even run that, the answer is UNKNOWN.
+    The extra subprocess only ever runs in the already-failing case, and both
+    answers go through the same cache."""
+    state = _cached_import_state('aitoolkit_torch', python, 'import torch')
+    if state is not False:
+        return state
+    if _cached_import_state('aitoolkit_alive', python, 'pass') is not True:
+        return None
+    return False
+
+
+def aitoolkit_interpreter_report() -> dict:
+    """Can the interpreter ai-toolkit is configured with actually `import torch`?
+
+    {'python': str, 'torch': True|False|None, 'alternative': str}.
+
+    `torch` is THREE-valued on purpose and reuses the same cached subprocess seam
+    every other ML capability goes through: True = proven importable, False =
+    proven not, None = we did not find out (no interpreter on disk, or a cold
+    import that timed out). None must never be treated as a refusal — a first
+    `import torch` on a cold venv behind an antivirus takes tens of seconds.
+
+    `alternative` is the venv the checkout carries (`venv/`, `.venv/`) when an
+    EXPLICIT `aitoolkit.python` is set, is broken, and that venv works — the
+    swap we can then offer instead of leaving the user to guess. Empty
+    otherwise; it costs a second probe only in the already-broken case.
+
+    Deliberately NOT part of probe(): probe() is polled and must stay cheap and
+    never spawn a torch import. This is called from a launch attempt, from the
+    Test button, and from a crash report — moments where the answer is worth
+    paying for."""
+    out = {'python': '', 'torch': None, 'alternative': ''}
+    python = cfg.aitoolkit_path('venv_python')
+    if not python or not Path(python).is_file():
+        return out
+    out['python'] = str(python)
+    out['torch'] = _torch_import_state(str(python))
+    if out['torch'] is not False:
+        return out
+    # Broken, and only because of an explicit override? Then the checkout's own
+    # venv is the obvious way out — but only claim it after PROVING it works.
+    if not (cfg.get('aitoolkit.python') or '').strip():
+        return out
+    derived = cfg.aitoolkit_path('venv_python_derived')
+    if derived and Path(derived).is_file() and os.path.normcase(str(derived)) \
+            != os.path.normcase(str(python)):
+        if _torch_import_state(str(derived)) is True:
+            out['alternative'] = str(derived)
+    return out
+
+
+def probe_aitoolkit_test() -> dict:
+    """The Settings ▸ Local tools "Test" button for ai-toolkit. Same folder checks
+    as probe_aitoolkit, plus the one the folder checks cannot see: does the chosen
+    interpreter have torch? A Test that goes green on a Python without torch is
+    the exact trap of GitHub #19 (strouder) — everything configured, every run
+    dead on `No module named 'torch'`. An UNKNOWN probe keeps the green: we refuse
+    to fail a test on an answer we do not have."""
+    result = probe_aitoolkit()
+    if not result.get('ok'):
+        return result
+    from .services.training_diagnostics import interpreter_verdict
+    report = aitoolkit_interpreter_report()
+    verdict = interpreter_verdict(report['python'], report['torch'],
+                                  alternative=report['alternative'])
+    if verdict:
+        return {**result, 'ok': False, 'detail': verdict['message']}
+    return result
+
+
 # JoyCaption's runtime deps that ai-toolkit does NOT ship: the training venv has
 # torch/torchvision, but joycaption_infer.py also needs transformers (AutoTokenizer
 # / LlavaForConditionalGeneration), bitsandbytes (the NF4 4-bit load) and accelerate
@@ -1144,8 +1223,6 @@ def probe(force=False) -> dict:
     # green (advisory too_small does not gate) — an honest badge points the user at
     # the broken file instead of letting a doomed generate crash ComfyUI.
     klein_invalid = _keh.klein_invalid_assets()
-    klein_blocking_invalid = any(
-        i['blocking'] and i['asset'] in _keh.KLEIN_REQUIRED for i in klein_invalid)
     # Capability gap on the graph's WIDGET VALUES, not its nodes. The shipped Klein
     # workflow used to pin `scheduler: "beta57"`, a value the third-party RES4LYF
     # pack injects into ComfyUI's CORE list — so a stock install passed every asset
@@ -1158,11 +1235,13 @@ def probe(force=False) -> dict:
     # this fails OPEN — an unreachable ComfyUI reports no gap, `reachable` already
     # says that.
     klein_unsupported_enums = _keh.klein_unsupported_enums() if comfy['ok'] else []
-    klein_ready = (comfy['ok'] and not klein_unsupported_enums
-                   and bool(_keh.resolve_klein_unet())
-                   and bool(_keh.resolve_klein_vae())
-                   and bool(_keh.resolve_klein_text_encoder())
-                   and not klein_blocking_invalid)
+    # The verdict itself lives in klein_edit_helper so the watermark cleaner reads
+    # the SAME four conditions instead of its own laxer copy; the ingredients are
+    # already computed here for the payload, so they are handed over rather than
+    # re-probed.
+    klein_ready = _keh.klein_engine_ready(
+        comfy['ok'], missing=klein_missing, invalid=klein_invalid,
+        unsupported_enums=klein_unsupported_enums)
     # Krea 2 Identity Edit — the second LOCAL engine. Readiness is honest and
     # four-part (base model + identity LoRA + text encoder + VAE) AND depends on
     # a custom-node pack, unlike Klein whose graph is core-nodes-only. Both gaps

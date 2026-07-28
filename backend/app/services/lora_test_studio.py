@@ -144,12 +144,77 @@ def _aspect_dims(aspect, train_type=None, resolution_tier=None, resolution_multi
     table = TEST_ASPECTS_SDXL if (train_type or '').lower() == 'sdxl' else TEST_ASPECTS
     return table.get(aspect, table[DEFAULT_ASPECT])
 
-# Axes optionnels CFG / steps (Z-Image Turbo : défaut cfg=1.0, 8 steps). Tester
-# plusieurs valeurs aide à trouver le réglage qui tient le mieux l'identité.
+# Axes optionnels CFG / steps. Le défaut de la FAMILLE reste le réglage distillé
+# (cfg=1.0, 8 steps) : c'est ce que valent Z-Image Turbo, Krea 2 Turbo et les
+# checkpoints SDXL DMD-distillés que le studio teste. Tester plusieurs valeurs aide
+# à trouver le réglage qui tient le mieux l'identité.
 DEFAULT_CFG = 1.0
 DEFAULT_STEPS = 8
-CFG_CHOICES = [1.0, 1.5, 2.0, 2.5, 3.0]
-STEPS_CHOICES = [6, 8, 10, 12, 16, 20, 24, 32, 40]
+# Additive only — these lists are echoed into the Studio pickers and a value that
+# disappears would strand a persisted selection. 3.5/4.0/5.0 and 30/50 exist so the
+# NON-distilled Z-Image Base defaults below are reachable from the picker at all.
+CFG_CHOICES = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0]
+STEPS_CHOICES = [6, 8, 10, 12, 16, 20, 24, 30, 32, 40, 50]
+
+# --- Per-BASE-MODEL sampler defaults (bobba84, GitHub #18) --------------------
+# Z-Image ships in two flavours that need opposite sampler settings, and the app
+# used to hand both the same one: picking "Z-Image Base" in the Test Studio landed
+# on cfg 1 / 8 steps, which are Turbo's numbers. Turbo is guidance-DISTILLED — cfg 1
+# is correct there and ruinous on Base, where it means "no guidance at all". A user
+# trying Base with those settings concludes the model is bad.
+#
+# PROVENANCE OF THE BASE NUMBERS: ComfyUI's own Z-Image day-0 announcement states
+# Z-Image-Base "requires 30-50 steps with cfg 3~5 for optimal quality". We take the
+# CONSERVATIVE end of the step range (30, the cheapest of the recommended window)
+# and the middle of the cfg range (4.0). These are documented starting points, NOT
+# values this project measured — they are defaults for an axis the user can and
+# should sweep, which is the entire point of the Studio grid.
+ZIMAGE_TURBO_DEFAULTS = {'cfg': DEFAULT_CFG, 'steps': DEFAULT_STEPS}
+ZIMAGE_BASE_DEFAULTS = {'cfg': 4.0, 'steps': 30}
+
+# Whole-word phrases (see zimage_model_resolver._phrase: separators and case are
+# normalised away) that identify a build. Distilled markers are checked FIRST, so a
+# name carrying both stays on today's behaviour rather than flipping to slow+guided.
+_ZIMAGE_DISTILLED_PHRASES = ('turbo', 'zt1', 'zt2', 'zt3', 'distill', 'distilled',
+                             'lightning', 'lightx2v', 'step')
+_ZIMAGE_BASE_PHRASES = ('base', 'deturbo', 'de turbo', 'raw')
+
+
+def zimage_build_of(model_name) -> str:
+    """'turbo' | 'base' | 'unknown' for a Z-Image UNET filename, read from its NAME —
+    the only signal available, since these are loose files a user downloaded. 'unknown'
+    deliberately keeps the historical Turbo defaults: the overwhelming majority of
+    Z-Image checkpoints in the wild are Turbo finetunes, and changing the defaults for
+    an unrecognised name would be a regression for everyone who is fine today."""
+    from .zimage_model_resolver import _phrase
+    key = _phrase(_basename(model_name))
+    if any(f' {p} ' in key for p in _ZIMAGE_DISTILLED_PHRASES):
+        return 'turbo'
+    if any(f' {p} ' in key for p in _ZIMAGE_BASE_PHRASES):
+        return 'base'
+    return 'unknown'
+
+
+def zimage_model_defaults(model_name) -> dict:
+    """{'cfg', 'steps'} for ONE Z-Image base model. Turbo/unknown -> today's values."""
+    return dict(ZIMAGE_BASE_DEFAULTS if zimage_build_of(model_name) == 'base'
+                else ZIMAGE_TURBO_DEFAULTS)
+
+
+def studio_model_defaults(family, models) -> dict:
+    """{model_value: {'cfg', 'steps'}} for the bases the Studio offers, so the front
+    can seed its axes from the SELECTED base instead of one family-wide constant.
+    Only Z-Image differentiates today (SDXL/Krea return nothing and keep
+    `default_cfg`/`default_steps`); the shape is per-family on purpose so the next
+    family that needs it has nowhere else to put it."""
+    if (family or '').lower() != 'zimage':
+        return {}
+    out = {}
+    for m in models or []:
+        value = m.get('value') if isinstance(m, dict) else m
+        if value:
+            out[value] = zimage_model_defaults(value)
+    return out
 
 
 def _basename(path: str) -> str:
@@ -1296,6 +1361,16 @@ def _scan_workflow_assets(workflow, models_root):
             abs_path = _resolve_model_abs(models_root, subfolders, ref)
             if abs_path is None:
                 entry = {'path': display, 'kind': kind}
+                # A resolver that came up empty leaves `_meta.lds_missing_hint` on the
+                # node saying WHAT it accepted and WHERE it looked (see
+                # utils/zimage_helper._resolve_zimage_assets). Carrying it into the 409
+                # is what keeps the preflight honest now that resolution is automatic:
+                # "this file is missing" alone would suggest the exact name is required,
+                # when a dozen spellings would have done.
+                meta = node.get('_meta')
+                hint = meta.get('lds_missing_hint') if isinstance(meta, dict) else None
+                if hint:
+                    entry['hint'] = str(hint)
                 if entry not in missing:
                     missing.append(entry)
                 continue
@@ -2640,6 +2715,11 @@ def studio_payload(user_id, dataset_id, family=None) -> dict | None:
         'default_aspect': DEFAULT_ASPECT,
         'cfg_choices': CFG_CHOICES, 'default_cfg': DEFAULT_CFG,
         'steps_choices': STEPS_CHOICES, 'default_steps': DEFAULT_STEPS,
+        # Per-BASE-MODEL cfg/steps, keyed by the same `value` as `z_models` (bobba84,
+        # GitHub #18): Z-Image Base is not guidance-distilled and must not inherit
+        # Turbo's cfg 1 / 8 steps. `default_cfg`/`default_steps` stay the fallback for
+        # every base not listed here, so an older frontend behaves exactly as before.
+        'model_defaults': studio_model_defaults(eff, z_models),
         # 2e passe (detail daemon) : exposée UNIQUEMENT pour SDXL (le workflow HQ a deux
         # passes). NULL sinon → le frontend ne montre pas le 2e picker de steps.
         'steps2_choices': (STEPS_CHOICES if eff == 'sdxl' else None),

@@ -832,7 +832,7 @@ function ChatgptSubscriptionCard({ caps, config, setField, refreshCaps, toast, c
     if (!device) return undefined
     const id = setInterval(async () => {
       try {
-        const r = await apiFetch('/api/settings/chatgpt-oauth/poll')
+        const r = await apiFetch('/api/settings/chatgpt-oauth/poll', { background: true })
         if (r.status === 'connected') {
           setDevice(null)
           toast.success('ChatGPT subscription connected.')

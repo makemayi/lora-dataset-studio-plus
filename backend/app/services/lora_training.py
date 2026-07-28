@@ -246,6 +246,33 @@ def is_installed() -> bool:
     return bool(p) and p.is_file()
 
 
+def assert_interpreter_ready() -> None:
+    """Refuse a launch whose interpreter provably cannot `import torch`, NAMING
+    the path — the only fact that makes the failure obvious in one second.
+
+    `is_installed()` above only asks whether a file is there. A path that exists,
+    runs, and carries none of ai-toolkit's dependencies passes it, the run starts,
+    and ai-toolkit dies on `ModuleNotFoundError: No module named 'torch'` while the
+    panel suggests a missing base model or a Hugging Face token (GitHub #19,
+    strouder — an `aitoolkit.python` pointing at the Windows Store python stub
+    while a working venv sat next to run.py).
+
+    Refuses ONLY on a proven False. An unknown probe (cold-import timeout) lets
+    the launch through: blocking a real training run on an answer we do not have
+    would be a worse bug than the one this fixes. RuntimeError -> 409 (a backend
+    availability problem, not a bad request)."""
+    from .. import capabilities
+    from .training_diagnostics import interpreter_verdict
+    try:
+        report = capabilities.aitoolkit_interpreter_report()
+    except Exception:
+        return                                   # a broken probe never blocks a run
+    verdict = interpreter_verdict(report['python'], report['torch'],
+                                  alternative=report['alternative'])
+    if verdict:
+        raise RuntimeError(verdict['message'])
+
+
 def _aitoolkit_supports_krea() -> bool:
     """L'ai-toolkit installé connaît-il l'arch Krea 2 ? C'est CRITIQUE : ai-toolkit
     fait `if ModelClass.arch == config.arch` puis, sans match, retombe
@@ -4465,7 +4492,8 @@ _KREA_MIN_VRAM_GB = 24
 _VRAM24_FAMILIES = ('krea', 'flux')   # familles 12B qui recommandent ~24 GB à 1024
 
 
-def training_preflight(user_id, dataset_id, train_type=None, variant=None) -> dict:
+def training_preflight(user_id, dataset_id, train_type=None, variant=None,
+                       lane=None) -> dict:
     """Pre-launch sanity report: {'blockers': [...], 'warnings': [...]}. Blockers
     stop the launch (too few images for the family); warnings ask for one explicit
     confirm in the UI. Pure reads — never mutates, never raises on probe failures
@@ -4478,7 +4506,16 @@ def training_preflight(user_id, dataset_id, train_type=None, variant=None) -> di
     workspace (gf-generate/gf-images) où corriger — None quand rien à cibler.
     NB : le check 'captioned' (images gardées sans caption) est un fail dans
     `checks` (assert_trainable refusera le launch) mais volontairement PAS un
-    blocker ici — le flux modal existant (launch → erreur explicite) est conservé."""
+    blocker ici — le flux modal existant (launch → erreur explicite) est conservé.
+
+    ``lane`` ('local' default, or 'cloud') says WHERE the run will execute. Every
+    row carries a ``scope``: 'dataset' (a property of the images/captions, true
+    wherever the job runs) or 'machine' (a read of THIS box — its GPU, its
+    ai-toolkit venv). A cloud lane drops the 'machine' rows and their warning
+    lines: that hardware will not run the job, and on a machine with no local
+    training environment at all they would fire on every single cloud launch —
+    which is exactly how users learn to click through warnings without reading
+    them. Default 'local' keeps the historical payload byte-for-byte."""
     from .face_variations import caption_has_identity_leak
     ds = fds.get_dataset(user_id, dataset_id)
     if not ds:
@@ -4487,13 +4524,24 @@ def training_preflight(user_id, dataset_id, train_type=None, variant=None) -> di
     label = _FAMILY_LABEL.get(ttype, ttype)
     blockers, warnings = [], []
     checks = []
+    # `warnings` is a flat list of strings (the modal renders it verbatim), so the
+    # lane filter cannot recognise a machine-scope line by reading it. Record the
+    # indices as they are appended instead — the only reliable pairing.
+    machine_warning_ix = set()
 
-    def _check(cid, clabel, status, detail, target=None, bypassable=None, hint=None):
+    def _machine_warn(msg):
+        machine_warning_ix.add(len(warnings))
+        warnings.append(msg)
+
+    def _check(cid, clabel, status, detail, target=None, bypassable=None, hint=None,
+               scope='dataset'):
         # `bypassable` (fail rows only): True = a QUALITY guard-rail the explicit
         # "Continue anyway" ack can waive; False = a physical impossibility the ack
         # never covers. `hint` = the honest one-line risk shown next to the ack.
+        # `scope`: 'dataset' = a property of the images/captions (true on any lane);
+        # 'machine' = a read of THIS box, meaningless when the job runs elsewhere.
         entry = {'id': cid, 'label': clabel, 'status': status,
-                 'detail': detail, 'target': target}
+                 'detail': detail, 'target': target, 'scope': scope}
         if bypassable is not None:
             entry['bypassable'] = bool(bypassable)
         if hint:
@@ -4711,11 +4759,12 @@ def training_preflight(user_id, dataset_id, train_type=None, variant=None) -> di
         from .. import capabilities
         vram = capabilities.gpu_vram_gb()
         if vram is not None and ttype in _VRAM24_FAMILIES and vram < _KREA_MIN_VRAM_GB:
-            warnings.append(f'{label} training needs ~{_KREA_MIN_VRAM_GB} GB of VRAM at 1024 '
-                            f'— this GPU reports {vram} GB; expect OOM or extreme slowness. '
-                            'Drop the resolution to 768 in Advanced options to fit.')
+            _machine_warn(f'{label} training needs ~{_KREA_MIN_VRAM_GB} GB of VRAM at 1024 '
+                          f'— this GPU reports {vram} GB; expect OOM or extreme slowness. '
+                          'Drop the resolution to 768 in Advanced options to fit.')
             _check('vram', 'GPU memory', 'warn',
-                   f'{label} needs ~{_KREA_MIN_VRAM_GB} GB VRAM — this GPU reports {vram} GB')
+                   f'{label} needs ~{_KREA_MIN_VRAM_GB} GB VRAM — this GPU reports {vram} GB',
+                   scope='machine')
     except Exception:
         pass
 
@@ -4731,13 +4780,13 @@ def training_preflight(user_id, dataset_id, train_type=None, variant=None) -> di
         arch = torch_arch_verdict(capabilities.aitoolkit_torch_info(),
                                   venv_python=cfg.aitoolkit_path('venv_python'))
         if arch and not arch['supported']:
-            warnings.append(arch['message']
-                            + (f' Fix: {arch["command"]}' if arch['command'] else ''))
+            _machine_warn(arch['message']
+                          + (f' Fix: {arch["command"]}' if arch['command'] else ''))
             # Keep the row SHORT — it sits in a one-line list next to ten other
             # checks, on a phone too. The full explanation + fix is the warning.
             _check('torch_arch', 'PyTorch supports this GPU', 'warn',
                    f'torch {arch["torch"]} has no {arch["sm"]} kernels — the run '
-                   'dies at the first GPU computation')
+                   'dies at the first GPU computation', scope='machine')
     except Exception:
         pass   # a probe failure must never block or fake a diagnosis
 
@@ -4775,6 +4824,16 @@ def training_preflight(user_id, dataset_id, train_type=None, variant=None) -> di
             _check('face_mask', 'Face masking ready', 'ok',
                    'InsightFace found — the faces will be weighted down')
 
+    # Lane filter — BEFORE the verdict, so a cloud launch whose only complaint was
+    # this machine's GPU comes back a clean 🟢 instead of a warning nobody can act
+    # on. Note what stays: face_mask is machine-INSTALLED but dataset-SCOPED, since
+    # the masks are generated locally at export and uploaded with the images
+    # (cloud_training uploads `<staging>_masks`) — InsightFace missing here means
+    # the PAID run trains unmasked. Local origin, cloud consequence: it must show.
+    if (lane or 'local') == 'cloud':
+        checks = [c for c in checks if c.get('scope') != 'machine']
+        warnings = [w for i, w in enumerate(warnings) if i not in machine_warning_ix]
+
     # Verdict agrégé pour la pastille : un fail = 🔴, sinon un warn = 🟡, sinon 🟢.
     statuses = {c['status'] for c in checks}
     verdict = ('blocked' if 'fail' in statuses
@@ -4797,6 +4856,9 @@ def training_preflight(user_id, dataset_id, train_type=None, variant=None) -> di
             # can_override : la case « Continue anyway » n'est offerte que quand c'est True
             # (miroir exact du garde serveur assert_trainable/allow_not_ready).
             'can_override': can_override, 'override_hint': override_hint,
+            # Echoed so the modal can say WHERE this run is headed (and, implicitly,
+            # why no GPU-memory row is listed) without re-deriving it client-side.
+            'lane': ('cloud' if (lane or 'local') == 'cloud' else 'local'),
             'kept': n, 'floor': floor, 'recommended': reco}
 
 
@@ -4857,7 +4919,8 @@ def _crash_payload(log_path, dataset_id, rc) -> dict:
     the watcher thread, and an unknown probe adds no key at all."""
     from ..utils.redact import redact_tokens, redact_user_paths
     from .training_diagnostics import (extract_error_excerpt, gated_repo_verdict,
-                                       torch_arch_verdict)
+                                       hf_transfer_verdict, interpreter_verdict,
+                                       missing_module_in_log, torch_arch_verdict)
     wide = _log_tail(log_path, _ERROR_SCAN_LINES)
     payload = {'dataset_id': dataset_id, 'rc': rc,
                'log_tail': redact_tokens(redact_user_paths(_log_tail(log_path)))[-1500:],
@@ -4869,6 +4932,34 @@ def _crash_payload(log_path, dataset_id, rc) -> dict:
         if gated:
             payload['hf_gated'] = {k: gated[k] for k in ('status', 'repo', 'url',
                                                          'title', 'message')}
+    except Exception:
+        pass
+    # A dead fast-download accelerator looks exactly like a network fault, and the
+    # app never sets that variable — so saying so is the whole remedy (GitHub #18,
+    # bobba84).
+    try:
+        transfer = hf_transfer_verdict(wide)
+        if transfer:
+            payload['hf_transfer'] = transfer
+    except Exception:
+        pass
+    # A `ModuleNotFoundError` in the log is a PROVEN interpreter problem, and the
+    # one fact the log itself never carries is WHICH Python produced it. The
+    # module is read off the log — no subprocess is spawned from the watcher
+    # thread — and the "which venv works instead" hint costs a probe only here,
+    # on a run that already failed (GitHub #19, strouder).
+    try:
+        module = missing_module_in_log(wide)
+        if module:
+            from .. import capabilities
+            report = capabilities.aitoolkit_interpreter_report()
+            verdict = interpreter_verdict(
+                report['python'] or cfg.aitoolkit_path('venv_python'),
+                False, alternative=report['alternative'], module=module)
+            if verdict:
+                payload['interpreter'] = {k: verdict[k] for k in (
+                    'python', 'module', 'windows_store', 'alternative',
+                    'title', 'message')}
     except Exception:
         pass
     try:
@@ -4954,6 +5045,10 @@ def launch_training(user_id, dataset_id, steps: int | None = None, check_caption
     availability problem, not a bad request)."""
     if not is_installed():
         raise RuntimeError('ai-toolkit is not configured')
+    # The interpreter EXISTS; can it actually run ai-toolkit? Asked here, before a
+    # whole dataset is exported, so a torch-less Python is named now instead of
+    # surfacing minutes later as an opaque crash (GitHub #19, strouder).
+    assert_interpreter_ready()
     ds = fds.get_dataset(user_id, dataset_id)
     if not ds:
         raise ValueError('dataset not found')
@@ -5280,6 +5375,9 @@ def continue_training(user_id, dataset_id, extra_steps: int = 1000,
             queue_manager._get_system_state('training_pid', None))
         if not (_allow_dead_predecessor and previous_is_dead):
             raise ValueError('a training is already in progress')
+    # Same interpreter gate as a fresh launch: a resume spawns the very same
+    # ai-toolkit command, so a torch-less Python must be named here too.
+    assert_interpreter_ready()
     # Validate the safe-subset overrides BEFORE any side effect: a forbidden key
     # (rank/alpha/optimizer/…) must fail loudly with nothing archived or persisted.
     override_patch = validate_resume_overrides(overrides)

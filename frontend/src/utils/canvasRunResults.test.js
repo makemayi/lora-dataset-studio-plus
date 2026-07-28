@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import {
   CANVAS_RUN_KEY, canvasResultLabel, canvasRunDatasetIds, describeCanvasRun,
-  normaliseTargets, readCanvasRun, readyImageCount, writeCanvasRun,
+  normaliseTargets, readCanvasRun, readyImageCount, runPinCandidates, writeCanvasRun,
 } from './canvasRunResults.js';
 
 const fakeStore = (initial = {}) => {
@@ -89,4 +89,20 @@ test('a finished run knows which lanes to re-read, once each', () => {
 
 test('a result button names the checkpoint by the ids shown on the board', () => {
   assert.equal(canvasResultLabel({ recordId: 12, step: 2000 }), '#12 · step 2000');
+});
+
+test('the pinnable lot is the cells that produced a FILE, with their lane', () => {
+  const run = { cells: [
+    { id: 11, dataset_id: 3, filename: 'a.png', status: 'done' },
+    { id: 12, dataset_id: 3, filename: null, status: 'cancelled' },
+    { id: 13, dataset_id: 8, filename: 'c.png', status: 'done' },
+    { id: 14, dataset_id: null, filename: 'd.png' },
+  ] };
+  assert.deepEqual(runPinCandidates(run),
+    [{ id: 11, datasetId: 3 }, { id: 13, datasetId: 8 }]);
+  assert.deepEqual(runPinCandidates(null), []);
+  // A cell with a file but no lane is ready (it exists on disk) and NOT
+  // pinnable (there is no lane to put it in) — the two counts are allowed to
+  // disagree, and the button must follow the pinnable one.
+  assert.equal(readyImageCount(run), 3);
 });

@@ -1302,10 +1302,14 @@ def test_embedded_workflow_model_refs_are_all_layout_independent():
     EXPECTED = {
         ('ZImage_bigLove_ZT3_optimal.json', '1', 'unet_name'):
             ('z image\\bigLove_zt3.safetensors', 'OVERRIDDEN'),
+        # RESOLVED since bobba84 / GitHub #18: both refs are rewritten to whatever the
+        # target ComfyUI actually holds (services/zimage_model_resolver) instead of
+        # demanding this exact spelling. They stay PREFLIGHT-documented when nothing
+        # resolves — the workflow keeps these values and the 409 names them.
         ('ZImage_bigLove_ZT3_optimal.json', '2', 'clip_name'):
-            ('Z image\\qwen_3_4b.safetensors', 'PREFLIGHT_DOCUMENTED'),
+            ('Z image\\qwen_3_4b.safetensors', 'RESOLVED'),
         ('ZImage_bigLove_ZT3_optimal.json', '3', 'vae_name'):
-            ('z ae.safetensors', 'PREFLIGHT_DOCUMENTED'),
+            ('z ae.safetensors', 'RESOLVED'),
         ('image_real_HQ.json', '1', 'ckpt_name'):
             ('Biglove\\mopMixtureOfPervertsDMD_v40.safetensors', 'OVERRIDDEN'),
         ('image_real_HQ.json', '10', 'lora_name'):

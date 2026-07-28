@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, createContext, useContext } from 'react'
+import { pushToast, dropToast, sweepToasts, toastLabel } from '../../utils/toastQueue'
 
 // ── Context ──
 
@@ -6,20 +7,33 @@ const ToastContext = createContext(null)
 
 let _nextId = 0
 
+// Expiry is swept centrally instead of one setTimeout per emission: a merged
+// repeat has to be able to PUSH its banner's expiry out, which a timer captured
+// on the first emission's id cannot do. See utils/toastQueue.js.
+const SWEEP_MS = 250
+
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([])
 
   const addToast = useCallback((message, type = 'info', duration = 4000) => {
     const id = ++_nextId
-    setToasts((prev) => [...prev, { id, message, type }])
-    if (duration > 0) {
-      setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), duration)
-    }
+    const expiresAt = duration > 0 ? Date.now() + duration : null
+    setToasts((prev) => pushToast(prev, { id, message, type, expiresAt }))
     return id
   }, [])
 
   const removeToast = useCallback((id) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id))
+    setToasts((prev) => dropToast(prev, id))
+  }, [])
+
+  useEffect(() => {
+    const t = setInterval(() => {
+      setToasts((prev) => {
+        const next = sweepToasts(prev, Date.now())
+        return next.length === prev.length ? prev : next
+      })
+    }, SWEEP_MS)
+    return () => clearInterval(t)
   }, [])
 
   const toast = useMemo(() => ({
@@ -69,19 +83,34 @@ function ToastContainer({ toasts, onRemove }) {
   // region (per-type politeness), avoiding nested live regions (double-announce)
   // and per-new-toast re-announce-all.
   return (
-    <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 max-w-sm">
+    /* left-4 as well as right-4: at 400 px a max-w-sm card pinned only to the
+       right still had to fit, and long messages pushed past the viewport. */
+    <div className="fixed top-4 right-4 left-4 sm:left-auto z-[100] flex flex-col gap-2 sm:max-w-sm">
       {toasts.map((t) => (
         <div
           key={t.id}
           role={t.type === 'error' ? 'alert' : 'status'}
           aria-live={t.type === 'error' ? 'assertive' : 'polite'}
           aria-atomic="true"
+          title={toastLabel(t)}
           className={`flex items-start gap-2 border rounded-lg px-4 py-3 shadow-lg backdrop-blur-sm animate-slideIn ${
             TYPE_STYLES[t.type] || TYPE_STYLES.info
           }`}
         >
           <span className="flex-shrink-0 mt-0.5">{ICONS[t.type] || ICONS.info}</span>
-          <span className="text-sm flex-1">{t.message}</span>
+          {/* The message alone lives in the live region; the repeat counter is
+              aria-hidden ON PURPOSE. It changes on every repeat, and a live
+              region re-announces whenever its content changes — a banner
+              merged twelve times would otherwise be twelve announcements,
+              exactly the noise the merging was meant to remove. Sighted users
+              see "(12×)", assistive tech hears the sentence once. */}
+          <span className="text-sm flex-1 break-words">{t.message}</span>
+          {(t.count || 1) > 1 && (
+            <span aria-hidden="true"
+              className="flex-shrink-0 self-start rounded-full bg-black/25 px-1.5 py-px text-[0.6875rem] font-semibold tabular-nums">
+              {t.count}×
+            </span>
+          )}
           <button
             type="button"
             onClick={() => onRemove(t.id)}

@@ -142,15 +142,16 @@ export default function RunSetupPanel({ d, studio, form, datasetId,
             cfgChoices={d.cfg_choices}
             effectiveCfgs={form.effectiveCfgs}
             onToggleCfg={form.toggleCfg}
-            defaultCfg={d.default_cfg}
+            defaultCfg={form.modelDefaultCfg}
             stepsChoices={d.steps_choices}
             effectiveSteps={form.effectiveSteps}
             onToggleStep={form.toggleStep}
-            defaultSteps={d.default_steps}
+            defaultSteps={form.modelDefaultSteps}
             steps2Choices={d.steps2_choices}
             effectiveSteps2={form.effectiveSteps2}
             onToggleStep2={form.toggleStep2}
             defaultSteps2={d.default_steps2}
+            mixedDefaults={form.mixedModelDefaults}
             fmt={fmt}
           />
 

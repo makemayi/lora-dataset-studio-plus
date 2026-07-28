@@ -1408,6 +1408,25 @@ def dataset_image_mirror(image_id):
     return jsonify({'ok': True, **result})
 
 
+@bp.post('/dataset/image/<int:image_id>/rotate')
+def dataset_image_rotate(image_id):
+    """Permanently turn one owned dataset image by {degrees} CLOCKWISE (90/180/270).
+
+    Idea by 1Tomber (GitHub #17). Deliberately its own route rather than an
+    option of /crop: the crop lane RESAMPLES (it rescales the box to a fixed
+    long side), which costs detail however the result is then encoded, while a
+    quarter turn resamples nothing — it permutes existing pixels. This route
+    keeps the file's real format and its exact pixels."""
+    data = request.get_json(silent=True) or {}
+    try:
+        result = svc.rotate_image(LOCAL_USER, image_id, data.get('degrees'))
+    except Exception as e:
+        return _map_error(e)
+    if result is None:
+        return jsonify({'error': 'not found'}), 404
+    return jsonify({'ok': True, **result})
+
+
 @bp.get('/dataset/<int:dataset_id>/export')
 def dataset_export(dataset_id):
     try:

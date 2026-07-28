@@ -111,6 +111,32 @@ export function describeCanvasRun(run) {
   return { phase: 'idle', generating, queued, resumable, ready, text: '' };
 }
 
+/**
+ * The images a finished run actually produced, as {id, datasetId} — the lot
+ * 📌 Pin all offers to drop onto the board.
+ *
+ * Same definition of "ready" as readyImageCount: a cell with a file on disk.
+ * A cancelled or failed cell is not an image and must not be counted into a
+ * button that promises to put N pictures down.
+ *
+ * Only the ids: the FACTS of each image (prompt, seed, sampler, the checkpoint
+ * that made it) are read from the gallery route at pin time, so the node on the
+ * board carries exactly the payload every other gallery publishes. Rebuilding
+ * that payload from the run cells here would be a second shape of the same
+ * record, free to drift from the first.
+ */
+export function runPinCandidates(run) {
+  const out = [];
+  for (const c of (run?.cells || [])) {
+    if (!c?.filename) continue;
+    const id = asId(c.id);
+    const datasetId = asId(c.dataset_id);
+    if (id == null || datasetId == null) continue;
+    out.push({ id, datasetId });
+  }
+  return out;
+}
+
 /** The dataset ids a run touched — the lanes that have to be re-read so their
  *  pills gain the new thumbnail and the × N badge. */
 export function canvasRunDatasetIds(targets) {
