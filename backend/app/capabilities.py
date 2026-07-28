@@ -127,6 +127,16 @@ def probe_openrouter() -> dict:
     return {'ok': ok, 'detail': 'key set' if ok else 'key missing'}
 
 
+def probe_qwen() -> dict:
+    """Qwen Image engine readiness. Presence of the API key only — same contract as
+    probe_openrouter. Deliberately NOT a live call: testing the key would trigger an
+    authenticated request to DashScope on every capability poll, and it incurs the
+    account limits; a key that is set but out of credits is reported at generation
+    time with the provider's own error."""
+    ok = bool(cfg.secret('QWEN_API_KEY'))
+    return {'ok': ok, 'detail': 'key set' if ok else 'key missing'}
+
+
 def probe_comfyui() -> dict:
     api_url = (cfg.get('comfyui.api_url') or '').rstrip('/')
     if not api_url:

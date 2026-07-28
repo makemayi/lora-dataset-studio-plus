@@ -17,6 +17,7 @@ _TEST_TARGETS = {
     'gemini': capabilities.probe_gemini,
     'openai': capabilities.probe_openai,
     'openrouter': capabilities.probe_openrouter,
+    'qwen': capabilities.probe_qwen,
     'comfyui': capabilities.probe_comfyui,
     # End-to-end (reachable + vision model pulled), NOT reachability alone: the old
     # reachability-only target returned a green check while the Setup/diagnostic model
