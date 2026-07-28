@@ -11,13 +11,19 @@ at CALL time so a change in Settings applies without restart:
 
     engines.qwen_model  >  QWEN_MODEL (env)  >  DEFAULT_MODEL
 
-The latest API-accessible model is qwen-image-2.0-pro-2026-06-25 (released June 2026).
-Qwen Image 3.0 was announced July 2026 but is chat-only, not available via DashScope API.
+Use the ALIAS name (no date suffix), e.g. 'qwen-image-2.0-pro' — that is what
+DashScope's own request examples show in the model field. A dated snapshot name
+(e.g. 'qwen-image-2.0-pro-2026-06-25') is a SPECIFIC pinned version, not the
+generally-documented form, and will 400 with "model not exist" once DashScope
+retires that snapshot. See AVAILABLE_MODELS for the current catalog. Models are
+NOT region-restricted — the same names work on every DashScope endpoint.
 
 REGIONAL CONFIGURATION
 ----------------------
-DashScope endpoints vary by region (China/Singapore vs. US). Default uses Singapore
-endpoint. Configure via:
+DashScope endpoints AND API keys are region-locked to each other — a key issued
+for 华北2 (Beijing/cn) only works against the cn endpoint; using it against sg/us
+(or vice versa) fails authentication. Configure the region to match where your
+key was issued:
 
     backends.qwen_region: 'cn' | 'sg' | 'us' (default 'sg')
 
@@ -39,7 +45,7 @@ from .engine_errors import EngineError, EngineFatal
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = 'qwen-image-2.0'
+DEFAULT_MODEL = 'qwen-image-2.0-pro'
 _ENV_VAR = 'QWEN_MODEL'
 
 # Regional endpoints. DashScope API keys are region-specific.
@@ -49,12 +55,21 @@ _ENDPOINTS = {
     'us': 'https://dashscope-us.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
 }
 
-# Models available per region (from https://bailian.console.aliyun.com/cn-beijing?tab=model#/model-market)
-_REGION_MODELS = {
-    'cn': ['qwen-image-2.0'],  # China: qwen-image-2.0
-    'sg': ['qwen-image-2.0-pro-2026-06-25'],  # Singapore: pro variant
-    'us': ['qwen-image-2.0-pro-2026-06-25'],  # US: pro variant
-}
+# Models are NOT region-restricted — the same model catalog is available on every
+# DashScope endpoint (cn/sg/us alike). What IS region-locked is the API key: a
+# 华北2 (Beijing/cn) key only works against the cn endpoint, and a key from one
+# region is rejected outright on another (see _ENDPOINTS). Use the ALIAS name
+# (no date suffix) — DashScope resolves it to whichever dated snapshot is
+# "recommended" today; a hardcoded dated snapshot goes stale and 400s with
+# "model not exist" once DashScope retires it.
+# From https://bailian.console.aliyun.com/cn-beijing#/api/?type=model&url=2975126
+AVAILABLE_MODELS = [
+    'qwen-image-2.0-pro',  # recommended — best text rendering / realism
+    'qwen-image-2.0',      # recommended — faster, cheaper
+    'qwen-image-max',
+    'qwen-image-plus',
+    'qwen-image',
+]
 
 _NO_KEY = ('no DashScope API key saved — add QWEN_API_KEY in '
            'Settings > Image engines')
@@ -85,10 +100,10 @@ def _region():
 
 
 def get_available_models(region: str | None = None) -> list[str]:
-    """Models available in a region. Defaults to current region."""
-    if region is None:
-        region = _region()
-    return _REGION_MODELS.get(region, [])
+    """Models DashScope offers. `region` is accepted for call-site compatibility
+    but ignored — the model catalog is the same on every endpoint; only the API
+    key is region-locked (see AVAILABLE_MODELS)."""
+    return list(AVAILABLE_MODELS)
 
 
 def _endpoint():
@@ -157,16 +172,12 @@ def _raise_for_api_status(resp, *, model: str) -> None:
         raise QwenImageError(f'DashScope rate-limited (HTTP 429){suffix}')
     if status == 400:
         if 'model not exist' in detail.lower():
-            available = get_available_models(region)
-            if available:
-                raise QwenImageFatal(
-                    f'Model "{model}" not available in region "{region}". '
-                    f'Available models: {", ".join(available)}. '
-                    f'Change region in Settings > Image engines > Qwen region')
-            else:
-                raise QwenImageFatal(
-                    f'No Qwen Image models available in region "{region}". '
-                    f'Switch to Singapore (sg) or US (us) region')
+            raise QwenImageFatal(
+                f'DashScope does not recognize model "{model}" (HTTP 400){suffix}. '
+                f'Use one of: {", ".join(get_available_models())} — '
+                f'change it in Settings > Image engines > Qwen Image model. '
+                f'(Region "{region}" only affects which endpoint/key pair is used, '
+                f'not which model names exist.)')
         if _blames_the_model(resp, detail):
             raise QwenImageFatal(
                 f'DashScope rejected model "{model}" (HTTP 400){suffix} — '
@@ -176,32 +187,68 @@ def _raise_for_api_status(resp, *, model: str) -> None:
 
 
 def size_for_aspect(aspect_ratio: str) -> str:
-    """Map dataset aspect strings onto Qwen's supported sizes.
-    Qwen Image 2.0 supports: 1024×1024, 1024×1536, 1536×1024."""
+    """Map dataset aspect strings onto a DashScope `size` value. DashScope wants
+    'width*height' (asterisk, e.g. '1024*1024') — NOT 'widthxheight'; sending an
+    'x' separator is a plain HTTP 400 InvalidParameter ('Invalid size format').
+    Supported range is 512*512 to 2048*2048 per model."""
     try:
         w, h = (int(x) for x in str(aspect_ratio).split(':', 1))
         if w > 0 and h > 0:
             if h > w:
-                return '1024x1536'
+                return '1024*1536'
             if w > h:
-                return '1536x1024'
+                return '1536*1024'
     except (ValueError, TypeError):
         pass
-    return '1024x1024'
+    return '1024*1024'
+
+
+def _extract_image_ref(data) -> str | None:
+    """Pull the raw `image` value out of a DashScope multimodal-generation
+    response. The observed (and only confirmed-working) shape is the OpenAI-style
+    chat envelope:
+
+        {"output": {"choices": [{"message": {"content": [{"image": "https://…"}]}}]}}
+
+    — NOT the flat `output.results[].image` shape some DashScope docs/older SDKs
+    describe, which this endpoint does not actually return. Both are checked so a
+    future/alternate response shape doesn't silently break this."""
+    try:
+        output = data.get('output') or {}
+        choices = output.get('choices') or []
+        if choices:
+            content = ((choices[0].get('message') or {}).get('content') or [])
+            for item in content:
+                if isinstance(item, dict) and item.get('image'):
+                    return item['image']
+        results = output.get('results') or []
+        if results and results[0].get('image'):
+            return results[0]['image']
+    except (TypeError, AttributeError, IndexError, KeyError):
+        pass
+    return None
 
 
 def parse_image_response(data) -> bytes | None:
-    """Extract the first base64 image from a DashScope response."""
+    """Extract the first generated image from a DashScope response as bytes.
+    The `image` field DashScope returns is a temporary OSS download URL (not
+    inline base64) — fetch it. Falls back to base64-decoding if a value ever
+    arrives inline instead (defensive; not observed in practice)."""
+    ref = _extract_image_ref(data)
+    if not ref:
+        return None
+    if ref.startswith('http://') or ref.startswith('https://'):
+        try:
+            r = requests.get(ref, timeout=(10, 60))
+            r.raise_for_status()
+            return r.content
+        except requests.RequestException as e:
+            logger.warning(f"qwen_image: could not download result image: {e}")
+            return None
     try:
-        # DashScope returns: {"output": {"results": [{"image": "base64..."}]}}
-        output = data.get('output') or {}
-        results = output.get('results') or [{}]
-        img_data = results[0].get('image')
-        if img_data and isinstance(img_data, str):
-            return base64.b64decode(img_data)
-    except (TypeError, ValueError, KeyError, IndexError):
-        pass
-    return None
+        return base64.b64decode(ref)
+    except (TypeError, ValueError):
+        return None
 
 
 def generate_variation(ref_bytes: bytes | list[bytes], prompt: str, model: str | None = None,

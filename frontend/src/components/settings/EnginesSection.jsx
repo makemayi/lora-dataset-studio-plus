@@ -703,12 +703,18 @@ function ImageModelsCard({ config, setField, configDefaults }) {
           onChange={(e) => setField('engines', 'qwen_model', e.target.value)}
           className={INPUT_CLASS}
         >
-          <option value="">Default: qwen-image-2.0</option>
-          <option value="qwen-image-2.0">qwen-image-2.0 (All regions)</option>
-          <option value="qwen-image-2.0-pro-2026-06-25">qwen-image-2.0-pro-2026-06-25 (Singapore/US only)</option>
+          <option value="">Default: qwen-image-2.0-pro</option>
+          <option value="qwen-image-2.0-pro">qwen-image-2.0-pro (best text/realism)</option>
+          <option value="qwen-image-2.0">qwen-image-2.0 (faster, cheaper)</option>
+          <option value="qwen-image-max">qwen-image-max</option>
+          <option value="qwen-image-plus">qwen-image-plus</option>
+          <option value="qwen-image">qwen-image</option>
         </select>
         <p className="text-[0.6875rem] text-content-subtle">
-          qwen-image-2.0 works in all regions. Pro variant only in Singapore/US.
+          Same model names work on every region below — DashScope resolves the alias to its
+          current recommended snapshot. A dated snapshot name (e.g. a "-2026-06-25" suffix)
+          pins one specific version and will eventually 400 once DashScope retires it, so this
+          field always uses the alias form.
         </p>
       </div>
 
@@ -722,12 +728,14 @@ function ImageModelsCard({ config, setField, configDefaults }) {
           onChange={(e) => setField('engines', 'qwen_region', e.target.value)}
           className={INPUT_CLASS}
         >
-          <option value="sg">Singapore (recommended)</option>
+          <option value="sg">Singapore</option>
           <option value="us">US</option>
-          <option value="cn">China</option>
+          <option value="cn">China (华北2 / Beijing)</option>
         </select>
         <p className="text-[0.6875rem] text-content-subtle">
-          DashScope region for API calls. qwen-image-2.0 works in all regions; pro variant in SG/US only.
+          Must match the region your DashScope API key was issued for — a key and endpoint from
+          different regions fail authentication, even though the model catalog above is
+          identical in every region.
         </p>
       </div>
 
