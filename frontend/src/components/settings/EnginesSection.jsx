@@ -334,53 +334,70 @@ function KreaCard({ config, setField, configDefaults }) {
         <ResetToDefault label="Identity edit LoRA" section="krea" field="identity_lora" {...reset} />
       </div>
 
-      <div className="mt-3 sm:max-w-md border-t border-border pt-3">
-        <label htmlFor="krea-character-lora" className="block text-xs font-medium text-content">
-          Character LoRA (optional)
-        </label>
-        <input
-          id="krea-character-lora"
-          type="text"
-          value={krea.character_lora ?? ''}
-          placeholder="e.g. mychar/my_character_v1.safetensors"
-          onChange={(e) => setField('krea', 'character_lora', e.target.value)}
-          className={INPUT_CLASS}
-        />
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
-          A SECOND LoRA — your own trained character/person LoRA (e.g. from ai-toolkit) — chained
-          after the identity edit LoRA above for extra likeness on top of Krea&rsquo;s baseline
-          consistency. Path relative to ComfyUI&rsquo;s models/loras. Blank = off, the graph is
-          unchanged from before this existed. Unlike the identity edit LoRA there is no
-          auto-detection: this names one specific file you trained, so a typo surfaces as
-          ComfyUI&rsquo;s own &ldquo;file not found&rdquo; rather than silently using a guess.
-        </p>
-        <ResetToDefault label="Character LoRA" section="krea" field="character_lora" {...reset} />
-      </div>
-
-      {!!(krea.character_lora ?? '').trim() && (
-        <div className="mt-3 sm:max-w-md">
-          <label htmlFor="krea-character-lora-strength" className="block text-xs font-medium text-content">
-            Character LoRA strength ({Number(krea.character_lora_strength ?? dflt('character_lora_strength')).toFixed(2)})
-          </label>
-          <input
-            id="krea-character-lora-strength"
-            type="range"
-            min={0}
-            max={1.5}
-            step={0.05}
-            value={Number(krea.character_lora_strength ?? dflt('character_lora_strength'))}
-            onChange={(e) => setField('krea', 'character_lora_strength', Number(e.target.value))}
-            className="mt-1 w-full accent-violet-500"
-          />
-          <p className="mt-1 text-[0.6875rem] text-content-subtle">
-            {dflt('character_lora_strength')} is a reasonable starting point. Higher locks the
-            character harder but can fight the edit prompt (pose/outfit/scene changes stop
-            landing); lower lets the edit through more but weakens the likeness boost.
-          </p>
-          <ResetToDefault label="Character LoRA strength" section="krea" field="character_lora_strength" {...reset} />
-        </div>
-      )}
+      <KreaCharacterLorasCard krea={krea} setField={setField} />
     </Card>
+  )
+}
+
+// mirrors backend krea_edit_helper.CHARACTER_LORA_SLOTS
+const KREA_CHARACTER_LORA_SLOTS = 5
+
+/* The 5-slot character-LoRA chain (feature request: extra consistency beyond
+   the identity edit LoRA and the grounding dial — the same reason Klein's
+   generation-LoRA presets exist). Fixed 5 rows, not add/remove: every row is
+   ALWAYS stored, and a blank `file` in a row is simply not sent to the graph
+   (krea_edit_helper._character_loras drops it) — so there is nothing to add
+   or delete, only fields to fill in or clear. Plain text file fields, not the
+   Klein LoRA combobox: Krea's other model fields (base model, identity LoRA)
+   are already plain text, and the combobox's "Klein-compatible" badge would
+   be actively misleading labelling for a Krea-context field. */
+function KreaCharacterLorasCard({ krea, setField }) {
+  const rows = Array.isArray(krea.character_loras) ? krea.character_loras : []
+  const padded = Array.from({ length: KREA_CHARACTER_LORA_SLOTS }, (_, i) => ({
+    file: rows[i]?.file ?? '',
+    strength: Number.isFinite(Number(rows[i]?.strength)) ? Number(rows[i].strength) : 0.8,
+  }))
+  const setRow = (i, patch) => {
+    const next = padded.map((r, j) => (j === i ? { ...r, ...patch } : r))
+    setField('krea', 'character_loras', next)
+  }
+  return (
+    <div id="krea-character-loras" className="mt-3 scroll-mt-24 border-t border-border pt-3">
+      <span className="block text-xs font-medium text-content">
+        Character LoRAs (optional, up to {KREA_CHARACTER_LORA_SLOTS})
+      </span>
+      <p className="mt-1 mb-2 text-[0.6875rem] text-content-subtle">
+        Your own trained character/person LoRAs (e.g. from ai-toolkit), chained IN ORDER after
+        the identity edit LoRA above for extra likeness on top of Krea&rsquo;s baseline
+        consistency. Each path is relative to ComfyUI&rsquo;s models/loras. A blank row is simply
+        skipped — leaving every row blank is a complete no-op, byte-identical to before this
+        existed. Unlike the identity edit LoRA there is no auto-detection: each names one
+        specific file you trained, so a typo surfaces as ComfyUI&rsquo;s own &ldquo;file not
+        found&rdquo; rather than silently using a guess.
+      </p>
+      {padded.map((row, i) => (
+        <div key={i} className="mt-2 flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-content-muted w-4 shrink-0" aria-hidden="true">{i + 1}.</span>
+          <input
+            type="text"
+            aria-label={`Character LoRA ${i + 1} file`}
+            value={row.file}
+            placeholder="e.g. mychar/my_character_v1.safetensors"
+            onChange={(e) => setRow(i, { file: e.target.value })}
+            className={`${INPUT_CLASS} mt-0 flex-1 min-w-[16rem]`}
+          />
+          <label className="flex items-center gap-1.5 text-xs text-content-muted">
+            <span className="whitespace-nowrap">{row.strength.toFixed(2)}</span>
+            <input
+              type="range" min={0} max={1.5} step={0.05} value={row.strength}
+              aria-label={`Character LoRA ${i + 1} strength`}
+              onChange={(e) => setRow(i, { strength: Number(e.target.value) })}
+              className="w-28 accent-violet-500"
+            />
+          </label>
+        </div>
+      ))}
+    </div>
   )
 }
 

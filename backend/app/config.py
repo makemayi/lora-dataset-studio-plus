@@ -298,15 +298,19 @@ DEFAULTS = {
         'identity_lora_strength': 1.0,
         # How hard the source latent is pushed back into the model each step.
         'ref_boost': 4.0,
-        # OPTIONAL second LoRA: a user's own character/person LoRA (e.g. trained
-        # on ai-toolkit), chained AFTER the identity-edit LoRA for extra
-        # likeness on top of Krea's baseline consistency. Blank = off — nothing
-        # about the graph changes from before this existed. Unlike identity_lora
-        # there is no auto-resolution: this names ONE specific file the user
-        # trained, so a typo should surface as ComfyUI's own "file not found"
-        # rather than silently falling back to a guess.
-        'character_lora': '',
-        'character_lora_strength': 0.8,
+        # OPTIONAL extra LoRAs: the user's own character/person LoRAs (e.g.
+        # trained on ai-toolkit), chained AFTER the identity-edit LoRA in LIST
+        # ORDER for extra likeness on top of Krea's baseline consistency. Up to
+        # 5 slots (mirrors Klein's generation-LoRA chain cap); a blank `file`
+        # row is simply skipped when the graph is built, so 5 empty rows is a
+        # complete no-op — the graph stays byte-identical to before this
+        # existed. Unlike identity_lora there is no auto-resolution: each names
+        # ONE specific file the user trained, so a typo should surface as
+        # ComfyUI's own "file not found" rather than silently falling back to a
+        # guess. Pure user data (like klein.generation_lora_presets) — empty
+        # default, nothing to merge; see _migrate_krea_character_lora for the
+        # one-time upgrade from the earlier single-slot krea.character_lora.
+        'character_loras': [],
     },
     # Editable identity / quality prompts (feature request by @bbsorry / 雨田壹).
     # The identity "locks" that ride ahead of every generated variation used to be
@@ -523,6 +527,30 @@ def _migrate_klein_loras(conf: dict, convert: bool = True) -> dict:
     k['generation_lora_presets'] = presets
     return conf
 
+
+def _migrate_krea_character_lora(conf: dict, convert: bool = True) -> dict:
+    """One-time soft migration of the pre-chain single character LoRA slot
+    (krea.character_lora / krea.character_lora_strength) into row 0 of
+    krea.character_loras, then drops the legacy keys. Same shape and same
+    reasoning as _migrate_klein_loras: idempotent, applied on every load so a
+    config.json written before the 5-slot chain existed keeps the value the
+    user already set, and `convert=False` (a save that explicitly carries
+    `character_loras`) drops the legacy keys WITHOUT reviving them — the
+    client already speaks the list format, so a stale legacy key must not
+    resurrect a row the user just cleared."""
+    k = conf.get('krea')
+    if not isinstance(k, dict):
+        return conf
+    f = (k.pop('character_lora', '') or '')
+    f = f.strip() if isinstance(f, str) else ''
+    s = k.pop('character_lora_strength', None)
+    lst = k.get('character_loras')
+    lst = [dict(e) for e in lst if isinstance(e, dict)] if isinstance(lst, list) else []
+    if convert and f and not any((e.get('file') or '').strip() == f for e in lst):
+        lst.insert(0, {'file': f, 'strength': float(s) if isinstance(s, (int, float)) else 0.8})
+    k['character_loras'] = lst
+    return conf
+
 def load_config(force=False) -> dict:
     global _cache
     with _lock:
@@ -538,7 +566,8 @@ def load_config(force=False) -> dict:
         if not isinstance(user, dict):
             user = {}
         _cache = _merge_new_engines(
-            _migrate_klein_loras(_deep_merge(DEFAULTS, user)), user)
+            _migrate_krea_character_lora(_migrate_klein_loras(_deep_merge(DEFAULTS, user))),
+            user)
         return copy.deepcopy(_cache)
 
 def save_config(partial: dict) -> dict:
@@ -556,10 +585,12 @@ def save_config(partial: dict) -> dict:
         # file must not resurrect a preset the user just deleted — only purge.
         if not isinstance(current, dict):
             current = {}
-        merged = _stamp_known_engines(_migrate_klein_loras(
-            _deep_merge(current, partial or {}),
-            convert='generation_lora_presets' not in ((partial or {}).get('klein') or {})),
-            partial)
+        merged = _migrate_krea_character_lora(
+            _stamp_known_engines(_migrate_klein_loras(
+                _deep_merge(current, partial or {}),
+                convert='generation_lora_presets' not in ((partial or {}).get('klein') or {})),
+                partial),
+            convert='character_loras' not in ((partial or {}).get('krea') or {}))
         tmp = p.with_suffix('.json.tmp')
         tmp.write_text(json.dumps(merged, indent=2, ensure_ascii=False), encoding='utf-8')
         tmp.replace(p)

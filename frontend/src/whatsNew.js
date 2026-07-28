@@ -50,9 +50,9 @@ export const WHATS_NEW = [
   {
     id: '2026-07-28-krea-character-lora',
     date: '2026-07-28',
-    title: 'Krea 2 Edit: add your own character LoRA for extra consistency',
+    title: 'Krea 2 Edit: chain up to 5 of your own character LoRAs for extra consistency',
     blurb:
-      'Krea 2 Edit already carries one LoRA (the identity edit LoRA that makes the engine work at all). Settings ▸ Image engines ▸ Krea 2 Edit now has a second, optional slot for your OWN trained character/person LoRA, chained after it, so a re-staged shot resembles your subject more strongly than the base grounding dial alone can pull off. Off by default — nothing changes until you point it at a file — and a strength slider (0–1.5) appears once you do, so you can trade off likeness against how much the edit prompt is still allowed to change the pose, outfit or scene.',
+      'Krea 2 Edit already carries one LoRA (the identity edit LoRA that makes the engine work at all). Settings ▸ Image engines ▸ Krea 2 Edit now has 5 further, optional slots for your OWN trained character/person LoRAs, applied in order after it, so a re-staged shot resembles your subject more strongly than the base grounding dial alone can pull off. All 5 empty by default — nothing changes until you fill one in — each with its own strength slider (0–1.5), so you can trade off likeness against how much the edit prompt is still allowed to change the pose, outfit or scene.',
     to: '/settings/engines',
   },
   {

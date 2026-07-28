@@ -576,16 +576,30 @@ def _ref_boost():
     return _clamp(cfg.get('krea.ref_boost'), 0.0, 10.0, 4.0)
 
 
-def _character_lora():
-    """The user's own optional character LoRA, or '' when unset. Unlike
-    identity_lora this is NOT auto-resolved — it names one specific file the
-    user trained, and guessing at a substitute would silently apply the wrong
-    person's likeness."""
-    return (cfg.get('krea.character_lora') or '').strip()
+CHARACTER_LORA_SLOTS = 5   # mirrors the Settings UI's fixed 5 rows
 
 
-def _character_lora_strength():
-    return _clamp(cfg.get('krea.character_lora_strength'), 0.0, 1.5, 0.8)
+def _character_loras() -> list:
+    """Up to CHARACTER_LORA_SLOTS (file, strength) pairs for the extra
+    character-LoRA chain, in the user's configured order, blank rows dropped.
+    Unlike identity_lora these are NOT auto-resolved — each names one specific
+    file the user trained, and guessing at a substitute would silently apply
+    the wrong person's likeness. A malformed/oversized list degrades to
+    whatever prefix of it is usable rather than raising — this reads the same
+    user data Settings writes, never a live request body."""
+    raw = cfg.get('krea.character_loras')
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for row in raw[:CHARACTER_LORA_SLOTS]:
+        if not isinstance(row, dict):
+            continue
+        f = row.get('file')
+        f = f.strip() if isinstance(f, str) else ''
+        if not f:
+            continue
+        out.append((f, _clamp(row.get('strength'), 0.0, 1.5, 0.8)))
+    return out
 
 
 # --- Graph -------------------------------------------------------------------
@@ -593,8 +607,7 @@ def _character_lora_strength():
 def build_workflow(source_image, prompt, *, unet, clip, vae, lora_name,
                    width, height, seed, steps=None, grounding=None,
                    ref_boost=None, lora_strength=None, fit_mode='fit',
-                   filename_prefix='krea_edit',
-                   character_lora_name=None, character_lora_strength=None):
+                   filename_prefix='krea_edit', character_loras=None):
     """The ComfyUI API-format graph. Pure function of its arguments — no config
     read, no disk access — so a test can assert the exact wiring without a
     ComfyUI, and every loader value is one a resolver produced.
@@ -604,18 +617,18 @@ def build_workflow(source_image, prompt, *, unet, clip, vae, lora_name,
     branch is a grounded encode of the EMPTY prompt, not a bare CLIPTextEncode —
     that is what the reference workflow does and what the model expects.
 
-    `character_lora_name` is OPTIONAL: when set, a second LoraLoaderModelOnly
-    is chained AFTER the identity-edit LoRA (closer to the sampler) — the same
-    "chain after the structural one" order Klein's generation-LoRA presets use.
-    None/'' leaves the graph byte-identical to before this existed (still a
+    `character_loras` is an OPTIONAL list of (name, strength) pairs: each one
+    is a further LoraLoaderModelOnly chained after the previous, starting
+    after the identity-edit LoRA (closer to the sampler) — the same "chain
+    after the structural one" order Klein's generation-LoRA presets use.
+    None/[] leaves the graph byte-identical to before this existed (still a
     single-LoRA chain)."""
     steps = 10 if steps is None else max(1, int(steps))
     grounding = 1024 if grounding is None else int(grounding)
     ref_boost = 4.0 if ref_boost is None else float(ref_boost)
     lora_strength = 1.0 if lora_strength is None else float(lora_strength)
-    character_lora_name = (character_lora_name or '').strip()
-    character_lora_strength = (0.8 if character_lora_strength is None
-                                else float(character_lora_strength))
+    character_loras = [(str(n).strip(), float(s)) for n, s in (character_loras or [])
+                       if str(n).strip()]
     g = {
         '1': {'class_type': 'UNETLoader',
               'inputs': {'unet_name': unet, 'weight_dtype': 'default'},
@@ -632,13 +645,13 @@ def build_workflow(source_image, prompt, *, unet, clip, vae, lora_name,
         '6': {'class_type': 'VAEEncode', 'inputs': {'pixels': ['5', 0], 'vae': ['3', 0]}},
     }
     model_out = ['4', 0]
-    if character_lora_name:
-        g['4b'] = {'class_type': 'LoraLoaderModelOnly',
-                   'inputs': {'lora_name': character_lora_name,
-                              'strength_model': character_lora_strength,
-                              'model': ['4', 0]},
-                   '_meta': {'title': 'Character LoRA (extra consistency)'}}
-        model_out = ['4b', 0]
+    for i, (name, strength) in enumerate(character_loras):
+        node_id = f'4c{i}'
+        g[node_id] = {'class_type': 'LoraLoaderModelOnly',
+                      'inputs': {'lora_name': name, 'strength_model': strength,
+                                 'model': model_out},
+                      '_meta': {'title': f'Character LoRA {i + 1} (extra consistency)'}}
+        model_out = [node_id, 0]
     g.update({
         # Source latent in context + the pixel path that keeps the result sharp.
         '7': {'class_type': 'Krea2EditModelPatch',
@@ -718,8 +731,7 @@ def enqueue_krea_edit(user_id, source_filename, edit_prompt, source_path=None,
         seed=random.randint(0, 2 ** 64 - 1), steps=_steps(),
         grounding=grounding_px(), ref_boost=_ref_boost(),
         lora_strength=_identity_strength(),
-        character_lora_name=_character_lora(),
-        character_lora_strength=_character_lora_strength(),
+        character_loras=_character_loras(),
         # UNIQUE prefix per job: SaveImage numbers from what is currently in the
         # output folder and the app moves each result out right after completion,
         # so a shared prefix makes the counter re-issue the same name (the Klein
