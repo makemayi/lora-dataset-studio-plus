@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-28-qwen-image-actually-works',
+    date: '2026-07-28',
+    title: 'Qwen Image (Alibaba DashScope) engine now actually generates',
+    blurb:
+      'The Qwen Image engine card appeared in Settings but every generation failed — three separate bugs, none of them about your API key or region. The model field was pinned to a dated snapshot name DashScope eventually retires; the requested image size used the wrong separator ("1024x1024" instead of the "1024*1024" DashScope requires); and the code looked for the generated image in the wrong place in DashScope\'s response (it comes back as a download link, not inline data). All three are fixed and verified end-to-end against a live DashScope key. Model names in Settings are also no longer tied to a region — the same model works on every DashScope endpoint; only the API key itself is region-locked.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-07-28-setup-stops-certifying-broken-models',
     date: '2026-07-28',
     title: 'Setup no longer says a model is installed when it cannot be loaded',
