@@ -39,7 +39,7 @@ from .engine_errors import EngineError, EngineFatal
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = 'qwen-image-2.0-pro-2026-06-25'
+DEFAULT_MODEL = 'qwen-image-2.0'
 _ENV_VAR = 'QWEN_MODEL'
 
 # Regional endpoints. DashScope API keys are region-specific.
@@ -49,11 +49,11 @@ _ENDPOINTS = {
     'us': 'https://dashscope-us.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
 }
 
-# Models available per region. qwen-image-2.0-pro-2026-06-25 only available in sg/us.
+# Models available per region (from https://bailian.console.aliyun.com/cn-beijing?tab=model#/model-market)
 _REGION_MODELS = {
-    'cn': [],  # China region uses different model IDs
-    'sg': ['qwen-image-2.0-pro-2026-06-25'],
-    'us': ['qwen-image-2.0-pro-2026-06-25'],
+    'cn': ['qwen-image-2.0'],  # China: qwen-image-2.0
+    'sg': ['qwen-image-2.0-pro-2026-06-25'],  # Singapore: pro variant
+    'us': ['qwen-image-2.0-pro-2026-06-25'],  # US: pro variant
 }
 
 _NO_KEY = ('no DashScope API key saved — add QWEN_API_KEY in '

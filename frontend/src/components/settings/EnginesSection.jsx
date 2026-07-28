@@ -703,12 +703,12 @@ function ImageModelsCard({ config, setField, configDefaults }) {
           onChange={(e) => setField('engines', 'qwen_model', e.target.value)}
           className={INPUT_CLASS}
         >
-          <option value="">Default: qwen-image-2.0-pro-2026-06-25</option>
-          <option value="qwen-image-2.0-pro-2026-06-25">qwen-image-2.0-pro-2026-06-25 (Singapore/US)</option>
+          <option value="">Default: qwen-image-2.0</option>
+          <option value="qwen-image-2.0">qwen-image-2.0 (All regions)</option>
+          <option value="qwen-image-2.0-pro-2026-06-25">qwen-image-2.0-pro-2026-06-25 (Singapore/US only)</option>
         </select>
         <p className="text-[0.6875rem] text-content-subtle">
-          ⚠️ Only available in Singapore (sg) or US (us) regions. China region does not support this model.
-          Change region in "Qwen region" below if model selection fails.
+          qwen-image-2.0 works in all regions. Pro variant only in Singapore/US.
         </p>
       </div>
 
@@ -722,13 +722,12 @@ function ImageModelsCard({ config, setField, configDefaults }) {
           onChange={(e) => setField('engines', 'qwen_region', e.target.value)}
           className={INPUT_CLASS}
         >
-          <option value="sg">Singapore (recommended, has models)</option>
-          <option value="us">US (has models)</option>
-          <option value="cn">China (no Qwen Image models)</option>
+          <option value="sg">Singapore (recommended)</option>
+          <option value="us">US</option>
+          <option value="cn">China</option>
         </select>
         <p className="text-[0.6875rem] text-content-subtle">
-          ⚠️ DashScope region. Qwen Image only available in Singapore (sg) and US (us).
-          If "Model not exist" error occurs, switch to Singapore.
+          DashScope region for API calls. qwen-image-2.0 works in all regions; pro variant in SG/US only.
         </p>
       </div>
 
