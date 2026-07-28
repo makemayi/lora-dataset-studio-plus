@@ -598,6 +598,12 @@ def _character_loras() -> list:
         f = f.strip() if isinstance(f, str) else ''
         if not f:
             continue
+        # ComfyUI enumerates loras with the OS-native separator (backslash on
+        # Windows) and rejects anything else outright ("Value not in list"),
+        # even when the file genuinely exists under that name — the same
+        # normalization resolve_krea_identity_lora() already applies, so a
+        # typed 'krea2/x.safetensors' matches ComfyUI's own 'krea2\x.safetensors'.
+        f = f.replace('/', os.sep)
         out.append((f, _clamp(row.get('strength'), 0.0, 1.5, 0.8)))
     return out
 

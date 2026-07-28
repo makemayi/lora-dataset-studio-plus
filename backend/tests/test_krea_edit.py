@@ -503,6 +503,21 @@ def test_character_loras_reads_the_list_in_order_dropping_blanks(krea):
     assert keh._character_loras() == [('a.safetensors', 0.5), ('b.safetensors', 1.5)]
 
 
+def test_character_loras_normalize_forward_slash_to_the_os_separator(krea):
+    """ComfyUI enumerates lora_name with the OS-native separator and REJECTS
+    anything else outright ('Value not in list') even when the file genuinely
+    exists under that name — reported live: a typed 'krea2/x.safetensors'
+    (matching the identity-edit LoRA field's own documented forward-slash
+    style) was refused by a real ComfyUI that listed it as 'krea2\\x.safetensors'.
+    Mirrors the normalization resolve_krea_identity_lora() already applies."""
+    keh, _base, config = krea
+    config.save_config({'krea': {'character_loras': [
+        {'file': 'krea2/realism_engine_krea2_v2.safetensors', 'strength': 0.8},
+    ]}})
+    assert keh._character_loras() == [
+        (os.sep.join(['krea2', 'realism_engine_krea2_v2.safetensors']), 0.8)]
+
+
 def test_character_loras_caps_at_five_slots(krea):
     keh, _base, config = krea
     rows = [{'file': f'{i}.safetensors', 'strength': 0.8} for i in range(8)]
