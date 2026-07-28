@@ -440,6 +440,100 @@ A bank you already scanned picks all of this up on its next **🔎 Scan** — th
 pass re-visits the images that predate these measurements on its own. You do not
 need a full rescan.
 
+## Find bank images by describing them
+
+Under **Curate**, **🔤 Find by text…** ranks images by how close they are to a
+phrase you type — `brunette outdoors, wide shot`, `red dress against a white
+wall`, `close-up, harsh flash`. It reuses the embeddings **✨ Score** already
+computed, so there is no extra model, no download and no GPU work; searching
+while a LoRA trains is fine.
+
+**It is a ranking, not a filter.** Every image scores *something* against every
+phrase, so a result list always comes back full. The panel therefore reports the
+similarity of the best and of the last result, and tells you how far apart they
+are — *"all about equally close"*, *"the last ones are noticeably looser"*, or
+*"the tail is much weaker than the top"*. That spread is the useful signal: it
+says whether you can trust the bottom of the list.
+
+**Do not read those numbers as percentages.** They are much lower than intuition
+suggests. Measured on a real bank (48 images drawn from 8 unrelated datasets,
+using the exact model the app uses — ViT-L/14, `openai` weights):
+
+| | Range |
+|---|---|
+| Top-1 results verified correct by eye | **0.177 – 0.233** |
+| Guaranteed-unrelated image/phrase pairs | median **0.112**, up to **0.197** |
+
+So 0.22 is not "22% of a match" — it is roughly as good as this model ever gets.
+
+**And this is why there is no similarity slider.** Look at the two rows again:
+the unrelated *ceiling* (0.197) is **higher** than two genuinely correct answers
+(0.177 and 0.178). The distributions overlap, so no cut-off separates "relevant"
+from "unrelated" — anything below ~0.20 lets false positives through, anything
+above ~0.18 throws away true matches. A threshold control would be a knob on a
+boundary that does not exist, so the app gives you a result *count* instead and
+shows the ranking honestly.
+
+The app never compares your scores against those figures either. It measures
+what a *typical* image of **your** bank scores for **your** phrase, and describes
+the results relative to that — which is the only version of the question that
+survives a different bank.
+
+**On a bank that is mostly one subject** — the normal case here — expect the
+ranking to flatten. Images of the same person score 0.60–0.89 against *each
+other*, far above any text score, and a query's ability to discriminate
+compresses by 30–70%. The summary will say *"barely above what any image here
+scores — the order is a hint at best"* when that happens. Believe it: at that
+point the first result is not meaningfully better than the tenth.
+
+It searches **inside the current filter**, exactly like 🎨 Pick diverse and 🎯
+Similar to selected. So "wide shots, in this subfolder, among the undecided" is
+just a filter plus a phrase; nothing needs a second search grammar. Results land
+as a normal selection you review with ✓ Keep / ✕ Reject / ⬆ Promote — nothing is
+kept or deleted for you. **Clear search** returns to the full grid.
+
+**Images that were never scored cannot be found by any phrase.** Rather than
+letting them vanish, the summary counts them: *"3 of 27 images in this filter
+have no ✨ Score embedding yet and could NOT be searched."* Run ✨ Score to
+include them.
+
+### What it is good at, and what it is not
+
+CLIP reads a picture as a whole. It is reliable for **subjects, styles, framing,
+setting, materials and colour**, and unreliable for three things in particular:
+
+| Ask for | What you actually get | Measured |
+|---|---|---|
+| **Counting** — "two people" | Photos of people, any number. | On a two-person image, "two people" beat "one person" by **0.001** — pure noise. It separates "one" from "several" at best. |
+| **Negation** — "without glasses" | *More* glasses, not fewer. | On a photo of an astronaut **wearing** a helmet: "with a helmet" **0.212**, "without a helmet" **0.217**, plain "an astronaut" **0.219**. The negation scored **higher** than the affirmation. |
+| **Spatial relations** — "to the left of" | Both objects, in any arrangement. | — |
+
+The negation case is the one to remember, because it fails *silently and
+backwards*: CLIP does not penalise "without", it simply ignores the word. Someone
+searching `woman without glasses` gets women **wearing** glasses and has no way
+to tell the search misfired.
+
+These are properties of the model, not bugs to report. The workaround is to
+describe what *is* in the frame rather than what is absent — "bare face" works,
+"without glasses" does not — and to check counting and left/right by eye.
+
+One last caveat, seen in the same measurement: a result can be right on the broad
+trait and wrong on the detail. A generic indoor query returned a genuinely indoor
+shot that was not the *kind* of indoor scene the wording implied. Text search
+brings the likeliest images to the front; the final call stays yours.
+
+### Why the first search takes a moment
+
+The text encoder is CLIP's other half, and loading it costs about **ten seconds**
+on the CPU. The app therefore keeps it warm after the first search — subsequent
+searches are effectively instant — and releases it once you close the panel or
+after ten idle minutes, because it holds roughly 2.4 GB of RAM while it lives.
+Every phrase you have already searched is also cached on disk, so re-typing one
+is free even after a restart.
+
+On a memory-tight machine you can set `bank_scoring.text_search_idle_minutes` to
+`0`: nothing is ever kept warm, and each new phrase pays the ten seconds instead.
+
 ## Review a bank one image at a time
 
 Filter chips and bulk actions clear the obvious trash, but the last call —

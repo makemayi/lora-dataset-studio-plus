@@ -205,7 +205,13 @@ DEFAULTS = {
     # Bank ✨ Score pass interpreter (CLIP aesthetic/NSFW stack). Auto-provisioned
     # by the bank_scoring installer into its own venv — declared here so a
     # full-config Save round-trips it instead of failing "unknown config section".
-    'bank_scoring': {'python': ''},
+    # text_search_idle_minutes: how long the 🔤 text-search encoder stays warm
+    #   after its last query. Loading CLIP costs ~8 s; encoding a phrase costs
+    #   ~20 ms — so the worker is kept alive to make a refine-and-retry session
+    #   instant, and reaped afterwards because it holds ~2.4 GB of RAM. 0 means
+    #   "never stay warm": every distinct query pays the ~8 s load, which is the
+    #   right trade on a memory-tight machine.
+    'bank_scoring': {'python': '', 'text_search_idle_minutes': 10},
     # Watermark inpainting (simple-lama-inpainting, extra ML). Dedicated key so a
     # user can override it, but defaults empty -> reuse the same ML interpreter as
     # rembg/insightface (masks.python) then sys.executable. Never imported in-process.

@@ -25,6 +25,11 @@ import { BANK_ZONES, nextBankStep } from './bankGuide.js'
 import { ORIGIN_CHIPS, PROVENANCE_FLAG_LABEL, detailSummary } from './bankProvenance.js'
 // Grid ordering menu (which sorts exist, and which ones have data) — pure/testable.
 import { bankSortOptions } from '../../utils/gridSort.js'
+// 🔤 Text search wording — "closest", never "matching" — plus the cold-start and
+// CLIP-limitation copy. Pure/testable (node --test cannot parse this JSX).
+import {
+  limitsSentence, pendingLabel, readinessHint, summarize,
+} from './bankTextSearch.js'
 
 const PAGE_SIZE = 120
 
@@ -381,6 +386,14 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
   const [diverseTypicality, setDiverseTypicality] = useState(0.5)
   const [diverseBusy, setDiverseBusy] = useState(false)
   const [similarN, setSimilarN] = useState(60)
+  // 🔤 Text search. `textStatus` is the BEFORE-the-click truth (available? model
+  // already warm? would it download?), `textResult` the AFTER-the-click one that
+  // keeps the ranking legible once the grid has switched to it.
+  const [textQuery, setTextQuery] = useState('')
+  const [textN, setTextN] = useState(60)
+  const [textStatus, setTextStatus] = useState(null)
+  const [textPending, setTextPending] = useState(false)
+  const [textResult, setTextResult] = useState(null)
   // "Show selected" VIEW: render ONLY the selected ids, in a chosen order.
   // showSelected flips the grid from the facet page to the selection; selectedOrder
   // holds the order to render them in — the similarity/diversity ranking after a
@@ -688,6 +701,57 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
       toast.info(`Showing the ${d.image_ids.length} most similar to the reference (of ${d.pool}), closest first. Review, then ✓ Keep or ⬆ Promote — or “Show all” to leave this view.`)
     } catch (e) {
       toast.error(e?.message || 'Similarity search failed.')
+    }
+  }
+
+  // 🔤 Text search — same engine as 🎯 Similar, with the reference vector coming
+  // from words instead of a picture. Opening the panel asks the backend what it
+  // is about to cost (model warm? weights present?) so a slow FIRST search is
+  // announced before the click rather than felt as a freeze after it.
+  const openTextSearch = async () => {
+    const next = curateOpen === 'text' ? null : 'text'
+    setCurateOpen(next)
+    if (next !== 'text') { releaseTextEncoder(); return }
+    try {
+      setTextStatus(await apiFetch('/api/bank/text-search/status'))
+    } catch {
+      setTextStatus(null)      // a status we couldn't read never blocks the field
+    }
+  }
+
+  // Hand the ~2.4 GB back as soon as the panel closes. Best effort by design —
+  // the backend's idle timer is the real guarantee for a tab that just vanished.
+  const releaseTextEncoder = () => {
+    postJson('/api/bank/text-search/release', {}).catch(() => {})
+  }
+
+  // Leaving the Bank entirely is the same signal as closing the panel: give the
+  // memory back. The backend idle timer still covers a browser that just died.
+  useEffect(() => () => { releaseTextEncoder() }, [])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const runTextSearch = async () => {
+    const q = textQuery.trim()
+    if (!q) return
+    setTextPending(true)
+    try {
+      const d = await postJson(`/api/bank/${bankId}/search-text`,
+        { query: q, n: textN, ...filterParams(filter) })
+      setTextResult(d)
+      setCurateOpen(null)
+      if (!d.image_ids?.length) {
+        // NOT a silent empty grid: say why nothing could be ranked.
+        toast.info(summarize(d))
+        return
+      }
+      showCuratedSelection(d.image_ids)
+      // Refresh the warm flag so the panel now promises "instant" truthfully.
+      apiFetch('/api/bank/text-search/status').then(setTextStatus).catch(() => {})
+    } catch (e) {
+      // 503 = this install cannot do it at all; 400 = do something first. Both
+      // arrive as a message written for a human — show it as-is.
+      toast.error(e?.message || 'Text search failed.')
+    } finally {
+      setTextPending(false)
     }
   }
 
@@ -1338,6 +1402,61 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
             </>
           )}
         </div>
+        <div className="relative">
+          <button type="button" disabled={live || scored === 0}
+            onClick={openTextSearch}
+            aria-expanded={curateOpen === 'text'}
+            title={scored > 0
+              ? 'Describe what you are looking for in words ("brunette outdoors, wide shot") and rank the current filter by how close each image is. Reuses the ✨ Score embeddings, no GPU.'
+              : 'Run ✨ Score first — text search ranks the embeddings it computes'}
+            className="rounded-md border border-border bg-surface-raised px-2.5 py-0.5 text-xs text-content disabled:opacity-50 hover:bg-surface">
+            🔤 Find by text…{scored === 0 && ' (needs Score)'}
+          </button>
+          {curateOpen === 'text' && (
+            <>
+              <div className="fixed inset-0 z-40"
+                onClick={() => { setCurateOpen(null); releaseTextEncoder() }} aria-hidden />
+              {/* Below sm this is a BOTTOM SHEET, not a dropdown. Anchored to its
+                  trigger it is a w-80 panel hanging off a button that sits
+                  mid-row: measured on a 400 px viewport it reached x=517 and made
+                  the whole page scroll sideways. Pinning only the horizontal
+                  gutters was not enough either — a fixed box with `top: auto`
+                  resolves to its static position and lands off-screen once the
+                  page is scrolled. So the vertical anchor is explicit, and the
+                  sheet scrolls internally when the copy is long. From sm up it
+                  behaves exactly like its two sibling popovers. */}
+              <div className="fixed inset-x-4 bottom-4 z-50 max-h-[75vh] overflow-y-auto rounded-lg border border-border bg-surface-overlay p-3 shadow-xl space-y-2 sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:mt-1 sm:max-h-none sm:w-80 sm:overflow-visible">
+                <p className="text-xs text-content-muted">
+                  Ranks the <strong>current filter</strong> by how close each image is to your
+                  words. It refines what the grid is showing — it does not search the whole bank.
+                </p>
+                <label htmlFor="bank-text-search" className="block text-sm text-content">
+                  What are you looking for?
+                </label>
+                <input id="bank-text-search" type="search" value={textQuery}
+                  placeholder="brunette outdoors, wide shot"
+                  onChange={(e) => setTextQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !textPending) runTextSearch() }}
+                  className="w-full rounded-md border border-border bg-surface px-2 py-1 text-sm text-content" />
+                <label className="flex items-center gap-2 text-sm text-content">
+                  How many
+                  <input type="number" min={1} max={2000} value={textN}
+                    onChange={(e) => setTextN(Math.max(1, Math.min(2000, Number(e.target.value) || 1)))}
+                    className="w-20 rounded-md border border-border bg-surface px-2 py-0.5 text-sm text-content" />
+                </label>
+                {/* The cost, BEFORE the click — a cold CLIP load is ~10 s and an
+                    unexplained wait is exactly how this reads as a hang. */}
+                <p className="text-xs text-content-subtle">{readinessHint(textStatus)}</p>
+                <p className="text-xs text-amber-300/80">{limitsSentence()}</p>
+                <button type="button" onClick={runTextSearch}
+                  disabled={textPending || !textQuery.trim()}
+                  className="w-full rounded-md bg-gradient-primary px-3 py-1 text-xs font-semibold text-white disabled:opacity-50">
+                  {textPending ? pendingLabel(textStatus) : `Rank the closest ${textN}`}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
         {scored === 0 && (
           <span className="text-xs text-content-subtle">Run ✨ Score to unlock curation.</span>
         )}
@@ -1347,6 +1466,33 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
           className="rounded-md border border-border bg-surface-raised px-2.5 py-0.5 text-xs text-content disabled:opacity-50 hover:bg-surface">
           📊 Coverage advice{coverageOpen ? ' ▲' : ' ▼'}
         </button>
+      </div>
+
+      {/* 🔤 What the grid is currently showing, in words. This is the whole
+          honesty of the feature: the grid alone would read as "these match",
+          when it is a RANKING in which everything scores something. The range,
+          the strength wording and the unsearchable count live here. aria-live so
+          a screen reader hears the outcome — the grid change is silent. */}
+      <div aria-live="polite">
+        {textResult && (
+          <div className="mt-2 space-y-1 rounded-lg border border-indigo-400/40 bg-indigo-500/10 px-3 py-2 text-xs text-content">
+            <div className="flex flex-wrap items-start gap-x-2 gap-y-1">
+              <span aria-hidden>🔤</span>
+              <span className="min-w-0 flex-1">{summarize(textResult)}</span>
+              <button type="button"
+                onClick={() => { setTextResult(null); setShowSelected(false); refreshImages(filter, 0, { on: false }) }}
+                className="shrink-0 rounded-md border border-border px-2 py-0.5 text-xs text-content hover:bg-surface-raised">
+                Clear search
+              </button>
+            </div>
+            {textResult.cached === false && (
+              <p className="text-content-subtle">
+                This phrase is now cached — searching it again is instant, even after a restart.
+              </p>
+            )}
+            <p className="text-amber-300/80">{limitsSentence()}</p>
+          </div>
+        )}
       </div>
 
       {coverageOpen && (

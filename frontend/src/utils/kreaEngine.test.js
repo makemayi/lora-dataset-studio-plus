@@ -140,7 +140,11 @@ test('a file that is PRESENT but is not weights gets named, not left to ComfyUI'
       invalidAssets: [{ asset: 'krea_identity_lora', filename: 'id.safetensors',
         verdict: 'truncated_or_garbage', blocking: true }],
     }),
-    /truncated or corrupt/);
+    // Wording now comes from the SHARED helper (utils/modelIntegrityWords.js), so
+    // Klein and Krea describe one corrupted file the same way. It also says what
+    // "truncated" actually means, because the person reading it is looking at a
+    // file of plausible size and needs to know why it counts as broken.
+    /cut short or corrupted/);
 
   // An ADVISORY (too_small) is not a reason to refuse the engine.
   assert.equal(kreaUnavailableReason({

@@ -11,6 +11,7 @@
    a LoRA somewhere, or fix their ComfyUI URL. So the reason is computed here,
    from the capabilities payload, and it is unit-tested — one branch per real
    failure mode, in the order the user must fix them. */
+import { brokenAssetReason, blockingInvalid } from './modelIntegrityWords.js';
 
 /** Setup/capabilities asset keys -> the words a sentence uses. Mirrors
  *  krea_edit_helper.KREA_ASSETS; an unknown key falls back to itself rather
@@ -73,16 +74,11 @@ export function kreaUnavailableReason({
   // HTML or a half file as .safetensors. The file exists, which is why "missing"
   // says nothing — and without this the only symptom was ComfyUI's raw
   // "Expecting value: line 1 column 1 (char 0)" at generate time.
-  const broken = (Array.isArray(invalidAssets) ? invalidAssets : []).filter((i) => i && i.blocking);
-  if (broken.length) {
-    const b = broken[0];
-    const what = KREA_ASSET_LABELS[b.asset] || b.asset;
-    const why = b.verdict === 'html_or_text'
-      ? 'it is a web page, not weights — the download skipped the licence/login step'
-      : 'the file is truncated or corrupt';
-    return `⚠ Krea ${what} (${b.filename}) cannot be loaded: ${why}. `
-      + 'Delete it and download it again.';
-  }
+  // Worded by the SHARED helper: Klein hit the same class of failure (a truncated
+  // 9.5 GB UNET reported as "missing", zigzag4794 on Discord) and one corrupted
+  // file must not be described two different ways two screens apart.
+  const broken = blockingInvalid(invalidAssets);
+  if (broken.length) return brokenAssetReason('Krea', broken[0], KREA_ASSET_LABELS);
   return null;
 }
 

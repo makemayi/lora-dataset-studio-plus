@@ -32,14 +32,19 @@ const ROW_META = {
 // precondition isn't met yet render their hint (a pointer back to the config step) instead of
 // a button. The tile stays even once installed, so a broken venv can be rebuilt at any time.
 function InstallItem({ item, onDone }) {
-  const { action, label: lbl, present, available, hint, state, stateLabel } = item
-  // A component can be in a THIRD state: on disk, but not yet live (the Krea node
-  // pack, which ComfyUI only registers at startup). Claiming "✓ Installed" there
-  // would certify something the app cannot see; claiming "✗ Not installed" would
-  // invite a re-install of a folder that is already right. So the badge says what
-  // to do — and it is amber, not green.
-  const badgeCls = state === 'restart' ? 'text-amber-400'
-    : present ? 'text-emerald-400' : 'text-content-subtle'
+  const { action, label: lbl, present, available, hint, state, stateLabel, brokenReason } = item
+  // A component can be in a THIRD state, and there are now two of them:
+  //   'restart' — on disk but not yet live (the Krea node pack, which ComfyUI only
+  //               registers at startup);
+  //   'broken'  — on disk, right name, right size, and NOT loadable (a truncated or
+  //               corrupted download, a licence page saved as .safetensors).
+  // Both are cases where "✓ Installed" would certify something that does not work
+  // and "✗ Not installed" would describe a file the user can see. Each badge is a
+  // WORD, not just a colour — the glyph and the text carry the state, so it reads
+  // the same to anyone who doesn't perceive the hue.
+  const badgeCls = state === 'broken' ? 'text-rose-300'
+    : state === 'restart' ? 'text-amber-400'
+      : present ? 'text-emerald-400' : 'text-content-subtle'
   return (
     <div className="rounded-md border border-border bg-surface-raised p-3 space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
@@ -48,9 +53,15 @@ function InstallItem({ item, onDone }) {
           {stateLabel || (present ? '✓ Installed' : '✗ Not installed')}
         </span>
       </div>
+      {/* The fault and the fix, in the user's own file name. Wraps freely: it must
+          stay readable at 400px. */}
+      {brokenReason && (
+        <p className="break-words text-xs text-rose-300">{brokenReason}</p>
+      )}
       {available ? (
         <InstallRunner action={action}
-          buttonLabel={(present || state === 'restart') ? '↻ Reinstall' : 'Install'}
+          buttonLabel={state === 'broken' ? '↻ Download again'
+            : (present || state === 'restart') ? '↻ Reinstall' : 'Install'}
           onDone={onDone} />
       ) : (
         <p className="text-xs text-content-subtle">{hint}</p>

@@ -168,6 +168,42 @@ Klein needs a reachable ComfyUI **and** the Klein model files (~16 GB VRAM
 class). **Setup → ComfyUI** offers the download; the license-gated fp8 model
 needs a Hugging Face token (Settings → Local tools).
 
+Whatever the cause, the greyed-out engine now **names it**, and the Setup wizard
+shows the same sentence — the two screens read one verdict, so they cannot send
+you to fix different things. The causes, and what each one means:
+
+| What it says | What it means | What to do |
+| --- | --- | --- |
+| `Configure ComfyUI in Settings` | ComfyUI is not answering | Start it, or fix the API URL |
+| `Klein <file(s)> missing` | that weight is not on disk | Download it in Setup ▸ Install components |
+| `… is on disk but cannot be loaded` | the file is there but unreadable | See below |
+| `Your ComfyUI doesn't have <value>` | the graph pins a widget value your ComfyUI doesn't offer | Install the named node pack, restart ComfyUI |
+| `disabled in Settings (engines)` | you turned the engine off | Re-enable it in Settings ▸ Engines |
+
+### "On disk but cannot be loaded"
+
+A `.safetensors` file declares the length of its JSON header in its first eight
+bytes. A download that was **cut short or corrupted** leaves a file that is
+shorter than it claims — plausible size, right name, right folder, and no loader
+can open it. A licence or login page saved as `.safetensors` fails the same way.
+
+Setup used to tick these as **✓ Installed** (the file existed) while the
+generation page refused the engine. It now shows **⚠ On disk, unreadable** with
+the file name and the reason, and **↻ Download again** replaces the bad file
+instead of reporting "already present" and doing nothing.
+
+If you placed the file by hand somewhere other than the folder Setup downloads
+into, delete it yourself first — the app only replaces files at its own path.
+
+*(Reported by zigzag4794 on Discord.)*
+
+### "Not checked" is not "ready"
+
+With ComfyUI stopped, the checks that need it cannot run, and the app reports no
+gap rather than inventing one. Your files being on disk is therefore **not** a
+clean bill of health, and Setup says so instead of showing a tick it did not
+earn. Start ComfyUI and re-check.
+
 ## Port 5000 conflict on macOS
 
 macOS reserves port 5000 for AirPlay Receiver. Change the port in

@@ -5,9 +5,17 @@ import {
   comfyuiDirVerdict, COMFYUI_SKIP_LOST, COMFYUI_SKIP_KEPT,
   aitoolkitVerdict, AITOOLKIT_INSTALL_STEPS,
 } from './useSetupSteps.js';
+// installAllPlan / installCatalog are imported further down, next to their own
+// sections; kreaInstallPlan has no other importer here.
+import { kreaInstallPlan } from './useSetupSteps.js';
+import { localEngineUnavailableReason } from '../utils/localEngineReason.js';
 import fs from 'node:fs';
 
 const comfyStep = (comfyui) => deriveSetupSteps({ comfyui }).find((s) => s.id === 'comfyui');
+// The same step, driven by a FULL capabilities payload — engines included. That is
+// the shape the app actually receives, and the one where Setup reads the backend's
+// verdict instead of re-deriving its own.
+const comfyStepFull = (caps) => deriveSetupSteps(caps).find((s) => s.id === 'comfyui');
 
 test('Klein readiness needs the full trio, not just the UNET', () => {
   // UNET landed, but the backend still lists the text-encoder + VAE as missing:
@@ -113,6 +121,114 @@ test('legacy payload without klein_missing falls back to the UNET scan', () => {
   const noUnet = comfyStep({ reachable: true, models: { klein: [] } });
   assert.equal(noUnet.hasKlein, false);
   assert.deepEqual(noUnet.kleinMissing, ['klein_model']);
+});
+
+/* --- "Ready" must mean the same thing on every screen ------------------------
+
+   Reported by zigzag4794 (Discord): Setup showed ✓ Installed for every required
+   Klein model, ComfyUI tested OK, the 9.5 GB file was in models/unet/klein/ — and
+   the Generate page kept Klein greyed out with "⚠ Klein model missing — download
+   it in the Setup step". Both screens were sincere. `/api/capabilities` had the
+   answer all along: both model files under `klein_invalid`, verdict
+   `truncated_or_garbage`. The integrity validator existed and worked; the Setup
+   screen simply never asked it, and judged each file on presence alone.
+
+   These tests pin the contract, not the wording: ONE verdict (the backend's),
+   consumed by both, and a sentence that names the real gap. */
+
+const CORRUPT_KLEIN = [
+  { asset: 'klein_model', filename: 'flux-2-klein-9b-kv-fp8.safetensors',
+    verdict: 'truncated_or_garbage', blocking: true,
+    reason: 'flux-2-klein-9b-kv-fp8.safetensors is shorter than its header declares' },
+];
+
+const zigzagCaps = () => ({
+  engines: { klein: false, krea: false },   // what the BACKEND concluded
+  comfyui: {
+    reachable: true, dir_valid: true,
+    klein_missing: ['klein_lora'],          // recommended only — nothing required is absent
+    klein_unsupported_enums: [],
+    klein_invalid: CORRUPT_KLEIN,
+  },
+});
+
+test('a corrupted weight keeps Setup from claiming Klein is ready', () => {
+  const step = comfyStepFull(zigzagCaps());
+  assert.equal(step.hasKlein, false);
+  assert.equal(step.status, 'partial');
+  assert.equal(step.kleinBroken.length, 1);
+  assert.equal(step.kleinFilesReady, false);
+});
+
+test('Setup and the generation panel give the SAME reason, word for word', () => {
+  // Not "both say something is wrong" — literally the same sentence, because both
+  // read utils/localEngineReason.js. Two wordings for one gap is how the user ends
+  // up believing they are two problems.
+  const caps = zigzagCaps();
+  assert.equal(comfyStepFull(caps).kleinReason,
+    localEngineUnavailableReason('klein', caps));
+});
+
+test('Setup never says "missing" about a file that is on the disk', () => {
+  const reason = comfyStepFull(zigzagCaps()).kleinReason;
+  assert.doesNotMatch(reason, /missing/i);
+  assert.match(reason, /flux-2-klein-9b-kv-fp8\.safetensors/);
+  assert.match(reason, /Delete it and download it again/);
+});
+
+test('the install menu stops badging an unreadable file "✓ Installed"', () => {
+  // THE screen zigzag was reading. `present: false` is not cosmetic — it is what
+  // puts the asset back into the install plans so the button has work to do.
+  const rows = installCatalog(zigzagCaps());
+  const unet = rows.find((r) => r.action === 'klein_model');
+  assert.equal(unet.present, false);
+  assert.equal(unet.state, 'broken');
+  assert.match(unet.stateLabel, /unreadable/);
+  assert.match(unet.brokenReason, /flux-2-klein-9b-kv-fp8\.safetensors/);
+  // A file that is genuinely fine is untouched.
+  assert.equal(rows.find((r) => r.action === 'klein_vae').present, true);
+});
+
+test('a corrupted weight is re-queued by the one-click install, not skipped', () => {
+  // Without this the plan is empty, the card says "everything is in place", and
+  // the engine stays dark with no way forward from inside the app.
+  assert.ok(installAllPlan(zigzagCaps()).includes('klein_model'));
+  const kreaBroken = {
+    engines: { krea: false },
+    comfyui: { reachable: true, dir_valid: true, krea_missing: [],
+      krea_nodes_installed: true, krea_nodes_missing: [],
+      krea_invalid: [{ asset: 'krea_model', filename: 'k.safetensors',
+        verdict: 'html_or_text', blocking: true }] },
+  };
+  assert.deepEqual(kreaInstallPlan(kreaBroken), ['krea_model']);
+});
+
+test('an unreachable ComfyUI produces "not checked", never a ✓', () => {
+  // The unsupported-value and node probes fail OPEN by design — an unreachable
+  // ComfyUI reports no gap rather than inventing one. So "no warnings" here is the
+  // absence of an answer, not a clean bill of health, and the step must not read
+  // as ready on the strength of it.
+  const step = comfyStepFull({
+    engines: { klein: false },
+    comfyui: { reachable: false, dir_valid: true, klein_missing: [],
+      klein_unsupported_enums: [], klein_invalid: [] },
+  });
+  assert.equal(step.hasKlein, false);
+  assert.equal(step.status, 'available');
+  assert.equal(step.kleinVerified, false);
+  // …and the files themselves ARE fine, which is a different sentence.
+  assert.equal(step.kleinFilesReady, true);
+});
+
+test('Setup does not second-guess the backend when it says the engine is up', () => {
+  const step = comfyStepFull({
+    engines: { klein: true },
+    comfyui: { reachable: true, dir_valid: true, klein_missing: ['klein_lora'] },
+  });
+  assert.equal(step.hasKlein, true);
+  assert.equal(step.status, 'ready');
+  assert.equal(step.kleinReason, null);
+  assert.equal(step.kleinVerified, true);
 });
 
 // --- Conscious "continue without ComfyUI" skip (Setup Volet 2) --------------

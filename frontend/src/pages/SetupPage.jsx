@@ -336,9 +336,34 @@ export default function SetupPage() {
       // Null on a capable install AND on an unreachable one (the probe fails open),
       // so this line only ever appears when we actually proved the gap.
       const kleinEnumReason = comfyEnumUnavailableReason(step.unsupportedEnums)
-      const installBtn = (action, label) => kleinMissing.includes(action)
-        ? <InstallRunner action={action} buttonLabel={label} onDone={() => refresh(true)} />
-        : <p className="text-xs text-emerald-400">✓ Installed</p>
+      // THE reason Klein is not usable, worded by the same helper the generation
+      // panel uses — so this screen can no longer name a different cause (or a
+      // missing file that is sitting on the disk) from the one that refuses the
+      // engine two clicks later. Null when Klein is ready.
+      const kleinReason = step.kleinReason
+      // A file that is ON DISK but unreadable must never render "✓ Installed": that
+      // badge is what sent a user with a truncated 9.5 GB UNET to look for a file he
+      // already had (zigzag4794, Discord). Three states, three actions — and the
+      // word carries the state, not just the colour.
+      const kleinBrokenBy = {}
+      ;(step.kleinBroken || []).forEach((i) => { kleinBrokenBy[i.asset] = i })
+      const installBtn = (action, label) => {
+        const bad = kleinBrokenBy[action]
+        if (bad) {
+          return (
+            <>
+              <p className="break-words text-xs text-rose-300">
+                ⚠ On disk, unreadable — {bad.filename}. Downloading again replaces it.
+              </p>
+              <InstallRunner action={action} buttonLabel={`↻ Download ${label.replace(/^⬇ Download /, '')} again`}
+                onDone={() => refresh(true)} />
+            </>
+          )
+        }
+        return kleinMissing.includes(action)
+          ? <InstallRunner action={action} buttonLabel={label} onDone={() => refresh(true)} />
+          : <p className="text-xs text-emerald-400">✓ Installed</p>
+      }
       // Live verdict on the CURRENTLY-TYPED directory (from /api/setup/comfyui-dir),
       // shown the moment the field changes — a wrong path, an empty folder, or the
       // launcher/parent folder (with a one-click "use the child" adopt). The verdict
@@ -395,13 +420,28 @@ export default function SetupPage() {
               with a near-equivalent: a scheduler changes the render, and two users
               with identical settings must not get different images. Rendered ahead
               of the weights block — no download fixes this. */}
-          {kleinEnumReason && (
-            <p className="text-xs text-rose-300 break-words">
-              {kleinEnumReason}.{' '}
+          {/* Only when ComfyUI ANSWERED: an unreachable one makes this step's own
+              fields the answer, and "⚠ Configure ComfyUI in Settings" printed on
+              the ComfyUI configuration screen is noise. */}
+          {step.reachable && kleinReason && (
+            <p className="break-words text-xs text-rose-300">
+              {kleinReason}{' '}
               {(step.unsupportedEnums || []).filter((i) => i && i.url).map((i) => (
                 <a key={i.url} href={i.url} target="_blank" rel="noreferrer"
                   className="underline break-all">{i.url}</a>
               ))}
+            </p>
+          )}
+          {/* A ✓ must mean "I checked". With ComfyUI down, the checks that need it
+              (the unsupported-value probe, the node probe) fail OPEN — they report
+              nothing rather than inventing a gap — so every file being on disk is
+              NOT a clean bill of health, and this says so rather than letting an
+              empty warning list read as one. */}
+          {!step.reachable && step.kleinFilesReady && step.dirValid && (
+            <p className="break-words text-xs text-amber-300">
+              ⚠ Not checked — every Klein file is on disk and readable, but ComfyUI isn't
+              answering, so the app could not verify that Klein actually runs here. Start
+              ComfyUI and re-check.
             </p>
           )}
           {step.reachable && !step.hasKlein && (
@@ -551,11 +591,19 @@ export default function SetupPage() {
       if (step.reachable) {
         return (
           <div className="space-y-4">
-            <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-content">
-              ✓ ComfyUI is already running at <span className="font-mono">{step.apiUrl || 'the configured URL'}</span>.
+            {/* The banner used to end with "Klein still needs the ${missingSummary}"
+                — and missingSummary is EMPTY whenever the gap isn't a missing file
+                (a corrupted weight, a widget value this ComfyUI doesn't offer), so
+                the sentence rendered a blank where the cause belonged. It now
+                either confirms readiness or defers to the one shared reason line
+                below, which names the real gap. */}
+            <div className={`rounded-md border px-3 py-2 text-sm text-content ${step.hasKlein
+              ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-amber-500/40 bg-amber-500/10'}`}>
+              <span aria-hidden="true">{step.hasKlein ? '✓' : '⚠'}</span>{' '}
+              ComfyUI is running at <span className="font-mono">{step.apiUrl || 'the configured URL'}</span>.
               {step.hasKlein
-                ? ' Nothing to do here.'
-                : ` It works — Klein still needs the ${missingSummary} (optional, for local generation).`}
+                ? ' Klein is ready — nothing to do here.'
+                : ' Klein is not usable yet (local generation is optional) — see below.'}
             </div>
             {fields}
           </div>

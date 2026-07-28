@@ -22,10 +22,15 @@ test('each curation button feeds its OWN returned ids into the selection view', 
   assert.match(ws, /\/api\/bank\/\$\{bankId\}\/select-similar/);
   assert.match(ws, /const ref = \[\.\.\.selected\]\[0\]/);
   assert.match(ws, /ref_id: ref/);
-  // Both handlers must route through the same "show what you selected" helper —
-  // two calls, one per button.
+  // … and 🔤 Find by text is the third of the same family: its own endpoint, its
+  // own ranked ids, the same view. (Its wording/limits contract lives in
+  // bankTextSearch.test.js; here we only pin that it joins the family.)
+  assert.match(ws, /\/api\/bank\/\$\{bankId\}\/search-text/);
+  // Every handler must route through the same "show what you selected" helper —
+  // one call per selector. Bump this WITH the count when a fourth one lands; the
+  // guard is that no two of them share a code path, not that there are exactly N.
   const feeds = ws.match(/showCuratedSelection\(d\.image_ids\)/g) || [];
-  assert.equal(feeds.length, 2, 'both selectors feed their result into the view');
+  assert.equal(feeds.length, 3, 'each selector feeds its own result into the view');
 });
 
 // "Most diverse" was computed as "most isolated" — the criterion that structurally

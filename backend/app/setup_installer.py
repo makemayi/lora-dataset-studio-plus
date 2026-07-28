@@ -654,6 +654,21 @@ _INSTALL_ALL_ORDER = ('scrape_extras', 'face_scoring', 'masks', 'watermark_inpai
                       'klein_enhancement_lora')
 
 
+def _broken_or_missing(missing, invalid) -> set:
+    """Asset actions that need (re)downloading: absent from disk, OR present under
+    the resolved name but not loadable (capabilities' `*_invalid`, blocking only).
+
+    A corrupted file is not "installed". Judging these lists on `*_missing` alone
+    is what let a one-click install plan NOTHING while the engine stayed dark — the
+    file was there, so nothing looked missing. Mirrored in the front by
+    useSetupSteps.brokenOrMissing; this is the authority both plans recompute."""
+    out = set(missing or [])
+    for i in (invalid or []):
+        if isinstance(i, dict) and i.get('blocking') and i.get('asset'):
+            out.add(i['asset'])
+    return out
+
+
 def _action_needed(action, caps) -> bool:
     """Is `action` both MISSING and satisfiable right now, from live capabilities?
     Pure (caps in, bool out) — the single rule install_all_plan is built from."""
@@ -684,7 +699,8 @@ def _action_needed(action, caps) -> bool:
         # folder). klein_missing already lists exactly the asset actions still absent
         # (required trio + recommended LoRA).
         c = caps.get('comfyui') or {}
-        return bool(c.get('dir_valid')) and action in (c.get('klein_missing') or [])
+        return bool(c.get('dir_valid')) and action in _broken_or_missing(
+            c.get('klein_missing'), c.get('klein_invalid'))
     # The Krea 2 Edit assets are DELIBERATELY absent from this plan even though
     # they are one-click installable everywhere else. "Install everything" runs
     # unattended from a Setup button, and Krea is ~20 GB on top of Klein's ~20 —
@@ -751,7 +767,7 @@ def install_group_plan(group, caps=None) -> list:
     c = (caps or {}).get('comfyui') or {}
     if not c.get('dir_valid'):
         return []                      # nowhere to install into — never guess a path
-    missing_assets = set(c.get('krea_missing') or [])
+    missing_assets = _broken_or_missing(c.get('krea_missing'), c.get('krea_invalid'))
     # Does the pack need INSTALLING? Three states, and the difference matters:
     #   on disk                -> no. Missing nodes then mean a ComfyUI RESTART, and
     #                             re-running the installer would only log "already
@@ -1536,6 +1552,37 @@ def _krea_asset_already_installed(action) -> bool:
         return False
 
 
+def _replace_if_unloadable(action, dest, spec) -> bool:
+    """Is the file already at `dest` unusable weights, and did we clear the way for
+    a fresh download? True = it was blocking-invalid and has been removed, so the
+    caller must download; False = keep it (valid, only advisory-small, or the
+    checker itself could not answer).
+
+    Deleting a user's file is not done lightly, hence the narrow rule: ONLY a
+    blocking verdict (model_integrity: an HTML gate page, or a header the file is
+    too short to satisfy), which is a file no loader can open under any
+    circumstances. A failing checker is never grounds to delete — it falls back to
+    the old skip."""
+    try:
+        from .services import model_integrity
+        res = model_integrity.validate_model_file(dest, min_bytes=spec.get('min_bytes'))
+    except Exception:
+        logger.debug('integrity check failed for %s', action, exc_info=True)
+        return False
+    if res['ok'] or not res['blocking']:
+        return False
+    _append(action, f"the file already here cannot be loaded: {res['reason']}")
+    try:
+        os.remove(dest)
+    except OSError as e:
+        # Say so instead of downloading into a path we could not clear: the write
+        # would fail, or worse, look like it worked.
+        _append(action, f'could not delete it ({e}) — remove it by hand, then retry: {dest}')
+        return False
+    _append(action, 'removed it — downloading a fresh copy')
+    return True
+
+
 def _run_model_download(action) -> int:
     """Stream one model asset (Klein or Krea) into the validated ComfyUI tree.
     Writes to a .part file then renames (a killed download never leaves a half
@@ -1546,8 +1593,18 @@ def _run_model_download(action) -> int:
     spec = _MODEL_DOWNLOADS[action]
     dest = _download_dest_path(action)
     if os.path.isfile(dest):
-        _append(action, f'already present: {dest}')
-        return 0
+        # "Already present" used to end the story here, on ANY existing file. That
+        # made the one remedy the app suggests for a corrupted weight — download it
+        # again — a no-op that reported success: the file stayed broken, every
+        # screen kept certifying it, and there was no way out of the loop from
+        # inside the app (zigzag4794, Discord: a truncated 9.5 GB Klein UNET).
+        # So the same validator the readiness probe uses gets asked first, and a
+        # BLOCKING verdict (an HTML licence page, a truncated/garbage file) makes
+        # this a replacement instead of a skip. The advisory `too_small` never
+        # deletes anything — a small-but-loadable file is the user's, not ours.
+        if not _replace_if_unloadable(action, dest, spec):
+            _append(action, f'already present: {dest}')
+            return 0
     variant = _variant_already_present(action)
     if variant:
         _append(action, f'already present ({variant}) — an earlier build is '

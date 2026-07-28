@@ -4,6 +4,7 @@ import { useToast } from '../common/Toast'
 import {
   INSTALL_ALL_ACTION_LABELS, kreaInstallPlan, kreaNeedsComfyuiRestart,
 } from '../../hooks/useSetupSteps'
+import { localEngineReadiness } from '../../utils/localEngineReason'
 import { HelpBadge } from '../../help/HelpMode'
 
 const POLL_MS = 1200
@@ -47,6 +48,9 @@ export default function KreaInstallCard({ caps, onDone }) {
   const cu = caps?.comfyui || {}
   const dirValid = !!cu.dir_valid
   const needsRestart = kreaNeedsComfyuiRestart(caps)
+  // The engine's REAL verdict, from the backend, identical to the one the
+  // generation panel gates its Krea button on.
+  const readiness = localEngineReadiness('krea', caps)
   const rows = (phase === 'idle' ? plan : tracked) || []
   const doneCount = rows.filter((a) => (statuses[a] || {}).state === 'success').length
   const isTerminal = (s) => s && (s.state === 'success' || s.state === 'error')
@@ -133,9 +137,26 @@ export default function KreaInstallCard({ caps, onDone }) {
           the weights go inside it.
         </p>
       ) : nothingToInstall ? (
-        <p className="mt-3 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-content">
-          ✓ Everything Krea 2 Edit needs is in place.
-        </p>
+        // "Nothing left to download" is NOT "the engine works". This banner used to
+        // say the second while only knowing the first, so a stopped ComfyUI, an
+        // unloaded node pack or a corrupted weight all got a green ✓ here while the
+        // Generate page refused Krea. It now shows the engine's real verdict — the
+        // same one that page reads — and, when it is not ready, the same sentence.
+        readiness.ready ? (
+          <p className="mt-3 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-content">
+            ✓ Krea 2 Edit is ready — nothing left to install.
+          </p>
+        ) : (
+          <p className="mt-3 break-words rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-content">
+            {readiness.reason || '⚠ Krea 2 Edit is not ready yet.'}
+            {!readiness.verified && (
+              <span className="mt-1 block text-content-muted">
+                Every file is downloaded. ComfyUI is not answering, so the app could not
+                check that Krea can actually run — start ComfyUI and re-check.
+              </span>
+            )}
+          </p>
+        )
       ) : (
         <>
           {phase === 'running' && rows.length > 0 && (

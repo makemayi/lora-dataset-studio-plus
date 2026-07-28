@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-28-setup-stops-certifying-broken-models',
+    date: '2026-07-28',
+    title: 'Setup no longer says a model is installed when it cannot be loaded',
+    blurb:
+      'A download that stops halfway leaves a file of plausible size that no loader can open. Setup used to tick it as "✓ Installed" purely because it was there, while the Generate page kept the engine greyed out and blamed a "missing model" — for a file sitting in the right folder. Setup now asks the same question the generation page does, and both give the same answer: the file is named, the fault is named (cut short, corrupted, or a licence page saved as weights), and the fix is one button that replaces it instead of reporting "already present" and doing nothing. The same goes for a widget value your ComfyUI does not offer, and for ComfyUI being unreachable — which now reads as "not checked" rather than a tick nobody earned. Reported by zigzag4794.',
+    to: '/setup',
+  },
+  {
     id: '2026-07-27-face-mask-preview-progress',
     date: '2026-07-27',
     title: 'The face-mask preview now shows what it is doing, and you can walk away from it',
@@ -100,6 +108,14 @@ export const WHATS_NEW = [
     title: '🎨 Pick diverse stops spending your first picks on memes and strangers',
     blurb:
       '"The 60 most diverse" was computed as "the 60 most isolated", and those are not the same thing: the image that is farthest from everything else in a collected bank is usually the botched frame, the meme, or the one photo of somebody else — so the first picks went to exactly what you would have rejected. A new "Skip the odd ones out" slider in the 🎨 Pick diverse popover discounts an image for being alone in the bank, while leaving variety inside your subject completely untouched. HEADS UP: it is ON at 50% by default, so this selection is no longer the same set of images it used to be — set the slider to 0 for the exact previous behaviour, or push it to 100% to be ruthless. No rescan, no GPU: it reuses the ✨ Score embeddings you already have.',
+    to: '/bank',
+  },
+  {
+    id: '2026-07-27-bank-find-by-text',
+    date: '2026-07-27',
+    title: 'Find images in a bank by describing them',
+    blurb:
+      'A new 🔤 Find by text button in the Bank\'s Curate row ranks the images you are currently looking at by how close they are to a phrase — "brunette outdoors, wide shot". It reuses the embeddings ✨ Score already computed, so there is no new model, no download and no GPU work; it even runs while a LoRA trains. Results come back closest-first, and the panel says how far the last result sits from the best, because this is a ranking and not a filter: every image scores something against every phrase. Images that were never scored cannot be found by any phrase, so they are counted and named rather than quietly missing. The first search loads the search model (about ten seconds on the CPU); after that searches are instant, and a phrase you have already used stays free even after a restart. One thing worth knowing before you trust it: it is good at subjects, settings, styles and framing, but it cannot count, it ignores the word "without" — ask for "woman without glasses" and you get glasses — and left/right means nothing to it. Describe what IS in the shot rather than what is missing.',
     to: '/bank',
   },
   {

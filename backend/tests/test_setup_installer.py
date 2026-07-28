@@ -427,6 +427,14 @@ def test_run_model_download_sends_bearer_when_token_set(app, tmp_path, monkeypat
     assert cap['headers'].get('Authorization') == 'Bearer hf_secret'
 
 
+def _safetensors_blob(size=1024):
+    """A structurally VALID .safetensors: 8 little-endian bytes giving the JSON
+    header length, the header, then payload. What model_integrity accepts."""
+    import struct
+    hdr = b'{"__metadata__":{"lds":"test"}}'
+    return struct.pack('<Q', len(hdr)) + hdr + b'\0' * size
+
+
 def test_run_model_download_skips_when_already_present(app, tmp_path, monkeypatch):
     from app import setup_installer, config
     base = _make_comfyui(tmp_path)
@@ -437,12 +445,100 @@ def test_run_model_download_skips_when_already_present(app, tmp_path, monkeypatc
         dest = setup_installer._download_dest_path('klein_lora')
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         with open(dest, 'wb') as f:
-            f.write(b'already downloaded')
+            # A LOADABLE file. It used to be b'already downloaded' -- 18 bytes of
+            # prose, which is precisely the shape this skip must no longer accept.
+            f.write(_safetensors_blob())
         monkeypatch.setattr(setup_installer.requests, 'get', boom)
         setup_installer._runs['klein_lora'] = setup_installer._new_run()
         rc = setup_installer._run_model_download('klein_lora')
     assert rc == 0
     assert any('already present' in l for l in setup_installer._runs['klein_lora']['log'])
+
+
+def test_a_file_that_cannot_be_loaded_is_replaced_not_skipped(app, tmp_path, monkeypatch):
+    """The dead end reported by zigzag4794 (Discord).
+
+    His Klein UNET was on disk, in the right folder, at a plausible 9.5 GB, and
+    capabilities reported it under `klein_invalid` with verdict
+    `truncated_or_garbage` -- an interrupted download. The app's advice for that
+    is "download it again", and the downloader answered "already present: <path>"
+    and returned SUCCESS on any existing file. So the one remedy the UI offered
+    could not work, and there was no way out from inside the app.
+
+    Presence is not readability. The same validator the readiness probe uses gets
+    asked first now, and a blocking verdict makes this a replacement."""
+    from app import setup_installer, config
+    base = _make_comfyui(tmp_path)
+    good = _safetensors_blob(4096)
+    with app.app_context():
+        config.save_config({'comfyui': {'base_dir': str(base)}})
+        dest = setup_installer._download_dest_path('klein_vae')
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, 'wb') as f:
+            # Declares a 4 GB JSON header it does not have: structurally garbage,
+            # exactly what a cut-short download leaves behind.
+            import struct
+            f.write(struct.pack('<Q', 4 * 1024 ** 3) + b'\0' * 512)
+        monkeypatch.setattr(setup_installer.requests, 'get', _FakeGet(payload=good))
+        setup_installer._runs['klein_vae'] = setup_installer._new_run()
+        rc = setup_installer._run_model_download('klein_vae')
+    log = setup_installer._runs['klein_vae']['log']
+    assert rc == 0
+    assert not any('already present' in l for l in log)
+    assert any('cannot be loaded' in l for l in log)
+    assert any('downloading a fresh copy' in l for l in log)
+    with open(dest, 'rb') as f:
+        assert f.read() == good        # the broken file is gone, the good one is in
+
+
+def test_an_advisory_small_file_is_never_deleted(app, tmp_path, monkeypatch):
+    """`too_small` is advisory: the file LOADS, it is merely suspicious. Deleting a
+    user's weights on a hunch is not a repair, so the skip stands."""
+    from app import setup_installer, config
+    base = _make_comfyui(tmp_path)
+    def boom(*a, **k):
+        raise AssertionError('a loadable file must never be re-downloaded')
+    with app.app_context():
+        config.save_config({'comfyui': {'base_dir': str(base)}})
+        dest = setup_installer._download_dest_path('klein_model')
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, 'wb') as f:
+            f.write(_safetensors_blob(64))          # valid, but far under the 1 GB floor
+        monkeypatch.setattr(setup_installer.requests, 'get', boom)
+        setup_installer._runs['klein_model'] = setup_installer._new_run()
+        rc = setup_installer._run_model_download('klein_model')
+    assert rc == 0
+    assert os.path.isfile(dest)
+    assert any('already present' in l for l in setup_installer._runs['klein_model']['log'])
+
+
+def test_a_broken_weight_is_re_queued_by_the_one_click_installs():
+    """Before: `klein_missing` says nothing (the file is there), so the plan was
+    empty, the Setup card said "everything is in place", and the engine stayed
+    dark. A file no loader can open is not installed."""
+    from app import setup_installer
+    caps = {
+        'face_scoring': True, 'masks': True, 'watermark_inpaint': True, 'scrape_deps': True,
+        'ollama': {'reachable': False},
+        'comfyui': {
+            'dir_valid': True, 'reachable': True, 'klein_missing': [],
+            'klein_invalid': [{'asset': 'klein_model', 'filename': 'k.safetensors',
+                               'verdict': 'truncated_or_garbage', 'blocking': True}],
+        },
+    }
+    assert setup_installer.install_all_plan(caps) == ['klein_model']
+
+    # Same rule for the Krea group button, and the advisory verdict still doesn't count.
+    krea = {'comfyui': {
+        'dir_valid': True, 'reachable': True, 'krea_missing': [], 'krea_nodes_installed': True,
+        'krea_nodes_missing': [],
+        'krea_invalid': [
+            {'asset': 'krea_model', 'filename': 'a.safetensors',
+             'verdict': 'html_or_text', 'blocking': True},
+            {'asset': 'krea_vae', 'filename': 'b.safetensors',
+             'verdict': 'too_small', 'blocking': False},
+        ]}}
+    assert setup_installer.install_group_plan('krea', krea) == ['krea_model']
 
 
 def test_start_klein_blocks_on_low_disk(app, tmp_path, monkeypatch):

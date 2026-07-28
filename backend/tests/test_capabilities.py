@@ -188,6 +188,49 @@ def test_klein_engine_dark_when_unet_is_html_gate_page(app, monkeypatch, tmp_pat
     assert 'HTML' in invalid['klein_model']['reason']
 
 
+def test_a_truncated_download_is_reported_as_broken_not_missing(app, monkeypatch, tmp_path):
+    """zigzag4794's install (Discord), as a payload contract.
+
+    ComfyUI up, every required file in its folder at a plausible size, Setup
+    showing "✓ Installed" — and the Generate page refusing Klein with "model
+    missing". The bytes tell the real story: a .safetensors declares its JSON
+    header length in its first 8 bytes, and an interrupted download leaves a file
+    shorter than it claims. `truncated_or_garbage`.
+
+    This pins the wire format both screens read, because that is where the two
+    used to be able to disagree: the asset is NOT in klein_missing (it is on
+    disk), it IS in klein_invalid as blocking, and engines.klein is False. A front
+    end given this payload has everything it needs to say "corrupted — delete and
+    download again" instead of guessing "missing"."""
+    monkeypatch.setenv('OPENAI_API_KEY', '')
+    with app.app_context():
+        from app import capabilities, config
+        from app.services import model_integrity
+        model_integrity.clear_cache()
+        base = tmp_path / 'Comfy'
+        (base / 'models' / 'unet' / 'klein').mkdir(parents=True)
+        # Declares a 4 GB header it does not carry — the shape of a download that
+        # stopped, or a file copied off a full disk.
+        (base / 'models' / 'unet' / 'klein' / 'flux-2-klein-9b-kv-fp8.safetensors').write_bytes(
+            struct.pack('<Q', 4 * 1024 ** 3) + b'\0' * 4096)
+        (base / 'models' / 'vae').mkdir(parents=True)
+        (base / 'models' / 'vae' / 'flux2-vae.safetensors').write_bytes(_VALID_ST)
+        (base / 'models' / 'text_encoders').mkdir(parents=True)
+        (base / 'models' / 'text_encoders' / 'qwen_3_8b_fp8mixed.safetensors').write_bytes(_VALID_ST)
+        config.save_config({'comfyui': {'base_dir': str(base)}})
+        with patch('app.capabilities._http_ok', return_value=True):
+            caps = capabilities.probe(force=True)
+    assert caps['engines']['klein'] is False
+    assert 'klein_model' not in caps['comfyui']['klein_missing']   # it is NOT missing
+    invalid = {i['asset']: i for i in caps['comfyui']['klein_invalid']}
+    assert invalid['klein_model']['verdict'] == 'truncated_or_garbage'
+    assert invalid['klein_model']['blocking'] is True
+    assert invalid['klein_model']['filename'] == 'flux-2-klein-9b-kv-fp8.safetensors'
+    # Nothing else was wrong on his machine — which is exactly why blaming the
+    # weights read as nonsense: the enum probe found no gap either.
+    assert caps['comfyui']['klein_unsupported_enums'] == []
+
+
 def test_klein_invalid_too_small_is_advisory_and_does_not_gate(app, monkeypatch, tmp_path):
     """A tiny-but-structurally-valid stub (a download that stopped right after the
     header) is reported in klein_invalid as an advisory `too_small` — but being

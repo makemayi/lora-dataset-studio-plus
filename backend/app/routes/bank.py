@@ -556,6 +556,54 @@ def bank_select_similar(bank_id):
     return jsonify({'ok': True, **out})
 
 
+@bp.post('/bank/<int:bank_id>/search-text')
+def bank_search_text(bank_id):
+    """Rank the current filter by CLIP similarity to a written QUERY. Reuses the
+    ✨ Score embeddings; only the phrase is encoded, in the ML interpreter.
+
+    Top-N only, and deliberately NO min_score — unlike select-similar. On a real
+    bank the correct-hit and unrelated-pair score distributions overlap (correct
+    0.177-0.233, unrelated up to 0.197), so no threshold separates them and a
+    knob here would be a control over a boundary that does not exist. See
+    ``banks.search_by_text``.
+
+    400 = the request cannot be answered (no query, bank never scored).
+    503 = the FEATURE is unavailable here (no torch/open_clip, encoder failed) —
+    a different thing, and the UI says so differently: one is "do this first",
+    the other is "this install cannot do this at all"."""
+    from ..services.clip_text_encoder import TextEncodeError
+    data = request.get_json(silent=True) or {}
+    try:
+        n = int(data.get('n') or 60)
+    except (TypeError, ValueError):
+        n = 60
+    try:
+        out = banks.search_by_text(LOCAL_USER, bank_id, data.get('query'), n=n,
+                                   filters=_curation_filters(data))
+    except TextEncodeError as e:
+        return jsonify({'error': str(e), 'reason': 'encoder_unavailable'}), 503
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, **out})
+
+
+@bp.get('/bank/text-search/status')
+def bank_text_search_status():
+    """Is text search available, is the model already warm, how many phrases are
+    cached, would a download be needed — everything the UI needs to set
+    expectations BEFORE the click rather than after an unexplained wait."""
+    from ..services import clip_text_encoder
+    return jsonify({'ok': True, **clip_text_encoder.status()})
+
+
+@bp.post('/bank/text-search/release')
+def bank_text_search_release():
+    """Reap the warm text encoder now (~2.4 GB back). Called when the search
+    panel closes; the idle timer is the backstop for a tab that just went away."""
+    from ..services import clip_text_encoder
+    return jsonify({'ok': True, 'released': clip_text_encoder.release()})
+
+
 @bp.get('/bank/<int:bank_id>/delete-rejected/preview')
 def bank_delete_rejected_preview(bank_id):
     """What 🗑 Delete rejected would really do, for the confirmation dialog: how
