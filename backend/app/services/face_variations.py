@@ -738,14 +738,17 @@ KREA_MARKINGS_LOCK = (
 # after any resize instead of assuming a bigger palette is automatically flatter.
 # Every entry differs from the others on at least two of colour / cut / sleeve
 # length / material, so two shots that DO share a garment still look apart, and
-# every one of them is plausible from a face crop to a full body. Entries 26+
+# every one of them is plausible from a face crop to a full body. Entries 26-55
 # lean deliberately more form-fitting/revealing (community request) than the
-# first 25's neutral-everyday set — both registers can land on ANY co=True shot
-# (street, cafe, park…), which is the point: the palette is a general wardrobe
-# pool, not scene-matched, so nothing here may assume a specific setting.
+# first 25's neutral-everyday set; entries 56-71 add a fashion-forward/glamour
+# register (eveningwear, going-out fabrics) on top of that (community request).
+# All three registers can land on ANY co=True shot (street, cafe, park…), which
+# is the point: the palette is a general wardrobe pool, not scene-matched, so
+# nothing here may assume a specific setting.
 # Nothing here may name a summonable skin feature (see _SUMMONABLE in the
 # tests): 'scarf' contains 'scar'.
 KREA_OUTFIT_PALETTE = (
+    # 1-25: neutral everyday (the original set).
     'a plain white cotton t-shirt',
     'a red knit sweater',
     'a navy blue zip hoodie',
@@ -771,6 +774,7 @@ KREA_OUTFIT_PALETTE = (
     'a plum velvet top',
     'a silver grey satin blouse',
     'a coral sleeveless linen top',
+    # 26-55: form-fitting/revealing (community request).
     'a black bodycon mini dress',
     'a red satin slip dress',
     'a white cropped tank top',
@@ -801,6 +805,25 @@ KREA_OUTFIT_PALETTE = (
     'a one-shoulder bodycon dress',
     'a metallic mini skirt',
     'a ribbed knit bodycon dress',
+    # 56-71: fashion-forward/glamour (community request) — a distinct sexy-chic
+    # register from 26-55's plain form-fitting basics: statement silhouettes,
+    # eveningwear and going-out fabrics (sequin, vinyl, fringe, animal print).
+    'a satin cowl-neck slip dress',
+    'a fitted vinyl catsuit',
+    'a plunge-back sequin gown',
+    'a cut-out swimsuit-style bodysuit',
+    'a houndstooth mini dress',
+    'a fringe mini dress',
+    'a snakeskin-print bodycon dress',
+    'a mesh long-sleeve bodysuit with waist cut-outs',
+    'a chrome vinyl mini skirt',
+    'a draped one-shoulder satin gown',
+    'a lace-up leather mini dress',
+    'a tailored blazer dress with nothing underneath',
+    'a sequined tube dress',
+    'a monochrome halter jumpsuit',
+    'an animal-print wrap dress',
+    'a metallic bandeau top with a matching mini skirt',
 )
 
 

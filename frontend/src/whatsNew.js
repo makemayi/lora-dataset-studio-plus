@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-30-krea-outfit-palette-glamour',
+    date: '2026-07-30',
+    title: 'Krea 2 wardrobe grows to 71 outfits with a fashion-forward/glamour register',
+    blurb:
+      "The palette had neutral everyday basics and form-fitting/revealing pieces, but nothing in between for a sexy, going-out look. 16 new garments add eveningwear and statement fabrics — sequin, vinyl, fringe, animal print — like a plunge-back sequin gown, a fitted vinyl catsuit and a draped one-shoulder satin gown. Same rules as always: every garment differs from the others in cut, colour or material, and the pinned distribution test was re-verified so no single outfit ends up overloaded. Community-requested.",
+    to: '/settings/engines',
+  },
+  {
     id: '2026-07-30-nsfw-classic-poses',
     date: '2026-07-30',
     title: '16 classic nude poses added to the NSFW catalog, every one keeping the face in frame',
@@ -92,9 +100,9 @@ export const WHATS_NEW = [
   {
     id: '2026-07-30-krea-outfit-palette-57',
     date: '2026-07-30',
-    title: 'Krea 2 wardrobe grows from 25 to 57 outfits, including form-fitting/revealing options',
+    title: 'Krea 2 wardrobe grows from 25 to 55 outfits, including form-fitting/revealing options',
     blurb:
-      'A 40+ shot dataset was starting to repeat the same 25 garments. The Krea 2 outfit palette now spans 57, and the new 32 lean more form-fitting or revealing than the original neutral-everyday set — both registers can land on any clothed shot, so a dataset can be steered toward either look without new scene types. Community-requested; the pinned distribution test was re-verified after the resize.',
+      'A 40+ shot dataset was starting to repeat the same 25 garments. The Krea 2 outfit palette now spans 55, and the new 30 lean more form-fitting or revealing than the original neutral-everyday set — both registers can land on any clothed shot, so a dataset can be steered toward either look without new scene types. Community-requested; the pinned distribution test was re-verified after the resize.',
     to: '/settings/engines',
   },
   {
