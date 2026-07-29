@@ -8,7 +8,7 @@ import {
 import {
   ENGINES, LOCAL_ENGINES, API_ENGINES, ENGINE_LABELS, ENGINE_RATES, ENGINE_ACCENTS,
   canonicalEngines, engineBatches, localOnly, localQueuesBehindApi, estimateCost,
-  billingEngines, totalImages, readEngines, writeEngines, regenerateEngineOverride,
+  billingEngines, totalImages, readEngines, writeEngines,
 } from '../components/dataset/engineSelection.js';
 
 // ── The engine is a first-class member of the selection model ────────────────
@@ -69,31 +69,6 @@ test('a profile that only ever knew the legacy key can still name krea', () => {
   assert.equal(map.get('datasetGenerator'), 'krea', 'legacy mirror follows the primary');
 });
 
-// ── Regenerate must not silently reassign a tile to another engine ───────────
-// A tile made by Qwen in a split batch across [krea, qwen] must regenerate on
-// Qwen again — the legacy mirror only ever names 'krea' (the primary), and
-// sending it unconditionally used to switch every regenerate in the dataset
-// to that one engine regardless of which engine actually made the tile.
-
-test('a single checked engine overrides — the deliberate-switch case', () => {
-  const storage = { getItem: () => JSON.stringify(['nanobanana']) };
-  assert.equal(regenerateEngineOverride(storage), 'nanobanana');
-});
-
-test('several checked engines send no override — the tile keeps its own origin', () => {
-  const storage = { getItem: () => JSON.stringify(['krea', 'qwen']) };
-  assert.equal(regenerateEngineOverride(storage), null);
-});
-
-test('nothing checked sends no override either', () => {
-  const storage = { getItem: () => JSON.stringify([]) };
-  assert.equal(regenerateEngineOverride(storage), null);
-});
-
-test('the legacy single-string key alone still overrides (old profile, one engine)', () => {
-  const storage = { getItem: (k) => (k === 'datasetGenerator' ? 'klein' : null) };
-  assert.equal(regenerateEngineOverride(storage), 'klein');
-});
 
 // ── The "why can't I pick it?" sentence — one branch per real failure ────────
 

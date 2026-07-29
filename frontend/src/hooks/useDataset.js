@@ -12,7 +12,7 @@ import { serializeWatermarkRegions } from '../utils/watermarkRegions';
 import { summarizeScrapeImport } from '../utils/smallImageRescue';
 import { trainingRunSelection } from '../utils/checkpointBrowser';
 import { refreshDatasetIfActive } from '../utils/datasetRefresh';
-import { ENGINE_LABELS, regenerateEngineOverride } from '../components/dataset/engineSelection.js';
+import { ENGINE_LABELS } from '../components/dataset/engineSelection.js';
 import { classifyResultMessage } from '../components/dataset/classifyFramingGate.js';
 
 function post(url, body, isForm) {
@@ -961,27 +961,26 @@ export function useDataset() {
   // AND failed tiles — it is the recovery path for failures. `prompt` (optional)
   // is the user-edited core prompt from the tile's ✏️ bubble; omitted → the
   // server reuses the row's / label's prompt (plain 🔄 and reject→regenerate).
-  // The engine override (see regenerateEngineOverride) is sent only when the
-  // workspace currently has exactly ONE engine checked — the deliberate-switch
-  // case. Multi-engine (or empty) selection sends nothing, so the server keeps
-  // each tile's own origin engine instead of reassigning every regenerate in
-  // the dataset to whichever engine happens to be "primary". The Klein MODEL is
-  // deliberately NOT sent any more: it used to ride from localStorage
+  // NEVER sends an engine override: it used to send whatever the workspace's
+  // engine checkboxes currently show, which is ambient UI state that changes
+  // for reasons that have nothing to do with THIS click — glancing at another
+  // engine's cost while a big batch is still generating was enough to silently
+  // reassign an old tile to it on the next 🔄 (reported live: a 50-shot Krea 2
+  // batch still running, Qwen merely checked to compare, and a dissatisfied
+  // tile's regenerate came back on Qwen instead of Krea). There is no UI action
+  // for "regenerate THIS tile on a different engine" to preserve, so regenerate
+  // always keeps the row's own origin engine, unconditionally. The Klein MODEL
+  // is likewise never sent: it used to ride from localStorage
   // (editPage_flux2KleinModel_v1), which could contradict the dataset's own
   // pick on the one path that reads it (a row born on an API engine switching
-  // to Klein). The server resolves that from the dataset now — one setting,
+  // to Klein). The server resolves both from the dataset now — one setting,
   // one answer.
   /* Returns {ok, error}, and `silent` is for the ✏️ edit-prompt bubble: it shows
      the refusal itself, right under the prompt it was about, instead of losing a
      hand-written rewrite to a toast that names no field. */
   const regenerate = useCallback(async (imageId, loraStrength, prompt, { silent = false } = {}) => {
-    let engine = null;
-    try {
-      engine = regenerateEngineOverride(window.localStorage);
-    } catch { /* private mode — legacy behaviour */ }
     const d = await postJson(`/api/dataset/image/${imageId}/regenerate`,
-      { lora_strength: loraStrength, ...(prompt ? { prompt } : {}),
-        ...(engine ? { engine } : {}) });
+      { lora_strength: loraStrength, ...(prompt ? { prompt } : {}) });
     if (d.ok) { toast.success('Regeneration started'); await refresh(); return { ok: true }; }
     const error = d.error || 'Unexpected error';
     if (!silent) toast.error(error);

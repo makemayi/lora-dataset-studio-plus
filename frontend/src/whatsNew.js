@@ -81,7 +81,7 @@ export const WHATS_NEW = [
     date: '2026-07-30',
     title: 'Regenerating a tile no longer jumps to a different image engine',
     blurb:
-      'With several image engines checked at once (a split or "all" multi-engine batch), 🔄 regenerate on any tile silently reassigned it to whichever engine happened to be first-checked — a Qwen shot could come back rendered by Krea instead. Regenerate now only overrides the engine when exactly ONE is checked (the deliberate "I switched engines, redo this old tile with the new one" case); with several checked, or none, it keeps the tile on whichever engine actually made it.',
+      '🔄 regenerate used to send whichever engine happened to be checked in the workspace right then — ambient state that changes for reasons that have nothing to do with that click. Checking Qwen just to compare its cost while a 50-shot Krea 2 batch was still generating was enough to send an unhappy tile\'s regenerate to Qwen instead of Krea. Regenerate no longer sends an engine at all: every tile always regenerates on whichever engine actually made it, full stop.',
   },
   {
     id: '2026-07-30-bust-angle-lighting-variety',
