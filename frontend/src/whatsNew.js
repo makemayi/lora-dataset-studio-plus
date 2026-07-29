@@ -59,7 +59,7 @@ export const WHATS_NEW = [
     date: '2026-07-30',
     title: 'Full-body shots stop copying the reference photo\'s trousers/skirt/shoes',
     blurb:
-      "Every outfit shot names a garment so Klein/Krea don't just improvise — but most of the wardrobe only names a TOP (a sweater, a jacket, a blouse), and on a full-body shot that left the bottoms and shoes completely unsaid, so the model fell back on copying the reference photo's own pants and footwear, material, colour and cut included. The full-body and back-view shot detail now says so explicitly: trousers, skirt and shoes must match the named top, never be copied from the reference. Existing custom \"shot detail\" text in Settings ▸ Image engines keeps whatever you wrote — add the same sentence yourself, or clear the box to pick up this fix.",
+      "Every outfit shot names a garment so Klein/Krea don't just improvise — but most of the wardrobe only names a TOP (a sweater, a jacket, a blouse), and on a full-body shot that left the bottoms and shoes completely unsaid, so the model fell back on copying the reference photo's own pants and footwear, material, colour and cut included. A same-day follow-up fix: the first version of this baked the reminder into every full-body/back shot unconditionally, which meant it also fired on NSFW nude shots that never named any garment at all — nude shots started coming back dressed. It's now only added when a top was actually named, and phrased as a plain \"never copy the reference's bottoms/shoes\" instead of \"choose something to match it\", which was vague enough to make several shots converge on the same generic answer.",
     to: '/settings/engines',
   },
   {

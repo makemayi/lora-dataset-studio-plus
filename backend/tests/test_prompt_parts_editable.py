@@ -33,6 +33,8 @@ def _expected_klein(prompt, st, framing, nsfw, markings):
     noun = fv._KLEIN_SUBJECT_NOUN.get(st, 'subject')
     detail = fv._KLEIN_FRAMING_DETAIL_BY_SUBJECT.get(
         st, fv._KLEIN_FRAMING_DETAIL).get(framing or '', '')
+    if st == 'human' and framing in ('body', 'back') and not nsfw:
+        detail = f'{detail}{fv._BOTTOMS_ANTI_LEAK}' if detail else fv._BOTTOMS_ANTI_LEAK.strip()
     medium = fv._KLEIN_MEDIUM.get(st, fv._KLEIN_MEDIUM_DEFAULT)
     nsfw_tail, sfw_tail = fv._KLEIN_RENDER_TAIL.get(st, fv._KLEIN_RENDER_TAIL_DEFAULT)
     ending = nsfw_tail if nsfw else sfw_tail

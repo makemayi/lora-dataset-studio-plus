@@ -493,14 +493,26 @@ _KLEIN_FRAMING_DETAIL = {
              'posed, hands relaxed if visible, 50mm lens look.'),
     'body': ('Full-length shot: the ENTIRE body visible from head to toe including the '
              'feet, natural standing distance, 35mm lens look, the figure well '
-             'proportioned within the frame. The garment named above may only describe '
-             'a top — trousers, skirt, and shoes must still be chosen to match it and '
-             'NEVER copied from the reference image\'s own bottoms or footwear.'),
+             'proportioned within the frame.'),
     'back': ('Seen from behind: back to the camera, head direction natural, full or '
-             'three-quarter figure. The garment named above may only describe a top — '
-             'trousers, skirt, and shoes must still be chosen to match it and NEVER '
-             'copied from the reference image\'s own bottoms or footwear.'),
+             'three-quarter figure.'),
 }
+
+# Bottoms/footwear anti-leak clause (see _compose_edit_prompt): most of the
+# wardrobe only names a TOP, so on a full-body/back shot the reference image's
+# own trousers/skirt/shoes had nothing to compete against and leaked straight
+# through. A first attempt baked this into _KLEIN_FRAMING_DETAIL above
+# unconditionally — which meant it also fired on NSFW nude shots that never
+# named ANY garment, so the model started inventing clothing on shots that are
+# supposed to be nude. Scoped here instead: only appended when a concrete top
+# was actually named (concrete_outfit AND NOT nsfw), and phrased as a pure
+# negation (matches every other anti-leak clause in this file) rather than the
+# earlier "must be chosen to match it", which read as license to invent an
+# outfit and pushed the model toward one generic safe answer instead of the
+# variety the named tops already provide.
+_BOTTOMS_ANTI_LEAK = (
+    " Trousers, skirt, and shoes must NEVER be copied from the reference "
+    "image's own bottoms or footwear.")
 
 # Klein subject noun + per-subject framing detail. The human map above is reused
 # verbatim for 'human' so the human Klein prompt stays byte-identical; the others
@@ -968,6 +980,11 @@ def _compose_edit_prompt(prompt: str, *, nsfw: bool, framing, suffix: str,
     noun = _KLEIN_SUBJECT_NOUN.get(st, 'subject')
     detail = (get_identity_prompt(f'framing_{framing}', st)
               if framing in PROMPT_FRAMINGS else '').strip()
+    if st == 'human' and framing in ('body', 'back') and concrete_outfit and not nsfw:
+        # Only when an actual top was named: an NSFW nude shot has no garment to
+        # name a bottom to "match", and telling the model to invent trousers
+        # anyway is exactly how a nude shot ends up dressed.
+        detail = f'{detail}{_BOTTOMS_ANTI_LEAK}' if detail else _BOTTOMS_ANTI_LEAK.strip()
     medium = _KLEIN_MEDIUM.get(st, _KLEIN_MEDIUM_DEFAULT)
     ending = get_identity_prompt('render_tail_nsfw' if nsfw else 'render_tail_sfw', st)
     body = apply_directive_overrides(_append_suffix(prompt, suffix))
