@@ -725,16 +725,21 @@ KREA_MARKINGS_LOCK = (
 # and no randomness ever leaks into a stored prompt.
 #
 # SIZE IS MEASURED, not decorative. With crc32 modulo N, the load histogram over
-# the shipped catalog depends only on N, so the count was chosen by measuring it:
-# at 12 garments, 41 eligible shots collapsed onto 11 distinct ones with the
-# worst garment carrying 6 (a dataset that trades one uniform for another); at 25
-# they spread over 23 distinct ones with the worst carrying 4. Neighbouring sizes
-# are NOT monotonically better (24 peaks at 5, 22 at 6) — hence the pinned
-# distribution test, which fails if a catalog change re-concentrates the picks.
+# the shipped catalog depends only on N, so a resize is checked by the pinned
+# distribution test (test_the_outfit_palette_spreads_over_the_catalog), which
+# fails if a catalog/palette edit re-concentrates the picks — at 12 garments, 41
+# eligible shots collapsed onto 11 distinct ones with the worst garment carrying
+# 6; at 25, the spread was 23 distinct with the worst carrying 4. Neighbouring
+# sizes are NOT monotonically better (24 peaks at 5, 22 at 6), so re-run the test
+# after any resize instead of assuming a bigger palette is automatically flatter.
 # Every entry differs from the others on at least two of colour / cut / sleeve
 # length / material, so two shots that DO share a garment still look apart, and
-# all of them are neutral, everyday and plausible from a face crop to a full
-# body. Nothing here may name a summonable skin feature (see _SUMMONABLE in the
+# every one of them is plausible from a face crop to a full body. Entries 26+
+# lean deliberately more form-fitting/revealing (community request) than the
+# first 25's neutral-everyday set — both registers can land on ANY co=True shot
+# (street, cafe, park…), which is the point: the palette is a general wardrobe
+# pool, not scene-matched, so nothing here may assume a specific setting.
+# Nothing here may name a summonable skin feature (see _SUMMONABLE in the
 # tests): 'scarf' contains 'scar'.
 KREA_OUTFIT_PALETTE = (
     'a plain white cotton t-shirt',
@@ -762,6 +767,36 @@ KREA_OUTFIT_PALETTE = (
     'a plum velvet top',
     'a silver grey satin blouse',
     'a coral sleeveless linen top',
+    'a black bodycon mini dress',
+    'a red satin slip dress',
+    'a white cropped tank top',
+    'a denim mini skirt',
+    'an off-shoulder ribbed top',
+    'a plunge V-neck bodysuit',
+    'a black leather pencil skirt',
+    'a sheer mesh long-sleeve top',
+    'a halter neck crop top',
+    'a backless satin top',
+    'high-waisted skinny leather pants',
+    'a strapless tube top',
+    'a wrap mini dress',
+    'a corset-style lace-up top',
+    'a cut-out bodycon dress',
+    'a fitted ribbed bodysuit',
+    'a thigh-slit satin skirt',
+    'a spaghetti-strap slip top',
+    'a sequined mini dress',
+    'a velvet halter dress',
+    'a lace-trim camisole top',
+    'a bandage bodycon dress',
+    'a cropped denim jacket over a bralette top',
+    'high-waisted denim shorts with a crop top',
+    'a sheer chiffon blouse',
+    'a fitted turtleneck crop top',
+    'a satin wrap top',
+    'a one-shoulder bodycon dress',
+    'a metallic mini skirt',
+    'a ribbed knit bodycon dress',
 )
 
 
@@ -1066,6 +1101,48 @@ VARIATION_CATALOG = [
     _e('body_silhouette', 'lighting', 'body', 'Body, backlit silhouette',
        'full body shot, backlit near a large window, figure outlined by rim light, elegant '
        'fitted dress, moody interior', co=True, cb=True),
+    # --- Full-body pose variety (community request) : le catalogue plein-pied était
+    # presque entièrement debout — assis/accroupi/allongé manquaient, et aucun plan
+    # plein-pied ne rapprochait le visage. Chaque pose garde "full body shot" et
+    # "the entire body visible" dans le libellé pour ne pas glisser vers un cadrage
+    # buste par erreur (le detail block Klein/Krea insiste déjà là-dessus, mais le
+    # texte du catalogue doit rester cohérent avec lui).
+    _e('body_sit_floor', 'framing', 'body', 'Body sitting, floor',
+       'full body shot, the entire body visible, sitting on the floor, legs to one side, '
+       'relaxed posture, indoor', co=True, cb=True),
+    _e('body_sit_cross', 'framing', 'body', 'Body sitting, cross-legged',
+       'full body shot, the entire body visible, sitting cross-legged on the ground, relaxed, '
+       'outdoor', co=True, cb=True),
+    _e('body_sit_steps', 'background', 'body', 'Body sitting, outdoor steps',
+       'full body shot, the entire body visible, sitting on outdoor steps, elbows resting on '
+       'the knees, casual, daylight', co=True, cb=True),
+    _e('body_crouch', 'framing', 'body', 'Body crouching',
+       'full body shot, the entire body visible, crouching low, forearms resting on the knees, '
+       'looking at the camera, urban background', co=True, cb=True),
+    _e('body_crouch_side', 'framing', 'body', 'Body crouching, one knee down',
+       'full body shot, the entire body visible, crouching on one knee, side angle, balanced '
+       'pose, outdoor', co=True, cb=True),
+    _e('body_lying_front', 'framing', 'body', 'Body lying, propped up',
+       'full body shot, the entire body visible, lying on the front, propped up on the elbows, '
+       'looking at the camera, on the grass', co=True, cb=True, aspect='16:9'),
+    _e('body_lying_back', 'framing', 'body', 'Body lying, on the back',
+       'full body shot, the entire body visible, lying on the back, looking upward, relaxed, '
+       'on a bed', co=True, cb=True, aspect='16:9'),
+    _e('body_lying_side', 'framing', 'body', 'Body lying, on the side',
+       'full body shot, the entire body visible, lying on the side, relaxed pose, resting the '
+       'head on one hand', co=True, cb=True, aspect='16:9'),
+    # Ces deux plans restent "the entire body visible head to toe" — ce qui change
+    # est la DISTANCE au sujet, jamais le cadrage : un plein-pied rapproché est une
+    # vraie pratique photo (objectif plus large, sujet plus proche), pas un plan
+    # buste déguisé. Le dire explicitement évite que le moteur recadre en buste.
+    _e('body_close_low', 'angle', 'body', 'Body, low angle close',
+       'full body shot, the entire body still visible from head to toe, low camera angle '
+       'looking up, the subject standing closer to the camera than a typical full-body shot '
+       'so the face reads clearly, dramatic perspective', co=True, cb=True),
+    _e('body_close_lean', 'angle', 'body', 'Body, leaning toward camera',
+       'full body shot, the entire body still visible from head to toe, standing noticeably '
+       'closer to the camera than usual and leaning slightly forward, wide-angle perspective, '
+       'the face clearly visible and well lit', co=True, cb=True),
     # Gros plans VISAGE en formats variés (preset visage-centré) : la robustesse de
     # format sur le visage lui-même, sans plan corps (corps reste générique).
     _e('face_land', 'framing', 'face', 'Face, landscape framing',
@@ -1749,6 +1826,16 @@ LEGACY_LABEL_ALIASES = {
     'Corps, maillot piscine': 'Body, swimsuit pool',
     'Corps, jean ajusté': 'Body, fitted jeans',
     'Corps, silhouette contre-jour': 'Body, backlit silhouette',
+    'Corps assis, sol': 'Body sitting, floor',
+    'Corps assis, tailleur': 'Body sitting, cross-legged',
+    'Corps assis, marches exterieures': 'Body sitting, outdoor steps',
+    'Corps accroupi': 'Body crouching',
+    'Corps accroupi, un genou': 'Body crouching, one knee down',
+    'Corps allongé, ventre': 'Body lying, propped up',
+    'Corps allongé, dos': 'Body lying, on the back',
+    'Corps allongé, côté': 'Body lying, on the side',
+    'Corps, contre-plongée rapprochée': 'Body, low angle close',
+    'Corps, penché vers la caméra': 'Body, leaning toward camera',
     # Back
     'Dos 3/4': 'Back, three-quarter',
     # Face formats
@@ -1821,9 +1908,10 @@ _FACE_FOCUSED = [
 ]
 # Plein-pied fiable (deep-research 2026-06-16) : pour un LoRA qui doit rendre le
 # CORPS de façon robuste (le perso casse en paysage/pied). On prend TOUT le catalogue
-# corps (11) + dos, et un noyau visage/buste resserré pour rester ~50/50 — entraîner
-# surtout sur des plans corps dégraderait le visage (identité qui dérive). ZÉRO
-# nouvelle variation : tout est déjà dans le catalogue. 10 visage / 4 buste / 11 corps / 1 dos.
+# corps (21, depuis l'ajout des poses assis/accroupi/allongé/rapproché — community
+# request) + dos, et un noyau visage/buste resserré pour rester ~55/45 — entraîner
+# surtout sur des plans corps dégraderait le visage (identité qui dérive).
+# 10 visage / 4 buste / 21 corps / 1 dos.
 _FULLBODY_FOCUSED = [
     'face_front_neutral', 'face_front_smile', 'face_34l_smile', 'face_34r_laugh',
     'face_34r_soft', 'face_profile_l', 'face_window', 'face_golden', 'face_studio',
@@ -1832,6 +1920,10 @@ _FULLBODY_FOCUSED = [
     'body_stand_front', 'body_stand_34', 'body_sit', 'body_walk', 'body_cafe',
     'body_beach', 'body_wide_env', 'body_walk_wide', 'body_land_outdoor',
     'body_sit_terrace', 'body_field_wide',
+    'body_sit_floor', 'body_sit_cross', 'body_sit_steps',
+    'body_crouch', 'body_crouch_side',
+    'body_lying_front', 'body_lying_back', 'body_lying_side',
+    'body_close_low', 'body_close_lean',
     'back_34',
 ]
 # Body-emphasis (fidélité corps, 25 = 8 visage / 8 buste / 8 corps / 1 dos — aligné

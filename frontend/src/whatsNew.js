@@ -48,6 +48,21 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-30-fullbody-pose-variety',
+    date: '2026-07-30',
+    title: 'Ten new full-body poses: sitting, crouching, lying down, and a face-readable close full-body',
+    blurb:
+      'The full-body catalog was almost entirely standing shots, so a LoRA trained on it struggled with anything else. New shots add sitting (floor, cross-legged, outdoor steps), crouching (both knees, one knee down), lying down (front, back, side) and two closer full-body angles where the face still reads clearly instead of the usual distant full-length shot. Full-body-focused now pulls from all 21 body shots plus back view instead of 11. Community-requested.',
+  },
+  {
+    id: '2026-07-30-krea-outfit-palette-57',
+    date: '2026-07-30',
+    title: 'Krea 2 wardrobe grows from 25 to 57 outfits, including form-fitting/revealing options',
+    blurb:
+      'A 40+ shot dataset was starting to repeat the same 25 garments. The Krea 2 outfit palette now spans 57, and the new 32 lean more form-fitting or revealing than the original neutral-everyday set — both registers can land on any clothed shot, so a dataset can be steered toward either look without new scene types. Community-requested; the pinned distribution test was re-verified after the resize.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-07-28-krea-character-lora',
     date: '2026-07-28',
     title: 'Krea 2 Edit: chain up to 5 of your own character LoRAs for extra consistency',
