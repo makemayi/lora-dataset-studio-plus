@@ -18,9 +18,11 @@ IDENTITY_GUARD = (
     "This is the SAME person as the reference image. Preserve their facial identity "
     "EXACTLY: same eye shape and color, nose, jawline, lips, skin tone and texture, "
     "and face proportions. Do NOT beautify, slim, age, or alter the face. Use the "
-    "reference ONLY to lock the facial identity: take the clothing/outfit and the "
-    "facial expression from the description below, and do NOT copy the outfit or the "
-    "expression shown in the reference image. "
+    "reference ONLY to lock the facial identity: take the clothing/outfit, the "
+    "facial expression, AND the head/camera angle from the description below, and "
+    "do NOT copy the outfit, the expression, or the angle shown in the reference "
+    "image — a description that asks for a profile or three-quarter view must turn "
+    "the head/body fully to match it, not stay close to the reference's own angle. "
     "SFW, realistic photographic portrait.")
 
 # Variante multi-références (Nano Banana) : avec un guard au singulier le modèle
@@ -31,9 +33,11 @@ IDENTITY_GUARD_MULTI = (
     "framings). Use EVERY reference image together to lock the identity. Preserve their "
     "facial identity EXACTLY: same eye shape and color, nose, jawline, lips, skin tone "
     "and texture, and face proportions. Do NOT beautify, slim, age, or alter the face. "
-    "Use the reference images ONLY to lock the facial identity: take the clothing/outfit "
-    "and the facial expression from the description below, and do NOT copy the outfit or "
-    "the expression shown in the reference images. "
+    "Use the reference images ONLY to lock the facial identity: take the clothing/outfit, "
+    "the facial expression, AND the head/camera angle from the description below, and do "
+    "NOT copy the outfit, the expression, or the angle shown in any reference image — a "
+    "description that asks for a profile or three-quarter view must turn the head/body "
+    "fully to match it, not stay close to whichever reference angle is closest. "
     "SFW, realistic photographic portrait.")
 
 # Klein restage + face-identity block (see wrap_variation_klein). Held as a named
@@ -990,9 +994,9 @@ VARIATION_CATALOG = [
     _e('face_34r_soft', 'angle', 'face', 'Face 3/4 right, gentle',
        'close-up portrait, three-quarter right view, gentle expression'),
     _e('face_profile_l', 'angle', 'face', 'Profile left',
-       'close-up portrait, left profile view, neutral'),
+       'close-up portrait, strict left profile view, neutral'),
     _e('face_profile_r', 'angle', 'face', 'Profile right',
-       'close-up portrait, right profile view, neutral'),
+       'close-up portrait, strict right profile view, neutral'),
     _e('face_profile_l_smile', 'angle', 'face', 'Profile left, smile',
        'close-up portrait, strict left profile view, slight smile, soft window light, blurred background', cb=True),
     _e('face_profile_r_smile', 'angle', 'face', 'Profile right, smile',
@@ -1041,14 +1045,14 @@ VARIATION_CATALOG = [
     # qui a profil/contre-plongée/golden hour/fenêtre) — juste face/3-4 + fond/tenue.
     # Un LoRA entraîné dessus casse en profil ou en contre-plongée sur un buste.
     _e('bust_profile_l', 'angle', 'bust', 'Bust, profile left',
-       'upper body portrait, left profile view, looking away from camera, neutral, soft indoor light',
-       cb=True),
+       'upper body portrait, strict left profile view, looking away from camera, neutral, '
+       'soft indoor light', cb=True),
     _e('bust_profile_r', 'angle', 'bust', 'Bust, profile right',
-       'upper body portrait, right profile view, looking away from camera, neutral, soft indoor light',
-       cb=True),
+       'upper body portrait, strict right profile view, looking away from camera, neutral, '
+       'soft indoor light', cb=True),
     _e('bust_over_shoulder', 'angle', 'bust', 'Bust, over the shoulder',
-       'upper body portrait, looking back over the shoulder, three-quarter rear angle, soft light',
-       cb=True),
+       'upper body portrait, body and shoulders turned away, looking back over the shoulder '
+       'toward the camera, strict three-quarter rear angle, soft light', cb=True),
     _e('bust_low_angle', 'angle', 'bust', 'Bust, low angle',
        'upper body portrait, camera angled slightly upward from below, looking down toward the lens, '
        'dramatic perspective', cb=True),
@@ -1239,6 +1243,70 @@ NSFW_VARIATION_CATALOG = [
     _e('nsfw_back_nude', 'nsfw', 'back', 'Back, nude',
        'full body shot from behind, standing nude, back and buttocks visible, natural anatomy, '
        'neutral background', co=True, cb=True, aspect='3:4'),
+    # --- Classic nude/glamour poses (community request, ≥15) : toujours "état +
+    # pose + décor", jamais un acte — chaque prompt dit EXPLICITEMENT que le
+    # visage reste visible, y compris sur les plans qui mettent en valeur une
+    # partie du corps (poitrine/hanche/dos), pour empêcher un recadrage serré
+    # qui couperait la tête (le risque nommé par l'utilisateur).
+    _e('nsfw_pose_arch_back', 'nsfw', 'bust', 'Bust, nude, back arched',
+       'bust shot, nude, back gently arched, chest lifted, head turned toward the camera, '
+       'the face fully visible, soft window light', co=True, cb=True),
+    _e('nsfw_pose_collarbone', 'nsfw', 'bust', 'Bust, nude, collarbone',
+       'bust shot, nude, one hand resting at the collarbone, chin up, the face fully visible '
+       'above the hand, soft natural light', co=True, cb=True),
+    _e('nsfw_pose_hand_chest', 'nsfw', 'bust', 'Bust, nude, hand covering chest',
+       'bust shot, nude, one hand resting over part of the chest, relaxed shoulders, the face '
+       'fully visible and well lit, neutral background', co=True, cb=True),
+    _e('nsfw_pose_over_shoulder_bust', 'nsfw', 'bust', 'Bust, nude, glancing over the shoulder',
+       'bust shot, nude, upper back and shoulder turned toward the camera, glancing back over '
+       'the shoulder, the face fully visible and clearly turned into view, soft light',
+       co=True, cb=True),
+    _e('nsfw_pose_stretch', 'nsfw', 'body', 'Body, nude, standing stretch',
+       'full body shot, nude, standing, arms raised overhead in a stretch, body elongated, the '
+       'face fully visible looking toward the camera, soft daylight', co=True, cb=True,
+       aspect='3:4'),
+    _e('nsfw_pose_kneel_bed', 'nsfw', 'body', 'Body, nude, kneeling on bed',
+       'full body shot, nude, kneeling on the bed sitting back on the heels, hands resting on '
+       'the thighs, chest lifted, the face fully visible, warm bedroom light', co=True, cb=True,
+       aspect='3:4'),
+    _e('nsfw_pose_sit_cross_floor', 'nsfw', 'body', 'Body, nude, sitting cross-legged',
+       'full body shot, nude, sitting cross-legged on the floor, hands resting on the knees, '
+       'relaxed posture, the face fully visible, soft daylight', co=True, cb=True, aspect='3:4'),
+    _e('nsfw_pose_hip_lean', 'nsfw', 'body', 'Body, nude, hip lean',
+       'full body shot, nude, standing with the weight on one leg, hip leaning to the side, one '
+       'hand resting on the hip, the face fully visible looking toward the camera, soft '
+       'daylight', co=True, cb=True, aspect='3:4'),
+    _e('nsfw_pose_leg_up_tub', 'nsfw', 'body', 'Body, nude, seated at the tub edge',
+       'full body shot, nude, sitting on the edge of a bathtub, one leg raised and extended, '
+       'hands resting near the thigh, the face fully visible, soft bathroom light', co=True,
+       cb=True, aspect='3:4'),
+    _e('nsfw_pose_lying_stomach_legs_up', 'nsfw', 'body', 'Body, nude, lying on stomach, legs up',
+       'full body shot, nude, lying on the stomach on the bed, legs bent up and crossed at the '
+       'ankles, looking back over the shoulder toward the camera, the face fully visible, soft '
+       'morning light', co=True, cb=True, aspect='4:3'),
+    _e('nsfw_pose_kneel_hands_thighs', 'nsfw', 'body', 'Body, nude, kneeling upright',
+       'full body shot, nude, kneeling upright on the bed, hands resting along the thighs, '
+       'chest lifted, the face fully visible looking toward the camera, warm bedroom light',
+       co=True, cb=True, aspect='3:4'),
+    _e('nsfw_pose_window_light', 'nsfw', 'body', 'Body, nude, standing by the window',
+       'full body shot, nude, standing near a bright window, soft rim light on the body but '
+       'front-lit enough that the face reads clearly, not a full silhouette', co=True, cb=True,
+       aspect='3:4'),
+    _e('nsfw_pose_mirror', 'nsfw', 'body', 'Body, nude, mirror reflection',
+       'full body shot, nude, standing in front of a mirror, both the body and the reflected '
+       'face clearly visible, soft bathroom light', co=True, cb=True, aspect='3:4'),
+    _e('nsfw_pose_towel_drop', 'nsfw', 'body', 'Body, nude, towel about to drop',
+       'full body shot, nude, standing with a towel loosely held at the waist about to slip, '
+       'chest bare, one hand holding the towel, the face fully visible, warm bathroom light',
+       co=True, cb=True, aspect='3:4'),
+    _e('nsfw_pose_bed_stretch_back', 'nsfw', 'body', 'Body, nude, lying stretch',
+       'full body shot, nude, lying on the back on the bed, one arm stretched above the head, '
+       'back gently arched, the face fully visible and turned toward the camera, soft morning '
+       'light', co=True, cb=True, aspect='4:3'),
+    _e('nsfw_pose_kneel_thighs_apart', 'nsfw', 'body', 'Body, nude, kneeling, hands on thighs',
+       'full body shot, nude, kneeling upright with the hands resting flat on the thighs, '
+       'shoulders back, the face fully visible and looking directly at the camera, soft studio '
+       'light', co=True, cb=True, aspect='3:4'),
 ]
 
 # Bake the default outfit-variation / neutral-expression directives into every entry
@@ -1911,6 +1979,22 @@ LEGACY_LABEL_ALIASES = {
     'Corps, nu allongé': 'Body, nude lying',
     'Corps, nu douche': 'Body, nude shower',
     'Dos, nu': 'Back, nude',
+    'Buste, nu, dos cambré': 'Bust, nude, back arched',
+    'Buste, nu, clavicule': 'Bust, nude, collarbone',
+    'Buste, nu, main sur la poitrine': 'Bust, nude, hand covering chest',
+    'Buste, nu, regard par-dessus l\'épaule': 'Bust, nude, glancing over the shoulder',
+    'Corps, nu, étirement debout': 'Body, nude, standing stretch',
+    'Corps, nu, agenouillé sur le lit': 'Body, nude, kneeling on bed',
+    'Corps, nu, assis en tailleur': 'Body, nude, sitting cross-legged',
+    'Corps, nu, hanche penchée': 'Body, nude, hip lean',
+    'Corps, nu, assis au bord de la baignoire': 'Body, nude, seated at the tub edge',
+    'Corps, nu, allongé sur le ventre jambes relevées': 'Body, nude, lying on stomach, legs up',
+    'Corps, nu, agenouillé droit': 'Body, nude, kneeling upright',
+    'Corps, nu, debout près de la fenêtre': 'Body, nude, standing by the window',
+    'Corps, nu, reflet miroir': 'Body, nude, mirror reflection',
+    'Corps, nu, serviette qui glisse': 'Body, nude, towel about to drop',
+    'Corps, nu, étirement allongé': 'Body, nude, lying stretch',
+    'Corps, nu, agenouillé mains sur les cuisses': 'Body, nude, kneeling, hands on thighs',
 }
 
 

@@ -48,6 +48,20 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-30-nsfw-classic-poses',
+    date: '2026-07-30',
+    title: '16 classic nude poses added to the NSFW catalog, every one keeping the face in frame',
+    blurb:
+      'The uncensored catalog only had a handful of standing/sitting/lying states. New shots add classic nude/glamour poses — arched back, stretch, kneeling, hip lean, mirror, towel drop and more — including body-part-emphasis framings (collarbone, chest, over-the-shoulder). Every single one explicitly keeps the face fully visible, even the closer body-part shots, so a tight crop never trains away the one thing the LoRA needs. Local Klein only. Community-requested.',
+  },
+  {
+    id: '2026-07-30-profile-shots-turn-further',
+    date: '2026-07-30',
+    title: 'Profile and side-view shots turn further and land more reliably',
+    blurb:
+      "Side-view shots sometimes came back barely turned, or ignored the angle instruction outright. Two fixes: the identity guard (Nano Banana / ChatGPT / OpenRouter) never told the model to take the POSE and camera angle from the prompt — only the outfit and expression — so it had nothing stopping it from leaning back on the reference's own angle. It now names the angle explicitly, the same way outfit and expression already were. And the two profile shots used by every preset (Profile left/right) get the same firmer \"strict\" wording their smile/serious/rim-light siblings already had, instead of a plain \"left profile view\" nobody had gotten around to upgrading.",
+  },
+  {
     id: '2026-07-30-nsfw-face-closeups',
     date: '2026-07-30',
     title: '5 face close-ups added to the NSFW catalog (Klein local only)',
