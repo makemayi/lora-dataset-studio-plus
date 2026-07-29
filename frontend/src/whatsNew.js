@@ -48,6 +48,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-30-regenerate-keeps-its-own-engine',
+    date: '2026-07-30',
+    title: 'Regenerating a tile no longer jumps to a different image engine',
+    blurb:
+      'With several image engines checked at once (a split or "all" multi-engine batch), 🔄 regenerate on any tile silently reassigned it to whichever engine happened to be first-checked — a Qwen shot could come back rendered by Krea instead. Regenerate now only overrides the engine when exactly ONE is checked (the deliberate "I switched engines, redo this old tile with the new one" case); with several checked, or none, it keeps the tile on whichever engine actually made it.',
+  },
+  {
     id: '2026-07-30-bust-angle-lighting-variety',
     date: '2026-07-30',
     title: 'Eight new half-body shots: profile, over-the-shoulder, low/high angle, window light, golden hour',

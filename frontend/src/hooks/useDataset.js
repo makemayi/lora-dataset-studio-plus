@@ -12,7 +12,7 @@ import { serializeWatermarkRegions } from '../utils/watermarkRegions';
 import { summarizeScrapeImport } from '../utils/smallImageRescue';
 import { trainingRunSelection } from '../utils/checkpointBrowser';
 import { refreshDatasetIfActive } from '../utils/datasetRefresh';
-import { ENGINE_LABELS } from '../components/dataset/engineSelection.js';
+import { ENGINE_LABELS, regenerateEngineOverride } from '../components/dataset/engineSelection.js';
 import { classifyResultMessage } from '../components/dataset/classifyFramingGate.js';
 
 function post(url, body, isForm) {
@@ -961,22 +961,23 @@ export function useDataset() {
   // AND failed tiles — it is the recovery path for failures. `prompt` (optional)
   // is the user-edited core prompt from the tile's ✏️ bubble; omitted → the
   // server reuses the row's / label's prompt (plain 🔄 and reject→regenerate).
-  // The generator CURRENTLY selected in the workspace (persisted by
-  // VariationCatalog) is sent along so the regenerate follows the user's
-  // selection instead of being pinned to the engine that made the tile.
-  // Missing keys = server keeps the legacy reuse-the-row's-engine behaviour.
-  // The Klein MODEL is deliberately NOT sent any more: it used to ride from
-  // localStorage (editPage_flux2KleinModel_v1), which could contradict the
-  // dataset's own pick on the one path that reads it (a row born on an API
-  // engine switching to Klein). The server resolves that from the dataset now —
-  // one setting, one answer.
+  // The engine override (see regenerateEngineOverride) is sent only when the
+  // workspace currently has exactly ONE engine checked — the deliberate-switch
+  // case. Multi-engine (or empty) selection sends nothing, so the server keeps
+  // each tile's own origin engine instead of reassigning every regenerate in
+  // the dataset to whichever engine happens to be "primary". The Klein MODEL is
+  // deliberately NOT sent any more: it used to ride from localStorage
+  // (editPage_flux2KleinModel_v1), which could contradict the dataset's own
+  // pick on the one path that reads it (a row born on an API engine switching
+  // to Klein). The server resolves that from the dataset now — one setting,
+  // one answer.
   /* Returns {ok, error}, and `silent` is for the ✏️ edit-prompt bubble: it shows
      the refusal itself, right under the prompt it was about, instead of losing a
      hand-written rewrite to a toast that names no field. */
   const regenerate = useCallback(async (imageId, loraStrength, prompt, { silent = false } = {}) => {
     let engine = null;
     try {
-      engine = localStorage.getItem('datasetGenerator') || null;
+      engine = regenerateEngineOverride(window.localStorage);
     } catch { /* private mode — legacy behaviour */ }
     const d = await postJson(`/api/dataset/image/${imageId}/regenerate`,
       { lora_strength: loraStrength, ...(prompt ? { prompt } : {}),

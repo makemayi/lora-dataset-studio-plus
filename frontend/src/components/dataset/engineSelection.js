@@ -185,6 +185,22 @@ export function primaryEngine(engines) {
   return canonicalEngines(engines)[0] || null;
 }
 
+/** The engine `regenerate` should send to override a tile's own origin, or null
+ *  to let the server keep that origin. Only ONE case deliberately overrides:
+ *  the workspace has exactly one engine checked right now, and it differs from
+ *  whatever produced the tile — "I picked Nano Banana, regenerate this old
+ *  Klein tile with it". With several engines enabled (split/all multi-engine
+ *  batches), the legacy single-string mirror (STORAGE_PRIMARY) only ever names
+ *  the PRIMARY (first-in-canonical-order) engine, not the one that actually
+ *  rendered any given tile — sending it there would silently reassign every
+ *  regenerate in the dataset to that one engine regardless of which engine
+ *  made it. An empty selection (every card unchecked) also has nothing to
+ *  offer, so it falls back to the origin too. */
+export function regenerateEngineOverride(storage) {
+  const list = readEngines(storage);
+  return list.length === 1 ? list[0] : null;
+}
+
 /** Share `variations` between `engines`.
  *  - 'all'   : every engine renders EVERY shot (comparison — total = N × engines)
  *  - 'split' : round-robin, every shot goes to exactly ONE engine (variety —
