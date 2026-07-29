@@ -48,6 +48,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-30-bust-angle-lighting-variety',
+    date: '2026-07-30',
+    title: 'Eight new half-body shots: profile, over-the-shoulder, low/high angle, window light, golden hour',
+    blurb:
+      'The bust (half-body) catalog only ever varied outfit and background — no profile view, no camera angle, no lighting change like the face catalog already had. New shots add profile left/right, looking back over the shoulder, low and high camera angle, window light, golden hour and arms crossed, so a LoRA trained on half-body shots no longer breaks the moment it is asked for a bust in profile or from below. Community-requested.',
+  },
+  {
     id: '2026-07-30-fullbody-pose-variety',
     date: '2026-07-30',
     title: 'Ten new full-body poses: sitting, crouching, lying down, and a face-readable close full-body',

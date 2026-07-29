@@ -1036,6 +1036,32 @@ VARIATION_CATALOG = [
     _e('bust_evening', 'outfit', 'bust', 'Bust, evening outfit',
        'upper body portrait, elegant evening look, different from the reference outfit, dim ambient light',
        co=True, cb=True),
+    # --- Bust angle/lighting/pose variety (community request) : le catalogue buste
+    # n'avait AUCUNE variation d'angle ou d'éclairage propre (contrairement au visage
+    # qui a profil/contre-plongée/golden hour/fenêtre) — juste face/3-4 + fond/tenue.
+    # Un LoRA entraîné dessus casse en profil ou en contre-plongée sur un buste.
+    _e('bust_profile_l', 'angle', 'bust', 'Bust, profile left',
+       'upper body portrait, left profile view, looking away from camera, neutral, soft indoor light',
+       cb=True),
+    _e('bust_profile_r', 'angle', 'bust', 'Bust, profile right',
+       'upper body portrait, right profile view, looking away from camera, neutral, soft indoor light',
+       cb=True),
+    _e('bust_over_shoulder', 'angle', 'bust', 'Bust, over the shoulder',
+       'upper body portrait, looking back over the shoulder, three-quarter rear angle, soft light',
+       cb=True),
+    _e('bust_low_angle', 'angle', 'bust', 'Bust, low angle',
+       'upper body portrait, camera angled slightly upward from below, looking down toward the lens, '
+       'dramatic perspective', cb=True),
+    _e('bust_high_angle', 'angle', 'bust', 'Bust, high angle',
+       'upper body portrait, camera angled slightly downward from above, looking up toward the lens, '
+       'soft light', cb=True),
+    _e('bust_window', 'lighting', 'bust', 'Bust, window light',
+       'upper body portrait, front view, soft natural window light from the side, indoor', cb=True),
+    _e('bust_golden', 'lighting', 'bust', 'Bust, golden hour',
+       'upper body portrait, three-quarter view, warm golden hour light, outdoor', cb=True),
+    _e('bust_arms_crossed', 'framing', 'bust', 'Bust, arms crossed',
+       'upper body portrait, arms crossed, confident stance, three-quarter view, plain background',
+       cb=True),
     _e('body_stand_front', 'framing', 'body', 'Body standing, front',
        'full body shot, standing, front view, casual clothes different from the reference outfit, street',
        co=True, cb=True),
@@ -1808,6 +1834,14 @@ LEGACY_LABEL_ALIASES = {
     'Buste, haut ajusté': 'Bust, fitted top',
     "Buste, robe d'été": 'Bust, summer dress',
     'Buste, maillot (plage)': 'Bust, swimsuit (beach)',
+    'Buste, profil gauche': 'Bust, profile left',
+    'Buste, profil droite': 'Bust, profile right',
+    'Buste, regard arriere': 'Bust, over the shoulder',
+    'Buste, contre-plongée': 'Bust, low angle',
+    'Buste, plongée': 'Bust, high angle',
+    'Buste, lumiere fenetre': 'Bust, window light',
+    'Buste, golden hour': 'Bust, golden hour',
+    'Buste, bras croisés': 'Bust, arms crossed',
     # Body
     'Corps debout face': 'Body standing, front',
     'Corps debout 3/4': 'Body standing, three-quarter',
