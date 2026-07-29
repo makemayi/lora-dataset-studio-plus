@@ -48,6 +48,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-30-nsfw-face-closeups',
+    date: '2026-07-30',
+    title: '5 face close-ups added to the NSFW catalog (Klein local only)',
+    blurb:
+      'The uncensored catalog had bust, body and back shots but no face close-up at all, so a Klein-trained LoRA never got identity-focused frames of its NSFW states. New shots: lingerie, topless, towel, nude-in-bed and shower — same close-up portrait framing as the SFW face shots, same "state, not an act" register as the existing bust/body ones. Local Klein only, same as the rest of the NSFW catalog. Community-requested.',
+  },
+  {
     id: '2026-07-30-regenerate-keeps-its-own-engine',
     date: '2026-07-30',
     title: 'Regenerating a tile no longer jumps to a different image engine',

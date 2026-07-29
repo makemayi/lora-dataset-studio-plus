@@ -1199,6 +1199,25 @@ NSFW_VARIATION_CATALOG = [
     _e('nsfw_bust_towel', 'nsfw', 'bust', 'Bust, towel',
        'bust shot, wrapped in a bath towel, bare shoulders, bathroom, soft light',
        co=True, cb=True),
+    # --- Face close-ups (community request) : le catalogue NSFW n'avait AUCUN
+    # plan visage — juste buste/corps/dos — donc aucune fidélité d'identité
+    # spécifiquement entraînée en gros plan sur les scènes NSFW. Même registre
+    # que le buste (état + décor, jamais un acte), recadré serré sur le visage.
+    _e('nsfw_face_lingerie', 'nsfw', 'face', 'Face, lingerie',
+       'close-up portrait, front view, delicate lace lingerie strap visible at the shoulder, '
+       'bedroom, soft window light', co=True, cb=True),
+    _e('nsfw_face_topless', 'nsfw', 'face', 'Face, topless',
+       'close-up portrait, topless, bare shoulders and collarbone visible, neutral indoor '
+       'background, natural light', co=True, cb=True),
+    _e('nsfw_face_towel', 'nsfw', 'face', 'Face, towel',
+       'close-up portrait, wrapped in a bath towel, damp hair, bare shoulders, bathroom, soft '
+       'light', co=True, cb=True),
+    _e('nsfw_face_nude_bed', 'nsfw', 'face', 'Face, nude in bed',
+       'close-up portrait, lying nude in bed, bare shoulder visible, soft morning light, relaxed',
+       co=True, cb=True),
+    _e('nsfw_face_shower', 'nsfw', 'face', 'Face, shower',
+       'close-up portrait, wet hair and skin, water droplets, shower steam in the background',
+       co=True, cb=True),
     _e('nsfw_body_lingerie', 'nsfw', 'body', 'Body, lingerie standing',
        'full body shot, standing, matching lace lingerie set, bedroom interior, soft light',
        co=True, cb=True, aspect='3:4'),
@@ -1880,6 +1899,11 @@ LEGACY_LABEL_ALIASES = {
     'Buste, lingerie': 'Bust, lingerie',
     'Buste, topless': 'Bust, topless',
     'Buste, serviette': 'Bust, towel',
+    'Visage, lingerie': 'Face, lingerie',
+    'Visage, topless': 'Face, topless',
+    'Visage, serviette': 'Face, towel',
+    'Visage, nu au lit': 'Face, nude in bed',
+    'Visage, douche': 'Face, shower',
     'Corps, lingerie debout': 'Body, lingerie standing',
     'Corps, nu debout': 'Body, nude standing',
     'Corps, nu trois-quarts': 'Body, nude three-quarter',
