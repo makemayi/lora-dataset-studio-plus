@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-30-outfit-palette-colour-and-material',
+    date: '2026-07-30',
+    title: 'Every outfit in the Krea wardrobe now names a colour and a fabric',
+    blurb:
+      'About a third of the form-fitting/glamour garments named a cut but no colour ("a plunge V-neck bodysuit") — nothing for the model to render but a bare shape. All 46 now name both, skewed toward light/pastel shades (blush, lilac, mint, pale yellow, coral) with a few warm neutrals (cream, champagne, gold) where a fabric rarely comes in true pastel. Same 71 garments, same order, so the crc32 outfit-to-shot assignment is unaffected — this changes what each garment IS, not which shot gets it.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-07-30-krea-grounding-per-framing',
     date: '2026-07-30',
     title: 'Krea 2 Edit: tune reference grounding separately for face, bust, body and back shots',
