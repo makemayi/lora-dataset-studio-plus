@@ -23,6 +23,34 @@ export function overlapNotice(overlaps) {
     + 'so 🗑 Delete rejected in one removes them from the other too.'
 }
 
+/** A bank whose source folder IS a dataset's storage folder — the one overlap
+ *  that is never negotiable.
+ *
+ *  Two banks over one folder is a WARNING: the user may well mean it, and the
+ *  worst case is another bank's triage. A bank over a DATASET is different in
+ *  kind — the "rejected" files are the dataset's training images, and the app
+ *  copies in both directions precisely so the two never share. The server
+ *  refuses the click; this turns that refusal into a sentence, and into a
+ *  disabled button, so nobody types DELETE to be told no.
+ *
+ *  Installs made before the guard existed still hold such banks, which is why
+ *  this reads a fact off the payload instead of trusting creation-time checks.
+ *  Nothing is ever deleted or repaired on the app's own initiative — the bank
+ *  stays fully readable, and only the user decides to move or drop it.
+ *
+ *  Returns {blocked, title, text}; blocked=false when there is no conflict. */
+export function datasetConflictBlock(conflict) {
+  if (!conflict) return { blocked: false, title: '', text: '' }
+  return {
+    blocked: true,
+    title: '⛔ This bank sits on a dataset’s image folder',
+    text: conflict.message
+      || 'Deleting these files would delete images out of a dataset. A bank and a '
+      + 'dataset must never share files — open the dataset and use 🗃 Import to bank, '
+      + 'which copies them into a bank of their own.',
+  }
+}
+
 /** The blocking warning inside the delete confirmation: which OTHER banks lose
  *  files, and how many. null when this bank is on its own. */
 export function sharedFilesWarning(preview) {

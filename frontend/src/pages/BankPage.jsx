@@ -7,8 +7,10 @@ import FolderPickerField from '../components/common/FolderPicker'
 import { hiddenCount, previewSlots } from '../components/bank/bankPreview'
 import { bankListSyncToast } from '../components/bank/bankSync'
 import { overlapNotice } from '../components/bank/bankOverlap'
+import { datasetFolderNotice } from '../utils/pathRelation'
 import FolderSyncNote from '../components/bank/FolderSyncNote'
 import RelocateBankDialog from '../components/bank/RelocateBankDialog'
+import BankScrapePanel from '../components/bank/BankScrapePanel'
 
 const CURRENT_KEY = 'bankCurrentId'
 
@@ -58,6 +60,10 @@ export default function BankPage() {
   const [folder, setFolder] = useState('')
   const [creating, setCreating] = useState(false)
   const [relocating, setRelocating] = useState(null)   // the bank being repointed
+  // Dataset storage folders, so a folder that belongs to a dataset can be named
+  // as such WHILE it is typed. The server refuses it either way — this only
+  // spares the round-trip and the "why not?" (see utils/pathRelation.js).
+  const [datasets, setDatasets] = useState([])
 
   const refresh = useCallback(async () => {
     try {
@@ -75,6 +81,18 @@ export default function BankPage() {
 
   useEffect(() => { if (currentId == null) refresh() }, [currentId, refresh])
 
+  // Best effort: a failed list just means no live hint, never a broken form.
+  useEffect(() => {
+    if (currentId != null) return undefined
+    let alive = true
+    apiFetch('/api/dataset/list')
+      .then((d) => { if (alive) setDatasets(d.datasets || []) })
+      .catch(() => { if (alive) setDatasets([]) })
+    return () => { alive = false }
+  }, [currentId])
+
+  const folderNotice = datasetFolderNotice(folder, datasets)
+
   const open = (id) => {
     try { localStorage.setItem(CURRENT_KEY, String(id)) } catch { /* ignore */ }
     setCurrentId(id)
@@ -86,7 +104,9 @@ export default function BankPage() {
 
   const create = async (e) => {
     e.preventDefault()
-    if (creating) return
+    // A bank over a dataset's folder would share the dataset's LIVE files; the
+    // server refuses it, and so does the form (the notice says what to do).
+    if (creating || folderNotice) return
     setCreating(true)
     try {
       const d = await postJson('/api/bank/create', { name, folder })
@@ -146,11 +166,24 @@ export default function BankPage() {
             value={folder} onChange={setFolder} required
             placeholder="C:\path\to\unsorted-images (subfolders included)" />
         </div>
-        <button type="submit" disabled={creating}
+        <button type="submit" disabled={creating || !!folderNotice}
+          title={folderNotice ? 'That folder belongs to a dataset' : undefined}
           className="rounded-md bg-gradient-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
           {creating ? 'Inventorying…' : '➕ Create bank'}
         </button>
+        {/* basis-full: its own row inside the wrapping flex form, so the sentence
+            never squeezes the fields — including at 400 px. */}
+        {folderNotice && (
+          <p role="alert"
+            className="basis-full rounded-md border border-rose-500/70 bg-rose-500/15 p-3 text-sm text-rose-100">
+            ⛔ {folderNotice.text}
+          </p>
+        )}
       </form>
+
+      {/* Second way in: the scraper's own destination. A bank no longer needs a
+          folder you prepared by hand — you can fill one straight from the web. */}
+      <BankScrapePanel banks={banks} onDone={refresh} />
 
       {banks == null ? (
         <p className="text-sm text-content-muted">Loading…</p>

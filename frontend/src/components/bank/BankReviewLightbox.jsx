@@ -25,6 +25,8 @@ import {
 import {
   DETAIL_CAVEAT, PROVENANCE_FLAG_LABEL, detailSummary, originHint, originLabel,
 } from './bankProvenance.js'
+import BankWatermarkMaskDialog from './BankWatermarkMaskDialog'
+import { canEditMask } from './bankWatermarkMask.js'
 
 // How many upcoming images we pull metadata for in one go (the decision helpers
 // below the image). The grid page only holds the ids it rendered.
@@ -93,10 +95,16 @@ export default function BankReviewLightbox({
   })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  // 🚩 Which image's watermark mask is open, if any. Review is where a flagged
+  // image is actually LOOKED at, so it is where a wrong detection box gets
+  // fixed — until now that was only possible inside a dataset (Qeeyana, Reddit).
+  const [maskId, setMaskId] = useState(null)
   const dialogRef = useRef(null)
   const requested = useRef(new Set())
 
-  useFocusTrap(dialogRef, true)
+  // Hand the trap over while the mask editor is open — two live traps fight over
+  // the focus and the editor's own controls become unreachable.
+  useFocusTrap(dialogRef, maskId == null)
 
   const id = currentId(session)
   const done = isFinished(session)
@@ -177,6 +185,9 @@ export default function BankReviewLightbox({
   useEffect(() => {
     const onKey = (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return
+      // The mask editor owns the keyboard while it is open: every letter here is
+      // one keystroke away from a decision on the image being masked.
+      if (maskId != null) return
       if (e.key === 'Escape') { onClose(); return }
       // Only TEXT entry swallows the shortcuts. A blanket "input" guard broke
       // the whole mode: the focus trap lands on the 🎲 checkbox when the
@@ -196,10 +207,12 @@ export default function BankReviewLightbox({
       // letters: every free letter here is one keystroke away from a decision.
       else if (e.key === '[') { e.preventDefault(); rotateCurrent(-90) }
       else if (e.key === ']') { e.preventDefault(); rotateCurrent(90) }
+      // M edits the watermark mask of the flagged image under the cursor.
+      else if (k === 'm' && canEditMask(img)) { e.preventDefault(); setMaskId(id) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, sendDecision, doSkip, goBack, rotateCurrent])
+  }, [onClose, sendDecision, doSkip, goBack, rotateCurrent, maskId, img, id])
 
   const shortcut = (label) => (
     <kbd className="ml-1 rounded border border-white/25 px-1 text-[10px] font-mono text-white/70">{label}</kbd>
@@ -287,6 +300,13 @@ export default function BankReviewLightbox({
               className="rounded-lg border border-white/20 px-3 py-2 text-sm text-white disabled:opacity-35 hover:bg-white/10">
               <span aria-hidden="true">↻</span><span className="sr-only">Rotate right</span>
             </button>
+            {canEditMask(img) && (
+              <button type="button" onClick={() => setMaskId(id)} disabled={busy}
+                title="Fix the watermark zones on this image (M) — decides nothing. 🧽 Inpaint then repaints exactly what you draw."
+                className="rounded-lg border border-amber-400/60 bg-amber-500/20 px-4 py-2 text-sm font-semibold text-amber-100 disabled:opacity-50 hover:bg-amber-500/30">
+                🚩 Edit mask{shortcut('M')}
+              </button>
+            )}
             <button type="button" onClick={() => sendDecision('keep')} disabled={busy}
               title="Keep this image and move on (K)"
               className="rounded-lg border border-emerald-400/60 bg-emerald-500/20 px-5 py-2 text-sm font-semibold text-emerald-100 disabled:opacity-50 hover:bg-emerald-500/30">
@@ -304,10 +324,16 @@ export default function BankReviewLightbox({
             </button>
           </div>
           <p className="text-center text-[11px] text-white/45">
-            K keep · R reject · S skip · [ ] rotate · ← → move without deciding · Esc close.
-            Decisions are saved one by one — closing loses nothing.
+            K keep · R reject · S skip · [ ] rotate · M watermark mask · ← → move without
+            deciding · Esc close. Decisions are saved one by one — closing loses nothing.
           </p>
         </div>
+      )}
+
+      {maskId != null && meta[maskId] && (
+        <BankWatermarkMaskDialog bankId={bankId} image={meta[maskId]}
+          onSaved={(next) => setMeta((prev) => ({ ...prev, [next.id]: next }))}
+          onClose={() => setMaskId(null)} />
       )}
     </div>
   )

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiFetch, postJson } from '../../api/fetchClient'
+import { attemptModalSubmit } from '../../utils/submitOutcome.js'
 
 /** Ask the SERVER to open its native "choose a folder" dialog (the folder lives
  * on the machine running the app, so a browser file-picker can't reach it).
@@ -17,15 +18,50 @@ export async function pickNativeFolder(initial) {
 
 /** Read-only in-app folder browser (drives → subfolders), the fallback when the
  * server has no native dialog — used from the LAN/tablet or a Linux/vast.ai box.
- * Nothing is written; only directories are listed. onPick(path) then onClose. */
+ * Nothing is written; only directories are listed.
+ *
+ * `onPick(path)` MUST answer {ok:true} or {ok:false, error} (or throw). It used
+ * to be fired unawaited and followed by an unconditional onClose(), so a refused
+ * folder import ("no images in that folder", another dataset job running) closed
+ * the browser and threw away both the chosen path and the position in the tree —
+ * on a machine with no native dialog, walking back down there is the whole cost.
+ * A host that genuinely cannot fail says so explicitly (see FolderPickerField):
+ * silence is not a success. */
 export function FolderBrowserModal({ initial, onPick, onClose }) {
   const [path, setPath] = useState(initial || null)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [busy, setBusy] = useState(false)
+  // Two different failures, two different boxes: `browseError` is "I could not
+  // LIST that folder" (amber, informational, the list falls back to the drives);
+  // `error` is "the host REFUSED the folder you picked" (red, blocking, keeps
+  // you exactly where you are so you can pick another one).
+  const [browseError, setBrowseError] = useState('')
   const [error, setError] = useState('')
 
+  /* ONE way out, shut only while the pick is being posted. */
+  const dismiss = () => { if (!busy) onClose() }
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') dismiss() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [busy, onClose])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const use = async () => {
+    if (busy || !data?.path) return
+    setBusy(true)
+    setError('')
+    let outcome
+    try {
+      outcome = await attemptModalSubmit(() => onPick(data.path),
+        { fallback: 'That folder was refused' })
+    } finally { setBusy(false) }
+    if (outcome.close) onClose()
+    else setError(outcome.error)
+  }
+
   const load = useCallback(async (p) => {
-    setLoading(true); setError('')
+    setLoading(true); setBrowseError('')
     try {
       const q = p ? `?path=${encodeURIComponent(p)}` : ''
       const d = await apiFetch(`/api/system/list-folders${q}`)
@@ -34,7 +70,7 @@ export function FolderBrowserModal({ initial, onPick, onClose }) {
     } catch (e) {
       // A bad starting path (e.g. a stale pasted value) shouldn't dead-end the
       // browser — surface it and drop back to the drive list.
-      setError(e?.message || 'Could not open that folder.')
+      setBrowseError(e?.message || 'Could not open that folder.')
       if (p) load(null)
     } finally {
       setLoading(false)
@@ -48,7 +84,8 @@ export function FolderBrowserModal({ initial, onPick, onClose }) {
 
   return (
     <div role="dialog" aria-modal="true" aria-label="Choose a folder"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) dismiss() }}>
       <div className="flex w-full max-w-lg flex-col rounded-xl border border-border bg-surface-overlay p-5 shadow-2xl"
         style={{ maxHeight: '80vh' }}>
         <h2 className="text-base font-bold text-content">📁 Choose a folder</h2>
@@ -69,7 +106,7 @@ export function FolderBrowserModal({ initial, onPick, onClose }) {
           </span>
         </div>
 
-        {error && <p className="mt-2 text-xs text-amber-300">{error}</p>}
+        {browseError && <p className="mt-2 text-xs text-amber-300">{browseError}</p>}
 
         <ul className="mt-2 grow overflow-y-auto rounded-md border border-border bg-surface-raised">
           {loading ? (
@@ -87,15 +124,29 @@ export function FolderBrowserModal({ initial, onPick, onClose }) {
           ))}
         </ul>
 
-        <div className="mt-4 flex justify-end gap-2">
-          <button type="button" onClick={onClose}
-            className="rounded-md border border-border px-3 py-1.5 text-sm text-content hover:bg-surface-raised">
+        {/* shrink-0 so the list above (grow + overflow) gives up the room instead
+            of squashing this to a clipped sliver; max-h-24 so a long refusal
+            cannot push "Use this folder" off a 400-px screen. */}
+        {error && (
+          <div role="alert"
+            className="mt-2 shrink-0 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 max-h-24 overflow-y-auto">
+            <span className="block whitespace-pre-wrap break-words text-xs leading-relaxed text-red-200">
+              {error}
+            </span>
+            <span className="mt-1 block text-[0.625rem] text-content-subtle">
+              You are still where you were — pick another folder and try again.
+            </span>
+          </div>
+        )}
+
+        <div className="mt-4 flex shrink-0 justify-end gap-2">
+          <button type="button" onClick={dismiss} disabled={busy}
+            className="rounded-md border border-border px-3 py-1.5 text-sm text-content hover:bg-surface-raised disabled:opacity-50">
             Cancel
           </button>
-          <button type="button" disabled={atRoot || loading}
-            onClick={() => { onPick(data.path); onClose() }}
+          <button type="button" disabled={busy || atRoot || loading} onClick={use}
             className="rounded-md bg-gradient-primary px-4 py-1.5 text-sm font-semibold text-white disabled:opacity-50">
-            Use this folder
+            {busy ? 'Using…' : 'Use this folder'}
           </button>
         </div>
       </div>
@@ -145,8 +196,12 @@ export default function FolderPickerField({
       </div>
       {hint && <p className="mt-1 text-xs text-content-muted">{hint}</p>}
       {browsing && (
+        /* This host only writes the path into the field above — nothing can
+           refuse it — but it says {ok:true} out loud rather than returning
+           nothing: the browser treats silence as "no answer", on purpose. */
         <FolderBrowserModal initial={value || null}
-          onPick={onChange} onClose={() => setBrowsing(false)} />
+          onPick={(p) => { onChange(p); return { ok: true } }}
+          onClose={() => setBrowsing(false)} />
       )}
     </div>
   )

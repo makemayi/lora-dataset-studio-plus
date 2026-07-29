@@ -6,6 +6,9 @@ import { getCsrfToken } from '../../api/fetchClient';
 import { useCapabilities } from '../../context/CapabilitiesContext';
 import { postJson } from '../../hooks/useDataset';
 import { animeFamilyNote } from './animeFamilyNote.js';
+import { customBasePushView } from './customBasePush.js';
+import { dualCaptionsSupport } from './dualCaptions.js';
+import { maskedCarryOverAction, clearLegacyMasked } from './maskedMigration.js';
 import ConceptFaceMaskField from './ConceptFaceMaskField';
 import {
   checkpointSelectionMatchesTraining,
@@ -38,6 +41,7 @@ import {
   trainingPresetSnapshotScope,
 } from '../../utils/trainingPresets';
 import { runConfirmableTrainingRequest } from '../../utils/trainingConfirmations';
+import { continueAttemptOutcome } from '../../utils/continueOutcome';
 import { HelpBadge } from '../../help/HelpMode';
 import { requestHelpTip } from '../../help/helpTips';
 import { useToast } from '../common/Toast';
@@ -50,7 +54,7 @@ import { laneOfPayload, preflightUrl } from './preflightLane.js';
 import { failureView } from './trainingFailure';
 import {
   MEMORY_KEYS, MEMORY_LABELS, memoryAdviceText, memoryIsOverridden, memoryPatchFor,
-  memoryStateLabel,
+  memoryRiskLine, memoryStateLabel,
 } from './memorySavingAdvice';
 import { stopOutcomeMessage } from '../../utils/runSilence';
 import SettingsLink from '../common/SettingsLink';
@@ -388,11 +392,25 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
       // Wait for both before re-enabling Apply so an old-family preset/settings
       // cannot race the new selection.
       const info = await ds.trainBaseInfo?.();
+      // Re-seed base/variant from the SERVER, which now remembers them per
+      // family. The optimistic reset above only cleared this browser's state:
+      // it looked fixed until the next reload re-read the shared column and
+      // handed the other family's base straight back — the "change it and come
+      // back" dance. The server is the truth; adopt what it says. `nextBase`
+      // stays the fallback so SDXL — the one family that REQUIRES a checkpoint
+      // — still lands on a usable one the first time it is picked.
+      let seededBase = nextBase;
+      let seededVariant = nextVariant;
       if (info) {
         setBaseInfo(info);
         setAdv(info.train_settings || null);
+        seededBase = info.base || nextBase;
+        seededVariant = normalizeCheckpointVariant(t, info.variant || nextVariant);
+        setBase(seededBase);
+        setCustomBase(looksAbsolute(seededBase));
+        setVariant(seededVariant);
       }
-      const checkpointData = await ds.listCheckpoints?.(nextBase, t, nextVariant);
+      const checkpointData = await ds.listCheckpoints?.(seededBase, t, seededVariant);
       setStepsInfo(checkpointData?.recommended_steps_info || null);
     } catch {
       // Persistence succeeded: keep the new family truthful and let the normal
@@ -451,6 +469,9 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   const advMemTouched = memoryIsOverridden(adv?.memory_saving);
   const advMemStateLabel = memoryStateLabel(advMemEff);
   const advMemAdviceText = memoryAdviceText(adv?.memory_advice);
+  // Non-null only when a saver THIS family's recipe relies on is switched off.
+  // The server decides (one rule, shared with the preflight); the panel renders.
+  const advMemRiskLine = memoryRiskLine(adv?.memory_risk, adv?.family_label);
   const LR_SCHED_LABELS = { constant: 'Constant (default)', constant_with_warmup: 'Warmup → constant', linear: 'Linear decay', cosine: 'Cosine decay', cosine_with_restarts: 'Cosine + restarts' };
   // The resolution the next run will actually train at. Slider mode defaults to
   // 768 only (the slider loss makes several prediction passes per step — much
@@ -690,10 +711,19 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   // not going to care about this box's VRAM or torch build. trainType/variant
   // default to the panel's selection, but ▶ Continue overrides them with the
   // checkpoint's own family so the image floor is checked against the right one.
-  const preflightOk = async ({ lane, trainType: tt, variant: va } = {}) => {
+  // `onRefused(message)` — WHERE the blockers are said. Default: a toast, which
+  // is right for the launch buttons (nothing is open to say it in). ▶ Continue
+  // passes its own so the reason lands inside the still-open dialog, next to the
+  // choices the user would otherwise have had to retype.
+  const preflightOk = async ({ lane, trainType: tt, variant: va, onRefused } = {}) => {
     try {
       const r = await fetch(
-        preflightUrl(ds.currentId, { trainType: tt ?? trainType, variant: va ?? variant, lane }),
+        // `masked` rides along so the modal can say "rembg is missing — this run
+        // trains unmasked" BEFORE the GPU (or the rented pod) is paid for, instead
+        // of the fallback showing up as a flag on a progress view that disappears
+        // when the run ends (issue #24, 1Tomber).
+        preflightUrl(ds.currentId, { trainType: tt ?? trainType, variant: va ?? variant,
+                                     lane, masked }),
         { credentials: 'include' });
       if (!r.ok) return true;
       const d = await r.json();
@@ -702,7 +732,11 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
         // (d.can_override) may proceed when the user ticked « Continue anyway »;
         // the launch carries allow_not_ready and the server re-checks. A physical
         // impossibility (can_override false) always stops here.
-        if (!(d.can_override && allowNotReady)) { toast.error(d.blockers.join('\n')); return false; }
+        if (!(d.can_override && allowNotReady)) {
+          const msg = d.blockers.join('\n');
+          if (onRefused) onRefused(msg); else toast.error(msg);
+          return false;
+        }
       }
       if (d.warnings?.length) {
         return await new Promise((resolve) => {
@@ -732,28 +766,59 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   // The checkpoint the dialog opens ON, when it was opened from a ◉ Graph pill
   // (null = the plain Continue button → the dialog's historical "latest" default).
   const [continueInitialStep, setContinueInitialStep] = useState(null);
+  // The LAST refusal, rendered INSIDE the dialog (utils/continueOutcome.js), and
+  // the in-flight flag that keeps it from being dismissed mid-request.
+  const [continueError, setContinueError] = useState(null);
+  const [continueSubmitting, setContinueSubmitting] = useState(false);
   const runContinue = async (payload) => {
-    setContinueOpen(false);
-    setContinueInitialStep(null);
-    if (!payload) return;
+    // POST WITH THE DIALOG STILL OPEN. Closing first was a workaround for a toast
+    // container that sat UNDER every modal (fixed: Toast.jsx is z-[10000]), and
+    // it cost the user the whole form on every refusal — including the preflight
+    // one, which is precisely the case where the answer is "fix this, then retry
+    // with the same choices".
+    if (!payload) { setContinueOpen(false); setContinueInitialStep(null); setContinueError(null); return; }
     // ONE dialog, two lanes: the chosen checkpoint either resumes on this machine
     // or is seeded onto a fresh cloud pod. Same payload, same guarded+confirmable
     // request helper — only the hook call differs.
     const lane = laneOfPayload(payload);
     const inCloud = lane === 'cloud';
-    // Continuing trains on the LIVE dataset, which can have drifted since the run
-    // started (images added, captions edited, triage left half-done) — so it gets
-    // the same sanity gate as a fresh launch, on whichever lane it resumes. The
-    // checkpoint's own family/variant, not the panel's current selection.
-    if (!(await preflightOk({ lane, trainType: checkpointTrainType,
-                              variant: checkpointVariant }))) return;
-    await runConfirmableTrainingRequest(
-      (continueOpts) => (inCloud ? ds.continueTrainingInCloud : ds.continueTraining)(
-        payload.extraSteps, checkpointBase, checkpointVariant, checkpointTrainType,
-        { ...continueOpts, fromStep: payload.fromStep, overrides: payload.overrides }),
-      { masked },
-      (error) => confirmableRetryFlag(error, 'Continue anyway (force)'),
-    );
+    setContinueSubmitting(true);
+    setContinueError(null);
+    try {
+      // Continuing trains on the LIVE dataset, which can have drifted since the run
+      // started (images added, captions edited, triage left half-done) — so it gets
+      // the same sanity gate as a fresh launch, on whichever lane it resumes. The
+      // checkpoint's own family/variant, not the panel's current selection.
+      // Its blockers are a REFUSAL about the dataset: they belong in the dialog,
+      // not only in a toast that outlives the choices it was about.
+      // Cancelling the warning report says nothing further (it IS the answer);
+      // a hard blocker is a message the dialog shows.
+      if (!(await preflightOk({ lane, trainType: checkpointTrainType,
+        variant: checkpointVariant, onRefused: setContinueError }))) return;
+      const { response, declined } = await runConfirmableTrainingRequest(
+        (continueOpts) => (inCloud ? ds.continueTrainingInCloud : ds.continueTraining)(
+          payload.extraSteps, checkpointBase, checkpointVariant, checkpointTrainType,
+          { ...continueOpts, fromStep: payload.fromStep, overrides: payload.overrides,
+            // The hook toasts refusals for its other callers; here the dialog
+            // shows them, and two copies of one sentence a centimetre apart read
+            // as a bug. Its SUCCESS toast is kept — the dialog is gone by then.
+            quiet: true }),
+        // maskedOpt, pas masked : tant que les reglages du dataset ne sont pas
+        // charges, le panneau n'envoie RIEN et le serveur lit la valeur stockee.
+        // Envoyer un defaut ici ecraserait un masquage desactive, sur un run paye.
+        { masked: maskedOpt },
+        (error) => confirmableRetryFlag(error, 'Continue anyway (force)'),
+      );
+      // The hooks never throw (they return {ok:false,error}); a decline is the
+      // user's own answer and says nothing further.
+      const outcome = continueAttemptOutcome({ response, declined });
+      if (!outcome.close) { setContinueError(outcome.error); return; }
+      setContinueOpen(false);
+      setContinueInitialStep(null);
+      setContinueError(null);
+    } finally {
+      setContinueSubmitting(false);
+    }
     refreshStatus();
     loadCheckpoints(checkpointBase, checkpointTrainType, checkpointVariant);
   };
@@ -775,21 +840,31 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
     });
   };
 
-  // Masked training (fond 10 %) — défaut ON, persisté (partagé lancement/file/programmation).
-  const [masked, setMaskedS] = useState(() => {
-    try { return localStorage.getItem('trainMasked_v1') !== '0'; } catch { return true; }
-  });
-  const setMasked = (v) => {
-    setMaskedS(v);
-    try { localStorage.setItem('trainMasked_v1', v ? '1' : '0'); } catch { /* ignore */ }
-  };
-  // Concept/style : masked OFF. A person mask erases a concept and prevents an
-  // always-on style from learning the full frame/background. Do not overwrite
-  // the user's character preference while applying that safety default.
+  // Masked training (background at 10 %) — a PERSISTED DATASET setting, resolved
+  // server-side (default ON; forced OFF for concept/style and slider mode, which
+  // is why no client-side reset effect is needed here any more). It used to be a
+  // per-browser localStorage preference the server only saw at launch: the
+  // readiness badge could not warn about it, a phone reverted to the default, and
+  // no run snapshot recorded it. `maskedMigration` handles the one-time carry-over
+  // of the legacy browser key.
+  const masked = adv?.masked !== false;
+  const setMasked = (v) => saveAdv({ masked: !!v });
+  // Sent on a launch only once the settings have LOADED: an unloaded panel must
+  // never overwrite the dataset's stored value with an optimistic default.
+  const maskedOpt = adv ? masked : undefined;
+  const [maskedCarryOver, setMaskedCarryOver] = useState(false);
   useEffect(() => {
-    if (isConceptual) setMaskedS(false);
-    else { try { setMaskedS(localStorage.getItem('trainMasked_v1') !== '0'); } catch { setMaskedS(true); } }
-  }, [ds.currentId, isConceptual]); // eslint-disable-line react-hooks/exhaustive-deps
+    const store = (() => { try { return globalThis.localStorage || null; } catch { return null; } })();
+    const action = maskedCarryOverAction(store, adv);
+    if (action === 'clear') clearLegacyMasked(store);
+    setMaskedCarryOver(action === 'prompt');
+  }, [adv]);
+  const answerMaskedCarryOver = async (keep) => {
+    const store = (() => { try { return globalThis.localStorage || null; } catch { return null; } })();
+    await saveAdv({ masked: keep });
+    clearLegacyMasked(store);
+    setMaskedCarryOver(false);
+  };
   // Masked ON but rembg (person-mask backend) unavailable → the export silently
   // drops the masks and trains UNMASKED. Surface that instead of lying about it.
   // `=== false` (not `!caps.masks`) so we don't warn before caps have loaded.
@@ -806,7 +881,8 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   const enqueue = async () => {
     if (!(await preflightOk())) return;
     // Mise en file AVEC la base/variante choisie (sinon le job reprend la base persistée).
-    let body = { base_model: base, variant, train_type: trainType, masked, steps: stepsN,
+    let body = { base_model: base, variant, train_type: trainType, masked: maskedOpt,
+                 steps: stepsN,
                  ...(allowNotReady ? { allow_not_ready: true } : {}),
                  ...(trainType === 'sdxl' ? { vae_path: vaePath, te_path: tePath } : {}) };
     let d = await postTrain(`/api/dataset/${ds.currentId}/train/enqueue`, body);
@@ -844,7 +920,8 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   const schedule = async () => {
     if (!schedAt) return;
     if (!(await preflightOk())) return;
-    let body = { at: schedAt, base_model: base, variant, train_type: trainType, masked, steps: stepsN,
+    let body = { at: schedAt, base_model: base, variant, train_type: trainType,
+                 masked: maskedOpt, steps: stepsN,
                  ...(allowNotReady ? { allow_not_ready: true } : {}),
                  ...(trainType === 'sdxl' ? { vae_path: vaePath, te_path: tePath } : {}) };
     let d = await postTrain(`/api/dataset/${ds.currentId}/train/schedule`, body);
@@ -1096,6 +1173,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
     });
     if (refusal) { toast.warning(refusal); return; }
     setContinueInitialStep(step);
+    setContinueError(null);
     setContinueOpen(true);
   };
   const onCheckpointTypeChange = (nextType) => {
@@ -1250,7 +1328,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
     if (!(await preflightOk({ lane: 'cloud' }))) return;
     let body = {
       ...cloudTrainingLaunchPayload({
-        baseModel: base, variant, trainType, masked, steps: stepsN, gpuName,
+        baseModel: base, variant, trainType, masked: maskedOpt, steps: stepsN, gpuName,
       }),
       ...(allowNotReady ? { allow_not_ready: true } : {}),
     };
@@ -1521,7 +1599,8 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                                    allow_uncaptioned: 'allowUncaptioned',
                                    allow_caption_quality: 'allowCaptionQuality',
                                    allow_unverified_weights: 'allowUnverifiedWeights' };
-            let opts = { baseModel: base, variant, trainType, masked, steps: stepsN, fresh,
+            let opts = { baseModel: base, variant, trainType, masked: maskedOpt,
+                         steps: stepsN, fresh,
                          vaePath, tePath, allowNotReady };
             let d = await ds.train(opts);
             for (let flag; d && d.ok === false && (flag = confirmableRetryFlag(d.error, 'Train anyway (force)')); ) {
@@ -1586,6 +1665,15 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
           {sliderOn ? '🎚 slider (Beta) · ' : ''}base “{zimageRecipe?.baseLabel || baseLabel}”{zimageRecipe ? ` · ${zimageRecipe.adapterActive ? 'Turbo adapter v2 ON' : 'no training adapter'}` : ''} · {sliderOn ? 'unmasked (slider)' : maskedRembgMissing ? 'unmasked (rembg missing)' : masked ? 'masked' : 'unmasked'} · {advResLabel} · {stepsOverride.trim() ? `${stepsN} steps` : sliderOn ? `${stepsInfo?.steps ?? 1000} steps (slider policy)` : 'adaptive steps'}{advNetworkType === 'lokr' ? ' · LoKr' : ''}{advEma ? ` · EMA ${advEma}` : ''}
         </span>
       </div>
+
+      {/* A custom base picked on ANOTHER family was still attached to this
+          dataset (one shared column). The run ignores it — say so, once, rather
+          than let the summary above advertise weights nobody will load. */}
+      {baseInfo?.base_family_mismatch && (
+        <p className="m-0 mt-1 text-amber-300 text-[0.6875rem]">
+          ⚠ {baseInfo.base_family_mismatch}
+        </p>
+      )}
 
       {/* --- Slider LoRA (Beta) : entraîne un LoRA BIPOLAIRE (±strength) depuis une
            paire de prompts via le trainer `concept_slider` d'ai-toolkit. Les images
@@ -2186,6 +2274,14 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                     className="h-4 w-4 rounded border-border bg-surface accent-indigo-500" />
                   <span className="text-content-muted text-[0.75rem]">long + short (local training only)</span>
                 </label>
+                {/* Issue #22 (1Tomber): Krea 2 / Anima cache their text embeddings, so the
+                    short caption can never be encoded. Say it here rather than let the user
+                    believe two wordings are training. Wraps at 400 px — no fixed width. */}
+                {advDualCaptions && !dualCaptionsSupport(trainType).supported && (
+                  <span className="text-amber-400 text-[0.6875rem] leading-relaxed">
+                    Ignored here: {dualCaptionsSupport(trainType).note}
+                  </span>
+                )}
                 <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
                   <b className="text-content-muted font-medium">Why:</b> trains each image with both a full and a brief
                   caption (text-side augmentation) so the LoRA leans less on any single wording.
@@ -2237,6 +2333,16 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                     </label>
                   ))}
                 </div>
+                {/* A saver this family's recipe relies on is off — most often
+                    because it was switched off on a 2B family (Anima/SDXL, where
+                    off IS the default) and the family then changed. Wraps at
+                    400 px: no fixed width, no truncation. */}
+                {advMemRiskLine && (
+                  <span className={`text-[0.6875rem] leading-relaxed ${
+                    adv?.memory_risk?.verdict === 'can_disable' ? 'text-content-muted' : 'text-amber-300'}`}>
+                    {adv?.memory_risk?.verdict === 'can_disable' ? '' : '⚠️ '}{advMemRiskLine}
+                  </span>
+                )}
                 <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
                   <b className="text-content-muted font-medium">Why:</b> the recipes are tuned so a 12B model fits in
                   24 GB — quantisation costs precision and low-VRAM streaming costs a lot of speed. If your card is
@@ -2397,6 +2503,31 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               </span>
             )}
           </label>
+
+          {/* One-time carry-over of the legacy per-browser preference. Shown ONLY
+              to the browsers that had explicitly turned masking off — adopting
+              that silently would spread one browser's choice over every dataset,
+              and dropping it silently would start paying for a mask pass nobody
+              asked for. Neither happens: the user answers, once. */}
+          {maskedCarryOver && (
+            <div className="rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2 flex flex-col gap-2 text-[0.6875rem]">
+              <span className="text-content leading-relaxed">
+                🎭 <b>Masked training is now a dataset setting</b>, shared across your
+                browsers and devices instead of living in this one. This browser had it
+                turned <b>off</b>; datasets default to <b>on</b>. Which do you want here?
+              </span>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => answerMaskedCarryOver(false)}
+                  className="px-2 py-1 rounded border border-border text-content-muted hover:text-content hover:bg-surface-raised">
+                  Turn it off for this dataset
+                </button>
+                <button type="button" onClick={() => answerMaskedCarryOver(true)}
+                  className="px-2 py-1 rounded border border-emerald-400/40 text-emerald-300 hover:bg-emerald-500/10">
+                  Keep masking on
+                </button>
+              </div>
+            </div>
+          )}
 
           {!status.in_progress && keptCount >= 10 && (
             <label className="flex items-center gap-1.5 text-content-subtle text-[0.6875rem]"
@@ -2725,7 +2856,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                 <button type="button"
                   disabled={!checkpointMatchesTraining
                     || (status.in_progress && !continueLanes.cloud.available)}
-                  onClick={() => { setContinueInitialStep(null); setContinueOpen(true); }}
+                  onClick={() => { setContinueInitialStep(null); setContinueError(null); setContinueOpen(true); }}
                   title={!checkpointMatchesTraining
                     ? 'To continue this run, select the same LoRA family, base and variant in Training first'
                     : status.in_progress
@@ -2976,10 +3107,16 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
       </details>
       </CheckpointPortal>
 
-      {preflightReport && (
+      {/* Portalled, like the ▶ Continue dialog above and for the same reason:
+          this panel lives in a section the workspace hides with display:none,
+          and the ▶ Continue buttons are clickable from ANOTHER section. Rendered
+          in place, the report would open invisible and the launch would wait
+          forever on an answer nobody could give. It is also z-[9992] — ABOVE the
+          continue dialog that raises it, which now stays open behind it. */}
+      {preflightReport && createPortal((
         <PreflightModal report={preflightReport} datasetId={ds.currentId} ds={ds}
           onResolve={resolvePreflight} />
-      )}
+      ), document.body)}
 
       {cloudDialog && (
         <CloudLaunchDialog
@@ -3047,7 +3184,8 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
             optimizer: adv?.optimizer, learning_rate: adv?.learning_rate }}
           // A local training in flight no longer freezes the whole dialog: the
           // Local lane is disabled with its reason, the Cloud lane stays usable.
-          busy={status.in_progress && !continueLanes.cloud.available}
+          busy={continueSubmitting || (status.in_progress && !continueLanes.cloud.available)}
+          error={continueError}
           onResolve={runContinue} />
       ), document.body)}
 
@@ -3137,8 +3275,13 @@ function CustomBasePushSection({ datasetId, trainType, variant, base, onReadyCha
   const job = state?.job || {};
   const pushing = pushBusy || job.state === 'running';
   const sizeLabel = state?.local_size_bytes != null ? ` (~${fmtBytes(state.local_size_bytes)})` : '';
+  const view = customBasePushView({ state, checkError, pushing });
   let body;
-  if (checkError) {
+  if (view.kind === 'foreign') {
+    // Another family's base: nothing to push, nothing to restore. Say what the
+    // run will do instead of offering an upload that could only fail.
+    body = <p className="m-0 text-amber-300 text-[0.75rem]">⚠ {view.message}</p>;
+  } else if (checkError) {
     body = <p className="m-0 text-red-300 text-[0.75rem]">⚠ {checkError}</p>;
   } else if (!state) {
     body = <p className="m-0 text-content-muted text-[0.75rem]">Checking your custom base on Hugging Face…</p>;
@@ -3171,27 +3314,20 @@ function CustomBasePushSection({ datasetId, trainType, variant, base, onReadyCha
       </p>
     );
   } else {
-    const why = state.reason === 'size_mismatch'
-      ? 'Your local custom base changed since it was pushed — push it again to update the private copy.'
-      : state.reason === 'file_missing'
-        ? 'The private repo exists but is missing the file this variant needs — push again to add it.'
-        : 'This run uses custom weights the pod cannot download yet.';
     body = (
       <div className="flex flex-col gap-1.5">
         <p className="m-0 text-content-muted text-[0.75rem]">
-          {why} Pushing uploads your custom base{sizeLabel} to a <b className="text-content">PRIVATE</b> repo
+          {view.message} Pushing uploads your custom base{sizeLabel} to a <b className="text-content">PRIVATE</b> repo
           on your Hugging Face account — one time; future cloud runs reuse it. It is never made public.
         </p>
-        {!state.local_available && (
-          <p className="m-0 text-amber-300 text-[0.75rem]">
-            ⚠ The local file is unavailable ({state.local_reason || 'missing'}) — restore it to push.
-          </p>
+        {view.warning && (
+          <p className="m-0 text-amber-300 text-[0.75rem]">⚠ {view.warning}</p>
         )}
         {(pushError || job.state === 'error') && (
           <p className="m-0 text-red-300 text-[0.75rem]">⚠ {pushError || job.error}</p>
         )}
         <button type="button" onClick={() => startPush(false)}
-          disabled={!state.local_available || pushBusy}
+          disabled={!view.canPush || pushBusy}
           className="w-fit px-3 py-1.5 rounded-lg border border-sky-500/50 bg-sky-500/10 text-sky-200 text-sm font-semibold disabled:opacity-40">
           ⬆ Push custom base to Hugging Face (one-time)
         </button>

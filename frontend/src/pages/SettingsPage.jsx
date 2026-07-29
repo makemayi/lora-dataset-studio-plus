@@ -5,7 +5,7 @@ import { useToast } from '../components/common/Toast'
 import { useCapabilities } from '../context/CapabilitiesContext'
 import { SETTINGS_SECTIONS, sectionStatus, matchesQuery } from '../components/settings/registry'
 import { SectionHeader } from '../components/settings/primitives'
-import { shouldScrollToSection } from './settingsDeepLink'
+import { shouldScrollToSection, focusNeedsRescroll } from './settingsDeepLink'
 import { HelpBadge } from '../help/HelpMode'
 import { searchHelpTopics, helpTopics } from '../help/helpRegistry'
 import { openCollapsedAncestors, resolveFocusTarget } from '../help/revealTarget'
@@ -257,8 +257,26 @@ export default function SettingsPage() {
     found.el.scrollIntoView({ behavior: 'smooth', block: 'center' })
     const ring = ['ring-2', 'ring-indigo-400/70', 'ring-offset-2', 'ring-offset-app', 'rounded-md']
     found.el.classList.add(...ring)
-    const t = setTimeout(() => found.el.classList.remove(...ring), 2000)
-    return () => clearTimeout(t)
+    /* Panels above the target keep rendering after the first scroll (the composed
+       prompt preview fetches its text), which pushes the field back out of view —
+       measured 116 px below the fold at 400 px wide, with the ring already gone.
+       So keep checking while the highlight is lit, and re-scroll only when the
+       field is genuinely not visible. See focusNeedsRescroll. */
+    const settle = setInterval(() => {
+      const r = found.el.getBoundingClientRect()
+      if (!focusNeedsRescroll({ top: r.top, height: r.height, viewportHeight: window.innerHeight })) {
+        // Landed once — stop watching. Correcting after that would drag back a
+        // reader who has since scrolled somewhere else on purpose.
+        clearInterval(settle)
+        return
+      }
+      found.el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 500)
+    const t = setTimeout(() => {
+      clearInterval(settle)
+      found.el.classList.remove(...ring)
+    }, 4000)
+    return () => { clearInterval(settle); clearTimeout(t) }
   }, [focusId, section, loading, config])
 
   // Enriched search index: besides the section rail, individual settings are

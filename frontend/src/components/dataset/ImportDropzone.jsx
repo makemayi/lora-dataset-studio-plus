@@ -1,7 +1,18 @@
-/** Drop / pick real photos to import into the dataset. */
+/** Drop / pick real photos to import into the dataset.
+ *
+ * The dropzone used to say "normalized to 1024" and nothing else — no why, no
+ * way out (reported by Qeeyana on Reddit: "why? Let me choose not to"). It now
+ * states what will be stored, why that number, and links to the setting that
+ * changes it. The value comes from capabilities, never from a copy of the
+ * default kept here: a hint that can go stale is worse than no hint.
+ */
 import { useRef, useState } from 'react';
+import { useCapabilities } from '../../context/CapabilitiesContext';
+import SettingsLink from '../common/SettingsLink';
+import { importPolicyLine } from './importPolicy.js';
 
 export default function ImportDropzone({ onImport, busy, visionBusy = false, cropOption = false, defaultCrop = true }) {
+  const { caps } = useCapabilities();
   const inputRef = useRef(null);
   const [over, setOver] = useState(false);
   // Auto head-crop (square, vision pass). OFF keeps the original framing —
@@ -26,7 +37,12 @@ export default function ImportDropzone({ onImport, busy, visionBusy = false, cro
       <span className="text-xl">📥</span>
       <span className="text-content text-xs font-medium">Import real photos</span>
       <span className="text-content-subtle text-[0.625rem]">
-        drag and drop or click (normalized to 1024, kept)
+        drag and drop or click — kept, and {importPolicyLine(caps.dataset_import)}
+      </span>
+      <span onClick={(e) => e.stopPropagation()}
+        className="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 text-[0.625rem] text-content-subtle">
+        <span>trainers only ever downscale, so extra pixels cost disk, not quality.</span>
+        <SettingsLink section="captioning" focus="dataset-import-max-side">Change this</SettingsLink>
       </span>
       {cropOption && (
         <label onClick={(e) => e.stopPropagation()}

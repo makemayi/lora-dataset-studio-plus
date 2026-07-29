@@ -116,6 +116,38 @@ Pick **Style** at creation. What changes:
 - **Step count switches to a sublinear √n scale** built for the large sets
   (hundreds of images) style LoRAs want.
 
+## Caption your images in another tool
+
+You are not locked into the captioners shipped here. The round trip is:
+
+1. **⬇ Export ZIP** from *Import & export*. The archive is a plain kohya layout —
+   one folder of `image.png` + same-name `image.txt` pairs. If some kept images
+   have no caption yet, the app asks before exporting instead of refusing:
+   confirm and their `.txt` files come out empty, ready to be filled.
+2. **Caption them wherever you like.** Any tool that writes a `<image>.txt`
+   sidecar next to each image works — that is the convention this app reads,
+   whatever the file names are and whatever folder depth you use.
+3. **📦 Import dataset (ZIP)** (or **📂 Import from folder…**) with the same
+   images and their new `.txt` files. Images already in the dataset are **not
+   duplicated**: their caption lands on the row that already holds them, and the
+   toast says how many were applied.
+
+Two things worth knowing before you start:
+
+- **A caption you already wrote here is never overwritten.** Re-importing only
+  fills the empty ones; the toast reports the rest as *"kept the caption written
+  here"*. Clear a caption in the app first if you want the external one to win.
+- **Only the caption travels back.** Statuses, scores and framing stay as they
+  are here — the returning archive is read as captions for images you already
+  have, not as a replacement dataset.
+
+**A Style dataset asks louder, on purpose.** A Style LoRA learns everything its
+captions do *not* name, so an empty `.txt` teaches it nothing; the export
+confirmation says so before letting you through. Cancelling takes you straight
+to the captions instead.
+
+*Requested by Qeeyana (Reddit).*
+
 ## Krea and the shape of your reference photo
 
 **Krea 2 Edit reproduces the shape of your reference photo** (capped at 2 MP).
@@ -271,6 +303,28 @@ touching the folder itself:
    are never touched. Files you removed from the folder are reported at the top
    of the bank, never deleted from it, so an unplugged drive can't wipe your
    triage.
+1bis. **🕸 Scrape the web into a bank** — you don't need a folder you prepared
+   by hand. Unfold **🕸 Scrape the web into a bank** on the bank list, choose a
+   destination (a **new bank**, or **add to an existing one**), then scan a
+   gallery URL and pick images exactly as you would for a dataset. They are
+   downloaded into that bank's own folder and inventoried on the spot.
+
+   Two things are worth knowing, because they are the whole point:
+
+   - **Nothing is filtered on the way in.** Scraping straight into a *dataset*
+     applies training-grade gates (short side ≥ 768 px, ratio ≤ 3:1, perceptual
+     de-duplication) *before* anything is stored. A bank is the step **before**
+     that judgement: "too small", "near-duplicate" and "wrong framing" are
+     verdicts its own passes produce, with thresholds you move. So the bank
+     stores what it downloaded and lets you decide. If you already know what you
+     are collecting, scraping straight into a dataset is still the shorter road.
+   - **A second scrape resumes the same bank.** Pick *Add to an existing bank*
+     and the new images join the pile — nothing is replaced, and no triage
+     decision you already made is reset. Re-downloading the exact same file
+     lands on the same name instead of piling up copies; that is file identity,
+     not a duplicate verdict (the bank's own passes own that word).
+
+   The rest of the funnel is unchanged: scan, cull, promote into a dataset.
 2. **🔎 Scan quality** — a background pass (CPU only, a few minutes even on
    thousands of images) scores every file: sharpness, noise, flat/empty
    frames, resolution — and groups **near-duplicates**. The flags follow the
@@ -913,6 +967,73 @@ mark position; the panel says so and one more **🚩 Find watermarks** run makes
 them cleanable.
 
 
+## Fix a watermark mask in a bank
+
+The detector draws **one** box, and it is a guess: it can miss a second logo,
+swallow half the face, or land beside the mark. Open **▶ Review**, walk to a
+flagged image and press **🚩 Edit mask** (shortcut `M`) — the same zone editor
+the datasets use, on the bank image, right there.
+
+- **+ Add zone**, then drag on the photo to draw a rectangle over the mark. Up
+  to 32 zones; drag a zone to move it, its corners to resize.
+- **Delete zone** removes the selected one, **Reset to detected** throws your
+  zones away and puts the detector's box back.
+- Every edit saves as you draw. If a save fails it says so and offers a retry —
+  the zones on screen are never silently unsaved.
+
+What the two cleaning steps then do with your mask:
+
+- **🧽 Inpaint repaints exactly the zones you drew** — all of them, including a
+  zone sitting on the subject, which is precisely what a hand mask is for.
+- **✂ Auto-crop skips a hand-masked image.** A crop can only cut one border
+  band; it cannot express several zones or a mark on the subject, so cropping
+  the old box would remove pixels you did not point at.
+- **An empty mask cleans nothing.** Delete every zone and you have said "there
+  is nothing to repaint here": neither step touches that image, and the panel
+  says how many are in that state instead of leaving them looking unhandled.
+
+A flagged image an older scan left *without* a box becomes cleanable as soon as
+you draw the zones yourself — that drawing is the missing information. And as
+everywhere else in a bank, **your own file is never modified**: cleaning writes
+a separate copy. A rotated image is shown unrotated here, because the whole
+watermark lane works on your original file, which the ↻ turn never changed.
+
+
+## A bank and a dataset never share files
+
+A dataset and an image bank can hand images to each other in both directions,
+and both directions **copy**. That is not an implementation detail — it is the
+rule the whole flow rests on:
+
+- **Bank → dataset** (**⬆ Promote…**) writes new files into the dataset.
+- **Dataset → bank** (**🗃 Import to bank**, on the dataset) copies the dataset's
+  kept images into a folder of the bank's own.
+
+Neither ever *points* at the other's files. The reason is that the two containers
+have opposite contracts. A dataset **owns** its images; a bank merely **points**
+at a live folder it does not own — which is exactly why 🗑 **Delete rejected** is
+allowed to remove files from it. Put a bank on a dataset's folder and that button
+stops deleting your rejects and starts deleting the dataset's training images.
+
+So the app refuses it. If you paste a dataset's image folder into **➕ Create
+bank** — or into **📦 Move folder…** for an existing bank — you get a refusal
+that names the dataset and points you at **🗃 Import to bank** instead. The check
+looks through the disguises: a subfolder of the dataset, the folder *containing*
+all datasets, a different letter case, forward slashes instead of backslashes,
+and symlinks or Windows junctions that resolve to the same place.
+
+**If you already have such a bank** (it was possible before this check existed),
+nothing is repaired or deleted behind your back. Opening it shows a red banner
+naming the dataset, and 🗑 Delete rejected is refused on that bank — everything
+else keeps working, so you can finish triaging. When you are ready, either
+**📦 Move folder…** to point the bank at a folder of its own, or remove the bank
+(removing a bank never touches files).
+
+The dataset's own folder is shown at the top of the dataset, with a **⧉ Copy**
+button, so you never have to go hunting for it in a file manager — which is how
+this trap was found in the first place.
+
+
 ## Move a bank folder to another disk
 
 A bank points at a folder *in place*, but nothing it computes lives in that
@@ -1091,6 +1212,39 @@ Two things it will tell you rather than fail at:
   not share a base model or a workflow, so there is no single run that can render
   both. Unpick one family and the button comes back.
 
+**▶ Continue training from a checkpoint.** Clicking a pill's body opens its
+actions — Download, Deploy, Details, Delete — and **▶ Continue from here**. It
+opens the *same* launch dialog the Checkpoints panel and the Runs page open, on
+*that exact save*: pick where it runs (**💻 Local** or **☁ Cloud**), how many
+extra steps, and — folded under *Adjust settings* — the checkpoint cadence, the
+preview prompts, the timestep weighting and the learning rate. Rank, base and
+optimizer are locked to the checkpoint being continued; they are not things a
+resume can change.
+
+Read the step field as **extra** steps, not a total: the line beside it spells
+out where you land ("→ target step 3500") and so does the button. Resuming step
+2500 of a run that ended at 3500 is the whole point of opening this from a pill
+— a later epoch can be over-cooked, and the earlier one is often the better
+LoRA.
+
+The board is the only screen that offers **both lanes for both kinds of run**: a
+checkpoint is just a file, so a run trained on your machine can be finished on a
+rented GPU, and a cloud run's epoch can be finished here. What is *not* always
+possible is stated rather than hidden — a lane you cannot use stays visible,
+greyed, with its reason:
+
+- *"Local training needs ai-toolkit"* / *"A training is already running on this
+  machine"* — local training is single-flight for the whole machine.
+- *"Cloud training needs a vast.ai API key"*, an active cloud run on the same
+  dataset, or the concurrency limit.
+- *"This save is no longer on this machine"* — the lanes that need the file are
+  closed. For a **cloud** run the cloud lane still works, because a fresh pod is
+  seeded from that run's own staging rather than from your disk. For a local run
+  there is no copy anywhere, and both lanes say so.
+
+If the save vanished between the board being drawn and the click, the launch is
+refused with the steps that *are* available, named — never a silent failure.
+
 **The gallery under a checkpoint.** Images pile up. A checkpoint that has
 produced more than one shows a small **× N** badge; clicking it opens everything
 that checkpoint ever made, newest first — from the board, from the Test Studio,
@@ -1149,6 +1303,49 @@ picture and decide it belongs on the board.
 - The **✕**, the **🔍** and the resize corner keep a finger-sized target **at
   every zoom level**: they are drawn at a constant size on screen rather than at
   the board's, so a board fitted to twenty runs is still one you can tap.
+
+**🖼🖼 Fuse pinned images side by side.** Comparing two renders across a gap and
+two frames is comparing two frames. **Drop one pinned image onto another and
+they become a single node**, pictures edge to edge with nothing drawn between
+them. There is **no limit**: drop a third, a tenth, they all join the strip.
+
+- **Where it lands.** While you drag, the picture you are about to join lights up
+  with a dashed outline, a bar marks the exact slot yours would take, and a label
+  says how many pictures the group would then hold. Let go anywhere else and it
+  is an ordinary move — nothing fuses by surprise.
+- **Which side.** Drop on the left half of a picture to land before it, on the
+  right half to land after it. The same gesture **re-orders** a group: drag a
+  member out and back onto the slot you want.
+- **Move the whole group** by its **title bar** (`⠿ N images`), which is also
+  where its **✕** lives. That bar is the only thing that moves a group, on
+  purpose: dragging a *picture* inside a group means something else entirely.
+- **Take one back out** by dragging it **off the group**. That is the whole rule
+  — while it is still over the strip nothing has happened, and letting go there
+  puts it back. Once it is clear of the strip it becomes a node of its own again,
+  **at the size it had before it joined**, wherever you dropped it. Joining a
+  group never rewrites a picture's own size; the strip only borrows it.
+- **The pictures that stay do not move.** Take the first one out and the strip
+  keeps its place and its height; the rest simply close the gap. A group left
+  with a single picture stops being a group.
+- **Which ✕ am I about to press?** At rest a group is nothing but photographs.
+  Hover (or Tab to) one and *that* picture lights up and shows its own step
+  label, its 🔍 and its ✕ — the group's own ✕ is the one on the title bar, and it
+  carries the count (`✕3`) precisely so the two can never be confused. Closing a
+  group closes all of its pictures, undoes the group, and each one keeps its own
+  remembered size; re-pinning one from its gallery brings back **that one**, not
+  the strip.
+- **Every picture in a strip is the same height**, each scaled to keep its own
+  shape — that is what makes the band continuous instead of a row of letterboxed
+  tiles. Resize the group from its corner and the whole strip scales.
+- **A strip has no width limit, and that is the honest consequence of "no
+  limit".** Ten pictures side by side is ten times as wide as one; the board
+  zooms and pans, so **✦ Fit** is the answer. It deliberately does *not* wrap
+  onto a second row — a strip that quietly stopped being a strip at some
+  invisible threshold would be worse than a wide one. On a phone, expect to zoom.
+- **✦ Tidy up leaves groups alone.** It rebuilds the automatic tree and re-flows
+  the pictures you have *not* grouped; a strip is something you assembled on
+  purpose, and taking it apart is not tidying. The way out is the group's ✕, or
+  dragging its pictures back off it.
 
 **📌 Pin all — the whole lot in one gesture.** When a generation launched from
 the board finishes, the green bar says how many images are ready and names the

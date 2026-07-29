@@ -239,13 +239,16 @@ def test_retry_route_posts_record_id(app, client, monkeypatch):
     captured = {}
     monkeypatch.setattr(
         lt, 'retry_local_run',
-        lambda user_id, record_id: captured.update(record_id=record_id)
+        lambda user_id, record_id, **kw: captured.update(record_id=record_id, **kw)
         or {'started': True, 'pid': 7})
     r = client.post('/api/dataset/train/retry', json={'record_id': 55})
     assert r.status_code == 200
     d = r.get_json()
     assert d['ok'] is True and d['pid'] == 7
     assert captured['record_id'] == 55
+    # No body key = no confirmation. Every flag is explicitly False, never absent:
+    # "not sent" and "declined" must reach the service as the same thing.
+    assert all(captured[k] is False for k in lt.CONFIRMATION_FLAGS)
 
 
 def test_retry_route_gated_when_aitoolkit_unconfigured(app, client, monkeypatch):
@@ -253,3 +256,169 @@ def test_retry_route_gated_when_aitoolkit_unconfigured(app, client, monkeypatch)
     monkeypatch.setattr(capabilities, 'probe', lambda: {'aitoolkit': {'valid': False}})
     r = client.post('/api/dataset/train/retry', json={'record_id': 1})
     assert r.status_code == 409
+
+
+# --- confirmable pre-flight guards on the retry lane (GitHub #23, 1Tomber) --------
+#
+# Reported: a run started with one uncaptioned image (confirmed "train anyway")
+# failed before training on a missing Hugging Face token. After adding the token,
+# ↻ Retry did nothing at all — the route never read allow_uncaptioned, so the
+# guard refused again, and the 400 died as an uncaught promise in the console.
+#
+# A retry is a LAUNCH: it re-exports the LIVE dataset, so it meets the live
+# dataset's guards. The consent therefore comes from the retry itself, not from
+# the record of the failed launch — nothing stores it there, and a consent given
+# for "1 image has no caption" must not silently cover the twelve that lost their
+# caption since. The two halves below are the whole contract: the guard still
+# refuses an unconfirmed retry, and a confirmed one goes through.
+
+def _uncaption_one(ds):
+    """Take the caption off one kept image — 1Tomber's dataset, exactly."""
+    from app.services import face_dataset_service as svc
+    from app.models import FaceDatasetImage
+    img = (FaceDatasetImage.query.filter_by(dataset_id=ds.id, status='keep')
+           .order_by(FaceDatasetImage.id.asc()).first())
+    img.caption = '   '                      # whitespace counts as no caption
+    svc.db.session.commit()
+
+
+def _launchable(lt, tmp_path, monkeypatch):
+    """Everything a real launch needs EXCEPT the guards under test."""
+    monkeypatch.setattr(lt.shutil, 'disk_usage',
+                        lambda p: type('u', (), {'free': 500e9})())
+    monkeypatch.setattr(lt, '_watch_training', lambda *a, **k: None)
+    monkeypatch.setattr(lt.subprocess, 'Popen', lambda args, **kw: _FakeProc())
+    folder = tmp_path / 'exp'
+    folder.mkdir(exist_ok=True)
+    monkeypatch.setattr(lt, 'export_dataset_to_aitoolkit',
+                        lambda user_id, dataset_id, masked=True: str(folder))
+
+
+def _retry_ready(app, client, tmp_path, monkeypatch):
+    from app import capabilities
+    from app.services import lora_training as lt
+    monkeypatch.setattr(capabilities, 'probe', lambda: {'aitoolkit': {'valid': True}})
+    _configure_aitoolkit(tmp_path, monkeypatch, app)
+    _launchable(lt, tmp_path, monkeypatch)
+
+
+def test_retry_of_uncaptioned_run_is_refused_then_confirmable(app, client, tmp_path,
+                                                              monkeypatch):
+    """THE reported scenario. Unconfirmed → the same UNCAPTIONED: refusal Start
+    gives (never masked); confirmed in the retry payload → the run starts."""
+    _retry_ready(app, client, tmp_path, monkeypatch)
+    with app.app_context():
+        ds = _mk_ds(app, n_keep=20, trigger='u_trig', name='Uncaptioned')
+        _uncaption_one(ds)
+        rec = _register(app, ds)
+        _mark_failed(ds)
+
+        plain = client.post('/api/dataset/train/retry', json={'record_id': rec.id})
+        assert plain.status_code == 400
+        assert plain.get_json()['error'].startswith('UNCAPTIONED: ')
+        assert '1 kept image(s)' in plain.get_json()['error']
+
+        confirmed = client.post('/api/dataset/train/retry',
+                                json={'record_id': rec.id, 'allow_uncaptioned': True})
+        assert confirmed.status_code == 200, confirmed.get_json()
+        assert confirmed.get_json()['started'] is True
+
+
+def test_retry_still_refuses_a_run_that_was_never_confirmed(app, client, tmp_path,
+                                                            monkeypatch):
+    """Anti-masking. The fix must not be "drop the guard on retry": with no
+    confirmation in the payload, EVERY guard still refuses — including on a run
+    that is being retried for the tenth time."""
+    _retry_ready(app, client, tmp_path, monkeypatch)
+    with app.app_context():
+        ds = _mk_ds(app, n_keep=20, trigger='n_trig', name='NeverConfirmed')
+        _uncaption_one(ds)
+        rec = _register(app, ds)
+        _mark_failed(ds)
+        for _ in range(3):
+            r = client.post('/api/dataset/train/retry', json={'record_id': rec.id})
+            assert r.status_code == 400
+            assert r.get_json()['error'].startswith('UNCAPTIONED: ')
+        # …and confirming something ELSE does not open the caption gate
+        r = client.post('/api/dataset/train/retry',
+                        json={'record_id': rec.id, 'allow_not_ready': True})
+        assert r.status_code == 400
+        assert r.get_json()['error'].startswith('UNCAPTIONED: ')
+
+
+def test_retry_consent_is_never_inherited_from_the_failed_launch(app, monkeypatch):
+    """The arbitration, pinned. `retry_local_run` reads its confirmations from
+    its OWN call, never from the record: the record stores none, and the dataset
+    it replays is the mutable live one. A stale consent relaunching in silence
+    would be the reported defect in reverse."""
+    from app.services import lora_training as lt
+    with app.app_context():
+        ds = _mk_ds(app, trigger='i_trig', name='Inherit')
+        rec = _register(app, ds)
+        _mark_failed(ds)
+        captured = {}
+        monkeypatch.setattr(
+            lt, 'launch_training',
+            lambda user_id, dataset_id, **kw: captured.update(**kw) or {'started': True})
+        lt.retry_local_run(LOCAL_USER, rec.id)
+        assert all(captured[k] is False for k in lt.CONFIRMATION_FLAGS)
+
+
+def test_retry_forwards_every_confirmation_flag(app, monkeypatch):
+    """The whole family, not just the one that was reported: Start can confirm
+    five pre-flight refusals, so Retry forwards five."""
+    from app.services import lora_training as lt
+    with app.app_context():
+        ds = _mk_ds(app, trigger='f_trig', name='Flags')
+        rec = _register(app, ds)
+        _mark_failed(ds)
+        captured = {}
+        monkeypatch.setattr(
+            lt, 'launch_training',
+            lambda user_id, dataset_id, **kw: captured.update(**kw) or {'started': True})
+        lt.retry_local_run(LOCAL_USER, rec.id,
+                           **{k: True for k in lt.CONFIRMATION_FLAGS})
+        assert all(captured[k] is True for k in lt.CONFIRMATION_FLAGS)
+        assert set(lt.CONFIRMATION_FLAGS) == {
+            'allow_caption_mismatch', 'allow_uncaptioned', 'allow_caption_quality',
+            'allow_unverified_weights', 'allow_not_ready'}
+
+
+def test_retry_rejects_an_unknown_confirmation_flag(app):
+    """A misspelled flag must not read as "the user did not confirm" — that is
+    how a bypass silently stops bypassing."""
+    from app.services import lora_training as lt
+    with app.app_context():
+        ds = _mk_ds(app, trigger='x_trig', name='Typo')
+        rec = _register(app, ds)
+        _mark_failed(ds)
+        with pytest.raises(ValueError, match='unknown confirmation flag'):
+            lt.retry_local_run(LOCAL_USER, rec.id, allow_uncaption=True)
+
+
+@pytest.mark.parametrize('n_keep,marker,flag', [
+    (3, 'NOT_READY: ', 'allow_not_ready'),
+    (20, 'MISMATCH_CAPTION: ', 'allow_caption_mismatch'),
+])
+def test_retry_confirms_the_other_preflight_guards(app, client, tmp_path, monkeypatch,
+                                                   n_keep, marker, flag):
+    """Measured end to end, not assumed: the image floor and the caption-style
+    mismatch dead-ended ↻ Retry exactly like the uncaptioned guard did."""
+    from app.services import face_dataset_service as svc
+    from app.models import FaceDatasetImage
+    _retry_ready(app, client, tmp_path, monkeypatch)
+    with app.app_context():
+        ds = _mk_ds(app, n_keep=n_keep, trigger=f'g_{flag[6:12]}', name='Guard')
+        if marker.startswith('MISMATCH'):
+            for img in FaceDatasetImage.query.filter_by(dataset_id=ds.id,
+                                                        status='keep').all():
+                img.caption = '1girl, solo, long hair, smile, outdoors'
+            svc.db.session.commit()
+        rec = _register(app, ds)
+        _mark_failed(ds)
+        plain = client.post('/api/dataset/train/retry', json={'record_id': rec.id})
+        assert plain.status_code == 400
+        assert plain.get_json()['error'].startswith(marker)
+        ok = client.post('/api/dataset/train/retry',
+                         json={'record_id': rec.id, flag: True})
+        assert ok.status_code == 200, ok.get_json()

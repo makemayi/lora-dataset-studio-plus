@@ -14,8 +14,66 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
   // re-tuned between releases: the numbers shown when a key is missing, like the
   // ones "Reset to default" writes, come from the server (config_defaults).
   const bankDefault = (key) => defaultValueAt(configDefaults, 'bank', key)
+  const importDefault = (key) => defaultValueAt(configDefaults, 'dataset_import', key)
   return (
     <div className="space-y-6">
+      <Card
+        title="Dataset import"
+        help="What happens to a photo the moment it enters a dataset. Trainers only ever downscale, so 1024 px is what most people train on — but it is your call, and until now it was made for you."
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label htmlFor="dataset-import-max-side" className="block text-sm font-medium text-content">
+              Stored resolution
+            </label>
+            <select id="dataset-import-max-side"
+              value={String(config.dataset_import?.max_side ?? importDefault('max_side'))}
+              onChange={(e) => setField('dataset_import', 'max_side', Number(e.target.value))}
+              className={INPUT_CLASS}>
+              <option value="1024">1024 px long side (default)</option>
+              <option value="1536">1536 px long side</option>
+              <option value="2048">2048 px long side</option>
+              <option value="4096">4096 px long side</option>
+              <option value="0">Original size — no downscale</option>
+            </select>
+            <p className="mt-0.5 text-xs text-content-muted">
+              Longest side kept; the aspect ratio is always preserved and an image is never
+              enlarged. Original size still stops at 8192 px — WebP itself refuses past
+              16383 px, so that is a format wall, not a preference.
+            </p>
+            <ResetToDefault label="Stored resolution" section="dataset_import" field="max_side"
+              config={config} configDefaults={configDefaults} setField={setField} />
+          </div>
+          <div>
+            <label htmlFor="dataset-import-encoding" className="block text-sm font-medium text-content">
+              Stored encoding
+            </label>
+            <select id="dataset-import-encoding"
+              value={String(config.dataset_import?.encoding ?? importDefault('encoding'))}
+              onChange={(e) => setField('dataset_import', 'encoding', e.target.value)}
+              className={INPUT_CLASS}>
+              <option value="standard">Standard — WebP quality 92 (default)</option>
+              <option value="high">High — WebP quality 100</option>
+              <option value="lossless">Lossless — pixel-identical</option>
+            </select>
+            <p className="mt-0.5 text-xs text-content-muted">
+              The other half of the loss: raising the resolution while leaving quality 92 in
+              place still re-encodes every import. Lossless keeps every pixel and costs about
+              5× the disk space (measured on a noisy photo: 158 KB → 797 KB).
+            </p>
+            <ResetToDefault label="Stored encoding" section="dataset_import" field="encoding"
+              config={config} configDefaults={configDefaults} setField={setField} />
+          </div>
+        </div>
+        <p className="mt-3 text-xs text-content-muted">
+          Applies to images imported <span className="font-medium">from now on</span>: changing
+          it mid-way leaves a dataset holding both sizes. That is harmless for training (every
+          trainer buckets and downscales on its own) but it does mean the folder is no longer
+          uniform. Generated images and the copies sent to an image API keep their own fixed
+          sizes. Thanks to Qeeyana (Reddit) for asking why this was decided for you.
+        </p>
+      </Card>
+
       <Card
         title="Captioning"
         help="Who writes the captions. Auto prefers JoyCaption (via ai-toolkit) and falls back to the Ollama vision model."

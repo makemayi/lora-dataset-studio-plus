@@ -31,7 +31,12 @@ export default function PreflightModal({ report, datasetId, ds, onResolve }) {
   return (
     <div role="dialog" aria-modal="true"
       aria-label={inCloud ? 'Before training in the cloud' : 'Before training'}
-      className="fixed inset-0 z-[9990] bg-black/80 flex items-center justify-center p-3"
+      /* z-[9992], one notch above the 9990 modals: ▶ Continue now stays OPEN
+         while its request is in flight, and this report is the question raised
+         on top of it. At the same layer the continue dialog won (it portals to
+         document.body, so it comes last in the DOM) and this modal — whose
+         promise the launch is awaiting — was invisible. */
+      className="fixed inset-0 z-[9992] bg-black/80 flex items-center justify-center p-3"
       onClick={(e) => { if (e.target === e.currentTarget) onResolve(false); }}>
       <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl border border-amber-400/40 bg-app p-4 flex flex-col gap-3">
         <div className="flex items-start gap-2">

@@ -258,13 +258,24 @@ _FLASK_VENV_INCOMPATIBLE = frozenset({_WATERMARK_PKG})
 #                 the server-safe cv2 that insightface & rembg both pull — listed so
 #                 the scoped install prefers the headless variant, matching the
 #                 monolithic `-r` install.
-#   masks         rembg (u2net background removal), + the same shared numpy /
-#                 headless-opencv floor.
+#   masks         rembg (u2net background removal) + onnxruntime (the runtime it
+#                 RUNS on), + the same shared numpy / headless-opencv floor.
+#                 onnxruntime is listed EXPLICITLY, not via a `rembg[cpu]` extra:
+#                 rembg ≥2.0.50 imports onnxruntime at module load but stopped
+#                 declaring it, so a scoped masks install resolved every package
+#                 it knew about, reported success, and left `import rembg` dying
+#                 on ModuleNotFoundError — the capability stayed ✗ with no reason
+#                 shown (issue #24, 1Tomber). The explicit name is the durable
+#                 choice: the `[cpu]`/`[gpu]` extras did not exist before 2.0.50
+#                 and would silently resolve to nothing on an older pin, while
+#                 the plain name is pinned once in requirements-ml.txt like every
+#                 other ML package. _drop_provided_onnxruntime() below keeps it
+#                 from stepping on a GPU build the user already has.
 #   watermark_inpaint  simple-lama-inpainting (has its own dedicated worker below;
 #                 listed here only so the anti-orphan test sees its package covered).
 _CAPABILITY_PACKAGES = {
     'face_scoring': ('insightface', 'onnxruntime', 'numpy', 'opencv-python-headless'),
-    'masks': ('rembg', 'numpy', 'opencv-python-headless'),
+    'masks': ('rembg', 'onnxruntime', 'numpy', 'opencv-python-headless'),
     'watermark_inpaint': (_WATERMARK_PKG,),
 }
 # The capabilities served by the GENERIC per-capability pip worker
@@ -1407,7 +1418,8 @@ def _run_ml_capability(action) -> int:
     never bump numpy past the <2 ABI ceiling and break the other ML capabilities.
     Same shape as _run_watermark_inpaint (resolved ML python, -c constraint)."""
     python = _capability_python(action)
-    specs = [_requirement_spec(p) for p in _CAPABILITY_PACKAGES[action]]
+    specs = _drop_provided_onnxruntime(
+        action, python, [_requirement_spec(p) for p in _CAPABILITY_PACKAGES[action]])
     # face_scoring pulls insightface, which only has wheels for Python 3.10–3.12.
     # When targeting THIS interpreter (no dedicated env) and it's out of range,
     # lead with the plain-English reason so the pip source-build failure below is
@@ -1423,8 +1435,126 @@ def _run_ml_capability(action) -> int:
     _append(action, f"installing {', '.join(specs)}  (constraints: requirements-ml.txt)")
     # When this capability targets the Flask venv (no dedicated python), pin Pillow
     # so pulling insightface/rembg deps can't downgrade the app's Pillow either.
-    return _run_pip(action, [python, '-m', 'pip', 'install', *specs,
-                             '-c', str(_ML_REQUIREMENTS), *_flask_pillow_guard(python)])
+    rc = _run_pip(action, [python, '-m', 'pip', 'install', *specs,
+                           '-c', str(_ML_REQUIREMENTS), *_flask_pillow_guard(python)])
+    if rc == 0 and not _verify_capability_import(action, python):
+        return 1
+    return rc
+
+
+# onnxruntime ships under several DIFFERENT distribution names that all provide
+# the same `onnxruntime` module and cannot coexist in one environment:
+# onnxruntime (CPU), onnxruntime-gpu (CUDA), onnxruntime-directml,
+# onnxruntime-silicon. pip does not know they conflict, so `pip install
+# onnxruntime` into an env that already has the GPU build "succeeds" and quietly
+# leaves the user on CPU — a performance regression they would never be told
+# about. Any variant satisfies rembg and insightface equally well, so the rule is
+# simple: we only add onnxruntime when the target interpreter cannot import one.
+_ONNXRUNTIME_CANON = _canon('onnxruntime')
+# An `import onnxruntime` that is going to fail fails instantly (there is nothing
+# to load). A slow one means a real, large runtime IS being loaded. So this probe
+# is short on purpose, and a timeout counts as PRESENT.
+_ONNXRUNTIME_PROBE_TIMEOUT = 60
+
+
+def _onnxruntime_provided(python) -> bool:
+    """Can `python` already import onnxruntime (under ANY distribution name)?"""
+    if not os.path.isfile(python):
+        return False
+    try:
+        proc = subprocess.run([python, '-c', 'import onnxruntime'],
+                              capture_output=True, timeout=_ONNXRUNTIME_PROBE_TIMEOUT,
+                              creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    except subprocess.TimeoutExpired:
+        return True    # slow import == a real runtime is loading; do not overwrite it
+    except Exception:
+        # Could not ask at all (unlaunchable interpreter, …) -> install it. A missing
+        # runtime is the bug being fixed here; a broken interpreter has bigger
+        # problems than which onnxruntime build it carries. Never raises: this only
+        # shapes a pip command line.
+        return False
+    return proc.returncode == 0
+
+
+def _drop_provided_onnxruntime(action, python, specs) -> list:
+    """Remove the onnxruntime requirement when the target env already provides one.
+    Idempotent by design: on the very many installs that already have onnxruntime
+    (every machine where face scoring or the monolithic ML extras were installed)
+    this makes the added dependency a no-op instead of a reinstall, and on a
+    machine carrying onnxruntime-gpu it protects that build."""
+    keep, dropped = [], False
+    for spec in specs:
+        name = re.split(r'[<>=!~;\[\s]', spec, maxsplit=1)[0]
+        if _canon(name) == _ONNXRUNTIME_CANON and _onnxruntime_provided(python):
+            dropped = True
+            continue
+        keep.append(spec)
+    if dropped:
+        _append(action, 'onnxruntime already imports in this environment '
+                        '(any of the CPU / GPU / DirectML builds works) — leaving it '
+                        'untouched so a GPU build is not replaced by the CPU one.')
+    return keep
+
+
+def _verify_capability_import(action, python) -> bool:
+    """Re-run the capability's OWN probe import once pip reports done, and say what
+    happened in the install log.
+
+    This is the honesty gate for the scoped ML installs. pip's "Requirement already
+    satisfied" proves distributions are on disk; it proves nothing about whether the
+    feature loads. A masks install could therefore report success, every package
+    resolved, while `import rembg` died on a runtime nobody had listed — leaving
+    "✓ installed successfully" next to "✗ Not installed" with no reason anywhere
+    (issue #24, 1Tomber). The import expression comes from
+    capabilities.CAPABILITY_IMPORTS, i.e. literally the one the probe runs, so the
+    two can never drift apart again.
+
+    It also WARMS the import, like the watermark/bank verifications: the capability
+    probe fires seconds later and its first cold import can be slow enough to time
+    out and read ✗ on a perfectly good install.
+
+    True = ready, or merely slow (a cold import past the budget is 'still warming',
+    never a reason to fail a good install), or unverifiable. False = a genuine
+    import error → the caller fails the install. Never raises."""
+    expr = capabilities.CAPABILITY_IMPORTS.get(action)
+    if not expr or not os.path.isfile(python):
+        return True
+    _append(action, 'verifying the install (running the same import the capability '
+                    'check runs — this also warms it, so it turns green without a restart)…')
+    try:
+        proc = subprocess.run([python, '-c', expr], capture_output=True, text=True,
+                              encoding='utf-8', errors='replace',
+                              timeout=_WARM_IMPORT_TIMEOUT,
+                              creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    except subprocess.TimeoutExpired:
+        _append(action, 'still warming up (the first import is slow on a fresh machine) — '
+                        'the capability turns green on its own shortly; no restart needed')
+        return True
+    except Exception as e:
+        _append(action, f'could not run the verification import ({e}) — skipping the check')
+        return True   # couldn't check -> don't punish a pip install that succeeded
+    if proc.returncode == 0:
+        _append(action, f'import OK — {_CAPABILITY_LABEL.get(action, action)} is ready')
+        return True
+    stderr = proc.stderr or ''
+    _append(action, f'pip finished, but {_CAPABILITY_LABEL.get(action, action)} still does '
+                    f'not load in this environment — the capability stays OFF:')
+    missing = _MISSING_MODULE_RE.search(stderr)
+    if missing:
+        # The single most useful line in the whole chain, and the one the old
+        # flow threw away: WHICH module is missing. Lead with it — the stderr
+        # tail below is the proof, this is the answer.
+        _append(action, f"  missing module: {missing.group(1)} — it is not installed in "
+                        f"{python}. Install it there, then click Install again.")
+    for line in stderr.strip().splitlines()[-4:]:
+        _append(action, f'  {line}')
+    return False
+
+
+_MISSING_MODULE_RE = re.compile(r"No module named ['\"]([\w.]+)['\"]")
+_CAPABILITY_LABEL = {'face_scoring': 'face scoring', 'masks': 'person masks',
+                     'bank_scoring': 'bank scoring',
+                     'watermark_inpaint': 'watermark inpainting'}
 
 
 def _is_blocking_invalid(path, spec) -> bool:

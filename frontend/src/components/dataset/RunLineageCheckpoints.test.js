@@ -154,8 +154,12 @@ test('every popover action is live, or stated with its reason — never a silent
   assert.match(popover, /a\.download\.reason/);
   assert.match(popover, /a\.deploy\.reason/);
   assert.match(popover, /a\.continue\.reason/);
-  // The canvas has no resume flow of its own, so it SAYS where the gesture lives.
-  assert.match(canvas, /continueReason="Continue from here/);
+  // `continueReason` remains the escape hatch for a host with no resume flow —
+  // the row is then a sentence rather than a dead button. No host uses it today:
+  // the canvas grew its own flow (utils/canvasContinue.js) and now passes a
+  // handler, so its ▶ Continue is live. The PROP must survive the change.
+  assert.match(popoverRules, /continueReason \? \{ reason: continueReason \} : null/);
+  assert.match(canvas, /onContinue=\{handleContinueCheckpoint\}/);
 });
 
 test('the graph opens for any run with a checkpoint, not only 2+ run lineages', () => {
@@ -195,10 +199,11 @@ test('the dataset panel offers the SAME pill gesture through its local flow', ()
   assert.match(panel, /continueSource="any"/);
   assert.match(panel, /onContinueCheckpoint=\{checkpointMatchesTraining/);
   assert.match(panel, /const continueFromGraphCheckpoint = \(node, pill\) =>/);
-  assert.match(panel, /setContinueInitialStep\(step\);\s*setContinueOpen\(true\);/);
+  // (a fresh open also clears the last refusal — the dialog now keeps it)
+  assert.match(panel, /setContinueInitialStep\(step\);\s*setContinueError\(null\);\s*setContinueOpen\(true\);/);
   assert.match(panel, /initialFromStep=\{continueInitialStep\}/);
   // the plain Continue button clears the pill pick, so it still opens on latest
-  assert.match(panel, /setContinueInitialStep\(null\); setContinueOpen\(true\)/);
+  assert.match(panel, /setContinueInitialStep\(null\); setContinueError\(null\); setContinueOpen\(true\)/);
   // ONE continue call site (the guarded helper picks the lane's hook inside it),
   // never a second continue request assembled somewhere else in the panel
   assert.equal((panel.match(/payload\.extraSteps/g) || []).length, 1);

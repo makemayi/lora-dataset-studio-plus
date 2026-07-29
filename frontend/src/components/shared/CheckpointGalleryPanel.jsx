@@ -10,6 +10,9 @@ import {
   stepGroupLabel, unlinkedNote, visibleGalleryImages,
 } from '../../utils/runGallery';
 import { imageFactsLine } from '../../utils/generatedImageFacts';
+import {
+  galleryZipPlanUrl, galleryZipUrl, planNotice, zipButtonState,
+} from '../../utils/galleryDownload';
 import { configRows } from '../dataset/lineageDetail.js';
 import RunDeleteSection from './RunDeleteSection';
 import GeneratedImageLightbox from './GeneratedImageLightbox';
@@ -67,6 +70,7 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState(null);
   const [openGroups, setOpenGroups] = useState(() => new Set());
+  const [zipping, setZipping] = useState(false);
 
   const key = galleryTargetKey(target);
   const scope = galleryScope(target);
@@ -141,6 +145,46 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
     }
   }, [endpoints?.remove, selected, busy, load, onDeleted]);  // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* ⬇ The gallery, as one ZIP.
+   *
+   * PREFLIGHT FIRST, and that is the whole design. A ZIP is handed to the
+   * browser as a file: once it is downloading there is no place left to say
+   * "three of these were missing" or "you got the newest 500 of 812". So the
+   * counts are asked for BEFORE any byte is built (a cheap rows + exists()
+   * read), the sentence lands in the panel's own notice, and a scope with
+   * nothing left on disk is refused there instead of arriving as an archive
+   * that looks complete and is not.
+   *
+   * The download itself is an ANCHOR, not fetch+blob: a 500-image archive read
+   * into a Blob is a few hundred megabytes held in the tab for no reason, and
+   * the name is already decided by Content-Disposition.
+   */
+  const runZip = useCallback(async () => {
+    if (!target || zipping) return;
+    // Select mode narrows the SAME button to the picks — the mode is already on
+    // screen and already means "these ones"; a second download button that
+    // differed from the first by one word would be unreadable.
+    const ids = picking ? [...selected] : null;
+    setZipping(true);
+    setNotice(null);
+    try {
+      let plan = null;
+      try {
+        plan = await apiFetch(galleryZipPlanUrl(target, ids));
+      } catch { plan = null; }
+      const said = planNotice(plan);
+      if (said) setNotice({ kind: said.kind, text: said.text });
+      if (said?.blocked) return;
+      const a = document.createElement('a');
+      a.href = galleryZipUrl(target, ids);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } finally {
+      setZipping(false);
+    }
+  }, [target, key, picking, selected, zipping]);  // eslint-disable-line react-hooks/exhaustive-deps
+
   const toggleGroup = useCallback((groupKey) => {
     setOpenGroups((cur) => {
       const next = new Set(cur);
@@ -157,6 +201,13 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
     selectedCount: selected.size, busy,
   });
   const confirmation = galleryDeleteConfirmation(selected.size, d?.delete_mode);
+  // The count is the SCOPE's, not the grid's: a run gallery lays out only the
+  // steps that are open, but the archive holds the run. Saying "12" over a
+  // button that fetches 240 would be the same lie as a silently capped ZIP.
+  const zipBtn = zipButtonState({
+    picking, selectedCount: selected.size,
+    totalCount: Number(d?.count) || 0, busy: zipping,
+  });
   const node = target.node || null;
   const paramRows = isRun ? configRows(node?.config) : [];
   const ckNotes = isRun ? checkpointNotes(d, node) : [];
@@ -259,10 +310,17 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
             </p>
           )}
           {notice && (
-            <p className={`m-0 mb-2 rounded-lg border px-2 py-1.5 text-[0.6875rem] ${
-              notice.kind === 'error'
-                ? 'border-amber-400/40 bg-amber-500/10 text-amber-100'
-                : 'border-emerald-400/40 bg-emerald-500/10 text-emerald-100'}`}>
+            /* 'warn' is its own tone on purpose: "the ZIP you just started is
+               shorter than this gallery" is neither a failure nor a success,
+               and dressing it in the green of a finished delete would bury the
+               one sentence that has to be read. */
+            <p role={notice.kind === 'ok' ? undefined : 'alert'}
+              className={`m-0 mb-2 rounded-lg border px-2 py-1.5 text-[0.6875rem] ${
+                notice.kind === 'error'
+                  ? 'border-rose-400/50 bg-rose-500/10 text-rose-100'
+                  : notice.kind === 'warn'
+                    ? 'border-amber-400/40 bg-amber-500/10 text-amber-100'
+                    : 'border-emerald-400/40 bg-emerald-500/10 text-emerald-100'}`}>
               {notice.text}
             </p>
           )}
@@ -442,6 +500,18 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
                 : 'border-indigo-400/70 bg-indigo-500/15 text-indigo-200 hover:bg-indigo-500/25'}`}>
               <span aria-hidden>{picking ? '✓' : '☑'}</span> {bar.toggleLabel}
             </button>
+            {/* ⬇ ONE button, two meanings, taken from the mode already on
+                screen: the whole gallery normally, the picks in Select mode.
+                It carries its own count — and when the gallery is bigger than
+                one archive it carries the CAP, on its face and in its tooltip,
+                so a short ZIP is never a discovery. */}
+            {zipBtn.shown && (
+              <button type="button" data-testid="gallery-download-zip"
+                onClick={runZip} disabled={zipBtn.disabled} title={zipBtn.title}
+                className="shrink-0 rounded-md border border-border px-2.5 py-1.5 text-content-muted text-[0.75rem] hover:border-indigo-400/50 hover:text-content disabled:opacity-40">
+                {zipBtn.label}
+              </button>
+            )}
             {bar.showsDelete && (
               <>
                 <span className="text-content-muted text-[0.6875rem] tabular-nums">

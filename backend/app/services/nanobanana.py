@@ -29,8 +29,43 @@ batch. That matters most for the model field: a text-only or non-existent slug
 used to surface as "empty response (often a content-policy refusal)", sending the
 user to rewrite a prompt when the fix was one word in Settings.
 
-None keeps exactly one meaning: Gemini answered 200 with no image (safety block
-or a text-only answer). The API key never appears in a message or a log line.
+THE OUTPUT FILTER (why a refusal is its own outcome)
+----------------------------------------------------
+Gemini screens the image it just produced, and when that screen trips the API
+answers **200 OK with no image at all** — same shape as a success, minus the
+picture. This engine used to hand that back as `None`, which the fan-out worded
+as "empty response (often a content-policy refusal or a transient API error -
+retry usually works)". That sentence guessed, and it guessed in the direction
+that costs the most: a user whose request Google will refuse every time was told
+to retry.
+
+Three facts about this filter, established and worth stating plainly because
+they change what the honest message is:
+
+* It is **not configurable.** The four adjustable `safetySettings` categories act
+  on the PROMPT. Nothing in the API — `BLOCK_NONE`, `OFF`, any threshold —
+  turns off the screen on the returned image, and Google does not document it.
+  LDS therefore cannot offer a switch, and must not imply one exists.
+* It has **many false positives.** Ordinary requests get refused; the trip point
+  is not something a user can reason about from the prompt text.
+* It is **not deterministic.** The same prompt can pass on one call and be
+  refused on the next. So "try again" is a coin toss, not a fix, and this code
+  says so instead of promising a workaround it cannot deliver.
+
+Separately: Google's usage policy forbids adult content on this engine, up to
+and including account restriction. LDS does not route NSFW variations here (the
+fan-out is fail-closed on that), and the refusal text names the policy rather
+than hinting at a way around it.
+
+`refusal_message()` is a pure function over the response body precisely so this
+wording is testable without ever calling the real API.
+
+WHAT EACH RETURN MEANS
+----------------------
+Refusals raise `NanoBananaRefused` (an `EngineRefused`, therefore NOT fatal — the
+batch runs to the end and counts them). Malfunctions raise the named errors
+above. `None` is now unreachable on this engine and only survives as the shared
+signature. The API key never appears in a message or a log line.
 """
 from __future__ import annotations
 import base64
@@ -40,7 +75,7 @@ import os
 import requests
 
 from .. import config as cfg
-from .engine_errors import EngineError, EngineFatal
+from .engine_errors import EngineError, EngineFatal, EngineRefused
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +110,99 @@ class NanoBananaError(EngineError):
 class NanoBananaFatal(NanoBananaError, EngineFatal):
     """A failure that would repeat on every remaining row (rejected key, unknown
     model, a model that cannot take reference images)."""
+
+
+class NanoBananaRefused(NanoBananaError, EngineRefused):
+    """Gemini answered 200 and returned no image: its filter refused this one.
+    Per-request, so the batch continues (see EngineRefused)."""
+
+
+# finishReason values that mean "we made something and then refused to hand it
+# over", plus the prompt-side blocks. Read as a MEMBERSHIP test with an unknown
+# fallback: Google adds reasons without notice, and an unrecognised one must
+# still read as a refusal (a 200 with no image is never a success) rather than
+# fall through to a wrong sentence about the network.
+_REFUSAL_FINISH_REASONS = {
+    'IMAGE_SAFETY', 'SAFETY', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'RECITATION',
+    'IMAGE_PROHIBITED_CONTENT', 'IMAGE_RECITATION', 'IMAGE_OTHER', 'SPII',
+}
+# Said once, everywhere a refusal is reported. Deliberately claims nothing about
+# a remedy: there is none to offer (see the module docstring).
+_FILTER_IS_FIXED = 'not configurable — LDS cannot turn it off'
+
+
+def _first(d, *names):
+    """Gemini's REST envelope is camelCase, its protos are snake_case, and both
+    spellings have been observed in the wild. Read either."""
+    if not isinstance(d, dict):
+        return None
+    for n in names:
+        v = d.get(n)
+        if v not in (None, ''):
+            return v
+    return None
+
+
+def refusal_detail(data) -> dict:
+    """What a 200-with-no-image body actually says, as plain values.
+
+    Returns {'scope', 'reason', 'text'} where scope is 'prompt' (Google refused
+    the request before generating), 'image' (it generated, then withheld) or
+    'unknown'. `reason` is Google's own code when it gave one. `text` is the
+    model's written answer when it replied in words instead of pixels."""
+    out = {'scope': 'unknown', 'reason': '', 'text': ''}
+    if not isinstance(data, dict):
+        return out
+    feedback = _first(data, 'promptFeedback', 'prompt_feedback') or {}
+    blocked = _first(feedback, 'blockReason', 'block_reason')
+    if blocked:
+        # Prompt-side: the request never reached image generation. This IS the
+        # half of the safety stack the API exposes, so it is worth telling apart.
+        out['scope'] = 'prompt'
+        out['reason'] = str(blocked).strip()[:60]
+        return out
+    candidates = data.get('candidates')
+    for cand in candidates if isinstance(candidates, list) else []:
+        if not isinstance(cand, dict):
+            continue
+        reason = _first(cand, 'finishReason', 'finish_reason')
+        if reason:
+            reason = str(reason).strip()[:60]
+            out['reason'] = reason
+            if reason.upper() in _REFUSAL_FINISH_REASONS:
+                out['scope'] = 'image'
+        content = cand.get('content')
+        parts = content.get('parts') if isinstance(content, dict) else None
+        for part in parts if isinstance(parts, list) else []:
+            txt = isinstance(part, dict) and part.get('text')
+            if txt and not out['text']:
+                out['text'] = ' '.join(str(txt).split())[:160]
+        if out['scope'] == 'image':
+            break
+    return out
+
+
+def refusal_message(data) -> str:
+    """The user-facing sentence for a 200 that carried no image.
+
+    Kept SHORT on purpose: it lands in a dataset tile, which clamps to a few
+    lines. The full explanation of why there is no workaround lives in the app's
+    help topic and the README — this line's job is to name the cause correctly
+    and never to invent a remedy."""
+    d = refusal_detail(data)
+    named = f' ({d["reason"]})' if d['reason'] else ''
+    if d['scope'] == 'prompt':
+        return (f'Google blocked the prompt before generating{named}. '
+                'Nothing was produced.')
+    if d['scope'] == 'image':
+        return (f"Google's image filter refused this image{named}. "
+                f'That filter is {_FILTER_IS_FIXED}.')
+    if d['text']:
+        # A text-only answer is a different animal from a filter block: the
+        # model chose to reply in words. Relaying them beats paraphrasing.
+        return f'Gemini answered with text instead of an image: "{d["text"]}"'
+    return (f"Google's image filter refused this image{named or ' (no reason given)'}. "
+            f'That filter is {_FILTER_IS_FIXED}.')
 
 
 def _api_key():
@@ -168,8 +296,11 @@ def generate_variation(ref_bytes: bytes | list[bytes], prompt: str, model: str |
     plans corps. Tries with imageConfig first (Pro models); on a 400 retries once
     with a slim payload for models that don't accept imageConfig.
 
-    None means one thing only: Gemini answered 200 without an image (safety block
-    or text-only answer). Everything else raises with the cause named."""
+    Every outcome that is not an image RAISES with the cause named: a filter
+    refusal as NanoBananaRefused (per-request, the batch continues), a
+    malfunction as NanoBananaError, and a cause that would repeat on every row as
+    NanoBananaFatal. The `| None` in the signature is the shared engine contract,
+    kept so the three engines stay interchangeable; this one no longer uses it."""
     key = _api_key()
     if not key:
         # An exception, not None: a missing key must never read to the user as
@@ -204,7 +335,13 @@ def generate_variation(ref_bytes: bytes | list[bytes], prompt: str, model: str |
             raise NanoBananaError(f'Gemini returned a non-JSON response: {e}')
         img = parse_image_response(data)
         if img is None:
-            logger.warning("nanobanana: no image in response from %s "
-                           "(safety block or text-only)", mdl)
+            # 200 + no image = Gemini declined. Raise instead of returning None
+            # so the reason travels: the caller can tell a refusal from an
+            # outage, and count it as one. Never fatal — the filter is not
+            # deterministic, so the remaining rows still get their chance.
+            msg = refusal_message(data)
+            logger.warning("nanobanana: %s refused a request (%s)", mdl,
+                           refusal_detail(data).get('reason') or 'no reason given')
+            raise NanoBananaRefused(msg)
         return img
     return None

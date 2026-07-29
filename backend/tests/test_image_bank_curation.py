@@ -294,18 +294,25 @@ def test_isolation_penalty_never_materialises_a_full_matrix(app):
     performs is watched, and none may be pool-sized."""
     from app.services import image_bank_service as banks
     seen = []
+    # Every similarity this pass computes goes through the ONE chokepoint
+    # `_sim_block` (numpy or an optimised BLAS underneath — the memory shape is
+    # the same guarantee either way), so watching it watches everything.
+    real_sim = banks._sim_block
 
-    class Watched(np.ndarray):
-        def __matmul__(self, other):
-            out = np.asarray(self).__matmul__(np.asarray(other))
-            seen.append(out.shape)
-            return out.view(Watched)
+    def watched(A, E):
+        out = real_sim(A, E)
+        seen.append(out.shape)
+        return out
 
     m = banks._TYPICALITY_BLOCK * 3 + 7        # several blocks + a short tail
     rs = np.random.RandomState(3)
     E = rs.randn(m, 16).astype('float32')
     E /= np.linalg.norm(E, axis=1, keepdims=True)
-    pen = banks._isolation_penalty(E.view(Watched))
+    banks._sim_block = watched
+    try:
+        pen = banks._isolation_penalty(E)
+    finally:
+        banks._sim_block = real_sim
     assert pen.shape == (m,) and float(pen.min()) == 0.0
     assert seen, 'the density pass did compute similarities'
     assert all(s[0] <= banks._TYPICALITY_BLOCK for s in seen), seen

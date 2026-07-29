@@ -64,6 +64,236 @@ export const WHATS_NEW = [
     to: '/settings/engines',
   },
   {
+    id: '2026-07-28-memory-savers-and-timestep-per-family',
+    date: '2026-07-28',
+    title: 'Switching model family no longer changes your run behind your back',
+    blurb:
+      'Turning quantisation or low-VRAM streaming off on a small family (Anima, SDXL — where off is the normal setting) and then switching to Krea 2, FLUX or Z-Image quietly built an unquantised 12B run: no warning, and hours of GPU — or rented cloud time — before anything went wrong. Advanced options and the pre-launch check now both say which saver is off, what that family actually needs, and what your card has. Timestep weighting is remembered per family instead, so a value picked for Z-Image stops overwriting the recipe of FLUX.2 Klein or Anima. Nothing changes for a dataset that stays on one family.',
+    to: '/datasets',
+  },
+  {
+    id: '2026-07-28-mask-faces-says-why-it-is-off',
+    date: '2026-07-28',
+    title: '"Mask faces" tells you why it does not apply instead of vanishing',
+    blurb:
+      'On a character or style dataset the option disappeared entirely, so it read as a missing feature rather than one that does not apply — people went looking for it. It is now shown, greyed out, with the reason: a character LoRA has to learn the face, so weighing faces down would erase what you are training.',
+    to: '/datasets',
+  },
+  {
+    id: '2026-07-28-comfyui-input-copies-cleaned-up',
+    date: '2026-07-28',
+    title: 'Improve and Edit stop filling your ComfyUI input folder',
+    blurb:
+      'Every Klein or Krea job copies your source image into ComfyUI\'s input folder, and nothing ever deleted those copies: a three-month-old install had 3,896 of them sitting there, 0.67 GB. Each job now removes its own copies the moment it ends — finished, failed or stopped — and a sweep at startup clears what earlier versions left behind. Images you dropped in that folder yourself are never touched.',
+  },
+  {
+    id: '2026-07-28-training-base-is-per-family',
+    date: '2026-07-28',
+    title: 'Your training base now belongs to its model family',
+    blurb:
+      'Picking a custom base for Z-Image and then switching the LoRA type to Krea 2 left that Z-Image file attached: the selector said Krea 2, the line below it said the Z-Image file, and the only cure was changing the family and coming back — which fixed the screen but nothing else, so it was back on the next reload. The base and the variant are now remembered per family: switching hands you that family\'s own base, coming back finds yours exactly where you left it, and nothing is thrown away. The cloud dialog stops offering to upload another family\'s weights to your Hugging Face account, and no longer calls a file "missing" when it is sitting safely on your disk.',
+    to: '/datasets',
+  },
+  {
+    id: '2026-07-28-lightbox-actions-use-the-side-space',
+    date: '2026-07-28',
+    title: 'A portrait photo now fills the screen, with the actions beside it',
+    blurb:
+      'Opening a portrait image full-screen on a wide monitor left two thirds of the width black while Crop, Mirror, Rotate and Upscale & improve queued on one line underneath — on the one axis the photo was short of. Those actions now move into a labelled rail in that empty space, and the photo gets the height back. Landscape images keep the bar at the bottom, where there is no side space to take, and phones are unchanged. The rail keeps full wording, not mute icons.',
+  },
+  {
+    id: '2026-07-28-choose-the-klein-model-improve-runs-on',
+    date: '2026-07-28',
+    title: 'Choose which Klein model ✨ Upscale & improve runs on',
+    blurb:
+      'Improve never asked which model to use: it picked one for you, silently, and nothing on the screen said which. It now names the model it will run — even when there is only one — and lets you choose it when your ComfyUI has several. The choice is saved on the dataset (not in one browser), it is the same model Klein generation uses, and it applies to the single pass, the 🔄 re-run and the whole batch alike. Models are detected automatically wherever ComfyUI can load them, and if the one you chose is later moved away the run says so by name instead of quietly swapping in another.',
+    to: '/datasets',
+  },
+  {
+    id: '2026-07-28-refused-save-keeps-what-you-typed',
+    date: '2026-07-28',
+    title: 'A refused save no longer throws away what you just typed',
+    blurb:
+      'Four dialogs closed themselves before the server had answered, so a refusal deleted your work: the expanded caption editor lost the long AND short caption you had just written, the ✏️ edit-prompt bubble lost a rewritten prompt, 🚀 Launch all reset its seven pass checkboxes, and the folder browser dropped you back to the drive list. They now stay open, keep every field exactly as you left it, and show the reason next to the input that caused it. Escape and clicking outside still close them — only the server keeps them open.',
+  },
+  {
+    id: '2026-07-28-nano-banana-says-when-google-refused',
+    date: '2026-07-28',
+    title: 'Missing images from Nano Banana now say who refused them',
+    blurb:
+      'Google screens every image Gemini returns, and when it blocks one the API answers "success" with nothing in it. LDS used to call that an empty response and suggest retrying — so a refused request looked like a broken app. Each refused tile now names the cause and relays Google\'s own reason code, a run tells you how many were refused versus how many actually failed, and real problems (key, quota, connection) keep their own separate message. A batch never stops on a refusal. No promises attached: that filter is not configurable, it refuses ordinary requests, and the same prompt can pass one time and not the next.',
+    to: '/datasets?section=add',
+  },
+  {
+    id: '2026-07-28-bank-watermark-mask-editing',
+    date: '2026-07-28',
+    title: 'Fix a wrong watermark box without leaving the bank',
+    blurb:
+      'The watermark detector draws one box, and it guesses: it misses a second logo, or lands beside the mark. Correcting it was only possible inside a dataset, so in a bank a bad box meant rejecting the image. Open ▶ Review on a flagged image and press 🚩 Edit mask: draw the zones yourself, and 🧽 Inpaint repaints exactly those — including a mark on the subject. Auto-crop deliberately skips a hand-masked image, and an emptied mask cleans nothing, on purpose. Thanks to Qeeyana (Reddit) for reporting it.',
+    to: '/bank',
+  },
+  {
+    id: '2026-07-28-improve-says-what-it-is-about-to-ask-klein',
+    date: '2026-07-28',
+    title: 'Upscale & improve now shows the instruction it is about to send',
+    blurb:
+      'The improve pass sends Klein a fixed instruction — and the built-in one asks for photographic texture and sharp detail, which is why anime and illustrated datasets came back looking realistic. That instruction is now quoted right next to the ✨ button, with one click to rewrite it or turn it off entirely, and a drawn dataset gets an explicit warning. Thanks Qeeyana (Reddit).',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-07-28-klein-model-needs-no-symlink',
+    date: '2026-07-28',
+    title: 'Your Klein model can stay where it is — no copy, no symlink',
+    blurb:
+      'models/unet/klein/ is only where Setup downloads to; it was never required. Any klein-named sub-folder of models/unet or models/diffusion_models works, as does either folder\'s top level, plus every extra_model_paths.yaml root and a relocated models folder. The Setup screen, the README and the Guide now say so, and a test keeps that list honest. Thanks CyberTod (Reddit).',
+  },
+  {
+    id: '2026-07-28-import-resolution-is-yours-to-choose',
+    date: '2026-07-28',
+    title: 'You choose what resolution your imported photos are stored at',
+    blurb:
+      'Every image entering a dataset was resampled to 1024 px and re-encoded as WebP quality 92 — with no setting anywhere and nothing on screen saying why. Settings ▸ Captioning & quality ▸ Dataset import now lets you pick 1024 to 4096 px, or the original size, and the encoding alongside it (quality 92, quality 100, or fully lossless) — because the resolution was only half the loss. The default is unchanged at 1024/q92, so nothing already imported moves, and the import dropzone now states what it is about to store and why, with a link to change it. Original size still stops at 8192 px: WebP itself refuses past 16383. Thanks to Qeeyana (Reddit) for asking why the app was deciding this for you.',
+    to: '/settings/captioning',
+  },
+  {
+    id: '2026-07-28-caption-elsewhere-round-trip',
+    date: '2026-07-28',
+    title: 'Caption your images in another tool, and bring the captions back',
+    blurb:
+      'A Style dataset refused to export its ZIP until every kept image was captioned, with no way past it — which blocked something perfectly reasonable: getting the bare images out to caption them in your own tool. That refusal is now a confirmation that explains what an empty caption does to a Style LoRA, and cancelling still takes you to the captions. The return trip works too, and that was the real gap: re-importing those images with their new .txt files used to drop every one of them as a duplicate, captions included. Their captions now land on the images already in the dataset, a caption you wrote here is never overwritten, and the Import & export panel finally says the round trip exists. Thanks to Qeeyana (Reddit).',
+    to: '/datasets?section=export',
+  },
+  {
+    id: '2026-07-28-installs-that-do-not-work-no-longer-report-success',
+    date: '2026-07-28',
+    title: 'An install that did not work no longer says it worked',
+    blurb:
+      'Installing Person masks could report success — every requirement "already satisfied" — while the capability stayed ✗ Not installed and masked training quietly fell back to unmasked, so a whole run learned the background you meant to exclude. The missing piece (onnxruntime, which rembg needs but no longer declares) is now installed, an existing GPU build is left alone, and every scoped install re-runs the capability check afterwards and names the missing module when it fails. Launching a masked run without it now asks you first, instead of finding out from the result. Thanks to 1Tomber (GitHub #24).',
+    to: '/settings/local-tools',
+  },
+  {
+    id: '2026-07-28-cloud-boot-waits-for-a-pod-that-is-still-working',
+    date: '2026-07-28',
+    title: 'Cloud launches survive a slow host pulling its image',
+    blurb:
+      'A pod that took more than 25 minutes to boot was terminated even when it was honestly downloading its multi-gigabyte image — and its host was quietly skipped for the next three days. The boot wait now restarts its clock whenever the pod shows real progress, keeps an absolute ceiling so a dead pod still dies fast, tells you where the boot actually got to, and only exiles a slow host for a few hours.',
+  },
+  {
+    id: '2026-07-28-continue-training-keeps-your-choices-when-refused',
+    date: '2026-07-28',
+    title: 'A refused ▶ Continue training no longer wipes what you picked',
+    blurb:
+      'Continue training closed the moment you clicked it, so a refusal left you with an error and an empty form: the lane, the checkpoint to resume from, the extra steps and every adjusted setting had to be typed again, with no clue which of them was refused. The form now stays open, the reason appears inside it next to those choices, and only a launch that actually starts closes it.',
+  },
+  {
+    id: '2026-07-28-a-bank-can-no-longer-be-created-on-a-dataset-folder',
+    date: '2026-07-28',
+    title: 'A bank can no longer be pointed at a dataset’s own image folder',
+    blurb:
+      'Nothing stopped you from pasting a dataset’s storage folder into “Create bank”. The bank then listed the dataset’s live files — and its 🗑 Delete rejected deleted images out of the dataset, with no warning at all. A bank and a dataset only ever pass images to each other by copy, so that folder is now refused at creation and when moving a bank, and the refusal names the dataset and sends you to 🗃 Import to bank instead (which copies). The check sees through subfolders, the folder holding all datasets, a different case, other separators, and symlinks or Windows junctions. If you already have such a bank, nothing is deleted or repaired behind your back: opening it says so, and only the destructive button is refused.',
+    to: '/bank',
+  },
+  {
+    id: '2026-07-28-a-dataset-now-shows-where-its-images-are-on-disk',
+    date: '2026-07-28',
+    title: 'A dataset now shows where its images are on disk',
+    blurb:
+      'The folder holding a dataset’s images was displayed nowhere, so finding it meant digging through the app’s data directory by hand. It is now at the top of the dataset with a copy button — next to the one line worth knowing: that folder belongs to the dataset, and it must not be used as an image bank’s source.',
+    to: '/datasets',
+  },
+  {
+    id: '2026-07-28-masked-training-is-saved-on-the-dataset',
+    date: '2026-07-28',
+    title: 'Masked training is saved on the dataset, not in one browser',
+    blurb:
+      'The 🎭 Masked toggle used to live in the browser you set it in: open the app from your phone and it quietly reverted to the default, and no run recorded which way it was set. It is now a dataset setting — shared across your devices, stamped into every run so two runs that differ only by masking no longer look identical, and read by the readiness badge, which can finally warn you that a dataset set to masked will train unmasked because rembg is missing. Existing datasets keep today’s behaviour; a browser that had turned masking off is asked once what to do with it.',
+    to: '/datasets?section=training',
+  },
+  {
+    id: '2026-07-28-notifications-are-no-longer-hidden-behind-dialogs',
+    date: '2026-07-28',
+    title: 'Notifications no longer disappear behind an open dialog',
+    blurb:
+      'Every message the app raises — a refusal, a confirmation, an error — was drawn underneath any open dialog or full-screen viewer, so it simply never reached you: the app answered, and the answer was covered up. Notifications now sit above everything, and a check makes sure no future panel can climb over them again.',
+  },
+  {
+    id: '2026-07-28-cloud-watchdog-counts-a-downloading-pod-as-progress',
+    date: '2026-07-28',
+    title: 'A cloud run is no longer killed while its pod is downloading normally',
+    blurb:
+      'The run card now shows the bytes a pod is fetching — but the watchdog guarding that phase was still only watching the training step counter, so a run on a slow host was killed at 45 minutes for "no progress" while the card beside it showed the download working perfectly (a 26.3 GB model at the 2.6 MB/s some hosts give you takes nearly 3 hours). The watchdog now reads the same counter the card does: bytes moving is progress, and the clock restarts. A pod that reports no bytes at all still dies as fast as before, a hard ceiling still stops a host that will never finish, and the failure message finally says what was measured instead of guessing. The idle budget and that ceiling are now in Settings → Training. Thanks to j_o_e_l. (Discord) for the report.',
+    to: '/settings/training',
+  },
+  {
+    id: '2026-07-28-retry-asks-instead-of-doing-nothing',
+    date: '2026-07-28',
+    title: 'Retry no longer looks dead when a run needs your confirmation',
+    blurb:
+      'On the Runs page, ↻ Retry could do nothing at all: no job, no error, no toast. It happened whenever the run needed a confirmation Start had already asked for — an image with no caption, a dataset under the image floor, captions in the wrong style — because Retry never carried your answer, and the refusal that came back was thrown away before it reached the screen. Retry now asks the same question Start asks, relaunches once you confirm, and says out loud why it stopped when it stops. Stop and 🧹 Clean finished runs on the same page were silent in the same way and now speak too. Reported by 1Tomber (GitHub #23).',
+    to: '/cloud',
+  },
+  {
+    id: '2026-07-28-download-canvas-images-one-or-the-whole-gallery',
+    date: '2026-07-28',
+    title: 'Download your generated images — one, or a whole run as a ZIP',
+    blurb:
+      'The board can now hand the pictures over: ⬇ on a pinned image and in the full-screen viewer saves that one, and ⬇ ZIP in a gallery saves the lot (turn on Select first to take only the ones you tick). Every file keeps its lineage in its NAME — dataset, run, step and seed — so a render is still identifiable a month later instead of becoming another out_00042_.png. Big galleries say up front how many the archive holds, and a file that has left the disk is named rather than quietly dropped.',
+  },
+  {
+    id: '2026-07-28-canvas-fuse-pinned-images',
+    date: '2026-07-28',
+    title: 'Drop one pinned image onto another and compare them edge to edge',
+    blurb:
+      'Comparing two checkpoints on the canvas meant lining two pinned pictures up by hand and squinting at the gap between their frames. Now dropping one onto another fuses them into a single node: the pictures sit side by side with nothing drawn between them, and there is no limit — add a third, a tenth. Drag the title bar to move the whole strip, hover a picture for its own 🔍 and ✕, and drag one off the group to take it back out at the size it had before.',
+    to: '/canvas',
+  },
+  {
+    id: '2026-07-28-scrape-straight-into-a-bank',
+    date: '2026-07-28',
+    title: 'Scrape the web straight into a bank — no throwaway dataset first',
+    blurb:
+      'The scraper had one outlet: straight into a dataset, through filters made for training — anything under 768 px, anything wider than 3:1 and anything it judged a near-duplicate was dropped before you ever saw it. Getting a scrape into the Image bank meant building a dataset you did not want, then importing it back, having already lost the images the triage passes exist to judge. The Image bank page now has its own scrape section: same scan, same picking, you just choose which bank receives them — a new one, or more into a bank you are already triaging. Nothing is filtered on the way in; the quality, duplicate and framing passes rule on the pile, and you promote the keepers into a dataset as usual.',
+    to: '/bank',
+  },
+  {
+    id: '2026-07-28-cloud-run-download-bytes-and-durable-freeze-clock',
+    date: '2026-07-28',
+    title: 'A downloading cloud run now shows the bytes, not a frozen sentence',
+    blurb:
+      'While a pod fetches its base weights — 26 GB for Krea — the run card used to show one motionless line, "fetching transformer weights", for as long as it took. Nothing told a healthy download from a dead pod short of opening the vast.ai console, and people waited hours to find out. The card now reads the pod\'s own counter: how much has landed, of how much, at what speed, with the ETA. And the "no progress" warning is finally reliable — it is measured on what the pod does, so restarting the app no longer resets it, and a monitor repeating the same sentence no longer hides a frozen run.',
+    to: '/cloud',
+  },
+  {
+    id: '2026-07-28-generation-works-on-linux-and-across-wsl',
+    date: '2026-07-28',
+    title: 'Generation works on Linux — and when ComfyUI runs in WSL or a container',
+    blurb:
+      'On Linux, nothing generated at all: every model kept in a subfolder (Krea, Klein, Z-Image, your trained LoRAs — which is all of them) was handed to ComfyUI with Windows-style backslashes, and ComfyUI rejected the whole workflow before the first step. Model names are now spelled the way the ComfyUI you are actually talking to spells them, read from that install itself — so it also works the other way round, when the app runs on Windows and ComfyUI lives in WSL, Docker or on another machine. Found and diagnosed by 1Tomber (GitHub #21).',
+  },
+  {
+    id: '2026-07-28-pick-diverse-and-balanced-are-fast-again',
+    date: '2026-07-28',
+    title: '🎨 Pick diverse and ⚖️ Balanced pick answer in about a second',
+    blurb:
+      'On a large bank these two buttons took over half a minute, almost all of it spent computing the same thing over and over: how crowded each image\'s neighbourhood is, plus one filesystem lookup per image that had already been done. The maths now runs on an optimised BLAS, the bank folder is resolved once instead of once per image, and a second click on an unchanged bank reuses the scores it just read. Measured on a real 9 500-image pool: 32 seconds down to roughly two. The images picked are exactly the same ones — this is speed, not a different selection.',
+  },
+  {
+    id: '2026-07-28-dual-captions-no-longer-crash-krea-and-anima',
+    date: '2026-07-28',
+    title: 'Dual captions no longer crash a Krea 2 or Anima run',
+    blurb:
+      'Turning on dual captions before a Krea 2 or Anima run made training die at the first step with a NoneType error — after the weights download and the whole caching pass. Those two families pre-cache their text embeddings and unload the text encoder to fit in VRAM, so there is no encoder left to read a second caption. The app now says so on the toggle and in the pre-launch check, and trains on the long caption alone instead of building a config that cannot run. Reported by 1Tomber (GitHub #22).',
+    to: '/datasets?section=training',
+  },
+  {
+    id: '2026-07-28-continue-training-from-the-canvas',
+    date: '2026-07-28',
+    title: 'Continue training straight from a checkpoint on the Canvas',
+    blurb:
+      'Click any checkpoint on the LoRA Canvas and ▶ Continue from here now opens the real launch dialog on that exact save — where to run it (local or cloud), how many extra steps, cadence, preview prompts, timestep weighting and learning rate. It used to be a greyed line telling you to go find the run on another page, and which page depended on whether it had trained locally or in the cloud. The board is also the first place that offers BOTH lanes for BOTH kinds of run: a local checkpoint can be finished on a rented GPU, and a cloud epoch can be finished on your machine. A lane that cannot be used says why instead of disappearing.',
+    to: '/canvas',
+  },
+  {
     id: '2026-07-28-busy-database-no-longer-strands-a-paid-cloud-run',
     date: '2026-07-28',
     title: 'A busy database no longer strands a paid cloud run — for real this time',

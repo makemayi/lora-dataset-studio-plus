@@ -17,6 +17,28 @@
 
 export const SECTION_SCROLL_MARGIN_PX = 8
 
+/* A ?focus= arrival is not over when the first scroll ends.
+
+   MEASURED on the Engines section (400x800 headless, 2026-07-28): the deep link
+   to `identity-prompt-klein-improve` rang the field and started scrolling, but
+   panels ABOVE it finish rendering asynchronously (the composed-prompt preview
+   fetches its text), so the document kept growing under the scroll. At t≈2 s the
+   field was still 116 px BELOW the fold — and the ring had already expired. Only
+   at t≈4 s did it come to rest in view, un-highlighted. The reader is then looking
+   at the right screen with nothing pointing at anything.
+
+   So the arrival re-checks itself while the highlight is lit, and re-scrolls ONLY
+   when the field is not fully visible — a correction that fires unconditionally
+   would fight a user who has already scrolled somewhere on purpose.
+
+   Pure predicate, because node --test cannot parse the JSX that uses it. */
+export function focusNeedsRescroll({ top, height, viewportHeight, margin = 24 } = {}) {
+  if ([top, height, viewportHeight].some((v) => typeof v !== 'number')) return false
+  if (viewportHeight <= 0) return false
+  // Fully visible, with a little breathing room above (the sticky header) and below.
+  return !(top >= margin && top + height <= viewportHeight - margin)
+}
+
 export function shouldScrollToSection({
   hasSection, hasFocus, loading, panelTop, viewportHeight,
 } = {}) {

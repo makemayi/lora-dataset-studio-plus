@@ -23,11 +23,16 @@ strings are written to be dropped into a public help thread.
 """
 from __future__ import annotations
 
+import logging
 import os
+import re
 import shutil
+import time
 import uuid
 
 from .redact import redact_user_paths
+
+logger = logging.getLogger(__name__)
 
 # Which of the four ComfyUI folders the APP writes into (the rest it only reads).
 # Drives both the staging guards and the Settings/Setup writability probe.
@@ -179,3 +184,109 @@ def stage_input_write(dest_name, writer, input_dir) -> str:
         raise _staging_error('Writing the source image into ComfyUI', 'input',
                              base, _cause(exc)) from exc
     return dest
+
+
+# --- Un-staging: the other half of the contract ----------------------------
+# Every staged copy above is a FULL-RESOLUTION duplicate of a user image, and
+# nothing ever deleted one. Measured on a three-month-old install: 3 896 orphans,
+# 0.67 GB, from 17/04 to the day of writing — and the count is also what ComfyUI
+# enumerates for LoadImage on every prompt validation.
+#
+# The precise deletion happens per job (job_queue drops what the job's metadata
+# records the moment the job reaches a terminal state). `prune_staged_inputs` is
+# the safety net for what precise deletion cannot reach: the files already
+# orphaned before this existed, and any job whose process died before completing.
+#
+# The sweep deletes inside a folder that belongs to ComfyUI, not to us, so it is
+# fenced THREE times over and each fence is independently sufficient to spare a
+# file we have no business touching:
+#
+#  1. NAME. Not a loose prefix — a full match on the exact shape the staging code
+#     mints, `<lane>_<8 hex uid>_<original name>`. A user's own `edit_reference.png`
+#     or `krea_sources.png` does not match; nothing without one of our uids does.
+#  2. AGE. Nothing younger than STAGED_INPUT_MAX_AGE_SECONDS, which is set above
+#     the longest a staged copy can legitimately still be waiting for its job.
+#  3. LIVE JOBS. The caller passes the names every non-terminal queue row still
+#     references; those are skipped whatever their age or name.
+_STAGED_INPUT_RE = re.compile(
+    r'^(?:edit_source|edit_ref\d+|krea_source)_[0-9a-f]{8}_'
+    r'|^wmklein_crop_[0-9a-f]{8}\.png$')
+
+# A staged input is dead once its job can no longer run. The worst case is a full
+# fan-out queued at once (MAX_FANOUT jobs) each burning the whole poll timeout
+# (15 min) before the last one starts — about 15 h. 48 h clears that with a wide
+# margin, so age ALONE would already spare an input a live job still needs.
+STAGED_INPUT_MAX_AGE_SECONDS = 48 * 3600
+
+
+def is_staged_input_name(name) -> bool:
+    """Whether `name` is one this app minted in ComfyUI's input folder.
+
+    Deliberately strict: the input folder is shared with ComfyUI and with the
+    user, and the cost of a false positive (deleting someone's image) is not
+    comparable to the cost of a false negative (one stale copy survives until a
+    later sweep).
+    """
+    return bool(_STAGED_INPUT_RE.match(os.path.basename(str(name or ''))))
+
+
+def drop_staged_inputs(names, input_dir) -> int:
+    """Delete staged input copies by BASENAME. Returns how many were removed.
+
+    Basenames only, never paths: these names travel through job metadata, which
+    is stored in the database and shown in diagnostics — a machine path there
+    would not be paste-safe. Best-effort by design: a file already gone (a
+    duplicate completion, a user who cleaned the folder) is not an error, and a
+    failure to delete must never break job completion.
+    """
+    if not names or not input_dir:
+        return 0
+    removed = 0
+    for name in names:
+        base = os.path.basename(str(name or ''))
+        if not base:
+            continue
+        try:
+            os.remove(os.path.join(str(input_dir), base))
+            removed += 1
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            logger.warning('comfy_fs: could not drop staged input %s (%s)', base, exc)
+    return removed
+
+
+def prune_staged_inputs(input_dir, max_age_seconds=STAGED_INPUT_MAX_AGE_SECONDS,
+                        keep=None, now=None) -> int:
+    """Delete staged inputs older than `max_age_seconds`. Returns the count.
+
+    `keep` is the set of basenames still referenced by a job that has not
+    reached a terminal state. They are spared unconditionally — the age fence
+    alone already covers them, but a queue that took longer than anyone planned
+    must not cost a user an in-flight generation.
+    """
+    if not input_dir:
+        return 0
+    now = time.time() if now is None else now
+    cutoff = now - max_age_seconds
+    spared = {os.path.basename(str(n)) for n in (keep or ())}
+    removed = 0
+    try:
+        entries = os.scandir(str(input_dir))
+    except OSError:
+        return 0
+    with entries:
+        for entry in entries:
+            if not is_staged_input_name(entry.name) or entry.name in spared:
+                continue
+            try:
+                if not entry.is_file() or entry.stat().st_mtime >= cutoff:
+                    continue
+                os.remove(entry.path)
+                removed += 1
+            except OSError:
+                continue
+    if removed:
+        logger.info('comfy_fs: pruned %d staged input copies older than %d h',
+                    removed, max_age_seconds // 3600)
+    return removed

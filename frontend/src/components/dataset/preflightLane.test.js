@@ -21,6 +21,25 @@ test('no lane is sent unless it is the cloud one — the existing callers must n
   assert.equal(preflightUrl(7, {}), '/api/dataset/7/train/preflight');
 });
 
+test('the masked intent rides in the query string, and only when stated', () => {
+  // The server cannot read a localStorage preference, so a LAUNCH states whether
+  // it wants person masks and gets the "rembg is missing — this run trains
+  // unmasked" row before the GPU (or the rented pod) is paid for. A caller with
+  // no opinion — the readiness badge — omits it and its payload does not move
+  // (1Tomber, GitHub #24).
+  assert.equal(preflightUrl(7, { masked: true }),
+    '/api/dataset/7/train/preflight?masked=1');
+  assert.equal(preflightUrl(7, { masked: false }),
+    '/api/dataset/7/train/preflight?masked=0');
+  assert.equal(preflightUrl(7, {}), '/api/dataset/7/train/preflight');
+  assert.equal(preflightUrl(7, { masked: undefined }), '/api/dataset/7/train/preflight');
+});
+
+test('the launch preflight actually states its masked intent', () => {
+  // The URL contract above is worthless if TrainingPanel never passes it.
+  assert.match(panel, /preflightUrl\([\s\S]{0,300}?masked[,\s}]/);
+});
+
 test('the cloud lane rides in the query string', () => {
   assert.equal(preflightUrl(7, { trainType: 'zimage', variant: 'base', lane: 'cloud' }),
     '/api/dataset/7/train/preflight?train_type=zimage&variant=base&lane=cloud');
@@ -74,7 +93,9 @@ test('the cloud launch runs the preflight before spending money', () => {
 test('▶ Continue runs it too, on whichever lane it resumes', () => {
   // The gap nobody had reported: runContinue skipped the preflight on BOTH lanes.
   assert.match(panel, /const lane = laneOfPayload\(payload\);/);
-  assert.match(panel, /await preflightOk\(\{ lane, trainType: checkpointTrainType,\s*variant: checkpointVariant \}\)/);
+  // (…and its blockers are routed INTO the still-open dialog via onRefused,
+  // instead of a toast over a form that had already been thrown away.)
+  assert.match(panel, /await preflightOk\(\{ lane, trainType: checkpointTrainType,\s*variant: checkpointVariant, onRefused: setContinueError \}\)/);
 });
 
 test('the modal names the cloud lane and keeps its fix-in-place lists', () => {

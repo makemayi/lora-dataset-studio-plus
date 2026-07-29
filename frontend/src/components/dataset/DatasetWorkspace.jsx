@@ -9,6 +9,7 @@ import { fmt } from '../../utils/studioFormat';
 import ImportDropzone from './ImportDropzone';
 import ConceptSourcesPanel from './ConceptSourcesPanel';
 import BankImportPanel from './BankImportPanel';
+import DatasetFolderNote from './DatasetFolderNote';
 import { isDatasetImportBlocked, isStopGenerationBlocked } from './scraperState';
 import { faceAnalysisState, faceAnalysisLabel } from './faceScoringGate.js';
 import DatasetGrid from './DatasetGrid';
@@ -34,6 +35,7 @@ import NextStepCard from './NextStepCard';
 import TrainingReadiness from './TrainingReadiness';
 import useGuidedFlow from '../../hooks/useGuidedFlow';
 import { filterImages, normalizeTag } from '../../utils/tagFilter';
+import { summarizeGeneration, refusalHeadline, failureHeadline } from './generationOutcome.js';
 import {
   GRID_STATUS_FILTERS, DEFAULT_GRID_STATUS_FILTER,
   filterImagesByStatus, gridStatusFilterCounts, normalizeGridStatusFilter,
@@ -595,6 +597,16 @@ export default function DatasetWorkspace({ ds, onBack }) {
     filterImagesByStatus(rescueGridImages, statusFilter, statusFilterOpts),
     { excludes: excludeTags, includes: includeTags, mode: effCaptionMode },
   ), gridSort);
+  // Outcome tally for the refusal notice below the progress banner. Counted from
+  // the rows already polled — no extra request, and it survives a page reload
+  // because it reads the stored fail_kind rather than a one-shot end-of-batch
+  // event nobody would be watching when the batch actually ends.
+  // Deliberately NOT memoised: this line sits after an early return, and a hook
+  // here throws "Rendered more hooks than during the previous render" the moment
+  // a dataset is opened. It is one O(n) pass over a list this component already
+  // walks a dozen times unmemoised.
+  const outcome = summarizeGeneration(images);
+  const refusalNote = refusalHeadline(outcome);
   const pending = images.filter((i) => i.status === 'pending' && !i.filename
     && !unresolvedRescueIds.has(i.id)).length;
   const triage = images.filter((i) => i.status === 'pending' && i.filename
@@ -686,13 +698,27 @@ export default function DatasetWorkspace({ ds, onBack }) {
   };
 
   // Export ZIP — shared by the header CTA and the Import & export row.
-  // Guard-rails: untriaged images are silently EXCLUDED from the zip. Style
-  // captions are mandatory and have no trigger-only fallback.
+  // Guard-rails: untriaged images are silently EXCLUDED from the zip. Missing
+  // captions are a REFUSAL YOU CAN OVERRIDE, never a wall: a Style set with no
+  // captions used to be a hard toast.error with no way past it, which blocked a
+  // legitimate need — getting the bare images out to caption them in another
+  // tool (reported by Qeeyana on Reddit). The reason for the guard-rail is now
+  // said out loud, cancelling still walks you to the captions, and the way back
+  // in is named so the trip has an end.
   const exportZipGuarded = () => {
     if (triage && !window.confirm(`${triage} image(s) still await triage (✓/✕) and will NOT be in the ZIP. Export anyway?`)) return;
     if (isStyle && keptUncaptioned) {
-      toast.error(`Style training needs a content-only caption for every kept image — ${keptUncaptioned} still missing.`);
-      jumpTo({ targetId: 'gf-captions' });
+      const ok = window.confirm(
+        `${keptUncaptioned} kept image(s) have no caption.\n\n`
+        + 'A Style LoRA learns "everything the captions do NOT name", so an empty '
+        + '.txt teaches it nothing — that is why this is normally blocked, and the '
+        + 'ZIP will contain those empty files.\n\n'
+        + 'OK to export anyway — e.g. to caption the images in another tool and '
+        + 'bring the .txt files back with 📦 Import dataset, which drops them onto '
+        + 'these same images.\n'
+        + 'Cancel to caption them here instead.');
+      if (!ok) { jumpTo({ targetId: 'gf-captions' }); return; }
+      ds.exportZip();
       return;
     }
     if (keptUncaptioned && !window.confirm(`${keptUncaptioned} kept image(s) without a caption (trigger only). Export anyway?`)) return;
@@ -941,6 +967,12 @@ export default function DatasetWorkspace({ ds, onBack }) {
         </div>
       </div>
 
+      {/* Where the images actually are. Shown here, at the top, because the
+          question "where is this on disk?" is asked before anything else — and
+          because the answer used to be findable only by hand, which is how a
+          dataset folder ended up pasted into a bank. */}
+      <DatasetFolderNote path={d.storage_path} />
+
       {/* Two-column workspace: the persistent section sidebar on the left (with the
           guided Progress checklist below it for character datasets), the ACTIVE
           section's content on the right. On mobile the sidebar folds into a
@@ -1044,6 +1076,60 @@ export default function DatasetWorkspace({ ds, onBack }) {
             </div>
           )}
 
+          {/* Provider refusals, counted and named ONCE — because the alternative
+              is what shipped before: N missing images, each explained only by a
+              9px clamped line inside its own failed tile, which reads as "the app
+              generated fewer images than I asked for". Shown whenever refused rows
+              exist (not just right after a batch): it is derived from stored rows,
+              so it survives a reload and clears when they are purged or retried.
+              Collapsed by default — the count is the headline, the policy detail
+              is one tap away and does not eat a 400 px screen. */}
+          {refusalNote && (
+            <div className="rounded-lg border-2 border-amber-400/60 bg-amber-500/10 px-3 py-2.5">
+              <div className="flex items-start gap-2">
+                <span className="text-base leading-none pt-0.5" aria-hidden>🚫</span>
+                <div className="min-w-0 flex flex-col gap-1">
+                  <span className="text-content text-sm font-semibold break-words">
+                    {refusalNote}
+                  </span>
+                  {failureHeadline(outcome) && (
+                    <span className="text-content-subtle text-[0.6875rem] break-words">
+                      {failureHeadline(outcome)}
+                    </span>
+                  )}
+                  <details className="text-content-subtle text-[0.6875rem]">
+                    <summary className="cursor-pointer text-amber-300">
+                      Why, and what this does and does not mean
+                    </summary>
+                    <div className="mt-1 flex flex-col gap-1 break-words">
+                      <p className="m-0">
+                        {outcome.refusedEngines.includes('nanobanana')
+                          ? 'Gemini (Nano Banana) screens the image it just produced'
+                          : 'The provider screens the image it just produced'}
+                        {' '}and answers with no image when that screen trips.
+                        The screen is <strong>not configurable</strong>: the safety
+                        settings the API exposes act on the prompt, not on the
+                        returned image, so LDS has no switch to turn it off.
+                      </p>
+                      <p className="m-0">
+                        It refuses ordinary requests too, and it is not consistent —
+                        the same prompt can pass on one attempt and be refused on the
+                        next. That is why nothing here tells you to reword or retry:
+                        neither is a fix, and we will not pretend otherwise.
+                      </p>
+                      <p className="m-0">
+                        Google&apos;s usage policy does not allow adult content on
+                        this engine, and repeated attempts can lead to restrictions
+                        on your Google account. LDS never sends NSFW variations to an
+                        API engine — those run only on the local Klein engine.
+                      </p>
+                    </div>
+                  </details>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ============ 🖼️ Images — la grille : triage ✓/✕, filtres, tri auto. */}
           <div className={sectionCls('images')}>
             {heading('images')}
@@ -1087,11 +1173,12 @@ export default function DatasetWorkspace({ ds, onBack }) {
                 <DatasetGrid images={gridImages} datasetId={d.id} onStatus={ds.setStatus} onCaption={ds.setCaption}
                   onCrop={setCropImg} onDelete={ds.deleteImage}
                   onMirror={ds.mirrorImage} mirroringIds={ds.mirroringIds}
-                  onRegenerate={(id, loraStrength, prompt) => ds.regenerate(id, loraStrength, prompt)}
+                  onRegenerate={(id, loraStrength, prompt, opts) => ds.regenerate(id, loraStrength, prompt, opts)}
                   onReimprove={ds.reimproveImage} onView={setViewImg}
                   onBatch={ds.batchImages} busy={ds.busy}
                   onImproveBatch={ds.improveBatch} activity={act}
                   kleinAvailable={Boolean(caps.engines?.klein)}
+                  subjectType={d.subject_type || 'human'}
                   eligibilityImages={images}
                   nonces={ds.nonces} faceThresholds={d.face_thresholds} datasetKind={d.kind || 'character'}
                   faceScoringBlocked={d.face_scoring_blocked}
@@ -1140,7 +1227,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   <ClassifyFramingButton images={images} ollama={caps.ollama} capsLoading={capsLoading}
                     busy={ds.busy} activity={act} onClassify={(n) => ds.classify(n)} />
                   <div id="ds-add-generate" tabIndex={-1} className="scroll-mt-20">
-                    <VariationCatalog key={`vc-${d.id}-${bodyFid}`} busy={ds.busy}
+                    <VariationCatalog key={`vc-${d.id}-${bodyFid}`} datasetId={d.id} busy={ds.busy}
                       generating={act && act.kind === 'generate' ? act : null}
                       onGenerate={(...args) => {
                         // Guard-rail: a batch is already in flight — launching another one
@@ -1654,6 +1741,19 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   merges images + same-name .txt captions in — duplicates are skipped
                 </span>
               </div>
+              {/* The round trip existed and nothing said so: export → caption in
+                  another tool → import back. It only became a real trip once a
+                  re-imported .txt landed on the image ALREADY here instead of
+                  being dropped with its duplicate (see _merge_training_images).
+                  Reported by Qeeyana (Reddit). */}
+              <p id="ds-caption-elsewhere" tabIndex={-1}
+                className="scroll-mt-20 rounded-lg border border-border bg-surface px-3 py-2 text-[0.6875rem] text-content-muted">
+                <span className="font-medium text-content">Want to caption in another tool?</span>{' '}
+                Export the ZIP below, caption it wherever you like, then bring the same
+                folder back through 📦 Import dataset: images already here are not
+                duplicated, and their new <code>.txt</code> captions land on them.
+                A caption you already wrote here is never overwritten.
+              </p>
               <input ref={zipInput} type="file" accept=".zip,application/zip" className="hidden"
                 onChange={(e) => {
                   const f = e.target.files?.[0];
@@ -1863,6 +1963,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
           improveReady={viewImgImprovementReady}
           busy={ds.busy}
           kleinAvailable={Boolean(caps.engines?.klein)}
+          subjectType={d.subject_type || 'human'}
           onCrop={viewImgLive._rescueReviewPreview
             ? undefined
             : (img) => { setViewImg(null); setCropImg(img); }} />
@@ -1876,7 +1977,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
       )}
       {folderBrowseOpen && (
         <FolderBrowserModal
-          onPick={(p) => ds.importDatasetFolder(p)}
+          onPick={(p) => ds.importDatasetFolder(p, { silent: true })}
           onClose={() => setFolderBrowseOpen(false)} />
       )}
       {captionOptionsOpen && (

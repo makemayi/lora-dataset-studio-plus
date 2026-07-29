@@ -160,6 +160,8 @@ const COVERED = [
   ['EnginesSection.jsx', 'krea', 'base_model'],
   ['EnginesSection.jsx', 'krea', 'identity_lora'],
   // the same gap in the other sections
+  ['CaptioningSection.jsx', 'dataset_import', 'max_side'],
+  ['CaptioningSection.jsx', 'dataset_import', 'encoding'],
   ['CaptioningSection.jsx', 'captioning', 'backend'],
   ['CaptioningSection.jsx', 'watermark', 'device'],
   ['CaptioningSection.jsx', 'face_scoring', 'green'],
@@ -168,6 +170,7 @@ const COVERED = [
     'dup_distance', 'face_threshold', 'aesthetic_min', 'nsfw_max', 'style_threshold',
     'semantic_dup_threshold'].map((k) => ['CaptioningSection.jsx', 'bank', k]),
   ...['max_concurrent_runs', 'max_price_per_hour', 'monthly_budget_usd', 'stall_timeout_minutes',
+    'first_step_timeout_minutes', 'first_step_download_budget_minutes', 'max_runtime_minutes',
     'freeze_watchdog_minutes', 'unreachable_grace_minutes', 'min_reliability']
     .map((k) => ['TrainingSection.jsx', 'cloud', k]),
   // Concept face masking (issue #15) — both knobs are user-tunable, so both must

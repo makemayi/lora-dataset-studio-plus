@@ -187,6 +187,31 @@ DATASET_IMAGE_JOB_NAMES = frozenset({
 })
 
 
+def _drop_staged_inputs(md) -> None:
+    """Delete the ComfyUI input copies this job staged, now that it is over.
+
+    Called from `_dispatch_completion`, i.e. on EVERY terminal outcome — success,
+    failure, cancel, boot recovery of a stale row — because the copy is dead in
+    all four cases and only the success path was ever going to be tempting to
+    special-case. The staging side (`klein_edit_helper` / `krea_edit_helper`)
+    records the basenames under `staged_inputs`; a job without them (an older row
+    queued before this shipped, a Studio grid cell) is simply skipped.
+
+    Guarded end to end: leaving a stale copy behind is a wasted gigabyte, but
+    letting a filesystem hiccup escape here would strand the row that this same
+    function is on its way to complete.
+    """
+    names = md.get('staged_inputs') if isinstance(md, dict) else None
+    if not names:
+        return
+    try:
+        from . import config as cfg
+        from .utils import comfy_fs
+        comfy_fs.drop_staged_inputs(names, cfg.comfyui_dir('input'))
+    except Exception:
+        logger.exception('job_queue: staged input cleanup failed')
+
+
 def _dispatch_completion(job, filename, failed):
     """Route a finished job to whichever service created it, per its metadata.
     A callback crash must never take down the worker thread."""
@@ -194,6 +219,7 @@ def _dispatch_completion(job, filename, failed):
         md = json.loads(job.job_metadata or '{}')
     except (TypeError, ValueError):
         md = {}
+    _drop_staged_inputs(md)
     try:
         if md.get('is_lora_test'):
             from .services import lora_test_studio
@@ -255,6 +281,7 @@ class JobQueueManager:
             return
         with self._app.app_context():
             self._recover_stuck_jobs()
+            self._prune_staged_inputs()
         self._running = True
         self._thread = threading.Thread(target=self._run_loop, name='job-queue-worker', daemon=True)
         self._thread.start()
@@ -286,6 +313,37 @@ class JobQueueManager:
             job.update_status('failed', error_message='stale job recovered at boot')
             db.session.commit()
             _dispatch_completion(job, None, True)
+
+    def _prune_staged_inputs(self):
+        """Boot sweep for staged input copies no live job can still need.
+
+        The per-job deletion above keeps the steady state clean, but it only
+        started existing now: installs carry whatever they accumulated before
+        (0.67 GB over three months on the install this was measured on), and a
+        process killed mid-job leaves its copy behind whatever we do. Boot is the
+        one moment when nothing is in flight, so an age-bounded sweep here is
+        both safe and enough — no thread, no timer, no hot-path cost.
+
+        The folder belongs to ComfyUI, so the sweep is fenced by NAME and by AGE
+        (see comfy_fs) and, here, by the queue itself: every input a job that has
+        not finished still points at is collected first and handed over as
+        untouchable. Boot recovery has already failed the stale rows by the time
+        this runs, so what is left really is work that will still be done."""
+        try:
+            from . import config as cfg
+            from .utils import comfy_fs
+            keep = set()
+            for row in (ImageGenerationQueue.query
+                        .filter(ImageGenerationQueue.status.in_(
+                            ('pending', 'processing', 'sent_to_comfy'))).all()):
+                try:
+                    md = json.loads(row.job_metadata or '{}')
+                except (TypeError, ValueError):
+                    continue
+                keep.update(md.get('staged_inputs') or ())
+            comfy_fs.prune_staged_inputs(cfg.comfyui_dir('input'), keep=keep)
+        except Exception:
+            logger.exception('job_queue: staged input prune failed')
 
     # -- worker -----------------------------------------------------------
     def process_one(self) -> bool:

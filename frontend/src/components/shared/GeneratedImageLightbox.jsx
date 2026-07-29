@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { useImageDownload } from '../../hooks/useImageDownload';
 import {
   imageHeadlineFacts, imagePromptBlocks, imageSettingFacts, promptFold,
 } from '../../utils/generatedImageFacts';
@@ -104,6 +105,7 @@ function PromptBlock({ block }) {
 export default function GeneratedImageLightbox({ img, alt, actions = null, onClose }) {
   const dialogRef = useRef(null);
   const closeRef = useRef(null);
+  const dl = useImageDownload();
   useFocusTrap(dialogRef, !!img);
   useEffect(() => {
     if (!img) return undefined;
@@ -184,8 +186,31 @@ export default function GeneratedImageLightbox({ img, alt, actions = null, onClo
 
           {blocks.map((b) => <PromptBlock key={b.key} block={b} />)}
 
-          {actions && (
-            <div className="mt-3 flex flex-wrap gap-2 border-t border-white/10 pt-2.5">{actions}</div>
+          {/* ⬇ Keep it. In the SAME footer as 📌 Pin, because they are the two
+              things you do once you have decided a render is good — and the
+              file lands under a name that still says which dataset, run, step
+              and seed made it (services/gallery_download.py). Without that name
+              a saved render is anonymous within the week, which on a screen
+              whose whole job is telling checkpoints apart is the whole loss.
+
+              A refusal is shown here rather than swallowed: the gallery does
+              list rows whose file a resume or a trash sweep has already taken
+              off the disk. */}
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-white/10 pt-2.5">
+            <button type="button" data-testid="lightbox-download"
+              disabled={dl.busy || img.id == null}
+              onClick={(e) => { e.stopPropagation(); dl.download(img.id); }}
+              title="Download this image — the file name keeps its dataset, run, step and seed"
+              className="rounded-md border border-white/25 px-3 py-1.5 text-[0.75rem] font-semibold text-white/85 hover:border-white/50 hover:text-white disabled:opacity-40">
+              <span aria-hidden>⬇</span> {dl.busy ? 'Downloading…' : 'Download'}
+            </button>
+            {actions}
+          </div>
+          {dl.error && (
+            <p role="alert" data-testid="lightbox-download-error"
+              className="m-0 mt-1.5 rounded-md border border-amber-400/40 bg-amber-500/10 px-2 py-1 text-[0.6875rem] text-amber-100">
+              {dl.error}
+            </p>
           )}
         </div>
       </aside>

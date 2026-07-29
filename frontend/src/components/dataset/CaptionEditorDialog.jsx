@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { captionCharacterLabel, isCaptionSaveShortcut, isLikelyTruncatedCaption } from '../../utils/captionEditor';
+import { attemptModalSubmit } from '../../utils/submitOutcome.js';
 import CaptionLab from './CaptionLab';
 
 export default function CaptionEditorDialog({
@@ -16,27 +17,60 @@ export default function CaptionEditorDialog({
   const [mode, setMode] = useState('edit');
   const labAvailable = datasetId != null && imageId != null;
   const textareaRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  /* ONE way out, and it is closed only while the save is in flight — never
+     because the server said no. Escape, the backdrop, ✕ and Cancel all route
+     here: a dismissal mid-POST would leave the write running with nothing on
+     screen to report it. */
+  const dismiss = () => { if (!busy) onClose(); };
+
+  /* A refusal used to land on a caption editor that had already closed, so the
+     long AND short captions the user had just written were gone — on the most
+     used screen in the app. Now the dialog stays, the text is still in the
+     textareas, and the reason is drawn under them. The card scrolls inside
+     itself, so scroll to the end: the message and the button that produced it
+     are the last two blocks (measured on ContinueDialog at 400 px —
+     scrollIntoView({block:'nearest'}) left the message half-cut under the fold). */
+  const panelRef = useRef(null);
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (error && panel) panel.scrollTop = panel.scrollHeight;
+  }, [error]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     textareaRef.current?.focus();
     const closeOnEscape = (event) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') dismiss();
     };
     window.addEventListener('keydown', closeOnEscape);
     return () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener('keydown', closeOnEscape);
     };
-  }, [onClose]);
+  }, [onClose, busy]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pass the short only when the dataset uses dual captions, so a plain edit never writes one.
-  const save = () => onSave(draft, showShort ? shortDraft : undefined);
+  const save = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    let outcome;
+    try {
+      outcome = await attemptModalSubmit(
+        () => onSave(draft, showShort ? shortDraft : undefined),
+        { fallback: 'Could not save the caption' });
+    } finally { setBusy(false); }
+    if (outcome.close) onClose();
+    else setError(outcome.error);
+  };
 
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-3 sm:p-6"
-      onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      onMouseDown={(event) => { if (event.target === event.currentTarget) dismiss(); }}>
       <section role="dialog" aria-modal="true" aria-labelledby="caption-editor-title"
         className="flex h-[min(92vh,50rem)] w-[min(96vw,72rem)] flex-col overflow-hidden rounded-2xl border border-border bg-app shadow-2xl">
         <header className="flex items-start justify-between gap-4 border-b border-border bg-surface px-4 py-3 sm:px-5">
@@ -60,8 +94,8 @@ export default function CaptionEditorDialog({
               </div>
             )}
           </div>
-          <button type="button" onClick={onClose} aria-label="Close expanded caption editor"
-            className="rounded-lg border border-border bg-app px-2.5 py-1.5 text-sm text-content-muted hover:text-content">
+          <button type="button" onClick={dismiss} disabled={busy} aria-label="Close expanded caption editor"
+            className="rounded-lg border border-border bg-app px-2.5 py-1.5 text-sm text-content-muted hover:text-content disabled:opacity-40">
             ✕
           </button>
         </header>
@@ -82,7 +116,7 @@ export default function CaptionEditorDialog({
                 onKeep={(text) => { setDraft(text); setMode('edit'); textareaRef.current?.focus(); }} />
             </div>
           ) : (
-          <div className="flex min-h-0 flex-col gap-3 p-4 sm:p-5">
+          <div ref={panelRef} className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4 sm:p-5">
             <div className="flex items-center justify-between gap-3">
               <label htmlFor="expanded-caption" className="text-sm font-semibold text-content">Caption text</label>
               <span className="font-mono text-[0.6875rem] text-content-subtle" aria-live="polite">
@@ -105,7 +139,11 @@ export default function CaptionEditorDialog({
                 }
               }}
               placeholder="Caption (without the face)…"
-              className="min-h-0 flex-1 resize-none rounded-xl border border-border bg-surface p-4 text-sm leading-6 text-content outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/25" />
+              /* min-h-[6rem], not min-h-0: the column is a flex box, so once the
+                 refusal box and the short-caption section are both open at
+                 400 px a flex-1 child is free to be squeezed to nothing. The
+                 column scrolls instead (overflow-y-auto above). */
+              className="min-h-[6rem] flex-1 resize-none rounded-xl border border-border bg-surface p-4 text-sm leading-6 text-content outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/25" />
 
             {showShort && (
               <div className="rounded-xl border border-border bg-surface">
@@ -137,16 +175,33 @@ export default function CaptionEditorDialog({
               </div>
             )}
 
-            <div className="flex flex-col-reverse gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
+            {/* The LAST attempt's refusal, right above the button that produced
+                it — and the caption it is about is still in the textarea.
+                shrink-0 because this column is a flex box (a flex child is
+                otherwise squashed to a sliver of clipped text at 400 px), and
+                it scrolls in its own box rather than pushing Save off screen. */}
+            {error && (
+              <div role="alert"
+                className="shrink-0 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 max-h-28 overflow-y-auto">
+                <span className="block whitespace-pre-wrap break-words text-[0.6875rem] leading-relaxed text-red-200">
+                  {error}
+                </span>
+                <span className="mt-1 block text-[0.625rem] text-content-subtle">
+                  Your caption is kept — adjust and try again.
+                </span>
+              </div>
+            )}
+
+            <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
               <span className="text-[0.6875rem] text-content-subtle">Esc to close · Ctrl/⌘ + Enter to save</span>
               <div className="flex justify-end gap-2">
-                <button type="button" onClick={onClose}
-                  className="rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium text-content-muted hover:text-content">
+                <button type="button" onClick={dismiss} disabled={busy}
+                  className="rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium text-content-muted hover:text-content disabled:opacity-40">
                   Cancel
                 </button>
-                <button type="button" onClick={save}
-                  className="rounded-lg bg-gradient-primary px-4 py-2 text-sm font-semibold text-white">
-                  Save caption
+                <button type="button" onClick={save} disabled={busy}
+                  className="rounded-lg bg-gradient-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">
+                  {busy ? 'Saving…' : 'Save caption'}
                 </button>
               </div>
             </div>

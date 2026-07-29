@@ -14,7 +14,9 @@ test('every section a link points at really exists in the settings registry', ()
   const known = new Set([...registry.matchAll(/id: '([a-z0-9-]+)'/g)].map((m) => m[1]));
   assert.ok(known.size >= 8, 'settings registry did not parse');
   const files = [
-    '../dataset/DatasetLightbox.jsx', '../dataset/CaptionToolsBar.jsx',
+    // The lightbox's own improve links moved into KleinImproveNote, which the
+    // lightbox AND the grid's bulk toolbar both render — one note, two surfaces.
+    '../dataset/KleinImproveNote.jsx', '../dataset/CaptionToolsBar.jsx',
     '../dataset/TrainingPanel.jsx', '../dataset/ConceptSourcesPanel.jsx',
   ];
   let found = 0;
@@ -36,9 +38,21 @@ test('a settings link never triggers the surface it sits on', () => {
 test('the improve link is offered where the improve action is', () => {
   const lightbox = read('../dataset/DatasetLightbox.jsx');
   assert.match(lightbox, /Upscale & improve/);
-  assert.match(lightbox, /<SettingsLink section="engines"/);
+  assert.match(lightbox, /<KleinImproveNote\b/);
   // hidden while it runs — a settings trip mid-job is not the offer being made
   assert.match(lightbox, /\{onImprove && !improvementActive && \(/);
+  // The BULK improve is the same action at scale, and it went targetless for a
+  // long time: the instruction that spoils one tile spoils the whole selection.
+  assert.match(read('../dataset/DatasetGrid.jsx'), /<KleinImproveNote\b/);
+});
+
+test('the note offers BOTH improve levers — the words and the amount', () => {
+  // "Adjust improve strength" was the only pointer for a long time, and it aims
+  // at the knobs. The reported complaint (anime turned realistic, Qeeyana on
+  // Reddit) is caused by the INSTRUCTION, which had no pointer at all.
+  const note = read('../dataset/KleinImproveNote.jsx');
+  assert.match(note, /focus="identity-prompt-klein-improve"/);
+  assert.match(note, /focus="klein-improve-strength"/);
 });
 
 test('the cloud banner lands on the section holding the key, not the landing page', () => {

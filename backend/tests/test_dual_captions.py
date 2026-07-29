@@ -285,3 +285,186 @@ def test_cloudify_strips_dual_captions(app):
         assert proc['datasets'][0]['folder_path'] == '/workspace/datasets/myjob'
         assert proc['datasets'][0]['caption_ext'] == 'txt'
         assert 'short_and_long_captions' not in proc['train']
+
+
+# --- dual captions vs families that cache their text embeddings (issue #22) ----
+#
+# Reported by 1Tomber: a krea run with dual captions ON died at the first step with
+#     AttributeError: 'NoneType' object has no attribute 'replace'
+#       ... in inject_trigger_into_prompt
+# Reproduced against the installed ai-toolkit: its text-embedding caching pass reaches
+# load_caption() WITHOUT the JSON caption dict (get_text_embedding_info_dict), so every
+# item is filled from its .txt sidecar and `raw_caption_short` stays None; load_caption()
+# then short-circuits on the real per-batch call, `caption_short` is never computed, and
+# the doubled prompt list handed to inject_trigger_into_prompt contains None. Caching the
+# embeddings alone is fine; dual captions alone is fine; the PAIR is what breaks — and even
+# without the crash the short caption could never be encoded, because cache_text_embeddings
+# encodes file_item.caption only and unload_text_encoder then removes the encoder.
+_CACHING_FAMILIES = ('krea', 'anima')
+_ALL_FAMILIES = ('zimage', 'sdxl', 'flux', 'flux2klein', 'krea', 'anima')
+
+
+def _dual_dataset(tmp_path, family, name='Emma', monkeypatch=None):
+    """A one-image dual-captions dataset of `family`, exported. Returns (ds, export_dir)."""
+    ds = svc.create_dataset(LOCAL_USER, name, 'zchar_emma')
+    ds.train_type = family
+    if family == 'sdxl':
+        # SDXL refuses to build without a checkpoint, and resolving one needs ComfyUI.
+        ds.train_base_model = 'base.safetensors'
+        monkeypatch.setattr(lt, '_sdxl_base_path', lambda b: f'checkpoints/{b}')
+    _enable_dual(ds)
+    _kept_image(ds, 'a.png', caption='a woman on a bench', caption_short='a woman')
+    out = lt.export_dataset_to_aitoolkit(LOCAL_USER, ds.id, masked=False,
+                                         dest_dir=str(tmp_path / f'export_{family}'))
+    return ds, out
+
+
+def test_krea_dual_captions_never_emits_the_crashing_pair(app, tmp_path):
+    """THE reported scenario: krea + dual captions must not produce the #22 config."""
+    with app.app_context():
+        save_config({'aitoolkit': {'dir': str(tmp_path / 'aitoolkit')}})
+        ds, out = _dual_dataset(tmp_path, 'krea')
+        proc = lt.build_job_config(ds, out, steps=100)['config']['process'][0]
+        d0 = proc['datasets'][0]
+        # The krea recipe is unchanged — it still caches embeddings and unloads the TE.
+        assert d0['cache_text_embeddings'] is True
+        assert proc['train']['unload_text_encoder'] is True
+        # ...so the dual-caption pair is refused instead of emitted.
+        assert 'short_and_long_captions' not in proc['train']
+        assert d0['folder_path'] == out          # folder + .txt sidecars, not the JSON
+
+
+def test_no_family_emits_dual_with_cached_text_embeddings(app, tmp_path, monkeypatch):
+    """Family sweep: the pair must never appear, whatever the family."""
+    with app.app_context():
+        save_config({'aitoolkit': {'dir': str(tmp_path / 'aitoolkit')}})
+        for fam in _ALL_FAMILIES:
+            ds, out = _dual_dataset(tmp_path, fam, name=f'Emma{fam}', monkeypatch=monkeypatch)
+            proc = lt.build_job_config(ds, out, steps=100)['config']['process'][0]
+            cached = any(d.get('cache_text_embeddings') for d in proc['datasets'])
+            unloads = bool(proc['train'].get('unload_text_encoder'))
+            dual = bool(proc['train'].get('short_and_long_captions'))
+            assert not (dual and (cached or unloads)), f'{fam} emits the #22 pair'
+            # And the refusal is not over-broad: a family that can train it, does.
+            assert dual is not (cached or unloads), f'{fam} dual={dual} cached={cached}'
+
+
+def test_unsupported_family_list_matches_what_the_recipes_emit(app, tmp_path, monkeypatch):
+    """The preflight warns from a constant; keep it honest against the real recipes."""
+    with app.app_context():
+        save_config({'aitoolkit': {'dir': str(tmp_path / 'aitoolkit')}})
+        measured = []
+        for fam in _ALL_FAMILIES:
+            ds, out = _dual_dataset(tmp_path, fam, name=f'Emma{fam}', monkeypatch=monkeypatch)
+            proc = lt.build_job_config(ds, out, steps=100)['config']['process'][0]
+            if lt._dual_captions_unsupported_reason(proc):
+                measured.append(fam)
+        assert tuple(measured) == _CACHING_FAMILIES
+        assert lt.DUAL_CAPTION_UNSUPPORTED_FAMILIES == _CACHING_FAMILIES
+
+
+def test_krea_dual_still_trains_with_its_trigger(app, tmp_path):
+    """Anti-masking guard: refusing dual must not cost the trigger.
+
+    A `or ''` placeholder short caption would have made the crash go away while training
+    a LoRA whose keyword is never injected — invisible until the weights are useless."""
+    with app.app_context():
+        save_config({'aitoolkit': {'dir': str(tmp_path / 'aitoolkit')}})
+        ds, out = _dual_dataset(tmp_path, 'krea')
+        proc = lt.build_job_config(ds, out, steps=100)['config']['process'][0]
+        assert proc['trigger_word'] == 'zchar_emma'
+        # The captions ai-toolkit will actually read (the .txt sidecars) carry the trigger.
+        sidecar = os.path.join(out, 'zchar_emma_000.txt')
+        assert open(sidecar, encoding='utf-8').read().startswith('zchar_emma,')
+        # No empty/placeholder caption anywhere in the emitted config.
+        assert proc['datasets'][0].get('default_caption') is None
+
+
+def test_dual_captions_untouched_on_a_non_caching_family(app, tmp_path):
+    """Anti-regression: dual captions alone still work exactly as before."""
+    with app.app_context():
+        save_config({'aitoolkit': {'dir': str(tmp_path / 'aitoolkit')}})
+        ds, out = _dual_dataset(tmp_path, 'zimage')
+        proc = lt.build_job_config(ds, out, steps=100)['config']['process'][0]
+        assert proc['train']['short_and_long_captions'] is True
+        assert proc['datasets'][0]['folder_path'] == lt._dual_caption_json_path(out)
+        assert not proc['datasets'][0].get('cache_text_embeddings')
+
+
+def test_text_embedding_cache_untouched_without_dual(app, tmp_path):
+    """Anti-regression: embedding caching alone still works exactly as before."""
+    with app.app_context():
+        save_config({'aitoolkit': {'dir': str(tmp_path / 'aitoolkit')}})
+        ds = svc.create_dataset(LOCAL_USER, 'Emma', 'zchar_emma')
+        ds.train_type = 'krea'
+        db.session.commit()          # dual OFF
+        _kept_image(ds, 'a.png', caption='a woman on a bench')
+        out = lt.export_dataset_to_aitoolkit(LOCAL_USER, ds.id, masked=False,
+                                             dest_dir=str(tmp_path / 'export_plain'))
+        proc = lt.build_job_config(ds, out, steps=100)['config']['process'][0]
+        assert proc['datasets'][0]['cache_text_embeddings'] is True
+        assert proc['train']['unload_text_encoder'] is True
+        assert 'short_and_long_captions' not in proc['train']
+
+
+def test_preflight_says_dual_captions_are_ignored_on_a_caching_family(app):
+    """The refusal is announced BEFORE the launch, not discovered at the first step."""
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'Emma', 'zchar_emma')
+        _enable_dual(ds)
+        for i in range(20):
+            _kept_image(ds, f'k{i}.png', caption=f'a woman on a bench number {i} outdoors')
+
+        rep = lt.training_preflight(LOCAL_USER, ds.id, train_type='krea')
+        row = next(c for c in rep['checks'] if c['id'] == 'dual_captions')
+        assert row['status'] == 'warn'
+        assert 'short caption is ignored' in row['detail']
+        assert any('Dual captions are ON' in w for w in rep['warnings'])
+        assert not rep['blockers']       # a warning, not a wall: the run is still valid
+
+        # A family that can train them says so instead.
+        rep = lt.training_preflight(LOCAL_USER, ds.id, train_type='zimage')
+        row = next(c for c in rep['checks'] if c['id'] == 'dual_captions')
+        assert row['status'] == 'ok'
+        assert not any('Dual captions are ON' in w for w in rep['warnings'])
+
+
+def test_preflight_dual_row_stays_out_of_slider_mode(app):
+    """The slider loss ignores captions; a row promising two wordings would contradict
+    the 'captions are ignored by the slider loss' row already emitted above it."""
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'Emma', 'zchar_emma')
+        _enable_dual(ds)
+        ds.train_slider = json.dumps({'enabled': True, 'positive': 'more detail',
+                                      'negative': 'less detail', 'target_class': 'woman'})
+        db.session.commit()
+        for i in range(20):
+            _kept_image(ds, f'k{i}.png', caption=f'a woman on a bench number {i} outdoors')
+        rep = lt.training_preflight(LOCAL_USER, ds.id, train_type='zimage')
+        assert not any(c['id'] == 'dual_captions' for c in rep['checks'])
+
+
+def test_launch_snapshot_stamps_dual_captions_effective(app):
+    """Provenance must record what the trainer SAW, not what the toggle said.
+
+    Otherwise two krea runs that differ only by this toggle look like a dual-caption
+    experiment in the run comparison, while ai-toolkit read the same captions both times."""
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'Emma', 'zchar_emma')
+        _enable_dual(ds)
+        assert lt.launch_settings_snapshot(ds)['dual_captions'] is True    # zimage
+        ds.train_type = 'krea'
+        db.session.commit()
+        assert lt.launch_settings_snapshot(ds)['dual_captions'] is False
+        # The stored preference itself is untouched — the toggle still shows what was set.
+        assert lt.effective_train_settings(ds)['dual_captions'] is True
+
+
+def test_preflight_stays_silent_when_dual_captions_are_off(app):
+    """No new row on the historical path — the readiness pill gains nothing to read."""
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'Emma', 'zchar_emma')
+        for i in range(20):
+            _kept_image(ds, f'k{i}.png', caption=f'a woman on a bench number {i} outdoors')
+        rep = lt.training_preflight(LOCAL_USER, ds.id, train_type='krea')
+        assert not any(c['id'] == 'dual_captions' for c in rep['checks'])

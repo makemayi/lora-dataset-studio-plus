@@ -157,6 +157,16 @@ def _object_info_timeout() -> int:
     return _cu.object_info_timeout()
 
 
+def _dataset_import_policy() -> dict:
+    """The effective import resolution/encoding, published for the UI. Lazy
+    import for the same reason as _object_info_timeout: the service imports
+    config, not capabilities."""
+    from .services import face_dataset_service as _fds
+    p = _fds.import_encode_policy()
+    return {'max_side': p['max_side'], 'encoding': p['encoding'],
+            'capped': p['capped'], 'ceiling': p['ceiling']}
+
+
 def comfyui_down_message(status, waited) -> str:
     """THE sentence for a ComfyUI that isn't answering. Two causes, two remedies —
     never one fits-all line.
@@ -631,9 +641,24 @@ def probe_vast() -> dict:
         return {'ok': False, 'detail': f'unreachable: {e}'}
 
 
+# The EXACT import expression each ML capability's probe runs, keyed by the
+# setup_installer action name that installs it. It lives here, once, because the
+# installer's post-install verification must re-run the SAME import the probe
+# will: when the two drift, an install can report success while the capability
+# stays ✗ with no reason shown anywhere (issue #24, 1Tomber — the masks install
+# said "already satisfied" for every package it knew about while `import rembg`
+# died on a dependency that was not in its list).
+CAPABILITY_IMPORTS = {
+    'face_scoring': 'import insightface, onnxruntime',
+    'masks': 'import rembg',
+    'bank_scoring': 'import torch, open_clip, transformers',
+    'watermark_inpaint': 'import simple_lama_inpainting',
+}
+
+
 def probe_face_scoring() -> dict:
     python = cfg.get('face_scoring.python') or sys.executable
-    ok = _cached_import('face_scoring', python, 'import insightface, onnxruntime')
+    ok = _cached_import('face_scoring', python, CAPABILITY_IMPORTS['face_scoring'])
     return {'ok': ok, 'detail': 'insightface + onnxruntime import OK' if ok else 'import failed'}
 
 
@@ -678,7 +703,7 @@ def bank_scoring_gpu_available() -> bool:
 
 def probe_masks() -> dict:
     python = cfg.get('masks.python') or sys.executable
-    ok = _cached_import('masks', python, 'import rembg')
+    ok = _cached_import('masks', python, CAPABILITY_IMPORTS['masks'])
     return {'ok': ok, 'detail': 'rembg import OK' if ok else 'import failed'}
 
 
@@ -688,7 +713,7 @@ def probe_bank_scoring() -> dict:
     the other ML extras — torch/open_clip/transformers must all import. When False,
     the bank's Score button is disabled with an install hint (never a mute ✗)."""
     python = cfg.get('bank_scoring.python') or sys.executable
-    ok = _cached_import('bank_scoring', python, 'import torch, open_clip, transformers')
+    ok = _cached_import('bank_scoring', python, CAPABILITY_IMPORTS['bank_scoring'])
     return {'ok': ok,
             'detail': 'torch + open_clip + transformers import OK' if ok else 'import failed'}
 
@@ -699,7 +724,7 @@ def probe_watermark_inpaint() -> dict:
     same subprocess-probe pattern/timeout handling as probe_masks. When False the
     Clean pass still runs crop-only (LaMa-routed images are skipped, not failed)."""
     python = cfg.get('watermark.python') or cfg.get('masks.python') or sys.executable
-    ok = _cached_import('watermark', python, 'import simple_lama_inpainting')
+    ok = _cached_import('watermark', python, CAPABILITY_IMPORTS['watermark_inpaint'])
     return {'ok': ok, 'detail': 'simple-lama-inpainting import OK' if ok else 'import failed'}
 
 
@@ -1469,6 +1494,11 @@ def probe(force=False) -> dict:
         # review lightbox uses it as the per-image crop-vs-inpaint default; when False,
         # auto-routing repaints border marks instead of cropping them.
         'watermark_allow_crop': bool(cfg.get('watermark.allow_crop')),
+        # What an imported photo will actually be STORED as (Settings ▸ Captioning
+        # & quality ▸ Dataset import). Published so the import screens can quote
+        # the number instead of keeping their own copy of the default — the whole
+        # point of the setting is that the rule stops being invisible.
+        'dataset_import': _dataset_import_policy(),
         'python': python_ml_status(),
         'scrape_deps': probe_scrape_deps()['ok'],
         'training_visible': aitoolkit['ok'] or bool(cfg.secret('VAST_API_KEY')),

@@ -123,6 +123,18 @@ const TOPICS = [
   // Multi-engine generation: the cards are checkboxes and, from two engines on,
   // a mode decides whether the shots are SHARED between them (varied dataset,
   // same cost) or sent to ALL of them (compare, then triage — multiplies cost).
+  // Two properties of the Gemini engine that change what you get, and that no
+  // amount of settings can change back. Kept as its own topic rather than folded
+  // into dataset-engine-mode: this one answers "why did I get fewer images than
+  // I asked for", which is a question people arrive at already frustrated.
+  { id: 'nanobanana-filter-and-synthid', kind: 'section',
+    title: 'Nano Banana: the output filter, and SynthID',
+    keywords: ['nano banana', 'nanobanana', 'gemini', 'google', 'refused', 'refusal',
+      'blocked', 'content filter', 'safety', 'imagesafety', 'empty response',
+      'missing images', 'fewer images', 'synthid', 'watermark', 'provenance',
+      'nsfw', 'policy', 'bikini', 'lingerie'],
+    guide: { chapter: 'settings-reference', anchor: 'image-engines' },
+    app: { route: '/datasets?section=add' } },
   { id: 'dataset-engine-mode', kind: 'setting', title: 'Engines & how they share a batch',
     keywords: ['engine', 'engines', 'multiple engines', 'several engines', 'split',
       'all engines', 'compare engines', 'klein', 'krea', 'krea 2 edit', 'nano banana',
@@ -210,6 +222,11 @@ const TOPICS = [
      'trained loras', 'training history', 'include loras', 'not trained yet',
      'import backup', 'backup menu', 'restore backup', 'zip'],
     '/datasets', 'using-the-app', 'back-up-everything'),
+  action('caption-elsewhere', 'Caption your images in another tool',
+    ['caption', 'captions', 'external', 'another tool', 'other tool', 'taggui',
+     'booru', 'manual', 'txt', 'sidecar', 'export zip', 'import zip', 'round trip',
+     'style export blocked', 'export without captions', 'uncaptioned'],
+    '/datasets?section=export', 'using-the-app', 'caption-your-images-in-another-tool'),
   { id: 'page-bank', kind: 'page', title: 'Image bank (triage)',
     keywords: ['bank', 'triage', 'import', 'folder', 'browse', 'choose folder', 'path',
       'telegram', 'duplicates', 'blurry', 'quality', 'cluster', 'person', 'sort',
@@ -243,6 +260,14 @@ const TOPICS = [
       'folder unavailable', 'moved folder', 'deleted files'],
     guide: { chapter: 'using-the-app', anchor: 'the-image-bank-triage-a-big-folder' },
     app: { route: '/bank' } },
+  action('bank-scrape', 'Scrape the web into a bank',
+    ['scrape', 'scraper', 'scrape into bank', 'scrape to bank', 'web', 'gallery',
+     'gallery url', 'reddit', 'pexels', 'pornpics', 'civitai images', 'download',
+     'download images', 'from the web', 'fill a bank', 'new bank from the web',
+     'no folder', 'without a folder', 'add more images', 'resume scrape',
+     'second scrape', 'append', 'grow a bank', 'destination', 'unfiltered',
+     'no filter', 'keeps small images', 'small images kept', 'raw'],
+    '/bank', 'using-the-app', 'the-image-bank-triage-a-big-folder'),
   action('bank-find-by-text', 'Find bank images by describing them',
     ['find by text', 'text search', 'search by text', 'describe', 'description',
      'search images', 'semantic search', 'clip search', 'natural language',
@@ -272,6 +297,21 @@ const TOPICS = [
      'disk space', 'size', 'weight', 'how big', 'megabytes', 'copy', 'copies',
      'share files', 'bank', 'triage'],
     '/bank', 'using-the-app', 'promote-a-shortlist-into-a-new-bank'),
+  action('bank-not-on-a-dataset-folder', 'Why a bank cannot be created on a dataset’s folder',
+    ['dataset folder', 'dataset path', 'folder refused', 'cannot create bank',
+     'bank refused', 'refused', 'rejected folder', 'not allowed', 'blocked',
+     'belongs to a dataset', 'share files', 'shared files', 'same folder',
+     'delete rejected deleted my dataset', 'deleted my dataset', 'lost images',
+     'dataset images gone', 'missing images', 'bank over dataset',
+     'import to bank', 'copy', 'copies', 'transit', 'move folder', 'relocate',
+     'symlink', 'junction', 'shortcut', 'bank', 'triage', 'dataset'],
+    '/bank', 'using-the-app', 'a-bank-and-a-dataset-never-share-files'),
+  action('dataset-images-folder', 'Where a dataset’s images are on disk',
+    ['dataset folder', 'images folder', 'where are my images', 'on disk', 'path',
+     'storage', 'storage path', 'copy path', 'file manager', 'explorer',
+     'find the files', 'locate', 'open folder', 'data folder', 'datasets folder',
+     'dataset', 'images'],
+    '/datasets', 'using-the-app', 'a-bank-and-a-dataset-never-share-files'),
   action('bank-tune-thresholds', 'Tune the Bank filter thresholds without leaving the bank',
     ['threshold', 'thresholds', 'tune', 'tuning', 'calibrate', 'calibration', 'adjust',
      'filter', 'filters', 'stricter', 'harder', 'tighter', 'looser', 'sensitivity',
@@ -281,6 +321,12 @@ const TOPICS = [
      'reset to default', 'reset all', 'defaults', 'how many images',
      'preview', 'effect', 'bank', 'triage', 'settings in bank'],
     '/bank', 'using-the-app', 'tune-the-bank-filter-thresholds'),
+  action('bank-edit-watermark-mask', 'Fix a watermark mask in a bank',
+    ['watermark', 'mask', 'edit mask', 'zone', 'zones', 'region', 'regions', 'box',
+     'bbox', 'wrong box', 'missed', 'second logo', 'draw', 'redraw', 'correct',
+     'manual', 'by hand', 'inpaint', 'repaint', 'crop', 'clean', 'review',
+     'bank', 'triage'],
+    '/bank', 'using-the-app', 'fix-a-watermark-mask-in-a-bank'),
   action('bank-undo-bulk', 'Undo the last bulk decision in a bank',
     ['undo', 'undo last', 'revert', 'take back', 'go back', 'step back', 'oops',
      'mistake', 'wrong threshold', 'bad filter', 'rejected everything',
@@ -316,7 +362,15 @@ const TOPICS = [
      // a file that is present but unreadable (a cut-short or corrupted download).
      'klein model missing', 'model missing', 'corrupted', 'corrupt', 'truncated',
      'unreadable', 'on disk but', 'cannot be loaded', 'greyed out', 'not ready',
-     'download again', 'redownload', 're-download', 'broken download']),
+     'download again', 'redownload', 're-download', 'broken download',
+     // WHERE the model may live. CyberTod (Reddit) read the download destination
+     // as a requirement, copied ~10 GB into unet/klein/ and made a symlink to get
+     // the disk space back — the resolver had been scanning diffusion_models/,
+     // both roots' top level and every extra_model_paths root all along.
+     'symlink', 'symbolic link', 'junction', 'hard link', 'disk space', 'space',
+     'move the model', 'another folder', 'different folder', 'shared models',
+     'diffusion_models', 'extra_model_paths', 'stability matrix', 'portable',
+     'models_dir', 'models folder', 'duplicate', 'copy the model']),
   setupStep('setup-krea-install', 'install', 'Install the Krea 2 Edit engine',
     ['krea', 'krea 2', 'krea 2 edit', 'install krea', 'node pack', 'comfyui-krea2edit',
      'custom nodes', 'custom_nodes', 'identity lora', 'krea2_identity_edit', 'civitai',
@@ -363,6 +417,15 @@ const TOPICS = [
      'where did my image go', 'generation in progress', 'lost my run',
      'stop a canvas run', 'resume a canvas run', 'how many images'],
     '/canvas', 'using-the-app', 'the-lora-canvas-every-run-on-one-board'),
+  action('canvas-continue', '▶ Continue training from a checkpoint on the board',
+    ['continue from here', 'continue training from the canvas', 'resume from the board',
+     'continue a run from the canvas', 'more steps from the canvas', 'train further',
+     'resume a checkpoint', 'continue from step 2500', 'earlier epoch', 'undercooked',
+     'overcooked', 'local or cloud', 'run it in the cloud', 'finish on my machine',
+     'lane greyed out', 'continue button disabled', 'why can I not continue',
+     'no longer on this machine', 'not linked on this machine',
+     'continue from here does nothing', 'extra steps vs total steps'],
+    '/canvas', 'using-the-app', 'the-lora-canvas-every-run-on-one-board'),
   action('canvas-pin-all', '📌 Pin all of a run’s images at once',
     ['pin all', 'pin all images', 'pin everything', 'pin the whole run',
      'put all the images on the board', 'deploy all images to the canvas',
@@ -385,6 +448,30 @@ const TOPICS = [
      // at 100 % zoom, so this is a real search term, not a hypothetical one.
      'cross does not close', 'cannot close a pinned image', 'close button too small',
      'x does nothing', 'buttons too small on the canvas', 'canvas on a phone'],
+    '/canvas', 'using-the-app', 'the-lora-canvas-every-run-on-one-board'),
+  action('canvas-download-images', '⬇ Download images (one, or a gallery as ZIP)',
+    ['download an image', 'download image', 'save an image', 'save the picture',
+     'export generated images', 'download all images', 'download the gallery',
+     'zip', 'download as zip', 'download a run', 'get my images out',
+     'save to disk', 'keep this render', 'file name', 'which checkpoint made this',
+     'rename downloaded images', 'download selected images', 'download 500',
+     'why only 500', 'zip is smaller than the gallery', 'missing from the zip',
+     'image no longer on disk', 'download does nothing'],
+    '/canvas', 'using-the-app', 'the-lora-canvas-every-run-on-one-board'),
+  // 🖼🖼 A gesture nobody can guess: it earns a topic of its own, not a clause
+  // buried in the one above. Half these keywords are how someone who has
+  // ALREADY done it by accident would describe what happened.
+  action('canvas-image-groups', '🖼🖼 Fuse pinned images side by side',
+    ['group images', 'merge images', 'fuse images', 'combine pinned images',
+     'side by side', 'contact sheet on the canvas', 'compare images edge to edge',
+     'no border between images', 'strip of images', 'image group',
+     'drop one image on another', 'stack images', 'join two pinned images',
+     'add a third image to the group', 'how many images can i group',
+     // …and how it reads when it was NOT meant.
+     'my images merged', 'two images became one', 'images stuck together',
+     'ungroup', 'split a group', 'take an image out of the group',
+     'undo a group', 'move a group of images', 'resize a group',
+     'close a whole group', 'which x closes which image'],
     '/canvas', 'using-the-app', 'the-lora-canvas-every-run-on-one-board'),
   action('canvas-deploy-state', 'Which checkpoints are deployed (the edge colour)',
     ['deployed', 'not deployed', 'blue bar', 'dashed bar', 'edge colour', 'legend',
@@ -530,8 +617,16 @@ const TOPICS = [
      'subject type', 'animal', 'per subject', 'leak', 'tails', 'extra limbs']),
   setting('identity_prompts.klein_identity', 'engines', 'identity-prompts', 'Klein identity prompt',
     ['identity', 'klein', 'restage', 'face', 'prompt', 'preserve', 'pose']),
+  // The words Qeeyana (Reddit) actually used are in here verbatim: she had the
+  // symptom ("anime looks realistic after the quality inpaint") and no path to
+  // the cause, because the shipped instruction — "add detailed texture, add
+  // sharp details, add candid shot, add soft focus effect" — is a photographic
+  // recipe applied to every dataset. Searching her own sentence must land here.
   setting('identity_prompts.klein_improve', 'engines', 'identity-prompt-klein-improve', 'Klein improve prompt & toggle',
-    ['klein', 'improve', 'upscale', 'enhance', 'prompt', 'texture', 'detail', 'toggle', 'disable']),
+    ['klein', 'improve', 'upscale', 'enhance', 'prompt', 'texture', 'detail', 'toggle', 'disable',
+     'anime', 'drawn', 'illustration', 'cartoon', 'too realistic', 'realistic', 'photoreal',
+     'textures', 'skin detail', 'skin', 'improve prompt', 'turn off improve', 'quality inpaint',
+     'inpaint', 'ruins my images', 'harms the image', 'style changed', 'no prompt']),
   // The four knobs behind the lightbox's "Adjust improve strength →". They were
   // exposed as settings but never registered, so Help search could not reach them
   // and the link had nothing to aim at.
@@ -634,6 +729,14 @@ const TOPICS = [
   setting('aitoolkit.hf_home', 'local-tools', 'aitoolkit-hf-home', 'ai-toolkit Hugging Face cache',
     ['ai-toolkit', 'aitoolkit', 'hugging face', 'hf home', 'cache', 'override', 'path']),
   // captioning
+  setting('dataset_import.max_side', 'captioning', 'dataset-import-max-side',
+    'Dataset import — stored resolution',
+    ['import', 'resolution', 'size', 'pixels', '1024', '2048', 'downscale', 'resize',
+     'normalize', 'normalized', 'shrink', 'original', 'full size', 'quality']),
+  setting('dataset_import.encoding', 'captioning', 'dataset-import-encoding',
+    'Dataset import — stored encoding',
+    ['import', 'encoding', 'webp', 'quality', 'lossless', 'compression', 'artifacts',
+     'q92', 'recompress', 'disk space']),
   setting('captioning.backend', 'captioning', 'captioning-backend', 'Captioning backend',
     ['caption', 'captioning', 'backend', 'joycaption', 'ollama', 'auto']),
   setting('watermark.device', 'captioning', 'watermark-device', 'Watermark processing device',
@@ -684,6 +787,13 @@ const TOPICS = [
     ['cloud', 'budget', 'monthly', 'vast', 'cost', 'limit', 'spend']),
   setting('cloud.stall_timeout_minutes', 'training', 'cloud-stall-timeout', 'Stall timeout',
     ['cloud', 'stall', 'timeout', 'watchdog', 'vast', 'stuck']),
+  setting('cloud.first_step_timeout_minutes', 'training', 'cloud-first-step-timeout', 'First-step timeout',
+    ['cloud', 'first step', 'first-step', 'watchdog', 'base model', 'download', 'vast', 'stuck', 'timeout']),
+  setting('cloud.first_step_download_budget_minutes', 'training', 'cloud-first-step-download-budget',
+    'Base-model download ceiling',
+    ['cloud', 'download', 'base model', 'ceiling', 'budget', 'slow', 'watchdog', 'vast', 'cost']),
+  setting('cloud.max_runtime_minutes', 'training', 'cloud-max-runtime', 'Max runtime',
+    ['cloud', 'runtime', 'cap', 'max', 'hours', 'budget', 'vast', 'cost', 'hard stop']),
   setting('cloud.freeze_watchdog_minutes', 'training', 'cloud-freeze-watchdog', 'Freeze watchdog',
     ['cloud', 'freeze', 'watchdog', 'frozen', 'stuck', 'billing', 'supervisor', 'vast', 'cost']),
   setting('cloud.unreachable_grace_minutes', 'training', 'cloud-unreachable-grace', 'Unreachable grace',
@@ -700,11 +810,41 @@ const TOPICS = [
   // surfaces it when the Advanced options are first opened.
   { id: 'training.dual_captions', kind: 'setting', title: 'Dual captions (long + short)',
     keywords: ['dual captions', 'long', 'short', 'short caption', 'caption', 'augmentation',
-      'short_and_long', 'advanced', 'training'],
+      'short_and_long', 'advanced', 'training', 'krea', 'anima', 'cache_text_embeddings'],
     guide: { chapter: 'dataset-guide', anchor: '7-dual-captions-long-short' },
     app: { route: '/datasets?section=training' },
     tip: { trigger: 'dual-captions-advanced',
       text: 'New: train each image on a long AND a short caption (Advanced options → Dual captions) so the LoRA leans less on any single wording.' } },
+  // Person masking (`masked`, background at 10 %) became a per-DATASET setting on
+  // 28/07 — it used to be a per-BROWSER localStorage preference the server only saw
+  // at launch. Same shape as Dual captions / Memory saving: a per-dataset training
+  // option, so it points at the settings-reference Training section, and its route
+  // is the training workspace section where the toggle lives.
+  { id: 'training.masked', kind: 'setting', title: 'Masked training (background at 10%)',
+    keywords: ['masked', 'mask', 'person mask', 'masked training', 'background',
+      'bg 10%', 'rembg', 'subject', 'isolate', 'loss weight', 'identity', 'room',
+      'advanced', 'training', 'not installed', 'missing', 'ml extras',
+      // It moved: people searching for where their old browser toggle went must
+      // land here, and so must the readiness row that now names it.
+      'per browser', 'localstorage', 'preference', 'phone', 'other machine',
+      'trains unmasked', 'readiness', 'preparation'],
+    guide: { chapter: 'settings-reference', anchor: 'training' },
+    // Deliberately NO one-time tip: the What's-new entry announces the move, and
+    // the panel already shows a targeted notice to the only browsers it affects
+    // (the ones that had turned masking off). A third surface would be nagging.
+    app: { route: '/datasets?section=training' } },
+  // WHICH Klein model runs — a per-DATASET setting since 28/07. Improve took no
+  // model at all (the server resolved one silently) and generation's picker was a
+  // per-BROWSER localStorage value that improve never read, so "which model made
+  // this?" had no answer on any screen. One setting now serves both.
+  { id: 'dataset.klein_model', kind: 'setting', title: 'Klein model for this dataset',
+    keywords: ['klein', 'model', 'base model', 'unet', 'diffusion model', 'which model',
+      'choose model', 'pick model', 'improve', 'upscale', 'upscale & improve',
+      'generation', 'flux2', 'flux 2', 'kv', '9b', '4b', 'safetensors', 'auto',
+      'auto-detected', 'detected', 'comfyui models', 'model missing', 'moved',
+      'not on disk', 'per browser', 'localstorage'],
+    guide: { chapter: 'settings-reference', anchor: 'image-engines' },
+    app: { route: '/datasets' } },
   // Concept face masking (issue #15) is a per-DATASET Advanced training option,
   // so like Dual captions it points at the dataset guide rather than
   // settings-reference. Its two tuning knobs live in Settings > Training and are
@@ -735,7 +875,11 @@ const TOPICS = [
   { id: 'training.memory_saving', kind: 'setting', title: 'Memory saving (quantisation, low VRAM)',
     keywords: ['quantise', 'quantize', 'quantisation', 'qfloat8', 'fp8', 'low vram', 'lowvram',
       'vram', 'memory', 'oom', 'out of memory', '5090', '4090', '24 gb', '32 gb', 'slow',
-      'speed', 'precision', 'text encoder', 'advanced', 'training'],
+      'speed', 'precision', 'text encoder', 'advanced', 'training',
+      // The cross-family trap: these three flags are global while their
+      // calibrated default is per family, so people search for why a run that
+      // "worked on Anima" crawls or dies on Krea 2 / FLUX.
+      'model family', 'switched family', 'lora type', 'carried over', 'crawl'],
     guide: { chapter: 'settings-reference', anchor: 'training' },
     app: { route: '/datasets?section=training' },
     tip: { trigger: 'memory-saving-advanced',

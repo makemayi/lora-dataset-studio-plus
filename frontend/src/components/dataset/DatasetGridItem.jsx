@@ -7,6 +7,7 @@ import PromptEditPopover from './PromptEditPopover';
 import PexelsAttribution from './PexelsAttribution';
 import { ENGINE_ACCENTS, ENGINE_LABELS } from './engineSelection.js';
 import { canRegenerateGeneric, improveRerunAffordance, isImageImproveRow } from './improveRerun.js';
+import { rememberImageRatio } from './lightboxActionPlacement.js';
 import { FACE_BADGE_CLASS, PROVENANCE_BADGE_CLASS, TILE_BADGE_STACK_CLASS,
   WATERMARK_BADGE_CLASS } from './tileBadgeLayout.js';
 
@@ -138,7 +139,14 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             title="Inspect (zoom)"
             aria-label={`Inspect ${displayLabel(img.variation_label) || 'the image'} full screen`}
             className="block w-full h-full cursor-zoom-in">
+            {/* The tile and the lightbox request the SAME url, so the tile is
+                where the intrinsic size is known FIRST. Recording it here is
+                what lets the lightbox open with its actions already in the
+                right place, instead of committing them once the image paints
+                — see lightboxActionPlacement.js. */}
             <img src={url} alt={displayLabel(img.variation_label)} loading="lazy"
+              onLoad={(e) => rememberImageRatio(
+                img.id, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
               className={`w-full h-full ${imgFitCls}`} />
           </button>
         ) : (
@@ -242,7 +250,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
         {editingPrompt && (
           <PromptEditPopover
             initialPrompt={img.variation_prompt || ''}
-            onSubmit={(prompt) => onRegenerate?.(img.id, undefined, prompt)}
+            onSubmit={(prompt) => onRegenerate?.(img.id, undefined, prompt, { silent: true })}
             onClose={() => setEditingPrompt(false)} />
         )}
       </div>
@@ -314,15 +322,20 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
           initialShortCaption={img.caption_short || ''} showShort={dualCaptions}
           imageLabel={displayLabel(img.variation_label)}
           onClose={() => setCaptionEditorOpen(false)}
-          onSave={(nextCaption, nextShort) => {
-            editingRef.current = false;
-            setCap(nextCaption);
+          /* Awaited, and its answer is handed BACK: an unawaited handler cannot
+             know it was refused, which is how a refused save used to close the
+             editor and destroy the caption. `silent` because the dialog draws
+             the refusal itself, next to the text it is about. The tile's own
+             copy is only advanced on a success — otherwise a failed save would
+             show the new text on a tile the server never accepted. */
+          onSave={async (nextCaption, nextShort) => {
             // Persist when either field changed; `nextShort` is undefined unless dual is on.
-            if (nextCaption !== (img.caption || '')
-                || (nextShort !== undefined && nextShort !== (img.caption_short || ''))) {
-              onCaption(img.id, nextCaption, nextShort);
-            }
-            setCaptionEditorOpen(false);
+            const changed = nextCaption !== (img.caption || '')
+              || (nextShort !== undefined && nextShort !== (img.caption_short || ''));
+            if (!changed) return { ok: true };
+            const outcome = await onCaption(img.id, nextCaption, nextShort, { silent: true });
+            if (outcome?.ok) { editingRef.current = false; setCap(nextCaption); }
+            return outcome;
           }} />
       )}
     </div>

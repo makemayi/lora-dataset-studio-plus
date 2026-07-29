@@ -93,10 +93,15 @@ test('the Runs hub actually offers the picker and routes the local lane', () => 
 test('a local continuation loops on the confirmable refusals like the panel does', () => {
   // A resume re-exports the CURRENT dataset, so it hits the caption/quality
   // guards; without the loop the user just got a raw "MISMATCH_CAPTION: …".
-  assert.match(page, /confirmableRetryFlag\(e\?\.message, 'Continue anyway \(force\)'\)/);
-  assert.match(page, /body = \{ \.\.\.body, \[flag\]: true \}/);
-  // and a refusal must surface: postJson THROWS on 400/409
-  assert.match(page, /toast\.error\(e\?\.message \|\| 'Continue failed'\)/);
+  // The loop itself now lives in the shared helper (one implementation, one
+  // place where "never ask twice for the same flag" is enforced) — the contract
+  // is that this lane goes through it, with its own label.
+  assert.match(page, /postWithConfirmations\(\s*\n?\s*\(b\) => postJson\(`\/api\/dataset\/\$\{run\.dataset_id\}\/train\/continue`, b\),\s*\n?\s*body, 'Continue anyway \(force\)'\)/);
+  // and a refusal must surface: postJson THROWS on 400/409. It is now shown
+  // INSIDE the still-open dialog (the choices that caused it are still filled
+  // in) instead of as a toast over a dialog that had already been destroyed.
+  assert.match(page, /continueAttemptOutcome\(\{ thrown: e \}\)/);
+  assert.match(page, /if \(!outcome\.close\) \{ setContinueError\(outcome\.error\); return; \}/);
 });
 
 test('the confirmable refusal markers have ONE definition, shared by both mounts', () => {
@@ -107,7 +112,14 @@ test('the confirmable refusal markers have ONE definition, shared by both mounts
     'CAPTION_QUALITY: ', 'CUSTOM_WEIGHTS_UNVERIFIED: ']) {
     assert.ok(util.includes(marker), `${marker} must live in the shared util`);
   }
+  // The readiness floor is a marker too, and it also belongs to the util — the
+  // Runs hub's ↻ Retry answers it (GitHub #23), the dataset panel's own
+  // "Continue anyway" checkbox answers it there.
+  assert.ok(util.includes('NOT_READY: '), 'NOT_READY: must live in the shared util');
   assert.match(panel, /import \{ confirmableRetryFlag \} from '\.\.\/\.\.\/utils\/trainingRefusals'/);
-  assert.match(page, /import \{ confirmableRetryFlag \} from '\.\.\/utils\/trainingRefusals'/);
+  assert.match(page, /from '\.\.\/utils\/trainingRefusals'/);
   assert.doesNotMatch(panel, /const CONFIRMABLE_REFUSALS = \[/);
+  assert.doesNotMatch(page, /const CONFIRMABLE_REFUSALS = \[/);
+  // neither mount may hand-roll the confirm loop again
+  assert.doesNotMatch(page, /\[flag\]: true \}/);
 });

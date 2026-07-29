@@ -760,15 +760,25 @@ export function useDataset() {
     await refresh();
   }, [refresh, toast]);
 
-  const setCaption = useCallback(async (imageId, captionText, shortText) => {
+  /* Returns {ok, error} — the expanded caption editor keeps the text the user
+     just typed only if it can tell a refusal from a success. `silent` is for
+     that caller and that caller only: it renders the refusal next to the
+     textarea, so a toast would say the same thing twice. The inline grid edit
+     and 🗑 Caption own no surface of their own and keep the toast. */
+  const setCaption = useCallback(async (imageId, captionText, shortText, { silent = false } = {}) => {
     // shortText undefined → only the long caption is sent (inline grid edit); the expanded
     // editor passes a string (possibly '') to also set the short variant.
     const body = shortText === undefined
       ? { caption: captionText }
       : { caption: captionText, caption_short: shortText };
     const d = await postJson(`/api/dataset/image/${imageId}/caption`, body);
-    if (!d.ok) { toast.error(d.error || 'Unexpected error'); return; }
+    if (!d.ok) {
+      const error = d.error || 'Unexpected error';
+      if (!silent) toast.error(error);
+      return { ok: false, error };
+    }
     await refresh();
+    return { ok: true };
   }, [refresh, toast]);
 
   const mirrorImage = useCallback(async (imageId) => {
@@ -953,20 +963,28 @@ export function useDataset() {
   // server reuses the row's / label's prompt (plain 🔄 and reject→regenerate).
   // The generator CURRENTLY selected in the workspace (persisted by
   // VariationCatalog) is sent along so the regenerate follows the user's
-  // selection instead of being pinned to the engine that made the tile;
-  // the Klein model pick rides too for an API→Klein switch. Missing keys =
-  // server keeps the legacy reuse-the-row's-engine behaviour.
-  const regenerate = useCallback(async (imageId, loraStrength, prompt) => {
-    let engine = null; let kleinModel = null;
+  // selection instead of being pinned to the engine that made the tile.
+  // Missing keys = server keeps the legacy reuse-the-row's-engine behaviour.
+  // The Klein MODEL is deliberately NOT sent any more: it used to ride from
+  // localStorage (editPage_flux2KleinModel_v1), which could contradict the
+  // dataset's own pick on the one path that reads it (a row born on an API
+  // engine switching to Klein). The server resolves that from the dataset now —
+  // one setting, one answer.
+  /* Returns {ok, error}, and `silent` is for the ✏️ edit-prompt bubble: it shows
+     the refusal itself, right under the prompt it was about, instead of losing a
+     hand-written rewrite to a toast that names no field. */
+  const regenerate = useCallback(async (imageId, loraStrength, prompt, { silent = false } = {}) => {
+    let engine = null;
     try {
       engine = localStorage.getItem('datasetGenerator') || null;
-      kleinModel = localStorage.getItem('editPage_flux2KleinModel_v1') || null;
     } catch { /* private mode — legacy behaviour */ }
     const d = await postJson(`/api/dataset/image/${imageId}/regenerate`,
       { lora_strength: loraStrength, ...(prompt ? { prompt } : {}),
-        ...(engine ? { engine } : {}), ...(kleinModel ? { klein_model: kleinModel } : {}) });
-    if (d.ok) { toast.success('Regeneration started'); await refresh(); }
-    else toast.error(d.error || 'Unexpected error');
+        ...(engine ? { engine } : {}) });
+    if (d.ok) { toast.success('Regeneration started'); await refresh(); return { ok: true }; }
+    const error = d.error || 'Unexpected error';
+    if (!silent) toast.error(error);
+    return { ok: false, error };
   }, [refresh, toast]);
 
   const purgeUnused = useCallback(async () => {
@@ -996,8 +1014,11 @@ export function useDataset() {
         // seulement pour SDXL pour ne pas déclencher ce refus sur les autres.
         ...(opts.trainType === 'sdxl'
           ? { vae_path: opts.vaePath || '', te_path: opts.tePath || '' } : {}),
-        // Masked training (fond à 10 %) — défaut ON, toggle dans TrainingPanel.
-        masked: opts.masked !== false,
+        // Masked training (background at 10 %) — a persisted DATASET setting now,
+        // so the key is only sent when the caller has an explicit value. Omitted =
+        // the server reads the dataset (a browser that never loaded the settings
+        // must not overwrite a stored OFF with an optimistic default).
+        ...(typeof opts.masked === 'boolean' ? { masked: opts.masked } : {}),
         // Cible de steps absolue (plafond choisi dans TrainingPanel) — omise si
         // vide → le backend calcule la valeur adaptative (recommended_steps).
         ...(opts.steps ? { steps: opts.steps } : {}),
@@ -1055,7 +1076,7 @@ export function useDataset() {
     const body = {
       extra_steps: extraSteps,
       ...trainingRunSelection(baseModel, trainType, variant),
-      masked: opts.masked !== false,
+      ...(typeof opts.masked === 'boolean' ? { masked: opts.masked } : {}),
       allow_caption_mismatch: !!opts.allowCaptionMismatch,
       allow_uncaptioned: !!opts.allowUncaptioned,
       allow_unverified_weights: !!opts.allowUnverifiedWeights,
@@ -1070,7 +1091,11 @@ export function useDataset() {
     if (d.ok) toast.success(`Resumed from step ${d.resumed_from} → ${d.target_steps} — ComfyUI paused`);
     // CUSTOM_WEIGHTS_UNVERIFIED is an interactive refusal: TrainingPanel owns
     // the explicit confirm + retry, so do not emit a premature error toast.
-    else if (!String(d.error || '').includes('CUSTOM_WEIGHTS_UNVERIFIED: ')
+    // `opts.quiet` says the CALLER shows the refusal itself — the ▶ Continue
+    // dialog now stays open and renders it inside, and one sentence printed
+    // twice a centimetre apart reads as a bug.
+    else if (!opts.quiet
+             && !String(d.error || '').includes('CUSTOM_WEIGHTS_UNVERIFIED: ')
              && !String(d.error || '').includes('CAPTION_QUALITY: ')
              && !String(d.error || '').includes('MISMATCH_CAPTION: ')
              && !String(d.error || '').includes('UNCAPTIONED: ')) {
@@ -1088,7 +1113,7 @@ export function useDataset() {
     const body = {
       extra_steps: extraSteps,
       ...trainingRunSelection(baseModel, trainType, variant),
-      masked: opts.masked !== false,
+      ...(typeof opts.masked === 'boolean' ? { masked: opts.masked } : {}),
       allow_caption_mismatch: !!opts.allowCaptionMismatch,
       allow_uncaptioned: !!opts.allowUncaptioned,
       allow_unverified_weights: !!opts.allowUnverifiedWeights,
@@ -1100,7 +1125,10 @@ export function useDataset() {
     };
     const d = await postJson(`/api/dataset/${currentId}/train/cloud/continue-local`, body);
     if (d.ok) toast.success(`Cloud run started from step ${d.resumed_from} → ${d.target_steps}`);
-    else if (!String(d.error || '').includes('CUSTOM_WEIGHTS_UNVERIFIED: ')
+    // `opts.quiet`: same contract as continueTraining above — the caller owns
+    // the refusal message (the ▶ Continue dialog stays open and shows it).
+    else if (!opts.quiet
+             && !String(d.error || '').includes('CUSTOM_WEIGHTS_UNVERIFIED: ')
              && !String(d.error || '').includes('CAPTION_QUALITY: ')
              && !String(d.error || '').includes('MISMATCH_CAPTION: ')
              && !String(d.error || '').includes('UNCAPTIONED: ')) {
@@ -1243,7 +1271,12 @@ export function useDataset() {
     if (!d.ok) { toast.error(d.error || 'Unexpected error'); return; }
     const parts = [`${d.imported} imported`];
     if (d.captions) parts.push(`${d.captions} caption(s) attached`);
+    // The caption-elsewhere round trip: images already here are duplicates by
+    // design, so "N duplicates skipped" alone read as a failure. Say what the
+    // trip actually brought back.
+    if (d.captions_applied) parts.push(`${d.captions_applied} caption(s) applied to images already here`);
     if (d.duplicates) parts.push(`${d.duplicates} duplicate(s) skipped`);
+    if (d.captions_kept) parts.push(`${d.captions_kept} kept the caption written here`);
     if (d.failed) parts.push(`${d.failed} unreadable`);
     toast.success(parts.join(' · '));
     if (d.small) toast.warning(`${d.small} image(s) under 768 px — they will stay soft in training.`);
@@ -1253,17 +1286,36 @@ export function useDataset() {
   // Same merge from a FOLDER on this machine's disk (kohya images + same-stem
   // .txt captions) — the path is a server-side path pasted as text, not a
   // browser file pick (a browser can't hand the server a folder path).
-  const importDatasetFolder = useCallback((path) => wrap(async () => {
-    const d = await postJson(`/api/dataset/${currentId}/import-folder`, { path });
-    if (!d.ok) { toast.error(d.error || 'Unexpected error'); return; }
-    const parts = [`${d.imported} imported`];
-    if (d.captions) parts.push(`${d.captions} caption(s) attached`);
-    if (d.duplicates) parts.push(`${d.duplicates} duplicate(s) skipped`);
-    if (d.failed) parts.push(`${d.failed} unreadable`);
-    toast.success(parts.join(' · '));
-    if (d.small) toast.warning(`${d.small} image(s) under 768 px — they will stay soft in training.`);
-    await refresh();
-  }), [wrap, currentId, refresh, toast]);
+  /* {ok, error}, so the in-app folder browser can keep the tree where the user
+     left it when the path is refused. `silent` for that browser only — it draws
+     the refusal above its own "Use this folder" button.
+     wrap() DROPS the call when another dataset job holds the busy flag and
+     returns undefined for it; that is a refusal too, and it says so rather than
+     reaching the browser as a mute "no answer from the server". */
+  const importDatasetFolder = useCallback(async (path, { silent = false } = {}) => {
+    const out = await wrap(async () => {
+      const d = await postJson(`/api/dataset/${currentId}/import-folder`, { path });
+      if (!d.ok) {
+        const error = d.error || 'Unexpected error';
+        if (!silent) toast.error(error);
+        return { ok: false, error };
+      }
+      const parts = [`${d.imported} imported`];
+      if (d.captions) parts.push(`${d.captions} caption(s) attached`);
+      // The caption-elsewhere round trip: images already here are duplicates by
+      // design, so "N duplicates skipped" alone read as a failure. Say what the
+      // trip actually brought back.
+      if (d.captions_applied) parts.push(`${d.captions_applied} caption(s) applied to images already here`);
+      if (d.duplicates) parts.push(`${d.duplicates} duplicate(s) skipped`);
+      if (d.captions_kept) parts.push(`${d.captions_kept} kept the caption written here`);
+      if (d.failed) parts.push(`${d.failed} unreadable`);
+      toast.success(parts.join(' · '));
+      if (d.small) toast.warning(`${d.small} image(s) under 768 px — they will stay soft in training.`);
+      await refresh();
+      return { ok: true };
+    });
+    return out ?? { ok: false, error: 'Another dataset job is running — wait for it to finish, then try again.' };
+  }, [wrap, currentId, refresh, toast]);
 
   // Restoration layer: fold the server-side `activity` into the visual flags so a
   // reloaded page (which lost the local captioning/analyzing/watermarking state)

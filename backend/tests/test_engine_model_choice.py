@@ -14,7 +14,9 @@ The invariants, in order of how badly they hurt when broken:
      pre-existing environment variable: setting > env var > built-in default;
   4. a model the provider refuses fails with a NAMED cause that says it is the
      model, and stops the batch instead of paying for the same refusal per row;
-  5. a moderation refusal is still reported as a refusal (it is one).
+  5. a moderation refusal is still reported as a refusal (it is one) — and on
+     Gemini it is now reported with the provider's own reason instead of a
+     silent None the caller had to guess about.
 """
 import base64
 import logging
@@ -392,15 +394,30 @@ def test_a_transient_openai_failure_stays_per_row(app, monkeypatch, status, expe
     assert expected in str(e.value)
 
 
-def test_a_200_with_no_image_is_still_the_only_none_on_gemini(app, monkeypatch):
-    """A safety block: Gemini answers 200 with a text-only candidate."""
+def test_a_200_with_no_image_on_gemini_now_names_the_refusal(app, monkeypatch):
+    """A safety block: Gemini answers 200 with a text-only candidate.
+
+    CONTRACT CHANGE, on purpose. This used to assert `is None` — the engine
+    returned nothing and the fan-out guessed at the cause, wording it "empty
+    response (often a content-policy refusal or a transient API error - retry
+    usually works)". That guess was wrong in both directions at once, so the
+    engine now RAISES with the cause read out of the response. `None` on this
+    engine is gone, not accidentally lost; see test_nanobanana_refusal.py for the
+    full behaviour, and nanobanana.py for why no remedy is offered."""
     monkeypatch.setenv('GEMINI_API_KEY', GEMINI_KEY)
     from app.services import nanobanana
+    from app.services.engine_errors import EngineFatal, EngineRefused
     with app.app_context():
         with patch('app.services.nanobanana.requests.post',
                    return_value=_resp(200, {'candidates': [
                        {'content': {'parts': [{'text': 'I cannot help with that'}]}}]})):
-            assert nanobanana.generate_variation(b'r', 'p') is None
+            with pytest.raises(EngineRefused) as e:
+                nanobanana.generate_variation(b'r', 'p')
+    # The model answered in words: relay them rather than paraphrase a block.
+    assert 'I cannot help with that' in str(e.value)
+    # A refusal costs one row, never the batch (invariant 4 is about the MODEL).
+    assert not isinstance(e.value, EngineFatal)
+    assert GEMINI_KEY not in str(e.value)
 
 
 @pytest.mark.parametrize('status,body', [

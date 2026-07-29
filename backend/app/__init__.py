@@ -132,11 +132,24 @@ _SCHEMA_ADDITIONS = (
     ('face_dataset', 'train_slider', 'TEXT'),
     ('face_dataset', 'train_vae_path', 'TEXT'),
     ('face_dataset', 'train_te_path', 'TEXT'),
+    # Per-family memory of (base, variant) — see models.FaceDataset. Additive and
+    # nullable: a dataset that predates it simply has nothing remembered yet, and
+    # keeps the base/variant it already had on the family it already had.
+    ('face_dataset', 'train_family_bases', 'TEXT'),
+    # Per-family memory of the family-SCOPED train_settings keys (timestep_type).
+    # Additive and nullable, same contract: a dataset that predates it has
+    # nothing remembered and keeps exactly the settings it already had.
+    ('face_dataset', 'train_family_settings', 'TEXT'),
     ('face_dataset', 'prompt_suffix', 'TEXT'),
     ('face_dataset', 'prompt_suffixes', 'TEXT'),
     ('face_dataset', 'caption_options', 'TEXT'),
+    ('face_dataset', 'klein_model', 'VARCHAR(255)'),
     ('face_dataset_image', 'caption_short', 'TEXT'),
     ('face_dataset_image', 'fail_reason', 'TEXT'),
+    # Nature de l'échec ('refused' | 'empty' | 'error') pour compter les refus
+    # fournisseur séparément des pannes. Les lignes existantes restent NULL :
+    # elles gardent leur phrase, et les compteurs ne les rangent nulle part.
+    ('face_dataset_image', 'fail_kind', 'VARCHAR(16)'),
     ('face_dataset_image', 'parent_image_id', 'INTEGER'),
     ('face_dataset_image', 'derivation_kind', 'VARCHAR(32)'),
     ('face_dataset_image', 'upscale_ratio', 'REAL'),
@@ -185,6 +198,10 @@ _SCHEMA_ADDITIONS = (
     # is recorded. Additive: existing banks keep their rows, they just carry NULLs.
     ('bank_image', 'watermark_bbox', 'TEXT'),
     ('bank_image', 'watermark_clean_method', 'VARCHAR(16)'),
+    # Hand-edited watermark mask (JSON list of normalized boxes), the bank's half
+    # of the dataset's watermark_regions. Additive: a database that never gains it
+    # simply has no hand-edited mask and both levels keep routing on the bbox.
+    ('bank_image', 'watermark_regions', 'TEXT'),
     # Bank provenance pass — effective resolution, letterbox, JPEG quality and the
     # ai/camera/unknown origin. Same additive path: existing banks keep every row
     # and simply carry NULLs until the next quality scan fills them in.
@@ -205,6 +222,11 @@ _SCHEMA_ADDITIONS = (
     # the database so the supervisor can terminate a pod whose monitor thread
     # never honoured it. Additive — existing runs simply carry NULL.
     ('cloud_training_run', 'stop_requested_at', 'DATETIME'),
+    # 🖼🖼 Canvas: which side-by-side group a pinned image is fused into, and
+    # where in it. Additive and nullable — a board that predates them simply has
+    # no groups on it, and every pinned picture keeps the geometry it had.
+    ('canvas_image_node', 'group_id', 'VARCHAR(40)'),
+    ('canvas_image_node', 'group_pos', 'INTEGER'),
 )
 
 # Indexes that only a FRESH database ever got. `index=True` on a model column is

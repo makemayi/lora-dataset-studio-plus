@@ -7,6 +7,7 @@ These tests drive REAL git repositories rather than a faked _git, because the wh
 question is what git actually does to commit identity across a rewrite; a stub would
 just re-assert our own assumptions.
 """
+import os
 import shutil
 import subprocess
 
@@ -17,15 +18,55 @@ from app.services import updater
 pytestmark = pytest.mark.skipif(shutil.which('git') is None, reason='git not on PATH')
 
 
+def _git_env():
+    """A git environment that depends on nothing outside this test.
+
+    Two settings, both of which cost a real failure when they are left to the
+    machine:
+
+    * ``FILTER_BRANCH_SQUELCH_WARNING`` — without it ``git filter-branch``
+      prints its deprecation banner and then **sleeps 10 seconds**, every time.
+      Seven tests here rewrite a history: that was 70 s of deliberate sleep,
+      measured at 98 s for this file against 31 s with the variable set —
+      15 % of the entire backend suite, spent in ``sleep``.
+    * ``GIT_CONFIG_GLOBAL`` / ``GIT_CONFIG_SYSTEM`` — these tests drive REAL
+      repositories, so the developer's own git config is an input to them. A
+      global ``commit.gpgsign=true``, ``core.hooksPath``, ``core.autocrlf`` or
+      ``init.defaultBranch`` silently changes what the commands under test do,
+      on that machine only. Pointing both at os.devnull makes the fixture
+      hermetic; the identity the commits need is set per-repo below.
+    """
+    env = dict(os.environ)
+    env['FILTER_BRANCH_SQUELCH_WARNING'] = '1'
+    env['GIT_CONFIG_GLOBAL'] = os.devnull
+    env['GIT_CONFIG_SYSTEM'] = os.devnull
+    return env
+
+
 def _run(cwd, *args):
     return subprocess.run(('git',) + args, cwd=str(cwd), capture_output=True,
-                          text=True, timeout=60)
+                          text=True, timeout=60, env=_git_env())
+
+
+def _must(cwd, *args):
+    """A git command whose failure is a broken TEST ENVIRONMENT, not a verdict.
+
+    The setup commands used to swallow their return code, so a git that refused
+    to commit (signing, hooks, missing `sed` for the msg-filter) surfaced three
+    lines later as an assertion about update behaviour — a mystery failure
+    about the wrong subject. Failing here names the command and shows git's own
+    words instead."""
+    out = _run(cwd, *args)
+    assert out.returncode == 0, (
+        f'git {" ".join(args)} failed ({out.returncode}) in the test fixture:\n'
+        f'{(out.stderr or out.stdout or "").strip()[-600:]}')
+    return out
 
 
 def _commit(repo, name, text, message):
     (repo / name).write_text(text, encoding='utf-8')
-    _run(repo, 'add', '-A')
-    _run(repo, 'commit', '-m', message)
+    _must(repo, 'add', '-A')
+    _must(repo, 'commit', '-m', message)
 
 
 @pytest.fixture()
@@ -33,24 +74,53 @@ def checkout(tmp_path):
     """An 'upstream' repo plus a clone of it, the way a user's install looks."""
     upstream = tmp_path / 'upstream'
     upstream.mkdir()
-    _run(upstream, 'init', '-b', 'main')
-    _run(upstream, 'config', 'user.email', 't@example.com')
-    _run(upstream, 'config', 'user.name', 'Test')
+    _must(upstream, 'init', '-b', 'main')
+    _must(upstream, 'config', 'user.email', 't@example.com')
+    _must(upstream, 'config', 'user.name', 'Test')
     _commit(upstream, 'a.txt', 'one', 'first\n\nCo-Authored-By: Someone <s@example.com>')
     _commit(upstream, 'b.txt', 'two', 'second\n\nCo-Authored-By: Someone <s@example.com>')
 
     clone = tmp_path / 'clone'
-    _run(tmp_path, 'clone', str(upstream), str(clone))
-    _run(clone, 'config', 'user.email', 't@example.com')
-    _run(clone, 'config', 'user.name', 'Test')
+    _must(tmp_path, 'clone', str(upstream), str(clone))
+    _must(clone, 'config', 'user.email', 't@example.com')
+    _must(clone, 'config', 'user.name', 'Test')
     return upstream, clone
 
 
 def _rewrite_upstream(upstream):
     """Strip a trailer from every message — same shape as a filter-branch scrub:
-    identical trees, brand-new commit SHAs."""
-    _run(upstream, 'filter-branch', '-f', '--msg-filter',
-         'sed "/^Co-Authored-By:/d"', '--', '--all')
+    identical trees, brand-new commit SHAs.
+
+    `_must`, not `_run`: the msg-filter runs through git's bundled shell and
+    `sed`. When that resolves to something else (a PATH where another `sed`
+    wins, a shell git can't spawn), filter-branch fails, the history is NOT
+    rewritten, and the failure lands on whichever assertion happens to read the
+    history next — blaming the updater for the environment."""
+    _must(upstream, 'filter-branch', '-f', '--msg-filter',
+          'sed "/^Co-Authored-By:/d"', '--', '--all')
+
+
+def test_the_git_environment_is_hermetic_and_does_not_sleep():
+    """The fixture's environment is part of the contract, not a detail.
+
+    Drop FILTER_BRANCH_SQUELCH_WARNING and this file costs 98 s instead of 31 s
+    — 70 s of `sleep` inside git, for nothing. Drop the config redirection and
+    the tests start reading the developer's own ~/.gitconfig, which is how a
+    suite passes on one machine and fails on another for reasons no diff
+    explains."""
+    env = _git_env()
+    assert env['FILTER_BRANCH_SQUELCH_WARNING'] == '1'
+    assert env['GIT_CONFIG_GLOBAL'] == os.devnull
+    assert env['GIT_CONFIG_SYSTEM'] == os.devnull
+
+
+def test_a_failing_setup_command_names_itself(tmp_path):
+    """`_must` exists so a broken git environment says which command broke, in
+    git's words — instead of a silent no-op that fails an unrelated assertion
+    about the updater three lines later."""
+    with pytest.raises(AssertionError) as excinfo:
+        _must(tmp_path, 'rev-parse', 'HEAD')      # not a repository
+    assert 'git rev-parse HEAD failed' in str(excinfo.value)
 
 
 def test_pull_ff_only_really_does_break_after_a_rewrite(checkout):

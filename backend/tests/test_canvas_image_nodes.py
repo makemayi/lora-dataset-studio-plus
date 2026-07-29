@@ -198,3 +198,105 @@ def test_deleting_a_dataset_that_has_pinned_images_does_not_500(client, app):
         db.session.execute(text('PRAGMA foreign_keys=OFF'))
         svc.delete_dataset('local', ds_id)
         assert CanvasImageNode.query.filter_by(dataset_id=ds_id).count() == 0
+
+
+# ---- 🖼🖼 fused into one node, side by side --------------------------------
+
+def test_a_group_survives_a_reload_with_its_order_intact(client, app):
+    """Drop one pinned image onto another and they become ONE node. What the
+    board needs back on the next load is exactly two extra fields per row."""
+    with app.app_context():
+        ds_id = _dataset().id
+        a = _image(ds_id, filename='a.png')
+        b = _image(ds_id, filename='b.png')
+        c = _image(ds_id, filename='c.png')
+    client.put(f'/api/dataset/{ds_id}/canvas/images', json={'nodes': [
+        {'image_id': a, 'x': 100, 'y': 100, 'w': 320, 'h': 320,
+         'group_id': 'g1', 'group_pos': 0},
+        {'image_id': b, 'x': 700, 'y': 100, 'w': 480, 'h': 320,
+         'group_id': 'g1', 'group_pos': 1},
+        {'image_id': c, 'x': 900, 'y': 500, 'w': 320, 'h': 640,
+         'group_id': 'g1', 'group_pos': 2}]})
+    lane = {n['image_id']: n for n in _lane(client, ds_id)}
+    assert [lane[i]['group_id'] for i in (a, b, c)] == ['g1', 'g1', 'g1']
+    assert [lane[i]['group_pos'] for i in (a, b, c)] == [0, 1, 2]
+    # And each member still remembers its OWN box — that is what it gets back
+    # the day it is dragged out again.
+    assert (lane[c]['w'], lane[c]['h']) == (320.0, 640.0)
+
+
+def test_a_board_that_never_grouped_anything_reads_null_not_a_group(client, app):
+    with app.app_context():
+        ds_id = _dataset().id
+        img_id = _image(ds_id)
+    client.put(f'/api/dataset/{ds_id}/canvas/images', json={'nodes': [
+        {'image_id': img_id, 'x': 10, 'y': 20, 'w': 200, 'h': 200}]})
+    node = _lane(client, ds_id)[0]
+    assert node['group_id'] is None
+    assert node['group_pos'] is None
+
+
+def test_a_plain_move_never_dissolves_a_group(client, app):
+    """A row that does not MENTION the group fields keeps them. Otherwise every
+    code path that only knows about geometry — an older client, a re-flow —
+    would silently take the board's groups apart."""
+    with app.app_context():
+        ds_id = _dataset().id
+        a = _image(ds_id, filename='a.png')
+        b = _image(ds_id, filename='b.png')
+    client.put(f'/api/dataset/{ds_id}/canvas/images', json={'nodes': [
+        {'image_id': a, 'x': 0, 'y': 0, 'w': 300, 'h': 300, 'group_id': 'g1', 'group_pos': 0},
+        {'image_id': b, 'x': 0, 'y': 0, 'w': 300, 'h': 300, 'group_id': 'g1', 'group_pos': 1}]})
+    client.put(f'/api/dataset/{ds_id}/canvas/images', json={'nodes': [
+        {'image_id': a, 'x': 55, 'y': 66, 'w': 300, 'h': 300, 'visible': True}]})
+    lane = {n['image_id']: n for n in _lane(client, ds_id)}
+    assert lane[a]['group_id'] == 'g1', 'the move must not have dropped the membership'
+    assert (lane[a]['x'], lane[a]['y']) == (55.0, 66.0)
+
+
+def test_taking_an_image_out_of_a_group_is_a_null_group_id(client, app):
+    with app.app_context():
+        ds_id = _dataset().id
+        a = _image(ds_id, filename='a.png')
+        b = _image(ds_id, filename='b.png')
+    client.put(f'/api/dataset/{ds_id}/canvas/images', json={'nodes': [
+        {'image_id': a, 'x': 0, 'y': 0, 'w': 300, 'h': 300, 'group_id': 'g1', 'group_pos': 0},
+        {'image_id': b, 'x': 0, 'y': 0, 'w': 300, 'h': 300, 'group_id': 'g1', 'group_pos': 1}]})
+    # b dragged out; a is left alone, so the group dissolves for both.
+    client.put(f'/api/dataset/{ds_id}/canvas/images', json={'nodes': [
+        {'image_id': b, 'x': 900, 'y': 900, 'w': 300, 'h': 300,
+         'group_id': None, 'group_pos': None},
+        {'image_id': a, 'x': 0, 'y': 0, 'w': 300, 'h': 300,
+         'group_id': None, 'group_pos': None}]})
+    lane = {n['image_id']: n for n in _lane(client, ds_id)}
+    assert lane[a]['group_id'] is None and lane[b]['group_id'] is None
+    assert lane[b]['group_pos'] is None, 'a position with no group is not a state'
+
+
+def test_a_hostile_group_id_cannot_poison_the_column(client, app):
+    with app.app_context():
+        ds_id = _dataset().id
+        img_id = _image(ds_id)
+    client.put(f'/api/dataset/{ds_id}/canvas/images', json={'nodes': [
+        {'image_id': img_id, 'x': 0, 'y': 0, 'w': 300, 'h': 300,
+         'group_id': 'g' * 500, 'group_pos': 'not a number'}]})
+    node = _lane(client, ds_id)[0]
+    assert len(node['group_id']) <= 40
+    assert node['group_pos'] == 0
+    # An empty id is "in no group", position included.
+    client.put(f'/api/dataset/{ds_id}/canvas/images', json={'nodes': [
+        {'image_id': img_id, 'x': 0, 'y': 0, 'w': 300, 'h': 300,
+         'group_id': '   ', 'group_pos': 4}]})
+    node = _lane(client, ds_id)[0]
+    assert node['group_id'] is None and node['group_pos'] is None
+
+
+def test_the_group_columns_are_added_to_a_database_that_predates_them(app):
+    """The additive-migration path, on the real table: an install that has been
+    pinning images since before groups existed must gain the columns on boot,
+    not be told its board is corrupt."""
+    from app.extensions import db
+    with app.app_context():
+        cols = {r[1] for r in db.session.execute(
+            text('PRAGMA table_info(canvas_image_node)'))}
+        assert {'group_id', 'group_pos'} <= cols

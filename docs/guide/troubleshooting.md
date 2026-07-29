@@ -177,6 +177,32 @@ Hugging Face publishing. Only the ComfyUI-local engines need the filesystem.
 
 *(Reported by nofaceman on Discord.)*
 
+## "Value not in list" on every model, on Linux (fixed)
+
+**Symptom:** on a Linux install, nothing generated at all. ComfyUI's console showed,
+for every workflow:
+
+```
+Failed to validate prompt for output 28:
+* UNETLoader 20:
+  - Value not in list: unet_name: 'Krea\krea2_turbo_fp8.safetensors'
+    not in ['Krea/krea2_turbo_fp8.safetensors']
+```
+
+**Why:** ComfyUI builds its model lists with the separator of **its own** host —
+backslash on Windows, forward slash on Linux — and validates a model widget by
+exact string match. The app spelled those names with a Windows backslash whatever
+the platform, and it keeps every model in a subfolder (`Krea`, `klein`,
+`z image`, and every LoRA you train), so on Linux the answer was "nothing works"
+rather than "one model is missing".
+
+**Fixed:** the app now reads the spelling from the ComfyUI it is actually talking
+to and matches it. This also covers the reverse case — the app on Windows driving
+a ComfyUI in WSL, Docker or on another machine, which needs forward slashes — so
+there is nothing to configure either way.
+
+*(Found and diagnosed by 1Tomber, [GitHub #21](https://github.com/perfectgf/lora-dataset-studio/issues/21).)*
+
 ## Klein engine stays greyed out
 
 Klein needs a reachable ComfyUI **and** the Klein model files (~16 GB VRAM
@@ -194,6 +220,35 @@ you to fix different things. The causes, and what each one means:
 | `… is on disk but cannot be loaded` | the file is there but unreadable | See below |
 | `Your ComfyUI doesn't have <value>` | the graph pins a widget value your ComfyUI doesn't offer | Install the named node pack, restart ComfyUI |
 | `disabled in Settings (engines)` | you turned the engine off | Re-enable it in Settings ▸ Engines |
+
+### Where the Klein model may live — you do **not** need `models/unet/klein/`
+
+`models/unet/klein/` is only where the Setup button *downloads* to. It has never
+been a requirement, and nothing needs to be copied, moved or symlinked to satisfy
+it. The app resolves the Klein UNET exactly where a running ComfyUI would, in
+this order:
+
+| Layout | Example |
+| --- | --- |
+| a `klein`-named sub-folder of `models/unet` | `models/unet/klein/flux-2-klein-9b-kv-fp8.safetensors` |
+| **any** sub-folder whose name contains `klein`, any capitalisation or spacing | `models/unet/Flux2 Klein/…safetensors` |
+| the **top level** of `models/unet` | `models/unet/flux-2-klein-9b-kv-fp8.safetensors` |
+| the same three, under `models/diffusion_models` | `models/diffusion_models/flux2-klein-9b/…safetensors` |
+| any root declared in your `extra_model_paths.yaml` | a Stability Matrix / portable / A1111-shared tree |
+| a relocated models folder | **Settings → Local tools → ComfyUI models folder** |
+
+**The one limit:** the model has to be *nameable* as Klein — either the **file
+name** or its **sub-folder name** must contain `klein`. A file called
+`model.safetensors` sitting loose in `diffusion_models/` is invisible; put it in
+a `klein/` folder (any file name then works) or rename the file. That rule is
+what stops another family's checkpoint being wired into the Klein graph.
+
+Every row of that table is covered by
+`backend/tests/test_klein_model_locations_documented.py`, so it cannot quietly
+stop being true.
+
+*(Reported by CyberTod on Reddit, who duplicated the weights and built a symlink
+to reclaim the disk space — neither was necessary.)*
 
 ### "On disk but cannot be loaded"
 
@@ -219,6 +274,37 @@ gap rather than inventing one. Your files being on disk is therefore **not** a
 clean bill of health, and Setup says so instead of showing a tick it did not
 earn. Start ComfyUI and re-check.
 
+## "Upscale & improve" makes my anime look realistic
+
+**Why:** the improve pass sends Klein a fixed instruction, and the shipped one is
+a *photographic* recipe — `add detailed texture, add sharp details, add candid
+shot, add soft focus effect`. It is applied to every dataset, drawn ones
+included, so on anime or illustration it does exactly what it says: it adds skin
+texture and photo micro-detail your line art never had.
+
+**Fix — two levers, both in Settings → Image engines → *Identity & Klein prompts
+(advanced)*:**
+
+1. **Rewrite the instruction.** The *Klein upscale & improve prompt* box holds
+   the text in use; edit it to something that suits drawn art (e.g. "keep the
+   drawn anime rendering, clean line art, flat cel shading, sharpen the lines").
+   Clearing the box restores the shipped default — nothing is frozen.
+2. **Or send no instruction at all.** The checkbox above the box — *Apply an
+   improvement prompt on "Klein upscale & improve"* — turns it off, and the pass
+   becomes a pure upscale.
+
+Separately, **Settings → Image engines → *Upscale & improve — strength*** decides
+how far the pass may move the image at all (output megapixels, sampler steps, the
+enhancement LoRA, the consistency LoRA). Lower the *Enhancement LoRA* and raise
+the *Consistency LoRA* if you want the pass to change less.
+
+Both are now quoted and linked **from the ✨ Upscale & improve button itself** —
+in the lightbox and in the grid's bulk toolbar — so the instruction currently in
+force is readable where the action happens, and anime datasets get an explicit
+warning there.
+
+*(Reported by Qeeyana on Reddit.)*
+
 ## Port 5000 conflict on macOS
 
 macOS reserves port 5000 for AirPlay Receiver. Change the port in
@@ -241,3 +327,17 @@ Open the **Cloud** tab: every run shows its live phase, and the stall watchdog
 (Settings → Training → stall timeout) rescues logs and kills the pod if no step
 progress happens for too long. Orphaned pods are also destroyed automatically
 at every app start — you never pay for a forgotten GPU.
+
+**Decide without opening the vast.ai console.** The longest phase of a fresh
+run is the pod pulling its base weights — 26 GB for Krea 2, half an hour on a
+healthy host. The card shows that download as it happens: how much has landed,
+of how much, at what speed and its ETA. Two readings tell you everything:
+
+- the figures move → it is working, however slow it looks. A crawling download
+  is still a download; the *no training step in 45 min* watchdog will end it if
+  it never gets there;
+- the figures do not move, and the card says **Silent run — no progress
+  reported for N min** → the pod is frozen, not slow. Stop it, or let the
+  freeze watchdog terminate it at the configured limit. That counter is
+  measured on the pod and survives restarting the app, so leaving and coming
+  back does not reset the evidence.

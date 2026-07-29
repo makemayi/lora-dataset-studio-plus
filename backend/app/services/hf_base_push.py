@@ -207,6 +207,15 @@ def base_push_state(user_id, dataset_id, family, variant, base_model, token,
     if not ds:
         out['reason'] = 'dataset_not_found'
         return out
+    # A base left over from ANOTHER family is not a missing file: reporting it as
+    # one told people to "restore" a file sitting safely on their disk, under a
+    # button offering to upload it for a run that could never load it. Say the
+    # real thing and stop — nothing to push, nothing to check on HF.
+    foreign = lt.foreign_base_message(family, base_model)
+    if foreign:
+        out['reason'] = 'foreign_family'
+        out['foreign_base_message'] = foreign
+        return out
     try:
         repo_name = base_repo_name(ds, family, base_model)
     except HfPublishError as e:
@@ -263,6 +272,9 @@ def require_base_repo(ds, family, variant, base_model, token) -> dict:
     if family not in CLOUD_CUSTOM_BASE_FAMILIES:
         raise ValueError('custom weights are local-only — cloud training '
                          'uses the official Hugging Face bases')
+    foreign = lt.foreign_base_message(family, base_model)
+    if foreign:
+        raise ValueError(foreign)     # never rent a pod for another family's base
     if not token:
         raise ValueError(
             'a custom base trains from a PRIVATE repo on your Hugging Face '
@@ -335,6 +347,9 @@ def push_base_to_hf(dataset_id, family, variant, base_model, token,
     ds = fds.get_dataset(user_id, dataset_id)
     if not ds:
         raise HfPublishError('dataset_not_found', 'dataset not found')
+    foreign = lt.foreign_base_message(family, base_model)
+    if foreign:                       # belt to start_push's braces: this is the
+        raise HfPublishError('foreign_family', foreign)   # seam the job re-runs
     payload = local_base_payload(family, base_model)   # raises when absent locally
     # Same architecture guardrail as a local launch (confirmable marker —
     # CUSTOM_WEIGHTS_UNVERIFIED — so the UI can confirm-and-retry). Z-Image
@@ -455,6 +470,12 @@ def start_push(app, dataset_id, family, variant, base_model, token,
     if not ds:
         raise HfPublishError('dataset_not_found', 'dataset not found')
     family = fds.normalize_train_type(family)
+    # Same refusal as the readiness probe, on the write path: never upload weights
+    # from another family to the user's Hugging Face account for a run that cannot
+    # load them. Synchronous, like the other cheap validations below.
+    foreign = lt.foreign_base_message(family, base_model)
+    if foreign:
+        raise HfPublishError('foreign_family', foreign)
     repo_name = base_repo_name(ds, family, base_model)
     # Cheap validations run SYNCHRONOUSLY so the request answers with the
     # actionable error (missing file, unconverted Z-Image base, and the

@@ -6,6 +6,7 @@ import {
 } from '../utils/canvasSelection';
 import { toOverrideMap } from '../utils/canvasPlacement';
 import { toImageNodeMap, visibleImageNodes } from '../utils/canvasImageNodes';
+import { layoutImageNodes } from '../utils/canvasImageGroups';
 import { placeImageBatch } from '../utils/canvasPinBatch';
 import CanvasDatasetFilter from '../components/canvas/CanvasDatasetFilter';
 import LineageCanvas from '../components/canvas/LineageCanvas';
@@ -111,7 +112,13 @@ export default function CanvasPage() {
      the user with a modal about a rectangle.
 
      A closed node keeps its row and its geometry (`visible: false`), which is
-     what makes re-opening it land on the same spot at the same size. */
+     what makes re-opening it land on the same spot at the same size.
+
+     🖼🖼 `group_id`/`group_pos` travel the same way — which side-by-side strip
+     this picture belongs to, and where in it. They are ADDITIVE and nullable:
+     an install whose database predates them reads null and draws the board it
+     always drew. A row that does not MENTION them keeps whatever it had, so a
+     plain move or resize can never quietly dissolve a group. */
   const onSaveImageNodes = useCallback((datasetId, rows) => {
     setImageNodes((cur) => {
       const lane = { ...(cur[datasetId] || {}) };
@@ -120,6 +127,8 @@ export default function CanvasPage() {
         lane[r.image_id] = {
           imageId: r.image_id, x: r.x, y: r.y, w: r.w, h: r.h,
           visible: r.visible !== false,
+          groupId: 'group_id' in r ? (r.group_id ?? null) : (prev?.groupId ?? null),
+          groupPos: 'group_pos' in r ? (r.group_pos ?? null) : (prev?.groupPos ?? null),
           image: r.image || prev?.image,
         };
       }
@@ -170,11 +179,21 @@ export default function CanvasPage() {
         if (!map) continue;
         const tree = trees[id]?.tree;
         const graph = tree ? buildLineageGraph(tree) : null;
-        const nodes = visibleImageNodes(map);
+        /* 🖼🖼 A picture that is part of a side-by-side GROUP is left exactly
+           where it is. Same argument as the closed pins just below: a strip is
+           a deliberate arrangement the user built by hand, and re-flowing its
+           members one by one would not tidy it — it would take it apart.
+           ✦ Tidy up rebuilds the automatic tree; it has never been the button
+           that undoes what you assembled on purpose. (The way out of a group is
+           the group's own ✕, or dragging its pictures back off it.) */
+        const nodes = visibleImageNodes(map).filter((n) => !n.groupId);
         if (!nodes.length) continue;
         const res = placeImageBatch({
           graph,
-          existing: [],
+          // …and nothing may land ON one of those strips either.
+          existing: layoutImageNodes(visibleImageNodes(map))
+            .filter((r) => r.kind === 'group')
+            .map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h })),
           images: nodes.map((n) => ({ id: n.imageId, dataset_id: id,
             record_id: n.image?.record_id, step: n.image?.step })),
           max: nodes.length,

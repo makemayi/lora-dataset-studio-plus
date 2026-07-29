@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import DatasetGridItem from './DatasetGridItem';
 import TileSizeControl from '../shared/TileSizeControl';
+import KleinImproveNote from './KleinImproveNote';
 import { isSmallImageRescueRow } from '../../utils/smallImageRescue';
 import {
   describeKleinImproveLaunch,
@@ -159,6 +160,7 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
                                       mirroringIds, faceThresholds, datasetKind = 'character',
                                       onImproveBatch, kleinAvailable = false,
                                       eligibilityImages, dualCaptions = false,
+                                      subjectType = '',
                                       // Server's reason why face scoring can't run here
                                       // (string) or null — auto-triage acts on face
                                       // scores, so it stands down when they can't be
@@ -319,6 +321,14 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
                 <button type="button" disabled={bulkBusy} onClick={() => setSelected(new Set())}
                   className="text-content-muted underline hover:text-content disabled:opacity-40">none</button>
               </span>
+              {/* A bulk improve is where the damage scales: the instruction that
+                  turned ONE anime tile realistic is about to run on the whole
+                  selection. w-full = its own line under the buttons, at every
+                  width (Qeeyana, Reddit). */}
+              {onImproveBatch && kleinAvailable && improveSelection.eligible.length > 0 && (
+                <KleinImproveNote subjectType={subjectType} datasetId={datasetId}
+                  className="w-full border-t border-indigo-400/20 pt-1.5" />
+              )}
             </div>
           )
         )}

@@ -664,7 +664,17 @@ _FAMILY_EXPECTED_ARCH = {'sdxl': 'sdxl', 'krea': 'krea2',
                          'flux': 'flux', 'flux2klein': 'flux', 'anima': 'anima'}
 _ARCH_LABEL = {'sdxl': 'an SDXL', 'sd15': 'a Stable Diffusion 1.5',
                'flux': 'a FLUX', 'krea2': 'a Krea 2', 'anima': 'an Anima'}
-_FAMILY_LABEL = {'sdxl': 'SDXL', 'krea': 'Krea 2',
+# THE family display name — one map, used by preflight_custom_paths,
+# foreign_base_message, training_preflight and the run-summary lines.
+#
+# It was defined TWICE in this module (here, and again ~4000 lines below). Python
+# keeps the LAST binding, so at runtime the second one always won and this one was
+# dead code — nothing was ever mislabelled. What was lost was READABILITY: this
+# copy had no 'zimage' entry, so anyone reading the callers here concluded that
+# Z-Image falls through to its raw key, and a fix applied to this map would have
+# had no effect at all. The two are merged, with 'zimage' kept (the runtime
+# behaviour of the surviving definition), and the lower one deleted.
+_FAMILY_LABEL = {'zimage': 'Z-Image', 'sdxl': 'SDXL', 'krea': 'Krea 2',
                  'flux': 'FLUX.1', 'flux2klein': 'FLUX.2 Klein', 'anima': 'Anima'}
 # Confirmable-refusal marker (mirrors UNCAPTIONED:/MISMATCH_CAPTION:): the UI
 # strips it, asks window.confirm, and retries with allow_unverified_weights.
@@ -888,6 +898,56 @@ def assert_zimage_custom_recipe_confirmed(family, base_model, variant,
             'or non-distilled. Confirm this recipe explicitly before export.')
 
 
+# Families whose custom base is a free ABSOLUTE local file: a RELATIVE name there
+# can only have been picked on another family (their builders gate on
+# `_is_custom_weights`, so they ignore it outright — see the `name_or_path` lines
+# in _build_job_config_krea/_flux/_flux2klein/_anima).
+_ABSOLUTE_BASE_FAMILIES = ('krea', 'flux', 'flux2klein', 'anima')
+
+
+def foreign_base_reason(family, base_model) -> str | None:
+    """Why `base_model` provably cannot belong to `family` — or None.
+
+    `train_base_model` is ONE column shared by every family, so a base picked for
+    Z-Image stays attached when the family becomes Krea 2. The two shapes below
+    are decidable without touching the disk or a ComfyUI config, which is what
+    makes them safe to act on:
+
+    * a RELATIVE name on a family whose custom lane is an absolute file path — it
+      can only be a Z-Image merge (or an SDXL checkpoint) name;
+    * an ABSOLUTE path on Z-Image, whose custom lane is a ComfyUI merge NAME that
+      gets converted to diffusers first.
+
+    SDXL is deliberately excluded: its bases are relative basenames too, and
+    telling them apart from a Z-Image merge needs a configured ComfyUI — on an
+    install that has none, every legitimate SDXL base would read as foreign.
+    Companion of `assert_zimage_custom_recipe_confirmed`: same "the recipe must be
+    coherent before anything is spawned or uploaded" job, one family-scope earlier.
+    """
+    base = str(base_model or '').strip()
+    if not base:
+        return None
+    fam = (family or '').lower()
+    if fam in _ABSOLUTE_BASE_FAMILIES and not _is_custom_weights(base):
+        return 'relative_base_on_absolute_family'
+    if fam == 'zimage' and _is_custom_weights(base):
+        return 'absolute_base_on_zimage'
+    return None
+
+
+def foreign_base_message(family, base_model) -> str | None:
+    """The human sentence for `foreign_base_reason`, or None when coherent.
+    Names the family it can't belong to AND what actually happens, because
+    "unavailable" was read as "my file is gone" when the file was fine."""
+    if not foreign_base_reason(family, base_model):
+        return None
+    label = _FAMILY_LABEL.get(family, family)
+    name = os.path.basename(str(base_model).replace('\\', '/'))
+    return (f'“{name}” was chosen for another model family, not {label} — a '
+            f'{label} run cannot load it, so this run uses the official '
+            f'{label} base. Pick a {label} base to change that.')
+
+
 def zimage_recipe_diagnostic(family, variant, effective_base=None,
                              training_adapter=None, recipe_version=None) -> dict | None:
     """Read-only safety annotation for Runs payloads, including legacy rows.
@@ -1032,6 +1092,11 @@ _EMA_CHOICES = (0.99, 0.999)
 # échangent de la qualité contre de la place). Un knob qui ne peut que dégrader
 # n'est pas un choix, c'est un piège.
 _MEMORY_SETTING_KEYS = ('quantize', 'quantize_te', 'low_vram')
+# Human names, mirrored from the panel's MEMORY_LABELS (memorySavingAdvice.js) so
+# a preflight sentence names the checkbox the user has to go and tick back.
+_MEMORY_LABELS = {'quantize': 'Quantise base model',
+                  'quantize_te': 'Quantise text encoder',
+                  'low_vram': 'Low-VRAM streaming'}
 
 # Ce que chaque famille émet quand l'utilisateur ne choisit rien. NE PAS TOUCHER :
 # la majorité du parc est à 24 Go ou moins et c'est ce qui fait tenir l'entraînement.
@@ -1131,6 +1196,62 @@ def _memory_saving_advice(ds, family) -> dict:
         verdict = 'keep_on'
     return {'verdict': verdict, 'vram_gb': vram, 'gpu': gpu,
             'unquantised_vram_gb': need}
+
+
+def memory_saving_risk(ds, family) -> dict | None:
+    """Which of the family's CALIBRATED memory savers this run has switched off,
+    or None when the recipe is intact.
+
+    Why a warning and not a per-family memory (the `train_family_bases` treatment
+    given to the base and the variant):
+
+    * a base model is meaningless outside its family — a Z-Image merge is not a
+      thing a Krea run can even load — so remembering it per family is the only
+      way to state a truth. `quantize=False` is not like that: it is a statement
+      about the CARD ("mine is big enough"), and the card does not change when
+      the family does. What changes is whether it still suffices. Stashing the
+      flag per family would answer a question nobody asked and would silently
+      re-enable quantisation on the way back, which is the same silence in the
+      other direction;
+    * this is provenance-BLIND on purpose. Someone who unticks "Quantise base
+      model" directly on Krea 2 with a 24 GB card is in exactly the same danger
+      as someone who unticked it on Anima and switched family. A memory only ever
+      catches the second one. One check catches both.
+
+    Only the True→False direction is reported: switching a saver ON where the
+    family default is off (anima/sdxl) costs precision and speed, never a run.
+    """
+    d = _memory_saving_defaults(ds, family)
+    disabled = [k for k in _MEMORY_SETTING_KEYS
+                if d[k] and not _memory_flag_eff(ds, k, d[k])]
+    if not disabled:
+        return None
+    advice = _memory_saving_advice(ds, family)
+    return {'family': family, 'disabled': disabled,
+            'unquantised_vram_gb': advice['unquantised_vram_gb'],
+            'vram_gb': advice['vram_gb'], 'gpu': advice['gpu'],
+            'verdict': advice['verdict']}
+
+
+# Settings whose meaning is bound to the FAMILY, not to the machine or the
+# dataset — the ones that get the `train_family_bases` treatment (a per-family
+# memory in `train_family_settings`, see face_dataset_service.set_train_type).
+#
+# `timestep_type` qualifies and the memory levers deliberately do not:
+#   * 'weighted' is the canonical flowmatch schedule of FLUX.2 Klein and Anima,
+#     'sigmoid' of Z-Image and FLUX.1, 'linear' of Krea 2. Picking one is picking
+#     a family's recipe; carrying it over silently changes the LoRA that comes
+#     out, with no error, no slowdown and nothing to observe afterwards. There is
+#     no sentence a warning could add — "your LoRA is different" is not
+#     actionable — so the honest fix is to stop carrying it;
+#   * the memory levers are a statement about the card, and get a warning
+#     instead. See memory_saving_risk for the full argument;
+#   * `resolution` stays global too: 768 and 1024 mean the same thing on every
+#     family, the value is a deliberate quality/VRAM trade-off a user restates
+#     rarely, and the one dangerous combination (1024 on a 12B, small card) is
+#     already a preflight row. Adding it here would mean silently re-raising
+#     someone's 768 back to 768,1024 on a family switch — a NEW silent change.
+_FAMILY_SCOPED_SETTING_KEYS = ('timestep_type',)
 
 
 def _train_settings(ds) -> dict:
@@ -1634,7 +1755,38 @@ def _sample_every(ds) -> int:
     return v if v in _SAMPLE_EVERY_CHOICES else 250
 
 
-def launch_settings_snapshot(ds, family=None) -> dict:
+def person_masking_enabled(ds) -> bool:
+    """Person masking resolved for a run: the dataset's stored opt-in (default ON),
+    minus the two server guards that already force it off at export time — a
+    concept/style set (a person mask erases what is being taught) and slider mode
+    (the guided slider loss never reads batch.mask_tensor)."""
+    return fds.person_masking_enabled(ds) and not slider_mode_enabled(ds)
+
+
+def resolve_masked(ds, requested=None) -> bool:
+    """THE resolution of `masked` for a launch — one implementation, every lane.
+
+    An EXPLICIT boolean on the request still wins, and that is deliberate: the
+    canvas ▶ Continue replays the SOURCE run's own frozen flag, and a cloud
+    retry/continue replays the stamped run params. Those are per-RUN facts and
+    must not be re-read from a dataset that has since been edited. Absent (None)
+    — every fresh launch from the panel, the queue and the scheduler — resolves
+    to the dataset's persisted setting instead of the old hardcoded True."""
+    if isinstance(requested, bool):
+        return requested
+    return person_masking_enabled(ds)
+
+
+def resolve_masked_for(user_id, dataset_id, requested=None) -> bool:
+    """`resolve_masked` for the routes, which hold ids rather than the ORM row.
+    An unknown dataset falls back to the historical default (the launch below
+    raises 'dataset not found' on its own — this must not raise first)."""
+    if isinstance(requested, bool):
+        return requested
+    return person_masking_enabled(fds.get_dataset(user_id, dataset_id))
+
+
+def launch_settings_snapshot(ds, family=None, masked=None) -> dict:
     """Les réglages EFFECTIFS envoyés à ai-toolkit pour CE lancement — défauts
     résolus, pas les choix stockés. Stampé dans le registre de provenance
     (TrainingRunRecord.settings) par chaque launch local et cloud ; la page
@@ -1726,11 +1878,24 @@ def launch_settings_snapshot(ds, family=None) -> dict:
     # Fixed at 1 by every family's recipe today. Recorded anyway: the day it stops
     # being 1, the runs on either side of the change have to be comparable.
     snap['batch_size'] = 1
-    snap['dual_captions'] = bool(s.get('dual_captions'))
+    # Stamped EFFECTIVE, like `ema` and the memory keys: krea/anima cannot train a second
+    # caption (they cache their text embeddings — see _dual_captions_unsupported_reason),
+    # so recording the preference there would make the run comparison claim two runs
+    # differ by dual captions when the trainer saw exactly the same captions.
+    snap['dual_captions'] = (bool(s.get('dual_captions'))
+                             and fam not in DUAL_CAPTION_UNSUPPORTED_FAMILIES)
     # Face masking is a per-run FACT, not a preference: two concept runs that
     # differ only by it are not the same experiment, so it is stamped effective
     # (concept-only, hence the kind check) exactly like `ema` and the memory keys.
     snap['mask_faces'] = bool(s.get('mask_faces')) and fds.is_concept(ds)
+    # Person masking, same reasoning as `mask_faces` right above: two runs of the
+    # same dataset that differ only by it are NOT the same experiment, and until
+    # this line the value lived in a browser and appeared in no snapshot at all —
+    # so a run comparison could not tell them apart. Stamped EFFECTIVE (the export
+    # guards for concept/style and slider mode are already folded in), and the
+    # per-run override wins when a replay carries one.
+    snap['masked'] = (bool(masked) if isinstance(masked, bool)
+                      else person_masking_enabled(ds))
     # Memory strategy — stamped with its EFFECTIVE value for the same reason as
     # `ema` above: two runs of the same dataset can differ only by these, and a
     # quantised run and a full-precision one are NOT the same experiment. Absent
@@ -1797,6 +1962,15 @@ def effective_train_settings(ds, family=None) -> dict:
             'mask_faces': bool(s.get('mask_faces')) and fds.is_concept(ds),
             'mask_faces_supported': fds.is_concept(ds),
             'mask_faces_concept_conflict': fds.concept_face_conflict(ds),
+            # Person masking (background at 10 % loss weight). `masked` = the value
+            # this dataset will train with, resolved (default ON, forced OFF for
+            # concept/style and slider mode); `masked_supported` = whether the
+            # toggle can do anything at all here, so the panel states the reason
+            # instead of hiding the control; `masked_stored` = the RAW tri-state
+            # (None = never answered) the one-time localStorage carry-over reads.
+            'masked': person_masking_enabled(ds),
+            'masked_supported': not fds.is_conceptual(ds) and not slider_mode_enabled(ds),
+            'masked_stored': fds.person_masking_stored(ds),
             # --- Memory strategy (issue #14) -----------------------------------
             # `memory_saving` = le choix STOCKÉ par clé (None = « Auto », le panel
             # recoche le défaut de la famille) ; `memory_saving_default` = ce que
@@ -1810,6 +1984,15 @@ def effective_train_settings(ds, family=None) -> dict:
                 k: _memory_flag_eff(ds, k, _memory_saving_defaults(ds, fam)[k])
                 for k in _MEMORY_SETTING_KEYS},
             'memory_advice': _memory_saving_advice(ds, fam),
+            # None when the family's calibrated recipe is intact; otherwise names
+            # WHICH savers are off and what this family needs without them. The
+            # panel states it next to the checkboxes, the preflight repeats it
+            # before the GPU (or the rented pod) is paid for. Both read the same
+            # function — one rule, two surfaces.
+            'memory_risk': memory_saving_risk(ds, fam),
+            # Family label, so the panel can name the family in that sentence
+            # without shipping a second copy of the map.
+            'family_label': _FAMILY_LABEL.get(fam, fam),
             'resolution': res if res in _RES_CHOICES else '768,1024',
             # `resolution` above is the STORED choice (default label when unset);
             # these two report what the run will actually train at — slider mode
@@ -1974,6 +2157,18 @@ def update_train_settings(user_id, dataset_id, patch: dict) -> dict:
             cur['mask_faces'] = True
         else:
             cur.pop('mask_faces', None)
+    if 'masked' in patch:
+        # Person masking. TRI-STATE, like the memory keys and unlike dual_captions /
+        # mask_faces: this lever's default is ON, so an explicit False is a VALUE
+        # that must be stored — dropping it would silently re-enable masking. Only
+        # None/'auto'/'' clears the key back to the default.
+        v = patch['masked']
+        if isinstance(v, bool):
+            cur['masked'] = v
+        elif v in (None, 'auto', ''):
+            cur.pop('masked', None)
+        else:
+            raise ValueError('masked must be true, false or auto')
     for _mk in _MEMORY_SETTING_KEYS:
         if _mk not in patch:
             continue
@@ -2010,7 +2205,7 @@ TRAIN_SETTING_KEYS = ('rank', 'resolution', 'save_every', 'max_step_saves',
                       'sample_every', 'sample_prompts', 'dropout', 'alpha',
                       'timestep_type', 'optimizer', 'lr_scheduler', 'warmup',
                       'grad_accum', 'network_type', 'ema', 'dual_captions',
-                      'mask_faces', 'learning_rate', *_MEMORY_SETTING_KEYS)
+                      'mask_faces', 'masked', 'learning_rate', *_MEMORY_SETTING_KEYS)
 
 # The ONLY settings a resume/continue may change. ai-toolkit rebuilds the job
 # config from scratch on every launch, so a re-read setting is honored on resume —
@@ -2876,6 +3071,45 @@ def _apply_style_overrides(ds, process: dict, family: str | None = None) -> dict
     return process
 
 
+# Families whose recipe caches the text embeddings and unloads the text encoder to fit
+# their 12B/2B DiT — and which therefore CANNOT honour dual captions (see
+# _dual_captions_unsupported_reason). Kept as data so the preflight can warn before the
+# launch without building a job config; test_dual_captions asserts it stays in sync with
+# what the recipes actually emit, so a new caching family cannot slip in unnoticed.
+DUAL_CAPTION_UNSUPPORTED_FAMILIES = ('krea', 'anima')
+
+
+def _dual_captions_unsupported_reason(process: dict) -> str | None:
+    """Why this ai-toolkit process cannot train dual captions. None = it can.
+
+    ai-toolkit caches ONE embedding per image: TextEmbeddingCachingMixin.cache_text_embeddings
+    encodes `file_item.caption` (the LONG one) and nothing else, and once the encoder is
+    unloaded SDTrainer takes the `if unload_text_encoder or is_caching_text_embeddings`
+    branch, which feeds the model `batch.prompt_embeds` and never looks at the prompt
+    strings again. The short caption has, literally, nowhere to go.
+
+    It does not merely go unused — it crashes the run. The caching pass reaches
+    load_caption() through get_text_embedding_info_dict() WITHOUT the JSON caption dict,
+    so each item is filled from its .txt sidecar (long only) and `raw_caption_short` stays
+    None; load_caption() then short-circuits on the real per-batch call ("we already
+    loaded it"), `caption_short` is never computed, and the doubled prompt list handed to
+    inject_trigger_into_prompt contains None → AttributeError at the first step, after the
+    weights download and the whole caching pass. Reported on krea as GitHub issue #22 by
+    1Tomber; anima emits the identical pair.
+
+    So the combination is refused at config time rather than patched with a placeholder
+    short caption: a placeholder would buy a green run that trains exactly like a
+    long-caption run while claiming otherwise."""
+    train = process.get('train') or {}
+    if any(d.get('cache_text_embeddings') for d in process.get('datasets', ())):
+        return ('this family pre-caches its text embeddings (one embedding per image) '
+                'to free the VRAM its text encoder would hold')
+    if train.get('unload_text_encoder'):
+        return ('this family unloads its text encoder after caching, so no second '
+                'caption can be encoded')
+    return None
+
+
 def _apply_dual_captions(ds, process: dict, dataset_folder) -> dict:
     """Wire ai-toolkit dual long+short captioning onto one process. No-op unless the
     dataset opted in. When on, the FIRST dataset block points at the JSON caption file
@@ -2884,8 +3118,14 @@ def _apply_dual_captions(ds, process: dict, dataset_folder) -> dict:
     BOTH captions. caption_ext is left as-is; it is ignored once folder_path is a JSON file.
 
     Local-only for now: the cloud pod's dataset upload skips the JSON, so the cloud path
-    (_cloudify_job_config) reverts this back to the historical folder + .txt sidecars."""
+    (_cloudify_job_config) reverts this back to the historical folder + .txt sidecars.
+
+    No-op as well on a family that caches its text embeddings — emitting the pair is what
+    crashed issue #22. The run then trains on the long caption alone (the .txt sidecars,
+    trigger included), and the preflight says so before the launch."""
     if not fds.dual_captions_enabled(ds):
+        return process
+    if _dual_captions_unsupported_reason(process):
         return process
     datasets = process.get('datasets') or []
     if not datasets:
@@ -4491,8 +4731,8 @@ def style_caption_quality(dataset_id) -> dict:
 # surapprentissage.
 TRAIN_MIN_IMAGES = {'zimage': (12, 20), 'sdxl': (20, 30), 'krea': (15, 20), 'flux': (15, 20),
                     'flux2klein': (15, 20)}
-_FAMILY_LABEL = {'zimage': 'Z-Image', 'sdxl': 'SDXL', 'krea': 'Krea 2', 'flux': 'FLUX.1',
-                 'flux2klein': 'FLUX.2 Klein', 'anima': 'Anima'}
+# (_FAMILY_LABEL used to be re-declared here, shadowing the definition near the
+#  top of the module. Merged there — see the comment on it.)
 # VRAM mesurée : Krea 2 (12B) sature un 24 GB à 1024 (cf. KREA_TRAIN_RESOLUTION). Flux
 # est un DiT de même classe (12B) → même seuil recommandé.
 _KREA_MIN_VRAM_GB = 24
@@ -4504,7 +4744,7 @@ _VRAM24_FAMILIES = ('krea', 'flux')   # familles 12B qui recommandent ~24 GB à 
 
 
 def training_preflight(user_id, dataset_id, train_type=None, variant=None,
-                       lane=None) -> dict:
+                       lane=None, masked=None) -> dict:
     """Pre-launch sanity report: {'blockers': [...], 'warnings': [...]}. Blockers
     stop the launch (too few images for the family); warnings ask for one explicit
     confirm in the UI. Pure reads — never mutates, never raises on probe failures
@@ -4526,7 +4766,13 @@ def training_preflight(user_id, dataset_id, train_type=None, variant=None,
     lines: that hardware will not run the job, and on a machine with no local
     training environment at all they would fire on every single cloud launch —
     which is exactly how users learn to click through warnings without reading
-    them. Default 'local' keeps the historical payload byte-for-byte."""
+    them. Default 'local' keeps the historical payload byte-for-byte.
+
+    ``masked`` says whether the caller intends MASKED training (person masks). It
+    is a client-side preference the server cannot read, so it is passed in; None
+    (the default) means "not stated" and the person-mask row is omitted entirely —
+    warning about a mask nobody asked for is exactly the noise that teaches people
+    to click through preflights."""
     from .face_variations import caption_has_identity_leak
     ds = fds.get_dataset(user_id, dataset_id)
     if not ds:
@@ -4675,6 +4921,28 @@ def training_preflight(user_id, dataset_id, train_type=None, variant=None,
         else:
             _check('captioned', 'Every kept image captioned', 'ok', f'{n}/{n} captioned')
 
+    # 3ter) DUAL CAPTIONS vs famille. Krea/Anima pré-cachent les embeddings de texte et
+    # déchargent l'encodeur : la caption courte n'a aucun encodeur pour la lire, et l'émettre
+    # quand même faisait planter le run au 1er step (issue #22, 1Tomber). La combinaison est
+    # refusée à la construction de la config — on le DIT ici, avant le launch, plutôt que de
+    # laisser l'utilisateur croire qu'il entraîne sur deux libellés. scope='dataset' : c'est
+    # une propriété de la recette de famille, vraie sur n'importe quelle voie.
+    # Slider mode is excluded: its guided loss ignores captions entirely, and the
+    # 'captioned' row above already says so — a second row promising two wordings would
+    # contradict it.
+    if fds.dual_captions_enabled(ds) and not slider:
+        if ttype in DUAL_CAPTION_UNSUPPORTED_FAMILIES:
+            warnings.append(
+                f'Dual captions are ON but {label} cannot train them — it pre-caches its '
+                'text embeddings and unloads the text encoder, so only the long caption is '
+                'encoded. The run will train on the long caption alone.')
+            _check('dual_captions', 'Dual captions', 'warn',
+                   f'{label} caches its text embeddings — the short caption is ignored and '
+                   'the run trains on the long one alone', 'gf-training')
+        else:
+            _check('dual_captions', 'Dual captions', 'ok',
+                   f'{label} trains each image on both its long and its short caption')
+
     # 3) captions suspectes (trop courtes / dupliquées) — sans objet en slider mode
     caps = [(r.caption or '').strip() for r in kept if (r.caption or '').strip()]
     if caps and not slider:
@@ -4765,16 +5033,67 @@ def training_preflight(user_id, dataset_id, train_type=None, variant=None,
     elif rows:
         _check('triage', 'Everything triaged', 'ok', 'no image awaiting ✓/✕')
 
+    # 6bis) MEMORY SAVERS switched off under a family whose recipe needs them.
+    #
+    # This is the row that did not exist while quantize/quantize_te/low_vram were
+    # stored globally and applied to whatever family came next: a `False` set on
+    # Anima or SDXL (2B — where it IS the default) followed a family switch onto a
+    # 12B DiT and produced a Krea/FLUX config with `quantize: false`, no
+    # `low_vram` and no `qtype` — the calibrated recipe gone, and nothing said.
+    # Deliberately provenance-blind (see memory_saving_risk): setting it here
+    # directly is the same danger, so it earns the same sentence.
+    #
+    # scope='dataset': the flags travel WITH the job, so they matter on the cloud
+    # lane too — that is where the mistake costs rented GPU-hours in real money,
+    # which is the last place to drop the row.
+    _mem_risk = memory_saving_risk(ds, ttype)
+    if _mem_risk:
+        _off = ', '.join(_MEMORY_LABELS[k] for k in _mem_risk['disabled'])
+        _need = _mem_risk['unquantised_vram_gb']
+        # The local card's verdict only speaks for the LOCAL lane. On the cloud
+        # the job runs on a pod we have not rented yet, so a big local card
+        # proves nothing about it and the requirement is stated as a requirement.
+        if (lane or 'local') == 'cloud':
+            warnings.append(
+                f'{_off} switched off for a {label} run — {label} needs roughly {_need} GB '
+                f'of VRAM without them. Rent a pod with at least that, or turn them back '
+                'on in Advanced options ▸ Memory saving.')
+            _check('memory_saving', 'Memory saving', 'warn',
+                   f'{_off} off — the pod needs ~{_need} GB VRAM for {label}', 'gf-training')
+        elif _mem_risk['verdict'] == 'can_disable':
+            _check('memory_saving', 'Memory saving', 'ok',
+                   f'{_off} off — {_mem_risk["gpu"] or "this GPU"} has '
+                   f'{_mem_risk["vram_gb"]} GB, over the ~{_need} GB {label} needs without them')
+        else:
+            _seen = (f'this GPU reports {_mem_risk["vram_gb"]} GB'
+                     if _mem_risk['vram_gb'] else 'this machine reports no usable GPU')
+            warnings.append(
+                f'{_off} switched off for a {label} run — {label} needs roughly {_need} GB '
+                f'of VRAM without them and {_seen}. The run does not fail cleanly there: it '
+                'slows to a crawl for hours while the driver pages to system RAM. Turn them '
+                'back on in Advanced options ▸ Memory saving.')
+            _check('memory_saving', 'Memory saving', 'warn',
+                   f'{_off} off — {label} needs ~{_need} GB without them, {_seen}',
+                   'gf-training')
+
     # 7) VRAM (Krea 2 mesuré à 24 GB ; None = inconnu, jamais bloquant)
     try:
         from .. import capabilities
         vram = capabilities.gpu_vram_gb()
         if vram is not None and ttype in _VRAM24_FAMILIES and vram < _KREA_MIN_VRAM_GB:
+            # Only advise dropping to 768 when 768 is not ALREADY the choice —
+            # telling someone to make a change they made is how a preflight
+            # teaches people to click through it.
+            _at_1024 = max(_effective_resolution(ds)) > 768
+            _fix = ('Drop the resolution to 768 in Advanced options to fit.' if _at_1024
+                    else 'You are already at 768, the low-VRAM resolution for this family; '
+                         'keep the memory savers on too.')
             _machine_warn(f'{label} training needs ~{_KREA_MIN_VRAM_GB} GB of VRAM at 1024 '
                           f'— this GPU reports {vram} GB; expect OOM or extreme slowness. '
-                          'Drop the resolution to 768 in Advanced options to fit.')
+                          + _fix)
             _check('vram', 'GPU memory', 'warn',
-                   f'{label} needs ~{_KREA_MIN_VRAM_GB} GB VRAM — this GPU reports {vram} GB',
+                   f'{label} needs ~{_KREA_MIN_VRAM_GB} GB VRAM at 1024 — this GPU reports '
+                   f'{vram} GB' + ('' if _at_1024 else ' (already at 768)'),
                    scope='machine')
     except Exception:
         pass
@@ -4834,6 +5153,58 @@ def training_preflight(user_id, dataset_id, train_type=None, variant=None,
         elif face_mask_ok:
             _check('face_mask', 'Face masking ready', 'ok',
                    'InsightFace found — the faces will be weighted down')
+
+    # 9bis) Person masking set to ON, but rembg isn't installed.
+    # Retenu de la premiere ecriture de cette ligne (issue #24) : la sonde derriere
+    # rembg est un import en sous-processus dont le TIMEOUT s'effondre en False
+    # (capabilities._cached_import), et un `import rembg` a froid a ete MESURE a
+    # ~20 s. Un refus dur transformerait donc une machine lente en machine qui ne
+    # peut plus lancer du tout : c'est la seconde raison, independante, pour
+    # laquelle cette ligne avertit et ne bloque jamais.
+    #
+    # THE reason `masked` became a stored dataset setting. While it lived in the
+    # browser's localStorage the server only learned it at launch, so this badge
+    # could not say what it says now: that the dataset is set to train masked and
+    # will not, because the mask backend is missing. Users found out from a flag
+    # on the progress view, GPU-hours in.
+    #
+    # Same shape as the face-mask row above and for the same reasons: rembg is an
+    # optional ML extra, so its absence is a NORMAL state — a warning, never a
+    # blocker (a run without masks is a valid run). person_masking_enabled()
+    # already returns False for concept/style and slider mode, where masks are
+    # refused BY DESIGN and installing rembg would change nothing, so those stay
+    # silent instead of emitting pure noise.
+    # resolve_masked, pas person_masking_enabled : un appelant qui EXPRIME une
+    # intention explicite (le panneau qui rejoue le drapeau gele d'un run, une
+    # relance cloud) doit etre cru — avertir « le dataset est en masque » a qui
+    # vient de dire « lance sans masque » serait un contresens. Sans intention
+    # (le badge de preparation, qui n'en a pas), on lit le reglage du dataset :
+    # c'est exactement ce que ce chantier rend possible.
+    # …ET les gardes de CONCEPTION, toujours. Une intention explicite decide de
+    # l'OPT-IN de l'utilisateur, jamais des cas ou le masque est refuse par
+    # construction : sur un concept/style le masque effacerait ce qu'on enseigne,
+    # et en mode slider la perte guidee ne lit jamais le masque. Sans cette
+    # seconde moitie, un `masked=True` explicite sur un concept enverrait
+    # installer rembg pour un run qui ne s'en servira jamais.
+    if resolve_masked(ds, masked) and not slider and not concept and not style:
+        try:
+            from . import person_mask
+            person_mask_ok = person_mask.is_available()
+        except Exception:
+            person_mask_ok = None    # probe blew up -> say nothing, never block
+        if person_mask_ok is False:
+            warnings.append(
+                'Masked training is ON for this dataset, but the person-mask backend '
+                '(rembg) is not installed — this run would train UNMASKED, with the '
+                'background at full loss weight. Install the ML extras from the Setup '
+                'tab, or turn Masked off in the training panel to train unmasked on '
+                'purpose.')
+            _check('person_mask', 'Masked training ready', 'warn',
+                   'rembg is not installed — this dataset is set to masked but the run '
+                   'trains unmasked', 'gf-training')
+        elif person_mask_ok:
+            _check('person_mask', 'Masked training ready', 'ok',
+                   'rembg found — the background will be weighted down to 10%')
 
     # Lane filter — BEFORE the verdict, so a cloud launch whose only complaint was
     # this machine's GPU comes back a clean 🟢 instead of a warning nobody can act
@@ -5035,7 +5406,7 @@ def archive_previous_run(ds) -> str | None:
 
 def launch_training(user_id, dataset_id, steps: int | None = None, check_captions: bool = True,
                     base_model=None, variant: str | None = None, train_type: str | None = None,
-                    allow_caption_mismatch: bool = False, masked: bool = True,
+                    allow_caption_mismatch: bool = False, masked: bool | None = None,
                     fresh: bool = False, allow_uncaptioned: bool = False,
                     allow_caption_quality: bool = False,
                     vae_path=_PERSISTED, te_path=_PERSISTED,
@@ -5189,8 +5560,11 @@ def launch_training(user_id, dataset_id, steps: int | None = None, check_caption
     # Steps adaptatifs si non imposés ; sinon override borné (jamais < 500).
     steps = (default_steps(ds, train_type=launch_fam, variant=variant)
              if steps is None else max(500, int(steps)))
-    # masked (défaut ON) : masques personne exportés à côté du dataset → la
-    # job-config passe en masked training (fond 10 %). OFF ou indispo = historique.
+    # masked : masques personne exportés à côté du dataset → la job-config passe
+    # en masked training (fond 10 %). OFF ou indispo = historique. `None` (the
+    # default, and what every fresh launch now sends) = read the dataset's stored
+    # setting; an explicit bool is a per-RUN override replayed by ▶ Continue.
+    masked = resolve_masked(ds, masked)
     dataset_folder = export_dataset_to_aitoolkit(user_id, dataset_id, masked=masked)
     config_path = write_job_config(ds, dataset_folder, steps=steps)
     # Environnement du sous-process d'entraînement (HF_HOME + auth Hugging Face,
@@ -5256,7 +5630,7 @@ def launch_training(user_id, dataset_id, steps: int | None = None, check_caption
         # Honest provenance: a launch waved through despite a readiness blocker
         # records « acknowledged_not_ready » in its settings snapshot (surfaced in
         # the Runs-hub Share config) — discreet, so a thin run is explainable later.
-        _launch_settings = launch_settings_snapshot(ds)
+        _launch_settings = launch_settings_snapshot(ds, masked=masked)
         if allow_not_ready and isinstance(_launch_settings, dict):
             _launch_settings = {**_launch_settings, 'acknowledged_not_ready': True}
         checkpoint_registry.register_launch(
@@ -5359,7 +5733,7 @@ def _seed_continuation_from(user_id, dataset_id, base, family, variant,
 
 def continue_training(user_id, dataset_id, extra_steps: int = 1000,
                       base_model=_PERSISTED, variant=None, train_type=None,
-                      masked=True, allow_unverified_weights=False,
+                      masked=None, allow_unverified_weights=False,
                       allow_caption_mismatch=False, allow_uncaptioned=False,
                       allow_caption_quality=False, from_step=None, overrides=None,
                       allow_not_ready=False, _allow_dead_predecessor=False) -> dict:
@@ -5819,14 +6193,39 @@ def failed_local_run() -> tuple | None:
     return rec_id, local_error_message(last_local_error())
 
 
-def retry_local_run(user_id, record_id) -> dict:
+# The confirmable pre-flight refusals a launch can be waved through, and the ONE
+# list the local retry lane forwards. Every one of them is a refusal the Start
+# flow already lets the user answer; a retry that could not answer them was a
+# dead button (GitHub #23). Mirrors cloud_training._CONFIRMATION_FLAGS — the
+# cloud lane replays them from the run's stored pod params, the local lane asks
+# again (its record stores no consent, and the dataset it re-exports is live).
+CONFIRMATION_FLAGS = (
+    'allow_caption_mismatch',
+    'allow_uncaptioned',
+    'allow_caption_quality',
+    'allow_unverified_weights',
+    'allow_not_ready',
+)
+
+
+def retry_local_run(user_id, record_id, **confirmations) -> dict:
     """↻ Retry a FAILED local run: a REAL launch_training replaying the identity
     params stamped for that launch (family / variant / base / masked / steps) —
     same guardrails as any launch (GPU-collision refusal, normal preflight, no
     bypass), not a resurrection of a dead process. The live dataset (images,
     captions, advanced + slider settings) is the source of truth and is replayed
     as-is, so a slider run re-emits its slider recipe — now with the 768-only
-    default that keeps its VRAM peak under 24 GB."""
+    default that keeps its VRAM peak under 24 GB.
+
+    ``**confirmations`` = the CONFIRMATION_FLAGS the caller answered for THIS
+    retry (all False by default). They are not read back from the failed record:
+    the record stores no consent, and the dataset being re-exported is the live
+    one, so an answer given at the first launch describes a dataset that may no
+    longer exist. Unknown keys are refused rather than silently dropped — a
+    typo'd flag name must not read as "the user did not confirm"."""
+    unknown = set(confirmations) - set(CONFIRMATION_FLAGS)
+    if unknown:
+        raise ValueError(f'unknown confirmation flag(s): {", ".join(sorted(unknown))}')
     from ..models import TrainingRunRecord
     rec = fds.db.session.get(TrainingRunRecord, int(record_id))
     if rec is None:
@@ -5843,7 +6242,8 @@ def retry_local_run(user_id, record_id) -> dict:
     return launch_training(
         user_id, rec.dataset_id, steps=rec.steps,
         base_model=(rec.base_model or None), variant=rec.variant,
-        train_type=rec.family, masked=bool(rec.masked))
+        train_type=rec.family, masked=bool(rec.masked),
+        **{k: bool(confirmations.get(k)) for k in CONFIRMATION_FLAGS})
 
 
 # --- Suivi de progression (log tail + loss curve + samples) -------------------
@@ -5859,6 +6259,23 @@ _PROG_LOG_MAX_BYTES = 4 * 1024 * 1024   # tail cap: 3000 tqdm updates ≈ 0.5 MB
 _PROG_CURVE_MAX_POINTS = 200
 _PROG_SAMPLES_MAX = 24
 
+# The SAME log also carries huggingface_hub's byte-counter bars while the pod
+# pulls the base weights — the phase that costs the most and reported the least:
+#   raw.safetensors:   7%|▋| 1.95G/26.3G [15:30<2:37:06, 2.58MB/s]
+# Two independent reasons to recognise them.
+#  * They are not steps. '0.00/26.3G' matched _PROG_STEP_RE as "0/26", so a run
+#    downloading its base model showed 'step 0 / 26' — a plausible-looking
+#    number that was pure noise (verified on the run-121 log, 2026-07-28).
+#  * They ARE the answer to "is it downloading or is it frozen?", which nothing
+#    surfaced: two users waited hours in front of a fixed sentence.
+# The discriminator is the rate unit: tqdm prints B/s only for byte bars
+# (it/s or s/it for step bars). '?B/s' (no estimate yet) counts too.
+_DOWNLOAD_PROG_RE = re.compile(
+    r'(?P<label>[^\r\n|]{1,80}?):\s*(?P<percent>\d{1,3})%\|[^|]*\|\s*'
+    r'(?P<done>[\d.]+\s*[kKMGTP]?)/(?P<total>[\d.]+\s*[kKMGTP]?)\s*'
+    r'\[(?P<elapsed>[\d:]+)<(?P<eta>[\d:?]+),\s*(?P<speed>[\d.?]+\s*[kKMGTP]?B/s)\s*\]')
+_DOWNLOAD_RATE_RE = re.compile(r'[\d.?]\s*[kKMGTP]?B/s')
+
 
 def _parse_training_log(text: str) -> dict:
     """Extract (step, total, loss, speed, eta, loss_curve) from raw log text.
@@ -5872,6 +6289,10 @@ def _parse_training_log(text: str) -> dict:
         # contains incidental 'X/Y' text (dataset counts, resolutions) that must not
         # be read as progress.
         if '%|' not in seg and not lm:
+            continue
+        # A byte bar is a download, not a training step: '0.00/26.3G' read as
+        # step 0 of 26 is worse than no number at all.
+        if _DOWNLOAD_RATE_RE.search(seg):
             continue
         sm = None
         for sm in _PROG_STEP_RE.finditer(seg):
@@ -5902,6 +6323,75 @@ def _parse_training_log(text: str) -> dict:
         curve = [curve[int(i * stride)] for i in range(_PROG_CURVE_MAX_POINTS - 1)] + [curve[-1]]
     out['loss_curve'] = curve
     return out
+
+
+def parse_download_progress(text: str) -> dict | None:
+    """The LAST byte-counter bar in the log, or None when there is none.
+
+    Pure function. Returns the figures exactly as tqdm printed them — strings,
+    not converted numbers: '1.95G' is what the log says, and inventing
+    1.95 × 1024³ bytes from it would be a number the log never contained (the
+    unit divisor is the producer's choice, not ours). The caller displays them
+    and compares `done` for movement; neither needs a conversion.
+
+    Degrades on purpose: this format belongs to huggingface_hub/tqdm and can
+    change or be absent (some phases print no bar at all). Anything that does
+    not match EVERY field is not guessed at — it yields None, and the caller
+    keeps whatever it was already showing."""
+    last = None
+    for seg in re.split(r'[\r\n]+', text or ''):
+        m = _DOWNLOAD_PROG_RE.search(seg)
+        if m:
+            last = m
+    if last is None:
+        return None
+    label = last.group('label').strip()
+    # tqdm re-prints the bar with a bumped elapsed even while the byte counter
+    # is frozen (measured on the run-121 log: 1.95G at 15:11, then at 15:30).
+    # 'done' is therefore the only field that means "it moved".
+    return {'label': label[-60:] or 'download',
+            'percent': min(100, int(last.group('percent'))),
+            'done': last.group('done').strip(),
+            'total': last.group('total').strip(),
+            'elapsed': last.group('elapsed'),
+            'eta': None if '?' in last.group('eta') else last.group('eta'),
+            'speed': (None if '?' in last.group('speed')
+                      else last.group('speed').strip())}
+
+
+_DOWNLOAD_UNIT = {'': 1.0, 'k': 1e3, 'K': 1e3, 'M': 1e6,
+                  'G': 1e9, 'T': 1e12, 'P': 1e15}
+
+
+def download_bytes_seen(text: str) -> float | None:
+    """Total bytes downloaded across EVERY bar in the log, or None when the log
+    holds no download bar at all. Same regex, same log, different question from
+    parse_download_progress(): that one answers "what do I SHOW the user" and
+    therefore reports the last bar verbatim; this one answers "did the pod
+    MOVE", which no single bar can answer.
+
+    Why a sum and not the last bar: huggingface_hub fetches several files at
+    once, so consecutive tails end on DIFFERENT bars. A watchdog comparing the
+    last bar alone would read A(1.0G), B(2.0G), A(1.0G)… as endless movement
+    while both files sit frozen — the exact false progress a kill decision must
+    never be built on. Keyed by label, summed, so only a file that genuinely
+    advanced can raise the total.
+
+    The unit divisor is assumed decimal. That is a guess about a producer's
+    formatting choice (see parse_download_progress), so the result is used for
+    two things only — a `>` comparison against the previous poll, and a rounded
+    human label in a failure message — never as an exact byte count."""
+    per_label = {}
+    for seg in re.split(r'[\r\n]+', text or ''):
+        for m in _DOWNLOAD_PROG_RE.finditer(seg):
+            raw = m.group('done').strip()
+            unit = raw[-1] if raw and raw[-1] in _DOWNLOAD_UNIT else ''
+            try:
+                value = float(raw[:-1] if unit else raw) * _DOWNLOAD_UNIT[unit]
+            except ValueError:
+                continue                      # not a number we can compare
+            per_label[m.group('label').strip()] = value
+    return sum(per_label.values()) if per_label else None
 
 
 def _samples_dir(user_id, dataset_id, base_model=_PERSISTED, family=None,
@@ -5999,6 +6489,10 @@ def training_progress(user_id, dataset_id, base_model=_PERSISTED, family=None,
     log_path = _run_log_path(ds, base_model, family, variant)
     parsed = {'step': None, 'total': None, 'loss': None, 'speed': None, 'eta': None,
               'loss_curve': []}
+    # A local run downloads its base weights too (the first run of a family
+    # pulls tens of GB from Hugging Face), and showed the same motionless
+    # 'Starting up...' the cloud card showed. Same parser, same degradation.
+    download = None
     log_exists = os.path.isfile(log_path)
     if log_exists:
         try:
@@ -6006,10 +6500,13 @@ def training_progress(user_id, dataset_id, base_model=_PERSISTED, family=None,
             with open(log_path, encoding='utf-8', errors='replace') as fh:
                 if size > _PROG_LOG_MAX_BYTES:
                     fh.seek(size - _PROG_LOG_MAX_BYTES)
-                parsed = _parse_training_log(fh.read())
+                text = fh.read()
+            parsed = _parse_training_log(text)
+            download = parse_download_progress(text)
         except OSError:
             log_exists = False
     return {'active': active, 'log_exists': log_exists, **parsed,
+            'download': download,
             'masks_skipped': bool(active and queue_manager._get_system_state('training_masks_skipped', False)),
             'samples': list_training_samples(
                 user_id, dataset_id, base_model, family, variant=variant)}
@@ -6059,7 +6556,7 @@ def _save_queue(q: list) -> None:
 
 def enqueue_training(user_id, dataset_id, extra_steps=None,
                      base_model=_PERSISTED, variant=None, train_type=None,
-                     allow_caption_mismatch=False, not_before=None, masked=True,
+                     allow_caption_mismatch=False, not_before=None, masked=None,
                      steps=None, allow_uncaptioned=False,
                      allow_caption_quality=False,
                      vae_path=_PERSISTED, te_path=_PERSISTED,
@@ -6170,7 +6667,11 @@ def enqueue_training(user_id, dataset_id, extra_steps=None,
         steps_target = None
     item = {'dataset_id': int(dataset_id), 'user_id': str(user_id), 'extra_steps': extra_steps,
             'base_model': base, 'variant': var, 'train_type': ttype,
-            'not_before': not_before, 'masked': bool(masked), 'steps': steps_target,
+            # Resolved HERE, at enqueue: the queue item freezes what the user saw
+            # when they queued it (like base/variant/steps just above). `None` =
+            # no explicit request → the dataset's stored setting.
+            'not_before': not_before, 'masked': resolve_masked(ds, masked),
+            'steps': steps_target,
             # SDXL custom overrides ride along so the deferred launch reproduces
             # the exact triplet (they're also persisted on ds above).
             'vae_path': eff_vae, 'te_path': eff_te,

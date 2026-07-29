@@ -1,6 +1,6 @@
 /** Variation catalog: presets + per-entry toggles + multiplier + Klein picker. */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import Flux2KleinModelPicker from '../shared/Flux2KleinModelPicker';
+import KleinModelSetting from '../shared/KleinModelSetting';
 import { useToast } from '../common/Toast';
 import { useCapabilities } from '../../context/CapabilitiesContext';
 import { apiFetch, putJson } from '../../api/fetchClient';
@@ -173,7 +173,7 @@ function EngineCard({ id, checked, available, generating, onToggle, icon, title,
   );
 }
 
-export default function VariationCatalog({ onGenerate, busy, generating = null, hasRef, composition, images = [], bodyFidelity = false, promptSuffix = '', promptSuffixes = null, onSaveSuffixes = null, subjectType = 'human', onSaveSubjectType = null, refWidth = null, refHeight = null, onCropRefTo = null }) {
+export default function VariationCatalog({ datasetId = null, onGenerate, busy, generating = null, hasRef, composition, images = [], bodyFidelity = false, promptSuffix = '', promptSuffixes = null, onSaveSuffixes = null, subjectType = 'human', onSaveSubjectType = null, refWidth = null, refHeight = null, onCropRefTo = null }) {
   const toast = useToast();
   const { caps } = useCapabilities();
   const [catalog, setCatalog] = useState([]);
@@ -883,6 +883,18 @@ export default function VariationCatalog({ onGenerate, busy, generating = null, 
         Not the look you wanted (a stylized reference coming out realistic)? Edit the generation prompt in{' '}
         <a href="#/settings/engines" className="text-amber-300 underline decoration-amber-300/50">Settings › Image engines →</a>
       </p>
+      {/* Two facts about the Gemini engine that belong next to the choice, not in
+          a support thread after the fact. Both are stated flat, with no verdict
+          attached: the filter has no setting to offer, and nobody — in either
+          direction — has measured what SynthID does to trained weights, so this
+          says it is present and stops there. Plain <p>: wraps freely at 400 px. */}
+      <p className="text-content-subtle text-[0.625rem] -mt-1">
+        Building with <span className="text-content-muted">Nano Banana</span>? Google
+        screens every image it returns and refuses some of them — LDS names each
+        refusal on the tile; the filter itself is not configurable. Its outputs also
+        carry SynthID, Google&apos;s invisible provenance watermark.{' '}
+        <HelpBadge topic="nanobanana-filter-and-synthid" />
+      </p>
       {/* Five cards now, and the column stops at THREE. Tailwind breakpoints read
           the VIEWPORT, but these cards live in the workspace column next to the
           sidebar — a `2xl:grid-cols-5` measured on a 1600 px window put five cards
@@ -1094,7 +1106,15 @@ export default function VariationCatalog({ onGenerate, busy, generating = null, 
             </span>
           </summary>
           <div className="px-2.5 pt-1 flex flex-col gap-2">
-            <div className="max-w-sm"><Flux2KleinModelPicker onChange={setKlein} /></div>
+            {/* The SAME dataset setting ✨ Upscale & improve uses: both run the
+                same UNETLoader in the same graph, and two near-identical model
+                dropdowns side by side is a confusion that never goes away.
+                Replaces the old per-BROWSER pick (editPage_flux2KleinModel_v1),
+                which described what a dataset contains but travelled with the
+                browser — see kleinModelChoice.js for the carry-over. */}
+            <div className="max-w-sm">
+              <KleinModelSetting datasetId={datasetId} onChange={setKlein} />
+            </div>
             <div className="flex flex-col gap-0.5">
               <label className="flex items-center gap-2 text-content-muted text-[0.6875rem]">
                 <span className="whitespace-nowrap">

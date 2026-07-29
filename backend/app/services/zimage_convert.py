@@ -24,6 +24,7 @@ import threading
 
 from .. import config as cfg
 from ..job_queue import queue_manager
+from ..utils.comfy_names import local_model_path
 from .lora_training import (_aitoolkit_dir, _hf_home, _venv_python,
                             assert_free_disk, MIN_FREE_GB_CONVERT)
 
@@ -67,7 +68,12 @@ def _resolve_merge(z_model: str) -> str | None:
         return None
     root_real = os.path.realpath(str(root))
     root_key = os.path.normcase(os.path.normpath(root_real))
-    rel = z_model.replace('/', '\\')
+    # Chemin du SYSTÈME DE FICHIERS LOCAL, pas un widget ComfyUI : séparateur
+    # os.sep, jamais un backslash en dur. Sous Linux, `os.path.join(root, 'unet',
+    # 'z image\\x.safetensors')` n'échoue pas — il fabrique le nom d'un fichier
+    # unique contenant un backslash, donc introuvable, donc « conversion
+    # impossible » sans explication (famille du bug GitHub #21, 1Tomber).
+    rel = local_model_path(z_model)
     base = os.path.basename(rel)
     for sub in ('unet', 'diffusion_models'):
         for cand in (os.path.join(root_real, sub, rel), os.path.join(root_real, sub, 'z image', base)):

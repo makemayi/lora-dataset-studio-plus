@@ -17,7 +17,7 @@
  * `lanes` lets the user choose it — a checkpoint is a file, so a run trained here
  * can be finished on a rented GPU and vice-versa; a mount that doesn't gets its
  * own `where` back and can ignore the field. */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { HelpBadge } from '../../help/HelpMode';
 import { initialResumeStep, resolveInitialLane, submitBlockedReason } from './lineageContinue.js';
 
@@ -51,6 +51,12 @@ export default function ContinueDialog({
   settings = {},           // inherited effective settings shown as the starting point
   defaultExtra = 1000,
   busy = false,
+  // A refusal from the LAST attempt, rendered inside the dialog. The hosts keep
+  // the dialog open on refusal now: the lane, the resume checkpoint, the extra
+  // steps and the five folded settings are exactly what the user has to change
+  // to get past it, and they used to be wiped before the message arrived. null
+  // while nothing has been refused.
+  error = null,
   onResolve,
 }) {
   // Distinct steps, ascending; the newest is the default resume point.
@@ -92,11 +98,30 @@ export default function ContinueDialog({
   const currentLR = typeof settings.learning_rate === 'number' && settings.learning_rate > 0
     ? settings.learning_rate : DEFAULT_LR;
 
+  /* ONE way out, and it is closed while a request is in flight.
+     Two reasons, both paid for once: a dismissal during the post would leave the
+     launch running with nothing on screen to report it, and the dataset panel
+     raises its preflight report ON TOP of this dialog — a single Escape reached
+     both window listeners and cancelled the two at once. */
+  const dismiss = () => { if (!busy) onResolve(null); };
+
+  /* With "Adjust settings" unfolded the dialog is taller than a 400-px screen
+     and scrolls INSIDE itself, so a refusal can land outside the viewport —
+     MEASURED on a 400-px capture with the section open. The message and the
+     button that produced it are the last two blocks, so scrolling the card to
+     its end shows both. (scrollIntoView({block:'nearest'}) does not: it moves
+     the minimum, which left the message half-cut under the fold.) */
+  const cardRef = useRef(null);
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onResolve(null); };
+    const card = cardRef.current;
+    if (error && card) card.scrollTop = card.scrollHeight;
+  }, [error]);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') dismiss(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onResolve]);
+  }, [busy, onResolve]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const extraNum = Math.max(100, parseInt(extra, 10) || 0);
   const target = fromStep + extraNum;
@@ -133,14 +158,15 @@ export default function ContinueDialog({
   return (
     <div role="dialog" aria-modal="true" aria-label="Continue training"
       className="fixed inset-0 z-[9990] bg-black/80 flex items-center justify-center p-3"
-      onClick={(e) => { if (e.target === e.currentTarget) onResolve(null); }}>
-      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl border border-indigo-400/40 bg-app p-4 flex flex-col gap-3">
+      onClick={(e) => { if (e.target === e.currentTarget) dismiss(); }}>
+      <div ref={cardRef}
+        className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl border border-indigo-400/40 bg-app p-4 flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <span className="text-indigo-300 font-semibold"><span aria-hidden>▶</span> Continue training</span>
           <HelpBadge topic="continue-training" />
           {context && <span className="text-content-subtle text-[0.75rem] truncate">{context}</span>}
-          <button type="button" onClick={() => onResolve(null)}
-            className="ml-auto text-content-subtle hover:text-content" aria-label="Cancel">✕</button>
+          <button type="button" onClick={dismiss} disabled={busy}
+            className="ml-auto text-content-subtle hover:text-content disabled:opacity-40" aria-label="Cancel">✕</button>
         </div>
 
         {/* WHERE the continuation runs — offered only when the mount passes
@@ -316,9 +342,30 @@ export default function ContinueDialog({
           <span className="text-amber-300/90 text-[0.6875rem] leading-relaxed">{blockedReason}</span>
         )}
 
+        {/* The LAST attempt's refusal, right above the button that produced it —
+            and the inputs it is about are still filled in. Scrolls on its own
+            rather than pushing ▶ Continue off a 400-px screen: a backend
+            refusal can be several lines ("no local checkpoint at step 750
+            (available: 250, 500)"), and an error that hides the retry button is
+            the same dead end wearing a different coat. */}
+        {error && (
+          <div role="alert"
+            /* shrink-0: the card is a flex column with a max height, so a flex
+               child is free to be SQUASHED — with the settings unfolded the
+               message rendered as a 20-px sliver of clipped text (measured). */
+            className="shrink-0 rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-2 max-h-28 overflow-y-auto">
+            <span className="block text-red-200 text-[0.6875rem] leading-relaxed whitespace-pre-wrap break-words">
+              {error}
+            </span>
+            <span className="block text-content-subtle text-[0.625rem] mt-1">
+              Your choices are kept — adjust and try again.
+            </span>
+          </div>
+        )}
+
         <div className="flex items-center gap-2 pt-1">
-          <button type="button" onClick={() => onResolve(null)}
-            className="px-3 py-1.5 rounded-lg bg-surface text-content text-sm">Cancel</button>
+          <button type="button" onClick={dismiss} disabled={busy}
+            className="px-3 py-1.5 rounded-lg bg-surface text-content text-sm disabled:opacity-40">Cancel</button>
           <button type="button" onClick={submit} disabled={busy || latest === 0 || laneBlocked}
             title={laneBlocked ? laneState(lane).reason || undefined : undefined}
             className="ml-auto px-3 py-1.5 rounded-lg bg-gradient-primary text-white text-sm font-semibold disabled:opacity-40">

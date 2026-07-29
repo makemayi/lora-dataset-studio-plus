@@ -616,6 +616,59 @@ def face_masking_enabled(ds) -> bool:
         return False
 
 
+# Person masking (background down-weighted to 10 %) has always defaulted to ON.
+# Keep the constant next to the reader: the default is what makes the migration
+# to a stored setting a no-op for every dataset that never touched it.
+PERSON_MASK_DEFAULT = True
+
+
+def person_masking_enabled(ds) -> bool:
+    """Whether this dataset trains with PERSON masks (subject isolated, background
+    at 10 % loss weight). Default ON.
+
+    Used to be a `masked` query parameter carried by the browser's localStorage,
+    which the server only ever saw at launch. Three consequences, all real: the
+    readiness badge could not warn that a dataset set to masked would train
+    unmasked for want of rembg; opening the app from a phone silently reverted to
+    the default; and no run snapshot recorded it, so two runs differing only by
+    masking looked identical. Stored in the train_settings JSON blob now, exactly
+    like `mask_faces` — one read, at export time, so the local queue, the
+    scheduler, a cloud run and a re-run of an OLD dataset all inherit it.
+
+    ABSENT key = the historical default (True): no existing dataset changes
+    behaviour by upgrading. An explicit False is a VALUE, not a falsy no-op —
+    the opposite of `mask_faces`, whose default is OFF.
+
+    Concept/Style are forced OFF here, mirroring the export guard: a person mask
+    erases a concept, and an always-on style must learn the whole frame."""
+    if not ds:
+        return PERSON_MASK_DEFAULT
+    if is_conceptual(ds):
+        return False
+    raw = getattr(ds, 'train_settings', None)
+    if not raw:
+        return PERSON_MASK_DEFAULT
+    try:
+        stored = json.loads(raw).get('masked')
+    except (ValueError, TypeError):
+        return PERSON_MASK_DEFAULT
+    return PERSON_MASK_DEFAULT if stored is None else bool(stored)
+
+
+def person_masking_stored(ds):
+    """The RAW stored opt-in — True / False / None when the dataset never answered.
+    The panel needs the tri-state (not the resolved boolean) to know whether the
+    one-time localStorage carry-over notice still has anything to disclose."""
+    raw = getattr(ds, 'train_settings', None) if ds else None
+    if not raw:
+        return None
+    try:
+        stored = json.loads(raw).get('masked')
+    except (ValueError, TypeError):
+        return None
+    return None if stored is None else bool(stored)
+
+
 # Concept descriptions whose ACT lives on the face. Masking the head then erases
 # the very thing being taught -- the community workflow this feature follows hit
 # exactly this and had to subtract the mouth back out of its face masks. We WARN
@@ -741,6 +794,40 @@ def set_caption_options(user_id, dataset_id, patch) -> dict:
     ds.caption_options = json.dumps(stored) if stored else None
     db.session.commit()
     return cur
+
+
+# --- Which Klein model this dataset runs on ----------------------------------
+# Stored on the DATASET, not in localStorage: it describes what the dataset is
+# made of, so it must survive a browser change and be the same from a phone. The
+# generation picker had a per-browser value (editPage_flux2KleinModel_v1) that
+# improve never even read — hence "no option anywhere to choose the model used
+# for improve". NULL = auto (resolve_klein_unet decides), which is exactly what
+# every improve did before this setting existed.
+def dataset_klein_model(ds):
+    """The bare Klein model file name this dataset chose, or None for auto."""
+    name = (getattr(ds, 'klein_model', None) or '').strip() if ds else ''
+    return name or None
+
+
+def set_dataset_klein_model(user_id, dataset_id, name):
+    """Persist the dataset's Klein model pick. '' / None clears it back to auto —
+    un-choosing has to be a real gesture, not a value you can never take back.
+
+    Only a BARE file name is accepted: the picker lists bare names (the loader
+    prefix is resolve_klein_unet's job), so a value carrying a path separator is
+    never something the UI produced. Existence is deliberately NOT checked here —
+    a model can be moved away long after it was chosen, and the honest place to
+    say so is the run (KleinModelGone names the file), not a settings write that
+    would silently drop the user's answer."""
+    ds = get_dataset(user_id, dataset_id)
+    if not ds:
+        raise ValueError('dataset not found')
+    value = (name or '').strip()
+    if value and (os.path.basename(value) != value or value in ('.', '..')):
+        raise ValueError('a Klein model is named by its file name, without a folder')
+    ds.klein_model = value or None
+    db.session.commit()
+    return dataset_klein_model(ds)
 
 
 def _resolve_caption_backend(ds) -> str:
@@ -966,13 +1053,130 @@ def create_dataset(user_id, name, trigger_word, kind=None, concept_desc=None, tr
     return ds
 
 
+def family_base_memory(ds) -> dict:
+    """Parsed `train_family_bases` — {family: {'base': str, 'variant': str|None}}.
+
+    Anything unparsable/foreign reads as {} (same discipline as _train_settings):
+    a corrupted blob must degrade to "nothing remembered", never to a crash."""
+    raw = getattr(ds, 'train_family_bases', None)
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out = {}
+    for fam, entry in data.items():
+        if fam in TRAIN_TYPES and isinstance(entry, dict):
+            out[fam] = {'base': entry.get('base') or '',
+                        'variant': entry.get('variant') or None}
+    return out
+
+
+def remembered_family_base(ds, family):
+    """(base, variant) this dataset last used on `family`, or (None, None) when
+    that family has never been configured here. `None` is deliberately distinct
+    from `''` (= "officially chose the official base")."""
+    entry = family_base_memory(ds).get(normalize_train_type(family))
+    if entry is None:
+        return None, None
+    return entry['base'], entry['variant']
+
+
+def family_settings_memory(ds) -> dict:
+    """Parsed `train_family_settings` — {family: {setting: value}}, restricted to
+    the family-scoped keys. Same degrade-to-{} discipline as family_base_memory:
+    a corrupted blob means "nothing remembered", never a crash."""
+    from . import lora_training as _lt
+    raw = getattr(ds, 'train_family_settings', None)
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out = {}
+    for fam, entry in data.items():
+        if fam in TRAIN_TYPES and isinstance(entry, dict):
+            out[fam] = {k: v for k, v in entry.items()
+                        if k in _lt._FAMILY_SCOPED_SETTING_KEYS}
+    return out
+
+
+def remembered_family_settings(ds, family):
+    """The family-scoped settings this dataset last used on `family`, or None
+    when that family was never configured here. `{}` (configured, everything on
+    Auto) is deliberately distinct from None (never configured)."""
+    return family_settings_memory(ds).get(normalize_train_type(family))
+
+
 def set_train_type(user_id, dataset_id, train_type) -> bool:
     """Change the target model family later (kept in sync with the TrainingPanel
-    selector so the menu re-groups). Normalizes; unknown -> zimage. False if absent."""
+    selector so the menu re-groups). Normalizes; unknown -> zimage. False if absent.
+
+    The base and the variant are FAMILY-SCOPED even though `train_base_model` /
+    `train_variant` are single columns: a Z-Image merge is not a thing a Krea run
+    can load, and 'turbo' means a different checkpoint on each family. So the
+    outgoing family's pair is stashed in `train_family_bases` and the incoming
+    family's remembered pair takes its place — a family never yet configured
+    starts from the official base, and coming back to Z-Image finds the merge
+    exactly where it was left. Nothing is destroyed and nothing is asked.
+
+    The SAME treatment is given to the handful of `train_settings` keys whose
+    meaning is bound to the family (lora_training._FAMILY_SCOPED_SETTING_KEYS —
+    `timestep_type`, whose canonical value differs per family): stashed in
+    `train_family_settings`, restored on the way back, and CLEARED (back to the
+    incoming family's own default) when that family has nothing remembered. The
+    other advanced settings stay global on purpose — see the comment on
+    _FAMILY_SCOPED_SETTING_KEYS for why quantisation and resolution are not
+    here."""
     ds = get_dataset(user_id, dataset_id)
     if not ds:
         return False
-    ds.train_type = normalize_train_type(train_type)
+    new_fam = normalize_train_type(train_type)
+    old_fam = normalize_train_type(getattr(ds, 'train_type', None))
+    if new_fam == old_fam:
+        db.session.commit()
+        return True
+    memory = family_base_memory(ds)
+    # Never remember a base the OUTGOING family provably cannot load. Datasets
+    # created before this column exist in exactly that state (a Z-Image merge
+    # left attached to a Krea 2 dataset); stashing it under 'krea' would freeze
+    # the bug into the memory and hand it back on the way home.
+    from . import lora_training as _lt
+    outgoing = ds.train_base_model or ''
+    if _lt.foreign_base_reason(old_fam, outgoing):
+        outgoing = ''
+    memory[old_fam] = {'base': outgoing,
+                       'variant': ds.train_variant or None}
+    remembered = memory.get(new_fam)
+    ds.train_base_model = (remembered or {}).get('base') or None
+    ds.train_variant = (remembered or {}).get('variant') or None
+    ds.train_family_bases = json.dumps(memory)
+
+    # --- family-scoped train_settings keys, same stash/restore contract --------
+    scoped = _lt._FAMILY_SCOPED_SETTING_KEYS
+    settings = _lt._train_settings(ds)
+    smemory = family_settings_memory(ds)
+    smemory[old_fam] = {k: settings[k] for k in scoped if k in settings}
+    incoming = smemory.get(new_fam)
+    for k in scoped:
+        if incoming is not None and k in incoming:
+            settings[k] = incoming[k]
+        else:
+            # Never configured on the incoming family (or explicitly left on
+            # Auto there) → drop the key so the family's own canonical default
+            # applies. Dropping is what makes it byte-identical to a dataset
+            # that never touched the setting, exactly like update_train_settings.
+            settings.pop(k, None)
+    ds.train_settings = json.dumps(settings) if settings else None
+    ds.train_family_settings = json.dumps(smemory)
+
+    ds.train_type = new_fam
     db.session.commit()
     return True
 
@@ -1985,7 +2189,7 @@ _BACKUP_IMG_FIELDS = ('filename', 'source', 'framing', 'variation_label', 'statu
                       'caption', 'caption_short', 'variation_prompt', 'face_score', 'face_state',
                       'upscale_ratio', 'watermark_state', 'watermark_bbox',
                       'watermark_regions', 'parent_image_id', 'derivation_kind',
-                      'fail_reason', 'source_metadata')
+                      'fail_reason', 'fail_kind', 'source_metadata')
 
 
 def _backup_basename(value):
@@ -2822,10 +3026,11 @@ def _run_reference_edit(app, user_id, dataset_id, token, act_token, engine, refs
                 reference_edit_jobs.set_failed(dataset_id, token, f'{engine}: {e}')
                 return
             if out is None:
-                reference_edit_jobs.set_failed(
-                    dataset_id, token,
-                    f'{engine}: empty response (often a content-policy refusal or a '
-                    'transient API error - retry usually works)')
+                # Un refus NOMMÉ est déjà parti par `except EngineError` au-dessus
+                # (EngineRefused en hérite) : ici il ne reste que le vide muet des
+                # moteurs qui ne savent pas distinguer refus et hoquet.
+                reference_edit_jobs.set_failed(dataset_id, token,
+                                               f'{engine}: {_EMPTY_MSG}')
                 return
             cand_fn = f'{user_id}{reference_edit_jobs.CANDIDATE_MARKER}{uuid.uuid4().hex[:8]}.webp'
             cand_path = os.path.join(_dataset_dir(dataset_id), cand_fn)
@@ -3085,6 +3290,13 @@ def dataset_payload(user_id, dataset_id):
         # prefill. Applied at wrap time; never part of the stored per-image prompt.
         'prompt_suffix': ds.prompt_suffix or '',
         'prompt_suffixes': prompt_suffixes_dict(ds),
+        # Where this dataset's images actually live. It was displayed NOWHERE,
+        # which is how people ended up hunting for it in the file manager and
+        # pasting it into "create a bank" — a bank over a dataset's live files,
+        # whose 🗑 Delete rejected then deleted images out of the dataset. Showing
+        # the path (with the sentence that it belongs to the dataset) removes the
+        # reason to go looking; `services.path_guard` refuses the paste anyway.
+        'storage_path': _dataset_path(ds.id),
         'ref_filename': ds.ref_filename,
         # Pixel size of the ACTIVE reference (the cropped one — that is the file
         # every engine is handed). Krea 2 Edit reproduces this shape, so the
@@ -3119,6 +3331,10 @@ def dataset_payload(user_id, dataset_id):
                     'status': i.status, 'caption': i.caption,
                     'caption_short': i.caption_short,
                     'fail_reason': i.fail_reason,
+                    # 'refused' | 'empty' | 'error' | None — de quelle NATURE est
+                    # l'échec, pour que l'UI puisse compter les refus fournisseur
+                    # sans relire la phrase (cf. models.FaceDatasetImage).
+                    'fail_kind': i.fail_kind,
                     'parent_image_id': i.parent_image_id,
                     'derivation_kind': i.derivation_kind,
                     'source_metadata': normalize_source_metadata(i.source_metadata),
@@ -3195,10 +3411,16 @@ def write_image_atomic(path, data: bytes) -> None:
         raise
 
 
-def normalize_to_webp(image_bytes: bytes, size: int = 1024) -> bytes:
+def normalize_to_webp(image_bytes: bytes, size: int = 1024,
+                      quality: int = 92, lossless: bool = False) -> bytes:
     """Resize so the longest side ≤ `size`, KEEP the aspect ratio (no square pad),
     return WEBP. Pour les variations Nano Banana : un plan corps reste en portrait
     (pas de bandes noires que le LoRA apprendrait). ai-toolkit gère le bucketing.
+
+    `size=0` means "do not resample at all" — the ceiling below still applies
+    because it is a FORMAT limit, not a taste: Pillow refuses to write a WebP
+    past 16383 px ("Image size exceeds WebP limit of 16383 pixels"), so an
+    uncapped call would turn a big panorama into a failed import.
 
     DERIVATIVE ON PURPOSE — this is INGEST/TRANSPORT (the ≤2048 px copy handed to a
     generation API, and the normalisation of freshly generated bytes), not an edit of
@@ -3206,10 +3428,67 @@ def normalize_to_webp(image_bytes: bytes, size: int = 1024) -> bytes:
     inflating an upload 4x to protect pixels the remote engine will re-encode anyway
     buys nothing. See the module docstring of `image_encoding` for the split."""
     im = Image.open(io.BytesIO(image_bytes)).convert('RGB')
-    im.thumbnail((size, size), Image.LANCZOS)
+    limit = min(size, IMPORT_MAX_SIDE_CEILING) if size else IMPORT_MAX_SIDE_CEILING
+    im.thumbnail((limit, limit), Image.LANCZOS)   # only ever shrinks
     out = io.BytesIO()
-    im.save(out, 'WEBP', quality=92)
+    if lossless:
+        im.save(out, 'WEBP', lossless=True)
+    else:
+        im.save(out, 'WEBP', quality=quality)
     return out.getvalue()
+
+
+# --- Import resolution & encoding (Settings ▸ Captioning & quality) ----------
+# Hard ceiling on a stored dataset image, in px. MEASURED, not chosen: Pillow's
+# WebP encoder raises "Image size exceeds WebP limit of 16383 pixels" past that
+# side, so "keep the original" has to stop somewhere or a 20000 px panorama is
+# simply an import that fails. 8192 sits well under the format wall, is already
+# 8x what any mainstream trainer buckets to, and keeps the review grid loadable.
+IMPORT_MAX_SIDE_CEILING = 8192
+_IMPORT_ENCODINGS = {                       # label -> PIL save kwargs
+    'standard': {'quality': 92, 'lossless': False},
+    'high': {'quality': 100, 'lossless': False},
+    'lossless': {'quality': 100, 'lossless': True},
+}
+
+
+def import_encode_policy() -> dict:
+    """What an imported image will ACTUALLY be stored as, resolved once so the
+    UI, the toast and the encoder all quote the same numbers.
+
+    Total by construction: an unusable configured value logs and degrades to the
+    shipped default rather than breaking every import. `capped` is True when the
+    user asked for more than the format allows — the screens say so instead of
+    silently shrinking (that silence is the bug this whole setting answers)."""
+    defaults = cfg.DEFAULTS['dataset_import']
+    raw_side = cfg.get('dataset_import.max_side', defaults['max_side'])
+    try:
+        max_side = int(raw_side)
+        if max_side < 0:
+            raise ValueError(raw_side)
+    except (TypeError, ValueError):
+        logger.warning('ignoring unusable dataset_import.max_side %r', raw_side)
+        max_side = int(defaults['max_side'])
+    capped = max_side > IMPORT_MAX_SIDE_CEILING
+    if capped:
+        max_side = IMPORT_MAX_SIDE_CEILING
+    encoding = str(cfg.get('dataset_import.encoding', defaults['encoding']) or '')
+    if encoding not in _IMPORT_ENCODINGS:
+        if encoding:
+            logger.warning('ignoring unusable dataset_import.encoding %r', encoding)
+        encoding = defaults['encoding']
+    return {'max_side': max_side, 'encoding': encoding, 'capped': capped,
+            'ceiling': IMPORT_MAX_SIDE_CEILING, **_IMPORT_ENCODINGS[encoding]}
+
+
+def import_encode(image_bytes: bytes) -> bytes:
+    """normalize_to_webp under the USER's import policy — the single door every
+    dataset ingest lane goes through. Generated images and API transport copies
+    deliberately keep their own fixed sizes: this knob is about what the user
+    hands in, not about what the app produces."""
+    p = import_encode_policy()
+    return normalize_to_webp(image_bytes, size=p['max_side'],
+                             quality=p['quality'], lossless=p['lossless'])
 
 
 def detect_head_bbox(image_bytes):
@@ -3444,7 +3723,7 @@ def import_images(user_id, dataset_id, files_bytes, crop=False, dedupe=False, st
             if crop:
                 webp, scale = face_crop_to_square_webp(raw, return_scale=True)
             else:
-                webp, scale = normalize_to_webp(raw), None
+                webp, scale = import_encode(raw), None
         except Exception as e:
             failed += 1
             logger.warning(f"dataset import: image skipped (dataset {dataset_id}): {e}")
@@ -3513,9 +3792,10 @@ def _merge_training_images(user_id, dataset_id, entries, captions, stats=None):
     où `getter()` rend les bytes de l'image, `captions` = {stem: texte}. Chaque
     image lisible devient une row 'import' (status=keep, ratio préservé), la
     caption de même stem est attachée (tronquée à CAPTION_MAX_CHARS), les
-    doublons perceptuels (dHash) vs le lot ET le dataset sont sautés.
-    Returns (ids, failed)."""
-    seen = _existing_dhashes(dataset_id)
+    doublons perceptuels (dHash) vs le lot ET le dataset sont sautés — mais leur
+    caption, elle, atterrit sur la row déjà présente si celle-ci n'en a pas
+    (aller-retour « je légende ailleurs »). Returns (ids, failed)."""
+    seen = _existing_dhash_rows(dataset_id)   # [(dhash, image_id)]
     ids, failed = [], 0
     for stem, display, getter in entries:
         try:
@@ -3531,7 +3811,7 @@ def _merge_training_images(user_id, dataset_id, entries, captions, stats=None):
             except Exception:
                 pass
         try:
-            webp = normalize_to_webp(raw)
+            webp = import_encode(raw)
         except Exception as e:
             failed += 1
             logger.warning(f"dataset import: image skipped ({display}): {e}")
@@ -3541,24 +3821,45 @@ def _merge_training_images(user_id, dataset_id, entries, captions, stats=None):
                 fp = _dhash(im)
         except (OSError, ValueError):
             fp = None
+        incoming = (captions.get(stem) or '').strip() or None
         if fp is not None:
-            if any(_hamming(fp, s) <= SCRAPE_DHASH_MAX_DISTANCE for s in seen):
+            match = next((mid for h, mid in seen
+                          if _hamming(fp, h) <= SCRAPE_DHASH_MAX_DISTANCE), None)
+            if match is not None:
+                # THE round trip: export the images, caption them in another
+                # tool, bring the .txt files back. Those images are duplicates
+                # BY DESIGN — dropping the row silently dropped the caption with
+                # it ("0 imported · N duplicates skipped"), which made the whole
+                # trip a dead end (reported by Qeeyana on Reddit). The pixels are
+                # already here; what is new is the text, so the text lands on the
+                # row that holds them. A caption written HERE is never
+                # overwritten — an import cannot silently rewrite curated work.
                 if stats is not None:
                     stats['duplicates'] = stats.get('duplicates', 0) + 1
+                row = FaceDatasetImage.query.get(match) if incoming else None
+                if row is not None:
+                    if (row.caption or '').strip():
+                        if stats is not None:
+                            stats['captions_kept'] = stats.get('captions_kept', 0) + 1
+                    else:
+                        row.caption = _cap_caption(incoming)
+                        db.session.commit()
+                        if stats is not None:
+                            stats['captions_applied'] = \
+                                stats.get('captions_applied', 0) + 1
                 continue
-            seen.append(fp)
         fn = f"{user_id}_dsimport_{uuid.uuid4().hex[:8]}.webp"
         with open(os.path.join(_dataset_dir(dataset_id), fn), 'wb') as fh:
             fh.write(webp)
-        cap = (captions.get(stem) or '').strip() or None
-        if cap:
-            cap = _cap_caption(cap)
-            if stats is not None:
-                stats['captions'] = stats.get('captions', 0) + 1
+        cap = _cap_caption(incoming) if incoming else None
+        if cap and stats is not None:
+            stats['captions'] = stats.get('captions', 0) + 1
         img = FaceDatasetImage(dataset_id=dataset_id, source='import', status='keep',
                                filename=fn, caption=cap)
         db.session.add(img)
         db.session.commit()
+        if fp is not None:
+            seen.append((fp, img.id))     # so the rest of the batch dedupes too
         ids.append(img.id)
     return ids, failed
 
@@ -5591,7 +5892,7 @@ def _sync_generate_activity(dataset_id):
     dataset_activity.sync_pending(dataset_id, 'generate', pending, engine=engine)
 
 
-def generate_variations(user_id, dataset_id, variations, multiplier, klein_model,
+def generate_variations(user_id, dataset_id, variations, multiplier, klein_model=None,
                         lora_strength=None, generation_lora_preset=None):
     """For each (variation x multiplier), enqueue a Klein edit of the reference
     and create a pending FaceDatasetImage. Returns the created image ids.
@@ -5615,6 +5916,12 @@ def generate_variations(user_id, dataset_id, variations, multiplier, klein_model
         raise ValueError('dataset not found')
     if not ds.ref_filename:
         raise ValueError('reference image required')
+    # No model named by the caller → the DATASET's pick (None = auto, i.e. exactly
+    # what generation resolved before the setting existed). An explicit request
+    # value still wins: it is what the workspace picker sends, and a legacy browser
+    # that still holds editPage_flux2KleinModel_v1 must keep generating with it.
+    if not klein_model:
+        klein_model = dataset_klein_model(ds)
     # Preflight the Klein model files BEFORE creating any rows: a missing model
     # then surfaces as one actionable "downloading, retry" 409 (route handler) —
     # not a dataset full of failed tiles, each doomed by a ComfyUI validation
@@ -5784,9 +6091,15 @@ def _improve_candidate_label(source) -> str:
     return (f'{base_label} · {source_label}' if source_label else base_label)[:120]
 
 
-def _improve_enqueue_profile() -> dict:
-    """Profile reproduced from the user-provided ComfyUI PNG metadata: keep the
-    selected/default Klein model, override only sampling/LoRA/resolution.
+def _improve_enqueue_profile(ds=None) -> dict:
+    """Profile reproduced from the user-provided ComfyUI PNG metadata: the
+    dataset's Klein model plus the sampling/LoRA/resolution overrides.
+
+    `ds` is the dataset the improved image belongs to. Reading its model HERE is
+    what makes the choice reach all three improve lanes at once: the single pass,
+    the 🔄 re-run, and the batch (which drains through improve_existing_image).
+    None / a dataset that never chose yields klein_model=None — the exact value
+    every improve sent before this setting existed.
 
     The defaults (1.0 / 4 / 0.0 / 2.0) are the values that were once hardcoded,
     so an untouched install behaves exactly as before. Clamped, because a bad
@@ -5795,6 +6108,7 @@ def _improve_enqueue_profile() -> dict:
     default" as "the user has not set this", which is what lets a value saved
     under the old key name speak for it."""
     return {
+        'klein_model': dataset_klein_model(ds),
         'lora_strength': _improve_float('improve_consistency_strength', 1.0, 1.5),
         'sampler_steps': _improve_int('improve_steps', 4),
         'base_lora_strength': _improve_float('improve_base_lora_strength', 0.0),
@@ -5897,7 +6211,7 @@ def _improve_existing_image_locked(user_id, image_id):
         job_id = keh.enqueue_klein_edit(
             user_id=str(user_id), source_filename=img.filename,
             source_path=source_path, edit_prompt=prompt,
-            **_improve_enqueue_profile(),
+            **_improve_enqueue_profile(get_dataset(user_id, img.dataset_id)),
             extra_metadata=_improve_extra_metadata(img, label),
         )
     except Exception:
@@ -5999,14 +6313,14 @@ def _reimprove_image_locked(user_id, image_id):
     # refusal must leave the current result on screen, not a broken tile.
     from ..job_queue import queue_manager
     old_state = {field: getattr(img, field) for field in (
-        'filename', 'caption', 'status', 'fail_reason', 'job_id',
+        'filename', 'caption', 'status', 'fail_reason', 'fail_kind', 'job_id',
         'variation_label', 'variation_prompt', 'framing',
         'watermark_state', 'watermark_bbox', 'watermark_regions')}
     old_path = _img_path(img) if img.filename else None
     job_id = keh.enqueue_klein_edit(
         user_id=str(user_id), source_filename=parent.filename,
         source_path=source_path, edit_prompt=prompt,
-        **_improve_enqueue_profile(),
+        **_improve_enqueue_profile(get_dataset(user_id, img.dataset_id)),
         extra_metadata=_improve_extra_metadata(parent, label),
     )
 
@@ -6023,6 +6337,7 @@ def _reimprove_image_locked(user_id, image_id):
         img.status = 'pending'
         img.job_id = job_id
         img.fail_reason = None
+        img.fail_kind = None
         db.session.commit()
     except Exception:
         db.session.rollback()
@@ -6308,7 +6623,7 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
     from ..job_queue import queue_manager
     old_state = {
         field: getattr(img, field) for field in (
-            'filename', 'caption', 'status', 'fail_reason', 'job_id',
+            'filename', 'caption', 'status', 'fail_reason', 'fail_kind', 'job_id',
             'klein_model', 'variation_prompt', 'watermark_state',
             'watermark_bbox', 'watermark_regions')
     }
@@ -6353,8 +6668,9 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
         # Klein target: keep the row's real model file when it has one; a row born
         # on an API engine holds an engine TAG here, not a model — use the
         # workspace's Klein pick instead (None = enqueue's default model).
+        # …and when the workspace sent none either, the DATASET's pick (None = auto).
         model = (img.klein_model if img.klein_model not in API_ENGINES
-                 else ((klein_model or '').strip() or None))
+                 else ((klein_model or '').strip() or dataset_klein_model(ds)))
         ref_path = os.path.join(_dataset_path(ds.id), ds.ref_filename)
         extra_paths = [os.path.join(_dataset_path(ds.id), fn)
                        for fn in extra_ref_filenames(ds)]
@@ -6395,6 +6711,7 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
         img.status = 'pending'
         img.job_id = new_job_id
         img.fail_reason = None
+        img.fail_kind = None
         db.session.commit()
     except Exception:
         db.session.rollback()
@@ -6467,16 +6784,27 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
                                    suffix=dataset_prompt_suffix(ds, img.framing),
                                    subject_type=subject_type_of(ds)),
                     **gen_kwargs)
+            except EngineRefused as e:
+                # Même règle que dans le lot : un refus se nomme, il ne se
+                # déguise pas en panne (et il n'invente pas de contournement).
+                out = None
+                img.status = 'failed'
+                img.fail_reason = f'{engine}: {str(e)[:400]}'
+                img.fail_kind = 'refused'
+                db.session.commit()
+                return engine
             except SubscriptionQuotaExceeded:
                 out = None
                 img.status = 'failed'
                 img.fail_reason = _QUOTA_MSG
+                img.fail_kind = 'error'
                 db.session.commit()
                 return engine
             except SubscriptionUnavailable as e:
                 out = None
                 img.status = 'failed'
                 img.fail_reason = f'chatgpt: {e}'
+                img.fail_kind = 'error'
                 db.session.commit()
                 return engine
             except Exception as gen_err:
@@ -6501,7 +6829,8 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
                 img.filename = fn
             else:
                 img.status = 'failed'
-                img.fail_reason = f'{engine}: empty response (often a content-policy refusal or a transient API error - retry usually works)'
+                img.fail_reason = f'{engine}: {_EMPTY_MSG}'
+                img.fail_kind = 'empty'
             db.session.commit()
             return engine
         except Exception as e:
@@ -6510,6 +6839,7 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
             if current and current.filename is None:
                 current.status = 'failed'
                 current.fail_reason = f'{engine}: {e}'[:500]
+                current.fail_kind = 'error'
                 db.session.commit()
             raise
         finally:
@@ -6584,7 +6914,16 @@ def edit_engine_choice_message():
     return 'pick ' + (f"{', '.join(head)} or {last}" if head else last)
 
 from .chatgpt_image import SubscriptionQuotaExceeded, SubscriptionUnavailable
-from .engine_errors import EngineError, EngineFatal
+from .engine_errors import EngineError, EngineFatal, EngineRefused
+
+# La phrase des moteurs qui ne SAVENT pas pourquoi ils rentrent bredouilles
+# (ChatGPT, OpenRouter : 200 sans image, aucune métadonnée de refus lisible).
+# Nano Banana ne passe plus par là — il lève NanoBananaRefused avec la vraie
+# cause. Ce qui reste ici doit donc dire l'ambiguïté au lieu de la trancher :
+# l'ancienne version promettait « retry usually works », ce qui était faux la
+# moitié du temps et envoyait réessayer un refus définitif. On nomme l'ignorance.
+_EMPTY_MSG = ('empty response — no image and no reason given (a content-policy '
+              'refusal and a transient API error look identical here)')
 
 _QUOTA_MSG = ('chatgpt: subscription image quota reached — remaining rows were '
               'stopped; rerun in API-key mode or wait for your plan quota to reset')
@@ -6636,6 +6975,10 @@ def _run_nanobanana_batch(app, items, ref_bytes, engine='nanobanana', dataset_id
     # the batch fails fast instead of burning one call each.
     quota_exhausted = threading.Event()
     stop_msg = {'text': _QUOTA_MSG}   # set to the actual stop reason when it fires
+    # Refus fournisseur du lot. Une liste (append est atomique sous le GIL) pour
+    # que le log de fin rende un DÉCOMPTE au lieu de laisser 12 trous sur 40 se
+    # découvrir tuile par tuile. L'UI, elle, recompte depuis fail_kind.
+    refused = []
     token = dataset_activity.begin(dataset_id, 'generate', total=len(items), engine=engine) \
         if dataset_id is not None else None
 
@@ -6667,10 +7010,12 @@ def _run_nanobanana_batch(app, items, ref_bytes, engine='nanobanana', dataset_id
                 if img is not None:
                     img.status = 'failed'
                     img.fail_reason = stop_msg['text']
+                    img.fail_kind = 'error'
                     db.session.commit()
             return
         out = None
         fail_reason = None
+        fail_kind = 'error'
         gen_kwargs = {'aspect_ratio': aspect}
         if engine == 'chatgpt':
             gen_kwargs['force_lane'] = force_lane
@@ -6682,7 +7027,17 @@ def _run_nanobanana_batch(app, items, ref_bytes, engine='nanobanana', dataset_id
             if not out:
                 # api_generate signale certains refus/vides par un retour falsy
                 # sans lever — sans raison, la tuile "failed" resterait muette.
-                fail_reason = f'{engine}: empty response (often a content-policy refusal or a transient API error - retry usually works)'
+                fail_reason = f'{engine}: {_EMPTY_MSG}'
+                fail_kind = 'empty'
+        except EngineRefused as e:
+            # Le fournisseur a répondu, et a refusé CETTE image. Ce n'est pas une
+            # panne : on ne coupe pas le lot (les lignes suivantes ont leurs
+            # chances — le filtre n'est pas déterministe), on nomme la cause et
+            # on la compte à part pour pouvoir en rendre un décompte honnête.
+            refused.append(image_id)
+            logger.info(f"{engine} batch: refused at row {image_id}: {e}")
+            fail_reason = f'{engine}: {str(e)[:400]}'
+            fail_kind = 'refused'
         except SubscriptionQuotaExceeded as e:
             quota_exhausted.set(); stop_msg['text'] = _QUOTA_MSG
             logger.warning(f"{engine} batch: quota exhausted at row {image_id}: {e}")
@@ -6722,9 +7077,11 @@ def _run_nanobanana_batch(app, items, ref_bytes, engine='nanobanana', dataset_id
                     logger.warning(f"{engine} batch: save failed for row {image_id}: {e}")
                     img.status = 'failed'
                     img.fail_reason = f'saving the image failed: {str(e)[:400]}'
+                    img.fail_kind = 'error'
             else:
                 img.status = 'failed'
                 img.fail_reason = fail_reason
+                img.fail_kind = fail_kind
             db.session.commit()
 
     def _one(item):
@@ -6742,7 +7099,8 @@ def _run_nanobanana_batch(app, items, ref_bytes, engine='nanobanana', dataset_id
             list(pool.map(_one, items))
     finally:
         dataset_activity.end(token)   # idempotent; end(None) is a no-op
-    logger.info(f"{engine} batch: done ({len(items)} variation(s))")
+    tally = f" — {len(refused)} refused by the provider" if refused else ''
+    logger.info(f"{engine} batch: done ({len(items)} variation(s)){tally}")
 
 
 def generate_variations_nanobanana(app, user_id, dataset_id, variations, multiplier,

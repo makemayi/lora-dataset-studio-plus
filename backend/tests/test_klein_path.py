@@ -68,7 +68,11 @@ def test_generate_variations_creates_pending_rows_with_job_id(app, tmp_path, mon
         monkeypatch.setattr(queue_manager, 'add_job', fake_add_job)
 
         variations = select_preset('zimage_12')[:2]
-        ids = svc.generate_variations(LOCAL_USER, ds.id, variations, 1, klein_model='k.safetensors')
+        # The model NAMED here has to be one _configure_comfy_dirs installed: a
+        # named-but-absent model is now refused by name (KleinModelGone) instead
+        # of being silently resolved to the canonical file.
+        ids = svc.generate_variations(LOCAL_USER, ds.id, variations, 1,
+                                      klein_model='flux-2-klein-9b-fp8.safetensors')
 
         assert len(ids) == 2
         assert len(calls) == 2
@@ -370,7 +374,13 @@ def test_workflow_json_loads_and_consistency_lora_from_config(app, tmp_path, mon
         monkeypatch.setattr(queue_manager, 'add_job', fake_add_job)
 
         keh.enqueue_klein_edit(user_id='local', source_filename='ref.png',
-                               edit_prompt='a prompt', klein_model='k.safetensors',
+                               # Name the model that is actually installed. This
+                               # line used to say 'k.safetensors' and the
+                               # assertion below still expected the canonical
+                               # file — the test was pinning the silent
+                               # substitution that is now refused by name.
+                               edit_prompt='a prompt',
+                               klein_model='flux-2-klein-9b-fp8.safetensors',
                                source_path=str(source_path))
 
         assert captured, 'add_job should have been called'

@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { attemptModalSubmit } from '../../utils/submitOutcome.js'
 
 /** 🚀 Launch all — the overnight funnel. The user picks which passes run and how
  * auto-reject behaves, sees a plain "here's what will run" preview, and hits Go.
@@ -78,18 +79,51 @@ export default function LaunchAllDialog({ caps, visionReady, onClose, onLaunch }
   }))
   const nRun = plan.filter((s) => !s.willSkip).length
 
-  const launch = () => {
-    onLaunch({
-      steps: [...steps],
-      reject_flags: autoRejectOn ? [...rejectFlags] : [],
-      resolve_dups: autoRejectOn && resolveDups,
-    })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  /* ONE way out, shut only while the launch is being posted. */
+  const dismiss = () => { if (!busy) onClose() }
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') dismiss() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [busy, onClose])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* One bank, one background job: this dialog is refused whenever another pass
+     owns the bank — the single most likely answer for an overnight funnel the
+     user just spent a minute configuring. Closing first reset all seven
+     checkboxes and the reject flags to their defaults. The card scrolls inside
+     itself, so scroll to the end where the message and the button that produced
+     it live. */
+  const cardRef = useRef(null)
+  useEffect(() => {
+    const card = cardRef.current
+    if (error && card) card.scrollTop = card.scrollHeight
+  }, [error])
+
+  const launch = async () => {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    let outcome
+    try {
+      outcome = await attemptModalSubmit(() => onLaunch({
+        steps: [...steps],
+        reject_flags: autoRejectOn ? [...rejectFlags] : [],
+        resolve_dups: autoRejectOn && resolveDups,
+      }), { fallback: 'Could not start the run' })
+    } finally { setBusy(false) }
+    if (outcome.close) onClose()
+    else setError(outcome.error)
   }
 
   return (
     <div role="dialog" aria-modal="true" aria-label="Launch all"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl border border-border bg-surface-overlay p-5 shadow-2xl space-y-4">
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) dismiss() }}>
+      <div ref={cardRef}
+        className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl border border-border bg-surface-overlay p-5 shadow-2xl space-y-4">
         <div>
           <h2 className="text-base font-bold text-content">🚀 Launch all</h2>
           <p className="mt-1 text-sm text-content-muted">
@@ -163,14 +197,30 @@ export default function LaunchAllDialog({ caps, visionReady, onClose, onLaunch }
           )}
         </div>
 
+        {/* The refusal, right above the button that produced it — the passes you
+            ticked are still ticked. shrink-0 keeps it from being squashed to a
+            clipped sliver, max-h-24 keeps a long sentence from pushing 🚀 Launch
+            off a 400-px screen. */}
+        {error && (
+          <div role="alert"
+            className="shrink-0 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 max-h-24 overflow-y-auto">
+            <span className="block whitespace-pre-wrap break-words text-xs leading-relaxed text-red-200">
+              {error}
+            </span>
+            <span className="mt-1 block text-[0.625rem] text-content-subtle">
+              Your selection is kept — adjust and try again.
+            </span>
+          </div>
+        )}
+
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose}
-            className="rounded-md border border-border px-3 py-1.5 text-sm text-content-muted hover:text-content hover:bg-surface-raised">
+          <button type="button" onClick={dismiss} disabled={busy}
+            className="rounded-md border border-border px-3 py-1.5 text-sm text-content-muted hover:text-content hover:bg-surface-raised disabled:opacity-50">
             Cancel
           </button>
-          <button type="button" onClick={launch} disabled={nRun === 0}
+          <button type="button" onClick={launch} disabled={busy || nRun === 0}
             className="rounded-md bg-gradient-primary px-4 py-1.5 text-sm font-semibold text-white disabled:opacity-50">
-            🚀 Launch{nRun ? ` ${nRun} pass${nRun > 1 ? 'es' : ''}` : ''}
+            {busy ? 'Starting…' : `🚀 Launch${nRun ? ` ${nRun} pass${nRun > 1 ? 'es' : ''}` : ''}`}
           </button>
         </div>
       </div>

@@ -154,6 +154,42 @@ def _klein_unet_folders():
     return out
 
 
+class KleinModelGone(ValueError):
+    """A model was NAMED for this job and is not on disk any more.
+
+    Deliberately not a fallback. `resolve_klein_unet(selected)` degrades an
+    unknown pick to the canonical download, which is the right behaviour when the
+    pick is a stale browser preference nobody typed — but not when it is a stored
+    dataset setting: the user chose a model, the job silently ran on a different
+    one, and the result looks fine, so nothing ever tells them. Named exception so
+    the routes can say WHICH file went missing rather than "improve failed"."""
+
+    def __init__(self, name):
+        self.name = name
+        super().__init__(
+            f'the Klein model chosen for this dataset is no longer on disk: {name} '
+            '— pick another one, or put the file back')
+
+
+def klein_model_on_disk(selected):
+    """The loader-relative `unet_name` for the BARE model file `selected` (e.g.
+    'klein\\flux-2-klein-9b-fp8.safetensors'), or None when no search root holds a
+    file by that name. This is the STRICT half of resolve_klein_unet: it answers
+    "is exactly this file there?" and never falls back to another one.
+
+    Scans the same roots as the picker's list (capabilities._scan_models) so a
+    model the UI offers is always one this can name — see
+    tests/test_improve_klein_model_choice.py, which asserts both ends layout by
+    layout."""
+    bare = os.path.basename(selected) if selected else None
+    if not bare:
+        return None
+    for sub, names in _klein_unet_folders():
+        if bare in names:
+            return os.path.join(sub, bare)
+    return None
+
+
 def resolve_klein_unet(selected=None):
     """ComfyUI-relative `unet_name` for node 114, or None if no Klein model is on
     disk. Returns the value WITH its subfolder prefix (e.g.
@@ -624,7 +660,17 @@ def enqueue_klein_edit(user_id, source_filename, edit_prompt, klein_model=None,
     # docstring), none of which match a fresh install. Block BEFORE copying the
     # source / enqueuing when a graph-critical asset is absent, so the caller can
     # auto-download it instead of firing a job every tile of which would fail.
-    unet_ref = resolve_klein_unet(klein_model)
+    # A NAMED model is a promise, not a hint: when the caller (the dataset's stored
+    # pick, or the workspace picker) says which UNET to run, a file that has left
+    # the disk must stop the job by name instead of quietly resolving to the
+    # canonical download — the result of that swap is indistinguishable from a
+    # correct one. With no name, the historical auto-resolution is untouched.
+    if klein_model:
+        unet_ref = klein_model_on_disk(klein_model)
+        if not unet_ref:
+            raise KleinModelGone(klein_model)
+    else:
+        unet_ref = resolve_klein_unet()
     vae_ref = resolve_klein_vae()
     te_ref = resolve_klein_text_encoder()
     missing = klein_missing_assets()
@@ -639,6 +685,10 @@ def enqueue_klein_edit(user_id, source_filename, edit_prompt, klein_model=None,
     uid = uuid.uuid4().hex[:8]
     comfy_input = f"edit_source_{uid}_{source_filename}"
     comfy_fs.stage_input_copy(source_path, comfy_input, comfy_input_dir)
+    # Every name staged for THIS job, so its completion can delete them again.
+    # Without this list each improved image left a full-resolution duplicate in
+    # ComfyUI's input folder forever (measured: 3 896 orphans on one install).
+    staged_inputs = [comfy_input]
 
     workflow["52"]["inputs"]["image"] = comfy_input
     # Prompt into the CLIPTextEncode widget directly (node 6). The old RES4LYF
@@ -679,6 +729,7 @@ def enqueue_klein_edit(user_id, source_filename, edit_prompt, klein_model=None,
             continue
         ref_input = f"edit_ref{i}_{uid}_{os.path.basename(ref_path)}"
         comfy_fs.stage_input_copy(ref_path, ref_input, comfy_input_dir)
+        staged_inputs.append(ref_input)
         load_id, scale_id = f"ds_ref{i}_load", f"ds_ref{i}_scale"
         enc_id, lat_id = f"ds_ref{i}_encode", f"ds_ref{i}_latent"
         workflow[load_id] = {"class_type": "LoadImage", "inputs": {"image": ref_input},
@@ -802,6 +853,7 @@ def enqueue_klein_edit(user_id, source_filename, edit_prompt, klein_model=None,
     meta = {"model_name": "klein_edit_dataset"}
     if extra_metadata:
         meta.update(extra_metadata)
+    meta["staged_inputs"] = staged_inputs
     queue_manager.add_job(job_type="image", user_id=str(user_id), workflow_data=workflow,
                           prompt=edit_prompt, job_id=job_id, metadata=meta)
     return job_id

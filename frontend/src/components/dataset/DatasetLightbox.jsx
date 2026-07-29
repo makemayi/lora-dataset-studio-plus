@@ -2,9 +2,17 @@
  * Full-screen inspection lightbox (F3): toggle fit ↔ 100 % (native pixels) to
  * hunt skin/eyes artefacts before keeping an image. Esc, ✕ or a click on the
  * backdrop close it; a click on the image toggles the zoom mode.
+ *
+ * The action bar is NOT always at the bottom: beside a portrait image on a wide
+ * window it becomes a side rail in the space that image cannot use, which hands
+ * the bar's height back to the photo. `lightboxActionPlacement.js` owns that
+ * decision and its stability guarantees.
  */
-import { useEffect, useRef, useState } from 'react';
-import SettingsLink from '../common/SettingsLink';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import KleinImproveNote from './KleinImproveNote';
+import {
+  decideActionPlacement, rememberImageRatio, readImageRatio,
+} from './lightboxActionPlacement';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { displayLabel } from '../../utils/labels';
 import PexelsAttribution from './PexelsAttribution';
@@ -57,12 +65,71 @@ export default function DatasetLightbox({
   improvePending = false,
   improveReady = false,
   kleinAvailable = false,
+  subjectType = '',
 }) {
   const [full, setFull] = useState(false); // false = fit screen, true = 100 %
   const [comparing, setComparing] = useState(false);
   const [improving, setImproving] = useState(false);
   const dialogRef = useRef(null);
   const closeRef = useRef(null);
+
+  /* WHERE THE ACTIONS LIVE. A portrait photo on a wide monitor leaves two
+     thirds of the width black while the buttons queue on one line under it, on
+     the one axis the image is short of. The rule (and the geometry behind it)
+     lives in lightboxActionPlacement.js because `node --test` cannot parse JSX
+     and this is the part that must be tested case by case. */
+  const imageId = img?.id ?? null;
+  // A rail decided mid-rotation would move under the pointer that started it.
+  const actionsLocked = busy || mirrorBusy || improving || improvePending;
+  const [ratio, setRatio] = useState(() => readImageRatio(imageId));
+  // Decided for the FIRST painted frame, not corrected by an effect afterwards:
+  // with the ratio already known (the grid measured it) there is no frame in
+  // which the actions sit somewhere they are about to leave.
+  const [placement, setPlacement] = useState(() => decideActionPlacement({
+    viewportWidth: typeof window === 'undefined' ? 0 : window.innerWidth,
+    viewportHeight: typeof window === 'undefined' ? 0 : window.innerHeight,
+    imageWidth: ratio?.imageWidth,
+    imageHeight: ratio?.imageHeight,
+  }));
+
+  // A new image starts from whatever was measured for it before — reopening one
+  // therefore never replays the bottom→rail commit in front of the user.
+  useEffect(() => { setRatio(readImageRatio(imageId)); }, [imageId]);
+
+  const onImageLoad = useCallback((event) => {
+    const { naturalWidth: w, naturalHeight: h } = event.currentTarget;
+    rememberImageRatio(imageId, w, h);
+    setRatio((prev) => (prev && prev.imageWidth === w && prev.imageHeight === h
+      ? prev
+      : { imageWidth: w, imageHeight: h }));
+  }, [imageId]);
+
+  useEffect(() => {
+    let frame = 0;
+    const apply = () => setPlacement((current) => decideActionPlacement({
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      imageWidth: ratio?.imageWidth,
+      imageHeight: ratio?.imageHeight,
+      current,
+      comparing,
+      locked: actionsLocked,
+    }));
+    apply();
+    // One decision per frame: a window drag fires `resize` dozens of times a
+    // second, and re-deciding per event is how a bar ends up shimmering.
+    const onResize = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => { frame = 0; apply(); });
+    };
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [ratio, comparing, actionsLocked]);
+
+  const rail = placement === 'rail';
 
   // Focus trap keeps Tab inside the dialog (P2-7).
   useFocusTrap(dialogRef, !!(img && img.filename));
@@ -125,7 +192,8 @@ export default function DatasetLightbox({
 
   return (
     <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`Inspect — ${alt}`}
-      className="fixed inset-0 z-[9996] bg-black/95 flex flex-col" onClick={onClose}>
+      className={`fixed inset-0 z-[9996] bg-black/95 flex ${rail ? 'flex-row' : 'flex-col'}`}
+      onClick={onClose}>
       <button type="button" ref={closeRef}
         onClick={(e) => { e.stopPropagation(); onClose(); }}
         title="Close (Esc)" aria-label="Close inspection"
@@ -143,35 +211,50 @@ export default function DatasetLightbox({
           <ComparePane label={compare.afterLabel} alt={alt} url={url} accent />
         </div>
       ) : full ? (
-        <div className="flex-1 min-h-0 overflow-auto">
-          <img src={url} alt={alt}
+        <div className="flex-1 min-h-0 min-w-0 overflow-auto">
+          <img src={url} alt={alt} onLoad={onImageLoad}
             onClick={(e) => { e.stopPropagation(); setFull(false); }}
             className="max-w-none cursor-zoom-out select-none" />
         </div>
       ) : (
-        <div className="flex-1 min-h-0 flex items-center justify-center p-4">
-          <img src={url} alt={alt}
+        /* min-w-0 matters only in rail mode: without it this flex child refuses
+           to shrink below its content and the rail gets pushed off-screen. */
+        <div className="flex-1 min-h-0 min-w-0 flex items-center justify-center p-4">
+          <img src={url} alt={alt} onLoad={onImageLoad}
             onClick={(e) => { e.stopPropagation(); setFull(true); }}
             className="max-h-full max-w-full object-contain cursor-zoom-in select-none" />
         </div>
       )}
 
+      {/* DOM order is the SAME in both placements — meta, then compare, crop,
+          mirror, rotate, improve, then the Klein note. A rail that reads left
+          to right on screen but jumps around under Tab would trade one problem
+          for a worse one, so nothing here reorders itself; only the axis
+          changes. `overflow-y-auto` is the promise that a short window can
+          still reach the last action. */}
       <div onClick={(e) => e.stopPropagation()}
-        className="shrink-0 flex flex-wrap items-center justify-center gap-2 px-4 py-2.5 bg-black/60">
-        <span className="text-white text-sm">{alt}</span>
-        <span className="px-1.5 py-0.5 rounded text-[10px] bg-white/10 text-white/80">
-          {img.source === 'import' ? 'real' : 'generated'}{img.framing ? ` · ${img.framing}` : ''}
-        </span>
-        <PexelsAttribution metadata={img.source_metadata}
-          className="text-[11px] text-white/70" />
-        <span className="text-white/50 text-[11px]">
-          {inCompare
-            /* Zoom is OFF here, and says so. At 100 % a 2 MP result and a 0.5 MP
-               original cover different parts of the subject, which is exactly
-               the dishonest comparison this mode exists to avoid. */
-            ? 'same scale — exit comparison to zoom to 100 %'
-            : full ? '100 % — click image to fit' : 'fitted — click image for 100 %'}
-        </span>
+        className={rail
+          ? 'shrink-0 flex w-[17rem] flex-col items-stretch gap-2 overflow-y-auto border-l border-white/10 bg-black/60 px-4 pb-4 pt-14'
+          : 'shrink-0 flex flex-wrap items-center justify-center gap-2 px-4 py-2.5 bg-black/60'}>
+        {/* One group, so the rail stacks four lines of context instead of four
+            full-width blocks (a stretched 10 px pill reads as a button). */}
+        <div className={`flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 ${
+          rail ? 'justify-start' : 'justify-center'}`}>
+          <span className="text-white text-sm">{alt}</span>
+          <span className="px-1.5 py-0.5 rounded text-[10px] bg-white/10 text-white/80">
+            {img.source === 'import' ? 'real' : 'generated'}{img.framing ? ` · ${img.framing}` : ''}
+          </span>
+          <PexelsAttribution metadata={img.source_metadata}
+            className="text-[11px] text-white/70" />
+          <span className="text-white/50 text-[11px]">
+            {inCompare
+              /* Zoom is OFF here, and says so. At 100 % a 2 MP result and a 0.5 MP
+                 original cover different parts of the subject, which is exactly
+                 the dishonest comparison this mode exists to avoid. */
+              ? 'same scale — exit comparison to zoom to 100 %'
+              : full ? '100 % — click image to fit' : 'fitted — click image for 100 %'}
+          </span>
+        </div>
         {canCompare && (
           <button type="button" aria-pressed={comparing}
             onClick={(e) => { e.stopPropagation(); setFull(false); setComparing((v) => !v); }}
@@ -195,7 +278,7 @@ export default function DatasetLightbox({
         {onCrop && (
           <button type="button" onClick={() => onCrop(img)}
             title="Open the crop editor for this image (stretchable box, any ratio)"
-            className="px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold">
+            className="min-h-9 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold">
             ✂ Crop
           </button>
         )}
@@ -211,18 +294,23 @@ export default function DatasetLightbox({
         {onRotate && (
           /* The pair shares ONE row even on a 400 px screen: two full-width
              rows for two halves of the same gesture would push everything else
-             below the fold. Emoji stay aria-hidden — the label is the text. */
-          <div className="flex w-full items-stretch gap-2 sm:w-auto">
+             below the fold. In the rail the same row spans its full width —
+             `sm:flex-none` would otherwise leave them huddled on the left,
+             reading as a different kind of control than their neighbours.
+             Emoji stay aria-hidden — the label is the text. */
+          <div className={`flex items-stretch gap-2 ${rail ? 'w-full' : 'w-full sm:w-auto'}`}>
             <button type="button" onClick={rotate(270)} disabled={busy || mirrorBusy}
               aria-busy={mirrorBusy} aria-label={`Rotate ${alt} 90 degrees left`}
               title="Rotate 90° left (counter-clockwise) — keeps the file's format; four turns come back round"
-              className="min-h-9 flex-1 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-45 sm:flex-none">
+              className={`min-h-9 flex-1 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-45 ${
+                rail ? '' : 'sm:flex-none'}`}>
               <span aria-hidden="true">↺</span> Rotate left
             </button>
             <button type="button" onClick={rotate(90)} disabled={busy || mirrorBusy}
               aria-busy={mirrorBusy} aria-label={`Rotate ${alt} 90 degrees right`}
               title="Rotate 90° right (clockwise) — keeps the file's format; four turns come back round"
-              className="min-h-9 flex-1 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-45 sm:flex-none">
+              className={`min-h-9 flex-1 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-45 ${
+                rail ? '' : 'sm:flex-none'}`}>
               <span aria-hidden="true">↻</span> Rotate right
             </button>
           </div>
@@ -238,13 +326,21 @@ export default function DatasetLightbox({
         )}
         {/* Its strength, step count and instruction are all editable, and nothing
             here said so — the reported case for making settings discoverable from
-            where the action happens. `focus` lands on the strength block itself:
-            a label promising one setting must not leave the reader hunting for it
-            down a long section. */}
+            where the action happens. A link alone was not enough: it pointed at
+            the strength knobs while the complaint ("anime comes back realistic",
+            Qeeyana on Reddit) is caused by the INSTRUCTION. The note quotes that
+            instruction live and links to both. */}
+        {/* It stays glued to ✨, in both placements. It is what the button is
+            about to ask the model for, so it is only worth reading in the
+            second before clicking — parked anywhere else it becomes a stray
+            paragraph. The rail is where it fits BEST: it is prose, and a 15rem
+            column is a better shape for prose than a strip squeezed to the
+            right of six buttons. A rule above it ties it to the ✨ it explains. */}
         {onImprove && !improvementActive && (
-          <SettingsLink section="engines" focus="klein-improve-strength" className="self-center">
-            Adjust improve strength
-          </SettingsLink>
+          <KleinImproveNote subjectType={subjectType} datasetId={datasetId}
+            className={rail
+              ? 'w-full border-t border-white/10 pt-2'
+              : 'w-full sm:w-auto sm:max-w-md'} />
         )}
       </div>
     </div>

@@ -153,7 +153,34 @@ export default function ConceptFaceMaskField({
   // and it is exactly the moment to offer the install rather than report a defeat.
   const [needsFaceDetection, setNeedsFaceDetection] = useState(false);
 
-  if (!supported) return null;          // concept datasets only
+  // NOT a concept dataset. The server publishes `mask_faces_supported`
+  // deliberately — "so the panel states the reason instead of hiding it"
+  // (effective_train_settings) — and this component returned null anyway, so the
+  // row simply vanished and the feature read as missing rather than as
+  // inapplicable. Same contract as `masked_supported` and the dual-captions note
+  // right above it in the panel: the control is shown, disabled, with the reason.
+  if (!supported) {
+    return (
+      <div className="flex flex-col gap-0.5">
+        <label className="flex items-center gap-2 flex-wrap">
+          <span className="text-content-muted text-[0.75rem] w-28 shrink-0 inline-flex items-center gap-1">
+            Mask faces<HelpBadge topic="training.mask_faces" />
+          </span>
+          <input type="checkbox" checked={false} disabled readOnly
+            aria-label="Mask faces while training this concept"
+            className="h-4 w-4 rounded border-border bg-surface accent-indigo-500 opacity-40" />
+          <span className="text-content-subtle text-[0.75rem]">concept datasets only</span>
+        </label>
+        <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
+          A character LoRA has to learn the face, and a style LoRA has to learn how faces
+          are rendered — weighing faces down would amputate the very thing being trained.
+          This lever only applies to a <b className="text-content-muted font-medium">concept</b> dataset,
+          where the identities in your photos are incidental. Change the dataset type in
+          Dataset settings if that is what you meant to train.
+        </span>
+      </div>
+    );
+  }
 
   const runPreview = async () => {
     setErr(null);

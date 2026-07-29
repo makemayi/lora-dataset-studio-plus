@@ -63,13 +63,17 @@ export function trainingRunSelection(baseModel, trainType, variant) {
  * official sentinel. A non-empty local/custom selection then reaches the
  * authoritative server guard instead of silently falling back to official. */
 export function cloudTrainingLaunchPayload({
-  baseModel = '', variant, trainType, masked = true, steps, gpuName,
+  baseModel = '', variant, trainType, masked, steps, gpuName,
 } = {}) {
   return {
     base_model: baseModel,
     variant,
     train_type: trainType,
-    masked,
+    // Presence-conditional, like `masked` in canvasContinueRequest: person masking
+    // is a persisted DATASET setting now, so an OMITTED key means "the server reads
+    // the dataset", not "true". Sending an optimistic default from a panel whose
+    // settings had not loaded yet would overwrite a stored OFF on a PAID run.
+    ...(typeof masked === 'boolean' ? { masked } : {}),
     ...(steps ? { steps } : {}),
     ...(gpuName ? { gpu_name: gpuName } : {}),
   };

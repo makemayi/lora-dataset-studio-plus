@@ -75,3 +75,36 @@ export function memoryIsOverridden(stored) {
   const s = stored || {};
   return MEMORY_KEYS.some((k) => s[k] === true || s[k] === false);
 }
+
+/* The amber line under the checkboxes when a saver the CURRENT family's recipe
+   relies on is switched off — the panel half of the server's `memory_risk`
+   (lora_training.memory_saving_risk, which is also what the preflight reads).
+
+   Why this exists at all: these three flags live in one global `train_settings`
+   blob while the calibrated default is per family. Switching an off-by-default
+   2B family (Anima, SDXL) to a 12B DiT carried the `false` over and produced a
+   config with no quantisation, no low-VRAM streaming and no qtype — a recipe
+   that OOMs or crawls, built in silence. The flags still travel (they are a
+   statement about the CARD, not about the family, so remembering them per family
+   would answer a question nobody asked); what changes is that they are now said
+   out loud on the family that cannot afford them.
+
+   Returns null when the recipe is intact — the common case, which must stay
+   visually silent. `risk` is the server payload; nothing is recomputed here. */
+export function memoryRiskLine(risk, familyLabel) {
+  if (!risk || !(risk.disabled || []).length) return null;
+  const off = risk.disabled.map((k) => MEMORY_LABELS[k] || k).join(', ');
+  const fam = familyLabel || 'this family';
+  const need = risk.unquantised_vram_gb;
+  if (risk.verdict === 'can_disable') {
+    // The card covers it — still worth stating, because the state is unusual and
+    // the reason it is safe (the card) is not visible anywhere else on the panel.
+    return `${off} off — ${memoryCardLabel(risk) || 'your card'} covers the `
+      + `~${need} GB ${fam} needs without them.`;
+  }
+  const seen = risk.vram_gb ? `this card reports ${risk.vram_gb} GB`
+    : 'no card was detected here';
+  return `${off} off, but ${fam} needs roughly ${need} GB of VRAM without them `
+    + `and ${seen}. The run will not fail cleanly — it slows to a crawl for hours `
+    + 'while the driver pages to system RAM.';
+}

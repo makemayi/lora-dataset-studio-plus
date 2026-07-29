@@ -27,8 +27,17 @@
    testing: the component only applies the number. */
 
 const CHROME_BASE = 28;        // one control's own size, in board units
-// The whole corner cluster (🔍 + ✕, their gap and their padding) at scale 1…
-const CLUSTER_UNITS = 64;
+// The cluster's WIDTH budget at scale 1 — two controls, their gap and their
+// padding. Exported because the component must lay itself out inside exactly
+// this number: the cap below is spent on it, so a row that grew to three
+// buttons would spend 50 % more and shrink every target by a third.
+export const CLUSTER_UNITS = 64;
+// …which is why a third control WRAPS instead of widening the row. ⬇ Download
+// joined 🔍 and ✕ and the honest choice was between a narrower button and a
+// second line; the second line costs nothing (the node has vertical room to
+// spare in its corner) and it keeps 🔍 and ✕ at the exact pixel they have
+// always been, which muscle memory has a right to.
+export const CLUSTER_COLUMNS = 2;
 // …and the share of the node it is never allowed to exceed. The cap is on the
 // CLUSTER, not on one button: capping each button separately let two of them
 // side by side cover almost the entire width of a small tile.
@@ -51,12 +60,45 @@ export function chromeScale(boardScale, nodeW) {
   return Math.min(Math.max(1, wanted), cap);
 }
 
+/** The cluster's own box, in the UNSCALED units the component lays out in.
+ *  A hard max-width is what actually makes the third control wrap: without it
+ *  flex would happily draw a 96-unit row inside a 64-unit budget and every
+ *  target would silently lose a third of its size at low zoom. */
+export function clusterBox(buttonCount = 3) {
+  const rows = Math.max(1, Math.ceil(buttonCount / CLUSTER_COLUMNS));
+  return { maxWidth: CLUSTER_UNITS, rows };
+}
+
 /** What that control measures on screen, once counter-scaled — the number the
  *  proof is about ("is it big enough for a finger?"). */
 export function chromeScreenSize(boardScale, nodeW) {
   const s = Number(boardScale);
   if (!Number.isFinite(s) || s <= 0) return CHROME_BASE;
   return CHROME_BASE * chromeScale(s, nodeW) * s;
+}
+
+// 🖼🖼 The GRIP of a group of pinned images: the title bar you drag to move the
+// whole strip. Same problem as the buttons above and the same answer, with one
+// difference — a bar spans the strip's whole width, so it cannot be `scale()`d
+// (that would stretch it sideways too). Only its HEIGHT is counter-scaled.
+const BAR_BASE = 26;           // its height on screen, in pixels
+const MAX_BAR_FRACTION = 0.35; // …and the share of the strip it may never exceed
+
+/**
+ * How tall a group's drag bar must be drawn, in BOARD units, so it stays a
+ * finger-sized grip whatever the zoom.
+ *
+ * This bar is the ONLY way to move a group — dragging a picture inside a group
+ * means "take this one out" — so a bar that shrinks to four pixels at 24 % does
+ * not make the gesture awkward, it makes the group immovable.
+ */
+export function groupBarHeight(boardScale, groupH) {
+  const s = Number(boardScale);
+  const h = Number(groupH);
+  if (!Number.isFinite(s) || s <= 0) return BAR_BASE;
+  const wanted = Math.max(BAR_BASE, BAR_BASE / s);
+  const cap = Number.isFinite(h) && h > 0 ? Math.max(BAR_BASE, h * MAX_BAR_FRACTION) : Infinity;
+  return Math.min(wanted, cap);
 }
 
 /**
@@ -76,22 +118,32 @@ export function chromeScreenSize(boardScale, nodeW) {
  */
 export function isNodeControlTarget(target) {
   if (!target || typeof target.closest !== 'function') return false;
-  return !!target.closest('[data-canvas-image] button');
+  // A group's own ✕ is on the strip, not inside any one picture, so it needs
+  // naming here too — otherwise the frame captures its pointer and the button
+  // never hears the click, which is exactly the bug this guard exists for.
+  return !!(target.closest('[data-canvas-image] button')
+    || target.closest('[data-canvas-group-bar] button'));
 }
 
 /**
  * What a pointerdown inside a pinned node means:
- *   'control' — a button: hands off entirely, no capture, no long press;
- *   'resize'  — the corner handle: resize immediately, on every pointer type;
- *   'move'    — mouse/pen on the picture: pick it up;
- *   'press'   — touch on the picture: pan for now, pick it up on a long press.
+ *   'control'    — a button: hands off entirely, no capture, no long press;
+ *   'group-move' — a group's title bar: move the WHOLE strip, on any pointer
+ *                  type. It is a bar you deliberately grabbed; making a finger
+ *                  wait out a long press on it would be gratuitous, and it is
+ *                  the only grip a group has;
+ *   'resize'     — the corner handle: resize immediately, on every pointer type;
+ *   'move'       — mouse/pen on the picture: pick it up;
+ *   'press'      — touch on the picture: pan for now, pick it up on a long press.
  *
  * One function instead of a chain of `if`s inside the handler, so the rule
  * "a control is never a gesture" is a thing a test can hold on to.
  */
 export function nodePointerIntent(target, pointerType) {
   if (!target || typeof target.closest !== 'function') return 'press';
-  if (target.closest('[data-canvas-image] button')) return 'control';
+  if (target.closest('[data-canvas-image] button')
+    || target.closest('[data-canvas-group-bar] button')) return 'control';
+  if (target.closest('[data-canvas-group-bar]')) return 'group-move';
   if (target.closest('[data-canvas-image-resize]')) return 'resize';
   return pointerType === 'touch' ? 'press' : 'move';
 }

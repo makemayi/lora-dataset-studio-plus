@@ -587,9 +587,20 @@ function IdentityPromptsCard({ config, setField, promptDefaults, promptDefaultsB
       <PromptPreview subject={subject} identityPrompts={ip} />
 
       <div className="border-t border-border pt-4">
+        {/* The second sentence is the honest half. The default asks for
+            PHOTOGRAPHIC detail, and the app does not vary it by subject type, so
+            on a drawn dataset it works against the anime lock every other prompt
+            here enforces. The default is deliberately left as-is — people have
+            calibrated their results on it — but saying nothing turned that into
+            "the tool ruins my anime" (Qeeyana, Reddit). */}
         <p className="mb-2 text-xs text-content-subtle">
           The prompt below is <strong>not</strong> per subject type — it asks for texture and
-          detail, which means the same thing for a person, a dog or a car.
+          detail, which means the same thing for a person, a dog or a car.{' '}
+          <span className="text-amber-300">
+            It does <strong>not</strong> mean the same thing for a drawing: the built-in text asks for
+            photographic detail, so on an Anime dataset it pushes skin and fabric towards realism.
+            Rewrite it below, or untick the box above to upscale with no prompt at all.
+          </span>
         </p>
         <label htmlFor="identity-prompt-klein-improve-enabled" className="flex items-center gap-2 text-sm font-medium text-content">
           <input

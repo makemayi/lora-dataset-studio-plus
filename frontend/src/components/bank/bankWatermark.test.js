@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   cropLevelState, findLevelState, hasCleanedImages, inpaintLevelState, levelCounts,
-  progressSummary, rescanNote,
+  maskNote, progressSummary, rescanNote,
 } from './bankWatermark.js';
 
 const levels = (over = {}) => ({
@@ -14,8 +14,30 @@ test('levelCounts: a missing payload reads as zeros, never NaN', () => {
   assert.deepEqual(levelCounts(null), {
     scanned: 0, unscanned: 0, flagged: 0, croppable: 0, inpaintable: 0,
     cropped: 0, inpainted: 0, dismissed: 0, needsRescan: 0,
+    handMasked: 0, emptyMasks: 0,
   });
   assert.equal(levelCounts({ flagged: 'x' }).flagged, 0);
+});
+
+test('hand-edited masks are reported, and an EMPTY one is called out', () => {
+  assert.equal(maskNote(levels()), null);            // nothing edited → no noise
+  const drawn = maskNote(levels({ hand_masked: 3 }));
+  assert.match(drawn, /3 flagged image/);
+  assert.match(drawn, /Inpaint/);
+  assert.match(drawn, /Auto-crop skips/);
+  const emptied = maskNote(levels({ hand_masked: 3, empty_masks: 1 }));
+  assert.match(emptied, /EMPTY mask/);
+  assert.match(emptied, /neither level/);            // it is cleaned by NOTHING
+});
+
+test('crop off because every flagged image is hand-masked says THAT, not "no border"', () => {
+  const s = cropLevelState(levels({ flagged: 2, croppable: 0, hand_masked: 2 }));
+  assert.equal(s.disabled, true);
+  assert.match(s.reason, /hand-edited mask/);
+  assert.doesNotMatch(s.reason, /border/);
+  // A partially hand-masked pool keeps the ordinary explanation.
+  assert.match(cropLevelState(levels({ flagged: 2, croppable: 0, hand_masked: 1 })).reason,
+    /border/);
 });
 
 test('level 1 is live whenever something is croppable — it needs no model at all', () => {

@@ -673,7 +673,12 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
   }, [searchText])
   const goto = (off) => { setOffset(off); refreshImages(filter, off) }
 
-  const act = async (fn, okMsg) => {
+  /* `onRefusal` is for a caller that OWNS a surface for the refusal — today the
+     🚀 Launch all dialog, which draws it next to the checkboxes it is about and
+     stays open so they survive. When it is given, the message goes THERE instead
+     of to a toast: two copies of the same sentence is not twice as clear. Every
+     other button keeps the toast, because it has nowhere else to put it. */
+  const act = async (fn, okMsg, { onRefusal } = {}) => {
     try {
       const d = await fn()
       if (okMsg) toast.success(okMsg)
@@ -689,9 +694,11 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
       // panel, 🗑 Delete rejected, ⬆ Promote, 🚀 Launch all. Anything else keeps
       // its own message — only a refusal that identified itself is reworded.
       const kind = e?.body?.busy_kind
-      toast.error(e?.status === 409 && kind
+      const message = e?.status === 409 && kind
         ? busyRefusal({ kind, activity: payload?.activity })
-        : (e?.message || 'Action failed.'))
+        : (e?.message || 'Action failed.')
+      if (onRefusal) onRefusal(message)
+      else toast.error(message)
       return null
     }
   }
@@ -709,10 +716,18 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
       ...(captionVocab ? { vocabulary: captionVocab } : {}),
     }), null)
   const cancelJob = () => act(() => postJson(`/api/bank/${bankId}/cancel`, {}), null)
+  /* Posts with the dialog still OPEN and answers {ok,error}: a refused launch —
+     "a scan job is already running on this bank" is the usual one — used to close
+     the dialog first and reset all seven pass checkboxes and the reject flags to
+     their defaults. The dialog decides what to do with the answer. */
   const startPipeline = async (config) => {
+    let error = null
+    const d = await act(() => postJson(`/api/bank/${bankId}/pipeline`, config),
+      '🚀 Launch all started — you can walk away; Stop any time.',
+      { onRefusal: (m) => { error = m } })
+    if (!d) return { ok: false, error }
     setLaunchOpen(false)
-    await act(() => postJson(`/api/bank/${bankId}/pipeline`, config),
-      '🚀 Launch all started — you can walk away; Stop any time.')
+    return { ok: true }
   }
 
   const batchStatus = async (ids, status) => {
@@ -1043,6 +1058,23 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
               className="shrink-0 rounded border border-border px-2 py-0.5 text-xs text-content-muted hover:bg-surface-raised hover:text-content">
               📦 Move folder…
             </button>
+          </div>
+        )}
+        {/* A bank created before this was refused can still point at a dataset's
+            own image folder. Nothing is repaired behind the user's back — the
+            bank stays fully readable — but the fact is stated every time it is
+            opened, because the click that hurts (🗑 Delete rejected) is right
+            here on this page. */}
+        {payload?.dataset_conflict && (
+          <div role="alert"
+            className="rounded-md border border-rose-500/70 bg-rose-500/15 p-3 text-sm text-rose-100 space-y-1">
+            <p className="font-semibold">⛔ This bank sits on a dataset’s image folder</p>
+            <p className="text-rose-100/90">{payload.dataset_conflict.message}</p>
+            <p className="text-rose-100/90">
+              🗑 Delete rejected is disabled here. Use 📦 Move folder… to point this
+              bank at a folder of its own, or remove the bank — removing a bank never
+              touches files.
+            </p>
           </div>
         )}
         <FolderSyncNote sync={payload?.folder_sync}
@@ -1857,11 +1889,16 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
           className="rounded-md bg-gradient-primary px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50">
           ⬆ Promote…
         </button>
+        {/* Disabled outright when this bank's folder belongs to a dataset: the
+            banner above says it is, and a button that still opened a dialog only
+            to be refused there would make that sentence a lie. */}
         <button type="button" onClick={() => setDeleteRejectedOpen(true)}
-          disabled={live || !(counts?.reject > 0)}
-          title={(counts?.reject > 0)
-            ? 'Delete the rejected images from your disk (OS trash when available). Irreversible — asks you to type DELETE first. Kept images are untouched.'
-            : 'No rejected images to delete'}
+          disabled={live || !(counts?.reject > 0) || !!payload?.dataset_conflict}
+          title={payload?.dataset_conflict
+            ? 'This bank sits on a dataset’s image folder — deleting these files would delete the dataset’s images.'
+            : (counts?.reject > 0)
+              ? 'Delete the rejected images from your disk (OS trash when available). Irreversible — asks you to type DELETE first. Kept images are untouched.'
+              : 'No rejected images to delete'}
           className="rounded-md border border-rose-500/50 px-3 py-1.5 text-sm text-rose-300 disabled:opacity-40 hover:bg-rose-500/10">
           🗑 Delete rejected from disk{(counts?.reject > 0) ? ` (${counts.reject})` : ''}
         </button>

@@ -2,6 +2,32 @@ import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import pytest
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import _basetemp_guard
+
+
+def pytest_configure(config):
+    """Refuse a --basetemp another live pytest run already owns.
+
+    pytest rm_rf's the basetemp it is given (see _basetemp_guard), so two runs
+    sharing one wipe each other's tmp_path trees mid-flight and fail on things
+    that have nothing to do with the code. Several agents running this suite in
+    parallel is now the norm, so the collision is refused here — with a message
+    naming the other run — instead of surfacing as a phantom failure plus a
+    handful of "ERROR at setup" half a suite later."""
+    basetemp = getattr(config.option, 'basetemp', None)
+    if not basetemp:
+        return                        # no --basetemp: pytest numbers per run, safe
+    conflict = _basetemp_guard.claim(basetemp)
+    if conflict:
+        pytest.exit(conflict, returncode=pytest.ExitCode.USAGE_ERROR)
+
+
+def pytest_unconfigure(config):
+    basetemp = getattr(config.option, 'basetemp', None)
+    if basetemp:
+        _basetemp_guard.release(basetemp)
+
 @pytest.fixture(autouse=True)
 def _restore_secret_env():
     """set_secrets() writes os.environ directly; snapshot & restore the secret keys.
@@ -23,6 +49,30 @@ def _restore_secret_env():
             os.environ.pop(k, None)
         else:
             os.environ[k] = v
+
+@pytest.fixture(autouse=True)
+def _no_live_comfyui_vram_release(monkeypatch):
+    """Every GPU-exclusive vision window POSTs /free to ComfyUI — for real.
+
+    `gpu_exclusive_vision_window` calls `free_comfyui_vram()`, which is a live
+    `requests.post('<comfyui>/free', {"unload_models": true, "free_memory": true})`
+    with a 10 s timeout. Nothing mocks it, so on a developer machine where
+    ComfyUI is running the unit suite REALLY unloads that ComfyUI's models —
+    measured 2026-07-28: eleven test files reach 127.0.0.1:8188, among them the
+    whole bank-vision-concurrency file.
+
+    Two costs, and the second is the one that gets misfiled. It has a side
+    effect on a program nobody asked it to touch; and its duration is whatever
+    that program happens to be doing — instant when ComfyUI is idle, seconds
+    when it is mid-generation, the full 10 s timeout when the port answers but
+    the server is wedged. A test asserting "Stop returns in under 5 s" then
+    passes or fails on the state of an unrelated process. That is not a flake,
+    it is an undeclared dependency.
+
+    Tests that are ABOUT this call (test_vision_features) monkeypatch it
+    themselves; a later setattr wins over this one, so they are unaffected."""
+    monkeypatch.setattr('app.utils.comfyui.free_comfyui_vram', lambda *a, **k: True)
+
 
 @pytest.fixture(autouse=True)
 def _reset_inmemory_registries():
@@ -58,6 +108,7 @@ def _reset_inmemory_registries():
     bank_jobs.reset()
     bank_undo.reset()
     image_bank_service.reset_folder_sync()
+    image_bank_service.reset_score_memo()
     vision_keepalive.forget_lease()
     clip_text_encoder.forget_memory_cache()
     yield
@@ -65,6 +116,7 @@ def _reset_inmemory_registries():
     bank_jobs.reset()
     bank_undo.reset()
     image_bank_service.reset_folder_sync()
+    image_bank_service.reset_score_memo()
     vision_keepalive.forget_lease()
     clip_text_encoder.forget_memory_cache()
     clip_text_encoder.release()
@@ -84,6 +136,21 @@ def app(tmp_path, monkeypatch):
     # a test asserting "ComfyUI unconfigured -> RuntimeError" silently inherited a
     # previous test's real base_dir and passed for the wrong reason.
     monkeypatch.setattr(_cfg, '_cache', None)
+    # capabilities.py caches its WHOLE probe for 30 s in a module global, and that
+    # clock does not know tests exist: a file that ran seconds earlier -- with its
+    # own tmp config, so legitimately seeing no ai-toolkit -- leaves 'aitoolkit
+    # invalid' in the cache, and the next test's `client.get(.../preflight)` gets
+    # 409 instead of 200 no matter what config IT wrote. Reproduced 2/2 by running
+    # test_masked_dataset_setting.py before test_training_preflight.py.
+    #
+    # Same class as the two bank tests that failed a release this morning: a test
+    # whose answer depends on a shared clock fails INTERMITTENTLY, and intermittent
+    # reads as random. Clearing both caches per test makes the suite say what the
+    # test set up, and nothing else.
+    import app.capabilities as _caps
+    monkeypatch.setattr(_caps, '_cache', None)
+    monkeypatch.setattr(_caps, '_cache_ts', 0.0)
+    _caps._import_cache.clear()
     from app import create_app
     application = create_app({'TESTING': True, 'WTF_CSRF_ENABLED': False,
                               'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:'})
@@ -92,3 +159,32 @@ def app(tmp_path, monkeypatch):
 @pytest.fixture()
 def client(app):
     return app.test_client()
+
+
+@pytest.fixture(autouse=True)
+def _no_hugging_face_gate_call(request, monkeypatch):
+    """Keep the unit suite off the public internet.
+
+    `cloud_training._assert_official_base_reachable` really opens
+    https://huggingface.co/api/models/<repo>/tree/main, with an 8 s timeout, and
+    **83 tests reached it** — measured, not estimated. Two costs, one of which
+    has not been paid yet:
+
+    * duration, and it is the answer to a mystery from 2026-07-28: two agents
+      saw the suite take 620 s instead of 505 s and read that as the CAUSE of
+      failing tests. It was this, a network dependency nobody declared;
+    * a release trap. The call fails OPEN on timeouts and outages, but it RAISES
+      on 401/403. The day HF gates a base, changes a quota, or a stale token is
+      present, ~83 cloud tests fail at once and it will look exactly like a
+      flake storm — the same shape as the ordering bug that failed a release
+      that morning.
+
+    A unit test must never depend on someone else's uptime. The tests that exist
+    to exercise this gate opt back in with @pytest.mark.hf_gate, and they stub
+    urlopen themselves, so the behaviour stays covered — only the traffic goes.
+    """
+    if request.node.get_closest_marker('hf_gate'):
+        return
+    from app.services import cloud_training as _ct
+    monkeypatch.setattr(_ct, '_assert_official_base_reachable',
+                        lambda *a, **k: None, raising=False)

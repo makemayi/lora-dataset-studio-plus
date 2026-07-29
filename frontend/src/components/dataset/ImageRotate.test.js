@@ -47,7 +47,11 @@ test('the dataset lightbox offers both directions, labelled and keyboard reachab
   assert.match(lightbox, /onClick=\{rotate\(90\)\}/);
   assert.ok(lightbox.includes('<span aria-hidden="true">↺</span> Rotate left'));
   // 400 px: the pair shares ONE row instead of stacking two full-width buttons.
-  assert.match(lightbox, /flex w-full items-stretch gap-2 sm:w-auto/);
+  // The bar can now also live in a side rail (lightboxActionPlacement.js), but
+  // that placement is unreachable below 1024 px, so the phone branch is still
+  // the `w-full sm:w-auto` one and both buttons still flex to share the row.
+  assert.match(lightbox, /flex items-stretch gap-2 \$\{rail \? 'w-full' : 'w-full sm:w-auto'\}/);
+  assert.match(lightbox, /min-h-9 flex-1 rounded-lg[\s\S]*rail \? '' : 'sm:flex-none'/);
   assert.match(workspace, /onRotate=\{viewImgLive\._rescueReviewPreview \? undefined : ds\.rotateImage\}/);
 });
 

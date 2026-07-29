@@ -460,6 +460,19 @@ export default function SetupPage() {
                 <span className="font-mono"> &lt;ComfyUI&gt;/models/unet/klein/</span> — the <span className="text-content font-medium">KV build</span>,
                 up to 2.5× faster on multi-reference edits at the same quality, and a public download (no token).
               </p>
+              {/* That folder is where the button below DOWNLOADS to, and it read as
+                  where the file MUST be: CyberTod (Reddit) duplicated the weights
+                  into it and built a symlink to claim the disk space back. The
+                  resolver has always scanned both diffusion-model roots, their top
+                  level and every extra_model_paths root — so say it, right here. */}
+              <p>
+                <span className="text-content font-medium">Already have Klein somewhere else?</span> Leave it there —
+                no copy and no symlink. The app looks in any <span className="font-mono">klein</span>-named sub-folder of{' '}
+                <span className="font-mono">models/unet</span> <em>or</em> <span className="font-mono">models/diffusion_models</span>,
+                at the top level of either (when the file name contains <span className="font-mono">klein</span>), and in every
+                root declared by your <span className="font-mono">extra_model_paths.yaml</span>. A relocated models folder is
+                handled by the <span className="text-content font-medium">ComfyUI models folder</span> override in Settings.
+              </p>
               <p>
                 Also recommended: the <span className="text-content font-medium">consistency LoRA</span>{' '}
                 <span className="font-mono">Flux2-Klein-9B-consistency-V2.safetensors</span> (331 MB) — a community LoRA by

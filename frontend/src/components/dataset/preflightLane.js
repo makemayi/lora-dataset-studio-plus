@@ -24,12 +24,19 @@ export function laneOfPayload(payload) {
 
 /** GET url for the preflight. `lane` is only sent for the cloud lane: a request
  * with no `lane` must stay byte-for-byte the historical one, so nothing that
- * already calls this route (the workspace readiness badge) changes behaviour. */
-export function preflightUrl(datasetId, { trainType, variant, lane } = {}) {
+ * already calls this route (the workspace readiness badge) changes behaviour.
+ *
+ * `masked` follows the same rule for the opposite reason. Whether the run wants
+ * person masks is a localStorage preference the server cannot read, so a launch
+ * states it and gets the "rembg is missing, this run trains unmasked" row; a
+ * caller that has no opinion (the readiness badge) omits it and gets no row,
+ * rather than a warning about a mask nobody asked for. */
+export function preflightUrl(datasetId, { trainType, variant, lane, masked } = {}) {
   const qs = [];
   if (trainType) qs.push(`train_type=${encodeURIComponent(trainType)}`);
   if (variant) qs.push(`variant=${encodeURIComponent(variant)}`);
   if (normalizeLane(lane) === 'cloud') qs.push('lane=cloud');
+  if (masked !== undefined && masked !== null) qs.push(`masked=${masked ? '1' : '0'}`);
   return `/api/dataset/${datasetId}/train/preflight${qs.length ? `?${qs.join('&')}` : ''}`;
 }
 

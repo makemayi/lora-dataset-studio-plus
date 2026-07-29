@@ -5,6 +5,16 @@ import pytest
 from app.config import LOCAL_USER
 
 
+@pytest.fixture(autouse=True)
+def _rembg_installed(monkeypatch):
+    """Person masking is ON by default, so the `person_mask` row now depends on
+    whether rembg is installed ON THIS MACHINE. Pin it available so these tests
+    describe the dataset, not the box they run on (test_masked_dataset_setting.py
+    owns the missing-rembg case)."""
+    from app.services import person_mask
+    monkeypatch.setattr(person_mask, 'is_available', lambda: True)
+
+
 def _mk(app, n_keep=0, framing='face', caption='a nice varied caption with many words',
         train_type='zimage', fidelity=None, extra_rows=()):
     from app.services import face_dataset_service as svc

@@ -33,8 +33,9 @@ test('the path field stays editable (pasting a path still works)', () => {
 });
 
 test('the in-app browser lists folders only and never writes', () => {
-  // "Use this folder" is disabled at the drive roots (must descend into a dir).
-  assert.match(picker, /disabled=\{atRoot \|\| loading\}/);
+  // "Use this folder" is disabled at the drive roots (must descend into a dir),
+  // and while the pick it already sent is in flight (ModalRefusalKeepsInput).
+  assert.match(picker, /disabled=\{busy \|\| atRoot \|\| loading\}/);
   // Only the GET listing + the native POST are called — no mutating folder call.
   assert.doesNotMatch(picker, /\/api\/system\/(create|delete|write)/);
 });

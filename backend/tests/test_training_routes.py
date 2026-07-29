@@ -168,6 +168,48 @@ def test_continue_forwards_kwargs(client, monkeypatch):
     }
 
 
+def test_continue_forwards_from_step_and_overrides(client, monkeypatch):
+    """The LoRA Canvas ALWAYS names the step it resumes (utils/canvasContinue.js):
+    a lane's run dir can hold several runs' saves, so an implicit "resume in
+    place" would continue a different run than the card that was clicked."""
+    _valid(monkeypatch, True)
+    ds_id = _create(client)
+    captured = {}
+
+    def fake_continue(user_id, dataset_id, **kw):
+        captured.update(kw)
+        return {'started': True, 'resumed_from': 2500, 'target_steps': 3500}
+
+    monkeypatch.setattr('app.services.lora_training.continue_training', fake_continue)
+    resp = client.post(f'/api/dataset/{ds_id}/train/continue', json={
+        'extra_steps': 1000, 'from_step': 2500, 'overrides': {'lr_factor': 0.5},
+    })
+    assert resp.status_code == 200
+    assert captured['from_step'] == 2500
+    assert captured['overrides'] == {'lr_factor': 0.5}
+
+
+def test_continue_from_a_vanished_checkpoint_is_refused_with_the_real_reason(
+        client, monkeypatch):
+    """A save the board still draws can be gone by the time it is clicked (deleted
+    elsewhere, set aside by a continuation). The route must return the service's
+    OWN sentence — which names the steps that DO exist — because that string is
+    what the UI shows the user. A generic 500 would read as a dead button."""
+    _valid(monkeypatch, True)
+    ds_id = _create(client)
+
+    def fake_continue(user_id, dataset_id, **kw):
+        raise ValueError('no local checkpoint at step 2500 for this run '
+                         '(available: [500, 1000])')
+
+    monkeypatch.setattr('app.services.lora_training.continue_training', fake_continue)
+    resp = client.post(f'/api/dataset/{ds_id}/train/continue',
+                       json={'extra_steps': 1000, 'from_step': 2500})
+    assert resp.status_code == 400
+    assert 'no local checkpoint at step 2500' in resp.get_json()['error']
+    assert '[500, 1000]' in resp.get_json()['error']
+
+
 # --- /train/enqueue ----------------------------------------------------------
 
 def test_enqueue_forwards_kwargs(client, monkeypatch):
@@ -187,7 +229,10 @@ def test_enqueue_forwards_kwargs(client, monkeypatch):
     assert resp.status_code == 200
     assert captured == {
         'extra_steps': 500,
-        'masked': True,
+        # Absent from the request = the SERVICE reads the dataset's stored
+        # `masked` setting (it used to be a browser-only value the route
+        # substituted True for, which made the stored value unreachable).
+        'masked': None,
         'steps': 3000,
         'allow_caption_mismatch': True,
         'allow_caption_quality': True,
@@ -228,7 +273,10 @@ def test_schedule_future_enqueues_with_not_before(client, monkeypatch):
     assert captured == {
         'extra_steps': None,
         'not_before': '2999-01-01T00:00',
-        'masked': True,
+        # Absent from the request = the SERVICE reads the dataset's stored
+        # `masked` setting (it used to be a browser-only value the route
+        # substituted True for, which made the stored value unreachable).
+        'masked': None,
         'allow_caption_quality': True,
     }
 

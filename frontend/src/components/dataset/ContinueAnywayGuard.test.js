@@ -34,7 +34,12 @@ test('the Train button relaxes the image-floor gate only when acknowledged', () 
 });
 
 test('the preflight gate lets a bypassable blocker through only with the ack', () => {
-  assert.match(panel, /if \(!\(d\.can_override && allowNotReady\)\) \{ toast\.error\(d\.blockers\.join/);
+  assert.match(panel, /if \(!\(d\.can_override && allowNotReady\)\) \{[\s\S]{0,120}?d\.blockers\.join/);
+  // …and the blockers are SAID, wherever the caller can be heard: a toast for
+  // the launch buttons (nothing is open to show it in), the still-open ▶ Continue
+  // dialog when it passes onRefused — so a refused continuation no longer throws
+  // away the lane, the checkpoint and the settings that were picked.
+  assert.match(panel, /if \(onRefused\) onRefused\(msg\); else toast\.error\(msg\);/);
 });
 
 test('every launch lane carries allow_not_ready when acknowledged', () => {

@@ -36,6 +36,8 @@ import requests
 from flask import current_app
 
 from .. import config as cfg
+from . import comfy_names
+from .comfy_names import local_model_path
 
 logger = logging.getLogger(__name__)
 
@@ -430,6 +432,30 @@ def queue_prompt_to_comfyui(prompt_workflow, client_id, worker_url=None):
         except Exception as e:
             logger.error(f"Error checking for Ollama dependency: {e}")
 
+    # Model-file widgets: respell them the way THIS ComfyUI spells them, because
+    # its validator does an exact string match and nothing else (execution.py:
+    # `val not in combo_options`). The separator is a property of ComfyUI's HOST,
+    # never of ours: measured, a Windows ComfyUI publishes
+    # 'Krea\krea2_turbo_fp8.safetensors' and a Linux one 'Krea/krea2…' — so both
+    # a hardcoded backslash (which is what shipped, and made Linux generate
+    # NOTHING: GitHub #21, 1Tomber) and a hardcoded forward slash (which would
+    # take out every Windows install) are wrong. `/object_info` already tells us,
+    # and it is the same cached payload the two preflights below read, so this
+    # costs no extra request.
+    #
+    # Local only for the LIST — /object_info is fetched from api_address(), so a
+    # remote worker must not be judged against the local install's models. It
+    # still gets the os.sep fallback, which is what it had before.
+    try:
+        listed = fetch_object_info_model_files() if is_local else None
+        prompt_workflow, respelled = comfy_names.canonical_model_widgets(
+            prompt_workflow, listed)
+        if respelled:
+            logger.info('Model widget names respelled for the target ComfyUI: %d',
+                        respelled)
+    except Exception as e:      # a naming helper must never be what blocks a job
+        logger.warning(f"Model-name canonicalisation skipped: {e}")
+
     # Capability preflight on the graph itself, LOCAL only. Our workflows pin widget
     # values (a scheduler, a sampler, a dtype) that a given install only accepts if
     # it is recent enough or loaded the node pack that registers them. Left alone,
@@ -820,15 +846,12 @@ ENUM_VALUE_SOURCES = {
 # lists ONLY for the loader classes our own graphs actually emit, not for every
 # pack installed. `UnetLoaderGGUF` is listed so its presence is observable — NOT
 # because our graphs use it (they do not; see `_GGUF_PACK`).
-_MODEL_FILE_CLASSES = frozenset({
-    'UNETLoader', 'CheckpointLoaderSimple', 'VAELoader', 'CLIPLoader',
-    'DualCLIPLoader', 'LoraLoaderModelOnly', 'LoraLoader', 'ControlNetLoader',
-    'UnetLoaderGGUF', 'UnetLoaderGGUFAdvanced', 'CLIPLoaderGGUF', 'DualCLIPLoaderGGUF',
-})
-_MODEL_FILE_INPUTS = frozenset({
-    'unet_name', 'ckpt_name', 'vae_name', 'clip_name', 'clip_name1', 'clip_name2',
-    'lora_name', 'control_net_name', 'style_model_name',
-})
+#
+# Defined in utils.comfy_names, which also owns the emit-time canonicaliser: the
+# preflight ("does this install list the name?") and the rewrite ("spell it the
+# way this install does") must read the same two sets or they drift apart.
+_MODEL_FILE_CLASSES = comfy_names.MODEL_FILE_CLASSES
+_MODEL_FILE_INPUTS = comfy_names.MODEL_FILE_INPUTS
 
 # Reported by naniii2352 (Discord, displayed name Dexter): a Krea 2 model
 # quantised to GGUF (`krea2_turbo-Q4_K_M.gguf`) that no folder would make work.
@@ -875,22 +898,23 @@ def _distill_object_info(data):
     return out
 
 
-def _normalise_model_name(name):
-    """Comparison key for a ComfyUI model file name.
-
-    ComfyUI joins a subfolder with the HOST's os.sep (backslash on Windows,
-    forward slash in a Linux container) while several of our resolvers
-    backslash-join their own names; Windows model folders are case-insensitive.
-    Comparing raw strings would therefore report a perfectly loadable model as
-    missing on half the installs — a false positive here BLOCKS a working setup,
-    so both separators and case are flattened before deciding."""
-    return name.replace('\\', '/').casefold()
+# Comparison key for a ComfyUI model file name — see comfy_names for the why.
+# ComfyUI joins a subfolder with its OWN host's os.sep (measured: backslash on a
+# live Windows 0.27.0, forward slash on the Linux install of GitHub #21), and the
+# two ends of the wire need not be the same host, so raw comparison is never
+# right in either direction.
+_normalise_model_name = comfy_names.normalise_model_name
 
 
 def _distill_model_files(data):
-    """{class_type: {input_name: frozenset(names)}} for the FILE inputs of the
-    loader classes we ship (`_MODEL_FILE_CLASSES` / `_MODEL_FILE_INPUTS`), with
-    names normalised by `_normalise_model_name`.
+    """{class_type: {input_name: {normalised_name: PUBLISHED name}}} for the FILE
+    inputs of the loader classes we ship (`_MODEL_FILE_CLASSES` /
+    `_MODEL_FILE_INPUTS`).
+
+    A mapping and not a set of keys: since GitHub #21 we do not only ask "does
+    this install list the model?", we also need to WRITE BACK the exact string it
+    published, because that is the only spelling its validator accepts. `in`
+    still reads the keys, so every existing caller is unchanged.
 
     Restricted to those classes on purpose: this is the half of /object_info the
     enum view drops wholesale for size, and a node-rich install repeats the same
@@ -911,7 +935,7 @@ def _distill_model_files(data):
                         continue
                     choices = decl[0] if isinstance(decl, (list, tuple)) and decl else None
                     if isinstance(choices, list) and all(isinstance(v, str) for v in choices):
-                        combos[name] = frozenset(_normalise_model_name(v) for v in choices)
+                        combos[name] = {_normalise_model_name(v): v for v in choices}
         if combos:
             out[cls] = combos
     return out
@@ -1260,20 +1284,24 @@ def family_of_lora(filename: str) -> str | None:
     entraînés atterrissent dans ``loras/sdxl``, ``loras/krea`` ou ``loras/z image``
     (cf. lora_training._lora_dest_dir). La famille est donc une fonction du chemin —
     pas besoin de la stocker en base. Renvoie None si pas de préfixe de dossier connu."""
-    low = (filename or '').replace('/', '\\').lower()
-    if low.startswith('sdxl\\'):
+    # Comparaison, pas un chemin : le nom arrive dans l'une OU l'autre convention
+    # (Windows, Linux, valeur relue d'une config écrite sur l'autre OS), donc on
+    # aplatit d'abord sur '/' — le même pivot que comfy_names.normalise_model_name,
+    # pour qu'il n'y ait qu'UNE forme normalisée dans toute l'app.
+    low = (filename or '').replace('\\', '/').lower()
+    if low.startswith('sdxl/'):
         return 'sdxl'
-    if low.startswith('krea\\'):
+    if low.startswith('krea/'):
         return 'krea'
-    # flux2klein AVANT flux par lisibilité seulement : « flux\\ » exige le backslash
-    # juste après « flux », donc « flux2klein\\x » ne le matche pas — pas d'ambiguïté.
-    if low.startswith('flux2klein\\'):
+    # flux2klein AVANT flux par lisibilité seulement : « flux/ » exige le séparateur
+    # juste après « flux », donc « flux2klein/x » ne le matche pas — pas d'ambiguïté.
+    if low.startswith('flux2klein/'):
         return 'flux2klein'
-    if low.startswith('flux\\'):
+    if low.startswith('flux/'):
         return 'flux'
-    if low.startswith('anima\\'):
+    if low.startswith('anima/'):
         return 'anima'
-    if low.startswith(('z image\\', 'zimage\\', 'z-image\\')):
+    if low.startswith(('z image/', 'zimage/', 'z-image/')):
         return 'zimage'
     return None
 
@@ -1605,15 +1633,21 @@ def resolve_checkpoint_ckpt_name(name):
     """Map a checkpoint BASENAME (as returned by get_checkpoint_models, which strips
     the folder via os.path.basename) to the path RELATIVE to models/checkpoints that
     ComfyUI's CheckpointLoaderSimple expects, e.g. 'bigLove_photo5.safetensors' ->
-    'Biglove\\bigLove_photo5.safetensors', but 'sam3.1_…' stays at the root.
+    'Biglove/bigLove_photo5.safetensors' on Linux, 'Biglove\\bigLove_photo5.safetensors'
+    on Windows, but 'sam3.1_…' stays at the root.
 
     Without this the loader rejects the prompt (400 'value_not_in_list'). Names that
-    already contain a separator (already a relative path) are returned unchanged;
-    unknown names — or an unconfigured ComfyUI output dir — fall back to themselves."""
+    already contain a separator (already a relative path) keep their segments;
+    unknown names — or an unconfigured ComfyUI output dir — fall back to themselves.
+
+    The separator is the one of the tree we WALKED (os.sep), never a hardcoded
+    backslash: it used to be, and on Linux that made every subfoldered checkpoint
+    unloadable (GitHub #21, 1Tomber). `queue_prompt_to_comfyui` has the last word
+    and respells this against the target install's published list."""
     if not name:
         return name
     if "\\" in name or "/" in name:
-        return name.replace("/", "\\")
+        return local_model_path(name)
     out_dir = _out_dir()
     if not out_dir:
         return name
@@ -1621,8 +1655,7 @@ def resolve_checkpoint_ckpt_name(name):
         ck_dir = os.path.normpath(os.path.join(out_dir, "..", "models", "checkpoints"))
         for root, _dirs, files in os.walk(ck_dir):
             if name in files:
-                rel = os.path.relpath(os.path.join(root, name), ck_dir)
-                return rel.replace("/", "\\")
+                return os.path.relpath(os.path.join(root, name), ck_dir)
     except OSError:
         pass
     return name
@@ -1634,8 +1667,10 @@ _zimage_models_cache = {"data": None, "timestamp": 0}
 def get_zimage_models():
     """List Z-Image UNET checkpoints: .safetensors files under a 'z image'
     subfolder of models/unet or models/diffusion_models. Returns names in the
-    UNETLoader form (relative to the base dir, backslash-joined), e.g.
-    'z image\\bigLove_zt3.safetensors'. Cached with the shared TTL. Returns []
+    UNETLoader form — relative to the base dir, joined with the separator of the
+    tree we walked (os.sep), e.g. 'z image\\bigLove_zt3.safetensors' on Windows
+    and 'z image/bigLove_zt3.safetensors' on Linux; the queue respells it against
+    the target ComfyUI's own list. Cached with the shared TTL. Returns []
     when ComfyUI's output dir isn't configured yet."""
     current_time = time.time()
     if (_zimage_models_cache["data"] is not None
@@ -1657,8 +1692,7 @@ def get_zimage_models():
                         continue
                     for f in files:
                         if f.lower().endswith((".safetensors", ".gguf", ".sft")):
-                            rel = f if rel_dir == "." else os.path.join(rel_dir, f)
-                            out.append(rel.replace("/", "\\"))
+                            out.append(f if rel_dir == "." else os.path.join(rel_dir, f))
             out = sorted(set(out))
         except Exception as e:
             logger.error(f"get_zimage_models error: {e}")
@@ -1674,7 +1708,9 @@ def get_krea_models():
     """List Krea 2 UNET checkpoints: le défaut du workflow (krea2_turbo_fp8.safetensors
     à la racine de models/unet ou models/diffusion_models) + tout .safetensors/.gguf
     sous un sous-dossier 'krea' (ex. 'Krea\\monKrea.safetensors'). Noms en forme
-    UNETLoader (relatifs au dossier de base, backslash). Cache TTL partagé. Vide si
+    UNETLoader (relatifs au dossier de base, séparateur de l'arbre parcouru =
+    os.sep ; la file d'attente les réécrit selon la liste publiée par le ComfyUI
+    ciblé). Cache TTL partagé. Vide si
     ComfyUI n'est pas encore configuré."""
     current_time = time.time()
     if (_krea_models_cache["data"] is not None
@@ -1698,7 +1734,7 @@ def get_krea_models():
                         continue
                     for f in files:
                         if f.lower().endswith((".safetensors", ".gguf", ".sft")):
-                            out.append(os.path.join(rel_dir, f).replace("/", "\\"))
+                            out.append(os.path.join(rel_dir, f))
             out = sorted(set(out))
         except Exception as e:
             logger.error(f"get_krea_models error: {e}")
@@ -1747,7 +1783,7 @@ def get_zimage_loras():
                 for f in sorted(files):
                     if not f.lower().endswith(".safetensors"):
                         continue
-                    rel = (f if rel_dir == "." else os.path.join(rel_dir, f)).replace("/", "\\")
+                    rel = f if rel_dir == "." else os.path.join(rel_dir, f)
                     triggers = _extract_klein_triggers(f)
                     grp, stp = trained_lora_group(f, 'zimage')
                     out.append({
@@ -1784,7 +1820,7 @@ def get_sdxl_loras():
                 for f in sorted(files):
                     if not f.lower().endswith(".safetensors"):
                         continue
-                    rel = (f if rel_dir == "." else os.path.join(rel_dir, f)).replace("/", "\\")
+                    rel = f if rel_dir == "." else os.path.join(rel_dir, f)
                     triggers = _extract_klein_triggers(f)
                     grp, stp = trained_lora_group(f, 'sdxl')
                     out.append({
@@ -1822,7 +1858,7 @@ def get_krea_loras():
                 for f in sorted(files):
                     if not f.lower().endswith(".safetensors"):
                         continue
-                    rel = (f if rel_dir == "." else os.path.join(rel_dir, f)).replace("/", "\\")
+                    rel = f if rel_dir == "." else os.path.join(rel_dir, f)
                     triggers = _extract_klein_triggers(f)
                     grp, stp = trained_lora_group(f, 'krea')
                     out.append({

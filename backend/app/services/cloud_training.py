@@ -24,7 +24,7 @@ from sqlalchemy import func
 
 from .. import config as cfg
 from ..extensions import db
-from ..models import CloudTrainingRun
+from ..models import CloudTrainingRun, SystemState
 from . import face_dataset_service as fds
 from . import gpu_speed
 from . import lora_training as lt
@@ -597,7 +597,7 @@ def continue_cloud_run(user_id, run_id, extra_steps=1000, from_step=None,
 def continue_local_run_in_cloud(user_id, dataset_id, extra_steps=1000,
                                 from_step=None, overrides=None,
                                 base_model=_UNSET, variant=None, train_type=None,
-                                masked=True, allow_caption_mismatch=False,
+                                masked=None, allow_caption_mismatch=False,
                                 allow_uncaptioned=False, allow_caption_quality=False,
                                 allow_unverified_weights=False, allow_not_ready=False,
                                 gpu_name=None) -> dict:
@@ -724,7 +724,7 @@ def continue_local_run_in_cloud(user_id, dataset_id, extra_steps=1000,
 
 
 def launch_cloud_training(user_id, dataset_id, steps=None, base_model=_UNSET,
-                          variant=None, train_type=None, masked=True,
+                          variant=None, train_type=None, masked=None,
                           allow_caption_mismatch=False, allow_uncaptioned=False,
                           allow_caption_quality=False,
                           allow_unverified_weights=False, allow_not_ready=False,
@@ -917,6 +917,13 @@ def launch_cloud_training(user_id, dataset_id, steps=None, base_model=_UNSET,
         # a lock: _provision re-searches live offers and rents the cheapest one
         # of this class, falling back to the cheapest overall if the class has
         # since sold out (vast offers are ephemeral).
+        # `masked` resolved ONCE, here, then stamped into the run params. That
+        # stamp is what _prepare_staging reads to decide whether rembg generates
+        # the person masks that get UPLOADED with the dataset — the cloud lane's
+        # only source of truth for masking. `None` (a fresh launch) = the
+        # dataset's stored setting; an explicit bool = a retry/continue replaying
+        # the source run's own frozen flag.
+        masked = lt.resolve_masked(ds, masked)
         params = {'steps': n_steps, 'variant': variant, 'base_model': base_model,
                   'train_type': fam, 'masked': bool(masked), **confirmations}
         if base_repo:
@@ -966,7 +973,7 @@ def launch_cloud_training(user_id, dataset_id, steps=None, base_model=_UNSET,
             variant=variant, masked=bool(masked), steps=n_steps,
             cloud_run_id=run.id,
             settings=lt.launch_settings_snapshot(
-                _run_config_dataset(ds, params), fam),
+                _run_config_dataset(ds, params), fam, masked=masked),
             prepared=_prepared,
             parent_record_id=parent_record_id, resumed_from=resumed_from)
         if rec is not None:
@@ -1171,19 +1178,49 @@ def _run_machine_id(run):
         return None
 
 
+def _run_host_ip(run):
+    """Public address of the host this run rented, or None.
+
+    Two sources, in order of trust: the address stamped from the RENTED
+    instance (measured — it is the same field the pod's base_url is built
+    from), then the one the offer advertised. A bad host that re-registers
+    under a new machine_id keeps its address, which is the only reason this
+    exists (2026-07-28)."""
+    try:
+        parsed = json.loads(run.train_params or '{}')
+        if not isinstance(parsed, dict):
+            return None
+        return parsed.get('host_ip') or parsed.get('offer_ip') or None
+    except (ValueError, TypeError):
+        return None
+
+
 def _load_bad_hosts() -> dict:
-    """{machine_id(str): {'ts': epoch, 'reason': str}} — expired entries are
-    dropped on read (TTL cloud.host_blacklist_days). Corrupt file -> empty."""
+    """{machine_id(str): {'ts': epoch, 'reason': str, 'ip': str|None,
+    'ttl': seconds|None}} — expired entries are dropped on read. The default TTL
+    is cloud.host_blacklist_days; an entry may carry its OWN shorter 'ttl' when
+    the failure said "slow", not "broken" (see _blacklist_host).
+    Corrupt file -> empty. Legacy files (entries without 'ip'/'ttl') load
+    unchanged; they simply ban one machine_id on the default TTL, as always."""
     try:
         raw = json.loads(_bad_hosts_path().read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return {}
     if not isinstance(raw, dict):
         return {}
-    ttl = float(cfg.get('cloud.host_blacklist_days') or 3) * 86400
+    default_ttl = float(cfg.get('cloud.host_blacklist_days') or 3) * 86400
     now = _now()
-    live = {k: v for k, v in raw.items()
-            if isinstance(v, dict) and now - float(v.get('ts') or 0) <= ttl}
+
+    def _alive(v):
+        if not isinstance(v, dict):
+            return False
+        try:
+            ttl = float(v.get('ttl')) if v.get('ttl') is not None else default_ttl
+        except (TypeError, ValueError):
+            ttl = default_ttl
+        return now - float(v.get('ts') or 0) <= ttl
+
+    live = {k: v for k, v in raw.items() if _alive(v)}
     if len(live) != len(raw):
         try:
             _bad_hosts_path().write_text(json.dumps(live), encoding='utf-8')
@@ -1192,19 +1229,78 @@ def _load_bad_hosts() -> dict:
     return live
 
 
-def _blacklist_host(machine_id, reason):
+def _blacklist_host(machine_id, reason, ip=None, ttl_seconds=None):
     """Remember a host whose pod never became ready so the next launch (and the
-    tier list) skips it for a few days. Best-effort: never raises."""
-    if not machine_id:
+    tier list) skips it for a few days. Best-effort: never raises.
+
+    The entry is still KEYED by machine_id (legacy files keep working), but it
+    also records the host's public address when one is known, because
+    machine_id alone is defeatable: run #120 failed on a machine, that machine
+    was blacklisted, and run #121 was rented three minutes later on a DIFFERENT
+    machine_id at the same address — the same box, re-registered (a vast
+    machine_id is a file on the host; reinstalling the daemon mints a new one).
+
+    The address is a WEAKER identity than the machine id — several machines can
+    sit behind one NAT — so it only ever widens a ban that a real failure
+    already justified, it expires on the same TTL, and _filter_offers refuses
+    to let it starve a launch.
+
+    ttl_seconds overrides the default TTL for THIS entry — a host killed while
+    it was still visibly booting is slow, not broken, and a three-day exile is
+    the wrong price for that. A later, generic ban on the same host (the
+    retry path re-bans every failure it classifies as transient) INHERITS the
+    explicit ttl instead of silently upgrading it back to the default: the
+    specific classification of a failure outranks the generic one."""
+    if not machine_id and not ip:
         return
     try:
         hosts = _load_bad_hosts()
-        hosts[str(machine_id)] = {'ts': _now(), 'reason': str(reason)[:200]}
+        key = str(machine_id) if machine_id else f'ip:{ip}'
+        prev = hosts.get(key) if isinstance(hosts.get(key), dict) else {}
+        ttl = ttl_seconds if ttl_seconds is not None else prev.get('ttl')
+        hosts[key] = {'ts': _now(), 'reason': str(reason)[:200], 'ip': ip or None,
+                      'ttl': float(ttl) if ttl is not None else None}
         _bad_hosts_path().write_text(json.dumps(hosts), encoding='utf-8')
-        logger.warning('blacklisted vast host machine_id=%s for %s day(s): %s',
-                       machine_id, cfg.get('cloud.host_blacklist_days') or 3, reason)
+        logger.warning('blacklisted vast host machine_id=%s ip=%s for %s: %s',
+                       machine_id, ip or '?',
+                       f'{float(ttl) / 3600:.0f} h' if ttl is not None
+                       else f"{cfg.get('cloud.host_blacklist_days') or 3} day(s)",
+                       reason)
     except Exception:
         logger.exception('could not blacklist host %s', machine_id)
+
+
+def _stamp_host_ip(run, ip):
+    """Record the rented pod's public address in train_params (once). Silent on
+    any failure: this is bookkeeping for a future ban, never a reason to fail
+    a boot that is otherwise going fine."""
+    try:
+        parsed = json.loads(run.train_params or '{}')
+        if not isinstance(parsed, dict) or parsed.get('host_ip') == str(ip):
+            return
+        parsed['host_ip'] = str(ip)
+        _set(run, train_params=json.dumps(parsed))
+    except Exception:
+        logger.debug('could not stamp the host address of run %s', run.id)
+
+
+def _blacklist_run_host(run, reason, ttl_seconds=None):
+    """Blacklist the host a RUN was on, with every identity it left behind."""
+    _blacklist_host(_run_machine_id(run), reason, ip=_run_host_ip(run),
+                    ttl_seconds=ttl_seconds)
+
+
+def _banned_ips(bad) -> set:
+    return {str(v.get('ip')) for v in bad.values()
+            if isinstance(v, dict) and v.get('ip')}
+
+
+def _offer_ip(offer) -> str:
+    """Public address advertised by an OFFER. Documented on the vast offer
+    object; treated as optional because nothing guarantees it is populated for
+    every offer — when it is absent the address ban simply does not apply to
+    that offer, and the machine_id ban still does."""
+    return str(offer.get('public_ipaddr') or '')
 
 
 def _filter_offers(offers) -> list:
@@ -1214,8 +1310,17 @@ def _filter_offers(offers) -> list:
     offer got filtered, fall back to the input minus blacklisted hosts only
     (renting a suspect host beats failing the run outright)."""
     bad = _load_bad_hosts()
-    not_blacklisted = [o for o in offers
-                       if str(o.get('machine_id') or '') not in bad]
+    banned_ips = _banned_ips(bad)
+    by_machine = [o for o in offers
+                  if str(o.get('machine_id') or '') not in bad]
+    not_blacklisted = [o for o in by_machine
+                       if not (_offer_ip(o) and _offer_ip(o) in banned_ips)]
+    if not not_blacklisted and by_machine:
+        # The address ban is the wide one; it must never be the reason a launch
+        # finds nothing. Fall back to the narrow machine_id ban and say so.
+        logger.warning('every remaining offer sits on a blacklisted address — '
+                       'falling back to the machine-id blacklist only')
+        not_blacklisted = by_machine
     by_class = {}
     for o in not_blacklisted:
         by_class.setdefault(o.get('gpu_name') or '', []).append(o)
@@ -1337,9 +1442,18 @@ def _provision(run):
         offer = _pick_offer(_filter_offers(pool), params.get('requested_gpu'),
                             strict=bool(params.get('strict_gpu')))
         tried_offers.add(offer['offer_id'])
-        # Stamp the host identity so a boot failure can blacklist THIS machine.
-        if offer.get('machine_id') is not None:
-            params['machine_id'] = offer['machine_id']
+        # Stamp the host identity so a boot failure can blacklist THIS machine —
+        # by its id AND by the address it answers on, since the id alone was
+        # re-minted around a ban (see _blacklist_host). offer_ip is whatever the
+        # offer advertised; host_ip (stamped during boot-wait, below) is the
+        # address of the pod actually rented and is the one to trust.
+        if offer.get('machine_id') is not None or _offer_ip(offer):
+            if offer.get('machine_id') is not None:
+                params['machine_id'] = offer['machine_id']
+            if offer.get('host_id') is not None:
+                params['host_id'] = offer['host_id']
+            if _offer_ip(offer):
+                params['offer_ip'] = _offer_ip(offer)
             _set(run, train_params=json.dumps(params))
         try:
             if template_hash:
@@ -1388,15 +1502,160 @@ def _provision(run):
 
 
 def _idle_seconds(run, now=None) -> float:
-    """How long this run has been silent in the DATABASE — the only progress
-    signal that survives a restart and does not depend on the monitor thread
-    being healthy. Every monitor poll writes phase_detail through _set(), which
-    bumps updated_at, so a frozen updated_at means the monitor stopped
-    completing iterations (whatever the reason: dead, wedged in a socket read,
-    or gone with a restart)."""
+    """How long this run has been silent in the DATABASE — the MONITOR's
+    heartbeat, and nothing more.
+
+    Every monitor poll writes phase_detail through _set(), which bumps
+    updated_at, so a frozen updated_at means the monitor stopped completing
+    iterations (dead, wedged in a socket read, or gone with a restart). That
+    makes this the right question for "can this thread still be trusted with a
+    stop?" — and the WRONG one for "is the run getting anywhere?", which is
+    what _silent_seconds answers: a monitor happily re-writing the same
+    sentence every 10 s keeps this at zero forever. Do not merge the two."""
     now = now or datetime.utcnow()
     ref = run.updated_at or run.created_at or now
     return max(0.0, (now - ref).total_seconds())
+
+
+# -- durable progress clock ---------------------------------------------------
+# updated_at cannot answer "is this run getting anywhere?" for two independent
+# reasons, both measured:
+#  * it is re-stamped when the app RE-ADOPTS a run after a restart, so the
+#    silence counter restarts with the process. Three restarts in one hour kept
+#    a dead pod under the 45 min threshold for good (2026-07-28) — on the
+#    machine of someone who tinkers, the watchdog is off by construction;
+#  * it is bumped by the monitor's own writes, so a pod frozen at
+#    'running: - fetching transformer weights' looks perfectly alive.
+# The fix is to timestamp REMOTE evidence instead, and to keep that timestamp
+# in the database (SystemState) so it outlives the process. The fingerprint is
+# deliberately narrow: the run's phase, how many checkpoints landed, and the
+# byte/step counters the pod printed. Not the raw log — tqdm re-prints the same
+# bar with a bumped elapsed while the byte counter is frozen (measured: 1.95G
+# at 15:11 and again at 15:30), so hashing the text would call a stuck download
+# "progress". Not phase_detail either — re-adoption rewrites it, which is the
+# very reset being fixed.
+_PROGRESS_STATE_PREFIX = 'cloud_progress_watch:'
+
+
+def _progress_state_key(run_id) -> str:
+    return f'{_PROGRESS_STATE_PREFIX}{int(run_id)}'
+
+
+def _log_tail(run, max_bytes=64 * 1024) -> str:
+    """Tail of the run's mirrored pod log ('' when there is none). Bounded:
+    this is read on every card render and every supervisor tick."""
+    path = os.path.join(run.staging_dir or '', 'training.log')
+    try:
+        with open(path, 'rb') as fh:
+            fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, fh.tell() - max_bytes))
+            return fh.read().decode('utf-8', errors='replace')
+    except OSError:
+        return ''
+
+
+def _download_progress(run):
+    """Byte-counter progress of whatever the pod is currently downloading, or
+    None. Never raises: a card must never fail because a third-party bar
+    changed shape."""
+    try:
+        return lt.parse_download_progress(_log_tail(run))
+    except Exception:
+        logger.debug('download progress parse failed for run %s', run.id)
+        return None
+
+
+def _progress_fingerprint(run) -> str:
+    """What "something actually happened on the pod" means, as a short string.
+
+    The download part is the SUM of every bar's bytes, not the last bar. Those
+    are not the same reading: huggingface_hub fetches several files at once, so
+    two consecutive tails end on different bars, and a fingerprint built from
+    the last one alone flips A(1.0G) → B(2.0G) → A(1.0G) forever while BOTH
+    files sit frozen. It would report movement on a dead pod — the freeze
+    watchdog would then never fire on the one case it exists for. Summing per
+    label means only a file that genuinely advanced can move the total.
+
+    Changing this string re-anchors the clock once per open run on upgrade (an
+    unseen fingerprint reads as progress). That costs one watchdog period on
+    runs alive at that moment, and it errs toward NOT killing — the right side
+    to be wrong on."""
+    tail = _log_tail(run)
+    parsed = {}
+    try:
+        parsed = lt._parse_training_log(tail) or {}
+    except Exception:
+        parsed = {}
+    try:
+        downloaded = lt.download_bytes_seen(tail)
+    except Exception:
+        downloaded = None
+    return '|'.join(str(x) for x in (
+        run.status or '', _staging_save_count(run), parsed.get('step'),
+        '' if downloaded is None else downloaded))
+
+
+def _read_progress_watch(run):
+    row = db.session.get(SystemState, _progress_state_key(run.id))
+    if row is None or not row.value:
+        return None
+    try:
+        data = json.loads(row.value)
+        return (data['fp'], datetime.fromisoformat(data['ts']))
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def note_progress(run, now=None) -> datetime:
+    """Observe the run and return WHEN it last actually moved.
+
+    Writes only when the fingerprint changed, so a frozen run does not touch
+    the database at all (and a stuck run's own clock cannot be reset by the
+    act of watching it). The first observation of a run seeds the timestamp
+    with updated_at rather than `now`: at the first tick after a restart, the
+    last thing the previous process wrote is a much better estimate of "last
+    seen alive" than the instant the new process happened to start — seeding
+    with `now` would re-create the very reset this exists to remove."""
+    now = now or datetime.utcnow()
+    fp = _progress_fingerprint(run)
+    prev = _read_progress_watch(run)
+    if prev and prev[0] == fp:
+        return prev[1]
+    ts = now if prev else min(run.updated_at or now, now)
+    key = _progress_state_key(run.id)
+    try:
+        row = db.session.get(SystemState, key)
+        if row is None:
+            row = SystemState(key=key)
+            db.session.add(row)
+        row.value = json.dumps({'fp': fp, 'ts': ts.isoformat()})
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        logger.debug('could not record the progress clock of run %s', run.id)
+    return ts
+
+
+def _clear_progress_watch(run_id):
+    """Drop a finished run's progress clock — history rows never consult it."""
+    try:
+        row = db.session.get(SystemState, _progress_state_key(run_id))
+        if row is not None:
+            db.session.delete(row)
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
+def _silent_seconds(run, now=None) -> float:
+    """How long the run has made no OBSERVABLE progress. Read-only: falls back
+    to _idle_seconds when nothing has been recorded yet (a run younger than the
+    first supervisor tick), so this is never worse than what it replaces."""
+    now = now or datetime.utcnow()
+    prev = _read_progress_watch(run)
+    if not prev:
+        return _idle_seconds(run, now)
+    return max(0.0, (now - prev[1]).total_seconds())
 
 
 def _monitor_is_responsive(run) -> bool:
@@ -1424,6 +1683,7 @@ def _force_stop(run, detail, error=None) -> dict:
     destroy by hand in the meantime."""
     iid = run.vast_instance_id
     _stop_event_for(run.id).set()   # a still-living monitor stands down too
+    _clear_progress_watch(run.id)   # every path below closes the run
     if not iid:
         _set(run, status='stopped', phase_detail=detail,
              error=error, finished_at=datetime.utcnow())
@@ -1547,8 +1807,13 @@ def supervise_active_runs() -> list:
                     acted.append({'run_id': run.id, 'reason': 'stop_deadline',
                                   'ok': res['ok']})
                     continue
+                # The progress clock is advanced HERE, from outside every
+                # monitor: the tick that judges the run is also the one that
+                # observes it, so the watchdog cannot be starved by a monitor
+                # that stopped looking.
+                note_progress(run, now)
                 limit = _freeze_limit_seconds(run, c)
-                if limit and _idle_seconds(run, now) > limit:
+                if limit and _silent_seconds(run, now) > limit:
                     res = _force_stop(
                         run, detail=f'Frozen — no progress for {limit // 60} min; '
                                     'pod terminated by the supervisor',
@@ -1751,6 +2016,69 @@ def _make_remote(run) -> RemoteAiToolkit:
     return RemoteAiToolkit(run.base_url, run.auth_token)
 
 
+# --- Boot evidence (2026-07-28) ------------------------------------------------
+# The boot wait used to read the pod's remote state and spend it on the phase
+# line only, then decide on elapsed time alone: a host honestly pulling a 26 GB
+# image died at 25 min and was exiled from the marketplace for three days. Same
+# guiding rule as the first-step watchdog: a pod whose remote evidence advances
+# is a pod that progresses.
+#
+# "Advances" is the whole difficulty. A boot fact that keeps being TRUE is not
+# progress (a pod frozen in 'loading' reports 'loading' forever), and a line
+# whose only moving part is its clock is not progress either. So evidence is
+# modelled as a growing SET of facts: only a fact never observed before rearms
+# the clock, which makes a frozen pod rearm exactly zero times.
+_ANSI_RE = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+# Clock-ish runs (12:34, 1:02:03, 2026-07-28T10:11) are stripped before a host
+# progress line is compared: an advancing elapsed time is the exact false
+# evidence that nearly got shipped into the first-step watchdog.
+_CLOCKISH_RE = re.compile(r'\d{1,2}:\d{2}(?::\d{2})?'
+                          r'|\d{4}-\d{2}-\d{2}[t ]?[\d:.]*', re.I)
+
+
+def _boot_status_message(inst) -> str:
+    """The host's free-text boot progress line, stripped of colour codes and of
+    anything that only measures time. Empty when vast publishes nothing — the
+    field is optional, so this is a bonus signal, never a requirement."""
+    raw = (inst or {}).get('status_msg')
+    if not isinstance(raw, str) or not raw.strip():
+        return ''
+    text = _CLOCKISH_RE.sub('', _ANSI_RE.sub('', raw))
+    return ' '.join(text.split())[:200]
+
+
+def _boot_facts(inst, port, base) -> set:
+    """Everything the pod is provably showing RIGHT NOW, as comparable facts."""
+    inst = inst or {}
+    facts = {'status:' + str(inst.get('actual_status') or 'unlisted')}
+    if ((inst.get('ports') or {}).get(f'{port}/tcp')):
+        facts.add('port-published')
+    if base:
+        facts.add('base-url')
+    if inst.get('jupyter_token'):
+        facts.add('auth-token')
+    msg = _boot_status_message(inst)
+    if msg:
+        facts.add('msg:' + msg)
+    return facts
+
+
+def _boot_stage_label(inst, port, base) -> str:
+    """What was MEASURED about this boot, for the failure message. 'Pod never
+    became ready in 25 min' is a guess; where it actually got to is not."""
+    inst = inst or {}
+    bits = ['vast status "%s"' % (inst.get('actual_status') or 'not listed yet')]
+    bits.append(f'port {port} '
+                + ('published' if ((inst.get('ports') or {}).get(f'{port}/tcp'))
+                   else 'not published yet'))
+    if base:
+        bits.append('UI not answering')
+    msg = _boot_status_message(inst)
+    if msg:
+        bits.append(f'host reported "{msg[:120]}"')
+    return ', '.join(bits)
+
+
 def _cloudify_job_config(job_config: dict, job_name: str,
                          staging_dataset: str, pod_settings: dict,
                          run_params: dict | None = None) -> dict:
@@ -1828,6 +2156,7 @@ def _finish(run, status, detail='', error=None, destroy=True):
             logger.warning('terminate %s failed: %s', run.vast_instance_id, e)
     _set(run, status=status, phase_detail=detail, error=error,
          finished_at=datetime.utcnow())
+    _clear_progress_watch(run.id)
     return pod_gone
 
 
@@ -1908,8 +2237,31 @@ def _monitor(app, run_id):
             # strides per call must not misfire this boot-timeout on a pod
             # that was, in fact, instantly ready.
             template_mode = bool((c.get('template_hash') or '').strip())
+            # Two clocks, exactly like the pre-step-1 phase further down:
+            #  * ready_timeout is IDLE time, rearmed by any boot fact the pod
+            #    had never shown before. Judging on elapsed time alone killed
+            #    honest 26 GB image pulls at 25 min — while the evidence that
+            #    they were progressing was already read, one line above, and
+            #    shown to the user in the phase line.
+            #  * boot_budget is the ABSOLUTE ceiling, evaluated BEFORE the
+            #    rearm so a host that dribbles one new fact per poll cannot
+            #    rearm its way past it. Raising ready_timeout instead would
+            #    have been a cover-up: a pod that shows nothing is money
+            #    burning and must still die in 25 minutes.
             ready_timeout = (int(c.get('ready_timeout_minutes') or 0) * 60
                              or READY_TIMEOUT_SECONDS)
+            raw_boot_budget = c.get('boot_budget_minutes')
+            boot_budget = int(90 if raw_boot_budget is None
+                              else (raw_boot_budget or 0)) * 60
+            slow_ban_seconds = float(
+                cfg.get('cloud.slow_boot_blacklist_hours') or 6) * 3600
+            # None until the first observation: the state a monitor INHERITS
+            # (every fact a resumed pod already shows) is a baseline, not
+            # progress — otherwise every app restart would hand a dead pod a
+            # brand-new window, the 2026-07-14 regression all over again.
+            boot_facts = None
+            boot_progress_ts = boot_started
+            boot_rearms = 0
             _set(run, phase_detail='Waiting for the pod to boot')
             port = int(c.get('ui_port') or 18675)
             if template_mode and port == 8675:
@@ -1934,6 +2286,10 @@ def _monitor(app, run_id):
                 # Bearer header) — pick it up as soon as the record shows it.
                 if inst and not run.auth_token and inst.get('jupyter_token'):
                     _set(run, auth_token=inst['jupyter_token'])
+                # The address of the pod we are actually paying for — the only
+                # host identity that a machine_id re-registration cannot shed.
+                if inst and inst.get('public_ipaddr'):
+                    _stamp_host_ip(run, inst['public_ipaddr'])
                 base = vast_client.derive_base_url(inst, port) if inst else None
                 ready = False
                 if base:
@@ -1954,8 +2310,7 @@ def _monitor(app, run_id):
                     # host — blacklist it like a timeout would. An early stop
                     # (changed their mind) says nothing about the host.
                     if _now() - boot_started > 8 * 60:
-                        _blacklist_host(_run_machine_id(run),
-                                        'user stopped a boot stuck past 8 min')
+                        _blacklist_run_host(run, 'user stopped a boot stuck past 8 min')
                     _finish(run, 'stopped', detail='Stopped by user during boot')
                     return
                 # Live telemetry: surface WHERE the boot is stuck (image pull,
@@ -1971,12 +2326,36 @@ def _monitor(app, run_id):
                                 'base=%s ready=%s', run.id, st, port, has_ports,
                                 base or '-', ready)
                     _set(run, phase_detail=detail)
-                if _now() - boot_started > ready_timeout:
-                    # This host burned the whole boot budget — skip it for the
-                    # next few days so a relaunch can't land on it again.
-                    _blacklist_host(_run_machine_id(run),
-                                    'pod did not become ready in time')
-                    raise RuntimeError('pod did not become ready in time')
+                facts = _boot_facts(inst, port, base)
+                if boot_facts is None:
+                    boot_facts = set(facts)      # baseline, not progress
+                elif boot_budget and _now() - boot_started > boot_budget:
+                    # Ceiling first, so advancing evidence can never buy an
+                    # unbounded boot. This host was still visibly working —
+                    # slow, not broken — so it is skipped for HOURS, not days:
+                    # a saturated uplink is a condition of the night, and a
+                    # three-day exile the user never sees is the wrong price
+                    # for it. (A host that shows nothing takes the full ban
+                    # below — that mechanism has already saved real money.)
+                    _blacklist_run_host(
+                        run, 'pod was still booting past the boot budget',
+                        ttl_seconds=slow_ban_seconds if boot_rearms else None)
+                    raise RuntimeError(
+                        'pod did not become ready in time — still booting after '
+                        f'{boot_budget // 60} min: '
+                        f'{_boot_stage_label(inst, port, base)}')
+                elif facts - boot_facts:
+                    boot_facts |= facts
+                    boot_progress_ts = _now()
+                    boot_rearms += 1
+                elif _now() - boot_progress_ts > ready_timeout:
+                    # Nothing about this pod changed for the whole idle budget:
+                    # a dead or frozen host. Full ban, as before.
+                    _blacklist_run_host(run, 'pod stopped making boot progress')
+                    raise RuntimeError(
+                        'pod did not become ready in time — no boot progress '
+                        f'for {ready_timeout // 60} min: '
+                        f'{_boot_stage_label(inst, port, base)}')
                 _sleep(POLL_SECONDS)
 
             remote = _make_remote(run)
@@ -2053,12 +2432,39 @@ def _monitor(app, run_id):
             #    — 2026-07-19). A healthy Krea-2-Raw run reaches step 1 in a few
             #    minutes (its full 2000-step run was ~84 min), so the default is
             #    generous enough to survive an honestly slow download.
+            #    The step counter is NOT the only progress signal in that phase:
+            #    the pod's log carries the base-model download's byte counter,
+            #    and a pod whose bytes advance is a pod that progresses. Judging
+            #    the phase on steps alone killed a paid run whose download was
+            #    perfectly healthy (reported by j_o_e_l. on Discord 2026-07-27:
+            #    KREA-2 RAW on a 5090, FAILED at 59 min, never past step 0 —
+            #    26.3 GB at the 2.58 MB/s measured on another pod is ~2 h 50, so
+            #    the 45-min budget GUARANTEED the failure). Advancing bytes now
+            #    rearm this clock, exactly as a step rearms the stall clock.
+            #    Raising the timeout instead would have been a cover-up: a
+            #    genuinely wedged pod must still die fast, because it is money
+            #    burning. Hence the second, ABSOLUTE ceiling below.
+            #  * download budget — the ceiling that keeps the rearm honest. A
+            #    host at 200 kB/s advances its bytes at every poll for 36 h;
+            #    rearming alone would let it ride the whole runtime cap for zero
+            #    steps, which IS the run-#75 failure the first-step watchdog was
+            #    built to stop. The default (180 min) clears the measured 2 h 50
+            #    worst case and stays far under the 480-min runtime cap; 0 turns
+            #    the ceiling off and leaves the runtime cap as sole backstop.
             stall_seconds = int(c.get('stall_timeout_minutes') or 30) * 60
             first_step_seconds = int(c.get('first_step_timeout_minutes') or 45) * 60
+            raw_budget = c.get('first_step_download_budget_minutes')
+            dl_budget_seconds = int(180 if raw_budget is None else (raw_budget or 0)) * 60
             grace_seconds = (int(c.get('unreachable_grace_minutes') or 0) * 60
                              or UNREACHABLE_GRACE_SECONDS)
             last_step = -1
             last_progress_ts = _now()
+            # Peak bytes the pod has reported downloading, and the anchor of the
+            # absolute pre-step-1 ceiling. `downloaded_bytes` only ever grows:
+            # a bar that restarts lower is treated as no progress, which is the
+            # conservative side of the choice.
+            downloaded_bytes = 0.0
+            first_step_anchor = last_progress_ts
             # Time of the FIRST failure of the current unreachable streak (None
             # while the pod answers). The grace must measure CONSECUTIVE get_job
             # failure time, not time-since-last-success: the per-poll log/sample
@@ -2102,7 +2508,7 @@ def _monitor(app, run_id):
                     _sleep(POLL_SECONDS)
                     continue
 
-                _pull_log_and_samples(run, remote, job_id)
+                log_text = _pull_log_and_samples(run, remote, job_id)
                 # Mid-run checkpoint mirror, throttled (~2 min at 10 s polls):
                 # list_files is cheap, but no need to hammer it every poll —
                 # the pod only writes a new save every save_every steps.
@@ -2118,8 +2524,7 @@ def _monitor(app, run_id):
                     if not ok:
                         # A host that cannot DELIVER its result (even through
                         # the resume loop) is a bad host — skip it next time.
-                        _blacklist_host(_run_machine_id(run),
-                                        'could not serve the final checkpoint')
+                        _blacklist_run_host(run, 'could not serve the final checkpoint')
                         # LoRA > a few minutes of pod time: keep the pod for
                         # manual recovery; max-runtime/reconcile will reap it.
                         # Same guard as _finish_if_open: announcing a kept pod
@@ -2160,20 +2565,60 @@ def _monitor(app, run_id):
                                            f'{stall_seconds // 60} min; pod terminated',
                                     error='stall watchdog')
                     return
-                elif last_step <= 0 and (_now() - last_progress_ts) > first_step_seconds:
-                    # No training step in first_step_timeout_minutes — the pod is
-                    # wedged before step 1 (typically the base-model download
-                    # crawling; nothing to rescue since no checkpoint exists).
-                    try:
-                        remote.stop_job(job_id)
-                    except Exception:
-                        pass
-                    _finish_if_open(run, 'error',
-                                    detail='No training step reached in '
-                                           f'{first_step_seconds // 60} min — pod likely '
-                                           'stuck downloading the base model; terminated',
-                                    error='first-step watchdog')
-                    return
+                elif last_step <= 0:
+                    # -- before step 1: the same guiding rule, applied to the
+                    # signal this phase actually has. Nothing to rescue here
+                    # either way — no checkpoint exists yet.
+                    if dl_budget_seconds and \
+                            (_now() - first_step_anchor) > dl_budget_seconds:
+                        # Checked BEFORE the rearm on purpose: a pod that
+                        # advances a handful of bytes every poll would otherwise
+                        # rearm its way past every ceiling.
+                        try:
+                            remote.stop_job(job_id)
+                        except Exception:
+                            pass
+                        _finish_if_open(
+                            run, 'error',
+                            detail='Still not training after '
+                                   f'{dl_budget_seconds // 60} min '
+                                   f'(base model fetched: {_fetched_label(downloaded_bytes)}) '
+                                   '— pod terminated before it could burn the '
+                                   'whole runtime cap',
+                            error='first-step download budget')
+                        return
+                    # download_bytes_seen, not parse_download_progress: the
+                    # card's parser reports the LAST bar, and with several
+                    # files in flight consecutive tails end on different bars,
+                    # so its `done` alternates between two frozen files and
+                    # would read as endless movement. A kill decision needs the
+                    # total, which only a file that really advanced can raise.
+                    seen = lt.download_bytes_seen(log_text)
+                    if seen is not None and seen > downloaded_bytes:
+                        downloaded_bytes = seen
+                        last_progress_ts = _now()
+                    elif (_now() - last_progress_ts) > first_step_seconds:
+                        # Say what was MEASURED. The old wording ("pod likely
+                        # stuck downloading the base model") is exactly what
+                        # j_o_e_l. read while his pod downloaded normally, and it
+                        # sent him hunting a vast.ai fault that did not exist.
+                        if downloaded_bytes > 0:
+                            what = ('its base-model download stopped at '
+                                    f'{_fetched_label(downloaded_bytes)}')
+                        else:
+                            what = ('the pod never reported a single downloaded '
+                                    'byte')
+                        try:
+                            remote.stop_job(job_id)
+                        except Exception:
+                            pass
+                        _finish_if_open(
+                            run, 'error',
+                            detail='No training step reached in '
+                                   f'{first_step_seconds // 60} min and '
+                                   f'{what}; pod terminated',
+                            error='first-step watchdog')
+                        return
                 _sleep(POLL_SECONDS)
         except _RunClosedExternally as closed:
             # Someone with more authority than this thread (a forced stop, the
@@ -2194,8 +2639,8 @@ def _monitor(app, run_id):
             retryable = _is_retryable_pod_failure(error_text)
             # Exclude the failed host before selecting the fresh pod.
             if retryable:
-                _blacklist_host(_run_machine_id(run),
-                                f'transient pod failure: {error_text[:160]}')
+                _blacklist_run_host(
+                    run, f'transient pod failure: {error_text[:160]}')
             pod_gone = _finish(run, 'error', detail='Run failed',
                                error=error_text)
             if retryable and pod_gone:
@@ -2317,9 +2762,26 @@ def _seed_resume_checkpoint(run, remote, pod_settings):
                 run.id, os.path.basename(src), dest_dir)
 
 
+def _fetched_label(num_bytes) -> str:
+    """Downloaded volume as a user-facing string. Watchdog messages quote what
+    was measured, so the unit has to survive both '0 bytes' and '26.3 GB'."""
+    n = float(num_bytes or 0)
+    if n <= 0:
+        return 'nothing'
+    if n < 1e9:
+        return f'{n / 1e6:.0f} MB'
+    return f'{n / 1e9:.1f} GB'
+
+
 def _pull_log_and_samples(run, remote, job_id):
     """Mirror remote log + new samples into staging so cloud_progress reuses
-    the exact local parsing/serving machinery. Never raises."""
+    the exact local parsing/serving machinery. Never raises.
+
+    Returns the log text (''
+    when it could not be fetched) — the first-step watchdog reads the
+    base-model download's byte counter out of it, and re-reading the file we
+    just wrote would only add a way for the two to disagree."""
+    text = ''
     try:
         text = remote.get_log(job_id)
         with open(os.path.join(run.staging_dir, 'training.log'), 'w',
@@ -2337,6 +2799,7 @@ def _pull_log_and_samples(run, remote, job_id):
                                        os.path.join(samples_dir, name))
     except Exception as e:
         logger.debug('sample mirror failed: %s', e)
+    return text
 
 
 def _newest_remote_checkpoint(remote, job_id):
@@ -2765,13 +3228,21 @@ def _run_payload(run) -> dict:
             'auto_retry_of': _run_param(run, 'auto_retry_of'),
             'auto_retry_run_id': _run_param(run, 'auto_retry_run_id'),
             'created_at': run.created_at.isoformat() if run.created_at else None,
-            # How long the run has reported nothing, and how long it is allowed
-            # to (0 = the freeze watchdog is off). The card warns on its own
-            # from these two, so a silent run is visible even when the watchdog
-            # is configured never to cut.
-            'idle_seconds': int(_idle_seconds(run)),
+            # How long the run has reported nothing OBSERVABLE (not just how
+            # long the monitor has been quiet — see _silent_seconds), and how
+            # long it is allowed to (0 = the freeze watchdog is off). The card
+            # warns on its own from these two, so a silent run is visible even
+            # when the watchdog is configured never to cut.
+            'idle_seconds': int(_silent_seconds(run) if run.status in ACTIVE_STATES
+                                else _idle_seconds(run)),
             'idle_limit_seconds': (_freeze_limit_seconds(run)
                                    if run.status in ACTIVE_STATES else 0),
+            # Byte counter of whatever the pod is fetching right now (base
+            # weights are 26 GB — the phase users could not tell from a hang).
+            # None whenever nothing parsable is in the log: the card then keeps
+            # showing phase_detail, exactly as before.
+            'download': (_download_progress(run)
+                         if run.status in ACTIVE_STATES else None),
             'stop_requested': bool(run.stop_requested_at),
             'finished_at': run.finished_at.isoformat() if run.finished_at else None}
     if base_model is not None:
@@ -4250,6 +4721,25 @@ def _clamp_image_box(x, y, w, h):
             min(CANVAS_IMAGE_MAX, max(CANVAS_IMAGE_MIN, h)))
 
 
+def _clean_group(node) -> tuple:
+    """🖼🖼 One row's group membership, sanitised: (group_id, group_pos).
+
+    The id is an opaque client key (``g<image id>``, with a suffix when that one
+    is taken); it is length-capped and stripped, never parsed. An empty or
+    unusable id means "in no group", and then the position is meaningless and
+    goes with it — a row carrying a position and no group would be a state the
+    board cannot draw."""
+    gid = node.get('group_id')
+    gid = str(gid).strip()[:40] if gid not in (None, '') else None
+    if not gid:
+        return (None, None)
+    try:
+        pos = int(node.get('group_pos') or 0)
+    except (TypeError, ValueError):
+        pos = 0
+    return (gid, max(0, min(10_000, pos)))
+
+
 def canvas_image_nodes(user_id, dataset_ids=None) -> dict:
     """🖼 Every image pinned on the board, grouped by dataset id — geometry AND
     the image row itself, so a lane can draw its pinned pictures without a
@@ -4290,6 +4780,11 @@ def canvas_image_nodes(user_id, dataset_ids=None) -> dict:
             'x': float(r.x), 'y': float(r.y),
             'w': float(r.w), 'h': float(r.h),
             'visible': bool(r.visible),
+            # 🖼🖼 The side-by-side strip this picture belongs to, if any. Null
+            # on every row of a board that has never grouped anything — and on
+            # every row of a database that predates the columns.
+            'group_id': r.group_id or None,
+            'group_pos': None if r.group_pos is None else int(r.group_pos),
             'image': _gallery_image(img),
         })
     if pruned:
@@ -4321,7 +4816,12 @@ def save_canvas_image_nodes(user_id, dataset_id, nodes) -> dict:
         box = _clamp_image_box(n.get('x'), n.get('y'), n.get('w'), n.get('h'))
         if box is None:
             continue
-        wanted[iid] = (box, bool(n.get('visible', True)))
+        # 🖼🖼 Group membership travels with the row. A row that does not MENTION
+        # the fields keeps whatever it had — a plain drag or resize sent by an
+        # older client (or by any code path that only knows about geometry) must
+        # never quietly dissolve a group.
+        group = _clean_group(n) if ('group_id' in n or 'group_pos' in n) else None
+        wanted[iid] = (box, bool(n.get('visible', True)), group)
     if not wanted:
         return {'saved': 0,
                 'total': CanvasImageNode.query.filter_by(dataset_id=dataset_id).count()}
@@ -4332,16 +4832,19 @@ def save_canvas_image_nodes(user_id, dataset_id, nodes) -> dict:
         CanvasImageNode.dataset_id == dataset_id,
         CanvasImageNode.image_id.in_(list(wanted))).all()}
     saved = 0
-    for iid, ((x, y, w, h), visible) in wanted.items():
+    for iid, ((x, y, w, h), visible, group) in wanted.items():
         if iid not in legit:
             continue
+        gid, gpos = group if group is not None else (None, None)
         row = existing.get(iid)
         if row is None:
             db.session.add(CanvasImageNode(
                 dataset_id=dataset_id, image_id=iid, x=x, y=y, w=w, h=h,
-                visible=visible))
+                visible=visible, group_id=gid, group_pos=gpos))
         else:
             row.x, row.y, row.w, row.h, row.visible = x, y, w, h, visible
+            if group is not None:
+                row.group_id, row.group_pos = gid, gpos
         saved += 1
     db.session.commit()
     return {'saved': saved,
@@ -4687,6 +5190,9 @@ def cloud_progress(user_id, dataset_id, train_type=None) -> dict:
                 samples.append({'filename': f, 'step': int(m.group(1)),
                                 'prompt_idx': int(m.group(2))})
         samples.sort(key=lambda s: s['step'], reverse=True)
+    # `download` arrives through _run_payload (active runs only) — the same
+    # field name the local training_progress payload uses, so the component
+    # that renders it does not care which lane it is looking at.
     return {'active': run.status in ACTIVE_STATES, 'log_exists': log_exists,
             **parsed, 'samples': samples, **_run_payload(run),
             'phase': run.status}

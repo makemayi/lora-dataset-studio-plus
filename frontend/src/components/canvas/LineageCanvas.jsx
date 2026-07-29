@@ -10,6 +10,10 @@ import {
   clampImageBox, defaultImageSpot, imageNodeEdges, imageNodeExtent,
   openGeometry, visibleImageNodes,
 } from '../../utils/canvasImageNodes';
+import {
+  drawnNodes, extractFromGroup, groupBoxOf, layoutBoxes, layoutImageNodes,
+  mergeIntoGroup, mergeTargetAt, shouldExtract,
+} from '../../utils/canvasImageGroups';
 import { DEPLOY_BAR_CLASS, DEPLOY_LEGEND } from '../../utils/checkpointDeployState';
 import { GraphCard, CheckpointPill } from '../dataset/lineageNodes';
 import { LineageEdgeDefs, LineageEdges } from '../dataset/lineageEdges';
@@ -24,6 +28,13 @@ import { apiFetch, postJson } from '../../api/fetchClient';
 import LineageDetailPanel from '../dataset/LineageDetailPanel';
 import LineageDiffPanel from '../dataset/LineageDiffPanel';
 import CheckpointActionsPopover from '../dataset/CheckpointActionsPopover';
+import ContinueDialog from '../dataset/ContinueDialog';
+import {
+  canvasContinueLanes, canvasContinueRefusal, canvasContinueRequest,
+  canvasContinueRow, canvasContinueSettings, canvasContinueSteps,
+} from '../../utils/canvasContinue';
+import { continueAttemptOutcome } from '../../utils/continueOutcome';
+import { postWithConfirmations } from '../../utils/trainingRefusals';
 import PreviewLightbox from '../dataset/PreviewLightbox';
 import GeneratedImageLightbox from '../shared/GeneratedImageLightbox';
 import { clampPopoverToViewport, POPOVER_H, POPOVER_W } from '../dataset/checkpointPopover.js';
@@ -40,8 +51,10 @@ import { runIdentityLabel } from '../../utils/runIdentity';
 import CanvasGenerationPanel from './CanvasGenerationPanel';
 import CanvasRunTracker from './CanvasRunTracker';
 import CanvasImageNode from './CanvasImageNode';
+import CanvasImageGroup from './CanvasImageGroup';
 import CheckpointGalleryPanel from '../shared/CheckpointGalleryPanel';
 import { useToast } from '../common/Toast';
+import { useCapabilities } from '../../context/CapabilitiesContext';
 import { HelpBadge } from '../../help/HelpMode';
 
 /* ◉ The LoRA Canvas surface — every selected dataset's genealogy on ONE board,
@@ -184,19 +197,47 @@ function LaneGraph({ lane, isLit, onHover, onNodeClick, diffRole, noteOf, lifted
  *
  *  Its own <svg>, sized 1x1 and overflow-visible, because a pinned image may sit
  *  well outside the tree's box and the tree's <svg> is sized to the tree. */
-function LaneImages({ lane, nodes, onGeometry, onClose, onOpen, boardScale }) {
-  if (!nodes.length) return null;
-  const edges = imageNodeEdges(nodes, lane.graph);
+function LaneImages({ lane, layout, onGeometry, onClose, onOpen, onCloseGroup,
+  boardScale, hint }) {
+  if (!layout.length) return null;
+  // Edges are drawn from where each picture actually IS — a member's slot in
+  // its strip, not the box it remembers while it waits to leave one.
+  const edges = imageNodeEdges(drawnNodes(layout), lane.graph);
   return (
     <div style={{ position: 'absolute', left: 0, top: lane.graphY }}>
       <svg width="1" height="1" className="block overflow-visible" aria-hidden>
         <LineageEdges edges={edges} isLit={() => false} />
       </svg>
-      {nodes.map((n) => (
-        <CanvasImageNode key={n.imageId} node={n} datasetId={lane.datasetId}
+      {layout.map((r) => (r.kind === 'group' ? (
+        <CanvasImageGroup key={r.key} group={r} datasetId={lane.datasetId}
+          laneName={lane.name} onClose={onClose} onOpen={onOpen}
+          onCloseGroup={onCloseGroup} boardScale={boardScale}
+          dropHint={hint?.leaving && hint.groupId === r.groupId ? 'leaving' : null} />
+      ) : (
+        <CanvasImageNode key={r.key} node={r.node} datasetId={lane.datasetId}
           laneName={lane.name} onGeometry={onGeometry} onClose={onClose}
           onOpen={onOpen} boardScale={boardScale} />
-      ))}
+      )))}
+      {/* ⊕ "Let go here and these become one node." Without it the very first
+          merge can only be discovered by accident, which is worse than not
+          having the feature: two pictures would fuse and the board would look
+          broken. Sober on purpose — the board's own indigo, an outline and a
+          caret at the exact slot the picture would take, no animation. */}
+      {hint?.merge && (
+        <div style={{ position: 'absolute', left: hint.box.x, top: hint.box.y,
+          width: hint.box.w, height: hint.box.h }}
+          data-testid="canvas-merge-hint"
+          className="pointer-events-none z-20 rounded-md border-2 border-dashed border-indigo-300 bg-indigo-500/15">
+          <span style={{ position: 'absolute', left: hint.caret - hint.box.x - 2, top: 0,
+            width: 4, height: hint.box.h }}
+            className="bg-indigo-300" aria-hidden />
+          <span style={{ position: 'absolute', left: 0, top: -22 / Math.max(boardScale, 0.05),
+            fontSize: Math.max(9, 11 / Math.max(boardScale, 0.05)) }}
+            className="whitespace-nowrap rounded bg-indigo-500 px-1.5 py-0.5 font-semibold text-white">
+            Join — {hint.count} images side by side
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -204,6 +245,9 @@ function LaneImages({ lane, nodes, onGeometry, onClose, onOpen, boardScale }) {
 export default function LineageCanvas({ entries, positions, imageNodes, onPinLane,
   onSaveImageNodes, onTidyUp, onRefetchDataset }) {
   const toast = useToast();
+  // ▶ Continue's LOCAL lane guard (is ai-toolkit set up at all) — the app's own
+  // capability probe, already loaded app-wide: no second request for it.
+  const { caps } = useCapabilities();
   const frameRef = useRef(null);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 });
@@ -279,16 +323,46 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
   const imagesRef = useRef(imagesByLane);
   useEffect(() => { imagesRef.current = imagesByLane; }, [imagesByLane]);
 
+  /* 🖼🖼 What each lane actually DRAWS: lone pictures, and groups of pictures
+     fused into one side-by-side strip (utils/canvasImageGroups). Derived, never
+     stored — the rows keep one geometry per picture, exactly as before, plus
+     two nullable group fields.
+
+     A member being dragged is pulled OUT of its strip here, for the duration of
+     the gesture only. That is the affordance as much as the mechanism: the
+     picture lifts off the band the moment the drag starts, so "I can take this
+     one out" is visible before anything has been committed. */
+  const layoutByLane = useMemo(() => {
+    const out = {};
+    for (const e of placed) {
+      const list = imagesByLane[e.datasetId] || [];
+      const nodes = imgDrag?.detach && imgDrag.datasetId === e.datasetId
+        ? list.map((n) => (n.imageId === imgDrag.imageId
+          ? { ...n, groupId: null, groupPos: null } : n))
+        : list;
+      out[e.datasetId] = layoutImageNodes(nodes);
+    }
+    return out;
+  }, [placed, imagesByLane, imgDrag]);
+  const layoutRef = useRef(layoutByLane);
+  useEffect(() => { layoutRef.current = layoutByLane; }, [layoutByLane]);
+  // ⊕ / ⤢ What the gesture in flight would DO on release: a merge target, or
+  // "this one is on its way out of its group". Feedback only — the decision is
+  // taken again from the same functions at pointerup.
+  const [dropHint, setDropHint] = useState(null);
+
   // A lane has to be big enough to hold its pinned pictures too, or Fit would
-  // crop one off the board with no way back to it.
+  // crop one off the board with no way back to it. Measured on the STRIPS: a
+  // group is wider than any of its members and cropping it would put a picture
+  // out of reach with no way back.
   const world = useMemo(() => stackLanes(placed.map((e) => {
-    const ext = imageNodeExtent(imagesByLane[e.datasetId] || []);
+    const ext = imageNodeExtent(layoutBoxes(layoutByLane[e.datasetId] || []));
     return {
       ...e,
       width: Math.max(e.graph?.width || 0, ext.width),
       height: Math.max(e.graph?.height || 0, ext.height),
     };
-  })), [placed, imagesByLane]);
+  })), [placed, layoutByLane]);
 
   // The latest placement, for the pointer handlers (which must not re-bind on
   // every board change just to read a card's current position).
@@ -438,15 +512,46 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
     }]);
   }, [onSaveImageNodes]);
 
-  const beginImage = useCallback((datasetId, imageId, mode, origin) => {
+  /* Write a whole set of rows a group gesture produced (a merge, an extraction,
+     a group close). Same optimistic rule as saveImage: on screen first, sent
+     after. `image` is looked up from the live lane because the pure functions
+     only deal in geometry and membership — they never carry the payload. */
+  const saveRows = useCallback((datasetId, rows, visible = true) => {
+    if (!rows?.length) return;
+    const byId = new Map((imagesRef.current[datasetId] || []).map((n) => [n.imageId, n]));
+    onSaveImageNodes?.(datasetId, rows.map((r) => ({
+      image_id: r.imageId, ...clampImageBox(r),
+      visible: r.visible ?? visible,
+      group_id: r.groupId ?? null,
+      group_pos: r.groupPos ?? null,
+      image: byId.get(r.imageId)?.image,
+    })));
+  }, [onSaveImageNodes]);
+
+  /* Pick a pinned picture — or a whole strip — up.
+     `asGroup` is what tells the two apart: a group is moved and resized through
+     its ANCHOR (the strip sits at the anchor's box), so the very same gesture
+     machinery serves both and there is no second one to keep in step. Without
+     the flag the anchor would be read as "a member being dragged out of its own
+     group", which is the one thing its title bar must never do. */
+  const beginImage = useCallback((datasetId, imageId, mode, origin, opts = {}) => {
     const node = (imagesRef.current[datasetId] || []).find((n) => n.imageId === imageId);
     if (!node) return false;
     const box = { x: node.x, y: node.y, w: node.w, h: node.h };
+    const groupBox = opts.asGroup
+      ? null : groupBoxOf(layoutRef.current[datasetId] || [], imageId);
+    // A member is dragged from the box it is DRAWN in, not the one it
+    // remembers — otherwise it would jump the instant it is picked up.
+    const tile = groupBox
+      ? drawnNodes(layoutRef.current[datasetId] || []).find((n) => n.imageId === imageId)
+      : null;
+    const from = tile ? { x: tile.x, y: tile.y, w: tile.w, h: tile.h } : box;
     // `cur` is the live box, kept on the gesture itself: reading it back off the
     // rendered lane at pointerup would race the last frame of the drag.
     imgRef.current = { datasetId, imageId, mode, sx: origin.x, sy: origin.y,
-      box, cur: box, moved: false, node };
-    setImgDrag({ datasetId, imageId, ...box });
+      box: from, own: box, cur: from, moved: false, node,
+      keepAspect: !!opts.keepAspect, groupBox, hint: null, leaving: false };
+    setImgDrag({ datasetId, imageId, ...from, detach: !!groupBox && mode === 'move' });
     pan.current = null;
     return true;
   }, []);
@@ -463,6 +568,21 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
        in utils/canvasNodeChrome so it is testable and cannot be lost in a
        rewrite of this handler. */
     if (isNodeControlTarget(e.target)) return;
+    /* 🖼🖼 A GROUP's own grips, hit-tested before its pictures: the title bar
+       moves the whole strip, the corner resizes it. Both act on the ANCHOR,
+       whose box IS the strip's — see beginImage(asGroup). On every pointer
+       type, no long press: the bar is the only grip a group has, and a finger
+       that deliberately grabbed a bar has already said what it means. */
+    const groupEl = e.target.closest?.('[data-canvas-group]');
+    if (groupEl) {
+      const resizing = !!e.target.closest?.('[data-canvas-group-resize]');
+      if (resizing || nodePointerIntent(e.target, e.pointerType) === 'group-move') {
+        frameRef.current?.setPointerCapture?.(e.pointerId);
+        if (beginImage(Number(groupEl.dataset.datasetId),
+          Number(groupEl.dataset.anchorId), resizing ? 'resize' : 'move',
+          localPoint(e), { asGroup: true, keepAspect: resizing })) return;
+      }
+    }
     const imgEl = e.target.closest?.('[data-canvas-image]');
     if (imgEl) {
       const dsId = Number(imgEl.dataset.datasetId);
@@ -545,11 +665,46 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
       const dy = (p.y - gi.sy) / s;
       if (!gi.moved && Math.hypot(p.x - gi.sx, p.y - gi.sy) < DRAG_SLOP) return;
       gi.moved = true;
-      const box = gi.mode === 'resize'
-        ? clampImageBox({ ...gi.box, w: gi.box.w + dx, h: gi.box.h + dy })
-        : clampImageBox({ ...gi.box, x: gi.box.x + dx, y: gi.box.y + dy });
+      let box;
+      if (gi.mode === 'resize') {
+        // A strip is resized as a WHOLE and keeps its shape: its height drives
+        // it (every member is scaled to that height), so letting width and
+        // height drift apart would only distort the anchor.
+        box = gi.keepAspect
+          ? clampImageBox({ ...gi.box, h: gi.box.h + dy,
+            w: gi.box.w * Math.max(0.05, (gi.box.h + dy) / Math.max(1, gi.box.h)) })
+          : clampImageBox({ ...gi.box, w: gi.box.w + dx, h: gi.box.h + dy });
+      } else {
+        box = clampImageBox({ ...gi.box, x: gi.box.x + dx, y: gi.box.y + dy });
+      }
+      /* What this drop WOULD do, recomputed on every frame from the very
+         functions that will decide it again on release — so the highlight can
+         never promise something the drop then refuses.
+         The probe is the dragged picture's CENTRE: "superposer" is about the
+         picture, not about where the finger happens to be inside it. */
+      if (gi.mode === 'move') {
+        const centre = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
+        const hit = mergeTargetAt(layoutRef.current[gi.datasetId] || [], gi.imageId, centre);
+        const leaving = !hit && shouldExtract(gi.groupBox, centre);
+        gi.hint = hit;
+        gi.leaving = leaving;
+        // Once it is on its way out, it is drawn at the size it will REALLY
+        // get back, so the change of size happens in the open during the
+        // gesture rather than as a surprise on release.
+        if (leaving && gi.own) {
+          box = clampImageBox({ x: centre.x - gi.own.w / 2, y: centre.y - gi.own.h / 2,
+            w: gi.own.w, h: gi.own.h });
+        }
+        setDropHint(hit
+          ? { datasetId: gi.datasetId, merge: true, box: hit.box, count: hit.count,
+            caret: hit.caret }
+          : (gi.groupBox && !leaving
+            ? { datasetId: gi.datasetId, leaving: true, groupId: gi.groupBox.groupId }
+            : null));
+      }
       gi.cur = box;
-      setImgDrag({ datasetId: gi.datasetId, imageId: gi.imageId, ...box });
+      setImgDrag({ datasetId: gi.datasetId, imageId: gi.imageId, ...box,
+        detach: !!gi.groupBox && gi.mode === 'move' });
       return;
     }
     const d = dragRef.current;
@@ -593,9 +748,31 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
     const gi = imgRef.current;
     if (gi) {
       imgRef.current = null;
-      // Only a gesture that actually MOVED writes: a tap on a pinned picture
-      // must not quietly re-save the same coordinates.
-      if (gi.moved) saveImage(gi.datasetId, gi.node, gi.cur);
+      setDropHint(null);
+      /* Only a gesture that actually MOVED writes: a tap on a pinned picture
+         must not quietly re-save the same coordinates.
+
+         Three outcomes, in this order — the same order the highlight announced
+         them in, recomputed from the same functions so the two can never
+         disagree:
+           ⊕ dropped on another picture (or on a strip) → they FUSE, and the
+             dragged one keeps its own remembered geometry for the day it
+             leaves again;
+           ⤢ dropped clear of the strip it was in → it comes back out, at its
+             own size, where it was let go;
+           · anything else → the ordinary move/resize.
+         A member let go while still over its own strip falls through all three
+         and writes NOTHING: the gesture was started and abandoned, and the
+         board goes back exactly as it was. */
+      const nodes = imagesRef.current[gi.datasetId] || [];
+      if (gi.moved && gi.hint) {
+        saveRows(gi.datasetId,
+          mergeIntoGroup(nodes, gi.imageId, gi.hint.targetImageId, gi.hint.side));
+      } else if (gi.moved && gi.leaving) {
+        saveRows(gi.datasetId, extractFromGroup(nodes, gi.imageId, gi.cur));
+      } else if (gi.moved && !gi.groupBox) {
+        saveImage(gi.datasetId, gi.node, gi.cur);
+      }
       setImgDrag(null);
       pointers.current.delete(e.pointerId);
       frameRef.current?.releasePointerCapture?.(e.pointerId);
@@ -635,7 +812,7 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
       pan.current = null;
       frameRef.current?.classList.remove('is-grabbing');
     }
-  }, [onPinLane, runCardGesture, saveImage]);
+  }, [onPinLane, runCardGesture, saveImage, saveRows]);
 
   // --- inspection / compare (identical rules to the in-card graph) -----------
   const nodeById = useMemo(() => {
@@ -824,6 +1001,106 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
     if (await deleteCheckpoint(openCk?.lane?.datasetId ?? null, node, pill)) setOpenCk(null);
   }, [deleteCheckpoint, openCk]);
 
+  /* --- ▶ Continue training, FROM THE BOARD ---------------------------------
+     The popover used to render a greyed sentence here: "open this run from the
+     Runs page (cloud) or the dataset's Checkpoints panel (local)". The capacity
+     existed; only the way in was missing, and it was a different way per lane.
+     The board now opens the app's ONE continue form — components/dataset/
+     ContinueDialog, the very dialog both other hosts mount, with every option it
+     offers (lane, resume-from, extra steps, cadence, preview prompts, timestep,
+     LR factor). No third form: what the board owns is the ROUTING and the LANE
+     RULE, and those live JSX-free in utils/canvasContinue.js.
+
+     Two things are fetched only when the dialog opens, never polled: the Runs
+     hub payload. It answers the lane guards (ai-toolkit, machine-wide local
+     single-flight, this dataset's active cloud run, the concurrency limit) AND
+     supplies the two fields a lineage node does not carry — the run's own
+     `masked` flag and its frozen settings snapshot. A board that polled that on
+     idle would spend a phone's battery drawing a static graph. */
+  const [continueTarget, setContinueTarget] = useState(null);   // {node, pill, step}
+  const [continueRuns, setContinueRuns] = useState(null);       // /cloud/runs payload
+  const [continueBusy, setContinueBusy] = useState(false);
+  // The LAST refusal, shown inside the dialog. See utils/continueOutcome.js: a
+  // refusal keeps the form and its five folded settings, only a success closes it.
+  const [continueError, setContinueError] = useState(null);
+
+  const handleContinueCheckpoint = useCallback((node, pill) => {
+    const refusal = canvasContinueRefusal(node, pill);
+    if (refusal) { toast.warning(refusal); return; }
+    setContinueTarget({ node, pill: pill || null, step: pill?.step ?? null });
+    setContinueRuns(null);
+    setContinueError(null);
+    // The dialog SEEDS its lane and its checkpoint from props on mount and never
+    // re-seeds, so it must not mount before this answer lands: opening a beat
+    // early made a configured cloud lane look like "needs a vast.ai API key",
+    // pre-selected Local for a cloud run, and posted to the local endpoint. Hence
+    // the two-state resolution — `null` while in flight, an OBJECT once settled.
+    // A failed read settles to `{}`: the lanes then read as open and the BACKEND
+    // refuses with its own reason, which beats a dialog refusing on a request
+    // that never left.
+    apiFetch('/api/dataset/train/cloud/runs?limit=50')
+      .then((d) => setContinueRuns(d || {}))
+      .catch(() => setContinueRuns({}));
+  }, [toast]);
+
+  const continueSteps = useMemo(
+    () => canvasContinueSteps(continueTarget?.node), [continueTarget]);
+  const continueRow = useMemo(
+    () => canvasContinueRow(continueTarget?.node,
+      [...(continueRuns?.actives || []), ...(continueRuns?.recent || [])]),
+    [continueTarget, continueRuns]);
+  const continueLanes = useMemo(
+    () => (continueTarget ? canvasContinueLanes(continueTarget.node, continueTarget.pill, {
+      aitoolkitValid: caps?.aitoolkit?.valid,
+      localActive: continueRuns?.local_active,
+      actives: continueRuns?.actives || [],
+      configured: continueRuns?.configured,
+      limit: continueRuns?.limit || 1,
+    }) : null),
+    [continueTarget, caps, continueRuns]);
+
+  const submitContinue = useCallback(async (payload) => {
+    const target = continueTarget;
+    // POST WITH THE DIALOG STILL OPEN. It used to close first — a workaround for
+    // a toast container that lived UNDER every modal (fixed: Toast.jsx is
+    // z-[10000]) — and the price was the whole form: lane, resume checkpoint,
+    // extra steps and the five folded settings, gone before the refusal arrived,
+    // with no clue which of them was refused.
+    if (!payload) { setContinueTarget(null); setContinueError(null); return; }
+    const req = canvasContinueRequest(target.node, payload,
+      { steps: canvasContinueSteps(target.node), masked: continueRow?.masked ?? null });
+    if (!req) { setContinueError('This run cannot be continued from the board.'); return; }
+    setContinueBusy(true);
+    setContinueError(null);
+    let outcome;
+    let d = null;
+    try {
+      // The board's local lane re-exports the CURRENT dataset, so it meets the
+      // same caption/quality guards as the two other hosts — which is a QUESTION
+      // ("12 images have no caption — continue anyway?"), not a refusal. It used
+      // to arrive here as a dead-end error string with no way to answer it. The
+      // app's one confirm-and-retry loop answers it, and its add-the-flag-ONCE
+      // rule is what stops a server that ignores the flag from re-asking forever.
+      d = await postWithConfirmations((b) => postJson(req.url, b), req.body,
+        'Continue anyway (force)');
+      outcome = continueAttemptOutcome(d === null ? { declined: true } : { response: d });
+    } catch (e) {
+      // postJson THROWS on a 400/409. That is exactly how a checkpoint whose
+      // file is gone comes back ("no local checkpoint at step N (available:
+      // …)"), and how a busy GPU does.
+      outcome = continueAttemptOutcome({ thrown: e });
+    } finally {
+      setContinueBusy(false);
+    }
+    if (!outcome.close) { setContinueError(outcome.error); return; }
+    setContinueTarget(null);
+    setContinueError(null);
+    setOpenCk(null);
+    toast.success(`Continuing from step ${d.resumed_from} → ${d.target_steps} `
+      + (payload.lane === 'cloud' ? 'on a fresh pod…' : 'on this machine…'));
+    onRefetchDataset?.(target.node.dataset_id);
+  }, [continueTarget, continueRow, toast, onRefetchDataset]);
+
   /* --- the generation in flight, owned by the BOARD -------------------------
      Not by the settings panel: closing that panel used to destroy the run id, so
      a launch could only be watched at the moment it was fired. */
@@ -915,7 +1192,10 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
       const laneMap = imageNodes?.[dsId] || {};
       const res = placeImageBatch({
         graph: lane?.graph,
-        existing: imagesRef.current[dsId] || [],
+        // The boxes actually OCCUPIED: a strip, not the members' remembered
+        // spots — a fresh pin landing squarely on a group would be exactly the
+        // "nothing lands on top of anything" promise broken.
+        existing: layoutBoxes(layoutRef.current[dsId] || []),
         images,
         remembered: laneMap,
       });
@@ -957,14 +1237,52 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
     setPinAllState(null);
   }, [pinAllState, onSaveImageNodes]);
 
-  // Closing KEEPS the geometry -- that is the whole promise. Only `visible` flips.
+  /* Closing KEEPS the geometry -- that is the whole promise. Only `visible`
+     flips.
+
+     🖼🖼 Closing a picture that is inside a GROUP also takes it out of it: a
+     closed picture is not in the strip, and leaving its membership behind would
+     make the strip re-form around a picture nobody can see. It leaves through
+     exactly the same function a drag-out uses, so the ones staying behind close
+     the gap the same way and a group left with one member dissolves the same
+     way — closing the second-to-last picture of a strip cannot leave a "group"
+     of one. The closed picture keeps its OWN remembered box, which is what
+     re-opening it from its gallery reads. */
   const handleCloseImage = useCallback((node) => {
     const dsId = node?.image?.dataset_id;
     if (dsId == null) return;
+    if (node.groupId) {
+      const nodes = imagesRef.current[dsId] || [];
+      const rows = extractFromGroup(nodes, node.imageId, { x: node.x, y: node.y });
+      if (rows.length) {
+        saveRows(dsId, rows.map((r) => (r.imageId === node.imageId
+          ? { ...r, visible: false } : { ...r, visible: true })));
+        return;
+      }
+    }
     onSaveImageNodes?.(dsId, [{
       image_id: node.imageId, x: node.x, y: node.y, w: node.w, h: node.h,
-      visible: false, image: node.image,
+      visible: false, group_id: null, group_pos: null, image: node.image,
     }]);
+  }, [onSaveImageNodes, saveRows]);
+
+  /* ✕ on the GROUP's bar: close all N at once.
+     Each picture keeps its OWN remembered geometry — the box it had before it
+     ever joined, never the slot it happened to occupy in the strip — and the
+     group is undone. So re-opening one from its gallery brings back exactly
+     that one, at its own size, which is the promise every other pinned picture
+     already makes; resurrecting a whole strip from a single gallery pin would
+     be the board doing something nobody asked for. The button says all of this
+     before it is pressed, and carries the count on the glyph so it can never be
+     mistaken for a member's ✕. */
+  const handleCloseGroup = useCallback((group) => {
+    const dsId = group?.members?.[0]?.node?.image?.dataset_id;
+    if (dsId == null) return;
+    onSaveImageNodes?.(dsId, group.members.map((m) => ({
+      image_id: m.node.imageId,
+      x: m.node.x, y: m.node.y, w: m.node.w, h: m.node.h,
+      visible: false, group_id: null, group_pos: null, image: m.node.image,
+    })));
   }, [onSaveImageNodes]);
 
   // The keyboard path into the same write (arrows / +- on a focused node), so
@@ -1053,8 +1371,12 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
             </span>
           ))}
         </span>
+        {/* The ONLY place the board's gestures are discoverable. A gesture that
+            is not listed here does not exist as far as anyone is concerned, so
+            every new one earns its clause — including 🖼🖼 drop-to-fuse, which
+            nobody would ever guess. */}
         <span className="ml-auto hidden text-content-subtle text-[0.625rem] lg:inline">
-          Drag a run to move it · drag the background to pan · wheel to zoom · click a run for all its images, notes and settings · click a checkpoint for its actions · tick a checkpoint’s <span aria-hidden>✓</span> to generate from it · <span className="font-semibold">⇧ Shift-click</span> two runs to compare - pin an image from its gallery to put it ON the board
+          Drag a run to move it · drag the background to pan · wheel to zoom · click a run for all its images, notes and settings · click a checkpoint for its actions · tick a checkpoint’s <span aria-hidden>✓</span> to generate from it · <span className="font-semibold">⇧ Shift-click</span> two runs to compare - pin an image from its gallery to put it ON the board · <span className="font-semibold">drop one pinned image onto another</span> to fuse them side by side, drag one off the group to take it back out
         </span>
         {selectedForDiff.length > 0 && (
           <button type="button" onClick={() => setSelectedForDiff([])}
@@ -1103,9 +1425,11 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
             {world.lanes.map((lane) => (
               <div key={lane.datasetId}>
                 <LaneHeader lane={lane} />
-                <LaneImages lane={lane} nodes={imagesByLane[lane.datasetId] || []}
+                <LaneImages lane={lane} layout={layoutByLane[lane.datasetId] || []}
                   onGeometry={handleImageGeometry} onClose={handleCloseImage}
+                  onCloseGroup={handleCloseGroup}
                   onOpen={(n) => setPinnedZoom(n.image)}
+                  hint={dropHint?.datasetId === lane.datasetId ? dropHint : null}
                   boardScale={clampScale(view.scale)} />
                 <LaneGraph lane={lane} isLit={isLit} onHover={onHover}
                   onNodeClick={onNodeClick} diffRole={diffRole} noteOf={noteOf}
@@ -1138,11 +1462,14 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
               node={openCk.node} pill={openCk.pill}
               runLabel={runIdentityLabel(openCk.node)}
               folderLabel={loraFolderLabel(openCk.node.train_type)}
-              // The board has no resume flow of its own: continuing a run is the
-              // Runs hub's (cloud) or the dataset panel's (local) gesture, each
-              // with its own dialog. Rather than a button that would go nowhere,
-              // the row says where the gesture lives.
-              continueReason="Continue from here: open this run from the Runs page (cloud) or the dataset’s Checkpoints panel (local)"
+              // ▶ Continue from here is a REAL button on the board now. It used
+              // to be a greyed sentence pointing at two other pages — one per
+              // lane — which is the whole reason this exists: the capacity was
+              // there, only the way in was missing. 'any' because the board
+              // serves BOTH sources (a local run's save qualifies too); the
+              // per-lane truth is the dialog's own answer, stated per lane.
+              continueSource="any"
+              onContinue={handleContinueCheckpoint}
               importing={importing} deleting={deleting}
               onDeploy={handleDeployCheckpoint}
               onDelete={handleDeleteCheckpoint}
@@ -1151,6 +1478,40 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
           </div>
         );
       })()}
+
+      {/* ▶ Continue training — the app's ONE dialog, hosted by the board.
+
+          It is a full-screen modal, NOT more rows inside the popover, and that
+          is a deliberate call: the popover is a fixed 210×232 px card sized to
+          fit a 400-px phone, and the launch form has a lane picker, a
+          checkpoint select, a step field and five folded settings. Cramming it
+          in would have produced a third, smaller, diverging form — the exact
+          debt the shared popover was extracted to avoid. The popover stays what
+          it is good at: the launcher.
+
+          It is also drawn in SCREEN pixels (fixed inset-0), like the popover
+          above it — neither scales with the board. A control drawn in world
+          units becomes a ~6-px target at 45 % zoom, which is how the ✕ became
+          unclickable once already. */}
+      {continueTarget && continueRuns && (
+        <ContinueDialog
+          context={runIdentityLabel(continueTarget.node)}
+          // Opens on the lane the SOURCE run trained in; resolveInitialLane then
+          // moves off it if that lane is closed and the other one isn't.
+          where={continueTarget.node.source === 'cloud' ? 'cloud' : 'local'}
+          lanes={continueLanes}
+          // This run's OWN saves — not the dataset's current selection. On a
+          // board holding ten datasets that distinction is the feature.
+          checkpoints={continueSteps.map((step) => ({ step }))}
+          // THE point of opening from a pill: step 2500 of a 3500-step run, not
+          // "the latest". initialResumeStep honours it only when it is a real
+          // save of this run (unit-tested in lineageContinue.js).
+          initialFromStep={continueTarget.step}
+          settings={canvasContinueSettings(continueTarget.node, continueRow)}
+          busy={continueBusy}
+          error={continueError}
+          onResolve={submitContinue} />
+      )}
 
       {/* One drawer at a time: two picked runs → the compare diff, otherwise the
           single-run inspector. Both are the EXISTING panels, hosted unchanged —

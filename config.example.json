@@ -35,6 +35,10 @@
   "captioning": {
     "backend": "auto"
   },
+  "dataset_import": {
+    "max_side": 1024,
+    "encoding": "standard"
+  },
   "training": {
     "default_family": "zimage"
   },

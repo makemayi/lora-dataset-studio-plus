@@ -41,6 +41,12 @@ const num = (v, fallback) => {
   return Number.isFinite(n) ? n : fallback;
 };
 
+const numOrNull = (v) => {
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
 /** Clamp one node's box into its lane and into a usable size. Unusable numbers
  *  degrade to the default rather than to 0/NaN: a node parked at NaN would be
  *  unreachable on every future load and there is no UI to fix that. */
@@ -71,6 +77,13 @@ export function toImageNodeMap(rows) {
       imageId: Number(id),
       ...clampImageBox(r),
       visible: r.visible !== false,
+      /* 🖼🖼 Group membership, when this picture is part of a side-by-side strip
+         (utils/canvasImageGroups). Two ADDITIVE, nullable fields: a lane loaded
+         from a database that predates them reads null everywhere and draws the
+         board it always drew. Nothing here is renamed — the geometry keys and
+         `visible` are stored in every user's database and keep their names. */
+      groupId: r.group_id ?? r.groupId ?? null,
+      groupPos: numOrNull(r.group_pos ?? r.groupPos),
       image: r.image,
     };
   }

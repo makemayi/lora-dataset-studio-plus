@@ -1219,6 +1219,182 @@ def test_first_step_watchdog_kills_run_stuck_before_step_one(ct, app, client, mo
         assert remote.stopped                  # job stop was requested
 
 
+# --- The first-step watchdog must read BYTES, not just steps -------------------
+# j_o_e_l. (Discord, 2026-07-27) launched a KREA-2 RAW run on a 5090 and was
+# told to sit tight because "we have some protection for buggy pods". 59 min
+# later that protection killed the run: FAILED, error 'first-step watchdog',
+# never past step 0 — while the pod was downloading its 26.3 GB base model
+# perfectly normally. Measured on another pod's log (run #121): 2.58 MB/s puts
+# that download at ~2 h 50, so the 45-min budget GUARANTEED the failure.
+
+
+class DownloadingRemote(FakeRemote):
+    """Pod stuck at step 0 forever — but whose log shows the base-model download
+    advancing by 250 MB at every poll. j_o_e_l.'s pod."""
+
+    def get_job(self, job_id):
+        self.polls += 1
+        if self.stopped:
+            return {'status': 'stopped', 'step': 0, 'total_steps': 3500}
+        return {'status': 'running', 'step': 0, 'total_steps': 3500,
+                'info': 'downloading base model', 'speed_string': ''}
+
+    def get_log(self, job_id):
+        mb = 250 * self.polls
+        return (f'raw.safetensors:   {min(99, mb // 270)}%|  | {mb}M/26.3G '
+                f'[{self.polls}:00<2:37:06, 2.58MB/s]')
+
+
+def test_first_step_watchdog_spares_a_pod_whose_download_advances(
+        ct, app, client, monkeypatch):
+    """j_o_e_l.'s run. No step for far longer than first_step_timeout_minutes, but
+    the pod's byte counter moves at every poll — a pod whose bytes advance is a
+    pod that progresses, and the guiding rule is NEVER kill a run that
+    progresses. The coarse 600 s/_now() clock blows through the 45-min budget
+    within two polls, so before the fix this run dies; after it, it trains."""
+    destroyed = []
+    remote = DownloadingRemote(polls_to_complete=10_000)
+    ds_id, run_id = _launch(ct, app, client, monkeypatch, remote, destroyed)
+    clock = {'t': 0.0}
+    monkeypatch.setattr(ct, '_now',
+                        lambda: clock.__setitem__('t', clock['t'] + 600.0) or clock['t'])
+    with app.app_context():
+        # Download budget off: this test is about the idle clock being rearmed,
+        # the absolute ceiling has its own test below.
+        ct.cfg.save_config({'cloud': {'first_step_download_budget_minutes': 0}})
+        ct._monitor(app, run_id)
+        run = ct.CloudTrainingRun.query.get(run_id)
+        # It dies of the RUNTIME CAP (the honest backstop), never of the
+        # first-step watchdog.
+        assert 'first-step' not in ((run.error or '') + (run.phase_detail or '')).lower()
+        assert run.status == 'stopped'
+        assert 'max runtime' in (run.error or '').lower()
+
+
+def test_first_step_watchdog_still_kills_a_genuinely_wedged_pod(
+        ct, app, client, monkeypatch):
+    """The anti-masking guard. No step AND no byte ever reported = a wedged pod
+    burning money, and it must still die on the 45-min budget, not on the 8-hour
+    runtime cap. If this ever regresses, the fix above became a cover-up."""
+    destroyed = []
+    remote = NeverStartsRemote(polls_to_complete=10_000)
+    ds_id, run_id = _launch(ct, app, client, monkeypatch, remote, destroyed)
+    clock = {'t': 0.0}
+    monkeypatch.setattr(ct, '_now',
+                        lambda: clock.__setitem__('t', clock['t'] + 600.0) or clock['t'])
+    with app.app_context():
+        ct._monitor(app, run_id)
+        run = ct.CloudTrainingRun.query.get(run_id)
+        assert run.status == 'error'
+        assert 'first-step' in (run.error or '').lower()
+        assert destroyed == ['777']
+        # And the message says what was MEASURED, not what was guessed. The old
+        # wording ("pod likely stuck downloading the base model") is exactly
+        # what j_o_e_l. read while his pod was downloading fine.
+        detail = (run.phase_detail or '')
+        assert 'likely' not in detail.lower()
+        assert 'never reported' in detail.lower()
+
+
+class FrozenDownloadRemote(FakeRemote):
+    """MEASURED failure mode (run #121): the byte counter sticks at 1.95G while
+    tqdm keeps reprinting the bar with an advancing `elapsed` and a decaying
+    rate. The LINE moves at every poll; the DOWNLOAD is dead."""
+
+    def get_job(self, job_id):
+        self.polls += 1
+        if self.stopped:
+            return {'status': 'stopped', 'step': 0, 'total_steps': 3500}
+        return {'status': 'running', 'step': 0, 'total_steps': 3500,
+                'info': 'downloading base model', 'speed_string': ''}
+
+    def get_log(self, job_id):
+        return (f'raw.safetensors:   7%|  | 1.95G/26.3G '
+                f'[{self.polls}:30<9:12:44, {max(0.01, 3.0 - self.polls * 0.1):.2f}MB/s]')
+
+
+def test_frozen_byte_counter_is_not_progress(ct, app, client, monkeypatch):
+    """A moving line is not a moving download. Only the bytes count — so this
+    pod must die on the first-step budget like any other wedged pod."""
+    destroyed = []
+    remote = FrozenDownloadRemote(polls_to_complete=10_000)
+    ds_id, run_id = _launch(ct, app, client, monkeypatch, remote, destroyed)
+    clock = {'t': 0.0}
+    monkeypatch.setattr(ct, '_now',
+                        lambda: clock.__setitem__('t', clock['t'] + 600.0) or clock['t'])
+    with app.app_context():
+        ct._monitor(app, run_id)
+        run = ct.CloudTrainingRun.query.get(run_id)
+        assert run.status == 'error'
+        assert 'first-step' in (run.error or '').lower()
+        assert destroyed == ['777']
+        # ... and the message reports where it actually got to.
+        assert '1.9' in (run.phase_detail or '') or '2.0 GB' in (run.phase_detail or '')
+
+
+class DownloadThenSilentRemote(FakeRemote):
+    """Pod that downloads for a few polls, finishes, and then never produces a
+    step. Once the bytes stop the clock must RESTART — this is where the 45-min
+    budget keeps all its meaning."""
+
+    def get_job(self, job_id):
+        self.polls += 1
+        if self.stopped:
+            return {'status': 'stopped', 'step': 0, 'total_steps': 3500}
+        return {'status': 'running', 'step': 0, 'total_steps': 3500,
+                'info': 'preparing', 'speed_string': ''}
+
+    def get_log(self, job_id):
+        done = min(self.polls, 3)
+        return (f'raw.safetensors: 100%|  | {done * 8.7:.1f}G/26.1G '
+                f'[{self.polls}:00<00:00, 40MB/s]')
+
+
+def test_clock_restarts_when_the_download_ends_without_a_step(
+        ct, app, client, monkeypatch):
+    """The download completes at poll 3 and no step ever comes. The run must
+    still be killed by the first-step watchdog — the rearm buys time for a
+    download, it does not disarm the watchdog."""
+    destroyed = []
+    remote = DownloadThenSilentRemote(polls_to_complete=10_000)
+    ds_id, run_id = _launch(ct, app, client, monkeypatch, remote, destroyed)
+    clock = {'t': 0.0}
+    monkeypatch.setattr(ct, '_now',
+                        lambda: clock.__setitem__('t', clock['t'] + 600.0) or clock['t'])
+    with app.app_context():
+        ct.cfg.save_config({'cloud': {'first_step_download_budget_minutes': 0}})
+        ct._monitor(app, run_id)
+        run = ct.CloudTrainingRun.query.get(run_id)
+        assert run.status == 'error'
+        assert 'first-step' in (run.error or '').lower()
+        assert destroyed == ['777']
+        # It got to 26.1 GB, and the message says so instead of blaming the
+        # download it just watched succeed.
+        assert 'GB' in (run.phase_detail or '')
+
+
+def test_download_budget_caps_an_endlessly_slow_pod(ct, app, client, monkeypatch):
+    """The ceiling that keeps the rearm honest. A host at 200 kB/s advances its
+    bytes at every poll for 36 h — rearming alone would let it burn the whole
+    runtime cap for zero steps, which is the very failure (run #75) the
+    first-step watchdog was built to stop. Past the budget it dies anyway."""
+    destroyed = []
+    remote = DownloadingRemote(polls_to_complete=10_000)
+    ds_id, run_id = _launch(ct, app, client, monkeypatch, remote, destroyed)
+    clock = {'t': 0.0}
+    monkeypatch.setattr(ct, '_now',
+                        lambda: clock.__setitem__('t', clock['t'] + 600.0) or clock['t'])
+    with app.app_context():
+        ct.cfg.save_config({'cloud': {'first_step_download_budget_minutes': 60}})
+        ct._monitor(app, run_id)
+        run = ct.CloudTrainingRun.query.get(run_id)
+        assert run.status == 'error'
+        assert 'download budget' in (run.error or '').lower()
+        assert destroyed == ['777']
+        # Killed WELL before the 480-min runtime cap.
+        assert clock['t'] < 480 * 60
+
+
 def test_progressing_run_never_trips_stall_watchdog(ct, app, client, monkeypatch):
     """Guiding principle: NEVER kill a run that makes progress. Same coarse
     fake clock as the stall test — a run whose step advances at every poll

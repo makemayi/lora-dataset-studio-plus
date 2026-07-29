@@ -285,6 +285,16 @@ How the short caption is produced:
 JSON file the short caption is read from, so **cloud runs train on the long
 caption alone** — turning the toggle on simply has no effect there yet.
 
+**Not on Krea 2 or Anima.** Those two families pre-cache their text embeddings and
+unload the text encoder to fit their DiT in VRAM. ai-toolkit caches exactly one
+embedding per image — the long caption — and once the encoder is gone the training
+loop reads those cached embeddings instead of the caption text, so a second caption
+has nowhere to be encoded. Asking for both used to crash the run at the first step,
+*after* the weights download and the whole caching pass (reported by **1Tomber**,
+GitHub #22). The app now refuses the combination when it builds the training config:
+the toggle says so, the pre-launch check warns, and the run trains on the long
+caption alone — trigger word included, exactly like a normal run.
+
 ---
 
 ## 8. Concept LoRAs: keeping faces out

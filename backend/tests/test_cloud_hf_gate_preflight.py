@@ -23,6 +23,7 @@ def _patch(monkeypatch, raiser):
                         'urlopen', raiser, raising=False)
 
 
+@pytest.mark.hf_gate
 def test_a_refused_gate_stops_the_launch_before_anything_is_rented(monkeypatch):
     import urllib.request
     monkeypatch.setattr(urllib.request, 'urlopen',
@@ -35,6 +36,7 @@ def test_a_refused_gate_stops_the_launch_before_anything_is_rented(monkeypatch):
     assert 'cost' in msg.lower()                        # says nothing was rented
 
 
+@pytest.mark.hf_gate
 def test_an_unauthenticated_refusal_is_treated_the_same(monkeypatch):
     import urllib.request
     monkeypatch.setattr(urllib.request, 'urlopen',
@@ -46,6 +48,7 @@ def test_an_unauthenticated_refusal_is_treated_the_same(monkeypatch):
 @pytest.mark.parametrize('boom', [
     _http_error(500), _http_error(404), TimeoutError('slow'), OSError('offline'),
 ])
+@pytest.mark.hf_gate
 def test_it_fails_OPEN_on_anything_that_is_not_a_refusal(monkeypatch, boom):
     """An HF outage, a rename, a flaky network — none of those mean the user cannot
     train. The pod stays the real authority; grounding a good run would be worse
@@ -56,6 +59,7 @@ def test_it_fails_OPEN_on_anything_that_is_not_a_refusal(monkeypatch, boom):
     ct._assert_official_base_reachable('krea/Krea-2-Turbo', 'hf_token')   # no raise
 
 
+@pytest.mark.hf_gate
 def test_no_repo_to_check_is_a_no_op(monkeypatch):
     """Custom local weights resolve to None — there is nothing for HF to refuse."""
     import urllib.request

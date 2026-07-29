@@ -34,6 +34,29 @@ class FaceDataset(db.Model):
     # honore top-level que pour SDXL) : chemin VAE et chemin/te repo-id du TE.
     train_vae_path = db.Column(Text, nullable=True)
     train_te_path = db.Column(Text, nullable=True)
+    # Per-FAMILY memory of (base, variant). `train_base_model`/`train_variant`
+    # above stay the ACTIVE selection — every reader keeps reading them — and
+    # this JSON only remembers what each family was last set to:
+    #   {"zimage": {"base": "z image\\merge.safetensors", "variant": "turbo"},
+    #    "krea":   {"base": "", "variant": "base"}}
+    # Switching train_type stashes the outgoing family's pair here and restores
+    # the incoming one (cf. face_dataset_service.set_train_type). Without it a
+    # base chosen for Z-Image stayed attached to a Krea run: the selector read
+    # the family, the summary read the column, and both told the truth about
+    # different things. Additive + nullable migration in create_app; NULL simply
+    # means "nothing remembered yet", which is what every existing dataset is.
+    train_family_bases = db.Column(Text, nullable=True)
+    # Same idea, for the handful of `train_settings` keys whose MEANING is bound
+    # to the family (lora_training._FAMILY_SCOPED_SETTING_KEYS — today
+    # `timestep_type`). `train_settings` above stays the ACTIVE blob every reader
+    # reads; this JSON only remembers what each family was last set to:
+    #   {"zimage": {"timestep_type": "sigmoid"}, "flux2klein": {}}
+    # An empty dict for a family means "that family rides its own default", which
+    # is NOT the same as "never configured" (absent). Without it, a `sigmoid`
+    # picked under Z-Image overwrote the canonical `weighted` of FLUX.2 Klein and
+    # Anima on a family switch — silently, and it changes the LoRA that comes out.
+    # Additive + nullable migration in create_app; NULL = nothing remembered yet.
+    train_family_settings = db.Column(Text, nullable=True)
     # Réglages ai-toolkit avancés éditables par dataset (JSON) : rank, resolution,
     # save_every. NULL = défauts family-aware. Cf. lora_training._train_settings.
     train_settings = db.Column(Text, nullable=True)
@@ -84,6 +107,15 @@ class FaceDataset(db.Model):
     # so captioning never has to depend on the ai-toolkit gate. Read via
     # face_dataset_service.caption_options; additive migration in create_app.
     caption_options = db.Column(Text, nullable=True)
+    # Which Klein UNET this dataset's Klein work runs on — the BARE file name as the
+    # picker lists it (the subfolder prefix is the resolver's job). NULL = auto: let
+    # klein_edit_helper.resolve_klein_unet choose, which is byte-for-byte what every
+    # dataset did before this column existed. Read by ✨ Upscale & improve (all three
+    # lanes) and used as the default of the generation picker. A dedicated column
+    # (NOT train_settings) so applying a training preset — which REPLACES that blob —
+    # cannot wipe it, and because it is not a training setting at all. Additive
+    # migration in create_app.
+    klein_model = db.Column(String(255), nullable=True)
     created_at = db.Column(DateTime, default=db.func.current_timestamp())
     updated_at = db.Column(DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
 
@@ -134,6 +166,17 @@ class FaceDatasetImage(db.Model):
     # affiché sur la tuile — sinon l'échec est muet et l'utilisateur relance à
     # l'aveugle. Nettoyé au regenerate. Colonne additive (migration create_app).
     fail_reason = db.Column(Text, nullable=True)
+    # Ce que fail_reason raconte, en UN mot machine — pour COMPTER les échecs par
+    # nature sans relire la phrase (une phrase se réécrit, une clé non) :
+    #   'refused' = le fournisseur a répondu normalement et a refusé l'image
+    #               (filtre de sortie) — ce n'est pas une panne ;
+    #   'empty'   = 200 sans image, sans raison exploitable (moteurs qui ne
+    #               savent pas distinguer refus et hoquet) ;
+    #   'error'   = vraie panne (réseau, clé, quota, 5xx, sauvegarde, queue).
+    # NULL = ligne d'avant la colonne, ou échec non classé : l'UI ne compte alors
+    # que ce qu'elle sait, elle ne devine pas. Colonne additive (migration
+    # create_app). Valeurs = clés stockées en base : ne jamais les renommer.
+    fail_kind = db.Column(String(16), nullable=True)
     # De combien la box recadrée (head-crop auto à l'import OU recadrage manuel) est
     # en-dessous de la résolution d'entraînement : size / côté_de_la_box. NULL =
     # jamais croppé (import plein cadre) ou pas encore recalculé (anciennes lignes).
@@ -275,6 +318,13 @@ class BankImage(db.Model):
     # or to repaint. NULL on a row scanned by a build that only kept the boolean —
     # such rows are re-picked by the next scan (see start_watermark).
     watermark_bbox = db.Column(Text, nullable=True)
+    # Hand-drawn correction: JSON list of normalized bboxes, the SAME shape and the
+    # same meaning as FaceDatasetImage.watermark_regions (one validator, one editor).
+    # NULL keeps the detector's bbox as the effective mask; [] is an EXPLICIT empty
+    # override ("there is nothing to repaint here") and never falls back to the box.
+    # Both cleaning levels read this first — an edit the cleaner ignores would be
+    # worse than no editor at all. Additive column (migration in create_app).
+    watermark_regions = db.Column(Text, nullable=True)
     # How the cleaned blob was produced: NULL = none (no cleaned version on disk) |
     # 'crop' (level 1, PIL, invents no pixel) | 'lama' | 'klein' (level 2, inpaint).
     # Non-NULL is what makes the readers (promote, thumbnails, the file route)
@@ -801,6 +851,24 @@ class CanvasImageNode(db.Model):
     w = db.Column(Float, nullable=False, default=260.0)
     h = db.Column(Float, nullable=False, default=260.0)
     visible = db.Column(db.Boolean, nullable=False, default=True)
+    # 🖼🖼 Which side-by-side GROUP this picture is fused into, and where in it.
+    # Dropping one pinned image onto another turns them into one node whose
+    # pictures sit edge to edge; there is no limit on how many join, and
+    # dragging one off the strip makes it a node of its own again.
+    #
+    # A group is deliberately NOT a row of its own. It is a membership carried
+    # by pictures that stay ordinary nodes, because the geometry above is a
+    # per-image promise ("close it, re-open it from its gallery, it comes back
+    # where and how big you left it") and a container node would have to keep a
+    # second copy of every member's box, free to disagree with this one. Joining
+    # a group therefore never touches x/y/w/h — the strip is computed from them
+    # at draw time (frontend utils/canvasImageGroups), and leaving one hands
+    # them straight back.
+    #
+    # Both are NULLABLE and ADDITIVE (see _SCHEMA_ADDITIONS): a database that
+    # predates them reads NULL everywhere and draws the board it always drew.
+    group_id = db.Column(db.String(40), nullable=True)
+    group_pos = db.Column(db.Integer, nullable=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow,
                            onupdate=datetime.utcnow)
     dataset = db.relationship('FaceDataset')

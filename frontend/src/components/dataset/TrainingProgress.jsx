@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { formatDownloadProgress } from '../../utils/downloadProgress';
+
 /* Live view of the CURRENT run (mounted by TrainingPanel while this dataset
    trains): progress bar, loss sparkline, and the sample previews ai-toolkit
    writes every sample_every steps. Polls /train/progress every 5 s.
@@ -51,6 +53,39 @@ function LossSparkline({ curve }) {
           <circle cx={hover.x} cy={hover.y} r="3.5" fill="#818cf8" stroke="#0b0b10" strokeWidth="2" />
         )}
       </svg>
+    </div>
+  );
+}
+
+/* The byte counter of whatever the run is currently fetching. Before this, the
+   longest and most expensive phase of a cloud run — pulling 26 GB of base
+   weights — was one motionless sentence, and telling a slow download from a
+   dead pod meant opening the vast.ai console. Absent (null) whenever nothing
+   parsable is in the log, in which case the phase sentence above stands alone
+   exactly as it used to.
+
+   Deliberately not aria-live: the figures change every few seconds, and a bar
+   that re-announces itself is worse than no bar. The role/label/valuenow trio
+   lets a screen reader read it ON DEMAND, and valuenow moves at most 100 times
+   over a 26 GB download. */
+function DownloadProgress({ download }) {
+  const d = formatDownloadProgress(download);
+  if (!d) return null;
+  return (
+    <div className="flex flex-col gap-1">
+      {/* 400 px: the figures wrap under the label instead of overflowing. */}
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[0.6875rem]">
+        <span className="text-content font-semibold tabular-nums">{d.headline}</span>
+        {d.detail && <span className="text-content-muted tabular-nums">{d.detail}</span>}
+      </div>
+      {d.percent != null && (
+        <div className="h-1.5 rounded bg-app/60 border border-border overflow-hidden"
+          role="progressbar" aria-valuenow={d.percent} aria-valuemin={0} aria-valuemax={100}
+          aria-label={d.aria}>
+          <div className="h-full bg-sky-400/70 transition-all duration-700"
+            style={{ width: `${d.percent}%` }} />
+        </div>
+      )}
     </div>
   );
 }
@@ -111,6 +146,7 @@ export default function TrainingProgress({ datasetId, base, trainType, variant, 
       {cloud && prog.phase && (
         <p className="m-0 text-sky-300 text-[0.625rem]">{prog.phase}{prog.phase_detail ? ` — ${prog.phase_detail}` : ''}</p>
       )}
+      <DownloadProgress download={prog.download} />
       {pct != null && (
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2 text-[0.6875rem] text-content-muted flex-wrap">

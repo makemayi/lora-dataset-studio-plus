@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
-  deleteDestination, deletePreviewState, isRecoverable, overlapNotice, sharedFileCount,
-  sharedFilesWarning,
+  datasetConflictBlock, deleteDestination, deletePreviewState, isRecoverable,
+  overlapNotice, sharedFileCount, sharedFilesWarning,
 } from './bankOverlap.js';
 
 test('a permanent delete is never described as recoverable', () => {
@@ -85,8 +85,38 @@ test('deletePreviewState: a real preview arms, even with nothing shared', () => 
 test('the delete dialog wires the fail-closed check into the destructive button', () => {
   const src = fs.readFileSync(new URL('./DeleteRejectedDialog.jsx', import.meta.url), 'utf8');
   // armed alone is not enough: the preview has to have landed
-  assert.match(src, /disabled=\{busy \|\| !armed \|\| !check\.ready\}/);
-  assert.match(src, /if \(busy \|\| !armed \|\| !check\.ready\) return/);
+  assert.match(src, /disabled=\{busy \|\| !armed \|\| !check\.ready \|\| block\.blocked\}/);
+  assert.match(src, /if \(busy \|\| !armed \|\| !check\.ready \|\| block\.blocked\) return/);
   // and an unverified destination is never asserted as fact
   assert.match(src, /still being checked/);
+});
+
+test('datasetConflictBlock: silent by default, hard stop when the bank is on a dataset', () => {
+  assert.equal(datasetConflictBlock(null).blocked, false);
+  assert.equal(datasetConflictBlock(undefined).blocked, false);
+  const b = datasetConflictBlock({ scope: 'dataset', dataset_id: 7, message: 'X — Import to bank copies.' });
+  assert.equal(b.blocked, true);
+  assert.match(b.title, /dataset/);
+  assert.equal(b.text, 'X — Import to bank copies.');
+});
+
+test('datasetConflictBlock: with no server sentence it still names the way out', () => {
+  // The block must never degrade into a bare "no" just because the payload is
+  // older/leaner than this build.
+  const b = datasetConflictBlock({ scope: 'dataset' });
+  assert.equal(b.blocked, true);
+  assert.match(b.text, /Import to bank/);
+});
+
+test('the delete dialog blocks on a dataset conflict rather than warning about it', () => {
+  const src = fs.readFileSync(new URL('./DeleteRejectedDialog.jsx', import.meta.url), 'utf8');
+  assert.match(src, /datasetConflictBlock\(preview\?\.dataset_conflict\)/);
+});
+
+test('the workspace disables 🗑 Delete rejected on a bank that sits on a dataset', () => {
+  // The banner promises "Delete rejected is disabled here". A button that still
+  // opened the dialog, only to be refused inside it, would make that a lie.
+  const src = fs.readFileSync(new URL('./BankWorkspace.jsx', import.meta.url), 'utf8');
+  assert.match(src, /disabled=\{live \|\| !\(counts\?\.reject > 0\) \|\| !!payload\?\.dataset_conflict\}/);
+  assert.match(src, /payload\?\.dataset_conflict && \(/);
 });

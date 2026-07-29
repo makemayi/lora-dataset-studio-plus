@@ -889,11 +889,15 @@ def test_run_face_scoring_falls_back_to_sys_executable(app, monkeypatch):
     seen = {}
     monkeypatch.setattr(setup_installer.subprocess, 'Popen',
                         _fake_popen_capturing(seen, 0))
+    # Same reason as the Pillow test below: keep the captured command line the PIP one.
+    monkeypatch.setattr(setup_installer, '_onnxruntime_provided', lambda p: False)
+    monkeypatch.setattr(setup_installer, '_verify_capability_import', lambda a, p: True)
     with app.app_context():
         config.save_config({})   # no face_scoring.python
         setup_installer._runs['face_scoring'] = setup_installer._new_run()
         setup_installer._run_ml_capability('face_scoring')
     assert seen['cmd'][0] == sys.executable
+    assert seen['cmd'][1:4] == ['-m', 'pip', 'install']
 
 
 def test_run_ml_capability_nonzero_returncode_propagates(app, monkeypatch):
@@ -1493,6 +1497,12 @@ def test_run_ml_capability_pins_pillow_when_targeting_flask_venv(app, monkeypatc
     seen = {}
     monkeypatch.setattr(setup_installer.subprocess, 'Popen',
                         _fake_popen_capturing(seen, 0))
+    # The worker also runs two SHORT probes around pip (does this env already have
+    # an onnxruntime? does the capability import once pip is done?), and this crude
+    # global Popen fake would capture their command lines instead of the pip one.
+    # They have their own tests — stub them out and keep this one about pip.
+    monkeypatch.setattr(setup_installer, '_onnxruntime_provided', lambda p: False)
+    monkeypatch.setattr(setup_installer, '_verify_capability_import', lambda a, p: True)
     with app.app_context():
         config.save_config({})   # no masks.python -> Flask venv
         setup_installer._runs['masks'] = setup_installer._new_run()

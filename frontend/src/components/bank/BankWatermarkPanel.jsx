@@ -22,7 +22,7 @@ import { useCapabilities } from '../../context/CapabilitiesContext'
 import { useToast } from '../common/Toast'
 import {
   cropLevelState, findLevelState, hasCleanedImages, inpaintLevelState,
-  levelCounts, progressSummary, rescanNote,
+  levelCounts, maskNote, progressSummary, rescanNote,
 } from './bankWatermark.js'
 import { localEngineUnavailableReason } from '../../utils/localEngineReason'
 
@@ -97,6 +97,9 @@ export default function BankWatermarkPanel({ bankId, live, onChanged }) {
     kleinReason,
   })
   const note = rescanNote(levels)
+  // What the hand-edited masks change for the two levels below (and, loudest, an
+  // emptied mask that neither level will act on).
+  const masks = maskNote(levels)
   const cleaned = hasCleanedImages(levels)
   // A handful of already-cleaned ids, served by the levels payload — enough to
   // judge a pass, and no extra endpoint just to list them.
@@ -132,6 +135,7 @@ export default function BankWatermarkPanel({ bankId, live, onChanged }) {
       </p>
       <p className="text-xs text-content-subtle">{progressSummary(levels)}</p>
       {note && <p className="text-xs text-amber-300/90">⚠️ {note}</p>}
+      {masks && <p className="text-xs text-content-subtle">🚩 {masks}</p>}
 
       <div className="flex flex-wrap gap-2">
         <LevelCard index={1} title="Find them" state={find}

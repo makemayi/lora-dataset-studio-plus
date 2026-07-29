@@ -33,6 +33,11 @@ export function levelCounts(levels) {
     inpainted: num(l.inpainted),
     dismissed: num(l.dismissed),
     needsRescan: num(l.needs_rescan),
+    // Flagged images whose zones the user drew by hand in ▶ Review, and how many
+    // of those were emptied on purpose. Both change what the LEVELS will do, so
+    // neither may stay invisible.
+    handMasked: num(l.hand_masked),
+    emptyMasks: num(l.empty_masks),
   };
 }
 
@@ -70,8 +75,14 @@ export function cropLevelState(levels, { live = false } = {}) {
     ? 'A pass is already running on this bank — wait for it to finish.'
     : c.croppable === 0
       ? (c.flagged > 0
-        ? 'Nothing to crop: the remaining marks are not in a border, or cropping '
-          + 'would shrink the image too much. Use level 3.'
+        ? (c.handMasked >= c.flagged
+          // A hand-drawn mask can hold several zones and zones on the subject —
+          // a border crop expresses neither, so this level skips those images.
+          // Saying "not in a border" there would be a lie.
+          ? 'The flagged images all carry a hand-edited mask — 🧽 Inpaint repaints '
+            + 'the zones you drew.'
+          : 'Nothing to crop: the remaining marks are not in a border, or cropping '
+            + 'would shrink the image too much. Use level 3.')
         : 'Nothing flagged — run 🚩 Find watermarks first.')
       : null;
   return {
@@ -145,6 +156,19 @@ export function progressSummary(levels) {
     ? 'nothing left flagged'
     : `${c.flagged} still flagged (${c.croppable} croppable, ${c.inpaintable} to repaint)`;
   return partial + (done.length ? `${done.join(', ')} — ${left}.` : `${left}.`);
+}
+
+/** What the hand-edited masks change, or null. An emptied mask repaints NOTHING:
+ * that image would otherwise sit in the flagged count forever, looking like a
+ * pass that keeps failing on it. */
+export function maskNote(levels) {
+  const c = levelCounts(levels);
+  if (!c.handMasked) return null;
+  const drawn = `${c.handMasked} flagged image(s) carry a mask you edited — 🧽 Inpaint `
+    + 'repaints those zones, ✂ Auto-crop skips them.';
+  if (!c.emptyMasks) return drawn;
+  return `${drawn} ${c.emptyMasks} of them has an EMPTY mask and will be cleaned by `
+    + 'neither level — draw a zone in ▶ Review, or dismiss the image.';
 }
 
 /** Rows a previous build flagged without keeping the box: they are invisible to

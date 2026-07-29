@@ -96,8 +96,8 @@ function CloudTrainingCard({ config, setField, configDefaults }) {
     return () => { alive = false }
   }, [])
   return (
-    <Card title="Cloud training" help="vast.ai GPU rental guardrails — how many training pods may run at once, the offer price ceiling, your monthly spend limit, and how long a run may go without step progress before it is rescued and killed.">
-      <div className="grid grid-cols-2 gap-3">
+    <Card title="Cloud training" help="vast.ai GPU rental guardrails — how many training pods may run at once, the offer price ceiling, your monthly spend limit, and the watchdogs that end a run that has stopped making progress. A pod that is still downloading its base model IS making progress: those budgets are judged on its byte counter, not on the training step it has not reached yet.">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label htmlFor="cloud-max-concurrent-runs" className="block text-sm font-medium text-content">
             Max simultaneous cloud runs
@@ -163,6 +163,66 @@ function CloudTrainingCard({ config, setField, configDefaults }) {
             className={INPUT_CLASS}
           />
           <ResetToDefault label="Stall timeout" section="cloud" field="stall_timeout_minutes"
+            config={config} configDefaults={configDefaults} setField={setField} />
+        </div>
+        <div>
+          <label htmlFor="cloud-first-step-timeout" className="block text-sm font-medium text-content">
+            First-step timeout (minutes)
+          </label>
+          <input
+            id="cloud-first-step-timeout"
+            type="number"
+            min="5"
+            max="240"
+            step="1"
+            value={config.cloud?.first_step_timeout_minutes ?? dflt('first_step_timeout_minutes')}
+            onChange={(e) => setField('cloud', 'first_step_timeout_minutes', parseInt(e.target.value) || dflt('first_step_timeout_minutes'))}
+            className={INPUT_CLASS}
+          />
+          <p className="mt-1 text-[0.6875rem] text-content-subtle">
+            Before training starts, the pod downloads its base model. This is the idle budget for that phase — the clock restarts every time the pod reports more downloaded bytes, so a slow-but-working download is never cut. Only a pod that reports nothing at all for this long is terminated.
+          </p>
+          <ResetToDefault label="First-step timeout" section="cloud" field="first_step_timeout_minutes"
+            config={config} configDefaults={configDefaults} setField={setField} />
+        </div>
+        <div>
+          <label htmlFor="cloud-first-step-download-budget" className="block text-sm font-medium text-content">
+            Base-model download ceiling (minutes, 0 = none)
+          </label>
+          <input
+            id="cloud-first-step-download-budget"
+            type="number"
+            min="0"
+            max="480"
+            step="1"
+            value={config.cloud?.first_step_download_budget_minutes ?? dflt('first_step_download_budget_minutes')}
+            onChange={(e) => setField('cloud', 'first_step_download_budget_minutes', Math.max(0, parseInt(e.target.value, 10) || 0))}
+            className={INPUT_CLASS}
+          />
+          <p className="mt-1 text-[0.6875rem] text-content-subtle">
+            The hard ceiling on that same phase. A host too slow to ever finish would otherwise keep its download alive — and your rental with it — until the runtime cap. Past this, the pod is terminated even though it is still downloading. Set 0 to rely on the runtime cap alone.
+          </p>
+          <ResetToDefault label="Base-model download ceiling" section="cloud" field="first_step_download_budget_minutes"
+            config={config} configDefaults={configDefaults} setField={setField} />
+        </div>
+        <div>
+          <label htmlFor="cloud-max-runtime" className="block text-sm font-medium text-content">
+            Max runtime (minutes)
+          </label>
+          <input
+            id="cloud-max-runtime"
+            type="number"
+            min="30"
+            max="1440"
+            step="10"
+            value={config.cloud?.max_runtime_minutes ?? dflt('max_runtime_minutes')}
+            onChange={(e) => setField('cloud', 'max_runtime_minutes', parseInt(e.target.value) || dflt('max_runtime_minutes'))}
+            className={INPUT_CLASS}
+          />
+          <p className="mt-1 text-[0.6875rem] text-content-subtle">
+            The last backstop on the bill: past this, the pod is terminated whatever it is doing, and the newest checkpoint is rescued first. Enforced from outside the run too, so it holds even if the run's own supervision dies.
+          </p>
+          <ResetToDefault label="Max runtime" section="cloud" field="max_runtime_minutes"
             config={config} configDefaults={configDefaults} setField={setField} />
         </div>
         <div>

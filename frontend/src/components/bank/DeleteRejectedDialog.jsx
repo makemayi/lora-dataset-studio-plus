@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { apiFetch, postJson } from '../../api/fetchClient'
 import { useToast } from '../common/Toast'
 import {
-  deleteDestination, deletePreviewState, isRecoverable, sharedFileCount,
-  sharedFilesWarning,
+  datasetConflictBlock, deleteDestination, deletePreviewState, isRecoverable,
+  sharedFileCount, sharedFilesWarning,
 } from './bankOverlap'
 
 /** 🗑 Delete rejected from disk — the ONE bank action that writes to the source
@@ -35,9 +35,13 @@ export default function DeleteRejectedDialog({ bankId, count, sourcePath, onClos
   // No preview = no ⚠ banner, no verified destination. The button must not arm
   // on evidence that never arrived (see deletePreviewState).
   const check = deletePreviewState(preview)
+  // The one refusal that is not a warning: this bank's folder belongs to a
+  // dataset, so these "rejects" are its training images. The server says no —
+  // the button must never even arm.
+  const block = datasetConflictBlock(preview?.dataset_conflict)
 
   const run = async () => {
-    if (busy || !armed || !check.ready) return
+    if (busy || !armed || !check.ready || block.blocked) return
     setBusy(true)
     try {
       const d = await postJson(`/api/bank/${bankId}/delete-rejected`, {})
@@ -81,6 +85,12 @@ export default function DeleteRejectedDialog({ bankId, count, sourcePath, onClos
             <p className="text-xs">{check.text}</p>
           </div>
         )}
+        {block.blocked && (
+          <div className="rounded-md border border-rose-500/70 bg-rose-500/15 p-3 text-sm text-rose-100 space-y-1">
+            <p className="font-semibold">{block.title}</p>
+            <p className="text-rose-100/90">{block.text}</p>
+          </div>
+        )}
         {shared && (
           <div className="rounded-md border border-amber-500/60 bg-amber-500/10 p-3 text-sm text-amber-200 space-y-1">
             <p className="font-semibold">
@@ -94,7 +104,7 @@ export default function DeleteRejectedDialog({ bankId, count, sourcePath, onClos
           Source folder:{' '}
           <span className="font-mono text-content-muted break-all">{sourcePath}</span>
         </p>
-        <div>
+        <div className={block.blocked ? 'opacity-40 pointer-events-none' : undefined}>
           <label htmlFor="delete-rejected-confirm" className="block text-sm text-content">
             Type <span className="font-mono font-bold text-rose-300">DELETE</span> to confirm
           </label>
@@ -107,12 +117,14 @@ export default function DeleteRejectedDialog({ bankId, count, sourcePath, onClos
             className="rounded-md border border-border px-3 py-1.5 text-sm text-content hover:bg-surface-raised">
             Cancel
           </button>
-          <button type="button" onClick={run} disabled={busy || !armed || !check.ready}
-            title={check.ready ? undefined : check.title}
+          <button type="button" onClick={run}
+            disabled={busy || !armed || !check.ready || block.blocked}
+            title={block.blocked ? block.title : (check.ready ? undefined : check.title)}
             className="rounded-md bg-rose-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-rose-500 disabled:opacity-40">
             {busy ? 'Deleting…'
-              : check.state === 'checking' ? 'Checking…'
-                : `Delete ${count} file${count === 1 ? '' : 's'}`}
+              : block.blocked ? 'Blocked'
+                : check.state === 'checking' ? 'Checking…'
+                  : `Delete ${count} file${count === 1 ? '' : 's'}`}
           </button>
         </div>
       </div>

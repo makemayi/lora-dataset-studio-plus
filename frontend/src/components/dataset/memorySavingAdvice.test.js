@@ -6,6 +6,7 @@ import {
   memoryCardLabel,
   memoryPatchFor,
   memoryIsOverridden,
+  memoryRiskLine,
   memoryStateLabel,
 } from './memorySavingAdvice.js';
 
@@ -74,4 +75,47 @@ test('a mixed state never reads as "on"', () => {
 
 test('the three keys stay the ones the backend validates', () => {
   assert.deepEqual(MEMORY_KEYS, ['quantize', 'quantize_te', 'low_vram']);
+});
+
+/* --- memoryRiskLine: the sentence that was missing entirely ------------------
+   A `quantize: false` chosen on Anima or SDXL (2B — where OFF is the calibrated
+   default) travelled, via the single global train_settings blob, onto a 12B DiT
+   and produced a Krea/FLUX config with no quantisation and no low-VRAM
+   streaming. Nothing anywhere said so. */
+
+test('an intact recipe stays visually silent', () => {
+  assert.equal(memoryRiskLine(null, 'Krea 2'), null);
+  assert.equal(memoryRiskLine({ disabled: [] }, 'Krea 2'), null);
+});
+
+test('a disabled saver on a hungry family names it, the family and the need', () => {
+  const t = memoryRiskLine({ disabled: ['quantize', 'low_vram'], verdict: 'keep_on',
+    vram_gb: 24, unquantised_vram_gb: 30 }, 'Krea 2');
+  assert.match(t, /Quantise base model, Low-VRAM streaming/);
+  assert.match(t, /Krea 2 needs roughly 30 GB/);
+  assert.match(t, /this card reports 24 GB/);
+  // Same discipline as memoryAdviceText: the symptom is SLOWNESS, not a clean OOM.
+  assert.match(t, /slows to a crawl/);
+  assert.doesNotMatch(t, /out of memory/i);
+});
+
+test('an undetected card says so rather than guessing', () => {
+  const t = memoryRiskLine({ disabled: ['quantize'], verdict: 'unknown',
+    vram_gb: null, unquantised_vram_gb: 30 }, 'FLUX.1');
+  assert.match(t, /no card was detected here/);
+});
+
+test('a card that genuinely covers it is stated, not warned about', () => {
+  // Issue #14 was a request to STOP paying a 24 GB tax on a 5090. The line must
+  // not turn that legitimate choice back into an alarm.
+  const t = memoryRiskLine({ disabled: ['quantize'], verdict: 'can_disable',
+    vram_gb: 31.4, gpu: 'NVIDIA GeForce RTX 5090', unquantised_vram_gb: 30 }, 'Krea 2');
+  assert.match(t, /RTX 5090 · 31\.4 GB covers/);
+  assert.doesNotMatch(t, /slows to a crawl/);
+});
+
+test('the family is named even when the server sent no label', () => {
+  const t = memoryRiskLine({ disabled: ['quantize'], verdict: 'keep_on',
+    vram_gb: 8, unquantised_vram_gb: 30 }, undefined);
+  assert.match(t, /this family needs roughly 30 GB/);
 });

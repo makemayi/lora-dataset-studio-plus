@@ -70,7 +70,19 @@ export function newEntries(current, previousIds) {
 // "Reported by nofaceman (Discord)." — the credit lives inside the blurb prose,
 // which is where it should stay. This only LIFTS it into a Thanks line as well;
 // missing one costs visibility, never the credit itself.
-const CREDIT_RE = /\b(?:(?:Reported|Suggested|Requested|Contributed|Spotted|Found|Idea|Patch)(?:\s+\w+)? by|Thanks to) ([^.,(]+?) \((Reddit|Discord|GitHub|Civitai)\)/g;
+// Anchored on the SHAPE of a credit — "<by|to> <handle> (<source>)" — and not
+// on a list of verbs, because every one of this wave's five credits escaped the
+// verb-list version and shipped a release with no Thanks line at all:
+//   • "Found and diagnosed by 1Tomber (…)" — two words between verb and "by";
+//   • "…and fixed by …"                    — a verb the list did not have;
+//   • "Thanks to j_o_e_l. (Discord)"       — a handle containing a dot, which
+//     the old `[^.,(]+?` could not cross;
+//   • "Reported by 1Tomber (GitHub #23)"   — an issue number inside the parens.
+// Prose is kept out by the HANDLE charset (no spaces) rather than by grammar:
+// "…thanks to the work of everyone (Discord)" cannot match, "by nofaceman
+// (Discord)" must. An issue number is dropped from the displayed credit — the
+// person is the credit, the number is a coordinate.
+const CREDIT_RE = /\b(?:by|to) ([A-Za-z0-9][A-Za-z0-9._-]{1,30}?)\.? \((Reddit|Discord|GitHub|Civitai)(?:[^)]*)?\)/g;
 
 export function extractCredits(entries) {
   const seen = new Set();

@@ -748,6 +748,7 @@ def enqueue_krea_edit(user_id, source_filename, edit_prompt, source_path=None,
     meta = {'model_name': 'krea_identity_edit_dataset'}
     if extra_metadata:
         meta.update(extra_metadata)
+    meta['staged_inputs'] = [comfy_input]   # dropped again when the job ends
     queue_manager.add_job(job_type='image', user_id=str(user_id),
                           workflow_data=workflow, prompt=edit_prompt,
                           job_id=job_id, metadata=meta)

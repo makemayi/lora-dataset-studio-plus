@@ -113,6 +113,27 @@ DEFAULTS = {
                 # DashScope region configuration: 'sg' (Singapore, default), 'cn', or 'us'.
                 'qwen_region': 'sg'},
     'captioning': {'backend': 'auto'},                         # auto|joycaption|ollama|none
+    # 📥 What happens to a photo the moment it enters a dataset. Until now this
+    # was two hardcoded numbers with no sentence anywhere saying they existed
+    # (reported by Qeeyana on Reddit: "images added to dataset are automatically
+    # normalized to 1024. Why? Let me choose not to.").
+    #
+    # max_side: longest side kept, in px. The default 1024 is NOT arbitrary — it
+    #   is the resolution the mainstream trainers bucket to, and every trainer
+    #   only ever DOWNSCALES, so storing more pixels than you will train on buys
+    #   nothing but disk. It stays 1024 so no existing dataset changes meaning.
+    #   0 = store the image at its original size. Whatever the value, the
+    #   ceiling below applies: it is a format limit, not a preference.
+    # encoding: 'standard' (WebP q92 — the shipped behaviour), 'high' (WebP
+    #   q100, still lossy but visually indistinguishable), 'lossless' (WebP
+    #   lossless, pixel-identical, typically 3-5x the file size). This is the
+    #   OTHER half of the loss: raising max_side while leaving q92 in place
+    #   keeps re-encoding every import.
+    #
+    # Applies to the dataset INGEST lanes only (photo import, kohya ZIP/folder
+    # merge, scrape-to-dataset). It does not touch generated images, the ≤2048
+    # copies handed to a generation API, or an image the user already curated.
+    'dataset_import': {'max_side': 1024, 'encoding': 'standard'},
     'training': {'default_family': 'zimage'},
     # Concept face masking (opt-in per dataset, Advanced training options). Both
     # knobs are exposed because NOBODY has measured the right value: no public A/B
@@ -157,10 +178,28 @@ DEFAULTS = {
         'verified_only': True,
         'secure_cloud_only': False,
         'host_blacklist_days': 3,      # skip hosts whose pod never became ready
-        'ready_timeout_minutes': 25,   # boot budget: image pull + services up
+        # A host killed while it was still VISIBLY booting (see boot_budget below)
+        # was slow, not broken: it is skipped for hours, not days, so a bad night
+        # on one uplink does not silently shrink the marketplace for three days.
+        'slow_boot_blacklist_hours': 6,
+        # Boot is guarded by the same two clocks as the pre-step-1 phase below.
+        # ready_timeout is IDLE time — rearmed every time the pod shows a boot
+        # fact it had never shown before (a new vast status, the UI port getting
+        # published, a moving host progress line), so a pod honestly pulling a
+        # 26 GB image is never cut; boot_budget is the ABSOLUTE ceiling on the
+        # phase, so a host too slow to ever finish still dies fast (0 = none).
+        'ready_timeout_minutes': 25,   # no boot progress at all past this -> kill
+        'boot_budget_minutes': 90,     # hard ceiling on the whole boot phase
         'max_runtime_minutes': 480,    # safety net (stall watchdog is the first line): hard stop past this
         'stall_timeout_minutes': 30,   # no step progress past this -> rescue + kill
-        'first_step_timeout_minutes': 45,  # no step 1 reached past this -> kill (base download wedged)
+        # Before step 1 the pod is fetching the base model. Two clocks guard it:
+        # first_step_timeout is IDLE time — rearmed every time the pod's log
+        # reports more downloaded bytes, so an honestly slow download is never
+        # cut; download_budget is the ABSOLUTE ceiling on that phase, so a host
+        # too slow to ever finish still dies well before the runtime cap
+        # (0 = no ceiling, runtime cap is then the only backstop).
+        'first_step_timeout_minutes': 45,  # no step 1 AND no new bytes past this -> kill
+        'first_step_download_budget_minutes': 180,  # hard ceiling on the pre-step-1 phase
         # Out-of-monitor freeze watchdog: a training run whose own monitor stopped
         # reporting for this long is terminated by the supervisor (0 = only warn
         # in the UI, never cut). Slow-by-design phases (boot/upload/download) are

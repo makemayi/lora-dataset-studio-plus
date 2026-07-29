@@ -22,7 +22,19 @@ from unittest.mock import patch
 
 from PIL import Image
 
+import pytest
+
 from app.config import LOCAL_USER, save_config
+
+@pytest.fixture(autouse=True)
+def _rembg_installed(monkeypatch):
+    """Person masking is ON by default, so the `person_mask` row now depends on
+    whether rembg is installed ON THIS MACHINE. Pin it available so these tests
+    describe the dataset, not the box they run on (test_masked_dataset_setting.py
+    owns the missing-rembg case)."""
+    from app.services import person_mask
+    monkeypatch.setattr(person_mask, 'is_available', lambda: True)
+
 from app.extensions import db
 from app.models import FaceDatasetImage
 from app.services import face_dataset_service as svc

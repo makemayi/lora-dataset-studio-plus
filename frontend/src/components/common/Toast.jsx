@@ -84,8 +84,17 @@ function ToastContainer({ toasts, onRemove }) {
   // and per-new-toast re-announce-all.
   return (
     /* left-4 as well as right-4: at 400 px a max-w-sm card pinned only to the
-       right still had to fit, and long messages pushed past the viewport. */
-    <div className="fixed top-4 right-4 left-4 sm:left-auto z-[100] flex flex-col gap-2 sm:max-w-sm">
+       right still had to fit, and long messages pushed past the viewport.
+
+       z-[10000] — ABOVE EVERY OVERLAY, and that is the whole point. At z-[100]
+       this container sat *under* every modal and lightbox in the app (they run
+       9990-9999), so a toast raised while a dialog was open rendered behind it:
+       the app said something and nobody could read it. Callers worked around it
+       by closing the dialog first, which throws away whatever the user had just
+       typed into it. A notification that cannot be seen is worse than none —
+       keep this the highest layer, and let TOAST_Z in Toast.contract.test.js
+       fail the build if a new overlay ever climbs past it. */
+    <div className="fixed top-4 right-4 left-4 sm:left-auto z-[10000] flex flex-col gap-2 sm:max-w-sm">
       {toasts.map((t) => (
         <div
           key={t.id}
