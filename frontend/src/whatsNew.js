@@ -48,6 +48,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-30-generating-tile-glows-green',
+    date: '2026-07-30',
+    title: 'The tile a worker is actually rendering now stands out from the ones still queued',
+    blurb:
+      'Queue up 50 shots and every not-yet-done tile sat on the same amber "pending" border — no way to tell which one was actually being rendered right now versus merely waiting its turn. The tile a worker has actually claimed now gets a pulsing green border and an "⚙ generating…" label instead of a plain "…", so a big batch reads at a glance instead of a wall of identical amber squares. Community-requested.',
+  },
+  {
     id: '2026-07-30-outfit-palette-colour-and-material',
     date: '2026-07-30',
     title: 'Every outfit in the Krea wardrobe now names a colour and a fabric',

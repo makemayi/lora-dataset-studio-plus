@@ -1017,6 +1017,36 @@ def test_regenerate_edited_prompt_exposed_in_payload(app, monkeypatch):
         assert payload['images'][0]['variation_prompt'] == 'new scene, golden hour'
 
 
+def test_payload_flags_only_the_tile_the_worker_actually_claimed(app):
+    """A 50-shot batch leaves every not-yet-done tile 'pending' — is_generating
+    distinguishes the one a worker has claimed (processing/sent_to_comfy in the
+    SEPARATE job-queue table) from the rest still merely queued. A batched
+    lookup, not one query per row: this must hold for several pending rows at
+    once without erroring."""
+    from app.services import face_dataset_service as svc
+    from app.models import FaceDatasetImage, ImageGenerationQueue
+    from app.config import LOCAL_USER
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'Q', 'q')
+        rows = {}
+        for name, job_status in (('claimed', 'processing'), ('dispatched', 'sent_to_comfy'),
+                                 ('queued', 'pending'), ('stale', None)):
+            img = FaceDatasetImage(dataset_id=ds.id, status='pending', source='generated',
+                                   filename=None, job_id=(f'job-{name}' if job_status else None))
+            svc.db.session.add(img)
+            svc.db.session.flush()
+            rows[name] = img.id
+            if job_status:
+                svc.db.session.add(ImageGenerationQueue(
+                    job_id=f'job-{name}', status=job_status, user_id=LOCAL_USER))
+        svc.db.session.commit()
+        by_id = {i['id']: i['is_generating'] for i in svc.dataset_payload(LOCAL_USER, ds.id)['images']}
+        assert by_id[rows['claimed']] is True
+        assert by_id[rows['dispatched']] is True
+        assert by_id[rows['queued']] is False, 'still pending in the queue itself — not claimed yet'
+        assert by_id[rows['stale']] is False, 'no job_id at all'
+
+
 def test_delete_dataset_without_lora_training_module(app):
     """lora_training (Task 19) doesn't exist yet in phase 1 -> delete_dataset must
     still succeed (purge step is best-effort and silently skipped)."""

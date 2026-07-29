@@ -101,7 +101,15 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
 
   const fb = faceBadge(img, faceThresholds);
   const wb = WATERMARK_BADGE[img.watermark_state];
-  const borderCls = fb ? fb.border : `border-2 ${STATUS_CLS[img.status] || 'border-border'}`;
+  // A big batch leaves every not-yet-done tile on the same amber "pending"
+  // border, with no way to tell which one a worker has actually claimed from
+  // the ones still merely queued behind it. is_generating (see dataset_payload)
+  // is true for ONLY that tile — border colour AND a pulse (never colour
+  // alone, same rule faceBadge follows below) so it reads even without colour.
+  const generating = img.status === 'pending' && img.is_generating;
+  const borderCls = fb ? fb.border
+    : generating ? 'border-2 border-emerald-400 animate-pulse'
+    : `border-2 ${STATUS_CLS[img.status] || 'border-border'}`;
   // The tile stays a square (crop decisions need a stable grid), but at the L
   // size — fewer, bigger tiles, the whole point being to judge a composition
   // before deciding — a hard object-cover square crop hides exactly what you'd
@@ -162,6 +170,8 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
                 )}
                 <span className="text-content-subtle text-[0.5625rem]">🔄 to retry</span>
               </>
+            ) : generating ? (
+              <span className="text-emerald-300 text-xs font-semibold animate-pulse">⚙ generating…</span>
             ) : (
               <span className="text-content-subtle text-xs">…</span>
             )}

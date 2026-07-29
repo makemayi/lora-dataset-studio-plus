@@ -28,7 +28,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 from ..extensions import db
 from ..models import (CanvasImageNode, CanvasNodePosition, FaceDataset,
-                      FaceDatasetImage, LoraTestImage)
+                      FaceDatasetImage, ImageGenerationQueue, LoraTestImage)
 from .. import config as cfg
 from . import dataset_activity, image_encoding, reference_edit_jobs, trash
 from .dataset_storage import dataset_path, ensure_dataset_dir
@@ -3260,6 +3260,24 @@ def dataset_payload(user_id, dataset_id):
             return False
         return caption_has_identity_leak(i.caption, body=body)
 
+    # Which pending rows are ACTUALLY being worked on right now, vs merely
+    # queued behind them — a 50-shot batch left every not-yet-done tile on the
+    # same amber "pending" border, with no way to tell which one the worker is
+    # actually cooking. One batched lookup (never one query per row) against
+    # the SEPARATE job-queue table (FaceDatasetImage.status is the curation
+    # verdict; ImageGenerationQueue.status is the job's own lifecycle:
+    # pending -> processing -> sent_to_comfy). Only 'processing'/'sent_to_comfy'
+    # count as "running now" — a job still 'pending' in the queue hasn't been
+    # claimed by a worker yet, same as the tile itself.
+    _job_ids = [i.job_id for i in imgs if i.status == 'pending' and i.job_id]
+    _running_jobs = set()
+    if _job_ids:
+        _running_jobs = {row.job_id for row in
+                         ImageGenerationQueue.query
+                         .filter(ImageGenerationQueue.job_id.in_(_job_ids),
+                                 ImageGenerationQueue.status.in_(('processing', 'sent_to_comfy')))
+                         .all()}
+
     return {
         'id': ds.id, 'name': ds.name, 'trigger_word': ds.trigger_word,
         'train_type': (ds.train_type or 'zimage'),
@@ -3328,7 +3346,12 @@ def dataset_payload(user_id, dataset_id):
                     # multi-engine run comparable. None = no badge.
                     'engine': _image_engine(i),
                     'framing': i.framing, 'variation_label': i.variation_label,
-                    'status': i.status, 'caption': i.caption,
+                    'status': i.status,
+                    # True for the (usually few) pending tiles a worker has
+                    # actually claimed right now, vs merely queued behind them —
+                    # see the batched lookup above.
+                    'is_generating': i.job_id in _running_jobs,
+                    'caption': i.caption,
                     'caption_short': i.caption_short,
                     'fail_reason': i.fail_reason,
                     # 'refused' | 'empty' | 'error' | None — de quelle NATURE est
