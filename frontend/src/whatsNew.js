@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-30-full-body-bottoms-stop-copying-the-reference',
+    date: '2026-07-30',
+    title: 'Full-body shots stop copying the reference photo\'s trousers/skirt/shoes',
+    blurb:
+      "Every outfit shot names a garment so Klein/Krea don't just improvise — but most of the wardrobe only names a TOP (a sweater, a jacket, a blouse), and on a full-body shot that left the bottoms and shoes completely unsaid, so the model fell back on copying the reference photo's own pants and footwear, material, colour and cut included. The full-body and back-view shot detail now says so explicitly: trousers, skirt and shoes must match the named top, never be copied from the reference. Existing custom \"shot detail\" text in Settings ▸ Image engines keeps whatever you wrote — add the same sentence yourself, or clear the box to pick up this fix.",
+    to: '/settings/engines',
+  },
+  {
     id: '2026-07-30-krea-outfit-palette-glamour',
     date: '2026-07-30',
     title: 'Krea 2 wardrobe grows to 71 outfits with a fashion-forward/glamour register',

@@ -489,9 +489,13 @@ _KLEIN_FRAMING_DETAIL = {
              'posed, hands relaxed if visible, 50mm lens look.'),
     'body': ('Full-length shot: the ENTIRE body visible from head to toe including the '
              'feet, natural standing distance, 35mm lens look, the figure well '
-             'proportioned within the frame.'),
+             'proportioned within the frame. The garment named above may only describe '
+             'a top — trousers, skirt, and shoes must still be chosen to match it and '
+             'NEVER copied from the reference image\'s own bottoms or footwear.'),
     'back': ('Seen from behind: back to the camera, head direction natural, full or '
-             'three-quarter figure.'),
+             'three-quarter figure. The garment named above may only describe a top — '
+             'trousers, skirt, and shoes must still be chosen to match it and NEVER '
+             'copied from the reference image\'s own bottoms or footwear.'),
 }
 
 # Klein subject noun + per-subject framing detail. The human map above is reused
