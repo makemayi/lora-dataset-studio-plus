@@ -48,6 +48,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-30-human-shots-stop-copying-the-reference-background',
+    date: '2026-07-30',
+    title: 'Human shots stop inheriting the reference photo\'s background',
+    blurb:
+      'Every non-human subject type (Animal, Object, Creature, Other, Anime) already told the model "do NOT copy the background shown in the reference image" — the Human identity guard, the one everyone actually uses, never did. A shot describing a park or a café could come back in whatever room the reference photo was taken in, and because every shot then shares that ONE background, a dataset ends up looking far less varied than the catalog it was generated from. The Human guard now says it explicitly, on both the API-engine and Klein/Krea paths, matching every other subject type.',
+  },
+  {
     id: '2026-07-30-full-body-bottoms-stop-copying-the-reference',
     date: '2026-07-30',
     title: 'Full-body shots stop copying the reference photo\'s trousers/skirt/shoes',

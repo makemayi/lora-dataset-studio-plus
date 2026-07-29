@@ -19,10 +19,12 @@ IDENTITY_GUARD = (
     "EXACTLY: same eye shape and color, nose, jawline, lips, skin tone and texture, "
     "and face proportions. Do NOT beautify, slim, age, or alter the face. Use the "
     "reference ONLY to lock the facial identity: take the clothing/outfit, the "
-    "facial expression, AND the head/camera angle from the description below, and "
-    "do NOT copy the outfit, the expression, or the angle shown in the reference "
-    "image — a description that asks for a profile or three-quarter view must turn "
-    "the head/body fully to match it, not stay close to the reference's own angle. "
+    "facial expression, the head/camera angle, AND the background/setting from the "
+    "description below, and do NOT copy the outfit, the expression, the angle, or "
+    "the background shown in the reference image — a description that asks for a "
+    "profile or three-quarter view must turn the head/body fully to match it, not "
+    "stay close to the reference's own angle, and a description that names a scene "
+    "must place the shot there, not in front of whatever is behind the reference. "
     "SFW, realistic photographic portrait.")
 
 # Variante multi-références (Nano Banana) : avec un guard au singulier le modèle
@@ -34,10 +36,12 @@ IDENTITY_GUARD_MULTI = (
     "facial identity EXACTLY: same eye shape and color, nose, jawline, lips, skin tone "
     "and texture, and face proportions. Do NOT beautify, slim, age, or alter the face. "
     "Use the reference images ONLY to lock the facial identity: take the clothing/outfit, "
-    "the facial expression, AND the head/camera angle from the description below, and do "
-    "NOT copy the outfit, the expression, or the angle shown in any reference image — a "
-    "description that asks for a profile or three-quarter view must turn the head/body "
-    "fully to match it, not stay close to whichever reference angle is closest. "
+    "the facial expression, the head/camera angle, AND the background/setting from the "
+    "description below, and do NOT copy the outfit, the expression, the angle, or the "
+    "background shown in any reference image — a description that asks for a profile or "
+    "three-quarter view must turn the head/body fully to match it, not stay close to "
+    "whichever reference angle is closest, and a description that names a scene must "
+    "place the shot there, not in front of whatever is behind any reference image. "
     "SFW, realistic photographic portrait.")
 
 # Klein restage + face-identity block (see wrap_variation_klein). Held as a named
@@ -46,9 +50,9 @@ IDENTITY_GUARD_MULTI = (
 # NOT part of it — that stays a separate SFW/nudity clamp the wrapper appends.
 IDENTITY_GUARD_KLEIN = (
     "Restage the shot to match this description — change the pose, camera angle, "
-    "framing, clothing and facial expression accordingly; do not copy the "
-    "composition, the outfit or the facial expression of the reference image (use "
-    "it only for the facial identity). "
+    "framing, clothing, facial expression AND background/setting accordingly; do "
+    "not copy the composition, the outfit, the facial expression, or the "
+    "background of the reference image (use it only for the facial identity). "
     "Keep the facial identity exactly the same: same eye shape and color, nose, "
     "jawline, lips, skin tone and texture, and face proportions. Do not beautify "
     "or alter the face. Sharp focus, natural skin texture with visible pores, "
