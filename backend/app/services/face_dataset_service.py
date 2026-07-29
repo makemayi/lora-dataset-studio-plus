@@ -6044,7 +6044,7 @@ def generate_variations_krea(user_id, dataset_id, variations, multiplier):
                 try:
                     job_id = keh.enqueue_krea_edit(
                         user_id=str(user_id), source_filename=ds.ref_filename,
-                        source_path=ref_path,
+                        source_path=ref_path, framing=v.get('framing'),
                         # Suffix applied AT WRAP, like Klein: the row keeps the raw
                         # catalog prompt so a regenerate re-applies the CURRENT
                         # suffix exactly once. The label rides along because it
@@ -6651,7 +6651,7 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
         ref_path = os.path.join(_dataset_path(ds.id), ds.ref_filename)
         new_job_id = _keh.enqueue_krea_edit(
             user_id=str(user_id), source_filename=ds.ref_filename,
-            source_path=ref_path,
+            source_path=ref_path, framing=img.framing,
             edit_prompt=wrap_variation_krea(
                 prompt, nsfw=is_nsfw_label(img.variation_label),
                 framing=img.framing,

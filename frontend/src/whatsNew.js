@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-30-krea-grounding-per-framing',
+    date: '2026-07-30',
+    title: 'Krea 2 Edit: tune reference grounding separately for face, bust, body and back shots',
+    blurb:
+      "One grounding dial applied the same pixel budget to every shot, but it isn't equally strong everywhere: on a face close-up the reference IS almost entirely face, so identity is already solid there and a lower value buys more expression/angle/background variety; on a full-body shot the face is a small slice of the same reference, so a higher value can help identity hold up where it is most likely to drift. Settings ▸ Image engines ▸ Krea 2 Edit now has 4 optional per-framing overrides underneath the main dial — all blank by default, so nothing changes until you set one.",
+    to: '/settings/engines',
+  },
+  {
     id: '2026-07-30-human-shots-stop-copying-the-reference-background',
     date: '2026-07-30',
     title: 'Human shots stop inheriting the reference photo\'s background',

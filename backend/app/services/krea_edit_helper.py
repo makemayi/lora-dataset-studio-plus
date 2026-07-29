@@ -564,6 +564,27 @@ def grounding_px():
     return int(round(v / 64) * 64)
 
 
+def grounding_px_for(framing) -> int:
+    """`grounding_px()`, but allowed to differ by framing (community request).
+
+    The SAME pixel budget is not equally "strong" everywhere: on a face
+    close-up the reference IS almost entirely face, so the whole budget goes
+    into holding it (and pose/background copy more as a side effect, which is
+    why the leak fixes elsewhere in this file exist). On a full-body shot the
+    face is a small fraction of the same reference, so identical grounding_px
+    encodes it in far less detail — identity is the one that needs MORE help
+    there, not less. A blank/zero override for a framing (the shipped default)
+    falls back to the single grounding_px() dial above, so nobody who has
+    never opened this setting sees any change at all."""
+    if framing in ('face', 'bust', 'body', 'back'):
+        override = cfg.get(f'krea.grounding_px_by_framing.{framing}')
+        if override not in (None, '', 0, '0'):
+            v = _clamp(override, GROUNDING_PX_MIN, GROUNDING_PX_MAX, None)
+            if v is not None:
+                return int(round(v / 64) * 64)
+    return grounding_px()
+
+
 def _steps():
     return int(_clamp(cfg.get('krea.steps'), 1, 50, 10.0))
 
@@ -695,7 +716,7 @@ def _comfy_input_dir() -> str:
 
 
 def enqueue_krea_edit(user_id, source_filename, edit_prompt, source_path=None,
-                      extra_metadata=None, krea_model=None):
+                      extra_metadata=None, krea_model=None, framing=None):
     """Copy the reference into ComfyUI's input folder, build the Krea 2 Edit
     graph against what is ACTUALLY installed, and enqueue it. Returns the app
     job_id.
@@ -703,6 +724,10 @@ def enqueue_krea_edit(user_id, source_filename, edit_prompt, source_path=None,
     Raises KreaModelsMissing when an asset or a node is absent (checked BEFORE
     anything is copied or queued), ValueError on a missing source, RuntimeError
     when ComfyUI isn't configured.
+
+    `framing` (optional: 'face'/'bust'/'body'/'back') picks the grounding_px for
+    THIS shot via grounding_px_for — None (the free-form reference-edit action,
+    which has no catalog framing) falls back to the single global dial.
 
     Deliberately NO extra-reference chaining: `Krea2EditModelPatch` takes a
     SECOND source (`source_latent_b` / `source_image_b`) and no more, and we have
@@ -735,7 +760,7 @@ def enqueue_krea_edit(user_id, source_filename, edit_prompt, source_path=None,
         comfy_input, edit_prompt, unet=unet, clip=clip, vae=vae,
         lora_name=lora_name, width=width, height=height,
         seed=random.randint(0, 2 ** 64 - 1), steps=_steps(),
-        grounding=grounding_px(), ref_boost=_ref_boost(),
+        grounding=grounding_px_for(framing), ref_boost=_ref_boost(),
         lora_strength=_identity_strength(),
         character_loras=_character_loras(),
         # UNIQUE prefix per job: SaveImage numbers from what is currently in the

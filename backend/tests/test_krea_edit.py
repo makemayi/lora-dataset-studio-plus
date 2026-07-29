@@ -488,6 +488,29 @@ def test_grounding_is_clamped_and_snapped_and_junk_degrades_to_the_default(krea)
     assert keh.grounding_px() == 1024
 
 
+def test_grounding_per_framing_falls_back_to_the_global_dial_by_default(krea):
+    keh, _base, _config = krea
+    for framing in ('face', 'bust', 'body', 'back', None, 'nonsense'):
+        assert keh.grounding_px_for(framing) == keh.grounding_px() == 1024
+
+
+def test_grounding_per_framing_override_wins_only_for_that_framing(krea):
+    keh, _base, config = krea
+    config.save_config({'krea': {'grounding_px_by_framing': {'face': 700, 'body': 1400}}})
+    assert keh.grounding_px_for('face') == 704, 'snapped to the 64px patch grid'
+    assert keh.grounding_px_for('body') == 1408
+    assert keh.grounding_px_for('bust') == keh.grounding_px() == 1024, 'untouched framing falls back'
+    assert keh.grounding_px_for('back') == 1024
+    assert keh.grounding_px_for(None) == 1024, 'no framing (free-form edit) uses the global dial'
+
+
+def test_grounding_per_framing_override_is_clamped_and_junk_degrades_to_the_global_dial(krea):
+    keh, _base, config = krea
+    config.save_config({'krea': {'grounding_px_by_framing': {'face': 99999, 'body': 'lots'}}})
+    assert keh.grounding_px_for('face') == keh.GROUNDING_PX_MAX
+    assert keh.grounding_px_for('body') == keh.grounding_px() == 1024, 'junk override ignored'
+
+
 def test_character_loras_are_empty_by_default_and_off_means_off(krea):
     keh, _base, _config = krea
     assert keh._character_loras() == []

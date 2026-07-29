@@ -343,6 +343,17 @@ DEFAULTS = {
         # asked it to change). The node's own default is 768; its author
         # recommends 1024+ for people, and a character dataset is people.
         'grounding_px': 1024,
+        # Per-framing override (community request): the SAME grounding_px pixel
+        # budget is not equally "strong" on every framing. On a face close-up
+        # the reference IS almost entirely face, so the whole budget goes into
+        # holding it -- which also means pose/background copy more. On a full
+        # body shot the face is a small fraction of the same reference, so the
+        # same pixel budget encodes it in far less detail -- identity is the
+        # one that needs MORE help there, not less. Blank/0 for a framing =
+        # fall back to grounding_px above (today's behaviour, unchanged for
+        # anyone who never touches this). Keys mirror identity_prompts'
+        # framing_face/framing_bust/framing_body/framing_back naming.
+        'grounding_px_by_framing': {'face': '', 'bust': '', 'body': '', 'back': ''},
         # Pack reference workflow values, measured working. cfg is pinned at 1.0
         # in code (guidance-distilled model) and is deliberately NOT a setting.
         'steps': 10,

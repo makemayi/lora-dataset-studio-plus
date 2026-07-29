@@ -268,6 +268,47 @@ function KreaCard({ config, setField, configDefaults }) {
         <ResetToDefault label="Reference grounding" section="krea" field="grounding_px" {...reset} />
       </div>
 
+      <div id="krea-grounding-by-framing" className="mt-3 sm:max-w-md">
+        <p className="block text-xs font-medium text-content">
+          Reference grounding, per framing (optional)
+        </p>
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          The same pixel budget is not equally strong everywhere: on a face close-up the
+          reference IS almost entirely face, so identity is already solid and a LOWER value
+          buys more variety in expression/angle/background. On a full-body shot the face is a
+          small fraction of the same reference, so a HIGHER value can help identity hold up.
+          Blank = use the dial above for that framing.
+        </p>
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {['face', 'bust', 'body', 'back'].map((framing) => {
+            const byFraming = krea.grounding_px_by_framing || {}
+            const value = byFraming[framing] ?? ''
+            return (
+              <div key={framing}>
+                <label htmlFor={`krea-grounding-${framing}`}
+                  className="block text-[0.6875rem] font-medium text-content-subtle capitalize">
+                  {framing}
+                </label>
+                <input
+                  id={`krea-grounding-${framing}`}
+                  type="number"
+                  min={KREA_GROUNDING_MIN}
+                  max={KREA_GROUNDING_MAX}
+                  step={64}
+                  placeholder={String(grounding)}
+                  value={value}
+                  onChange={(e) => setField('krea', 'grounding_px_by_framing',
+                    { ...dflt('grounding_px_by_framing'), ...byFraming,
+                      [framing]: e.target.value === '' ? '' : Number(e.target.value) })}
+                  className={INPUT_CLASS}
+                />
+              </div>
+            )
+          })}
+        </div>
+        <ResetToDefault label="Reference grounding per framing" section="krea" field="grounding_px_by_framing" {...reset} />
+      </div>
+
       <div className="mt-3 sm:max-w-md">
         <label htmlFor="krea-steps" className="block text-xs font-medium text-content">
           Sampler steps

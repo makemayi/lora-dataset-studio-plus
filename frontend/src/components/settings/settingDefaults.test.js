@@ -156,6 +156,7 @@ const COVERED = [
   ['EnginesSection.jsx', 'klein', 'improve_consistency_strength'],
   ['EnginesSection.jsx', 'klein', 'improve_steps'],
   ['EnginesSection.jsx', 'krea', 'grounding_px'],
+  ['EnginesSection.jsx', 'krea', 'grounding_px_by_framing'],
   ['EnginesSection.jsx', 'krea', 'steps'],
   ['EnginesSection.jsx', 'krea', 'base_model'],
   ['EnginesSection.jsx', 'krea', 'identity_lora'],
