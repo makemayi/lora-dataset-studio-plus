@@ -221,11 +221,13 @@ def record_by_id(record_id):
 
 
 def network_geometry(rec):
-    """The LoRA's FIXED shape as a record trained it: {'rank': int, 'alpha': int}
-    with only the keys that were recorded. Rank and alpha size the LoRA matrices,
-    so they are a property of the weights, never a choice a continuation gets to
-    make — resuming rank-32 weights into a rank-64 network cannot load. Empty
-    dict for a legacy/unparsable record: unknown geometry must not be enforced."""
+    """The adapter topology a record explicitly says it trained.
+
+    Rank/alpha, adapter kind, and LoKr's factor/full-rank mode all affect which
+    tensors a checkpoint can load.  Only persisted, valid facts are returned:
+    old records lack the newer topology keys and must stay *unknown*, never be
+    retroactively interpreted as today's defaults.
+    """
     out = {}
     if rec is None or not getattr(rec, 'settings', None):
         return out
@@ -241,6 +243,22 @@ def network_geometry(rec):
             continue
         if isinstance(val, int) and val > 0:
             out[key] = val
+    network_type = cfg.get('network_type')
+    if network_type not in ('lora', 'lokr'):
+        return out
+    out['network_type'] = network_type
+    # These keys only describe a LoKr checkpoint.  Their absence on an older
+    # snapshot is meaningful: ai-toolkit's defaults changed, so guessing False
+    # or auto would turn an unknown legacy fact into an unsafe assertion.
+    if network_type == 'lokr':
+        full_rank = cfg.get('lokr_full_rank')
+        if isinstance(full_rank, bool):
+            out['lokr_full_rank'] = full_rank
+        factor = cfg.get('lokr_factor')
+        if factor == 'auto' or (isinstance(factor, int)
+                               and not isinstance(factor, bool)
+                               and factor in (4, 8, 16, 32)):
+            out['lokr_factor'] = factor
     return out
 
 

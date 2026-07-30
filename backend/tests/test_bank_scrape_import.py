@@ -21,6 +21,8 @@ tests pin the difference:
 """
 import io
 import os
+import struct
+import zlib
 from unittest.mock import patch
 
 import pytest
@@ -44,6 +46,15 @@ def _img_bytes(w=1280, h=960, fmt='JPEG', grad=None, shade=(120, 40, 40)):
     b = io.BytesIO()
     im.save(b, fmt)
     return b.getvalue()
+
+
+def _compact_png_header(width, height):
+    def chunk(kind, data):
+        return (struct.pack('>I', len(data)) + kind + data
+                + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff))
+    return (b'\x89PNG\r\n\x1a\n'
+            + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
+            + chunk(b'IEND', b''))
 
 
 def _item(url):
@@ -173,6 +184,13 @@ def test_a_busy_bank_refuses_the_scrape(app):
 
 
 # --- validation -------------------------------------------------------------
+def test_scrape_blob_gate_rejects_compact_pixel_bombs_but_keeps_valid_bmp():
+    """Bank scrape uses the same static/header budget as Dataset import."""
+    assert banks._scrape_blob_name(_compact_png_header(9000, 9000)) is None
+    name = banks._scrape_blob_name(_img_bytes(32, 20, fmt='BMP'))
+    assert name is not None and name.endswith('.bmp')
+
+
 def test_a_failed_download_is_counted_and_never_stored(app):
     with app.app_context():
         by_url = {'http://x/a.jpg': _img_bytes(grad='ltr'), 'http://x/dead.jpg': None}

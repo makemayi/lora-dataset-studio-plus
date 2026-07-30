@@ -10,8 +10,9 @@ has that machine. So these tests pin the parts that have to survive a DIFFERENT
 install: resolution (canonical first, narrow tokens after, never a blind guess,
 never an incompatible base), preflight (say what is missing, do not crash and do
 not invent a downloader), the graph wiring (both custom nodes, grounded negative,
-cfg 1), the output geometry (source aspect, ≤ 2 MP) and the prompt rewriting
-(positive garments instead of negations the model ignores).
+cfg 1), the output geometry (source aspect for free edits, catalog aspect for
+dataset cards, ≤ 2 MP) and the prompt rewriting (positive garments instead of
+negations the model ignores).
 
 NOTHING here renders anything: not one GPU second, not one paid call.
 """
@@ -318,9 +319,36 @@ def test_invalid_assets_is_empty_on_an_install_with_nothing(krea):
 def test_output_keeps_the_source_aspect_under_two_megapixels(w, h):
     from app.services import krea_edit_helper as keh
     ow, oh = keh.fit_output_size(w, h)
-    assert ow * oh <= 2_100_000, 'the model drifts above ~2 MP'
+    assert ow * oh <= 2_000_000, 'the model drifts above ~2 MP'
     assert ow % 16 == 0 and oh % 16 == 0, 'the latent grid is 16-aligned'
     assert abs((ow / oh) - (w / h)) / (w / h) < 0.05, 'aspect must be preserved'
+
+
+@pytest.mark.parametrize(('requested_aspect', 'expected_ratio'), [
+    ('1:1', 1.0),
+    ('3:4', 3 / 4),
+])
+def test_requested_catalog_aspect_uses_a_16_aligned_canvas_under_two_megapixels(
+        requested_aspect, expected_ratio):
+    """The v1.2 fit node can use a card ratio even from a mismatched reference."""
+    from app.services import krea_edit_helper as keh
+    ow, oh = keh.fit_output_size(4000, 1000, requested_aspect=requested_aspect)
+    assert ow * oh <= 2_000_000
+    assert ow % 16 == 0 and oh % 16 == 0
+    assert abs((ow / oh) - expected_ratio) / expected_ratio < 0.02
+
+
+def test_an_invalid_requested_aspect_keeps_the_reference_edit_source_geometry():
+    from app.services import krea_edit_helper as keh
+    assert (keh.fit_output_size(1536, 2048, requested_aspect='not-a-ratio') ==
+            keh.fit_output_size(1536, 2048))
+
+
+def test_requested_catalog_aspect_never_upscales_a_normal_reference():
+    from app.services import krea_edit_helper as keh
+    ow, oh = keh.fit_output_size(1024, 1024, requested_aspect='3:4')
+    assert ow * oh <= 1024 * 1024
+    assert abs((ow / oh) - (3 / 4)) / (3 / 4) < 0.02
 
 
 def test_a_small_source_is_never_upscaled_into_invented_detail():
@@ -334,20 +362,15 @@ def test_an_unreadable_size_degrades_to_a_square_instead_of_crashing():
     assert keh.fit_output_size(None, 'x') == (1024, 1024)
 
 
-# --- the framing consequence, and the gesture the UI offers for it ----------
-# MEASURED 2026-07-25, same shot / same seed / same graph:
-#   square 1024x1024 reference  -> `body_stand_front` came back a BUST
-#   portrait 835x1024 reference -> full figure down to the calves
-# The cause is right above: the output REPRODUCES the source's aspect ratio, so
-# a full-length pose cannot fit a square and the model resolves the conflict by
-# moving in. The generation panel therefore warns when Krea is picked with a
-# non-portrait reference and body/back shots selected, and offers a 3:4 crop.
-# These two tests pin the claim the UI makes: 3:4 really is portrait output.
+# --- free-reference edit geometry -------------------------------------------
+# Dataset cards now request their own canvas above. These tests deliberately
+# cover the other Krea path: a free reference edit keeps the source frame, so a
+# user who manually crops their source gets exactly that geometry back.
 
-def test_a_square_reference_yields_a_square_frame_no_room_for_a_full_figure():
+def test_a_free_reference_edit_keeps_a_square_source_frame():
     from app.services import krea_edit_helper as keh
     ow, oh = keh.fit_output_size(1024, 1024)
-    assert ow == oh, 'this is the measured bust case — the frame has no vertical room'
+    assert ow == oh
 
 
 @pytest.mark.parametrize('w,h', [
@@ -356,16 +379,14 @@ def test_a_square_reference_yields_a_square_frame_no_room_for_a_full_figure():
     (600, 800),     # a 3:4 crop of a tiny one (must not be upscaled either)
     (1080, 1920),   # 9:16 — the taller preset the crop editor also offers
 ])
-def test_the_offered_crop_really_produces_a_portrait_output(w, h):
-    """The advisory proposes '✂ Crop reference to 3:4'. If that crop did not
-    actually come back as a portrait frame, the advice would be worse than the
-    problem — so the promise is measured here, not assumed."""
+def test_a_free_reference_edit_keeps_a_manual_portrait_crop(w, h):
+    """Manual source crops retain their shape in the free-edit path."""
     from app.services import krea_edit_helper as keh
     ow, oh = keh.fit_output_size(w, h)
     assert oh > ow, f'{w}x{h} must stay portrait through the sizing, got {ow}x{oh}'
     assert abs((ow / oh) - (w / h)) / (w / h) < 0.05, 'the crop ratio is preserved'
     assert ow % 16 == 0 and oh % 16 == 0
-    assert ow * oh <= 2_100_000
+    assert ow * oh <= 2_000_000
     # And it stays big enough to be worth training on: a "portrait" that came
     # back at 300 px would be a technically-correct, useless answer.
     assert min(ow, oh) >= 512
@@ -411,7 +432,17 @@ def test_the_sampler_settings_are_the_measured_ones():
     ks = next(n for n in g.values() if n['class_type'] == 'KSampler')['inputs']
     assert ks['cfg'] == 1.0, 'guidance-distilled: any other cfg is a mistake'
     assert (ks['sampler_name'], ks['scheduler']) == ('euler', 'simple')
-    assert ks['steps'] == 10
+    assert ks['steps'] == 8
+
+
+def test_the_krea_graph_defaults_favor_prompt_adherence_without_weakening_identity():
+    g = _graph()
+    encodes = [n for n in g.values() if n['class_type'] == 'Krea2EditGroundedEncode']
+    patch = next(n for n in g.values() if n['class_type'] == 'Krea2EditModelPatch')
+    lora = next(n for n in g.values() if n['class_type'] == 'LoraLoaderModelOnly')
+    assert {n['inputs']['grounding_px'] for n in encodes} == {512}
+    assert patch['inputs']['ref_boost'] == 0.25
+    assert lora['inputs']['strength_model'] == 1.0
 
 
 def test_the_clip_loader_asks_for_the_krea2_type():
@@ -479,19 +510,22 @@ def test_blank_rows_in_the_character_lora_list_are_skipped():
 
 def test_grounding_is_clamped_and_snapped_and_junk_degrades_to_the_default(krea):
     keh, _base, config = krea
-    assert keh.grounding_px() == 1024
+    assert config.get('krea.grounding_px') == 512
+    assert config.get('krea.ref_boost') == 0.25
+    assert keh.grounding_px() == 512
+    assert keh._ref_boost() == 0.25
     config.save_config({'krea': {'grounding_px': 700}})
     assert keh.grounding_px() == 704, 'snapped to the 64px patch grid'
     config.save_config({'krea': {'grounding_px': 99999}})
     assert keh.grounding_px() == keh.GROUNDING_PX_MAX
     config.save_config({'krea': {'grounding_px': 'a lot'}})
-    assert keh.grounding_px() == 1024
+    assert keh.grounding_px() == 512
 
 
 def test_grounding_per_framing_falls_back_to_the_global_dial_by_default(krea):
     keh, _base, _config = krea
     for framing in ('face', 'bust', 'body', 'back', None, 'nonsense'):
-        assert keh.grounding_px_for(framing) == keh.grounding_px() == 1024
+        assert keh.grounding_px_for(framing) == keh.grounding_px() == 512
 
 
 def test_grounding_per_framing_override_wins_only_for_that_framing(krea):
@@ -499,16 +533,16 @@ def test_grounding_per_framing_override_wins_only_for_that_framing(krea):
     config.save_config({'krea': {'grounding_px_by_framing': {'face': 700, 'body': 1400}}})
     assert keh.grounding_px_for('face') == 704, 'snapped to the 64px patch grid'
     assert keh.grounding_px_for('body') == 1408
-    assert keh.grounding_px_for('bust') == keh.grounding_px() == 1024, 'untouched framing falls back'
-    assert keh.grounding_px_for('back') == 1024
-    assert keh.grounding_px_for(None) == 1024, 'no framing (free-form edit) uses the global dial'
+    assert keh.grounding_px_for('bust') == keh.grounding_px() == 512, 'untouched framing falls back'
+    assert keh.grounding_px_for('back') == 512
+    assert keh.grounding_px_for(None) == 512, 'no framing (free-form edit) uses the global dial'
 
 
 def test_grounding_per_framing_override_is_clamped_and_junk_degrades_to_the_global_dial(krea):
     keh, _base, config = krea
     config.save_config({'krea': {'grounding_px_by_framing': {'face': 99999, 'body': 'lots'}}})
     assert keh.grounding_px_for('face') == keh.GROUNDING_PX_MAX
-    assert keh.grounding_px_for('body') == keh.grounding_px() == 1024, 'junk override ignored'
+    assert keh.grounding_px_for('body') == keh.grounding_px() == 512, 'junk override ignored'
 
 
 def test_character_loras_are_empty_by_default_and_off_means_off(krea):
@@ -623,6 +657,118 @@ def test_the_wrapper_is_instruction_first_and_locks_permanent_markings():
     assert fv.get_identity_prompt('klein_identity', 'human') in out
 
 
+@pytest.mark.parametrize(
+    ('entry_id', 'conflicting_detail', 'requested_card_text'),
+    [
+        ('face_profile_l', 'both eyes in crisp focus', 'left profile view'),
+        ('body_sit', 'natural standing distance', 'sitting on a chair'),
+    ],
+)
+def test_krea_pose_cards_override_conflicting_generic_framing_details(
+        entry_id, conflicting_detail, requested_card_text):
+    """The card, not a reusable front/standing hint, is Krea's final command.
+
+    These are the two field failures: the default face detail asks for both eyes
+    on a strict profile, while the body detail asks for a standing composition on
+    a seated card.  The generic detail must disappear and the exact card intent
+    must be the last imperative Krea reads.
+    """
+    entry = next(e for e in fv.VARIATION_CATALOG if e['id'] == entry_id)
+    out = fv.wrap_variation_krea(entry['prompt'], framing=entry['framing'],
+                                 label=entry['label'])
+    final_card = fv.krea_card_pose_priority(
+        fv._krea_builtin_card_prompt(entry['prompt'], entry['label'], 'human'),
+        true_profile=entry_id == 'face_profile_l')
+
+    assert requested_card_text in out
+    assert conflicting_detail not in out
+    assert out.endswith(final_card)
+    # The concrete words must be repeated after the identity lock and rendering
+    # tail, not merely referred to as an earlier instruction.
+    assert out.rfind(requested_card_text) > out.rfind(
+        fv.get_identity_prompt('render_tail_sfw', 'human'))
+    assert (fv.KREA_TRUE_PROFILE_REQUIREMENT in out) == (entry_id == 'face_profile_l')
+
+
+def test_krea_card_priority_is_scoped_to_krea_not_klein_or_api_wrappers():
+    """Do not generalise a Krea-specific prompt correction to other engines."""
+    entry = next(e for e in fv.VARIATION_CATALOG if e['id'] == 'face_profile_l')
+    krea = fv.wrap_variation_krea(entry['prompt'], framing=entry['framing'],
+                                  label=entry['label'])
+    klein = fv.wrap_variation_klein(entry['prompt'], framing=entry['framing'],
+                                    label=entry['label'])
+    api = fv.wrap_variation(entry['prompt'])
+
+    assert 'both eyes in crisp focus' not in krea
+    assert fv.KREA_CARD_POSE_PRIORITY_PREFIX in krea
+    assert 'both eyes in crisp focus' in klein
+    assert fv.KREA_CARD_POSE_PRIORITY_PREFIX not in klein
+    assert fv.KREA_CARD_POSE_PRIORITY_PREFIX not in api
+
+
+def test_krea_card_priority_stays_human_and_uses_the_current_regenerate_prompt():
+    """A historical label must not overrule an edited prompt or non-human detail."""
+    front = fv.wrap_variation_krea('close-up portrait, front view', framing='face',
+                                   label='Profile left')
+    assert 'both eyes in crisp focus' in front
+    assert fv.KREA_CARD_POSE_PRIORITY_PREFIX not in front
+
+    sitting = next(e for e in fv.VARIATION_CATALOG if e['id'] == 'body_sit')
+    animal = fv.wrap_variation_krea(sitting['prompt'], framing='body',
+                                    subject_type='animal', label=sitting['label'])
+    animal_detail = fv.get_identity_prompt('framing_body', 'animal')
+    assert animal_detail in animal
+    assert fv.KREA_CARD_POSE_PRIORITY_PREFIX not in animal
+
+
+def test_krea_three_quarter_profile_is_not_rewritten_as_a_true_side_profile():
+    out = fv.wrap_variation_krea('close-up portrait, three-quarter profile, smiling',
+                                 framing='face', label='Face 3/4')
+    assert 'both eyes in crisp focus' in out
+    assert fv.KREA_CARD_POSE_PRIORITY_PREFIX not in out
+    assert fv.KREA_TRUE_PROFILE_REQUIREMENT not in out
+
+
+def test_krea_profile_priority_is_not_disabled_by_an_age():
+    out = fv.wrap_variation_krea('close-up portrait, left profile view, 34-year-old',
+                                 framing='face', label='Profile left')
+    assert 'both eyes in crisp focus' not in out
+    assert fv.KREA_TRUE_PROFILE_REQUIREMENT in out
+
+
+def test_krea_card_priority_does_not_duplicate_a_dataset_suffix():
+    entry = next(e for e in fv.VARIATION_CATALOG if e['id'] == 'face_profile_l')
+    suffix = 'shot on 35mm film'
+    out = fv.wrap_variation_krea(entry['prompt'], framing=entry['framing'],
+                                 label=entry['label'], suffix=suffix)
+    assert out.count(suffix) == 1
+
+
+def test_krea_card_priority_does_not_repeat_edited_or_custom_prompt_text():
+    """Free-form prompt text stays before the identity/SFW locks exactly once."""
+    custom = 'left profile view, ' + ('deliberate detail ' * 800)
+    out = fv.wrap_variation_krea(custom, framing='face', label='Custom profile')
+    assert out.count(custom) == 1
+    assert out.endswith(fv.krea_card_pose_priority(true_profile=True))
+    assert not out.endswith(fv.krea_card_pose_priority(custom))
+
+
+def test_krea_card_priority_tail_is_not_built_from_the_editable_palette(monkeypatch):
+    """A palette choice may shape the description, never the post-SFW tail."""
+    entry = next(e for e in fv.VARIATION_CATALOG if e['id'] == 'face_profile_l')
+    palette_text = 'untrusted palette text that must remain before identity'
+    monkeypatch.setattr(fv, 'outfit_palette', lambda *_args: (palette_text,))
+
+    out = fv.wrap_variation_krea(entry['prompt'], framing=entry['framing'],
+                                 label=entry['label'])
+    assert out.count(palette_text) == 1
+    assert out.rfind(palette_text) < out.rfind(
+        fv.get_identity_prompt('klein_identity', 'human'))
+    assert out.endswith(fv.krea_card_pose_priority(
+        fv._krea_builtin_card_prompt(entry['prompt'], entry['label'], 'human'),
+        true_profile=True))
+
+
 def test_the_wrapper_respects_the_subject_type_and_the_nsfw_switch():
     anime = fv.wrap_variation_krea('close-up', framing='face', subject_type='anime',
                                    label='Face front')
@@ -668,6 +814,49 @@ def test_krea_is_a_known_engine_the_routes_accept():
     from app.services import face_dataset_service as svc
     assert 'krea' in svc.KNOWN_ENGINES and 'krea' in svc.LOCAL_ENGINES
     assert 'krea' not in svc.API_ENGINES
+
+
+def test_krea_dataset_batch_and_regenerate_forward_the_catalog_card_aspect(app, monkeypatch):
+    """Krea alone turns the card ratio into its local target canvas.
+
+    ``Body, wide urban shot`` deliberately overrides the body's normal 3:4 with
+    16:9, so this catches both a missing label lookup and an accidental fallback
+    to the source geometry. The API engine functions are never involved here.
+    """
+    from app.extensions import db
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+    from app.services import krea_edit_helper as keh
+
+    calls = []
+    monkeypatch.setattr(keh, 'preflight', lambda: None)
+
+    def enqueue(**kwargs):
+        calls.append(kwargs)
+        return f'krea-aspect-{len(calls)}'
+
+    monkeypatch.setattr(keh, 'enqueue_krea_edit', enqueue)
+    shot = {'label': 'Body, wide urban shot', 'framing': 'body',
+            'prompt': 'full body shot, wide environmental framing'}
+    with app.app_context():
+        ds = svc.create_dataset('local', 'Krea aspect', 'krea_aspect')
+        ds.ref_filename = 'ref.png'
+        db.session.commit()
+
+        assert svc.generate_variations_krea('local', ds.id, [shot], 1)
+
+        # A finished/failed row avoids cancelling a fake job while exercising the
+        # same Krea regenerate branch a real completed tile takes.
+        row = FaceDatasetImage(dataset_id=ds.id, source='generated', status='failed',
+                               variation_label=shot['label'], framing=shot['framing'],
+                               variation_prompt=shot['prompt'], klein_model='krea')
+        db.session.add(row)
+        db.session.commit()
+        assert svc.regenerate_image('local', row.id) == 'krea-aspect-2'
+        db.session.refresh(row)
+        assert row.klein_model == 'krea'
+
+    assert [call['aspect_ratio'] for call in calls] == ['16:9', '16:9']
 
 
 # --- route: the 409 is the ONLY thing standing between a fresh install and a

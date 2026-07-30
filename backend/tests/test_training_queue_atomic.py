@@ -1,3 +1,4 @@
+import sys
 import threading
 from types import SimpleNamespace
 
@@ -79,6 +80,7 @@ def _stub_enqueue_preflights(monkeypatch, lt):
             train_base_model=None,
             train_variant=None,
             train_vae_path=None,
+            trigger_word='queued',
             train_te_path=None,
         )
 
@@ -163,7 +165,7 @@ def test_enqueue_continue_requires_custom_zimage_base_confirmation(monkeypatch):
 
     ds = SimpleNamespace(
         id=4, train_type='zimage', train_base_model=None,
-        train_variant='base', train_vae_path=None, train_te_path=None)
+        train_variant='base', train_vae_path=None, train_te_path=None, trigger_word='queued')
     monkeypatch.setattr(lt.fds, 'get_dataset', lambda *_a, **_kw: ds)
     # Dataset readiness is covered separately; isolate the custom-weight guard.
     monkeypatch.setattr(lt, 'assert_trainable', lambda *_a, **_kw: None)
@@ -372,6 +374,8 @@ def test_stop_waits_until_launch_publishes_the_new_pid(
         monkeypatch.setattr(
             lt.os, 'kill', lambda pid, sig: killed.append([str(pid), str(sig)]))
     monkeypatch.setattr(lt, '_watch_training', lambda *_a, **_kw: None)
+    pid_states = iter((True, True, False))
+    monkeypatch.setattr(lt, '_pid_alive', lambda _pid: next(pid_states))
 
     def launch():
         try:
@@ -409,23 +413,21 @@ def test_stop_waits_until_launch_publishes_the_new_pid(
     assert any('7878' in args for args in killed)
 
 
-def test_vision_revoke_runs_outside_the_queue_lock(app, tmp_path, monkeypatch):
-    """Handing the warm vision model back must NOT happen under `_queue_lock`.
+def test_training_refuses_when_ollama_fence_cannot_release_before_spawn(
+        app, tmp_path, monkeypatch):
+    """The authoritative GPU handoff is fail-closed inside the spawn lock.
 
-    With a live keep-warm lease, `vision_keepalive.revoke()` is an HTTP POST to
-    Ollama with `timeout=(10, 30)`, retried once — up to ~80 s of blocking. Run
-    under the queue lock, it froze Stop, enqueue/dequeue and queue advancement
-    for that whole time: Stop pressed during a launch did nothing until Ollama
-    answered. It also made this file's launch/Stop test fail in a full suite
-    (an ordinary upload test leaves a 120 s lease behind, and the launch path
-    then pays for a real unload), which no liveness timeout can honestly fix.
+    It deliberately replaces the old `vision_keepalive.revoke()` liveness
+    expectation: a ComfyUI/training admission now requires a confirmed local
+    Ollama release, otherwise it must reject before `Popen`.
     """
     from app import config as cfg
     from app.config import LOCAL_USER
+    from app.gpu_window import GpuBusyError
     from app.services import checkpoint_registry
     from app.services import face_dataset_service as svc
     from app.services import lora_training as lt
-    from app.services import vision_keepalive
+    from app.services import ollama_gpu_fence
 
     root = tmp_path / 'aitoolkit'
     (root / 'venv' / 'Scripts').mkdir(parents=True)
@@ -434,31 +436,11 @@ def test_vision_revoke_runs_outside_the_queue_lock(app, tmp_path, monkeypatch):
     with app.app_context():
         cfg.save_config({'aitoolkit': {'dir': str(root)}})
         ds = svc.create_dataset(
-            LOCAL_USER, 'Revoke lock', 'revoke_lock', train_type='zimage')
+            LOCAL_USER, 'Fence lock', 'fence_lock', train_type='zimage')
         dataset_id = ds.id
         lt._clear_training_identity(ttl_seconds=None)
 
-    lock_free_during_revoke = []
-
-    def probing_revoke(_reason=''):
-        # Another thread — an operator pressing Stop — must be able to take the
-        # queue lock while the (potentially very slow) revoke is in flight.
-        def probe():
-            taken = lt._queue_lock.acquire(timeout=BLOCKED_PROBE)
-            lock_free_during_revoke.append(taken)
-            if taken:
-                lt._queue_lock.release()
-
-        prober = threading.Thread(target=probe)
-        prober.start()
-        prober.join(timeout=LIVENESS)
-        return False
-
-    def fake_popen(_args, **kwargs):
-        kwargs['stdout'].close()
-        return SimpleNamespace(pid=4321)
-
-    monkeypatch.setattr(vision_keepalive, 'revoke', probing_revoke)
+    monkeypatch.setattr(lt, 'assert_interpreter_ready', lambda: None)
     monkeypatch.setattr(lt, 'assert_free_disk', lambda *_a, **_kw: None)
     monkeypatch.setattr(lt, 'assert_trainable', lambda *_a, **_kw: None)
     monkeypatch.setattr(lt, 'preflight_custom_paths', lambda *_a, **_kw: None)
@@ -469,13 +451,13 @@ def test_vision_revoke_runs_outside_the_queue_lock(app, tmp_path, monkeypatch):
         lt, 'write_job_config', lambda *_a, **_kw: str(tmp_path / 'job.json'))
     monkeypatch.setattr(
         checkpoint_registry, 'register_launch', lambda *_a, **_kw: None)
-    monkeypatch.setattr(lt.subprocess, 'Popen', fake_popen)
-    monkeypatch.setattr(lt, '_watch_training', lambda *_a, **_kw: None)
+    monkeypatch.setattr(ollama_gpu_fence, 'ensure_released_for_comfy', lambda: False)
+    monkeypatch.setattr(
+        lt.subprocess, 'Popen',
+        lambda *_args, **_kwargs: pytest.fail('training must not spawn without a GPU handoff'))
 
-    with app.app_context():
+    with app.app_context(), pytest.raises(GpuBusyError, match='Ollama'):
         lt.launch_training(LOCAL_USER, dataset_id, steps=500, masked=False)
-
-    assert lock_free_during_revoke == [True]
 
 
 def test_queued_continue_replays_captured_base_variant_and_confirmation(monkeypatch):
@@ -516,7 +498,7 @@ def test_queued_continue_accepts_dead_predecessor_flag(monkeypatch):
 
     ds = SimpleNamespace(
         id=9, train_type='zimage', train_base_model=None,
-        train_variant='base', train_vae_path=None, train_te_path=None)
+        train_variant='base', train_vae_path=None, train_te_path=None, trigger_word='queued')
     state = {'training_in_progress': True, 'training_pid': 4242}
     launched = {}
     monkeypatch.setattr(
@@ -594,7 +576,8 @@ def test_stop_holds_queue_lock_during_kill_before_watcher_advance(monkeypatch):
     monkeypatch.setattr(lt.queue_manager, '_set_system_state', set_state)
     monkeypatch.setattr(lt, 'get_train_queue', get_queue)
     monkeypatch.setattr(lt, '_save_queue', save_queue)
-    monkeypatch.setattr(lt, '_pid_alive', lambda _pid: False)
+    pid_states = iter((True, True, False))
+    monkeypatch.setattr(lt, '_pid_alive', lambda _pid: next(pid_states))
     monkeypatch.setattr(lt, '_snapshot_final_checkpoint', lambda *_args: None)
     monkeypatch.setattr(lt, '_launch_queued_item',
                         lambda item: launch_calls.append(item['dataset_id']))
@@ -634,3 +617,198 @@ def test_stop_holds_queue_lock_during_kill_before_watcher_advance(monkeypatch):
     assert observations == [{'queue': [], 'in_progress': False, 'pid': None}]
     assert launch_calls == []
     assert queue_items == []
+
+def test_stop_keeps_gpu_fence_when_taskkill_fails(monkeypatch):
+    from app.services import lora_training as lt
+
+    state = {
+        'training_in_progress': True,
+        'training_pid': 4242,
+        'training_dataset_id': 9,
+    }
+    saved_queues = []
+    attempts = []
+
+    monkeypatch.setattr(
+        lt.queue_manager, '_get_system_state',
+        lambda key, default=None: state.get(key, default))
+    monkeypatch.setattr(
+        lt.queue_manager, '_set_system_state',
+        lambda key, value, ttl_seconds=None: state.__setitem__(key, value))
+    monkeypatch.setattr(lt, '_save_queue', lambda items: saved_queues.append(items))
+    monkeypatch.setattr(lt, '_pid_alive', lambda _pid: True)
+    if lt.os.name == 'nt':
+        monkeypatch.setattr(
+            lt.subprocess, 'run',
+            lambda *_args, **_kwargs: attempts.append(True) or SimpleNamespace(returncode=1))
+    else:
+        def failed_kill(*_args, **_kwargs):
+            attempts.append(True)
+            raise OSError('permission denied')
+        monkeypatch.setattr(lt.os, 'kill', failed_kill)
+
+    assert lt.stop_training() is False
+    assert attempts == [True]
+    assert saved_queues == []
+    assert state['training_in_progress'] is True
+    assert state['training_pid'] == 4242
+
+
+def test_stop_keeps_gpu_fence_when_pid_probe_is_unknown(monkeypatch):
+    from app.services import lora_training as lt
+
+    state = {
+        'training_in_progress': True,
+        'training_pid': 4242,
+        'training_dataset_id': 9,
+    }
+    saved_queues = []
+
+    monkeypatch.setattr(
+        lt.queue_manager, '_get_system_state',
+        lambda key, default=None: state.get(key, default))
+    monkeypatch.setattr(
+        lt.queue_manager, '_set_system_state',
+        lambda key, value, ttl_seconds=None: state.__setitem__(key, value))
+    monkeypatch.setattr(lt, '_save_queue', lambda items: saved_queues.append(items))
+    monkeypatch.setattr(lt, '_pid_alive', lambda _pid: None)
+    if lt.os.name == 'nt':
+        monkeypatch.setattr(
+            lt.subprocess, 'run',
+            lambda *_args, **_kwargs: pytest.fail('unknown PID must not be killed'))
+    else:
+        monkeypatch.setattr(
+            lt.os, 'kill',
+            lambda *_args, **_kwargs: pytest.fail('unknown PID must not be killed'))
+
+    assert lt.stop_training() is False
+    assert saved_queues == []
+    assert state['training_in_progress'] is True
+    assert state['training_pid'] == 4242
+
+
+def test_queue_advance_keeps_gpu_fence_when_pid_probe_is_unknown(monkeypatch):
+    from app.services import lora_training as lt
+
+    state = {
+        'training_in_progress': True,
+        'training_pid': 4242,
+        'vision_in_progress': False,
+    }
+    writes = []
+
+    monkeypatch.setattr(
+        lt.queue_manager, '_get_system_state',
+        lambda key, default=None: state.get(key, default))
+    monkeypatch.setattr(
+        lt.queue_manager, '_set_system_state',
+        lambda key, value, ttl_seconds=None: writes.append((key, value)))
+    monkeypatch.setattr(lt, 'get_train_queue', lambda: [])
+    monkeypatch.setattr(lt, '_pid_alive', lambda _pid: None)
+    monkeypatch.setattr(
+        lt, '_snapshot_final_checkpoint',
+        lambda *_args, **_kwargs: pytest.fail('unknown PID must not finalize'))
+
+    assert lt._advance_training_queue() is None
+    assert state['training_in_progress'] is True
+    assert not any(key == 'training_in_progress' and value is False
+                   for key, value in writes)
+
+def test_stop_rechecks_identity_immediately_before_pid_only_kill(monkeypatch):
+    from app.services import lora_training as lt
+
+    state = {
+        'training_in_progress': True,
+        'training_pid': 4242,
+        'training_dataset_id': 9,
+    }
+    probes = iter((True, False))
+
+    monkeypatch.setattr(
+        lt.queue_manager, '_get_system_state',
+        lambda key, default=None: state.get(key, default))
+    monkeypatch.setattr(
+        lt.queue_manager, '_set_system_state',
+        lambda key, value, ttl_seconds=None: state.__setitem__(key, value))
+    monkeypatch.setattr(lt, '_save_queue', lambda _items: None)
+    monkeypatch.setattr(lt, '_pid_alive', lambda _pid: next(probes))
+    if lt.os.name == 'nt':
+        monkeypatch.setattr(
+            lt.subprocess, 'run',
+            lambda *_args, **_kwargs: pytest.fail('reused PID must not be taskkilled'))
+    else:
+        monkeypatch.setattr(
+            lt.os, 'kill',
+            lambda *_args, **_kwargs: pytest.fail('reused PID must not be killed'))
+
+    assert lt.stop_training() is True
+    assert state['training_in_progress'] is False
+
+
+def test_recover_training_fence_rearms_exact_live_process_without_ttl(monkeypatch):
+    from app.services import lora_training as lt
+
+    state = {
+        'training_in_progress': True,
+        'training_pid': 4242,
+        'training_pid_create_time': 100.0,
+        'vision_in_progress': False,
+    }
+    writes = []
+
+    monkeypatch.setattr(
+        lt.queue_manager, '_get_system_state',
+        lambda key, default=None: state.get(key, default))
+    monkeypatch.setattr(
+        lt.queue_manager, '_set_system_state',
+        lambda key, value, ttl_seconds=None: writes.append((key, value, ttl_seconds)))
+    monkeypatch.setattr(lt, 'get_train_queue', lambda: [])
+    monkeypatch.setattr(lt, '_pid_alive', lambda _pid: True)
+
+    assert lt.recover_training_fence() is None
+    assert ('training_in_progress', True, None) in writes
+    assert ('training_pid', 4242, None) in writes
+    assert ('training_pid_create_time', 100.0, None) in writes
+    assert not any(key == 'training_in_progress' and value is False
+                   for key, value, _ttl in writes)
+
+
+def test_reused_pid_is_never_taskkilled_after_training_restart(monkeypatch):
+    from app.services import lora_training as lt
+
+    state = {
+        'training_in_progress': True,
+        'training_pid': 4242,
+        'training_pid_create_time': 100.0,
+        'training_dataset_id': 9,
+    }
+    killed = []
+    fake_process = SimpleNamespace(create_time=lambda: 200.0)
+    fake_psutil = SimpleNamespace(
+        Process=lambda _pid: fake_process,
+        NoSuchProcess=RuntimeError,
+    )
+
+    monkeypatch.setitem(sys.modules, 'psutil', fake_psutil)
+    monkeypatch.setattr(
+        lt.queue_manager, '_get_system_state',
+        lambda key, default=None: state.get(key, default))
+    monkeypatch.setattr(
+        lt.queue_manager, '_set_system_state',
+        lambda key, value, ttl_seconds=None: state.__setitem__(key, value))
+    monkeypatch.setattr(lt, '_save_queue', lambda _items: None)
+    if lt.os.name == 'nt':
+        monkeypatch.setattr(
+            lt.subprocess, 'run',
+            lambda *_args, **_kwargs: killed.append(True) or pytest.fail(
+                'a reused PID must never be taskkilled'))
+    else:
+        monkeypatch.setattr(
+            lt.os, 'kill',
+            lambda *_args, **_kwargs: killed.append(True) or pytest.fail(
+                'a reused PID must never be killed'))
+
+    assert lt._pid_alive(4242) is False
+    assert lt.stop_training() is True
+    assert killed == []
+    assert state['training_in_progress'] is False

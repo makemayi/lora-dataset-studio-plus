@@ -33,6 +33,17 @@ def _png():
     return b.getvalue()
 
 
+def _oriented_jpeg(marker, size=(40, 80)):
+    """A camera-like JPEG whose marker must never leave in an API data URL."""
+    b = io.BytesIO()
+    image = Image.new('RGB', size, (20, 130, 220))
+    exif = image.getexif()
+    exif[274] = 6
+    exif[271] = marker
+    image.save(b, 'JPEG', quality=95, subsampling=0, exif=exif)
+    return b.getvalue()
+
+
 def _seed_ref(ds, *, original, cropped):
     d = svc._dataset_dir(ds.id)
     orig_fn, ref_fn = 'local_datasetreforig_e.webp', 'local_datasetref_e.webp'
@@ -363,6 +374,108 @@ def test_route_edit_openrouter_sends_every_reference_with_the_configured_model(
     assert len(sent['json']['input_references']) == 2
     assert all(r['image_url']['url'].startswith('data:image/')
                for r in sent['json']['input_references'])
+
+
+def test_external_edit_sanitizes_persistent_and_transient_camera_refs(
+        app, client, monkeypatch):
+    """Every API ref is upright pixels only; neither camera EXIF marker leaves."""
+    import base64
+
+    from app import config as cfg
+    from app.config import LOCAL_USER
+    from app.services import openrouter
+
+    monkeypatch.setenv('OPENROUTER_API_KEY', 'sk-or-v1-testkeyvalue0123456789')
+    with app.app_context():
+        cfg.save_config({'engines': {'openrouter_model': 'acme/pixel-forge-1'}})
+    did = _create_with_ref(client, monkeypatch, 'Sanitized', 'zchar_sanitized')
+    primary_marker, extra_marker = 'PRIMARY-EXIF-MARKER', 'EXTRA-EXIF-MARKER'
+    primary_raw = _oriented_jpeg(primary_marker)
+    extra_raw = _oriented_jpeg(extra_marker, size=(60, 30))
+    with app.app_context():
+        ds = svc.get_dataset(LOCAL_USER, did)
+        ds.ref_filename = 'legacy-camera.jpg'
+        primary_path = os.path.join(svc._dataset_dir(did), ds.ref_filename)
+        with open(primary_path, 'wb') as fh:
+            fh.write(primary_raw)
+        svc.db.session.commit()
+
+    sent = {}
+
+    class _Resp:
+        status_code = 200
+        text = ''
+
+        @staticmethod
+        def json():
+            return {'data': [{'b64_json': base64.b64encode(_webp((9, 9, 9))).decode(),
+                              'media_type': 'image/webp'}]}
+
+    def _fake_post(_url, **kwargs):
+        sent['json'] = kwargs['json']
+        return _Resp()
+
+    monkeypatch.setattr(openrouter.requests, 'post', _fake_post)
+    monkeypatch.setattr(svc.threading, 'Thread', _SyncThread)
+
+    response = client.post(
+        f'/api/dataset/{did}/ref/edit',
+        data={'prompt': 'add glasses', 'engine': 'openrouter',
+              'ref': (io.BytesIO(extra_raw), 'camera.jpg')},
+        content_type='multipart/form-data')
+
+    assert response.status_code == 202
+    refs = sent['json']['input_references']
+    assert len(refs) == 2
+    remote = [base64.b64decode(ref['image_url']['url'].split(',', 1)[1]) for ref in refs]
+    assert primary_marker.encode() not in remote[0]
+    assert extra_marker.encode() not in remote[1]
+    assert open(primary_path, 'rb').read() == primary_raw  # egress never mutates master
+    with Image.open(io.BytesIO(remote[0])) as primary:
+        assert primary.format == 'WEBP' and primary.size == (80, 40)
+        assert not primary.getexif() and 'exif' not in primary.info
+    with Image.open(io.BytesIO(remote[1])) as extra:
+        assert extra.format == 'WEBP' and extra.size == (30, 60)
+        assert not extra.getexif() and 'exif' not in extra.info
+
+
+def test_external_edit_rejects_invalid_transient_ref_before_provider(client, monkeypatch):
+    """Malformed modal bytes must not start a paid provider worker."""
+    did = _create_with_ref(client, monkeypatch, 'Bad ref', 'zchar_bad_ref')
+    calls = []
+    monkeypatch.setattr(svc, '_edit_engine_call',
+                        lambda *args: calls.append(args) or _webp((9, 9, 9)))
+
+    response = client.post(
+        f'/api/dataset/{did}/ref/edit',
+        data={'prompt': 'add glasses', 'engine': 'chatgpt',
+              'ref': (io.BytesIO(b'not an image'), 'broken.jpg')},
+        content_type='multipart/form-data')
+
+    assert response.status_code == 400
+    assert 'extra edit reference 1' in response.get_json()['error']
+    assert calls == []
+
+
+def test_external_edit_caps_transient_route_read_before_service(client, monkeypatch):
+    """The request snapshot uses max+1, so an oversized upload reaches no worker."""
+    import app.routes.datasets as routes
+
+    did = _create_with_ref(client, monkeypatch, 'Big ref', 'zchar_big_ref')
+    called = []
+    monkeypatch.setattr(svc, 'EXTERNAL_REFERENCE_MAX_BYTES', 8)
+    monkeypatch.setattr(routes.svc, 'start_reference_edit',
+                        lambda *args, **kwargs: called.append((args, kwargs)))
+
+    response = client.post(
+        f'/api/dataset/{did}/ref/edit',
+        data={'prompt': 'add glasses', 'engine': 'chatgpt',
+              'ref': (io.BytesIO(b'012345678'), 'large.jpg')},
+        content_type='multipart/form-data')
+
+    assert response.status_code == 400
+    assert 'too large' in response.get_json()['error']
+    assert called == []
 
 
 def test_route_edit_openrouter_names_a_model_that_cannot_take_references(

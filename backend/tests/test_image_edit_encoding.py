@@ -18,7 +18,7 @@ decode back to exactly the crop+resize result.
 import io
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageOps
 
 from app.services import image_encoding
 
@@ -75,6 +75,42 @@ def _decoded(path):
         return (im.format or '').upper(), im.convert('RGB').tobytes(), im.size
 
 
+def test_visual_header_size_swaps_exif_axes_without_loading_pixels():
+    """Route/poll geometry must not full-decode a master just to read W×H."""
+    class _HeaderOnly:
+        size = (1600, 1000)
+
+        def getexif(self):
+            return {274: 6}
+
+        def load(self):
+            raise AssertionError('visual-size helper must remain header-only')
+
+    assert image_encoding.visual_size_from_header(_HeaderOnly()) == (1000, 1600)
+
+
+def test_live_source_transform_uses_bounded_exact_bytes(tmp_path, monkeypatch):
+    """A Bank rotation must decode the bytes it bounded, not reopen its live path."""
+    from app.services import face_dataset_service as svc
+
+    path = tmp_path / 'live.png'
+    _write(path, 'PNG', 24, 18)
+    opened = []
+    real_open = svc.Image.open
+
+    def _opened_from_bytes(source, *args, **kwargs):
+        opened.append(source)
+        assert isinstance(source, io.BytesIO)
+        return real_open(source, *args, **kwargs)
+
+    monkeypatch.setattr(svc.Image, 'open', _opened_from_bytes)
+    payload = svc.transformed_image_bytes(
+        path, ImageOps.mirror, max_source_bytes=1024 * 1024)
+    assert opened and payload
+    with pytest.raises(ValueError, match='too large'):
+        svc.transformed_image_bytes(path, ImageOps.mirror, max_source_bytes=1)
+
+
 def _seed_image(app, filename, fmt, w=400, h=300):
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
@@ -96,6 +132,7 @@ def _seed_image(app, filename, fmt, w=400, h=300):
 @pytest.mark.parametrize('fmt,filename', [
     ('PNG', 'shot.png'),
     ('WEBP', 'shot.webp'),
+    ('BMP', 'shot.bmp'),
 ])
 def test_crop_encoding_is_lossless_for_lossless_sources(app, fmt, filename):
     """A PNG cropped stays a PNG, and the bytes on disk decode back to the exact
@@ -177,7 +214,8 @@ def test_cropped_file_extension_still_matches_its_real_content(app):
     from app.config import LOCAL_USER
     from app.services import face_dataset_service as svc
 
-    for filename, fmt in (('shot.png', 'PNG'), ('shot.jpg', 'JPEG'), ('shot.webp', 'WEBP')):
+    for filename, fmt in (('shot.png', 'PNG'), ('shot.jpg', 'JPEG'),
+                          ('shot.webp', 'WEBP'), ('shot.bmp', 'BMP')):
         _ds, image_id, path = _seed_image(app, filename, fmt)
         with app.app_context():
             svc.crop_image(LOCAL_USER, image_id, 10, 10, 200, 150)
@@ -228,9 +266,9 @@ def test_a_crop_longer_than_1024_is_still_normalised_down(app):
         assert im.size == (1024, 768)
 
 
-def test_crop_of_an_exotic_format_falls_back_to_lossless_webp(app):
-    """Crop must not REFUSE an image it used to handle. A stray BMP becomes lossless
-    WEBP — what the pipeline would have produced anyway, minus the lossy step."""
+def test_crop_of_a_bmp_stays_a_lossless_bmp(app):
+    """BMP is a supported dataset format, not a legacy exception: crop keeps a
+    BMP-named file as real BMP bytes and preserves every remaining RGB pixel."""
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
@@ -251,7 +289,7 @@ def test_crop_of_an_exotic_format_falls_back_to_lossless_webp(app):
         assert svc.crop_image(LOCAL_USER, image_id, box[0], box[1],
                               box[2] - box[0], box[3] - box[1]) is True
     detected, pixels, _size = _decoded(path)
-    assert detected == 'WEBP'
+    assert detected == 'BMP'
     assert pixels == expected.convert('RGB').tobytes()
 
 
@@ -268,6 +306,45 @@ def test_watermark_crop_is_byte_exact_because_it_never_resizes(app):
     detected, pixels, size = _decoded(path)
     assert detected == 'PNG' and size == (280, 225)
     assert pixels == expected
+
+
+def test_manual_crop_uses_exif_oriented_browser_coordinates(app):
+    """The crop widget sees an upright JPEG, so its coordinates must too."""
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+
+    _ds, image_id, path = _seed_image(app, 'camera.jpg', 'JPEG', w=80, h=40)
+    source = _photo(80, 40)
+    exif = source.getexif()
+    exif[274] = 6
+    source.save(path, 'JPEG', quality=95, subsampling=0, exif=exif)
+
+    # Visual image is 40×80. A full-height 20px strip must remain 20×80;
+    # applying this to raw dimensions would incorrectly return 20×40.
+    with app.app_context():
+        assert svc.crop_image(LOCAL_USER, image_id, 0, 0, 20, 80) is True
+
+    with Image.open(path) as cropped:
+        cropped.load()
+        assert cropped.format == 'JPEG' and cropped.size == (20, 80)
+        assert not cropped.getexif()
+
+
+def test_direct_watermark_crop_uses_exif_oriented_visual_box(app):
+    """The crop helper shares the VLM/browser orientation contract on its own."""
+    from app.services import face_dataset_service as svc
+
+    _ds, _image_id, path = _seed_image(app, 'camera.jpg', 'JPEG', w=80, h=40)
+    source = _photo(80, 40)
+    exif = source.getexif()
+    exif[274] = 6
+    source.save(path, 'JPEG', quality=95, subsampling=0, exif=exif)
+
+    assert svc._apply_watermark_crop(path, (0, 0, 20, 80)) is True
+    with Image.open(path) as cropped:
+        cropped.load()
+        assert cropped.format == 'JPEG' and cropped.size == (20, 80)
+        assert not cropped.getexif()
 
 
 @pytest.mark.parametrize('fmt,filename', [

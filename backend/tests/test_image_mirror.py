@@ -58,6 +58,7 @@ def _pixels(path):
     ('PNG', 'image.png'),
     ('WEBP', 'image.webp'),
     ('JPEG', 'image.jpg'),
+    ('BMP', 'image.bmp'),
 ])
 def test_mirror_flips_pixels_and_preserves_real_format(app, fmt, filename):
     from app.config import LOCAL_USER

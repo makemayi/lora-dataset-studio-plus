@@ -80,6 +80,24 @@ export function legacyNotice({ stored = null, legacy = '', choices = [],
   return { text: LEGACY_NOTICE, value: legacy };
 }
 
+/** Where the /klein-model payload for a screen comes from: the dataset's own
+    state when there is a dataset, else the global read-only one (the bank's
+    watermark inpaint has no dataset to inherit a pick from). Naming the model and
+    choosing it are two different questions — the second stays a dataset gesture,
+    which is why there is no POST counterpart to the global route. */
+export function modelEndpoint(datasetId) {
+  return datasetId ? `/api/dataset/${datasetId}/klein-model` : '/api/klein-model';
+}
+
+/**
+ * Whether to show the <select> at all. A dropdown with a single option is
+ * furniture; a dropdown with nowhere to save is worse — it would imply a second
+ * place to choose a Klein model, and there is exactly one (the dataset).
+ */
+export function canChooseModel({ datasetId = null, choices = [] } = {}) {
+  return Boolean(datasetId) && (choices || []).length >= 2;
+}
+
 /**
  * The value a <select> should show: the dataset's pick when it is still one of
  * the detected models, else '' (the "Auto" row). A stored-but-missing model is

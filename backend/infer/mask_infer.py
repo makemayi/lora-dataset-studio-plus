@@ -29,7 +29,7 @@ def main() -> int:
     try:
         from PIL import Image
         from rembg import new_session, remove
-        session = new_session('u2net')  # telecharge ~/.u2net/u2net.onnx au 1er run
+        session = new_session('u2net', providers=['CPUExecutionProvider'])
     except Exception as e:
         print(json.dumps({"ok": False, "error": f"rembg init: {e}"}))
         return 1

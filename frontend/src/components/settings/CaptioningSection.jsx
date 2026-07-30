@@ -1,6 +1,7 @@
 import { INPUT_CLASS, Card } from './primitives'
 import ResetToDefault from './ResetToDefault'
 import { defaultValueAt } from './settingDefaults.js'
+import { importInputLimitLine } from '../dataset/importPolicy.js'
 
 const CAPTIONING_OPTIONS = [
   { id: 'auto', label: 'Auto (best available)' },
@@ -15,31 +16,34 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
   // ones "Reset to default" writes, come from the server (config_defaults).
   const bankDefault = (key) => defaultValueAt(configDefaults, 'bank', key)
   const importDefault = (key) => defaultValueAt(configDefaults, 'dataset_import', key)
+  const importEncoding = String(config.dataset_import?.encoding ?? importDefault('encoding') ?? 'preserve')
+  const preservesOriginals = importEncoding === 'preserve'
+  const inputLimit = importInputLimitLine()
   return (
     <div className="space-y-6">
       <Card
         title="Dataset import"
-        help="What happens to a photo the moment it enters a dataset. Trainers only ever downscale, so 1024 px is what most people train on — but it is your call, and until now it was made for you."
+        help={`What happens to a photo the moment it enters a dataset. Preserve originals keeps the master file; training makes a temporary working copy only when a run starts. Every import must fit within ${inputLimit}; convert or resize a larger source before importing.`}
       >
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label htmlFor="dataset-import-max-side" className="block text-sm font-medium text-content">
-              Stored resolution
+              Stored resolution for WebP modes
             </label>
             <select id="dataset-import-max-side"
               value={String(config.dataset_import?.max_side ?? importDefault('max_side'))}
               onChange={(e) => setField('dataset_import', 'max_side', Number(e.target.value))}
               className={INPUT_CLASS}>
-              <option value="1024">1024 px long side (default)</option>
+              <option value="1024">1024 px long side</option>
               <option value="1536">1536 px long side</option>
               <option value="2048">2048 px long side</option>
               <option value="4096">4096 px long side</option>
               <option value="0">Original size — no downscale</option>
             </select>
             <p className="mt-0.5 text-xs text-content-muted">
-              Longest side kept; the aspect ratio is always preserved and an image is never
-              enlarged. Original size still stops at 8192 px — WebP itself refuses past
-              16383 px, so that is a format wall, not a preference.
+              {preservesOriginals
+                ? 'Preserve originals ignores this setting: no resize is performed. It becomes active only if you choose a WebP mode below.'
+                : 'Longest side kept; the aspect ratio is always preserved and an image is never enlarged. WebP normalization starts only after the source passes the import safety limit below.'}
             </p>
             <ResetToDefault label="Stored resolution" section="dataset_import" field="max_side"
               config={config} configDefaults={configDefaults} setField={setField} />
@@ -49,28 +53,36 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
               Stored encoding
             </label>
             <select id="dataset-import-encoding"
-              value={String(config.dataset_import?.encoding ?? importDefault('encoding'))}
+              value={importEncoding}
               onChange={(e) => setField('dataset_import', 'encoding', e.target.value)}
               className={INPUT_CLASS}>
-              <option value="standard">Standard — WebP quality 92 (default)</option>
+              <option value="preserve">Preserve originals — no resize or conversion (default)</option>
+              <option value="standard">Standard — resize + WebP quality 92</option>
               <option value="high">High — WebP quality 100</option>
               <option value="lossless">Lossless — pixel-identical</option>
             </select>
             <p className="mt-0.5 text-xs text-content-muted">
-              The other half of the loss: raising the resolution while leaving quality 92 in
-              place still re-encodes every import. Lossless keeps every pixel and costs about
-              5× the disk space (measured on a noisy photo: 158 KB → 797 KB).
+              {preservesOriginals
+                ? 'Non-cropped JPEG, PNG, WebP and BMP files keep their exact bytes with the matching extension. ai-toolkit receives a disposable PNG copy only when training starts.'
+                : 'WebP modes are opt-in normalization: they resize and re-encode each new import. Lossless keeps every pixel and costs about 5× the disk space (measured on a noisy photo: 158 KB → 797 KB).'}
             </p>
             <ResetToDefault label="Stored encoding" section="dataset_import" field="encoding"
               config={config} configDefaults={configDefaults} setField={setField} />
           </div>
         </div>
         <p className="mt-3 text-xs text-content-muted">
+          <span className="font-medium">Import safety limit:</span> every source, including
+          WebP modes and Auto head-crop, must be no larger than {inputLimit}. A larger file is
+          rejected; convert or resize it before importing.
+        </p>
+        <p className="mt-3 text-xs text-content-muted">
           Applies to images imported <span className="font-medium">from now on</span>: changing
-          it mid-way leaves a dataset holding both sizes. That is harmless for training (every
-          trainer buckets and downscales on its own) but it does mean the folder is no longer
-          uniform. Generated images and the copies sent to an image API keep their own fixed
-          sizes. Thanks to Qeeyana (Reddit) for asking why this was decided for you.
+          it mid-way can leave a dataset holding mixed formats or sizes. That is harmless for
+          training (every trainer buckets and downscales on its own) but it does mean the folder
+          is no longer uniform. Auto head-crop intentionally creates a derived WebP; existing
+          WebPs cannot be turned back into their original files. Generated images and copies sent
+          to an image API keep their own fixed sizes. Thanks to Qeeyana (Reddit) for asking why
+          this was decided for you.
         </p>
       </Card>
 

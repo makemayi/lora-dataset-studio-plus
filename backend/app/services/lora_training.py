@@ -28,13 +28,14 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from .. import config as cfg
 from ..models import FaceDataset, FaceDatasetImage
-from ..job_queue import queue_manager
+from ..job_queue import GPU_ARBITER_LOCK, queue_manager
 from . import face_dataset_service as fds, face_mask, trash
 from .person_mask import generate_person_masks
 
@@ -48,17 +49,10 @@ logger = logging.getLogger(__name__)
 # (cadence prouvée). Curseur de tuning #1, un seul endroit.
 KREA_TRAIN_RESOLUTION = 1024
 
-# TTL des flags system_state d'un run (training_in_progress / _pid / _dataset_id /
-# _target_step). L'anti-concurrence repose sur le PID VIVANT, mais le GARDE lit
-# d'abord le flag `training_in_progress` (cf. is-training checks) : si son TTL
-# expire AU MILIEU d'un run, le flag retombe à False, le garde rouvre la porte et
-# la file lance un 2e entraînement par-dessus le 1er (collision mémoire → « page
-# file too small »). Un run Krea-2-Raw (non distillé, CFG 4 / 25 steps de preview)
-# dépasse 4 h → l'ancien TTL 4 h expirait avant la fin ET privait le snapshot du
-# checkpoint final de son target_step. 12 h couvre le plus long run réaliste ;
-# `process_training_queue` re-arme de toute façon les flags à chaque poll tant que
-# le PID vit, donc c'est une ceinture, pas la bretelle.
-_TRAIN_STATE_TTL = 12 * 3600
+# The local-training state is a durable GPU ownership fence. It must never
+# expire while a surviving ai-toolkit child may still own VRAM; only an exact
+# process identity check is allowed to release it after a restart.
+_TRAIN_STATE_TTL = None
 
 
 # --- Path accessors (replace SRC's module-level AITOOLKIT_DIR/HF_HOME/... constants) --
@@ -202,46 +196,97 @@ def training_subprocess_env(hf_home=None) -> dict:
 # checkpoint pool). Distinct error message from the aitoolkit accessors above:
 # a dataset can be trainable (aitoolkit OK) while ComfyUI itself is unconfigured,
 # and the two are gated independently by the Settings/capabilities probe.
-def _lora_dest_dir_zimage():
-    d = cfg.comfyui_dir('loras')
+#
+# The loras root comes from `comfy_model_paths.write_root`, NOT from
+# `cfg.comfyui_dir('loras')`: the latter only knows the explicit override and
+# <base>/models/loras, so an `extra_model_paths.yaml` declaring the real loras
+# folder was honoured when READING and ignored when WRITING — deploys and the
+# "open LoRA folder" button both landed in the default folder (GitHub #25,
+# Geekswordsman). Everything a user can still find on disk keeps being read from
+# EVERY root (see `_lora_family_dirs`), so a LoRA deployed before this change is
+# still listed, resolvable and deletable.
+def _loras_root():
+    from . import comfy_model_paths
+    d = comfy_model_paths.write_root('loras')
     if not d:
         raise RuntimeError('ComfyUI is not configured')
-    return d / 'z image'
+    return d
+
+
+# Family -> its subfolder under a loras root. Single source for the deploy
+# accessors AND for the multi-root read helpers below.
+_FAMILY_SUBDIR = {'zimage': 'z image', 'sdxl': 'sdxl', 'krea': 'krea',
+                  'flux': 'flux', 'flux2klein': 'flux2klein', 'anima': 'anima'}
+
+
+def _lora_dest_dir_zimage():
+    return os.path.join(_loras_root(), 'z image')
 
 
 def _lora_dest_dir_sdxl():
-    d = cfg.comfyui_dir('loras')
-    if not d:
-        raise RuntimeError('ComfyUI is not configured')
-    return d / 'sdxl'
+    return os.path.join(_loras_root(), 'sdxl')
 
 
 def _lora_dest_dir_krea():
-    d = cfg.comfyui_dir('loras')
-    if not d:
-        raise RuntimeError('ComfyUI is not configured')
-    return d / 'krea'
+    return os.path.join(_loras_root(), 'krea')
 
 
 def _lora_dest_dir_flux():
-    d = cfg.comfyui_dir('loras')
-    if not d:
-        raise RuntimeError('ComfyUI is not configured')
-    return d / 'flux'
+    return os.path.join(_loras_root(), 'flux')
 
 
 def _lora_dest_dir_flux2klein():
-    d = cfg.comfyui_dir('loras')
-    if not d:
-        raise RuntimeError('ComfyUI is not configured')
-    return d / 'flux2klein'
+    return os.path.join(_loras_root(), 'flux2klein')
 
 
 def _lora_dest_dir_anima():
-    d = cfg.comfyui_dir('loras')
-    if not d:
-        raise RuntimeError('ComfyUI is not configured')
-    return d / 'anima'
+    return os.path.join(_loras_root(), 'anima')
+
+
+def _lora_family_dirs(fam: str) -> list[str]:
+    """Every folder where a LoRA of this family can be found, write folder FIRST
+    then the other roots ComfyUI searches, de-duplicated.
+
+    Writing needs one folder; reading must not lose sight of the others. Without
+    this, changing the deploy root would have orphaned every LoRA already deployed
+    under `<base>/models/loras` — still on disk, still loadable by ComfyUI, but
+    gone from the "IN COMFYUI" list and undeletable from the app."""
+    from . import comfy_model_paths
+    sub = _FAMILY_SUBDIR.get((fam or '').lower(), 'z image')
+    roots = []
+    try:
+        roots.append(_loras_root())
+    except RuntimeError:
+        pass
+    roots += comfy_model_paths.search_roots('loras')
+    out, seen = [], set()
+    for root in roots:
+        p = os.path.join(root, sub)
+        key = os.path.normcase(os.path.normpath(p))
+        if key not in seen:
+            seen.add(key)
+            out.append(p)
+    return out
+
+
+def _resolve_deployed_path(fam: str, filename: str) -> str | None:
+    """Absolute path of a deployed LoRA named in LoraLoader form
+    (`<family subfolder>\\name.safetensors`), searched across every loras root.
+    Fail-closed on path traversal: the resolved file must sit inside the family
+    folder of the root it was found in. None when it is nowhere."""
+    rel = str(filename or '').replace('\\', os.sep).replace('/', os.sep).strip(os.sep)
+    if not rel:
+        return None
+    for d in _lora_family_dirs(fam):
+        root = os.path.abspath(d)
+        cand = os.path.abspath(os.path.join(os.path.dirname(root), rel))
+        try:
+            inside = os.path.commonpath([cand, root]) == root
+        except ValueError:            # different drives
+            continue
+        if inside and os.path.isfile(cand):
+            return cand
+    return None
 
 
 def _sdxl_checkpoints_dir():
@@ -417,32 +462,52 @@ def _lora_dest_dir(ds, family=None) -> str:
 def _sdxl_base_choices() -> set:
     """Whitelist serveur des bases SDXL = basenames des checkpoints ComfyUI.
     include_hidden=True pour ne pas exclure un checkpoint masqué légitime, et
-    pour récupérer une forme stable quelle que soit la variante de retour."""
+    pour récupérer une forme stable quelle que soit la variante de retour.
+
+    Union with every checkpoint reachable through ``extra_model_paths.yaml``:
+    get_checkpoint_models only knows ``<base>/models/checkpoints``, so on a
+    portable / Stability-Matrix / A1111-shared install this whitelist rejected
+    ('unknown SDXL checkpoint') bases that ComfyUI itself loads. Strictly ADDITIVE
+    — with no yaml the extra set is empty and this is byte-for-byte the old one."""
     from ..utils.comfyui import get_checkpoint_models
     out = set()
     for c in (get_checkpoint_models(include_hidden=True) or []):
         out.add(c['name'] if isinstance(c, dict) else c)
+    try:
+        from . import comfy_model_paths
+        for rel, _ab in comfy_model_paths.list_models('checkpoints'):
+            out.add(os.path.basename(rel))
+    except Exception:
+        pass
     return out
 
 
 def _sdxl_base_path(base_model: str) -> str:
-    """Résout le .safetensors SDXL sous models/checkpoints. get_checkpoint_models
-    APLATIT en basename (l'info de sous-dossier - ex. Biglove/ - est perdue) → on
-    cherche récursivement le basename. Refuse chemin absolu / '..' (anti-traversal ;
-    la whitelist amont _sdxl_base_choices garantit déjà un basename connu)."""
+    """Résout le .safetensors SDXL parmi TOUTES les racines `checkpoints` que
+    ComfyUI utiliserait (``<base>/models/checkpoints`` + les racines déclarées dans
+    ``extra_model_paths.yaml``), dans l'ordre de priorité de ComfyUI. get_checkpoint_models
+    APLATIT en basename (l'info de sous-dossier - ex. Biglove/ - est perdue) → la
+    recherche par basename est conservée. Refuse chemin absolu / '..' (anti-traversal ;
+    la whitelist amont _sdxl_base_choices garantit déjà un basename connu).
+
+    Raises ValueError NAMING the file when nothing matches. The old code returned the
+    bare name here, which is what made this hole expensive rather than merely wrong:
+    ai-toolkit received `bigLove_photo5.safetensors`, resolved it against its OWN
+    working directory, and died with a message about a path the user never typed. A
+    model we cannot find has to be said here, by name, while we still know which name
+    was asked for."""
     name = str(base_model or '')
     parts = name.replace('\\', '/').split('/')
     if os.path.isabs(name) or '..' in parts:
         raise ValueError('invalid SDXL base path')
-    checkpoints_dir = str(_sdxl_checkpoints_dir())
-    cand = os.path.join(checkpoints_dir, name)
-    if os.path.exists(cand):
-        return cand
-    base = os.path.basename(name.replace('\\', '/'))
-    for root, _dirs, files in os.walk(checkpoints_dir):
-        if base in files:
-            return os.path.join(root, base)
-    return name  # fallback (ne devrait pas arriver : base whitelistée + existante)
+    _sdxl_checkpoints_dir()   # raises the explicit 'ComfyUI is not configured'
+    from . import comfy_model_paths
+    hit = comfy_model_paths.resolve_model_file('checkpoints', name)
+    if hit:
+        return hit
+    raise ValueError(
+        f'SDXL base checkpoint not found: {name} - looked in every ComfyUI '
+        'checkpoints folder, including the ones declared in extra_model_paths.yaml')
 
 
 # --- Custom weights (V1 « Custom weights… », local-only) ----------------------
@@ -1056,7 +1121,7 @@ _DEFAULT_TIMESTEP = {'zimage': 'sigmoid', 'krea': 'linear', 'flux': 'sigmoid',
                      'flux2klein': 'weighted', 'anima': 'weighted'}   # ce que « Auto » résout (sdxl : aucun) ; flux subject → sigmoid (reco ai-toolkit) ; flux2klein → weighted (défaut canonique options.ts, PAS sigmoid) ; anima → weighted (défaut options.ts PR #860)
 # Batch 2 — optimiseur / planning du LR / batch effectif (valeurs VÉRIFIÉES dans
 # ai-toolkit : get_optimizer + toolkit/scheduler.py). CAME n'est PAS supporté.
-_OPTIMIZER_CHOICES = ('adamw8bit', 'adafactor', 'automagic', 'prodigy')
+_OPTIMIZER_CHOICES = ('adamw8bit', 'adafactor', 'automagic', 'automagic2', 'prodigy')
 _LR_SCHEDULER_CHOICES = ('constant', 'linear', 'cosine', 'cosine_with_restarts', 'constant_with_warmup')
 _WARMUP_CHOICES = (50, 100, 200, 500)          # num_warmup_steps ; UNIQUEMENT avec constant_with_warmup
 _GRAD_ACCUM_CHOICES = (1, 2, 4)
@@ -1064,15 +1129,19 @@ _GRAD_ACCUM_CHOICES = (1, 2, 4)
 #   - network.type='lokr' : LoRASpecialNetwork choisit LokrModule pour TOUTE arch
 #     (toolkit/lora_special.py L384 `elif self.network_type.lower() == "lokr"`) et
 #     'lokr' est dans le Literal NetworkType (toolkit/config_modules.py L165). Aucune
-#     famille exclue → PAS de whitelist. lokr_factor reste au défaut -1 (auto = plus
-#     grand facteur) donc non émis. NB : use_old_lokr_format diffère selon l'arch
+#     famille exclue → PAS de whitelist. NB : use_old_lokr_format diffère selon l'arch
 #     (nommage des poids seulement, pas le support) — krea2/flux2_klein = nouveau
 #     format, zimage/sdxl/flux = ancien ; les deux s'entraînent et se chargent.
 #   - train.ema_config={use_ema, ema_decay} : knob niveau TrainConfig, arch-agnostique
 #     (config_modules.py L525-533 + EMAConfig L794-797, défaut ema_decay=0.999).
-# Recette communautaire (Krea-2) : LoKr + rank bas + EMA 0.99 → ressemblance ~step 500.
 _NETWORK_TYPE_CHOICES = ('lora', 'lokr')
+_LOKR_FACTOR_CHOICES = (4, 8, 16, 32)
 _EMA_CHOICES = (0.99, 0.999)
+# Krea Raw community-recipe controls. They are real ai-toolkit TrainConfig
+# fields, but intentionally Krea-scoped in LDS: the report that motivated them
+# concerns Krea 2 and we do not turn one anecdotal recipe into a global default.
+_CONTENT_OR_STYLE_CHOICES = ('balanced', 'style', 'content')
+_DIFFERENTIAL_GUIDANCE_SCALE_RANGE = (0.1, 10.0)
 
 # --- Memory-saving levers (quantisation + low-VRAM streaming) --------------------
 # Community request (GitHub issue #14, bobba84): the recipes hard-coded quantize /
@@ -1303,12 +1372,23 @@ def _lora_alpha(rank, family, ds=None) -> int:
     return rank
 
 
+def _numeric_choice(value, choices):
+    """A persisted numeric choice, accepting only real integer values.
+
+    ``bool`` is an ``int`` subclass and legacy JSON can also contain floats that
+    compare equal to an integer choice (for example ``1.0 == 1``).  Neither is a
+    valid stored configuration value, so keep the effective readers aligned with
+    API ingress and only propagate exact integers.
+    """
+    return value if type(value) is int and value in choices else None
+
+
 def _lora_alpha_eff(ds, rank, family) -> int:
     """Alpha EFFECTIF : un `alpha` explicite dans train_settings prime sur le dérivé.
     Découpler alpha du rank = levier de LR « doux » (échelle effective = alpha/rank).
     En mode slider, l'utilisateur peut ainsi remettre alpha 8 (défaut 4) via ce knob."""
-    a = _train_settings(ds).get('alpha')
-    return a if a in _ALPHA_CHOICES else _lora_alpha(rank, family, ds)
+    a = _numeric_choice(_train_settings(ds).get('alpha'), _ALPHA_CHOICES)
+    return a if a is not None else _lora_alpha(rank, family, ds)
 
 
 def _network_type_eff(ds) -> str:
@@ -1319,13 +1399,43 @@ def _network_type_eff(ds) -> str:
     return t if t in _NETWORK_TYPE_CHOICES else 'lora'
 
 
+def _lokr_factor_eff(ds) -> int | None:
+    """Explicit LoKr decomposition factor, or None for ai-toolkit's auto choice.
+
+    `lokr_factor=-1` is ai-toolkit's auto mode. LDS keeps the user-facing setting
+    absent in that case so existing LoKr runs retain their prior behaviour; a
+    shipped recipe can opt into a known factor (notably Krea Raw's factor 16).
+    """
+    v = _train_settings(ds).get('lokr_factor')
+    return v if isinstance(v, int) and not isinstance(v, bool) and v in _LOKR_FACTOR_CHOICES else None
+
+
+def _lokr_full_rank_eff(ds) -> bool:
+    """The explicitly recorded LoKr full-rank mode, defaulting to the LDS-safe False.
+
+    This is deliberately not an editable advanced setting.  It only lets a cloud
+    continuation replay a provenance snapshot made by an older/other LDS run that
+    explicitly used full-rank LoKr; otherwise forcing False would silently change
+    the checkpoint topology while claiming to resume it.
+    """
+    return _train_settings(ds).get('lokr_full_rank') is True
+
+
 def _network_block(ds, rank, family) -> dict:
     """Bloc `network` LoRA/LoKr partagé par les 5 job-configs : type + rank + alpha
     (override-aware) + dropout optionnel (régularisateur anti-overfit, clé omise quand
-    off). LoKr = même bloc, seul `type` change ; lokr_factor reste au défaut ai-toolkit
-    (-1 = auto) donc non émis."""
-    net = {'type': _network_type_eff(ds), 'linear': rank,
+    off). A normal LDS LoKr run pins `lokr_full_rank=False` because ai-toolkit has
+    changed its implicit default; an explicit value from a frozen continuation
+    snapshot is replayed verbatim so the weights' topology is not changed.
+    `lokr_factor` remains auto unless explicitly chosen."""
+    network_type = _network_type_eff(ds)
+    net = {'type': network_type, 'linear': rank,
            'linear_alpha': _lora_alpha_eff(ds, rank, family)}
+    if network_type == 'lokr':
+        net['lokr_full_rank'] = _lokr_full_rank_eff(ds)
+        factor = _lokr_factor_eff(ds)
+        if factor is not None:
+            net['lokr_factor'] = factor
     if _klein_style(ds, family) and net['type'] == 'lora':
         # FLUX.2 Klein STYLE : ajoute un LoRA Conv2d aux moitiés du linear (conv_alpha
         # au quart) → dims 128/64/64/32 au rank par défaut. Combo dominant du sweep
@@ -1395,8 +1505,8 @@ def resolve_resume_lr(settings: dict, lr_factor) -> float | None:
 
 
 def _grad_accum(ds) -> int:
-    g = _train_settings(ds).get('grad_accum')
-    return g if g in _GRAD_ACCUM_CHOICES else 1
+    g = _numeric_choice(_train_settings(ds).get('grad_accum'), _GRAD_ACCUM_CHOICES)
+    return g if g is not None else 1
 
 
 def _lr_sched_fields(ds) -> dict:
@@ -1428,6 +1538,43 @@ def _ema_fields(ds) -> dict:
     if v is None:
         return {}
     return {'ema_config': {'use_ema': True, 'ema_decay': v}}
+
+
+def _content_or_style_eff(ds) -> str:
+    """Krea's ai-toolkit `train.content_or_style`, defaulting to balanced."""
+    v = _train_settings(ds).get('content_or_style')
+    return v if v in _CONTENT_OR_STYLE_CHOICES else 'balanced'
+
+
+def _differential_guidance_enabled(ds) -> bool:
+    return _train_settings(ds).get('do_differential_guidance') is True
+
+
+def _differential_guidance_scale_eff(ds) -> float:
+    """Validated Differential Guidance multiplier, defaulting to ai-toolkit's 3."""
+    v = _train_settings(ds).get('differential_guidance_scale')
+    lo, hi = _DIFFERENTIAL_GUIDANCE_SCALE_RANGE
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and lo <= float(v) <= hi:
+        return float(v)
+    return 3.0
+
+
+def _krea_recipe_fields(ds) -> dict:
+    """Optional Krea 2 community-recipe controls for ai-toolkit's TrainConfig.
+
+    LDS emits no extra keys for an untouched dataset, preserving the existing
+    ai-toolkit defaults. A preset that pins Balanced or Differential Guidance
+    emits exactly what it announced, so the run config and provenance stay
+    reproducible.
+    """
+    s = _train_settings(ds)
+    out = {}
+    if s.get('content_or_style') in _CONTENT_OR_STYLE_CHOICES:
+        out['content_or_style'] = _content_or_style_eff(ds)
+    if _differential_guidance_enabled(ds):
+        out['do_differential_guidance'] = True
+        out['differential_guidance_scale'] = _differential_guidance_scale_eff(ds)
+    return out
 
 
 # --- Slider LoRA mode (Beta) -----------------------------------------------------
@@ -1870,11 +2017,24 @@ def launch_settings_snapshot(ds, family=None, masked=None) -> dict:
     # experiment exists to answer. An explicit 'off' costs one line and cannot be
     # misread. The cloud run stamps this same snapshot.
     snap['network_type'] = _network_type_eff(ds)
+    if snap['network_type'] == 'lokr':
+        # ai-toolkit has changed the implicit `lokr_full_rank` default across
+        # releases. LDS pins False in the emitted job so rank/alpha stay real;
+        # stamp both facts to make a shared recipe reproducible.
+        snap['lokr_full_rank'] = _lokr_full_rank_eff(ds)
+        factor = _lokr_factor_eff(ds)
+        snap['lokr_factor'] = factor if factor is not None else 'auto'
     em = _ema_eff(ds)
     snap['ema'] = em if em is not None else 'off'
+    if fam == 'krea':
+        snap['content_or_style'] = _content_or_style_eff(ds)
+        dg_enabled = _differential_guidance_enabled(ds)
+        snap['do_differential_guidance'] = dg_enabled
+        snap['differential_guidance_scale'] = (
+            _differential_guidance_scale_eff(ds) if dg_enabled else 'off')
     snap['lr_scheduler'] = s.get('lr_scheduler') if s.get('lr_scheduler') in _LR_SCHEDULER_CHOICES else 'constant'
     snap['warmup'] = s.get('warmup') if s.get('warmup') in _WARMUP_CHOICES else 0
-    snap['grad_accum'] = s.get('grad_accum') if s.get('grad_accum') in _GRAD_ACCUM_CHOICES else 1
+    snap['grad_accum'] = _grad_accum(ds)
     # Fixed at 1 by every family's recipe today. Recorded anyway: the day it stops
     # being 1, the runs on either side of the change have to be comparable.
     snap['batch_size'] = 1
@@ -1923,7 +2083,7 @@ def effective_train_settings(ds, family=None) -> dict:
             'alpha': _lora_alpha_eff(ds, eff_rank, fam),   # alpha EFFECTIF (override-aware) — libellé
             'default_rank': _default_rank_for(ds, fam),
             # --- Expert levers (None/off = comportement actuel ; le select recoche « Auto ») ---
-            'alpha_setting': s.get('alpha') if s.get('alpha') in _ALPHA_CHOICES else None,
+            'alpha_setting': _numeric_choice(s.get('alpha'), _ALPHA_CHOICES),
             'default_alpha': _lora_alpha(eff_rank, fam, ds),
             'alpha_choices': list(_ALPHA_CHOICES),
             'dropout': s.get('dropout') if s.get('dropout') in _DROPOUT_CHOICES else None,
@@ -1942,7 +2102,7 @@ def effective_train_settings(ds, family=None) -> dict:
             'lr_scheduler_choices': list(_LR_SCHEDULER_CHOICES),
             'warmup': s.get('warmup') if s.get('warmup') in _WARMUP_CHOICES else None,
             'warmup_choices': list(_WARMUP_CHOICES),
-            'grad_accum': s.get('grad_accum') if s.get('grad_accum') in _GRAD_ACCUM_CHOICES else None,   # None → 1
+            'grad_accum': _numeric_choice(s.get('grad_accum'), _GRAD_ACCUM_CHOICES),   # None → 1
             'grad_accum_choices': list(_GRAD_ACCUM_CHOICES),
             'network_type': s.get('network_type') if s.get('network_type') in _NETWORK_TYPE_CHOICES else None,  # None → lora
             'network_type_choices': list(_NETWORK_TYPE_CHOICES),
@@ -1950,8 +2110,26 @@ def effective_train_settings(ds, family=None) -> dict:
             # mirrors timestep_type_supported so the UI can gate a future family with
             # one line; today it is always True (no family refuses lokr).
             'network_type_supported': True,
+            'lokr_factor': (_lokr_factor_eff(ds) if _network_type_eff(ds) == 'lokr'
+                            else None),
+            'lokr_factor_choices': list(_LOKR_FACTOR_CHOICES),
             'ema': s.get('ema') if s.get('ema') in _EMA_CHOICES else None,   # None → off
             'ema_choices': list(_EMA_CHOICES),
+            # The four fields below are deliberately Krea-only in LDS. ai-toolkit
+            # accepts them broadly, but they exist here to make the Krea Raw LoKr
+            # community preset transparent rather than silently storing invisible
+            # settings on unrelated families. Values survive a family switch and
+            # return when the user comes back to Krea, like other advanced knobs.
+            'krea_recipe_supported': fam == 'krea',
+            'content_or_style': (s.get('content_or_style')
+                                 if fam == 'krea' and s.get('content_or_style') in _CONTENT_OR_STYLE_CHOICES
+                                 else None),
+            'content_or_style_choices': list(_CONTENT_OR_STYLE_CHOICES),
+            'content_or_style_default': 'balanced',
+            'do_differential_guidance': (s.get('do_differential_guidance') is True
+                                         if fam == 'krea' else False),
+            'differential_guidance_scale': (_differential_guidance_scale_eff(ds)
+                                            if fam == 'krea' else None),
             # Dual long+short captioning (ai-toolkit short_and_long_captions). Boolean,
             # default OFF. Local training only for now (the cloud pod's dataset upload
             # skips the JSON caption file), so the recipe strips it on the cloud path.
@@ -2011,14 +2189,17 @@ def effective_train_settings(ds, family=None) -> dict:
             'max_sample_prompts': _MAX_SAMPLE_PROMPTS}
 
 
-def update_train_settings(user_id, dataset_id, patch: dict) -> dict:
+def update_train_settings(user_id, dataset_id, patch: dict, *, _settings=None) -> dict:
     """Valide + fusionne un patch {rank?, resolution?, save_every?, sample_every?,
     sample_prompts?} dans train_settings. Une clé à None/'auto'/vide est RETIRÉE
     (retour au défaut). Retourne les réglages effectifs pour la famille courante."""
     ds = fds.get_dataset(user_id, dataset_id)
     if not ds:
         raise ValueError('dataset not found')
-    cur = _train_settings(ds)
+    # ``_settings`` is the preset path's private, unpersisted candidate.  Reusing
+    # this validator keeps every acceptance/rejection rule identical while a
+    # preset validates its complete replacement before making one DB write.
+    cur = _train_settings(ds) if _settings is None else _settings
     if 'rank' in patch:
         r = patch['rank']
         if r in (None, 'auto'):
@@ -2080,7 +2261,7 @@ def update_train_settings(user_id, dataset_id, patch: dict) -> dict:
         v = patch['alpha']
         if v in (None, 'auto'):
             cur.pop('alpha', None)                         # auto → alpha dérivé du rank
-        elif v in _ALPHA_CHOICES:
+        elif type(v) is int and v in _ALPHA_CHOICES:
             cur['alpha'] = v
         else:
             raise ValueError(f'alpha must be one of {_ALPHA_CHOICES} (or auto)')
@@ -2118,9 +2299,9 @@ def update_train_settings(user_id, dataset_id, patch: dict) -> dict:
             raise ValueError(f'warmup must be one of {_WARMUP_CHOICES} (or off)')
     if 'grad_accum' in patch:
         v = patch['grad_accum']
-        if v in (None, 1, 'auto'):
+        if v in (None, 'auto') or (type(v) is int and v == 1):
             cur.pop('grad_accum', None)                    # 1 = défaut → clé retirée
-        elif v in _GRAD_ACCUM_CHOICES:
+        elif type(v) is int and v in _GRAD_ACCUM_CHOICES:
             cur['grad_accum'] = v
         else:
             raise ValueError(f'grad_accum must be one of {_GRAD_ACCUM_CHOICES} (or auto)')
@@ -2132,6 +2313,14 @@ def update_train_settings(user_id, dataset_id, patch: dict) -> dict:
             cur['network_type'] = v
         else:
             raise ValueError(f'network_type must be one of {_NETWORK_TYPE_CHOICES} (or auto)')
+    if 'lokr_factor' in patch:
+        v = patch['lokr_factor']
+        if v in (None, 'auto', '', -1):
+            cur.pop('lokr_factor', None)                   # -1 = ai-toolkit auto factor
+        elif isinstance(v, int) and not isinstance(v, bool) and v in _LOKR_FACTOR_CHOICES:
+            cur['lokr_factor'] = v
+        else:
+            raise ValueError(f'lokr_factor must be one of {_LOKR_FACTOR_CHOICES} (or auto)')
     if 'ema' in patch:
         v = patch['ema']
         if v in (None, 'off', '', 0, 0.0):
@@ -2140,6 +2329,36 @@ def update_train_settings(user_id, dataset_id, patch: dict) -> dict:
             cur['ema'] = v
         else:
             raise ValueError(f'ema must be one of {_EMA_CHOICES} (or off)')
+    if 'content_or_style' in patch:
+        v = patch['content_or_style']
+        if v in (None, 'auto', ''):
+            cur.pop('content_or_style', None)
+        elif v in _CONTENT_OR_STYLE_CHOICES:
+            # Keep an explicit 'balanced' setting when a preset provides it: the
+            # preset then remains self-describing even though it matches ai-toolkit's
+            # default today.
+            cur['content_or_style'] = v
+        else:
+            raise ValueError(f'content_or_style must be one of {_CONTENT_OR_STYLE_CHOICES} (or auto)')
+    if 'do_differential_guidance' in patch:
+        v = patch['do_differential_guidance']
+        if not isinstance(v, bool):
+            raise ValueError('do_differential_guidance must be true or false')
+        if v:
+            cur['do_differential_guidance'] = True
+        else:
+            cur.pop('do_differential_guidance', None)
+    if 'differential_guidance_scale' in patch:
+        v = patch['differential_guidance_scale']
+        lo, hi = _DIFFERENTIAL_GUIDANCE_SCALE_RANGE
+        if v in (None, 'auto', '', 'off'):
+            cur.pop('differential_guidance_scale', None)
+        elif (isinstance(v, (int, float)) and not isinstance(v, bool)
+              and lo <= float(v) <= hi):
+            cur['differential_guidance_scale'] = float(v)
+        else:
+            raise ValueError(
+                f'differential_guidance_scale must be between {lo:g} and {hi:g} (or auto)')
     if 'dual_captions' in patch:
         # Plain boolean lever: truthy stores True, anything falsy drops the key so OFF is
         # byte-identical to a dataset that never touched it.
@@ -2193,6 +2412,8 @@ def update_train_settings(user_id, dataset_id, patch: dict) -> dict:
             cur['learning_rate'] = float(v)
         else:
             raise ValueError('learning_rate must be a positive number (or auto)')
+    if _settings is not None:
+        return cur
     ds.train_settings = json.dumps(cur) if cur else None
     fds.db.session.commit()
     return effective_train_settings(ds)
@@ -2204,7 +2425,9 @@ def update_train_settings(user_id, dataset_id, patch: dict) -> dict:
 TRAIN_SETTING_KEYS = ('rank', 'resolution', 'save_every', 'max_step_saves',
                       'sample_every', 'sample_prompts', 'dropout', 'alpha',
                       'timestep_type', 'optimizer', 'lr_scheduler', 'warmup',
-                      'grad_accum', 'network_type', 'ema', 'dual_captions',
+                      'grad_accum', 'network_type', 'lokr_factor', 'ema',
+                      'content_or_style', 'do_differential_guidance',
+                      'differential_guidance_scale', 'dual_captions',
                       'mask_faces', 'masked', 'learning_rate', *_MEMORY_SETTING_KEYS)
 
 # The ONLY settings a resume/continue may change. ai-toolkit rebuilds the job
@@ -2299,16 +2522,17 @@ def validate_resume_overrides(overrides) -> dict:
     return patch
 
 # Built-in quick presets: shipped with the app (every install sees them),
-# read-only, versioned with the code. One preset per (family × dataset kind):
-# Character locks an identity, Style absorbs a look (route-owned catalogue),
-# Concept generalizes an object/pose/composition. Every value is SOURCED —
+# read-only, versioned with the code. Every (family × dataset kind) has one
+# general-purpose quick preset; narrowly-scoped, source-labelled recipes may sit
+# alongside it. Character locks an identity, Style absorbs a look (route-owned
+# catalogue), Concept generalizes an object/pose/composition. Every value is SOURCED —
 # research vault first (Tech-IA notes), the installed ai-toolkit's own defaults
 # second (ui/src/app/jobs/new/options.ts + config/examples), 2026 community
 # consensus third — never intuition; per-preset comments carry the source.
-# Steps stay adaptive (recommended_steps owns them per kind) and the learning
-# rate is family-fixed (1e-4 / prodigy), so neither is a preset key. A test
-# asserts every builtin applies with zero ignored/rejected keys, so a drifting
-# choice-list can't silently break them.
+# Steps stay adaptive (recommended_steps owns them per kind). A source-labelled
+# recipe may pin the family-default learning rate explicitly when that is part of
+# its published configuration. A test asserts every builtin applies with zero
+# ignored/rejected keys, so a drifting choice-list can't silently break them.
 
 # Identity AND flexibility probes — overfit (waxy skin, frozen pose) shows here
 # first. One probe sheet per checkpoint: on character sets the quality comes
@@ -2402,6 +2626,36 @@ BUILTIN_TRAIN_PRESETS = [
                        '768/1024 with a probe sheet every 250 steps to catch '
                        'the identity sweet-spot early.',
         'settings': _character_preset_settings(32, 32),
+    },
+    # Community report, not a universal result:
+    # https://www.reddit.com/r/StableDiffusion/comments/1v2vsqm/
+    # almost_perfect_likeness_in_750_steps_krea_2_lokr/
+    # The linked Pastebin configuration was later deleted. The post specifies
+    # LoKr factor 16 but not linear rank/alpha, so LDS retains its verified Krea
+    # Character 32/32 baseline instead of inventing missing values. `base` is
+    # Krea-2-Raw in LDS; Turbo is deliberately excluded from this Raw recipe.
+    {
+        'id': 'builtin-krea-raw-lokr-likeness',
+        'name': 'Krea 2 Raw · LoKr likeness',
+        'train_type': 'krea',
+        'dataset_kind': 'character',
+        'variants': ['base', 'raw'],
+        'builtin': True,
+        'community': True,
+        'description': 'Community Krea-2 Raw starting recipe: LoKr factor 16, '
+                       '768 px, Automagic v2, sigmoid, Balanced and Differential '
+                       'Guidance ×3. Inspect the early checkpoints; it is not a '
+                       'guarantee for every dataset.',
+        'settings': {
+            **_character_preset_settings(32, 32, resolution='768', timestep_type='sigmoid'),
+            'network_type': 'lokr',
+            'lokr_factor': 16,
+            'optimizer': 'automagic2',
+            'learning_rate': 1e-4,
+            'content_or_style': 'balanced',
+            'do_differential_guidance': True,
+            'differential_guidance_scale': 3.0,
+        },
     },
     # 32/32 is the AI-Toolkit-community default and the "lower-regret choice
     # for hard faces" (vault 2026-07-10; options.ts + neurocanvas ship 32) —
@@ -2618,11 +2872,17 @@ BUILTIN_TRAIN_PRESETS = [
 
 def snapshot_train_settings(user_id, dataset_id) -> dict:
     """The dataset's RAW explicit settings (what a preset captures) — only the
-    keys the user actually changed, not the effective/derived view."""
+    keys the user actually changed, not the effective/derived view. Invalid
+    legacy non-integer values for numeric controls are omitted so a newly saved
+    preset cannot perpetuate bool/float numeric ambiguity."""
     ds = fds.get_dataset(user_id, dataset_id)
     if not ds:
         raise ValueError('dataset not found')
-    return _train_settings(ds)
+    settings = _train_settings(ds)
+    return {key: value for key, value in settings.items()
+            if (key == 'alpha' and _numeric_choice(value, _ALPHA_CHOICES) is not None)
+            or (key == 'grad_accum' and _numeric_choice(value, _GRAD_ACCUM_CHOICES) is not None)
+            or key not in ('alpha', 'grad_accum')}
 
 
 def apply_train_settings_dict(user_id, dataset_id, settings: dict):
@@ -2636,17 +2896,20 @@ def apply_train_settings_dict(user_id, dataset_id, settings: dict):
         raise ValueError('dataset not found')
     ignored = sorted(k for k in settings if k not in TRAIN_SETTING_KEYS)
     rejected = []
-    ds.train_settings = None          # a preset REPLACES, it doesn't overlay
-    fds.db.session.commit()
+    candidate = {}                    # a preset REPLACES, it doesn't overlay
     for k in TRAIN_SETTING_KEYS:
         if k not in settings:
             continue
         try:
-            update_train_settings(user_id, dataset_id, {k: settings[k]})
+            update_train_settings(user_id, dataset_id, {k: settings[k]},
+                                  _settings=candidate)
         except ValueError as e:
             rejected.append({'key': k, 'reason': str(e)})
-    return (effective_train_settings(fds.get_dataset(user_id, dataset_id)),
-            ignored, rejected)
+    # A concurrent Train observes either the old preset or this fully validated
+    # replacement — never the previous clear plus a prefix of its keys.
+    ds.train_settings = json.dumps(candidate) if candidate else None
+    fds.db.session.commit()
+    return effective_train_settings(ds), ignored, rejected
 
 
 def _dest_base_tag(ds, base_model=_PERSISTED, family=None,
@@ -2957,7 +3220,11 @@ def export_dataset_to_aitoolkit(user_id, dataset_id, masked: bool = True, dest_d
             continue
         stem = f'{trigger}_{n:03d}'
         dst = os.path.join(out, f'{stem}.png')
-        Image.open(src).convert('RGB').save(dst, 'PNG')
+        # Dataset masters can retain their native JPEG/PNG/WebP/BMP bytes. The
+        # trainer receives this disposable PNG instead: bake EXIF orientation into
+        # pixels before dropping metadata so an upright JPEG never trains sideways.
+        with Image.open(src) as source:
+            ImageOps.exif_transpose(source).convert('RGB').save(dst, 'PNG')
         exported.append(dst)
         cap = fds.style_content_caption(ds, img.caption)
         body = cap if fds.is_style(ds) else (f'{trigger}, {cap}' if cap else trigger)
@@ -3405,6 +3672,7 @@ def _build_job_config_krea(ds, dataset_folder: str, steps: int, training_folder=
                     'dtype': 'bf16',
                     **_lr_sched_fields(ds),
                     **_ema_fields(ds),
+                    **_krea_recipe_fields(ds),
                 },
                 'model': model,
                 'sample': {
@@ -3906,26 +4174,83 @@ def resume_source_checkpoint(checkpoints, step):
     return min(matches, key=lambda c: bool(c.get('final')))
 
 
-def describe_geometry_conflict(parent_geometry, rank, alpha):
-    """Message for "you cannot continue THESE weights at THAT rank", or None when
-    the shapes agree (or the parent's geometry was never recorded).
+_LEGACY_LOKR_FULL_RANK_RESUME_ERROR = (
+    'cannot continue this legacy LoKr checkpoint because its `lokr_full_rank` '
+    'topology was never recorded. ai-toolkit defaults have changed, so forcing '
+    'a mode now could load the weights into a different network. Start a fresh '
+    'LoKr run, or continue from a checkpoint with recorded LoKr topology.')
 
-    A LoRA's rank and alpha size its matrices: rank-32 weights simply do not load
-    into a rank-64 network. So on a resume the geometry is a property of the
-    checkpoint, never a setting to re-pick — and when the two disagree the launch
-    must say so BEFORE renting anything, not train a fresh LoRA the user believes
-    is a continuation."""
+
+def legacy_lokr_resume_error(parent_geometry, fallback_settings=None):
+    """Return a hard-stop reason when a resume would guess LoKr full-rank mode.
+
+    A recorded LoKr parent is authoritative: it must carry a real boolean
+    ``lokr_full_rank`` value.  When a pre-registry parent has no adapter type,
+    inspect the frozen/live settings that the continuation would otherwise emit;
+    a legacy LoKr setting without that fact is equally unsafe.  A known LoRA
+    parent stays untouched here (the normal type-conflict check handles a
+    LoRA-to-LoKr switch separately).
+    """
+    geometry = parent_geometry if isinstance(parent_geometry, dict) else {}
+    parent_type = geometry.get('network_type')
+    candidate = (geometry if parent_type == 'lokr'
+                 else fallback_settings if parent_type not in _NETWORK_TYPE_CHOICES
+                 else None)
+    if isinstance(candidate, str):
+        try:
+            candidate = json.loads(candidate)
+        except (TypeError, ValueError):
+            candidate = None
+    if (isinstance(candidate, dict)
+            and candidate.get('network_type') == 'lokr'
+            and not isinstance(candidate.get('lokr_full_rank'), bool)):
+        return _LEGACY_LOKR_FULL_RANK_RESUME_ERROR
+    return None
+
+
+def describe_geometry_conflict(parent_geometry, rank, alpha, *, network_type=None,
+                               lokr_factor=None, lokr_full_rank=None):
+    """Explain a known checkpoint/topology mismatch, or return ``None``.
+
+    Adapter type, rank/alpha, and LoKr's decomposition parameters all determine
+    the tensors a checkpoint can load.  The parent geometry is intentionally
+    partial: missing provenance keys are legacy *unknowns*, not today's defaults,
+    so only facts explicitly recorded for the checkpoint are enforced.
+    """
     geo = parent_geometry or {}
+    parent_type = geo.get('network_type')
+    if (parent_type in _NETWORK_TYPE_CHOICES
+            and network_type in _NETWORK_TYPE_CHOICES
+            and parent_type != network_type):
+        return (f'this checkpoint was trained as {"LoKr" if parent_type == "lokr" else "LoRA"}, '
+                f'and this run would use {"LoKr" if network_type == "lokr" else "LoRA"}. '
+                'The adapter type is fixed by the checkpoint weights; restore the '
+                'original network type in Training settings, or start a fresh run.')
     want_r, want_a = geo.get('rank'), geo.get('alpha')
     bad = ((want_r is not None and rank is not None and int(want_r) != int(rank))
            or (want_a is not None and alpha is not None and int(want_a) != int(alpha)))
-    if not bad:
-        return None
-    return (f'this checkpoint was trained at rank {want_r} / alpha {want_a}, and '
-            f'this run would use rank {rank} / alpha {alpha}. A LoRA\'s rank is '
-            'fixed by its weights — continuing it at another rank cannot load '
-            'them. Set rank and alpha back in Training settings, or start a '
-            'fresh run instead of continuing.')
+    if bad:
+        return (f'this checkpoint was trained at rank {want_r} / alpha {want_a}, and '
+                f'this run would use rank {rank} / alpha {alpha}. A LoRA\'s rank is '
+                'fixed by its weights — continuing it at another rank cannot load '
+                'them. Set rank and alpha back in Training settings, or start a '
+                'fresh run instead of continuing.')
+    if parent_type == network_type == 'lokr':
+        parent_factor = geo.get('lokr_factor')
+        if (parent_factor is not None and lokr_factor is not None
+                and parent_factor != lokr_factor):
+            return (f'this LoKr checkpoint was trained with factor {parent_factor}, and '
+                    f'this run would use factor {lokr_factor}. LoKr factor changes the '
+                    'checkpoint tensor geometry; restore the original factor or start '
+                    'a fresh run.')
+        if ('lokr_full_rank' in geo and isinstance(lokr_full_rank, bool)
+                and geo['lokr_full_rank'] != lokr_full_rank):
+            return ('this LoKr checkpoint was trained with '
+                    f'lokr_full_rank={geo["lokr_full_rank"]}, and this run would use '
+                    f'lokr_full_rank={lokr_full_rank}. Full-rank mode changes the '
+                    'checkpoint tensor geometry; restore the original mode or start '
+                    'a fresh run.')
+    return None
 
 
 def checkpoint_file_path(user_id, dataset_id, filename, base_model=_PERSISTED,
@@ -4112,11 +4437,12 @@ def list_imported_checkpoints(user_id, dataset_id, family=None) -> list[dict]:
         return []
     fam = _train_type(ds, family)
     prefix = f'lora_{_safe_trigger(ds)}'
-    try:
-        dest_dir = _lora_dest_dir(ds, family)
-    except RuntimeError:
-        return []
-    if not os.path.isdir(dest_dir):
+    # EVERY loras root, not just the deploy one: a LoRA deployed before the app
+    # learned to read extra_model_paths.yaml (GitHub #25) sits in the old default
+    # folder, and dropping it from this list would make an existing file
+    # undeletable from the app for no reason the user can see.
+    dirs = [d for d in _lora_family_dirs(fam) if os.path.isdir(d)]
+    if not dirs:
         return []
     from ..utils.comfyui import format_trained_lora_label
     # Cloud-trained checkpoints are auto-imported into the same folder but
@@ -4140,11 +4466,17 @@ def list_imported_checkpoints(user_id, dataset_id, family=None) -> list[dict]:
             cloud_prefixes.add(f'lds{r.id}_')
     except Exception:
         pass
-    subfolder = os.path.basename(os.path.normpath(dest_dir))
-    out = []
-    for fn in sorted(os.listdir(dest_dir)):
+    subfolder = _FAMILY_SUBDIR.get(fam, 'z image')
+    out, seen = [], set()
+    for dest_dir, fn in sorted(((d, fn) for d in dirs for fn in os.listdir(d)),
+                               key=lambda pair: pair[1]):
         if not fn.lower().endswith('.safetensors'):
             continue
+        # Same name in two roots = ComfyUI loads the higher-priority one; list it
+        # once, from that same root, so the app never shows a file ComfyUI shadows.
+        if fn in seen:
+            continue
+        seen.add(fn)
         # deployed cloud names may carry the _v<N> dataset-version suffix —
         # strip it before matching against the staging basenames
         stem = re.sub(r'_v\d+(?=\.safetensors$)', '', fn)
@@ -4189,18 +4521,17 @@ def lora_deploy_dir(user_id, dataset_id, family=None) -> str:
 
 def deployed_lora_paths(user_id, dataset_id, family=None) -> list[str]:
     """Absolute paths of THIS dataset's LoRA files already deployed in the
-    family's ComfyUI loras folder, for the "include trained LoRAs" backup toggle.
+    family's ComfyUI loras folders, for the "include trained LoRAs" backup toggle.
     [] when ComfyUI is unconfigured or nothing is deployed. Reuses
     list_imported_checkpoints so cloud-named epochs are captured too."""
-    try:
-        dest = lora_deploy_dir(user_id, dataset_id, family)
-    except (RuntimeError, ValueError):
+    ds = fds.get_dataset(user_id, dataset_id)
+    if not ds:
         return []
+    fam = _train_type(ds, family)
     out = []
     for c in list_imported_checkpoints(user_id, dataset_id, family=family):
-        name = os.path.basename(str(c.get('filename', '')).replace('\\', '/'))
-        p = os.path.join(dest, name)
-        if name and os.path.isfile(p):
+        p = _resolve_deployed_path(fam, c.get('filename', ''))
+        if p:
             out.append(p)
     return out
 
@@ -4217,11 +4548,10 @@ def delete_imported_checkpoint(user_id, dataset_id, filename, family=None) -> st
         raise ValueError('unknown checkpoint')
     # ds is guaranteed truthy here: an unowned/missing dataset makes
     # list_imported_checkpoints return [] above, which already raised.
-    root = os.path.abspath(_lora_dest_dir(ds, family))
-    loras_root = os.path.dirname(root)
-    rel = filename.replace('\\', os.sep).replace('/', os.sep)
-    dest = os.path.abspath(os.path.join(loras_root, rel))
-    if os.path.commonpath([dest, root]) != root or not os.path.isfile(dest):
+    # Searched across every loras root, so a LoRA deployed before the app read
+    # extra_model_paths.yaml (GitHub #25) is deletable where it actually is.
+    dest = _resolve_deployed_path(_train_type(ds, family), filename)
+    if not dest:
         raise ValueError('file not found')
     # trash, never destroy: a wrong click on a deployed LoRA is recoverable
     # until 'Empty trash' in Settings.
@@ -4316,12 +4646,11 @@ def dataset_disk_usage(user_id, dataset_id, base_model=_PERSISTED, family=None,
         pass
     try:
         ds = fds.get_dataset(user_id, dataset_id)
-        root = _lora_dest_dir(ds, family)
+        fam = _train_type(ds, family)
         for c in list_imported_checkpoints(user_id, dataset_id, family=family):
-            p = os.path.join(os.path.dirname(root),
-                             c['filename'].replace('\\', os.sep))
+            p = _resolve_deployed_path(fam, c['filename'])
             try:
-                out['deployed_bytes'] += os.path.getsize(p)
+                out['deployed_bytes'] += os.path.getsize(p) if p else 0
             except OSError:
                 pass
     except Exception:
@@ -4360,14 +4689,12 @@ def purge_training_artifacts(user_id, trigger_safe) -> list[str]:
     removed: list[str] = []
     run_prefix = f'u{user_id}_{trigger_safe}'    # ex. u1_Lola69382
     lora_prefix = f'lora_{trigger_safe}'         # ex. lora_Lola69382
-    # 1) LoRA déployés dans ComfyUI (z image + sdxl + krea + flux + flux2klein + anima séparés)
+    # 1) LoRA déployés dans ComfyUI (z image + sdxl + krea + flux + flux2klein + anima
+    # séparés), dans CHAQUE racine loras : un LoRA déployé avant le correctif #25
+    # vit dans l'ancien dossier par défaut et doit partir avec le dataset.
     lora_roots = []
-    for accessor in (_lora_dest_dir_zimage, _lora_dest_dir_sdxl, _lora_dest_dir_krea,
-                     _lora_dest_dir_flux, _lora_dest_dir_flux2klein, _lora_dest_dir_anima):
-        try:
-            lora_roots.append(str(accessor()))
-        except RuntimeError:
-            pass
+    for fam in _FAMILY_SUBDIR:
+        lora_roots += _lora_family_dirs(fam)
     for root in lora_roots:
         if not os.path.isdir(root):
             continue
@@ -4522,10 +4849,11 @@ def rename_training_artifacts(user_id, old_trigger_safe, new_trigger_safe) -> di
         return roots
 
     plan = []
-    # 1) deployed LoRAs in ComfyUI (zimage + sdxl + krea + flux + flux2klein + anima)
-    for root in _roots((_lora_dest_dir_zimage, _lora_dest_dir_sdxl, _lora_dest_dir_krea,
-                        _lora_dest_dir_flux, _lora_dest_dir_flux2klein, _lora_dest_dir_anima)):
-        plan += _rename_plan(root, old_lora, new_lora, suffix='.safetensors')
+    # 1) deployed LoRAs in ComfyUI (zimage + sdxl + krea + flux + flux2klein + anima),
+    # in every loras root — see purge_training_artifacts.
+    for fam in _FAMILY_SUBDIR:
+        for root in _lora_family_dirs(fam):
+            plan += _rename_plan(root, old_lora, new_lora, suffix='.safetensors')
     # 2) run output + 3) export datasets (whole folders)
     for root in _roots((_output_dir, _datasets_dir)):
         plan += _rename_plan(root, old_run, new_run, want_dir=True)
@@ -5360,7 +5688,7 @@ def _watch_training(app, proc, log_path, dataset_id) -> None:
     file (libère ComfyUI / lance le suivant) DÈS la fin, sans dépendre du polling
     client. Sur un crash (rc≠0), remonte la fin du log. process_training_queue()
     reste le filet de secours si Flask redémarre (le watcher meurt, le flag est
-    rattrapé au prochain poll ou à l'expiration du TTL)."""
+    rattrapé au prochain poll ou à la récupération de démarrage)."""
     try:
         proc.wait()
         rc = proc.returncode
@@ -5441,7 +5769,8 @@ def launch_training(user_id, dataset_id, steps: int | None = None, check_caption
     # l'optimizer partagé (incident Test/Test 2). Un pid mort avec flag encore
     # levé (avance de file) passe : on ne bloque que sur un process réellement vivant.
     if (queue_manager._get_system_state('training_in_progress', False)
-            and _pid_alive(queue_manager._get_system_state('training_pid', None))):
+            and not _training_process_is_definitely_dead(
+                queue_manager._get_system_state('training_pid', None))):
         raise ValueError('a training is already in progress - wait for it to finish or queue this dataset')
     # Cheap refusal BEFORE the dataset export below: re-exporting a whole dataset
     # only to reject the launch under the spawn lock would burn minutes of disk
@@ -5589,35 +5918,23 @@ def launch_training(user_id, dataset_id, steps: int | None = None, check_caption
     # check under `_queue_lock` refused it. Two reads of an in-memory flag; the
     # copy inside the lock stays the authority, this one only saves the work.
     if (queue_manager._get_system_state('training_in_progress', False)
-            and _pid_alive(queue_manager._get_system_state('training_pid', None))):
+            and not _training_process_is_definitely_dead(
+                queue_manager._get_system_state('training_pid', None))):
         raise ValueError(
             'a training is already in progress - wait for it to finish or '
             'queue this dataset')
     _prepared = checkpoint_registry.prepare_launch(
         user_id, dataset_id, base_model=base_model)
-    # ai-toolkit is about to claim the card. Give back the vision model's
-    # 7.5 GB if an isolated call leased it warm (no-op without a live lease).
-    #
-    # OUTSIDE `_queue_lock`, and it must stay outside: a live lease makes this an
-    # HTTP POST to Ollama with `timeout=(10, 30)` retried once — up to ~80 s of
-    # blocking. Held under the lock, that froze Stop, enqueue/dequeue and queue
-    # advancement for as long as Ollama took to answer: pressing Stop during a
-    # launch did nothing until the unload returned. Nothing here depends on the
-    # lock (the vision-pass guard already ran above), and the ordering that
-    # matters — VRAM handed back BEFORE Popen — is unchanged.
-    try:
-        from .vision_keepalive import revoke as _revoke_vision
-        _revoke_vision('training starting')
-    except Exception:
-        logger.warning('vision keep-warm revoke failed before training start',
-                       exc_info=True)
-    # The authoritative live-run check, identity state and PID publication are
-    # one transition under the SAME lock used by Stop and queue advancement.
-    # This closes both races: two launches spawning together, and a stale Stop
-    # clearing the identity of the next queued process between Popen and PID set.
-    with _queue_lock:
+    # The training queue lock serializes launch/Stop ownership; the shared GPU
+    # arbiter also covers vision's check -> flag handoff. Keep this lock order
+    # everywhere training launches: queue ownership first, GPU admission second.
+    # The verified Ollama handoff is intentionally *inside* both locks: releasing
+    # it before acquiring the shared arbiter would let a vision pass claim the
+    # GPU in the interval before Popen.
+    with _queue_lock, GPU_ARBITER_LOCK:
         if (queue_manager._get_system_state('training_in_progress', False)
-                and _pid_alive(queue_manager._get_system_state('training_pid', None))):
+                and not _training_process_is_definitely_dead(
+                    queue_manager._get_system_state('training_pid', None))):
             raise ValueError(
                 'a training is already in progress - wait for it to finish or '
                 'queue this dataset')
@@ -5625,6 +5942,28 @@ def launch_training(user_id, dataset_id, steps: int | None = None, check_caption
         # export above. Checked under the SAME lock as the live-run test so the
         # two GPU owners can never both believe they won the card.
         _assert_no_vision_pass_on_gpu()
+        # ComfyUI keeps rendering while its worker polls outside this lock. The
+        # durable queue state is therefore the admission record for an already
+        # running prompt as well as for a pending one.
+        if queue_manager.has_comfyui_work():
+            from ..gpu_window import GpuBusyError
+            raise GpuBusyError(
+                'ComfyUI has queued or active work, so local training cannot take the GPU. '
+                'Wait for it to finish or cancel it safely first.')
+        try:
+            from .ollama_gpu_fence import ensure_released_for_comfy
+            ollama_released = ensure_released_for_comfy()
+        except Exception as exc:
+            logger.exception('could not verify Ollama GPU release before training')
+            from ..gpu_window import GpuBusyError
+            raise GpuBusyError(
+                'Could not verify that Ollama released the GPU before local training. '
+                'Check Ollama, then try again.') from exc
+        if not ollama_released:
+            from ..gpu_window import GpuBusyError
+            raise GpuBusyError(
+                'Ollama still owns the GPU, so local training cannot start safely. '
+                'Wait for the vision task to finish or unload it, then try again.')
         # Provenance registry: record WHICH dataset version this launch trains on
         # only after this request has won the process slot.
         # Honest provenance: a launch waved through despite a readiness blocker
@@ -5666,8 +6005,7 @@ def launch_training(user_id, dataset_id, steps: int | None = None, check_caption
                 cwd=str(_aitoolkit_dir()), env=env, shell=False,
                 stdout=logf, stderr=subprocess.STDOUT,
                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-            queue_manager._set_system_state(
-                'training_pid', proc.pid, ttl_seconds=_TRAIN_STATE_TTL)
+            _record_training_process_identity(proc.pid)
         except (FileNotFoundError, OSError) as e:
             if logf is not None:
                 try:
@@ -5756,7 +6094,7 @@ def continue_training(user_id, dataset_id, extra_steps: int = 1000,
     # (so ComfyUI never grabs the GPU between jobs).  Only a *live* PID blocks;
     # a dead predecessor is precisely the normal queued-continue transition.
     if queue_manager._get_system_state('training_in_progress', False):
-        previous_is_dead = not _pid_alive(
+        previous_is_dead = _training_process_is_definitely_dead(
             queue_manager._get_system_state('training_pid', None))
         if not (_allow_dead_predecessor and previous_is_dead):
             raise ValueError('a training is already in progress')
@@ -5830,9 +6168,18 @@ def continue_training(user_id, dataset_id, extra_steps: int = 1000,
     # inherit the parent's rank without rewriting the user's own settings behind
     # their back (the cloud lane can — it carries a per-run snapshot). Refuse
     # loudly, here: nothing has been archived, persisted or launched yet.
+    _parent_geometry = checkpoint_registry.network_geometry(_parent)
+    _legacy_lokr_error = legacy_lokr_resume_error(
+        _parent_geometry, getattr(ds, 'train_settings', None))
+    if _legacy_lokr_error:
+        raise ValueError(_legacy_lokr_error)
+    _live_geometry = launch_settings_snapshot(ds, fam)
     _conflict = describe_geometry_conflict(
-        checkpoint_registry.network_geometry(_parent),
-        _lora_rank(ds, fam), _lora_alpha_eff(ds, _lora_rank(ds, fam), fam))
+        _parent_geometry,
+        _live_geometry['rank'], _live_geometry['alpha'],
+        network_type=_live_geometry.get('network_type'),
+        lokr_factor=_live_geometry.get('lokr_factor'),
+        lokr_full_rank=_live_geometry.get('lokr_full_rank'))
     if _conflict:
         raise ValueError(_conflict)
     try:
@@ -5883,20 +6230,16 @@ def continue_training(user_id, dataset_id, extra_steps: int = 1000,
 
 
 def stop_training(expected_dataset_id=None, expected_run_token=None) -> bool:
-    """Tue le process d'entraînement (s'il tourne) PUIS lève le flag → le
-    superviseur relance ComfyUI. L'ordre compte : si on levait le flag d'abord,
-    ComfyUI reprendrait le GPU pendant que l'entraînement tourne encore.
+    """Kill the local training process, then release its GPU ownership fence.
 
-    La vue Runs fournit dataset + jeton opaque. Les deux sont vérifiés SOUS le
-    même verrou que le kill : même si le run suivant utilise le même dataset,
-    une carte périmée ne peut pas l'arrêter. L'appel historique sans identité
-    reste un Stop global pour le gestionnaire de dataset."""
-    # Le verrou couvre TOUTE la transition, lecture/kill du PID compris. Sinon le
-    # watcher peut constater la mort entre le kill et le clear, entrer dans
-    # process_training_queue(), lancer le job suivant, puis voir Stop effacer ses
-    # flags. L'état « process arrêté + file vide + idle » doit devenir visible en
-    # une seule fois aux autres opérations de queue.
-    with _queue_lock:
+    The final state transition is deliberately fail-closed: a non-zero
+    taskkill result, a missing PID, or an unavailable PID probe leaves the
+    training fence in place. Releasing it without proof would let Vision or
+    ComfyUI allocate the GPU while ai-toolkit may still be running.
+    """
+    # Keep the launch lock order: training ownership first, then shared GPU
+    # admission. This makes the final clear atomic with Vision/ComfyUI admission.
+    with _queue_lock, GPU_ARBITER_LOCK:
         current_id = queue_manager._get_system_state('training_dataset_id', None)
         current_token = queue_manager._get_system_state('training_run_token', None)
         in_progress = bool(queue_manager._get_system_state(
@@ -5913,20 +6256,53 @@ def stop_training(expected_dataset_id=None, expected_run_token=None) -> bool:
                 str(current_token), str(expected_run_token))
             if not in_progress or not token_ok:
                 return False
+
         pid = queue_manager._get_system_state('training_pid', None)
-        if pid:
+        pid_alive = _pid_alive(pid) if in_progress else False
+        if in_progress and pid_alive is None:
+            logger.error(
+                'stop_training: cannot prove whether training pid %r is still alive; '
+                'keeping the GPU fence', pid)
+            return False
+
+        if pid_alive:
+            # Recheck the birth-time identity immediately before the PID-only OS
+            # kill. If the old training exited and Windows recycled this PID between
+            # probes, the replacement is never a permitted taskkill target.
+            rechecked_pid_alive = _pid_alive(pid)
+            if rechecked_pid_alive is None:
+                logger.error(
+                    'stop_training: cannot re-prove training pid %r immediately before kill; ',
+                    'keeping the GPU fence', pid)
+                return False
+            pid_alive = rechecked_pid_alive
+
+        if pid_alive:
             try:
                 if os.name == 'nt':
-                    # /T tue aussi les sous-process (dataloaders, etc.).
-                    subprocess.run(['taskkill', '/F', '/T', '/PID', str(int(pid))],
-                                   shell=False, capture_output=True)
+                    # /T terminates ai-toolkit children such as dataloaders too.
+                    completed = subprocess.run(
+                        ['taskkill', '/F', '/T', '/PID', str(int(pid))],
+                        shell=False, capture_output=True)
+                    if getattr(completed, 'returncode', 0) != 0:
+                        logger.warning(
+                            'stop_training: taskkill pid %s failed (rc=%s); '
+                            'keeping the GPU fence', pid,
+                            getattr(completed, 'returncode', None))
+                        return False
                 else:
                     os.kill(int(pid), 15)
-            except (ValueError, OSError) as e:
-                logger.warning(f"stop_training: kill pid {pid} échoué : {e}")
-        # Stop = arrêt voulu : on VIDE la file D'ABORD (sinon le prochain poll
-        # relancerait l'entraînement suivant), PUIS on lève le flag EN DERNIER
-        # (c'est lui qui signale à ComfyUI de reprendre le GPU).
+            except (ValueError, OSError) as exc:
+                logger.warning('stop_training: kill pid %s failed: %s', pid, exc)
+                return False
+
+            if not _wait_for_training_process_exit(pid):
+                logger.warning(
+                    'stop_training: pid %s did not become conclusively dead; '
+                    'keeping the GPU fence', pid)
+                return False
+
+        # Stop is intentional: clear the queue before publishing the idle state.
         _save_queue([])
         _clear_training_identity(ttl_seconds=None)
         return True
@@ -6067,16 +6443,29 @@ def _assert_no_vision_pass_on_gpu():
     Nothing raises and nothing OOMs — so a training started here would simply
     crawl for hours with no error to explain it. Refusing is the kinder failure.
 
-    The flag is TTL-bounded and cleared at startup (recover_stale_vision_window),
-    so this can never latch a training out permanently.
+    The persisted flag is TTL-bounded and cleared at startup. A process-local
+    companion stays closed while a currently running Vision window is alive,
+    including a transient heartbeat failure.
     """
-    if queue_manager._get_system_state('vision_in_progress', False):
-        from ..gpu_window import GpuBusyError
+    from ..gpu_window import GpuBusyError, vision_gpu_window_blocks_gpu
+    try:
+        active_vision_window = vision_gpu_window_blocks_gpu()
+    except Exception as exc:
+        raise GpuBusyError(
+            'Could not confirm whether a vision task owns the GPU; training was not started safely.'
+        ) from exc
+
+    if active_vision_window or queue_manager._get_system_state('vision_in_progress', False):
         raise GpuBusyError(
             'a vision pass (captioning, watermark or framing) is using the GPU - '
             'training would fight it for VRAM instead of failing outright, so it '
             'has to wait. Stop the pass, or queue this dataset and it will start '
             'by itself when the pass is done.')
+
+    if queue_manager.has_comfyui_stalled_barrier():
+        raise GpuBusyError(
+            'ComfyUI recovery is required before local training can take the GPU. '
+            'Recover ComfyUI, cancel the paused Test Studio job, then resume it.')
 
 
 def is_local_run_active(dataset_id) -> bool:
@@ -6235,7 +6624,8 @@ def retry_local_run(user_id, record_id, **confirmations) -> dict:
     # Run-in-progress → the exact collision message launch_training would raise,
     # surfaced before any preflight work.
     if (queue_manager._get_system_state('training_in_progress', False)
-            and _pid_alive(queue_manager._get_system_state('training_pid', None))):
+            and not _training_process_is_definitely_dead(
+                queue_manager._get_system_state('training_pid', None))):
         raise ValueError('a training is already in progress - wait for it to finish or queue this dataset')
     if _failed_local_record_id() != rec.id:
         raise ValueError('this run has no recorded failure to retry')
@@ -6485,7 +6875,8 @@ def training_progress(user_id, dataset_id, base_model=_PERSISTED, family=None,
     cur_id = queue_manager._get_system_state('training_dataset_id', None)
     active = (bool(queue_manager._get_system_state('training_in_progress', False))
               and cur_id is not None and int(cur_id) == int(dataset_id)
-              and _pid_alive(queue_manager._get_system_state('training_pid', None)))
+              and not _training_process_is_definitely_dead(
+                  queue_manager._get_system_state('training_pid', None)))
     log_path = _run_log_path(ds, base_model, family, variant)
     parsed = {'step': None, 'total': None, 'loss': None, 'speed': None, 'eta': None,
               'loss_curve': []}
@@ -6523,7 +6914,8 @@ TRAIN_QUEUE_KEY = 'lora_train_queue'
 _queue_lock = threading.RLock()
 
 _TRAIN_IDENTITY_KEYS = (
-    'training_pid', 'training_dataset_id', 'training_target_step',
+    'training_pid', 'training_pid_create_time', 'training_dataset_id',
+    'training_target_step',
     'training_run_token', 'training_train_type', 'training_variant',
     'training_base_model', 'training_effective_base',
     'training_training_adapter', 'training_recipe_version',
@@ -6537,12 +6929,90 @@ def _clear_training_identity(ttl_seconds=None) -> None:
         'training_in_progress', False, ttl_seconds=ttl_seconds)
 
 
-def _pid_alive(pid) -> bool:
+def _training_process_create_time(pid) -> float | None:
+    """Read a process birth time without ever treating an error as a death."""
     try:
         import psutil
-        return bool(pid) and psutil.pid_exists(int(pid))
-    except Exception:
+        return float(psutil.Process(int(pid)).create_time())
+    except Exception as exc:
+        logger.warning('Could not capture training process identity for pid %r: %s', pid, exc)
+        return None
+
+
+def _record_training_process_identity(pid) -> None:
+    """Persist a PID plus birth time so a later PID reuse cannot be killed."""
+    queue_manager._set_system_state(
+        'training_pid', int(pid), ttl_seconds=_TRAIN_STATE_TTL)
+    birth_time = _training_process_create_time(pid)
+    if birth_time is None:
+        logger.error(
+            'training pid %s has no durable birth-time identity; keeping its GPU '
+            'fence fail-closed after a restart', pid)
+        return
+    queue_manager._set_system_state(
+        'training_pid_create_time', birth_time, ttl_seconds=_TRAIN_STATE_TTL)
+
+
+def _pid_alive(pid) -> bool | None:
+    """Return True (exact training child), False (confirmed old child gone), or None.
+
+    A persisted PID alone is not safe after Flask restarts because Windows can
+    reuse it. The stored process creation time turns a reused PID into a
+    confirmed dead old training identity, never a process to terminate.
+    """
+    if not pid:
+        return None
+    try:
+        import psutil
+        process = psutil.Process(int(pid))
+        current_birth_time = float(process.create_time())
+    except Exception as exc:
+        # psutil.NoSuchProcess is the one reliable proof that this exact PID is
+        # gone. Everything else (access denied, bad state, import failure) keeps
+        # the durable GPU fence in place.
+        try:
+            import psutil
+            no_such_process = psutil.NoSuchProcess
+        except Exception:
+            no_such_process = ()
+        if no_such_process and isinstance(exc, no_such_process):
+            return False
+        logger.warning('Could not inspect training pid %r: %s', pid, exc)
+        return None
+
+    expected_raw = queue_manager._get_system_state(
+        'training_pid_create_time', None)
+    try:
+        expected_birth_time = float(expected_raw)
+    except (TypeError, ValueError):
+        logger.error(
+            'training pid %s lacks a durable birth-time identity; keeping the GPU '
+            'fence fail-closed', pid)
+        return None
+
+    if abs(current_birth_time - expected_birth_time) > 0.01:
+        logger.warning(
+            'training pid %s was reused (expected birth %.6f, got %.6f); '
+            'the old training is confirmed gone and will never be taskkilled',
+            pid, expected_birth_time, current_birth_time)
         return False
+    return True
+
+
+def _training_process_is_definitely_dead(pid) -> bool:
+    """Only a trustworthy negative PID probe may release the GPU fence."""
+    return _pid_alive(pid) is False
+
+
+def _wait_for_training_process_exit(pid, timeout_seconds=5.0) -> bool:
+    """Bounded proof that a successful kill actually released this PID."""
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        if _training_process_is_definitely_dead(pid):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.1)
 
 
 def get_train_queue() -> list:
@@ -6775,15 +7245,15 @@ def _launch_queued_item(item) -> None:
                         allow_unverified_weights=bool(item.get('allow_unverified_weights')))
 
 
-def process_training_queue() -> str | None:
-    """Avance la file : si le training courant est FINI (process mort mais flag
-    encore levé), lance le suivant ; sinon, si rien ne tourne et la file n'est pas
-    vide, lance le prochain. À appeler périodiquement (le poll de /train/status le
-    fait). Retourne un libellé d'action ou None. SÉRIALISÉ par _queue_lock : sans
-    ça, le watcher et un poll /train/status peuvent avancer la file en même temps
-    → double-lancement du même entraînement."""
-    with _queue_lock:
+def recover_training_fence() -> str | None:
+    """Reconcile the durable local-training GPU fence at boot or poll time."""
+    with _queue_lock, GPU_ARBITER_LOCK:
         return _advance_training_queue()
+
+
+def process_training_queue() -> str | None:
+    """Advance queued training through the same boot-safe GPU recovery path."""
+    return recover_training_fence()
 
 
 def _snapshot_final_checkpoint(dataset_id, step, base_model=_PERSISTED,
@@ -6844,7 +7314,10 @@ def _advance_training_queue() -> str | None:
     q = get_train_queue()
 
     if flag:
-        if _pid_alive(pid):
+        pid_alive = _pid_alive(pid)
+        if pid_alive is not False:
+            # A failed PID probe is not evidence that ai-toolkit released
+            # the GPU, so it deliberately keeps the same durable fence.
             # Re-arm the 4h TTLs on every poll: without this, a training run
             # longer than 4h would see these flags silently expire mid-run,
             # and the GPU gate (job_queue / gpu_busy_reason) would think
@@ -6927,6 +7400,11 @@ def start_training_scheduler(app, interval_seconds=60):
     if _scheduler_started:
         return
     _scheduler_started = True
+    try:
+        with app.app_context():
+            recover_training_fence()
+    except Exception as exc:
+        logger.warning('training boot recovery failed closed: %s', exc)
 
     def _tick():
         import time

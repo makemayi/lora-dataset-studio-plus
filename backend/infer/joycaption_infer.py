@@ -19,7 +19,9 @@ Logs/progress → stderr (pour ne pas polluer la sortie JSON).
 """
 from __future__ import annotations
 
+import io
 import json
+import os
 import sys
 
 MODEL_ID = "John6666/llama-joycaption-beta-one-hf-llava-nf4"
@@ -29,6 +31,10 @@ DEFAULT_PROMPT = (
     "Write a medium-length descriptive caption for this image in a casual tone. "
     "Describe the subject, pose, clothing or nudity, setting, lighting and camera "
     "framing as flowing natural-language prose. Be literal and explicit; no euphemisms.")
+
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from bank_image_guard import read_validated_bank_image  # noqa: E402
 
 
 def _log(msg: str) -> None:
@@ -141,13 +147,16 @@ def main() -> int:
     errors: dict[str, str] = {}
     for i, path in enumerate(images, 1):
         try:
-            image = Image.open(path)
-            if image.size != (384, 384):
-                image = image.resize((384, 384), Image.LANCZOS)
-            image = image.convert("RGB")
-            pixel_values = TVF.pil_to_tensor(image).unsqueeze(0).to(vision_device)
-            pixel_values = pixel_values / 255.0
-            pixel_values = TVF.normalize(pixel_values, [0.5], [0.5]).to(vision_dtype)
+            # Keep the exact bounded snapshot returned by the guard: opening
+            # ``path`` again would race a live Bank-folder replacement.
+            payload = read_validated_bank_image(path)
+            with Image.open(io.BytesIO(payload)) as opened:
+                image = opened.resize((384, 384), Image.LANCZOS) \
+                    if opened.size != (384, 384) else opened.copy()
+                image = image.convert("RGB")
+                pixel_values = TVF.pil_to_tensor(image).unsqueeze(0).to(vision_device)
+                pixel_values = pixel_values / 255.0
+                pixel_values = TVF.normalize(pixel_values, [0.5], [0.5]).to(vision_dtype)
             input_ids = torch.tensor([input_tokens], dtype=torch.long, device=lang_device)
             attn = torch.ones_like(input_ids)
             with torch.inference_mode():

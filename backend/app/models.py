@@ -217,6 +217,13 @@ class FaceDatasetImage(db.Model):
     # values only costs one re-hash. Additive columns (migration in create_app).
     content_sig = db.Column(String(24), nullable=True)
     content_sig_stat = db.Column(String(40), nullable=True)
+    # Versioned Bank-only analysis captured when a Bank image is promoted here.
+    # Its fingerprint is of THIS Dataset file's bytes, so importing this image back
+    # into a Bank can restore scores only while the image has not been edited.
+    # User-facing metadata (caption, framing, watermark, provenance and status)
+    # deliberately stays in its normal columns and is never rolled back from this
+    # historical snapshot. Additive column (migration in create_app).
+    bank_analysis_snapshot = db.Column(Text, nullable=True)
     created_at = db.Column(DateTime, default=db.func.current_timestamp())
 
     def __repr__(self):
@@ -336,6 +343,11 @@ class BankImage(db.Model):
     # dataset on promotion, so a promoted selection starts already captioned. NULL =
     # not captioned yet. Additive column — created by db.create_all(), no migration.
     caption = db.Column(Text, nullable=True)
+    # Portable source provenance shared with Dataset images. The only currently
+    # accepted shape is normalized Pexels attribution; services validate/canonicalize
+    # it before writing. Keeping it on the Bank makes Bank -> Dataset -> Bank
+    # round-trips retain the user's lawful source information.
+    source_metadata = db.Column(Text, nullable=True)
     # Framing pass — the SAME face/bust/body/back classification the datasets use
     # (Qwen3-VL, CLASSIFY_PROMPT). face = head close-up | bust = upper body |
     # body = full body | back = seen from behind | 'unknown' = a parseable answer

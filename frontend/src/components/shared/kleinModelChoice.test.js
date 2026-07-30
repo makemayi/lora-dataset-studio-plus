@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import {
   LEGACY_NOTICE, LEGACY_STORAGE_KEY, MODEL_LINE_NONE, MODEL_LINE_UNKNOWN,
-  legacyNotice, modelLine, readLegacyPick, selectValue,
+  canChooseModel, legacyNotice, modelEndpoint, modelLine, readLegacyPick, selectValue,
 } from './kleinModelChoice.js';
 
 test('before the payload arrives, the line promises nothing it cannot name', () => {
@@ -67,6 +67,24 @@ test('nothing is disclosed when there is nothing to disclose', () => {
   // Adopting it would change nothing — auto already resolves to it.
   assert.equal(legacyNotice({ stored: null, legacy: 'a.safetensors', choices,
     effective: 'a.safetensors' }), null);
+});
+
+test('a screen with no dataset reads the global state, not a dataset one', () => {
+  // The bank's watermark inpaint: no dataset to inherit a pick from, so it reads
+  // the model that WILL run and nothing else.
+  assert.equal(modelEndpoint(7), '/api/dataset/7/klein-model');
+  assert.equal(modelEndpoint(null), '/api/klein-model');
+  assert.equal(modelEndpoint(undefined), '/api/klein-model');
+});
+
+test('there is exactly one place to CHOOSE a Klein model: the dataset', () => {
+  const choices = ['a.safetensors', 'b.safetensors'];
+  assert.equal(canChooseModel({ datasetId: 3, choices }), true);
+  // A single option is furniture…
+  assert.equal(canChooseModel({ datasetId: 3, choices: ['a.safetensors'] }), false);
+  // …and a picker with nowhere to save would imply a second authority for the
+  // same UNETLoader. Naming stays; choosing does not.
+  assert.equal(canChooseModel({ datasetId: null, choices }), false);
 });
 
 test('the select falls back to Auto rather than to a neighbour', () => {

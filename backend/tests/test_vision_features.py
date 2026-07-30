@@ -10,6 +10,11 @@ def _png(color=(255, 0, 0), size=(64, 64)):
     return buf.getvalue()
 
 
+def _vram_freed(*_args, **_kwargs):
+    from app.utils.comfyui import ComfyVramFreeVerdict
+    return ComfyVramFreeVerdict.FREED
+
+
 def _create(client, name='Lola', trigger='lola'):
     return client.post('/api/dataset/create', json={'name': name, 'trigger_word': trigger})
 
@@ -18,7 +23,7 @@ def _create(client, name='Lola', trigger='lola'):
 def test_nested_window_raises_gpu_busy_and_clears_flag_on_exit(app, monkeypatch):
     from app.gpu_window import gpu_exclusive_vision_window, GpuBusyError
     from app.job_queue import queue_manager
-    monkeypatch.setattr('app.utils.comfyui.free_comfyui_vram', lambda *a, **k: True)
+    monkeypatch.setattr('app.utils.comfyui.free_comfyui_vram', _vram_freed)
     with app.app_context():
         with gpu_exclusive_vision_window():
             assert queue_manager._get_system_state('vision_in_progress')  # flag is truthy (token string)
@@ -31,7 +36,7 @@ def test_nested_window_raises_gpu_busy_and_clears_flag_on_exit(app, monkeypatch)
 def test_flag_cleared_when_body_raises(app, monkeypatch):
     from app.gpu_window import gpu_exclusive_vision_window
     from app.job_queue import queue_manager
-    monkeypatch.setattr('app.utils.comfyui.free_comfyui_vram', lambda *a, **k: True)
+    monkeypatch.setattr('app.utils.comfyui.free_comfyui_vram', _vram_freed)
     with app.app_context():
         with pytest.raises(ValueError):
             with gpu_exclusive_vision_window():
@@ -51,25 +56,30 @@ def test_window_blocked_while_training_in_progress(app):
         assert queue_manager._get_system_state('vision_in_progress') is None
 
 
-def test_free_comfyui_vram_called_best_effort_and_exception_swallowed(app, monkeypatch):
-    from app.gpu_window import gpu_exclusive_vision_window
+def test_window_refuses_when_comfyui_vram_release_is_unconfirmed(app, monkeypatch):
+    from app.gpu_window import (GpuBusyError, gpu_exclusive_vision_window,
+                                vision_gpu_window_blocks_gpu)
+    from app.job_queue import queue_manager
     calls = []
 
-    def _raise(*a, **k):
+    def _raise(*_args, **_kwargs):
         calls.append(True)
         raise RuntimeError('comfyui unreachable')
 
     monkeypatch.setattr('app.utils.comfyui.free_comfyui_vram', _raise)
     with app.app_context():
-        with gpu_exclusive_vision_window():
-            pass  # must not raise even though free_comfyui_vram blew up
+        with pytest.raises(GpuBusyError, match='did not confirm'):
+            with gpu_exclusive_vision_window():
+                pass
+        assert queue_manager._get_system_state('vision_in_progress') is None
     assert calls, 'free_comfyui_vram should have been called'
+    assert vision_gpu_window_blocks_gpu() is False
 
 
 def test_window_ownership_prevents_flag_stomp_on_re_acquisition(app, monkeypatch):
     from app.gpu_window import gpu_exclusive_vision_window
     from app.job_queue import queue_manager
-    monkeypatch.setattr('app.utils.comfyui.free_comfyui_vram', lambda *a, **k: True)
+    monkeypatch.setattr('app.utils.comfyui.free_comfyui_vram', _vram_freed)
     with app.app_context():
         with gpu_exclusive_vision_window():
             # Simulate flag expiry + re-acquisition by a different caller
@@ -79,6 +89,19 @@ def test_window_ownership_prevents_flag_stomp_on_re_acquisition(app, monkeypatch
         assert queue_manager._get_system_state('vision_in_progress') == 'someone-else-token'
         # clean up for test isolation
         queue_manager._set_system_state('vision_in_progress', None)
+
+
+def test_teardown_releases_inprocess_fence_when_db_cleanup_raises(app, monkeypatch):
+    import app.gpu_window as gw
+
+    monkeypatch.setattr('app.utils.comfyui.free_comfyui_vram', _vram_freed)
+    with app.app_context():
+        with pytest.raises(RuntimeError, match='db cleanup'):
+            with gw.gpu_exclusive_vision_window():
+                monkeypatch.setattr(
+                    gw, '_in_app_context',
+                    lambda _callback: (_ for _ in ()).throw(RuntimeError('db cleanup')))
+    assert gw.vision_gpu_window_blocks_gpu() is False
 
 
 def _configure_aitoolkit(tmp_path, app):
@@ -133,6 +156,35 @@ def test_direct_training_launch_refused_while_a_vision_pass_holds_the_gpu(
         finally:
             queue_manager._set_system_state('vision_in_progress', None)
             lt.dequeue_training(ds.id)
+
+
+def test_direct_training_refuses_a_live_inprocess_vision_fence_before_spawn(
+        app, tmp_path, monkeypatch):
+    from app import gpu_window
+    from app.config import LOCAL_USER
+    from app.gpu_window import GpuBusyError
+    from app.job_queue import GPU_ARBITER_LOCK, queue_manager
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as lt
+
+    _configure_aitoolkit(tmp_path, app)
+    monkeypatch.setattr(lt, 'assert_interpreter_ready', lambda: None)
+    monkeypatch.setattr(lt, 'assert_trainable', lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(lt.shutil, 'disk_usage',
+                        lambda _path: type('usage', (), {'free': 500e9})())
+    monkeypatch.setattr(lt.subprocess, 'Popen',
+                        lambda *_args, **_kwargs: pytest.fail('training must not spawn'))
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'Live Vision', 'live_vision')
+        queue_manager._set_system_state('vision_in_progress', None)
+        with GPU_ARBITER_LOCK:
+            gpu_window._active_vision_window_tokens.add('live-worker-token')
+        try:
+            with pytest.raises(GpuBusyError, match='vision pass'):
+                lt.launch_training(LOCAL_USER, ds.id, check_captions=False)
+        finally:
+            with GPU_ARBITER_LOCK:
+                gpu_window._active_vision_window_tokens.discard('live-worker-token')
 
 
 def test_training_launch_not_blocked_once_the_vision_pass_released(
@@ -259,7 +311,7 @@ def test_classify_images_sets_framing_from_vision(app, monkeypatch):
 
     monkeypatch.setattr(vision_ollama, 'describe_image_ollama',
                         lambda *a, **k: '{"framing": "body", "angle": "3/4", "expression": "smile"}')
-    monkeypatch.setattr(vision_ollama, 'unload_vision_model', lambda *a, **k: True)
+    monkeypatch.setattr(vision_ollama, 'unload_vision_model', _vram_freed)
     with app.app_context():
         ds = svc.create_dataset(LOCAL_USER, 'I', 'i')
         ids, failed = svc.import_images(LOCAL_USER, ds.id, [_png(), _png((0, 255, 0))], crop=False)

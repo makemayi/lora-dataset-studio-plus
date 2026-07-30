@@ -4,8 +4,8 @@ Reuses the training-export SHAPE (kept images + a same-stem `.txt` caption with
 the trigger word prepended, via `face_dataset_service._export_caption`) but with
 three deliberate differences from the ZIP export:
 
-  * files are kept **as-is** on disk (a `.webp` stays `.webp`) instead of the
-    ZIP's PNG re-encode — smaller repo, and the HF viewer renders webp fine;
+  * each public image is a fresh, metadata-free **PNG staging copy**. This keeps
+    camera EXIF/XMP/GPS out of the Hub while leaving the local master untouched;
   * the **real reference photo** (`_000_ref`) is included ONLY when `include_ref`
     is set (default OFF) — it's the source face of a possibly real person;
   * a **`metadata.jsonl`** (`{"file_name", "text"}` per image) and a
@@ -30,6 +30,8 @@ import re
 import shutil
 import tempfile
 import threading
+
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from .. import config as cfg
 from ..config import LOCAL_USER
@@ -235,8 +237,35 @@ def build_readme(ds, count, license, nfaa) -> str:
     return redact_user_paths('\n'.join(fm + body))
 
 
+def _write_sanitized_publish_png(source_path, destination_path) -> None:
+    """Write a neutral public PNG from a local master without carrying metadata.
+
+    HF publish is an external disclosure boundary. Rebuilding pixels into a fresh
+    image strips EXIF/XMP/GPS/PNG text chunks and bakes camera orientation; merely
+    calling ``save`` on a decoded source can let Pillow retain ``image.info``.
+    The original master is read only and never rewritten.
+    """
+    try:
+        with Image.open(source_path) as source:
+            source.load()
+            oriented = ImageOps.exif_transpose(source)
+            has_alpha = ('A' in oriented.getbands()
+                         or 'transparency' in getattr(oriented, 'info', {}))
+            mode = 'RGBA' if has_alpha else 'RGB'
+            # Image.new has no inherited `.info`, unlike a copy/convert of the
+            # source, so save() has no metadata payload to reproduce.
+            neutral = Image.new(mode, oriented.size)
+            neutral.paste(oriented.convert(mode))
+            neutral.save(destination_path, 'PNG', compress_level=6)
+    except (OSError, ValueError, UnidentifiedImageError) as exc:
+        raise HfPublishError(
+            'invalid_image',
+            'could not prepare a metadata-free image for publishing',
+        ) from exc
+
+
 def build_publish_dir(user_id, dataset_id, dest_dir, include_ref, license, nfaa):
-    """Populate `dest_dir` with the HF-ready dataset (images as-is + same-stem
+    """Populate `dest_dir` with metadata-free PNG copies + same-stem
     `.txt` + metadata.jsonl + README.md) and return {count, entries, readme,
     trigger}. `entries` is the metadata rows (also what tests assert on)."""
     from ..models import FaceDatasetImage
@@ -257,9 +286,8 @@ def build_publish_dir(user_id, dataset_id, dest_dir, include_ref, license, nfaa)
     if include_ref and ds.ref_filename:
         ref_path = fds._ref_path(ds)
         if os.path.exists(ref_path):
-            ext = os.path.splitext(ds.ref_filename)[1].lower() or '.webp'
-            name = f'{stem}_000_ref{ext}'
-            shutil.copyfile(ref_path, os.path.join(dest_dir, name))
+            name = f'{stem}_000_ref.png'
+            _write_sanitized_publish_png(ref_path, os.path.join(dest_dir, name))
             text = redact_user_paths(ds.trigger_word or '')
             _write_text(dest_dir, f'{stem}_000_ref.txt', text)
             entries.append({'file_name': name, 'text': text})
@@ -270,9 +298,8 @@ def build_publish_dir(user_id, dataset_id, dest_dir, include_ref, license, nfaa)
         src = fds._img_path(img)
         if not os.path.exists(src):
             continue
-        ext = os.path.splitext(img.filename)[1].lower() or '.webp'
-        name = f'{stem}_{n:03d}{ext}'
-        shutil.copyfile(src, os.path.join(dest_dir, name))
+        name = f'{stem}_{n:03d}.png'
+        _write_sanitized_publish_png(src, os.path.join(dest_dir, name))
         # redact is a no-op on real captions; belt-and-suspenders so NOTHING in
         # the public repo can carry a stray home path.
         text = redact_user_paths(fds._export_caption(ds, img.caption))

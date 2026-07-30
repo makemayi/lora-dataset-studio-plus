@@ -39,7 +39,7 @@ from .. import config as cfg
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MAX_GB = 5.0
-_ALLOWED_EXT = ('.png', '.jpg', '.jpeg', '.webp')
+_ALLOWED_EXT = ('.png', '.jpg', '.jpeg', '.webp', '.bmp')
 
 _lock = threading.Lock()
 _size_cache = {'bytes': None}

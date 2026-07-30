@@ -247,14 +247,71 @@ def test_an_unparseable_error_body_still_yields_a_status(app, monkeypatch):
 
 # --- reading the answer -----------------------------------------------------
 
-def test_a_200_with_no_image_is_the_only_none(app, monkeypatch):
-    """None means exactly one thing to the caller: the provider answered without
-    an image, i.e. a content-policy refusal. Everything else raises."""
+def test_a_200_with_no_image_and_no_reason_is_the_only_none(app, monkeypatch):
+    """None now means one narrower thing: the provider answered without an image
+    AND without saying why. That is the one case this engine cannot read, and it
+    is reported as unreadable rather than being called a refusal."""
     monkeypatch.setenv('OPENROUTER_API_KEY', KEY)
     from app.services import openrouter
     with patch('app.services.openrouter.requests.post',
                return_value=_resp(200, {'created': 1, 'data': []})):
         assert openrouter.generate_variation(b'r', 'p') is None
+
+
+def test_a_moderation_block_embedded_in_a_200_is_read_out_of_the_body(app, monkeypatch):
+    """OpenRouter puts moderation blocks INSIDE a 200 (error.code 403, reasons in
+    error.metadata). Flattening that to None threw away a stated cause and made
+    the tile read as if the app had come back empty-handed."""
+    monkeypatch.setenv('OPENROUTER_API_KEY', KEY)
+    from app.services import openrouter
+    from app.services.engine_errors import EngineFatal, EngineRefused
+    body = {'created': 1, 'data': [],
+            'error': {'code': 403, 'message': 'Blocked by moderation',
+                      'metadata': {'reasons': ['sexual', 'minors']}}}
+    with patch('app.services.openrouter.requests.post', return_value=_resp(200, body)):
+        with pytest.raises(openrouter.OpenRouterRefused) as e:
+            openrouter.generate_variation(b'r', 'p')
+    msg = str(e.value)
+    assert 'refused this request' in msg
+    assert 'sexual, minors' in msg                      # the provider's own reasons
+    assert isinstance(e.value, EngineRefused)
+    assert not isinstance(e.value, EngineFatal)         # one row, not the run
+    for banned in ('retry', 'try again', 'rephrase'):
+        assert banned not in msg.lower()
+
+
+def test_a_provider_failure_embedded_in_a_200_is_not_called_a_refusal(app, monkeypatch):
+    """The mirror case: an upstream provider that died mid-response also lands in
+    the body. It must keep its own words and never read as content moderation."""
+    monkeypatch.setenv('OPENROUTER_API_KEY', KEY)
+    from app.services import openrouter
+    from app.services.engine_errors import EngineRefused
+    body = {'created': 1, 'data': [],
+            'error': {'code': 502, 'message': 'Provider returned an error'}}
+    with patch('app.services.openrouter.requests.post', return_value=_resp(200, body)):
+        with pytest.raises(openrouter.OpenRouterError) as e:
+            openrouter.generate_variation(b'r', 'p')
+    assert 'Provider returned an error' in str(e.value)
+    assert not isinstance(e.value, EngineRefused)
+    assert 'moderation' not in str(e.value)
+
+
+@pytest.mark.parametrize('body', [
+    {'data': [], 'error': 'not-a-dict'}, {'data': [], 'error': None},
+    {'data': [], 'error': {}}, {'data': [], 'error': {'metadata': 'not-a-dict'}},
+    {'data': [], 'error': {'code': 'nonsense', 'metadata': {'reasons': 'not-a-list'}}},
+])
+def test_an_unreadable_embedded_error_never_crashes_the_row(app, monkeypatch, body):
+    """Runs on whatever OpenRouter sends. A shape we did not anticipate must
+    degrade to a sentence or to None — never to an AttributeError the user reads
+    as an app bug."""
+    monkeypatch.setenv('OPENROUTER_API_KEY', KEY)
+    from app.services import openrouter
+    with patch('app.services.openrouter.requests.post', return_value=_resp(200, body)):
+        try:
+            assert openrouter.generate_variation(b'r', 'p') is None
+        except openrouter.OpenRouterError as e:
+            assert 'without an image' in str(e)
 
 
 def test_a_vector_answer_is_refused_where_it_happens(app, monkeypatch):

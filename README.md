@@ -6,7 +6,7 @@
 
 🖥️ **Train locally** on your own NVIDIA GPU — or ☁️ **train in the cloud** on a rented pod (~$1–2 per run, no GPU required): same one-click flow, every epoch synced back to your machine. You can even bring your own custom base weights to either lane.
 
-📑 **Not sure which settings to use?** Seventeen researched presets ship built-in — a Character and Concept recipe for every family, plus a Style recipe for five of the six — sourced from Ostris' ai-toolkit defaults, vendor guidance and documented community consensus. One click applies the whole recipe.
+📑 **Not sure which settings to use?** Eighteen built-in training starters ship — a Character and Concept recipe for every family, plus a Style recipe for five of the six and a Krea 2 Raw · LoKr likeness community starting point. One click applies the whole recipe.
 
 ### ▶️ Watch the whole thing, start to finish
 
@@ -81,7 +81,7 @@ Point it at a messy dump of thousands of images and triage it in place. Nothing 
 | **▶ Review one by one** | Full-screen, one image at a time, **Keep / Reject / Skip** — for the pile that needs an eye, not a filter |
 | **📦 Move folder…** | Move a bank's images to another disk and keep every analysis: scores, duplicate groups, faces, decisions, captions |
 | **🚀 Launch all** | Runs the whole chain end to end overnight and leaves a morning report |
-| **④ Promote** | Pushes the keepers into a target dataset, resolving duplicate groups as you go |
+| **④ Promote · ↑ Import to bank** | Pushes a bank's keepers into a target dataset, or copies a dataset's keepers into a new bank. Both choices retain Dataset-owned captions, curation, framing, watermark and provenance. By default compatible final-file technical analysis is restored; **Start fresh** skips only reuse of prior analysis. Face/Score AI results are intentionally not reused after normalization. |
 
 *Details: [The Image bank](#the-image-bank--triage-a-giant-folder-in-place)*
 
@@ -173,7 +173,7 @@ Left in, a site logo is something the LoRA learns. Find → Review → Clean, on
 | Sub-feature | What it gets you |
 | :-- | :-- |
 | **Six families** | Z-Image, SDXL, Krea 2, FLUX.1, FLUX.2 Klein and Anima (anime, local-only for now), each with its own safety checks |
-| **Seventeen researched presets** | A Character and Concept recipe per family (plus Style for five of the six), every value sourced with a one-line *why* |
+| **18 built-in training starters** | A Character and Concept recipe per family (plus Style for five of the six), plus a scoped Krea 2 Raw · LoKr likeness community starting point; each says where its choices come from and why |
 | **Adaptive step policies** | Character ≈120 steps/image, Concept `475 × √images`, Style 50 steps/image inside a safe envelope |
 | **Readiness & launch guards** | Image counts, untriaged rows, suspicious captions, duplicates, VRAM, disk and family compatibility, re-checked at launch |
 | **⚙ Advanced controls** | Rank/alpha, resolution, LoRA or LoKr, dropout, timestep weighting, optimizer, scheduler, EMA, save/sample cadence |
@@ -229,6 +229,7 @@ A LoRA that's *trained* isn't necessarily a LoRA that's *good*. Compare them on 
 | **Checkpoint × strength sweep** | 0 → 2.0 by default, an over-cook range up to 4.0, and negative strengths down to −2.0 for slider LoRAs |
 | **Multi-LoRA grids** | Select several LoRAs of the same family and compare them against strength |
 | **🔎 Describe** | Drop any image and the local Ollama vision model turns it into a test prompt — never the identity or trigger |
+| **🎲 Caption** | Choose a dataset once, then use a random nonblank caption from one of its kept images as the test prompt; ▾ changes the source and typed text is confirmed before replacement |
 | **Vote & rank** | Quick votes feed a Wilson ranking; Character results can also be ranked by face similarity |
 | **Export the grid** | One labeled image ready to post — the composer works even with ComfyUI offline |
 | **Flip in place** | Swipe, ‹ › buttons or arrow keys with wrap-around; strength variants sit adjacent |
@@ -281,7 +282,7 @@ This README follows the app itself: the road you actually walk, from an empty da
 | **[3 · Curate down to the keepers](#3-curate-down-to-the-keepers)** | Keep/reject on a real curation grid, with face-similarity scoring, auto-triage and a live composition meter. |
 | **[4 · Caption for the model](#4-caption-for-the-model)** | Prose or booru tags, model-matched and machine-written, with a Vocabulary preset, a Caption Lab and full find/replace. |
 | **[5 · Scrub watermarks](#5-scrub-watermarks)** | Find overlaid logos/URLs, then crop or inpaint them (fast LaMa or Klein quality) behind a review step. |
-| **[6 · Train](#6-train--guided-advanced-when-you-need-it)** | Guided training over six families and seventeen presets, adaptive steps and guards, sliders — [locally or in the cloud](#no-gpu-train-in-the-cloud). |
+| **[6 · Train](#6-train--guided-advanced-when-you-need-it)** | Guided training over six families and eighteen configuration starters, adaptive steps and guards, sliders — [locally or in the cloud](#no-gpu-train-in-the-cloud). |
 | **[7 · Read the family tree](#7-read-the-family-tree)** | Every continuation and fork drawn as a lineage graph you can inspect, diff, annotate and preview. |
 | **[8 · Pick the best checkpoint](#8-pick-the-best-checkpoint)** | Sweep checkpoint × strength in **Test Studio**, vote, rank, and export a shareable grid. |
 | **[9 · Take it with you](#9-take-it-with-you)** | Training ZIPs, portable backups, merges, Hugging Face publishing, one-click ComfyUI import. |
@@ -388,7 +389,7 @@ An empty dataset needs material. There are four ways in, and they mix freely ins
   that is a property of your data worth knowing about; what effect it has on
   trained LoRA weights has not been measured, in either direction, by anyone.
   Neither limit applies to the local engines.
-- **📥 Import** — drag in your own photos. Concept/Style keep the full frame; Character can optionally auto-crop around the head (or use a centered/manual crop when local vision is unavailable).
+- **📥 Import** — drag in your own photos. Uncropped JPEG/JPG, PNG, WebP and BMP files stay byte-for-byte in their original format by default; training creates its disposable PNG working pairs only when a run starts. Every source, including WebP normalization and head-crop, must be at most **16 Mi-pixels** and **8192 px per side**; a larger file is rejected, so convert or resize it before importing. Concept/Style keep the full frame; Character can optionally auto-crop around the head (or use a centered/manual crop when local vision is unavailable), which deliberately creates a derived WebP.
 - **🌐 Scrape** — collect real images from supported web sources (below).
 - **🗃️ Image bank** — when you're not starting from a handful of shots but from a **giant unsorted dump**, triage it first, then promote the keepers.
 
@@ -522,7 +523,7 @@ Inpainting is an **ML extra**: without it, Clean still crops border marks and si
 Click **Train** and [ai-toolkit](https://github.com/ostris/ai-toolkit) runs underneath. The recommended path needs no config file; **⚙ Advanced** exposes the levers for deliberate experiments. The preset picker only shows a recipe when dataset kind, family and variant match.
 
 - **Six training families with distinct recipes** — **Z-Image** (Turbo/Base/De-Turbo), **SDXL**, **Krea 2** (Raw/Turbo), **FLUX.1**, **FLUX.2 Klein** (4B/9B), and **Anima** (a 2B anime-focused model on the Cosmos-Predict2 architecture — **local-only for now**, cloud lane lands once the pod image is verified), each with its own safety checks. Custom compatible weights train locally for any family, and Z-Image, Krea 2 and FLUX.2 Klein can also train on a **custom base in the cloud** via a one-time push to a private Hugging Face repo (SDXL and FLUX.1 stay local-only). Z-Image bases can be **converted** to the layout the trainer expects, straight from ComfyUI.
-- **Seventeen researched built-ins** — a **Built-in (researched)** group ships a Character and a Concept recipe for each of the six families, plus a Style recipe for five of them (Anima has no published style source yet, so none is invented). Every value is sourced (ai-toolkit defaults, vendor guidance or documented community consensus) with a one-line *why*, and the picker only shows a recipe when dataset kind, family and variant match. Save/import/export your own Advanced recipe as JSON too.
+- **Eighteen built-ins** — the **Built-in (researched)** group ships a Character and a Concept recipe for each of the six families, plus a Style recipe for five of them (Anima has no published style source yet, so none is invented). A separate **Built-in (community starting points)** group holds the scoped **Krea 2 Raw · LoKr likeness** starter. It is a [reported Reddit recipe](https://www.reddit.com/r/StableDiffusion/comments/1v2vsqm/almost_perfect_likeness_in_750_steps_krea_2_lokr/), not a guaranteed outcome; the picker keeps it to Character + compatible Krea Raw/Base variants and spells out its settings. Every recipe says whether its choices come from ai-toolkit defaults, vendor guidance or documented community evidence, and the picker only shows it when dataset kind, family and variant match. Save/import/export your own Advanced recipe as JSON too.
 - **Adaptive step policies** — Character ≈ 120 steps/image (1500–3500), Concept `475 × √images` (2000–12000), Style 50 steps/image inside a family/variant-specific safe envelope.
 - **Readiness and launch guards** — minimum image counts, untriaged rows, missing/suspicious captions, near-duplicates, Character composition, VRAM, disk space, base architecture and family/variant compatibility are checked again at launch, queue start, continue and cloud retry. The **pre-training review** — with its editable caption list and its reject-one-of-each duplicate pairs — now opens on **every** lane: a ☁️ cloud launch and **▶ Continue** used to skip it and ship leaking captions and untriaged images straight to a paid GPU. Checks about *your* card (VRAM, PyTorch build) are dropped from a cloud review, because that GPU isn't the one running the job.
 - **It names the Python it is about to run** — a configured interpreter that exists and runs but has no `torch` used to pass every check, then kill every run on `No module named 'torch'` while the panel blamed a missing base model or a Hugging Face token. The app now tries `import torch` on that interpreter *before* launching, refuses with the path on screen, points out a Windows Store `python.exe` when that's what was picked, and offers the working venv sitting next to `run.py`. The **Test** button in Settings → Local tools asks the same question.
@@ -637,6 +638,7 @@ A LoRA that's *trained* isn't necessarily a LoRA that's *good*. Test Studio uses
 
 - **The sweep** — strength runs **0 → 2.0** by default, with a discreet **+** chip that reveals the over-cook range up to **4.0** and a mirrored **−** chip for **negative strengths down to −2.0** — the way you exercise the negative pole of a slider LoRA (yours or any downloaded one). A single-LoRA run inspects its epochs in detail; selecting multiple LoRAs from the **same family** builds a LoRA × strength comparison grid.
 - **🔎 Describe** — need a test prompt? Drop any image and the local Ollama vision model turns it into one — scene, pose, framing and outfit in compact prose, never the person's identity or the trigger word.
+- **🎲 Caption** — choose a source dataset on first use, then each click inserts a random **nonblank caption from one of its kept images** into the test prompt. Studio remembers that source in this browser; use **▾** to change it. It needs at least one kept caption, and asks before replacing prompt text you typed.
 - **Vote & rank** — quick votes feed a **Wilson ranking**, and Character results can also be ranked by **face similarity**. A failed cell shows its reason and is excluded from ranking.
 - **Export the grid** — when a run reads well, export it as a single labeled image (title banner with model/CFG/steps/seed, checkpoint rows, strength columns) ready to post on Civitai or Reddit; the composer works even with **ComfyUI offline**.
 - **Flip in place** — opened results flip without leaving the grid: swipe on touch, **‹ ›** buttons or **arrow keys** on desktop, with an *i / n* counter and wrap-around, and strength variants of the same render sit adjacent so comparing strengths is one keypress.

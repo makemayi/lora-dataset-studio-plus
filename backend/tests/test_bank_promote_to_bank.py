@@ -221,6 +221,19 @@ def test_a_running_job_on_the_source_bank_is_a_409(client, app, source):
     assert r.status_code == 409
 
 
+def test_a_busy_snapshot_that_expires_between_reads_still_refuses_cleanly(
+        app, source, monkeypatch):
+    """A TTL race is a 409, never a ``get(None)['kind']`` server error."""
+    bank_id, _folder, ids = source
+    with app.app_context():
+        from app.services import bank_jobs, image_bank_service as banks
+
+        monkeypatch.setattr(banks.bank_jobs, 'running', lambda _bank_id: True)
+        monkeypatch.setattr(banks.bank_jobs, 'get', lambda _bank_id: None)
+        with pytest.raises(bank_jobs.BankJobBusy, match='background'):
+            banks.start_bank_promote(app, 'local', bank_id, ids[:1], 'Candidates')
+
+
 def test_the_route_returns_202_and_the_new_bank_id(client, app, source):
     bank_id, _folder, ids = source
     r = client.post(f'/api/bank/{bank_id}/promote-to-bank',

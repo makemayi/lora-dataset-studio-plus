@@ -132,24 +132,25 @@ def test_unloading_clears_the_lease(app):
 
 # -- the wiring: the paths that take the GPU actually revoke -----------------
 
-def test_the_comfyui_queue_revokes_before_submitting(app):
-    """The load-bearing hook. Without it, keep-warm would just relocate the cost
-    from a reload we control to an eviction we don't."""
+def test_the_comfyui_queue_proves_ollama_released_before_submitting(app):
+    """The load-bearing handoff runs before the workflow reaches ComfyUI.
+
+    `ensure_released_for_comfy` subsumes an optional warm-lease revoke and the
+    mandatory `/api/ps` ownership check. It must finish before `/prompt`.
+    """
     from app.job_queue import queue_manager
     with app.app_context():
         queue_manager.add_job(workflow_data={'1': {}}, prompt='p')
     order = []
-    with patch('app.services.vision_keepalive.revoke',
-               side_effect=lambda *a, **k: order.append('revoke')), \
+    with patch('app.services.vision_keepalive.ensure_released_for_comfy',
+               side_effect=lambda *a, **k: (order.append('fence'), True)[1]), \
          patch('app.job_queue._submit',
                side_effect=lambda *a, **k: (order.append('submit'), 'pid-1')[1]), \
          patch('app.job_queue._poll_outputs', return_value=('out.png', False)), \
          patch('app.job_queue._dispatch_completion'):
         with app.app_context():
             assert queue_manager.process_one() is True
-    # Revoked BEFORE the workflow reaches ComfyUI, not after — ComfyUI sizes its
-    # own loads against the VRAM it finds free, so the order is the whole point.
-    assert order == ['revoke', 'submit']
+    assert order == ['fence', 'submit']
 
 
 def test_head_crop_asks_the_policy_instead_of_hardcoding_zero(app):

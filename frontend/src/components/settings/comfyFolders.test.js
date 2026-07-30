@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 
 import {
   COMFY_FOLDER_FIELDS, comfyFolderField, folderPlaceholder, folderEffective,
-  folderWarning, detectedSuggestion, foldersQuery, hasAnyOverride,
+  folderEffectiveNote, folderWarning, detectedSuggestion, foldersQuery, hasAnyOverride,
 } from './comfyFolders.js'
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8')
@@ -36,6 +36,20 @@ test('an empty field states the derived path it falls back to', () => {
 
 test('a filled field does not restate a path already in the input', () => {
   assert.equal(folderEffective({ source: 'override', resolved: 'X:\\in', exists: true }), null)
+})
+
+/* GitHub #25 (Geekswordsman): deploys now follow extra_model_paths.yaml, so the
+   panel that promises to show "the folder the app uses" has to show that one — a
+   preview still naming <ComfyUI>/models/loras would rebuild the same divergence. */
+test('a folder coming from extra_model_paths.yaml is shown, and says so', () => {
+  const info = { kind: 'loras', source: 'extra_paths', resolved: 'E:\\shared\\loras', exists: true }
+  assert.equal(folderEffective(info), 'E:\\shared\\loras')
+  assert.equal(folderEffectiveNote(info), 'from extra_model_paths.yaml')
+})
+
+test('a derived folder needs no provenance note', () => {
+  assert.equal(folderEffectiveNote({ source: 'derived', resolved: 'D:\\C\\models\\loras' }), null)
+  assert.equal(folderEffectiveNote(undefined), null)
 })
 
 test('with nothing to derive from, no effective path is claimed', () => {

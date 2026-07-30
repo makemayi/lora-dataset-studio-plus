@@ -25,7 +25,7 @@ import {
   estimateCost, generateBlockedReason, localQueuesBehindApi, localOnly, readEngines,
   readMode, totalImages, writeEngines, writeMode,
 } from './engineSelection.js';
-import { kreaUnavailableReason, groundingDescription, kreaFramingAdvisory } from '../../utils/kreaEngine.js';
+import { kreaUnavailableReason, groundingDescription } from '../../utils/kreaEngine.js';
 import { kleinUnavailableReason } from '../../utils/localEngineReason.js';
 import {
   SUBJECT_TYPES, SUBJECT_TYPE_LABELS, SUBJECT_TYPE_HINTS,
@@ -173,7 +173,7 @@ function EngineCard({ id, checked, available, generating, onToggle, icon, title,
   );
 }
 
-export default function VariationCatalog({ datasetId = null, onGenerate, busy, generating = null, hasRef, composition, images = [], bodyFidelity = false, promptSuffix = '', promptSuffixes = null, onSaveSuffixes = null, subjectType = 'human', onSaveSubjectType = null, refWidth = null, refHeight = null, onCropRefTo = null }) {
+export default function VariationCatalog({ datasetId = null, onGenerate, busy, generating = null, hasRef, composition, images = [], bodyFidelity = false, promptSuffix = '', promptSuffixes = null, onSaveSuffixes = null, subjectType = 'human', onSaveSubjectType = null }) {
   const toast = useToast();
   const { caps } = useCapabilities();
   const [catalog, setCatalog] = useState([]);
@@ -489,7 +489,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
   // Qwen's model, also mirrored from Settings (Qwen Image 2.0 by default).
   const [qwenModel, setQwenModel] = useState('');
   // Krea's consistency <-> prompt-adherence dial, mirrored from Settings.
-  const [kreaGrounding, setKreaGrounding] = useState(1024);
+  const [kreaGrounding, setKreaGrounding] = useState(512);
   useEffect(() => {
     let cancelled = false;
     apiFetch('/api/settings')
@@ -505,7 +505,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
         // Krea's one dial. It lives in Settings (it changes the meaning of every
         // shot in the batch identically, so it is not a per-run argument), and is
         // MIRRORED here so the workspace can say what the run will actually do.
-        setKreaGrounding(Number(d.config?.krea?.grounding_px) || 1024);
+        setKreaGrounding(Number(d.config?.krea?.grounding_px) || 512);
       })
       .catch(() => { /* keep the permissive default on a transient failure */ });
     return () => { cancelled = true; };
@@ -669,20 +669,6 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
       return [preset.id, { counts, total: preset.selectedIds.length }];
     }));
   }, [catalog, nsfwCatalog, customShots, customPresets]);
-
-  // MEASURED: Krea reproduces the REFERENCE's aspect ratio (the edit LoRA was
-  // trained on same-size pairs — krea_edit_helper.fit_output_size), so a square
-  // or landscape reference makes every body/back shot land tighter than asked.
-  // Computed here, from the shots actually ticked, so it appears the moment the
-  // user picks Krea or ticks a wide shot — not after twenty generations. Klein
-  // and the API engines are untouched, so the notice is Krea-only.
-  const kreaAdvisory = useMemo(() => {
-    if (!engines.includes('krea') || !krAvailable) return null;
-    const framingById = new Map([...catalog, ...nsfwCatalog, ...userShots]
-      .map((shot) => [shot.id, shot.framing]));
-    const framings = [...selected].map((id) => framingById.get(id)).filter(Boolean);
-    return kreaFramingAdvisory({ width: refWidth, height: refHeight, framings });
-  }, [engines, krAvailable, catalog, nsfwCatalog, userShots, selected, refWidth, refHeight]);
 
   const toggle = (id) => setSelected((s) => {
     const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n;
@@ -942,7 +928,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
           hint={krAvailable ? (
             <span className="text-content-subtle text-[0.625rem]">
               Identity-preserving edit — strongest likeness from a single reference photo.
-              Keeps the source aspect ratio (shot aspect overrides don&rsquo;t apply).
+              Krea Fit v1.2 honors the selected shot card&rsquo;s framing and aspect ratio.
               {localQueuesBehindApi(engines) && (
                 <> <span className={ENGINE_ACCENTS.krea.text}>
                   Its {engineShare('krea')} shot(s) queue on your GPU, one at a time, after the API ones.
@@ -1030,34 +1016,6 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
             <span className="text-amber-300 text-[0.625rem]">⚠ Add QWEN_API_KEY in Settings</span>
           )} />
       </div>
-
-      {/* Krea + a square/landscape reference = squeezed body & back shots
-          (MEASURED — see utils/kreaEngine.js). Advisory, never a blocker: those
-          shots DO generate, they just land closer in. Shown only when Krea is
-          ticked, the reference is measurable and non-portrait, AND wide shots are
-          actually selected — a face-only run hears nothing. Wraps at 400 px: the
-          count, the sentence, then the action on its own line. */}
-      {kreaAdvisory && (
-        <div role="status"
-          className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 flex flex-col gap-1.5">
-          <span className="text-amber-200 text-xs font-semibold">
-            ⚠ {kreaAdvisory.headline}
-          </span>
-          <span className="text-amber-200/85 text-[0.6875rem] leading-snug">
-            {kreaAdvisory.detail}
-          </span>
-          <div className="flex items-center gap-2 flex-wrap">
-            {onCropRefTo && (
-              <button type="button" onClick={() => onCropRefTo(kreaAdvisory.suggestAspect)}
-                title={`Open the reference crop editor pre-set to ${kreaAdvisory.suggestLabel} — you can still reshape the box`}
-                className="px-2.5 py-1 rounded-lg bg-surface-raised border border-border text-content text-[0.6875rem] font-semibold">
-                ✂ Crop reference to {kreaAdvisory.suggestLabel}
-              </button>
-            )}
-            <HelpBadge topic="krea-reference-shape" />
-          </div>
-        </div>
-      )}
 
       {/* How several engines share the run. Only shown when it can change
           anything (2+ engines): with a single one both modes are identical, and
@@ -1197,15 +1155,17 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
           <div className="px-2.5 pt-1 flex flex-col gap-1.5">
             <p className="text-content-subtle text-[0.625rem]">
               <b className="text-content-muted font-semibold">Reference grounding</b> is the
-              consistency ↔ prompt dial: LOW follows the shot description (more variety in pose,
-              outfit and scene, looser likeness), HIGH resembles the reference more closely — and
-              starts copying the very pose and outfit you asked it to change. 1024 px is the
-              recommended balance for people.
+              consistency ↔ prompt dial: the low end follows the shot description (more variety
+              in pose, outfit and scene, looser likeness), while HIGH resembles the reference
+              more closely — and can copy the very pose and outfit you asked it to change.
+              512 px is the dataset-restaging balance: it keeps the prompt and selected shot
+              card in charge while preserving identity. Raise it deliberately when reference
+              likeness matters more.
             </p>
             <p className="text-content-subtle text-[0.625rem]">
               Identity comes from the reference photo alone — no character LoRA needed. Extra
-              reference images are not used by this engine, and the output keeps the reference&rsquo;s
-              aspect ratio (capped at 2 MP), which is what the model was trained on.
+              reference images are not used by this engine. Krea Fit v1.2 honors each selected
+              card&rsquo;s framing and aspect ratio instead of forcing the source photo&rsquo;s shape.
             </p>
             <p className="text-content-subtle text-[0.625rem]">
               Change it in{' '}

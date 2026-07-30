@@ -37,6 +37,258 @@ def _source(svc, image_cls, user_id, *, filename='source.png', derivation_kind=N
     return ds, image, raw
 
 
+def _improve_candidate(svc, image_cls, dataset_id, parent_image_id, *,
+                       status='pending', filename='improved.png', write_file=True,
+                       job_id=None):
+    candidate = image_cls(
+        dataset_id=dataset_id,
+        source='generated',
+        status=status,
+        filename=filename,
+        job_id=job_id,
+        parent_image_id=parent_image_id,
+        derivation_kind=svc.KLEIN_IMAGE_IMPROVE,
+        variation_label='Klein upscale & improve',
+    )
+    svc.db.session.add(candidate)
+    svc.db.session.flush()
+    if filename and write_file:
+        os.makedirs(svc._dataset_dir(dataset_id), exist_ok=True)
+        with open(os.path.join(svc._dataset_dir(dataset_id), filename), 'wb') as fh:
+            fh.write(_png((200, 180, 160)))
+    svc.db.session.commit()
+    return candidate
+
+
+def test_keeping_an_improvement_unkeeps_its_kept_parent_without_deleting_files(app):
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+
+    with app.app_context():
+        ds, parent, raw = _source(svc, FaceDatasetImage, LOCAL_USER)
+        parent_id = parent.id
+        candidate = _improve_candidate(svc, FaceDatasetImage, ds.id, parent_id)
+        candidate_id = candidate.id
+
+        assert svc.set_image_status(LOCAL_USER, candidate_id, 'keep') is True
+
+        svc.db.session.expire_all()
+        parent = svc.db.session.get(FaceDatasetImage, parent_id)
+        candidate = svc.db.session.get(FaceDatasetImage, candidate_id)
+        assert candidate.status == 'keep'
+        assert parent.status == 'pending'
+        with open(svc._img_path(parent), 'rb') as fh:
+            assert fh.read() == raw
+
+
+def test_keeping_an_inflight_or_missing_improvement_leaves_parent_kept(app):
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+
+    with app.app_context():
+        ds, parent, _raw = _source(svc, FaceDatasetImage, LOCAL_USER)
+        in_flight = _improve_candidate(
+            svc, FaceDatasetImage, ds.id, parent.id, filename=None)
+        missing_file = _improve_candidate(
+            svc, FaceDatasetImage, ds.id, parent.id,
+            filename='result-not-written.png', write_file=False)
+        non_leaf_filename = _improve_candidate(
+            svc, FaceDatasetImage, ds.id, parent.id,
+            # This resolves to the real source file unless the helper rejects
+            # path-like legacy/corrupt names before looking on disk.
+            filename='./source.png', write_file=False)
+
+        assert svc.set_image_status(LOCAL_USER, in_flight.id, 'keep') is True
+        assert svc.set_image_status(LOCAL_USER, missing_file.id, 'keep') is True
+        assert svc.set_image_status(LOCAL_USER, non_leaf_filename.id, 'keep') is True
+
+        svc.db.session.expire_all()
+        assert svc.db.session.get(FaceDatasetImage, in_flight.id).status == 'keep'
+        assert svc.db.session.get(FaceDatasetImage, missing_file.id).status == 'keep'
+        assert svc.db.session.get(FaceDatasetImage, non_leaf_filename.id).status == 'keep'
+        assert svc.db.session.get(FaceDatasetImage, parent.id).status == 'keep'
+
+
+@pytest.mark.parametrize('current_status', ('pending', 'reject'))
+def test_keeping_improvement_uses_current_database_candidate_status(app, current_status):
+    """Completion may hold a stale ORM candidate while the user changes it."""
+    from sqlalchemy import update
+
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+
+    with app.app_context():
+        ds, parent, _raw = _source(svc, FaceDatasetImage, LOCAL_USER)
+        candidate = _improve_candidate(
+            svc, FaceDatasetImage, ds.id, parent.id, status='keep')
+        # Deliberately leave `candidate.status` stale at Keep while changing its
+        # database row, which simulates a user decision racing a completion.
+        svc.db.session.execute(
+            update(FaceDatasetImage)
+            .where(FaceDatasetImage.id == candidate.id)
+            .values(status=current_status)
+            .execution_options(synchronize_session=False))
+
+        assert svc._unkeep_parent_for_kept_improvement(candidate) is False
+        svc.db.session.commit()
+        svc.db.session.expire_all()
+        assert svc.db.session.get(FaceDatasetImage, parent.id).status == 'keep'
+
+
+def test_late_improvement_success_unkeeps_a_parent_only_if_candidate_stays_kept(
+        app, monkeypatch, tmp_path):
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+
+    output_dir = tmp_path / 'comfy-output'
+    output_dir.mkdir()
+    monkeypatch.setattr(svc, '_comfy_output_dir', lambda: str(output_dir))
+    with app.app_context():
+        ds, parent, _raw = _source(svc, FaceDatasetImage, LOCAL_USER)
+        candidate = _improve_candidate(
+            svc, FaceDatasetImage, ds.id, parent.id,
+            filename=None, job_id='late-success')
+
+        assert svc.set_image_status(LOCAL_USER, candidate.id, 'keep') is True
+        assert svc.db.session.get(FaceDatasetImage, parent.id).status == 'keep'
+
+        (output_dir / 'late-success.png').write_bytes(_png((120, 160, 200)))
+        svc.link_completed_dataset_image('late-success', 'late-success.png', failed=False)
+
+        svc.db.session.expire_all()
+        candidate = svc.db.session.get(FaceDatasetImage, candidate.id)
+        assert candidate.status == 'keep'
+        assert candidate.filename == 'late-success.png'
+        assert os.path.isfile(svc._img_path(candidate))
+        assert svc.db.session.get(FaceDatasetImage, parent.id).status == 'pending'
+
+
+def test_late_improvement_success_respects_a_later_return_to_pending(
+        app, monkeypatch, tmp_path):
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+
+    output_dir = tmp_path / 'comfy-output'
+    output_dir.mkdir()
+    monkeypatch.setattr(svc, '_comfy_output_dir', lambda: str(output_dir))
+    with app.app_context():
+        ds, parent, _raw = _source(svc, FaceDatasetImage, LOCAL_USER)
+        candidate = _improve_candidate(
+            svc, FaceDatasetImage, ds.id, parent.id,
+            filename=None, job_id='late-reset')
+
+        assert svc.set_image_status(LOCAL_USER, candidate.id, 'keep') is True
+        assert svc.set_image_status(LOCAL_USER, candidate.id, 'pending') is True
+        (output_dir / 'late-reset.png').write_bytes(_png((120, 160, 200)))
+        svc.link_completed_dataset_image('late-reset', 'late-reset.png', failed=False)
+
+        svc.db.session.expire_all()
+        assert svc.db.session.get(FaceDatasetImage, candidate.id).status == 'pending'
+        assert svc.db.session.get(FaceDatasetImage, parent.id).status == 'keep'
+
+
+def test_late_improvement_failure_leaves_a_kept_parent_as_fallback(app):
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+
+    with app.app_context():
+        ds, parent, _raw = _source(svc, FaceDatasetImage, LOCAL_USER)
+        candidate = _improve_candidate(
+            svc, FaceDatasetImage, ds.id, parent.id,
+            filename=None, job_id='late-failure')
+
+        assert svc.set_image_status(LOCAL_USER, candidate.id, 'keep') is True
+        svc.link_completed_dataset_image('late-failure', 'never-arrived.png', failed=True)
+
+        svc.db.session.expire_all()
+        assert svc.db.session.get(FaceDatasetImage, candidate.id).status == 'failed'
+        assert svc.db.session.get(FaceDatasetImage, parent.id).status == 'keep'
+
+
+@pytest.mark.parametrize('parent_status', ('pending', 'reject', 'failed'))
+def test_keeping_an_improvement_leaves_a_nonkept_parent_alone(app, parent_status):
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+
+    with app.app_context():
+        ds, parent, _raw = _source(svc, FaceDatasetImage, LOCAL_USER)
+        parent.status = parent_status
+        svc.db.session.commit()
+        candidate = _improve_candidate(svc, FaceDatasetImage, ds.id, parent.id)
+
+        assert svc.set_image_status(LOCAL_USER, candidate.id, 'keep') is True
+        svc.db.session.expire_all()
+        assert svc.db.session.get(FaceDatasetImage, parent.id).status == parent_status
+
+
+def test_keeping_an_improvement_ignores_missing_or_cross_dataset_parent(app):
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+
+    with app.app_context():
+        local, _local_parent, _raw = _source(svc, FaceDatasetImage, LOCAL_USER)
+        foreign, foreign_parent, _raw = _source(svc, FaceDatasetImage, LOCAL_USER)
+        cross_dataset = _improve_candidate(
+            svc, FaceDatasetImage, local.id, foreign_parent.id,
+            filename='cross-dataset.png')
+        missing_parent = _improve_candidate(
+            svc, FaceDatasetImage, local.id, foreign_parent.id + 1_000_000,
+            filename='missing-parent.png')
+
+        assert svc.set_image_status(LOCAL_USER, cross_dataset.id, 'keep') is True
+        assert svc.set_image_status(LOCAL_USER, missing_parent.id, 'keep') is True
+        svc.db.session.expire_all()
+        assert svc.db.session.get(FaceDatasetImage, foreign_parent.id).status == 'keep'
+
+
+def test_batch_keep_makes_improvement_win_after_all_selected_rows_are_kept(app):
+    """A restored/legacy lineage may list the child before its parent by id.
+
+    This deliberately creates that order: an inline implementation would see a
+    pending parent while processing the candidate, then put the parent back to
+    keep later in the loop.  The second status phase must leave it pending.
+    """
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'Batch improve', 'batch-improve')
+        candidate = FaceDatasetImage(
+            dataset_id=ds.id, source='generated', status='pending',
+            filename='improved.png',
+            derivation_kind=svc.KLEIN_IMAGE_IMPROVE,
+            variation_label='Klein upscale & improve')
+        svc.db.session.add(candidate)
+        svc.db.session.flush()
+        os.makedirs(svc._dataset_dir(ds.id), exist_ok=True)
+        with open(os.path.join(svc._dataset_dir(ds.id), candidate.filename), 'wb') as fh:
+            fh.write(_png((200, 180, 160)))
+        parent = FaceDatasetImage(
+            dataset_id=ds.id, source='import', status='pending',
+            filename='original.png')
+        svc.db.session.add(parent)
+        svc.db.session.flush()
+        candidate.parent_image_id = parent.id
+        svc.db.session.commit()
+        assert candidate.id < parent.id
+
+        assert svc.batch_image_action(
+            LOCAL_USER, ds.id, [candidate.id, parent.id], 'keep') == 2
+
+        svc.db.session.expire_all()
+        assert svc.db.session.get(FaceDatasetImage, candidate.id).status == 'keep'
+        assert svc.db.session.get(FaceDatasetImage, parent.id).status == 'pending'
+
+
 @pytest.mark.parametrize('configured_prompt', [
     '',
     'Restore natural detail while preserving the person and composition.',

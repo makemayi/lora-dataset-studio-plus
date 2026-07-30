@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import RecentPrompts from './RecentPrompts';
 import DescribeImageModal from './DescribeImageModal';
+import DatasetCaptionControl from './DatasetCaptionControl';
 
 // Champ prompt de test : textarea + bouton « ↺ défaut » + « 🔎 Describe » + prompts récents.
 // Extrait behavior-preserving de LoraTestStudio.jsx (bloc « Prompt de test »).
@@ -16,15 +17,23 @@ export default function PromptField({ value, placeholder, onChange, onReset, isC
       && !window.confirm('Replace the current test prompt with the described one?')) return;
     onChange(text);
   };
+  const applyCaption = (text) => {
+    if (value && value.trim()
+      && !window.confirm('Replace the current test prompt with a random dataset caption?')) return;
+    onChange(text);
+  };
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-content-muted text-[0.625rem] uppercase">Test prompt</span>
-        <button type="button" onClick={() => setDescribeOpen(true)}
-          title="Describe an image into a test prompt (vision model)"
-          className="px-2 py-0.5 rounded border border-border bg-surface text-content-subtle text-[0.625rem] hover:text-content">
-          🔎 Describe
-        </button>
+        <div className="flex max-w-full flex-wrap items-center justify-end gap-1">
+          <DatasetCaptionControl onCaption={applyCaption} />
+          <button type="button" onClick={() => setDescribeOpen(true)}
+            title="Describe an image into a test prompt (vision model)"
+            className="px-2 py-0.5 rounded border border-border bg-surface text-content-subtle text-[0.625rem] hover:text-content">
+            🔎 Describe
+          </button>
+        </div>
       </div>
       <textarea
         value={value}

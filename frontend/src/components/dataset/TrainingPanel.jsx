@@ -208,6 +208,10 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   // Textarea des prompts de preview : état local (édition libre), sauvé au blur —
   // resynchronisé sur la valeur stockée canonique chaque fois que `adv` arrive/change.
   const [samplePromptsText, setSamplePromptsText] = useState('');
+  // Same protection for the Krea Differential Guidance decimal: a controlled
+  // number input cannot be edited naturally if every partial keystroke writes
+  // through to the server ("" / "3." are not valid saved scales).
+  const [differentialGuidanceScaleDraft, setDifferentialGuidanceScaleDraft] = useState('3');
   // Presets de réglages avancés : snapshots nommés, partageables (fichier JSON).
   // Stockés bruts côté serveur ; la validation se fait à l'APPLICATION (clés
   // inconnues ignorées, valeurs invalides signalées) → tolérant aux versions.
@@ -439,7 +443,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   const advTimestepSupported = adv ? adv.timestep_type_supported !== false : trainType !== 'sdxl';
   const advTimestepChoices = adv?.timestep_type_choices ?? ['sigmoid', 'linear', 'weighted', 'shift'];
   const advOptimizer = adv?.optimizer ?? 'adamw8bit';
-  const advOptimizerChoices = adv?.optimizer_choices ?? ['adamw8bit', 'adafactor', 'automagic', 'prodigy'];
+  const advOptimizerChoices = adv?.optimizer_choices ?? ['adamw8bit', 'adafactor', 'automagic', 'automagic2', 'prodigy'];
   const advLrSched = adv?.lr_scheduler ?? 'constant';
   const advLrSchedChoices = adv?.lr_scheduler_choices ?? ['constant', 'linear', 'cosine', 'cosine_with_restarts', 'constant_with_warmup'];
   const advWarmup = adv?.warmup ?? 0;
@@ -452,6 +456,18 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   const advNetworkType = adv?.network_type ?? 'lora';
   const advNetworkChoices = adv?.network_type_choices ?? ['lora', 'lokr'];
   const advNetworkSupported = adv ? adv.network_type_supported !== false : true;
+  // LoKr's decomposition factor is meaningful only once the network is LoKr.
+  // null deliberately means ai-toolkit's automatic factor, not factor zero.
+  const advLokrFactor = adv?.lokr_factor ?? null;
+  const advLokrFactorChoices = adv?.lokr_factor_choices ?? [4, 8, 16, 32];
+  // These four knobs are intentionally exposed only for Krea. They make the
+  // reported Krea Raw LoKr community recipe inspectable, without pretending an
+  // anecdotal setting is a universal control for every model family.
+  const advKreaRecipeSupported = Boolean(adv?.krea_recipe_supported);
+  const advContentOrStyle = adv?.content_or_style ?? null;
+  const advContentOrStyleChoices = adv?.content_or_style_choices ?? ['balanced', 'style', 'content'];
+  const advContentOrStyleDefault = adv?.content_or_style_default ?? adv?.default_content_or_style ?? 'balanced';
+  const advDifferentialGuidance = Boolean(adv?.do_differential_guidance);
   const advEma = adv?.ema ?? 0;
   const advEmaChoices = adv?.ema_choices ?? [0.99, 0.999];
   const advDualCaptions = Boolean(adv?.dual_captions);
@@ -495,10 +511,24 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   useEffect(() => {
     setSamplePromptsText((adv?.sample_prompts ?? []).join('\n'));
   }, [adv?.sample_prompts]);
+  useEffect(() => {
+    setDifferentialGuidanceScaleDraft(String(adv?.differential_guidance_scale ?? 3));
+  }, [adv?.differential_guidance_scale]);
   const saveSamplePrompts = () => {
     const stored = (adv?.sample_prompts ?? []).join('\n');
     if (samplePromptsText === stored) return;      // no-op → skip the round-trip
     saveAdv({ sample_prompts: samplePromptsText }); // server splits on newlines + trims
+  };
+  const saveDifferentialGuidanceScale = () => {
+    const stored = String(adv?.differential_guidance_scale ?? 3);
+    if (differentialGuidanceScaleDraft === stored) return;
+    const value = Number(differentialGuidanceScaleDraft);
+    if (!Number.isFinite(value) || value < 0.1 || value > 10) {
+      setDifferentialGuidanceScaleDraft(stored);
+      toast.warning('Differential guidance scale must be between 0.1 and 10.');
+      return;
+    }
+    saveAdv({ differential_guidance_scale: value });
   };
 
   // --- Slider LoRA mode (Beta) ------------------------------------------------
@@ -555,6 +585,11 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   };
   useEffect(() => { loadPresets(); }, []);
   const visiblePresets = filterTrainingPresets(presets, presetContext);
+  // Built-ins can be evidence-backed general recipes or deliberately narrow,
+  // source-labelled community starters. Keep those labels separate so a reported
+  // result is never silently upgraded to a researched guarantee in the picker.
+  const researchedBuiltins = visiblePresets.filter((p) => p.builtin && !p.community);
+  const communityBuiltins = visiblePresets.filter((p) => p.builtin && p.community);
   const selPreset = visiblePresets.find((p) => String(p.id) === presetSel) || null;
   useEffect(() => {
     setPresetSel((current) => compatibleTrainingPresetSelection(
@@ -1662,7 +1697,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
             réglages eux-mêmes vivent dans « Advanced options ». */}
         <span className="ml-auto text-content-subtle text-[0.625rem]"
           title="The configuration the next run will use — change it in Advanced options below">
-          {sliderOn ? '🎚 slider (Beta) · ' : ''}base “{zimageRecipe?.baseLabel || baseLabel}”{zimageRecipe ? ` · ${zimageRecipe.adapterActive ? 'Turbo adapter v2 ON' : 'no training adapter'}` : ''} · {sliderOn ? 'unmasked (slider)' : maskedRembgMissing ? 'unmasked (rembg missing)' : masked ? 'masked' : 'unmasked'} · {advResLabel} · {stepsOverride.trim() ? `${stepsN} steps` : sliderOn ? `${stepsInfo?.steps ?? 1000} steps (slider policy)` : 'adaptive steps'}{advNetworkType === 'lokr' ? ' · LoKr' : ''}{advEma ? ` · EMA ${advEma}` : ''}
+          {sliderOn ? '🎚 slider (Beta) · ' : ''}base “{zimageRecipe?.baseLabel || baseLabel}”{zimageRecipe ? ` · ${zimageRecipe.adapterActive ? 'Turbo adapter v2 ON' : 'no training adapter'}` : ''} · {sliderOn ? 'unmasked (slider)' : maskedRembgMissing ? 'unmasked (rembg missing)' : masked ? 'masked' : 'unmasked'} · {advResLabel} · {stepsOverride.trim() ? `${stepsN} steps` : sliderOn ? `${stepsInfo?.steps ?? 1000} steps (slider policy)` : 'adaptive steps'}{advNetworkType === 'lokr' ? ` · LoKr${advLokrFactor ? ` factor ${advLokrFactor}` : ''}` : ''}{advEma ? ` · EMA ${advEma}` : ''}
         </span>
       </div>
 
@@ -1842,14 +1877,23 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               aria-label="Training preset"
               className="px-2 py-1 rounded-lg border border-border bg-surface text-content text-[0.75rem] max-w-[220px]">
               <option value="">— pick a preset —</option>
-              {/* Built-ins first, as their own group: the shipped, researched
-                  recipes for this family × kind (read-only, versioned with
-                  the app). User snapshots follow. */}
-              {visiblePresets.some((p) => p.builtin) && (
+              {/* Built-ins are read-only and versioned with the app. Evidence-backed
+                  recipes and source-labelled community starters stay visibly separate;
+                  user snapshots follow. */}
+              {researchedBuiltins.length > 0 && (
                 <optgroup label="Built-in (researched)">
-                  {visiblePresets.filter((p) => p.builtin).map((p) => (
+                  {researchedBuiltins.map((p) => (
                     <option key={p.id} value={p.id} title={p.description || undefined}>
                       ★ {p.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {communityBuiltins.length > 0 && (
+                <optgroup label="Built-in (community starting points)">
+                  {communityBuiltins.map((p) => (
+                    <option key={p.id} value={p.id} title={p.description || undefined}>
+                      ◌ {p.name}
                     </option>
                   ))}
                 </optgroup>
@@ -1898,7 +1942,11 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               }} />
             {selPreset && (
               <span role="status" className="basis-full text-content-subtle text-[0.625rem] leading-relaxed">
-                {selPreset.builtin ? '★ researched recipe' : 'user preset'} · {typeLabel} · {kind}
+                {selPreset.builtin
+                  ? selPreset.community
+                    ? '◌ reported community starting point — not a result guarantee'
+                    : '★ researched recipe'
+                  : 'user preset'} · {typeLabel} · {kind}
                 {Array.isArray(selPreset.variants) && selPreset.variants.length
                   ? ` · recipe ${selPreset.variants.join(' / ')}` : ''}
                 {selPreset.builtin && trainingPresetDatasetKind(selPreset) === 'style'
@@ -2236,13 +2284,80 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                     <span className="text-amber-300 text-[0.625rem]" title={`LoKr isn't supported for ${trainType} — this run would fall back to LoRA.`}>⚠ not supported for {trainType}</span>
                   )}
                 </div>
+                {advNetworkType === 'lokr' && (
+                  <div className="flex items-center gap-2 flex-wrap mt-1">
+                    <span className="text-content text-[0.75rem] w-28 shrink-0 inline-flex items-center gap-1">
+                      LoKr factor<HelpBadge topic="training.lokr_factor" />
+                    </span>
+                    <select value={advLokrFactor == null ? 'auto' : String(advLokrFactor)}
+                      onChange={(e) => saveAdv({ lokr_factor: e.target.value === 'auto' ? 'auto' : Number(e.target.value) })}
+                      aria-label="LoKr decomposition factor"
+                      className="px-2 py-1 rounded-lg border border-border bg-surface text-content text-[0.75rem]">
+                      <option value="auto">Auto (ai-toolkit)</option>
+                      {advLokrFactorChoices.map((factor) => <option key={factor} value={String(factor)}>{factor}</option>)}
+                    </select>
+                  </div>
+                )}
                 <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
-                  <b className="text-content-muted font-medium">Why:</b> LoKr often locks likeness earlier at small
-                  rank — community recipe: LoKr + low rank + EMA. <b className="text-content-muted font-medium">How:</b> LoRA
-                  (default) is the standard adapter; LoKr factorises the update differently and can capture identity in
-                  fewer steps on a tiny set. Pair it with a low rank and EMA below.
+                  <b className="text-content-muted font-medium">Why:</b> LoRA is the standard adapter; LoKr factorises
+                  the update differently. <b className="text-content-muted font-medium">How:</b> keep LoRA unless you are
+                  deliberately comparing it. The Krea Raw community starter below pins LoKr factor 16, but a network type
+                  alone cannot make up for the wrong images, captions or total steps.
                 </span>
               </div>
+              {/* Krea-only fields from the reported Krea Raw LoKr recipe. Kept out of
+                  every other family: this is a transparent, testable starting point,
+                  not an assertion that one anecdote transfers to another architecture. */}
+              {advKreaRecipeSupported && (
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-content text-[0.75rem] w-28 shrink-0 inline-flex items-center gap-1">
+                      Krea community recipe<HelpBadge topic="training.krea_community_recipe" />
+                    </span>
+                    <span className="text-amber-200 text-[0.6875rem] leading-relaxed">
+                      Community starting point, not a likeness promise — compare your own checkpoints.
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-content text-[0.75rem] w-28 shrink-0">Content / style</span>
+                    <select value={advContentOrStyle ?? 'auto'}
+                      onChange={(e) => saveAdv({ content_or_style: e.target.value === 'auto' ? 'auto' : e.target.value })}
+                      aria-label="Krea content or style balance"
+                      className="px-2 py-1 rounded-lg border border-border bg-surface text-content text-[0.75rem]">
+                      <option value="auto">Auto ({advContentOrStyleDefault})</option>
+                      {advContentOrStyleChoices.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <label className="flex items-center gap-2 flex-wrap cursor-pointer">
+                      <span className="text-content text-[0.75rem] w-28 shrink-0 inline-flex items-center gap-1">
+                        Differential guidance<HelpBadge topic="training.krea_community_recipe" />
+                      </span>
+                      <input type="checkbox" checked={advDifferentialGuidance}
+                        onChange={(e) => saveAdv({ do_differential_guidance: e.target.checked })}
+                        aria-label="Enable Krea differential guidance"
+                        className="h-4 w-4 rounded border-border bg-surface accent-indigo-500" />
+                      <span className="text-content-muted text-[0.75rem]">enable</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <span className="text-content-muted text-[0.6875rem]">scale</span>
+                      <input type="number" min="0.1" max="10" step="0.1"
+                        value={differentialGuidanceScaleDraft}
+                        disabled={!advDifferentialGuidance}
+                        onChange={(e) => setDifferentialGuidanceScaleDraft(e.target.value)}
+                        onBlur={saveDifferentialGuidanceScale}
+                        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                        aria-label="Krea differential guidance scale"
+                        className="w-16 px-2 py-1 rounded-lg border border-border bg-surface text-content text-[0.75rem] disabled:cursor-not-allowed disabled:opacity-50" />
+                    </label>
+                  </div>
+                  <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
+                    <b className="text-content-muted font-medium">Reported starter:</b> Balanced plus differential
+                    guidance at scale 3 is what the Krea 2 Raw · LoKr likeness preset applies. Change one variable at a
+                    time and keep the intermediate saves that actually work for your dataset.
+                  </span>
+                </div>
+              )}
               {/* EMA — exponential moving average of the weights */}
               <div className="flex flex-col gap-0.5">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -2258,8 +2373,8 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                 <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
                   <b className="text-content-muted font-medium">Why:</b> exponential moving average of the weights —
                   smoother, often better checkpoints. <b className="text-content-muted font-medium">How:</b> Off by
-                  default; 0.99 averages faster (the recommended pairing with LoKr on small sets), 0.999 is slower and
-                  steadier.
+                  default; 0.99 averages faster, 0.999 is slower and steadier. Test it as a separate variable: it is
+                  not part of the Krea Raw LoKr likeness starter.
                 </span>
               </div>
               {/* Dual captions — train each image with a long AND a short caption */}
@@ -2422,10 +2537,11 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                 <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
                   <b className="text-content-muted font-medium">Why:</b> how the weights are updated — the biggest training
                   lever after the dataset. <b className="text-content-muted font-medium">How:</b> <i>adamw8bit</i> (default)
-                  is fast and VRAM-light; <i>adafactor</i> uses less memory and auto-scales; <i>automagic</i> sets the
-                  learning rate itself (no LR to tune, no extra install); <i>prodigy</i> also auto-tunes the LR and is
-                  popular for tiny sets — but may need <code className="text-content-muted">pip install prodigyopt</code> in
-                  the ai-toolkit venv. Picking an auto-LR optimiser is the &quot;push further without cranking the LR&quot; move.
+                  is fast and VRAM-light; <i>adafactor</i> uses less memory and auto-scales; <i>automagic</i>/<i>automagic2</i>
+                  use ai-toolkit&apos;s adaptive update rule; the Krea community starter still records its reported initial
+                  LR of 1e-4. <i>prodigy</i> also auto-tunes the LR and is popular for tiny sets — but may need
+                  <code className="text-content-muted">pip install prodigyopt</code> in the ai-toolkit venv. Picking an
+                  adaptive optimiser is the &quot;push further without cranking the LR&quot; move.
                 </span>
               </div>
               {/* LR schedule (+ warmup, only for the warmup schedule) */}

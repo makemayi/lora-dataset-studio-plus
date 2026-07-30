@@ -71,6 +71,24 @@ def test_empty_input_is_a_no_op():
     assert list(map_vision([], lambda i: i, workers=4)) == []
 
 
+def test_parallel_worker_inherits_only_the_vision_token(app):
+    """The heartbeat token crosses threads; Flask contexts never do."""
+    from flask import has_app_context, has_request_context
+    from app import gpu_window
+
+    with app.app_context():
+        token = gpu_window._vision_window_context.set(('vision-token', 60))
+        try:
+            out = list(map_vision(
+                [0],
+                lambda _item: (gpu_window.vision_window_is_owned(),
+                               has_app_context(), has_request_context()),
+                workers=2))
+        finally:
+            gpu_window._vision_window_context.reset(token)
+    assert out == [(0, (True, False, False), None)]
+
+
 # --- failure accounting ------------------------------------------------------
 def test_one_failing_call_does_not_sink_the_pass():
     def work(i):

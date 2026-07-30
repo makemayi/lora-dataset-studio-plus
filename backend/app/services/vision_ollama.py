@@ -12,10 +12,12 @@ from __future__ import annotations
 import base64
 import logging
 import os as _os
+import warnings
 
 import requests
 
 from .. import config as cfg
+from . import image_encoding
 
 logger = logging.getLogger(__name__)
 
@@ -76,39 +78,43 @@ def _ollama_reject_message(exc: Exception) -> str:
 # GGUF vision models most users pull, e.g. huihui_ai/qwen3-vl-abliterated) loads images
 # with stb_image, which handles JPEG/PNG/BMP/GIF/TGA but NOT WebP; Ollama's native Go
 # engine only decodes the formats registered in image.Decode (gif/jpeg/png) unless the
-# build blank-imports x/image/webp. Our datasets are stored as WebP (normalize_to_webp)
-# and the Studio "Describe" pass also re-encodes to WebP, so on those builds the request
+# build blank-imports x/image/webp. Dataset masters may now stay JPEG/PNG/WebP/BMP and
+# the Studio "Describe" pass can still produce WebP, so on those builds a WebP request
 # fails with HTTP 400 "Failed to load image or audio file" (the exact llama.cpp reject) —
-# issue #6, theotherbox122 on Ollama 0.32.0. Re-encoding anything that isn't already
-# JPEG/PNG to JPEG at this single seam makes captioning work regardless of the Ollama /
-# runner version, and passes JPEG/PNG through untouched so a batch of hundreds of images
-# never pays for a needless re-encode.
-_JPEG_MAGIC = b'\xff\xd8\xff'
-_PNG_MAGIC = b'\x89PNG\r\n\x1a\n'
-# Ollama vision encoders downscale to a small grid anyway; bound the JPEG we send so a
-# huge source image (a raw import, not the ~1024px normalized dataset webp) doesn't bloat
-# the base64 payload. Only applied when we already have the pixels open to re-encode.
+# issue #6, theotherbox122 on Ollama 0.32.0. Every decodable image is re-encoded at this
+# single seam: it guarantees a JPEG all Ollama runners can read, bounds payload size, bakes
+# EXIF orientation, and prevents camera EXIF/XMP/GPS from leaving the machine for the
+# configured Ollama endpoint. The dataset master is only read, never rewritten.
 _OLLAMA_MAX_SIDE = 1536
 
 
-def _ensure_ollama_decodable(image_bytes: bytes) -> bytes:
+def _ensure_ollama_decodable(image_bytes: bytes) -> bytes | None:
     """Return image bytes Ollama's server-side decoder can definitely read.
 
-    JPEG and PNG pass through byte-for-byte (both stb_image and Go's image.Decode read
-    them, and skipping the re-encode keeps batch captioning cheap). Everything else —
-    WebP above all — is re-encoded to JPEG (alpha flattened onto white, longest side
-    bounded, quality 90). Best-effort: an undecodable blob is returned unchanged so the
-    caller still surfaces Ollama's own error rather than crashing the never-raise
-    contract."""
-    head = image_bytes[:8] if image_bytes else b''
-    if head.startswith(_JPEG_MAGIC) or head.startswith(_PNG_MAGIC):
-        return image_bytes
+    Every decodable format becomes a fresh, metadata-free JPEG (alpha flattened
+    onto white, EXIF orientation baked, longest side bounded, quality 90). That
+    makes remote captioning an explicit pixel-only disclosure even for source
+    JPEG/PNG files. Fail closed: an undecodable or unsafe source returns ``None``
+    so raw camera bytes can never be sent to the configured (possibly remote)
+    Ollama endpoint."""
     try:
         import io
 
-        from PIL import Image
-        im = Image.open(io.BytesIO(image_bytes))
-        im.load()
+        from PIL import Image, ImageOps
+        with warnings.catch_warnings():
+            warnings.simplefilter('error', Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(image_bytes)) as source:
+                width, height = source.size
+                if (not isinstance(width, int) or not isinstance(height, int)
+                        or width <= 0 or height <= 0
+                        or width > image_encoding.INPUT_MAX_SIDE
+                        or height > image_encoding.INPUT_MAX_SIDE
+                        or width * height > image_encoding.INPUT_MAX_PIXELS):
+                    raise ValueError(
+                        f'image exceeds {image_encoding.INPUT_MAX_SIDE} px per side or '
+                        f'{image_encoding.INPUT_MAX_PIXELS} pixels')
+                source.load()
+                im = ImageOps.exif_transpose(source)
         if im.mode in ('RGBA', 'LA', 'PA') or (im.mode == 'P' and 'transparency' in im.info):
             im = im.convert('RGBA')
             bg = Image.new('RGB', im.size, (255, 255, 255))
@@ -116,15 +122,19 @@ def _ensure_ollama_decodable(image_bytes: bytes) -> bytes:
             im = bg
         elif im.mode != 'RGB':
             im = im.convert('RGB')
+        # A fresh image has no inherited `info`; Pillow otherwise may carry
+        # source metadata in surprising format-specific save paths.
+        clean = Image.new('RGB', im.size)
+        clean.paste(im)
+        im = clean
         if max(im.size) > _OLLAMA_MAX_SIDE:
             im.thumbnail((_OLLAMA_MAX_SIDE, _OLLAMA_MAX_SIDE), Image.LANCZOS)
         out = io.BytesIO()
         im.save(out, 'JPEG', quality=90)
         return out.getvalue()
-    except Exception as e:  # noqa: BLE001 - not-an-image / truncated: fall through to Ollama's error
-        logger.warning('vision_ollama: could not re-encode image to JPEG (%s); '
-                       'sending original bytes', e)
-        return image_bytes
+    except Exception as e:  # noqa: BLE001 - never disclose raw bytes after a decode failure
+        logger.warning('vision_ollama: refusing unsafe/unreadable image before Ollama (%s)', e)
+        return None
 
 
 def get_vision_model() -> str:
@@ -141,6 +151,26 @@ def get_vision_model() -> str:
     if env:
         return env
     return cfg.get('ollama.vision_model') or 'huihui_ai/qwen3-vl-abliterated:8b-instruct'
+
+
+class LocalOllamaFenceError(RuntimeError):
+    """A local inference lost its verified Vision GPU ownership."""
+
+
+def _admit_local_ollama(url, model) -> None:
+    """Record a local request and renew its outer Vision ownership when present."""
+    from . import ollama_gpu_fence
+    scope = ollama_gpu_fence.mark_before_generate(url, model)
+    if scope == 'blocked':
+        raise LocalOllamaFenceError(
+            'A local Ollama model is already in use outside LDS. LDS will not change it; '
+            'unload it first or configure a dedicated Ollama endpoint for LDS.')
+    if scope != 'local':
+        return
+    from ..gpu_window import renew_gpu_exclusive_vision_window, vision_window_is_owned
+    if vision_window_is_owned() and not renew_gpu_exclusive_vision_window():
+        raise LocalOllamaFenceError(
+            'The Vision GPU window expired before Ollama could start safely.')
 
 
 def describe_image_ollama(image_bytes: bytes, prompt: str, *,
@@ -178,14 +208,22 @@ def describe_image_ollama(image_bytes: bytes, prompt: str, *,
     passer une durée (ex. '5m') pour garder le modèle chaud entre les images, PUIS
     appeler unload_vision_model() en fin de batch pour rendre la VRAM à ComfyUI.
     """
+    prepared = _ensure_ollama_decodable(image_bytes)
+    if prepared is None:
+        # This deliberately happens before base64 / requests.post. A malformed
+        # Bank master must behave like an unavailable vision result, not become a
+        # raw-byte egress to a remote endpoint or provoke an auto-start retry.
+        logger.warning('vision_ollama: describe skipped: image is unsafe or unreadable')
+        return ''
     try:
         url = (ollama_url or _ollama_url()).rstrip('/')
-        # Normalize to a format Ollama's decoder can read (WebP -> JPEG); JPEG/PNG are
-        # passed through untouched. Without this, WebP dataset bytes hit HTTP 400
-        # "Failed to load image or audio file" on llama.cpp-backed runners (issue #6).
-        b64 = base64.b64encode(_ensure_ollama_decodable(image_bytes)).decode('ascii')
+        model_name = model or get_vision_model()
+        # Every valid source was converted above to a bounded, metadata-free JPEG.
+        # Without this, WebP dataset bytes hit HTTP 400 "Failed to load image or
+        # audio file" on llama.cpp-backed runners (issue #6).
+        b64 = base64.b64encode(prepared).decode('ascii')
         payload = {
-            'model': model or get_vision_model(),
+            'model': model_name,
             'prompt': prompt,
             'images': [b64],
             'stream': False,
@@ -198,6 +236,7 @@ def describe_image_ollama(image_bytes: bytes, prompt: str, *,
         # stops the abliterated model from rambling prose instead of the object.
         if fmt:
             payload['format'] = fmt
+        _admit_local_ollama(url, model_name)
         resp = requests.post(f'{url}/api/generate', json=payload, timeout=timeout)
         resp.raise_for_status()
         data = resp.json()
@@ -231,6 +270,8 @@ def describe_image_ollama(image_bytes: bytes, prompt: str, *,
                 return '\n\n'.join(parts[-3:])
             return parts[-1]
         return ''
+    except LocalOllamaFenceError:
+        raise
     except Exception as e:
         # If Ollama answered with a 4xx/5xx it told us WHY in the body — carry that
         # exact reason into both the log and the user-facing error. '' when the
@@ -281,8 +322,9 @@ def generate_text_ollama(prompt: str, *,
     extraction as describe_image_ollama so the -instruct answer is read correctly."""
     try:
         url = (ollama_url or _ollama_url()).rstrip('/')
+        model_name = model or get_vision_model()
         payload = {
-            'model': model or get_vision_model(),
+            'model': model_name,
             'prompt': prompt,
             'stream': False,
             'options': {'temperature': 0.3, 'num_ctx': int(num_ctx),
@@ -290,6 +332,7 @@ def generate_text_ollama(prompt: str, *,
                         'repeat_penalty': float(repeat_penalty)},
             'keep_alive': keep_alive,
         }
+        _admit_local_ollama(url, model_name)
         resp = requests.post(f'{url}/api/generate', json=payload, timeout=timeout)
         resp.raise_for_status()
         data = resp.json()
@@ -307,30 +350,47 @@ def generate_text_ollama(prompt: str, *,
 
 
 def unload_vision_model(*, ollama_url: str | None = None, model: str | None = None) -> bool:
-    """Décharge le modèle vision d'Ollama (libère la VRAM). À appeler à la FIN d'un
-    batch caption/classify (où les appels ont gardé le modèle chaud via keep_alive)
-    AVANT que ComfyUI reprenne le GPU, sinon le modèle resterait chargé et ComfyUI
-    pourrait manquer de VRAM. Retente une fois car un unload raté = ~5 min résident
-    (keep_alive). Retourne True si l'appel a réussi."""
+    """Release all LDS-owned local Vision models and verify their absence.
+
+    For a configured remote Ollama endpoint, no local GPU is involved, so this
+    keeps the old targeted best-effort semantics but still requires a strict
+    successful HTTP acknowledgement. Local ownership is delegated to the fence:
+    a bare call releases every tracked custom model, not just today's default.
+    """
     try:
-        url = (ollama_url or _ollama_url()).rstrip('/')
-        payload = {'model': model or get_vision_model(), 'keep_alive': 0}
-    except Exception as e:
-        logger.warning('vision_ollama: unload url/model resolution échouée : %s', e)
+        url = ollama_url or _ollama_url()
+        if not isinstance(url, str) or not url.strip():
+            raise ValueError('invalid Ollama URL')
+        url = url.rstrip('/')
+    except Exception as exc:
+        logger.warning('vision_ollama: unload url/model resolution failed: %s', exc)
         return False
-    # Whatever the outcome, this process is no longer *asking* for the model to
-    # stay resident: drop any keep-warm lease so a later revoke() doesn't fire a
-    # second, pointless unload. Batch passes end with this call, which is exactly
-    # where their (unleased) warm period ends too.
-    try:
-        from .vision_keepalive import forget_lease
-        forget_lease()
-    except Exception:
-        pass
+
+    from . import ollama_gpu_fence
+    # With no explicit endpoint a batch's finally must release every local LDS
+    # model it used, including a custom model that differs from current Settings.
+    released = ollama_gpu_fence.release_owned_models(
+        ollama_url=url if ollama_url is not None else None,
+        model=model)
+    if released is not None:
+        if released:
+            from .vision_keepalive import forget_lease
+            forget_lease()
+        return released
+
+    # Remote Ollama: it cannot contend with this machine's ComfyUI GPU. Keep the
+    # request narrowly targeted and never use the local residency registry.
+    payload = {'model': model or get_vision_model(), 'keep_alive': 0}
     for attempt in (1, 2):
         try:
-            requests.post(f'{url}/api/generate', json=payload, timeout=(10, 30))
-            return True
-        except Exception as e:
-            logger.warning('vision_ollama: unload attempt %d échoué : %s', attempt, e)
+            response = requests.post(f'{url}/api/generate', json=payload, timeout=(10, 30))
+            status = getattr(response, 'status_code', None)
+            if type(status) is int and 200 <= status < 300:
+                from .vision_keepalive import forget_lease
+                forget_lease()
+                return True
+            logger.warning('vision_ollama: remote unload attempt %d returned invalid/non-2xx status %r',
+                           attempt, status)
+        except Exception as exc:
+            logger.warning('vision_ollama: remote unload attempt %d failed: %s', attempt, exc)
     return False

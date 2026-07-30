@@ -10,13 +10,14 @@ from app.utils.comfyui import (
 )
 
 
-def _response(payload=None):
+def _response(payload=None, *, status_code=200):
     response = MagicMock()
+    response.status_code = status_code
     response.json.return_value = payload
     return response
 
 
-def test_cancel_comfyui_prompt_interrupts_only_matching_running_prompt(app):
+def test_cancel_comfyui_prompt_never_interrupts_matching_running_prompt(app):
     from app.utils.comfyui import cancel_comfyui_prompt
     queue = {
         'queue_running': [
@@ -27,10 +28,9 @@ def test_cancel_comfyui_prompt_interrupts_only_matching_running_prompt(app):
     }
     with app.app_context(), \
          patch('app.utils.comfyui.requests.get', return_value=_response(queue)), \
-         patch('app.utils.comfyui.requests.post', return_value=_response({})) as post:
-        assert cancel_comfyui_prompt('target-prompt', 'target-job') is True
-    post.assert_called_once()
-    assert post.call_args.args[0].endswith('/interrupt')
+         patch('app.utils.comfyui.requests.post') as post:
+        assert cancel_comfyui_prompt('target-prompt', 'target-job') is False
+    post.assert_not_called()
 
 
 def test_cancel_comfyui_prompt_never_interrupts_unrelated_running_prompt(app):
@@ -58,6 +58,73 @@ def test_cancel_comfyui_prompt_deletes_matching_pending_prompt(app):
         assert cancel_comfyui_prompt('target-prompt', 'target-job') is True
     assert post.call_args.args[0].endswith('/queue')
     assert post.call_args.kwargs['json'] == {'delete': ['target-prompt']}
+
+
+def test_history_probe_requires_the_exact_prompt_key(app):
+    from app.utils.comfyui import ComfyHistoryHealth, get_comfyui_history_probe
+
+    # A direct-looking entry cannot prove it belongs to this exact prompt. It
+    # must pause the scheduler rather than completing unrelated remote GPU work.
+    with app.app_context(), patch(
+            'app.utils.comfyui.requests.get',
+            return_value=_response({'outputs': {}, 'status': {}})):
+        probe = get_comfyui_history_probe('expected-prompt')
+    assert probe.health is ComfyHistoryHealth.UNHEALTHY
+    assert probe.detail == 'history does not contain requested prompt'
+
+
+
+def test_comfyui_gpu_decisions_refuse_redirects(app):
+    """A proxy redirect is not proof of a prompt, history, queue, or VRAM state."""
+    import importlib
+    import app.utils.comfyui as comfyui
+
+    # The suite safety fixture replaces /free. Reload just this module so this
+    # contract exercises the real request call without touching a live server.
+    comfyui = importlib.reload(comfyui)
+
+    with app.app_context(), patch(
+            'app.utils.comfyui.requests.post',
+            return_value=_response({'prompt_id': 'prompt-1'})) as post:
+        queued, error = comfyui.queue_prompt_to_comfyui(
+            {'1': {}}, 'client-1', worker_url='http://comfy.local')
+    assert error is None and queued['prompt_id'] == 'prompt-1'
+    assert post.call_args.kwargs['allow_redirects'] is False
+
+    with app.app_context(), patch(
+            'app.utils.comfyui.requests.post',
+            return_value=_response({'prompt_id': 'forged'}, status_code=302)) as post:
+        queued, error = comfyui.queue_prompt_to_comfyui(
+            {'1': {}}, 'client-1', worker_url='http://comfy.local')
+    assert queued is None
+    assert error.startswith('ComfyUI /prompt returned unsafe HTTP status')
+    assert post.call_args.kwargs['allow_redirects'] is False
+
+    with app.app_context(), patch(
+            'app.utils.comfyui.requests.get',
+            return_value=_response({'prompt-1': {'outputs': {}}})) as get:
+        probe = comfyui.get_comfyui_history_probe(
+            'prompt-1', worker_url='http://comfy.local')
+    assert probe.health is comfyui.ComfyHistoryHealth.READY
+    assert get.call_args.kwargs['allow_redirects'] is False
+
+    queue = {
+        'queue_running': [],
+        'queue_pending': [[1, 'prompt-1', {}, {'client_id': 'client-1'}, []]],
+    }
+    with app.app_context(),          patch('app.utils.comfyui.requests.get',
+               return_value=_response(queue)) as get,          patch('app.utils.comfyui.requests.post',
+               return_value=_response({})) as post:
+        assert comfyui.cancel_comfyui_prompt(
+            'prompt-1', 'client-1', worker_url='http://comfy.local') is True
+    assert get.call_args.kwargs['allow_redirects'] is False
+    assert post.call_args.kwargs['allow_redirects'] is False
+
+    with app.app_context(), patch(
+            'app.utils.comfyui.requests.post', return_value=_response({})) as post:
+        assert comfyui.free_comfyui_vram(
+            worker_url='http://comfy.local').value == 'freed'
+    assert post.call_args.kwargs['allow_redirects'] is False
 
 
 def test_label_and_group_share_parse():

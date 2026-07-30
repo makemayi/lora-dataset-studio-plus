@@ -388,6 +388,59 @@ def test_clean_crops_border_and_preserves_original(app, monkeypatch):
         assert svc.db.session.get(FaceDatasetImage, img.id).watermark_state == 'cleaned'
 
 
+@pytest.mark.parametrize(
+    ('method', 'bbox'),
+    [
+        ('auto', [0.0, 0.0, 1.0, 0.05]),       # destructive border crop
+        ('auto', [0.35, 0.35, 0.45, 0.45]),     # LaMa staging/promote path
+        ('klein', [0.35, 0.35, 0.45, 0.45]),    # Klein staging/promote path
+    ],
+    ids=('crop', 'lama', 'klein'),
+)
+def test_clean_refuses_every_destructive_route_when_original_backup_fails(
+        app, monkeypatch, method, bbox):
+    """A failed `.orig` copy must fail closed before any master edit is attempted."""
+    from app.services import face_dataset_service as svc
+    from app.services import watermark_klein, watermark_lama
+    from app.config import LOCAL_USER
+
+    calls = []
+    monkeypatch.setattr(watermark_lama, 'is_available', lambda: True)
+    monkeypatch.setattr(watermark_klein, 'is_available', lambda: True)
+    monkeypatch.setattr(
+        watermark_lama, 'inpaint_watermark',
+        lambda *args, **kwargs: calls.append(('lama', args)) or (True, None),
+    )
+    monkeypatch.setattr(
+        watermark_klein, 'inpaint_watermark_klein',
+        lambda *args, **kwargs: calls.append(('klein', args)) or (True, None),
+    )
+    monkeypatch.setattr(
+        svc.shutil, 'copy2',
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError('disk full')),
+    )
+
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, f'backup failure {method}', 'backup_failure')
+        img = _kept_image(svc, ds.id, 'wm.webp', size=(1024, 1024), bbox=bbox)
+        path = svc._img_path(img)
+        before = open(path, 'rb').read()
+
+        counts, err = svc.clean_watermarks(LOCAL_USER, ds.id, method=method)
+
+        assert counts['failed'] == 1
+        assert counts['cropped'] == counts['inpainted'] == counts['inpainted_klein'] == 0
+        assert err == {
+            'kind': 'failed',
+            'detail': 'could not preserve original; master was left unchanged',
+        }
+        assert calls == []
+        assert open(path, 'rb').read() == before
+        stem, ext = os.path.splitext(path)
+        assert not os.path.exists(f'{stem}.orig{ext}')
+        assert svc.db.session.get(type(img), img.id).watermark_state == 'failed'
+
+
 def test_clean_inpaints_small_offcenter(app, monkeypatch):
     from app.services import face_dataset_service as svc
     from app.services import watermark_lama
@@ -526,7 +579,10 @@ def test_clean_manual_regions_force_one_composite_inpaint_at_edge_and_clear_on_s
             'cropped': 0, 'inpainted': 1, 'inpainted_klein': 0, 'needs_review': 0,
             'failed': 0, 'skipped': 0,
         }
-        assert calls == [(path, regions)]
+        assert len(calls) == 1
+        staged_path, staged_regions = calls[0]
+        assert staged_path != path and staged_regions == regions
+        assert not os.path.exists(staged_path)            # disposable engine copy cleaned up
         stem, ext = os.path.splitext(path)
         assert open(f'{stem}.orig{ext}', 'rb').read() == before
         row = svc.db.session.get(FaceDatasetImage, img.id)
@@ -637,6 +693,108 @@ def test_clean_manual_regions_failure_preserves_retry_metadata(app, monkeypatch)
         row = svc.db.session.get(FaceDatasetImage, img.id)
         assert row.watermark_state == 'detected'
         assert json.loads(row.watermark_regions) == regions
+
+
+def test_manual_watermark_failure_keeps_exif_master_and_uses_upright_staging_copy(
+        app, monkeypatch):
+    """LaMa must never get the live EXIF-tagged master to edit in place.
+
+    Manual browser regions are visual coordinates. The external worker receives a
+    disposable upright copy; a reported failure removes that copy and leaves the
+    exact original JPEG bytes (including its camera orientation) untouched.
+    """
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+    from app.services import watermark_lama
+
+    failure = {'kind': 'failed', 'detail': 'external engine failed'}
+    seen = {}
+    monkeypatch.setattr(watermark_lama, 'is_available', lambda: True)
+
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'EXIF manual', 'exif_manual')
+        filename = 'manual-camera.jpg'
+        path = os.path.join(svc._dataset_dir(ds.id), filename)
+        source = Image.new('RGB', (800, 1000), (30, 110, 220))
+        exif = source.getexif()
+        exif[274] = 6
+        exif[271] = 'Private Camera'
+        source.save(path, 'JPEG', quality=95, subsampling=0, exif=exif)
+        before = open(path, 'rb').read()
+        regions = [[0.1, 0.1, 0.2, 0.2]]
+        img = FaceDatasetImage(
+            dataset_id=ds.id, source='import', status='keep', filename=filename,
+            framing='body', watermark_state='detected',
+            watermark_bbox=json.dumps([0.1, 0.1, 0.2, 0.2]),
+            watermark_regions=json.dumps(regions),
+        )
+        svc.db.session.add(img)
+        svc.db.session.commit()
+
+        def _failing_inpaint(staged_path, bboxes, **_kwargs):
+            seen['path'] = staged_path
+            assert staged_path != path
+            assert os.path.exists(staged_path)
+            assert open(path, 'rb').read() == before
+            assert bboxes == regions
+            with Image.open(staged_path) as staged:
+                staged.load()
+                assert staged.size == (1000, 800)
+                assert not staged.getexif()
+            return False, failure
+
+        monkeypatch.setattr(watermark_lama, 'inpaint_watermarks', _failing_inpaint)
+        counts, err = svc.clean_watermarks(LOCAL_USER, ds.id, image_ids=[img.id])
+
+        assert counts['failed'] == 1 and counts['inpainted'] == 0
+        assert err == failure
+        assert open(path, 'rb').read() == before
+        assert not os.path.exists(seen['path'])
+        stem, ext = os.path.splitext(path)
+        assert open(f'{stem}.orig{ext}', 'rb').read() == before
+        row = svc.db.session.get(FaceDatasetImage, img.id)
+        assert row.watermark_state == 'detected'
+        assert json.loads(row.watermark_regions) == regions
+
+
+def test_auto_watermark_crop_uses_exif_oriented_visual_dimensions(app, monkeypatch):
+    """A VLM top-border box is routed/cropped against the browser's upright view."""
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+    from app.services import watermark_lama
+
+    monkeypatch.setattr(watermark_lama, 'is_available', lambda: True)
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'EXIF auto', 'exif_auto')
+        filename = 'auto-camera.jpg'
+        path = os.path.join(svc._dataset_dir(ds.id), filename)
+        source = Image.new('RGB', (800, 1000), (200, 70, 20))
+        exif = source.getexif()
+        exif[274] = 6
+        source.save(path, 'JPEG', quality=95, subsampling=0, exif=exif)
+        before = open(path, 'rb').read()
+        img = FaceDatasetImage(
+            dataset_id=ds.id, source='import', status='keep', filename=filename,
+            framing='body', watermark_state='detected',
+            # 2% of the visual 800px height leaves 784px: still above the
+            # crop guard, whereas raw dimensions would yield the wrong geometry.
+            watermark_bbox=json.dumps([0.0, 0.0, 1.0, 0.02]),
+        )
+        svc.db.session.add(img)
+        svc.db.session.commit()
+
+        counts, err = svc.clean_watermarks(LOCAL_USER, ds.id, image_ids=[img.id])
+
+        assert err is None and counts['cropped'] == 1
+        stem, ext = os.path.splitext(path)
+        assert open(f'{stem}.orig{ext}', 'rb').read() == before
+        with Image.open(path) as cleaned:
+            cleaned.load()
+            assert cleaned.size == (1000, 784)
+            assert not cleaned.getexif()
+        assert svc.db.session.get(FaceDatasetImage, img.id).watermark_state == 'cleaned'
 
 
 # --- routes -----------------------------------------------------------------
@@ -1555,7 +1713,8 @@ def test_clean_klein_inpaints_the_lama_route_and_preserves_original(app, monkeyp
         path = svc._img_path(img)
         counts, err = svc.clean_watermarks(LOCAL_USER, ds.id, method='klein')
         assert err is None and counts['inpainted_klein'] == 1 and counts['inpainted'] == 0
-        assert calls == [{'path': path, 'boxes': [[0.35, 0.35, 0.45, 0.45]]}]
+        assert len(calls) == 1 and calls[0]['boxes'] == [[0.35, 0.35, 0.45, 0.45]]
+        assert calls[0]['path'] != path and not os.path.exists(calls[0]['path'])
         stem, ext = os.path.splitext(path)
         assert os.path.exists(f'{stem}.orig{ext}')          # original preserved
         assert svc.db.session.get(FaceDatasetImage, img.id).watermark_state == 'cleaned'
@@ -1573,7 +1732,8 @@ def test_clean_klein_makes_the_review_route_actionable(app, monkeypatch):
         img = _kept_image(svc, ds.id, 'wm.webp', bbox=[0.45, 0.45, 0.55, 0.55])
         counts, err = svc.clean_watermarks(LOCAL_USER, ds.id, method='klein')
         assert err is None and counts['inpainted_klein'] == 1 and counts['needs_review'] == 0
-        assert calls == [{'path': svc._img_path(img), 'boxes': [[0.45, 0.45, 0.55, 0.55]]}]
+        assert len(calls) == 1 and calls[0]['boxes'] == [[0.45, 0.45, 0.55, 0.55]]
+        assert calls[0]['path'] != svc._img_path(img) and not os.path.exists(calls[0]['path'])
         assert svc.db.session.get(FaceDatasetImage, img.id).watermark_state == 'cleaned'
 
 
@@ -1589,7 +1749,8 @@ def test_clean_klein_uses_manual_regions_and_clears_them(app, monkeypatch):
         img = _kept_image(svc, ds.id, 'wm.webp', bbox=[0.0, 0.0, 1.0, 0.05], regions=regions)
         counts, err = svc.clean_watermarks(LOCAL_USER, ds.id, image_ids=[img.id], method='klein')
         assert err is None and counts['inpainted_klein'] == 1
-        assert calls == [{'path': svc._img_path(img), 'boxes': regions}]
+        assert len(calls) == 1 and calls[0]['boxes'] == regions
+        assert calls[0]['path'] != svc._img_path(img) and not os.path.exists(calls[0]['path'])
         row = svc.db.session.get(FaceDatasetImage, img.id)
         assert row.watermark_state == 'cleaned' and row.watermark_regions is None
 
@@ -1665,7 +1826,7 @@ def test_klein_clean_disk_equals_display_equals_export_and_keeps_dimensions(
     monkeypatch.setattr(wk, 'is_available', lambda: True)
     monkeypatch.setattr(wk, '_prefill_region', lambda scaled, boxes, device='cpu': (scaled, None))
 
-    def _fake_klein(user_id, crop_img, *, seed, timeout=None):
+    def _fake_klein(user_id, crop_img, *, seed, timeout=None, **_kw):
         arr = np.asarray(crop_img.convert('RGB')).astype('int16') + 60
         return Image.fromarray(np.clip(arr, 0, 255).astype('uint8'), 'RGB'), None
     monkeypatch.setattr(wk, '_run_klein_job', _fake_klein)
@@ -1914,7 +2075,7 @@ def test_inpaint_klein_harmonizes_the_drifted_patch_into_the_neighbourhood(monke
     # prefill: pass the crop through untouched; Klein: brighten the whole crop by +40 (drift)
     monkeypatch.setattr(wk, '_prefill_region', lambda scaled, boxes, device='cpu': (scaled, None))
 
-    def _fake_klein(user_id, crop_img, *, seed, timeout=None):
+    def _fake_klein(user_id, crop_img, *, seed, timeout=None, **_kw):
         arr = np.asarray(crop_img).astype('int16') + 40
         return Image.fromarray(np.clip(arr, 0, 255).astype('uint8'), 'RGB'), None
     monkeypatch.setattr(wk, '_run_klein_job', _fake_klein)

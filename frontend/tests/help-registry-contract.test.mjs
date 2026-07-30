@@ -181,6 +181,8 @@ test('(8) search matches settings by keyword/id', () => {
     "'abliterated' should surface ollama.vision_model")
   assert.ok(searchHelpTopics('short caption').some((t) => t.id === 'training.dual_captions'),
     "'short caption' should surface training.dual_captions")
+  assert.ok(searchHelpTopics('unkeep original').some((t) => t.id === 'action-compare-with-original'),
+    "'unkeep original' should explain how a kept improvement affects its source")
 })
 
 // ---- (9) GuidePage registers the settings-reference chapter -----------------

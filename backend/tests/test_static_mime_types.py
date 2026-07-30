@@ -123,12 +123,14 @@ def test_pin_overrides_an_already_loaded_entry(poisoned_mimetypes):
     mimetypes.add_type('text/plain', '.js', strict=True)
     mimetypes.add_type('text/plain', '.mjs', strict=True)
     mimetypes.add_type('application/octet-stream', '.webp', strict=True)
+    mimetypes.add_type('application/octet-stream', '.bmp', strict=True)
 
     pin_static_mime_types()
 
     assert mimetypes.guess_type('a.js')[0] == 'text/javascript'
     assert mimetypes.guess_type('a.mjs')[0] == 'text/javascript'
     assert mimetypes.guess_type('a.webp')[0] == 'image/webp'
+    assert mimetypes.guess_type('a.bmp')[0] == 'image/bmp'
 
 
 # --------------------------------------------------------------------------

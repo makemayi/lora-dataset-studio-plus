@@ -29,10 +29,41 @@ pixels. None of the three are ever merged.
 FAILING LOUDLY
 --------------
 A rejected key, an unknown model, or a model gated behind OpenAI organization
-verification now raises a NAMED, FATAL error (see engine_errors) that stops the
+verification raises a NAMED, FATAL error (see engine_errors) that stops the
 batch instead of returning None — which the fan-out would have worded as "empty
-response (often a content-policy refusal)", the wrong sentence entirely. A
-moderation 400 still returns None: there, that sentence is right.
+response (often a content-policy refusal)", the wrong sentence entirely.
+
+BOTH LANES ANSWER THE SAME EVENT THE SAME WAY
+---------------------------------------------
+They did not. The API-key lane raised for a 5xx and for an unreachable host; the
+subscription lane returned None for EVERY non-200 except 429/401, and for every
+transport error — a dropped connection, a read timeout, a 500, a lane OpenAI had
+closed, all came back as the same blank shrug, and the fan-out then wrote the
+sentence reserved for "the provider answered and produced nothing". One file,
+one event, two opposite answers, and the user in front of the muter of the two.
+
+Both lanes now sort the SAME event into the same four buckets, and no bucket
+borrows another's words:
+
+  refusal    the provider answered and declined THIS request -> EngineRefused
+             (not fatal: the next row may well pass)
+  breakdown  network, timeout, 5xx -> EngineError, this row only
+  quota      429 -> SubscriptionQuotaExceeded / EngineError (rate limit)
+  door shut  the token is rejected after a refresh, or the experimental
+             subscription endpoint answers 403/404/410 -> the run stops, and it
+             says WHICH of the two happened
+
+Nothing anywhere offers a remedy that is not one. No message says retry, try
+again or rephrase: whether the same call would pass a second time is exactly
+what we do not know, and the previous wording guessed it wrong in both
+directions at once (see nanobanana.py and test_chatgpt_refusal.py).
+
+WHAT STAYS HONESTLY UNKNOWN
+---------------------------
+A 200 with no image and no readable reason is still `None`. So is a 400 whose
+body names no cause we can recognise: the fan-out words those as "a
+content-policy refusal and a transient API error look identical here", which is
+the truth, and inventing a cause to fill the silence would be the worse bug.
 """
 from __future__ import annotations
 import base64
@@ -44,7 +75,7 @@ import uuid
 import requests
 
 from .. import config as cfg
-from .engine_errors import EngineError, EngineFatal
+from .engine_errors import EngineError, EngineFatal, EngineRefused
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +104,29 @@ _MODEL_FAULT_HINTS = (
     'must be verified', 'organization must be verified',
 )
 
+# Fragments OpenAI uses when a 400 blames the CONTENT — its own moderation stack
+# speaking, not a malfunction. Narrow on purpose: everything not matched here
+# stays "cause unknown" rather than being talked into a refusal it may not be.
+_MODERATION_HINTS = (
+    'moderation_blocked', 'content_policy_violation', 'content policy',
+    'safety system', 'safety_violation', 'rejected by our safety',
+)
+
+# Fragments OpenAI uses when a 400 blames the REFERENCE PHOTOS we uploaded. This
+# one is worth telling apart from a moderation 400 because the remedy is the
+# opposite end of the app: a broken/oversized reference is a file to replace, not
+# a prompt to reconsider — and the whole batch shares the same references, so it
+# would fail identically on every row.
+_IMAGE_FAULT_CODES = ('invalid_image', 'image_parse_error', 'invalid_image_format',
+                      'unsupported_image', 'image_too_large')
+_IMAGE_FAULT_HINTS = ('invalid image', 'could not be decoded', 'unsupported image',
+                      'image is too large', 'invalid file format')
+
+# The one sentence this project uses when it genuinely cannot tell the two
+# apart. Reused verbatim by the fan-out for a 200-with-no-image.
+_AMBIGUOUS = ('a content-policy refusal and a transient API error look '
+              'identical here')
+
 # --- Subscription lane (Codex OAuth) -----------------------------------------
 # EXPERIMENTAL: renders gpt-image-2 on the user's ChatGPT subscription quota via
 # the Codex Responses backend. Undocumented lane — may break if OpenAI closes it.
@@ -89,6 +143,12 @@ class ChatGPTImageError(EngineError):
 class ChatGPTImageFatal(ChatGPTImageError, EngineFatal):
     """A failure that would repeat on every remaining row (missing/rejected key,
     unknown model, model gated behind organization verification)."""
+
+
+class ChatGPTImageRefused(ChatGPTImageError, EngineRefused):
+    """OpenAI answered and declined THIS request (its moderation stack, or the
+    model replying in prose instead of pixels). Not fatal: the batch keeps going,
+    and the fan-out counts these apart from breakdowns."""
 
 
 class SubscriptionQuotaExceeded(RuntimeError):
@@ -117,14 +177,29 @@ def get_image_model() -> str:
             or DEFAULT_IMAGE_MODEL)
 
 
-def _error_message(resp) -> str:
-    """OpenAI's own explanation, trimmed. Documented envelope is
-    {"error": {"message", "type", "param", "code"}}; an edge/proxy failure
-    answers something else, so fall back to the raw text."""
+def _error_body(resp):
+    """The parsed JSON of an error response, or None. `resp.text` on a mocked or
+    streamed response can be anything, so every read is defensive."""
     try:
         body = resp.json()
     except Exception:                                  # noqa: BLE001 — non-JSON edge error
         body = None
+    if isinstance(body, dict):
+        return body
+    try:
+        return json.loads(resp.text or '')
+    except Exception:                                  # noqa: BLE001
+        return None
+
+
+def _error_message(resp) -> str:
+    """The provider's own explanation, trimmed. The API lane's documented
+    envelope is {"error": {"message", "type", "param", "code"}}; the Codex
+    subscription backend uses {"detail": "..."} instead, and an edge/proxy
+    failure answers neither — so fall back to the raw text. Reading only the
+    documented shape is how the subscription lane's reasons were being thrown
+    away before they ever reached a tile."""
+    body = _error_body(resp)
     if isinstance(body, dict):
         err = body.get('error')
         if isinstance(err, dict):
@@ -133,10 +208,43 @@ def _error_message(resp) -> str:
                 return msg[:300]
         elif isinstance(err, str) and err.strip():
             return err.strip()[:300]
+        for key in ('detail', 'message'):              # Codex / generic gateways
+            val = body.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()[:300]
     try:
         return (resp.text or '').strip()[:300]
     except Exception:                                  # noqa: BLE001
         return ''
+
+
+def _err_field(resp, name: str) -> str:
+    body = _error_body(resp) or {}
+    err = body.get('error')
+    return str((err or {}).get(name) or '') if isinstance(err, dict) else ''
+
+
+def _blames_the_content(resp, detail: str) -> bool:
+    """Is this 400 OpenAI's moderation stack, in its own words? Matched on the
+    documented code first, then on wording — and on NOTHING else, so an
+    unrecognised 400 stays unexplained instead of being called a refusal."""
+    if _err_field(resp, 'code') in ('moderation_blocked', 'content_policy_violation'):
+        return True
+    low = detail.lower()
+    return any(h in low for h in _MODERATION_HINTS)
+
+
+def _blames_our_images(resp, detail: str) -> bool:
+    """Is this 400 about the reference photos we uploaded rather than the prompt?
+    A malformed or oversized reference reads exactly like a content refusal in
+    the old wording, and sends the user to rewrite a prompt that was never the
+    problem."""
+    if _err_field(resp, 'code') in _IMAGE_FAULT_CODES:
+        return True
+    if _err_field(resp, 'param').startswith('image'):
+        return True
+    low = detail.lower()
+    return any(h in low for h in _IMAGE_FAULT_HINTS)
 
 
 def _blames_the_model(resp, detail: str) -> bool:
@@ -158,13 +266,14 @@ def _blames_the_model(resp, detail: str) -> bool:
 
 def _raise_for_api_status(resp, *, model: str) -> None:
     """Turn a non-200 from the API lane into the most specific outcome we can
-    justify. Returns normally for the ONE case that stays a silent per-row
-    failure: a moderation 400, which the caller reports as an empty response —
-    the historical behaviour, and the right words for a refused prompt.
+    justify — and no more specific than that.
 
     401/403 (the key, or an unverified organization) and 404 / a model-blaming
     400 would refuse every other row identically, so they are FATAL. 429 and 5xx
-    are transient and stay per-row."""
+    are transient and stay per-row. A 400 is sorted by what OpenAI says it is:
+    the model, the reference photos, its moderation stack, or — the case that
+    still returns instead of raising — none of those, where the caller words it
+    as the genuine ambiguity it is."""
     status = resp.status_code
     if status == 200:
         return
@@ -194,7 +303,22 @@ def _raise_for_api_status(resp, *, model: str) -> None:
                 'this engine always sends your reference photos to the image-editing '
                 'endpoint, so the model must accept image input; check the model in '
                 'Settings > Image engines')
-        return                                         # moderation / per-prompt refusal
+        if _blames_our_images(resp, detail):
+            # Every row of a batch is sent the SAME reference photos, so this
+            # repeats identically to the last one: stop, and point at the file.
+            raise ChatGPTImageFatal(
+                f'OpenAI could not read the reference photos (HTTP 400){suffix} — '
+                'replace the reference image for this dataset; the prompt is not '
+                'what was refused')
+        if _blames_the_content(resp, detail):
+            raise ChatGPTImageRefused(
+                f"OpenAI's safety system refused this request (HTTP 400){suffix} — "
+                'that filter is not configurable and LDS cannot turn it off')
+        return                                         # cause unnamed -> stays ambiguous
+    if 500 <= status <= 599:
+        raise ChatGPTImageError(
+            f'OpenAI is having trouble (HTTP {status}){suffix} — nothing was '
+            'generated for this image; your prompt was not refused')
     raise ChatGPTImageError(f'OpenAI returned HTTP {status}{suffix}')
 
 
@@ -294,7 +418,14 @@ def generate_variation(ref_bytes: bytes | list[bytes], prompt: str, model: str |
 
 
 def _image_from_output(output) -> bytes | None:
-    for item in output or []:
+    if not isinstance(output, (list, tuple)):
+        return None
+    for item in output:
+        # The subscription backend is undocumented: a shape we did not expect
+        # must read as "no image", never as an AttributeError the user meets as
+        # an app crash on a tile.
+        if not isinstance(item, dict):
+            continue
         if item.get('type') == 'image_generation_call' and item.get('result'):
             try:
                 return base64.b64decode(item['result'])
@@ -316,13 +447,113 @@ def _parse_sse_for_image(text: str) -> bytes | None:
             evt = json.loads(line[5:].strip())
         except ValueError:
             continue
+        if not isinstance(evt, dict):                  # `data: null`, `data: 42`
+            continue
         if evt.get('type') == 'response.completed':
-            return _image_from_output((evt.get('response') or {}).get('output'))
+            resp = evt.get('response')
+            return _image_from_output(
+                resp.get('output') if isinstance(resp, dict) else None)
         if evt.get('type') == 'response.output_item.done':
             img = _image_from_output([evt.get('item') or {}])
             if img:
                 return img
     return None
+
+
+def _text_from_output(output) -> str:
+    """The words the model wrote when it answered in prose instead of pixels, and
+    the error an `image_generation_call` carries when the tool itself declined.
+    Relayed verbatim: paraphrasing OpenAI's own refusal would be a second guess
+    on top of the one this whole change exists to remove."""
+    for item in (output if isinstance(output, (list, tuple)) else []):
+        if not isinstance(item, dict):
+            continue
+        if item.get('type') == 'image_generation_call':
+            err = item.get('error')
+            if isinstance(err, dict) and str(err.get('message') or '').strip():
+                return str(err['message']).strip()[:300]
+            if isinstance(err, str) and err.strip():
+                return err.strip()[:300]
+        for part in (item.get('content') or []):
+            if not isinstance(part, dict):
+                continue
+            txt = str(part.get('text') or '').strip()
+            if txt:
+                return txt[:300]
+    return ''
+
+
+def _refusal_text_from_body(text: str) -> str:
+    """Walk the streamed (or plain) Codex reply for a refusal in words. Returns
+    '' when there is none — and then the caller keeps saying it does not know."""
+    items = []
+    for line in (text or '').splitlines():
+        if not line.startswith('data:'):
+            continue
+        try:
+            evt = json.loads(line[5:].strip())
+        except ValueError:
+            continue
+        if not isinstance(evt, dict):
+            continue
+        if evt.get('type') == 'response.output_item.done':
+            items.append(evt.get('item') or {})
+        elif evt.get('type') == 'response.completed':
+            resp = evt.get('response')
+            out = resp.get('output') if isinstance(resp, dict) else None
+            if isinstance(out, (list, tuple)):
+                items.extend(out)
+    if not items:
+        try:
+            parsed = json.loads(text or '')
+        except ValueError:
+            parsed = None
+        out = parsed.get('output') if isinstance(parsed, dict) else None
+        items = list(out) if isinstance(out, (list, tuple)) else []
+    return _text_from_output(items)
+
+
+def _raise_for_subscription_status(resp) -> None:
+    """The subscription twin of `_raise_for_api_status`, and the reason this file
+    stopped answering the same event two ways.
+
+    The one status handled by the caller instead of here is 401 on the FIRST
+    attempt: that is a stale token to refresh, not a failure yet."""
+    status = resp.status_code
+    if status == 200:
+        return
+    detail = _error_message(resp)
+    suffix = f': {detail}' if detail else ''
+    if status == 401:
+        # Second attempt, i.e. still refused with a freshly refreshed token.
+        raise SubscriptionUnavailable(
+            f'ChatGPT refused the connection even after refreshing the token '
+            f'(HTTP 401){suffix} — reconnect your ChatGPT account in '
+            'Settings > Image engines')
+    if status in (403, 404, 410):
+        # The single most useful thing this lane can report. It rides on an
+        # undocumented endpoint OpenAI never promised us; the day they close it,
+        # "unknown error" would send everyone hunting through their own settings
+        # for a fault that is not there.
+        raise ChatGPTImageFatal(
+            f'OpenAI is no longer serving image generation on this ChatGPT '
+            f'subscription (HTTP {status}){suffix} — this lane is experimental '
+            'and OpenAI can withdraw it at any time; switch ChatGPT access to '
+            'API key in Settings > Image engines to keep generating')
+    if 500 <= status <= 599:
+        raise ChatGPTImageError(
+            f'ChatGPT is having trouble (HTTP {status}){suffix} — nothing was '
+            'generated for this image; your prompt was not refused')
+    if status == 400 and _blames_the_content(resp, detail):
+        raise ChatGPTImageRefused(
+            f"OpenAI's safety system refused this request (HTTP 400){suffix} — "
+            'that filter is not configurable and LDS cannot turn it off')
+    # Everything left is a status this lane has never been documented to send.
+    # Name the code and hand over OpenAI's own words; claim nothing about which
+    # of the two causes it was.
+    raise ChatGPTImageError(
+        f'ChatGPT returned HTTP {status} on the subscription lane{suffix} — '
+        f'{_AMBIGUOUS}')
 
 
 def _generate_via_subscription(refs: list, prompt: str, aspect_ratio: str) -> bytes | None:
@@ -360,18 +591,20 @@ def _generate_via_subscription(refs: list, prompt: str, aspect_ratio: str) -> by
             r = requests.post(CODEX_RESPONSES_URL, headers=headers, json=body,
                               timeout=(10, 420))
         except requests.RequestException as e:
+            # Was `return None`, i.e. a dropped connection reported to the user
+            # as "the provider produced no image" — the API lane has raised here
+            # since it shipped, and this is the same event.
             logger.warning(f"chatgpt_image: subscription request error: {e}")
-            return None
+            raise ChatGPTImageError(f'could not reach ChatGPT: {e}')
         if r.status_code == 401 and attempt == 0:
-            continue
+            continue                                   # stale token: refresh and retry
         if r.status_code == 429:
             raise SubscriptionQuotaExceeded(
                 'ChatGPT subscription image quota reached — rerun in API-key mode '
                 'or wait for your plan quota to reset')
         if r.status_code != 200:
-            # Content-policy refusals land here too — the row fails, same as the API lane.
             logger.warning(f"chatgpt_image: subscription HTTP {r.status_code}: {r.text[:300]}")
-            return None
+            _raise_for_subscription_status(r)
         # The Codex backend streams the reply (stream:true is mandatory) but
         # frequently sends NO content-type header, so we cannot trust it: sniff
         # the body head instead. An SSE stream opens with `data:`/`event:` lines;
@@ -388,5 +621,13 @@ def _generate_via_subscription(refs: list, prompt: str, aspect_ratio: str) -> by
                 img = None
         if img is None:
             logger.warning("chatgpt_image: no image in subscription response")
+            said = _refusal_text_from_body(body)
+            if said:
+                # The model answered in words. Those words ARE the reason, so
+                # they are relayed as one — with no promise attached to them.
+                raise ChatGPTImageRefused(
+                    f'ChatGPT answered with text instead of an image: "{said}"')
+            # No image, no words: this is the case we genuinely cannot read.
+            # None keeps the fan-out's honest sentence instead of inventing one.
         return img
     return None

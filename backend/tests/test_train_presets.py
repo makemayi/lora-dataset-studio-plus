@@ -65,6 +65,37 @@ def test_apply_is_schema_tolerant(client, app):
         assert stored == {'rank': 32, 'dropout': 0.1}
 
 
+def test_apply_validates_then_commits_the_complete_replacement_once(app, monkeypatch):
+    """A concurrent Train may see the old preset or the final one, never a prefix.
+
+    The count is the regression guard: the old implementation committed once to
+    clear and once per accepted key, exposing partial combinations between them.
+    """
+    from app.services import lora_training as lt
+    from app.services import face_dataset_service as svc
+    from app.config import LOCAL_USER
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'Atomic', 'atomic', train_type='krea')
+        lt.update_train_settings(LOCAL_USER, ds.id, {'rank': 64, 'dropout': 0.3})
+        commits = []
+        real_commit = svc.db.session.commit
+
+        def commit_once():
+            commits.append(True)
+            return real_commit()
+
+        monkeypatch.setattr(svc.db.session, 'commit', commit_once)
+        _, ignored, rejected = lt.apply_train_settings_dict(LOCAL_USER, ds.id, {
+            'rank': 32, 'dropout': 0.1, 'save_every': 123,
+        })
+        assert commits == [True]
+        assert ignored == []
+        assert [r['key'] for r in rejected] == ['save_every']
+        assert lt.snapshot_train_settings(LOCAL_USER, ds.id) == {
+            'rank': 32, 'dropout': 0.1,
+        }
+
+
 def test_apply_replaces_previous_settings(client, app):
     """A preset REPLACES the explicit settings — keys absent from the preset
     fall back to defaults instead of surviving from before."""
@@ -143,9 +174,11 @@ def test_every_builtin_applies_cleanly(client, app):
         assert body['rejected'] == [], preset['id']
 
 
-# --- Built-in quick presets: 5 families × 3 kinds ---------------------------
-# The shipped catalogue promise: every supported model family exposes exactly
-# one Character, one Style and one Concept quick preset (15 total).
+# --- Built-in quick presets: core coverage + source-labelled specialties -------
+# The shipped catalogue promise: every supported model family exposes one
+# general-purpose Character, Style and Concept quick preset where that kind is
+# supported. A source-labelled specialty may share a scope without replacing its
+# general-purpose recipe (Krea Raw LoKr likeness is the first such preset).
 
 _QUICK_PRESET_MATRIX = {
     ('zimage', 'character'): 'builtin-character-zimage',
@@ -173,9 +206,15 @@ _QUICK_PRESET_MATRIX = {
 def test_quick_preset_catalogue_covers_every_family_and_kind(client):
     listed = client.get('/api/train/presets').get_json()['presets']
     builtins = [p for p in listed if p.get('builtin')]
-    assert len(builtins) == 17
-    coverage = {(p['train_type'], p['dataset_kind']): p['id'] for p in builtins}
-    assert coverage == _QUICK_PRESET_MATRIX
+    assert len(builtins) == 18
+    coverage = {}
+    for preset in builtins:
+        coverage.setdefault((preset['train_type'], preset['dataset_kind']), set()).add(preset['id'])
+    assert set(coverage) == set(_QUICK_PRESET_MATRIX)
+    for scope, preset_id in _QUICK_PRESET_MATRIX.items():
+        assert preset_id in coverage[scope]
+    assert coverage[('krea', 'character')] == {
+        'builtin-krea-character', 'builtin-krea-raw-lokr-likeness'}
     for p in builtins:
         # Why culture: every quick preset explains itself in one line, and
         # pins its researched capacity explicitly (no silent family fallback).
@@ -186,7 +225,7 @@ def test_quick_preset_catalogue_covers_every_family_and_kind(client):
 
 
 def test_every_quick_preset_applies_by_id_with_announced_values(client, app):
-    """Apply each of the 17 by preset_id on a dataset of ITS family and kind:
+    """Apply each general-purpose quick preset by id on its family and kind:
     the scope check passes, nothing is ignored/rejected, and the STORED raw
     settings reproduce the announced settings dict exactly."""
     listed = client.get('/api/train/presets').get_json()['presets']
@@ -212,6 +251,36 @@ def test_every_quick_preset_applies_by_id_with_announced_values(client, app):
             from app.services import lora_training as lt
             stored = lt.snapshot_train_settings('local', ds_id)
             assert stored == preset['settings'], preset_id
+
+
+def test_krea_raw_lokr_likeness_builtin_is_scoped_and_self_describing(client, app):
+    """The community Krea recipe is an extra Character option, never a replacement
+    for the default Krea preset; all of its announced controls survive apply."""
+    listed = client.get('/api/train/presets').get_json()['presets']
+    preset = next(p for p in listed if p['id'] == 'builtin-krea-raw-lokr-likeness')
+    assert preset['dataset_kind'] == 'character'
+    assert preset['variants'] == ['base', 'raw']
+    assert preset['community'] is True
+    assert {k: preset['settings'][k] for k in (
+        'network_type', 'lokr_factor', 'rank', 'alpha', 'resolution',
+        'timestep_type', 'optimizer', 'learning_rate', 'content_or_style',
+        'do_differential_guidance', 'differential_guidance_scale',
+    )} == {
+        'network_type': 'lokr', 'lokr_factor': 16, 'rank': 32, 'alpha': 32,
+        'resolution': '768', 'timestep_type': 'sigmoid', 'optimizer': 'automagic2',
+        'learning_rate': 1e-4, 'content_or_style': 'balanced',
+        'do_differential_guidance': True, 'differential_guidance_scale': 3.0,
+    }
+    ds_id = _create_ds(client, train_type='krea', kind='character')
+    r = client.post(f'/api/dataset/{ds_id}/train/presets/apply', json={
+        'preset_id': preset['id'], 'train_type': 'krea', 'variant': 'base',
+    })
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body['ignored'] == [] and body['rejected'] == []
+    with app.app_context():
+        from app.services import lora_training as lt
+        assert lt.snapshot_train_settings('local', ds_id) == preset['settings']
 
 
 def test_apply_by_preset_id_and_delete(client):
@@ -261,6 +330,8 @@ def test_builtin_scope_mismatches_never_mutate_dataset(client, app):
         ('zimage', 'style', 'base', 'builtin-style-krea-raw'),
         # variant mismatch (Krea style is scoped to base/raw, not turbo)
         ('krea', 'style', 'turbo', 'builtin-style-krea-raw'),
+        # Krea Raw LoKr likeness is likewise never offered to the distilled Turbo base.
+        ('krea', 'character', 'turbo', 'builtin-krea-raw-lokr-likeness'),
     ]
     for idx, (family, kind, variant, preset_id) in enumerate(cases):
         ds_id = _create_ds(client, name=f'Scope {idx}', trigger=f'scope{idx}',

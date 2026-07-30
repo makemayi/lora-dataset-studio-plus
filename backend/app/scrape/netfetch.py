@@ -214,7 +214,7 @@ def _download_with_ytdlp(url, dest_template):
 
 
 def _looks_like_image(path):
-    """True si `path` commence par une signature raster connue (jpg/png/gif/webp/avif).
+    """True si `path` commence par une signature raster connue (jpg/png/bmp/gif/webp/avif).
     PAS de SVG (peut embarquer du script). MIME/extension seuls sont falsifiables."""
     try:
         with open(path, 'rb') as f:
@@ -226,6 +226,8 @@ def _looks_like_image(path):
     if head[:3] == b'\xff\xd8\xff':                       # jpeg
         return True
     if head[:8] == b'\x89PNG\r\n\x1a\n':                  # png
+        return True
+    if head[:2] == b'BM':                                  # bmp
         return True
     if head[:4] == b'GIF8':                               # gif
         return True
@@ -335,6 +337,8 @@ def _bytes_look_like_image(head):
     if head[:3] == b'\xff\xd8\xff':                       # jpeg
         return True
     if head[:8] == b'\x89PNG\r\n\x1a\n':                  # png
+        return True
+    if head[:2] == b'BM':                                  # bmp
         return True
     if head[:4] == b'GIF8':                               # gif
         return True

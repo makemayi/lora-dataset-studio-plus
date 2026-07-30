@@ -103,6 +103,38 @@ test('diffConfigs resolves the REAL snapshot keys, not only the aliases', () => 
   assert.equal(byKey.network.b, 'lokr');
 });
 
+test('configRows and diffConfigs preserve the Krea Raw LoKr recipe provenance', () => {
+  const reported = {
+    network_type: 'lokr',
+    lokr_factor: 16,
+    lokr_full_rank: false,
+    content_or_style: 'balanced',
+    do_differential_guidance: true,
+    differential_guidance_scale: 3,
+  };
+  const rows = configRows(reported);
+  const labels = new Map(rows.map((row) => [row.label, row.value]));
+  assert.equal(labels.get('LoKr factor'), '16');
+  assert.equal(labels.get('LoKr full rank'), 'false');
+  assert.equal(labels.get('Krea content / style'), 'balanced');
+  assert.equal(labels.get('Differential guidance'), 'true');
+  assert.equal(labels.get('Differential guidance scale'), '3');
+
+  const diff = Object.fromEntries(diffConfigs(reported, {
+    ...reported,
+    lokr_factor: 8,
+    lokr_full_rank: true,
+    content_or_style: 'style',
+    do_differential_guidance: false,
+    differential_guidance_scale: 'off',
+  }).map((row) => [row.key, row]));
+  assert.equal(diff.lokr_factor.changed, true);
+  assert.equal(diff.lokr_full_rank.changed, true);
+  assert.equal(diff.content_or_style.changed, true);
+  assert.equal(diff.do_differential_guidance.changed, true);
+  assert.equal(diff.differential_guidance_scale.changed, true);
+});
+
 test('configRows shows a recorded `false` as a value, never as "not recorded"', () => {
   const rows = configRows({ dual_captions: false });
   const dual = rows.find((r) => r.label === 'Dual captions');

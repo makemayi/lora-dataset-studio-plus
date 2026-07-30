@@ -424,6 +424,15 @@ def retry_cloud_run(user_id, run_id) -> dict:
     if not isinstance(p, dict):
         p = {}
     _assert_recipe_replayable(p, 'retry')
+    snapshot = p.get(_TRAIN_SETTINGS_SNAPSHOT, _UNSET)
+    if p.get('resume_ckpt_path'):
+        # A retry with a seed is still a continuation: its checkpoint topology
+        # comes from the original parent record, not a modern default inferred
+        # from this failed child's raw snapshot.
+        from . import checkpoint_registry
+        topology = checkpoint_registry.network_geometry(_resume_parent_record(run))
+        snapshot = _resume_snapshot_with_recorded_topology(
+            user_id, run.dataset_id, snapshot, topology)
     return launch_cloud_training(
         user_id, run.dataset_id,
         steps=p.get('steps'),
@@ -435,7 +444,7 @@ def retry_cloud_run(user_id, run_id) -> dict:
         gpu_name=p.get('requested_gpu'),
         resume_ckpt_path=p.get('resume_ckpt_path'),
         resume_step=p.get('resume_step'),
-        train_settings_snapshot=p.get(_TRAIN_SETTINGS_SNAPSHOT, _UNSET),
+        train_settings_snapshot=snapshot,
         train_slider_snapshot=p.get(_TRAIN_SLIDER_SNAPSHOT, _UNSET))
 
 
@@ -488,6 +497,39 @@ def _merge_resume_overrides(snapshot, patch):
     return json.dumps(base) if base else None
 
 
+def _cloud_run_record(run):
+    """The provenance row stamped for one cloud run, if it still exists."""
+    from ..models import TrainingRunRecord
+    return (TrainingRunRecord.query
+            .filter_by(cloud_run_id=run.id)
+            .order_by(TrainingRunRecord.id.desc()).first())
+
+
+def _resume_parent_record(run):
+    """The record that made a seeded checkpoint replayed by a retry.
+
+    A normal cloud→cloud continuation records this edge on its child.  Do not
+    trust that child's own emitted settings as evidence for an older checkpoint:
+    before full-rank provenance existed it may already contain a forced modern
+    default.  Without a parent edge, the raw snapshot remains the only fact.
+    """
+    record = _cloud_run_record(run)
+    if record is None or not record.parent_record_id:
+        return None
+    from ..models import TrainingRunRecord
+    return db.session.get(TrainingRunRecord, record.parent_record_id)
+
+
+def _resume_snapshot_with_recorded_topology(user_id, dataset_id, snapshot, topology):
+    """Freeze known checkpoint topology or reject an ambiguous legacy LoKr seed."""
+    fallback = (getattr(fds.get_dataset(user_id, dataset_id), 'train_settings', None)
+                if snapshot is _UNSET else snapshot)
+    error = lt.legacy_lokr_resume_error(topology, fallback)
+    if error:
+        raise ValueError(error)
+    return _merge_resume_overrides(fallback, topology) if topology else snapshot
+
+
 def continue_cloud_run(user_id, run_id, extra_steps=1000, from_step=None,
                        overrides=None) -> dict:
     """Reprend un run cloud TERMINAL (done OU en échec) depuis un checkpoint
@@ -525,6 +567,17 @@ def continue_cloud_run(user_id, run_id, extra_steps=1000, from_step=None,
         p = {}
     _assert_recipe_replayable(p, 'continue')
     override_patch = lt.validate_resume_overrides(overrides)
+    # The raw cloud snapshot historically omitted LoKr's full-rank bit, while
+    # the provenance record for newer launches has the complete emitted
+    # topology.  Prefer that recorded fact and freeze it into the child.  A
+    # legacy LoKr source with neither fact must stop: emitting today's False
+    # would silently change which checkpoint tensors can load.
+    from . import checkpoint_registry
+    _parent = _cloud_run_record(run)
+    _parent_topology = checkpoint_registry.network_geometry(_parent)
+    snapshot = _resume_snapshot_with_recorded_topology(
+        user_id, run.dataset_id, p.get(_TRAIN_SETTINGS_SNAPSHOT, _UNSET),
+        _parent_topology)
     cks = _run_staging_checkpoints(run)
     if not cks:
         raise ValueError('no harvested checkpoint to continue from — its staging '
@@ -551,7 +604,6 @@ def continue_cloud_run(user_id, run_id, extra_steps=1000, from_step=None,
         extra = max(100, int(extra_steps))
     except (TypeError, ValueError):
         extra = 1000
-    snapshot = p.get(_TRAIN_SETTINGS_SNAPSHOT, _UNSET)
     # Resolve the LR factor against the SOURCE run's frozen settings (never the live
     # dataset): a 1e-4 run continues at 5e-5 / 1e-5. Refused loudly on a Prodigy run
     # before any launch. The resulting learning_rate merges into the per-run snapshot
@@ -568,13 +620,8 @@ def continue_cloud_run(user_id, run_id, extra_steps=1000, from_step=None,
         override_patch['learning_rate'] = lt.resolve_resume_lr(run_settings, lr_factor)
     if override_patch:
         snapshot = _merge_resume_overrides(snapshot, override_patch)
-    # Lineage: the parent is the provenance record of the cloud run being
-    # continued (source-of-truth edge for the Runs-hub tree). Legacy cloud runs
-    # that predate the registry have no record -> the child is a root (NULL).
-    from ..models import TrainingRunRecord
-    _parent = (TrainingRunRecord.query
-               .filter_by(cloud_run_id=run.id)
-               .order_by(TrainingRunRecord.id.desc()).first())
+    # Lineage: the source record above is also the parent edge. Legacy cloud
+    # runs that predate the registry have no record -> the child is a root.
     res = launch_cloud_training(
         user_id, run.dataset_id,
         steps=chosen['step'] + extra,
@@ -692,18 +739,21 @@ def continue_local_run_in_cloud(user_id, dataset_id, extra_steps=1000,
             _parent = checkpoint_registry.newest_record_for(dataset_id, fam, base, var)
     except Exception:
         _parent = None
-    # The LoRA's geometry belongs to the weights, not to today's dataset settings:
-    # rank-32 weights cannot load into a rank-64 network. Without this, a resume
-    # stamped the dataset's LIVE rank onto the run (snapshot _UNSET) — edit rank
-    # between two runs and the "continuation" silently trained a different LoRA.
-    # This lane carries a PER-RUN snapshot, so the parent's geometry is inherited
-    # here with no side effect on the dataset (the local lane, which trains from
-    # the persisted settings, refuses loudly instead).
-    geometry = checkpoint_registry.network_geometry(_parent)
+    # The checkpoint's complete known topology belongs to its weights, not to
+    # today's dataset settings: rank/alpha, adapter type, and LoKr's factor /
+    # full-rank mode all change tensors. This lane carries a PER-RUN snapshot, so
+    # it inherits those recorded facts without touching the dataset. A legacy
+    # LoKr parent without full-rank provenance is deliberately blocked rather
+    # than emitting today's default and changing its topology.
+    topology = checkpoint_registry.network_geometry(_parent)
+    _legacy_lokr_error = lt.legacy_lokr_resume_error(
+        topology, getattr(ds, 'train_settings', None))
+    if _legacy_lokr_error:
+        raise ValueError(_legacy_lokr_error)
     snapshot = _UNSET      # _UNSET → launch stamps the dataset's live settings
-    if override_patch or geometry:
+    if override_patch or topology:
         snapshot = _merge_resume_overrides(getattr(ds, 'train_settings', None),
-                                           {**override_patch, **geometry})
+                                           {**override_patch, **topology})
     res = launch_cloud_training(
         user_id, dataset_id,
         steps=chosen['step'] + extra,
@@ -1054,6 +1104,21 @@ def _maybe_auto_retry(run, error):
             logger.warning('automatic retry blocked for unsafe legacy recipe on run %s',
                            run.id)
             return None
+        resume_snapshot = params.get(_TRAIN_SETTINGS_SNAPSHOT, _UNSET)
+        if params.get('resume_ckpt_path'):
+            # A pod retry that re-seeds a checkpoint is a continuation, not a
+            # fresh run. Refuse an ambiguous legacy LoKr source before claiming
+            # a retry or renting another GPU; newer parent provenance is folded
+            # into the child's frozen snapshot.
+            from . import checkpoint_registry
+            topology = checkpoint_registry.network_geometry(_resume_parent_record(run))
+            try:
+                resume_snapshot = _resume_snapshot_with_recorded_topology(
+                    'local', run.dataset_id, resume_snapshot, topology)
+            except ValueError as e:
+                logger.warning('automatic retry blocked for unsafe resume topology on run %s: %s',
+                               run.id, e)
+                return None
         try:
             retry_count = max(0, int(params.get('auto_retry_count') or 0))
         except (TypeError, ValueError):
@@ -1100,8 +1165,7 @@ def _maybe_auto_retry(run, error):
                 auto_retry_count=retry_count + 1,
                 auto_retry_of=run.id,
                 strict_gpu=bool(gpu_name),
-                train_settings_snapshot=params.get(
-                    _TRAIN_SETTINGS_SNAPSHOT, _UNSET))
+                train_settings_snapshot=resume_snapshot)
         except Exception as retry_error:
             params['auto_retry_pending'] = False
             params['auto_retry_error'] = str(retry_error)[:300]

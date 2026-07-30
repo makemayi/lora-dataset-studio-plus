@@ -17,6 +17,7 @@ import os
 import time
 
 import pytest
+from PIL import Image
 
 from app.utils import comfy_fs
 
@@ -26,6 +27,11 @@ def _touch(path, age_seconds=0):
     if age_seconds:
         past = time.time() - age_seconds
         os.utime(path, (past, past))
+    return path
+
+
+def _image(path):
+    Image.new('RGB', (32, 24), (30, 120, 220)).save(path, 'PNG')
     return path
 
 
@@ -108,8 +114,8 @@ def test_klein_enqueue_records_every_name_it_staged(app, tmp_path, monkeypatch):
 
     comfy_input = tmp_path / 'comfy' / 'input'
     comfy_input.mkdir(parents=True)
-    source = _touch(tmp_path / 'face.png')
-    extra = _touch(tmp_path / 'angle.png')
+    source = _image(tmp_path / 'face.png')
+    extra = _image(tmp_path / 'angle.png')
 
     monkeypatch.setattr(keh, 'klein_missing_assets', lambda: [])
     monkeypatch.setattr(keh, 'resolve_klein_unet', lambda selected=None: 'u.safetensors')

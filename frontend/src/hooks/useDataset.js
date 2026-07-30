@@ -148,6 +148,13 @@ export function useDataset() {
   const [refNonce, setRefNonce] = useState(0);
   const pollRef = useRef(null);
   const busyRef = useRef(false); // re-entrancy guard for GPU-bound actions (I2)
+  // A retry must replay the exact request, including File objects temporarily
+  // attached to the modal. Keep those bytes in memory only for this browser
+  // session: persisting them in storage would be surprising and can leak space.
+  const referenceEditRetryRef = useRef(new Map());
+  // A ref retains transient File objects; this state tick makes availability
+  // reactive when a queued edit cannot be refreshed safely.
+  const [, bumpReferenceEditRetryRevision] = useState(0);
 
   const fetchList = useCallback(async () => {
     try {
@@ -401,6 +408,7 @@ export function useDataset() {
     const dup = d.duplicates || 0;
     const small = d.small || 0;
     toast.success(`${d.imported} imported${dup ? ` · ${dup} duplicate(s) skipped` : ''}`);
+    if (d.failed) toast.warning(`${d.failed} image${d.failed === 1 ? '' : 's'} not imported — use JPEG, PNG, WebP or BMP, up to 16 Mi-pixels and 8192 px per side; convert or resize before importing.`);
     if (dup && !d.imported) toast.warning('All files were already in the dataset (perceptual duplicates).');
     if (small) toast.warning(`${small} image(s) are under 768 px — training only downscales, they will stay soft.`);
     await refresh();
@@ -876,21 +884,43 @@ export function useDataset() {
   // the activity poll that tracks it. Returns false (with a toast) on a start
   // error; true once the job is queued.
   const editReference = useCallback(async (prompt, engine, files = []) => {
+    const retryRequest = { prompt, engine, files: Array.from(files || []) };
     const fd = new FormData();
-    fd.append('prompt', prompt);
-    fd.append('engine', engine);
-    files.forEach((f) => fd.append('ref', f));
+    fd.append('prompt', retryRequest.prompt);
+    fd.append('engine', retryRequest.engine);
+    retryRequest.files.forEach((f) => fd.append('ref', f));
     const d = await postJson(`/api/dataset/${currentId}/ref/edit`, fd, true);
     if (!d.ok) { toast.error(d.error || 'Unexpected error'); return false; }
-    await refresh();
+    // The server remembers the prompt and engine for display/recovery, but not
+    // request-scoped File objects. This snapshot is therefore the only honest
+    // way to offer an exact Retry without changing backend storage semantics.
+    referenceEditRetryRef.current.set(String(currentId), retryRequest);
+    bumpReferenceEditRetryRevision((revision) => revision + 1);
+    const refreshed = await refresh();
+    if (refreshed?.status !== 'applied') {
+      // The request was accepted, but stale status makes another Retry unsafe:
+      // remove the in-memory files and force the modal to disable it until refresh.
+      referenceEditRetryRef.current.delete(String(currentId));
+      bumpReferenceEditRetryRevision((revision) => revision + 1);
+      toast.warning('Edit queued, but its status could not be refreshed. Refresh the page before trying another edit.');
+      return false;
+    }
     return true;
   }, [currentId, refresh, toast]);
+
+  const retryReferenceEdit = useCallback(async () => {
+    const retryRequest = referenceEditRetryRef.current.get(String(currentId));
+    if (!retryRequest) return false;
+    return editReference(retryRequest.prompt, retryRequest.engine, retryRequest.files);
+  }, [currentId, editReference]);
 
   // Keep the ready candidate: the server atomically swaps the reference (old files
   // removed only after the new ones are on disk) and deletes the candidate.
   const keepEditedReference = useCallback(async () => {
     const d = await postJson(`/api/dataset/${currentId}/ref/edit/keep`, {});
     if (!d.ok) { toast.error(d.error || 'Unexpected error'); return false; }
+    referenceEditRetryRef.current.delete(String(currentId));
+    bumpReferenceEditRetryRevision((revision) => revision + 1);
     toast.success('Reference updated');
     await refresh();
     setRefNonce((n) => n + 1);
@@ -901,6 +931,8 @@ export function useDataset() {
   const discardEditedReference = useCallback(async () => {
     const d = await postJson(`/api/dataset/${currentId}/ref/edit/discard`, {});
     if (!d.ok) { toast.error(d.error || 'Unexpected error'); return false; }
+    referenceEditRetryRef.current.delete(String(currentId));
+    bumpReferenceEditRetryRevision((revision) => revision + 1);
     await refresh();
     return true;
   }, [currentId, refresh, toast]);
@@ -1331,13 +1363,15 @@ export function useDataset() {
   const watermarkingLive = watermarking
     || actKind === 'watermark_detect' || actKind === 'watermark_clean';
   const busyLive = busy || !!activity;
+  const canRetryReferenceEdit = referenceEditRetryRef.current.has(String(currentId));
+
 
   return { datasets, currentId, data, busy: busyLive, localBusy: busy, captioning: captioningLive,
            analyzing: analyzingLive, watermarking: watermarkingLive, activity,
            nonces, mirroringIds, refNonce, recaptioningIds, create, open,
            deleteDataset, updateSettings, setCurrentId, setRef, addExtraRef, removeExtraRef,
            generate, importFiles, scrapeImport, resolveSmallImageRescue, improveImage, reimproveImage, improveBatch, classify, caption, recaption, recaptionImages,
-           setStatus, setCaption, mirrorImage, rotateImage, crop, cropRef, cropExtraRef, recropRefAuto, editReference, keepEditedReference, discardEditedReference, setDatasetTrainType, setDatasetFidelity, deleteImage, batchImages, replaceCaptions, writeCaptionFiles, openDatasetFolder, cancelPending, cancelCaption, regenerate, analyzeFaces,
+           setStatus, setCaption, mirrorImage, rotateImage, crop, cropRef, cropExtraRef, recropRefAuto, editReference, retryReferenceEdit, canRetryReferenceEdit, keepEditedReference, discardEditedReference, setDatasetTrainType, setDatasetFidelity, deleteImage, batchImages, replaceCaptions, writeCaptionFiles, openDatasetFolder, cancelPending, cancelCaption, regenerate, analyzeFaces,
            findWatermarks, cleanWatermarks, cleanWatermarkImages, restoreWatermarkImage, dismissWatermarks, saveWatermarkRegions,
            purgeUnused, exportZip, exportBackup, exportZipFor, exportBackupFor, importBackup, importDatasetZip, importDatasetFolder,
            backupEverything, backupJob, downloadBackup, openBackupsFolder, dismissBackup, restoreJob, dismissRestore,

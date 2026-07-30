@@ -16,6 +16,7 @@ import { postJson } from '../../../api/fetchClient';
 import StrengthPicker from './StrengthPicker';
 import RecentPrompts from './RecentPrompts';
 import DescribeImageModal from './DescribeImageModal';
+import DatasetCaptionControl from './DatasetCaptionControl';
 
 export default function StudioRunSetup({
   selectionCount, strengths, onToggleStrength,
@@ -35,6 +36,11 @@ export default function StudioRunSetup({
   const applyDescription = (text) => {
     if (prompt && prompt.trim()
       && !window.confirm('Replace the current prompt with the described one?')) return;
+    onPrompt(text);
+  };
+  const applyCaption = (text) => {
+    if (prompt && prompt.trim()
+      && !window.confirm('Replace the current prompt with a random dataset caption?')) return;
     onPrompt(text);
   };
   const loadRecent = useCallback(() => {
@@ -59,19 +65,24 @@ export default function StudioRunSetup({
 
       <StrengthPicker choices={STRENGTH_CHOICES} selected={strengths} onToggle={onToggleStrength} fmt={fmt} />
 
-      <label className="flex flex-col gap-1">
-        <span className="flex items-center justify-between gap-2">
-          <span className="text-content-muted text-[0.625rem] uppercase">Prompt (optional)</span>
+      <div className="flex flex-col gap-1">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <label htmlFor="studio-run-prompt" className="text-content-muted text-[0.625rem] uppercase">
+            Prompt (optional)
+          </label>
+          <div className="flex max-w-full flex-wrap items-center justify-end gap-1">
+            <DatasetCaptionControl onCaption={applyCaption} />
           <button type="button" onClick={() => setDescribeOpen(true)}
             title="Describe an image into a test prompt (vision model)"
             className="px-2 py-0.5 rounded border border-border bg-surface text-content-subtle text-[0.625rem] hover:text-content">
             🔎 Describe
           </button>
-        </span>
-        <textarea value={prompt} onChange={(e) => onPrompt(e.target.value)} rows={5}
+          </div>
+        </div>
+        <textarea id="studio-run-prompt" value={prompt} onChange={(e) => onPrompt(e.target.value)} rows={5}
           placeholder="Leave empty for the LoRA's default prompt…"
           className="rounded-lg border border-border bg-app/60 px-2.5 py-1.5 text-content text-sm resize-y min-h-[7rem]" />
-      </label>
+      </div>
       <DescribeImageModal open={describeOpen} onClose={() => setDescribeOpen(false)}
         onResult={applyDescription} />
 

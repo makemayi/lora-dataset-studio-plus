@@ -3,6 +3,21 @@ from unittest.mock import patch
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _isolate_host_ollama_gpu_fence(monkeypatch):
+    """Queue unit tests must not depend on the host Ollama process."""
+    monkeypatch.setattr(
+        'app.services.vision_keepalive.ensure_released_for_comfy',
+        lambda: True,
+    )
+
+
+def _ready_history(history):
+    """Typed successful history response used by queue poll tests."""
+    from app.utils.comfyui import ComfyHistoryHealth, ComfyHistoryProbe
+    return ComfyHistoryProbe(ComfyHistoryHealth.READY, history=history)
+
+
 def test_add_job_inserts_pending(app):
     from app.job_queue import queue_manager
     from app.models import ImageGenerationQueue
@@ -90,9 +105,25 @@ def test_worker_dispatches_failed_on_poll_failure(app):
             assert row.status == 'failed' and done == {'fn': None, 'failed': True}
 
 
-def test_worker_survives_submit_exception(app):
-    """A missing/broken seam (e.g. utils.comfyui not lifted yet) must fail the
-    job, not crash the worker thread."""
+def test_worker_does_not_callback_when_poll_is_stalled(app):
+    """The worker treats POLL_STALLED as a non-terminal ownership state and
+    leaves callback-driven deletion/linking untouched."""
+    from app.job_queue import POLL_STALLED, queue_manager
+    from app.models import ImageGenerationQueue
+    with app.app_context():
+        jid = queue_manager.add_job(workflow_data={'1': {}})
+    with patch('app.job_queue._submit', return_value='prompt-stalled'), \
+         patch('app.job_queue._poll_outputs', return_value=(None, POLL_STALLED)), \
+         patch('app.job_queue._dispatch_completion') as dispatch:
+        with app.app_context():
+            assert queue_manager.process_one() is True
+            row = ImageGenerationQueue.query.filter_by(job_id=jid).one()
+            assert row.status == 'sent_to_comfy'
+            dispatch.assert_not_called()
+
+def test_worker_stalls_ambiguous_submit_without_callback(app):
+    """An exception whose point relative to `/prompt` is unknown must preserve
+    the queue row and record a durable manual-recovery barrier, not fail/callback."""
     from app.job_queue import queue_manager
     from app.models import ImageGenerationQueue
     done = {}
@@ -102,10 +133,14 @@ def test_worker_survives_submit_exception(app):
          patch('app.job_queue._dispatch_completion',
                side_effect=lambda job, fn, failed: done.update(fn=fn, failed=failed)):
         with app.app_context():
-            queue_manager.process_one()
+            assert queue_manager.process_one() is True
             row = ImageGenerationQueue.query.filter_by(job_id=jid).one()
-            assert row.status == 'failed' and done == {'fn': None, 'failed': True}
-
+            barrier = queue_manager.get_comfyui_stalled_barrier()
+            assert row.status == 'stalled'
+            assert row.comfyui_prompt_id is None
+            assert barrier and barrier['kind'] == 'unknown_submit'
+            assert barrier['job_id'] == jid and barrier['prompt_id'] is None
+            assert done == {}
 
 def test_process_one_returns_false_when_empty(app):
     from app.job_queue import queue_manager
@@ -146,26 +181,68 @@ def test_process_one_skips_while_vision_in_progress(app):
             submit.assert_not_called()
 
 
-def test_cancel_during_submit_window_not_resurrected(app):
-    """A cancel landing between _submit() returning and the sent_to_comfy write
-    must not be overwritten back to sent_to_comfy, and must never be polled."""
+def test_process_one_skips_when_in_process_vision_window_blocks_gpu(app):
+    """A live in-process vision token is fail-closed even if its persisted TTL
+    heartbeat has temporarily vanished."""
+    from app.job_queue import queue_manager
+    from app.models import ImageGenerationQueue
+    with app.app_context():
+        jid = queue_manager.add_job(workflow_data={'1': {}})
+        with patch('app.gpu_window.vision_gpu_window_blocks_gpu', return_value=True), \
+             patch('app.job_queue._submit') as submit:
+            assert queue_manager.process_one() is False
+            submit.assert_not_called()
+        row = ImageGenerationQueue.query.filter_by(job_id=jid).one()
+        assert row.status == 'pending'
+
+def test_cancel_during_submit_window_persists_exact_barrier(app):
+    """A cancel landing between `/prompt` return and mapping must leave the
+    returned prompt attached to a durable barrier; a later explicit cancel may
+    reconcile it, but this worker must neither poll nor callback it."""
     from app.job_queue import queue_manager
     from app.models import ImageGenerationQueue
     with app.app_context():
         jid = queue_manager.add_job(workflow_data={'1': {}})
 
         def _submit_then_cancel(workflow, client_id):
-            queue_manager.cancel_job(client_id)  # race: cancel lands mid-submit
+            assert queue_manager.cancel_job(client_id) is False
             return 'prompt-1'
 
         with patch('app.job_queue._submit', side_effect=_submit_then_cancel), \
              patch('app.job_queue._poll_outputs') as poll, \
-             patch('app.utils.comfyui.cancel_comfyui_prompt') as interrupt:
+             patch('app.job_queue._dispatch_completion') as dispatch:
             assert queue_manager.process_one() is True
             poll.assert_not_called()
-            interrupt.assert_called_once_with('prompt-1', jid)
+            dispatch.assert_not_called()
         row = ImageGenerationQueue.query.filter_by(job_id=jid).one()
+        barrier = queue_manager.get_comfyui_stalled_barrier()
+        assert row.status == 'stalled'
+        assert row.comfyui_prompt_id == 'prompt-1'
+        assert barrier and barrier['kind'] == 'prompt'
+        assert barrier['job_id'] == jid and barrier['prompt_id'] == 'prompt-1'
+
+
+def test_deterministic_submit_refusal_finishes_reentrant_cancel(app):
+    """A local refusal never submitted a remote prompt, so an overlapping
+    cancellation must terminalize instead of blocking the whole queue."""
+    from app.job_queue import _ComfySubmitRejected, queue_manager
+    from app.models import ImageGenerationQueue
+
+    with app.app_context():
+        job_id = queue_manager.add_job(workflow_data={'1': {}})
+
+        def reject_after_cancel(_workflow, client_id):
+            assert queue_manager.cancel_job(client_id) is False
+            raise _ComfySubmitRejected('workflow rejected before HTTP submit')
+
+        with patch('app.job_queue._submit', side_effect=reject_after_cancel),              patch('app.job_queue._dispatch_completion') as dispatch:
+            assert queue_manager.process_one() is True
+
+        row = ImageGenerationQueue.query.filter_by(job_id=job_id).one()
         assert row.status == 'cancelled'
+        dispatch.assert_called_once()
+        assert dispatch.call_args.args[1:] == (None, True)
+        assert queue_manager.has_comfyui_work() is False
 
 
 def test_dispatch_completion_crash_marks_linked_row_failed(app):
@@ -220,40 +297,17 @@ def test_cancel_already_completed_job_returns_false(app):
         assert queue_manager.cancel_job(jid) is False
 
 
-def test_boot_recovery_fails_stuck_jobs_and_dispatches(app):
-    """Rows stuck in processing/sent_to_comfy past the timeout must be marked
-    failed and dispatched with failed=True at boot."""
-    from datetime import datetime, timedelta
+def test_boot_recovery_stalls_known_prompt_without_callback(app):
+    """Restart recovery preserves an exact remote prompt even when it is old:
+    it must not fail the job or delete staged inputs through a callback."""
     from app.job_queue import queue_manager
     from app.models import ImageGenerationQueue
     from app.extensions import db
-    done = {}
     with app.app_context():
         jid = queue_manager.add_job(workflow_data={'1': {}},
                                     metadata={'model_name': 'klein_edit_dataset'})
         row = ImageGenerationQueue.query.filter_by(job_id=jid).one()
-        row.update_status('sent_to_comfy')
-        row.last_heartbeat = datetime.utcnow() - timedelta(minutes=11)
-        db.session.commit()
-
-        queue_manager.init_app(app)
-        with patch('app.job_queue._dispatch_completion',
-                   side_effect=lambda job, fn, failed: done.update(fn=fn, failed=failed)):
-            queue_manager._recover_stuck_jobs()
-
-        row = ImageGenerationQueue.query.filter_by(job_id=jid).one()
-        assert row.status == 'failed'
-        assert done == {'fn': None, 'failed': True}
-
-
-def test_boot_recovery_leaves_fresh_jobs_alone(app):
-    from app.job_queue import queue_manager
-    from app.models import ImageGenerationQueue
-    with app.app_context():
-        jid = queue_manager.add_job(workflow_data={'1': {}})
-        row = ImageGenerationQueue.query.filter_by(job_id=jid).one()
-        row.update_status('processing')  # fresh heartbeat, not stuck
-        from app.extensions import db
+        row.update_status('sent_to_comfy', comfyui_prompt_id='boot-known')
         db.session.commit()
 
         queue_manager.init_app(app)
@@ -262,8 +316,36 @@ def test_boot_recovery_leaves_fresh_jobs_alone(app):
             dispatch.assert_not_called()
 
         row = ImageGenerationQueue.query.filter_by(job_id=jid).one()
-        assert row.status == 'processing'
+        barrier = queue_manager.get_comfyui_stalled_barrier()
+        assert row.status == 'stalled'
+        assert row.comfyui_prompt_id == 'boot-known'
+        assert barrier and barrier['kind'] == 'prompt'
+        assert barrier['job_id'] == jid and barrier['prompt_id'] == 'boot-known'
 
+
+def test_boot_recovery_stalls_fresh_unknown_submit_without_callback(app):
+    """Every active row is uncertain after a process restart, including a
+    fresh processing row whose `/prompt` result was never durably mapped."""
+    from app.job_queue import queue_manager
+    from app.models import ImageGenerationQueue
+    from app.extensions import db
+    with app.app_context():
+        jid = queue_manager.add_job(workflow_data={'1': {}})
+        row = ImageGenerationQueue.query.filter_by(job_id=jid).one()
+        row.update_status('processing')
+        db.session.commit()
+
+        queue_manager.init_app(app)
+        with patch('app.job_queue._dispatch_completion') as dispatch:
+            queue_manager._recover_stuck_jobs()
+            dispatch.assert_not_called()
+
+        row = ImageGenerationQueue.query.filter_by(job_id=jid).one()
+        barrier = queue_manager.get_comfyui_stalled_barrier()
+        assert row.status == 'stalled'
+        assert row.comfyui_prompt_id is None
+        assert barrier and barrier['kind'] == 'unknown_submit'
+        assert barrier['job_id'] == jid and barrier['prompt_id'] is None
 
 def test_start_stop_idempotent_and_clean(app):
     """start() must be safe to call twice and stop() must leave no thread running."""
@@ -345,7 +427,7 @@ def test_poll_outputs_skips_temp_images_returns_output_type(app):
         }
     }
     with app.app_context():
-        with patch('app.utils.comfyui.get_comfyui_history', return_value=history):
+        with patch('app.utils.comfyui.get_comfyui_history_probe', return_value=_ready_history(history)):
             filename, failed = _poll_outputs('prompt-1', timeout=1)
     assert (filename, failed) == ('final.png', False)
 
@@ -354,7 +436,7 @@ def test_poll_outputs_fails_fast_on_comfyui_error_status(app):
     from app.job_queue import _poll_outputs
     history = {'prompt-1': {'outputs': {}, 'status': {'status_str': 'error', 'completed': True}}}
     with app.app_context():
-        with patch('app.utils.comfyui.get_comfyui_history', return_value=history):
+        with patch('app.utils.comfyui.get_comfyui_history_probe', return_value=_ready_history(history)):
             filename, failed = _poll_outputs('prompt-1', timeout=1)
     assert (filename, failed) == (None, True)
 
@@ -363,31 +445,63 @@ def test_poll_outputs_completed_with_no_outputs_fails(app):
     from app.job_queue import _poll_outputs
     history = {'prompt-1': {'outputs': {}, 'status': {'status_str': 'success', 'completed': True}}}
     with app.app_context():
-        with patch('app.utils.comfyui.get_comfyui_history', return_value=history):
+        with patch('app.utils.comfyui.get_comfyui_history_probe', return_value=_ready_history(history)):
             filename, failed = _poll_outputs('prompt-1', timeout=1)
     assert (filename, failed) == (None, True)
 
 
-def test_poll_outputs_all_temp_images_keeps_polling_then_times_out(app):
-    """If every image found is still 'temp' (no real SaveImage output yet) and
-    the job hasn't reported completed/error, polling must continue and only
-    fail once the timeout elapses — never mistake a temp image for the result."""
-    from app.job_queue import _poll_outputs
-    history = {'prompt-1': {'outputs': {'9': {'images': [{'filename': 'p.png', 'type': 'temp'}]}},
-                            'status': {}}}
+def test_poll_outputs_nonterminal_timeout_stalls_exact_prompt(app):
+    """A healthy but non-terminal history at deadline is ownership uncertainty,
+    not a failed generation: persist an exact barrier and return POLL_STALLED."""
+    from app.job_queue import POLL_STALLED, _poll_outputs, queue_manager
+    from app.models import ImageGenerationQueue
+    from app.extensions import db
+    history = {'prompt-timeout': {'outputs': {'9': {'images': [
+        {'filename': 'p.png', 'type': 'temp'}]}}, 'status': {}}}
     with app.app_context():
-        with patch('app.utils.comfyui.get_comfyui_history', return_value=history), \
+        jid = queue_manager.add_job(workflow_data={'1': {}})
+        row = ImageGenerationQueue.query.filter_by(job_id=jid).one()
+        row.update_status('sent_to_comfy', comfyui_prompt_id='prompt-timeout')
+        db.session.commit()
+        with patch('app.utils.comfyui.get_comfyui_history_probe',
+                   return_value=_ready_history(history)), \
              patch('app.job_queue.POLL_INTERVAL_SECONDS', 0.01):
-            filename, failed = _poll_outputs('prompt-1', timeout=0.05)
-    assert (filename, failed) == (None, True)
+            assert _poll_outputs('prompt-timeout', timeout=0.05) == (None, POLL_STALLED)
+        row = ImageGenerationQueue.query.filter_by(job_id=jid).one()
+        barrier = queue_manager.get_comfyui_stalled_barrier()
+        assert row.status == 'stalled'
+        assert barrier and barrier['prompt_id'] == 'prompt-timeout'
 
 
-def test_cancel_during_poll_exits_fast_and_interrupts_exact_prompt(app):
-    """Stop must wake the history poll immediately and request a targeted
-    ComfyUI cancellation instead of waiting for the next 2-second tick/timeout."""
+def test_poll_outputs_unhealthy_deadline_stalls_without_terminalizing(app):
+    """An unhealthy history response, even with a short timeout, must retain
+    the exact prompt and never turn into a normal failed poll result."""
+    from app.job_queue import POLL_STALLED, _poll_outputs, queue_manager
+    from app.models import ImageGenerationQueue
+    from app.extensions import db
+    from app.utils.comfyui import ComfyHistoryHealth, ComfyHistoryProbe
+    with app.app_context():
+        jid = queue_manager.add_job(workflow_data={'1': {}})
+        row = ImageGenerationQueue.query.filter_by(job_id=jid).one()
+        row.update_status('sent_to_comfy', comfyui_prompt_id='prompt-unhealthy')
+        db.session.commit()
+        probe = ComfyHistoryProbe(ComfyHistoryHealth.UNHEALTHY,
+                                  detail='connection reset')
+        with patch('app.utils.comfyui.get_comfyui_history_probe', return_value=probe):
+            assert _poll_outputs('prompt-unhealthy', timeout=0) == (None, POLL_STALLED)
+        row = ImageGenerationQueue.query.filter_by(job_id=jid).one()
+        barrier = queue_manager.get_comfyui_stalled_barrier()
+        assert row.status == 'stalled'
+        assert barrier and barrier['prompt_id'] == 'prompt-unhealthy'
+
+def test_cancel_during_poll_exits_fast_and_cancels_exact_prompt(app):
+    """Stop wakes the history poll after the exact prompt is durably cancelled;
+    it must never issue a global `/interrupt`."""
     from app.job_queue import queue_manager, _poll_outputs
     from app.models import ImageGenerationQueue
     from app.extensions import db
+    from app.utils.comfyui import (ComfyHistoryHealth, ComfyHistoryProbe,
+                                   ComfyPromptState)
     with app.app_context():
         jid = queue_manager.add_job(workflow_data={'1': {}})
         row = ImageGenerationQueue.query.filter_by(job_id=jid).one()
@@ -400,19 +514,21 @@ def test_cancel_during_poll_exits_fast_and_interrupts_exact_prompt(app):
             nonlocal history_calls
             history_calls += 1
             assert queue_manager.cancel_job(jid) is True
-            return {}
+            return ComfyHistoryProbe(ComfyHistoryHealth.NOT_READY)
 
         started = time.monotonic()
-        with patch('app.utils.comfyui.get_comfyui_history', side_effect=cancel_while_polling), \
-             patch('app.utils.comfyui.cancel_comfyui_prompt', return_value=True) as interrupt, \
+        with patch('app.utils.comfyui.get_comfyui_history_probe',
+                   side_effect=cancel_while_polling), \
+             patch('app.utils.comfyui.cancel_comfyui_prompt_state',
+                   return_value=ComfyPromptState.DELETED) as cancel_exact, \
+             patch('app.utils.comfyui.comfyui_prompt_is_absent', return_value=True), \
              patch('app.job_queue.POLL_INTERVAL_SECONDS', 30):
             assert _poll_outputs('prompt-cancel', timeout=60) == (None, True)
 
         assert time.monotonic() - started < 1
         assert history_calls == 1
-        interrupt.assert_called_once_with('prompt-cancel', jid)
+        cancel_exact.assert_called_once_with('prompt-cancel', jid)
         assert ImageGenerationQueue.query.filter_by(job_id=jid).one().status == 'cancelled'
-
 
 def test_concurrent_expired_delete_guard(app):
     """_get_system_state on an expired row must survive losing a delete race:
@@ -508,7 +624,7 @@ def test_poll_outputs_stashes_execution_error_on_job_row(app):
         row.comfyui_prompt_id = 'prompt-err'
         from app.extensions import db
         db.session.commit()
-        with patch('app.utils.comfyui.get_comfyui_history', return_value=history):
+        with patch('app.utils.comfyui.get_comfyui_history_probe', return_value=_ready_history(history)):
             filename, failed = _poll_outputs('prompt-err', timeout=1)
         assert (filename, failed) == (None, True)   # 2-tuple contract unchanged
         row = ImageGenerationQueue.query.filter_by(job_id=jid).one()

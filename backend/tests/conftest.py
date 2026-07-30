@@ -71,7 +71,9 @@ def _no_live_comfyui_vram_release(monkeypatch):
 
     Tests that are ABOUT this call (test_vision_features) monkeypatch it
     themselves; a later setattr wins over this one, so they are unaffected."""
-    monkeypatch.setattr('app.utils.comfyui.free_comfyui_vram', lambda *a, **k: True)
+    from app.utils.comfyui import ComfyVramFreeVerdict
+    monkeypatch.setattr('app.utils.comfyui.free_comfyui_vram',
+                        lambda *a, **k: ComfyVramFreeVerdict.FREED)
 
 
 @pytest.fixture(autouse=True)
@@ -103,13 +105,14 @@ def _reset_inmemory_registries():
     Both did, before this line existed."""
     from app.services import bank_jobs, bank_undo, clip_text_encoder
     from app.services import dataset_activity
-    from app.services import image_bank_service, vision_keepalive
+    from app.services import image_bank_service, ollama_gpu_fence, vision_keepalive
     dataset_activity.reset()
     bank_jobs.reset()
     bank_undo.reset()
     image_bank_service.reset_folder_sync()
     image_bank_service.reset_score_memo()
     vision_keepalive.forget_lease()
+    ollama_gpu_fence.reset_for_tests()
     clip_text_encoder.forget_memory_cache()
     yield
     dataset_activity.reset()
@@ -118,6 +121,7 @@ def _reset_inmemory_registries():
     image_bank_service.reset_folder_sync()
     image_bank_service.reset_score_memo()
     vision_keepalive.forget_lease()
+    ollama_gpu_fence.reset_for_tests()
     clip_text_encoder.forget_memory_cache()
     clip_text_encoder.release()
 

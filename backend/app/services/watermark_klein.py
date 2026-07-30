@@ -431,12 +431,19 @@ def _wait_for_job(job_id, timeout):
 
 
 def _run_klein_job(user_id, crop_img, *, seed, steps=KLEIN_STEPS,
-                   denoise=KLEIN_DENOISE, timeout=KLEIN_TIMEOUT):
+                   denoise=KLEIN_DENOISE, timeout=KLEIN_TIMEOUT, klein_model=None):
     """Enqueue one full-edit refine job on the PRE-FILLED `crop_img` and return
     (filled_crop_image, None) or (None, error). The crop must already be watermark-free —
     it becomes the KSampler latent AND the ReferenceLatent (no SetLatentNoiseMask). Isolated
     seam so tests can mock the GPU round-trip. Raises KleinModelsMissing if a required asset
-    vanished between preflight and here (so the route can 409 + auto-download)."""
+    vanished between preflight and here (so the route can 409 + auto-download).
+
+    `klein_model`: the bare file name this pass must run on — the DATASET's stored
+    pick when the images belong to one. None keeps the historical auto-resolution,
+    which is what a dataset that never chose and every bank (no dataset, nothing to
+    inherit) get. A named model that has left the disk raises KleinModelGone rather
+    than repainting on a neighbour: this lane overwrites the user's file in place,
+    so a silent swap is not even reversible by regenerating."""
     workflow = load_workflow_local(str(KLEIN_INPAINT_WORKFLOW_PATH))
     if not workflow:
         return None, {'kind': 'failed', 'detail': 'failed to load klein_inpaint workflow'}
@@ -444,7 +451,7 @@ def _run_klein_job(user_id, crop_img, *, seed, steps=KLEIN_STEPS,
         if node not in workflow:
             return None, {'kind': 'failed',
                           'detail': f'workflow node {node} missing — klein_inpaint.json changed'}
-    unet = keh.resolve_klein_unet()
+    unet = keh.unet_for_job(klein_model)
     vae = keh.resolve_klein_vae()
     te = keh.resolve_klein_text_encoder()
     missing = keh.klein_missing_assets()
@@ -504,14 +511,17 @@ def _run_klein_job(user_id, crop_img, *, seed, steps=KLEIN_STEPS,
 
 
 def inpaint_watermark_klein(user_id, image_path, boxes, *, seed=None, device='cpu',
-                            timeout=KLEIN_TIMEOUT) -> tuple[bool, dict | None]:
+                            timeout=KLEIN_TIMEOUT,
+                            klein_model=None) -> tuple[bool, dict | None]:
     """Remove the watermark(s) at normalized `boxes` from `image_path` via PREFILL + Klein
     full-edit refine + pixel-space composite, overwriting the file in place (WEBP q92, same
     as LaMa; the caller preserves the .orig). Returns the `(ok, error)` tuple contract:
     `error` is None on success, else {'kind', 'detail'} (kind 'unavailable' when Klein or the
     prefill engine isn't ready, 'failed' otherwise). Preserves every pixel outside the
     mask+feather. `device` selects the prefill LaMa device ('cpu' by default so the pending
-    ComfyUI GPU job runs alone; Klein itself always owns the GPU via ComfyUI)."""
+    ComfyUI GPU job runs alone; Klein itself always owns the GPU via ComfyUI).
+    `klein_model`: see _run_klein_job — the dataset's pick, or None (auto) when the
+    caller has no dataset to inherit from."""
     if not is_available():
         return False, {'kind': 'unavailable',
                        'detail': 'Klein inpaint is not ready (ComfyUI unreachable or models missing)'}
@@ -540,7 +550,8 @@ def inpaint_watermark_klein(user_id, image_path, boxes, *, seed=None, device='cp
         return False, err
 
     seed = random.randint(0, 2 ** 63 - 1) if seed is None else int(seed)
-    filled_scaled, err = _run_klein_job(user_id, prefilled, seed=seed, timeout=timeout)
+    filled_scaled, err = _run_klein_job(user_id, prefilled, seed=seed, timeout=timeout,
+                                        klein_model=klein_model)
     if err:
         return False, err
     filled_crop = (filled_scaled if filled_scaled.size == (cw, ch)

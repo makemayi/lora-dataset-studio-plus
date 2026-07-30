@@ -20,6 +20,7 @@ import { clearScraperScanState, loadScraperScanState, saveScraperScanState } fro
 import { HelpBadge } from '../../help/HelpMode';
 import PexelsAttribution from './PexelsAttribution';
 import SettingsLink from '../common/SettingsLink';
+import KleinModelSetting from '../shared/KleinModelSetting';
 import { localEngineUnavailableReason } from '../../utils/localEngineReason';
 import {
   buildPexelsSearchUrl,
@@ -479,6 +480,14 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
           </span>
         </span>
       </label>
+      )}
+      {/* A rescued image lands in the SAME dataset as the improved ones, so it runs
+          on the same Klein model — said here rather than discovered from the result.
+          Only once the option is on (an off checkbox launches nothing), and OUTSIDE
+          the <label> above: its picker is a control of its own, and inside a label
+          every click on it would toggle the checkbox. */}
+      {!toBank && rescueSmall && (
+        <KleinModelSetting datasetId={datasetId} className="px-2.5" />
       )}
 
       {items.length > 0 && (() => {

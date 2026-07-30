@@ -333,15 +333,25 @@ def test_a_model_openai_will_not_edit_with_is_fatal(app, monkeypatch):
 def test_a_moderation_400_is_still_a_plain_row_failure(app, monkeypatch):
     """The mirror invariant, and the non-regression that matters most: a refused
     PROMPT must not be dressed up as a model problem, and must not stop a batch
-    the rest of which would have rendered."""
+    the rest of which would have rendered.
+
+    Rewritten on purpose: this used to assert a silent `None`, which the fan-out
+    worded as "empty response", i.e. as if the app had come back empty-handed for
+    unknown reasons. OpenAI named the cause in that body, so the engine now says
+    it (ChatGPTImageRefused). What must NOT change is fatality — a refusal still
+    costs one row, never the run. See test_chatgpt_refusal.py."""
     monkeypatch.setenv('OPENAI_API_KEY', OPENAI_KEY)
     from app.services import chatgpt_image
+    from app.services.engine_errors import EngineFatal
     with app.app_context():
         with patch('app.services.chatgpt_image.requests.post',
                    return_value=_resp(400, _openai_err(
                        'Your request was rejected as a result of our safety system',
                        code='moderation_blocked'))):
-            assert chatgpt_image.generate_variation(b'r', 'p') is None
+            with pytest.raises(chatgpt_image.ChatGPTImageRefused) as e:
+                chatgpt_image.generate_variation(b'r', 'p')
+    assert 'safety system refused' in str(e.value)
+    assert not isinstance(e.value, EngineFatal)         # one row, not the batch
 
 
 def test_a_missing_key_says_so_instead_of_looking_like_a_refusal(app, monkeypatch):

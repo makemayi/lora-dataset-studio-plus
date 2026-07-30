@@ -118,6 +118,273 @@ def test_reimprove_reruns_the_pass_from_the_parent_with_todays_settings(app, mon
         assert parent.status == 'keep'
 
 
+def test_reimprove_kept_candidate_restores_parent_as_fallback_after_late_failure(
+        app, monkeypatch):
+    """A re-run replaces a selected result with an in-flight row.
+
+    Its parent must cover that gap, including when the new ComfyUI job fails,
+    instead of leaving no kept image for the source shot.
+    """
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+    from app.services import klein_edit_helper as keh
+
+    queued = []
+    _stub_klein(monkeypatch, keh, queued)
+    monkeypatch.setattr(svc.trash, 'send_to_trash', lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(svc, '_sync_generate_activity', lambda _dataset_id: None)
+
+    with app.app_context():
+        ds, parent, candidate = _improved_pair(svc, FaceDatasetImage, LOCAL_USER)
+        parent.status = 'pending'
+        candidate.status = 'keep'
+        svc.db.session.commit()
+
+        result = svc.reimprove_image(LOCAL_USER, candidate.id)
+
+        svc.db.session.expire_all()
+        assert svc.db.session.get(FaceDatasetImage, candidate.id).status == 'pending'
+        assert svc.db.session.get(FaceDatasetImage, candidate.id).filename is None
+        assert svc.db.session.get(FaceDatasetImage, parent.id).status == 'keep'
+
+        svc.link_completed_dataset_image(result['job_id'], 'rerun-failed.png', failed=True)
+        svc.db.session.expire_all()
+        assert svc.db.session.get(FaceDatasetImage, candidate.id).status == 'failed'
+        assert svc.db.session.get(FaceDatasetImage, parent.id).status == 'keep'
+
+
+def test_reimprove_trash_failure_restores_candidate_and_parent_states(app, monkeypatch):
+    from app import job_queue
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+    from app.services import klein_edit_helper as keh
+
+    queued = []
+    _stub_klein(monkeypatch, keh, queued)
+    monkeypatch.setattr(
+        svc.trash, 'send_to_trash',
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError('Trash unavailable')))
+    monkeypatch.setattr(job_queue.queue_manager, 'cancel_job', lambda *_args, **_kwargs: None)
+
+    with app.app_context():
+        ds, parent, candidate = _improved_pair(svc, FaceDatasetImage, LOCAL_USER)
+        parent.status = 'pending'
+        candidate.status = 'keep'
+        svc.db.session.commit()
+        candidate_id, parent_id = candidate.id, parent.id
+
+        with pytest.raises(OSError, match='Trash unavailable'):
+            svc.reimprove_image(LOCAL_USER, candidate_id)
+
+        svc.db.session.expire_all()
+        restored_candidate = svc.db.session.get(FaceDatasetImage, candidate_id)
+        assert restored_candidate.status == 'keep'
+        assert restored_candidate.filename == 'improved.png'
+        assert svc.db.session.get(FaceDatasetImage, parent_id).status == 'pending'
+
+
+def test_reimprove_never_overwrites_a_candidate_changed_during_enqueue(app, monkeypatch):
+    """A status click racing the queue hand-off wins over the re-run request."""
+    from sqlalchemy import update
+
+    from app import job_queue
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+    from app.services import klein_edit_helper as keh
+
+    cancelled, trashed = [], []
+    monkeypatch.setattr(keh, 'klein_missing_assets', lambda: [])
+    monkeypatch.setattr(keh, 'klein_missing_nodes', lambda: [])
+    monkeypatch.setattr(job_queue.queue_manager, 'cancel_job',
+                        lambda *args, **_kwargs: cancelled.append(args))
+    monkeypatch.setattr(svc.trash, 'send_to_trash',
+                        lambda path, context=None: trashed.append(path))
+
+    with app.app_context():
+        ds, parent, candidate = _improved_pair(svc, FaceDatasetImage, LOCAL_USER)
+        parent.status = 'pending'
+        candidate.status = 'keep'
+        svc.db.session.commit()
+        candidate_id, parent_id = candidate.id, parent.id
+
+        def enqueue(**_kwargs):
+            # Simulate a second request committing a Reject while this request
+            # is still waiting for ComfyUI to accept the new job.
+            svc.db.session.execute(
+                update(FaceDatasetImage)
+                .where(FaceDatasetImage.id == candidate_id)
+                .values(status='reject')
+                .execution_options(synchronize_session=False))
+            svc.db.session.commit()
+            return 'race-job'
+
+        monkeypatch.setattr(keh, 'enqueue_klein_edit', enqueue)
+        with pytest.raises(RuntimeError, match='changed while it was being re-queued'):
+            svc.reimprove_image(LOCAL_USER, candidate_id)
+
+        svc.db.session.expire_all()
+        assert svc.db.session.get(FaceDatasetImage, candidate_id).status == 'reject'
+        assert svc.db.session.get(FaceDatasetImage, parent_id).status == 'pending'
+        assert trashed == []
+        assert cancelled and cancelled[0][0] == 'race-job'
+
+
+@pytest.mark.parametrize('old_caption', [None, 'caption before re-run'])
+def test_reimprove_preserves_a_caption_edited_during_enqueue(app, monkeypatch, old_caption):
+    from sqlalchemy import update
+
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+    from app.services import klein_edit_helper as keh
+
+    monkeypatch.setattr(keh, 'klein_missing_assets', lambda: [])
+    monkeypatch.setattr(keh, 'klein_missing_nodes', lambda: [])
+    monkeypatch.setattr(svc.trash, 'send_to_trash', lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(svc, '_sync_generate_activity', lambda _dataset_id: None)
+
+    with app.app_context():
+        ds, parent, candidate = _improved_pair(svc, FaceDatasetImage, LOCAL_USER)
+        candidate.caption = old_caption
+        svc.db.session.commit()
+        candidate_id = candidate.id
+
+        def enqueue(**_kwargs):
+            svc.db.session.execute(
+                update(FaceDatasetImage)
+                .where(FaceDatasetImage.id == candidate_id)
+                .values(caption='caption edited while enqueueing')
+                .execution_options(synchronize_session=False))
+            svc.db.session.commit()
+            return 'caption-race-job'
+
+        monkeypatch.setattr(keh, 'enqueue_klein_edit', enqueue)
+        result = svc.reimprove_image(LOCAL_USER, candidate_id)
+
+        svc.db.session.expire_all()
+        row = svc.db.session.get(FaceDatasetImage, candidate_id)
+        assert row.status == 'pending'
+        assert row.job_id == result['job_id'] == 'caption-race-job'
+        assert row.caption == 'caption edited while enqueueing'
+
+
+def test_reimprove_trash_rollback_preserves_a_concurrent_candidate_decision(
+        app, monkeypatch):
+    from sqlalchemy import update
+
+    from app import job_queue
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+    from app.services import klein_edit_helper as keh
+
+    queued = []
+    _stub_klein(monkeypatch, keh, queued)
+    monkeypatch.setattr(job_queue.queue_manager, 'cancel_job', lambda *_args, **_kwargs: None)
+
+    with app.app_context():
+        ds, parent, candidate = _improved_pair(svc, FaceDatasetImage, LOCAL_USER)
+        parent.status = 'pending'
+        candidate.status = 'keep'
+        svc.db.session.commit()
+        candidate_id, parent_id = candidate.id, parent.id
+
+        def trash_then_user_rejects(*_args, **_kwargs):
+            svc.db.session.execute(
+                update(FaceDatasetImage)
+                .where(FaceDatasetImage.id == candidate_id)
+                .values(status='reject')
+                .execution_options(synchronize_session=False))
+            svc.db.session.commit()
+            raise OSError('Trash unavailable')
+
+        monkeypatch.setattr(svc.trash, 'send_to_trash', trash_then_user_rejects)
+        with pytest.raises(OSError, match='Trash unavailable'):
+            svc.reimprove_image(LOCAL_USER, candidate_id)
+
+        svc.db.session.expire_all()
+        assert svc.db.session.get(FaceDatasetImage, candidate_id).status == 'reject'
+        assert svc.db.session.get(FaceDatasetImage, parent_id).status == 'keep'
+
+
+def test_reimprove_trash_rollback_preserves_a_caption_edited_during_trash(
+        app, monkeypatch):
+    from sqlalchemy import update
+
+    from app import job_queue
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+    from app.services import klein_edit_helper as keh
+
+    queued = []
+    _stub_klein(monkeypatch, keh, queued)
+    monkeypatch.setattr(job_queue.queue_manager, 'cancel_job', lambda *_args, **_kwargs: None)
+
+    with app.app_context():
+        ds, parent, candidate = _improved_pair(svc, FaceDatasetImage, LOCAL_USER)
+        parent.status = 'pending'
+        candidate.status = 'keep'
+        svc.db.session.commit()
+        candidate_id, parent_id = candidate.id, parent.id
+
+        def trash_then_caption_edit(*_args, **_kwargs):
+            svc.db.session.execute(
+                update(FaceDatasetImage)
+                .where(FaceDatasetImage.id == candidate_id)
+                .values(caption='caption edited while moving old result')
+                .execution_options(synchronize_session=False))
+            svc.db.session.commit()
+            raise OSError('Trash unavailable')
+
+        monkeypatch.setattr(svc.trash, 'send_to_trash', trash_then_caption_edit)
+        with pytest.raises(OSError, match='Trash unavailable'):
+            svc.reimprove_image(LOCAL_USER, candidate_id)
+
+        svc.db.session.expire_all()
+        row = svc.db.session.get(FaceDatasetImage, candidate_id)
+        assert row.status == 'keep'
+        assert row.filename == 'improved.png'
+        assert row.caption == 'caption edited while moving old result'
+        assert svc.db.session.get(FaceDatasetImage, parent_id).status == 'pending'
+
+
+def test_reimprove_trash_rollback_restores_an_unchanged_blank_caption(app, monkeypatch):
+    from app import job_queue
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+    from app.services import klein_edit_helper as keh
+
+    queued = []
+    _stub_klein(monkeypatch, keh, queued)
+    monkeypatch.setattr(job_queue.queue_manager, 'cancel_job', lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        svc.trash, 'send_to_trash',
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError('Trash unavailable')))
+
+    with app.app_context():
+        ds, parent, candidate = _improved_pair(svc, FaceDatasetImage, LOCAL_USER)
+        parent.status = 'pending'
+        candidate.status = 'keep'
+        candidate.caption = None
+        svc.db.session.commit()
+        candidate_id, parent_id = candidate.id, parent.id
+
+        with pytest.raises(OSError, match='Trash unavailable'):
+            svc.reimprove_image(LOCAL_USER, candidate_id)
+
+        svc.db.session.expire_all()
+        row = svc.db.session.get(FaceDatasetImage, candidate_id)
+        assert row.status == 'keep'
+        assert row.filename == 'improved.png'
+        assert row.caption is None
+        assert svc.db.session.get(FaceDatasetImage, parent_id).status == 'pending'
+
+
 def test_generic_regenerate_still_refuses_an_improvement(app, monkeypatch):
     """The original guard must survive: the generic route would restart from the
     dataset reference and make an unrelated image. It stays closed, and now there

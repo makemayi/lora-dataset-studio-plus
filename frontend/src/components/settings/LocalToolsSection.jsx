@@ -3,7 +3,7 @@ import { INPUT_CLASS, Card, TextField, TestResult, TestButton, SecretField } fro
 import { postJson, apiFetch } from '../../api/fetchClient'
 import {
   COMFY_FOLDER_FIELDS, comfyFolderField, folderPlaceholder, folderEffective,
-  folderWarning, detectedSuggestion, foldersQuery, hasAnyOverride,
+  folderEffectiveNote, folderWarning, detectedSuggestion, foldersQuery, hasAnyOverride,
 } from './comfyFolders'
 import ResetToDefault from './ResetToDefault'
 import { defaultValueAt } from './settingDefaults.js'
@@ -167,6 +167,7 @@ function ComfyFolderRow({ comfy, setField, state, fieldKey, id }) {
       {folderEffective(info) && (
         <p className="mt-1 break-all text-xs text-content-muted">
           Currently using <code className="text-content">{folderEffective(info)}</code>
+          {folderEffectiveNote(info) && <> ({folderEffectiveNote(info)})</>}
         </p>
       )}
       {suggestion && (

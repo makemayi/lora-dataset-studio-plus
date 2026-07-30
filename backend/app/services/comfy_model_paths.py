@@ -281,6 +281,48 @@ def search_roots(folder_type: str) -> list[str]:
     return roots
 
 
+# Folder types for which the app has a dedicated "put it exactly here" override.
+# Only `loras` today: it is the only type the app WRITES into (deployed LoRAs).
+_WRITE_OVERRIDE_KEYS = {'loras': 'comfyui.loras_dir'}
+
+
+def write_root(folder_type: str) -> str | None:
+    """The ONE root new files are WRITTEN to for a folder type. ``None`` when
+    ComfyUI is unconfigured.
+
+    Reading may span every root; writing has to pick one, and picking it silently
+    is what shipped GitHub #25 (Geekswordsman): deploys and the "open LoRA folder"
+    button used ``<base>/models/loras`` even when the yaml declared the real one.
+    Priority, highest first:
+
+      1. the explicit ``comfyui.loras_dir`` override — someone who filled that
+         field said exactly where their files go, and no yaml may take it back;
+      2. ``search_roots()[0]`` — the root ComfyUI ITSELF treats as primary, which
+         is a yaml root only when that profile carries ``is_default: true``
+         (that flag is precisely how ComfyUI is told "look here first");
+      3. nothing else — with no yaml this IS ``<base>/models/loras``, so installs
+         without an ``extra_model_paths.yaml`` are unchanged.
+
+    Consequence worth stating out loud: a yaml root declared WITHOUT
+    ``is_default`` is a secondary location for ComfyUI, so it stays secondary
+    here too and deploys keep landing in ``<base>/models/loras``. Making a plain
+    extra root capture the writes would hijack the very common "also read my
+    A1111 folder" setup. Users who want the yaml root to receive files have two
+    levers, both already theirs: ``is_default: true``, or the loras override.
+    """
+    canon = _canon(folder_type)
+    key = _WRITE_OVERRIDE_KEYS.get(canon)
+    if key:
+        try:
+            explicit = (cfg.get(key) or '').strip()
+        except Exception:
+            explicit = ''
+        if explicit:
+            return os.path.normpath(explicit)
+    roots = search_roots(canon)
+    return roots[0] if roots else None
+
+
 def _recursive_models(root: str):
     """Yield ``(rel_name, abs_path)`` for every model file under ``root`` (os.walk,
     followlinks), mirroring folder_paths.recursive_search: ``rel_name`` is the path
@@ -292,6 +334,80 @@ def _recursive_models(root: str):
             if fn.lower().endswith(_MODEL_EXTENSIONS):
                 ab = os.path.join(dirpath, fn)
                 yield os.path.relpath(ab, root), ab
+
+
+def ci_resolve(root: str, rel: str):
+    """The real absolute path of ``root/rel`` with each component matched
+    case-INSENSITIVELY below ``root``, or None when no such entry exists.
+
+    ComfyUI on Windows is case-insensitive and stored model values carry whatever
+    casing the workflow template or the user's picker had at the time (``Z image\\``
+    vs the on-disk ``z image``). On a case-SENSITIVE filesystem — Linux, and every
+    cloud trainer — a plain join reads those as missing. Never escapes ``root``:
+    only components of ``rel`` are followed, one directory listing at a time.
+
+    (``lora_test_studio`` carries an identical private ``_ci_resolve``; this is the
+    shared home for it. Folding the two is a follow-up, not part of this fix.)"""
+    if not root or not os.path.isdir(root):
+        return None
+    cur = root
+    for part in str(rel).split(os.sep):
+        if not part or part == '.':
+            continue
+        nxt = os.path.join(cur, part)
+        if os.path.exists(nxt):
+            cur = nxt
+            continue
+        try:
+            match = next((e for e in os.listdir(cur) if e.lower() == part.lower()), None)
+        except OSError:
+            return None
+        if match is None:
+            return None
+        cur = os.path.join(cur, match)
+    return cur if os.path.exists(cur) else None
+
+
+def resolve_model_file(folder_type: str, ref: str):
+    """Absolute path of a model ``ref`` across ALL search roots of a folder type, in
+    ComfyUI's own priority order — or None. ``ref`` is a relative name (a loader
+    value, possibly carrying its own subfolder) or a bare basename.
+
+    Two phases, both walking ``search_roots`` in priority order so the answer is the
+    file a running ComfyUI would load — the point of the ordering. Training on a
+    twin of the file that generates, because two roots hold the same filename and we
+    picked the wrong one, is invisible until the results are wrong.
+      1. ``ref`` read as a path relative to each root (case-insensitively).
+      2. ``ref``'s BASENAME searched recursively under each root. This phase exists
+         because the checkpoint picker flattens names to a basename (the subfolder
+         is lost before the value is ever stored), so a subfoldered file can only be
+         found this way. Within one root the match is deterministic: the shortest
+         relative path, then alphabetical.
+
+    Absolute refs and ``..`` are refused outright: callers pass user-controlled
+    values and a resolver is not the place to widen what a path may reach.
+    ``None`` — never a bare-name fallback: a caller that cannot say WHICH file is
+    missing pushes the failure into a subprocess that has no idea what it was asked
+    for."""
+    ref = str(ref or '')
+    if not ref or os.path.isabs(ref) or '..' in ref.replace('\\', '/').split('/'):
+        return None
+    rel = ref.replace('\\', os.sep).replace('/', os.sep).strip(os.sep)
+    if not rel:
+        return None
+    roots = search_roots(folder_type)
+    for root in roots:
+        hit = ci_resolve(root, rel)
+        if hit and os.path.isfile(hit):
+            return hit
+    base = os.path.basename(rel).lower()
+    for root in roots:
+        found = sorted((r for r, _ab in _recursive_models(root)
+                        if os.path.basename(r).lower() == base),
+                       key=lambda r: (r.count(os.sep), r.lower()))
+        if found:
+            return os.path.join(root, found[0])
+    return None
 
 
 def list_models(folder_type: str) -> list[tuple[str, str]]:

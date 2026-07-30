@@ -60,14 +60,23 @@ def _resolve_merge(z_model: str) -> str | None:
     Windows (models/ symlinké vers un 2e DD, cas courant pour les gros modèles),
     ce qui levait `ValueError: Paths don't have the same drive` et cassait la
     conversion. realpath ne sert donc qu'à tester l'existence et à retourner le
-    chemin réel dont le sous-process a besoin."""
+    chemin réel dont le sous-process a besoin.
+
+    Les racines fouillées sont celles de ComfyUI lui-même — ``<base>/models/{unet,
+    diffusion_models}`` PLUS toute racine ``diffusion_models`` déclarée dans
+    ``extra_model_paths.yaml`` — dans l'ordre de priorité de ComfyUI (``is_default``
+    d'abord). Avant ce correctif, un merge Z-Image rangé sous une racine yaml était
+    tout simplement inconvertible : présent sur le disque, chargé par ComfyUI tous
+    les jours, et « base model not found on disk » ici. `unet` et `diffusion_models`
+    ne sont plus deux dossiers en dur mais le MÊME type canonique côté ComfyUI
+    (folder_paths.map_legacy), ce que ``search_roots`` applique déjà.
+
+    Sans yaml, les racines sont exactement les deux dossiers historiques, dans le
+    même ordre : la résolution est inchangée au bit près."""
     if not z_model or os.path.isabs(z_model) or '..' in z_model.replace('\\', '/'):
         return None
-    root = cfg.comfyui_dir('models')
-    if not root:
+    if not cfg.comfyui_dir('models'):
         return None
-    root_real = os.path.realpath(str(root))
-    root_key = os.path.normcase(os.path.normpath(root_real))
     # Chemin du SYSTÈME DE FICHIERS LOCAL, pas un widget ComfyUI : séparateur
     # os.sep, jamais un backslash en dur. Sous Linux, `os.path.join(root, 'unet',
     # 'z image\\x.safetensors')` n'échoue pas — il fabrique le nom d'un fichier
@@ -75,14 +84,30 @@ def _resolve_merge(z_model: str) -> str | None:
     # impossible » sans explication (famille du bug GitHub #21, 1Tomber).
     rel = local_model_path(z_model)
     base = os.path.basename(rel)
-    for sub in ('unet', 'diffusion_models'):
-        for cand in (os.path.join(root_real, sub, rel), os.path.join(root_real, sub, 'z image', base)):
+    from . import comfy_model_paths
+    roots = comfy_model_paths.search_roots('diffusion_models')
+    for root in roots:
+        root_real = os.path.realpath(str(root))
+        root_key = os.path.normcase(os.path.normpath(root_real))
+        for want in (rel, os.path.join('z image', base)):
+            cand = os.path.join(root_real, want)
             cand_key = os.path.normcase(os.path.normpath(cand))
             if os.path.commonpath([root_key, cand_key]) != root_key:
                 continue
             real = os.path.realpath(cand)
             if os.path.isfile(real):
                 return real
+    # Second passage, insensible à la casse : la valeur stockée porte la casse du
+    # template ou du picker ('Z image\\'), le disque porte la sienne ('z image').
+    # Windows ne fait pas la différence, Linux (et tout entraînement cloud) si.
+    for root in roots:
+        root_real = os.path.realpath(str(root))
+        for want in (rel, os.path.join('z image', base)):
+            hit = comfy_model_paths.ci_resolve(root_real, want)
+            if hit:
+                real = os.path.realpath(hit)
+                if os.path.isfile(real):
+                    return real
     return None
 
 

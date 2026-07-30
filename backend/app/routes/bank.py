@@ -77,10 +77,18 @@ def bank_from_dataset():
     """Reverse of promote: build a NEW bank from a dataset's kept images, under a
     name the user chooses. Copies the files so the two never share (curating one
     would otherwise mutate the other). 202 + background job, like the other passes."""
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return jsonify({'error': 'request body must be an object'}), 400
+    preserve_analysis = data.get('preserve_analysis', True)
+    if not isinstance(preserve_analysis, bool):
+        return jsonify({'error': 'preserve_analysis must be a boolean'}), 400
     try:
         bank_id = banks.start_dataset_import(_app(), LOCAL_USER,
-                                             data.get('dataset_id'), data.get('name'))
+                                             data.get('dataset_id'), data.get('name'),
+                                             preserve_analysis=preserve_analysis)
     except bank_jobs.BankJobBusy as e:
         return _busy(e)
     except ValueError as e:

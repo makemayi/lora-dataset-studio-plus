@@ -99,7 +99,7 @@ What OpenRouter does **not** change:
 - **Not less restricted.** OpenRouter forwards to the same upstream providers, so the same content policies apply. NSFW variations still run on a local engine only.
 - **No subscription lane.** OpenRouter is credit-based; there is no equivalent of the ChatGPT-plan option below.
 
-When a generation fails, the tile names the cause in OpenRouter's own words — no key saved, key rejected, out of credits, unknown model, rate-limited. The four causes that would fail every remaining image identically (no key, rejected key, no credits, unknown model) **stop the rest of the batch** instead of asking the same refused question once per image. The app never falls back to another engine behind your back: if you picked OpenRouter, only OpenRouter is billed.
+When a generation fails, the tile names the cause in OpenRouter's own words — no key saved, key rejected, out of credits, unknown model, rate-limited. The four causes that would fail every remaining image identically (no key, rejected key, no credits, unknown model) **stop the rest of the batch** instead of asking the same refused question once per image. The app never falls back to another engine behind your back: if you picked OpenRouter, only OpenRouter is billed. A moderation block arrives *inside* a successful response rather than as an error code, so it is read out of the body and shown with the reasons the provider gave — a refused image costs that row, not the run.
 
 ### ChatGPT subscription (experimental)
 
@@ -117,6 +117,8 @@ If you have a ChatGPT Plus/Pro plan, you can run the ChatGPT engine on your subs
 | `subscription` | Subscription only — never touch the API key. |
 
 Good to know: in subscription mode you get up to **5 reference images** per generation (versus 16 on the API), your plan's image cap applies, and when the quota runs out mid-batch the remaining rows fail with a clear message — **the app never silently switches to your paid API key**.
+
+**When a generation fails on this lane**, the tile names the cause rather than showing a blank "empty response": a network drop or timeout, an OpenAI outage, a plan quota, a connection that needs reconnecting, a refusal by OpenAI's safety system — and, because this lane is undocumented, the case that matters most for it: *OpenAI is no longer serving image generation on this ChatGPT subscription*. That last one stops the run and points at API-key mode, which is the only way back. No message suggests retrying: whether the same call would pass a second time is exactly what the app cannot know. If OpenAI answers without an image **and** without a reason, the tile says so instead of picking a cause.
 
 ### Engines
 
@@ -159,16 +161,18 @@ The engine card in the workspace names whichever of these is still missing, one 
 
 Settings:
 
-- **Reference grounding** → `krea.grounding_px`. Range `512`–`1536`, default **`1024`**. **The** dial of this engine: the resolution your reference is shown to the model's vision encoder at. **Lower** = it follows the shot description (more variety in pose, outfit and scene, looser likeness). **Higher** = it resembles the reference more closely, and starts copying the very pose and outfit you asked it to change. The node's own default is 768; 1024+ is recommended for people, and a character dataset is people.
+- **Reference grounding** → `krea.grounding_px`. Range `512`–`1536`, default **`512`**. **The** dial of this engine: the resolution your reference is shown to the model's vision encoder at. At the low end it follows the shot description (more variety in pose, outfit and scene, looser likeness); **higher** values favor reference likeness and can copy the very pose and outfit you asked it to change. **512 is the dataset-restaging balance**: it keeps the prompt and selected catalog card in charge while preserving identity. Raise it deliberately when keeping the reference more closely matters than changing its pose. This is Krea-only: it does not change ChatGPT, Gemini/Nano Banana, OpenRouter, or Klein.
 - **Reference grounding, per framing** → `krea.grounding_px_by_framing.{face,bust,body,back}`. Blank (default) for a framing = use the dial above for it — nothing changes until you touch this. The same pixel budget is not equally strong on every framing: on a face close-up the reference IS almost entirely face, so identity is already solid and a LOWER value there buys more expression/angle/background variety without losing it; on a full-body shot the face is a small fraction of the same reference, so a HIGHER value can help identity hold up where it is most likely to drift.
 - **Sampler steps** → `krea.steps`. Default **`10`**, the value the model's own reference workflow uses. More is slower and rarely better on this pipeline.
 - **Base model file** → `krea.base_model`. **This is the GENERATION setting only** — the checkpoint ComfyUI loads for Krea 2 Identity Edit. It has **nothing to do with LoRA training**, which never reads it: training pulls its base from Hugging Face and picks it from the **Krea 2 training base** dropdown in the training panel (**Raw**, the default and the official recommendation — you train on Raw and apply the LoRA on Turbo at inference). Nobody can accidentally train on Turbo by leaving this field alone. *(The naming confusion was raised by strouder, GitHub #19.)* Blank (default) = the app picks a Krea 2 **Turbo** then **Raw** build from your ComfyUI. Set it only if you own several. Checkpoints that merely carry "krea" in their name but are not Krea 2 bases are **skipped on purpose** — the identity LoRA renders pure noise on them, which looks like a broken app rather than a wrong file.
 - **Identity edit LoRA** → `krea.identity_lora`. Path relative to `models/loras`; if nothing is there under that name the app searches your LoRA folders for a `krea2_identity_edit` file, so a renamed download still works.
 - **Character LoRAs (optional, up to 5)** → `krea.character_loras`. A chain of your own trained character/person LoRAs (e.g. from ai-toolkit), applied IN ORDER after the identity edit LoRA above for extra likeness on top of Krea's baseline consistency. Each row is a `{file, strength}` pair (strength 0–1.5, default `0.8`); a blank row is simply skipped, so leaving all 5 rows empty (the default) is a complete no-op — the graph is byte-identical to before this setting existed. Unlike the identity edit LoRA there is no auto-detection: each names one specific file you trained, so a typo surfaces as ComfyUI's own "file not found" rather than silently using a guess. (Upgraded from an earlier single-slot `krea.character_lora` — an already-configured value migrates into row 1 automatically.)
 
+The pipeline's reference boost is an internal Krea calibration, not a second user-facing likeness slider; use **Reference grounding** for that trade-off.
+
 Two behaviours worth knowing before you build a dataset with it:
 
-- **The output keeps the reference's aspect ratio** (capped at 2 MP). The shot catalog's aspect overrides do **not** apply to this engine — the model was trained on same-size pairs and preservation degrades when the frame changes shape.
+- **The selected card's framing is honored.** Krea Fit v1.2 uses the selected catalog card's framing and aspect ratio (including its 1:1 / 3:4 shape) instead of copying the source photo's shape.
 - **Extra reference images are ignored.** Identity comes from the primary reference alone. Klein and the API engines still use your extra refs.
 
 Outfits and expressions are steered differently here than on the other engines: this model preserves anything it is not *positively* told to change, so the catalog's "a different outfit (not the one in the reference)" phrasing is rewritten at generation time into a concrete garment ("wearing a red knit sweater"), picked from the shot's own name — so outfits genuinely differ across the dataset while regenerating one shot reproduces its own.
@@ -207,7 +211,9 @@ Not in Settings — it lives on the **dataset**, in the 🖥️ *Klein tuning* b
 
 **The list is detected, never typed.** It comes from the same scan ComfyUI itself would do — `models/unet`, `models/diffusion_models`, every root declared in `extra_model_paths.yaml`, and a relocated models folder (`comfyui.models_dir`) — in a `klein`-named subfolder **or** loose at the root. The one real constraint is that the model must be *nameable* as Klein: either the file name or its folder name has to contain `klein`. See *Where the Klein model can live* in the README.
 
-**What it applies to:** the single ✨ improve, the 🔄✨ re-run, the whole improve batch, and Klein generation (variations and regenerations) for that dataset.
+**What it applies to:** every piece of Klein work that dataset starts — the single ✨ improve, the 🔄✨ re-run, the whole improve batch, Klein generation (variations and regenerations), the **reference edit** on the Klein engine, the **rescue of scraped images under 768 px**, and the **🧽 watermark clean** on the Klein engine (bulk and per-image).
+
+**The one exception is a bank**, which has no dataset and therefore nothing to inherit: its 🧽 Klein inpaint resolves the model automatically, and the panel says which one. Naming the model and choosing it are separate questions — a bank can be told, it just has nowhere to store an answer.
 
 **When there is only one model**, the picker does not appear — there is no choice to make — but the line naming the model still does. Not knowing which model produced an image was the actual complaint; a dropdown with one option was never the answer.
 
@@ -307,9 +313,13 @@ Where you point the app at the local programs that unlock the full pipeline: **C
 
 **Overrides and `extra_model_paths.yaml`.** These two mechanisms stack rather than compete. `comfyui.models_dir`/`comfyui.loras_dir` set the app's *default* model roots; `extra_model_paths.yaml` is read **in addition**, from `<comfyui.base_dir>/extra_model_paths.yaml` — the same place ComfyUI itself looks. The yaml is therefore always located from the install directory, never from a models override, so the two can't end up pointing at different trees. For models and LoRAs the yaml usually already does the job; the override is for the case where the models folder itself moved.
 
+**Where a deployed LoRA lands.** Reading a LoRA can span every root; installing one has to pick exactly one folder, and the app picks it in this order: the **`comfyui.loras_dir` override** if you filled it (you said where your files go — the yaml cannot take that back), otherwise **the first LoRA root in ComfyUI's own priority order**, otherwise `<install>/models/loras`. In yaml terms that first root is a declared `loras:` folder **only when its profile carries `is_default: true`** — that flag is exactly how ComfyUI is told *look here first*, and a plain extra root stays a secondary location for ComfyUI, so it stays secondary here too. The **open LoRA folder** button opens that same folder, by construction. Reported by Geekswordsman (GitHub #25), whose deploys were landing in `<install>/models/loras` while his yaml declared another folder. LoRAs deployed **before** this changed are still listed, still loadable and still deletable where they are — nothing on disk is moved.
+
 **Continuing without ComfyUI.** Leaving the install directory empty in the Setup wizard is a deliberate choice: it shows what turns off (local Klein generation including the NSFW lane, Klein watermark cleaning, the Test Studio, training on your own ComfyUI base models, and the on-disk LoRA preset picker) versus what stays on (scraping, curation, captioning, the API image engines, ai-toolkit/cloud training, Hugging Face publishing), then remembers the skip (`comfyui.setup_skipped`) so it stops nagging. Entering a directory at any point cancels the skip automatically and turns those features back on — the flag never hides a real problem with a ComfyUI you *have* configured.
 
 **Models outside `models/`?** If your ComfyUI uses an `extra_model_paths.yaml` (portable builds and Stability Matrix installs commonly do), the app reads it the same way ComfyUI does, so bases that live elsewhere are found. This isn't a setting — it follows automatically from your install directory. Without such a file, nothing changes.
+
+This now includes the **training** bases, which were the last exception: an SDXL checkpoint and a Z-Image merge declared in the yaml are listed in the base picker, accepted at launch, and handed to ai-toolkit as a real path. When the same file name exists in two roots, the one a running ComfyUI would load wins (`is_default` first), so you train on the same weights you generate with. Capitalisation of folders and file names doesn't have to match what the picker stored. And when a base genuinely cannot be found, the app says so **naming the file**, instead of passing a bare name down to ai-toolkit and letting it fail on a path you never typed.
 
 ### Ollama
 
@@ -342,44 +352,47 @@ Settings for how captions are produced and how the quality tools behave.
 
 ### Dataset import
 
-What happens to a photo the **moment it enters a dataset**. Until this pair
-existed, both numbers were hardcoded and nothing on screen said so — reported by
-**Qeeyana (Reddit)**: *"Images added to 'dataset' are automatically normalized to
-1024. Why? Let me choose not to."*
+What happens to a photo the **moment it enters a dataset**. The default now
+keeps the source as the master file; a training launch creates its own disposable
+working copies. This follows **Qeeyana (Reddit)** asking: *"Images added to
+'dataset' are automatically normalized to 1024. Why? Let me choose not to."*
 
-- **Stored resolution** → `dataset_import.max_side`. Longest side kept, in px.
-  Default **`1024`**. Options: `1024`, `1536`, `2048`, `4096`, or `0` = **keep
-  the original size**. The aspect ratio is always preserved (no square padding)
-  and an image is **never enlarged** — this only ever shrinks.
-  *Why 1024 by default:* every mainstream trainer buckets and downscales on its
-  own, so pixels above what you train at cost disk and nothing else. Raise it if
-  you train at a higher resolution, or if the dataset folder is also your
-  archive.
-- **Stored encoding** → `dataset_import.encoding`. Default **`standard`**.
+- **Stored encoding** → `dataset_import.encoding`. Default **`preserve`**.
   | Value | What is written |
   |---|---|
-  | `standard` *(default)* | WebP quality 92 — the shipped behaviour. |
-  | `high` | WebP quality 100. Still lossy, visually indistinguishable. |
-  | `lossless` | WebP lossless: pixel-identical to what you handed in. |
-  This is the **other half** of the loss: raising the resolution while leaving
-  quality 92 in place still re-encodes every import. Measured on a noisy 800×600
-  frame: q92 **158 KB**, q100 **243 KB**, lossless **797 KB** — roughly **5×**
-  the disk for lossless.
+  | `preserve` *(default)* | An un-cropped JPG/JPEG, PNG, WebP or BMP is kept byte-for-byte with the matching extension. `max_side` is ignored. |
+  | `standard` | Opt-in normalization to WebP quality 92, with the selected maximum side. |
+  | `high` | Opt-in normalization to WebP quality 100, with the selected maximum side. Still lossy. |
+  | `lossless` | Opt-in normalization to lossless WebP, with the selected maximum side. |
+  `preserve` is for a dataset that is also your archive. It does not ask the
+  trainer to consume an arbitrary source file: at training start LDS writes
+  temporary PNG + caption pairs for ai-toolkit, then leaves the imported master
+  untouched.
 
-**The hard ceiling is 8192 px, and it is not a preference.** Pillow's WebP
-encoder refuses any side past **16383 px** ("Image size exceeds WebP limit"), so
-an uncapped *original size* would turn a large panorama into a failed import
-rather than a big one. Anything above 8192 px is downscaled to it, and a
-configured value above the ceiling is clamped rather than silently ignored.
+**Import safety limit — every mode:** Before preserve, WebP normalization, or
+auto head-crop can decode the source, it must be no larger than **16 Mi-pixels**
+and **8192 px per side**. A larger file is rejected; convert or resize it before
+importing. WebP normalization does not bypass this admission limit.
+- **Stored resolution** → `dataset_import.max_side`. Used only by the three WebP
+normalization modes. Choose `1024`, `1536`, `2048`, `4096`, or `0` = original
+size. The aspect ratio is always preserved (no square padding) and an image is
+never enlarged. This output setting takes effect only after the source passes
+the import safety limit above; normalized output also clamps the longest side to
+**8192 px**.
+
+**Auto head-crop is deliberately different.** It changes the picture into a
+square head shot, so it creates a derived WebP even when `preserve` is selected.
+The same is true of later edits such as crop, rotate and watermark clean: a
+transformed image is not the original master any more.
 
 **Changing this is not retroactive.** It applies to images imported *from now
-on*, so a dataset imported at 1024 and topped up at 2048 holds both — harmless
-for training (trainers bucket per image) but the folder is no longer uniform.
-Re-importing the originals is the only way to change what is already stored.
+on*, so a dataset can hold mixed formats and sizes. That is harmless for training
+(every trainer buckets and downscales on its own). Existing WebPs cannot be
+reconstructed into the source files that were discarded by older versions.
 
 **What it does NOT touch**: generated images, the ≤2048 px copies handed to an
-image API, and any image you have already curated (crop, rotate, watermark
-clean) — those lanes keep their own fixed sizes on purpose.
+image API, and any image you have already curated — those lanes keep their own
+fixed sizes on purpose.
 
 ### Captioning
 
@@ -557,6 +570,33 @@ Guard-rails on cost and host quality for rented pods. The card also shows a live
 
 These live under **⚙️ Advanced options** in a dataset's training panel — rank, resolution, save/sample cadence, optimizer, scheduler, EMA, LoKr and more. Each carries its own inline **Why/How** note, so they aren't repeated here. Two are worth calling out because of a caveat.
 
+#### Krea 2 Raw · LoKr likeness — a reported community starting point
+
+The built-in **Krea 2 Raw · LoKr likeness** preset is deliberately narrow: it is
+shown only for a **Character** dataset on a compatible Krea 2 Base/Raw variant.
+It turns a [reported Krea 2 Raw LoKr recipe from the Stable Diffusion
+community](https://www.reddit.com/r/StableDiffusion/comments/1v2vsqm/almost_perfect_likeness_in_750_steps_krea_2_lokr/)
+into a named, inspectable starting point — **not** into a promise that a different
+person, image set, captioning style or checkpoint will match at the same step.
+
+The post linked a full Pastebin configuration, but that Pastebin has since been
+deleted. LDS therefore records only the values the post actually reports:
+**LoKr factor 16**, **768 px**, **Automagic2** with initial learning rate
+**`1e-4`**, **Sigmoid** timestep weighting, **Balanced** content/style mode,
+**Differential Guidance** at scale **3**, and a checkpoint/preview cadence of
+**250** steps. The Krea-only Expert controls show those values plainly, and the
+run snapshot carries the factor, content/style mode and Differential Guidance so
+you can compare an experiment later instead of trusting a remembered recipe.
+
+The post does **not** publish the LoKr linear rank or alpha. LDS keeps its
+existing Krea Character **32/32** choice rather than inventing a rank/alpha pair
+and presenting it as sourced. Likewise, the reported **3000 total steps** are
+not forced by the preset: LDS keeps its adaptive step policy so a small dataset
+is not silently overcooked. To reproduce that target intentionally, type
+**3000** into the **Steps** box for that run; leave it empty to use the adaptive
+policy. Treat the intermediate saves — including the early ones — as candidates
+to compare in Test Studio, not as proof that a specific step will be best.
+
 **One rule applies to all of them: they are stored per DATASET, not per family.** Switching **LORA TYPE** keeps every advanced setting you had — which is what you want for rank, optimizer or resolution, and what you do **not** want for the two settings below, whose right value is different on every family. Those two are handled explicitly:
 
 - **Memory saving carries over, and is now said out loud.** `quantize` / `quantize_te` / `low_vram` are a statement about *your card*, and your card doesn't change when the family does — so the values follow you. What changes is whether the card still suffices: switching them off on Anima or SDXL (2B, where **off** is the calibrated default) and then moving to Krea 2, FLUX.1, FLUX.2 Klein or Z-Image used to build an unquantised 12B run in complete silence. Both the panel and the **pre-launch check** now name which saver is off, what that family needs without it (see the estimates below) and what your card reports. It stays a **warning, never a blocker** — a big card legitimately runs unquantised — and it is deliberately **not** dropped on the cloud lane, where the mistake bills rented GPU-hours. The warning is also *provenance-blind*: unticking a box directly on Krea 2 with a 24 GB card gets the same sentence as inheriting it from Anima, because it is the same danger.
@@ -709,15 +749,15 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `server.port` | Port the server listens on (default `5050`). |
 | `server.require_token` | On a non-loopback bind, require remote clients to present an access token (default `false` — a trusted LAN needs none). Toggle and token also live in Settings → Server & access. |
 | `paths.dataset_images_root` | Where dataset images are stored. Empty string defaults to `<data dir>/datasets`. |
-| `dataset_import.max_side` | Longest side kept for an image imported into a dataset, in px (default `1024`; `0` = original size). Ratio always preserved, never enlarged, hard ceiling 8192 px (WebP's own limit is 16383). Not retroactive. Editable in Settings → Captioning & quality. |
-| `dataset_import.encoding` | How an imported image is written: `standard` (WebP q92, default), `high` (WebP q100), `lossless` (pixel-identical, ~5x the disk). Editable in Settings → Captioning & quality. |
+| `dataset_import.max_side` | Longest side for opt-in WebP normalization (default `1024`; `0` = original size). It is ignored by the default `preserve` mode; ratio is always preserved, never enlarged, and normalized paths clamp at 8192 px. Every source must still be at most 16 Mi-pixels and 8192 px per side; a larger one is rejected and must be converted or resized before import. Not retroactive. Editable in Settings → Captioning & quality. |
+| `dataset_import.encoding` | How an un-cropped imported image is written: `preserve` (default; original JPG/JPEG, PNG, WebP or BMP bytes with the matching extension), or the opt-in WebP modes `standard` (q92), `high` (q100), and `lossless`. Auto head-crop is always a derived WebP. The 16 Mi-pixel / 8192 px-per-side input limit applies to every mode. Editable in Settings → Captioning & quality. |
 | `comfyui.api_url` | Base URL of your ComfyUI instance (default `http://127.0.0.1:8188`). |
 | `comfyui.base_dir` | ComfyUI install directory, used to derive `output`/`input`/`models`/`loras` dirs if those aren't set explicitly. |
 | `comfyui.output_dir` | Explicit override for ComfyUI's output folder. Set it when ComfyUI runs with `--output-directory`. Editable in Settings → Local tools. |
 | `comfyui.input_dir` | Explicit override for ComfyUI's input folder. Set it when ComfyUI runs with `--input-directory`. Editable in Settings → Local tools. |
 | `comfyui.models_dir` | Explicit override for ComfyUI's models folder (used to scan available checkpoints/UNETs). `extra_model_paths.yaml` is still read on top of it. Editable in Settings → Local tools. |
 | `comfyui.object_info_timeout_s` | Seconds ComfyUI may take to enumerate its nodes and model files (default `45`, clamped to 5-300). Raise it on an install with many custom nodes; a ComfyUI that is simply stopped is still detected in ~3 s regardless. Editable in Settings → Local tools. |
-| `comfyui.loras_dir` | Explicit override for ComfyUI's LoRA folder. Editable in Settings → Local tools. |
+| `comfyui.loras_dir` | Explicit override for ComfyUI's LoRA folder — where trained LoRAs are installed. Wins over `extra_model_paths.yaml`; left empty, the deploy folder follows the yaml's `is_default` LoRA root, else `<install>/models/loras`. Editable in Settings → Local tools. |
 | `ollama.url` | Base URL of your Ollama instance (default `http://127.0.0.1:11434`). |
 | `ollama.vision_model` | Ollama vision model used for auto-classify and auto head-crop (default `huihui_ai/qwen3-vl-abliterated:8b-instruct`, the uncensored **abliterated** build — use the Instruct, not Thinking, variant). |
 | `ollama.vision_concurrency` | How many images a bank vision pass (watermark / framing / captions) sends to Ollama at once (default `4`, clamped to 1-16). Higher overlaps more waiting; `1` restores the old one-at-a-time behaviour. |

@@ -175,6 +175,98 @@ def test_studio_checkpoints_and_recent_prompts_smoke(client):
     assert client.get('/api/studio/recent-prompts').get_json() == {'ok': True, 'prompts': []}
 
 
+def test_studio_random_caption_returns_a_trimmed_kept_caption(client, app, monkeypatch):
+    """Only kept, non-blank captions are eligible, and the response is clean."""
+    ds_id = _create(client)
+    with app.app_context():
+        from app.extensions import db
+        from app.models import FaceDatasetImage
+        db.session.add_all([
+            # Python strips U+2003 too; forcing offset 0 below proves SQL excludes it.
+            FaceDatasetImage(dataset_id=ds_id, status='keep', caption='\u2003'),
+            FaceDatasetImage(dataset_id=ds_id, status='keep', caption='  usable caption  '),
+            FaceDatasetImage(dataset_id=ds_id, status='keep', caption=' \t\r\n '),
+            FaceDatasetImage(dataset_id=ds_id, status='reject', caption='rejected caption'),
+            FaceDatasetImage(dataset_id=ds_id, status='pending', caption='pending caption'),
+        ])
+        db.session.commit()
+
+    monkeypatch.setattr('app.services.face_dataset_service.random.randrange', lambda count: 0)
+    response = client.post('/api/studio/random-caption', json={'dataset_id': ds_id})
+    assert response.status_code == 200
+    assert response.get_json() == {'ok': True, 'caption': 'usable caption'}
+
+
+def test_studio_random_caption_rejects_missing_or_invalid_dataset_id(client):
+    for payload in ({}, {'dataset_id': 0}, {'dataset_id': 2 ** 63},
+                    {'dataset_id': '1'}, {'dataset_id': True}, []):
+        response = client.post('/api/studio/random-caption', json=payload)
+        assert response.status_code == 400
+        assert response.get_json() == {'error': 'dataset_id must be a positive integer'}
+
+
+def test_studio_random_caption_hides_missing_or_inaccessible_dataset(client, app):
+    with app.app_context():
+        from app.extensions import db
+        from app.models import FaceDataset
+        foreign = FaceDataset(user_id='another-user', name='Private', trigger_word='private')
+        db.session.add(foreign)
+        db.session.commit()
+        foreign_id = foreign.id
+
+    for dataset_id in (999999, foreign_id):
+        response = client.post('/api/studio/random-caption', json={'dataset_id': dataset_id})
+        assert response.status_code == 404
+        assert response.get_json() == {
+            'error': ('The selected dataset was not found or is inaccessible. '
+                      'Choose a dataset from your library and try again.')
+        }
+
+
+def test_random_caption_query_rechecks_ownership_after_precheck(app, monkeypatch):
+    """The caption query itself must not trust an earlier ownership lookup.
+
+    Simulates ownership changing after the preliminary check: no private caption
+    may be returned even when that check was true a moment ago.
+    """
+    with app.app_context():
+        from app.config import LOCAL_USER
+        from app.extensions import db
+        from app.models import FaceDataset, FaceDatasetImage
+        from app.services import face_dataset_service as svc
+
+        foreign = FaceDataset(user_id='another-user', name='Private', trigger_word='private')
+        db.session.add(foreign)
+        db.session.flush()
+        db.session.add(FaceDatasetImage(dataset_id=foreign.id, status='keep',
+                                        caption='private training caption'))
+        db.session.commit()
+
+        # Model the time-of-check result before another request transferred access.
+        monkeypatch.setattr(svc, 'get_dataset', lambda *args: object())
+        assert svc.random_kept_caption(LOCAL_USER, foreign.id) is None
+
+
+def test_studio_random_caption_explains_when_no_usable_caption_exists(client, app):
+    ds_id = _create(client)
+    with app.app_context():
+        from app.extensions import db
+        from app.models import FaceDatasetImage
+        db.session.add_all([
+            FaceDatasetImage(dataset_id=ds_id, status='keep', caption=' \t\r\n '),
+            FaceDatasetImage(dataset_id=ds_id, status='reject', caption='not eligible'),
+            FaceDatasetImage(dataset_id=ds_id, status='pending', caption='not eligible either'),
+        ])
+        db.session.commit()
+
+    response = client.post('/api/studio/random-caption', json={'dataset_id': ds_id})
+    assert response.status_code == 422
+    assert response.get_json() == {
+        'error': ('This dataset has no usable kept captions. Caption at least one '
+                  'kept image and try again.')
+    }
+
+
 def test_recent_prompts_has_no_ten_prompt_cap():
     """The old 10-prompt ceiling is gone (user request): every DISTINCT prompt in
     the scanned rows comes back, not just the ten most recent. The 1500-cell scan

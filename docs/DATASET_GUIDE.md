@@ -225,6 +225,17 @@ best one**. Later checkpoints know the identity better but obey prompts worse.
    expression/angle regardless of prompt, outfits from the dataset bleeding in.
 4. Save the winning settings (★) — they're reused as the dataset's defaults.
 
+### Reuse a dataset caption in Studio
+
+Press **🎲 Caption** for a realistic test prompt from work you already curated.
+The first use asks which dataset to draw from; after that, each main-button click
+inserts a random **nonblank caption from a kept image** in that dataset. Studio
+remembers the chosen source in this browser's localStorage. Use **▾** beside the
+button to change the source dataset.
+
+The source needs at least one kept image with a nonblank caption. If you have
+typed a prompt, Studio asks before replacing it.
+
 ### Continue a run instead of starting over
 
 If the best checkpoint is *almost* there — the identity nearly locked but a touch

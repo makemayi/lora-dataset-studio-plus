@@ -13,6 +13,7 @@ import DatasetFolderNote from './DatasetFolderNote';
 import { isDatasetImportBlocked, isStopGenerationBlocked } from './scraperState';
 import { faceAnalysisState, faceAnalysisLabel } from './faceScoringGate.js';
 import DatasetGrid from './DatasetGrid';
+import KleinModelSetting from '../shared/KleinModelSetting';
 import SmallImageRescueReview from './SmallImageRescueReview';
 import CaptionToolsBar from './CaptionToolsBar';
 import CaptionOptionsPopover from './CaptionOptionsPopover';
@@ -24,6 +25,7 @@ import { localEngineUnavailableReason, hasComfyui } from '../../utils/localEngin
 import { extraRefCropSource } from './extraRefs';
 import DatasetLightbox from './DatasetLightbox';
 import DatasetSettingsModal from './DatasetSettingsModal';
+import DatasetToBankDialog from './DatasetToBankDialog';
 import PublishHfModal from './PublishHfModal';
 import WatermarkReviewLightbox, { buildWatermarkRecap } from './WatermarkReviewLightbox';
 import { useToast } from '../common/Toast';
@@ -51,6 +53,7 @@ import {
 import { describeDerivedComparison } from '../../utils/derivedCompare';
 import { WORKSPACE_SECTIONS, SECTION_FOR_TARGET } from './workspaceSections';
 import { postJson, putJson } from '../../api/fetchClient';
+import { datasetToBankRequest, datasetToBankUrl } from './datasetToBank';
 import { HelpBadge } from '../../help/HelpMode';
 import { requestHelpTip } from '../../help/helpTips';
 import { openCollapsedAncestors } from '../../help/revealTarget';
@@ -258,6 +261,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
   // launch (allow_not_ready). Le serveur reste l'autorité.
   const [notReadyAck, setNotReadyAck] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [importToBankOpen, setImportToBankOpen] = useState(false);
   const [publishHfOpen, setPublishHfOpen] = useState(false);
   const [folderBrowseOpen, setFolderBrowseOpen] = useState(false);  // in-app folder browser (native-dialog fallback)
   // Grid tag-filter (session-only): tags whose images are hidden (exclude) or the
@@ -680,20 +684,19 @@ export default function DatasetWorkspace({ ds, onBack }) {
     && !isSmallImageRescueRow(viewImgLive)
     && viewImgLive.derivation_kind !== 'klein_image_improve';
 
-  // Import to bank — the reverse of promoting bank images into a dataset. The kept
-  // images are COPIED into a folder of the bank's own, so re-triaging there can
-  // never disturb this dataset. Named by the user, then we jump to it: the copy
-  // runs as a background job and the bank page is where its progress shows.
-  const importToBank = async () => {
-    const name = window.prompt('Name for the new bank:', ds.data?.name || '');
-    if (name === null) return;
-    const d = await postJson('/api/bank/from-dataset',
-      { dataset_id: ds.data?.id, name });
-    if (!d.ok) { toast.error(d.error || 'Could not create the bank'); return; }
+  // Import to bank — the reverse of promoting bank images into a dataset. Both
+  // choices retain Dataset-owned metadata; the default restores compatible
+  // final-file technical analysis, while Start fresh skips only prior reuse.
+  // Either way the images are COPIED into a bank-owned folder, never shared.
+  const importToBank = async ({ name, preserveAnalysis }) => {
+    const result = await postJson(datasetToBankUrl(),
+      datasetToBankRequest(d.id, name, preserveAnalysis));
+    if (!result?.ok) throw new Error(result?.error || 'Could not create the bank');
     toast.success(`Importing ${kept} image(s) into the bank — copying in the background`);
     // The bank page picks its open bank from localStorage (it has no :id route),
     // so preselect the new one before navigating rather than landing on the list.
-    try { localStorage.setItem('bankCurrentId', String(d.id)); } catch { /* ignore */ }
+    try { localStorage.setItem('bankCurrentId', String(result.id)); } catch { /* ignore */ }
+    setImportToBankOpen(false);
     navigate('/bank');
   };
 
@@ -1237,11 +1240,6 @@ export default function DatasetWorkspace({ ds, onBack }) {
                         ds.generate(...args);
                       }}
                       hasRef={!!d.ref_filename} composition={d.composition} images={images}
-                      // Krea reproduces the reference's shape: the panel needs it to
-                      // warn about squeezed body/back shots BEFORE a batch, and a way
-                      // to offer the fix (the same ✂ editor, pre-set to a portrait).
-                      refWidth={d.ref_width} refHeight={d.ref_height}
-                      onCropRefTo={(aspect) => setRefCrop({ aspect })}
                       bodyFidelity={bodyFid}
                       promptSuffix={d.prompt_suffix || ''}
                       promptSuffixes={d.prompt_suffixes || null}
@@ -1350,6 +1348,14 @@ export default function DatasetWorkspace({ ds, onBack }) {
                       Klein <span className="font-normal opacity-70">quality</span>
                     </button>
                   </div>
+                  {/* A clean OVERWRITES the image, so the model that repaints it is
+                      the one lane whose swap can never be spotted afterwards. It is
+                      the dataset's model, like improve and generation — named here,
+                      changeable here. basis-full: its own row rather than a squeezed
+                      column at 400 px. */}
+                  {watermarkMethod === 'klein' && (
+                    <KleinModelSetting datasetId={d.id} className="basis-full" />
+                  )}
                   {/* Allow auto-crop: the SAME persisted preference as Settings ▸ Watermark
                       inpainting (write-through). Off → a border mark is repainted (LaMa/
                       Klein) instead of cropped; the per-image review can still override it. */}
@@ -1793,13 +1799,13 @@ export default function DatasetWorkspace({ ds, onBack }) {
                     <div id="ds-export-to-bank" tabIndex={-1}
                       className="flex items-center gap-2 flex-wrap scroll-mt-20">
                       <button type="button" data-workspace-focus disabled={!kept}
-                        onClick={importToBank}
-                        title="Turn this dataset back into a bank: its kept images are COPIED into a bank of their own, so you can re-triage them with the bank tools (duplicate detection, framing, scores) without touching this dataset."
+                        onClick={() => setImportToBankOpen(true)}
+                        title="Turn this dataset back into a bank: its kept images are COPIED into a bank of their own. Both choices keep Dataset-owned captions, curation, framing, watermark and provenance. By default compatible final-file technical analysis is restored; Start fresh skips only reuse of prior analysis. This dataset is never touched."
                         className="px-3 py-1.5 rounded-lg bg-surface border border-border text-content text-sm disabled:opacity-40">
                         ↑ Import to bank
                       </button>
                       <span className="text-content-subtle text-[0.6875rem]">
-                        kept images copied into a new bank — re-triage them without touching this dataset
+                        both choices keep Dataset metadata — restore compatible analysis, or start fresh analysis
                       </span>
                     </div>
                     <div id="ds-export-backup" tabIndex={-1}
@@ -1910,11 +1916,9 @@ export default function DatasetWorkspace({ ds, onBack }) {
         // back out — not just tighten the already-cropped square. Legacy datasets with
         // no stored original fall back to the cropped ref (can only tighten, as before).
         <CropModal imageUrl={`/api/dataset/${d.id}/img/${encodeURIComponent(d.ref_original_filename || d.ref_filename)}`}
-          // 1:1 stays the historical default. `setRefCrop({aspect})` opens the same
-          // editor pre-set to another ratio — how the Krea framing advisory offers
-          // "crop to 3:4" without a second modal. The row of ratio buttons is still
-          // there, so the preset is a starting point, never a lock.
-          defaultAspect={(refCrop && refCrop.aspect) || 1}
+          // 1:1 is the historical default; the editor itself still offers its ratio
+          // buttons when a different manual crop is wanted.
+          defaultAspect={1}
           onCancel={() => setRefCrop(false)}
           onConfirm={async (box) => { await ds.cropRef(box); setRefCrop(false); }}
           onReset={d.ref_original_filename
@@ -1934,7 +1938,9 @@ export default function DatasetWorkspace({ ds, onBack }) {
           engineReason={(e) => localEngineUnavailableReason(e, caps)}
           datasetExtraCount={(d.ref_extra_filenames || []).length}
           liveActivity={ds.activity} referenceEdit={d.reference_edit}
-          onEdit={ds.editReference} onKeep={ds.keepEditedReference} onDiscard={ds.discardEditedReference}
+          onEdit={ds.editReference} onRetry={ds.retryReferenceEdit}
+          canRetry={ds.canRetryReferenceEdit}
+          onKeep={ds.keepEditedReference} onDiscard={ds.discardEditedReference}
           onClose={() => setRefEdit(false)} />
       )}
       {extraRefCrop && extraRefCropSource(d.ref_extra_filenames, d.ref_extra_crop_sources, extraRefCrop) && (
@@ -1971,6 +1977,10 @@ export default function DatasetWorkspace({ ds, onBack }) {
       {settingsOpen && (
         <DatasetSettingsModal d={d} busy={ds.busy}
           onSave={ds.updateSettings} onClose={() => setSettingsOpen(false)} />
+      )}
+      {importToBankOpen && (
+        <DatasetToBankDialog datasetName={d.name} keptCount={kept}
+          onClose={() => setImportToBankOpen(false)} onStart={importToBank} />
       )}
       {publishHfOpen && (
         <PublishHfModal datasetId={d.id} onClose={() => setPublishHfOpen(false)} />

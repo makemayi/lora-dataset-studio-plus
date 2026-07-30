@@ -86,6 +86,8 @@ _SETTING_ROWS = [
     ('rank', 'LoRA rank', str),
     ('alpha', 'LoRA alpha', str),
     ('network_type', 'Network type', str),
+    ('lokr_factor', 'LoKr factor', str),
+    ('lokr_full_rank', 'LoKr full rank', lambda v: 'yes' if v else 'no'),
     ('resolution', 'Resolution', _fmt_resolution),
     ('save_every', 'Save every', _fmt_steps),
     ('max_step_saves', 'Max saved checkpoints', str),
@@ -97,6 +99,9 @@ _SETTING_ROWS = [
     ('timestep_type', 'Timestep type', str),
     ('dropout', 'LoRA dropout', str),
     ('ema', 'EMA decay', str),
+    ('content_or_style', 'Content or style', str),
+    ('do_differential_guidance', 'Differential guidance', lambda v: 'yes' if v else 'no'),
+    ('differential_guidance_scale', 'Differential guidance scale', str),
     ('batch_size', 'Batch size', str),
     ('dual_captions', 'Dual captions', lambda v: 'yes' if v else 'no'),
     # Memory strategy: a quantised run and a full-precision one are different

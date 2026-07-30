@@ -13,12 +13,15 @@ import math
 import ntpath
 import os
 import posixpath
+import random
 import re
 import shutil
+import stat
 import tempfile
 import threading
 import time
 import uuid
+import warnings
 import zipfile
 from types import SimpleNamespace
 from typing import BinaryIO
@@ -30,8 +33,11 @@ from ..extensions import db
 from ..models import (CanvasImageNode, CanvasNodePosition, FaceDataset,
                       FaceDatasetImage, ImageGenerationQueue, LoraTestImage)
 from .. import config as cfg
-from . import dataset_activity, image_encoding, reference_edit_jobs, trash
+from . import (bank_transfer_metadata, dataset_activity, image_encoding,
+               reference_edit_jobs, trash)
 from .dataset_storage import dataset_path, ensure_dataset_dir
+from .image_provenance import provenance_metrics
+from .image_quality import ANALYSIS_MAX_SIDE, quality_metrics
 
 # Garde le modèle vision chaud entre les images d'un même batch caption/classify
 # (sinon Ollama le recharge - cold start ~10s - à CHAQUE image). Déchargé en fin
@@ -70,6 +76,17 @@ def _comfy_output_dir():
 # mord, _cap_caption coupe à une FIN DE PHRASE — jamais en plein mot. Historique : à 800
 # il tranchait les captions descriptives en pleine phrase (« …a pale, neutral tone, and a »).
 CAPTION_MAX_CHARS = 10000
+
+# Exact Unicode whitespace set that Python's ``str.strip()`` recognizes.  SQLite's
+# default ``trim`` only removes U+0020, so it would otherwise sample a caption made
+# solely of (for example) U+2003 and let the final Python cleanup turn it into an
+# apparent empty result.  Supplying this set to SQLite keeps the SQL eligibility
+# predicate and the API's ``.strip()`` contract aligned without loading all rows.
+_PYTHON_STRIP_CHARS = (
+    '\t\n\x0b\x0c\r\x1c\x1d\x1e\x1f \x85\xa0\u1680'
+    '\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a'
+    '\u2028\u2029\u202f\u205f\u3000'
+)
 
 
 def _cap_caption(text):
@@ -150,14 +167,12 @@ def image_pixel_size(path):
     """(w, h) of an image file, or None when it cannot be measured.
 
     PIL reads the header only — no decode — and the answer is cached per
-    (path, mtime, size). WHY the payload needs it at all: the Krea 2 Edit engine
-    reproduces the REFERENCE's aspect ratio (krea_edit_helper.fit_output_size —
-    the edit LoRA was trained on same-size pairs), so a square reference makes
-    every `body`/`back` shot come back cropped tighter than asked. The front end
-    can only warn about that if it knows the reference's shape, and it has never
-    been told. Degrades to None on ANY failure (missing file, exotic format,
-    Pillow absent): an unmeasurable reference must cost a warning, never a 500.
-    A file that cannot be stat'ed is measured without caching — never guessed."""
+    (path, mtime, size). The dataset payload exposes the reference dimensions
+    for clients that need to describe or crop the source; Krea dataset cards now
+    choose their own target aspect through the Fit v1.2 path. Degrades to None
+    on ANY failure (missing file, exotic format, Pillow absent): an unmeasurable
+    image must never turn a payload read into a 500. A file that cannot be
+    stat'ed is measured without caching — never guessed."""
     try:
         st = os.stat(path)
         key = (str(path), st.st_mtime_ns, st.st_size)
@@ -309,6 +324,15 @@ class KleinNodesMissing(Exception):
 # sur la principale. Cap bas pour garder des payloads API légers.
 MAX_EXTRA_REFS = 3
 
+# A reference handed to an external image API is a disposable transport copy,
+# never a reason to disclose a camera master byte-for-byte.  Keep the same 2048px
+# API-transport convention as ``normalize_to_webp`` and a modest raw-input cap:
+# three dataset extras plus transient anchors must not turn a base64 request into
+# an unbounded allocation.  The cap applies again to persistent legacy refs read
+# from disk, because a restored backup can contain a preserved JPEG/PNG/BMP.
+EXTERNAL_REFERENCE_MAX_BYTES = 25 * 1024 * 1024
+EXTERNAL_REFERENCE_MAX_SIDE = 2048
+
 
 def extra_ref_filenames(ds) -> list:
     """Références additionnelles du dataset (JSON en base, parse tolérant)."""
@@ -319,19 +343,86 @@ def extra_ref_filenames(ds) -> list:
     return [f for f in v if isinstance(f, str)] if isinstance(v, list) else []
 
 
+def sanitize_external_reference(image_bytes: bytes, *, label: str = 'reference image') -> bytes:
+    """Return a bounded, upright, metadata-free WebP for an external API.
+
+    This is an egress boundary, deliberately separate from dataset storage:
+    local masters stay untouched, while every API engine receives fresh pixels
+    without EXIF/XMP/GPS/ICC payloads.  It also rejects unsupported/animated
+    containers and unsafe headers before asking Pillow to decode pixels.
+    """
+    if not isinstance(image_bytes, (bytes, bytearray)) or not image_bytes:
+        raise ValueError(f'{label} must be a non-empty image')
+    raw = bytes(image_bytes)
+    if len(raw) > EXTERNAL_REFERENCE_MAX_BYTES:
+        raise ValueError(
+            f'{label} is too large (max {EXTERNAL_REFERENCE_MAX_BYTES // (1024 * 1024)} MiB)')
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter('error', Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(raw)) as source:
+                # This shared header validator admits only static JPEG/PNG/WebP/BMP
+                # and applies the global side/pixel budget before ``load``.
+                _preserved_import_header_extension(source, label=label)
+                source.load()
+                oriented = ImageOps.exif_transpose(source)
+                has_alpha = ('A' in oriented.getbands()
+                             or 'transparency' in getattr(oriented, 'info', {}))
+                if has_alpha:
+                    rgba = oriented.convert('RGBA')
+                    clean = Image.new('RGB', rgba.size, (255, 255, 255))
+                    clean.paste(rgba, mask=rgba.getchannel('A'))
+                else:
+                    clean = Image.new('RGB', oriented.size)
+                    clean.paste(oriented.convert('RGB'))
+        clean.thumbnail((EXTERNAL_REFERENCE_MAX_SIDE, EXTERNAL_REFERENCE_MAX_SIDE),
+                        Image.LANCZOS)
+        out = io.BytesIO()
+        # ``clean`` is a fresh canvas, so no source EXIF/XMP/GPS/ICC metadata can
+        # reach an external provider even on Pillow format-specific save paths.
+        clean.save(out, 'WEBP', quality=92)
+        payload = out.getvalue()
+    except ValueError:
+        raise
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
+        raise ValueError(f'{label} rejected an unsafe image header') from exc
+    except (OSError, UnidentifiedImageError, SyntaxError, MemoryError) as exc:
+        raise ValueError(f'{label} is unreadable') from exc
+    if len(payload) > EXTERNAL_REFERENCE_MAX_BYTES:
+        raise ValueError(
+            f'{label} is too large after preparation '
+            f'(max {EXTERNAL_REFERENCE_MAX_BYTES // (1024 * 1024)} MiB)')
+    return payload
+
+
+def _read_external_reference(path, *, label: str) -> bytes:
+    """Read at most one external-reference budget, then sanitize exact bytes."""
+    try:
+        with open(path, 'rb') as fh:
+            raw = fh.read(EXTERNAL_REFERENCE_MAX_BYTES + 1)
+    except (OSError, TypeError, MemoryError) as exc:
+        raise ValueError(f'{label} is unavailable') from exc
+    if len(raw) > EXTERNAL_REFERENCE_MAX_BYTES:
+        raise ValueError(
+            f'{label} is too large (max {EXTERNAL_REFERENCE_MAX_BYTES // (1024 * 1024)} MiB)')
+    return sanitize_external_reference(raw, label=label)
+
+
 def _all_ref_bytes(ds) -> list:
-    """Bytes de la référence principale puis des extras présents sur disque
-    (ordre stable, principale d'abord - c'est elle que Gemini doit prioriser).
-    Un extra au fichier manquant est ignoré silencieusement (jamais bloquant)."""
-    with open(_ref_path(ds), 'rb') as fh:
-        out = [fh.read()]
+    """Safe external derivatives of primary then persistent extra references.
+
+    The primary remains mandatory.  A missing/corrupt legacy extra is skipped
+    like it was before, but it can never leak raw EXIF/GPS bytes to an API.
+    """
+    out = [_read_external_reference(_ref_path(ds), label='primary reference')]
     for fn in extra_ref_filenames(ds):
         p = os.path.join(_dataset_dir(ds.id), fn)
         try:
-            with open(p, 'rb') as fh:
-                out.append(fh.read())
-        except OSError:
-            logger.warning(f"dataset {ds.id}: extra ref missing on disk: {fn}")
+            out.append(_read_external_reference(p, label='extra reference'))
+        except ValueError:
+            # An old/hand-edited extra is optional identity context. Do not turn
+            # it into an opaque provider error, but do not send raw fallback bytes.
+            logger.warning('dataset %s: skipping unavailable/unsafe extra reference', ds.id)
     return out
 
 
@@ -1421,6 +1512,39 @@ def get_dataset(user_id, dataset_id):
     return ds if ds and str(ds.user_id) == str(user_id) else None
 
 
+def random_kept_caption(user_id, dataset_id) -> str | None:
+    """Return one cleaned caption from an owned dataset's kept images.
+
+    The candidate count and random offset stay in SQL so a large dataset never
+    has all of its captions materialized just to choose one.  ``None`` means
+    the dataset exists but has no non-blank kept caption; an inaccessible
+    dataset raises ``LookupError`` so the route can return a 404 without
+    leaking ownership details.
+    """
+    if not get_dataset(user_id, dataset_id):
+        raise LookupError('dataset not found')
+
+    from sqlalchemy import func
+
+    cleaned = func.trim(FaceDatasetImage.caption, _PYTHON_STRIP_CHARS)
+    eligible = (db.session.query(FaceDatasetImage.caption)
+                .join(FaceDataset, FaceDatasetImage.dataset_id == FaceDataset.id)
+                .filter(FaceDatasetImage.dataset_id == dataset_id,
+                        FaceDataset.user_id == str(user_id),
+                        FaceDatasetImage.status == 'keep',
+                        FaceDatasetImage.caption.isnot(None),
+                        cleaned != ''))
+    count = eligible.count()
+    if not count:
+        return None
+
+    caption = (eligible.order_by(FaceDatasetImage.id.asc())
+               .offset(random.randrange(count)).limit(1).scalar())
+    # Keep the API contract robust if an unusual Unicode whitespace-only value
+    # slipped through SQLite's trim character set.
+    return (caption or '').strip() or None
+
+
 def list_datasets(user_id):
     return (FaceDataset.query.filter_by(user_id=str(user_id))
             .order_by(FaceDataset.updated_at.desc()).all())
@@ -1466,6 +1590,196 @@ def _clear_watermark_metadata(img):
     img.watermark_regions = None
 
 
+def _unkeep_parent_for_kept_improvement(img):
+    """Make a kept Klein improvement the dataset's active choice.
+
+    An improve result is a separate image row, so this deliberately changes only
+    the original row's review state: no files, captions or lineage are removed.
+    The parent lookup is scoped to the candidate's dataset because legacy
+    ``parent_image_id`` has no foreign key and may be stale or point elsewhere.
+    A queued result can be marked Keep before its bytes arrive; it cannot replace
+    the source until a regular file has actually landed in the dataset folder.
+    """
+    filename = img.filename
+    if (img.derivation_kind != KLEIN_IMAGE_IMPROVE
+            or not img.parent_image_id
+            or not isinstance(filename, str)
+            or not filename
+            or '/' in filename
+            or '\\' in filename
+            or os.path.basename(filename) != filename
+            or ntpath.basename(filename) != filename
+            or posixpath.basename(filename) != filename
+            or img.parent_image_id == img.id):
+        return False
+    try:
+        candidate_path = _img_path(img)
+    except (TypeError, ValueError):
+        return False
+    if not os.path.isfile(candidate_path):
+        return False
+    # Keep can race with an unkeep/reject click while completion is linking its
+    # file.  Flush our local completion/status work, then let one SQL statement
+    # consult the CURRENT candidate row and update only a still-kept parent.
+    # Reading ``img.status`` here would use a stale SQLAlchemy object and could
+    # evict the parent after the user already changed their mind.
+    from sqlalchemy import exists, update
+    from sqlalchemy.orm import aliased
+
+    db.session.flush()
+    candidate = aliased(FaceDatasetImage)
+    candidate_is_kept = exists().where(
+        candidate.id == img.id,
+        candidate.dataset_id == img.dataset_id,
+        candidate.parent_image_id == img.parent_image_id,
+        candidate.derivation_kind == KLEIN_IMAGE_IMPROVE,
+        candidate.status == 'keep',
+        candidate.filename == filename,
+    )
+    result = db.session.execute(
+        update(FaceDatasetImage)
+        .where(FaceDatasetImage.id == img.parent_image_id,
+               FaceDatasetImage.dataset_id == img.dataset_id,
+               FaceDatasetImage.status == 'keep',
+               candidate_is_kept)
+        .values(status='pending')
+        .execution_options(synchronize_session=False))
+    return bool(result.rowcount)
+
+
+def _rekeep_pending_parent_for_reimprove(img):
+    """CAS the source back to Keep while a currently kept result is re-run."""
+    if (img.derivation_kind != KLEIN_IMAGE_IMPROVE
+            or not img.parent_image_id
+            or img.parent_image_id == img.id):
+        return False
+    from sqlalchemy import exists, update
+    from sqlalchemy.orm import aliased
+
+    candidate = aliased(FaceDatasetImage)
+    candidate_is_kept = exists().where(
+        candidate.id == img.id,
+        candidate.dataset_id == img.dataset_id,
+        candidate.parent_image_id == img.parent_image_id,
+        candidate.derivation_kind == KLEIN_IMAGE_IMPROVE,
+        candidate.status == 'keep',
+    )
+    result = db.session.execute(
+        update(FaceDatasetImage)
+        .where(FaceDatasetImage.id == img.parent_image_id,
+               FaceDatasetImage.dataset_id == img.dataset_id,
+               FaceDatasetImage.status == 'pending',
+               candidate_is_kept)
+        .values(status='keep')
+        .execution_options(synchronize_session=False))
+    return bool(result.rowcount)
+
+
+def _nullable_equals(column, value):
+    return column.is_(None) if value is None else column == value
+
+
+def _matches_reimprove_state(row, img, state):
+    """SQL predicates for the snapshot that the re-run is allowed to replace."""
+    return (
+        row.id == img.id,
+        row.dataset_id == img.dataset_id,
+        row.parent_image_id == img.parent_image_id,
+        row.derivation_kind == KLEIN_IMAGE_IMPROVE,
+        row.status == state['status'],
+        _nullable_equals(row.filename, state['filename']),
+        _nullable_equals(row.job_id, state['job_id']),
+    )
+
+
+def _transition_reimprove_candidate(img, old_state, parent, label, prompt, job_id,
+                                    expected_transition_caption):
+    """CAS one improvement into its in-flight replacement state.
+
+    The job has already been queued, but a status click can land while enqueue is
+    in progress.  Do not overwrite that newer decision; the caller cancels the
+    unlinked job when this snapshot no longer matches.
+    """
+    from sqlalchemy import case, update
+
+    values = {
+        'filename': None,
+        'status': 'pending',
+        'job_id': job_id,
+        'variation_label': label,
+        'variation_prompt': prompt[:500],
+        'framing': parent.framing,
+        'fail_reason': None,
+        'fail_kind': None,
+        'watermark_state': None,
+        'watermark_bbox': None,
+        'watermark_regions': None,
+    }
+    if not old_state['caption']:
+        # A blank caption inherits the parent on a normal re-run, but an editor
+        # can save text while enqueue_klein_edit is waiting.  Fill only if it is
+        # STILL blank in the database; otherwise preserve that newer work.
+        still_blank = ((FaceDatasetImage.caption.is_(None))
+                       | (FaceDatasetImage.caption == ''))
+        values['caption'] = case(
+            (still_blank, expected_transition_caption), else_=FaceDatasetImage.caption)
+    result = db.session.execute(
+        update(FaceDatasetImage)
+        .where(*_matches_reimprove_state(FaceDatasetImage, img, old_state))
+        .values(**values)
+        .execution_options(synchronize_session=False))
+    if result.rowcount:
+        db.session.expire(img)
+    return bool(result.rowcount)
+
+
+def _restore_reimprove_candidate_after_trash_failure(
+        img, old_state, job_id, expected_transition_caption):
+    """Restore only the exact transient state written by this re-run."""
+    from sqlalchemy import case, update
+
+    transient = dict(old_state, status='pending', filename=None, job_id=job_id)
+    # Restore the exact old caption only while it is still what this transition
+    # would have written.  A caption changed during Trash I/O wins instead.
+    restore_values = {field: value for field, value in old_state.items()
+                      if field != 'caption'}
+    restore_values['caption'] = case(
+        (_nullable_equals(FaceDatasetImage.caption, expected_transition_caption),
+         old_state['caption']),
+        else_=FaceDatasetImage.caption)
+    result = db.session.execute(
+        update(FaceDatasetImage)
+        .where(*_matches_reimprove_state(FaceDatasetImage, img, transient))
+        .values(**restore_values)
+        .execution_options(synchronize_session=False))
+    if result.rowcount:
+        db.session.expire(img)
+    return bool(result.rowcount)
+
+
+def _undo_rekeep_parent_after_reimprove_trash_failure(img, old_state):
+    """Undo only a fallback whose candidate was successfully restored."""
+    if (img.derivation_kind != KLEIN_IMAGE_IMPROVE
+            or not img.parent_image_id
+            or img.parent_image_id == img.id):
+        return False
+    from sqlalchemy import exists, update
+    from sqlalchemy.orm import aliased
+
+    candidate = aliased(FaceDatasetImage)
+    candidate_is_restored = exists().where(
+        *_matches_reimprove_state(candidate, img, old_state))
+    result = db.session.execute(
+        update(FaceDatasetImage)
+        .where(FaceDatasetImage.id == img.parent_image_id,
+               FaceDatasetImage.dataset_id == img.dataset_id,
+               FaceDatasetImage.status == 'keep',
+               candidate_is_restored)
+        .values(status='pending')
+        .execution_options(synchronize_session=False))
+    return bool(result.rowcount)
+
+
 def set_image_status(user_id, image_id, status):
     if status not in _VALID_STATUS:
         raise ValueError('invalid status')
@@ -1480,6 +1794,8 @@ def set_image_status(user_id, image_id, status):
     if status == 'reject':
         _clear_watermark_metadata(img)
     img.status = status
+    if status == 'keep':
+        _unkeep_parent_for_kept_improvement(img)
     db.session.commit()
     return True
 
@@ -1660,9 +1976,12 @@ def _crop_resize_file(path, x, y, w, h, size=1024, dst=None):
         fmt = image_encoding.format_for_path(dst or path, opened)
         opened.load()
         icc = _valid_icc_profile(opened.info.get('icc_profile'))
+        # Browser crop coordinates describe the EXIF-oriented visual frame, not
+        # the raw camera raster. Bake the orientation before interpreting x/y.
+        oriented = ImageOps.exif_transpose(opened)
         # Narrow the mode BEFORE resampling: Pillow silently drops to nearest-neighbour
         # on paletted images, which would undo the point of removing the lossy encoder.
-        src = opened.convert(image_encoding.resample_mode(opened))
+        src = oriented.convert(image_encoding.resample_mode(oriented))
     box = (max(0, int(x)), max(0, int(y)), min(src.width, int(x + w)), min(src.height, int(y + h)))
     if box[2] <= box[0] or box[3] <= box[1]:
         return False, None
@@ -1715,54 +2034,79 @@ def _valid_icc_profile(raw):
     return bytes(raw)
 
 
-def transformed_image_bytes(path, transform):
+def transformed_image_bytes(path, transform, *, max_source_bytes: int | None = None):
     """Apply ``transform`` (a PIL image -> PIL image callable) fully in memory,
-    without touching ``path``, and return the re-encoded bytes.
+    without touching ``path``, and return the re-encoded bytes. ``max_source_bytes``
+    is an optional exact-read fence for a live external folder (Bank); ordinary
+    Dataset edits retain their historical path-backed behaviour.
 
     THE shared encoder of every in-place pixel edit that REORDERS pixels without
-    rebuilding any (mirror, rotation). Dataset rows normally point at WEBP files,
-    but restored/legacy datasets may contain PNG or JPEG bytes (even under a
-    misleading extension). Preserve the format Pillow actually detects and encode
+    rebuilding any (mirror, rotation). Dataset rows may point at JPEG, PNG, WebP
+    or BMP files (and restored legacy rows can still carry a misleading extension).
+    Preserve the format Pillow actually detects and encode
     it under `image_encoding.LOSSLESS` — the policy this operation REQUIRES, passed
     explicitly so that tuning another operation's encoder can never silently
     degrade this one.
 
     ⚠️ Only JPEG loses anything here, and it loses it on EVERY edit — Pillow has
     no DCT-domain (jpegtran-style) path, so a 90° turn of a JPEG is a re-encode,
-    not a lossless block transform. PNG and WEBP round-trip pixel-exact, which is
-    what dataset files actually are in practice (imports normalise to WEBP).
+    not a lossless block transform. PNG, WebP and BMP preserve their decoded RGB
+    pixels; BMP has no useful alpha path, so edits intentionally flatten it to RGB.
 
     The format is read from the CONTENT, not the file name: a mirror/rotation has
     no business converting a legacy extension mismatch it did not create. Crop,
     which rewrites the file wholesale and may write to a DIFFERENT destination,
     uses `image_encoding.format_for_path` instead.
     """
+    source = path
+    if max_source_bytes is not None:
+        try:
+            max_source_bytes = int(max_source_bytes)
+        except (TypeError, ValueError) as exc:
+            raise ValueError('invalid image source byte limit') from exc
+        if max_source_bytes < 1:
+            raise ValueError('invalid image source byte limit')
+        try:
+            with open(path, 'rb') as raw_source:
+                raw = raw_source.read(max_source_bytes + 1)
+        except (OSError, MemoryError) as exc:
+            raise ValueError('invalid image file') from exc
+        if len(raw) > max_source_bytes:
+            raise ValueError(
+                f'image source is too large (max {max_source_bytes // (1024 * 1024)} MiB)')
+        # Decode the exact bounded bytes just read, not a path that a live Bank
+        # folder could replace between a header check and the actual edit.
+        source = io.BytesIO(raw)
     try:
-        with Image.open(path) as src:
-            fmt = (src.format or '').upper()
-            if fmt not in image_encoding.EDITABLE_FORMATS:
-                raise ValueError(f'unsupported image format: {fmt or "unknown"}')
-            if getattr(src, 'n_frames', 1) != 1:
-                raise ValueError('animated images are not supported')
-            src.load()
-            icc = _valid_icc_profile(src.info.get('icc_profile'))
-            # EXIF orientation is baked into the pixels FIRST, so the edit the
-            # user asked for is applied to the image they were shown — and the
-            # tag is dropped (never reattached), so nothing rotates it twice.
-            oriented = ImageOps.exif_transpose(src)
-            edited = transform(oriented)
+        with warnings.catch_warnings():
+            warnings.simplefilter('error', Image.DecompressionBombWarning)
+            with Image.open(source) as src:
+                image_encoding.validate_input_header_dimensions(src, label='image edit')
+                fmt = (src.format or '').upper()
+                if fmt not in image_encoding.EDITABLE_FORMATS:
+                    raise ValueError(f'unsupported image format: {fmt or "unknown"}')
+                if getattr(src, 'n_frames', 1) != 1:
+                    raise ValueError('animated images are not supported')
+                src.load()
+                icc = _valid_icc_profile(src.info.get('icc_profile'))
+                # EXIF orientation is baked into the pixels FIRST, so the edit the
+                # user asked for is applied to the image they were shown — and the
+                # tag is dropped (never reattached), so nothing rotates it twice.
+                oriented = ImageOps.exif_transpose(src)
+                edited = transform(oriented)
 
-            out = io.BytesIO()
-            edited, save_kwargs = image_encoding.save_params(
-                edited, fmt, image_encoding.LOSSLESS, icc_profile=icc)
-            edited.save(out, fmt, **save_kwargs)
-            payload = out.getvalue()
-            # Read AFTER save_params: it may have converted the mode, and the
-            # self-check below compares the decoded size against this.
-            expected_size = edited.size
+                out = io.BytesIO()
+                edited, save_kwargs = image_encoding.save_params(
+                    edited, fmt, image_encoding.LOSSLESS, icc_profile=icc)
+                edited.save(out, fmt, **save_kwargs)
+                payload = out.getvalue()
+                # Read AFTER save_params: it may have converted the mode, and the
+                # self-check below compares the decoded size against this.
+                expected_size = edited.size
     except ValueError:
         raise
-    except (UnidentifiedImageError, OSError, SyntaxError) as e:
+    except (UnidentifiedImageError, OSError, SyntaxError, MemoryError,
+            Image.DecompressionBombError, Image.DecompressionBombWarning) as e:
         raise ValueError('invalid image file') from e
 
     # Decode the exact encoded result before it is allowed near the live path.
@@ -1771,7 +2115,7 @@ def transformed_image_bytes(path, transform):
             check.load()
             if (check.format or '').upper() != fmt or check.size != expected_size:
                 raise OSError('encoded edit validation failed')
-    except (UnidentifiedImageError, OSError, SyntaxError) as e:
+    except (UnidentifiedImageError, OSError, SyntaxError, MemoryError) as e:
         raise ValueError('could not encode the edited image') from e
     return payload
 
@@ -2181,7 +2525,14 @@ _BACKUP_MAX_FILES = 600
 _BACKUP_MAX_ROWS = 600
 _BACKUP_MAX_BYTES = 2 * 1024 * 1024 * 1024   # 2 GB uncompressed (zip-bomb guard)
 _BACKUP_MAX_METADATA_BYTES = 4 * 1024 * 1024
-_BACKUP_NAME_RE = re.compile(r'^[\w.-]+\.(webp|jpg|jpeg|png)$', re.IGNORECASE)
+# The import raster budget permits at most 16 Mi pixels.  96 MiB leaves room for
+# a valid 16 MP RGBA/BMP source plus container overhead, while making a single
+# archive entry incapable of filling a disk or RAM by itself.
+_BACKUP_MAX_IMAGE_BYTES = 96 * 1024 * 1024
+_BACKUP_NAME_RE = re.compile(r'^[\w.-]+\.(webp|jpg|jpeg|png|bmp)$', re.IGNORECASE)
+_BACKUP_EXTENSION_CANONICAL = {
+    '.jpg': '.jpg', '.jpeg': '.jpg', '.png': '.png', '.webp': '.webp', '.bmp': '.bmp',
+}
 
 # Champs snapshotés tels quels par ligne image (job_id/klein_model exclus : liés
 # à la machine source — un backup restauré ne peut pas « regénérer »).
@@ -2189,7 +2540,8 @@ _BACKUP_IMG_FIELDS = ('filename', 'source', 'framing', 'variation_label', 'statu
                       'caption', 'caption_short', 'variation_prompt', 'face_score', 'face_state',
                       'upscale_ratio', 'watermark_state', 'watermark_bbox',
                       'watermark_regions', 'parent_image_id', 'derivation_kind',
-                      'fail_reason', 'fail_kind', 'source_metadata')
+                      'fail_reason', 'fail_kind', 'source_metadata',
+                      'bank_analysis_snapshot')
 
 
 def _backup_basename(value):
@@ -2199,6 +2551,43 @@ def _backup_basename(value):
     if '/' in value or '\\' in value or not _BACKUP_NAME_RE.fullmatch(value):
         return None
     return value
+
+
+def _read_validated_backup_image(z: zipfile.ZipFile, info: zipfile.ZipInfo,
+                                 basename: str) -> bytes:
+    """Return one bounded, fully-decoded static backup image.
+
+    The outer archive's central-directory total protects the aggregate, but a
+    single entry still needs its own raw cap before it is inflated.  Crucially,
+    validation happens while the bytes are only in memory: a malformed image
+    must never be copied into the restore staging directory and later promoted.
+    """
+    max_bytes = _BACKUP_MAX_IMAGE_BYTES
+    if info.file_size > max_bytes:
+        raise ValueError(
+            f'backup image {basename} is too large '
+            f'(max {max_bytes // (1024 * 1024)} MiB per image)')
+    try:
+        with z.open(info) as source:
+            # Do not trust a crafted central-directory ``file_size`` alone.
+            # Reading one extra byte limits actual decompression even if that
+            # metadata is inconsistent with the entry payload.
+            raw = source.read(max_bytes + 1)
+    except (OSError, EOFError, RuntimeError, MemoryError, zipfile.BadZipFile) as exc:
+        raise ValueError(f'backup image {basename} could not be read') from exc
+    if len(raw) > max_bytes:
+        raise ValueError(
+            f'backup image {basename} is too large '
+            f'(max {max_bytes // (1024 * 1024)} MiB per image)')
+    try:
+        content_ext = _preserved_import_extension(raw, label=f'backup image {basename}')
+    except (ValueError, MemoryError) as exc:
+        raise ValueError(f'backup image {basename} is invalid: {exc}') from exc
+    named_ext = _BACKUP_EXTENSION_CANONICAL.get(os.path.splitext(basename)[1].lower())
+    if named_ext != content_ext:
+        raise ValueError(
+            f'backup image {basename} extension does not match its decoded content')
+    return raw
 
 
 def _backup_extra_ref_names(raw, *, limit=MAX_EXTRA_REFS):
@@ -2317,6 +2706,11 @@ def write_backup_zip(user_id: int, dataset_id: int, output: BinaryIO) -> None:
         # Archive a structured, revalidated object rather than the raw TEXT
         # column. A malformed legacy/local row can never export arbitrary links.
         row['source_metadata'] = normalize_source_metadata(img.source_metadata)
+        # A snapshot is durable only when it has the expected version, fingerprint
+        # and bounded analysis shape.  Invalid legacy/local text is deliberately
+        # omitted rather than becoming an opaque payload in a portable backup.
+        row['bank_analysis_snapshot'] = bank_transfer_metadata.normalized_snapshot_storage(
+            img.bank_analysis_snapshot)
         images_meta.append(row)
     with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as z:
         z.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False, indent=1))
@@ -2397,7 +2791,7 @@ def _import_backup_zipfile(user_id: int, z: zipfile.ZipFile):
     try:
         manifest = json.loads(z.read(metadata['manifest.json']).decode('utf-8'))
         images_meta = json.loads(z.read(metadata['images.json']).decode('utf-8'))
-    except (ValueError, UnicodeError, zipfile.BadZipFile):
+    except (ValueError, UnicodeError, RecursionError, MemoryError, zipfile.BadZipFile):
         raise ValueError('not a dataset backup (manifest.json/images.json missing or invalid)')
     if not isinstance(manifest, dict):
         raise ValueError('invalid backup manifest')
@@ -2487,8 +2881,14 @@ def _import_backup_zipfile(user_id: int, z: zipfile.ZipFile):
             base = _backup_basename(candidate)
             if not base:
                 continue   # nested path or weird name -> skip, never traverse
-            with z.open(info) as src, open(os.path.join(staging_dir, base), 'wb') as dst:
-                shutil.copyfileobj(src, dst, 1024 * 1024)
+            # Decode/verify all archive image bytes before they ever reach the
+            # restore staging directory. That keeps the eventual rename/promotion
+            # atomic even for compact pixel bombs or content/extension lies.
+            raw = _read_validated_backup_image(z, info, base)
+            with open(os.path.join(staging_dir, base), 'wb') as dst:
+                # Keep this copy seam (rather than ``dst.write(raw)``): it is
+                # deliberately fault-injectable by the atomic restore regression.
+                shutil.copyfileobj(io.BytesIO(raw), dst, 1024 * 1024)
             if prefix == 'ref':
                 extracted_refs.setdefault(base.casefold(), base)
             else:
@@ -2536,6 +2936,9 @@ def _import_backup_zipfile(user_id: int, z: zipfile.ZipFile):
             # while valid Pexels metadata is canonicalized back to JSON TEXT.
             values['source_metadata'] = _source_metadata_storage(
                 values.get('source_metadata'))
+            values['bank_analysis_snapshot'] = (
+                bank_transfer_metadata.normalized_snapshot_storage(
+                    values.get('bank_analysis_snapshot')))
             if is_candidate and not fn and values.get('status') in ('pending', 'keep'):
                 values['status'] = 'failed'
                 values['fail_reason'] = (
@@ -2701,6 +3104,13 @@ def batch_image_action(user_id, dataset_id, image_ids, action):
                 _clear_watermark_metadata(img)
             img.status = action
         n += 1
+    if action == 'keep':
+        # This is deliberately a second phase.  If both a source and its
+        # improvement are selected, every explicit choice is applied first,
+        # then the kept candidate wins regardless of database/query order.
+        for img in rows:
+            if img.status == 'keep':
+                _unkeep_parent_for_kept_improvement(img)
     db.session.commit()
     return n
 
@@ -2796,7 +3206,17 @@ def start_reference_edit(app, user_id, dataset_id, engine, prompt, extra_edit_re
         raise ValueError('reference image required')
     if not os.path.exists(_ref_path(ds)):
         raise ValueError('reference image file missing')
-    # Supersede FIRST, whichever lane is starting and whichever was running: a
+    refs = None
+    if engine in API_ENGINES:
+        # Validate/sanitize every byte that could leave this machine BEFORE
+        # disrupting a previous edit or creating an async worker. In particular,
+        # transient modal uploads are request bytes, not trusted dataset files.
+        refs = _all_ref_bytes(ds)                 # primary + persistent extras
+        for index, raw in enumerate(extra_edit_ref_bytes or (), 1):
+            if raw:
+                refs.append(sanitize_external_reference(
+                    raw, label=f'extra edit reference {index}'))
+    # Once the new request is valid, supersede whichever lane was running: a
     # previous LOCAL edit still on the GPU is no longer wanted, and nothing else
     # would ever stop it (its callback will find no entry). Switching from Klein
     # to ChatGPT mid-thought used to leave the render — and its ✦ badge — behind.
@@ -2805,8 +3225,6 @@ def start_reference_edit(app, user_id, dataset_id, engine, prompt, extra_edit_re
     if engine in LOCAL_ENGINES:
         return _start_local_reference_edit(user_id, dataset_id, ds, engine, prompt,
                                            extra_edit_ref_bytes)
-    refs = _all_ref_bytes(ds)                       # SNAPSHOT (primary + dataset extras)
-    refs.extend(rb for rb in (extra_edit_ref_bytes or []) if rb)
     dsdir = _dataset_dir(dataset_id)
     token = reference_edit_jobs.start(dataset_id, dsdir, engine, prompt)
     act_token = dataset_activity.begin(dataset_id, 'edit_reference', total=1, engine=engine)
@@ -2881,6 +3299,11 @@ def _start_local_reference_edit(user_id, dataset_id, ds, engine, prompt,
             job_id = enqueue_klein_edit(
                 user_id=str(user_id), source_filename=ds.ref_filename,
                 source_path=ref_path, edit_prompt=prompt, extra_ref_paths=extras,
+                # The dataset's model, like every other Klein lane: this edit
+                # produces the REFERENCE the whole dataset is built from, so it is
+                # the last place that should run on a different model than the
+                # images it anchors. None (never chose) = the historical auto pick.
+                klein_model=dataset_klein_model(ds),
                 sampler_steps=_generation_steps(), extra_metadata=meta)
     except Exception as exc:
         # Nothing queued: drop the entry rather than leave a spinner with no job.
@@ -3177,7 +3600,11 @@ def _watermark_route_payload(img):
         return none
     try:
         with Image.open(_img_path(img)) as im:
-            W, H = im.size
+            # The bbox comes from the browser/VLM visual frame, so route against
+            # the same EXIF-oriented dimensions the user can see. This is a
+            # payload/polling read: use the header-only helper, never decode the
+            # whole master merely to draw a route badge.
+            W, H = image_encoding.visual_size_from_header(im)
     except (OSError, ValueError):
         return none
     box = tuple(bbox)
@@ -3317,9 +3744,8 @@ def dataset_payload(user_id, dataset_id):
         'storage_path': _dataset_path(ds.id),
         'ref_filename': ds.ref_filename,
         # Pixel size of the ACTIVE reference (the cropped one — that is the file
-        # every engine is handed). Krea 2 Edit reproduces this shape, so the
-        # generation panel uses it to warn, BEFORE a batch, that a square/landscape
-        # reference will squeeze the body & back shots. None when unmeasurable.
+        # every engine is handed). Kept for crop-aware clients; Krea dataset cards
+        # now use the selected card's target frame. None when unmeasurable.
         'ref_width': (ref_size or (None, None))[0],
         'ref_height': (ref_size or (None, None))[1],
         'ref_original_filename': ds.ref_original_filename or '',
@@ -3450,7 +3876,10 @@ def normalize_to_webp(image_bytes: bytes, size: int = 1024,
     an image the user already curated. It must NOT be routed through `image_encoding`:
     inflating an upload 4x to protect pixels the remote engine will re-encode anyway
     buys nothing. See the module docstring of `image_encoding` for the split."""
-    im = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+    # A normalised WebP has no reason to retain a camera orientation tag. The
+    # shared loader validates header geometry before any full decode, then bakes
+    # the visible orientation into its temporary pixels.
+    im = _load_import_derivative_image(image_bytes).convert('RGB')
     limit = min(size, IMPORT_MAX_SIDE_CEILING) if size else IMPORT_MAX_SIDE_CEILING
     im.thumbnail((limit, limit), Image.LANCZOS)   # only ever shrinks
     out = io.BytesIO()
@@ -3462,27 +3891,50 @@ def normalize_to_webp(image_bytes: bytes, size: int = 1024,
 
 
 # --- Import resolution & encoding (Settings ▸ Captioning & quality) ----------
-# Hard ceiling on a stored dataset image, in px. MEASURED, not chosen: Pillow's
-# WebP encoder raises "Image size exceeds WebP limit of 16383 pixels" past that
-# side, so "keep the original" has to stop somewhere or a 20000 px panorama is
-# simply an import that fails. 8192 sits well under the format wall, is already
-# 8x what any mainstream trainer buckets to, and keeps the review grid loadable.
-IMPORT_MAX_SIDE_CEILING = 8192
-_IMPORT_ENCODINGS = {                       # label -> PIL save kwargs
-    'standard': {'quality': 92, 'lossless': False},
-    'high': {'quality': 100, 'lossless': False},
-    'lossless': {'quality': 100, 'lossless': True},
+# Hard ceiling on a *normalised WebP* dataset image, in px. MEASURED, not chosen:
+# Pillow's WebP encoder raises "Image size exceeds WebP limit of 16383 pixels" past
+# that side. It applies only to the opt-in normalisation modes; preserving a source
+# file never re-encodes it just to meet a WebP implementation limit.
+IMPORT_MAX_SIDE_CEILING = image_encoding.INPUT_MAX_SIDE
+_IMPORT_ENCODINGS = {                       # label -> storage policy
+    'preserve': {'preserve': True, 'quality': None, 'lossless': False},
+    'standard': {'preserve': False, 'quality': 92, 'lossless': False},
+    'high': {'preserve': False, 'quality': 100, 'lossless': False},
+    'lossless': {'preserve': False, 'quality': 100, 'lossless': True},
 }
+
+# Only static formats both the dataset tools and the trainer's disposable PNG
+# staging pass can read. The extension comes from decoded CONTENT, never from the
+# upload name: an `image.jpg` carrying PNG bytes must not leave a lying filename.
+_PRESERVED_IMPORT_EXTENSIONS = {
+    'JPEG': '.jpg',
+    'PNG': '.png',
+    'WEBP': '.webp',
+    'BMP': '.bmp',
+}
+
+# A raw master is intentionally NOT resized on import, but importing it must not
+# turn the process into an unbounded decompressor. These limits apply uniformly to
+# every image ingress path (preserve, crop, explicit normalisation, ZIP and scrape)
+# and are checked from Pillow's header before ``load()``: 8192 px on either side
+# and 16 Mi pixels (about 64 MiB for one decoded RGB buffer; substantially more
+# once an edit/analysis copy exists). This deliberately favours process safety and
+# a coherent contract over raw 50 MP phone masters: reduce those before importing.
+# The values are a safety budget, not an encoder limit; an accepted preserved image
+# remains byte-for-byte untouched on disk.
+PRESERVED_IMPORT_MAX_SIDE = IMPORT_MAX_SIDE_CEILING
+PRESERVED_IMPORT_MAX_PIXELS = image_encoding.INPUT_MAX_PIXELS
 
 
 def import_encode_policy() -> dict:
     """What an imported image will ACTUALLY be stored as, resolved once so the
-    UI, the toast and the encoder all quote the same numbers.
+    UI, the toast and the encoder all quote the same policy.
 
     Total by construction: an unusable configured value logs and degrades to the
-    shipped default rather than breaking every import. `capped` is True when the
-    user asked for more than the format allows — the screens say so instead of
-    silently shrinking (that silence is the bug this whole setting answers)."""
+    shipped default rather than breaking every import. `capped` is True when a
+    WebP-normalisation mode asked for more than that format allows. In `preserve`
+    mode the value is retained for a future explicit normalisation choice, but has
+    no effect on the stored source bytes."""
     defaults = cfg.DEFAULTS['dataset_import']
     raw_side = cfg.get('dataset_import.max_side', defaults['max_side'])
     try:
@@ -3500,18 +3952,146 @@ def import_encode_policy() -> dict:
         if encoding:
             logger.warning('ignoring unusable dataset_import.encoding %r', encoding)
         encoding = defaults['encoding']
-    return {'max_side': max_side, 'encoding': encoding, 'capped': capped,
-            'ceiling': IMPORT_MAX_SIDE_CEILING, **_IMPORT_ENCODINGS[encoding]}
+    policy = _IMPORT_ENCODINGS[encoding]
+    # A preserved image is never sent through a WebP encoder, so a WebP ceiling
+    # cannot cap it. Keep the resolved max_side in the payload so switching
+    # back to a normalising mode remains predictable.
+    return {'max_side': max_side, 'encoding': encoding,
+            'capped': capped and not policy['preserve'],
+            'ceiling': IMPORT_MAX_SIDE_CEILING,
+            # Explicit names for the ingress safety budget. The older
+            # `preserve_*` aliases stay below for clients released while this
+            # policy only described raw-preserve imports.
+            'input_max_side': PRESERVED_IMPORT_MAX_SIDE,
+            'input_max_pixels': PRESERVED_IMPORT_MAX_PIXELS,
+            'preserve_max_side': PRESERVED_IMPORT_MAX_SIDE,
+            'preserve_max_pixels': PRESERVED_IMPORT_MAX_PIXELS,
+            **policy}
+
+
+def _validate_import_header_dimensions(im: Image.Image, *, label: str) -> None:
+    """Reject an unsafe raster header before any caller asks Pillow to decode it."""
+    image_encoding.validate_input_header_dimensions(im, label=label)
+
+
+def _import_header_dimensions(image_bytes: bytes, *, label: str = 'import') -> tuple[int, int]:
+    """Read bounded image dimensions without ever asking Pillow for pixel data.
+
+    This is the common ingress check for the small-image warning, scrape sorting,
+    crop and explicit normalisation paths.  It is deliberately separate from the
+    preserve validator: those paths additionally require a static, supported
+    container, while this helper is only about stopping an unsafe raster header
+    before any caller decides to call ``load()``.
+    """
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter('error', Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(image_bytes)) as im:
+                _validate_import_header_dimensions(im, label=label)
+                return im.size
+    except ValueError:
+        raise
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
+        raise ValueError(f'{label} rejected an unsafe image header') from exc
+    except (OSError, UnidentifiedImageError, MemoryError) as exc:
+        raise ValueError(f'{label} received an unreadable image') from exc
+
+
+def _preserved_import_header_extension(im: Image.Image, *, label: str = 'preserve mode') -> str:
+    """Validate a raw static source header and return its content extension.
+
+    This is deliberately called before ``im.load()``.  A file can advertise a
+    huge raster in a very small compressed payload, so dimensions must be
+    rejected before the decoder allocates its full pixel buffer.
+    """
+    fmt = (getattr(im, 'format', None) or '').upper()
+    ext = _PRESERVED_IMPORT_EXTENSIONS.get(fmt)
+    if ext is None:
+        raise ValueError(
+            f'{label} supports only static JPEG, PNG, WebP, or BMP images '
+            f'(got {fmt or "unknown"})')
+    if getattr(im, 'n_frames', 1) != 1:
+        raise ValueError(
+            f'{label} supports only static JPEG, PNG, WebP, or BMP images '
+            '(animated images are not supported)')
+    _validate_import_header_dimensions(im, label=label)
+    return ext
+
+
+def _preserved_import_extension(image_bytes: bytes, *, label: str = 'preserve mode') -> str:
+    """Validate a raw static source and return its canonical content extension.
+
+    Preserving bytes must not mean accepting arbitrary browser/media formats the
+    rest of the dataset pipeline cannot safely edit, serve or train from. GIF,
+    TIFF, AVIF and animated WebP are deliberately refused here instead of being
+    silently flattened or saved under a made-up extension.  Header dimensions
+    are checked before ``load()`` under a local Pillow bomb-warning policy; no
+    process-global warning filter is ever changed.
+    """
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter('error', Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(image_bytes)) as im:
+                ext = _preserved_import_header_extension(im, label=label)
+                # Fully decode only after the explicit header budget passed. PIL can
+                # identify a truncated file from the header alone; `load` enforces the
+                # same readability guarantee the old normalisation path provided.
+                im.load()
+    except ValueError:
+        raise
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
+        raise ValueError(f'{label} rejected an unsafe image header') from exc
+    except (OSError, UnidentifiedImageError, MemoryError) as exc:
+        raise ValueError(f'{label} received an unreadable image') from exc
+    return ext
+
+
+def _load_import_derivative_image(image_bytes: bytes) -> Image.Image:
+    """Decode a bounded, visually upright temporary image for derived imports.
+
+    Preserve mode calls its stricter static-format validator above.  Crop and
+    explicit WebP-normalisation use this shared geometry guard so they cannot
+    decode a compressed bomb merely because they are allowed to derive pixels.
+    """
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter('error', Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(image_bytes)) as opened:
+                _validate_import_header_dimensions(opened, label='import')
+                opened.load()
+                return ImageOps.exif_transpose(opened).copy()
+    except ValueError:
+        raise
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
+        raise ValueError('import rejected an unsafe image header') from exc
+    except (OSError, UnidentifiedImageError, MemoryError) as exc:
+        raise ValueError('import received an unreadable image') from exc
+
+
+def import_store_image(image_bytes: bytes) -> tuple[bytes, str]:
+    """Return exactly what a non-cropped import should store and its extension.
+
+    `preserve` keeps approved source bytes byte-for-byte. The three legacy
+    encoding modes intentionally still create WebP derivatives, preserving their
+    historical resizing and quality controls for users who explicitly choose them.
+    """
+    p = import_encode_policy()
+    if p['preserve']:
+        return image_bytes, _preserved_import_extension(image_bytes)
+    return (normalize_to_webp(image_bytes, size=p['max_side'],
+                              quality=p['quality'], lossless=p['lossless']),
+            '.webp')
 
 
 def import_encode(image_bytes: bytes) -> bytes:
-    """normalize_to_webp under the USER's import policy — the single door every
-    dataset ingest lane goes through. Generated images and API transport copies
-    deliberately keep their own fixed sizes: this knob is about what the user
-    hands in, not about what the app produces."""
-    p = import_encode_policy()
-    return normalize_to_webp(image_bytes, size=p['max_side'],
-                             quality=p['quality'], lossless=p['lossless'])
+    """Backward-compatible bytes-only view of :func:`import_store_image`.
+
+    New ingest lanes need the true extension as well and use
+    :func:`import_store_image` directly. Generated images and API transport
+    copies deliberately keep their own fixed sizes: this policy is about what the
+    user hands in, not about what the app produces.
+    """
+    return import_store_image(image_bytes)[0]
 
 
 def detect_head_bbox(image_bytes):
@@ -3631,7 +4211,9 @@ def face_crop_to_square_webp(image_bytes: bytes, size: int = 1024, pad: float = 
     part of its contract (callers write the result to a `.webp`). Re-cropping that
     reference afterwards goes through `_crop_resize_file`, which does preserve the
     format losslessly."""
-    im = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+    # The VLM sees an upright transport derivative. Work in that same visual
+    # coordinate space so its normalized head box lands on the visible subject.
+    im = _load_import_derivative_image(image_bytes).convert('RGB')
     W, H = im.size
     norm = detect_head_bbox(image_bytes) if use_vision else None
     half = 0
@@ -3665,17 +4247,19 @@ def face_crop_to_square_webp(image_bytes: bytes, size: int = 1024, pad: float = 
 # --- Import + classify (Qwen3-VL) ------------------------------------------
 def import_images(user_id, dataset_id, files_bytes, crop=False, dedupe=False, stats=None,
                   source_metadata=None, captions=None, bank_image_ids=None,
-                  framings=None):
-    """Normalize (or head-crop) + persist + create import rows (status=keep).
+                  framings=None, bank_analysis_snapshots=None,
+                  watermark_states=None, watermark_bboxes=None,
+                  watermark_regions=None):
+    """Store original static bytes (or head-crop) + create import rows (status=keep).
     When crop=True, each image is auto head-cropped via Qwen3-VL - the CALLER
     must then hold the GPU-exclusive window - and is by construction a face,
     so framing='face' is set directly (no classify pass needed).
 
     dedupe=True (the /import route) drops perceptual duplicates by dHash — both
     within the batch and vs the dataset's existing files. The hash is computed on
-    the NORMALIZED result (what's actually stored), so a re-import of the same
-    photo matches its earlier crop instead of comparing a full frame to a head
-    crop. Skips are counted in stats['duplicates'] when a stats dict is passed.
+    the final stored image, so a re-import of the same photo matches its earlier
+    crop instead of comparing a full frame to a head crop. Skips are counted in
+    stats['duplicates'] when a stats dict is passed.
     Default stays False: service-level callers (scrape flow dedupes upstream on
     the ORIGINALS, before paying the crop) keep the historical behavior.
 
@@ -3703,11 +4287,19 @@ def import_images(user_id, dataset_id, files_bytes, crop=False, dedupe=False, st
     that could NOT be linked (the matched row already belongs to another bank —
     a scalar column can only credit one) are listed in ``stats['bank_unlinked']``.
 
+    ``bank_analysis_snapshots`` is an internal Bank-promotion marker parallel to
+    ``files_bytes``.  When present, this importer recalculates the deterministic
+    quality/provenance values from the final Dataset file, then seals
+    only those values with that file's fingerprint.  Source-file and ML verdicts
+    never enter the snapshot.  The regular user-facing fields stay separate:
+    ``watermark_*`` mirrors the current Bank watermark decision and mask without
+    treating either as a historical analysis value.
+
     Returns (ids, failed_count)."""
     ds = get_dataset(user_id, dataset_id)
     if not ds:
         return [], 0
-    # Sans head-crop, on préserve TOUJOURS le ratio (normalize_to_webp) : l'ancien
+    # Sans head-crop, on préserve le ratio ET les octets source autorisés : l'ancien
     # chemin « carré padé » ajoutait des bandes noires que le LoRA apprendrait, et
     # forçait tous les imports personnage en carré — un plan buste/corps importé
     # doit rester tel quel (ai-toolkit gère le bucketing multi-ratios).
@@ -3716,6 +4308,11 @@ def import_images(user_id, dataset_id, files_bytes, crop=False, dedupe=False, st
     captions_by_index = list(captions) if captions is not None else []
     bank_ids_by_index = list(bank_image_ids) if bank_image_ids is not None else []
     framings_by_index = list(framings) if framings is not None else []
+    snapshots_by_index = (list(bank_analysis_snapshots)
+                          if bank_analysis_snapshots is not None else [])
+    watermark_states_by_index = list(watermark_states) if watermark_states is not None else []
+    watermark_bboxes_by_index = list(watermark_bboxes) if watermark_bboxes is not None else []
+    watermark_regions_by_index = list(watermark_regions) if watermark_regions is not None else []
 
     def bank_id_at(i):
         return bank_ids_by_index[i] if i < len(bank_ids_by_index) else None
@@ -3729,6 +4326,24 @@ def import_images(user_id, dataset_id, files_bytes, crop=False, dedupe=False, st
         fr = framings_by_index[i] if i < len(framings_by_index) else None
         return fr if fr in ('face', 'bust', 'body', 'back') else None
 
+    def snapshot_at(i):
+        return snapshots_by_index[i] if i < len(snapshots_by_index) else None
+
+    def watermark_state_at(i):
+        state = (watermark_states_by_index[i]
+                 if i < len(watermark_states_by_index) else None)
+        return state if state in ('none', 'detected', 'dismissed', 'cleaned', 'failed', 'error') else None
+
+    def watermark_bbox_at(i):
+        value = (watermark_bboxes_by_index[i]
+                 if i < len(watermark_bboxes_by_index) else None)
+        return value if isinstance(value, str) else None
+
+    def watermark_regions_at(i):
+        value = (watermark_regions_by_index[i]
+                 if i < len(watermark_regions_by_index) else None)
+        return value if isinstance(value, str) else None
+
     ids = []
     failed = 0
     for index, raw in enumerate(files_bytes):
@@ -3737,24 +4352,31 @@ def import_images(user_id, dataset_id, files_bytes, crop=False, dedupe=False, st
         # jamais bloquée : c'est parfois la seule photo disponible.
         if stats is not None:
             try:
-                with Image.open(io.BytesIO(raw)) as im0:
-                    if min(im0.size) < SCRAPE_IMPORT_MIN_SIDE:
-                        stats['small'] = stats.get('small', 0) + 1
+                if min(_import_header_dimensions(raw)) < SCRAPE_IMPORT_MIN_SIDE:
+                    stats['small'] = stats.get('small', 0) + 1
             except Exception:
                 pass
         try:
             if crop:
-                webp, scale = face_crop_to_square_webp(raw, return_scale=True)
+                stored, scale = face_crop_to_square_webp(raw, return_scale=True)
+                extension = '.webp'
             else:
-                webp, scale = import_encode(raw), None
+                stored, extension = import_store_image(raw)
+                scale = None
         except Exception as e:
             failed += 1
             logger.warning(f"dataset import: image skipped (dataset {dataset_id}): {e}")
             continue
+        analysis_snapshot = None
+        if snapshot_at(index) is not None:
+            final_analysis = bank_deterministic_analysis(stored)
+            if final_analysis is not None:
+                analysis_snapshot = bank_transfer_metadata.snapshot_storage(
+                    final_analysis, stored)
         fp = None
         if dedupe:
             try:
-                with Image.open(io.BytesIO(webp)) as im:
+                with Image.open(io.BytesIO(stored)) as im:
                     fp = _dhash(im)
             except (OSError, ValueError):
                 fp = None   # unreadable output would have failed above; belt & braces
@@ -3770,20 +4392,24 @@ def import_images(user_id, dataset_id, files_bytes, crop=False, dedupe=False, st
                     # photo first), report the id back: the caller has no verifiable
                     # trace here and needs to fall back on its own bookkeeping.
                     bid = bank_id_at(index)
-                    if bid and not _attach_bank_provenance(match, bid) \
+                    if bid and not _attach_bank_provenance(
+                            match, bid, bank_analysis_snapshot=analysis_snapshot) \
                             and stats is not None:
                         stats.setdefault('bank_unlinked', []).append(bid)
                     logger.info(f"dataset import: perceptual duplicate skipped (dataset {dataset_id})")
                     continue
-        fn = f"{user_id}_dataset_{uuid.uuid4().hex[:8]}.webp"
-        with open(os.path.join(_dataset_dir(dataset_id), fn), 'wb') as fh:
-            fh.write(webp)
+        fn = f"{user_id}_dataset_{uuid.uuid4().hex[:8]}{extension}"
+        write_image_atomic(os.path.join(_dataset_dir(dataset_id), fn), stored)
         cap = (captions_by_index[index] if index < len(captions_by_index) else None)
         cap = _cap_caption(cap) if (cap or '').strip() else None
         img = FaceDatasetImage(dataset_id=dataset_id, source='import', status='keep',
                                filename=fn, framing=framing_at(index),
                                upscale_ratio=scale, caption=cap,
                                bank_image_id=bank_id_at(index),
+                               bank_analysis_snapshot=analysis_snapshot,
+                               watermark_state=watermark_state_at(index),
+                               watermark_bbox=watermark_bbox_at(index),
+                               watermark_regions=watermark_regions_at(index),
                                source_metadata=_source_metadata_storage(
                                    metadata_by_index[index]
                                    if index < len(metadata_by_index) else None))
@@ -3799,7 +4425,7 @@ def import_images(user_id, dataset_id, files_bytes, crop=False, dedupe=False, st
 # Des images + sidecars .txt de même nom (la convention kohya/ai-toolkit), soit
 # dans un ZIP uploadé, soit dans un dossier du disque du serveur (app locale
 # mono-user : le chemin est SON disque). Les images gardent leur ratio
-# (normalize_to_webp, pas de crop), les captions atterrissent sur les rows,
+# (source préservée par défaut, sans crop), les captions atterrissent sur les rows,
 # dédup perceptuelle vs le lot ET le dataset. Les fichiers sont réécrits sous
 # des noms générés (jamais celui de la source → aucune traversée possible),
 # profondeur de dossiers libre (le ZIP accepte toute arborescence ; le dossier
@@ -3823,24 +4449,23 @@ def _merge_training_images(user_id, dataset_id, entries, captions, stats=None):
     for stem, display, getter in entries:
         try:
             raw = getter()
-        except (OSError, zipfile.BadZipFile):
+        except (OSError, ValueError, MemoryError, zipfile.BadZipFile):
             failed += 1
             continue
         if stats is not None:   # même garde qualité que l'import de photos
             try:
-                with Image.open(io.BytesIO(raw)) as im0:
-                    if min(im0.size) < SCRAPE_IMPORT_MIN_SIDE:
-                        stats['small'] = stats.get('small', 0) + 1
+                if min(_import_header_dimensions(raw)) < SCRAPE_IMPORT_MIN_SIDE:
+                    stats['small'] = stats.get('small', 0) + 1
             except Exception:
                 pass
         try:
-            webp = import_encode(raw)
+            stored, extension = import_store_image(raw)
         except Exception as e:
             failed += 1
             logger.warning(f"dataset import: image skipped ({display}): {e}")
             continue
         try:
-            with Image.open(io.BytesIO(webp)) as im:
+            with Image.open(io.BytesIO(stored)) as im:
                 fp = _dhash(im)
         except (OSError, ValueError):
             fp = None
@@ -3871,9 +4496,8 @@ def _merge_training_images(user_id, dataset_id, entries, captions, stats=None):
                             stats['captions_applied'] = \
                                 stats.get('captions_applied', 0) + 1
                 continue
-        fn = f"{user_id}_dsimport_{uuid.uuid4().hex[:8]}.webp"
-        with open(os.path.join(_dataset_dir(dataset_id), fn), 'wb') as fh:
-            fh.write(webp)
+        fn = f"{user_id}_dsimport_{uuid.uuid4().hex[:8]}{extension}"
+        write_image_atomic(os.path.join(_dataset_dir(dataset_id), fn), stored)
         cap = _cap_caption(incoming) if incoming else None
         if cap and stats is not None:
             stats['captions'] = stats.get('captions', 0) + 1
@@ -3957,17 +4581,38 @@ def import_dataset_folder(user_id, dataset_id, folder, stats=None):
         paths.extend(os.path.join(root, f) for f in files)
     if len(paths) > DATASET_ZIP_MAX_FILES:
         raise ValueError(f'too many files in the folder (max {DATASET_ZIP_MAX_FILES})')
-    sizes = {}
+    sizes, regular_paths = {}, set()
     for p in paths:
         try:
-            sizes[p] = os.path.getsize(p)
+            # Do not follow a symlink into an arbitrary file/pipe outside the
+            # folder the user selected. A named pipe must never reach ``open``:
+            # it can block the request forever before there are image bytes to
+            # validate.
+            source_stat = os.lstat(p)
         except OSError:
+            sizes[p] = 0
+            continue
+        if stat.S_ISREG(source_stat.st_mode):
+            regular_paths.add(p)
+            sizes[p] = source_stat.st_size
+        else:
             sizes[p] = 0
     if sum(sizes.values()) > DATASET_ZIP_MAX_BYTES:
         raise ValueError('folder too large (max 2 GB)')
+    oversized = next((
+        p for p in paths
+        if p.lower().endswith(_DATASET_ZIP_IMG_EXTS)
+        and p in regular_paths
+        and sizes.get(p, 0) > DATASET_ZIP_MAX_IMAGE_BYTES
+    ), None)
+    if oversized is not None:
+        # Match ZIP import's per-image rule before a regular/sparse file is ever
+        # opened. The bounded reader below repeats it to cover a live-folder race.
+        raise ValueError('image too large in folder (max 128 MiB per image)')
     captions = {}
     for p in paths:
-        if p.lower().endswith('.txt') and sizes.get(p, 0) <= 64 * 1024:
+        if (p in regular_paths and p.lower().endswith('.txt')
+                and sizes.get(p, 0) <= 64 * 1024):
             try:
                 with open(p, 'rb') as fh:
                     captions[os.path.splitext(p)[0]] = \
@@ -3976,11 +4621,28 @@ def import_dataset_folder(user_id, dataset_id, folder, stats=None):
                 pass
 
     def _read(p):
+        source_stat = os.lstat(p)
+        if not stat.S_ISREG(source_stat.st_mode):
+            raise ValueError('folder image is not a regular file')
+        if source_stat.st_size > DATASET_ZIP_MAX_IMAGE_BYTES:
+            raise ValueError('image too large in folder (max 128 MiB per image)')
         with open(p, 'rb') as fh:
-            return fh.read()
+            opened_stat = os.fstat(fh.fileno())
+            if not stat.S_ISREG(opened_stat.st_mode):
+                raise ValueError('folder image is not a regular file')
+            raw = fh.read(DATASET_ZIP_MAX_IMAGE_BYTES + 1)
+        if len(raw) > DATASET_ZIP_MAX_IMAGE_BYTES:
+            raise ValueError('image too large in folder (max 128 MiB per image)')
+        return raw
 
-    entries = [(os.path.splitext(p)[0], p, lambda p=p: _read(p))
-               for p in paths if p.lower().endswith(_DATASET_ZIP_IMG_EXTS)]
+    def _non_regular_image():
+        raise ValueError('folder image is not a regular file')
+
+    entries = [
+        (os.path.splitext(p)[0], p,
+         (lambda p=p: _read(p)) if p in regular_paths else _non_regular_image)
+        for p in paths if p.lower().endswith(_DATASET_ZIP_IMG_EXTS)
+    ]
     return _merge_training_images(user_id, dataset_id, entries, captions, stats=stats)
 
 
@@ -3995,7 +4657,8 @@ SCRAPE_IMPORT_MAX = 60             # cap par import (download synchrone parallé
 SCRAPE_IMPORT_MIN_SIDE = 768       # ai-toolkit ne fait que downscaler : 768 reste exploitable
 SCRAPE_IMPORT_MAX_RATIO = 3.0      # au-delà de 3:1, aucun bucket trainer ne gère proprement
 SCRAPE_DHASH_MAX_DISTANCE = 8      # Hamming ≤ 8 sur 64 bits = doublon perceptuel
-_SCRAPE_DL_TYPES = ('image/jpeg', 'image/jpg', 'image/png', 'image/webp')  # pas de gif/svg
+_SCRAPE_DL_TYPES = ('image/jpeg', 'image/jpg', 'image/png', 'image/webp',
+                    'image/bmp')  # pas de gif/svg
 _SCRAPE_DL_MAX_BYTES = 25 * 1024 * 1024
 _SCRAPE_DL_WORKERS = 6
 
@@ -4011,6 +4674,85 @@ def _dhash(im: Image.Image) -> int:
         for col in range(8):
             bits = (bits << 1) | (px[row * 9 + col] > px[row * 9 + col + 1])
     return bits
+
+
+# Bank analysis needs to decode before its pure-Pillow metrics can downscale.
+# Keep the header guard local to this call rather than changing Pillow's process-
+# wide bomb policy: a 16 MP source is already a substantial RGB working set, and
+# the project itself caps stored Dataset sides at 8192 px.  A Bank may still copy
+# a larger file; it simply starts unanalysed and can be reviewed separately.
+BANK_ANALYSIS_MAX_SIDE = IMPORT_MAX_SIDE_CEILING
+BANK_ANALYSIS_MAX_PIXELS = 16 * 1024 * 1024
+
+
+def _bank_analysis_dimensions_allowed(im: Image.Image) -> bool:
+    """Reject headers whose full decode would exceed the local analysis budget."""
+    try:
+        width, height = im.size
+        return (isinstance(width, int) and isinstance(height, int)
+                and 0 < width <= BANK_ANALYSIS_MAX_SIDE
+                and 0 < height <= BANK_ANALYSIS_MAX_SIDE
+                and width * height <= BANK_ANALYSIS_MAX_PIXELS)
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return False
+
+
+def _loaded_bank_deterministic_analysis(im: Image.Image) -> dict | None:
+    """Apply the header guard, then decode only an image safe for this analysis."""
+    if not _bank_analysis_dimensions_allowed(im):
+        logger.warning('bank analysis skipped image beyond %d px / %d px-side budget',
+                       BANK_ANALYSIS_MAX_PIXELS, BANK_ANALYSIS_MAX_SIDE)
+        return None
+    # Match the Bank scan's JPEG fast path. It bounds decode work before the
+    # quality metric performs its own <=1024px analysis copy; other formats
+    # keep their native decoder behavior after the local header guard.
+    im.draft(None, (ANALYSIS_MAX_SIDE * 2, ANALYSIS_MAX_SIDE * 2))
+    im.load()
+    return _bank_deterministic_values(im)
+
+
+def bank_deterministic_analysis(image_source) -> dict | None:
+    """Measure the deterministic Bank fields from one final image.
+
+    Bank -> Dataset always invokes this on its emitted final file, and every Bank
+    -> Bank copy invokes it on the destination file. Keeping it here next to the
+    Dataset dHash makes both transfer directions use exactly the same pure-Pillow
+    formulas as the Bank quality scan, without carrying stale source ML outputs.
+    """
+    try:
+        # Pillow may warn at open time, but the explicit header guard below runs
+        # before ``load()``. If an installation promotes that warning to an
+        # exception, the dedicated catch remains safe without changing global
+        # warning filters shared by concurrent Bank scans.
+        if isinstance(image_source, (bytes, bytearray)):
+            handle = io.BytesIO(image_source)
+            with Image.open(handle) as im:
+                return _loaded_bank_deterministic_analysis(im)
+        with Image.open(image_source) as im:
+            return _loaded_bank_deterministic_analysis(im)
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning):
+        logger.warning('bank analysis skipped Pillow decompression bomb')
+        return None
+    except (OSError, TypeError, ValueError, SyntaxError, UnidentifiedImageError):
+        return None
+
+
+def _bank_deterministic_values(im: Image.Image) -> dict:
+    """The strict v2 snapshot schema, computed from an already decoded image."""
+    metrics = quality_metrics(im)
+    provenance = provenance_metrics(im)
+    return {
+        'quality_state': 'ok',
+        'blur_score': metrics['blur_score'],
+        'noise_score': metrics['noise_score'],
+        'uniformity_score': metrics['uniformity_score'],
+        'dhash': f'{_dhash(im):016x}',
+        'detail_ratio': provenance['detail_ratio'],
+        'bars_ratio': provenance['bars_ratio'],
+        'jpeg_quality': provenance['jpeg_quality'],
+        'origin': provenance['origin'],
+        'origin_evidence': provenance['origin_evidence'],
+    }
 
 
 def _hamming(a: int, b: int) -> int:
@@ -4043,20 +4785,42 @@ def _existing_dhashes(dataset_id) -> list:
     return [h for h, _id in _existing_dhash_rows(dataset_id)]
 
 
-def _attach_bank_provenance(image_id, bank_image_id) -> bool:
+def _attach_bank_provenance(image_id, bank_image_id, *, bank_analysis_snapshot=None) -> bool:
     """Raccroche une image de dataset DÉJÀ présente à la bank_image dont elle est
     le doublon perceptuel, et dit si le lien a été pris. N'écrase jamais une
     provenance existante : la première bank qui a fourni l'image la garde (sinon
     deux banks se voleraient le lien à chaque promotion croisée) — l'appelant
     apprend alors que CETTE bank n'a pas de trace vérifiable ici."""
-    if not image_id or not bank_image_id:
+    if not image_id:
         return False
     row = db.session.get(FaceDatasetImage, image_id)
-    if row is None or row.bank_image_id is not None:
+    if row is None:
         return False
-    row.bank_image_id = bank_image_id
-    db.session.commit()
-    return True
+    # A dHash duplicate can be only visually similar, not byte-identical.  Its
+    # source Bank scores are useful only when the Dataset file proves it is the
+    # exact normalized transfer output; never attach a stale-looking snapshot.
+    changed = False
+    # First Bank wins for the snapshot exactly as it does for bank_image_id.  A
+    # later Bank may hold a perceptual duplicate with different scores, but it
+    # must never rewrite the analysis attributed to the original provenance.
+    # The sole exception fills a legacy/mid-upgrade row that is already linked to
+    # this SAME Bank but has no snapshot yet.
+    owns_snapshot = (row.bank_image_id is None
+                     or (row.bank_image_id == bank_image_id
+                         and row.bank_analysis_snapshot is None))
+    if owns_snapshot and bank_analysis_snapshot and row.filename:
+        path = os.path.join(_dataset_dir(row.dataset_id), row.filename)
+        if bank_transfer_metadata.compatible_analysis(bank_analysis_snapshot, path) is not None:
+            row.bank_analysis_snapshot = bank_analysis_snapshot
+            changed = True
+    linked = bool(bank_image_id and row.bank_image_id == bank_image_id)
+    if bank_image_id and row.bank_image_id is None:
+        row.bank_image_id = bank_image_id
+        linked = True
+        changed = True
+    if changed:
+        db.session.commit()
+    return linked
 
 
 def _accept_scrape_bytes(raw, seen_hashes, skipped, rescue_small=False):
@@ -4066,17 +4830,23 @@ def _accept_scrape_bytes(raw, seen_hashes, skipped, rescue_small=False):
     est vrai, une petite image continue vers ratio+dedup au lieu d'être rejetée;
     elle ne sera jamais importée directement dans l'entraînement."""
     try:
-        with Image.open(io.BytesIO(raw)) as im:
-            im.load()
-            w, h = im.size
-            if min(w, h) < SCRAPE_IMPORT_MIN_SIDE and not rescue_small:
-                skipped['low_res'] += 1
-                return None
-            if max(w, h) > SCRAPE_IMPORT_MAX_RATIO * min(w, h):
-                skipped['extreme_ratio'] += 1
-                return None
-            fp = _dhash(im)
-    except (OSError, ValueError):
+        with warnings.catch_warnings():
+            warnings.simplefilter('error', Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(raw)) as im:
+                # Scrape quality/dHash must not become the first full decode of a
+                # crafted response: run the same header budget as every import lane.
+                _preserved_import_header_extension(im)
+                im.load()
+                w, h = im.size
+                if min(w, h) < SCRAPE_IMPORT_MIN_SIDE and not rescue_small:
+                    skipped['low_res'] += 1
+                    return None
+                if max(w, h) > SCRAPE_IMPORT_MAX_RATIO * min(w, h):
+                    skipped['extreme_ratio'] += 1
+                    return None
+                fp = _dhash(im)
+    except (OSError, ValueError, Image.DecompressionBombError,
+            Image.DecompressionBombWarning):
         skipped['errors'] += 1
         return None
     if any(_hamming(fp, s) <= SCRAPE_DHASH_MAX_DISTANCE for s in seen_hashes):
@@ -4092,9 +4862,9 @@ def _scrape_resolution_key(downloaded):
     if reason != 'ok' or not raw:
         return (0, 0)
     try:
-        with Image.open(io.BytesIO(raw)) as im:
-            return (min(im.size), im.width * im.height)
-    except (OSError, ValueError):
+        width, height = _import_header_dimensions(raw, label='scrape import')
+        return (min(width, height), width * height)
+    except ValueError:
         return (0, 0)
 
 
@@ -4107,10 +4877,10 @@ def _save_small_scrape_pair(user_id, dataset_id, raw, prompt, source_metadata=No
     """
     from .klein_edit_helper import enqueue_klein_edit
 
-    with Image.open(io.BytesIO(raw)) as im:
-        ext = {'JPEG': '.jpg', 'PNG': '.png', 'WEBP': '.webp'}.get(im.format)
-    if not ext:
-        raise ValueError('unsupported scrape image format')
+    # This helper is usually called only after `_accept_scrape_bytes`, but it is
+    # also a service seam. Validate again rather than letting a direct caller make
+    # this its first unbounded decoder.
+    ext = _preserved_import_extension(raw)
     filename = f"{user_id}_scrape_small_{uuid.uuid4().hex[:8]}{ext}"
     source_path = os.path.join(_dataset_dir(dataset_id), filename)
     with open(source_path, 'wb') as fh:
@@ -4138,6 +4908,11 @@ def _save_small_scrape_pair(user_id, dataset_id, raw, prompt, source_metadata=No
     try:
         job_id = enqueue_klein_edit(
             user_id=str(user_id), source_filename=filename, source_path=source_path,
+            # Same model as everything else this dataset makes — a rescued 512 px
+            # scrape ends up in the SAME training set as the improved images, so
+            # running it on another model is exactly the drift the setting exists
+            # to stop. None (never chose) = the historical auto pick.
+            klein_model=dataset_klein_model(get_dataset(user_id, dataset_id)),
             edit_prompt=prompt, sampler_steps=_generation_steps(),
             extra_metadata={'is_dataset': True, 'dataset_id': dataset_id,
                             'variation_label': label,
@@ -4212,9 +4987,9 @@ def scrape_import_urls(user_id, dataset_id, items, rescue_small=False):
         if ok_bytes is not None:
             if rescue_small:
                 try:
-                    with Image.open(io.BytesIO(ok_bytes)) as im:
-                        is_small = min(im.size) < SCRAPE_IMPORT_MIN_SIDE
-                except (OSError, ValueError):
+                    is_small = (min(_import_header_dimensions(
+                        ok_bytes, label='scrape import')) < SCRAPE_IMPORT_MIN_SIDE)
+                except ValueError:
                     skipped['errors'] += 1
                     continue
                 target = rescue_candidates if is_small else accepted
@@ -5505,20 +6280,121 @@ def _route_watermark(bbox, W, H, *, min_side=WATERMARK_MIN_SIDE, allow_crop=True
     return 'review', None
 
 
-def _preserve_original(path) -> None:
-    """Copy `path` to a sibling `<stem>.orig<suffix>` before a destructive edit, so the
-    watermarked original stays recoverable. The app trash util (send_to_trash) MOVES a
-    file -- unusable here since the cleaned image must keep serving from the SAME path
-    (and LaMa overwrites it in place) -- so we keep a sibling copy instead. Only written
-    ONCE (a re-clean must not clobber the true original with an already-modified one).
-    These .orig files carry no DB row, so export/backup (which iterate rows) ignore them."""
+def _preserve_original(path) -> bool:
+    """Durably preserve ``path`` before any destructive watermark edit.
+
+    Returns ``True`` only when a usable sibling ``.orig`` exists.  A direct
+    ``copy2(path, backup)`` can leave a truncated backup if the disk fills up;
+    treating that as success would allow a subsequent crop/inpaint to destroy
+    the only intact master.  Copy through a sibling temporary file and promote
+    it atomically instead.  Existing backups are deliberately never overwritten
+    (they are the older, recoverable master from a prior clean pass).
+    """
     stem, ext = os.path.splitext(path)
     backup = f'{stem}.orig{ext or ".webp"}'
-    if not os.path.exists(backup):
+    if os.path.exists(backup):
+        # A prior interrupted *old* implementation could have left a partial
+        # .orig behind. Do not assume its mere existence makes an edit safe.
         try:
-            shutil.copy2(path, backup)
-        except OSError as e:
-            logger.warning('watermark: could not preserve original %s: %s', path, e)
+            if not os.path.isfile(backup) or os.path.getsize(backup) <= 0:
+                raise OSError('existing backup is empty or not a regular file')
+            with Image.open(backup) as check:
+                check.verify()
+            return True
+        except (OSError, ValueError, UnidentifiedImageError) as exc:
+            logger.error('watermark: refusing edit; existing backup is unusable for %s: %s',
+                         path, exc)
+            return False
+
+    staged_backup = None
+    try:
+        fd, staged_backup = tempfile.mkstemp(
+            prefix=f'.{os.path.basename(backup)}.preserve-', suffix='.part',
+            dir=os.path.dirname(path),
+        )
+        os.close(fd)
+        shutil.copy2(path, staged_backup)
+        # ``copy2`` returning does not guarantee that the data was flushed to
+        # disk. Fsync the staged bytes before making the backup visible.
+        # Windows requires a writable descriptor for fsync; the staged copy is
+        # complete at this point, so ``rb+`` does not alter its bytes.
+        with open(staged_backup, 'rb+') as handle:
+            os.fsync(handle.fileno())
+        with Image.open(staged_backup) as check:
+            check.verify()
+        os.replace(staged_backup, backup)
+        staged_backup = None
+        return True
+    except (OSError, ValueError, UnidentifiedImageError) as exc:
+        logger.error('watermark: could not preserve original %s; refusing edit: %s', path, exc)
+        return False
+    finally:
+        if staged_backup:
+            try:
+                os.unlink(staged_backup)
+            except OSError:
+                pass
+
+
+def _stage_oriented_watermark_edit(path) -> str | None:
+    """Create an upright, metadata-free sibling for a destructive watermark pass.
+
+    Browser/VLM boxes live in visual orientation, whereas the master may still
+    carry camera EXIF.  LaMa and Klein edit a path in place, so they must receive
+    a disposable, EXIF-transposed file.  The caller promotes this sibling only
+    after the engine reports success; a failure must leave the master byte-for-
+    byte untouched.
+    """
+    staged = None
+    try:
+        with Image.open(path) as opened:
+            fmt = image_encoding.format_for_path(path, opened)
+            opened.load()
+            icc = _valid_icc_profile(opened.info.get('icc_profile'))
+            oriented = ImageOps.exif_transpose(opened)
+            payload = io.BytesIO()
+            image_encoding.save_edit(oriented, payload, fmt, image_encoding.LOSSLESS,
+                                     icc_profile=icc)
+        suffix = os.path.splitext(path)[1] or '.webp'
+        fd, staged = tempfile.mkstemp(
+            prefix=f'.{os.path.basename(path)}.wm-orient-', suffix=suffix,
+            dir=os.path.dirname(path),
+        )
+        with os.fdopen(fd, 'wb') as fh:
+            fh.write(payload.getvalue())
+            fh.flush()
+            os.fsync(fh.fileno())
+        return staged
+    except (OSError, ValueError, UnidentifiedImageError) as exc:
+        logger.warning('watermark: could not stage EXIF-oriented edit for %s: %s', path, exc)
+        if staged:
+            try:
+                os.unlink(staged)
+            except OSError:
+                pass
+        return None
+
+
+def _promote_staged_watermark_edit(staged_path, live_path) -> bool:
+    """Atomically replace a master only after a staged engine result verifies."""
+    try:
+        expected = image_encoding.format_for_path(live_path)
+        with Image.open(staged_path) as check:
+            if (check.format or '').upper() != expected:
+                raise OSError('staged result format does not match its extension')
+            check.verify()
+        os.replace(staged_path, live_path)
+        return True
+    except (OSError, ValueError, UnidentifiedImageError) as exc:
+        logger.warning('watermark: could not promote staged edit for %s: %s', live_path, exc)
+        return False
+
+
+def _discard_staged_watermark_edit(staged_path) -> None:
+    try:
+        os.unlink(staged_path)
+    except OSError:
+        pass
 
 
 def _apply_watermark_crop(path, box) -> bool:
@@ -5526,17 +6402,19 @@ def _apply_watermark_crop(path, box) -> bool:
     point of the crop route is that it invents no pixel (the aspect-ratio change is
     absorbed by ai-toolkit's bucketing). Returns bool.
 
-    Because nothing is resampled here, and the source format is now preserved and
-    re-encoded without loss (`image_encoding`), this is the one edit that is exactly
-    lossless end to end: the surviving pixels come out byte-identical. It used to be
-    re-saved as WEBP q92, which quietly re-compressed the ENTIRE image to remove a
-    band at its edge."""
+    Because nothing is resampled here, PNG/WebP/BMP retain the surviving pixels
+    losslessly under ``image_encoding``. JPEG has no lossless write path and is
+    deliberately re-encoded at the documented high-quality 4:4:4 setting. It used
+    to re-save every format as WebP q92, which quietly re-compressed the ENTIRE
+    image to remove a band at its edge."""
     try:
         with Image.open(path) as opened:
             fmt = image_encoding.format_for_path(path, opened)
             opened.load()
             icc = _valid_icc_profile(opened.info.get('icc_profile'))
-            im = opened.copy()
+            # `box` is visual/browser (and VLM) space. If called directly rather
+            # than through clean_watermarks, keep the same orientation contract.
+            im = ImageOps.exif_transpose(opened)
     except (OSError, ValueError):
         return False
     box = (max(0, int(box[0])), max(0, int(box[1])),
@@ -5546,8 +6424,7 @@ def _apply_watermark_crop(path, box) -> bool:
     out = io.BytesIO()
     image_encoding.save_edit(im.crop(box), out, fmt, image_encoding.LOSSLESS,
                              icc_profile=icc)
-    with open(path, 'wb') as fh:
-        fh.write(out.getvalue())
+    write_image_atomic(path, out.getvalue())
     return True
 
 
@@ -5699,30 +6576,76 @@ def clean_watermarks(user_id, dataset_id, image_ids=None, device='cpu', method='
     error = None
     lama_ok = watermark_lama.is_available()
     klein_ok = method == 'klein' and watermark_klein.is_available()
-    lama_pending = []  # (img, path, bboxes, manual_regions)
+    # The Klein model this DATASET runs on — the same pick ✨ improve and Klein
+    # generation use. A watermark clean overwrites the image in place, so running
+    # it on a model the dataset did not choose is the one lane where the swap
+    # cannot be spotted afterwards by comparing to a source.
+    klein_model = dataset_klein_model(ds)
+    if klein_ok and klein_model:
+        # Refuse the WHOLE pass by name, before a single file is touched: every
+        # image would fail identically, and a half-cleaned dataset is worse than
+        # an untouched one. None (never chose) skips this — nothing was promised.
+        from . import klein_edit_helper as keh
+        if not keh.klein_model_on_disk(klein_model):
+            raise keh.KleinModelGone(klein_model)
+    # (img, live_path, staged_path, bboxes, manual_regions). The VLM/browser
+    # boxes apply to the staged upright file; the master is replaced only after
+    # a successful engine result has passed verification.
+    lama_pending = []
+
+    def _backup_failed(img, staged_path=None):
+        """Record a fail-closed preservation error and discard any edit staging."""
+        nonlocal error
+        if staged_path:
+            _discard_staged_watermark_edit(staged_path)
+        # Retain manual regions for a future retry, but never present this row
+        # as clean/detected when no recoverable pre-edit master exists.
+        img.watermark_state = 'failed'
+        out['failed'] += 1
+        error = {
+            'kind': 'failed',
+            'detail': 'could not preserve original; master was left unchanged',
+        }
 
     def _run_klein(img, path, boxes, manual):
-        """One serialized Klein inpaint of `img` in place. Preserves the .orig first;
-        on success flips to 'cleaned' (+ clears manual regions like the LaMa path)."""
+        """One serialized Klein inpaint through an upright disposable sibling."""
         nonlocal error
         if not klein_ok:
             out['skipped'] += 1               # leave 'detected' (Klein not ready)
             return
-        _preserve_original(path)
-        ok, err = watermark_klein.inpaint_watermark_klein(user_id, path, boxes)
-        if ok:
-            img.watermark_state = 'cleaned'
-            if manual:
-                img.watermark_regions = None
-            out['inpainted_klein'] += 1
-        elif err and err.get('kind') == 'unavailable':
-            out['skipped'] += 1
-        else:
-            if not manual:                    # keep manual retry metadata (like LaMa)
+        staged = _stage_oriented_watermark_edit(path)
+        if not staged:
+            if not manual:                    # retain manual regions for a retry
                 img.watermark_state = 'failed'
             out['failed'] += 1
-            if err:
-                error = err
+            error = {'kind': 'failed', 'detail': 'could not stage image EXIF orientation'}
+            return
+        if not _preserve_original(path):
+            _backup_failed(img, staged)
+            return
+        try:
+            ok, err = watermark_klein.inpaint_watermark_klein(user_id, staged, boxes,
+                                                              klein_model=klein_model)
+            if ok and _promote_staged_watermark_edit(staged, path):
+                img.watermark_state = 'cleaned'
+                if manual:
+                    img.watermark_regions = None
+                out['inpainted_klein'] += 1
+            elif ok:
+                if not manual:
+                    img.watermark_state = 'failed'
+                out['failed'] += 1
+                error = {'kind': 'failed', 'detail': 'could not promote staged watermark edit'}
+            elif err and err.get('kind') == 'unavailable':
+                out['skipped'] += 1
+            else:
+                if not manual:                # keep manual retry metadata (like LaMa)
+                    img.watermark_state = 'failed'
+                out['failed'] += 1
+                if err:
+                    error = err
+        finally:
+            _discard_staged_watermark_edit(staged)
     # Persistent progress indicator (survives a page reload). The device is included
     # so the UI can honestly state whether ComfyUI is paused for the GPU pass.
     device_label = 'GPU' if device == 'cuda' else 'CPU'
@@ -5760,8 +6683,18 @@ def clean_watermarks(user_id, dataset_id, image_ids=None, device='cpu', method='
                     out['skipped'] += 1
                     db.session.commit()
                     continue
-                _preserve_original(path)
-                lama_pending.append((img, path, regions, True))
+                staged = _stage_oriented_watermark_edit(path)
+                if not staged:
+                    out['failed'] += 1
+                    error = {'kind': 'failed',
+                             'detail': 'could not stage image EXIF orientation'}
+                    db.session.commit()
+                    continue
+                if not _preserve_original(path):
+                    _backup_failed(img, staged)
+                    db.session.commit()
+                    continue
+                lama_pending.append((img, path, staged, regions, True))
                 continue
             bbox = _safe_json(img.watermark_bbox)
             if not os.path.exists(path) or not (isinstance(bbox, list) and len(bbox) == 4):
@@ -5771,7 +6704,11 @@ def clean_watermarks(user_id, dataset_id, image_ids=None, device='cpu', method='
                 continue
             try:
                 with Image.open(path) as im:
-                    W, H = im.size
+                    # Stored detection boxes are in the browser/VLM's upright
+                    # coordinate space, never the raw camera raster. This branch
+                    # may route to review/no-op, so keep it header-only until an
+                    # actual crop/staging edit needs the pixels.
+                    W, H = image_encoding.visual_size_from_header(im)
             except (OSError, ValueError):
                 img.watermark_state = 'failed'
                 out['failed'] += 1
@@ -5779,8 +6716,9 @@ def clean_watermarks(user_id, dataset_id, image_ids=None, device='cpu', method='
                 continue
             route, box = _route_watermark(tuple(bbox), W, H, allow_crop=allow_crop)
             if route == 'crop':
-                _preserve_original(path)
-                if _apply_watermark_crop(path, box):
+                if not _preserve_original(path):
+                    _backup_failed(img)
+                elif _apply_watermark_crop(path, box):
                     # NOTE dHash: the perceptual hash used for import-dedupe is recomputed
                     # ON THE FLY from the file (_existing_dhashes / _dhash), NOT stored in a
                     # column -- there is no stored dHash to leave untouched. So after a crop
@@ -5801,45 +6739,80 @@ def clean_watermarks(user_id, dataset_id, image_ids=None, device='cpu', method='
                     if not lama_ok:
                         out['skipped'] += 1      # leave state='detected' (crop-only mode)
                     else:
-                        _preserve_original(path)
-                        lama_pending.append((img, path, [bbox], False))
+                        staged = _stage_oriented_watermark_edit(path)
+                        if staged:
+                            if _preserve_original(path):
+                                lama_pending.append((img, path, staged, [bbox], False))
+                            else:
+                                _backup_failed(img, staged)
+                        else:
+                            img.watermark_state = 'failed'
+                            out['failed'] += 1
+                            error = {'kind': 'failed',
+                                     'detail': 'could not stage image EXIF orientation'}
                 else:  # 'review' -> stays 'detected' so the badge/count keep flagging it
                     out['needs_review'] += 1
             db.session.commit()
         if lama_pending:
-            if len(lama_pending) == 1:
-                img, path, boxes, manual = lama_pending[0]
-                if manual:
-                    ok, err = watermark_lama.inpaint_watermarks(
-                        path, boxes, **({'device': device} if device != 'cpu' else {}))
-                else:
-                    ok, err = watermark_lama.inpaint_watermark(
-                        path, boxes[0], **({'device': device} if device != 'cpu' else {}))
-                results = {path: (ok, err)}
-            else:
-                results = watermark_lama.inpaint_batch(
-                    [{'image_path': path, 'bboxes': boxes}
-                     for _img, path, boxes, _manual in lama_pending],
-                    device=device,
-                )
-            for img, path, _boxes, manual in lama_pending:
-                ok, err = results.get(path, (False, {'kind': 'failed', 'detail': 'missing inpaint result'}))
-                if ok:
-                    img.watermark_state = 'cleaned'
+            try:
+                if len(lama_pending) == 1:
+                    img, live_path, staged_path, boxes, manual = lama_pending[0]
                     if manual:
-                        img.watermark_regions = None
-                    out['inpainted'] += 1
-                elif err and err.get('kind') == 'unavailable':
-                    out['skipped'] += 1
+                        ok, err = watermark_lama.inpaint_watermarks(
+                            staged_path, boxes,
+                            **({'device': device} if device != 'cpu' else {}))
+                    else:
+                        ok, err = watermark_lama.inpaint_watermark(
+                            staged_path, boxes[0],
+                            **({'device': device} if device != 'cpu' else {}))
+                    results = {staged_path: (ok, err)}
                 else:
-                    # Manual correction regions are user-authored retry metadata. Keep
-                    # the image detected when LaMa fails so Clean can be retried.
+                    results = watermark_lama.inpaint_batch(
+                        [{'image_path': staged_path, 'bboxes': boxes}
+                         for _img, _live_path, staged_path, boxes, _manual in lama_pending],
+                        device=device,
+                    )
+                for img, live_path, staged_path, _boxes, manual in lama_pending:
+                    ok, err = results.get(
+                        staged_path,
+                        (False, {'kind': 'failed', 'detail': 'missing inpaint result'}),
+                    )
+                    if ok and _promote_staged_watermark_edit(staged_path, live_path):
+                        img.watermark_state = 'cleaned'
+                        if manual:
+                            img.watermark_regions = None
+                        out['inpainted'] += 1
+                    elif ok:
+                        if not manual:
+                            img.watermark_state = 'failed'
+                        out['failed'] += 1
+                        error = {'kind': 'failed',
+                                 'detail': 'could not promote staged watermark edit'}
+                    elif err and err.get('kind') == 'unavailable':
+                        out['skipped'] += 1
+                    else:
+                        # Manual correction regions are user-authored retry metadata. Keep
+                        # the image detected when LaMa fails so Clean can be retried.
+                        if not manual:
+                            img.watermark_state = 'failed'
+                        out['failed'] += 1
+                        if err:
+                            error = err
+                    db.session.commit()
+            except Exception as exc:  # engine/process faults must not leak a staged edit
+                logger.exception('watermark: LaMa execution failed for dataset %s', dataset_id)
+                error = {'kind': 'failed', 'detail': f'watermark inpaint failed: {exc}'}
+                for img, _live_path, _staged_path, _boxes, manual in lama_pending:
                     if not manual:
                         img.watermark_state = 'failed'
                     out['failed'] += 1
-                    if err:
-                        error = err
-                db.session.commit()
+                    db.session.commit()
+            finally:
+                # The engine can crash before returning a result; in that case its
+                # disposable EXIF-oriented copy still has to disappear, while the
+                # master remains exactly where it was.
+                for _img, _live_path, staged_path, _boxes, _manual in lama_pending:
+                    _discard_staged_watermark_edit(staged_path)
         return out, error
     finally:
         dataset_activity.end(token)
@@ -6077,6 +7050,9 @@ def generate_variations_krea(user_id, dataset_id, variations, multiplier):
                             suffix=dataset_prompt_suffix(ds, v.get('framing')),
                             subject_type=subject_type_of(ds),
                             label=v.get('label') or ''),
+                        # Krea v1.2 fit geometry accepts the catalog canvas even
+                        # when it differs from the dataset reference.
+                        aspect_ratio=aspect_for_label(v.get('label'), v.get('framing')),
                         extra_metadata={'is_dataset': True, 'dataset_id': dataset_id,
                                         'variation_label': v.get('label')})
                 except Exception:
@@ -6258,6 +7234,8 @@ REIMPROVE_PARENT_GONE = ('the source image this improvement came from was delete
 REIMPROVE_SOURCE_FILE_GONE = ('the source image file is missing on disk '
                               '— nothing left to re-improve from')
 REIMPROVE_IN_FLIGHT = 'this improvement is still generating'
+REIMPROVE_STATE_CHANGED = ('this improvement changed while it was being re-queued '
+                           '— review it and try again')
 
 
 def reimprove_image(user_id, image_id):
@@ -6339,6 +7317,8 @@ def _reimprove_image_locked(user_id, image_id):
         'filename', 'caption', 'status', 'fail_reason', 'fail_kind', 'job_id',
         'variation_label', 'variation_prompt', 'framing',
         'watermark_state', 'watermark_bbox', 'watermark_regions')}
+    expected_transition_caption = (old_state['caption']
+                                   if old_state['caption'] else parent.caption)
     old_path = _img_path(img) if img.filename else None
     job_id = keh.enqueue_klein_edit(
         user_id=str(user_id), source_filename=parent.filename,
@@ -6348,19 +7328,17 @@ def _reimprove_image_locked(user_id, image_id):
     )
 
     try:
-        _clear_watermark_metadata(img)
-        img.variation_label = label
-        img.variation_prompt = prompt[:500]
-        img.framing = parent.framing
-        # A caption typed on this tile is the user's work — keep it. Only an
-        # empty one is refilled from the parent, which is what a first pass does.
-        if not img.caption:
-            img.caption = parent.caption
-        img.filename = None
-        img.status = 'pending'
-        img.job_id = job_id
-        img.fail_reason = None
-        img.fail_kind = None
+        # Do this while the candidate is still Keep.  The CAS observes both
+        # rows in the database, so an intervening parent reject/failed decision
+        # is never overwritten by this re-run's temporary fallback.
+        parent_rekept = _rekeep_pending_parent_for_reimprove(img)
+        if not _transition_reimprove_candidate(
+                img, old_state, parent, label, prompt, job_id,
+                expected_transition_caption):
+            # The status/file/job snapshot changed after enqueue. Rolling back
+            # also undoes a just-applied parent fallback; the except path below
+            # cancels this unlinked job and maps the race to a 409.
+            raise RuntimeError(REIMPROVE_STATE_CHANGED)
         db.session.commit()
     except Exception:
         db.session.rollback()
@@ -6378,8 +7356,13 @@ def _reimprove_image_locked(user_id, image_id):
                 old_path, context=f'dataset-{img.dataset_id}-reimprove-{img.id}')
     except Exception:
         try:
-            for field, value in old_state.items():
-                setattr(img, field, value)
+            restored_candidate = _restore_reimprove_candidate_after_trash_failure(
+                img, old_state, job_id, expected_transition_caption)
+            if parent_rekept and restored_candidate:
+                # Candidate first: if a user changed it during the Trash call,
+                # its CAS fails and the fallback parent remains Keep instead of
+                # overwriting that newer decision.
+                _undo_rekeep_parent_after_reimprove_trash_failure(img, old_state)
             queue_manager.cancel_job(job_id, str(user_id), 'image', commit=False)
             db.session.commit()
         except Exception:
@@ -6681,6 +7664,7 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
                 suffix=dataset_prompt_suffix(ds, img.framing),
                 subject_type=subject_type_of(ds),
                 label=img.variation_label or ''),
+            aspect_ratio=aspect_for_label(img.variation_label, img.framing),
             extra_metadata={'is_dataset': True, 'dataset_id': img.dataset_id,
                             'variation_label': img.variation_label})
     else:
@@ -7259,6 +8243,10 @@ def link_completed_dataset_image(job_id, filename, failed=False, reason=None):
                 img.fail_reason = ('The finished image could not be retrieved from ComfyUI '
                                    '(not on disk, and the /view API fetch failed).')
                 logger.warning(f"dataset link: file not on disk and /view API fetch failed (job {job_id})")
+        # A user may have marked this in-flight improvement Keep while waiting.
+        # Only the freshly linked, on-disk result may now replace its parent;
+        # the helper also preserves a later explicit return to Pending.
+        _unkeep_parent_for_kept_improvement(img)
     db.session.commit()
     # This job just left the in-flight set: reconcile the Klein 'generate'
     # indicator (clears it when this was the last job of the batch). Guarded — a
@@ -7404,7 +8392,8 @@ def write_export_zip(user_id: int, dataset_id: int, output: BinaryIO) -> None:
         if ref_path and os.path.exists(ref_path) and not is_style(ds):
             try:
                 rpng = io.BytesIO()
-                Image.open(ref_path).convert('RGB').save(rpng, 'PNG')
+                with Image.open(ref_path) as source:
+                    ImageOps.exif_transpose(source).convert('RGB').save(rpng, 'PNG')
                 zf.writestr(f"{folder}/{safe}_000_ref.png", rpng.getvalue())
                 zf.writestr(f"{folder}/{safe}_000_ref.txt", ds.trigger_word)
             except OSError:
@@ -7414,7 +8403,8 @@ def write_export_zip(user_id: int, dataset_id: int, output: BinaryIO) -> None:
             if not img.filename or not os.path.exists(path):
                 continue
             png = io.BytesIO()
-            Image.open(path).convert('RGB').save(png, 'PNG')
+            with Image.open(path) as source:
+                ImageOps.exif_transpose(source).convert('RGB').save(png, 'PNG')
             base = f"{folder}/{safe}_{n:03d}"
             zf.writestr(f"{base}.png", png.getvalue())
             zf.writestr(f"{base}.txt", _export_caption(ds, img.caption))

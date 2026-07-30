@@ -31,11 +31,11 @@ def _map_error(e: Exception):
     raise e
 
 
-def _require_comfyui():
+def _require_comfyui(*, force=False):
     """None if ComfyUI is reachable, else the (body, status) 409 to return.
     Shared by studio.py and datasets.py's lora-test routes that actually enqueue
     a ComfyUI job (run/resume) — read-only/history/DB-only routes stay ungated."""
-    comfy = capabilities.probe()['comfyui']
+    comfy = capabilities.probe(force=force)['comfyui']
     if not comfy['reachable']:
         # Two causes, two sentences: "not reachable / check the URL" was returned
         # for a ComfyUI that was up and merely slow to enumerate itself, which sent

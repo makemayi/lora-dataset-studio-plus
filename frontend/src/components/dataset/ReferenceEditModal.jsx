@@ -20,9 +20,10 @@
  * just closes and LEAVES the job running (rediscovered on reopen). Modal idiom
  * mirrors CropModal: role=dialog, Escape closes, initial focus. */
 import { useEffect, useRef, useState } from 'react';
+import KleinModelSetting from '../shared/KleinModelSetting';
 import {
   EDIT_ENGINES, LOCAL_ENGINES, editBlockedReason, batchLiveNote, editPhase,
-  editEngineOptions, editCostNote, editKeepNote, editRefNote, acceptsExtraEditRefs,
+  editEngineOptions, editCostNote, editKeepNote, editRefNote, acceptsExtraEditRefs, ENGINE_LABELS,
 } from './referenceEdit';
 
 const MAX_EDIT_REFS = 3;
@@ -32,7 +33,8 @@ export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
                                              referenceEdit = null, datasetExtraCount = 0,
                                              comfyuiConfigured = false, engineAvailable = null,
                                              engineReason = null,
-                                             onEdit, onKeep, onDiscard, onClose }) {
+                                             onEdit, onRetry = null, canRetry = false,
+                                             onKeep, onDiscard, onClose }) {
   const [prompt, setPrompt] = useState('');
   const [engine, setEngine] = useState(EDIT_ENGINES.includes(defaultEngine) ? defaultEngine : 'chatgpt');
   const [editRefs, setEditRefs] = useState([]);            // transient File[]
@@ -42,15 +44,20 @@ export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
   const promptRef = useRef(null);
 
   const serverPhase = editPhase(referenceEdit);            // idle | running | ready | failed
-  const phase = (starting && serverPhase === 'idle') ? 'running' : serverPhase;
+  const phase = starting ? 'running' : serverPhase;
   // Once the server reflects the job (running/ready/failed), drop the local bridge.
-  useEffect(() => { if (serverPhase !== 'idle') setStarting(false); }, [serverPhase]);
+  useEffect(() => { if (serverPhase !== 'idle') setStarting(false); },
+    [serverPhase, referenceEdit?.started_at]);
 
   const imgUrl = (fn) => `/api/dataset/${datasetId}/img/${encodeURIComponent(fn)}${nonce ? `?v=${nonce}` : ''}`;
   const beforeUrl = imgUrl(refFilename);
   const afterUrl = referenceEdit?.candidate_filename
     ? `/api/dataset/${datasetId}/img/${encodeURIComponent(referenceEdit.candidate_filename)}`
     : null;
+  // This comes from the server-side job record, never the engine pill currently
+  // selected in the form. A reopened modal must describe the candidate it shows.
+  const resultEngine = referenceEdit?.engine || engine;
+  const resultEngineLabel = ENGINE_LABELS[resultEngine] || resultEngine;
 
   const busy = starting || busyAction;
   // Escape / ✕ close the modal but NEVER discard — a running or ready job is left
@@ -98,6 +105,14 @@ export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
     setStarting(true);
     const ok = await onEdit(prompt, engine, editRefs);
     if (!ok) setStarting(false);          // start failed → stay on the form
+  };
+
+  const canRetryExact = Boolean(canRetry && typeof onRetry === 'function');
+  const retryEdit = async () => {
+    if (!canRetryExact) return;
+    setStarting(true);
+    const ok = await onRetry();
+    if (!ok) setStarting(false);
   };
 
   const keep = async () => {
@@ -170,12 +185,26 @@ export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
                 echoes it back), not from the current toggle: the user may have
                 closed and reopened the modal while it rendered. */}
             <p className="text-[0.6875rem] text-content-muted">
-              {editKeepNote(referenceEdit?.engine || engine)}
+              {editKeepNote(resultEngine)}
             </p>
+            <p className="text-[0.6875rem] text-content-muted" aria-live="polite">
+              Engine used for this result: <span className="text-content font-semibold">{resultEngineLabel}</span>
+            </p>
+            {!canRetryExact && (
+              <p className="text-[0.6875rem] text-content-subtle">
+                Retry keeps temporary reference files only for this browser session. After reopening
+                this page, use Try another prompt to attach them again.
+              </p>
+            )}
             <div className="flex gap-2 justify-end flex-wrap">
               <button type="button" onClick={() => discard(false)} disabled={busy}
                 className="mr-auto px-4 py-2 rounded-lg bg-surface text-content text-sm disabled:opacity-40">
                 Try another prompt
+              </button>
+              <button type="button" onClick={retryEdit} disabled={busy || !canRetryExact}
+                title={canRetryExact ? undefined : 'The original temporary references are no longer available'}
+                className="px-4 py-2 rounded-lg bg-surface text-content text-sm disabled:opacity-40">
+                ↻ Retry same edit
               </button>
               <button type="button" onClick={() => discard(true)} disabled={busy}
                 className="px-4 py-2 rounded-lg bg-surface text-content text-sm disabled:opacity-40">
@@ -261,15 +290,29 @@ export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
             )}
 
             {phase === 'failed' && referenceEdit?.error && (
-              <p className="text-[0.6875rem] text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-2.5 py-1.5">
-                {referenceEdit.error}
-              </p>
+              <div className="flex flex-col gap-1 text-[0.6875rem] bg-red-500/10 border border-red-500/30 rounded-lg px-2.5 py-1.5">
+                <p className="text-red-300">{referenceEdit.error}</p>
+                <p className="text-content-muted">Engine used for this result: {resultEngineLabel}</p>
+              </div>
             )}
             <p className="text-[0.6875rem] text-content-muted">{editCostNote(engine)}</p>
+            {/* The reference is what the whole dataset is anchored on, and this
+                lane runs on the dataset's Klein model like every other one — so
+                say which, and let it be changed from here. Klein only: the other
+                local engine (Krea) resolves a global base model, and the API
+                engines have no local model at all. */}
+            {engine === 'klein' && <KleinModelSetting datasetId={datasetId} />}
 
             <div className="flex gap-2 justify-end">
               <button type="button" onClick={onClose} disabled={busy}
                 className="px-4 py-2 rounded-lg bg-surface text-content text-sm disabled:opacity-40">Cancel</button>
+              {phase === 'failed' && (
+                <button type="button" onClick={retryEdit} disabled={busy || !canRetryExact}
+                  title={canRetryExact ? undefined : 'The original temporary references are no longer available'}
+                  className="px-4 py-2 rounded-lg bg-surface text-content text-sm disabled:opacity-40">
+                  ↻ Retry same edit
+                </button>
+              )}
               <button type="button" onClick={runEdit} disabled={busy || !!blocked}
                 title={blocked || undefined}
                 className="px-4 py-2 rounded-lg bg-gradient-primary text-white text-sm font-semibold disabled:opacity-40">

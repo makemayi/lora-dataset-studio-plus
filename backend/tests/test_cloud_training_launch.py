@@ -315,6 +315,88 @@ def test_retry_relaunches_failed_run_with_same_params(ct, app, seeded_dataset, m
     assert captured['allow_caption_quality'] is True
 
 
+def test_retry_resume_refuses_legacy_lokr_without_parent_full_rank(
+        ct, app, seeded_dataset, monkeypatch):
+    """A retry that re-seeds weights must apply the same LoKr gate as Continue."""
+    from app.models import TrainingRunRecord
+    legacy = {'rank': 64, 'alpha': 32, 'network_type': 'lokr', 'lokr_factor': 16}
+    launched = []
+    monkeypatch.setattr(ct, 'launch_cloud_training',
+                        lambda *a, **k: launched.append(k))
+    with app.app_context():
+        run = ct.CloudTrainingRun(
+            dataset_id=seeded_dataset, status='error', run_name='legacy-resume',
+            train_params=json.dumps({
+                'steps': 1500, 'variant': 'base', 'train_type': 'krea',
+                'resume_ckpt_path': 'C:/staging/legacy.safetensors',
+                'resume_step': 1000,
+                'train_settings_snapshot': json.dumps(legacy),
+            }))
+        ct.db.session.add(run)
+        ct.db.session.commit()
+        parent = TrainingRunRecord(
+            dataset_id=seeded_dataset, family='krea', source='cloud', base_model='',
+            variant='base', steps=1000, version=1, fingerprint='parent', manifest='[]',
+            settings=json.dumps(legacy))
+        ct.db.session.add(parent)
+        ct.db.session.commit()
+        child = TrainingRunRecord(
+            dataset_id=seeded_dataset, family='krea', source='cloud', base_model='',
+            variant='base', steps=1500, version=1, fingerprint='child', manifest='[]',
+            cloud_run_id=run.id, parent_record_id=parent.id,
+            settings=json.dumps({'network_type': 'lokr', 'lokr_full_rank': False}))
+        ct.db.session.add(child)
+        ct.db.session.commit()
+        before = run.train_params
+        with pytest.raises(ValueError, match='lokr_full_rank'):
+            ct.retry_cloud_run('local', run.id)
+        assert run.train_params == before
+    assert launched == []
+
+
+def test_retry_resume_uses_recorded_lokr_parent_topology(
+        ct, app, seeded_dataset, monkeypatch):
+    """A raw historical snapshot may omit the bit when lineage proves it."""
+    from app.models import TrainingRunRecord
+    topology = {
+        'rank': 64, 'alpha': 32, 'network_type': 'lokr',
+        'lokr_factor': 'auto', 'lokr_full_rank': False,
+    }
+    captured = {}
+    monkeypatch.setattr(ct, 'launch_cloud_training',
+                        lambda user_id, dataset_id, **kw:
+                        (captured.update(**kw), {'run_id': 2})[1])
+    with app.app_context():
+        run = ct.CloudTrainingRun(
+            dataset_id=seeded_dataset, status='error', run_name='known-resume',
+            train_params=json.dumps({
+                'steps': 1500, 'variant': 'base', 'train_type': 'krea',
+                'resume_ckpt_path': 'C:/staging/known.safetensors',
+                'resume_step': 1000,
+                'train_settings_snapshot': json.dumps({
+                    'rank': 64, 'alpha': 32, 'network_type': 'lokr',
+                }),
+            }))
+        ct.db.session.add(run)
+        ct.db.session.commit()
+        parent = TrainingRunRecord(
+            dataset_id=seeded_dataset, family='krea', source='cloud', base_model='',
+            variant='base', steps=1000, version=1, fingerprint='parent', manifest='[]',
+            settings=json.dumps(topology))
+        ct.db.session.add(parent)
+        ct.db.session.commit()
+        child = TrainingRunRecord(
+            dataset_id=seeded_dataset, family='krea', source='cloud', base_model='',
+            variant='base', steps=1500, version=1, fingerprint='child', manifest='[]',
+            cloud_run_id=run.id, parent_record_id=parent.id,
+            settings=json.dumps(topology))
+        ct.db.session.add(child)
+        ct.db.session.commit()
+        ct.retry_cloud_run('local', run.id)
+    snapshot = json.loads(captured['train_settings_snapshot'])
+    assert {key: snapshot[key] for key in topology} == topology
+
+
 def test_legacy_cloud_retry_and_continue_default_confirmations_false(
         ct, app, seeded_dataset, monkeypatch, tmp_path):
     staging = tmp_path / 'legacy_done'
@@ -458,6 +540,7 @@ def test_auto_retry_freezes_advanced_settings_after_dataset_edit(
         proc = job['config']['process'][0]
         assert proc['network'] == {
             'type': 'lokr', 'linear': 64, 'linear_alpha': 32,
+            'lokr_full_rank': False,
             'dropout': 0.1,
         }
         assert proc['datasets'][0]['resolution'] == [1024]
@@ -1307,6 +1390,18 @@ def _seed_done_run(ct, dataset_id, staging, steps=750, ckpt_name='lds1_x_0000007
     return run
 
 
+def _record_cloud_topology(ct, run, settings):
+    """Attach the provenance row the cloud→cloud continuation must consult."""
+    from app.models import TrainingRunRecord
+    rec = TrainingRunRecord(
+        dataset_id=run.dataset_id, family='krea', source='cloud', base_model='',
+        variant='base', steps=750, version=1, fingerprint='fp', manifest='[]',
+        cloud_run_id=run.id, settings=json.dumps(settings))
+    ct.db.session.add(rec)
+    ct.db.session.commit()
+    return rec
+
+
 def test_continue_from_done_calls_launch_with_resume_params(ct, app, seeded_dataset,
                                                             monkeypatch, tmp_path):
     """▶ Continue = a REAL launch with the source run's persisted params, steps =
@@ -1337,6 +1432,52 @@ def test_continue_from_done_calls_launch_with_resume_params(ct, app, seeded_data
     assert captured['allow_uncaptioned'] is True
     assert captured['allow_caption_quality'] is True
     assert res['resumed_from'] == 750 and res['target_steps'] == 1250
+
+
+def test_cloud_to_cloud_refuses_legacy_lokr_without_full_rank(
+        ct, app, seeded_dataset, monkeypatch, tmp_path):
+    """A LoKr source missing this topology bit cannot be safely rebuilt."""
+    staging = tmp_path / 'legacy_lokr'
+    staging.mkdir()
+    legacy = {'rank': 64, 'alpha': 32, 'network_type': 'lokr', 'lokr_factor': 16}
+    launched = []
+    monkeypatch.setattr(ct, 'launch_cloud_training',
+                        lambda *a, **k: launched.append(k))
+    with app.app_context():
+        src = _seed_done_run(
+            ct, seeded_dataset, staging, variant='base', train_type='krea',
+            train_settings_snapshot=json.dumps(legacy))
+        _record_cloud_topology(ct, src, legacy)
+        before = src.train_params
+        with pytest.raises(ValueError, match='lokr_full_rank'):
+            ct.continue_cloud_run('local', src.id, extra_steps=500)
+        assert src.train_params == before
+    assert launched == []
+
+
+def test_cloud_to_cloud_uses_recorded_lokr_full_rank_when_raw_snapshot_lacks_it(
+        ct, app, seeded_dataset, monkeypatch, tmp_path):
+    """New cloud runs have the fact in provenance even when raw settings omit it."""
+    staging = tmp_path / 'known_lokr'
+    staging.mkdir()
+    topology = {
+        'rank': 64, 'alpha': 32, 'network_type': 'lokr',
+        'lokr_factor': 'auto', 'lokr_full_rank': False,
+    }
+    captured = {}
+    monkeypatch.setattr(ct, 'launch_cloud_training',
+                        lambda user_id, dataset_id, **kw:
+                        (captured.update(**kw), {'run_id': 2})[1])
+    with app.app_context():
+        src = _seed_done_run(
+            ct, seeded_dataset, staging, variant='base', train_type='krea',
+            train_settings_snapshot=json.dumps({'rank': 64, 'alpha': 32,
+                                                 'network_type': 'lokr'}))
+        parent = _record_cloud_topology(ct, src, topology)
+        ct.continue_cloud_run('local', src.id, extra_steps=500)
+    snapshot = json.loads(captured['train_settings_snapshot'])
+    assert {key: snapshot[key] for key in topology} == topology
+    assert captured['parent_record_id'] == parent.id
 
 
 def test_continue_refuses_active_run_but_allows_terminal(

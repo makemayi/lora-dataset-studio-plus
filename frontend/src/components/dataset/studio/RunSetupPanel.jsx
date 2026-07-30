@@ -82,6 +82,19 @@ export default function RunSetupPanel({ d, studio, form, datasetId,
         </p>
       )}
 
+      {/* --- Soumission ComfyUI inconnue : confirmation humaine requise ------ */}
+      {d.comfyui_recovery?.requires_comfyui_restart_confirmation && (
+        <div className="flex items-center gap-2 flex-wrap rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2" role="status">
+          <span aria-hidden>⚠</span>
+          <span className="text-content text-sm">A ComfyUI submission has an unknown outcome. Restart ComfyUI first, then confirm it here; the paused cell will become resumable.</span>
+          <button type="button" disabled={studio.confirmingComfyuiRestart}
+            onClick={studio.confirmComfyuiRestart}
+            className="ml-auto px-2.5 py-1 rounded-lg bg-gradient-primary text-white text-xs font-semibold disabled:opacity-40">
+            {studio.confirmingComfyuiRestart ? 'Confirming…' : '✓ J’ai redémarré ComfyUI'}
+          </button>
+        </div>
+      )}
+
       {/* --- Run en cours ------------------------------------------------ */}
       {d.pending > 0 && (
         <div className="flex items-center gap-2 rounded-lg border border-indigo-400/40 bg-indigo-500/10 px-3 py-2" role="status">

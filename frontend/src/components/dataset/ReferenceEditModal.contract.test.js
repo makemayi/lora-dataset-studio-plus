@@ -14,6 +14,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const modal = readFileSync(join(here, 'ReferenceEditModal.jsx'), 'utf8');
 const workspace = readFileSync(join(here, 'DatasetWorkspace.jsx'), 'utf8');
 
+const datasetHook = readFileSync(join(here, '../../hooks/useDataset.js'), 'utf8');
 test('the engine list is DERIVED, never spelled out in the component', () => {
   assert.ok(modal.includes('editEngineOptions('), 'the modal must build its list from the helper');
   // A literal engine label in the JSX is the hardcoded list coming back.
@@ -60,4 +61,61 @@ test('the engine pills wrap instead of overflowing a 400px screen', () => {
   assert.ok(modal.includes('flex-wrap min-w-0'),
     'the engine row must wrap and be allowed to shrink');
   assert.ok(pills.length > 0);
+});
+
+test('Retry replays the exact session request, including transient reference files', () => {
+  assert.match(modal, /onRetry = null, canRetry = false/,
+    'the modal needs an explicit retry contract');
+  assert.match(modal, /const retryEdit = async \(\) =>/,
+    'the modal must invoke its retry callback instead of rebuilding the request');
+  assert.match(datasetHook, /const retryRequest = \{ prompt, engine, files: Array\.from\(files \|\| \[\]\) \}/,
+    'the hook must snapshot prompt, engine and File objects after a successful queue');
+  assert.match(datasetHook, /referenceEditRetryRef\.current\.set\(String\(currentId\), retryRequest\)/,
+    'the exact request must remain available for this browser session');
+  assert.match(datasetHook, /return editReference\(retryRequest\.prompt, retryRequest\.engine, retryRequest\.files\)/,
+    'retry must replay the saved prompt, engine and files');
+  assert.match(workspace, /onRetry=\{ds\.retryReferenceEdit\}/,
+    'the workspace must wire the hook retry callback to the modal');
+
+  const retryHandler = modal.indexOf('const retryEdit = async');
+  const keepHandler = modal.indexOf('const keep = async');
+  assert.ok(retryHandler > modal.indexOf('const runEdit = async') && retryHandler < keepHandler,
+    'retry must be a standalone handler, never nested inside Keep');
+
+  const keepStart = datasetHook.indexOf('const keepEditedReference');
+  const discardStart = datasetHook.indexOf('const discardEditedReference');
+  const clear = 'referenceEditRetryRef.current.delete(String(currentId))';
+  const keepClear = datasetHook.indexOf(clear, keepStart);
+  const discardClear = datasetHook.indexOf(clear, discardStart);
+  assert.ok(keepClear > keepStart && keepClear < discardStart,
+    'Keep clears only the saved retry after a successful promotion');
+  assert.ok(discardClear > discardStart,
+    'Discard clears only the saved retry after a successful discard');
+
+  const readyStart = modal.indexOf("phase === 'ready'");
+  const readyEnd = modal.indexOf('\n        ) : (', readyStart);
+  assert.ok(readyStart > 0 && readyEnd > readyStart, 'the ready branch must be isolated');
+  const ready = modal.slice(readyStart, readyEnd);
+  assert.ok(ready.indexOf('Engine used for this result:') < ready.indexOf('justify-end flex-wrap'),
+    'the result label must be visible above the action buttons');
+  assert.match(ready, /Try another prompt\s*<\/button>\s*<button type="button" onClick=\{retryEdit\}/,
+    'Retry must be its own action button, not nested inside another action');
+});
+
+test('a queued edit never leaves the modal bridge locked or retryable when refresh is unavailable', () => {
+  assert.match(datasetHook,
+    /const \[, bumpReferenceEditRetryRevision\] = useState\(0\)/,
+    'the transient File snapshot must have reactive availability');
+  assert.match(datasetHook,
+    /const refreshed = await refresh\(\);\s*if \(refreshed\?\.status !== 'applied'\) \{[\s\S]*?referenceEditRetryRef\.current\.delete\(String\(currentId\)\);\s*bumpReferenceEditRetryRevision\(\(revision\) => revision \+ 1\);[\s\S]*?toast\.warning\('Edit queued, but its status could not be refreshed\.[^']*'\);\s*return false;\s*\}/,
+    'a successful queue with a stale or network refresh must disable Retry before releasing the spinner');
+});
+
+test('the completed or failed candidate names the engine that actually produced it', () => {
+  assert.match(modal, /const resultEngine = referenceEdit\?\.engine \|\| engine/,
+    'the server job record, not the current picker, is the source of truth');
+  assert.match(modal, /Engine used for this result:/,
+    'the result must visibly state its effective engine');
+  assert.match(modal, /ENGINE_LABELS\[resultEngine\] \|\| resultEngine/,
+    'engine identifiers must render as their canonical user-facing labels');
 });

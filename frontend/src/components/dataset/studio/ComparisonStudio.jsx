@@ -197,6 +197,18 @@ export default function ComparisonStudio({ selection, baseModels = [], runType =
       <main id="st-results" className="flex flex-col gap-3 min-w-0 scroll-mt-16">
         <StudioPreflightBanner missing={preflight} archMismatch={archMismatch}
           onDismiss={() => { setPreflight(null); setArchMismatch(null); }} />
+        {data?.comfyui_recovery?.requires_comfyui_restart_confirmation && (
+          <div className="flex items-center gap-2 flex-wrap rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2" role="status">
+            <span aria-hidden>⚠</span>
+            <span className="text-content text-sm">A ComfyUI submission has an unknown outcome. Restart ComfyUI first, then confirm it here; the paused cell will become resumable.</span>
+            <button type="button" disabled={run.confirmingComfyuiRestart}
+              onClick={run.confirmComfyuiRestart}
+              className="ml-auto px-2.5 py-1 rounded-lg bg-gradient-primary text-white text-xs font-semibold disabled:opacity-40">
+              {run.confirmingComfyuiRestart ? 'Confirming…' : '✓ J’ai redémarré ComfyUI'}
+            </button>
+          </div>
+        )}
+
         {data?.pending > 0 && (
           <div className="flex items-center gap-2 rounded-lg border border-indigo-400/40 bg-indigo-500/10 px-3 py-2" role="status">
             <span className="inline-block w-4 h-4 border-2 border-indigo-400/40 border-t-indigo-400 rounded-full animate-spin" aria-hidden />

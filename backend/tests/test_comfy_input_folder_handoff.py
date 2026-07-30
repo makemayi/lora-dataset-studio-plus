@@ -17,6 +17,7 @@ import os
 from unittest.mock import patch
 
 import pytest
+from PIL import Image
 
 from app.utils import comfy_fs
 
@@ -172,7 +173,7 @@ def test_klein_generation_still_works_on_a_normal_install(app, tmp_path, monkeyp
     comfy_in = tmp_path / 'input'
     comfy_in.mkdir()
     src = tmp_path / 'src.png'
-    src.write_bytes(b'\x89PNG\r\n\x1a\n')
+    Image.new('RGB', (32, 24), (30, 120, 220)).save(src, 'PNG')
     seen = {}
     with app.app_context():
         _klein_ready(monkeypatch, keh, comfy_in)

@@ -10,6 +10,7 @@ racine d'images via la fixture `app`, route sous app.routes.datasets.
 """
 import io
 import json
+import os
 import zipfile
 from unittest.mock import patch
 
@@ -91,6 +92,30 @@ def test_scrape_import_happy_path(app):
         assert all(v == 0 for v in res['skipped'].values()), res['skipped']
         rows = FaceDatasetImage.query.filter_by(dataset_id=c.id).all()
         assert len(rows) == 2 and all(r.source == 'import' and r.status == 'keep' for r in rows)
+
+
+def test_scrape_import_keeps_the_downloaded_master_bytes(app):
+    """The scrape lane enters through `import_images(crop=False)`: it must keep
+    the downloaded JPEG instead of quietly creating a WebP before review."""
+    with app.app_context():
+        dataset = _concept()
+        raw = _img_bytes(grad='ltr')
+        with patch.object(svc, '_download_scrape_item',
+                          _fake_downloader({'http://x/master.jpg': raw})):
+            result = svc.scrape_import_urls(LOCAL_USER, dataset.id,
+                                            [_item('http://x/master.jpg')])
+        row = FaceDatasetImage.query.filter_by(dataset_id=dataset.id).one()
+        path = os.path.join(svc._dataset_dir(dataset.id), row.filename)
+        assert result['imported'] == 1
+        assert row.filename.endswith('.jpg') and open(path, 'rb').read() == raw
+
+
+def test_scrape_allows_bmp_when_the_remote_server_labels_it_correctly():
+    """BMP was already a supported dataset master; accept it at the hardened
+    scrape boundary too, including its magic-byte verification."""
+    from app.scrape.netfetch import _bytes_look_like_image
+    assert 'image/bmp' in svc._SCRAPE_DL_TYPES
+    assert _bytes_look_like_image(b'BM' + (b'\0' * 30)) is True
 
 
 def test_pexels_scan_import_payload_and_backup_preserve_provenance(app, monkeypatch):
@@ -183,7 +208,7 @@ def test_scrape_import_dedup_vs_existing(app):
     with app.app_context():
         c = _concept()
         data = _img_bytes(grad='ltr')
-        ids, _ = svc.import_images(LOCAL_USER, c.id, [data], crop=False)  # déjà présente (webp normalisé)
+        ids, _ = svc.import_images(LOCAL_USER, c.id, [data], crop=False)  # déjà présente (master préservé)
         assert len(ids) == 1
         with patch.object(svc, '_download_scrape_item', _fake_downloader({'http://x/again.jpg': data})):
             res = svc.scrape_import_urls(LOCAL_USER, c.id, [_item('http://x/again.jpg')])

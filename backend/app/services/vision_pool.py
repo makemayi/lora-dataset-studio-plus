@@ -165,6 +165,12 @@ def map_vision(items, work, *, workers=None, should_cancel=None):
     # Abandoning the generator (a `break`, or an exception in the consumer)
     # exits this `with`, which joins the pool — a pass can never leave worker
     # threads calling Ollama behind it.
+    # Carry only the Vision ownership token into workers. Deliberately do not
+    # copy the full execution context: that could leak Flask's app/request or
+    # SQLAlchemy state across threads.
+    from ..gpu_window import bind_vision_window_context
+    guarded_work = bind_vision_window_context(_guarded)
+
     with ThreadPoolExecutor(max_workers=count, thread_name_prefix='vision') as pool:
         inflight = deque()
 
@@ -173,7 +179,7 @@ def map_vision(items, work, *, workers=None, should_cancel=None):
                 return
             item = next(iterator, _NOTHING)
             if item is not _NOTHING:
-                inflight.append((item, pool.submit(_guarded, work, item)))
+                inflight.append((item, pool.submit(guarded_work, work, item)))
 
         for _ in range(count):
             submit_next()

@@ -412,8 +412,22 @@ def dataset_ref_edit(dataset_id):
     # anchors for THIS call only, never persisted as dataset extra refs. The local
     # engines refuse them rather than drop them silently (see
     # svc.LOCAL_EDIT_REF_SUPPORT); the modal hides the picker for those engines.
-    extra_bytes = [f.read() for f in request.files.getlist('ref') if f and f.filename]
     try:
+        extra_bytes = []
+        for index, upload in enumerate(request.files.getlist('ref'), 1):
+            if not upload or not upload.filename:
+                continue
+            # Bound the request-thread snapshot itself. The service repeats the
+            # cap + full image sanitation before any external API worker starts.
+            try:
+                raw = upload.read(svc.EXTERNAL_REFERENCE_MAX_BYTES + 1)
+            except (OSError, TypeError, MemoryError) as exc:
+                raise ValueError(f'extra edit reference {index} could not be read') from exc
+            if len(raw) > svc.EXTERNAL_REFERENCE_MAX_BYTES:
+                raise ValueError(
+                    f'extra edit reference {index} is too large '
+                    f'(max {svc.EXTERNAL_REFERENCE_MAX_BYTES // (1024 * 1024)} MiB)')
+            extra_bytes.append(raw)
         svc.start_reference_edit(current_app._get_current_object(), LOCAL_USER,
                                  dataset_id, engine, prompt, extra_edit_ref_bytes=extra_bytes)
     except Exception as e:
@@ -1183,6 +1197,18 @@ def _klein_model_state(ds):
             'choices': choices}
 
 
+@bp.get('/klein-model')
+def klein_model_global():
+    """The Klein model a job with NO dataset behind it will run on — today only the
+    bank's watermark inpaint (a bank has no dataset to inherit a pick from).
+
+    READ-ONLY on purpose: there is exactly one place to CHOOSE a Klein model, and
+    it is the dataset. This endpoint exists so the bank can still say which model
+    is about to repaint its images — naming and choosing are two different
+    questions, and the naming half is the one that works everywhere."""
+    return jsonify({'ok': True, **_klein_model_state(None)})
+
+
 @bp.get('/dataset/<int:dataset_id>/klein-model')
 def dataset_klein_model_get(dataset_id):
     """The dataset's Klein model pick, the model that will actually run, and the
@@ -1654,6 +1680,24 @@ def lora_test_cancel(dataset_id):
         return jsonify({'error': 'not found'}), 404
     n = lts.cancel_run(LOCAL_USER, dataset_id)
     return jsonify({'ok': True, 'cancelled': n})
+
+
+@bp.post('/dataset/<int:dataset_id>/lora-test/confirm-comfyui-restart')
+def lora_test_confirm_comfyui_restart(dataset_id):
+    if not svc.get_dataset(LOCAL_USER, dataset_id):
+        return jsonify({'error': 'not found'}), 404
+    data = request.get_json(silent=True) or {}
+    if data.get('confirmed_comfyui_restart') is not True:
+        return jsonify({'error': 'Confirm that you restarted ComfyUI before clearing this paused job.'}), 400
+    gate = _require_comfyui(force=True)
+    if gate:
+        return gate
+    try:
+        cancelled = lts.confirm_unknown_comfyui_restart(
+            LOCAL_USER, dataset_id=dataset_id, restart_confirmed=True)
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, 'cancelled': cancelled, 'resumable': True})
 
 
 @bp.post('/dataset/<int:dataset_id>/lora-test/resume')

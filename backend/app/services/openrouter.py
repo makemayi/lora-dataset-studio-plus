@@ -48,7 +48,7 @@ import logging
 import requests
 
 from .. import config as cfg
-from .engine_errors import EngineError, EngineFatal
+from .engine_errors import EngineError, EngineFatal, EngineRefused
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +78,11 @@ class OpenRouterFatal(OpenRouterError, EngineFatal):
     """A failure that would repeat identically on every remaining row of a batch
     (missing/rejected key, no credits, unknown model). The fan-out stops the run
     on this rather than paying for the same refusal N times."""
+
+
+class OpenRouterRefused(OpenRouterError, EngineRefused):
+    """OpenRouter answered 200 and embedded a refusal in the body instead of an
+    image. Not fatal: the next row may pass."""
 
 
 def _api_key():
@@ -177,6 +182,40 @@ def parse_image_response(data) -> bytes | None:
     return None
 
 
+def _raise_embedded_error(data, *, model: str) -> None:
+    """OpenRouter can answer 200 and put the failure INSIDE the body — that is
+    how a moderation block arrives (`error.code == 403`, with the reasons in
+    `error.metadata.reasons`), and how an upstream provider outage arrives once
+    the response has already started. Reading it costs nothing and is the whole
+    difference between "the app came back empty" and "the model refused this,
+    for this reason". Returns silently when the body says nothing: an
+    unexplained blank stays unexplained rather than being given a cause."""
+    if not isinstance(data, dict):
+        return
+    err = data.get('error')
+    if not isinstance(err, dict):
+        return
+    msg = str(err.get('message') or '').strip()[:300]
+    meta = err.get('metadata') if isinstance(err.get('metadata'), dict) else {}
+    reasons = meta.get('reasons') if isinstance(meta.get('reasons'), list) else []
+    reasons = ', '.join(str(r) for r in reasons if r)[:120]
+    try:
+        code = int(err.get('code'))
+    except (TypeError, ValueError):
+        code = 0
+    if not (msg or reasons or code):
+        return                          # an error key with nothing in it says nothing
+    if code == 403 or reasons:
+        detail = f' ({reasons})' if reasons else (f': {msg}' if msg else '')
+        raise OpenRouterRefused(
+            f'{model} refused this request{detail} — the moderation is the '
+            "provider's, and LDS cannot turn it off")
+    suffix = f': {msg}' if msg else ''
+    raise OpenRouterError(
+        f'OpenRouter answered without an image (error {code or "unknown"} in the '
+        f'body){suffix} — nothing was generated for this image')
+
+
 def generate_variation(ref_bytes: bytes | list[bytes], prompt: str, model: str | None = None,
                        aspect_ratio: str = '1:1') -> bytes | None:
     """Reference photo(s) + variation prompt -> generated image bytes, or None.
@@ -185,8 +224,11 @@ def generate_variation(ref_bytes: bytes | list[bytes], prompt: str, model: str |
     stays engine-parametric. `ref_bytes` is one image or a list of images of the
     same subject, principal first; every one of them is sent.
 
-    None means only one thing: OpenRouter answered 200 without an image (a
-    content-policy refusal). Anything else raises with the cause named."""
+    None now means one thing only, and a narrower one than it used to: OpenRouter
+    answered 200, produced no image, and said NOTHING about why — the one case
+    this engine genuinely cannot read. When the body embeds a reason (OpenRouter
+    puts moderation blocks and mid-stream provider failures there, at 200), it is
+    raised with that reason instead of being flattened into the same blank."""
     key = _api_key()
     if not key:
         # Deliberately an exception, not a None + warning: a missing key must
@@ -228,5 +270,9 @@ def generate_variation(ref_bytes: bytes | list[bytes], prompt: str, model: str |
         if img is None:
             logger.warning('openrouter: no image in response from %s '
                            '(safety block or text-only answer)', mdl)
+            _raise_embedded_error(data, model=mdl)
+            # Nothing readable in the body: it stays None, and the fan-out says
+            # so in words ("a content-policy refusal and a transient API error
+            # look identical here") instead of picking one.
         return img
     return None

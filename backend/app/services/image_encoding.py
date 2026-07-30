@@ -37,6 +37,8 @@ would leave a file that lies to everything guessing by extension.
   a real photograph: PSNR 47.6 dB vs 43.0 dB) at ~40% of the size a lossless WEBP of
   the same pixels would take. Converting a user's JPEG to a 2.4x heavier lossless
   file to preserve pixels that were already lossy is a bad trade.
+* **BMP** — uncompressed RGB is its native, lossless path. BMP has no dependable
+  alpha/ICC round trip in Pillow, so an edit deliberately writes RGB pixels only.
 
 `HIGH_QUALITY` — the documented escape hatch for an operation that decides the size
 of `LOSSLESS` is not worth it. It is deliberately NOT the crop's policy, and the
@@ -82,9 +84,55 @@ from __future__ import annotations
 # this file directly by path, so nothing here may reach for the app, the DB or config.
 from PIL import Image
 
+# Shared ingress/staging safety budget. Dataset import and every ComfyUI hand-off
+# use the same header limits: no route may quietly decode or disclose a larger
+# camera master just because it happens after the initial upload.
+INPUT_MAX_SIDE = 8192
+INPUT_MAX_PIXELS = 16 * 1024 * 1024
+
+
+def validate_input_header_dimensions(im: Image.Image, *, label: str) -> tuple[int, int]:
+    """Validate a raster header before any caller decodes pixels.
+
+    This is the shared ingress/live-file guard.  The caller supplies a concise
+    label for its user-facing error, but the byte/pixel budget is deliberately
+    global so a later Bank scan, thumbnail or edit cannot materialise a source
+    that Dataset import would have rejected.
+    """
+    try:
+        width, height = im.size
+        valid_size = (isinstance(width, int) and isinstance(height, int)
+                      and width > 0 and height > 0)
+    except (AttributeError, TypeError, ValueError, OverflowError, MemoryError) as exc:
+        raise ValueError(f'{label} received an unreadable image') from exc
+    if (not valid_size or width > INPUT_MAX_SIDE or height > INPUT_MAX_SIDE
+            or width * height > INPUT_MAX_PIXELS):
+        raise ValueError(
+            f'{label} rejects images above {INPUT_MAX_SIDE} px per side or '
+            f'{INPUT_MAX_PIXELS} pixels (got {width}x{height}); '
+            'reduce the image before import')
+    return width, height
+
+
+def visual_size_from_header(im: Image.Image) -> tuple[int, int]:
+    """Return displayed dimensions without decoding pixel data.
+
+    ``ImageOps.exif_transpose(im).size`` looks innocent but Pillow may call
+    ``load()`` while materialising the transposed image. Route badges and polling
+    paths only need width/height, so inspect EXIF orientation from the header and
+    swap axes for the four 90° orientations instead. Pixel-edit paths must still
+    use ``ImageOps.exif_transpose`` before operating on coordinates.
+    """
+    width, height = im.size
+    try:
+        orientation = im.getexif().get(274, 1)
+    except (AttributeError, OSError, ValueError):
+        orientation = 1
+    return (height, width) if orientation in (5, 6, 7, 8) else (width, height)
+
 #: Formats an edit is allowed to write back as-is. Anything else is a format the
 #: dataset pipeline never produces; see `source_format`.
-EDITABLE_FORMATS = ('PNG', 'WEBP', 'JPEG')
+EDITABLE_FORMATS = ('PNG', 'WEBP', 'JPEG', 'BMP')
 
 #: Discard nothing the format allows keeping. What every edit uses today.
 LOSSLESS = 'lossless'
@@ -99,6 +147,7 @@ FORMAT_EXTENSIONS = {
     'PNG': ('.png',),
     'WEBP': ('.webp',),
     'JPEG': ('.jpg', '.jpeg'),
+    'BMP': ('.bmp',),
 }
 
 
@@ -106,9 +155,10 @@ def source_format(im: Image.Image, fallback: str = 'WEBP') -> str:
     """The format an edit of `im` should be written back as.
 
     `fallback` covers the formats an edit must not REFUSE but cannot round-trip
-    sensibly (a legacy BMP/TIFF/GIF frame that somehow reached a dataset folder):
-    those become lossless WEBP, which is what the pipeline would have produced
-    anyway — without the lossy step.
+    sensibly (a legacy TIFF/GIF frame that somehow reached a dataset folder): those
+    become lossless WEBP, which is what the pipeline used to produce anyway —
+    without the lossy step. BMP is a supported static dataset format and therefore
+    remains BMP.
     """
     fmt = (getattr(im, 'format', '') or '').upper()
     return fmt if fmt in EDITABLE_FORMATS else fallback
@@ -157,7 +207,7 @@ def save_params(im: Image.Image, fmt: str, policy: str, *,
         raise ValueError(f'unknown encoding policy: {policy!r}')
     fmt = (fmt or '').upper()
     kwargs: dict = {}
-    if icc_profile:
+    if icc_profile and fmt != 'BMP':
         kwargs['icc_profile'] = icc_profile
     if fmt == 'PNG':
         # PNG has no lossy mode at all, so both policies land here. Native mode is
@@ -178,6 +228,11 @@ def save_params(im: Image.Image, fmt: str, policy: str, *,
         im = im.convert('RGB')
         kwargs.update(quality=95 if policy == LOSSLESS else 92,
                       subsampling=0, optimize=True)
+    elif fmt == 'BMP':
+        # BMP is a lossless RGB container. Pillow's BMP writer does not offer a
+        # reliable alpha/ICC round trip, so keep its portable core rather than
+        # claiming metadata preservation we cannot prove.
+        im = im.convert('RGB')
     else:
         raise ValueError(f'unsupported image format: {fmt or "unknown"}')
     return im, kwargs

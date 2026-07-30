@@ -30,6 +30,7 @@ a broken single head never sinks the whole pass. Embeddings + scores are cached 
 the .npz and written every CACHE_EVERY images, so killing the pass mid-way loses at
 most that slice and re-clustering at another threshold is near-instant."""
 from __future__ import annotations
+import io
 import json
 import os
 import sys
@@ -42,6 +43,10 @@ _AESTHETIC_URL = ('https://github.com/christophschuhmann/improved-aesthetic-pred
                   'raw/main/sac+logos+ava1-l14-linearMSE.pth')
 _AESTHETIC_FILE = 'sac+logos+ava1-l14-linearMSE.pth'
 _NSFW_MODEL = 'Marqo/nsfw-image-detection-384'
+
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from bank_image_guard import read_validated_bank_image  # noqa: E402
 
 
 def _log(m):
@@ -322,7 +327,10 @@ def main() -> int:
             return 0
         for i, p in enumerate(todo, 1):
             try:
-                with Image.open(p) as im:
+                # The bytes were validated from the open descriptor immediately
+                # before this decode.  Never re-open the mutable Bank path.
+                payload = read_validated_bank_image(p)
+                with Image.open(io.BytesIO(payload)) as im:
                     im = im.convert('RGB')
                     with torch.no_grad():
                         tens = preprocess(im).unsqueeze(0).to(device)

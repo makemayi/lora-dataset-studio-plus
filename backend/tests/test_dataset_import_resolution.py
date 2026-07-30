@@ -1,204 +1,400 @@
-"""Import resolution + encoding are a CHOICE, not a fate.
+"""Dataset imports preserve masters; conversion is a training-time derivative.
 
-Every image entering a dataset used to be resampled to 1024 px on the long side
-and re-encoded as WebP q92, with no setting anywhere and no sentence saying so
-(reported by Qeeyana on Reddit: "why? let me choose not to").
+The previous default was an implicit WebP q92 conversion at import. That meant a
+dataset could never recover the file it was built from, even though the training
+export already makes a disposable PNG copy. These tests pin the new split:
 
-What these tests pin:
-  - the shipped default is STILL 1024 / q92 — nobody's existing datasets change
-    meaning because a setting appeared;
-  - a chosen size is applied, and `0` means "store what I gave you";
-  - "no downscale" is still capped, because WebP itself refuses past 16383 px —
-    an uncapped "original" would turn a big panorama into a failed import;
-  - encoding tiers do what they claim (lossless really is pixel-identical);
-  - the guarantee that survived from the old code: it only ever SHRINKS;
-  - an unusable configured value degrades to the default instead of exploding;
-  - both entry lanes (photo import and the kohya ZIP/folder merge) obey it.
+* default non-cropped imports retain approved source bytes and a content-derived
+  extension (manual, ZIP and folder lanes);
+* head crop remains an intentional WebP derivative;
+* standard/high/lossless stay available as explicit legacy normalisation modes;
+* the trainer, not the master dataset, is where a PNG conversion happens.
 """
 import io
 import os
+import stat
+import warnings
+import zipfile
 
+import pytest
 from PIL import Image
 
 
-def _photo(w, h, seed=3):
-    """Non-uniform image: a flat color shares its dHash with every other flat
-    color and would be dropped as a perceptual duplicate."""
-    im = Image.new('RGB', (w, h), (250, 250, 250))
-    step = max(8, w // 16)
-    for i in range(0, w, step):
-        im.paste(((i * seed) % 255, (i * 7) % 255, (i * 31 + seed) % 255),
-                 (i, (i * 3) % max(1, h - 8), min(i + step, w), h))
-    buf = io.BytesIO()
-    im.save(buf, 'PNG')
-    return buf.getvalue()
+def _image_bytes(fmt='PNG', size=(160, 100), seed=3):
+    """A non-flat static image encoded under ``fmt``."""
+    image = Image.new('RGB', size)
+    pixels = image.load()
+    for y in range(size[1]):
+        for x in range(size[0]):
+            pixels[x, y] = ((x * 5 + y * 7 + seed) % 256,
+                            (x * 11 + y * 3 + seed * 5) % 256,
+                            (x * 2 + y * 13 + seed * 17) % 256)
+    out = io.BytesIO()
+    if fmt == 'JPEG':
+        image.save(out, fmt, quality=91, subsampling=0)
+    elif fmt == 'WEBP':
+        image.save(out, fmt, quality=91)
+    else:
+        image.save(out, fmt)
+    return out.getvalue()
 
 
-def _noisy(w, h):
-    """A real photo does not compress like flat blocks — the encoding tiers only
-    show their true cost on noise."""
-    import random
-    random.seed(7)
-    im = Image.new('RGB', (w, h))
-    im.putdata([(random.randint(0, 255), random.randint(0, 255),
-                 random.randint(0, 255)) for _ in range(w * h)])
-    buf = io.BytesIO()
-    im.save(buf, 'PNG')
-    return buf.getvalue()
-
-
-def _stored_sizes(ds_id, svc):
+def _row(svc, dataset_id, image_id):
     from app.models import FaceDatasetImage
-    out = []
-    for row in FaceDatasetImage.query.filter_by(dataset_id=ds_id).all():
-        with Image.open(os.path.join(svc._dataset_dir(ds_id), row.filename)) as im:
-            out.append(im.size)
-    return out
+    row = svc.db.session.get(FaceDatasetImage, image_id)
+    assert row is not None
+    return row
 
 
-def _import_one(svc, ds_id, raw):
+def _stored_bytes(svc, dataset_id, row):
+    return open(os.path.join(svc._dataset_dir(dataset_id), row.filename), 'rb').read()
+
+
+@pytest.mark.parametrize('fmt, extension', [
+    ('JPEG', '.jpg'),
+    ('PNG', '.png'),
+    ('WEBP', '.webp'),
+    ('BMP', '.bmp'),
+])
+def test_default_non_cropped_import_preserves_bytes_and_content_extension(
+        app, fmt, extension):
     from app.config import LOCAL_USER
-    ids, failed = svc.import_images(LOCAL_USER, ds_id, [raw], crop=False)
-    assert failed == 0 and len(ids) == 1
-    return _stored_sizes(ds_id, svc)[0]
-
-
-# --- the default nobody asked to change -------------------------------------
-
-def test_default_import_stays_1024_q92(app):
-    """No config → exactly the behaviour every existing install already has."""
     from app.services import face_dataset_service as svc
-    from app.config import LOCAL_USER
+
+    raw = _image_bytes(fmt, seed=len(fmt))
     with app.app_context():
         policy = svc.import_encode_policy()
-        assert policy['max_side'] == 1024
-        assert policy['encoding'] == 'standard'
-        assert policy['quality'] == 92
-        assert policy['lossless'] is False
-        ds = svc.create_dataset(LOCAL_USER, 'Def', 'def')
-        assert _import_one(svc, ds.id, _photo(3000, 2000)) == (1024, 683)
+        assert policy['encoding'] == 'preserve' and policy['preserve'] is True
+        dataset = svc.create_dataset(LOCAL_USER, f'Preserve {fmt}', f'preserve_{fmt}')
+        ids, failed = svc.import_images(LOCAL_USER, dataset.id, [raw], crop=False)
+        assert failed == 0 and len(ids) == 1
+        row = _row(svc, dataset.id, ids[0])
+        filename = row.filename
+        stored = _stored_bytes(svc, dataset.id, row)
+
+    assert filename.endswith(extension)
+    assert stored == raw
+    with Image.open(io.BytesIO(stored)) as image:
+        assert image.format == fmt
 
 
-def test_import_never_upscales(app):
-    """`thumbnail` only shrank; a chosen bigger size must not start enlarging."""
+def test_default_preserve_ignores_the_legacy_resolution_limit(app):
+    """1024 remains the saved normalisation choice, but must not downscale a
+    master when the default policy is `preserve`."""
+    from app.config import LOCAL_USER
     from app.services import face_dataset_service as svc
-    from app.config import LOCAL_USER, save_config
+
+    raw = _image_bytes('PNG', size=(1500, 900))
     with app.app_context():
-        save_config({'dataset_import': {'max_side': 2048}})
-        ds = svc.create_dataset(LOCAL_USER, 'Small', 'small')
-        assert _import_one(svc, ds.id, _photo(512, 384)) == (512, 384)
+        dataset = svc.create_dataset(LOCAL_USER, 'No implicit resize', 'no_resize')
+        ids, failed = svc.import_images(LOCAL_USER, dataset.id, [raw], crop=False)
+        assert failed == 0
+        row = _row(svc, dataset.id, ids[0])
+        stored = _stored_bytes(svc, dataset.id, row)
+    with Image.open(io.BytesIO(stored)) as image:
+        assert image.size == (1500, 900)
 
 
-# --- one test per value of the setting --------------------------------------
-
-def test_chosen_max_side_is_applied(app):
+def test_preserve_rejects_unsupported_or_animated_format_clearly(app):
+    from app.config import LOCAL_USER
     from app.services import face_dataset_service as svc
-    from app.config import LOCAL_USER, save_config
+
+    gif = io.BytesIO()
+    Image.new('RGB', (20, 20), 'red').save(gif, 'GIF')
     with app.app_context():
-        save_config({'dataset_import': {'max_side': 2048}})
-        assert svc.import_encode_policy()['max_side'] == 2048
-        ds = svc.create_dataset(LOCAL_USER, 'Big', 'big')
-        assert _import_one(svc, ds.id, _photo(3000, 2000)) == (2048, 1365)
+        with pytest.raises(ValueError, match='preserve mode supports only static'):
+            svc.import_store_image(gif.getvalue())
+        dataset = svc.create_dataset(LOCAL_USER, 'Unsupported preserve', 'unsupported')
+        ids, failed = svc.import_images(LOCAL_USER, dataset.id, [gif.getvalue()], crop=False)
+    assert ids == [] and failed == 1
 
 
-def test_zero_means_no_downscale_at_all(app):
-    """'Let me choose not to': the stored pixels are the ones handed in."""
+def test_head_crop_remains_an_intentional_webp_derivative(app, monkeypatch):
+    from app.config import LOCAL_USER
     from app.services import face_dataset_service as svc
-    from app.config import LOCAL_USER, save_config
+
+    raw = _image_bytes('PNG')
+    derived = _image_bytes('WEBP', size=(64, 64))
+    monkeypatch.setattr(svc, 'face_crop_to_square_webp',
+                        lambda _raw, return_scale=False: (derived, 1.0))
     with app.app_context():
-        save_config({'dataset_import': {'max_side': 0}})
-        assert svc.import_encode_policy()['max_side'] == 0
-        ds = svc.create_dataset(LOCAL_USER, 'Orig', 'orig')
-        assert _import_one(svc, ds.id, _photo(3000, 2000)) == (3000, 2000)
+        dataset = svc.create_dataset(LOCAL_USER, 'Crop derives', 'crop_derives')
+        ids, failed = svc.import_images(LOCAL_USER, dataset.id, [raw], crop=True)
+        assert failed == 0 and len(ids) == 1
+        row = _row(svc, dataset.id, ids[0])
+        filename = row.filename
+        stored = _stored_bytes(svc, dataset.id, row)
+    assert filename.endswith('.webp') and stored == derived
 
 
-def test_no_downscale_still_hits_the_hard_ceiling(app):
-    """MEASURED: Pillow refuses `WEBP` past 16383 px ("Image size exceeds WebP
-    limit of 16383 pixels"), so an uncapped 'original' would FAIL the import of
-    a big panorama instead of storing it. The ceiling is announced, not silent."""
-    from app.services import face_dataset_service as svc
+def test_opt_in_standard_mode_keeps_the_old_normalised_webp_behaviour(app):
     from app.config import LOCAL_USER, save_config
-    with app.app_context():
-        assert svc.IMPORT_MAX_SIDE_CEILING <= 16383
-        save_config({'dataset_import': {'max_side': 0}})
-        ds = svc.create_dataset(LOCAL_USER, 'Huge', 'huge')
-        w, h = _import_one(svc, ds.id, _photo(svc.IMPORT_MAX_SIDE_CEILING + 1200, 900))
-        assert w == svc.IMPORT_MAX_SIDE_CEILING
-        # a chosen size above the ceiling is clamped, and says so
-        save_config({'dataset_import': {'max_side': 999999}})
-        pol = svc.import_encode_policy()
-        assert pol['max_side'] == svc.IMPORT_MAX_SIDE_CEILING and pol['capped'] is True
-
-
-def test_encoding_tiers(app):
-    """The other half of the loss: q92 is not the only option, and 'lossless'
-    really is pixel-identical (not merely 'quality=100')."""
     from app.services import face_dataset_service as svc
+
+    raw = _image_bytes('PNG', size=(2000, 1200))
+    with app.app_context():
+        save_config({'dataset_import': {'max_side': 1024, 'encoding': 'standard'}})
+        policy = svc.import_encode_policy()
+        assert policy['preserve'] is False and policy['quality'] == 92
+        dataset = svc.create_dataset(LOCAL_USER, 'Explicit standard', 'explicit_standard')
+        ids, failed = svc.import_images(LOCAL_USER, dataset.id, [raw], crop=False)
+        assert failed == 0 and len(ids) == 1
+        row = _row(svc, dataset.id, ids[0])
+        filename = row.filename
+        stored = _stored_bytes(svc, dataset.id, row)
+    assert filename.endswith('.webp') and stored != raw
+    with Image.open(io.BytesIO(stored)) as image:
+        assert image.format == 'WEBP' and image.size == (1024, 614)
+
+
+def test_explicit_encoding_tiers_and_ceiling_remain_available(app):
     from app.config import save_config
-    raw = _noisy(400, 300)
+    from app.services import face_dataset_service as svc
+
+    raw = _image_bytes('PNG', size=(400, 300))
     with app.app_context():
         save_config({'dataset_import': {'max_side': 0, 'encoding': 'lossless'}})
-        pol = svc.import_encode_policy()
-        assert pol['lossless'] is True
-        lossless = svc.import_encode(raw)
+        lossless, ext = svc.import_store_image(raw)
+        assert ext == '.webp' and svc.import_encode_policy()['lossless'] is True
         save_config({'dataset_import': {'max_side': 0, 'encoding': 'standard'}})
-        standard = svc.import_encode(raw)
-    src = Image.open(io.BytesIO(raw)).convert('RGB')
-    assert list(Image.open(io.BytesIO(lossless)).convert('RGB').getdata()) == list(src.getdata())
-    assert list(Image.open(io.BytesIO(standard)).convert('RGB').getdata()) != list(src.getdata())
-    # MEASURED on an 800x600 noisy frame: q92 158 KB, q100 243 KB, lossless
-    # 797 KB — the ~5x the setting's help text warns about.
-    assert len(lossless) > 2 * len(standard)
+        standard, ext = svc.import_store_image(raw)
+        assert ext == '.webp' and svc.import_encode_policy()['quality'] == 92
+        save_config({'dataset_import': {'max_side': 999999, 'encoding': 'standard'}})
+        policy = svc.import_encode_policy()
+
+    source = Image.open(io.BytesIO(raw)).convert('RGB')
+    assert list(Image.open(io.BytesIO(lossless)).convert('RGB').getdata()) == list(source.getdata())
+    assert list(Image.open(io.BytesIO(standard)).convert('RGB').getdata()) != list(source.getdata())
+    assert policy['max_side'] == svc.IMPORT_MAX_SIDE_CEILING and policy['capped'] is True
 
 
-def test_unusable_values_fall_back_to_the_default(app):
-    from app.services import face_dataset_service as svc
+def test_invalid_policy_falls_back_to_preserve_default(app):
     from app.config import save_config
+    from app.services import face_dataset_service as svc
+
     with app.app_context():
         save_config({'dataset_import': {'max_side': 'wide', 'encoding': 'ultra'}})
-        pol = svc.import_encode_policy()
-        assert pol['max_side'] == 1024 and pol['encoding'] == 'standard'
-        save_config({'dataset_import': {'max_side': -50}})
-        assert svc.import_encode_policy()['max_side'] == 1024
+        policy = svc.import_encode_policy()
+    assert policy['max_side'] == 1024
+    assert policy['encoding'] == 'preserve' and policy['preserve'] is True
+    assert policy['capped'] is False
 
 
-# --- the other entry lane ----------------------------------------------------
+class _OversizedImageHeader:
+    """Pillow-like header object whose `load` must never be reached in a test."""
+    format = 'JPEG'
+    size = (8192, 8192)  # valid side, unsafe 67 Mi-pixel raster
+    n_frames = 1
 
-def test_zip_merge_lane_obeys_the_same_policy(app):
-    """Importing an existing training set went through the same hardcoded 1024."""
-    import zipfile
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def load(self):
+        raise AssertionError('unsafe header was decoded before it was rejected')
+
+
+def test_import_header_budget_rejects_before_decode_for_every_ingress_lane(app, monkeypatch):
+    """Manual, ZIP, scrape, crop and normalisation share the 16 Mi-pixel gate."""
+    from app.config import LOCAL_USER
     from app.services import face_dataset_service as svc
-    from app.config import LOCAL_USER, save_config
+
+    monkeypatch.setattr(svc.Image, 'open', lambda *_args, **_kwargs: _OversizedImageHeader())
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, 'w') as zf:
+        zf.writestr('train/unsafe.jpg', b'header-only')
+
     with app.app_context():
-        save_config({'dataset_import': {'max_side': 0}})
-        ds = svc.create_dataset(LOCAL_USER, 'ZipRes', 'zipres')
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, 'w') as z:
-            z.writestr('10_x/a.png', _photo(2400, 1600, seed=5))
-        ids, failed = svc.import_dataset_zip(LOCAL_USER, ds.id, buf.getvalue())
-        assert len(ids) == 1 and failed == 0
-        assert _stored_sizes(ds.id, svc)[0] == (2400, 1600)
+        manual = svc.create_dataset(LOCAL_USER, 'Manual guarded', 'manual_guarded')
+        ids, failed = svc.import_images(LOCAL_USER, manual.id, [b'header-only'], crop=False)
+        assert ids == [] and failed == 1
+
+        zipped = svc.create_dataset(LOCAL_USER, 'Zip guarded', 'zip_guarded')
+        ids, failed = svc.import_dataset_zip(LOCAL_USER, zipped.id, archive.getvalue())
+        assert ids == [] and failed == 1
+
+        scraped = svc.create_dataset(LOCAL_USER, 'Scrape guarded', 'scrape_guarded',
+                                     kind='concept', concept_desc='a guarded concept')
+        monkeypatch.setattr(svc, '_download_scrape_item',
+                            lambda _item: ('ok', b'header-only'))
+        result = svc.scrape_import_urls(
+            LOCAL_USER, scraped.id, [{'url': 'https://example.invalid/unsafe.jpg'}])
+        assert result['imported'] == 0 and result['skipped']['errors'] == 1
+
+        with pytest.raises(ValueError, match='reduce the image before import'):
+            svc.normalize_to_webp(b'header-only')
+        with pytest.raises(ValueError, match='reduce the image before import'):
+            svc.face_crop_to_square_webp(b'header-only', use_vision=False)
 
 
-# --- the setting is reachable from the UI ------------------------------------
+def test_preserve_bomb_warning_is_local_and_never_changes_global_filters(app, monkeypatch):
+    """A Pillow bomb warning becomes a clear rejection without global state leaks."""
+    from app.services import face_dataset_service as svc
 
-def test_settings_api_round_trips_the_new_section(client):
-    r = client.get('/api/settings')
-    assert r.status_code == 200
-    body = r.get_json()
-    assert body['config']['dataset_import']['max_side'] == 1024
-    assert body['config_defaults']['dataset_import']['encoding'] == 'standard'
+    before = list(warnings.filters)
+
+    def _bomb(*_args, **_kwargs):
+        raise Image.DecompressionBombWarning('crafted header')
+
+    monkeypatch.setattr(svc.Image, 'open', _bomb)
+    with app.app_context(), pytest.raises(ValueError, match='unsafe image header'):
+        svc.import_store_image(b'crafted')
+    assert warnings.filters == before
+
+
+def test_zip_and_folder_merge_preserve_raw_sources(app, tmp_path):
+    """ZIP and folder routes share `_merge_training_images`; cover both public
+    entries so a future shortcut cannot reintroduce a WebP rewrite in one lane."""
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+
+    zip_raw = _image_bytes('PNG', seed=12)
+    folder_raw = _image_bytes('BMP', seed=18)
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, 'w') as z:
+        z.writestr('kohya/zip-master.png', zip_raw)
+    folder = tmp_path / 'training-folder'
+    folder.mkdir()
+    (folder / 'folder-master.bmp').write_bytes(folder_raw)
+
+    with app.app_context():
+        zip_dataset = svc.create_dataset(LOCAL_USER, 'ZIP source', 'zip_source')
+        ids, failed = svc.import_dataset_zip(LOCAL_USER, zip_dataset.id, archive.getvalue())
+        assert failed == 0 and len(ids) == 1
+        zip_row = _row(svc, zip_dataset.id, ids[0])
+        assert zip_row.filename.endswith('.png')
+        assert _stored_bytes(svc, zip_dataset.id, zip_row) == zip_raw
+
+        folder_dataset = svc.create_dataset(LOCAL_USER, 'Folder source', 'folder_source')
+        ids, failed = svc.import_dataset_folder(LOCAL_USER, folder_dataset.id, str(folder))
+        assert failed == 0 and len(ids) == 1
+        folder_row = _row(svc, folder_dataset.id, ids[0])
+        assert folder_row.filename.endswith('.bmp')
+        assert _stored_bytes(svc, folder_dataset.id, folder_row) == folder_raw
+
+
+def test_folder_import_rejects_oversized_regular_file_before_reading(
+        app, tmp_path, monkeypatch):
+    """A sparse/live folder file over ZIP's per-image cap never reaches ``open``."""
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+
+    folder = tmp_path / 'oversized-folder'
+    folder.mkdir()
+    source = folder / 'sparse.png'
+    source.write_bytes(_image_bytes('PNG'))
+    real_lstat = svc.os.lstat
+    source_stat = real_lstat(source)
+    real_open = open
+    reads = []
+
+    class _LargeRegular:
+        st_mode = source_stat.st_mode
+        st_size = svc.DATASET_ZIP_MAX_IMAGE_BYTES + 1
+
+    def _reported_lstat(path):
+        if os.path.normcase(os.fspath(path)) == os.path.normcase(str(source)):
+            return _LargeRegular()
+        return real_lstat(path)
+
+    def _guarded_open(path, *args, **kwargs):
+        if os.path.normcase(os.fspath(path)) == os.path.normcase(str(source)):
+            reads.append(path)
+            raise AssertionError('oversized folder image was opened')
+        return real_open(path, *args, **kwargs)
+
+    with app.app_context():
+        dataset = svc.create_dataset(LOCAL_USER, 'Folder cap', 'folder_cap')
+        monkeypatch.setattr(svc.os, 'lstat', _reported_lstat)
+        monkeypatch.setattr(svc, 'open', _guarded_open, raising=False)
+        with pytest.raises(ValueError, match='image too large in folder'):
+            svc.import_dataset_folder(LOCAL_USER, dataset.id, str(folder))
+    assert reads == []
+
+
+def test_folder_import_skips_nonregular_image_without_opening(
+        app, tmp_path, monkeypatch):
+    """A named-pipe/symlink-shaped entry counts as failed but never blocks on open."""
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+
+    folder = tmp_path / 'special-folder'
+    folder.mkdir()
+    source = folder / 'pipe.png'
+    source.write_bytes(_image_bytes('PNG'))
+    real_lstat = svc.os.lstat
+    real_open = open
+    reads = []
+
+    class _Pipe:
+        st_mode = stat.S_IFIFO
+        st_size = 0
+
+    def _reported_lstat(path):
+        if os.path.normcase(os.fspath(path)) == os.path.normcase(str(source)):
+            return _Pipe()
+        return real_lstat(path)
+
+    def _guarded_open(path, *args, **kwargs):
+        if os.path.normcase(os.fspath(path)) == os.path.normcase(str(source)):
+            reads.append(path)
+            raise AssertionError('non-regular folder image was opened')
+        return real_open(path, *args, **kwargs)
+
+    with app.app_context():
+        dataset = svc.create_dataset(LOCAL_USER, 'Special folder', 'special_folder')
+        monkeypatch.setattr(svc.os, 'lstat', _reported_lstat)
+        monkeypatch.setattr(svc, 'open', _guarded_open, raising=False)
+        ids, failed = svc.import_dataset_folder(LOCAL_USER, dataset.id, str(folder))
+    assert ids == [] and failed == 1
+    assert reads == []
+
+
+def test_training_staging_is_png_and_never_mutates_the_preserved_master(app, tmp_path):
+    """Orientation is baked only into the disposable PNG: the JPEG master stays
+    byte-identical in the dataset while AI Toolkit gets upright pixels."""
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as training
+
+    image = Image.new('RGB', (40, 20), (40, 130, 220))
+    exif = image.getexif()
+    exif[274] = 6  # display is clockwise-rotated relative to stored pixels
+    raw = io.BytesIO()
+    image.save(raw, 'JPEG', quality=95, subsampling=0, exif=exif)
+    raw = raw.getvalue()
+
+    with app.app_context():
+        dataset = svc.create_dataset(LOCAL_USER, 'Stage only', 'stage_only')
+        ids, failed = svc.import_images(LOCAL_USER, dataset.id, [raw], crop=False)
+        assert failed == 0 and len(ids) == 1
+        row = _row(svc, dataset.id, ids[0])
+        master = os.path.join(svc._dataset_dir(dataset.id), row.filename)
+        before = open(master, 'rb').read()
+        output = training.export_dataset_to_aitoolkit(
+            LOCAL_USER, dataset.id, masked=False, dest_dir=tmp_path / 'staging')
+        staged = next((tmp_path / 'staging').glob('*.png'))
+
+    assert before == raw == open(master, 'rb').read()
+    assert output == str(tmp_path / 'staging')
+    with Image.open(staged) as staged_image:
+        assert staged_image.format == 'PNG' and staged_image.size == (20, 40)
+
+
+def test_settings_and_capabilities_advertise_preserve_as_the_default(client):
+    settings = client.get('/api/settings').get_json()
+    assert settings['config']['dataset_import']['max_side'] == 1024
+    assert settings['config_defaults']['dataset_import']['encoding'] == 'preserve'
     assert client.put('/api/settings', json={
         'config': {'dataset_import': {'max_side': 2048, 'encoding': 'high'}}}).status_code == 200
-    body = client.get('/api/settings').get_json()
-    assert body['config']['dataset_import'] == {'max_side': 2048, 'encoding': 'high'}
+    assert client.get('/api/settings').get_json()['config']['dataset_import'] == {
+        'max_side': 2048, 'encoding': 'high'}
 
-
-def test_capabilities_publish_the_effective_policy(client):
-    """The workspace quotes the number at the point of import — it must be able
-    to read it without inventing its own copy of the default."""
-    r = client.get('/api/capabilities')
-    assert r.status_code == 200
-    di = r.get_json()['dataset_import']
-    assert di['max_side'] == 1024 and di['encoding'] == 'standard'
-    assert di['ceiling'] >= 1024
+    capability = client.get('/api/capabilities').get_json()['dataset_import']
+    assert capability['encoding'] == 'high'
+    assert capability['max_side'] == 2048 and capability['ceiling'] >= 2048
+    assert capability['input_max_side'] == 8192
+    assert capability['input_max_pixels'] == 16 * 1024 * 1024

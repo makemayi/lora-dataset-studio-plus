@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { HelpBadge } from '../../help/HelpMode';
 import { requestHelpTip } from '../../help/helpTips';
+import KleinModelSetting from '../shared/KleinModelSetting';
 import { displayLabel } from '../../utils/labels';
 import { localEngineUnavailableReason } from '../../utils/localEngineReason.js';
 import {
@@ -673,6 +674,13 @@ export default function WatermarkReviewLightbox({ datasetId, queue, caps, nonces
             </button>
           </div>
         </div>
+        {/* Cleaning this image overwrites it, so which model repaints it is not a
+            detail — and it is the dataset's model, the same one improve uses.
+            Named here, changeable here, only while Klein is the engine. */}
+        {kleinSelected && !useCrop && (
+          <KleinModelSetting datasetId={datasetId}
+            className="mx-auto w-full max-w-md text-center" />
+        )}
 
         <div className="flex gap-2 flex-wrap">
           {restorable ? (

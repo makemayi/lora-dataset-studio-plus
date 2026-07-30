@@ -15,12 +15,17 @@ from flask import Blueprint, jsonify, request
 
 from ..config import LOCAL_USER
 from ..gpu_window import gpu_exclusive_vision_window
+from ..services import face_dataset_service as fds
 from ..services import lora_test_studio as lts
 from ..utils.comfyui import get_zimage_models
 from ._common import (_map_error, _require_comfyui, _studio_arch_mismatch_response,
                       _studio_missing_response)
 
 bp = Blueprint('studio', __name__, url_prefix='/api/studio')
+
+# SQLite Integer primary keys are signed 64-bit values.  Python ints are
+# arbitrary precision, so validate before an oversized JSON value reaches a DB bind.
+_MAX_DATABASE_ID = (1 << 63) - 1
 
 
 def _read_uploaded_image():
@@ -79,6 +84,32 @@ def studio_recent_prompts_delete():
     d = request.get_json(silent=True) or {}
     return jsonify({'ok': True,
                     'deleted': lts.delete_prompt_everywhere(LOCAL_USER, d.get('prompt'))})
+
+
+@bp.post('/random-caption')
+def studio_random_caption():
+    """Pick one usable training caption from the selected local dataset."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'dataset_id must be a positive integer'}), 400
+    dataset_id = data.get('dataset_id')
+    if (isinstance(dataset_id, bool) or not isinstance(dataset_id, int)
+            or dataset_id <= 0 or dataset_id > _MAX_DATABASE_ID):
+        return jsonify({'error': 'dataset_id must be a positive integer'}), 400
+    try:
+        caption = fds.random_kept_caption(LOCAL_USER, dataset_id)
+    except LookupError:
+        # Keep an inaccessible dataset indistinguishable from one that does not exist.
+        return jsonify({
+            'error': ('The selected dataset was not found or is inaccessible. '
+                      'Choose a dataset from your library and try again.')
+        }), 404
+    if caption is None:
+        return jsonify({
+            'error': ('This dataset has no usable kept captions. Caption at least one '
+                      'kept image and try again.')
+        }), 422
+    return jsonify({'ok': True, 'caption': caption})
 
 
 @bp.post('/describe-image')
@@ -143,6 +174,24 @@ def studio_run_status(run_id):
 @bp.post('/run/<run_id>/cancel')
 def studio_run_cancel(run_id):
     return jsonify({'ok': True, 'cancelled': lts.cancel_run(LOCAL_USER, run_id=run_id)})
+
+
+@bp.post('/run/<run_id>/confirm-comfyui-restart')
+def studio_run_confirm_comfyui_restart(run_id):
+    data = request.get_json(silent=True) or {}
+    if data.get('confirmed_comfyui_restart') is not True:
+        return jsonify({'error': 'Confirm that you restarted ComfyUI before clearing this paused job.'}), 400
+    # This one action must observe a freshly responsive replacement process; a
+    # cached green capability result cannot act as a restart gate.
+    gate = _require_comfyui(force=True)
+    if gate:
+        return gate
+    try:
+        cancelled = lts.confirm_unknown_comfyui_restart(
+            LOCAL_USER, run_id=run_id, restart_confirmed=True)
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, 'cancelled': cancelled, 'resumable': True})
 
 
 @bp.post('/run/<run_id>/resume')

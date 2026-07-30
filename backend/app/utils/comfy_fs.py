@@ -29,8 +29,12 @@ import re
 import shutil
 import time
 import uuid
+import warnings
+
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from .redact import redact_user_paths
+from ..services import image_encoding
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +173,68 @@ def stage_input_copy(src_path, dest_name, input_dir) -> str:
     except OSError as exc:
         raise _staging_error('Copying the source image into ComfyUI', 'input',
                              base, _cause(exc)) from exc
+    return dest
+
+
+def stage_input_image(src_path, dest_name, input_dir) -> str:
+    """Stage a bounded, visual-orientation PNG for a ComfyUI workflow.
+
+    ComfyUI may run in a different process, container, or machine. Its input
+    directory is therefore a disclosure boundary, not a harmless ``copy2``:
+    source EXIF/XMP/GPS must stay local and no camera master above the shared
+    8192 px / 16 Mi-pixel budget may be decoded there.  The caller supplies the
+    minted ``.png`` basename used by its workflow; this function returns its full
+    path after an atomic write.  Local masters are read only.
+
+    ``stage_input_copy`` remains for non-image filesystem tests/backward
+    compatibility. Image-generation lanes must call this function instead.
+    """
+    base = str(input_dir)
+    name = os.path.basename(str(dest_name or ''))
+    if not name or not name.lower().endswith('.png'):
+        raise ValueError('ComfyUI image staging requires a .png destination name')
+    dest = os.path.join(base, name)
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter('error', Image.DecompressionBombWarning)
+            with Image.open(src_path) as source:
+                width, height = source.size
+                valid = (isinstance(width, int) and isinstance(height, int)
+                         and width > 0 and height > 0
+                         and width <= image_encoding.INPUT_MAX_SIDE
+                         and height <= image_encoding.INPUT_MAX_SIDE
+                         and width * height <= image_encoding.INPUT_MAX_PIXELS)
+                if not valid:
+                    raise ValueError(
+                        f'image exceeds {image_encoding.INPUT_MAX_SIDE} px per side or '
+                        f'{image_encoding.INPUT_MAX_PIXELS} pixels; reduce it before use')
+                source.load()
+                oriented = ImageOps.exif_transpose(source)
+                has_alpha = ('A' in oriented.getbands()
+                             or 'transparency' in getattr(oriented, 'info', {}))
+                mode = 'RGBA' if has_alpha else 'RGB'
+                # A freshly allocated canvas intentionally has no inherited
+                # `info`: converting or copying alone can retain PNG/XMP fields.
+                clean = Image.new(mode, oriented.size)
+                clean.paste(oriented.convert(mode))
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
+        raise ValueError('ComfyUI image staging rejected an unsafe image header; '
+                         'reduce the image before use') from exc
+    except (OSError, UnidentifiedImageError, ValueError) as exc:
+        raise ValueError(f'ComfyUI image staging could not read the source image: {exc}') from exc
+
+    tmp = f'{dest}.part-{uuid.uuid4().hex[:8]}'
+    try:
+        clean.save(tmp, 'PNG', compress_level=6)
+        os.replace(tmp, dest)
+    except OSError as exc:
+        raise _staging_error('Writing the sanitized source image into ComfyUI', 'input',
+                             base, _cause(exc)) from exc
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
     return dest
 
 

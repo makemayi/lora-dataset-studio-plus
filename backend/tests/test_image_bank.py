@@ -4,6 +4,8 @@ to it; background jobs run inline under TESTING (see bank_jobs.start)."""
 import io
 import os
 import random
+import struct
+import zlib
 
 import pytest
 from PIL import Image, ImageFilter
@@ -63,7 +65,37 @@ def _mkbank(client, tmp_path, files, name='B'):
     return r.get_json()['id'], src
 
 
+def _compact_png_header(width, height):
+    def chunk(kind, data):
+        return (struct.pack('>I', len(data)) + kind + data
+                + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff))
+    return (b'\x89PNG\r\n\x1a\n'
+            + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
+            + chunk(b'IEND', b''))
+
+
 # --- quality metrics (pure PIL) ---------------------------------------------
+def test_live_bank_pixel_bomb_is_rejected_before_thumbnail_or_scan_decode(
+        app, client, tmp_path):
+    """A file added after Bank inventory cannot become a late decompression path."""
+    from app.extensions import db
+    from app.models import BankImage, ImageBank
+    from app.services import image_bank_service as banks
+
+    bank_id, src = _mkbank(
+        client, tmp_path, {'compact-bomb.png': _compact_png_header(9000, 9000)})
+    with app.app_context():
+        bank = db.session.get(ImageBank, bank_id)
+        row = BankImage.query.filter_by(bank_id=bank_id).one()
+        assert banks.ensure_thumb(bank, row) is None
+        result = banks._scan_one(str(src), tmp_path / 'thumbs', (row.id, row.relpath))
+        assert result['quality_state'] == 'unreadable'
+        with pytest.raises(ValueError, match='rejects images above'):
+            banks._read_safe_bank_source_bytes(
+                str(src / row.relpath), label='bank test')
+    assert not (tmp_path / 'thumbs' / f'{row.id}.webp').exists()
+
+
 def test_quality_metrics_discriminate():
     from app.services.image_quality import quality_metrics
     sharp = quality_metrics(checkerboard())

@@ -135,10 +135,13 @@ def gpu_is_contended() -> bool:
         from ..job_queue import queue_manager
         if queue_manager._get_system_state('training_in_progress'):
             return True
+        if queue_manager.has_comfyui_stalled_barrier():
+            return True
         from ..models import ImageGenerationQueue
         pending = (ImageGenerationQueue.query
                    .filter(ImageGenerationQueue.status.in_(
-                       ('pending', 'processing', 'sent_to_comfy')))
+                       ('pending', 'processing', 'sent_to_comfy',
+                        'cancel_requested', 'stalled')))
                    .first())
         return pending is not None
     except Exception as exc:
@@ -185,22 +188,42 @@ def forget_lease() -> None:
 
 
 def revoke(reason: str = '') -> bool:
-    """Hand the vision model's VRAM back, if this process is holding a lease.
+    """Hand the warm vision lease back only after Ollama confirmed the unload.
 
-    Called from the paths that are ABOUT to take the GPU. Best-effort and cheap:
-    with no live lease it does nothing at all (no HTTP call), so putting it on a
-    hot path such as `job_queue.process_one` costs a monotonic clock read per
-    job. Returns whether an unload was actually issued and succeeded.
+    A failed unload deliberately keeps the lease live. The ComfyUI queue uses
+    this fact as a fail-closed gate: it must not submit a model-loading workflow
+    while this process still believes Ollama owns the card.
     """
     if not lease_is_live():
         return False
-    forget_lease()
     try:
         from .vision_ollama import unload_vision_model
         ok = unload_vision_model()
     except Exception as exc:
         logger.warning('vision_keepalive: revoke failed (%s)', exc)
         return False
+    if not ok:
+        logger.warning('vision_keepalive: keeping the lease because Ollama did not confirm unload')
+        return False
+    forget_lease()
     logger.info('vision_keepalive: released the warm vision model%s',
                 f' ({reason})' if reason else '')
-    return bool(ok)
+    return True
+
+
+def ensure_released_for_comfy(reason: str = 'ComfyUI job starting') -> bool:
+    """Prove local Ollama no longer owns GPU memory before a ComfyUI handoff.
+
+    A live warm lease is revoked once. The ownership fence then verifies the
+    configured loopback Ollama runner is empty, including after an LDS restart
+    where no in-memory lease exists. Its verified-empty cache makes later cells
+    in the same ComfyUI batch hot: no unload and no repeated network probe.
+    """
+    if lease_is_live() and not revoke(reason):
+        return False
+    try:
+        from . import ollama_gpu_fence
+        return ollama_gpu_fence.ensure_released_for_comfy()
+    except Exception:
+        logger.exception('vision_keepalive: could not verify local Ollama release')
+        return False

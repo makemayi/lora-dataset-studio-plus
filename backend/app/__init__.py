@@ -39,6 +39,7 @@ _STATIC_MIME_TYPES = {
     '.svg': 'image/svg+xml',
     '.webp': 'image/webp',
     '.png': 'image/png',
+    '.bmp': 'image/bmp',
     '.jpg': 'image/jpeg',
     '.jpeg': 'image/jpeg',
     '.gif': 'image/gif',
@@ -166,6 +167,9 @@ _SCHEMA_ADDITIONS = (
     # database that never gains these columns simply keeps the old behaviour.
     ('face_dataset_image', 'content_sig', 'VARCHAR(24)'),
     ('face_dataset_image', 'content_sig_stat', 'VARCHAR(40)'),
+    # Versioned, byte-fingerprinted Bank analysis used by the durable Bank <-> Dataset
+    # transfer path. Legacy Dataset rows simply have no snapshot to restore.
+    ('face_dataset_image', 'bank_analysis_snapshot', 'TEXT'),
     ('training_run_record', 'settings', 'TEXT'),
     # Full launch freeze: caption text, per-image content hashes, environment.
     # NULL on every run recorded before it existed — the compare panel says so.
@@ -191,6 +195,9 @@ _SCHEMA_ADDITIONS = (
     ('bank_image', 'style_cluster', 'INTEGER'),
     ('bank_image', 'watermark_state', 'VARCHAR(16)'),
     ('bank_image', 'caption', 'TEXT'),
+    # Structured source provenance survives Bank <-> Dataset transfers. Existing
+    # rows remain NULL, just like they were before source attribution was added.
+    ('bank_image', 'source_metadata', 'TEXT'),
     ('bank_image', 'semantic_dup_group', 'INTEGER'),
     ('bank_image', 'framing', 'VARCHAR(8)'),
     # Bank watermark CLEANING (two manual levels) — the detected bbox is now kept

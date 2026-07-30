@@ -1,8 +1,8 @@
-"""LoKr network variant + EMA of weights — two community-recipe levers (Krea-2:
-LoKr + low rank + EMA 0.99 → likeness by ~step 500). Both are arch-generic in
-ai-toolkit (network.type='lokr' → LokrModule on every arch; train.ema_config is a
-TrainConfig knob), so they are offered on EVERY family with no whitelist — and the
-knob is a real config change, never a silent no-op."""
+"""LoKr network controls + EMA and the Krea Raw community-recipe fields.
+
+LoKr and EMA are arch-generic in ai-toolkit; the Krea-only fields below are
+deliberately scoped so a source-labelled Krea recipe is never a silent no-op.
+"""
 import json
 
 import pytest
@@ -45,8 +45,8 @@ def test_default_no_lokr_no_ema_every_family(app, tmp_path):
 def test_lokr_emitted_for_every_family(app, tmp_path):
     """network.type flips to 'lokr' for EVERY family (proof there is no family
     whitelist — ai-toolkit builds LokrModule regardless of arch). rank/alpha still
-    ride in linear/linear_alpha; lokr_factor is left at the ai-toolkit auto default
-    (-1) so it is deliberately NOT emitted."""
+    ride in linear/linear_alpha; the auto factor is omitted, while full-rank is
+    explicitly false so a future ai-toolkit default cannot erase those dimensions."""
     from app.services import lora_training as lt
     from app.services import face_dataset_service as svc
     from app import config as cfg
@@ -59,7 +59,25 @@ def test_lokr_emitted_for_every_family(app, tmp_path):
             p = _process(lt, svc.get_dataset(LOCAL_USER, ds.id), folder)
             assert p['network']['type'] == 'lokr', tt
             assert 'linear' in p['network'] and 'linear_alpha' in p['network'], tt
+            assert p['network']['lokr_full_rank'] is False, tt
             assert 'lokr_factor' not in p['network'], tt
+
+
+def test_explicit_lokr_factor_is_emitted_for_every_family(app, tmp_path):
+    """A selected factor reaches ai-toolkit rather than merely living in a preset."""
+    from app.services import lora_training as lt
+    from app.services import face_dataset_service as svc
+    from app import config as cfg
+    with app.app_context():
+        cfg.save_config({'aitoolkit': {'dir': str(tmp_path / 'aitoolkit')}})
+        folder = tmp_path / 'ds'; folder.mkdir()
+        for tt in FAMILIES:
+            ds = _mk(svc, tt, tmp_path)
+            lt.update_train_settings(LOCAL_USER, ds.id,
+                                     {'network_type': 'lokr', 'lokr_factor': 16})
+            p = _process(lt, svc.get_dataset(LOCAL_USER, ds.id), folder)
+            assert p['network']['lokr_factor'] == 16, tt
+            assert p['network']['lokr_full_rank'] is False, tt
 
 
 def test_ema_emitted_for_every_family(app, tmp_path):
@@ -76,6 +94,37 @@ def test_ema_emitted_for_every_family(app, tmp_path):
             lt.update_train_settings(LOCAL_USER, ds.id, {'ema': 0.99})
             p = _process(lt, svc.get_dataset(LOCAL_USER, ds.id), folder)
             assert p['train']['ema_config'] == {'use_ema': True, 'ema_decay': 0.99}, tt
+
+
+def test_krea_community_recipe_fields_reach_the_real_train_config(app, tmp_path):
+    """Balanced, Automagic v2 and Differential Guidance are emitted as the exact
+    ai-toolkit fields the Krea Raw recipe announces — no decorative preset keys."""
+    from app.services import lora_training as lt
+    from app.services import face_dataset_service as svc
+    from app import config as cfg
+    with app.app_context():
+        cfg.save_config({'aitoolkit': {'dir': str(tmp_path / 'aitoolkit')}})
+        folder = tmp_path / 'ds'; folder.mkdir()
+        ds = _mk(svc, 'krea', tmp_path)
+        lt.update_train_settings(LOCAL_USER, ds.id, {
+            'network_type': 'lokr', 'lokr_factor': 16,
+            'rank': 32, 'alpha': 32, 'timestep_type': 'sigmoid',
+            'optimizer': 'automagic2', 'learning_rate': 1e-4,
+            'content_or_style': 'balanced',
+            'do_differential_guidance': True,
+            'differential_guidance_scale': 3,
+        })
+        p = _process(lt, svc.get_dataset(LOCAL_USER, ds.id), folder)
+        assert p['network'] == {
+            'type': 'lokr', 'linear': 32, 'linear_alpha': 32,
+            'lokr_full_rank': False, 'lokr_factor': 16,
+        }
+        assert p['train']['optimizer'] == 'automagic2'
+        assert p['train']['lr'] == 1e-4
+        assert p['train']['timestep_type'] == 'sigmoid'
+        assert p['train']['content_or_style'] == 'balanced'
+        assert p['train']['do_differential_guidance'] is True
+        assert p['train']['differential_guidance_scale'] == 3.0
 
 
 def test_recipe_combo_lokr_lowrank_ema999(app, tmp_path):
@@ -109,12 +158,42 @@ def test_validation_rejects_and_clears(app, tmp_path):
         with pytest.raises(ValueError) as e2:
             lt.update_train_settings(LOCAL_USER, ds.id, {'ema': 0.95})
         assert 'ema' in str(e2.value)
-        lt.update_train_settings(LOCAL_USER, ds.id, {'network_type': 'lokr', 'ema': 0.99})
+        with pytest.raises(ValueError) as e3:
+            lt.update_train_settings(LOCAL_USER, ds.id, {'lokr_factor': 12})
+        assert 'lokr_factor' in str(e3.value)
+        with pytest.raises(ValueError) as e4:
+            lt.update_train_settings(LOCAL_USER, ds.id, {'differential_guidance_scale': 11})
+        assert 'differential_guidance_scale' in str(e4.value)
+        lt.update_train_settings(LOCAL_USER, ds.id, {
+            'network_type': 'lokr', 'lokr_factor': 16, 'ema': 0.99,
+            'content_or_style': 'balanced', 'do_differential_guidance': True,
+            'differential_guidance_scale': 3,
+        })
         stored = lt.snapshot_train_settings(LOCAL_USER, ds.id)
-        assert stored['network_type'] == 'lokr' and stored['ema'] == 0.99
-        lt.update_train_settings(LOCAL_USER, ds.id, {'network_type': 'lora', 'ema': 'off'})
+        assert stored['network_type'] == 'lokr' and stored['lokr_factor'] == 16
+        assert stored['ema'] == 0.99 and stored['content_or_style'] == 'balanced'
+        assert stored['do_differential_guidance'] is True
+        lt.update_train_settings(LOCAL_USER, ds.id, {
+            'network_type': 'lora', 'lokr_factor': 'auto', 'ema': 'off',
+            'content_or_style': 'auto', 'do_differential_guidance': False,
+            'differential_guidance_scale': 'auto',
+        })
         stored2 = lt.snapshot_train_settings(LOCAL_USER, ds.id)
-        assert 'network_type' not in stored2 and 'ema' not in stored2
+        assert {'network_type', 'lokr_factor', 'ema', 'content_or_style',
+                'do_differential_guidance', 'differential_guidance_scale'}.isdisjoint(stored2)
+
+
+@pytest.mark.parametrize('bad_value', [1, 'true', {}, []])
+def test_differential_guidance_requires_a_real_boolean(app, bad_value):
+    from app.services import lora_training as lt
+    from app.services import face_dataset_service as svc
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'Strict bool', 'strictbool', train_type='krea')
+        with pytest.raises(ValueError, match='do_differential_guidance'):
+            lt.update_train_settings(LOCAL_USER, ds.id,
+                                     {'do_differential_guidance': bad_value})
+        assert 'do_differential_guidance' not in lt.snapshot_train_settings(
+            LOCAL_USER, ds.id)
 
 
 def test_effective_settings_exposes_choices_and_supported(app):
@@ -127,17 +206,28 @@ def test_effective_settings_exposes_choices_and_supported(app):
         eff = lt.effective_train_settings(ds)
         assert eff['network_type'] is None and eff['ema'] is None          # defaults
         assert eff['network_type_choices'] == ['lora', 'lokr']
+        assert eff['lokr_factor'] is None and eff['lokr_factor_choices'] == [4, 8, 16, 32]
         assert eff['ema_choices'] == [0.99, 0.999]
         assert eff['network_type_supported'] is True
-        lt.update_train_settings(LOCAL_USER, ds.id, {'network_type': 'lokr', 'ema': 0.99})
+        assert eff['krea_recipe_supported'] is True
+        assert eff['content_or_style'] is None and eff['content_or_style_default'] == 'balanced'
+        assert eff['do_differential_guidance'] is False and eff['differential_guidance_scale'] == 3.0
+        lt.update_train_settings(LOCAL_USER, ds.id, {
+            'network_type': 'lokr', 'lokr_factor': 16, 'ema': 0.99,
+            'content_or_style': 'balanced', 'do_differential_guidance': True,
+            'differential_guidance_scale': 3,
+        })
         eff2 = lt.effective_train_settings(svc.get_dataset(LOCAL_USER, ds.id))
         assert eff2['network_type'] == 'lokr' and eff2['ema'] == 0.99
+        assert eff2['lokr_factor'] == 16
+        assert eff2['content_or_style'] == 'balanced'
+        assert eff2['do_differential_guidance'] is True
 
 
-def test_launch_snapshot_and_share_carry_lokr_ema(app):
+def test_launch_snapshot_and_share_carry_lokr_ema_and_krea_recipe(app):
     """The launch snapshot (stamped into the run's provenance and rendered by the
-    ⎘ Share config) stamps BOTH levers with their effective value — including the
-    default — and the share renderer knows both keys as first-class rows.
+    ⎘ Share config) stamps network/EMA and Krea recipe fields with their effective
+    value — including defaults — and the share renderer knows every key as a first-class row.
 
     These two used to be omitted while they matched the default. That reads as
     "compact" until two runs are compared: an absent `ema` was then
@@ -151,10 +241,23 @@ def test_launch_snapshot_and_share_carry_lokr_ema(app):
         ds = svc.create_dataset(LOCAL_USER, 'K', 'kt', train_type='krea')
         snap = lt.launch_settings_snapshot(ds, 'krea')
         assert snap['network_type'] == 'lora' and snap['ema'] == 'off'
-        lt.update_train_settings(LOCAL_USER, ds.id, {'network_type': 'lokr', 'ema': 0.99})
+        assert snap['content_or_style'] == 'balanced'
+        assert snap['do_differential_guidance'] is False
+        assert snap['differential_guidance_scale'] == 'off'
+        lt.update_train_settings(LOCAL_USER, ds.id, {
+            'network_type': 'lokr', 'lokr_factor': 16, 'ema': 0.99,
+            'content_or_style': 'balanced', 'do_differential_guidance': True,
+            'differential_guidance_scale': 3,
+        })
         snap2 = lt.launch_settings_snapshot(svc.get_dataset(LOCAL_USER, ds.id), 'krea')
         assert snap2['network_type'] == 'lokr' and snap2['ema'] == 0.99
-        assert 'network_type' in _KNOWN_SETTING_KEYS and 'ema' in _KNOWN_SETTING_KEYS
+        assert snap2['lokr_full_rank'] is False and snap2['lokr_factor'] == 16
+        assert snap2['content_or_style'] == 'balanced'
+        assert snap2['do_differential_guidance'] is True
+        assert snap2['differential_guidance_scale'] == 3.0
+        assert {'network_type', 'lokr_factor', 'lokr_full_rank', 'ema',
+                'content_or_style', 'do_differential_guidance',
+                'differential_guidance_scale'} <= _KNOWN_SETTING_KEYS
 
 
 def test_preset_apply_schema_tolerant_and_version_tolerant(client, app):
@@ -165,7 +268,11 @@ def test_preset_apply_schema_tolerant_and_version_tolerant(client, app):
                         json={'name': 'P', 'trigger_word': 'pt', 'train_type': 'krea'}).get_json()['id']
     r = client.post(f'/api/dataset/{ds_id}/train/presets/apply', json={'settings': {
         'network_type': 'lokr',      # valid → applied
+        'lokr_factor': 16,            # valid → applied
         'ema': 0.42,                 # invalid value → rejected with reason
+        'content_or_style': 'balanced',
+        'do_differential_guidance': True,
+        'differential_guidance_scale': 3,
         'lokr_alpha_beta': 3,        # unknown key → ignored
     }})
     body = r.get_json()
@@ -174,14 +281,18 @@ def test_preset_apply_schema_tolerant_and_version_tolerant(client, app):
     assert [x['key'] for x in body['rejected']] == ['ema']
     with app.app_context():
         from app.services import lora_training as lt
-        assert lt.snapshot_train_settings('local', ds_id) == {'network_type': 'lokr'}
+        assert lt.snapshot_train_settings('local', ds_id) == {
+            'network_type': 'lokr', 'lokr_factor': 16,
+            'content_or_style': 'balanced', 'do_differential_guidance': True,
+            'differential_guidance_scale': 3.0,
+        }
     # an older preset (no network/ema keys) REPLACES → the levers fall back to default
     client.post(f'/api/dataset/{ds_id}/train/presets/apply', json={'settings': {'rank': 16}})
     with app.app_context():
         from app.services import lora_training as lt
         from app.services import face_dataset_service as svc
         eff = lt.effective_train_settings(svc.get_dataset('local', ds_id))
-        assert eff['network_type'] is None and eff['ema'] is None
+        assert eff['network_type'] is None and eff['lokr_factor'] is None and eff['ema'] is None
 
 
 def test_cloud_rebuild_carries_lokr_ema(app, tmp_path):
@@ -196,9 +307,17 @@ def test_cloud_rebuild_carries_lokr_ema(app, tmp_path):
         cfg.save_config({'aitoolkit': {'dir': str(tmp_path / 'aitoolkit')}})
         folder = tmp_path / 'ds'; folder.mkdir()
         ds = svc.create_dataset(LOCAL_USER, 'K', 'kt', train_type='krea')
-        lt.update_train_settings(LOCAL_USER, ds.id, {'network_type': 'lokr', 'ema': 0.99})
+        lt.update_train_settings(LOCAL_USER, ds.id, {
+            'network_type': 'lokr', 'lokr_factor': 16, 'ema': 0.99,
+            'content_or_style': 'balanced', 'do_differential_guidance': True,
+            'differential_guidance_scale': 3,
+        })
         view = _run_config_dataset(svc.get_dataset(LOCAL_USER, ds.id),
                                    {'train_type': 'krea', 'variant': 'base'})
         p = lt.build_job_config(view, str(folder), 1500)['config']['process'][0]
         assert p['network']['type'] == 'lokr'
+        assert p['network']['lokr_factor'] == 16 and p['network']['lokr_full_rank'] is False
         assert p['train']['ema_config'] == {'use_ema': True, 'ema_decay': 0.99}
+        assert p['train']['content_or_style'] == 'balanced'
+        assert p['train']['do_differential_guidance'] is True
+        assert p['train']['differential_guidance_scale'] == 3.0

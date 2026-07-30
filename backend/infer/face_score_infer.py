@@ -1,5 +1,5 @@
 """Face similarity scorer — InsightFace antelopev2, lance dans un interprete DEDIE
-(insightface y est installe, PAS dans le venv Flask). CPU (onnxruntime CPU-only ici)
+(insightface y est installe, PAS dans le venv Flask). CPU force (provider CPU + ctx_id=-1)
 -> pas de GPU, ne touche pas ComfyUI.
 Protocole stdin: {"ref": path, "images": [paths], "models_root": path|null} -> stdout
 UNE ligne JSON {"ref_ok": bool, "results": {path: {state, sim?, det, bbox_frac, yaw}}}.
@@ -54,13 +54,11 @@ def main() -> int:
     from insightface.app import FaceAnalysis
     _repair_nested_antelopev2(models_root)
     try:
+        kwargs = {'name': 'antelopev2', 'providers': ['CPUExecutionProvider']}
         if models_root:
-            app = FaceAnalysis(name='antelopev2', root=models_root,
-                               providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
-        else:  # pas de models_root configure -> auto-download vers ~/.insightface
-            app = FaceAnalysis(name='antelopev2',
-                               providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
-        app.prepare(ctx_id=0, det_size=(640, 640))
+            kwargs['root'] = models_root
+        app = FaceAnalysis(**kwargs)
+        app.prepare(ctx_id=-1, det_size=(640, 640))
     except Exception as e:
         # Un crash de chargement (modeles absents/corrompus) doit sortir en JSON
         # propre — pas en traceback muet que le parent resume en « pas de JSON ».

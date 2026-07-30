@@ -1,6 +1,7 @@
 """'Back up everything' — the master archive that bundles every dataset's
 portable backup plus a secrets-free config, and the restore that rebuilds them."""
 import io
+import json
 import os
 import shutil
 import zipfile
@@ -16,7 +17,7 @@ def _png(color=(200, 40, 40)):
 
 
 def _dataset_with_image(svc, user, name, trigger, *, caption='a portrait',
-                        filename='img1.webp'):
+                        filename='img1.png'):
     """A dataset with one real on-disk image row — so a restore can be proven to
     carry pixels, not just metadata."""
     from app.models import FaceDatasetImage
@@ -260,6 +261,160 @@ def test_restore_rejects_non_full_backup(app, tmp_path):
         open(p, 'wb').write(single)
         with pytest.raises(ValueError, match='not a full backup'):
             fb.restore_full_backup(LOCAL_USER, p)
+
+
+@pytest.mark.parametrize('datasets', [
+    1,
+    [{'source_id': 1, 'entry': []}],
+    [{'source_id': True, 'entry': 'datasets/1-Alice.zip'}],
+])
+def test_restore_rejects_malformed_datasets_manifest_before_config_save(
+        app, tmp_path, monkeypatch, datasets):
+    """Malformed restore metadata must not leave a partial config merge behind."""
+    from app.config import LOCAL_USER
+    from app.services import full_backup as fb
+
+    archive = str(tmp_path / 'malformed-datasets-manifest.zip')
+    manifest = {'format': fb.FULL_BACKUP_FORMAT, 'version': fb.FULL_BACKUP_VERSION,
+                'datasets': datasets, 'loras': []}
+    with zipfile.ZipFile(archive, 'w') as z:
+        z.writestr(fb._MANIFEST_NAME, json.dumps(manifest))
+        z.writestr(fb._CONFIG_NAME,
+                   json.dumps({'engines': {'default': 'nanobanana'}}))
+
+    saves = []
+
+    def _unexpected_config_save(*args, **kwargs):
+        saves.append((args, kwargs))
+        pytest.fail('malformed manifest changed configuration')
+
+    monkeypatch.setattr(fb.cfg, 'save_config', _unexpected_config_save)
+    with app.app_context(), pytest.raises(ValueError,
+                                          match='invalid full-backup datasets manifest'):
+        fb.restore_full_backup(LOCAL_USER, archive)
+    assert saves == []
+
+
+def test_restore_rejects_compressed_oversized_dataset_before_opening_it(
+        app, tmp_path, monkeypatch):
+    """The outer member is validated before it can inflate into a staging file."""
+    from app.config import LOCAL_USER
+    from app.services import full_backup as fb
+
+    archive = str(tmp_path / 'dataset-bomb.zip')
+    manifest = {'format': fb.FULL_BACKUP_FORMAT, 'version': fb.FULL_BACKUP_VERSION,
+                'datasets': [], 'loras': []}
+    with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as z:
+        z.writestr(fb._MANIFEST_NAME, json.dumps(manifest))
+        z.writestr('datasets/1-bomb.zip', b'X' * 65,
+                   compress_type=zipfile.ZIP_DEFLATED)
+
+    monkeypatch.setattr(fb, '_MAX_MASTER_DATASET_BYTES', 64)
+    opened = []
+
+    def _unexpected_open(_self, member, *args, **kwargs):
+        opened.append(member)
+        pytest.fail('a master member was opened before size validation')
+
+    monkeypatch.setattr(zipfile.ZipFile, 'open', _unexpected_open)
+    monkeypatch.setattr(fb, '_new_temp',
+                        lambda *args, **kwargs: pytest.fail('staging temp was created'))
+    monkeypatch.setattr(fb.cfg, 'save_config',
+                        lambda *args, **kwargs: pytest.fail('config was changed'))
+
+    with app.app_context(), pytest.raises(ValueError, match='too large'):
+        fb.restore_full_backup(LOCAL_USER, archive)
+    assert opened == []
+
+
+def test_restore_rejects_compressed_oversized_lora_before_any_write(
+        app, tmp_path, monkeypatch):
+    """A compressed LoRA bomb never reaches its deployment folder or .part file."""
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+    from app.services import full_backup as fb
+    from app import config as cfg
+
+    loras_root = tmp_path / 'comfy_loras'
+    with app.app_context():
+        cfg.save_config({'comfyui': {'loras_dir': str(loras_root)}})
+        alice = _dataset_with_image(svc, LOCAL_USER, 'Alice', 'alice')
+        clean = str(tmp_path / 'clean-master.zip')
+        fb.build_full_backup(LOCAL_USER, clean)
+
+    lora_entry = f'loras/{alice.id}/sdxl/bomb.safetensors'
+    archive = str(tmp_path / 'lora-bomb.zip')
+    with zipfile.ZipFile(clean) as source, zipfile.ZipFile(archive, 'w') as target:
+        for info in source.infolist():
+            data = source.read(info.filename)
+            if info.filename == fb._MANIFEST_NAME:
+                manifest = json.loads(data)
+                manifest['loras'] = [{
+                    'source_id': alice.id,
+                    'family': 'sdxl',
+                    'name': 'bomb.safetensors',
+                    'entry': lora_entry,
+                    'bytes': 65,
+                }]
+                data = json.dumps(manifest).encode('utf-8')
+            target.writestr(info, data)
+        target.writestr(lora_entry, b'Y' * 65, compress_type=zipfile.ZIP_DEFLATED)
+
+    monkeypatch.setattr(fb, '_MAX_MASTER_LORA_BYTES', 64)
+    opened = []
+
+    def _unexpected_open(_self, member, *args, **kwargs):
+        opened.append(member)
+        pytest.fail('a master member was opened before size validation')
+
+    monkeypatch.setattr(zipfile.ZipFile, 'open', _unexpected_open)
+    monkeypatch.setattr(fb, '_new_temp',
+                        lambda *args, **kwargs: pytest.fail('dataset staging started'))
+
+    with app.app_context(), pytest.raises(ValueError, match='too large'):
+        fb.restore_full_backup(LOCAL_USER, archive)
+    assert opened == []
+    assert not loras_root.exists()
+
+
+def test_master_validation_keeps_normal_restore_compatible(app, tmp_path):
+    """A normal v2 master still restores after the outer ZIP preflight."""
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+    from app.services import full_backup as fb
+
+    with app.app_context():
+        _dataset_with_image(svc, LOCAL_USER, 'Alice', 'alice')
+        archive = str(tmp_path / 'normal-master.zip')
+        fb.build_full_backup(LOCAL_USER, archive)
+        for ds in list(svc.list_datasets(LOCAL_USER)):
+            svc.delete_dataset(LOCAL_USER, ds.id)
+
+        report = fb.restore_full_backup(LOCAL_USER, archive)
+
+    assert report['restored'] == 1 and report['skipped'] == []
+
+
+def test_detect_backup_format_bounds_manifest_before_opening_it(tmp_path, monkeypatch):
+    """The upload-thread format probe cannot inflate an oversized manifest."""
+    from app.services import full_backup as fb
+
+    archive = str(tmp_path / 'manifest-bomb.zip')
+    with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as z:
+        z.writestr(fb._MANIFEST_NAME, b'{' + b'X' * 64 + b'}',
+                   compress_type=zipfile.ZIP_DEFLATED)
+
+    monkeypatch.setattr(fb, '_MAX_MASTER_MANIFEST_BYTES', 64)
+    opened = []
+
+    def _unexpected_open(_self, member, *args, **kwargs):
+        opened.append(member)
+        pytest.fail('the format probe opened an oversized manifest')
+
+    monkeypatch.setattr(zipfile.ZipFile, 'open', _unexpected_open)
+    with open(archive, 'rb') as stream:
+        assert fb.detect_backup_format(stream) is None
+    assert opened == []
 
 
 # ---------------------------------------------------------------------------

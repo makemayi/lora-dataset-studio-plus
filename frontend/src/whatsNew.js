@@ -160,6 +160,94 @@ export const WHATS_NEW = [
     to: '/settings/engines',
   },
   {
+    id: '2026-07-30-retry-reference-edit-show-engine',
+    date: '2026-07-30',
+    title: 'Retry a reference edit exactly as it ran',
+    blurb:
+      'An Edit reference candidate now names the engine/API that actually produced it. Retry repeats the same instruction, selected engine and temporary reference files; choose Try another prompt only when you want to change the edit.',
+    to: '/datasets?section=add',
+  },
+  {
+    id: '2026-07-30-krea-shot-card-adherence',
+    date: '2026-07-30',
+    title: 'Krea 2 now follows the dataset shots you selected',
+    blurb:
+      'Krea 2 Edit used to let the reference photo dominate a dataset run, so distinct cards could repeat its pose. Its calibrated Krea-only profile now gives the selected card priority for angle, expression, pose and scene, while keeping identity from the reference. Face cards render 1:1 and bust/body/back cards 3:4 through Krea Fit v1.2, so a square reference no longer squeezes a full-body or sitting card into a bust crop. ChatGPT, Nano Banana, OpenRouter and Klein keep their own generation paths unchanged.',
+    to: '/datasets?section=add',
+  },
+  {
+    id: '2026-07-30-keep-an-improvement-without-training-on-both',
+    date: '2026-07-30',
+    title: '✓ Keep an improved image without accidentally training on both',
+    blurb:
+      'Keeping a completed ✨ Upscale & improve candidate now returns its original to Undecided automatically — from one tile or a bulk Keep, even when both were selected. Nothing is deleted: both files and the comparison remain, and you can keep the original again if you deliberately want both in training.',
+    to: '/datasets?section=images',
+  },
+  {
+    id: '2026-07-30-preserve-imported-photo-files',
+    date: '2026-07-30',
+    title: 'Keep the photo you imported, not an automatic WebP copy',
+    blurb:
+      'New un-cropped JPG, PNG, WebP and BMP imports now stay byte-for-byte in their original format by default. Training still gets disposable PNG pairs only when it starts, so the dataset keeps its master files. WebP normalization remains available as an opt-in policy; Auto head-crop deliberately creates a derived WebP, and older WebPs cannot be reversed into originals.',
+    to: '/settings/captioning',
+  },
+  {
+    id: '2026-07-30-krea-raw-lokr-likeness-starter',
+    date: '2026-07-30',
+    title: 'Start a Krea 2 Raw LoKr likeness run from a named recipe',
+    blurb:
+      'A new Character-only Krea 2 Raw · LoKr likeness preset puts the reported community starting point in one place: LoKr factor 16, 32/32, 768 px, Automagic2, Sigmoid, Balanced and differential guidance 3. Those Krea-only controls are now visible in Expert options and every run records them for comparison. It is a starting point, not a likeness promise: inspect your own checkpoints, and type 3000 in Steps only when you deliberately want that target instead of the adaptive policy.',
+    to: '/datasets?section=training&panel=advanced',
+  },
+  {
+    id: '2026-07-30-dataset-to-bank-keeps-useful-context',
+    date: '2026-07-30',
+    title: '🗃️ Turn a dataset back into a bank without losing its useful context',
+    blurb:
+      '↑ Import to bank now carries captions, keep/reject curation, framing, watermark and provenance into the copied bank, whichever analysis choice you make. The default restores compatible final-file technical analysis; Start fresh skips only reuse of prior analysis. Face and Score AI results are deliberately not reused after normalization, and the original dataset is untouched. Suggested by the owner.',
+    to: '/datasets?section=export&panel=to-bank',
+  },
+  {
+    id: '2026-07-29-test-studio-random-dataset-captions',
+    date: '2026-07-29',
+    title: 'Give Test Studio a real dataset caption in one click',
+    blurb:
+      '🎲 Caption can now pull a random nonblank caption from a kept image in a dataset you choose, so a useful Studio test prompt is never far from the work you already curated. Pick the source once and it stays locked in this browser; use ▾ to change it. If you have typed a prompt, Studio asks before replacing it. Suggested by the owner.',
+    to: '/studio',
+  },
+  {
+    id: '2026-07-29-deploy-follows-extra-model-paths',
+    date: '2026-07-29',
+    title: 'Deployed LoRAs land where your extra_model_paths.yaml says',
+    blurb:
+      'If your ComfyUI keeps its LoRAs outside the install folder, deploying one — and the "open LoRA folder" button — used the default folder anyway. Both now follow your extra_model_paths.yaml, the LoRA override still wins when you set one, and Settings shows the exact folder that will receive the file. LoRAs you deployed before stay listed and deletable where they are. Thanks to Geekswordsman (GitHub #25).',
+    to: '/settings/local-tools',
+  },
+  {
+    id: '2026-07-29-training-bases-follow-extra-model-paths',
+    date: '2026-07-29',
+    title: 'Train on a base that lives outside ComfyUI\'s models folder',
+    blurb:
+      'If your ComfyUI keeps its weights elsewhere through extra_model_paths.yaml (portable builds, Stability Matrix, a shared A1111 tree), your SDXL checkpoints and Z-Image merges now show up in the training base picker, launch, and convert — the last two places that still only looked in models/. When the same file name exists in two roots, the app picks the one ComfyUI itself would load, so you train on the weights you generate with. And a base that really is missing is now named here, instead of failing later inside ai-toolkit with a path you never typed.',
+    to: '/datasets',
+  },
+  {
+    id: '2026-07-29-chatgpt-failures-name-their-cause',
+    date: '2026-07-29',
+    title: 'A failed ChatGPT generation now says what went wrong',
+    blurb:
+      'On a ChatGPT subscription, a dropped connection, a timeout, an OpenAI outage and a lane OpenAI had closed all came back as the same blank tile worded as if the provider had simply produced nothing. Each now names itself, and the two that stop a run say so: a refused connection asks you to reconnect, and an endpoint OpenAI no longer serves tells you to switch to API-key mode instead of leaving you searching your own settings. On the API key, a safety refusal is now told apart from a reference photo OpenAI could not read — opposite problems that used to share one sentence. OpenRouter does the same with the moderation reasons it returns inside a successful response. Where the cause genuinely cannot be read, the tile still says so rather than guessing.',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-07-29-every-klein-screen-names-its-model',
+    date: '2026-07-29',
+    title: 'Every screen that runs Klein now says which model it runs',
+    blurb:
+      'Three more places started Klein work on a model nothing named: the reference edit, the rescue of scraped images under 768 px, and the 🧽 watermark clean. They follow your dataset\'s Klein model now, like improve and generation already did, and each screen states which model will run — including when there is only one and nothing to pick. A model you chose that has since been moved or deleted is refused by name instead of being swapped for a neighbour. A bank has no dataset to follow, so its Klein inpaint keeps resolving the model itself — and now tells you which. Datasets that never chose a model are untouched.',
+    to: '/datasets',
+  },
+  {
     id: '2026-07-28-memory-savers-and-timestep-per-family',
     date: '2026-07-28',
     title: 'Switching model family no longer changes your run behind your back',

@@ -538,6 +538,92 @@ def test_auto_retry_preserves_resume_and_uses_effective_gpu(ct, app, client,
     assert captured['auto_retry_of'] == run.id
 
 
+def test_auto_retry_resume_blocks_legacy_lokr_without_full_rank(
+        ct, app, client, monkeypatch):
+    """The automatic retry must not rent a pod for an ambiguous LoKr seed."""
+    from app.models import TrainingRunRecord
+    ds_id = client.post('/api/dataset/create',
+                        json={'name': 'Legacy auto retry', 'trigger_word': 'legacyauto'}).get_json()['id']
+    legacy = {'rank': 64, 'alpha': 32, 'network_type': 'lokr', 'lokr_factor': 16}
+    launched = []
+    monkeypatch.setattr(ct, 'launch_cloud_training',
+                        lambda *a, **k: launched.append(k))
+    with app.app_context():
+        run = ct.CloudTrainingRun(
+            dataset_id=ds_id, status='error', run_name='legacy-auto',
+            vast_instance_id='old-pod', train_params=json.dumps({
+                'steps': 1500, 'variant': 'base', 'train_type': 'krea',
+                'resume_ckpt_path': 'C:/staging/legacy.safetensors',
+                'resume_step': 1000,
+                'train_settings_snapshot': json.dumps(legacy),
+            }))
+        ct.db.session.add(run)
+        ct.db.session.commit()
+        parent = TrainingRunRecord(
+            dataset_id=ds_id, family='krea', source='cloud', base_model='',
+            variant='base', steps=1000, version=1, fingerprint='parent', manifest='[]',
+            settings=json.dumps(legacy))
+        ct.db.session.add(parent)
+        ct.db.session.commit()
+        child = TrainingRunRecord(
+            dataset_id=ds_id, family='krea', source='cloud', base_model='',
+            variant='base', steps=1500, version=1, fingerprint='child', manifest='[]',
+            cloud_run_id=run.id, parent_record_id=parent.id,
+            settings=json.dumps({'network_type': 'lokr', 'lokr_full_rank': False}))
+        ct.db.session.add(child)
+        ct.db.session.commit()
+        before = run.train_params
+        assert ct._maybe_auto_retry(run, 'connection reset by peer') is None
+        assert run.train_params == before
+    assert launched == []
+
+
+def test_auto_retry_resume_uses_recorded_lokr_parent_topology(
+        ct, app, client, monkeypatch):
+    """A modern parent record supplies the frozen topology for an auto retry."""
+    from app.models import TrainingRunRecord
+    ds_id = client.post('/api/dataset/create',
+                        json={'name': 'Known auto retry', 'trigger_word': 'knownauto'}).get_json()['id']
+    topology = {
+        'rank': 64, 'alpha': 32, 'network_type': 'lokr',
+        'lokr_factor': 'auto', 'lokr_full_rank': False,
+    }
+    captured = {}
+    monkeypatch.setattr(ct, 'launch_cloud_training',
+                        lambda user_id, dataset_id, **kw:
+                        (captured.update(**kw), {'run_id': 77, 'status': 'preparing'})[1])
+    with app.app_context():
+        run = ct.CloudTrainingRun(
+            dataset_id=ds_id, status='error', run_name='known-auto',
+            vast_instance_id='old-pod', train_params=json.dumps({
+                'steps': 1500, 'variant': 'base', 'train_type': 'krea',
+                'resume_ckpt_path': 'C:/staging/known.safetensors',
+                'resume_step': 1000,
+                'train_settings_snapshot': json.dumps({
+                    'rank': 64, 'alpha': 32, 'network_type': 'lokr',
+                }),
+            }))
+        ct.db.session.add(run)
+        ct.db.session.commit()
+        parent = TrainingRunRecord(
+            dataset_id=ds_id, family='krea', source='cloud', base_model='',
+            variant='base', steps=1000, version=1, fingerprint='parent', manifest='[]',
+            settings=json.dumps(topology))
+        ct.db.session.add(parent)
+        ct.db.session.commit()
+        child = TrainingRunRecord(
+            dataset_id=ds_id, family='krea', source='cloud', base_model='',
+            variant='base', steps=1500, version=1, fingerprint='child', manifest='[]',
+            cloud_run_id=run.id, parent_record_id=parent.id,
+            settings=json.dumps(topology))
+        ct.db.session.add(child)
+        ct.db.session.commit()
+        result = ct._maybe_auto_retry(run, 'connection reset by peer')
+    assert result['run_id'] == 77
+    snapshot = json.loads(captured['train_settings_snapshot'])
+    assert {key: snapshot[key] for key in topology} == topology
+
+
 def test_auto_retry_requires_confirmed_old_pod_termination(ct, app, client,
                                                             monkeypatch):
     """Never rent the replacement while Vast has not confirmed that the old

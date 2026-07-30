@@ -26,7 +26,7 @@ export const COMFY_FOLDER_FIELDS = [
   {
     key: 'loras_dir', id: 'comfyui-loras-dir', label: 'LoRAs folder override',
     derived: 'models/loras',
-    help: 'Where trained LoRAs are installed so ComfyUI can load them.',
+    help: 'Where trained LoRAs are installed so ComfyUI can load them. Leave empty to follow extra_model_paths.yaml, which wins over the default folder when a profile is marked is_default.',
   },
 ]
 
@@ -51,10 +51,20 @@ export function folderPlaceholder(field) {
 /** The path the app will actually use while the field is empty, or null when the
  *  field is filled (the value is right there) or nothing can be computed yet.
  *  Rendered as a wrapping line under the input: making the effective folder visible
- *  without having to work it out is the entire point of this block. */
+ *  without having to work it out is the entire point of this block.
+ *  `extra_paths` = the folder comes from the ComfyUI install's
+ *  extra_model_paths.yaml rather than from the install layout — it must show here
+ *  too, or the panel would name a folder deploys no longer use (GitHub #25). */
 export function folderEffective(info) {
-  if (!info || info.source !== 'derived' || !info.resolved) return null
+  if (!info || !info.resolved) return null
+  if (info.source !== 'derived' && info.source !== 'extra_paths') return null
   return info.resolved
+}
+
+/** Where an effective path came from, for the label next to it. Only the yaml case
+ *  needs saying: "derived" is already implied by an empty field. */
+export function folderEffectiveNote(info) {
+  return info && info.source === 'extra_paths' ? 'from extra_model_paths.yaml' : null
 }
 
 /** Warning under one override field, or null when there is nothing to say.

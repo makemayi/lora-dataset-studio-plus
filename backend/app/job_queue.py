@@ -27,6 +27,40 @@ POLL_TIMEOUT_SECONDS = 15 * 60
 STUCK_TIMEOUT_MINUTES = 10
 IDLE_SLEEP_SECONDS = 1
 
+# A ComfyUI history outage is neither a successful empty history nor a normal
+# generation failure.  Keep a durable, no-TTL barrier until the user explicitly
+# reconciles the exact prompt after recovering ComfyUI.
+COMFYUI_UNHEALTHY_GRACE_SECONDS = 60
+COMFYUI_STALLED_BARRIER_KEY = 'comfyui_stalled_barrier'
+COMFYUI_STALLED_MESSAGE = (
+    'ComfyUI stopped answering. Recover or restart ComfyUI, then cancel and resume '
+    'this Test Studio batch.'
+)
+POLL_STALLED = object()
+COMFYUI_UNKNOWN_SUBMIT_MESSAGE = (
+    'ComfyUI /prompt result was lost. Restart ComfyUI before cancelling or resuming '
+    'this batch; LDS cannot safely identify the remote prompt.'
+)
+
+
+class _ComfySubmitRejected(RuntimeError):
+    """A deterministic pre-submit refusal (safe to surface as terminal)."""
+
+
+class _ComfySubmitUnknown(RuntimeError):
+    """A /prompt outcome that may already own remote GPU work."""
+
+
+# One LDS process owns the SQLite-backed queue. The lock closes the small local
+# race between a vision window claim and a ComfyUI /prompt submission; the
+# persisted flags and queue rows remain the recovery record after a restart.
+GPU_ARBITER_LOCK = threading.RLock()
+
+
+def gpu_arbiter_lock():
+    """Shared in-process lock for the two local GPU consumers."""
+    return GPU_ARBITER_LOCK
+
 # A DB status check is the source of truth, but this in-process event also wakes
 # the worker immediately when it is sleeping between two history requests.
 _poll_cancel_events: dict[str, threading.Event] = {}
@@ -55,16 +89,31 @@ def _discard_cancel_event(prompt_id) -> None:
         _poll_cancel_events.pop(str(prompt_id), None)
 
 
+def _vision_window_blocks_gpu() -> bool:
+    """Fail closed while an in-process Vision/CUDA window is still active."""
+    try:
+        # Lazy import avoids gpu_window -> job_queue import recursion at startup.
+        from .gpu_window import vision_gpu_window_blocks_gpu
+        return vision_gpu_window_blocks_gpu()
+    except Exception:
+        logger.exception('job_queue: could not read the in-process Vision GPU fence')
+        return True
+
 def _claim(job_id) -> bool:
     """Atomically claim a pending job for processing. Returns False if the job
     was cancelled/claimed since the SELECT, preventing cancel-race loss."""
-    claimed = (ImageGenerationQueue.query
-               .filter_by(job_id=job_id, status='pending')
-               .update({'status': 'processing',
-                        'started_at': datetime.utcnow(),
-                        'last_heartbeat': datetime.utcnow()}))
-    db.session.commit()
-    return bool(claimed)
+    with GPU_ARBITER_LOCK:
+        # Recheck both durable and in-process GPU ownership inside the
+        # select -> claim window.
+        if _vision_window_blocks_gpu() or queue_manager.has_comfyui_stalled_barrier():
+            return False
+        claimed = (ImageGenerationQueue.query
+                   .filter_by(job_id=job_id, status='pending')
+                   .update({'status': 'processing',
+                            'started_at': datetime.utcnow(),
+                            'last_heartbeat': datetime.utcnow()}))
+        db.session.commit()
+        return bool(claimed)
 
 
 def _submit(workflow, client_id):
@@ -73,53 +122,108 @@ def _submit(workflow, client_id):
     queue_prompt_to_comfyui never raises: it returns (response.json(), None) on
     success or (None, error) on failure. Unpack it here -- binding the raw tuple
     into the comfyui_prompt_id String column is a ProgrammingError that fails
-    every real job. Raises on failure so process_one() marks the job failed."""
+    every real job. Deterministic local validation is terminal; every ambiguous
+    `/prompt` outcome is handed to process_one() as a recovery barrier."""
+    if not isinstance(workflow, dict) or not workflow:
+        raise _ComfySubmitRejected('WORKFLOW_INVALIDE: workflow data must be a non-empty object')
     from .utils.comfyui import queue_prompt_to_comfyui
     result, error = queue_prompt_to_comfyui(workflow, client_id)
     if error:
-        raise RuntimeError(error)
+        message = str(error)
+        if message.startswith('WORKFLOW_INVALIDE'):
+            raise _ComfySubmitRejected(message)
+        # A timeout, a reset, malformed JSON, or any non-validation HTTP
+        # response can happen after ComfyUI accepted the POST. Do not let a
+        # caller collapse that unknown remote ownership into an ordinary fail.
+        raise _ComfySubmitUnknown(message)
     prompt_id = (result or {}).get('prompt_id')
     if not prompt_id:
-        raise RuntimeError(f'ComfyUI returned no prompt_id: {result}')
+        raise _ComfySubmitUnknown(f'ComfyUI returned no prompt_id: {result}')
     return prompt_id
 
 
-def _poll_outputs(prompt_id, timeout=POLL_TIMEOUT_SECONDS):
-    """Poll ComfyUI history for `prompt_id` until it has an output image, an
-    error, or `timeout` elapses. Returns (filename, failed). Heartbeats the
-    owning job row on every poll so `is_stuck()` sees this job as alive.
+def _stall_comfyui_prompt(prompt_id, detail=None) -> bool:
+    """Durably pause exactly the still-sent prompt; false means CAS lost."""
+    with GPU_ARBITER_LOCK:
+        job = (ImageGenerationQueue.query
+               .filter_by(comfyui_prompt_id=str(prompt_id), status='sent_to_comfy').first())
+        if job is None:
+            return False
+        return queue_manager._stall_comfy_job(
+            job.job_id, str(prompt_id), allowed_statuses=('sent_to_comfy',), detail=detail)
 
-    History shape verified against the source app's queue_manager.py (its
-    `_extract_result_filename`/`_check_comfyui_errors` consumers of this same
-    endpoint): `GET /history/{prompt_id}` returns `{prompt_id: {outputs: {...},
-    status: {...}}}` — keyed by the prompt_id itself, not the entry directly
-    (hence the `history.get(prompt_id, history)` unwrap below). Each
-    `outputs[node_id]` is `{images: [{filename, subfolder, type}]}` where
-    `type` is `'output'` or `'temp'` — PreviewImage nodes emit `'temp'`, and
-    the source app explicitly skips those so a preview thumbnail upstream of
-    the real SaveImage node is never mistaken for the result. `status` is
-    `{status_str: 'success'|'error', completed: bool, messages: [...]}`; an
-    explicit `'error'` fails the job immediately instead of waiting out the
-    full timeout. Any exception here still degrades to a failed job rather
-    than raising.
+
+def _pause_unconfirmed_comfyui_prompt(prompt_id, detail=None):
+    """Never terminalize a prompt whose remote state is still unconfirmed.
+
+    A false stall is not evidence of failure: it can be a transient SQLite
+    commit error. The still-active queue row then remains the fail-closed
+    owner until recovery can write its durable barrier. Only a committed local
+    cancellation is proof that completion cleanup/callbacks are safe.
     """
-    from .utils.comfyui import get_comfyui_history
+    try:
+        if _stall_comfyui_prompt(prompt_id, detail):
+            return POLL_STALLED
+        fresh_status = (ImageGenerationQueue.query
+                        .with_entities(ImageGenerationQueue.status)
+                        .filter_by(comfyui_prompt_id=prompt_id).scalar())
+        if fresh_status == 'cancelled':
+            return True
+        if fresh_status in ('stalled', 'cancel_requested') or \
+                queue_manager.has_comfyui_stalled_barrier():
+            return POLL_STALLED
+        logger.critical(
+            'job_queue: could not durably pause unconfirmed ComfyUI prompt %s; '
+            'leaving its active queue row fail-closed', prompt_id)
+    except Exception:
+        logger.exception('job_queue: could not inspect unconfirmed ComfyUI prompt %s', prompt_id)
+    return POLL_STALLED
+
+
+def _poll_outputs(prompt_id, timeout=POLL_TIMEOUT_SECONDS):
+    """Poll one ComfyUI prompt without mistaking an outage for an empty history.
+
+    Returns (filename, failed) for normal terminal outcomes, or
+    (None, POLL_STALLED) when history is unhealthy long enough or no terminal
+    state exists at timeout. The latter deliberately leaves the queue/cell
+    non-terminal so the user can recover ComfyUI, cancel the exact old prompt,
+    then resume.
+    """
+    from .utils.comfyui import ComfyHistoryHealth, get_comfyui_history_probe
+
     deadline = time.monotonic() + timeout
+    unhealthy_since = None
     cancel_event = _cancel_event(prompt_id)
     try:
         while True:
-            # Read the scalar through a new SELECT instead of trusting an ORM
-            # object already present in the worker session's identity map.
             job_status = (ImageGenerationQueue.query
                           .with_entities(ImageGenerationQueue.status)
                           .filter_by(comfyui_prompt_id=prompt_id).scalar())
             if cancel_event.is_set() or job_status == 'cancelled':
                 return None, True
-            try:
-                history = get_comfyui_history(prompt_id) or {}
-                entry = history.get(prompt_id, history) if isinstance(history, dict) else {}
-            except Exception:
-                entry = {}
+            if job_status in ('stalled', 'cancel_requested'):
+                return None, POLL_STALLED
+
+            probe = get_comfyui_history_probe(prompt_id)
+            if probe.health is ComfyHistoryHealth.UNHEALTHY:
+                now = time.monotonic()
+                if unhealthy_since is None:
+                    unhealthy_since = now
+                # A shorter test/override timeout does not make an unhealthy
+                # history trustworthy. Either threshold means the remote state
+                # is unconfirmed and must be durably paused, never failed.
+                if (now - unhealthy_since >= COMFYUI_UNHEALTHY_GRACE_SECONDS
+                        or now >= deadline):
+                    return None, _pause_unconfirmed_comfyui_prompt(
+                        prompt_id, probe.detail or 'ComfyUI history unhealthy')
+                cancel_event.wait(min(POLL_INTERVAL_SECONDS, max(0, deadline - now)))
+                continue
+
+            # A 404 / empty object is a healthy worker that has not recorded this
+            # prompt yet. It resets the consecutive outage timer.
+            unhealthy_since = None
+            history = probe.history or {}
+            entry = history.get(prompt_id, history) if isinstance(history, dict) else {}
             outputs = (entry or {}).get('outputs') or {}
             for node_output in outputs.values():
                 for img in (node_output or {}).get('images') or []:
@@ -127,11 +231,6 @@ def _poll_outputs(prompt_id, timeout=POLL_TIMEOUT_SECONDS):
                         return img['filename'], False
             status = (entry or {}).get('status') or {}
             if status.get('status_str') == 'error' or (status.get('completed') and not outputs):
-                # ComfyUI errored, or finished with no image. Stash the execution
-                # error on the job row BEFORE returning (the 2-tuple contract stays):
-                # process_one/_dispatch_completion surface it on the dataset tile, so
-                # a runtime failure (wrong text encoder, OOM...) reads as itself, not
-                # as a generic "see the server log".
                 detail = _execution_error_detail(status)
                 if detail:
                     job = ImageGenerationQueue.query.filter_by(comfyui_prompt_id=prompt_id).first()
@@ -144,13 +243,14 @@ def _poll_outputs(prompt_id, timeout=POLL_TIMEOUT_SECONDS):
             if job:
                 if job.status == 'cancelled' or cancel_event.is_set():
                     return None, True
+                if job.status in ('stalled', 'cancel_requested'):
+                    return None, POLL_STALLED
                 job.last_heartbeat = datetime.utcnow()
                 db.session.commit()
 
             if time.monotonic() >= deadline:
-                return None, True
-            # Unlike time.sleep(), Event.wait() returns as soon as Stop signals
-            # this exact prompt.
+                return None, _pause_unconfirmed_comfyui_prompt(
+                    prompt_id, 'ComfyUI did not reach a terminal history state before timeout')
             cancel_event.wait(POLL_INTERVAL_SECONDS)
     finally:
         _discard_cancel_event(prompt_id)
@@ -215,6 +315,10 @@ def _drop_staged_inputs(md) -> None:
 def _dispatch_completion(job, filename, failed):
     """Route a finished job to whichever service created it, per its metadata.
     A callback crash must never take down the worker thread."""
+    if job.status == 'stalled':
+        # It may still own the GPU or yield a late output: preserve all linked state.
+        logger.warning('job_queue: suppressing completion callback for stalled job %s', job.job_id)
+        return
     try:
         md = json.loads(job.job_metadata or '{}')
     except (TypeError, ValueError):
@@ -274,6 +378,342 @@ class JobQueueManager:
     def init_app(self, app):
         self._app = app
 
+    # -- durable ComfyUI recovery barrier ---------------------------------
+    @staticmethod
+    def _barrier_owner(job, prompt_id=None, detail=None, *, unknown_submit=False) -> dict | None:
+        """Encode a known prompt or an explicitly unknown submit outcome.
+
+        `unknown_submit` is intentionally distinguishable from a corrupt
+        barrier: the POST may have succeeded before this process died. Its
+        durable client_id is audit evidence, but no local queue observation can
+        prove an in-flight POST will not arrive later; restart is required.
+        """
+        if not job.job_id or (unknown_submit and prompt_id is not None) or \
+                (not unknown_submit and not prompt_id):
+            return None
+        try:
+            metadata = json.loads(job.job_metadata or '{}')
+        except (TypeError, ValueError):
+            metadata = {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        owner = {
+            'job_id': str(job.job_id),
+            'prompt_id': None if unknown_submit else str(prompt_id),
+            # _submit always sends the LDS queue id as ComfyUI client_id.
+            'client_id': str(job.job_id),
+            'kind': 'unknown_submit' if unknown_submit else 'prompt',
+            'reason': (COMFYUI_UNKNOWN_SUBMIT_MESSAGE if unknown_submit
+                       else COMFYUI_STALLED_MESSAGE),
+        }
+        for key in ('dataset_id', 'cell_id', 'run_id'):
+            value = metadata.get(key)
+            if value is not None and str(value):
+                owner[key] = str(value)
+        if detail:
+            owner['detail'] = str(detail)[:200]
+        return owner
+
+    @staticmethod
+    def _same_barrier_owner(left, right) -> bool:
+        if not isinstance(left, dict) or not isinstance(right, dict):
+            return False
+        left_kind = left.get('kind', 'prompt')
+        right_kind = right.get('kind', 'prompt')
+        if left_kind not in ('prompt', 'unknown_submit') or left_kind != right_kind:
+            return False
+        if any(left.get(key) != right.get(key) for key in ('job_id', 'client_id')):
+            return False
+        if left_kind == 'prompt':
+            if left.get('prompt_id') != right.get('prompt_id'):
+                return False
+        elif left.get('prompt_id') is not None or right.get('prompt_id') is not None:
+            return False
+        return all(left.get(key) == right.get(key)
+                   for key in ('dataset_id', 'cell_id', 'run_id')
+                   if key in left or key in right)
+
+    @staticmethod
+    def _encode_comfyui_stalled_barrier(owner) -> str:
+        return json.dumps({'v': owner, 'exp': None},
+                          sort_keys=True, separators=(',', ':'))
+
+    def _read_comfyui_stalled_barrier(self):
+        """Return (row, raw_value, owner, valid); raw presence always blocks."""
+        row = db.session.get(SystemState, COMFYUI_STALLED_BARRIER_KEY)
+        if row is None:
+            return None, None, None, True
+        raw = row.value
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError):
+            return row, raw, None, False
+        owner = payload.get('v') if isinstance(payload, dict) else None
+        if (not isinstance(payload, dict) or payload.get('exp') is not None
+                or not isinstance(owner, dict)):
+            return row, raw, None, False
+        for key in ('job_id', 'client_id'):
+            if not isinstance(owner.get(key), str) or not owner[key]:
+                return row, raw, None, False
+        kind = owner.get('kind', 'prompt')
+        if kind == 'prompt':
+            if not isinstance(owner.get('prompt_id'), str) or not owner['prompt_id']:
+                return row, raw, None, False
+        elif kind == 'unknown_submit':
+            if 'prompt_id' not in owner or owner.get('prompt_id') is not None:
+                return row, raw, None, False
+        else:
+            return row, raw, None, False
+        for key in ('dataset_id', 'cell_id', 'run_id'):
+            if key in owner and (not isinstance(owner[key], str) or not owner[key]):
+                return row, raw, None, False
+        return row, raw, owner, True
+
+    def has_comfyui_stalled_barrier(self) -> bool:
+        # Do not route this through _get_system_state: a corrupt/TTL row blocks.
+        with GPU_ARBITER_LOCK:
+            return db.session.get(SystemState, COMFYUI_STALLED_BARRIER_KEY) is not None
+
+    def get_comfyui_stalled_barrier(self) -> dict | None:
+        with GPU_ARBITER_LOCK:
+            _, _, owner, valid = self._read_comfyui_stalled_barrier()
+            return dict(owner) if valid and owner is not None else None
+
+    def _stall_comfy_job(self, job_id, prompt_id, *, allowed_statuses, detail=None) -> bool:
+        """Persist exact `status -> stalled` and its no-TTL barrier atomically."""
+        if not job_id or not prompt_id:
+            return False
+        with GPU_ARBITER_LOCK:
+            job = (ImageGenerationQueue.query.filter_by(job_id=str(job_id))
+                   .filter(ImageGenerationQueue.status.in_(tuple(allowed_statuses))).first())
+            if job is None or job.comfyui_prompt_id not in (None, str(prompt_id)):
+                return False
+            owner = self._barrier_owner(job, prompt_id, detail)
+            if owner is None:
+                return False
+            row, _, _, _ = self._read_comfyui_stalled_barrier()
+            if row is not None:  # valid, corrupt, expired, or another owner: all block
+                return False
+
+            cas = (ImageGenerationQueue.query.filter_by(job_id=str(job_id))
+                   .filter(ImageGenerationQueue.status.in_(tuple(allowed_statuses))))
+            # SQL `IN (NULL, prompt_id)` never matches NULL: keep both CAS paths explicit.
+            if job.comfyui_prompt_id is None:
+                cas = cas.filter(ImageGenerationQueue.comfyui_prompt_id.is_(None))
+            else:
+                cas = cas.filter_by(comfyui_prompt_id=str(prompt_id))
+            changed = cas.update({
+                'status': 'stalled',
+                'comfyui_prompt_id': str(prompt_id),
+                'completed_at': None,
+                'error_message': COMFYUI_STALLED_MESSAGE,
+                'last_heartbeat': datetime.utcnow(),
+            }, synchronize_session=False)
+            if changed != 1:
+                return False
+            db.session.add(SystemState(
+                key=COMFYUI_STALLED_BARRIER_KEY,
+                value=self._encode_comfyui_stalled_barrier(owner),
+            ))
+            try:
+                db.session.commit()  # queue row + ownership record: one transaction
+            except Exception:
+                db.session.rollback()
+                logger.exception('job_queue: could not persist ComfyUI stalled barrier')
+                return False
+            return True
+
+    def _stall_unknown_comfy_job(self, job_id, *, allowed_statuses, detail=None) -> bool:
+        """Persist a recoverable barrier when `/prompt` may have succeeded
+        but no prompt id was durably observed.
+
+        The client_id is retained as audit identity. Because a timed-out POST
+        can still arrive after any later queue read, this state requires an
+        externally verified ComfyUI restart; it is never auto-reconciled.
+        """
+        if not job_id:
+            return False
+        with GPU_ARBITER_LOCK:
+            job = (ImageGenerationQueue.query.filter_by(job_id=str(job_id))
+                   .filter(ImageGenerationQueue.status.in_(tuple(allowed_statuses))).first())
+            if job is None or job.comfyui_prompt_id is not None:
+                return False
+            owner = self._barrier_owner(job, detail=detail, unknown_submit=True)
+            if owner is None:
+                return False
+            row, _, _, _ = self._read_comfyui_stalled_barrier()
+            if row is not None:
+                return False
+            changed = (ImageGenerationQueue.query.filter_by(job_id=str(job_id))
+                       .filter(ImageGenerationQueue.status.in_(tuple(allowed_statuses)))
+                       .filter(ImageGenerationQueue.comfyui_prompt_id.is_(None))
+                       .update({'status': 'stalled', 'completed_at': None,
+                                'error_message': COMFYUI_UNKNOWN_SUBMIT_MESSAGE,
+                                'last_heartbeat': datetime.utcnow()},
+                               synchronize_session=False))
+            if changed != 1:
+                return False
+            db.session.add(SystemState(
+                key=COMFYUI_STALLED_BARRIER_KEY,
+                value=self._encode_comfyui_stalled_barrier(owner),
+            ))
+            try:
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                logger.exception('job_queue: could not persist unknown ComfyUI submit barrier')
+                return False
+            return True
+
+    def reconcile_stalled_comfy_job(self, job_id) -> bool:
+        """Release only the exact stalled prompt after fresh remote proof."""
+        from .utils.comfyui import (ComfyHistoryHealth, ComfyPromptState,
+                                    cancel_comfyui_prompt_state,
+                                    comfyui_prompt_is_absent,
+                                    get_comfyui_history_probe)
+        with GPU_ARBITER_LOCK:
+            _, raw, owner, valid = self._read_comfyui_stalled_barrier()
+            if not valid or owner is None or str(owner.get('job_id')) != str(job_id):
+                return False
+            job = ImageGenerationQueue.query.filter_by(job_id=str(job_id), status='stalled').first()
+            if job is None or str(job.comfyui_prompt_id or '') != owner['prompt_id']:
+                return False
+            if not self._same_barrier_owner(
+                    owner, self._barrier_owner(job, owner['prompt_id'])):
+                return False
+
+            try:
+                state = cancel_comfyui_prompt_state(owner['prompt_id'], owner['client_id'])
+                if state is ComfyPromptState.DELETED:
+                    safe = comfyui_prompt_is_absent(owner['prompt_id']) is True
+                elif state is ComfyPromptState.ABSENT:
+                    # Empty/404 history is not enough. Verify queue absence on both
+                    # sides of the history read, then accept only a terminal history.
+                    if comfyui_prompt_is_absent(owner['prompt_id']) is not True:
+                        return False
+                    probe = get_comfyui_history_probe(owner['prompt_id'])
+                    if probe.health is ComfyHistoryHealth.UNHEALTHY:
+                        return False
+                    if probe.health is ComfyHistoryHealth.READY:
+                        entry = (probe.history.get(owner['prompt_id'])
+                                 if isinstance(probe.history, dict) else None)
+                        status = entry.get('status') if isinstance(entry, dict) else None
+                        if not isinstance(status, dict) or not (
+                                status.get('completed')
+                                or status.get('status_str') in ('success', 'error')):
+                            return False
+                    safe = comfyui_prompt_is_absent(owner['prompt_id']) is True
+                else:
+                    return False
+            except Exception:
+                logger.exception('job_queue: stalled prompt %s reconciliation failed', owner['prompt_id'])
+                return False
+            if not safe:
+                return False
+
+            _, current_raw, current_owner, current_valid = self._read_comfyui_stalled_barrier()
+            if (not current_valid or current_raw != raw
+                    or not self._same_barrier_owner(current_owner, owner)):
+                return False
+            now = datetime.utcnow()
+            changed = (ImageGenerationQueue.query
+                       .filter_by(job_id=str(job_id), status='stalled',
+                                  comfyui_prompt_id=owner['prompt_id'])
+                       .update({'status': 'cancelled', 'completed_at': now,
+                                'last_heartbeat': now, 'error_message': None},
+                               synchronize_session=False))
+            if changed != 1:
+                return False
+            deleted = (SystemState.query
+                       .filter_by(key=COMFYUI_STALLED_BARRIER_KEY, value=raw)
+                       .delete(synchronize_session=False))
+            if deleted != 1:
+                db.session.rollback()
+                return False
+            try:
+                db.session.commit()  # old job cancellation + exact raw barrier delete
+            except Exception:
+                db.session.rollback()
+                logger.exception('job_queue: could not finish stalled reconciliation')
+                return False
+            _signal_poll_cancel(owner['prompt_id'])
+            return True
+
+    def confirm_unknown_comfyui_restart(self, job_id, user_id=None, *,
+                                        restart_confirmed=False, commit=True) -> bool:
+        """Cancel one unknown ``/prompt`` outcome after explicit restart authority.
+
+        An empty queue/history cannot prove that a timed-out POST never reaches the
+        old ComfyUI process. The caller must therefore require a human's explicit
+        confirmation that ComfyUI was restarted *and* verify that the replacement
+        process is reachable before calling this method. This method deliberately
+        performs no remote queue/history inference and never touches a known-prompt
+        barrier.
+
+        ``commit=False`` lets a linked Test Studio cell join the exact queue-row +
+        raw-barrier delete in one database transaction.
+        """
+        if not restart_confirmed or not job_id:
+            return False
+        with GPU_ARBITER_LOCK:
+            _, raw, owner, valid = self._read_comfyui_stalled_barrier()
+            if (not valid or owner is None or owner.get('kind') != 'unknown_submit'
+                    or str(owner.get('job_id')) != str(job_id)
+                    or owner.get('prompt_id') is not None):
+                return False
+
+            query = (ImageGenerationQueue.query.filter_by(job_id=str(job_id), status='stalled')
+                     .filter(ImageGenerationQueue.comfyui_prompt_id.is_(None)))
+            if user_id is not None:
+                query = query.filter_by(user_id=str(user_id))
+            job = query.first()
+            if job is None or not self._same_barrier_owner(
+                    owner, self._barrier_owner(job, unknown_submit=True)):
+                return False
+
+            # Keep the compare-and-delete exact even though the in-process arbiter
+            # holds local callers out: another process or a crash recovery must not
+            # let this confirmation clear a replacement/corrupt barrier.
+            _, current_raw, current_owner, current_valid = self._read_comfyui_stalled_barrier()
+            if (not current_valid or current_raw != raw
+                    or not self._same_barrier_owner(current_owner, owner)):
+                return False
+
+            now = datetime.utcnow()
+            changed = (ImageGenerationQueue.query
+                       .filter_by(job_id=str(job_id), status='stalled')
+                       .filter(ImageGenerationQueue.comfyui_prompt_id.is_(None)))
+            if user_id is not None:
+                changed = changed.filter_by(user_id=str(user_id))
+            changed = changed.update({
+                'status': 'cancelled', 'completed_at': now,
+                'last_heartbeat': now, 'error_message': None,
+            }, synchronize_session=False)
+            if changed != 1:
+                return False
+            deleted = (SystemState.query
+                       .filter_by(key=COMFYUI_STALLED_BARRIER_KEY, value=raw)
+                       .delete(synchronize_session=False))
+            if deleted != 1:
+                db.session.rollback()
+                return False
+            if not commit:
+                return True
+            try:
+                db.session.commit()  # exact queue job + exact raw barrier
+            except Exception:
+                db.session.rollback()
+                logger.exception('job_queue: could not confirm unknown ComfyUI restart')
+                return False
+            return True
+
+    def has_comfyui_work(self) -> bool:
+        """True while LDS has work queued or an unresolved ComfyUI identity."""
+        return (ImageGenerationQueue.query
+                .filter(ImageGenerationQueue.status.in_(
+                    ('pending', 'processing', 'sent_to_comfy', 'cancel_requested', 'stalled')))
+                .first() is not None)
+
     # -- lifecycle ------------------------------------------------------
     def start(self):
         """Idempotent: a no-op if the worker thread is already running."""
@@ -304,15 +744,38 @@ class JobQueueManager:
             time.sleep(0 if worked else IDLE_SLEEP_SECONDS)
 
     def _recover_stuck_jobs(self):
-        """Boot recovery: rows left in processing/sent_to_comfy past the
-        timeout (a prior crash) are failed and their callback dispatched."""
-        stuck = [j for j in ImageGenerationQueue.query
-                 .filter(ImageGenerationQueue.status.in_(('processing', 'sent_to_comfy'))).all()
-                 if j.is_stuck(STUCK_TIMEOUT_MINUTES)]
-        for job in stuck:
-            job.update_status('failed', error_message='stale job recovered at boot')
-            db.session.commit()
-            _dispatch_completion(job, None, True)
+        """Recover only with a durable ownership record; never guess a crash
+        left remote ComfyUI work dead.
+
+        A crash after `/prompt` accepts but before its id commits leaves a
+        `processing` row with no prompt id. It remains a recoverable
+        `unknown_submit` barrier. A mapped row becomes an exact prompt barrier.
+        In both cases callbacks and staged-input deletion stay suppressed.
+        """
+        with GPU_ARBITER_LOCK:
+            active = (ImageGenerationQueue.query
+                      .filter(ImageGenerationQueue.status.in_(
+                          ('processing', 'sent_to_comfy', 'cancel_requested'))).all())
+            for job in active:
+                # A new worker after process restart has no trustworthy in-memory
+                # poller or submit state. Even a just-claimed row may be past an
+                # accepted `/prompt`; persist its ownership before doing anything
+                # else rather than relying on the stale-age heuristic.
+                if job.comfyui_prompt_id:
+                    paused = self._stall_comfy_job(
+                        job.job_id, job.comfyui_prompt_id,
+                        allowed_statuses=(job.status,),
+                        detail='startup recovery: remote ComfyUI state is unconfirmed')
+                else:
+                    paused = self._stall_unknown_comfy_job(
+                        job.job_id, allowed_statuses=(job.status,),
+                        detail='startup recovery: /prompt outcome was not durably mapped')
+                if not paused:
+                    # A pre-existing/corrupt barrier or failed commit is itself
+                    # fail-closed. Keep this active row intact for explicit repair.
+                    logger.critical(
+                        'job_queue: startup could not durably pause uncertain job %s; '
+                        'leaving it active and blocking new GPU work', job.job_id)
 
     def _prune_staged_inputs(self):
         """Boot sweep for staged input copies no live job can still need.
@@ -327,7 +790,7 @@ class JobQueueManager:
         The folder belongs to ComfyUI, so the sweep is fenced by NAME and by AGE
         (see comfy_fs) and, here, by the queue itself: every input a job that has
         not finished still points at is collected first and handed over as
-        untouchable. Boot recovery has already failed the stale rows by the time
+        untouchable. Boot recovery has already preserved uncertain rows by the time
         this runs, so what is left really is work that will still be done."""
         try:
             from . import config as cfg
@@ -335,7 +798,7 @@ class JobQueueManager:
             keep = set()
             for row in (ImageGenerationQueue.query
                         .filter(ImageGenerationQueue.status.in_(
-                            ('pending', 'processing', 'sent_to_comfy'))).all()):
+                            ('pending', 'processing', 'sent_to_comfy', 'cancel_requested', 'stalled'))).all()):
                 try:
                     md = json.loads(row.job_metadata or '{}')
                 except (TypeError, ValueError):
@@ -347,69 +810,188 @@ class JobQueueManager:
 
     # -- worker -----------------------------------------------------------
     def process_one(self) -> bool:
-        """Run one pending job end-to-end, synchronously. Returns True if a
-        job was processed, False if the queue was empty (caller should back
-        off). Assumes an active app context (pushed by the caller)."""
-        if self._get_system_state('training_in_progress') or self._get_system_state('vision_in_progress'):
-            return False  # GPU held by training/vision - leave jobs pending, retry later
+        """Run one queued image while closing the local ComfyUI/vision race."""
+        job = None
+        prompt_id = None
+        submit_error = None
+        dispatch_cancelled = False
 
-        job = (ImageGenerationQueue.query
-               .filter_by(status='pending')
-               .order_by(ImageGenerationQueue.priority.desc(), ImageGenerationQueue.created_at.asc())
-               .first())
-        if job is None:
-            return False
+        with GPU_ARBITER_LOCK:
+            # Any unresolved active row is itself a fail-closed GPU owner after a
+            # crash/mapping error; do not silently start a second prompt.
+            if (_vision_window_blocks_gpu()
+                    or self._get_system_state('training_in_progress')
+                    or self._get_system_state('vision_in_progress')
+                    or self.has_comfyui_stalled_barrier()
+                    or ImageGenerationQueue.query.filter(
+                        ImageGenerationQueue.status.in_(
+                            ('processing', 'sent_to_comfy', 'cancel_requested', 'stalled'))
+                    ).first() is not None):
+                return False
 
-        if not _claim(job.job_id):
-            return True  # Job was cancelled/claimed while we were selecting
-        db.session.refresh(job)
+            job = (ImageGenerationQueue.query.filter_by(status='pending')
+                   .order_by(ImageGenerationQueue.priority.desc(),
+                             ImageGenerationQueue.created_at.asc()).first())
+            if job is None:
+                return False
+            if not _claim(job.job_id):
+                return not self.has_comfyui_stalled_barrier()
+            db.session.refresh(job)
 
-        # A ComfyUI job is about to load models: hand back the vision model's
-        # 7.5 GB if an isolated call leased it warm. No live lease = a monotonic
-        # clock read and nothing else, so this is safe on the queue's hot path.
-        try:
-            from .services.vision_keepalive import revoke as _revoke_vision
-            _revoke_vision('ComfyUI job starting')
-        except Exception:
-            logger.exception('job_queue: vision keep-warm revoke failed')
+            try:
+                from .services.vision_keepalive import ensure_released_for_comfy
+                released_for_comfy = ensure_released_for_comfy()
+            except Exception:
+                # An unreadable local lease/fence is not permission to overlap it.
+                logger.exception('job_queue: could not verify vision lease release')
+                released_for_comfy = False
+            if not released_for_comfy:
+                # Give back only our fresh claim. It remains eligible once the
+                # strict Ollama unload fence confirms release; never terminalize it.
+                (ImageGenerationQueue.query
+                 .filter_by(job_id=job.job_id, status='processing')
+                 .update({'status': 'pending', 'started_at': None,
+                          'last_heartbeat': None}))
+                try:
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
+                    logger.exception('job_queue: could not defer %s after vision lease fence',
+                                     job.job_id)
+                return False
 
-        try:
-            workflow = json.loads(job.workflow_data or '{}')
-            prompt_id = _submit(workflow, job.job_id)
-            # Mirror _claim: only advance to sent_to_comfy from 'processing'. If a
-            # cancel landed between _submit() returning and this write, rowcount
-            # is 0 - the job was already sent to ComfyUI but must not be polled
-            # nor resurrected out of 'cancelled'.
-            claimed = (ImageGenerationQueue.query
-                       .filter_by(job_id=job.job_id, status='processing')
-                       .update({'status': 'sent_to_comfy', 'comfyui_prompt_id': prompt_id}))
-            db.session.commit()
-            if not claimed:
-                db.session.refresh(job)
-                # The cancel landed while /prompt was in flight, so cancel_job
-                # could not yet know the returned prompt id. Target it now.
-                self.interrupt_comfyui_job(prompt_id, job.job_id)
-                _dispatch_completion(job, None, True)
-                return True
-            filename, failed = _poll_outputs(prompt_id, POLL_TIMEOUT_SECONDS)
-            error_detail = None   # a poll failure already stashed its detail on the row
-        except Exception as exc:
-            logger.warning('job_queue: job %s failed: %s', job.job_id, exc)
-            filename, failed = None, True
-            error_detail = str(exc)[:400]   # e.g. the ComfyUI 400 validation body
+            try:
+                workflow = json.loads(job.workflow_data or '{}')
+            except (TypeError, ValueError) as exc:
+                # Parsing happens before `_submit`, so this is a local,
+                # deterministic refusal with no possible remote prompt.
+                submit_error = str(exc)[:400]
+                logger.warning('job_queue: invalid workflow for %s: %s', job.job_id, exc)
+            else:
+                try:
+                    prompt_id = _submit(workflow, job.job_id)
+                    mapped = (ImageGenerationQueue.query
+                              .filter_by(job_id=job.job_id, status='processing')
+                              .update({'status': 'sent_to_comfy',
+                                       'comfyui_prompt_id': prompt_id}))
+                    # `mapped` becomes true only after this commit succeeds. A
+                    # response from /prompt without this durable mapping is uncertain.
+                    db.session.commit()
+                except Exception as exc:
+                    db.session.rollback()
+                    if prompt_id:
+                        paused = self._stall_comfy_job(
+                            job.job_id, prompt_id,
+                            allowed_statuses=('processing', 'cancel_requested',
+                                              'cancelled', 'sent_to_comfy'),
+                            detail=f'prompt mapping failed: {exc}')
+                        if not paused:
+                            db.session.refresh(job)
+                            if job.status == 'cancelled':
+                                dispatch_cancelled = True
+                            else:
+                                logger.critical(
+                                    'job_queue: returned prompt %s has no durable mapping; '
+                                    'leaving job %s active and fail-closed', prompt_id, job.job_id)
+                        if not dispatch_cancelled:
+                            return True  # never terminal-fail/callback an uncertain prompt
+                    elif isinstance(exc, _ComfySubmitRejected):
+                        # These failures happen before an HTTP accept (explicit
+                        # validation refusal or an unavailable local submit seam).
+                        submit_error = str(exc)[:400]
+                        logger.warning('job_queue: job %s was deterministically refused: %s',
+                                       job.job_id, exc)
+                    else:
+                        # Any other /prompt exception can mean ComfyUI accepted
+                        # the job before the response was lost. Persist a client-id
+                        # recovery record instead of permitting a second GPU job.
+                        paused = self._stall_unknown_comfy_job(
+                            job.job_id,
+                            allowed_statuses=('processing', 'cancel_requested',
+                                              'cancelled', 'sent_to_comfy'),
+                            detail=f'unknown /prompt outcome: {exc}')
+                        if not paused:
+                            db.session.refresh(job)
+                            if job.status == 'cancelled':
+                                dispatch_cancelled = True
+                            else:
+                                logger.critical(
+                                    'job_queue: unknown /prompt outcome for %s has no durable '
+                                    'barrier; leaving job %s active and fail-closed',
+                                    job.job_id, job.job_id)
+                        if not dispatch_cancelled:
+                            return True
+                else:
+                    if not mapped:
+                        # A returned id with a lost mapping CAS is still exact
+                        # remote ownership. Persist the prompt barrier for every
+                        # active local state (not only the instrumented-cancel
+                        # race) before allowing this worker to return.
+                        db.session.refresh(job)
+                        if job.status in ('processing', 'sent_to_comfy',
+                                          'cancel_requested', 'cancelled'):
+                            paused = self._stall_comfy_job(
+                                job.job_id, prompt_id,
+                                allowed_statuses=(job.status,),
+                                detail='ComfyUI /prompt id could not be durably mapped')
+                            if paused and job.status in ('cancel_requested', 'cancelled'):
+                                self.reconcile_stalled_comfy_job(job.job_id)
+                            db.session.refresh(job)
+                            if job.status == 'stalled':
+                                return True
+                            if job.status == 'cancelled':
+                                dispatch_cancelled = True
+                        # A lost CAS/barrier write is never proof that the remote
+                        # prompt failed. Keep the active row as a fail-closed owner.
+                        if not dispatch_cancelled:
+                            return True
 
-        db.session.refresh(job)
-        if job.status == 'cancelled':  # cancelled by another request while in flight
-            _dispatch_completion(job, filename, True)
+        if dispatch_cancelled:
+            _dispatch_completion(job, None, True)
             return True
 
-        # Precedence on failure: submit exception > detail stashed by the poll
-        # (already on the row) > generic. Never clobber a specific message.
-        job.update_status('failed' if failed else 'completed',
-                          result_filename=filename,
-                          error_message=None if not failed else
-                          (error_detail or job.error_message or 'generation failed'))
-        db.session.commit()
+        if submit_error is not None:
+            filename, failed, error_detail = None, True, submit_error
+        else:
+            try:
+                filename, failed = _poll_outputs(prompt_id, POLL_TIMEOUT_SECONDS)
+            except Exception as exc:
+                logger.exception('job_queue: poll for job %s failed', job.job_id)
+                # A thrown poll has no trustworthy remote terminal observation.
+                self._stall_comfy_job(job.job_id, prompt_id,
+                                     allowed_statuses=('sent_to_comfy',), detail=str(exc))
+                return True
+            if failed is POLL_STALLED:
+                # `_poll_outputs` only returns this after a durable pause or an
+                # already-present global recovery block. Never route a callback.
+                return True
+            error_detail = None
+
+        with GPU_ARBITER_LOCK:
+            db.session.refresh(job)
+            if job.status == 'stalled':
+                return True
+            if job.status == 'cancel_requested':
+                if submit_error is None:
+                    return True
+                # A deterministic pre-submit refusal owns no remote prompt.
+                # Its cancellation can therefore finish locally instead of
+                # leaving an unresumable cancel_requested queue barrier.
+                job.update_status('cancelled')
+                db.session.commit()
+                _dispatch_completion(job, None, True)
+                return True
+            if job.status == 'cancelled':
+                # Keep this under the same lock as a batch cancel so its cell
+                # update cannot race a late failed callback.
+                _dispatch_completion(job, filename, True)
+                return True
+            job.update_status('failed' if failed else 'completed',
+                              result_filename=filename,
+                              error_message=None if not failed else
+                              (error_detail or job.error_message or 'generation failed'))
+            db.session.commit()
+
         _dispatch_completion(job, filename, failed)
         return True
 
@@ -440,49 +1022,83 @@ class JobQueueManager:
         return job_id
 
     def cancel_job(self, job_id, user_id=None, job_type='image', *, commit=True) -> bool:
-        """pending -> cancelled directly; processing/sent_to_comfy -> best-effort
-        (marks the row; `process_one` checks status before finalizing).
+        """Cancel only after the exact ComfyUI ownership is proven gone.
 
-        ``commit=False`` lets destructive services include the cancellation in
-        the same DB transaction as deleting their owning row. Existing callers
-        keep the historical immediate-commit behaviour.
+        Running/unknown remote work is first paused in a durable barrier. A false
+        result means the caller must preserve its row and job_id; it is not safe to
+        delete/requeue it yet.
         """
         if job_type != 'image':
             return False
-        query = ImageGenerationQueue.query.filter_by(job_id=job_id)
-        if user_id is not None:
-            query = query.filter_by(user_id=str(user_id))
-        job = query.first()
-        if job is None or job.status in ('completed', 'failed', 'cancelled'):
-            return False
-        previous_status = job.status
-        prompt_id = job.comfyui_prompt_id
-        job.update_status('cancelled')
-        if commit:
-            db.session.commit()
-            # Wake the exact LDS poll first, then ask ComfyUI to stop/delete only
-            # the matching prompt. commit=False deliberately has no external side
-            # effect before its owning transaction succeeds.
-            if previous_status in ('processing', 'sent_to_comfy'):
-                self.interrupt_comfyui_job(prompt_id, job.job_id)
-        return True
+        with GPU_ARBITER_LOCK:
+            query = ImageGenerationQueue.query.filter_by(job_id=str(job_id))
+            if user_id is not None:
+                query = query.filter_by(user_id=str(user_id))
+            job = query.first()
+            if job is None or job.status in ('completed', 'failed', 'cancelled'):
+                return False
+
+            if not commit:
+                # A caller holding a larger DB transaction cannot perform an
+                # external proof. Refuse active work instead of silently orphaning
+                # a possibly-running ComfyUI prompt.
+                if job.status != 'pending':
+                    return False
+                job.update_status('cancelled')
+                return True
+
+            if job.status == 'pending':
+                job.update_status('cancelled')
+                db.session.commit()
+                return True
+
+            if job.status == 'processing':
+                # Only a re-entrant cancellation from the /prompt seam can see
+                # this while the shared lock is held. Persist intent without
+                # claiming a remote cancellation; process_one pins its returned id.
+                job.status = 'cancel_requested'
+                job.last_heartbeat = datetime.utcnow()
+                db.session.commit()
+                return False
+            prompt_id = job.comfyui_prompt_id
+            if job.status in ('sent_to_comfy', 'cancel_requested'):
+                if prompt_id:
+                    paused = self._stall_comfy_job(
+                        job.job_id, prompt_id, allowed_statuses=(job.status,),
+                        detail='cancellation requested')
+                else:
+                    paused = self._stall_unknown_comfy_job(
+                        job.job_id, allowed_statuses=(job.status,),
+                        detail='cancellation requested before /prompt was durably mapped')
+                if not paused:
+                    return False
+                if not prompt_id:
+                    logger.warning(
+                        'job_queue: %s needs an external ComfyUI restart before '
+                        'its unknown /prompt outcome can be resolved', job.job_id)
+                    return False
+            elif job.status != 'stalled':
+                return False
+
+            if not job.comfyui_prompt_id:
+                logger.warning(
+                    'job_queue: %s has an unknown /prompt barrier; do not clear it '
+                    'without an externally verified ComfyUI restart', job.job_id)
+                return False
+            # Targeted delete / fresh absence checks happen while the exact raw
+            # ownership barrier remains present.
+            return self.reconcile_stalled_comfy_job(job.job_id)
 
     def interrupt_comfyui_job(self, prompt_id, job_id) -> bool:
-        """Wake LDS's exact poll and best-effort cancel the matching prompt.
-
-        Kept separate from ``cancel_job`` so a service cancelling a whole batch
-        transactionally can mark every row first, commit once, then perform the
-        external ComfyUI side effect without letting the worker claim the next
-        row halfway through that batch.
-        """
-        if not prompt_id:
+        """Compatibility helper: exact pending delete only; never /interrupt."""
+        if not prompt_id or not job_id:
             return False
-        _signal_poll_cancel(prompt_id)
         try:
-            from .utils.comfyui import cancel_comfyui_prompt
-            return cancel_comfyui_prompt(prompt_id, job_id)
+            from .utils.comfyui import ComfyPromptState, cancel_comfyui_prompt_state
+            return (cancel_comfyui_prompt_state(prompt_id, job_id)
+                    is ComfyPromptState.DELETED)
         except Exception:
-            logger.exception('job_queue: could not cancel ComfyUI prompt %s', prompt_id)
+            logger.exception('job_queue: could not target-cancel ComfyUI prompt %s', prompt_id)
             return False
 
     # -- system-state KV (underscore names required verbatim) -------------

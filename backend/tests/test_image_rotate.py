@@ -4,7 +4,7 @@ Idea by 1Tomber (GitHub #17), who asked for it "lossless if favorable". The two
 lanes answer that differently ON PURPOSE and these tests pin both answers:
 
 * a DATASET image is our own file, so the turn is applied in place through the
-  same encoder the mirror uses — pixel-exact for PNG/WEBP (asserted below by a
+  same encoder the mirror uses — pixel-exact for PNG/WebP/BMP (asserted below by a
   four-turn round trip), a re-encode for JPEG;
 * a BANK image belongs to the user's folder, which we never write to, so the
   turn is an integer on the row and the source keeps its exact bytes.
@@ -107,6 +107,7 @@ def test_rotate_270_is_the_other_way_round(app):
     ('PNG', 'corners.png'),
     ('WEBP', 'corners.webp'),
     ('JPEG', 'corners.jpg'),
+    ('BMP', 'corners.bmp'),
 ])
 def test_rotation_preserves_the_real_file_format(app, fmt, filename):
     from app.config import LOCAL_USER
@@ -123,9 +124,10 @@ def test_rotation_preserves_the_real_file_format(app, fmt, filename):
 @pytest.mark.parametrize('fmt,filename', [
     ('PNG', 'corners.png'),
     ('WEBP', 'corners.webp'),
+    ('BMP', 'corners.bmp'),
 ])
 def test_four_quarter_turns_restore_the_exact_pixels(app, fmt, filename):
-    """The losslessness claim, measured. PNG and WEBP are re-encoded LOSSLESS by
+    """The losslessness claim, measured. PNG, WebP and BMP are re-encoded losslessly by
     the shared encoder, so going all the way round costs nothing — this is what
     lets a user undo a mis-click without thinking about it. (JPEG deliberately
     excluded: Pillow has no DCT-domain path, see the module docstring.)"""

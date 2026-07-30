@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { importPolicyLine } from '../src/components/dataset/importPolicy.js';
+import { importInputLimitLine, importPolicyLine } from '../src/components/dataset/importPolicy.js';
 import { helpTopics } from '../src/help/helpRegistry.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -22,36 +22,57 @@ const src = (p) => readFileSync(join(here, '..', 'src', p), 'utf8');
 const dropzone = src('components/dataset/ImportDropzone.jsx');
 const workspace = src('components/dataset/DatasetWorkspace.jsx');
 const settings = src('components/settings/CaptioningSection.jsx');
+const datasetHook = readFileSync(join(here, '..', 'src', 'hooks', 'useDataset.js'), 'utf8');
 
 // --- the sentence at the point of import ------------------------------------
 
 test('the import line states the resolution actually configured', () => {
   assert.equal(importPolicyLine({ max_side: 1024, encoding: 'standard' }),
-    'resized to 1024 px on the long side, ratio kept (WebP q92)');
+    'stored as WebP q92, resized to 1024 px on the long side, ratio kept (input limit: 16 Mi-pixels and 8192 px per side)');
   assert.equal(importPolicyLine({ max_side: 2048, encoding: 'lossless' }),
-    'resized to 2048 px on the long side, ratio kept (WebP lossless)');
+    'stored as WebP lossless, resized to 2048 px on the long side, ratio kept (input limit: 16 Mi-pixels and 8192 px per side)');
 });
 
-test('"no downscale" says so, and names the ceiling it still has', () => {
+test('every policy names the input safety limit before a conversion can happen', () => {
   const line = importPolicyLine({ max_side: 0, encoding: 'high', ceiling: 8192 });
   assert.match(line, /original size/);
+  assert.match(line, /16 Mi-pixels/);
   assert.match(line, /8192 px/);
   assert.match(line, /WebP q100/);
+  assert.equal(importInputLimitLine({ input_max_pixels: 16 * 1024 * 1024, input_max_side: 8192 }),
+    '16 Mi-pixels and 8192 px per side');
 });
 
-test('a missing policy degrades to the shipped default, never to nonsense', () => {
+test('a missing policy degrades to preserving originals, never to a stale WebP claim', () => {
   assert.equal(importPolicyLine(undefined),
-    'resized to 1024 px on the long side, ratio kept (WebP q92)');
+    'stored byte-for-byte in the original file and format (input limit: 16 Mi-pixels and 8192 px per side)');
 });
 
-test('the dropzone reads the live policy instead of asserting 1024', () => {
+test('the dropzone reads the live policy, filters exactly the supported formats, and explains a rejection', () => {
   assert.ok(!dropzone.includes('(normalized to 1024, kept)'),
     'the hardcoded "normalized to 1024" claim must be gone from the UI text');
-  assert.ok(dropzone.includes('importPolicyLine(caps.dataset_import)'),
+  assert.ok(dropzone.includes('importPolicyLine(importPolicy)'),
     'the line must be built from the live policy');
+  assert.match(dropzone, /IMPORT_IMAGE_FORMATS} files stay byte-for-byte unchanged/,
+    'the preservation promise must name the supported original formats');
+  assert.ok(dropzone.includes('accept={IMPORT_IMAGE_ACCEPT}'),
+    'the picker must use the exact static-image accept list');
+  assert.ok(!dropzone.includes('accept="image/*"'),
+    'the picker must not advertise unsupported image types');
+  assert.match(dropzone, /Files larger than \{inputLimit\} are rejected — convert or resize before importing\./,
+    'a size rejection must say how to remedy it');
   // and it points at the setting that changes it
-  assert.ok(dropzone.includes('focus="dataset-import-max-side"'),
+  assert.ok(dropzone.includes('focus="dataset-import-encoding"'),
     'the hint must link to the setting it describes');
+});
+
+test('manual import makes server-side file refusals actionable instead of silently succeeding', () => {
+  const importFiles = datasetHook.slice(datasetHook.indexOf('const importFiles ='),
+    datasetHook.indexOf('// Concept only'));
+  assert.match(importFiles, /if \(d\.failed\) toast\.warning\(/);
+  assert.match(importFiles, /JPEG, PNG, WebP or BMP/);
+  assert.match(importFiles, /16 Mi-pixels and 8192 px per side/);
+  assert.match(importFiles, /convert or resize before importing/);
 });
 
 // --- the setting exists, is resettable, is documented -----------------------
@@ -69,6 +90,10 @@ test('both import knobs are rendered and registered for help', () => {
 test('the resolution choice warns that changing it mid-way is not retroactive', () => {
   assert.ok(settings.includes('from now on'),
     'the setting must say it is not retroactive');
+  assert.match(settings, /every source, including\s+WebP modes and Auto head-crop, must be no larger than/,
+    'the same admission limit must be stated for preserve, crop, and WebP modes');
+  assert.match(settings, /convert or resize it before importing/,
+    'the settings explanation must make the refusal actionable');
 });
 
 // --- the export refusal is a refusal, not a wall ----------------------------

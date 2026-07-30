@@ -2,6 +2,7 @@ import base64
 import io
 import json
 import os
+import struct
 import subprocess
 
 import pytest
@@ -555,11 +556,12 @@ def test_caption_images_backend_auto_falls_back_to_ollama(app, monkeypatch):
         assert refreshed.caption == 'ollama caption'
 
 
-# --- Problem A (issue #6): WebP -> JPEG re-encode at the Ollama seam ---------
+# --- Problem A (issue #6): metadata-free JPEG at the Ollama seam -------------
 # Ollama's server-side image decoder (stb_image on llama.cpp GGUF runners; Go's
 # image.Decode on the native engine) can't read WebP on many builds, so a WebP payload
 # fails with HTTP 400 "Failed to load image or audio file". describe_image_ollama now
-# re-encodes anything that isn't already JPEG/PNG to JPEG before base64.
+# re-encodes every decodable source to a bounded, EXIF/XMP-free JPEG before base64,
+# because the configured Ollama endpoint is an external disclosure boundary.
 
 def test_describe_image_ollama_reencodes_webp_payload_to_jpeg(app, monkeypatch):
     """The bytes that actually leave for Ollama must be JPEG when the source is WebP —
@@ -591,35 +593,92 @@ def test_describe_image_ollama_reencodes_webp_with_alpha_flattens_on_white(app, 
         assert im.mode == 'RGB'
 
 
-def test_describe_image_ollama_passes_jpeg_through_unchanged(app, monkeypatch):
-    """A source already JPEG is forwarded byte-for-byte — a batch of hundreds must not
-    pay for a needless re-encode."""
+def test_describe_image_ollama_sanitizes_small_jpeg_payload(app, monkeypatch):
+    """Even a small JPEG is a fresh outbound derivative, never the camera bytes."""
     from app.services import vision_ollama
     src = _jpeg()
     cap = _CapturePost()
     monkeypatch.setattr(vision_ollama.requests, 'post', cap)
     with app.app_context():
         vision_ollama.describe_image_ollama(src, 'describe this')
-    assert cap.sent_image_bytes() == src
+    sent = cap.sent_image_bytes()
+    assert sent != src and sent[:3] == b'\xff\xd8\xff'
+    with Image.open(io.BytesIO(sent)) as image:
+        assert image.size == (64, 64) and not image.getexif()
 
 
-def test_describe_image_ollama_passes_png_through_unchanged(app, monkeypatch):
-    """PNG is decodable everywhere too, so it is also forwarded untouched."""
+def test_describe_image_ollama_sanitizes_small_png_payload(app, monkeypatch):
+    """PNG metadata is also kept local: Ollama receives a clean JPEG instead."""
     from app.services import vision_ollama
     src = _png()
     cap = _CapturePost()
     monkeypatch.setattr(vision_ollama.requests, 'post', cap)
     with app.app_context():
         vision_ollama.describe_image_ollama(src, 'describe this')
-    assert cap.sent_image_bytes() == src
+    sent = cap.sent_image_bytes()
+    assert sent != src and sent[:3] == b'\xff\xd8\xff'
+    with Image.open(io.BytesIO(sent)) as image:
+        assert image.size == (64, 64) and not image.getexif()
 
 
-def test_ensure_ollama_decodable_returns_original_on_non_image(app):
-    """A non-image blob can't be re-encoded — it is returned unchanged so the caller
-    still surfaces Ollama's own error instead of crashing the never-raise contract."""
+@pytest.mark.parametrize('fmt', ['JPEG', 'PNG'])
+def test_describe_image_ollama_bounds_large_jpeg_and_png_payload(app, monkeypatch, fmt):
+    """Raw preserved masters cannot make a massive base64 caption payload."""
+    from app.services import vision_ollama
+    raw = io.BytesIO()
+    Image.new('RGB', (2000, 1000), (20, 110, 220)).save(raw, fmt)
+    cap = _CapturePost()
+    monkeypatch.setattr(vision_ollama.requests, 'post', cap)
+    with app.app_context():
+        vision_ollama.describe_image_ollama(raw.getvalue(), 'describe this')
+    with Image.open(io.BytesIO(cap.sent_image_bytes())) as image:
+        assert image.format == 'JPEG'
+        assert max(image.size) == vision_ollama._OLLAMA_MAX_SIDE
+
+
+def test_describe_image_ollama_bakes_exif_and_strips_it_from_request(app, monkeypatch):
+    """The request carries upright pixels only: no camera EXIF remains outbound."""
+    from app.services import vision_ollama
+    source = Image.new('RGB', (40, 20), (220, 80, 30))
+    exif = source.getexif()
+    exif[274] = 6
+    exif[271] = 'Private Camera'
+    raw = io.BytesIO()
+    source.save(raw, 'JPEG', quality=95, subsampling=0, exif=exif)
+    cap = _CapturePost()
+    monkeypatch.setattr(vision_ollama.requests, 'post', cap)
+    with app.app_context():
+        vision_ollama.describe_image_ollama(raw.getvalue(), 'describe this')
+    sent = cap.sent_image_bytes()
+    assert b'Exif' not in sent and b'Private Camera' not in sent
+    with Image.open(io.BytesIO(sent)) as image:
+        assert image.format == 'JPEG' and image.size == (20, 40)
+        assert not image.getexif()
+
+
+def test_ensure_ollama_decodable_fails_closed_on_non_image(app):
+    """A non-image blob is never forwarded verbatim to a configured endpoint."""
     from app.services import vision_ollama
     with app.app_context():
-        assert vision_ollama._ensure_ollama_decodable(b'not an image') == b'not an image'
+        assert vision_ollama._ensure_ollama_decodable(b'not an image') is None
+
+
+def test_unsafe_or_invalid_image_never_reaches_ollama_request(app, monkeypatch):
+    """Fail closed before base64/network: no raw EXIF marker can leave the host."""
+    from app.services import vision_ollama
+
+    # A header-only 180 MP PNG: Pillow can identify dimensions without pixel
+    # bytes, so this proves our header guard short-circuits before `load()`.
+    ihdr = struct.pack('>IIBBBBB', 18000, 10000, 8, 2, 0, 0, 0)
+    png = (b'\x89PNG\r\n\x1a\n' + struct.pack('>I', len(ihdr)) + b'IHDR' + ihdr
+           + b'\0\0\0\0' + b'Private Camera GPS marker')
+    calls = []
+    monkeypatch.setattr(vision_ollama.requests, 'post',
+                        lambda *a, **k: calls.append((a, k)) or _Resp())
+    with app.app_context():
+        assert vision_ollama._ensure_ollama_decodable(png) is None
+        assert vision_ollama.describe_image_ollama(png, 'describe') == ''
+    assert calls == []
 
 
 # --- Problem B (issue #6): JoyCaption live stderr streaming ------------------

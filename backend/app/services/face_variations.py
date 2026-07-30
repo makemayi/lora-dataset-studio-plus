@@ -945,8 +945,8 @@ def krea_outfit_directive(prompt: str, label: str = '') -> str:
 
 
 def wrap_variation_krea(prompt: str, nsfw: bool = False, framing: str | None = None,
-                        suffix: str = '', subject_type: str = 'human',
-                        label: str = '') -> str:
+                         suffix: str = '', subject_type: str = 'human',
+                         label: str = '') -> str:
     """Full Krea 2 Identity Edit prompt for one shot.
 
     Same four-part structure as `wrap_variation_klein` (command → full intended
@@ -955,31 +955,136 @@ def wrap_variation_krea(prompt: str, nsfw: bool = False, framing: str | None = N
     explicit hold order. `label` selects that garment deterministically — pass
     the variation label so the same shot always renders the same outfit.
 
-    Both fixes were re-measured on Klein (2026-07-27) and held there too, so both
-    wrappers now pass the same two flags and compose an identical prompt. Kept as
-    a named entry point because the two engines are separate product surfaces and
-    only one of them may need to move next — the flags are where that split would
-    reappear, which is why they stay parameters even while both are True."""
+    The outfit and permanent-marking fixes are also used by Klein, but Krea has
+    one deliberately local addition: conflicting pose cards receive a final,
+    catalog-owned priority instruction.  The named entry point keeps that engine
+    boundary explicit rather than letting a Krea tuning silently affect Klein.
+    """
     return _compose_edit_prompt(prompt, nsfw=nsfw, framing=framing, suffix=suffix,
-                                subject_type=subject_type, label=label,
-                                concrete_outfit=True, markings_lock=True)
+                                 subject_type=subject_type, label=label,
+                                 concrete_outfit=True, markings_lock=True,
+                                 card_pose_priority=True)
+
+
+# Krea 2 is especially literal about the prompt tail.  The otherwise useful
+# generic human details say "both eyes in crisp focus" for a face and "natural
+# standing distance" for a body.  Those clauses directly fight a profile card
+# and a sitting/lying/walking card respectively, then pull the edit back toward
+# the reference composition.  Do not try to rewrite the card itself: it is a
+# persisted user-facing instruction.  Instead, omit the generic block for the
+# conflicting cards and repeat the card's instruction as the final imperative.
+#
+# This is intentionally Krea-only.  Klein was separately measured with its
+# framing details, and API engines use `wrap_variation`, not this local-edit
+# assembly path.
+_KREA_PROFILE_VIEW = re.compile(
+    r'\b(?:left|right)\s+(?:profile|side)(?:\s+view)?\b|'
+    r'\b(?:profile|side)(?:\s+view)?\s+(?:left|right)\b|'
+    r'\b(?:strict\s+)?profile(?:\s+view)?\b|\bside[- ]view\b', re.I)
+_KREA_THREE_QUARTER_VIEW = re.compile(
+    r'\b(?:three[- ]quarter|3\s*(?:/|-)\s*4)\b', re.I)
+_KREA_NON_STANDING_BODY_POSE = re.compile(
+    r'\b(?:sitting|seated|sit|lying|reclining|kneeling|crouching|squatting|'
+    r'walking|running|jumping|dancing)\b', re.I)
+KREA_CARD_POSE_PRIORITY_PREFIX = 'Mandatory shot requirement:'
+KREA_CARD_POSE_PRIORITY_SUFFIX = (
+    'Render exactly this pose, camera angle and framing; do not substitute the '
+    'reference pose or a different view.')
+KREA_TRUE_PROFILE_REQUIREMENT = (
+    'For a profile shot, rotate the face to a true 90-degree side view with only '
+    'the nearer eye visible.')
+KREA_CARD_POSE_PRIORITY_GENERIC = (
+    f'{KREA_CARD_POSE_PRIORITY_PREFIX} honor exactly the pose, camera angle and '
+    f'framing already stated in the shot description. {KREA_CARD_POSE_PRIORITY_SUFFIX}')
+_KREA_TRUSTED_TAIL_MAX_CHARS = 600
+# The final priority instruction must stay server-owned.  These replace the
+# catalog's default variation clauses without consulting the editable outfit
+# palette (whose text is valid in the normal description, but must not appear
+# after identity/SFW locks).
+_KREA_CATALOG_OUTFIT = 'wearing a varied casual outfit'
+_KREA_CATALOG_EXPRESSION = 'a calm neutral facial expression'
+
+
+def krea_card_pose_priority(card_prompt: str = '', *, true_profile: bool = False) -> str:
+    """Return Krea's final pose imperative without moving free-form text after SFW.
+
+    A concrete prompt is only accepted here after `_krea_builtin_card_prompt`
+    proved it is one of the shipped catalog cards.  Custom and edited prompts get
+    the bounded generic form: their actual words stay in the ordinary description
+    before the identity and rendering locks.
+    """
+    shot = (card_prompt or '').strip().rstrip('.')
+    if not shot:
+        priority = KREA_CARD_POSE_PRIORITY_GENERIC
+    else:
+        priority = (
+            f'{KREA_CARD_POSE_PRIORITY_PREFIX} {shot}. '
+            f'{KREA_CARD_POSE_PRIORITY_SUFFIX}')
+    # ``true_profile`` comes from a pose classifier before the locks, but only
+    # selects this static instruction; no free-form request text moves after SFW.
+    return (f'{priority} {KREA_TRUE_PROFILE_REQUIREMENT}'
+            if true_profile else priority)
+
+
+def _krea_card_pose_needs_priority(prompt: str, framing: str | None,
+                                   subject_type: str) -> bool:
+    """Whether Krea's generic human framing would contradict this shot card."""
+    # The non-human framing details do not contain the human-only "both eyes" /
+    # "standing" assumptions.  Never strip useful animal/creature/anime detail.
+    if normalize_subject_type(subject_type) != 'human':
+        return False
+    text = prompt or ''
+    return (
+        framing == 'face' and _krea_true_profile_view(text)
+    ) or (
+        framing == 'body' and bool(_KREA_NON_STANDING_BODY_POSE.search(text))
+    )
+
+
+def _krea_true_profile_view(text: str) -> bool:
+    """A real side profile, never a three-quarter view with both eyes visible."""
+    return (bool(_KREA_PROFILE_VIEW.search(text or ''))
+            and not bool(_KREA_THREE_QUARTER_VIEW.search(text or '')))
+
+
+def _krea_builtin_card_prompt(prompt: str, label: str, subject_type: str) -> str:
+    """Return a bounded catalog card for a final Krea imperative, if exact.
+
+    A regenerate can keep its old label while its prompt is edited, and imported
+    shots use arbitrary user text.  Neither is allowed after identity/SFW locks.
+    Only the unmodified human catalog card is safe to repeat at the tail.
+    """
+    if normalize_subject_type(subject_type) != 'human':
+        return ''
+    catalog_prompt = prompt_by_label(label or '')
+    if not catalog_prompt or not isinstance(prompt, str):
+        return ''
+    if prompt.strip() != catalog_prompt.strip():
+        return ''
+    # Keep the final catalog instruction positive without consulting an editable
+    # setting.  The normal description may still use the selected outfit palette,
+    # but this tail is deliberately static and safe to place after identity/SFW.
+    card = (catalog_prompt
+            .replace(OUTFIT_VARY, _KREA_CATALOG_OUTFIT)
+            .replace(EXPRESSION_NEUTRAL, _KREA_CATALOG_EXPRESSION))
+    return card if len(card) <= _KREA_TRUSTED_TAIL_MAX_CHARS else ''
 
 
 def _compose_edit_prompt(prompt: str, *, nsfw: bool, framing, suffix: str,
-                         subject_type: str, label: str,
-                         concrete_outfit: bool, markings_lock: bool) -> str:
+                          subject_type: str, label: str,
+                          concrete_outfit: bool, markings_lock: bool,
+                          card_pose_priority: bool = False) -> str:
     """The ONE assembly of a local-edit prompt, shared by Klein and Krea — the two
-    wrappers had drifted into two copies of the same six-part concatenation, and
-    every part of it is now user-editable, which is five more chances for the
-    copies to disagree. The two flags are where the engines COULD differ (name a
-    concrete garment / hold the skin); both are True today because the two fixes
-    were born on Krea and then measured to hold on Klein too. They stay
-    parameters rather than duplicated bodies precisely so one engine can move
-    without the other silently following.
+    wrappers had drifted into two copies of the same six-part concatenation.  The
+    engine-specific flags (name a concrete garment / hold the skin / prioritize a
+    catalog pose) keep one engine's correction from silently moving the other.
 
-    Order is load-bearing and unchanged: command + description, framing detail,
-    markings hold, identity lock, rendering tail. Every part is read through
-    get_identity_prompt, so with no override the output is byte-identical to the
+    Klein's order remains load-bearing and unchanged: command + description,
+    framing detail, markings hold, identity lock, rendering tail.  On Krea only,
+    a profile or non-standing body card suppresses the contradictory generic
+    detail and finishes with a card-priority imperative.  Every other Krea call
+    keeps the historical assembly.  Every part is read through
+    get_identity_prompt, so the normal path remains byte-identical to the
     hardcoded version — including the single spaces between parts, which is why
     the markings lock is re-joined with an explicit space instead of relying on
     the trailing one its constant carries (a textarea cannot hold a trailing
@@ -1004,12 +1109,28 @@ def _compose_edit_prompt(prompt: str, *, nsfw: bool, framing, suffix: str,
         # yourself" — the only reading under which the Settings box does what it
         # says on the two engines that name a garment.
         body = krea_outfit_directive(body, label)
+    # The final Krea-only imperative never repeats free-form prompt/suffix text
+    # after the identity and rendering locks.  A built-in, unchanged card may be
+    # repeated because it is a short server-owned instruction; edited/custom
+    # cards get the bounded generic imperative instead.
+    prioritize_card = card_pose_priority and _krea_card_pose_needs_priority(
+        prompt, framing, st)
+    true_profile = (prioritize_card and framing == 'face'
+                    and _krea_true_profile_view(prompt))
+    final_card = (_krea_builtin_card_prompt(prompt, label, st)
+                  if prioritize_card else '')
+    if prioritize_card:
+        # A user override of the generic framing text must not revive the same
+        # contradiction.  The card itself remains the sole composition source.
+        detail = ''
     lock = get_identity_prompt('markings_lock', st).strip() if markings_lock else ''
     return (
         f"Create a new {medium} of the same {noun} as the reference image: {body}. "
         + (f"{detail} " if detail else "")
         + (f"{lock} " if lock else "")
-        + f"{get_identity_prompt('klein_identity', st)} {ending}")
+        + f"{get_identity_prompt('klein_identity', st)} {ending}"
+        + (f" {krea_card_pose_priority(final_card, true_profile=true_profile)}"
+           if prioritize_card else ""))
 
 
 def _e(i, axis, framing, label, prompt, co=False, cb=False, aspect=None):

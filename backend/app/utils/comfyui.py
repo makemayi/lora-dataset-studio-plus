@@ -23,6 +23,7 @@ Dataset Studio, config-driven and slimmed:
 """
 from __future__ import annotations
 
+import errno
 import glob
 import logging
 import os
@@ -30,6 +31,8 @@ import re
 import socket
 import subprocess
 import time
+from dataclasses import dataclass
+from enum import Enum
 from urllib.parse import urlencode, urljoin
 
 import requests
@@ -38,6 +41,68 @@ from flask import current_app
 from .. import config as cfg
 from . import comfy_names
 from .comfy_names import local_model_path
+
+
+class ComfyVramFreeVerdict(Enum):
+    """The only outcomes a vision request is allowed to act on."""
+
+    FREED = 'freed'
+    COMFYUI_OFFLINE = 'comfyui_offline'
+    UNKNOWN = 'unknown'
+
+    @property
+    def permits_ollama(self):
+        return self in (self.FREED, self.COMFYUI_OFFLINE)
+
+
+class ComfyHistoryHealth(Enum):
+    """Whether one /history response can safely drive the queue."""
+
+    READY = 'ready'
+    NOT_READY = 'not_ready'
+    UNHEALTHY = 'unhealthy'
+
+
+@dataclass(frozen=True)
+class ComfyHistoryProbe:
+    health: ComfyHistoryHealth
+    history: dict | None = None
+    detail: str | None = None
+
+
+class ComfyPromptState(Enum):
+    DELETED = 'deleted'
+    PENDING = 'pending'
+    RUNNING = 'running'
+    ABSENT = 'absent'
+    UNKNOWN = 'unknown'
+
+
+def _exception_chain(exc):
+    """Walk nested urllib3/requests transport errors without trusting text."""
+    seen, pending = set(), [exc]
+    while pending:
+        current = pending.pop()
+        if not isinstance(current, BaseException) or id(current) in seen:
+            continue
+        seen.add(id(current))
+        yield current
+        for name in ('__cause__', '__context__', 'reason'):
+            nested = getattr(current, name, None)
+            if isinstance(nested, BaseException):
+                pending.append(nested)
+        pending.extend(arg for arg in getattr(current, 'args', ())
+                       if isinstance(arg, BaseException))
+
+
+def _is_explicit_connection_refused(exc):
+    refused = {errno.ECONNREFUSED, 10061}  # POSIX / Winsock WSAECONNREFUSED
+    return any(
+        isinstance(item, ConnectionRefusedError)
+        or (isinstance(item, OSError) and item.errno in refused)
+        for item in _exception_chain(exc)
+    )
+
 
 logger = logging.getLogger(__name__)
 
@@ -497,8 +562,13 @@ def queue_prompt_to_comfyui(prompt_workflow, client_id, worker_url=None):
     try:
         payload = {"prompt": prompt_workflow, "client_id": client_id}
         headers = {'Content-Type': 'application/json'}
-        response = requests.post(urljoin(api_addr, "/prompt"), json=payload, headers=headers, timeout=10)
+        response = requests.post(
+            urljoin(api_addr, "/prompt"), json=payload, headers=headers, timeout=10,
+            allow_redirects=False)
         response.raise_for_status()
+        status = getattr(response, 'status_code', None)
+        if type(status) is not int or not 200 <= status < 300:
+            return None, f'ComfyUI /prompt returned unsafe HTTP status {status!r}'
         return response.json(), None
     except requests.exceptions.RequestException as e:
         logger.error(f"Error queuing prompt to {api_addr}: {e}")
@@ -523,20 +593,10 @@ def queue_prompt_to_comfyui(prompt_workflow, client_id, worker_url=None):
         if getattr(_resp, 'status_code', None) == 400:
             return None, f"WORKFLOW_INVALIDE (validation ComfyUI 400): {err_body[:600]}"
 
-        # Si c'est une erreur de connexion sur le worker local, essayer de redémarrer
-        if is_local and ("Failed to establish a new connection" in str(e) or "Connection refused" in str(e)):
-            logger.info("Connection error on local worker, attempting to restart ComfyUI...")
-            result = _ensure_comfyui_before_generation()
-            if result is not None and result[0]:
-                logger.info("ComfyUI restarted successfully, retrying prompt...")
-                try:
-                    response = requests.post(urljoin(api_addr, "/prompt"), json=payload, headers=headers, timeout=10)
-                    response.raise_for_status()
-                    return response.json(), None
-                except Exception as retry_error:
-                    logger.error(f"Retry after ComfyUI restart failed: {retry_error}")
-            elif result is not None:
-                logger.error(f"Failed to restart ComfyUI: {result[1]}")
+        # Never blindly retry a POST here. A transport failure can occur after
+        # ComfyUI accepted the first request; retrying would create an untracked
+        # second prompt. The queue stores this outcome as a client-id recovery
+        # barrier; recovery requires an externally verified ComfyUI restart.
 
         detail = f": {e}" + (f" | ComfyUI: {err_body}" if err_body else '')
         return None, f"Failed to connect or communicate with ComfyUI API ({api_addr}){detail}"
@@ -545,32 +605,62 @@ def queue_prompt_to_comfyui(prompt_workflow, client_id, worker_url=None):
         return None, f"An unexpected error occurred: {e}"
 
 
-def get_comfyui_history(prompt_id, worker_url=None):
-    """Récupère l'historique d'un prompt ComfyUI par son ID.
-
-    Args:
-        prompt_id: ID du prompt retourné par ComfyUI.
-        worker_url: URL optionnelle du worker distant. Si None, utilise api_address().
-    """
+def get_comfyui_history_probe(prompt_id, worker_url=None) -> ComfyHistoryProbe:
+    """Classify /history without confusing a worker outage with no output yet."""
     api_addr = worker_url or api_address()
     try:
-        response = requests.get(urljoin(api_addr, f"/history/{prompt_id}"), timeout=5)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        if hasattr(e, 'response') and e.response is not None:
-            if e.response.status_code == 404:
-                logger.debug(f"History for {prompt_id} not found yet (404).")
-                return None
-            else:
-                logger.error(f"Error getting history for {prompt_id} from {api_addr}: HTTP {e.response.status_code}")
-                return None
-        else:
-            logger.error(f"Error getting history for {prompt_id} from {api_addr}: {e}")
-            return None
-    except Exception as e:
-        logger.error(f"Unexpected error getting history from {api_addr}: {e}")
-        return None
+        response = requests.get(
+            urljoin(api_addr, f'/history/{prompt_id}'), timeout=5, allow_redirects=False)
+        status = getattr(response, 'status_code', None)
+        if type(status) is not int:
+            return ComfyHistoryProbe(ComfyHistoryHealth.UNHEALTHY,
+                                     detail='malformed response')
+        if status == 404:
+            return ComfyHistoryProbe(ComfyHistoryHealth.NOT_READY)
+        if not 200 <= status < 300:
+            return ComfyHistoryProbe(ComfyHistoryHealth.UNHEALTHY,
+                                     detail=f'HTTP {status}')
+        try:
+            history = response.json()
+        except Exception:
+            return ComfyHistoryProbe(ComfyHistoryHealth.UNHEALTHY,
+                                     detail='malformed JSON')
+        if not isinstance(history, dict):
+            return ComfyHistoryProbe(ComfyHistoryHealth.UNHEALTHY,
+                                     detail='malformed history')
+        if not history:
+            return ComfyHistoryProbe(ComfyHistoryHealth.NOT_READY)
+        # The exact requested key is the ownership proof. A direct entry could
+        # be a proxy/cache response for another prompt, so accepting it would
+        # falsely complete this queue row while its real GPU work still runs.
+        entry = history.get(prompt_id)
+        if entry is None:
+            return ComfyHistoryProbe(ComfyHistoryHealth.UNHEALTHY,
+                                     detail='history does not contain requested prompt')
+        if not isinstance(entry, dict) or not (
+                'outputs' in entry or 'status' in entry):
+            return ComfyHistoryProbe(ComfyHistoryHealth.UNHEALTHY,
+                                     detail='malformed history entry')
+        if ('outputs' in entry and not isinstance(entry.get('outputs'), dict)) or \
+                ('status' in entry and not isinstance(entry.get('status'), dict)):
+            return ComfyHistoryProbe(ComfyHistoryHealth.UNHEALTHY,
+                                     detail='malformed history entry fields')
+        return ComfyHistoryProbe(ComfyHistoryHealth.READY, history=history)
+    except requests.RequestException as exc:
+        response = getattr(exc, 'response', None)
+        if type(getattr(response, 'status_code', None)) is int and response.status_code == 404:
+            return ComfyHistoryProbe(ComfyHistoryHealth.NOT_READY)
+        return ComfyHistoryProbe(ComfyHistoryHealth.UNHEALTHY,
+                                 detail=str(exc)[:200])
+    except Exception as exc:
+        return ComfyHistoryProbe(ComfyHistoryHealth.UNHEALTHY,
+                                 detail=str(exc)[:200])
+
+
+def get_comfyui_history(prompt_id, worker_url=None):
+    """Backward-compatible untyped accessor for existing callers."""
+    probe = get_comfyui_history_probe(prompt_id, worker_url)
+    return probe.history if probe.health is ComfyHistoryHealth.READY else None
 
 
 def _queue_entry_identity(entry):
@@ -592,53 +682,95 @@ def _queue_entry_identity(entry):
     return None, None
 
 
-def cancel_comfyui_prompt(prompt_id, client_id=None, worker_url=None) -> bool:
-    """Cancel one known ComfyUI prompt without blindly interrupting the GPU.
+def comfyui_prompt_is_absent(prompt_id, worker_url=None):
+    """Return True only after a healthy queue response proves this id absent.
 
-    ComfyUI's ``/interrupt`` endpoint is global: calling it without first
-    checking ``/queue`` can stop an unrelated workflow submitted by another
-    app. We therefore interrupt only when the exact prompt is currently in
-    ``queue_running``. If it has not started yet, the targeted ``/queue``
-    delete operation is used instead. The optional LDS job id (sent as
-    ComfyUI's ``client_id``) is checked when the queue exposes it.
-
-    Returns whether a cancellation request was sent. Network errors and an
-    already-finished prompt are normal best-effort failures and return False.
+    None means unknown: malformed /queue, transport trouble, or an unparseable
+    entry must never grant permission to resume/requeue an old GPU prompt.
     """
     if not prompt_id:
-        return False
+        return None
+    try:
+        api_addr = worker_url or api_address()
+        response = requests.get(
+            urljoin(api_addr, '/queue'), timeout=3, allow_redirects=False)
+        status = getattr(response, 'status_code', None)
+        if type(status) is not int or not 200 <= status < 300:
+            return None
+        queue = response.json()
+        if not isinstance(queue, dict):
+            return None
+        pending = queue.get('queue_pending')
+        running = queue.get('queue_running')
+        if not isinstance(pending, (list, tuple)) or not isinstance(running, (list, tuple)):
+            return None
+        identities = [_queue_entry_identity(entry) for entry in [*pending, *running]]
+        if any(queued_prompt_id is None for queued_prompt_id, _client_id in identities):
+            return None
+        return not any(str(queued_prompt_id) == str(prompt_id)
+                       for queued_prompt_id, _client_id in identities)
+    except requests.RequestException as exc:
+        logger.warning('Could not inspect ComfyUI prompt %s: %s', prompt_id, exc)
+    except Exception as exc:
+        logger.warning('Unexpected queue inspection failure for %s: %s', prompt_id, exc)
+    return None
+
+
+
+def cancel_comfyui_prompt_state(prompt_id, client_id, worker_url=None) -> ComfyPromptState:
+    """Delete only LDS's exact queued prompt; never use global /interrupt."""
+    if not prompt_id or not client_id:
+        return ComfyPromptState.UNKNOWN
     api_addr = worker_url or api_address()
 
-    def _matches(entry):
+    def exact(entry):
         queued_prompt_id, queued_client_id = _queue_entry_identity(entry)
-        if str(queued_prompt_id or '') != str(prompt_id):
-            return False
-        # Some ComfyUI builds omit client_id from /queue. A prompt_id is unique,
-        # but when both sides provide a client id require it to match as an
-        # additional guard against interrupting somebody else's work.
-        return not (client_id and queued_client_id
-                    and str(queued_client_id) != str(client_id))
+        return (str(queued_prompt_id or '') == str(prompt_id)
+                and str(queued_client_id or '') == str(client_id))
 
     try:
-        response = requests.get(urljoin(api_addr, "/queue"), timeout=3)
-        response.raise_for_status()
-        queue = response.json() or {}
-
-        if any(_matches(entry) for entry in queue.get('queue_pending') or []):
-            response = requests.post(urljoin(api_addr, "/queue"),
-                                     json={'delete': [prompt_id]}, timeout=3)
-            response.raise_for_status()
-            return True
-
-        if any(_matches(entry) for entry in queue.get('queue_running') or []):
-            response = requests.post(urljoin(api_addr, "/interrupt"), timeout=3)
-            response.raise_for_status()
-            return True
-    except requests.exceptions.RequestException as exc:
-        logger.warning("Could not cancel ComfyUI prompt %s: %s", prompt_id, exc)
+        response = requests.get(
+            urljoin(api_addr, '/queue'), timeout=3, allow_redirects=False)
+        status = getattr(response, 'status_code', None)
+        if type(status) is not int or not 200 <= status < 300:
+            return ComfyPromptState.UNKNOWN
+        queue = response.json()
+        if not isinstance(queue, dict):
+            return ComfyPromptState.UNKNOWN
+        pending = queue.get('queue_pending')
+        running = queue.get('queue_running')
+        if not isinstance(pending, (list, tuple)) or not isinstance(running, (list, tuple)):
+            return ComfyPromptState.UNKNOWN
+        entries = [*pending, *running]
+        identities = [_queue_entry_identity(entry) for entry in entries]
+        if any(queued_prompt_id is None for queued_prompt_id, _client_id in identities):
+            return ComfyPromptState.UNKNOWN
+        if any(exact(entry) for entry in pending):
+            response = requests.post(
+                urljoin(api_addr, '/queue'), json={'delete': [prompt_id]}, timeout=3,
+                allow_redirects=False)
+            status = getattr(response, 'status_code', None)
+            return (ComfyPromptState.DELETED if type(status) is int and 200 <= status < 300
+                    else ComfyPromptState.UNKNOWN)
+        if any(exact(entry) for entry in running):
+            return ComfyPromptState.RUNNING
+        # A visible target prompt under another/missing client id is uncertain:
+        # it is not proof that our GPU work disappeared.
+        if any(str(queued_prompt_id) == str(prompt_id)
+               for queued_prompt_id, _client_id in identities):
+            return ComfyPromptState.UNKNOWN
+        return ComfyPromptState.ABSENT
+    except requests.RequestException as exc:
+        logger.warning('Could not cancel ComfyUI prompt %s: %s', prompt_id, exc)
     except Exception as exc:
-        logger.warning("Unexpected error cancelling ComfyUI prompt %s: %s", prompt_id, exc)
-    return False
+        logger.warning('Unexpected error cancelling ComfyUI prompt %s: %s', prompt_id, exc)
+    return ComfyPromptState.UNKNOWN
+
+
+def cancel_comfyui_prompt(prompt_id, client_id=None, worker_url=None) -> bool:
+    """Compatibility bool: only an exact pending-delete reports success."""
+    return (cancel_comfyui_prompt_state(prompt_id, client_id, worker_url)
+            is ComfyPromptState.DELETED)
 
 
 def download_image_from_worker(filename, worker_url, output_dir):
@@ -1214,28 +1346,36 @@ def format_unsupported_enums_message(items):
               "how your images look compared to everyone else's. " + fix)
 
 
-def free_comfyui_vram(worker_url=None):
-    """
-    Free ComfyUI VRAM by calling /free endpoint.
-    Should be called before video generation to avoid OOM.
-    """
+def free_comfyui_vram(worker_url=None, timeout=10) -> ComfyVramFreeVerdict:
+    """Ask ComfyUI to unload only when it can positively acknowledge the request."""
     try:
-        api_addr = worker_url or api_address()
-        # POST /free with unload_models=true and free_memory=true
+        api_addr = (worker_url or api_address()).rstrip('/')
+        if not api_addr:
+            raise ValueError('empty ComfyUI API address')
         response = requests.post(
-            f"{api_addr}/free",
-            json={"unload_models": True, "free_memory": True},
-            timeout=10
+            f'{api_addr}/free',
+            json={'unload_models': True, 'free_memory': True},
+            timeout=timeout,
+            allow_redirects=False,
         )
-        if response.status_code == 200:
-            logger.info("ComfyUI VRAM freed successfully")
-            return True
-        else:
-            logger.warning(f"ComfyUI /free returned status {response.status_code}")
-            return False
-    except Exception as e:
-        logger.warning(f"Failed to free ComfyUI VRAM: {e}")
-        return False
+    except (requests.RequestException, OSError) as exc:
+        # A message containing "connection refused" is not proof. Only an actual
+        # nested OS refusal proves that no local ComfyUI process owns the card.
+        verdict = (ComfyVramFreeVerdict.COMFYUI_OFFLINE
+                   if _is_explicit_connection_refused(exc)
+                   else ComfyVramFreeVerdict.UNKNOWN)
+        logger.warning('ComfyUI /free did not complete: %s (%s)', exc, verdict.value)
+        return verdict
+    except Exception as exc:
+        logger.warning('ComfyUI /free failed unexpectedly: %s', exc)
+        return ComfyVramFreeVerdict.UNKNOWN
+
+    status = getattr(response, 'status_code', None)
+    if type(status) is int and 200 <= status < 300:
+        logger.info('ComfyUI VRAM freed successfully')
+        return ComfyVramFreeVerdict.FREED
+    logger.warning('ComfyUI /free returned malformed/non-2xx status %r', status)
+    return ComfyVramFreeVerdict.UNKNOWN
 
 
 # --- Trained-LoRA parser (SINGLE source shared by labels + grouping) -------
@@ -1601,6 +1741,18 @@ def get_checkpoint_models(include_hidden=False):
             subdir_path = os.path.join(checkpoints_dir, subdir)
             if os.path.exists(subdir_path):
                 search_dirs.append(subdir_path)
+        # Any checkpoints root declared in extra_model_paths.yaml. Portable /
+        # Stability-Matrix / A1111-shared installs keep every checkpoint OUTSIDE
+        # <base>/models, so this picker showed them an empty SDXL base list while
+        # ComfyUI loaded those very files. Additive: no yaml -> nothing appended and
+        # this list is byte-for-byte the historical one. (The scan below is
+        # recursive, so subfolders under an extra root are covered like Biglove/.)
+        try:
+            from ..services import comfy_model_paths
+            search_dirs += [d for d in comfy_model_paths.extra_roots("checkpoints")
+                            if os.path.exists(d)]
+        except Exception:
+            pass
 
         if not search_dirs:
             logger.warning(f"Checkpoint model directories not found: {biglove_dir} (and parent {checkpoints_dir})")
@@ -1681,8 +1833,18 @@ def get_zimage_models():
     if out_dir:
         try:
             models_root = os.path.normpath(os.path.join(out_dir, "..", "models"))
-            for base in ("unet", "diffusion_models"):
-                base_dir = os.path.join(models_root, base)
+            base_dirs = [os.path.join(models_root, b) for b in ("unet", "diffusion_models")]
+            # Plus any diffusion_models root declared in extra_model_paths.yaml (the
+            # `unet` key folds into the same canonical type). Without this, a Z-Image
+            # merge kept outside <base>/models was absent from the training base
+            # picker — and therefore unconvertible, whatever zimage_convert resolves.
+            # Additive: no yaml -> nothing appended, list unchanged.
+            try:
+                from ..services import comfy_model_paths
+                base_dirs += comfy_model_paths.extra_roots("diffusion_models")
+            except Exception:
+                pass
+            for base_dir in base_dirs:
                 if not os.path.isdir(base_dir):
                     continue
                 for root, _dirs, files in os.walk(base_dir):

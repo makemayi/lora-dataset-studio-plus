@@ -22,6 +22,7 @@ export function useStudioRun(runId) {
   const toast = useToast();
   const [data, setData] = useState(null);
 
+  const [confirmingComfyuiRestart, setConfirmingComfyuiRestart] = useState(false);
   const refresh = useCallback(async () => {
     if (!runId) return;
     try {
@@ -69,5 +70,26 @@ export function useStudioRun(runId) {
     return d;
   }, [runId, refresh, toast]);
 
-  return { data, refresh, rate, cancel, resume };
+  // A timed-out ComfyUI submit has no safe automatic retry. The backend accepts
+  // this only after a fresh ComfyUI probe and the user's explicit restart claim.
+  const confirmComfyuiRestart = useCallback(async () => {
+    if (!runId || confirmingComfyuiRestart) return undefined;
+    setConfirmingComfyuiRestart(true);
+    try {
+      const d = await postJson(`/api/studio/run/${runId}/confirm-comfyui-restart`, {
+        confirmed_comfyui_restart: true,
+      });
+      toast.success('ComfyUI restart confirmed — the paused cell is ready to resume.');
+      await refresh();
+      return d;
+    } catch (e) {
+      toast.error(e.message || 'Could not confirm the ComfyUI restart');
+      await refresh();
+      return { ok: false, error: e.message || 'Could not confirm the ComfyUI restart' };
+    } finally {
+      setConfirmingComfyuiRestart(false);
+    }
+  }, [runId, confirmingComfyuiRestart, refresh, toast]);
+
+  return { data, refresh, rate, cancel, resume, confirmComfyuiRestart, confirmingComfyuiRestart };
 }

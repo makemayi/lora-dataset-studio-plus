@@ -15,6 +15,7 @@ export function useLoraTestStudio(datasetId, family = null) {
   const [data, setData] = useState(null);
   const [launching, setLaunching] = useState(false);
 
+  const [confirmingComfyuiRestart, setConfirmingComfyuiRestart] = useState(false);
   const refresh = useCallback(async () => {
     if (!datasetId) return;
     try {
@@ -109,6 +110,25 @@ export function useLoraTestStudio(datasetId, family = null) {
     return d;
   }, [datasetId, refresh, toast]);
 
+  // Unknown ComfyUI submissions are never retried automatically: the endpoint
+  // probes the restarted process, clears only that paused cell, then refreshes
+  // so the normal Resume button is the next explicit action.
+  const confirmComfyuiRestart = useCallback(async () => {
+    if (confirmingComfyuiRestart) return undefined;
+    setConfirmingComfyuiRestart(true);
+    try {
+      const d = await postJson(`/api/dataset/${datasetId}/lora-test/confirm-comfyui-restart`, {
+        confirmed_comfyui_restart: true,
+      });
+      if (d.ok) toast.success('ComfyUI restart confirmed — the paused cell is ready to resume.');
+      else toast.error(d.error || 'Could not confirm the ComfyUI restart');
+      await refresh();
+      return d;
+    } finally {
+      setConfirmingComfyuiRestart(false);
+    }
+  }, [datasetId, confirmingComfyuiRestart, refresh, toast]);
+
   // Persiste la config gagnante COMPLÈTE (pas juste checkpoint+strength) : on
   // passe la cellule entière pour garder modèle/cfg/steps/format.
   const setBest = useCallback(async (cell) => {
@@ -148,5 +168,5 @@ export function useLoraTestStudio(datasetId, family = null) {
     return d;
   }, [refresh, toast]);
 
-  return { data, refresh, launch, rate, cancel, resume, setBest, clearBest, deletePrompt, launching, scoreFaces, scoring };
+  return { data, refresh, launch, rate, cancel, resume, confirmComfyuiRestart, confirmingComfyuiRestart, setBest, clearBest, deletePrompt, launching, scoreFaces, scoring };
 }

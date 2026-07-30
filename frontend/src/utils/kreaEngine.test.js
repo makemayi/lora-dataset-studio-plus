@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 
 import {
   KREA_ASSET_LABELS, kreaMissingLabels, kreaUnavailableReason, groundingDescription,
-  refOrientation, kreaFramingAdvisory, KREA_SUGGESTED_ASPECT, KREA_TIGHT_FRAMINGS,
 } from './kreaEngine.js';
 import {
   ENGINES, LOCAL_ENGINES, API_ENGINES, ENGINE_LABELS, ENGINE_RATES, ENGINE_ACCENTS,
@@ -165,85 +164,10 @@ test('a file that is PRESENT but is not weights gets named, not left to ComfyUI'
 // ── The dial has to MEAN something, not just show a number ───────────────────
 
 test('grounding is described in words at every end of the range', () => {
-  assert.match(groundingDescription(512), /follows the prompt/);
-  assert.match(groundingDescription(768), /leans towards the prompt/);
-  assert.match(groundingDescription(1024), /balanced/);
+  assert.match(groundingDescription(512), /dataset-restaging balance/);
+  assert.match(groundingDescription(768), /leans towards reference likeness/);
+  assert.match(groundingDescription(1024), /may copy its pose/);
   assert.match(groundingDescription(1536), /sticks to the reference/);
-  assert.match(groundingDescription(undefined), /default/);
-  assert.match(groundingDescription('nonsense'), /default/);
-});
-
-// ── Reference shape vs body/back framing (MEASURED 2026-07-25) ──────────────
-// Krea reproduces the reference's aspect ratio, so a square reference crops the
-// wide shots. The two measured cases below are the anchors of this whole block:
-// 1024x1024 came back a bust, 835x1024 came back a full figure.
-
-const bodyShots = (n) => Array.from({ length: n }, () => 'body');
-
-test('orientation buckets the two MEASURED references on the right side', () => {
-  assert.equal(refOrientation(835, 1024), 'portrait', 'the one that produced a full figure');
-  assert.equal(refOrientation(1024, 1024), 'square', 'the one that produced a bust');
-  assert.equal(refOrientation(1920, 1080), 'landscape');
-  // "Nearly square" behaves like square, so it is bucketed like square.
-  assert.equal(refOrientation(1000, 1024), 'square');
-  // Unmeasurable stays unmeasurable — never guessed into a bucket.
-  for (const bad of [[0, 100], [100, 0], [null, 100], ['x', 'y'], [undefined, undefined]]) {
-    assert.equal(refOrientation(bad[0], bad[1]), null, `bad size ${JSON.stringify(bad)}`);
-  }
-});
-
-test('a square reference with body shots selected warns, and counts them', () => {
-  const a = kreaFramingAdvisory({
-    width: 1024, height: 1024,
-    framings: [...bodyShots(17), 'back', 'face', 'bust'],
-  });
-  assert.ok(a, 'a square reference + wide shots is exactly the case to warn about');
-  assert.equal(a.tight, 18, '17 body + 1 back');
-  assert.equal(a.total, 20);
-  assert.match(a.headline, /18 of your 20 selected shots/);
-  assert.match(a.detail, /1024×1024/);
-  assert.equal(a.suggestAspect, KREA_SUGGESTED_ASPECT);
-  assert.equal(a.suggestLabel, '3:4');
-});
-
-test('the wording is honest: tighter, not impossible, and Krea-only', () => {
-  const a = kreaFramingAdvisory({ width: 1024, height: 1024, framings: ['body'] });
-  assert.match(a.detail, /still generate/i, 'a square reference DOES produce body shots');
-  assert.doesNotMatch(a.detail, /impossible|cannot|won't work/i);
-  assert.match(a.detail, /other engines follow each shot/i,
-    'Klein and the API engines are untouched — the notice must not imply otherwise');
-  // Singular/plural is not a cosmetic detail on a one-shot run.
-  assert.match(a.headline, /1 of your 1 selected shot is a body or back framing/);
-});
-
-test('it stays quiet whenever it would be noise or a guess', () => {
-  // Already portrait — nothing to fix.
-  assert.equal(kreaFramingAdvisory({ width: 835, height: 1024, framings: bodyShots(17) }), null);
-  // Wide reference but only close framings selected: the square is FINE for those.
-  assert.equal(kreaFramingAdvisory({ width: 1024, height: 1024, framings: ['face', 'bust'] }), null);
-  // Nothing selected yet.
-  assert.equal(kreaFramingAdvisory({ width: 1024, height: 1024, framings: [] }), null);
-  // Unmeasurable reference (exotic format, missing file, Pillow absent server-side):
-  // an unknown shape is not a reason to alarm anyone.
-  assert.equal(kreaFramingAdvisory({ width: null, height: null, framings: bodyShots(5) }), null);
-  assert.equal(kreaFramingAdvisory({ framings: bodyShots(5) }), null);
-  assert.equal(kreaFramingAdvisory(), null);
-});
-
-test('an exotic reference still gets a straight answer', () => {
-  // Panoramic: the worst case, and the one most likely to surprise someone.
-  const pano = kreaFramingAdvisory({ width: 3840, height: 1080, framings: ['body', 'back'] });
-  assert.equal(pano.orientation, 'landscape');
-  assert.equal(pano.tight, 2);
-  // Tiny reference: the shape question is independent of the size question.
-  const tiny = kreaFramingAdvisory({ width: 256, height: 256, framings: ['body'] });
-  assert.equal(tiny.orientation, 'square');
-  assert.match(tiny.sizeLabel, /^256×256$/);
-});
-
-test('only body and back are treated as needing vertical room', () => {
-  assert.deepEqual(KREA_TIGHT_FRAMINGS, ['body', 'back']);
-  for (const fr of ['face', 'bust', 'unknown', '']) {
-    assert.equal(kreaFramingAdvisory({ width: 1024, height: 1024, framings: [fr] }), null, fr);
-  }
+  assert.match(groundingDescription(undefined), /default \(512\)/);
+  assert.match(groundingDescription('nonsense'), /default \(512\)/);
 });

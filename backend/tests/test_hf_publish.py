@@ -83,15 +83,15 @@ def test_metadata_jsonl_captions_have_trigger(app, tmp_path):
     lines = (tmp_path / 'metadata.jsonl').read_text(encoding='utf-8').splitlines()
     rows = [json.loads(l) for l in lines]
     assert info['count'] == 2 and len(rows) == 2
-    assert {r['file_name'] for r in rows} == {'Lola_001.webp', 'Lola_002.webp'}
+    assert {r['file_name'] for r in rows} == {'Lola_001.png', 'Lola_002.png'}
     # Caption carries the trigger inline (export contract).
     assert rows[0]['text'] == 'lola, a smile'
     assert rows[1]['text'] == 'lola, a wave'
     # Same-stem .txt sidecar exists next to each image.
     assert (tmp_path / 'Lola_001.txt').read_text(encoding='utf-8') == 'lola, a smile'
-    # webp kept as-is (no PNG re-encode).
-    assert (tmp_path / 'Lola_001.webp').exists()
-    assert not any(n.endswith('.png') for n in os.listdir(tmp_path))
+    # Public publication is a fresh, metadata-free PNG staging copy.
+    assert (tmp_path / 'Lola_001.png').exists()
+    assert not any(n.endswith('.webp') for n in os.listdir(tmp_path))
 
 
 def test_readme_front_matter_nfaa_and_license(app, tmp_path):
@@ -165,7 +165,51 @@ def test_include_ref_on_adds_anchor(app, tmp_path):
     ref = [r for r in rows if '_000_ref' in r['file_name']]
     assert info['count'] == 3 and len(ref) == 1
     assert ref[0]['text'] == 'lola'                       # ref caption = bare trigger
-    assert (tmp_path / 'Lola_000_ref.webp').exists()
+    assert (tmp_path / 'Lola_000_ref.png').exists()
+
+
+def test_publish_staging_png_bakes_orientation_and_strips_camera_metadata(app, tmp_path):
+    """A Hub-bound image is rebuilt from pixels: no EXIF/GPS/device name leaks.
+
+    The JPEG master itself remains an untouched source file; the orientation is
+    baked only into the disposable public PNG.
+    """
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+    from app.services import hf_publish
+    from PIL.TiffImagePlugin import IFDRational
+
+    with app.app_context():
+        ds_id = _make_dataset(app, captions=('a pose',), with_ref=False)
+        row = FaceDatasetImage.query.filter_by(dataset_id=ds_id).one()
+        master = os.path.join(svc._dataset_dir(ds_id), 'camera-master.jpg')
+        image = Image.new('RGB', (40, 20), (50, 120, 210))
+        exif = image.getexif()
+        exif[274] = 6
+        exif[271] = 'Private Camera'
+        # GPSInfo tag with a valid minimal GPS IFD. It is intentionally present
+        # on the master and must never survive the public staging copy.
+        exif[34853] = {1: 'N', 2: (IFDRational(48, 1), IFDRational(51, 1), IFDRational(0, 1)),
+                       3: 'E', 4: (IFDRational(2, 1), IFDRational(21, 1), IFDRational(0, 1))}
+        image.save(master, 'JPEG', quality=95, subsampling=0, exif=exif)
+        before = open(master, 'rb').read()
+        row.filename = 'camera-master.jpg'
+        svc.db.session.commit()
+
+        hf_publish.build_publish_dir(
+            'local', ds_id, str(tmp_path), include_ref=False,
+            license='cc0-1.0', nfaa=False,
+        )
+
+    staged = tmp_path / 'Lola_001.png'
+    payload = staged.read_bytes()
+    assert open(master, 'rb').read() == before
+    assert b'Private Camera' not in payload and b'Exif' not in payload and b'GPS' not in payload
+    with Image.open(staged) as published:
+        published.load()
+        assert published.format == 'PNG' and published.size == (20, 40)
+        assert not published.getexif()
+        assert 'XML:com.adobe.xmp' not in published.info
 
 
 # --- write-scope preflight ----------------------------------------------------
@@ -238,7 +282,8 @@ def test_publish_success_returns_url(app):
     assert api.created['exist_ok'] is False                # never silently overwrite
     # The uploaded folder carried the metadata + README + images.
     assert 'metadata.jsonl' in api.uploaded_files and 'README.md' in api.uploaded_files
-    assert any(n.endswith('.webp') for n in api.uploaded_files)
+    assert any(n.endswith('.png') for n in api.uploaded_files)
+    assert not any(n.endswith('.webp') for n in api.uploaded_files)
 
 
 def test_invalid_license_rejected(app):

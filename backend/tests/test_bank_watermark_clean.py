@@ -102,6 +102,53 @@ def test_crop_level_cleans_without_touching_the_source(client, tmp_path, app):
         assert im.height == 950 and im.width == 1000
 
 
+def test_bank_crop_uses_exif_visual_coordinates_and_keeps_camera_master(client, tmp_path, app):
+    """Bank clean works on a neutral upright derivative, never the source JPEG.
+
+    Vision's top-band bbox is expressed in visual space. A 1600×1000 raw JPEG
+    with EXIF=6 displays at 1000×1600, so a 10% top crop must yield 1000×1440.
+    """
+    bank_id, src = _mkbank(client, tmp_path, {'camera.jpg': _photo()})
+    camera = src / 'camera.jpg'
+    image = Image.new('RGB', (1600, 1000), (70, 130, 220))
+    exif = image.getexif()
+    exif[274] = 6
+    exif[271] = 'Private Camera'
+    image.save(camera, 'JPEG', quality=95, subsampling=0, exif=exif)
+    image_id = _flag(app, bank_id, [0.0, 0.0, 1.0, 0.10])
+    before = _fingerprint(camera)
+
+    assert client.post(f'/api/bank/{bank_id}/watermark/crop').status_code == 202
+
+    assert _fingerprint(camera) == before
+    with app.app_context():
+        from app.services import image_bank_service as banks
+        blob = banks.clean_image_path(bank_id, image_id)
+    payload = blob.read_bytes()
+    assert b'Private Camera' not in payload and b'Exif' not in payload
+    with Image.open(blob) as cleaned:
+        cleaned.load()
+        assert cleaned.format == 'WEBP' and cleaned.size == (1000, 1440)
+        assert not cleaned.getexif()
+
+
+def test_bank_levels_recompute_exif_visual_dimensions_not_raw_scan_dimensions(
+        client, tmp_path, app):
+    """The level badge must offer the same crop route the worker will take."""
+    bank_id, src = _mkbank(client, tmp_path, {'camera.jpg': _photo()})
+    camera = src / 'camera.jpg'
+    image = Image.new('RGB', (1600, 900), (70, 130, 220))
+    exif = image.getexif()
+    exif[274] = 6
+    image.save(camera, 'JPEG', quality=95, subsampling=0, exif=exif)
+    _flag(app, bank_id, [0.0, 0.0, 1.0, 0.20])
+
+    # Raw height 900 would retain only 720 px and fail the 768px crop guard;
+    # visual height 1600 retains 1200px and is correctly offered as croppable.
+    levels = client.get(f'/api/bank/{bank_id}/watermark/levels').get_json()
+    assert levels['croppable'] == 1
+
+
 def test_crop_level_leaves_everything_else_flagged(client, tmp_path, app):
     """Level 1 only touches what the router calls croppable — an off-centre and
     an on-subject mark stay flagged, which is exactly level 2's pool."""
@@ -261,6 +308,67 @@ def test_inpaint_level_repaints_what_the_crop_left(client, tmp_path, app,
     # The engine was handed OUR working copy, not the user's file.
     assert len(painted) == 1
     assert str(src) not in painted[0]
+
+
+@pytest.mark.parametrize('method, clean_method', [('lama', 'lama'), ('klein', 'klein')])
+def test_bank_inpaint_stages_exif_upright_metadata_free_copy_for_each_engine(
+        client, tmp_path, app, monkeypatch, method, clean_method):
+    """Both external engines receive the same visual, neutral Bank work file."""
+    from app.services import watermark_klein, watermark_lama
+
+    bank_id, src = _mkbank(client, tmp_path, {'camera.jpg': _photo()})
+    camera = src / 'camera.jpg'
+    image = Image.new('RGB', (1600, 1000), (40, 150, 70))
+    exif = image.getexif()
+    exif[274] = 6
+    exif[271] = 'Private Camera'
+    image.save(camera, 'JPEG', quality=95, subsampling=0, exif=exif)
+    # Manual regions make both engines actionable without depending on the
+    # automatic router's review branch.
+    image_id = _flag(app, bank_id, OFFCENTER_MARK)
+    with app.app_context():
+        from app.extensions import db
+        from app.models import BankImage
+        row = db.session.get(BankImage, image_id)
+        row.watermark_regions = json.dumps([[0.2, 0.2, 0.3, 0.3]])
+        db.session.commit()
+    before = _fingerprint(camera)
+    seen = []
+
+    def _assert_staged(path):
+        seen.append(path)
+        assert str(camera) != str(path)
+        assert _fingerprint(camera) == before
+        payload = open(path, 'rb').read()
+        assert b'Private Camera' not in payload and b'Exif' not in payload
+        with Image.open(path) as staged:
+            staged.load()
+            assert staged.format == 'WEBP' and staged.size == (1000, 1600)
+            assert not staged.getexif()
+
+    if method == 'lama':
+        monkeypatch.setattr(watermark_lama, 'is_available', lambda: True)
+        monkeypatch.setattr(watermark_lama, 'resolve_device', lambda: 'cpu')
+
+        def _batch(jobs, *, device, timeout=900):
+            for job in jobs:
+                _assert_staged(job['image_path'])
+            return {job['image_path']: (True, None) for job in jobs}
+
+        monkeypatch.setattr(watermark_lama, 'inpaint_batch', _batch)
+    else:
+        monkeypatch.setattr(watermark_klein, 'is_available', lambda: True)
+
+        def _klein(_user_id, path, _boxes, **_kwargs):
+            _assert_staged(path)
+            return True, None
+
+        monkeypatch.setattr(watermark_klein, 'inpaint_watermark_klein', _klein)
+
+    response = client.post(f'/api/bank/{bank_id}/watermark/inpaint', json={'method': method})
+    assert response.status_code == 202, response.get_json()
+    assert len(seen) == 1 and _fingerprint(camera) == before
+    assert _row(app, image_id) == ('cleaned', clean_method)
 
 
 def test_inpaint_level_leaves_on_subject_marks_for_klein(client, tmp_path, app,

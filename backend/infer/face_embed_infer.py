@@ -30,6 +30,7 @@ CACHE_EVERY = 50
 DET_MIN, BBOX_MIN, YAW_MAX = 0.50, 0.06, 40.0   # same gates as face_score_infer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from bank_image_guard import read_validated_bank_image  # noqa: E402
 from face_score_infer import _repair_nested_antelopev2  # noqa: E402
 
 
@@ -201,7 +202,12 @@ def main() -> int:
             return 0
         for i, p in enumerate(todo, 1):
             try:
-                img = cv2.imread(p)
+                # Read a bounded, validated snapshot rather than opening the
+                # live Bank path with cv2.  The parent can only preflight a
+                # path; it cannot stop that path being replaced before this
+                # dedicated interpreter starts.
+                payload = read_validated_bank_image(p)
+                img = cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_COLOR)
                 if img is None:
                     cache[p] = ('unreadable', 0.0, 0.0, zero)
                 else:

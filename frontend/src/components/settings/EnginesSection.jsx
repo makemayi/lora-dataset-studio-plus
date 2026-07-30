@@ -242,7 +242,7 @@ function KreaCard({ config, setField, configDefaults }) {
     <Card
       id="krea-engine"
       title="Krea 2 Edit (local)"
-      help="The second local engine. It re-stages your reference photo — new angle, framing, light, background — while keeping the face and the body, from that ONE photo and with no character LoRA, which is what makes it useful before a LoRA exists. It needs the comfyui-krea2edit custom-node pack plus four model files; the engine card in the workspace names whatever is still missing. Its output always keeps the reference's aspect ratio (capped at 2 MP) — the shot catalog's aspect overrides do not apply — because the model was trained on same-size pairs."
+      help="The second local engine. It re-stages your reference photo — new angle, framing, light, background — while keeping the face and the body, from that ONE photo and with no character LoRA, which is what makes it useful before a LoRA exists. It needs the comfyui-krea2edit custom-node pack plus four model files; the engine card in the workspace names whatever is still missing. Krea Fit v1.2 honors the selected shot card's framing and aspect ratio instead of copying the source photo's shape."
     >
       <div className="sm:max-w-md">
         <label htmlFor="krea-grounding" className="block text-xs font-medium text-content">
@@ -260,10 +260,12 @@ function KreaCard({ config, setField, configDefaults }) {
         />
         <p className="mt-1 text-[0.6875rem] text-content-subtle">
           The resolution your reference is shown to the model&rsquo;s vision encoder at — the
-          consistency ↔ prompt dial. <b>Lower</b> = it follows the shot description (more
+          consistency ↔ prompt dial. At the low end it follows the shot description (more
           variety in pose, outfit and scene, looser likeness). <b>Higher</b> = it resembles
-          the reference more, but starts copying the pose and outfit you asked it to change.
-          1024 px is the recommended balance for people; the node&rsquo;s own default is 768.
+          the reference more, but can copy the pose and outfit you asked it to change.
+          512 px is the dataset-restaging balance: it keeps the prompt and selected shot card
+          in charge while preserving identity. Raise it deliberately when reference likeness
+          matters more.
         </p>
         <ResetToDefault label="Reference grounding" section="krea" field="grounding_px" {...reset} />
       </div>

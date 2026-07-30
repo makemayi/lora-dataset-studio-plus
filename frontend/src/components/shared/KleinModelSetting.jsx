@@ -10,15 +10,23 @@
    root file). A second scanner would drift from the first one — the backend test
    test_improve_klein_model_choice asserts the two ends layout by layout.
 
+   WITHOUT a datasetId it becomes the naming half only: it reads the global
+   /api/klein-model and states which model will run, with no <select>. That is the
+   bank's watermark inpaint — a bank has no dataset to inherit a pick from, and
+   adding a picker there would create a second place to choose a Klein model for
+   the same UNETLoader. Naming and choosing are separate questions, and the naming
+   one is the half that works on every screen (backend counterpart: the comment at
+   image_bank_service's Klein call site).
+
    Wording and every conditional live in kleinModelChoice.js (pure JS) so
    `node --test` can cover them without a JSX parser. */
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch, postJson } from '../../api/fetchClient';
 import {
-  legacyNotice, modelLine, readLegacyPick, selectValue,
+  canChooseModel, legacyNotice, modelEndpoint, modelLine, readLegacyPick, selectValue,
 } from './kleinModelChoice';
 
-export default function KleinModelSetting({ datasetId, className = '', onChange }) {
+export default function KleinModelSetting({ datasetId = null, className = '', onChange }) {
   const [state, setState] = useState({ loaded: false, stored: null, effective: null,
     missing: null, choices: [] });
   const [legacy, setLegacy] = useState('');
@@ -26,12 +34,13 @@ export default function KleinModelSetting({ datasetId, className = '', onChange 
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!datasetId) return undefined;
     let cancelled = false;
-    setLegacy(readLegacyPick(typeof localStorage === 'undefined' ? null : localStorage));
+    setLegacy(datasetId
+      ? readLegacyPick(typeof localStorage === 'undefined' ? null : localStorage)
+      : '');
     // background: a model list is never worth a toast — the line degrades to
     // "Runs on the Klein model Studio detects" and the picker simply stays away.
-    apiFetch(`/api/dataset/${datasetId}/klein-model`, { background: true })
+    apiFetch(modelEndpoint(datasetId), { background: true })
       .then((d) => {
         if (cancelled || !d || !d.ok) return;
         setState({ loaded: true, stored: d.stored || null, effective: d.effective || null,
@@ -54,11 +63,9 @@ export default function KleinModelSetting({ datasetId, className = '', onChange 
     onChange?.(d.stored || null);
   }, [datasetId, onChange]);
 
-  if (!datasetId) return null;
-
   const line = modelLine(state);
   const notice = dismissed ? null : legacyNotice({ ...state, legacy });
-  const canChoose = (state.choices || []).length >= 2;
+  const canChoose = canChooseModel({ datasetId, choices: state.choices });
 
   return (
     <div className={`min-w-0 space-y-1 text-[0.6875rem] leading-relaxed ${className}`}>

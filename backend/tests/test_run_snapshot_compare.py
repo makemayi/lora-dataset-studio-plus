@@ -339,6 +339,20 @@ def test_archive_stores_one_blob_per_distinct_content(app):
         assert again['added'] == 0 and again['skipped'] == 1
 
 
+def test_archive_keeps_a_preserved_bmp_addressable(app, tmp_path):
+    """A dataset BMP must not fall through the archive's old PNG fallback: the
+    comparison route needs the real extension to serve it as image/bmp later."""
+    source = tmp_path / 'master.bmp'
+    source.write_bytes(b'BMnot-a-real-bitmap-but-the-archive-must-copy-bytes')
+    with app.app_context():
+        sig = 'beefcafe'
+        result = run_archive.store([(str(source), sig, source.name)])
+        archived = run_archive.path_for(sig)
+    assert result['added'] == 1
+    assert archived and archived.endswith('.bmp')
+    assert open(archived, 'rb').read() == source.read_bytes()
+
+
 def test_archive_stops_at_its_ceiling_instead_of_eating_the_disk(app):
     with app.app_context():
         from app import config as cfg

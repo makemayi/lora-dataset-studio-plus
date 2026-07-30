@@ -18,6 +18,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { apiFetch, postJson } from '../../api/fetchClient'
+import KleinModelSetting from '../shared/KleinModelSetting'
 import { useCapabilities } from '../../context/CapabilitiesContext'
 import { useToast } from '../common/Toast'
 import {
@@ -173,6 +174,12 @@ export default function BankWatermarkPanel({ bankId, live, onChanged }) {
             Klein <span className="font-normal opacity-70">quality</span>
           </button>
         </div>
+        {/* WHICH Klein model is about to repaint these images. A bank has no
+            dataset to inherit a choice from, so there is nothing to pick here —
+            but "no choice" was never a reason to stay silent about the model.
+            w-full: this drops onto its own line rather than squeezing the
+            toggle at 400 px. */}
+        {method === 'klein' && <KleinModelSetting className="w-full" />}
         {cleaned && (
           <>
             <button type="button" disabled={live}

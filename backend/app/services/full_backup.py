@@ -97,6 +97,37 @@ _DISK_HEADROOM_FACTOR = 1.10
 # this is almost certainly not one of ours (or is corrupt) — reject before looping.
 _MAX_DATASET_ENTRIES = 5000
 
+# Restore limits apply to the OUTER/master ZIP before a single member is opened.
+# Dataset archives are already protected by the portable-backup validator, but that
+# runs only after the master member has been copied to disk.  Keep the same 2 GiB
+# envelope for one embedded dataset archive, and give a (normally much smaller)
+# .safetensors the same ceiling.  The aggregate below intentionally matches the
+# full-restore upload envelope; a locally built master larger than that must be
+# split or handled outside this upload/restore path.
+_MAX_MASTER_ENTRIES = 50_000
+_MAX_MASTER_DATASET_BYTES = svc._BACKUP_MAX_BYTES
+_MAX_MASTER_LORA_BYTES = svc._BACKUP_MAX_BYTES
+# The full-restore upload already uses this same 2 GiB archive envelope.  Applying
+# it to the aggregate *decompressed* master members is what prevents a tiny
+# DEFLATEd master from consuming arbitrary staging/destination disk.
+_MAX_MASTER_TOTAL_BYTES = svc._BACKUP_MAX_BYTES
+
+# Metadata is read into memory, unlike the large payloads which are streamed.  The
+# generous ceilings preserve v1/v2 backups while keeping a compressed config/runs
+# member from becoming an in-memory bomb before JSON validation.
+_MAX_MASTER_MANIFEST_BYTES = 16 * 1024 * 1024
+_MAX_MASTER_CONFIG_BYTES = 16 * 1024 * 1024
+_MAX_MASTER_RUNS_BYTES = 128 * 1024 * 1024
+_ZIP_COPY_CHUNK_BYTES = 1024 * 1024
+
+# Exact layout emitted by build_full_backup.  Restricting the central directory
+# to these names rejects traversal, surprise members and platform-specific path
+# separators before any member can be opened.
+_MASTER_DATASET_ENTRY_RE = re.compile(
+    r'^datasets/[0-9]+-[A-Za-z0-9._-]+\.zip$')
+_MASTER_LORA_ENTRY_RE = re.compile(
+    r'^loras/[0-9]+/[A-Za-z0-9][A-Za-z0-9._-]*/[\w.\- ]+\.safetensors$')
+
 
 class AlreadyRunning(Exception):
     """A backup/restore of the same kind is already in flight."""
@@ -196,6 +227,123 @@ def _new_temp(suffix: str = '.zip') -> str:
     fd, path = tempfile.mkstemp(dir=str(cfg.backups_dir()), suffix=suffix)
     os.close(fd)
     return path
+
+
+class _MasterExtractionLimitError(ValueError):
+    """The actual bytes emitted by a master ZIP exceeded its validated bounds."""
+
+
+class _MasterExtractionBudget:
+    """Track actual bytes, independently of ZIP central-directory metadata."""
+
+    def __init__(self, maximum: int):
+        self.remaining = maximum
+
+    def consume(self, count: int, entry: str) -> None:
+        if count > self.remaining:
+            raise _MasterExtractionLimitError(
+                f'full backup extraction exceeds the '
+                f'{_MAX_MASTER_TOTAL_BYTES // (1024 * 1024 * 1024)} GiB limit '
+                f'while reading {entry!r}')
+        self.remaining -= count
+
+
+def _master_entry_limit(name: str) -> Optional[int]:
+    """Maximum uncompressed bytes for one allowed master-archive member.
+
+    ``None`` marks a name that a full backup never writes.  This is intentionally
+    based only on the central directory; callers run it before ``ZipFile.open``.
+    """
+    if name == _MANIFEST_NAME:
+        return _MAX_MASTER_MANIFEST_BYTES
+    if name == _CONFIG_NAME:
+        return _MAX_MASTER_CONFIG_BYTES
+    if name == _RUNS_NAME:
+        return _MAX_MASTER_RUNS_BYTES
+    if _MASTER_DATASET_ENTRY_RE.fullmatch(name):
+        return _MAX_MASTER_DATASET_BYTES
+    if _MASTER_LORA_ENTRY_RE.fullmatch(name):
+        return _MAX_MASTER_LORA_BYTES
+    return None
+
+
+def _validate_master_archive(z: zipfile.ZipFile) -> dict:
+    """Validate a master ZIP's central directory before opening any member.
+
+    A hostile master can DEFLATE an otherwise huge nested dataset ZIP or LoRA.
+    The inner dataset validator would then be too late, because copying the outer
+    entry has already consumed temporary-disk space.  Names, duplicates, member
+    counts and declared uncompressed sizes are therefore checked up front.
+    """
+    infos = z.infolist()
+    if len(infos) > _MAX_MASTER_ENTRIES:
+        raise ValueError(f'too many entries in full backup (max {_MAX_MASTER_ENTRIES})')
+
+    entries = {}
+    total = 0
+    for info in infos:
+        name = info.filename
+        if name in entries:
+            raise ValueError(f'duplicate entry in full backup: {name!r}')
+        if info.is_dir():
+            raise ValueError(f'not a full backup (unexpected directory: {name!r})')
+        if info.flag_bits & 0x1:
+            raise ValueError(f'encrypted entry in full backup: {name!r}')
+        maximum = _master_entry_limit(name)
+        if maximum is None:
+            raise ValueError(f'not a full backup (unexpected entry: {name!r})')
+        if info.file_size > maximum:
+            raise ValueError(
+                f'full backup entry {name!r} is too large '
+                f'(max {maximum // (1024 * 1024)} MiB)')
+        total += info.file_size
+        if total > _MAX_MASTER_TOTAL_BYTES:
+            raise ValueError(
+                f'full backup uncompressed contents exceed the '
+                f'{_MAX_MASTER_TOTAL_BYTES // (1024 * 1024 * 1024)} GiB limit')
+        entries[name] = info
+
+    if _MANIFEST_NAME not in entries:
+        raise ValueError('not a full backup (manifest.json missing)')
+    return entries
+
+
+def _read_master_entry_bounded(z: zipfile.ZipFile, info: zipfile.ZipInfo, *,
+                               maximum: int, budget: _MasterExtractionBudget) -> bytes:
+    """Read one metadata member with an actual-byte cap and shared budget."""
+    allowed = min(maximum, budget.remaining)
+    with z.open(info) as source:
+        raw = source.read(allowed + 1)
+    if len(raw) > maximum:
+        raise _MasterExtractionLimitError(
+            f'full backup entry {info.filename!r} exceeds its size limit')
+    budget.consume(len(raw), info.filename)
+    return raw
+
+
+def _copy_master_entry_bounded(source, destination, *, entry: str, maximum: int,
+                               budget: _MasterExtractionBudget) -> int:
+    """Stream one payload member without trusting the ZIP's declared size."""
+    copied = 0
+    while True:
+        # One extra byte makes a central-directory lie fail before an unbounded
+        # read can be written to a temporary dataset or LoRA file.
+        allowed = min(maximum - copied, budget.remaining - copied)
+        chunk = source.read(min(_ZIP_COPY_CHUNK_BYTES, allowed + 1))
+        if not chunk:
+            break
+        copied += len(chunk)
+        if copied > maximum:
+            raise _MasterExtractionLimitError(
+                f'full backup entry {entry!r} exceeds its size limit')
+        if copied > budget.remaining:
+            raise _MasterExtractionLimitError(
+                f'full backup extraction exceeds the '
+                f'{_MAX_MASTER_TOTAL_BYTES // (1024 * 1024 * 1024)} GiB limit '
+                f'while reading {entry!r}')
+        destination.write(chunk)
+    budget.consume(copied, entry)
+    return copied
 
 
 ProgressCb = Optional[Callable[[int, int, Optional[str]], None]]
@@ -382,7 +530,13 @@ def build_full_backup(user_id, out_path: str, *, progress: ProgressCb = None,
 
 def detect_backup_format(stream) -> Optional[str]:
     """The 'format' field of a backup zip's manifest, or None when the stream is
-    not a readable backup. Leaves the stream rewound for the caller."""
+    not a readable backup. Leaves the stream rewound for the caller.
+
+    This runs in the upload request before a full restore is moved into its
+    worker.  It deliberately opens only a single, size-bounded manifest member;
+    the worker performs the complete master central-directory validation before
+    touching config or payloads.
+    """
     try:
         stream.seek(0)
     except (OSError, ValueError, AttributeError):
@@ -390,8 +544,21 @@ def detect_backup_format(stream) -> Optional[str]:
     fmt = None
     try:
         with zipfile.ZipFile(stream) as z:
-            if _MANIFEST_NAME in z.namelist():
-                manifest = json.loads(z.read(_MANIFEST_NAME).decode('utf-8'))
+            infos = z.infolist()
+            if len(infos) > _MAX_MASTER_ENTRIES:
+                return None
+            manifests = [info for info in infos
+                         if info.filename == _MANIFEST_NAME]
+            if len(manifests) == 1:
+                info = manifests[0]
+                if info.is_dir() or info.flag_bits & 0x1:
+                    return None
+                if info.file_size > _MAX_MASTER_MANIFEST_BYTES:
+                    return None
+                budget = _MasterExtractionBudget(_MAX_MASTER_MANIFEST_BYTES)
+                manifest = json.loads(_read_master_entry_bounded(
+                    z, info, maximum=_MAX_MASTER_MANIFEST_BYTES,
+                    budget=budget).decode('utf-8'))
                 if isinstance(manifest, dict):
                     fmt = manifest.get('format')
     except (zipfile.BadZipFile, ValueError, KeyError, UnicodeError):
@@ -418,6 +585,31 @@ def _dedupe_name(base: str, taken: set) -> str:
     return f'{base} (restored {n})'[:100]
 
 
+def _dataset_entry_sources_from_manifest(manifest: dict) -> dict:
+    """Return the portable source-id map, rejecting malformed metadata early.
+
+    This happens before config is merged: a malformed ``datasets`` value must not
+    turn into a TypeError later in restore after the archive configuration was
+    already persisted.
+    """
+    datasets = manifest.get('datasets')
+    if not isinstance(datasets, list):
+        raise ValueError('invalid full-backup datasets manifest')
+    sources = {}
+    for item in datasets:
+        if not isinstance(item, dict):
+            raise ValueError('invalid full-backup datasets manifest')
+        source_id = item.get('source_id')
+        entry = item.get('entry')
+        if (isinstance(source_id, bool) or not isinstance(source_id, int)
+                or not isinstance(entry, str) or not entry):
+            raise ValueError('invalid full-backup datasets manifest')
+        if entry in sources:
+            raise ValueError('duplicate dataset entry in full-backup manifest')
+        sources[entry] = source_id
+    return sources
+
+
 def restore_full_backup(user_id, master_path: str, *,
                         progress: ProgressCb = None) -> dict:
     """Rebuild config + datasets from a master archive. Config merges
@@ -429,13 +621,21 @@ def restore_full_backup(user_id, master_path: str, *,
     trained LoRA files ride along only if the backup carried them AND ComfyUI is
     configured — a missing file is reported, never a lost "Trained" status.
     Returns {ok, datasets_total, restored, skipped, renamed, config_restored,
-    runs_restored, loras_restored, loras_skipped:[{name,reason}]}."""
+    runs_restored, loras_restored, loras_skipped:[{name,reason}]}.
+    """
     with zipfile.ZipFile(master_path) as z:
-        names = z.namelist()
-        if _MANIFEST_NAME not in names:
-            raise ValueError('not a full backup (manifest.json missing)')
+        # This must be the first archive operation: z.read() calls z.open() too,
+        # and saving config before rejecting a hostile member would be a partial
+        # restore.  The validator only inspects the central directory.
+        entry_infos = _validate_master_archive(z)
+        names = set(entry_infos)
+        budget = _MasterExtractionBudget(_MAX_MASTER_TOTAL_BYTES)
         try:
-            manifest = json.loads(z.read(_MANIFEST_NAME).decode('utf-8'))
+            manifest = json.loads(_read_master_entry_bounded(
+                z, entry_infos[_MANIFEST_NAME],
+                maximum=_MAX_MASTER_MANIFEST_BYTES, budget=budget).decode('utf-8'))
+        except _MasterExtractionLimitError:
+            raise
         except (ValueError, UnicodeError):
             raise ValueError('not a full backup (unreadable manifest)')
         if not isinstance(manifest, dict) or manifest.get('format') != FULL_BACKUP_FORMAT:
@@ -446,10 +646,19 @@ def restore_full_backup(user_id, master_path: str, *,
         if version > FULL_BACKUP_VERSION:
             raise ValueError('backup made by a newer version of the app - update first')
 
+        # Validate this manifest-owned map before config is touched.  Otherwise a
+        # malformed datasets value can crash the old mapping loop after a partial
+        # configuration restore.
+        entry_source = _dataset_entry_sources_from_manifest(manifest)
+
         config_restored = False
         if _CONFIG_NAME in names:
             try:
-                incoming = json.loads(z.read(_CONFIG_NAME).decode('utf-8'))
+                incoming = json.loads(_read_master_entry_bounded(
+                    z, entry_infos[_CONFIG_NAME],
+                    maximum=_MAX_MASTER_CONFIG_BYTES, budget=budget).decode('utf-8'))
+            except _MasterExtractionLimitError:
+                raise
             except (ValueError, UnicodeError):
                 incoming = None
             sanitized = _sanitize_incoming_config(incoming)
@@ -457,17 +666,7 @@ def restore_full_backup(user_id, master_path: str, *,
                 cfg.save_config(sanitized)
                 config_restored = True
 
-        # entry -> source dataset id, so a restored run/LoRA can be remapped to the
-        # newly allocated dataset id. Missing/legacy manifests leave the map empty
-        # (v1 archives carry no runs anyway).
-        entry_source = {}
-        for d in (manifest.get('datasets') or []):
-            if isinstance(d, dict) and isinstance(d.get('source_id'), int):
-                entry_source[d.get('entry')] = d['source_id']
-
-        entries = sorted(n for n in names
-                         if n.startswith(_DATASETS_PREFIX) and n.endswith('.zip')
-                         and '/' not in n[len(_DATASETS_PREFIX):])
+        entries = sorted(n for n in names if _MASTER_DATASET_ENTRY_RE.fullmatch(n))
         if len(entries) > _MAX_DATASET_ENTRIES:
             raise ValueError('too many datasets in backup')
         total = len(entries)
@@ -483,8 +682,10 @@ def restore_full_backup(user_id, master_path: str, *,
             tmp = None
             try:
                 tmp = _new_temp()
-                with z.open(entry) as src, open(tmp, 'wb') as dst:
-                    shutil.copyfileobj(src, dst, 1024 * 1024)
+                with z.open(entry_infos[entry]) as src, open(tmp, 'wb') as dst:
+                    _copy_master_entry_bounded(
+                        src, dst, entry=entry,
+                        maximum=_MAX_MASTER_DATASET_BYTES, budget=budget)
                 with open(tmp, 'rb') as fh:
                     ds = svc.import_backup_zip(user_id, fh)
                 name = (ds.name or '').strip()
@@ -499,6 +700,8 @@ def restore_full_backup(user_id, master_path: str, *,
                 if isinstance(sid, int):
                     id_map[sid] = ds.id
                 restored += 1
+            except _MasterExtractionLimitError:
+                raise
             except Exception as exc:
                 logger.exception('full restore: entry %r skipped', entry)
                 skipped.append({'entry': entry, 'reason': _friendly(exc)})
@@ -511,9 +714,9 @@ def restore_full_backup(user_id, master_path: str, *,
             if progress:
                 progress(i + 1, total, entry)
 
-        runs_restored = _restore_runs(z, names, id_map)
+        runs_restored = _restore_runs(z, entry_infos, id_map, budget)
         loras_restored, loras_skipped = _restore_loras(
-            user_id, z, manifest, id_map)
+            user_id, z, manifest, id_map, entry_infos, budget)
     # Same-machine safety net: the app already back-fills a v1 baseline when a
     # dataset is OPENED and on-disk training evidence (local checkpoints / deployed
     # LoRAs) exists but nothing is registered. Do it now, per restored dataset, so
@@ -580,17 +783,21 @@ def _resync_training_state(user_id, new_ids) -> int:
     return created
 
 
-def _restore_runs(z, names, id_map) -> int:
+def _restore_runs(z, entry_infos, id_map, budget) -> int:
     """Recreate TrainingRunRecord rows for every restored dataset, remapped to the
     new ids (new autoincrement rows — never a source id, so nothing collides with
     the destination's own runs). cloud_run_id is dropped (see _RUN_FIELDS). The
     LATEST record of each (dataset, family) is re-fingerprinted against the freshly
     imported dataset so the Runs hub reads "no change since" rather than spurious
     churn from the source's now-defunct image ids. Returns the count restored."""
-    if _RUNS_NAME not in names or not id_map:
+    if _RUNS_NAME not in entry_infos or not id_map:
         return 0
     try:
-        runs = json.loads(z.read(_RUNS_NAME).decode('utf-8'))
+        runs = json.loads(_read_master_entry_bounded(
+            z, entry_infos[_RUNS_NAME], maximum=_MAX_MASTER_RUNS_BYTES,
+            budget=budget).decode('utf-8'))
+    except _MasterExtractionLimitError:
+        raise
     except (ValueError, UnicodeError, KeyError):
         return 0
     if not isinstance(runs, list):
@@ -657,7 +864,7 @@ def _restore_runs(z, names, id_map) -> int:
     return created
 
 
-def _restore_loras(user_id, z, manifest, id_map):
+def _restore_loras(user_id, z, manifest, id_map, entry_infos, budget):
     """Copy the backup's trained .safetensors back into each restored dataset's
     ComfyUI loras folder. Non-destructive: an already-present file is left alone.
     A file whose ComfyUI family folder can't be resolved (ComfyUI unconfigured on
@@ -667,7 +874,6 @@ def _restore_loras(user_id, z, manifest, id_map):
     entries = manifest.get('loras') if isinstance(manifest, dict) else None
     if not isinstance(entries, list) or not id_map:
         return 0, []
-    names = set(z.namelist())
     restored = 0
     skipped = []
     for item in entries:
@@ -677,8 +883,14 @@ def _restore_loras(user_id, z, manifest, id_map):
         family = item.get('family')
         name = item.get('name')
         entry = item.get('entry')
-        new_id = id_map.get(src_id)
-        if (new_id is None or not family or not name or entry not in names
+        new_id = id_map.get(src_id) if isinstance(src_id, int) else None
+        expected_entry = (f'{_LORAS_PREFIX}{src_id}/{family}/{name}'
+                          if isinstance(src_id, int) and isinstance(family, str)
+                          and isinstance(name, str) else None)
+        info = entry_infos.get(entry) if isinstance(entry, str) else None
+        if (new_id is None or not family or not name or info is None
+                or entry != expected_entry
+                or not _MASTER_LORA_ENTRY_RE.fullmatch(entry)
                 or not _LORA_NAME_RE.fullmatch(str(name))):
             if name:
                 skipped.append({'name': str(name),
@@ -694,18 +906,26 @@ def _restore_loras(user_id, z, manifest, id_map):
         if os.path.isfile(dest):
             skipped.append({'name': str(name), 'reason': 'already present'})
             continue
+        tmp = dest + '.part'
         try:
             os.makedirs(dest_dir, exist_ok=True)
-            tmp = dest + '.part'
-            with z.open(entry) as src, open(tmp, 'wb') as out:
-                shutil.copyfileobj(src, out, 1024 * 1024)
+            with z.open(info) as src, open(tmp, 'wb') as out:
+                _copy_master_entry_bounded(
+                    src, out, entry=entry, maximum=_MAX_MASTER_LORA_BYTES,
+                    budget=budget)
             os.replace(tmp, dest)
             restored += 1
+        except _MasterExtractionLimitError:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
         except Exception as exc:
             logger.exception('full restore: LoRA %r could not be placed', name)
             skipped.append({'name': str(name), 'reason': _friendly(exc)})
             try:
-                os.remove(dest + '.part')
+                os.remove(tmp)
             except OSError:
                 pass
     return restored, skipped

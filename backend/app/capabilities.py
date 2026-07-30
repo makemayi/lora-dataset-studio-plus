@@ -164,7 +164,11 @@ def _dataset_import_policy() -> dict:
     from .services import face_dataset_service as _fds
     p = _fds.import_encode_policy()
     return {'max_side': p['max_side'], 'encoding': p['encoding'],
-            'capped': p['capped'], 'ceiling': p['ceiling']}
+            'capped': p['capped'], 'ceiling': p['ceiling'],
+            'input_max_side': p['input_max_side'],
+            'input_max_pixels': p['input_max_pixels'],
+            'preserve_max_side': p['preserve_max_side'],
+            'preserve_max_pixels': p['preserve_max_pixels']}
 
 
 def comfyui_down_message(status, waited) -> str:
@@ -1160,6 +1164,16 @@ def classify_comfyui_folders(base_dir: str, overrides: dict | None = None) -> di
         explicit = str(overrides.get(key) or '').strip()
         p = cfg.resolve_comfyui_dir(kind, base_dir, explicit)
         resolved = str(p) if p else ''
+        source = 'override' if explicit else ('derived' if resolved else 'unset')
+        if kind == 'loras' and not explicit:
+            # Deploys follow extra_model_paths.yaml (GitHub #25), so this preview
+            # has to as well — showing <base>/models/loras while LoRAs land in a
+            # yaml root would rebuild the very divergence that bug WAS. Only for
+            # the SAVED install: the yaml is read next to the live base_dir, so a
+            # not-yet-saved base_dir would be described with another tree's yaml.
+            yaml_root = _yaml_loras_root(base_dir)
+            if yaml_root and yaml_root != resolved:
+                resolved, source = yaml_root, 'extra_paths'
         try:
             exists = bool(resolved) and Path(resolved).is_dir()
         except OSError:
@@ -1168,11 +1182,26 @@ def classify_comfyui_folders(base_dir: str, overrides: dict | None = None) -> di
         if exists:
             verdict = comfy_fs.probe_folder(kind, resolved)
             usable, problem = verdict['ok'], verdict['problem']
-        out[key] = {'kind': kind,
-                    'source': 'override' if explicit else ('derived' if resolved else 'unset'),
+        out[key] = {'kind': kind, 'source': source,
                     'resolved': resolved, 'exists': exists,
                     'usable': usable, 'problem': problem}
     return out
+
+
+def _yaml_loras_root(base_dir: str) -> str:
+    """The loras root ``extra_model_paths.yaml`` puts first, or '' when there is no
+    yaml, no saved install, or the previewed base_dir is not the saved one (the
+    yaml lives next to the SAVED base_dir — describing another tree with it would
+    be a lie). Never raises."""
+    try:
+        saved = (cfg.get('comfyui.base_dir') or '').strip()
+        if not saved or os.path.normcase(os.path.normpath(saved)) != \
+                os.path.normcase(os.path.normpath((base_dir or '').strip() or '.')):
+            return ''
+        from .services import comfy_model_paths
+        return comfy_model_paths.write_root('loras') or ''
+    except Exception:
+        return ''
 
 
 # ComfyUI takes its custom folders on the COMMAND LINE only (--input-directory,
