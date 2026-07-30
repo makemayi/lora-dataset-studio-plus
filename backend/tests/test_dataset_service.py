@@ -1550,3 +1550,22 @@ def test_subscription_disconnect_never_falls_back_to_api_key(app, monkeypatch):
             row = svc.db.session.get(FaceDatasetImage, r.id)
             assert row.status == 'failed'
             assert 'connection lost' in row.fail_reason
+
+
+def test_register_launch_defaults_trainer_to_ai_toolkit(app):
+    from app.services import checkpoint_registry as cr, face_dataset_service as svc
+    from app.config import LOCAL_USER
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'A', 'a')
+        rec = cr.register_launch(LOCAL_USER, ds.id, family='krea', source='local')
+        assert rec.trainer == 'ai_toolkit'
+
+
+def test_register_launch_accepts_an_explicit_trainer(app):
+    from app.services import checkpoint_registry as cr, face_dataset_service as svc
+    from app.config import LOCAL_USER
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'B', 'b')
+        rec = cr.register_launch(LOCAL_USER, ds.id, family='krea', source='local',
+                                 trainer='onetrainer')
+        assert rec.trainer == 'onetrainer'

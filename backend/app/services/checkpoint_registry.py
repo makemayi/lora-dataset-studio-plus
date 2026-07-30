@@ -134,7 +134,7 @@ def prepare_launch(user_id, dataset_id, base_model=None):
 def register_launch(user_id, dataset_id, family, source, base_model='',
                     variant=None, masked=True, steps=None, cloud_run_id=None,
                     settings=None, parent_record_id=None, resumed_from=None,
-                    prepared=None):
+                    prepared=None, trainer='ai_toolkit'):
     """Record a training launch and return its TrainingRunRecord (or None on
     failure — provenance must never block a launch).
 
@@ -165,7 +165,7 @@ def register_launch(user_id, dataset_id, family, source, base_model='',
                       .order_by(TrainingRunRecord.version.desc()).first())
             version = (newest.version + 1) if newest else 1
         rec = TrainingRunRecord(
-            dataset_id=dataset_id, family=family, source=source,
+            dataset_id=dataset_id, family=family, source=source, trainer=trainer,
             cloud_run_id=cloud_run_id, base_model=base_model or '',
             variant=variant, masked=bool(masked), steps=steps,
             settings=json.dumps(settings) if settings else None,
