@@ -1029,6 +1029,7 @@ export function useDataset() {
     const d = await postJson(`/api/dataset/${currentId}/train`,
       { base_model: opts.baseModel || '', variant: opts.variant || 'turbo',
         train_type: opts.trainType || 'zimage',
+        trainer: opts.trainer || 'ai_toolkit',
         allow_caption_mismatch: !!opts.allowCaptionMismatch,
         // Images sans caption : plus un mur — confirm « train anyway » dans
         // TrainingPanel (marqueur UNCAPTIONED:), même flux que le mismatch.

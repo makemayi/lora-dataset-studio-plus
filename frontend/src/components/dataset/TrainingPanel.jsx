@@ -188,6 +188,10 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   const [variant, setVariant] = useState('turbo');
   // Type de LoRA : 'zimage' (défaut, encodeur Qwen3-4B) ou 'sdxl' (checkpoints ComfyUI).
   const [trainType, setTrainType] = useState('zimage');
+  // Local trainer for THIS run — 'ai_toolkit' (default) or 'onetrainer'. Krea 2
+  // only in this slice; reset to 'ai_toolkit' whenever trainType leaves 'krea'
+  // so a stale OneTrainer pick can never silently apply to an unsupported family.
+  const [trainer, setTrainer] = useState('ai_toolkit');
   // Navigateur de résultats indépendant : changer la configuration du PROCHAIN
   // entraînement ne doit jamais faire disparaître les checkpoints que l'utilisateur
   // est en train de consulter dans la section dédiée.
@@ -376,6 +380,9 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
     // Z-Image → Turbo est le chemin sûr : base Turbo + adaptateur d'entraînement v2.
     // Cela empêche une variante Krea/Klein persistée de survivre en silence au switch.
     setVariant(nextVariant);
+    // OneTrainer is Krea 2-only in this slice — a stale pick must never apply
+    // silently to a family that doesn't support it.
+    setTrainer('ai_toolkit');
     let saved;
     try {
       saved = await ds.setDatasetTrainType?.(t);
@@ -1634,7 +1641,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                                    allow_uncaptioned: 'allowUncaptioned',
                                    allow_caption_quality: 'allowCaptionQuality',
                                    allow_unverified_weights: 'allowUnverifiedWeights' };
-            let opts = { baseModel: base, variant, trainType, masked: maskedOpt,
+            let opts = { baseModel: base, variant, trainType, trainer, masked: maskedOpt,
                          steps: stepsN, fresh,
                          vaePath, tePath, allowNotReady };
             let d = await ds.train(opts);
@@ -2005,6 +2012,18 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                   className="px-2 py-1 rounded-lg border border-border bg-surface text-content text-[0.75rem]">
                   <option value="base">Raw (recommended)</option>
                   <option value="turbo">Turbo (w/ adapter)</option>
+                </select>
+              )}
+              {/* Local trainer — Krea 2 only in this slice. ai-toolkit stays the
+                  default everywhere; OneTrainer needs its own folder set in Settings. */}
+              {trainType === 'krea' && (
+                <select value={trainer} onChange={(e) => setTrainer(e.target.value)}
+                  disabled={status.in_progress}
+                  aria-label="Local trainer to use for this run"
+                  title="ai-toolkit (default) or OneTrainer (Krea 2 only, needs its own folder set in Settings)"
+                  className="px-2 py-1 rounded-lg border border-border bg-surface text-content text-[0.75rem] disabled:opacity-50">
+                  <option value="ai_toolkit">ai-toolkit</option>
+                  <option value="onetrainer">OneTrainer</option>
                 </select>
               )}
               {/* FLUX.2 Klein : deux TAILLES de base (pas une histoire de distillation
