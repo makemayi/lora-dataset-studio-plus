@@ -98,3 +98,97 @@ def test_shipped_preset_path_for_krea2(onetrainer):
     ots, cfg = onetrainer
     p = ots.KREA2_PRESET_RELATIVE_PATH
     assert p == 'training_presets/Krea 2/#krea2 LoRA 16GB.json'
+
+
+def test_launch_writes_config_and_concepts_and_spawns_the_right_command(
+        onetrainer, tmp_path, monkeypatch):
+    ots, cfg = onetrainer
+    root = tmp_path / 'OneTrainer'
+    (root / 'venv' / 'Scripts').mkdir(parents=True)
+    venv_py = root / 'venv' / 'Scripts' / 'python.exe'
+    venv_py.write_text('')
+    cfg.save_config({'onetrainer': {'dir': str(root)}})
+
+    captured = {}
+    class FakeProc:
+        pid = 4242
+    def fake_popen(cmd, cwd=None, env=None, **kw):
+        captured['cmd'] = cmd
+        captured['cwd'] = cwd
+        return FakeProc()
+    monkeypatch.setattr(ots.subprocess, 'Popen', fake_popen)
+
+    training_folder = tmp_path / 'run'
+    result = ots.launch(
+        trigger='lola', dataset_folder=str(tmp_path / 'ds'),
+        training_folder=str(training_folder), steps=1000, num_images=20, rank=16)
+
+    assert result['pid'] == 4242
+    assert (training_folder / 'concepts.json').is_file()
+    assert (training_folder / 'config.json').is_file()
+    assert captured['cwd'] == str(root)
+    assert captured['cmd'][0] == str(venv_py)
+    assert captured['cmd'][1] == 'scripts/train.py'
+    assert '--preset_path' in captured['cmd']
+    assert captured['cmd'][captured['cmd'].index('--preset_path') + 1] == \
+        str(root / ots.KREA2_PRESET_RELATIVE_PATH)
+    assert '--config_path' in captured['cmd']
+    assert captured['cmd'][captured['cmd'].index('--config_path') + 1] == \
+        str(training_folder / 'config.json')
+
+
+def test_launch_raises_when_onetrainer_not_installed(onetrainer, tmp_path):
+    ots, cfg = onetrainer
+    with pytest.raises(RuntimeError, match='OneTrainer is not configured'):
+        ots.launch(trigger='x', dataset_folder=str(tmp_path),
+                   training_folder=str(tmp_path / 'run'), steps=100,
+                   num_images=10, rank=16)
+
+
+def test_checkpoint_ready_true_only_when_destination_file_exists(onetrainer, tmp_path):
+    ots, cfg = onetrainer
+    training_folder = tmp_path / 'run'
+    training_folder.mkdir()
+    dest = training_folder / 'lola.safetensors'
+    assert ots.checkpoint_ready(str(dest)) is False
+    dest.write_bytes(b'fake-weights')
+    assert ots.checkpoint_ready(str(dest)) is True
+
+
+def test_launch_training_registers_and_tracks_like_an_ai_toolkit_run(
+        onetrainer, tmp_path, monkeypatch, app):
+    from app.services import checkpoint_registry, face_dataset_service as svc
+    from app.config import LOCAL_USER
+    ots, cfg = onetrainer
+    root = tmp_path / 'OneTrainer'
+    (root / 'venv' / 'Scripts').mkdir(parents=True)
+    (root / 'venv' / 'Scripts' / 'python.exe').write_text('')
+    cfg.save_config({'onetrainer': {'dir': str(root)}})
+
+    class FakeProc:
+        pid = 555
+        def poll(self):
+            return None
+    monkeypatch.setattr(ots.subprocess, 'Popen', lambda *a, **k: FakeProc())
+
+    with app.app_context():
+        import os as _os
+        ds = svc.create_dataset(LOCAL_USER, 'Lola', 'lola')
+        d = svc._dataset_dir(ds.id)
+        _os.makedirs(d, exist_ok=True)
+        with open(_os.path.join(d, 'ref.webp'), 'wb') as fh:
+            fh.write(b'\x89PNG\r\n\x1a\n')
+        ds.train_type = 'krea'
+        ds.ref_filename = 'ref.webp'
+        svc.db.session.commit()
+
+        result = ots.launch_training(LOCAL_USER, ds.id, steps=100, check_captions=False)
+
+        assert result['pid'] == 555
+        from app.job_queue import queue_manager
+        assert queue_manager._get_system_state('training_pid', None) == 555
+        assert queue_manager._get_system_state('training_in_progress', False) is True
+        rec = checkpoint_registry.latest_record(ds.id, 'krea')
+        assert rec is not None
+        assert rec.source == 'local'
+        assert rec.trainer == 'onetrainer'

@@ -15,8 +15,10 @@ state machine.
 """
 from __future__ import annotations
 
+import json
 import math
 import os
+import subprocess
 from pathlib import Path
 
 from .. import config as cfg
@@ -91,3 +93,147 @@ def build_concepts(trigger: str, dataset_folder: str) -> list[dict]:
     filename) is already this app's export format, so there is nothing to
     override."""
     return [{'name': trigger, 'path': dataset_folder, 'enabled': True}]
+
+
+def checkpoint_ready(output_model_destination: str) -> bool:
+    """Success is exit-code-0 AND the file existing — see spec's Error
+    handling: a process that exits 0 but produced nothing is treated as a
+    failure, never a silent no-op success."""
+    return os.path.isfile(output_model_destination)
+
+
+def launch(trigger: str, dataset_folder: str, training_folder: str,
+          steps: int, num_images: int, rank: int) -> dict:
+    """Write concepts.json + config.json under `training_folder` and spawn
+    `scripts/train.py --preset_path <shipped Krea 2 preset> --config_path
+    <our config.json>`. Returns {'pid': int, 'config_path': str,
+    'concepts_path': str}. Raises RuntimeError if OneTrainer isn't
+    installed/configured — same contract as lora_training.launch_training's
+    own ai-toolkit check, so the route can map it to a 409 the same way."""
+    if not is_installed():
+        raise RuntimeError('OneTrainer is not configured')
+    venv_python = onetrainer_path('venv_python')
+    root = onetrainer_path('dir')
+
+    training_folder_p = Path(training_folder)
+    training_folder_p.mkdir(parents=True, exist_ok=True)
+
+    config = build_job_config(trigger=trigger, dataset_folder=dataset_folder,
+                              training_folder=training_folder, steps=steps,
+                              num_images=num_images, rank=rank)
+    concepts = build_concepts(trigger=trigger, dataset_folder=dataset_folder)
+
+    concepts_path = training_folder_p / 'concepts.json'
+    config_path = training_folder_p / 'config.json'
+    concepts_path.write_text(json.dumps(concepts, indent=2), encoding='utf-8')
+    config_with_concepts = {**config, 'concept_file_name': str(concepts_path)}
+    config_path.write_text(json.dumps(config_with_concepts, indent=2), encoding='utf-8')
+
+    preset_path = root / KREA2_PRESET_RELATIVE_PATH
+    log_path = training_folder_p / 'onetrainer.log'
+    logf = open(log_path, 'w', encoding='utf-8')
+    proc = subprocess.Popen(
+        [str(venv_python), 'scripts/train.py',
+         '--preset_path', str(preset_path), '--config_path', str(config_path)],
+        cwd=str(root), stdout=logf, stderr=subprocess.STDOUT, shell=False,
+        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    return {'pid': proc.pid, 'config_path': str(config_path),
+            'concepts_path': str(concepts_path), 'log_path': str(log_path),
+            'output_model_destination': config['output_model_destination'],
+            '_proc': proc}
+
+
+def _training_folder_for(ds) -> Path:
+    """OneTrainer's own run root, isolated from ai-toolkit's `_output_dir()`
+    on purpose: a user may have ONLY OneTrainer configured (no ai-toolkit at
+    all — see routes' `dataset_train_status`), so this must never call
+    anything that raises when ai-toolkit is unconfigured. Rooted under this
+    app's own data dir, named after the dataset the same way ai-toolkit's
+    `_run_name` keys on user+trigger."""
+    from .lora_training import _safe_trigger
+    return cfg.data_dir() / 'onetrainer_runs' / f'u{ds.user_id}_{_safe_trigger(ds)}'
+
+
+def launch_training(user_id, dataset_id, steps: int | None = None,
+                    check_captions: bool = True) -> dict:
+    """The OneTrainer counterpart of lora_training.launch_training, scoped to
+    Krea 2 only for this slice. Reuses the SAME disk-space guard, caption
+    check, checkpoint_registry.register_launch (source='local') and
+    training-in-progress system-state keys ai-toolkit runs already use — a
+    OneTrainer run is tracked identically, only the config/launch step
+    differs (see spec's Hard constraint section)."""
+    if not is_installed():
+        raise RuntimeError('OneTrainer is not configured')
+    from . import face_dataset_service as fds
+    ds = fds.get_dataset(user_id, dataset_id)
+    if not ds:
+        raise ValueError('dataset not found')
+    if (ds.train_type or 'zimage') != 'krea':
+        raise ValueError('OneTrainer only supports the Krea 2 family in this build')
+
+    from .lora_training import (_TRAIN_STATE_TTL, _pid_alive,
+                                assert_free_disk, assert_trainable, recommended_steps)
+    from ..job_queue import queue_manager
+
+    assert_free_disk(cfg.data_dir(), 5, 'a training run')
+    if (queue_manager._get_system_state('training_in_progress', False)
+            and _pid_alive(queue_manager._get_system_state('training_pid', None))):
+        raise ValueError('a training is already in progress - wait for it to finish or queue this dataset')
+    if check_captions:
+        assert_trainable(dataset_id, train_type='krea')
+
+    trigger = (ds.trigger_word or '').strip() or f'ds{dataset_id}'
+    from .face_dataset_service import FaceDatasetImage as _FDI, db as _db
+    num_images = (_db.session.query(_FDI)
+                  .filter_by(dataset_id=dataset_id, status='keep').count())
+    steps = int(steps) if steps else recommended_steps(dataset_id)
+    training_folder = _training_folder_for(ds)
+    dataset_folder = str(training_folder / 'dataset')
+
+    launched = launch(trigger=trigger, dataset_folder=dataset_folder,
+                      training_folder=str(training_folder), steps=steps,
+                      num_images=max(1, num_images), rank=32)
+
+    from . import checkpoint_registry
+    checkpoint_registry.register_launch(
+        user_id, dataset_id, family='krea', source='local', variant='raw',
+        masked=False, steps=steps, trainer='onetrainer')
+    queue_manager._set_system_state('training_in_progress', True, ttl_seconds=_TRAIN_STATE_TTL)
+    queue_manager._set_system_state('training_pid', launched['pid'], ttl_seconds=_TRAIN_STATE_TTL)
+    queue_manager._set_system_state('training_dataset_id', int(dataset_id), ttl_seconds=_TRAIN_STATE_TTL)
+    queue_manager._set_system_state('training_train_type', 'krea', ttl_seconds=_TRAIN_STATE_TTL)
+
+    from flask import current_app
+    import threading
+    threading.Thread(target=_watch_onetrainer,
+                     args=(current_app._get_current_object(), launched, dataset_id),
+                     daemon=True).start()
+
+    return {'started': True, 'pid': launched['pid'], 'config_path': launched['config_path'],
+           'steps': steps, 'dataset_folder': dataset_folder,
+           'log_path': launched['log_path']}
+
+
+def _watch_onetrainer(app, launched, dataset_id) -> None:
+    """Minimal watcher (see spec's Non-goals: no queue-chaining for
+    OneTrainer in this slice, unlike ai-toolkit's _watch_training which
+    calls process_training_queue()). Waits for exit, clears the shared
+    in-progress flags, reuses _crash_payload for a consistent failure UX."""
+    proc = launched['_proc']
+    try:
+        proc.wait()
+        rc = proc.returncode
+    except Exception:
+        return
+    from .lora_training import _crash_payload
+    from ..job_queue import queue_manager
+    try:
+        with app.app_context():
+            ok = rc == 0 and checkpoint_ready(launched['output_model_destination'])
+            if not ok:
+                payload = _crash_payload(launched['log_path'], dataset_id, rc)
+                queue_manager._set_system_state('training_error', payload, ttl_seconds=3600)
+            queue_manager._set_system_state('training_in_progress', False, ttl_seconds=1)
+            queue_manager._set_system_state('training_pid', None, ttl_seconds=1)
+    except Exception:
+        pass
