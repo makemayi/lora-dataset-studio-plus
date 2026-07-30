@@ -435,13 +435,13 @@ def test_the_sampler_settings_are_the_measured_ones():
     assert ks['steps'] == 8
 
 
-def test_the_krea_graph_defaults_favor_prompt_adherence_without_weakening_identity():
+def test_the_krea_graph_defaults_are_the_measured_calibration():
     g = _graph()
     encodes = [n for n in g.values() if n['class_type'] == 'Krea2EditGroundedEncode']
     patch = next(n for n in g.values() if n['class_type'] == 'Krea2EditModelPatch')
     lora = next(n for n in g.values() if n['class_type'] == 'LoraLoaderModelOnly')
     assert {n['inputs']['grounding_px'] for n in encodes} == {512}
-    assert patch['inputs']['ref_boost'] == 0.25
+    assert patch['inputs']['ref_boost'] == 4.0
     assert lora['inputs']['strength_model'] == 1.0
 
 
@@ -511,15 +511,49 @@ def test_blank_rows_in_the_character_lora_list_are_skipped():
 def test_grounding_is_clamped_and_snapped_and_junk_degrades_to_the_default(krea):
     keh, _base, config = krea
     assert config.get('krea.grounding_px') == 512
-    assert config.get('krea.ref_boost') == 0.25
+    assert config.get('krea.ref_boost') == 4
     assert keh.grounding_px() == 512
-    assert keh._ref_boost() == 0.25
+    assert keh.ref_boost() == 4
     config.save_config({'krea': {'grounding_px': 700}})
     assert keh.grounding_px() == 704, 'snapped to the 64px patch grid'
     config.save_config({'krea': {'grounding_px': 99999}})
     assert keh.grounding_px() == keh.GROUNDING_PX_MAX
     config.save_config({'krea': {'grounding_px': 'a lot'}})
     assert keh.grounding_px() == 512
+
+
+def test_ref_boost_is_clamped_and_junk_degrades_to_the_default(krea):
+    keh, _base, config = krea
+    config.save_config({'krea': {'ref_boost': 8}})
+    assert keh.ref_boost() == 8
+    config.save_config({'krea': {'ref_boost': 99999}})
+    assert keh.ref_boost() == keh.REF_BOOST_MAX
+    config.save_config({'krea': {'ref_boost': 'a lot'}})
+    assert keh.ref_boost() == 4
+
+
+def test_ref_boost_per_framing_falls_back_to_the_global_dial_by_default(krea):
+    keh, _base, config = krea
+    config.save_config({'krea': {'ref_boost_by_framing': {'face': '', 'bust': '', 'body': '', 'back': ''}}})
+    for framing in ('face', 'bust', 'body', 'back', None, 'nonsense'):
+        assert keh.ref_boost_for(framing) == keh.ref_boost() == 4
+
+
+def test_ref_boost_per_framing_override_wins_only_for_that_framing(krea):
+    keh, _base, config = krea
+    config.save_config({'krea': {'ref_boost_by_framing': {'face': 4, 'bust': 6, 'body': 8, 'back': ''}}})
+    assert keh.ref_boost_for('face') == 4
+    assert keh.ref_boost_for('bust') == 6
+    assert keh.ref_boost_for('body') == 8
+    assert keh.ref_boost_for('back') == keh.ref_boost() == 4, 'untouched framing falls back'
+    assert keh.ref_boost_for(None) == 4, 'no framing (free-form edit) uses the global dial'
+
+
+def test_ref_boost_per_framing_override_is_clamped_and_junk_degrades_to_the_global_dial(krea):
+    keh, _base, config = krea
+    config.save_config({'krea': {'ref_boost_by_framing': {'face': 99999, 'body': 'lots'}}})
+    assert keh.ref_boost_for('face') == keh.REF_BOOST_MAX
+    assert keh.ref_boost_for('body') == keh.ref_boost() == 4, 'junk override ignored'
 
 
 def test_grounding_per_framing_falls_back_to_the_global_dial_by_default(krea):

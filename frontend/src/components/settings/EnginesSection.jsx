@@ -231,6 +231,8 @@ function KleinGenerationCard({ config, setField, configDefaults }) {
    they exist for the person whose files are named something else. */
 const KREA_GROUNDING_MIN = 512      // mirrors krea_edit_helper.GROUNDING_PX_MIN
 const KREA_GROUNDING_MAX = 1536     // mirrors krea_edit_helper.GROUNDING_PX_MAX
+const KREA_REF_BOOST_MIN = 0        // mirrors krea_edit_helper.REF_BOOST_MIN
+const KREA_REF_BOOST_MAX = 10       // mirrors krea_edit_helper.REF_BOOST_MAX
 const KREA_STEPS_MAX = 50
 
 function KreaCard({ config, setField, configDefaults }) {
@@ -238,6 +240,7 @@ function KreaCard({ config, setField, configDefaults }) {
   const reset = { config, configDefaults, setField }
   const dflt = (key) => defaultValueAt(configDefaults, 'krea', key)
   const grounding = Number(krea.grounding_px ?? dflt('grounding_px'))
+  const boost = Number(krea.ref_boost ?? dflt('ref_boost'))
   return (
     <Card
       id="krea-engine"
@@ -331,6 +334,69 @@ function KreaCard({ config, setField, configDefaults }) {
           slower and rarely better on this pipeline.
         </p>
         <ResetToDefault label="Sampler steps" section="krea" field="steps" {...reset} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="krea-ref-boost" className="block text-xs font-medium text-content">
+          Reference boost ({boost})
+        </label>
+        <input
+          id="krea-ref-boost"
+          type="range"
+          min={KREA_REF_BOOST_MIN}
+          max={KREA_REF_BOOST_MAX}
+          step={0.25}
+          value={boost}
+          onChange={(e) => setField('krea', 'ref_boost', Number(e.target.value))}
+          className="mt-1 w-full accent-violet-500"
+        />
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          How hard the source latent is pushed back into the model each step — the same
+          consistency ↔ prompt dial as grounding above, at a different pipeline stage.
+          <b>Higher</b> = stronger identity retention, less room for the prompt to change
+          pose/outfit/scene; <b>lower</b> = more freedom, weaker likeness.
+        </p>
+        <ResetToDefault label="Reference boost" section="krea" field="ref_boost" {...reset} />
+      </div>
+
+      <div id="krea-ref-boost-by-framing" className="mt-3 sm:max-w-md">
+        <p className="block text-xs font-medium text-content">
+          Reference boost, per framing (optional)
+        </p>
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          Same rationale as grounding per framing: a face close-up already holds identity at
+          full strength, but a bust/body/back shot dilutes that signal across more of the
+          frame, so a HIGHER boost is what it takes to hold the same identity there.
+          Blank = use the dial above for that framing.
+        </p>
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {['face', 'bust', 'body', 'back'].map((framing) => {
+            const byFraming = krea.ref_boost_by_framing || {}
+            const value = byFraming[framing] ?? ''
+            return (
+              <div key={framing}>
+                <label htmlFor={`krea-ref-boost-${framing}`}
+                  className="block text-[0.6875rem] font-medium text-content-subtle capitalize">
+                  {framing}
+                </label>
+                <input
+                  id={`krea-ref-boost-${framing}`}
+                  type="number"
+                  min={KREA_REF_BOOST_MIN}
+                  max={KREA_REF_BOOST_MAX}
+                  step={0.25}
+                  placeholder={String(boost)}
+                  value={value}
+                  onChange={(e) => setField('krea', 'ref_boost_by_framing',
+                    { ...dflt('ref_boost_by_framing'), ...byFraming,
+                      [framing]: e.target.value === '' ? '' : Number(e.target.value) })}
+                  className={INPUT_CLASS}
+                />
+              </div>
+            )
+          })}
+        </div>
+        <ResetToDefault label="Reference boost per framing" section="krea" field="ref_boost_by_framing" {...reset} />
       </div>
 
       <div className="mt-3 sm:max-w-md">

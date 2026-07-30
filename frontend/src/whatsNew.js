@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-31-krea-ref-boost-setting',
+    date: '2026-07-31',
+    title: 'Krea 2 Edit: a second consistency dial, tunable per framing',
+    blurb:
+      "Reference grounding controlled likeness at one stage of the pipeline; Reference boost (krea.ref_boost) controls it at another and was previously fixed in code. It's now a Settings slider — Reference boost, per framing — with shipped defaults that climb as framing widens (face 4, bust 6, body/back 8), on the same logic as grounding's own per-framing overrides: the face carries the full identity signal in a close-up, but a wider shot dilutes it, so it takes more boost to hold.",
+    to: '/settings/engines',
+  },
+  {
     id: '2026-07-30-onetrainer-krea2-backend',
     date: '2026-07-30',
     title: 'Train Krea 2 LoRAs with OneTrainer instead of ai-toolkit',

@@ -652,8 +652,31 @@ def _identity_strength():
     return _clamp(cfg.get('krea.identity_lora_strength'), 0.0, 1.5, 1.0)
 
 
-def _ref_boost():
-    return _clamp(cfg.get('krea.ref_boost'), 0.0, 10.0, 0.25)
+REF_BOOST_MIN, REF_BOOST_MAX = 0.0, 10.0
+
+
+def ref_boost():
+    """How hard the source latent is pushed back into the model each step —
+    the same consistency dial as grounding_px(), at a different pipeline
+    stage. Higher = stronger identity retention, less room for the prompt to
+    change pose/outfit/scene; lower = more freedom, weaker likeness."""
+    return _clamp(cfg.get('krea.ref_boost'), REF_BOOST_MIN, REF_BOOST_MAX, 4.0)
+
+
+def ref_boost_for(framing) -> float:
+    """`ref_boost()`, but allowed to differ by framing — same rationale as
+    `grounding_px_for`: a face close-up already holds identity at full
+    strength, but a bust/body/back shot dilutes that signal across more of
+    the frame, so a HIGHER boost is what it takes to hold the same identity
+    there. A blank/zero override for a framing falls back to the single
+    ref_boost() dial above."""
+    if framing in ('face', 'bust', 'body', 'back'):
+        override = cfg.get(f'krea.ref_boost_by_framing.{framing}')
+        if override not in (None, '', 0, '0'):
+            v = _clamp(override, REF_BOOST_MIN, REF_BOOST_MAX, None)
+            if v is not None:
+                return v
+    return ref_boost()
 
 
 CHARACTER_LORA_SLOTS = 5   # mirrors the Settings UI's fixed 5 rows
@@ -711,7 +734,7 @@ def build_workflow(source_image, prompt, *, unet, clip, vae, lora_name,
     single-LoRA chain)."""
     steps = 8 if steps is None else max(1, int(steps))
     grounding = 512 if grounding is None else int(grounding)
-    ref_boost = 0.25 if ref_boost is None else float(ref_boost)
+    ref_boost = 4.0 if ref_boost is None else float(ref_boost)
     lora_strength = 1.0 if lora_strength is None else float(lora_strength)
     character_loras = [(str(n).strip(), float(s)) for n, s in (character_loras or [])
                        if str(n).strip()]
@@ -827,7 +850,7 @@ def enqueue_krea_edit(user_id, source_filename, edit_prompt, source_path=None,
         comfy_input, edit_prompt, unet=unet, clip=clip, vae=vae,
         lora_name=lora_name, width=width, height=height,
         seed=random.randint(0, 2 ** 64 - 1), steps=_steps(),
-        grounding=grounding_px_for(framing), ref_boost=_ref_boost(),
+        grounding=grounding_px_for(framing), ref_boost=ref_boost_for(framing),
         lora_strength=_identity_strength(),
         character_loras=_character_loras(),
         # UNIQUE prefix per job: SaveImage numbers from what is currently in the

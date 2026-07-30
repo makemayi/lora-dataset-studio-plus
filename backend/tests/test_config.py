@@ -69,7 +69,7 @@ def test_legacy_krea_default_pair_migrates_on_read_and_persists_on_next_save(tmp
     # Reads do not rewrite user configuration, but the corrected profile applies
     # immediately to generation on an upgraded install.
     assert config.get('krea.grounding_px') == 512
-    assert config.get('krea.ref_boost') == 0.25
+    assert config.get('krea.ref_boost') == 4
     assert config.get('krea.steps') == 8
     untouched = json.loads(path.read_text(encoding='utf-8'))
     assert untouched['krea'] == {'grounding_px': 1024, 'ref_boost': 4.0}
@@ -78,7 +78,7 @@ def test_legacy_krea_default_pair_migrates_on_read_and_persists_on_next_save(tmp
     config.save_config({'server': {'port': 5051}})
     saved = json.loads(path.read_text(encoding='utf-8'))['krea']
     assert saved['grounding_px'] == 512
-    assert saved['ref_boost'] == 0.25
+    assert saved['ref_boost'] == 4
     assert saved['steps'] == 8
     assert saved['calibration_version'] == config.KREA_CALIBRATION_VERSION
 
@@ -91,7 +91,7 @@ def test_previous_krea_default_profile_migrates_but_a_v2_custom_profile_survives
     }}), encoding='utf-8')
     config = _fresh(monkeypatch, tmp_path)
     assert config.get('krea.grounding_px') == 512
-    assert config.get('krea.ref_boost') == 0.25
+    assert config.get('krea.ref_boost') == 4
     assert config.get('krea.steps') == 8
 
     path.write_text(json.dumps({'krea': {
@@ -109,6 +109,27 @@ def test_previous_krea_default_profile_migrates_but_a_v2_custom_profile_survives
     assert config.get('krea.grounding_px') == 1024
     assert config.get('krea.ref_boost') == 4.0
     assert config.get('krea.steps') == 10
+
+
+def test_v3_krea_default_ref_boost_migrates_but_a_v3_custom_value_survives(
+        tmp_path, monkeypatch):
+    """v3 shipped ref_boost=0.25; v4 raises it to 4 (too weak for a
+    character-LoRA-augmented setup) -- an untouched v3 install upgrades, a
+    deliberately customised v3 value is left alone."""
+    path = tmp_path / 'config.json'
+    path.write_text(json.dumps({'krea': {
+        'calibration_version': 3, 'grounding_px': 512, 'ref_boost': 0.25, 'steps': 8,
+    }}), encoding='utf-8')
+    config = _fresh(monkeypatch, tmp_path)
+    assert config.get('krea.grounding_px') == 512
+    assert config.get('krea.ref_boost') == 4
+    assert config.get('krea.steps') == 8
+
+    path.write_text(json.dumps({'krea': {
+        'calibration_version': 3, 'grounding_px': 512, 'ref_boost': 1.5, 'steps': 8,
+    }}), encoding='utf-8')
+    config = _fresh(monkeypatch, tmp_path)
+    assert config.get('krea.ref_boost') == 1.5, 'a v3 install that already tuned it keeps its choice'
 
 
 def test_a_custom_legacy_krea_calibration_is_not_rewritten(tmp_path, monkeypatch):

@@ -36,12 +36,17 @@ SECRET_KEYS = ('GEMINI_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'HF_TOK
 # config.json, so a changed DEFAULTS value alone would never reach it. This
 # marker lets us distinguish that one-time profile migration from settings the
 # user changes after the new profile is available.
-KREA_CALIBRATION_VERSION = 3
+KREA_CALIBRATION_VERSION = 4
 _LEGACY_KREA_GROUNDING_PX = 1024.0
 _LEGACY_KREA_REF_BOOST = 4.0
 _PREVIOUS_KREA_GROUNDING_PX = 512.0
 _PREVIOUS_KREA_REF_BOOST = 1.0
 _PREVIOUS_KREA_STEPS = 10
+# v3's shipped ref_boost (0.25) turned out too weak for a character-LoRA-
+# augmented setup; v4 raises the floor back to 4 and adds the per-framing
+# split. grounding_px/steps are unchanged from v3, so only ref_boost is
+# checked here — a v3 install that already customised it keeps its choice.
+_V3_KREA_REF_BOOST = 0.25
 
 DEFAULTS = {
     # host: '127.0.0.1' = this machine only ; '0.0.0.0' = reachable from the LAN
@@ -380,10 +385,19 @@ DEFAULTS = {
         # in code (guidance-distilled model) and is deliberately NOT a setting.
         'steps': 8,
         'identity_lora_strength': 1.0,
-        # How hard the source latent is pushed back into the model each step.
-        # 0.25 is the measured default (see grounding_px above for the same
-        # calibration pass).
-        'ref_boost': 0.25,
+        # How hard the source latent is pushed back into the model each step —
+        # the SAME consistency dial as grounding_px, applied at a different
+        # stage of the pipeline. Higher = stronger identity retention (but
+        # less room for the prompt to change pose/outfit/scene); lower =
+        # more freedom, weaker likeness.
+        'ref_boost': 4,
+        # Per-framing override (same rationale as grounding_px_by_framing): a
+        # face close-up already has the reference's identity signal at full
+        # strength, but a bust/body/back shot dilutes it across more of the
+        # frame, so a HIGHER boost is what it takes to hold the same identity
+        # there. Non-blank shipped defaults (unlike grounding_px_by_framing) —
+        # measured against a real dataset's own character-LoRA-augmented setup.
+        'ref_boost_by_framing': {'face': 4, 'bust': 6, 'body': 8, 'back': 8},
         # OPTIONAL extra LoRAs: the user's own character/person LoRAs (e.g.
         # trained on ai-toolkit), chained AFTER the identity-edit LoRA in LIST
         # ORDER for extra likeness on top of Krea's baseline consistency. Up to
@@ -535,7 +549,13 @@ def _migrate_krea_pose_profile(conf: dict, stored: dict, incoming: dict | None =
         and _number_is(stored_krea.get('ref_boost'), _PREVIOUS_KREA_REF_BOOST)
         and _number_is(stored_krea.get('steps', _PREVIOUS_KREA_STEPS),
                        _PREVIOUS_KREA_STEPS))
-    if is_v1_default or is_v2_default:
+    # v3 only ever shipped ref_boost=0.25 (grounding_px/steps unchanged from
+    # v2's already-migrated values) -- so only that one field marks an
+    # untouched v3 profile, unlike v1/v2's full-triplet match above.
+    is_v3_default = (
+        stored_version == 3
+        and _number_is(stored_krea.get('ref_boost'), _V3_KREA_REF_BOOST))
+    if is_v1_default or is_v2_default or is_v3_default:
         krea['grounding_px'] = DEFAULTS['krea']['grounding_px']
         krea['ref_boost'] = DEFAULTS['krea']['ref_boost']
         krea['steps'] = DEFAULTS['krea']['steps']
