@@ -175,13 +175,16 @@ def test_launch_training_registers_and_tracks_like_an_ai_toolkit_run(
 
     with app.app_context():
         import os as _os
+        from PIL import Image
+        from app.models import FaceDatasetImage
         ds = svc.create_dataset(LOCAL_USER, 'Lola', 'lola')
         d = svc._dataset_dir(ds.id)
         _os.makedirs(d, exist_ok=True)
-        with open(_os.path.join(d, 'ref.webp'), 'wb') as fh:
-            fh.write(b'\x89PNG\r\n\x1a\n')
+        Image.new('RGB', (64, 64), (200, 100, 50)).save(_os.path.join(d, 'a.png'))
         ds.train_type = 'krea'
-        ds.ref_filename = 'ref.webp'
+        row = FaceDatasetImage(dataset_id=ds.id, filename='a.png', status='keep',
+                               caption='a photo')
+        svc.db.session.add(row)
         svc.db.session.commit()
 
         result = ots.launch_training(LOCAL_USER, ds.id, steps=100, check_captions=False)

@@ -175,8 +175,9 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
     if (ds.train_type or 'zimage') != 'krea':
         raise ValueError('OneTrainer only supports the Krea 2 family in this build')
 
-    from .lora_training import (_TRAIN_STATE_TTL, _pid_alive,
-                                assert_free_disk, assert_trainable, recommended_steps)
+    from .lora_training import (_TRAIN_STATE_TTL, _pid_alive, assert_free_disk,
+                                assert_trainable, export_dataset_to_aitoolkit,
+                                recommended_steps)
     from ..job_queue import queue_manager
 
     assert_free_disk(cfg.data_dir(), 5, 'a training run')
@@ -192,7 +193,14 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
                   .filter_by(dataset_id=dataset_id, status='keep').count())
     steps = int(steps) if steps else recommended_steps(dataset_id)
     training_folder = _training_folder_for(ds)
-    dataset_folder = str(training_folder / 'dataset')
+    # Despite the name, export_dataset_to_aitoolkit is generic: `dest_dir` is
+    # exactly the "cloud seam" this app's own cloud-training path already uses
+    # to export WITHOUT ai-toolkit configured locally — writes kept images as
+    # .png/.txt pairs (OneTrainer's 'sample' prompt_source default already
+    # matches this layout, see build_concepts). masked=False: this slice's
+    # concepts.json carries no mask wiring yet (see spec's Non-goals).
+    dataset_folder = export_dataset_to_aitoolkit(
+        user_id, dataset_id, masked=False, dest_dir=str(training_folder / 'dataset'))
 
     launched = launch(trigger=trigger, dataset_folder=dataset_folder,
                       training_folder=str(training_folder), steps=steps,
