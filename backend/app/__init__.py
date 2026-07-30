@@ -170,6 +170,10 @@ _SCHEMA_ADDITIONS = (
     # Versioned, byte-fingerprinted Bank analysis used by the durable Bank <-> Dataset
     # transfer path. Legacy Dataset rows simply have no snapshot to restore.
     ('face_dataset_image', 'bank_analysis_snapshot', 'TEXT'),
+    # OneTrainer backend tag — additive and nullable; every existing row
+    # simply carries NULL, read as 'ai_toolkit' by the code that consumes it
+    # (see checkpoint_registry / lora_training call sites).
+    ('training_run_record', 'trainer', 'VARCHAR(16)'),
     ('training_run_record', 'settings', 'TEXT'),
     # Full launch freeze: caption text, per-image content hashes, environment.
     # NULL on every run recorded before it existed — the compare panel says so.

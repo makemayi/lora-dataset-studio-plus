@@ -47,3 +47,10 @@ def test_onetrainer_path_venv_python_derives_from_dir_when_no_override(onetraine
 def test_is_installed_false_without_a_real_venv_python(onetrainer):
     ots, cfg = onetrainer
     assert ots.is_installed() is False
+
+
+def test_trainer_column_exists_and_defaults_to_ai_toolkit(app):
+    from app.models import TrainingRunRecord
+    with app.app_context():
+        cols = {c.name for c in TrainingRunRecord.__table__.columns}
+        assert 'trainer' in cols

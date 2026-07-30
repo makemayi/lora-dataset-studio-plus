@@ -670,6 +670,12 @@ class TrainingRunRecord(db.Model):
     dataset_id = db.Column(db.Integer, nullable=False, index=True)
     family = db.Column(db.String(16), nullable=False)
     source = db.Column(db.String(8), nullable=False)        # 'local' | 'cloud'
+    # Which LOCAL trainer produced this run — orthogonal to `source`
+    # ('local'/'cloud'): a OneTrainer run is STILL source='local' (it's one
+    # process on this GPU, cancellable/resumable the same way), this column
+    # only decides which config-builder/launcher ran and which badge shows.
+    # NULL/'ai_toolkit' on every pre-existing row (additive migration below).
+    trainer = db.Column(db.String(16))                      # 'ai_toolkit' | 'onetrainer'
     cloud_run_id = db.Column(db.Integer)                    # FK-ish, cloud only
     base_model = db.Column(db.String(255), default='')      # '' = official base
     variant = db.Column(db.String(32))
