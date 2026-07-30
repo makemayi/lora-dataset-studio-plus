@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-30-onetrainer-krea2-backend',
+    date: '2026-07-30',
+    title: 'Train Krea 2 LoRAs with OneTrainer instead of ai-toolkit',
+    blurb:
+      "A second local trainer, chosen per run: pick Krea 2 as the family and a new 'ai-toolkit / OneTrainer' picker appears next to it. Point Settings at your OneTrainer folder once, then every Krea 2 run can go through either engine. First slice: Krea 2 only, no live progress bar yet (running/succeeded/failed), full advanced-knob parity with ai-toolkit's own settings still to come.",
+    to: '/settings/local-tools',
+  },
+  {
     id: '2026-07-30-generating-tile-glows-green',
     date: '2026-07-30',
     title: 'The tile a worker is actually rendering now stands out from the ones still queued',
