@@ -490,3 +490,37 @@ def test_import_folder_route_reimport_dedupes(client, tmp_path):
     assert first['imported'] == 2
     again = client.post(f'/api/dataset/{ds_id}/import-folder', json={'path': str(src)}).get_json()
     assert again['imported'] == 0 and again['duplicates'] == 2
+
+
+def test_train_route_dispatches_to_onetrainer_when_requested(client, monkeypatch):
+    ds_id = _create(client, 'C', 'c').get_json()['id']
+    called = {}
+    def fake_launch(*a, **k):
+        called['args'] = (a, k)
+        return {'started': True, 'pid': 1}
+    monkeypatch.setattr('app.services.onetrainer_service.is_installed', lambda: True)
+    monkeypatch.setattr('app.services.onetrainer_service.launch_training', fake_launch)
+    r = client.post(f'/api/dataset/{ds_id}/train', json={'trainer': 'onetrainer', 'steps': 500})
+    assert r.status_code == 200
+    assert called['args'][0][1] == ds_id  # dataset_id positional arg
+
+
+def test_train_route_refuses_onetrainer_when_not_configured(client):
+    ds_id = _create(client, 'D', 'd').get_json()['id']
+    r = client.post(f'/api/dataset/{ds_id}/train', json={'trainer': 'onetrainer'})
+    assert r.status_code == 409
+
+
+def test_train_status_available_when_only_onetrainer_is_configured(client, monkeypatch):
+    monkeypatch.setattr('app.capabilities.probe',
+                        lambda: {'aitoolkit': {'valid': False}})
+    monkeypatch.setattr('app.services.onetrainer_service.is_installed', lambda: True)
+    r = client.get('/api/dataset/train/status')
+    assert r.status_code == 200
+    assert r.get_json().get('available') is not False
+
+
+def test_train_enqueue_rejects_onetrainer_explicitly(client):
+    ds_id = _create(client, 'E', 'e').get_json()['id']
+    r = client.post(f'/api/dataset/{ds_id}/train/enqueue', json={'trainer': 'onetrainer'})
+    assert r.status_code == 400

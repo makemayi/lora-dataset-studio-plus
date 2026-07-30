@@ -44,14 +44,36 @@ def _require_cloud():
     return None
 
 
+def _require_onetrainer():
+    """None if OneTrainer is usable, else the (body, status) 409 to return."""
+    from ..services import onetrainer_service as ots
+    if not ots.is_installed():
+        return jsonify({'error': 'OneTrainer is not configured',
+                        'hint': 'Set its folder in Settings'}), 409
+    return None
+
+
 @bp.post('/dataset/<int:dataset_id>/train')
 def dataset_train(dataset_id):
+    d = request.get_json(silent=True) or {}
+    trainer = (d.get('trainer') or 'ai_toolkit').strip()
+    if trainer == 'onetrainer':
+        gate = _require_onetrainer()
+        if gate:
+            return gate
+        if not svc.get_dataset(LOCAL_USER, dataset_id):
+            return jsonify({'error': 'not found'}), 404
+        from ..services import onetrainer_service as ots
+        try:
+            res = ots.launch_training(LOCAL_USER, dataset_id, steps=d.get('steps'))
+        except Exception as e:
+            return _map_error(e)
+        return jsonify({'ok': True, **res})
     gate = _require_aitoolkit()
     if gate:
         return gate
     if not svc.get_dataset(LOCAL_USER, dataset_id):
         return jsonify({'error': 'not found'}), 404
-    d = request.get_json(silent=True) or {}
     try:
         # steps optionnel : None → adaptatif. base_model='' → officiel ; sinon merge
         # (doit être converti d'abord). variant règle l'adapter de de-distillation.
@@ -125,8 +147,10 @@ def dataset_train_continue(dataset_id):
 def dataset_train_status():
     # Le poll doit toujours répondre 200 (jamais d'erreur) : sans ai-toolkit
     # configuré, on renvoie juste 'indisponible' au lieu d'un 409 qui casserait
-    # le polling UI.
-    if not capabilities.probe()['aitoolkit']['valid']:
+    # le polling UI. OneTrainer compte aussi : un poste avec SEULEMENT OneTrainer
+    # configuré (pas d'ai-toolkit du tout) doit encore pouvoir poller.
+    from ..services import onetrainer_service as ots
+    if not capabilities.probe()['aitoolkit']['valid'] and not ots.is_installed():
         return jsonify({'available': False})
     # Le poll fait avancer la file : fin du training courant → lancement du suivant.
     try:
@@ -138,12 +162,18 @@ def dataset_train_status():
 
 @bp.post('/dataset/<int:dataset_id>/train/enqueue')
 def dataset_train_enqueue(dataset_id):
+    d = request.get_json(silent=True) or {}
+    # Checked BEFORE the ai-toolkit gate: a OneTrainer-only request must get its
+    # explicit "not supported yet" 400, not ai-toolkit's unrelated 409 when
+    # ai-toolkit itself happens to be unconfigured.
+    if (d.get('trainer') or 'ai_toolkit') == 'onetrainer':
+        return jsonify({'error': 'queueing a OneTrainer run is not supported yet — '
+                                 'launch it directly instead'}), 400
     gate = _require_aitoolkit()
     if gate:
         return gate
     if not svc.get_dataset(LOCAL_USER, dataset_id):
         return jsonify({'error': 'not found'}), 404
-    d = request.get_json(silent=True) or {}
     # base_model/variant = base CHOISIE pour le job en file (absente → persistée).
     kw = {'extra_steps': d.get('extra_steps'), 'masked': d.get('masked')}
     if 'base_model' in d:
