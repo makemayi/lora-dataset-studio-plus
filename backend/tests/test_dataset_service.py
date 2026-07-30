@@ -1386,7 +1386,7 @@ def test_klein_generate_activity_cleared_on_cancel(app, monkeypatch):
     # cancel_pending tries to cancel the queued job — stub the queue away.
     with app.app_context():
         import app.job_queue as jq
-        monkeypatch.setattr(jq.queue_manager, 'cancel_job', lambda *a, **k: None)
+        monkeypatch.setattr(jq.queue_manager, 'cancel_job', lambda *a, **k: True)
         ds = svc.create_dataset(LOCAL_USER, 'KC', 'kc')
         d = svc._dataset_dir(ds.id); os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, 'ref.webp'), 'wb') as fh:

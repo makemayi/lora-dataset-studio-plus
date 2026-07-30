@@ -71,6 +71,7 @@ const WATERMARK_BADGE = {
 
 export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, onCrop, onDelete,
                                           onMirror, mirrorBusy = false, busy = false,
+                                          onScoreFace, scoreFaceBusy = false, faceScoringBusy = false, faceScoringBlocked = null,
                                           onRegenerate, onReimprove, onView, nonce = 0, faceThresholds,
                                           selected = false, onToggleSelect, tileSize = 'M',
                                           datasetKind = 'character', dualCaptions = false }) {
@@ -98,6 +99,14 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
   const isImageImproveCandidate = isImageImproveRow(img);
   const canRegenerate = canRegenerateGeneric(img, { isRescueDerived });
   const rerunImprove = onReimprove ? improveRerunAffordance(img) : null;
+  const scoreFaceTitle = faceScoringBlocked
+    || (scoreFaceBusy
+      ? 'Scoring facial resemblance to the reference…'
+      : faceScoringBusy
+        ? 'Face scoring is already running for another image…'
+        : busy
+          ? 'Wait for the current dataset action to finish before scoring.'
+          : 'Score facial resemblance to the reference');
 
   const fb = faceBadge(img, faceThresholds);
   const wb = WATERMARK_BADGE[img.watermark_state];
@@ -209,6 +218,16 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
           </span>
         )}
         <div className="dataset-grid-item__actions absolute top-1 right-1 flex max-w-[calc(100%_-_0.5rem)] flex-wrap justify-end gap-1">
+          {url && onScoreFace && ['keep', 'pending'].includes(img.status) && (
+            <button type="button"
+              onClick={(e) => { e.stopPropagation(); onScoreFace(img.id); }}
+              disabled={busy || faceScoringBusy || !!faceScoringBlocked || scoreFaceBusy}
+              aria-busy={scoreFaceBusy}
+              title={scoreFaceTitle} aria-label={scoreFaceTitle}
+              className="grid min-h-7 min-w-7 place-items-center rounded bg-black/60 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-45">
+              <span aria-hidden="true" className={scoreFaceBusy ? 'animate-pulse' : ''}>{scoreFaceBusy ? '…' : '🎭'}</span>
+            </button>
+          )}
           {canRegenerate && (
             <button type="button"
               onClick={(e) => { e.stopPropagation(); onRegenerate?.(img.id); }}

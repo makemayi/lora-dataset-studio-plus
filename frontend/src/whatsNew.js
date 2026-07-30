@@ -184,6 +184,22 @@ export const WHATS_NEW = [
     to: '/datasets?section=add',
   },
   {
+    id: '2026-07-30-studio-safe-pause-comfyui-start',
+    date: '2026-07-30',
+    title: '🛟 A Test Studio batch now pauses safely for ComfyUI recovery',
+    blurb:
+      'If ComfyUI goes away mid-batch, Studio now pauses with a paste-safe reason and submits no later prompt. Recover or restart ComfyUI, then cancel and resume the batch. Setup’s “Start ComfyUI” uses the app’s fixed local-safe profile: it never reads, changes or runs a .bat file, so your own launcher stays untouched.',
+    to: '/studio',
+  },
+  {
+    id: '2026-07-30-runs-test-in-studio',
+    date: '2026-07-30',
+    title: 'Open the right Test Studio straight from a training run',
+    blurb:
+      'Every run that still belongs to a dataset now carries 🧪 Test in Studio in Runs — active local and cloud runs, recent cards, and even a folded dataset group. One click opens Test Studio with that run’s dataset already selected, so you can compare its checkpoints without first hunting through the library.',
+    to: '/cloud',
+  },
+  {
     id: '2026-07-30-keep-an-improvement-without-training-on-both',
     date: '2026-07-30',
     title: '✓ Keep an improved image without accidentally training on both',

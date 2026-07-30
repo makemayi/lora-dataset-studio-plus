@@ -1390,6 +1390,8 @@ def probe(force=False) -> dict:
     krea_ready = (comfy['ok'] and not krea_missing and not krea_nodes_missing
                   and not krea_blocking_invalid)
     base_dir = cfg.get('comfyui.base_dir') or ''
+    from .services import comfyui_control
+    comfy_launcher = comfyui_control.launcher_status()
     comfy_dir = resolve_comfyui_base(base_dir)
     # Conscious "continue without ComfyUI" skip (Setup wizard). DERIVED, not just the
     # stored flag: a directory being configured ANNULS the skip on the spot, so the
@@ -1442,6 +1444,10 @@ def probe(force=False) -> dict:
             'dir_configured': bool(base_dir),
             'dir_valid': comfy_dir['valid'],       # base_dir really is a ComfyUI install
             'resolved_dir': comfy_dir['resolved'],
+            # The start button is stricter than normal ComfyUI model discovery:
+            # only the saved NVIDIA portable layout and local standard URL qualify.
+            'portable_launcher_supported': comfy_launcher['portable_supported'],
+            'portable_launcher_local_api': comfy_launcher['local_api_safe'],
             # Effective "continue without ComfyUI" state: the user chose to skip AND no
             # directory is configured. Only drives the Setup step's neutral "skipped"
             # display — never the engine/studio gates below, so it cannot hide a real

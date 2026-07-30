@@ -78,6 +78,29 @@ prompt** only when you want to change the instruction. The candidate also names 
 engine/API that actually returned it, so you can see which service produced the
 image before you Keep or Discard it.
 
+## Test a run straight from Runs
+
+The **🏋️ Runs** hub is also a shortcut back to the right **Test Studio**. Every
+active or recent run that still has a dataset shows **🧪 Test in Studio** beside
+its actions. Click it to open Studio with that run’s dataset already selected —
+there is no need to return to the library and find the dataset first. The button
+is also available on a folded Recent dataset group, so you can start comparing
+checkpoints without expanding its run history.
+
+## Recover a paused Test Studio batch
+
+If ComfyUI drops while Test Studio is processing a batch, the affected tile says
+**paused** and shows its paste-safe reason. The queue deliberately stops there:
+it does **not** submit or start a later job, so nothing else runs against a
+recovered or different ComfyUI state.
+
+First recover or restart ComfyUI. For a valid local portable install,
+**Setup → ComfyUI → ▶ Start ComfyUI** uses the app's fixed local-safe profile.
+It does not read, change or execute any `.bat` file; your existing launcher and
+its settings stay untouched. Once ComfyUI is responding, **Cancel** the paused
+batch and resume it from Studio. That makes the next prompt an explicit choice,
+never an automatic continuation.
+
 ## Concept datasets (an object or action, not a person)
 
 Pick **Concept** at creation and describe the concept in the required field —

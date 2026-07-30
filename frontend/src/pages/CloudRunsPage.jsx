@@ -406,6 +406,13 @@ export default function CloudRunsPage() {
     navigate('/datasets');
   };
 
+  // Keep every Runs surface on the same Studio entry point: the dataset route
+  // preselects this run's dataset without having to detour through the library.
+  const openTestStudio = (id) => {
+    if (id == null) return;
+    navigate(`/dataset/studio/${id}`);
+  };
+
   const stop = async (run) => {
     const who = run.dataset_name || run.run_name || `run #${run.run_id}`;
     if (!window.confirm(`Stop the cloud run for “${who}”?\n\n`
@@ -792,6 +799,13 @@ export default function CloudRunsPage() {
                 ⬇ LoRA
               </a>
             )}
+            {run.dataset_id != null && (
+              <button type="button" onClick={() => openTestStudio(run.dataset_id)}
+                title="Open Test Studio with this run's dataset selected"
+                className="rounded-lg border border-indigo-400/40 bg-indigo-500/10 px-2 py-1 text-indigo-100 hover:bg-indigo-500/20 text-xs font-semibold">
+                🧪 Test in Studio
+              </button>
+            )}
             {/* The graph opens for ANY run with saved checkpoints (a single run
                 already shows its epochs), and labels as Lineage once it has a
                 parent or a branch. */}
@@ -947,6 +961,13 @@ export default function CloudRunsPage() {
                   className="px-2 py-1 rounded-lg text-content-muted hover:text-content text-xs">
                   Open dataset ↗
                 </button>
+                {data.local_active.current.dataset_id != null && (
+                  <button type="button" onClick={() => openTestStudio(data.local_active.current.dataset_id)}
+                    title="Open Test Studio with this run's dataset selected"
+                    className="px-2 py-1 rounded-lg text-indigo-200 hover:bg-indigo-500/10 hover:text-indigo-100 text-xs font-semibold">
+                    🧪 Test in Studio
+                  </button>
+                )}
               </span>
             </div>
             <RecipeWarning run={{ ...data.local_active, ...data.local_active.current }} />
@@ -1028,6 +1049,13 @@ export default function CloudRunsPage() {
                     className="px-2 py-1 rounded-lg text-content-muted hover:text-content text-xs">
                     Open dataset ↗
                   </button>
+                  {run.dataset_id != null && (
+                    <button type="button" onClick={() => openTestStudio(run.dataset_id)}
+                      title="Open Test Studio with this run's dataset selected"
+                      className="px-2 py-1 rounded-lg text-indigo-200 hover:bg-indigo-500/10 hover:text-indigo-100 text-xs font-semibold">
+                      🧪 Test in Studio
+                    </button>
+                  )}
                 </span>
               </div>
             </div>
@@ -1111,6 +1139,13 @@ export default function CloudRunsPage() {
                       className="ml-auto whitespace-nowrap rounded-lg px-2 py-0.5 text-content-muted hover:text-content text-[0.6875rem]">
                       Open dataset ↗
                     </button>
+                    {group.datasetId != null && (
+                      <button type="button" onClick={() => openTestStudio(group.datasetId)}
+                        title="Open Test Studio with this run's dataset selected"
+                        className="whitespace-nowrap rounded-lg px-2 py-0.5 text-indigo-200 hover:bg-indigo-500/10 hover:text-indigo-100 text-[0.6875rem] font-semibold">
+                        🧪 Test in Studio
+                      </button>
+                    )}
                   </div>
                   {!collapsed && (
                     <div className="flex flex-col gap-2 px-2 pb-2">

@@ -103,7 +103,9 @@ function comfyuiStep(caps) {
   return {
     id: 'comfyui', title: 'ComfyUI — local generation & Test Studio', recommended: false,
     unlocks: ['Klein engine', 'Test Studio'],
-    status, reachable: !!c.reachable, hasKlein, kleinMissing, kleinInvalid, apiUrl: c.api_url || '',
+    status, reachable: !!c.reachable,
+    connectionStatus: c.status || (c.reachable ? 'ok' : 'unreachable'),
+    hasKlein, kleinMissing, kleinInvalid, apiUrl: c.api_url || '',
     skipped,
     // The ONE sentence for why each local engine is dark, identical to the one the
     // generation panel shows — so the two screens can no longer name different
@@ -133,7 +135,27 @@ function comfyuiStep(caps) {
     // verdict for a freshly typed (unsaved) path, it would judge the wrong string.
     dirConfigured: !!c.dir_configured, dirValid: !!c.dir_valid, resolvedDir: c.resolved_dir || '',
     baseDir: c.base_dir || '',
+    portableLauncherSupported: !!c.portable_launcher_supported,
+    portableLauncherLocalApi: !!c.portable_launcher_local_api,
   }
+}
+
+// The server remains the authority. This only keeps the Setup button honest about
+// the already-probed, saved configuration before it makes the no-payload POST.
+export function comfyuiLauncherState(step, configPersisted) {
+  if (!step || !step.dirValid || step.reachable || step.connectionStatus === 'slow') {
+    return { visible: false, enabled: false, reason: '' }
+  }
+  if (!configPersisted) {
+    return { visible: true, enabled: false, reason: 'Save the ComfyUI settings before starting it from LDS.' }
+  }
+  if (!step.portableLauncherSupported) {
+    return { visible: true, enabled: false, reason: 'This button supports only the NVIDIA portable ComfyUI install. Your usual launcher is unchanged.' }
+  }
+  if (!step.portableLauncherLocalApi) {
+    return { visible: true, enabled: false, reason: 'Set ComfyUI to its local address on port 8188 before starting it from LDS.' }
+  }
+  return { visible: true, enabled: true, reason: '' }
 }
 
 // What "continue without ComfyUI" costs vs keeps — shown in the skip-confirmation

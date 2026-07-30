@@ -13,12 +13,18 @@ symlink/junction — and pin the two transit paths as COPIES, so the invariant i
 import os
 
 import pytest
+from PIL import Image
 
 
 # On Windows normcase folds case; on POSIX it does not, and two spellings that
 # differ in case really ARE two folders. The guarantee has to be stated per
 # platform rather than assumed.
 CASE_INSENSITIVE = os.path.normcase('A') == 'a'
+
+
+def _write_png(path, colour=(10, 20, 30)):
+    """Write a real, tiny PNG accepted by the image-ingest guard."""
+    Image.new('RGB', (1, 1), colour).save(path, format='PNG')
 
 
 @pytest.fixture()
@@ -32,8 +38,7 @@ def ds(app):
         db.session.add(d)
         db.session.commit()
         folder = ensure_dataset_dir(d.id)
-        with open(os.path.join(folder, 'a.png'), 'wb') as fh:
-            fh.write(b'\x89PNG\x01')
+        _write_png(os.path.join(folder, 'a.png'))
         db.session.add(FaceDatasetImage(dataset_id=d.id, filename='a.png',
                                         status='keep'))
         db.session.commit()
@@ -109,7 +114,7 @@ def test_through_a_symlink_or_junction(client, ds, tmp_path):
 def test_a_legitimate_folder_is_never_refused(client, ds, tmp_path):
     folder = tmp_path / 'my-scrape-dump'
     folder.mkdir()
-    (folder / 'x.png').write_bytes(b'\x89PNG\x02')
+    _write_png(folder / 'x.png')
     r = _create(client, str(folder))
     assert r.status_code == 200, r.get_json()
     assert r.get_json()['added'] == 1
@@ -130,7 +135,7 @@ def test_a_sibling_of_the_datasets_root_is_never_refused(client, ds, app, tmp_pa
 def test_relocating_a_bank_onto_a_dataset_folder_is_refused(client, ds, tmp_path):
     folder = tmp_path / 'dump'
     folder.mkdir()
-    (folder / 'x.png').write_bytes(b'\x89PNG\x03')
+    _write_png(folder / 'x.png')
     bank_id = _create(client, str(folder)).get_json()['id']
     r = client.post(f'/api/bank/{bank_id}/relocate',
                     json={'folder': ds['folder'], 'confirm': True})

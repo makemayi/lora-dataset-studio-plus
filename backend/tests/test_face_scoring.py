@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import pytest
 
 from PIL import Image
 
@@ -64,6 +65,46 @@ def test_analyze_faces_maps_state_and_sim_onto_rows(app, monkeypatch):
         assert refreshed.face_state == 'scorable'
         assert refreshed.face_score == 0.62
         assert counts == {'scorable': 1}
+
+
+
+@pytest.mark.parametrize('edit', ('crop', 'mirror', 'rotate'))
+def test_analyze_faces_skips_score_when_pixels_change_during_inference(
+        app, monkeypatch, edit):
+    from app.services import face_dataset_service as svc
+    from app.services import face_similarity as fsim
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+
+    with app.app_context():
+        _ds, img = _dataset_with_ref_and_kept_image(svc, LOCAL_USER)
+        image_id = img.id
+        image_path = svc._img_path(img)
+        img.face_state, img.face_score = 'scorable', 0.91
+        img.content_sig, img.content_sig_stat = 'old-content', '1:1'
+        svc.db.session.commit()
+
+        def _edit_while_scoring(_ref_path, image_paths, on_progress=None):
+            assert image_paths == [image_path]
+            if edit == 'crop':
+                assert svc.crop_image(LOCAL_USER, image_id, 0, 0, 32, 32)
+            elif edit == 'mirror':
+                assert svc.mirror_image(LOCAL_USER, image_id)
+            else:
+                assert svc.rotate_image(LOCAL_USER, image_id, 90)
+            if on_progress:
+                on_progress(1, 1)
+            return {image_path: {'state': 'scorable', 'sim': 0.12}}, None
+
+        monkeypatch.setattr(fsim, 'score_dataset_faces', _edit_while_scoring)
+        counts, scoring_error = svc.analyze_faces(LOCAL_USER, img.dataset_id)
+
+        assert counts == {}
+        assert scoring_error is None
+        svc.db.session.expire_all()
+        row = svc.db.session.get(FaceDatasetImage, image_id)
+        assert (row.face_state, row.face_score) == (None, None)
+        assert (row.content_sig, row.content_sig_stat) == (None, None)
 
 
 def test_analyze_faces_ref_not_ok_returns_empty_and_no_row_change(app, monkeypatch):
@@ -536,3 +577,358 @@ def test_the_timeout_grows_with_the_set_it_has_to_walk():
     assert fsim.default_timeout(2000) > 900
     assert fsim.default_timeout(2000) > fsim.default_timeout(1000)
     assert fsim.default_timeout(None) == 900
+
+# --- one-image face scoring -------------------------------------------------
+
+def test_analyze_image_face_scores_only_requested_path_and_persists(app, monkeypatch):
+    from app.services import face_dataset_service as svc
+    from app.services import face_similarity as fsim
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+
+    calls = []
+    with app.app_context():
+        ds, img = _dataset_with_ref_and_kept_image(svc, LOCAL_USER)
+        other = FaceDatasetImage(dataset_id=ds.id, source='import', status='keep',
+                                 filename='other.webp', framing='face')
+        with open(os.path.join(svc._dataset_dir(ds.id), other.filename), 'wb') as fh:
+            fh.write(_png((0, 0, 255)))
+        svc.db.session.add(other)
+        svc.db.session.commit()
+        image_path = svc._img_path(img)
+
+        def _fake(ref_path, image_paths):
+            calls.append((ref_path, image_paths))
+            return {image_path: {'state': 'scorable', 'sim': 0.64}}, None
+
+        monkeypatch.setattr(fsim, 'score_dataset_faces', _fake)
+        result = svc.analyze_image_face(LOCAL_USER, img.id)
+
+        assert calls == [(svc._ref_path(ds), [image_path])]
+        assert result == {'image_id': img.id, 'face_state': 'scorable',
+                          'face_score': 0.64, 'scoring_error': None}
+        svc.db.session.expire_all()
+        row = svc.db.session.get(FaceDatasetImage, img.id)
+        untouched = svc.db.session.get(FaceDatasetImage, other.id)
+        assert (row.face_state, row.face_score) == ('scorable', 0.64)
+        assert untouched.face_state is None and untouched.face_score is None
+
+
+def test_analyze_image_face_operational_errors_leave_score_untouched(app, monkeypatch):
+    from app.services import face_dataset_service as svc
+    from app.services import face_similarity as fsim
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+
+    cases = [
+        ({}, {'kind': 'unavailable', 'detail': 'not installed'}, 'unavailable'),
+        ({}, {'kind': 'ref_unusable', 'detail': 'reference has no face'}, 'ref_unusable'),
+        ({}, {'kind': 'failed', 'detail': 'scorer crashed'}, 'failed'),
+        ({}, None, 'failed'),
+    ]
+    with app.app_context():
+        ds, img = _dataset_with_ref_and_kept_image(svc, LOCAL_USER)
+        for results, scoring_error, expected_kind in cases:
+            img.face_state, img.face_score = 'scorable', 0.91
+            svc.db.session.commit()
+            monkeypatch.setattr(
+                fsim, 'score_dataset_faces',
+                lambda _ref, _paths, _results=results, _error=scoring_error:
+                (_results, _error),
+            )
+
+            result = svc.analyze_image_face(LOCAL_USER, img.id)
+
+            assert result['scoring_error']['kind'] == expected_kind
+            assert (result['face_state'], result['face_score']) == ('scorable', 0.91)
+            svc.db.session.expire_all()
+            row = svc.db.session.get(FaceDatasetImage, img.id)
+            assert (row.face_state, row.face_score) == ('scorable', 0.91)
+
+
+def test_analyze_image_face_honors_subject_gate_without_mutation(app, monkeypatch):
+    from app.services import face_dataset_service as svc
+    from app.services import face_similarity as fsim
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+
+    with app.app_context():
+        ds, img = _dataset_with_ref_and_kept_image(svc, LOCAL_USER)
+        ds.subject_type = 'anime'
+        img.face_state, img.face_score = 'scorable', 0.72
+        svc.db.session.commit()
+        monkeypatch.setattr(
+            fsim, 'score_dataset_faces',
+            lambda *_args: pytest.fail('the subject gate must run before the scorer'),
+        )
+
+        result = svc.analyze_image_face(LOCAL_USER, img.id)
+
+        assert result['scoring_error']['kind'] == 'subject_not_photographic'
+        assert (result['face_state'], result['face_score']) == ('scorable', 0.72)
+        svc.db.session.expire_all()
+        row = svc.db.session.get(FaceDatasetImage, img.id)
+        assert (row.face_state, row.face_score) == ('scorable', 0.72)
+
+
+def test_analyze_image_face_validates_status_and_file(app, monkeypatch):
+    from app.services import face_dataset_service as svc
+    from app.services import face_similarity as fsim
+    from app.config import LOCAL_USER
+
+    with app.app_context():
+        _ds, img = _dataset_with_ref_and_kept_image(svc, LOCAL_USER)
+        monkeypatch.setattr(
+            fsim, 'score_dataset_faces',
+            lambda *_args: pytest.fail('invalid rows must not reach the scorer'),
+        )
+        img.status = 'reject'
+        svc.db.session.commit()
+        with pytest.raises(ValueError, match='not eligible'):
+            svc.analyze_image_face(LOCAL_USER, img.id)
+
+        img.status = 'keep'
+        svc.db.session.commit()
+        os.remove(svc._img_path(img))
+        with pytest.raises(ValueError, match='image file missing'):
+            svc.analyze_image_face(LOCAL_USER, img.id)
+
+
+def test_analyze_image_face_route_returns_stable_payload_and_hides_foreign_rows(
+        app, client, monkeypatch):
+    from app.services import face_dataset_service as svc
+    from app.services import face_similarity as fsim
+    from app.config import LOCAL_USER
+
+    with app.app_context():
+        ds, img = _dataset_with_ref_and_kept_image(svc, LOCAL_USER)
+        image_path = svc._img_path(img)
+        monkeypatch.setattr(
+            fsim, 'score_dataset_faces',
+            lambda _ref, paths: ({paths[0]: {'state': 'scorable', 'sim': 0.63}}, None),
+        )
+        image_id = img.id
+        _other_ds, foreign = _dataset_with_ref_and_kept_image(svc, 'other-user')
+        foreign_id = foreign.id
+
+    response = client.post(f'/api/dataset/image/{image_id}/analyze-face')
+    assert response.status_code == 200
+    assert response.get_json() == {
+        'ok': True, 'image_id': image_id, 'face_state': 'scorable',
+        'face_score': 0.63, 'scoring_error': None,
+    }
+    assert client.post(f'/api/dataset/image/{foreign_id}/analyze-face').status_code == 404
+
+
+def _scored_generated_image(svc, user_id):
+    ds, img = _dataset_with_ref_and_kept_image(svc, user_id)
+    img.source = 'generated'
+    img.klein_model = 'nanobanana'
+    img.variation_label = 'face_front_neutral'
+    img.variation_prompt = 'a studio portrait'
+    img.face_state, img.face_score = 'scorable', 0.74
+    svc.db.session.commit()
+    return ds, img
+
+
+def test_regenerate_image_clears_prior_face_score(app, monkeypatch):
+    from app.services import face_dataset_service as svc
+    from app.models import FaceDatasetImage
+    from app.config import LOCAL_USER
+
+    monkeypatch.setattr(
+        svc, '_api_generate_fn',
+        lambda _engine: lambda _refs, _prompt, aspect_ratio=None: _png((0, 200, 0)),
+    )
+    monkeypatch.setattr(svc.trash, 'send_to_trash', lambda *_args, **_kwargs: None)
+    with app.app_context():
+        _ds, img = _scored_generated_image(svc, LOCAL_USER)
+        image_id = img.id
+        img.content_sig, img.content_sig_stat = 'old-content', '1:1'
+        svc.db.session.commit()
+
+        svc.regenerate_image(LOCAL_USER, image_id)
+
+        svc.db.session.expire_all()
+        row = svc.db.session.get(FaceDatasetImage, image_id)
+        assert row.face_state is None and row.face_score is None
+        assert (row.content_sig, row.content_sig_stat) == (None, None)
+
+
+def test_regenerate_image_restores_prior_face_score_when_trash_fails(app, monkeypatch):
+    from app.services import face_dataset_service as svc
+    from app.models import FaceDatasetImage
+    from app.config import LOCAL_USER
+
+    monkeypatch.setattr(
+        svc, '_api_generate_fn',
+        lambda _engine: lambda _refs, _prompt, aspect_ratio=None: _png((0, 200, 0)),
+    )
+
+    def _trash_failure(*_args, **_kwargs):
+        raise OSError('Trash unavailable')
+
+    monkeypatch.setattr(svc.trash, 'send_to_trash', _trash_failure)
+    with app.app_context():
+        _ds, img = _scored_generated_image(svc, LOCAL_USER)
+        image_id = img.id
+        img.content_sig, img.content_sig_stat = 'old-content', '1:1'
+        svc.db.session.commit()
+
+        with pytest.raises(OSError, match='Trash unavailable'):
+            svc.regenerate_image(LOCAL_USER, image_id)
+
+        svc.db.session.expire_all()
+        row = svc.db.session.get(FaceDatasetImage, image_id)
+        assert (row.face_state, row.face_score) == ('scorable', 0.74)
+        assert (row.content_sig, row.content_sig_stat) == ('old-content', '1:1')
+
+
+@pytest.mark.parametrize(
+    ('replacement', 'expected_filename', 'expected_status',
+     'expected_state', 'expected_score'),
+    [
+        ({'filename': None, 'status': 'pending',
+          'face_state': None, 'face_score': None},
+         None, 'pending', None, None),
+        ({'status': 'reject'}, 'kept.webp', 'reject', 'scorable', 0.91),
+    ],
+)
+def test_analyze_image_face_marks_stale_when_row_changes_during_scoring(
+        app, monkeypatch, replacement, expected_filename, expected_status,
+        expected_state, expected_score):
+    """A CPU scorer can finish after regenerate or a curation click. Its old
+    result must never overwrite the newer row, even when the old ORM object is
+    still resident in this request's session."""
+    from sqlalchemy import update
+    from app.services import face_dataset_service as svc
+    from app.services import face_similarity as fsim
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+
+    with app.app_context():
+        _ds, img = _dataset_with_ref_and_kept_image(svc, LOCAL_USER)
+        image_id = img.id
+        image_path = svc._img_path(img)
+        img.face_state, img.face_score = 'scorable', 0.91
+        svc.db.session.commit()
+
+        def _score_then_replace(_ref_path, _image_paths):
+            svc.db.session.execute(
+                update(FaceDatasetImage)
+                .where(FaceDatasetImage.id == image_id)
+                .values(**replacement))
+            svc.db.session.commit()
+            return {image_path: {'state': 'scorable', 'sim': 0.12}}, None
+
+        monkeypatch.setattr(fsim, 'score_dataset_faces', _score_then_replace)
+        result = svc.analyze_image_face(LOCAL_USER, image_id)
+
+        assert result['stale'] is True
+        assert result['scoring_error'] is None
+        assert (result['face_state'], result['face_score']) == \
+            (expected_state, expected_score)
+        svc.db.session.expire_all()
+        row = svc.db.session.get(FaceDatasetImage, image_id)
+        assert (row.filename, row.status, row.face_state, row.face_score) == \
+            (expected_filename, expected_status, expected_state, expected_score)
+
+
+def test_analyze_image_face_route_bounds_oversized_id(client):
+    response = client.post('/api/dataset/image/9223372036854775808/analyze-face')
+    assert response.status_code == 404
+    assert response.get_json() == {'error': 'not found'}
+
+
+def test_analyze_image_face_route_reports_busy_without_spawning_scorer(
+        app, client, monkeypatch):
+    from app.services import face_dataset_service as svc
+    from app.services import face_similarity as fsim
+    from app.config import LOCAL_USER
+
+    with app.app_context():
+        ds, img = _dataset_with_ref_and_kept_image(svc, LOCAL_USER)
+        image_id = img.id
+        lock = svc._face_scoring_lock(ds.id)
+        assert lock.acquire(blocking=False)
+        monkeypatch.setattr(
+            fsim, 'score_dataset_faces',
+            lambda *_args: pytest.fail('a busy request must not start the scorer'),
+        )
+    try:
+        response = client.post(f'/api/dataset/image/{image_id}/analyze-face')
+    finally:
+        lock.release()
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        'ok': True,
+        'image_id': image_id,
+        'face_state': None,
+        'face_score': None,
+        'scoring_error': {
+            'kind': 'busy',
+            'detail': 'face scoring is already running; try again shortly',
+        },
+    }
+
+
+def test_analyze_faces_shares_the_busy_score_lane(app):
+    from app.services import face_dataset_service as svc
+    from app.config import LOCAL_USER
+
+    with app.app_context():
+        ds, _img = _dataset_with_ref_and_kept_image(svc, LOCAL_USER)
+        lock = svc._face_scoring_lock(ds.id)
+        assert lock.acquire(blocking=False)
+        try:
+            counts, error = svc.analyze_faces(LOCAL_USER, ds.id)
+        finally:
+            lock.release()
+
+    assert counts == {}
+    assert error == {
+        'kind': 'busy',
+        'detail': 'face scoring is already running; try again shortly',
+    }
+
+
+@pytest.mark.parametrize('edit', ('crop', 'mirror', 'rotate'))
+def test_analyze_image_face_never_persists_after_pixel_edit(
+        app, monkeypatch, edit):
+    from app.services import face_dataset_service as svc
+    from app.services import face_similarity as fsim
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+
+    with app.app_context():
+        _ds, img = _dataset_with_ref_and_kept_image(svc, LOCAL_USER)
+        image_id = img.id
+        image_path = svc._img_path(img)
+        img.face_state, img.face_score = 'scorable', 0.91
+        img.content_sig, img.content_sig_stat = 'old-content', '1:1'
+        svc.db.session.commit()
+
+        def _edit_while_scoring(_ref_path, _image_paths):
+            if edit == 'crop':
+                assert svc.crop_image(LOCAL_USER, image_id, 0, 0, 32, 32)
+            elif edit == 'mirror':
+                assert svc.mirror_image(LOCAL_USER, image_id)
+            else:
+                assert svc.rotate_image(LOCAL_USER, image_id, 90)
+            return {image_path: {'state': 'scorable', 'sim': 0.12}}, None
+
+        monkeypatch.setattr(fsim, 'score_dataset_faces', _edit_while_scoring)
+        result = svc.analyze_image_face(LOCAL_USER, image_id)
+
+        assert result == {
+            'image_id': image_id,
+            'face_state': None,
+            'face_score': None,
+            'scoring_error': None,
+            'stale': True,
+        }
+        svc.db.session.expire_all()
+        row = svc.db.session.get(FaceDatasetImage, image_id)
+        assert (row.face_state, row.face_score) == (None, None)
+        assert (row.content_sig, row.content_sig_stat) == (None, None)

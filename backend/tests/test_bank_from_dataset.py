@@ -6,6 +6,12 @@ copying in the other direction."""
 import os
 
 import pytest
+from PIL import Image
+
+
+def _write_png(path, colour):
+    """Write a real, tiny PNG accepted by the image-ingest guard."""
+    Image.new('RGB', (1, 1), colour).save(path, format='PNG')
 
 
 def _seed(dataset_id, names, statuses=None):
@@ -15,8 +21,7 @@ def _seed(dataset_id, names, statuses=None):
     from app.services.dataset_storage import ensure_dataset_dir
     folder = ensure_dataset_dir(dataset_id)
     for i, fn in enumerate(names):
-        with open(os.path.join(folder, fn), 'wb') as fh:
-            fh.write(b'\x89PNG' + bytes([i]))
+        _write_png(os.path.join(folder, fn), (i, 20, 30))
         db.session.add(FaceDatasetImage(
             dataset_id=dataset_id, filename=fn,
             status=(statuses[i] if statuses else 'keep')))

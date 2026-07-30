@@ -473,11 +473,10 @@ def test_bank_deterministic_analysis_skips_pillow_bombs_without_filter_mutation(
     assert warnings.filters == filters_before
 
 
-def test_bank_to_bank_promotion_survives_pillow_bomb_in_both_destination_reads(
+def test_bank_to_bank_promotion_rejects_pillow_bomb_without_creating_a_row(
         app, tmp_path, monkeypatch):
-    """A bomb must not kill the later dimensions read after analysis skips it."""
+    """A bomb is rejected safely before it becomes a destination row."""
     from app.models import BankImage
-    from app.services import bank_transfer_metadata as transfer
     from app.services import image_bank_service as banks
 
     with app.app_context():
@@ -488,19 +487,11 @@ def test_bank_to_bank_promotion_survives_pillow_bomb_in_both_destination_reads(
             raise banks.Image.DecompressionBombError('too many pixels')
 
         # ``banks.Image`` and the Dataset analysis share Pillow's module, so
-        # this simulates both destination opens in the real B -> B job.
+        # the input validation rejects the copy before it can be registered.
         monkeypatch.setattr(banks.Image, 'open', bomb)
         destination_id = banks.start_bank_promote(
             app, 'local', source_bank.id, [source_image.id], 'Bomb-safe copy')
-        copied = BankImage.query.filter_by(bank_id=destination_id).one()
-        assert _row_values(copied, transfer.DETERMINISTIC_ANALYSIS_FIELDS) == {
-            name: None for name in transfer.DETERMINISTIC_ANALYSIS_FIELDS
-        }
-        _assert_model_analysis_is_empty(copied)
-        assert (copied.width, copied.height) == (None, None)
-        assert copied.caption == 'caption from the bank'
-        assert json.loads(copied.source_metadata) == SOURCE_METADATA
-        assert copied.status == 'pending'
+        assert BankImage.query.filter_by(bank_id=destination_id).first() is None
         assert warnings.filters == filters_before
 
 

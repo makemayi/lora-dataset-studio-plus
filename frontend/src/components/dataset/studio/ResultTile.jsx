@@ -8,9 +8,29 @@
  */
 export default function ResultTile({ cell, row, strength, variant, datasetId, onRate, onOpen, fmt }) {
   const isGenerating = cell.queue_status === 'generating';
+  // Current rows remain `pending` while their queue is stalled so Cancel/Resume
+  // continues to target the same run. Accept `status: stalled` too: older or
+  // in-flight payloads must never fall back to a misleading spinning "queued" tile.
+  const isStalled = cell.queue_status === 'stalled'
+    && (cell.status === 'pending' || cell.status === 'stalled');
+  // The backend supplies a redacted, paste-safe queue reason. Keep it visible
+  // instead of hiding the same sentence in a hover-only tooltip.
+  const stalledReason = typeof cell.queue_error === 'string' && cell.queue_error.trim()
+    ? cell.queue_error.trim()
+    : 'ComfyUI needs to be recovered before this tile can run.';
   return (
     <div className="flex flex-col gap-1 items-center">
-      {cell.status === 'pending' && (
+      {isStalled && (
+        <div
+          role="status" aria-live="polite" aria-atomic="true"
+          className="w-20 min-h-28 rounded-md border border-amber-500/50 bg-amber-500/10 flex flex-col gap-1 items-center justify-center px-1 py-1 text-center text-amber-200 text-[0.625rem]">
+          <span aria-hidden className="text-sm">⏸</span>
+          <span className="font-semibold">paused</span>
+          <p className="m-0 break-words leading-tight select-text text-amber-200/80">{stalledReason}</p>
+          <span className="leading-tight text-amber-200/90">Recover or restart ComfyUI, then cancel and resume.</span>
+        </div>
+      )}
+      {cell.status === 'pending' && !isStalled && (
         <div className="w-20 h-28 rounded-md border border-border bg-surface flex flex-col gap-2 items-center justify-center"
           role="status" aria-label={isGenerating ? 'Generating' : 'Queued'}>
           <span className="inline-block w-5 h-5 border-2 border-purple-400/40 border-t-purple-400 rounded-full animate-spin" aria-hidden />

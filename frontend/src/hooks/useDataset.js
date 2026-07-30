@@ -72,6 +72,21 @@ export async function postJson(url, body, isForm) {
   }
 }
 
+export function faceScoringErrorMessage(scoringError) {
+  const { kind, detail } = scoringError || {};
+  if (kind === 'unavailable') {
+    return 'Face scoring is not installed — run the Quality tools step in Setup.';
+  }
+  if (kind === 'subject_not_photographic') return detail || 'Face scoring is unavailable for this dataset.';
+  if (kind === 'busy') {
+    return 'Face scoring is already running. Wait for the current image to finish, then try again.';
+  }
+  if (kind === 'ref_unusable') return detail
+    ? `The reference photo is not usable for scoring: ${detail}`
+    : 'The reference photo is not usable for scoring.';
+  return detail ? `Face scoring failed: ${detail}` : 'Face scoring failed.';
+}
+
 /**
  * Compose the 🧽 Clean summary toast from the server's counts — PURE (no React,
  * no toast) so the honest-message logic is testable on its own.
@@ -145,6 +160,10 @@ export function useDataset() {
   // synchronous ref guard against a double-click enqueuing the same image twice.
   const [recaptioningIds, setRecaptioningIds] = useState(() => new Set());
   const recaptioningRef = useRef(new Set());
+  // Face scoring is GPU-heavy: allow one tile at a time and use a synchronous
+  // ref guard so rapid clicks cannot queue additional InsightFace work.
+  const [scoringFaceIds, setScoringFaceIds] = useState(() => new Set());
+  const scoringFaceRef = useRef(new Set());
   const [refNonce, setRefNonce] = useState(0);
   const pollRef = useRef(null);
   const busyRef = useRef(false); // re-entrancy guard for GPU-bound actions (I2)
@@ -632,17 +651,7 @@ export function useDataset() {
       // Un scorer cassé disait « 0 analyzed » en VERT : le backend remonte
       // maintenant scoring_error {kind, detail} — dire POURQUOI.
       if (d.scoring_error) {
-        const { kind, detail } = d.scoring_error;
-        toast.error(kind === 'unavailable'
-          ? 'Face scoring is not installed — run the Quality tools step in Setup.'
-          // The scorer can't read this KIND of image (a drawn face): the server's
-          // sentence already explains it and names the way out — pass it through
-          // verbatim rather than paraphrasing it into "failed".
-          : kind === 'subject_not_photographic'
-            ? detail
-          : kind === 'ref_unusable'
-            ? `The reference photo is not usable for scoring: ${detail}`
-            : `Face scoring failed: ${detail}`);
+        toast.error(faceScoringErrorMessage(d.scoring_error));
         return;
       }
       const grey = (d.states?.too_small || 0) + (d.states?.no_face || 0)
@@ -653,6 +662,46 @@ export function useDataset() {
       setAnalyzing(false);
     }
   }), [wrap, currentId, refresh, toast]);
+
+  // Score one image without launching the dataset-wide scan. Its busy state stays
+  // on this tile so independent curation actions remain available elsewhere.
+  const scoreFace = useCallback(async (imageId) => {
+    if (data?.face_scoring_blocked) {
+      const error = data.face_scoring_blocked;
+      toast.error(error);
+      return { ok: false, error };
+    }
+    if (scoringFaceRef.current.size > 0) {
+      return { ok: false, error: faceScoringErrorMessage({ kind: 'busy' }) };
+    }
+    scoringFaceRef.current.add(imageId);
+    setScoringFaceIds((prev) => {
+      const next = new Set(prev);
+      next.add(imageId);
+      return next;
+    });
+    try {
+      const d = await postJson(`/api/dataset/image/${imageId}/analyze-face`);
+      if (!d.ok) {
+        toast.error(d.scoring_error ? faceScoringErrorMessage(d.scoring_error)
+          : (d.error || 'Unexpected error'));
+        return d;
+      }
+      if (d.scoring_error) {
+        toast.error(faceScoringErrorMessage(d.scoring_error));
+        return d;
+      }
+      await refresh();
+      return d;
+    } finally {
+      scoringFaceRef.current.delete(imageId);
+      setScoringFaceIds((prev) => {
+        const next = new Set(prev);
+        next.delete(imageId);
+        return next;
+      });
+    }
+  }, [data, refresh, toast]);
 
   // Watermark scan (Qwen3-VL, GPU window). Marks kept images with an overlaid
   // watermark → 🚩 badges + a "Clean (N)" button. Deletes nothing.
@@ -1369,10 +1418,10 @@ export function useDataset() {
 
   return { datasets, currentId, data, busy: busyLive, localBusy: busy, captioning: captioningLive,
            analyzing: analyzingLive, watermarking: watermarkingLive, activity,
-           nonces, mirroringIds, refNonce, recaptioningIds, create, open,
+           nonces, mirroringIds, refNonce, scoringFaceIds, recaptioningIds, create, open,
            deleteDataset, updateSettings, setCurrentId, setRef, addExtraRef, removeExtraRef,
            generate, importFiles, scrapeImport, resolveSmallImageRescue, improveImage, reimproveImage, improveBatch, classify, caption, recaption, recaptionImages,
-           setStatus, setCaption, mirrorImage, rotateImage, crop, cropRef, cropExtraRef, recropRefAuto, editReference, retryReferenceEdit, canRetryReferenceEdit, keepEditedReference, discardEditedReference, setDatasetTrainType, setDatasetFidelity, deleteImage, batchImages, replaceCaptions, writeCaptionFiles, openDatasetFolder, cancelPending, cancelCaption, regenerate, analyzeFaces,
+           setStatus, setCaption, mirrorImage, rotateImage, crop, cropRef, cropExtraRef, recropRefAuto, editReference, retryReferenceEdit, canRetryReferenceEdit, keepEditedReference, discardEditedReference, setDatasetTrainType, setDatasetFidelity, deleteImage, batchImages, replaceCaptions, writeCaptionFiles, openDatasetFolder, cancelPending, cancelCaption, regenerate, analyzeFaces, scoreFace,
            findWatermarks, cleanWatermarks, cleanWatermarkImages, restoreWatermarkImage, dismissWatermarks, saveWatermarkRegions,
            purgeUnused, exportZip, exportBackup, exportZipFor, exportBackupFor, importBackup, importDatasetZip, importDatasetFolder,
            backupEverything, backupJob, downloadBackup, openBackupsFolder, dismissBackup, restoreJob, dismissRestore,

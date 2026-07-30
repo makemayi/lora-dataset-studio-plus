@@ -17,6 +17,7 @@ import json
 from unittest.mock import patch
 
 import pytest
+from PIL import Image
 
 
 @pytest.fixture()
@@ -28,7 +29,7 @@ def captured(app, tmp_path):
         seen = {}
 
         src = tmp_path / 'src.png'
-        src.write_bytes(b'\x89PNG\r\n\x1a\n')
+        Image.new('RGB', (1, 1), (10, 20, 30)).save(src, format='PNG')
         comfy_in = tmp_path / 'comfy_input'
         comfy_in.mkdir(exist_ok=True)
         # Node 139 carries klein/realistic.safetensors, which ships with NEITHER the

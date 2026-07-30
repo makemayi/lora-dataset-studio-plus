@@ -111,6 +111,7 @@ const FAMILY_BADGE = {
 // a phone), M = the historical 2/3-column photo grid, L = large previews.
 const TILE_SIZE_KEY = 'datasetLibraryTileSize';
 const COLLAPSED_KEY = 'datasetLibraryCollapsed_v1';
+const PREVIEWS_VISIBLE_KEY = 'datasetLibraryPreviewsVisible';
 const TILE_SIZE_TITLE = {
   S: 'Compact list — maximum density, browse many datasets at once',
   M: 'Medium tiles (default)',
@@ -143,7 +144,7 @@ function tileStats(d) {
 }
 
 /** Photo-first tile: the reference face IS the identity — lead with it. */
-function DatasetTile({ d, onOpen, onDelete, onExportZip, onExportBackup }) {
+function DatasetTile({ d, onOpen, onDelete, onExportZip, onExportBackup, showPreviews }) {
   const canExportZip = (d.images_kept ?? 0) > 0;
   return (
     <div className="library-card group relative overflow-hidden rounded-xl border border-border bg-surface transition-colors hover:border-primary/40">
@@ -151,7 +152,7 @@ function DatasetTile({ d, onOpen, onDelete, onExportZip, onExportBackup }) {
         aria-label={`Open the dataset ${d.name}`}
         className="block w-full text-left">
         <div className="relative aspect-[4/3] bg-app/60">
-          {d.ref_filename ? (
+          {showPreviews && d.ref_filename ? (
             <img
               src={`/api/dataset/${d.id}/img/${encodeURIComponent(d.ref_filename)}`}
               alt="" loading="lazy" aria-hidden="true"
@@ -227,7 +228,7 @@ function DatasetTile({ d, onOpen, onDelete, onExportZip, onExportBackup }) {
 
 /** Compact row for the S size: identity at a glance, one dataset per line,
  *  icon-only actions. Everything the photo tile shows, at list density. */
-function DatasetRow({ d, onOpen, onDelete, onExportZip, onExportBackup }) {
+function DatasetRow({ d, onOpen, onDelete, onExportZip, onExportBackup, showPreviews }) {
   const canExportZip = (d.images_kept ?? 0) > 0;
   const kind = datasetKind(d);
   const iconBtn = 'grid h-7 w-7 shrink-0 place-items-center rounded-md border border-border bg-app/50 text-xs text-content-muted transition-colors hover:border-primary/40 hover:bg-surface-raised hover:text-content';
@@ -237,7 +238,7 @@ function DatasetRow({ d, onOpen, onDelete, onExportZip, onExportBackup }) {
         aria-label={`Open the dataset ${d.name}`}
         className="flex min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-1.5 text-left">
         <span className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md bg-app/60">
-          {d.ref_filename ? (
+          {showPreviews && d.ref_filename ? (
             <img
               src={`/api/dataset/${d.id}/img/${encodeURIComponent(d.ref_filename)}`}
               alt="" loading="lazy" aria-hidden="true"
@@ -469,6 +470,14 @@ export default function DatasetListPanel({
   useEffect(() => {
     try { localStorage.setItem(TILE_SIZE_KEY, tileSize); } catch { /* ignore — private mode */ }
   }, [tileSize]);
+  // Image requests are intentionally conditional below: when previews are
+  // hidden, cards show their local initial fallback without mounting an <img>.
+  const [showPreviews, setShowPreviews] = useState(() => {
+    try { return localStorage.getItem(PREVIEWS_VISIBLE_KEY) !== '0'; } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(PREVIEWS_VISIBLE_KEY, showPreviews ? '1' : '0'); } catch { /* ignore — private mode */ }
+  }, [showPreviews]);
   const [collapsed, setCollapsed] = useState(() => {
     try { return normalizeCollapsedMap(localStorage.getItem(COLLAPSED_KEY)); } catch { return {}; }
   });
@@ -545,8 +554,22 @@ export default function DatasetListPanel({
                 ))}
               </div>
             )}
-            <TileSizeControl size={tileSize} onChange={setTileSize}
-              titles={TILE_SIZE_TITLE} className="ml-auto" />
+            <div className="ml-auto flex shrink-0 items-center gap-1.5">
+              <button type="button"
+                onClick={() => setShowPreviews((visible) => !visible)}
+                aria-pressed={showPreviews}
+                title={showPreviews ? 'Hide image previews' : 'Show image previews'}
+                className={`flex h-6 items-center gap-1 rounded-md border px-1.5 text-[0.6875rem] font-semibold transition-colors ${
+                  showPreviews
+                    ? 'border-indigo-400/60 bg-indigo-500/20 text-indigo-200'
+                    : 'border-border bg-surface text-content-muted hover:bg-surface-raised'}`}>
+                <span aria-hidden="true">{showPreviews ? '🖼️' : '▧'}</span>
+                <span className="hidden sm:inline">{showPreviews ? 'Hide previews' : 'Show previews'}</span>
+                <span className="sr-only">Image previews {showPreviews ? 'shown' : 'hidden'}</span>
+              </button>
+              <TileSizeControl size={tileSize} onChange={setTileSize}
+                titles={TILE_SIZE_TITLE} />
+            </div>
           </div>
         )}
       </div>
@@ -592,14 +615,16 @@ export default function DatasetListPanel({
                     <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
                       {items.map((d) => (
                         <DatasetRow key={d.id} d={d} onOpen={onOpen} onDelete={onDelete}
-                          onExportZip={onExportZip} onExportBackup={onExportBackup} />
+                          onExportZip={onExportZip} onExportBackup={onExportBackup}
+                          showPreviews={showPreviews} />
                       ))}
                     </div>
                   ) : (
                     <div className={GRID_COLS[tileSize]}>
                       {items.map((d) => (
                         <DatasetTile key={d.id} d={d} onOpen={onOpen} onDelete={onDelete}
-                          onExportZip={onExportZip} onExportBackup={onExportBackup} />
+                          onExportZip={onExportZip} onExportBackup={onExportBackup}
+                          showPreviews={showPreviews} />
                       ))}
                     </div>
                   )

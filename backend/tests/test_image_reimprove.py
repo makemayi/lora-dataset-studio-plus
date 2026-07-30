@@ -166,7 +166,7 @@ def test_reimprove_trash_failure_restores_candidate_and_parent_states(app, monke
     monkeypatch.setattr(
         svc.trash, 'send_to_trash',
         lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError('Trash unavailable')))
-    monkeypatch.setattr(job_queue.queue_manager, 'cancel_job', lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(job_queue.queue_manager, 'cancel_job', lambda *_args, **_kwargs: True)
 
     with app.app_context():
         ds, parent, candidate = _improved_pair(svc, FaceDatasetImage, LOCAL_USER)
@@ -283,7 +283,7 @@ def test_reimprove_trash_rollback_preserves_a_concurrent_candidate_decision(
 
     queued = []
     _stub_klein(monkeypatch, keh, queued)
-    monkeypatch.setattr(job_queue.queue_manager, 'cancel_job', lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(job_queue.queue_manager, 'cancel_job', lambda *_args, **_kwargs: True)
 
     with app.app_context():
         ds, parent, candidate = _improved_pair(svc, FaceDatasetImage, LOCAL_USER)
@@ -322,7 +322,7 @@ def test_reimprove_trash_rollback_preserves_a_caption_edited_during_trash(
 
     queued = []
     _stub_klein(monkeypatch, keh, queued)
-    monkeypatch.setattr(job_queue.queue_manager, 'cancel_job', lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(job_queue.queue_manager, 'cancel_job', lambda *_args, **_kwargs: True)
 
     with app.app_context():
         ds, parent, candidate = _improved_pair(svc, FaceDatasetImage, LOCAL_USER)
@@ -361,7 +361,7 @@ def test_reimprove_trash_rollback_restores_an_unchanged_blank_caption(app, monke
 
     queued = []
     _stub_klein(monkeypatch, keh, queued)
-    monkeypatch.setattr(job_queue.queue_manager, 'cancel_job', lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(job_queue.queue_manager, 'cancel_job', lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
         svc.trash, 'send_to_trash',
         lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError('Trash unavailable')))

@@ -190,7 +190,7 @@ def test_klein_regenerate_applies_current_suffix_exactly_once(app, monkeypatch):
     monkeypatch.setattr(keh, 'enqueue_klein_edit',
                         lambda **k: captured.append(k) or f'job-{len(captured)}')
     with app.app_context():
-        monkeypatch.setattr(jq.queue_manager, 'cancel_job', lambda *a, **k: None)
+        monkeypatch.setattr(jq.queue_manager, 'cancel_job', lambda *a, **k: True)
         ds = _ds_with_ref(svc, prompt_suffix='warm tones')
         svc.generate_variations(LOCAL_USER, ds.id,
                                 [{'label': 'a', 'framing': 'face', 'prompt': 'close-up portrait'}],

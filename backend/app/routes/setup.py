@@ -3,8 +3,11 @@ from flask import Blueprint, jsonify, request
 
 from .. import capabilities
 from .. import setup_installer
+from ..services import comfyui_control
 
 bp = Blueprint('setup', __name__, url_prefix='/api/setup')
+
+_COMFYUI_START_LOOPBACKS = {'127.0.0.1', '::1', '::ffff:127.0.0.1'}
 
 
 @bp.get('/autodetect')
@@ -23,6 +26,26 @@ def setup_validate_comfyui_dir():
     blanket "invalid" that only shows up after a save. Read-only, cheap (a couple of
     stat calls), never raises. `?path=` is the raw folder string the user typed."""
     return jsonify(capabilities.classify_comfyui_dir(request.args.get('path', '')))
+
+
+@bp.post('/comfyui/start')
+def start_comfyui():
+    """Explicitly start LDS's narrowly validated portable ComfyUI instance.
+
+    This endpoint intentionally accepts no path, flags, query values, or JSON. The
+    service reads only the already-persisted local configuration and owns no process
+    started by the user's normal ComfyUI launcher.
+    """
+    # The application-wide LAN guard can allow authenticated remote clients. Starting
+    # a local executable is stricter: it is available only to the exact local peers.
+    if request.remote_addr not in _COMFYUI_START_LOOPBACKS:
+        return jsonify({'error': 'This action is only available from this computer.'}), 403
+    # No client input may influence the executable, cwd, or arguments. Do not parse a
+    # body at all; reject it instead. The CSRF header remains the only required POST
+    # metadata and is enforced by Flask-WTF before this handler in normal operation.
+    if request.query_string or request.content_length not in (None, 0) or request.content_type:
+        return jsonify({'error': 'This action does not accept options.'}), 400
+    return jsonify(comfyui_control.start_comfyui()), 200
 
 
 @bp.get('/comfyui-folders')

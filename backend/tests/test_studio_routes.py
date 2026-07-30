@@ -73,9 +73,11 @@ def _png_bytes(color=(120, 60, 30), size=(48, 64)):
 
 
 def _mock_vram(monkeypatch):
-    # The GPU-exclusive vision window frees ComfyUI VRAM on entry (best-effort);
-    # stub it so the test never reaches a real ComfyUI.
-    monkeypatch.setattr('app.utils.comfyui.free_comfyui_vram', lambda *a, **k: True)
+    # The GPU-exclusive vision window frees ComfyUI VRAM on entry; stub it so
+    # this route test never reaches a real ComfyUI.
+    from app.utils.comfyui import ComfyVramFreeVerdict
+    monkeypatch.setattr('app.utils.comfyui.free_comfyui_vram',
+                        lambda *a, **k: ComfyVramFreeVerdict.FREED)
 
 
 def test_describe_image_returns_prompt(client, monkeypatch):

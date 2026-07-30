@@ -132,8 +132,24 @@ def test_a_copy_that_cannot_be_written_leaves_no_phantom_bank(app, source):
         from app.services import bank_jobs, image_bank_service as banks
 
         banks_before = ImageBank.query.count()
-        with patch.object(banks.shutil, 'copy2',
-                          side_effect=OSError(28, 'No space left on device')):
+        native_open = open
+
+        class DestinationWriteFailure:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def write(self, _payload):
+                raise OSError(28, 'No space left on device')
+
+        def fail_destination_write(path, mode='r', *args, **kwargs):
+            if mode == 'wb':
+                return DestinationWriteFailure()
+            return native_open(path, mode, *args, **kwargs)
+
+        with patch.object(banks, 'open', fail_destination_write, create=True):
             banks.start_bank_promote(app, 'local', bank_id, ids[:2], 'Candidates')
 
         # The job body reports through bank_jobs (the runner owns exceptions), and

@@ -1,0 +1,333 @@
+"""Focused safety contract for the LDS-owned ComfyUI portable launcher."""
+from __future__ import annotations
+
+import os
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _clear_owned_process(monkeypatch):
+    from app.services import comfyui_control
+    monkeypatch.setattr(comfyui_control, '_owned_process', None)
+
+
+def _portable_layout(tmp_path):
+    """Create the only portable shape the launcher is allowed to accept."""
+    bundle = tmp_path / 'ComfyUI_windows_portable'
+    base = bundle / 'ComfyUI'
+    base.mkdir(parents=True)
+    (base / 'main.py').write_text('# test ComfyUI entrypoint\n', encoding='utf-8')
+    (base / 'models').mkdir()
+    embedded = bundle / 'python_embeded'
+    embedded.mkdir()
+    (embedded / 'python.exe').write_bytes(b'not run by this test')
+    # Marker only: no test and no production path ever executes it.
+    (bundle / 'run_nvidia_gpu.bat').write_text('@echo off\n', encoding='utf-8')
+    return base
+
+
+def _configure(base, api_url='http://127.0.0.1:8188'):
+    from app import config
+    config.save_config({'comfyui': {'base_dir': str(base), 'api_url': api_url}})
+
+
+def _no_spawn(*_args, **_kwargs):
+    raise AssertionError('the portable launcher must not spawn for this input')
+
+
+@pytest.mark.parametrize('api_url', [
+    'http://192.168.1.20:8188',
+    'https://127.0.0.1:8188',
+    'http://localhost:8188',
+    'http://[::1]:8188',
+    'http://127.0.0.1:9999',
+    'http://127.0.0.1:8188/',
+    'http://127.0.0.1:8188/other',
+])
+def test_refuses_remote_or_nonstandard_comfyui_url(tmp_path, monkeypatch, api_url):
+    from app.services import comfyui_control
+    base = _portable_layout(tmp_path)
+    _configure(base, api_url)
+    monkeypatch.setattr(comfyui_control, '_spawn', _no_spawn)
+
+    result = comfyui_control.start_comfyui(wait_timeout=0)
+
+    assert result['ok'] is False
+    assert result['reachable'] is False
+    assert str(base) not in result['error']
+
+
+def test_refuses_an_invalid_or_nonportable_layout(tmp_path, monkeypatch):
+    from app.services import comfyui_control
+    base = tmp_path / 'some-source-checkout'
+    base.mkdir()
+    (base / 'main.py').touch()
+    (base / 'models').mkdir()
+    _configure(base)
+    monkeypatch.setattr(comfyui_control, '_spawn', _no_spawn)
+
+    result = comfyui_control.start_comfyui(wait_timeout=0)
+
+    assert result['ok'] is False
+    assert result['reachable'] is False
+
+
+def test_refuses_a_symlinked_embedded_python(tmp_path, monkeypatch):
+    from app.services import comfyui_control
+    base = _portable_layout(tmp_path)
+    executable = base.parent / 'python_embeded' / 'python.exe'
+    target = base.parent / 'python_embeded' / 'python-real.exe'
+    executable.replace(target)
+    try:
+        executable.symlink_to(target)
+    except (NotImplementedError, OSError):
+        pytest.skip('symlinks are unavailable in this test environment')
+    _configure(base)
+    monkeypatch.setattr(comfyui_control, '_spawn', _no_spawn)
+
+    result = comfyui_control.start_comfyui(wait_timeout=0)
+
+    assert result['ok'] is False
+
+
+def test_spawn_uses_only_the_fixed_safe_argv(tmp_path, monkeypatch):
+    from app.services import comfyui_control
+    base = _portable_layout(tmp_path)
+    _configure(base)
+    calls = []
+
+    class RunningProcess:
+        def poll(self):
+            return None
+
+    def fake_popen(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return RunningProcess()
+
+    # First check is before the lock, second is inside it, then the first poll wins.
+    history = iter([
+        comfyui_control._HISTORY_DOWN,
+        comfyui_control._HISTORY_DOWN,
+        comfyui_control._HISTORY_READY,
+    ])
+    monkeypatch.setattr(comfyui_control, '_history_state', lambda: next(history))
+    monkeypatch.setattr(comfyui_control.subprocess, 'Popen', fake_popen)
+
+    result = comfyui_control.start_comfyui(wait_timeout=1, poll_interval=0.05)
+
+    assert result == {'ok': True, 'reachable': True}
+    assert len(calls) == 1
+    argv, kwargs = calls[0]
+    assert argv == [
+        os.path.normcase(str(base.parent / 'python_embeded' / 'python.exe')), '-s', 'main.py',
+        '--windows-standalone-build', '--disable-auto-launch',
+        '--preview-method', 'none',
+        '--listen', '127.0.0.1', '--port', '8188',
+    ]
+    assert kwargs['shell'] is False
+    assert kwargs['stdin'] is comfyui_control.subprocess.DEVNULL
+    assert kwargs['stdout'] is comfyui_control.subprocess.DEVNULL
+    assert kwargs['stderr'] is comfyui_control.subprocess.DEVNULL
+    assert kwargs['cwd'] == os.path.normcase(str(base))
+    assert kwargs['close_fds'] is True
+    assert not any(str(arg).lower().endswith(('.bat', '.cmd')) for arg in argv)
+    assert '--cache-none' not in argv
+    assert '--disable-smart-memory' not in argv
+    assert '--force-fp16' not in argv
+    assert '--fast' not in argv
+
+
+def test_timeout_with_live_child_reports_starting_and_never_spawns_twice(tmp_path, monkeypatch):
+    from app.services import comfyui_control
+    base = _portable_layout(tmp_path)
+    _configure(base)
+    launches = []
+
+    class StillStarting:
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(comfyui_control, '_history_state',
+                        lambda: comfyui_control._HISTORY_DOWN)
+    monkeypatch.setattr(comfyui_control, '_spawn',
+                        lambda layout: (launches.append(layout) or StillStarting()))
+
+    first = comfyui_control.start_comfyui(wait_timeout=0)
+    second = comfyui_control.start_comfyui(wait_timeout=0)
+
+    assert first == {'ok': True, 'reachable': False, 'starting': True}
+    assert second == {'ok': True, 'reachable': False, 'already_running': True,
+                      'starting': True}
+    assert len(launches) == 1
+
+
+def test_already_listening_history_is_a_safe_noop(tmp_path, monkeypatch):
+    from app.services import comfyui_control
+    base = _portable_layout(tmp_path)
+    _configure(base)
+    monkeypatch.setattr(comfyui_control, '_history_state',
+                        lambda: comfyui_control._HISTORY_READY)
+    monkeypatch.setattr(comfyui_control, '_spawn', _no_spawn)
+
+    assert comfyui_control.start_comfyui() == {
+        'ok': True, 'reachable': True, 'already_running': True,
+    }
+
+
+def test_start_route_rejects_client_options_before_the_service(client, monkeypatch):
+    from app.services import comfyui_control
+    monkeypatch.setattr(comfyui_control, 'start_comfyui', _no_spawn)
+
+    query = client.post('/api/setup/comfyui/start?argv=bad')
+    body = client.post('/api/setup/comfyui/start', json={'argv': 'bad'})
+
+    assert query.status_code == 400
+    assert body.status_code == 400
+    assert query.get_json()['error'] == 'This action does not accept options.'
+
+
+@pytest.mark.parametrize('address', ['127.0.0.1', '::1', '::ffff:127.0.0.1'])
+def test_start_route_accepts_only_the_explicit_loopback_addresses(client, monkeypatch, address):
+    from app.services import comfyui_control
+    monkeypatch.setattr(comfyui_control, 'start_comfyui',
+                        lambda: {'ok': True, 'reachable': True})
+
+    response = client.post('/api/setup/comfyui/start',
+                           environ_overrides={'REMOTE_ADDR': address})
+
+    assert response.status_code == 200
+    assert response.get_json() == {'ok': True, 'reachable': True}
+
+
+def test_start_route_rejects_non_loopback_even_when_global_lan_guard_is_open(client, monkeypatch):
+    from app.services import comfyui_control
+    monkeypatch.setattr(comfyui_control, 'start_comfyui', _no_spawn)
+
+    response = client.post('/api/setup/comfyui/start',
+                           environ_overrides={'REMOTE_ADDR': '192.168.1.20'})
+
+    assert response.status_code == 403
+    assert response.get_json()['error'] == 'This action is only available from this computer.'
+
+
+def test_launch_error_never_returns_an_installation_path(tmp_path, monkeypatch):
+    from app.services import comfyui_control
+    base = _portable_layout(tmp_path)
+    _configure(base)
+    monkeypatch.setattr(comfyui_control, '_history_state',
+                        lambda: comfyui_control._HISTORY_DOWN)
+
+    def fail_with_private_path(_layout):
+        raise OSError(f'cannot execute {base}')
+
+    monkeypatch.setattr(comfyui_control, '_spawn', fail_with_private_path)
+    result = comfyui_control.start_comfyui(wait_timeout=0)
+
+    assert result['ok'] is False
+    assert str(base) not in result['error']
+    assert 'python_embeded' not in result['error']
+
+
+def test_occupied_port_is_never_replaced(tmp_path, monkeypatch):
+    from app.services import comfyui_control
+    base = _portable_layout(tmp_path)
+    _configure(base)
+    monkeypatch.setattr(comfyui_control, '_history_state',
+                        lambda: comfyui_control._HISTORY_OCCUPIED)
+    monkeypatch.setattr(comfyui_control, '_spawn', _no_spawn)
+
+    assert comfyui_control.start_comfyui() == {
+        'ok': True, 'reachable': False, 'already_running': True, 'starting': True,
+    }
+
+
+class _HistoryResponse:
+    def __init__(self, status_code, body):
+        self.status_code = status_code
+        self._body = body
+
+    def json(self):
+        if isinstance(self._body, BaseException):
+            raise self._body
+        return self._body
+
+
+def test_history_probe_fails_closed_except_for_a_connection_refusal(monkeypatch):
+    from app.services import comfyui_control
+    calls = []
+
+    def ready_get(url, **kwargs):
+        calls.append((url, kwargs))
+        return _HistoryResponse(200, {})
+
+    monkeypatch.setattr(comfyui_control.requests, 'get', ready_get)
+    assert comfyui_control._history_state() == comfyui_control._HISTORY_READY
+    assert calls == [(
+        'http://127.0.0.1:8188/history',
+        {'timeout': (1, 3), 'allow_redirects': False},
+    )]
+
+    monkeypatch.setattr(comfyui_control.requests, 'get',
+                        lambda *_args, **_kwargs: _HistoryResponse(404, {}))
+    assert comfyui_control._history_state() == comfyui_control._HISTORY_OCCUPIED
+    monkeypatch.setattr(comfyui_control.requests, 'get',
+                        lambda *_args, **_kwargs: _HistoryResponse(200, []))
+    assert comfyui_control._history_state() == comfyui_control._HISTORY_OCCUPIED
+    monkeypatch.setattr(comfyui_control.requests, 'get',
+                        lambda *_args, **_kwargs: _HistoryResponse(200, ValueError('invalid JSON')))
+    assert comfyui_control._history_state() == comfyui_control._HISTORY_OCCUPIED
+
+    def timeout(*_args, **_kwargs):
+        raise comfyui_control.requests.Timeout()
+
+    monkeypatch.setattr(comfyui_control.requests, 'get', timeout)
+    assert comfyui_control._history_state() == comfyui_control._HISTORY_OCCUPIED
+
+    def refused(*_args, **_kwargs):
+        raise comfyui_control.requests.ConnectionError()
+
+    monkeypatch.setattr(comfyui_control.requests, 'get', refused)
+    assert comfyui_control._history_state() == comfyui_control._HISTORY_DOWN
+
+
+def test_spawn_environment_excludes_lds_and_secret_variables(tmp_path, monkeypatch):
+    from app.services import comfyui_control
+    base = _portable_layout(tmp_path)
+    _configure(base)
+    calls = []
+
+    class RunningProcess:
+        def poll(self):
+            return None
+
+    def fake_popen(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return RunningProcess()
+
+    for secret_name in comfyui_control.cfg.SECRET_KEYS:
+        monkeypatch.setenv(secret_name, 'private-value')
+    monkeypatch.setenv('LDS_ACCESS_TOKEN', 'private-token')
+    monkeypatch.setenv('LDS_TEST_ONLY', 'private-app-setting')
+    monkeypatch.setenv('PYTHONPATH', 'untrusted-python-injection')
+    monkeypatch.setenv('SystemRoot', 'C:\\Windows')
+    history = iter([
+        comfyui_control._HISTORY_DOWN,
+        comfyui_control._HISTORY_DOWN,
+        comfyui_control._HISTORY_READY,
+    ])
+    monkeypatch.setattr(comfyui_control, '_history_state', lambda: next(history))
+    monkeypatch.setattr(comfyui_control.subprocess, 'Popen', fake_popen)
+
+    assert comfyui_control.start_comfyui(wait_timeout=1, poll_interval=0.05) == {
+        'ok': True, 'reachable': True,
+    }
+    assert len(calls) == 1
+    child_env = calls[0][1]['env']
+    names = {name.upper() for name in child_env}
+    assert 'PATH' in names
+    assert 'SYSTEMROOT' in names
+    assert not (names & {name.upper() for name in comfyui_control.cfg.SECRET_KEYS})
+    assert 'LDS_ACCESS_TOKEN' not in names
+    assert 'PYTHONPATH' not in names
+    assert not any(name.startswith('LDS_') for name in names)

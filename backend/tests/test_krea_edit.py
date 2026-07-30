@@ -859,6 +859,85 @@ def test_krea_dataset_batch_and_regenerate_forward_the_catalog_card_aspect(app, 
     assert [call['aspect_ratio'] for call in calls] == ['16:9', '16:9']
 
 
+def test_plain_krea_retry_uses_row_engine_without_klein_preflight(client, app, monkeypatch):
+    """Retry sends no override, so the saved Krea tag decides the lane.
+
+    In particular the route must not inspect the Klein graph before the service
+    can resolve a failed Krea row: an unavailable Klein node is irrelevant to a
+    Krea retry and must not reject it before the Krea lane is selected.
+    """
+    from app.extensions import db
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+    from app.services import krea_edit_helper as keh
+    from app.services import klein_edit_helper as kleh
+
+    seen = []
+    monkeypatch.setattr(
+        kleh, 'klein_missing_nodes',
+        lambda: (_ for _ in ()).throw(AssertionError('Klein preflight must not run for Krea')))
+    monkeypatch.setattr(
+        svc, '_api_generate_fn',
+        lambda _engine: (_ for _ in ()).throw(AssertionError('API must not run for Krea')))
+    monkeypatch.setattr(
+        keh, 'enqueue_krea_edit',
+        lambda **kwargs: (seen.append(kwargs), 'krea-retry-job')[1])
+
+    with app.app_context():
+        ds = svc.create_dataset('local', 'Krea retry', 'krea_retry')
+        ds.ref_filename = 'ref.png'
+        row = FaceDatasetImage(
+            dataset_id=ds.id, source='generated', status='failed',
+            variation_label='Bust, front', framing='bust',
+            variation_prompt='upper body portrait', klein_model='krea')
+        db.session.add(row)
+        db.session.commit()
+        row_id = row.id
+
+    response = client.post(f'/api/dataset/image/{row_id}/regenerate', json={})
+    assert response.status_code == 200
+    assert response.get_json() == {'ok': True, 'job_id': 'krea-retry-job'}
+    assert len(seen) == 1
+
+    with app.app_context():
+        retried = db.session.get(FaceDatasetImage, row_id)
+        assert (retried.status, retried.job_id, retried.klein_model) == (
+            'pending', 'krea-retry-job', 'krea')
+
+
+def test_plain_klein_retry_keeps_its_node_preflight_and_maps_the_409(
+        client, app, monkeypatch):
+    """Moving preflight behind origin resolution must not weaken Klein retries."""
+    from app.extensions import db
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+    from app.services import klein_edit_helper as kleh
+
+    missing = [{'class_type': 'ExampleKleinNode', 'pack': 'Example-Pack',
+                'url': 'https://example.invalid/pack'}]
+    monkeypatch.setattr(kleh, 'klein_missing_nodes', lambda: missing)
+    monkeypatch.setattr(kleh, 'klein_missing_assets', lambda: [])
+
+    with app.app_context():
+        ds = svc.create_dataset('local', 'Klein retry', 'klein_retry')
+        ds.ref_filename = 'ref.png'
+        row = FaceDatasetImage(
+            dataset_id=ds.id, source='generated', status='failed',
+            variation_label='Bust, front', framing='bust',
+            variation_prompt='upper body portrait',
+            klein_model='flux-2-klein.safetensors')
+        db.session.add(row)
+        db.session.commit()
+        row_id = row.id
+
+    response = client.post(f'/api/dataset/image/{row_id}/regenerate', json={})
+    assert response.status_code == 409
+    body = response.get_json()
+    assert body['ok'] is False
+    assert body['klein_nodes_missing'] == missing
+    assert 'ExampleKleinNode' in body['error']
+
+
 # --- route: the 409 is the ONLY thing standing between a fresh install and a
 #     grid of silently-failing tiles, so it is pinned end to end -------------
 

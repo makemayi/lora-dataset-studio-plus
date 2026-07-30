@@ -1003,6 +1003,20 @@ def dataset_analyze_faces(dataset_id):
                     'scoring_error': scoring_error})
 
 
+@bp.post('/dataset/image/<int:image_id>/analyze-face')
+def dataset_image_analyze_face(image_id):
+    if image_id > (1 << 63) - 1:
+        return jsonify({'error': 'not found'}), 404
+    # CPU (onnxruntime CPU-only) -> no GPU-exclusive window or ComfyUI pause.
+    try:
+        result = svc.analyze_image_face(LOCAL_USER, image_id)
+    except Exception as e:
+        return _map_error(e)
+    if result is None:
+        return jsonify({'error': 'not found'}), 404
+    return jsonify({'ok': True, **result})
+
+
 @bp.post('/dataset/<int:dataset_id>/watermarks/detect')
 def dataset_watermarks_detect(dataset_id):
     """Scan kept images for overlaid watermarks (Qwen3-VL) — GPU-exclusive vision
@@ -1309,24 +1323,10 @@ def dataset_image_regenerate(image_id):
     klein_model = (data.get('klein_model') or '').strip() or None
     try:
         from flask import current_app
-        # Klein node preflight (skip when the user explicitly picked an API engine,
-        # which doesn't touch ComfyUI): surface a missing custom node as one 409
-        # instead of a silent failed re-roll. Fail-open if /object_info is down;
-        # combined with the model scan (same rationale as the batch generate).
-        if engine == 'krea':
-            # Krea's own preflight (weights + node pack). Explicit engine only:
-            # when none is given the service picks the row's origin, and its
-            # KreaModelsMissing is mapped below.
-            from ..services import krea_edit_helper as krh
-            try:
-                krh.preflight()
-            except krh.KreaModelsMissing as e:
-                return _krea_missing_response(e)
-        elif engine not in svc.API_ENGINES:
-            from ..services import klein_edit_helper as keh
-            missing_nodes = keh.klein_missing_nodes()
-            if missing_nodes:
-                return _klein_missing_response(keh.klein_missing_assets(), missing_nodes)
+        # `engine` is absent for an ordinary Retry. The service then resolves the
+        # stored row provenance (Krea/API tag or Klein model filename) before its
+        # target-specific preflight; doing a Klein check here would reject a Krea
+        # retry before it ever reached Krea's own preflight.
         job_id = svc.regenerate_image(LOCAL_USER, image_id,
                                       lora_strength=data.get('lora_strength'),
                                       prompt=edited_prompt,
@@ -1336,6 +1336,8 @@ def dataset_image_regenerate(image_id):
     except Exception as e:
         from ..services.klein_edit_helper import KleinModelsMissing
         from ..services.krea_edit_helper import KreaModelsMissing
+        if isinstance(e, svc.KleinNodesMissing):
+            return _klein_missing_response(e.missing, e.missing_nodes)
         if isinstance(e, KleinModelsMissing):
             return _klein_missing_response(e.missing)  # auto-download, tell them to retry
         if isinstance(e, KreaModelsMissing):

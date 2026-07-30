@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import KleinModelSetting from '../shared/KleinModelSetting';
 import { useToast } from '../common/Toast';
+import SettingsLink from '../common/SettingsLink';
 import { useCapabilities } from '../../context/CapabilitiesContext';
 import { apiFetch, putJson } from '../../api/fetchClient';
 import ShotIllustration, { contextEmoji } from './ShotIllustration';
@@ -434,7 +435,8 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
   // SPLIT the shots between them (varied dataset, same cost) or run ALL of them
   // on every shot (compare the engines, then triage). engineSelection.js owns
   // the storage compatibility: the legacy single-string `datasetGenerator` key
-  // is still written, so regenerate and the ✎ modal keep working untouched.
+  // is still written for older profiles and the ✎ modal. Tile Retry uses the
+  // stored engine of its own row instead.
   const [engines, setEngines] = useState(() => readEngines(storage()));
   useEffect(() => { writeEngines(storage(), engines); }, [engines]);
   const [engineMode, setEngineMode] = useState(() => readMode(storage()));
@@ -522,8 +524,8 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
   // The persisted selection can name engines that have since been disabled in
   // Settings (or lost their key/backend): drop those instead of trying to
   // generate on a dead one, and fall back to the first usable card when that
-  // empties the selection. This also feeds regenerate, which follows the
-  // persisted primary engine.
+  // empties the selection. This governs future batches only; tile Retry follows
+  // its recorded engine.
   useEffect(() => {
     const usable = engines.filter((e) => available[e]);
     if (usable.length === engines.length) return;
@@ -1169,9 +1171,9 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
             </p>
             <p className="text-content-subtle text-[0.625rem]">
               Change it in{' '}
-              <a href="#/settings/engines" className="text-amber-300 underline decoration-amber-300/50">
+              <SettingsLink section="engines" focus="krea-grounding" tone="warning" className="text-[0.625rem]">
                 Settings › Image engines
-              </a>{' '}— it applies to every Krea run.
+              </SettingsLink>{' '}— it applies to every Krea run.
             </p>
           </div>
         </details>

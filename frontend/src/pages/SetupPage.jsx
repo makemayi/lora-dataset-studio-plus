@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { apiFetch, putJson, postJson } from '../api/fetchClient'
+import { apiFetch, getCsrfToken, putJson, postJson } from '../api/fetchClient'
 import { useToast } from '../components/common/Toast'
 import { useCapabilities } from '../context/CapabilitiesContext'
 import { deriveSetupSteps, deriveCapabilitySummary, SETUP_STEP_IDS, kleinMissingLabels,
-  comfyuiDirVerdict, COMFYUI_SKIP_LOST, COMFYUI_SKIP_KEPT, installAllPlan,
+  comfyuiDirVerdict, comfyuiLauncherState, COMFYUI_SKIP_LOST, COMFYUI_SKIP_KEPT, installAllPlan,
   aitoolkitVerdict, AITOOLKIT_INSTALL_STEPS } from '../hooks/useSetupSteps'
 import SettingsLink from '../components/common/SettingsLink'
 import GuidedSteps from '../components/setup/GuidedSteps'
@@ -105,6 +105,7 @@ export default function SetupPage() {
   })
   const [advancing, setAdvancing] = useState(false) // Next is mid save-&-recheck
   const [startingOllama, setStartingOllama] = useState(false) // "Start Ollama" in flight
+  const [startingComfyui, setStartingComfyui] = useState(false) // secure portable launch in flight
   const [dirCheck, setDirCheck] = useState(null)    // live classify of the typed ComfyUI dir
   const [skipConfirm, setSkipConfirm] = useState(false) // "continue without ComfyUI" panel open
   const autodetectedRef = useRef(false)             // run the on-load autodetect only once
@@ -256,6 +257,30 @@ export default function SetupPage() {
     finally { setStartingOllama(false) }
   }
 
+  // One-click launch is intentionally a body-free POST: the backend reads only the
+  // saved config and uses a fixed portable command, never a user .bat or UI input.
+  const startComfyui = async () => {
+    setStartingComfyui(true)
+    try {
+      const r = await apiFetch('/api/setup/comfyui/start', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': getCsrfToken() },
+      })
+      if (r.reachable) {
+        toast.success(r.already_running ? 'ComfyUI is already running.' : 'ComfyUI started.')
+        await refresh(true)
+      } else if (r.starting) {
+        toast.info('ComfyUI is already starting. Wait a moment, then re-check.')
+      } else {
+        toast.error(r.error || "ComfyUI couldn't start. Check the portable install, then try again.")
+      }
+    } catch (e) {
+      toast.error(e.message || "ComfyUI couldn't start. Check the portable install, then try again.")
+    } finally {
+      setStartingComfyui(false)
+    }
+  }
+
   if (!config) {
     return loadError ? (
       <div className="space-y-3">
@@ -399,6 +424,26 @@ export default function SetupPage() {
             )
           })()
       ) : null
+      const configPersisted = savedConfigRef.current !== null
+        && JSON.stringify(config) === savedConfigRef.current
+      const comfyLauncher = comfyuiLauncherState(step, configPersisted)
+      const slowComfyuiNode = step.connectionStatus === 'slow' && (
+        <p className="text-xs text-amber-400" aria-live="polite">
+          ComfyUI is responding slowly. Wait for it instead of starting another instance.
+        </p>
+      )
+      const startComfyuiNode = comfyLauncher.visible && (
+        <div className="space-y-1.5">
+          <button type="button" onClick={startComfyui}
+            disabled={startingComfyui || !comfyLauncher.enabled}
+            className="rounded-md border border-border-strong px-3 py-1.5 text-sm font-medium text-content hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-50">
+            {startingComfyui ? 'Starting…' : '▶ Start ComfyUI'}
+          </button>
+          {comfyLauncher.reason && (
+            <p className="text-xs text-content-muted" aria-live="polite">{comfyLauncher.reason}</p>
+          )}
+        </div>
+      )
       const fields = (
         <>
           {guidedField('ComfyUI API URL', 'comfyui', 'api_url', 'http://127.0.0.1:8188')}
@@ -410,6 +455,8 @@ export default function SetupPage() {
               replaces the old "Save & re-check to validate" placeholder — the check
               runs as you type, and the folder it judged is pinned to the field value. */}
           {dirVerdictNode}
+          {slowComfyuiNode}
+          {startComfyuiNode}
           {/* Capability gap on the GRAPH's widget values, not on the files: this
               ComfyUI doesn't offer a value the Klein workflow pins. That is what
               the `beta57` scheduler did — added to ComfyUI's core list by the

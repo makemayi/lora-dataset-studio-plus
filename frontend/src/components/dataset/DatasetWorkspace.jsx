@@ -1176,6 +1176,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                 <DatasetGrid images={gridImages} datasetId={d.id} onStatus={ds.setStatus} onCaption={ds.setCaption}
                   onCrop={setCropImg} onDelete={ds.deleteImage}
                   onMirror={ds.mirrorImage} mirroringIds={ds.mirroringIds}
+                  onScoreFace={ds.scoreFace} scoringFaceIds={ds.scoringFaceIds}
                   onRegenerate={(id, loraStrength, prompt, opts) => ds.regenerate(id, loraStrength, prompt, opts)}
                   onReimprove={ds.reimproveImage} onView={setViewImg}
                   onBatch={ds.batchImages} busy={ds.busy}

@@ -148,6 +148,19 @@ def _img_path(img) -> str:
     return os.path.join(_dataset_dir(img.dataset_id), img.filename)
 
 
+def _invalidate_image_content_analysis(img):
+    """Drop derived content and face analysis after a pixel-level mutation.
+
+    The content cache doubles as the optimistic-concurrency token for a running
+    one-image face score.  Clearing both fields is intentionally cheap: the
+    next training snapshot simply re-hashes this one file.
+    """
+    img.content_sig = None
+    img.content_sig_stat = None
+    img.face_state = None
+    img.face_score = None
+
+
 def _ref_path(ds) -> str:
     return os.path.join(_dataset_dir(ds.id), ds.ref_filename)
 
@@ -308,6 +321,20 @@ _IMAGE_IMPROVE_LOCKS = tuple(threading.Lock() for _ in range(64))
 # rotation deliberately share ONE stripe set so they serialize against each other
 # too.  Stripes avoid an unbounded lock map.
 _IMAGE_PIXEL_EDIT_LOCKS = tuple(threading.Lock() for _ in range(64))
+# Face scoring starts a heavyweight CPU subprocess.  Stripes keep one dataset's
+# requests serial without retaining an unbounded lock map; a collision only
+# makes an unrelated request retry, never permits concurrent scorers.
+_FACE_SCORING_LOCKS = tuple(threading.Lock() for _ in range(64))
+_FACE_SCORING_BUSY_DETAIL = 'face scoring is already running; try again shortly'
+
+
+def _face_scoring_lock(dataset_id):
+    return _FACE_SCORING_LOCKS[hash(str(dataset_id)) % len(_FACE_SCORING_LOCKS)]
+
+
+def _face_scoring_busy_error():
+    return {'kind': 'busy', 'detail': _FACE_SCORING_BUSY_DETAIL}
+
 
 
 class KleinNodesMissing(Exception):
@@ -2012,6 +2039,7 @@ def crop_image(user_id, image_id, x, y, w, h):
     if ok:
         _clear_watermark_metadata(img)
         img.upscale_ratio = scale
+        _invalidate_image_content_analysis(img)
         db.session.commit()
     return ok
 
@@ -2255,6 +2283,13 @@ def _edit_image_in_place(user_id, image_id, make_payload, *, tag):
                             'failed to restore watermark metadata after %s promotion failure', tag)
                 raise RuntimeError('could not update image file') from e
 
+
+            _invalidate_image_content_analysis(img)
+            try:
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                raise
             return {
                 'image_id': img.id,
                 # A request token is intentionally independent of filename and
@@ -2318,8 +2353,10 @@ def delete_image(user_id, image_id):
     try:
         if img.status == 'pending' and not img.filename and img.job_id:
             from ..job_queue import queue_manager
-            queue_manager.cancel_job(
-                img.job_id, str(user_id), 'image', commit=False)
+            if not queue_manager.cancel_job(
+                    img.job_id, str(user_id), 'image', commit=False):
+                raise RuntimeError(
+                    'This generation still has unconfirmed ComfyUI work; cancel it safely before deleting.')
         if original_path and os.path.exists(original_path):
             trashed_path = trash.send_to_trash(
                 original_path, context=f'dataset-{img.dataset_id}-image-{img.id}')
@@ -2406,13 +2443,17 @@ def delete_dataset(user_id, dataset_id):
         from ..job_queue import queue_manager
         for img in imgs:
             if img.status == 'pending' and not img.filename and img.job_id:
-                queue_manager.cancel_job(
-                    img.job_id, str(user_id), 'image', commit=False)
+                if not queue_manager.cancel_job(
+                        img.job_id, str(user_id), 'image', commit=False):
+                    raise RuntimeError(
+                        'A dataset generation still has unconfirmed ComfyUI work; cancel it safely first.')
         for cell in studio_rows:
             if (cell.job_id
                     and cell.status not in ('done', 'failed', 'cancelled')):
-                queue_manager.cancel_job(
-                    cell.job_id, str(user_id), 'image', commit=False)
+                if not queue_manager.cancel_job(
+                        cell.job_id, str(user_id), 'image', commit=False):
+                    raise RuntimeError(
+                        'A Test Studio cell still has unconfirmed ComfyUI work; cancel it safely first.')
         if os.path.exists(dataset_path):
             trashed_path = trash.send_to_trash(
                 dataset_path, context=f'dataset-{dataset_id}')
@@ -6086,6 +6127,23 @@ def derive_short_captions(user_id, dataset_id, image_ids=None, force=False, mode
 FACE_SCORING_STATUSES = ('keep', 'pending')
 
 
+def _face_score_content_revision(path):
+    """Return the current (content signature, stat) pair, or None on a race.
+
+    The signature makes edits that happen to preserve byte length detectable;
+    the second stat read rejects a file changed while it was being fingerprinted.
+    """
+    from . import run_snapshot
+
+    stat_key = run_snapshot._stat_key(path)
+    if stat_key is None:
+        return None
+    signature = run_snapshot._content_sig(path)
+    if not signature or run_snapshot._stat_key(path) != stat_key:
+        return None
+    return signature, stat_key
+
+
 def face_scoring_counts(imgs):
     """{'total', 'unscored'} over an ALREADY-LOADED image list — pure, no query,
     so `dataset_payload` pays nothing for it. `unscored` counts rows the pass has
@@ -6149,27 +6207,212 @@ def analyze_faces(user_id, dataset_id) -> dict:
     # to sit at 0 for the whole (multi-minute) pass and then fill in one jump,
     # which is indistinguishable from a hung pass. try/finally clears the
     # indicator even if scoring raises.
-    token = dataset_activity.begin(dataset_id, 'analyze_faces', total=len(by_path))
+    score_lock = _face_scoring_lock(ds.id)
+    if not score_lock.acquire(blocking=False):
+        return {}, _face_scoring_busy_error()
+
+    # Stamp every eligible file before inference.  A crop/mirror/rotate clears
+    # this pair, making the final per-row write below fail closed if pixels move.
+    reserved_by_path = {}
+    try:
+        from sqlalchemy import update
+        for p, img in by_path.items():
+            revision = _face_score_content_revision(p)
+            if revision is None:
+                continue
+            content_sig, content_sig_stat = revision
+            reservation = db.session.execute(
+                update(FaceDatasetImage)
+                .where(FaceDatasetImage.id == img.id,
+                       FaceDatasetImage.dataset_id == ds.id,
+                       FaceDatasetImage.filename == img.filename,
+                       FaceDatasetImage.status.in_(FACE_SCORING_STATUSES),
+                       _nullable_equals(FaceDatasetImage.content_sig, img.content_sig),
+                       _nullable_equals(FaceDatasetImage.content_sig_stat,
+                                        img.content_sig_stat))
+                .values(content_sig=content_sig, content_sig_stat=content_sig_stat)
+                .execution_options(synchronize_session=False))
+            if reservation.rowcount == 1:
+                reserved_by_path[p] = (img.id, img.filename,
+                                       content_sig, content_sig_stat)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        score_lock.release()
+        raise
+    if not reserved_by_path:
+        score_lock.release()
+        return {}, None
+
+    try:
+        token = dataset_activity.begin(dataset_id, 'analyze_faces', total=len(reserved_by_path))
+    except Exception:
+        score_lock.release()
+        raise
+
     try:
         results, scoring_error = score_dataset_faces(
-            ref_path, list(by_path.keys()),
+            ref_path, list(reserved_by_path.keys()),
             on_progress=lambda done, total: dataset_activity.progress(
                 token, done=done, total=total))
         counts = {}
         # The counter is already at N: the persist loop below is a fraction of the
         # pass (no model load, no inference), so it does NOT bump — doing so would
         # count every image twice and take the bar past its own total.
-        for p, img in by_path.items():
+        for p, (image_id, filename, content_sig, content_sig_stat) in reserved_by_path.items():
             r = results.get(p)
             if not r:
                 continue
-            img.face_state = r.get('state')
-            img.face_score = r.get('sim')   # None si non-scorable
+            if _face_score_content_revision(p) != (content_sig, content_sig_stat):
+                continue
+            write = db.session.execute(
+                update(FaceDatasetImage)
+                .where(FaceDatasetImage.id == image_id,
+                       FaceDatasetImage.dataset_id == ds.id,
+                       FaceDatasetImage.filename == filename,
+                       FaceDatasetImage.status.in_(FACE_SCORING_STATUSES),
+                       FaceDatasetImage.content_sig == content_sig,
+                       FaceDatasetImage.content_sig_stat == content_sig_stat)
+                .values(face_state=r.get('state'), face_score=r.get('sim'))
+                .execution_options(synchronize_session=False))
+            if write.rowcount != 1:
+                # Another request won the row after inference.  It is newer than
+                # this pass, so leave it exactly as it is.
+                db.session.rollback()
+                continue
             db.session.commit()
-            counts[img.face_state] = counts.get(img.face_state, 0) + 1
+            state = r.get('state')
+            counts[state] = counts.get(state, 0) + 1
         return counts, scoring_error
     finally:
         dataset_activity.end(token)
+        score_lock.release()
+
+
+def analyze_image_face(user_id, image_id):
+    """Score one owned dataset image against its dataset reference on CPU only.
+
+    The single-image action deliberately uses the same scorer contract as the
+    batch pass. Operational scorer failures are returned with the untouched
+    current fields, while invalid image/dataset input remains a validation
+    error for the route to map.
+    """
+    img = _owned_image(user_id, image_id)
+    if not img:
+        return None
+    ds = get_dataset(user_id, img.dataset_id)
+    if not ds:
+        return None
+
+    def _result(scoring_error=None, stale=False, row=None):
+        row = img if row is None else row
+        result = {'image_id': row.id, 'face_state': row.face_state,
+                  'face_score': row.face_score, 'scoring_error': scoring_error}
+        if stale:
+            result['stale'] = True
+        return result
+
+    def _stale_result():
+        db.session.expire_all()
+        fresh = _owned_image(user_id, image_id)
+        if not fresh:
+            return None
+        return _result(stale=True, row=fresh)
+
+
+    # Match the batch behaviour: explain the photographic-subject gate before
+    # asking for a reference that could never make this kind of dataset scorable.
+    blocked = face_scoring_block_reason(ds)
+    if blocked:
+        return _result({'kind': 'subject_not_photographic', 'detail': blocked})
+    if not ds.ref_filename or not os.path.isfile(_ref_path(ds)):
+        raise ValueError('reference photo missing')
+    if img.status not in FACE_SCORING_STATUSES:
+        raise ValueError('image is not eligible for face scoring')
+    filename_snapshot = img.filename
+    if not img.filename or not os.path.isfile(_img_path(img)):
+        raise ValueError('image file missing')
+
+    ref_path = _ref_path(ds)
+    image_path = _img_path(img)
+    score_lock = _face_scoring_lock(ds.id)
+    if not score_lock.acquire(blocking=False):
+        return _result(_face_scoring_busy_error())
+    try:
+        try:
+            from . import face_similarity
+        except ImportError:
+            return _result({'kind': 'unavailable',
+                            'detail': 'face scoring service not configured/available yet'})
+
+        # Reserve the content identity before launching the subprocess.  A pixel
+        # edit clears this cache pair, so the final write below can never promote
+        # a score calculated for an earlier version of the same filename.
+        revision = _face_score_content_revision(image_path)
+        if revision is None:
+            return _stale_result()
+        content_sig, content_sig_stat = revision
+        previous_sig = img.content_sig
+        previous_stat = img.content_sig_stat
+        from sqlalchemy import update
+        reservation = db.session.execute(
+            update(FaceDatasetImage)
+            .where(FaceDatasetImage.id == img.id,
+                   FaceDatasetImage.dataset_id == ds.id,
+                   FaceDatasetImage.filename == filename_snapshot,
+                   FaceDatasetImage.status.in_(FACE_SCORING_STATUSES),
+                   _nullable_equals(FaceDatasetImage.content_sig, previous_sig),
+                   _nullable_equals(FaceDatasetImage.content_sig_stat, previous_stat))
+            .values(content_sig=content_sig, content_sig_stat=content_sig_stat)
+            .execution_options(synchronize_session=False))
+        if reservation.rowcount != 1:
+            db.session.rollback()
+            return _stale_result()
+        db.session.commit()
+        db.session.expire(img)
+
+        # Recheck after the reservation: do not start the expensive process for
+        # a file that changed while its identity was being recorded.
+        from . import run_snapshot
+        if run_snapshot._stat_key(image_path) != content_sig_stat:
+            return _stale_result()
+
+        try:
+            results, scoring_error = face_similarity.score_dataset_faces(
+                ref_path, [image_path])
+        except Exception as e:
+            logger.warning('single face scoring failed for image %s: %s', image_id, e)
+            return _result({'kind': 'failed', 'detail': str(e) or 'face scoring failed'})
+        if scoring_error:
+            return _result(scoring_error)
+        scored = results.get(image_path) if isinstance(results, dict) else None
+        if not isinstance(scored, dict) or not scored.get('state'):
+            return _result({'kind': 'failed',
+                            'detail': 'face scorer returned no result for this image'})
+
+        # A stat check is cheap but coarse on some filesystems; re-reading the
+        # content signature here also catches a same-size edit in the same second.
+        if _face_score_content_revision(image_path) != (content_sig, content_sig_stat):
+            return _stale_result()
+
+        write = db.session.execute(
+            update(FaceDatasetImage)
+            .where(FaceDatasetImage.id == img.id,
+                   FaceDatasetImage.dataset_id == ds.id,
+                   FaceDatasetImage.filename == filename_snapshot,
+                   FaceDatasetImage.status.in_(FACE_SCORING_STATUSES),
+                   FaceDatasetImage.content_sig == content_sig,
+                   FaceDatasetImage.content_sig_stat == content_sig_stat)
+            .values(face_state=scored['state'], face_score=scored.get('sim'))
+            .execution_options(synchronize_session=False))
+        if write.rowcount != 1:
+            db.session.rollback()
+            return _stale_result()
+        db.session.commit()
+        db.session.expire(img)
+        return _result()
+    finally:
+        score_lock.release()
 
 
 # --- Watermark auto-correction (V1) ----------------------------------------
@@ -7356,6 +7599,12 @@ def _reimprove_image_locked(user_id, image_id):
                 old_path, context=f'dataset-{img.dataset_id}-reimprove-{img.id}')
     except Exception:
         try:
+            # Do not restore the old row over an unresolved new prompt: its
+            # eventual callback still owns `job_id` and would otherwise write
+            # into the restored candidate.
+            if not queue_manager.cancel_job(job_id, str(user_id), 'image', commit=False):
+                raise RuntimeError(
+                    'The replacement generation still has unconfirmed ComfyUI work.')
             restored_candidate = _restore_reimprove_candidate_after_trash_failure(
                 img, old_state, job_id, expected_transition_caption)
             if parent_rekept and restored_candidate:
@@ -7363,7 +7612,6 @@ def _reimprove_image_locked(user_id, image_id):
                 # its CAS fails and the fallback parent remains Keep instead of
                 # overwriting that newer decision.
                 _undo_rekeep_parent_after_reimprove_trash_failure(img, old_state)
-            queue_manager.cancel_job(job_id, str(user_id), 'image', commit=False)
             db.session.commit()
         except Exception:
             db.session.rollback()
@@ -7569,11 +7817,10 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
     applied on top, the user only steers the creative half. Empty/None = the
     current behaviour (recover the prompt from the row or the label).
 
-    `engine` (optional, 'nanobanana'/'chatgpt'/'klein') is the generator
-    CURRENTLY selected in the workspace — it wins over the engine that
-    originally produced the row, so a tile born on Klein doesn't pin every
-    regenerate to Klein after the user switched to Nano Banana (and vice
-    versa). None = legacy behaviour (reuse the row's origin). Exception:
+    `engine` (optional, one of ``KNOWN_ENGINES``) is an EXPLICIT caller
+    override. The ordinary workspace Retry omits it, so it reuses the engine
+    recorded on the row; callers that deliberately pass one can still move a
+    tile to another lane. Exception:
     an NSFW-labelled tile always stays on the local Klein path (fail-closed —
     NSFW never goes to third-party APIs, mirroring the batch generate rule).
     `klein_model` (optional) is the workspace's Klein model pick, used when a
@@ -7631,7 +7878,8 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
         field: getattr(img, field) for field in (
             'filename', 'caption', 'status', 'fail_reason', 'fail_kind', 'job_id',
             'klein_model', 'variation_prompt', 'watermark_state',
-            'watermark_bbox', 'watermark_regions')
+            'watermark_bbox', 'watermark_regions', 'face_score', 'face_state',
+            'content_sig', 'content_sig_stat')
     }
     old_path = (os.path.join(_dataset_path(img.dataset_id), img.filename)
                 if img.filename else None)
@@ -7672,6 +7920,14 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
             from .klein_edit_helper import enqueue_klein_edit, resolve_generation_lora_preset
         except ImportError:
             raise RuntimeError('ComfyUI is not configured')
+        # The route cannot know the effective engine when this is an ordinary
+        # retry: it may be a Krea/API row, or a Klein row with a model filename.
+        # Check Klein-only nodes only after the row's target has been resolved,
+        # before modifying its current file/state.
+        from . import klein_edit_helper as _kleh
+        missing_nodes = _kleh.klein_missing_nodes()
+        if missing_nodes:
+            raise KleinNodesMissing(_kleh.klein_missing_assets(), missing_nodes)
         # Klein target: keep the row's real model file when it has one; a row born
         # on an API engine holds an engine TAG here, not a model — use the
         # workspace's Klein pick instead (None = enqueue's default model).
@@ -7704,11 +7960,17 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
     try:
         if old_state['status'] == 'pending' and not old_state['filename'] \
                 and old_state['job_id']:
-            queue_manager.cancel_job(
-                old_state['job_id'], str(user_id), 'image', commit=False)
+            if not queue_manager.cancel_job(
+                    old_state['job_id'], str(user_id), 'image', commit=False):
+                raise RuntimeError(
+                    'The previous generation still has unconfirmed ComfyUI work; cancel it safely first.')
         if edited:
             img.variation_prompt = stored_prompt
         _clear_watermark_metadata(img)
+        img.face_score = None
+        img.content_sig = None
+        img.content_sig_stat = None
+        img.face_state = None
         # Engine TAG for the API engines and for Krea (each resolves its own
         # model); the real model FILE for Klein.
         img.klein_model = (engine if target in API_ENGINES or target == KREA_ENGINE
@@ -7738,11 +8000,14 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
                 old_path, context=f'dataset-{img.dataset_id}-regenerate-{img.id}')
     except Exception:
         try:
+            # The row must keep the replacement job identity unless its exact
+            # cancellation is committed in the same restoration transaction.
+            if new_job_id and not queue_manager.cancel_job(
+                    new_job_id, str(user_id), 'image', commit=False):
+                raise RuntimeError(
+                    'The replacement generation still has unconfirmed ComfyUI work.')
             for field, value in old_state.items():
                 setattr(img, field, value)
-            if new_job_id:
-                queue_manager.cancel_job(
-                    new_job_id, str(user_id), 'image', commit=False)
             db.session.commit()
         except Exception:
             db.session.rollback()
