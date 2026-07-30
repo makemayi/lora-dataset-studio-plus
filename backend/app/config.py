@@ -87,6 +87,16 @@ DEFAULTS = {
                   # Explicit interpreter for installs without venv/.venv
                   # (conda, uv, system python). Empty = auto-detect.
                   'python': ''},
+    # OneTrainer — second local training backend (Krea 2 first slice, see
+    # docs/superpowers/specs/2026-07-30-onetrainer-backend-design.md, a
+    # local-only file — this repo's docs/superpowers is gitignored).
+    # Deliberately as thin as aitoolkit's own block was before any install
+    # wizard existed: this slice has no Setup-wizard integration yet.
+    'onetrainer': {'dir': '',
+                   # Explicit interpreter override (conda/uv/system python).
+                   # Empty = derive venv/Scripts/python.exe (or venv/bin/python)
+                   # under `dir`.
+                   'python': ''},
     # `enabled` is the ENGINE CATALOG as well as the default selection: adding an
     # engine here is what makes it reach existing installs (see _merge_new_engines
     # and LEGACY_KNOWN_ENGINES below). `known` is not a setting — it is the ledger
