@@ -29,7 +29,7 @@ TRAINING_METHOD_LORA = 'LORA'
 # The shipped preset this app builds ON TOP OF, never duplicates. Verified
 # against Nerogar/OneTrainer's own repo (training_presets/Krea 2/), not
 # guessed — see the spec's "Verified facts" section. train.py's
-# --preset_path merges this UNDER our --config_path overrides below, so
+# --preset-path merges this UNDER our --config-path overrides below, so
 # every knob this app doesn't explicitly own (model_type, training_method,
 # base_model_name, transformer/text_encoder/vae dtypes, attention_mechanism,
 # ...) stays exactly whatever OneTrainer's own maintainers tuned it to.
@@ -65,8 +65,8 @@ def is_installed() -> bool:
 
 def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
                      steps: int, num_images: int, rank: int) -> dict:
-    """The OVERRIDE config this app writes to --config_path, merged by
-    OneTrainer OVER its own shipped Krea 2 preset (--preset_path). Contains
+    """The OVERRIDE config this app writes to --config-path, merged by
+    OneTrainer OVER its own shipped Krea 2 preset (--preset-path). Contains
     ONLY the fields this app's own UI/dataset state actually owns — never a
     field the shipped preset already decided (see the ownership-boundary
     test above).
@@ -105,7 +105,7 @@ def checkpoint_ready(output_model_destination: str) -> bool:
 def launch(trigger: str, dataset_folder: str, training_folder: str,
           steps: int, num_images: int, rank: int) -> dict:
     """Write concepts.json + config.json under `training_folder` and spawn
-    `scripts/train.py --preset_path <shipped Krea 2 preset> --config_path
+    `scripts/train.py --preset-path <shipped Krea 2 preset> --config-path
     <our config.json>`. Returns {'pid': int, 'config_path': str,
     'concepts_path': str}. Raises RuntimeError if OneTrainer isn't
     installed/configured — same contract as lora_training.launch_training's
@@ -133,8 +133,12 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
     log_path = training_folder_p / 'onetrainer.log'
     logf = open(log_path, 'w', encoding='utf-8')
     proc = subprocess.Popen(
+        # OneTrainer's actual argparse flags are HYPHENATED (--preset-path,
+        # --config-path), confirmed against train.py's own usage output —
+        # the underscored form silently fails argparse and the process
+        # exits before doing anything (issue found running Krea 2 for real).
         [str(venv_python), 'scripts/train.py',
-         '--preset_path', str(preset_path), '--config_path', str(config_path)],
+         '--preset-path', str(preset_path), '--config-path', str(config_path)],
         cwd=str(root), stdout=logf, stderr=subprocess.STDOUT, shell=False,
         creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     return {'pid': proc.pid, 'config_path': str(config_path),

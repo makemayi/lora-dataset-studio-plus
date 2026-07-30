@@ -129,11 +129,13 @@ def test_launch_writes_config_and_concepts_and_spawns_the_right_command(
     assert captured['cwd'] == str(root)
     assert captured['cmd'][0] == str(venv_py)
     assert captured['cmd'][1] == 'scripts/train.py'
-    assert '--preset_path' in captured['cmd']
-    assert captured['cmd'][captured['cmd'].index('--preset_path') + 1] == \
+    # Hyphenated, matching train.py's REAL argparse flags (confirmed against
+    # its own usage output — the underscored form fails argparse outright).
+    assert '--preset-path' in captured['cmd']
+    assert captured['cmd'][captured['cmd'].index('--preset-path') + 1] == \
         str(root / ots.KREA2_PRESET_RELATIVE_PATH)
-    assert '--config_path' in captured['cmd']
-    assert captured['cmd'][captured['cmd'].index('--config_path') + 1] == \
+    assert '--config-path' in captured['cmd']
+    assert captured['cmd'][captured['cmd'].index('--config-path') + 1] == \
         str(training_folder / 'config.json')
 
 
