@@ -817,12 +817,25 @@ class JobQueueManager:
         dispatch_cancelled = False
 
         with GPU_ARBITER_LOCK:
+            # A stalled barrier is meant to be RETRIED, not a permanent block: its
+            # own message says "recover... then cancel and resume", but nothing
+            # ever called reconcile_stalled_comfy_job on its behalf, so a barrier
+            # that could actually clear (ComfyUI's history now proves the prompt
+            # is gone) sat blocking every future job until someone cleared it by
+            # hand. Try once per idle tick here -- self-healing when ComfyUI truly
+            # recovered, still fail-closed (returns False, barrier stays) for a
+            # genuine 'unknown_submit' case that needs an externally verified
+            # ComfyUI restart (reconcile_stalled_comfy_job refuses those itself).
+            if self.has_comfyui_stalled_barrier():
+                owner = self.get_comfyui_stalled_barrier()
+                reconciled = bool(owner) and self.reconcile_stalled_comfy_job(owner.get('job_id'))
+                if not reconciled:
+                    return False
             # Any unresolved active row is itself a fail-closed GPU owner after a
             # crash/mapping error; do not silently start a second prompt.
             if (_vision_window_blocks_gpu()
                     or self._get_system_state('training_in_progress')
                     or self._get_system_state('vision_in_progress')
-                    or self.has_comfyui_stalled_barrier()
                     or ImageGenerationQueue.query.filter(
                         ImageGenerationQueue.status.in_(
                             ('processing', 'sent_to_comfy', 'cancel_requested', 'stalled'))

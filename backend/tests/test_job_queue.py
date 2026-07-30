@@ -222,6 +222,74 @@ def test_cancel_during_submit_window_persists_exact_barrier(app):
         assert barrier['job_id'] == jid and barrier['prompt_id'] == 'prompt-1'
 
 
+def test_process_one_auto_reconciles_a_prompt_barrier_when_comfyui_confirms_absence(app):
+    """A 'prompt'-kind barrier is meant to be RETRIED, not a permanent block: its
+    own stored message says "recover... then cancel and resume", but nothing
+    ever called reconcile_stalled_comfy_job on its behalf (verified: no route,
+    no scheduler called it before this fix) -- so a barrier ComfyUI's own
+    history could already prove gone sat blocking every future job until
+    someone cleared it by hand (reported running a real Krea 2 dataset batch).
+    process_one must now retry reconciliation once per tick and dispatch the
+    next pending job the same tick it succeeds."""
+    from app.job_queue import queue_manager
+    from app.models import ImageGenerationQueue
+    from app.utils.comfyui import ComfyPromptState
+
+    with app.app_context():
+        stalled_jid = queue_manager.add_job(workflow_data={'1': {}})
+
+        def _submit_then_cancel(workflow, client_id):
+            assert queue_manager.cancel_job(client_id) is False
+            return 'prompt-1'
+
+        with patch('app.job_queue._submit', side_effect=_submit_then_cancel), \
+             patch('app.job_queue._poll_outputs'), patch('app.job_queue._dispatch_completion'):
+            assert queue_manager.process_one() is True
+        assert queue_manager.get_comfyui_stalled_barrier() is not None
+
+        next_jid = queue_manager.add_job(workflow_data={'1': {}})
+        with patch('app.utils.comfyui.cancel_comfyui_prompt_state',
+                   return_value=ComfyPromptState.ABSENT), \
+             patch('app.utils.comfyui.comfyui_prompt_is_absent', return_value=True), \
+             patch('app.utils.comfyui.get_comfyui_history_probe',
+                   return_value=_ready_history(
+                       {'prompt-1': {'status': {'completed': True}}})), \
+             patch('app.job_queue._submit', return_value='prompt-2'), \
+             patch('app.job_queue._poll_outputs', return_value=('out.png', False)), \
+             patch('app.job_queue._dispatch_completion'):
+            assert queue_manager.process_one() is True
+
+        assert queue_manager.get_comfyui_stalled_barrier() is None
+        assert ImageGenerationQueue.query.filter_by(job_id=stalled_jid).one().status == 'cancelled'
+        assert ImageGenerationQueue.query.filter_by(job_id=next_jid).one().status == 'completed'
+
+
+def test_process_one_stays_blocked_when_comfyui_cannot_confirm_the_barrier(app):
+    """A barrier ComfyUI cannot yet vouch for (still pending/history unhealthy)
+    must keep blocking every job -- the fail-closed default, unchanged."""
+    from app.job_queue import queue_manager
+    from app.utils.comfyui import ComfyPromptState
+
+    with app.app_context():
+        queue_manager.add_job(workflow_data={'1': {}})
+
+        def _submit_then_cancel(workflow, client_id):
+            assert queue_manager.cancel_job(client_id) is False
+            return 'prompt-1'
+
+        with patch('app.job_queue._submit', side_effect=_submit_then_cancel), \
+             patch('app.job_queue._poll_outputs'), patch('app.job_queue._dispatch_completion'):
+            assert queue_manager.process_one() is True
+
+        queue_manager.add_job(workflow_data={'1': {}})
+        with patch('app.utils.comfyui.cancel_comfyui_prompt_state',
+                   return_value=ComfyPromptState.RUNNING), \
+             patch('app.job_queue._submit') as submit:
+            assert queue_manager.process_one() is False
+            submit.assert_not_called()
+        assert queue_manager.get_comfyui_stalled_barrier() is not None
+
+
 def test_deterministic_submit_refusal_finishes_reentrant_cancel(app):
     """A local refusal never submitted a remote prompt, so an overlapping
     cancellation must terminalize instead of blocking the whole queue."""
