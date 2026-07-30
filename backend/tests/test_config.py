@@ -132,6 +132,20 @@ def test_v3_krea_default_ref_boost_migrates_but_a_v3_custom_value_survives(
     assert config.get('krea.ref_boost') == 1.5, 'a v3 install that already tuned it keeps its choice'
 
 
+def test_v3_ref_boost_migration_never_touches_a_customised_grounding_px(tmp_path, monkeypatch):
+    """v3->v4 changed ONLY ref_boost's default -- grounding_px is a separate,
+    independently-tuned dial and must survive this migration untouched even
+    though ref_boost itself matches the untouched-v3 pattern exactly."""
+    path = tmp_path / 'config.json'
+    path.write_text(json.dumps({'krea': {
+        'calibration_version': 3, 'grounding_px': 1280, 'ref_boost': 0.25, 'steps': 8,
+    }}), encoding='utf-8')
+    config = _fresh(monkeypatch, tmp_path)
+    assert config.get('krea.grounding_px') == 1280
+    assert config.get('krea.ref_boost') == 4
+    assert config.get('krea.steps') == 8
+
+
 def test_a_custom_legacy_krea_calibration_is_not_rewritten(tmp_path, monkeypatch):
     path = tmp_path / 'config.json'
     path.write_text(json.dumps({'krea': {'grounding_px': 768, 'ref_boost': 4.0}}),

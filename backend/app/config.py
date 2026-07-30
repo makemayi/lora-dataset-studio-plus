@@ -555,10 +555,16 @@ def _migrate_krea_pose_profile(conf: dict, stored: dict, incoming: dict | None =
     is_v3_default = (
         stored_version == 3
         and _number_is(stored_krea.get('ref_boost'), _V3_KREA_REF_BOOST))
-    if is_v1_default or is_v2_default or is_v3_default:
+    if is_v1_default or is_v2_default:
         krea['grounding_px'] = DEFAULTS['krea']['grounding_px']
         krea['ref_boost'] = DEFAULTS['krea']['ref_boost']
         krea['steps'] = DEFAULTS['krea']['steps']
+        krea['calibration_version'] = KREA_CALIBRATION_VERSION
+    elif is_v3_default:
+        # v3->v4 changed ONLY ref_boost's shipped default -- grounding_px and
+        # steps are untouched by this bump, so a since-customised grounding_px
+        # (a real value, unrelated to this migration) must survive it.
+        krea['ref_boost'] = DEFAULTS['krea']['ref_boost']
         krea['calibration_version'] = KREA_CALIBRATION_VERSION
     return conf
 
