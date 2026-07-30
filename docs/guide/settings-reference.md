@@ -346,6 +346,13 @@ Under **Advanced: ai-toolkit overrides**, three optional path overrides (all def
 - **Output directory override** → `aitoolkit.output_dir` (defaults to `<dir>/output`).
 - **Hugging Face cache override** → `aitoolkit.hf_home` (defaults to a cache under the ai-toolkit folder). Point this at an existing HF cache to avoid re-downloading base models. It moves the *cache* only: a `hf auth login` token stored in your default Hugging Face home stays in use, so relocating the cache never de-authenticates you on gated bases.
 
+### OneTrainer
+
+A second local training engine, **Krea 2 only** for now — picked per run from the training panel's trainer selector next to the Krea 2 family, not a global switch. ai-toolkit stays the default everywhere else.
+
+- **OneTrainer directory** → `onetrainer.dir`. The folder containing OneTrainer's `scripts/train.py`. Default **empty**. No Test button yet — this slice has no Setup-wizard/install-check integration, unlike ai-toolkit's.
+- **Python interpreter (optional)** → `onetrainer.python`. Default **empty = auto-detect** a `venv/` next to `scripts/train.py`. Fill this in for conda/uv/system-Python installs with no venv folder.
+
 ## Captioning & quality
 
 Settings for how captions are produced and how the quality tools behave.
@@ -767,6 +774,8 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `aitoolkit.output_dir` | Override for ai-toolkit's output folder (defaults to `<aitoolkit.dir>/output`). |
 | `aitoolkit.hf_home` | Override for the Hugging Face cache directory ai-toolkit uses. |
 | `aitoolkit.python` | Full path to the Python interpreter to run ai-toolkit with. Empty = auto-detect a `venv/`/`.venv/` next to `run.py`; set it for conda/uv/system-Python and portable/embedded (`python_embeded`) installs that have no venv folder. |
+| `onetrainer.dir` | OneTrainer install directory (second local trainer, Krea 2 only). |
+| `onetrainer.python` | Full path to the Python interpreter to run OneTrainer with. Empty = auto-detect a `venv/` next to `scripts/train.py`. |
 | `engines.default` | Default image-generation engine selected in the UI (`nanobanana`, `chatgpt`, `openrouter`, or `klein`). |
 | `engines.enabled` | List of engines shown as options in the UI. Doubles as the engine catalogue: an engine added by an update is merged into a stored list on read, so a new engine reaches installs that already have saved settings. An engine you removed yourself is never added back. |
 | `engines.known` | Not a setting — the ledger of which engines the app was offering the last time this list was saved. It is what tells "this engine did not exist yet" apart from "I unticked it". Written automatically; `[]` (or absent) means the app assumes the pre-OpenRouter trio. Delete it to be re-offered every engine. |

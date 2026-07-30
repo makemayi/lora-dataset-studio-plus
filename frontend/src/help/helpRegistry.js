@@ -751,6 +751,10 @@ const TOPICS = [
     ['ai-toolkit', 'aitoolkit', 'output', 'directory', 'override', 'path']),
   setting('aitoolkit.hf_home', 'local-tools', 'aitoolkit-hf-home', 'ai-toolkit Hugging Face cache',
     ['ai-toolkit', 'aitoolkit', 'hugging face', 'hf home', 'cache', 'override', 'path']),
+  setting('onetrainer.dir', 'local-tools', 'onetrainer-dir', 'OneTrainer directory',
+    ['onetrainer', 'training', 'krea 2', 'trainer', 'backend', 'local training', 'directory', 'path']),
+  setting('onetrainer.python', 'local-tools', 'onetrainer-python', 'OneTrainer Python interpreter',
+    ['onetrainer', 'python', 'interpreter', 'venv', 'conda', 'uv', 'krea 2', 'trainer']),
   // captioning
   setting('dataset_import.max_side', 'captioning', 'dataset-import-max-side',
     'Dataset import — stored resolution',

@@ -392,6 +392,31 @@ export default function LocalToolsSection(props) {
           </div>
         </details>
       </Card>
+
+      <Card
+        title="OneTrainer"
+        help="A second local training engine, Krea 2 only for now — point at the folder containing scripts/train.py; its venv/ is detected automatically. Pick it per run from the training panel's Krea 2 trainer selector."
+      >
+        <TextField
+          id="onetrainer-dir"
+          label="OneTrainer directory"
+          value={config.onetrainer.dir}
+          onChange={(v) => setField('onetrainer', 'dir', v)}
+          placeholder="C:\OneTrainer"
+        />
+        <ResetToDefault label="OneTrainer directory" section="onetrainer" field="dir"
+          config={config} configDefaults={configDefaults} setField={setField} />
+        <TextField
+          id="onetrainer-python"
+          label="Python interpreter (optional)"
+          value={config.onetrainer.python}
+          onChange={(v) => setField('onetrainer', 'python', v)}
+          placeholder="Auto — only needed when OneTrainer has no venv (conda, uv, system Python)"
+          help="Full path to the python executable OneTrainer should run with."
+        />
+        <ResetToDefault label="Python interpreter" section="onetrainer" field="python"
+          config={config} configDefaults={configDefaults} setField={setField} />
+      </Card>
     </div>
   )
 }
