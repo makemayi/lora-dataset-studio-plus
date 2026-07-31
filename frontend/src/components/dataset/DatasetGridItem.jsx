@@ -72,7 +72,7 @@ const WATERMARK_BADGE = {
 export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, onCrop, onDelete,
                                           onMirror, mirrorBusy = false, busy = false,
                                           onScoreFace, scoreFaceBusy = false, faceScoringBusy = false, faceScoringBlocked = null,
-                                          onRegenerate, onReimprove, onView, nonce = 0, faceThresholds,
+                                          onRegenerate, onReimprove, onFaceSwap, hasRef = false, onView, nonce = 0, faceThresholds,
                                           selected = false, onToggleSelect, tileSize = 'M',
                                           datasetKind = 'character', dualCaptions = false }) {
   const [cap, setCap] = useState(img.caption || '');
@@ -98,6 +98,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
   // its OWN re-run below (same parent, current improve settings) instead.
   const isImageImproveCandidate = isImageImproveRow(img);
   const canRegenerate = canRegenerateGeneric(img, { isRescueDerived });
+  const canFaceSwap = canRegenerate && hasRef;
   const rerunImprove = onReimprove ? improveRerunAffordance(img) : null;
   const scoreFaceTitle = faceScoringBlocked
     || (scoreFaceBusy
@@ -255,6 +256,13 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               title="Edit the prompt, then regenerate this variation"
               aria-label="Edit the prompt, then regenerate this variation"
               className="px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px]">✏️</button>
+          )}
+          {canFaceSwap && onFaceSwap && (
+            <button type="button"
+              onClick={(e) => { e.stopPropagation(); onFaceSwap(img.id); }}
+              title="Swap this tile's face with the reference image"
+              aria-label="Swap this tile's face with the reference image"
+              className="px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px]">🎭↔</button>
           )}
           {rerunImprove && (
             <button type="button"
