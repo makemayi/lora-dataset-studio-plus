@@ -23,7 +23,7 @@ def _job(model_name, job_id='j1'):
 
 
 @pytest.mark.parametrize('model_name', [
-    'klein_edit_dataset', 'krea_identity_edit_dataset'])
+    'klein_edit_dataset', 'krea_identity_edit_dataset', 'klein_face_swap_dataset'])
 def test_every_local_engine_links_its_finished_image(app, monkeypatch, model_name):
     """The heart of it: a completed job must reach link_completed_dataset_image."""
     from app import job_queue
@@ -68,10 +68,10 @@ def test_the_declared_set_matches_what_the_engines_actually_stamp(app):
     """The set is only useful if it stays in step with the enqueue side, so read
     the stamps from the helpers themselves rather than trusting a literal."""
     from app import job_queue
-    from app.services import klein_edit_helper, krea_edit_helper  # noqa: F401
+    from app.services import klein_edit_helper, krea_edit_helper, face_swap_helper  # noqa: F401
     import inspect
     stamped = set()
-    for mod in (klein_edit_helper, krea_edit_helper):
+    for mod in (klein_edit_helper, krea_edit_helper, face_swap_helper):
         src = inspect.getsource(mod)
         for name in job_queue.DATASET_IMAGE_JOB_NAMES:
             if f"'{name}'" in src or f'"{name}"' in src:
