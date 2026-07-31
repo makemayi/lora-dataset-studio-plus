@@ -101,7 +101,16 @@ DEFAULTS = {
                    # Explicit interpreter override (conda/uv/system python).
                    # Empty = derive venv/Scripts/python.exe (or venv/bin/python)
                    # under `dir`.
-                   'python': ''},
+                   'python': '',
+                   # The PEFT adapter OneTrainer trains: 'LORA' (default, what
+                   # this app's own Krea 2 Edit inference graph loads via
+                   # LoraLoaderModelOnly) or 'OFT_2' (Orthogonal Finetuning —
+                   # a different adapter algorithm, user-confirmed to train
+                   # and load correctly on 2026-07-31). Not validated against
+                   # OneTrainer's own supported set here — an unrecognised
+                   # value degrades to LORA at launch time rather than
+                   # failing the whole run.
+                   'peft_type': 'LORA'},
     # `enabled` is the ENGINE CATALOG as well as the default selection: adding an
     # engine here is what makes it reach existing installs (see _merge_new_engines
     # and LEGACY_KNOWN_ENGINES below). `known` is not a setting — it is the ledger

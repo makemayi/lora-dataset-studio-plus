@@ -416,6 +416,28 @@ export default function LocalToolsSection(props) {
         />
         <ResetToDefault label="Python interpreter" section="onetrainer" field="python"
           config={config} configDefaults={configDefaults} setField={setField} />
+        <div className="mt-3">
+          <label htmlFor="onetrainer-peft-type" className="block text-xs font-medium text-content">
+            Training method
+          </label>
+          <select
+            id="onetrainer-peft-type"
+            value={config.onetrainer.peft_type ?? 'LORA'}
+            onChange={(e) => setField('onetrainer', 'peft_type', e.target.value)}
+            className={INPUT_CLASS}
+          >
+            <option value="LORA">LoRA (default)</option>
+            <option value="OFT_2">OFT_2 (Orthogonal Finetuning)</option>
+          </select>
+          <p className="mt-1 text-[0.6875rem] text-content-subtle">
+            The PEFT adapter OneTrainer trains. LoRA is what this app's own Krea 2 Edit
+            inference graph expects. OFT_2 is a different adapter algorithm — user-confirmed
+            to train and load correctly, offered as an alternative for anyone who wants to try
+            it, not a recommended default swap.
+          </p>
+          <ResetToDefault label="Training method" section="onetrainer" field="peft_type"
+            config={config} configDefaults={configDefaults} setField={setField} />
+        </div>
       </Card>
     </div>
   )

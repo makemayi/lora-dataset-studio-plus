@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-31-onetrainer-lora-strength-fix-and-oft',
+    date: '2026-07-31',
+    title: "OneTrainer LoRAs now train at full strength, and OFT_2 is a selectable alternative",
+    blurb:
+      "Found and fixed a real bug: OneTrainer launches set the LoRA rank you picked but left its matching alpha and batch_size to the shipped preset's own defaults — a rank change without a matching alpha silently trains a LoRA at a fraction of its intended strength, which looks exactly like \"training never converged.\" Both are now pinned alongside rank. Also new: Settings → Local tools → OneTrainer → Training method now offers OFT_2 (Orthogonal Finetuning) as an alternative to LoRA.",
+    to: '/settings/local-tools',
+  },
+  {
     id: '2026-07-31-krea-two-stage-sampler',
     date: '2026-07-31',
     title: 'Krea 2 Edit: an optional two-stage sampler for a sharper upscale pass',

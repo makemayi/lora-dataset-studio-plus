@@ -776,6 +776,9 @@ const TOPICS = [
     ['onetrainer', 'training', 'krea 2', 'trainer', 'backend', 'local training', 'directory', 'path']),
   setting('onetrainer.python', 'local-tools', 'onetrainer-python', 'OneTrainer Python interpreter',
     ['onetrainer', 'python', 'interpreter', 'venv', 'conda', 'uv', 'krea 2', 'trainer']),
+  setting('onetrainer.peft_type', 'local-tools', 'onetrainer-peft-type', 'OneTrainer training method',
+    ['onetrainer', 'peft', 'peft_type', 'lora', 'oft', 'oft_2', 'orthogonal finetuning',
+     'training method', 'adapter', 'krea 2', 'trainer', 'local training']),
   // captioning
   setting('dataset_import.max_side', 'captioning', 'dataset-import-max-side',
     'Dataset import — stored resolution',

@@ -26,6 +26,15 @@ from .. import config as cfg
 MODEL_TYPE_KREA_2 = 'KREA_2'
 TRAINING_METHOD_LORA = 'LORA'
 
+# PEFT adapter choices this app's own `onetrainer.peft_type` setting accepts.
+# LORA is what this app's own Krea 2 Edit inference graph loads via
+# LoraLoaderModelOnly; OFT_2 (Orthogonal Finetuning) is a different adapter
+# algorithm, user-confirmed to train and load correctly (2026-07-31). An
+# unrecognised setting value falls back to LORA rather than failing a launch.
+PEFT_TYPE_LORA = 'LORA'
+PEFT_TYPE_OFT_2 = 'OFT_2'
+PEFT_TYPES = (PEFT_TYPE_LORA, PEFT_TYPE_OFT_2)
+
 # The shipped preset this app builds ON TOP OF, never duplicates. Verified
 # against Nerogar/OneTrainer's own repo (training_presets/Krea 2/), not
 # guessed — see the spec's "Verified facts" section. train.py's
@@ -71,7 +80,8 @@ KREA2_RESOLUTION = 1024
 
 
 def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
-                     steps: int, num_images: int, rank: int) -> dict:
+                     steps: int, num_images: int, rank: int,
+                     peft_type: str = PEFT_TYPE_LORA) -> dict:
     """The OVERRIDE config this app writes to --config-path, merged by
     OneTrainer OVER its own shipped Krea 2 preset (--preset-path). Contains
     ONLY the fields this app's own UI/dataset state actually owns — never a
@@ -81,16 +91,38 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
     `epochs` is an approximation: OneTrainer trains by epoch count, this
     app's UI/recommended_steps() thinks in step count. One epoch here means
     "one pass over the dataset at batch_size 1" — a documented approximation
-    (see spec's Open Questions), not a verified equivalence."""
+    (see spec's Open Questions), not a verified equivalence. `batch_size` is
+    therefore pinned to 1 here too: leaving it at the shipped preset's own
+    value would silently change how many optimizer steps `epochs` actually
+    buys, without this function's epoch math ever knowing.
+
+    `lora_alpha` is pinned to equal `rank` (scale factor 1.0, the standard
+    "no-op" LoRA convention) for the same reason `lora_rank` is owned here:
+    a LoRA's effective output strength scales by alpha/rank, and the shipped
+    preset's own `lora_alpha` was tuned for ITS rank, not whatever rank this
+    app's UI passes in. MEASURED (2026-07-31): a run left at the preset's
+    lora_alpha=1 with this app's rank=32 trained a LoRA scaled to ~1/32 of
+    its intended strength — indistinguishable from "training never
+    converged," when the weights themselves were fine.
+
+    `peft_type` (default LORA, the `onetrainer.peft_type` setting) is owned
+    here rather than left to the shipped preset for the same reason: it is a
+    user choice this app's own UI now exposes, not a preset-tuning decision.
+    An unrecognised value degrades to LORA."""
     epochs = max(1, math.ceil(steps / max(1, num_images)))
     training_folder = Path(training_folder)
+    if peft_type not in PEFT_TYPES:
+        peft_type = PEFT_TYPE_LORA
     return {
         'workspace_dir': str(training_folder),
         'cache_dir': str(training_folder / 'cache'),
         'output_model_destination': str(training_folder / f'{trigger}.safetensors'),
         'epochs': epochs,
         'lora_rank': int(rank),
+        'lora_alpha': float(rank),
+        'batch_size': 1,
         'resolution': KREA2_RESOLUTION,
+        'peft_type': peft_type,
     }
 
 
@@ -111,7 +143,8 @@ def checkpoint_ready(output_model_destination: str) -> bool:
 
 
 def launch(trigger: str, dataset_folder: str, training_folder: str,
-          steps: int, num_images: int, rank: int) -> dict:
+          steps: int, num_images: int, rank: int,
+          peft_type: str = PEFT_TYPE_LORA) -> dict:
     """Write concepts.json + config.json under `training_folder` and spawn
     `scripts/train.py --preset-path <shipped Krea 2 preset> --config-path
     <our config.json>`. Returns {'pid': int, 'config_path': str,
@@ -128,7 +161,7 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
 
     config = build_job_config(trigger=trigger, dataset_folder=dataset_folder,
                               training_folder=training_folder, steps=steps,
-                              num_images=num_images, rank=rank)
+                              num_images=num_images, rank=rank, peft_type=peft_type)
     concepts = build_concepts(trigger=trigger, dataset_folder=dataset_folder)
 
     concepts_path = training_folder_p / 'concepts.json'
@@ -210,9 +243,10 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
     dataset_folder = export_dataset_to_aitoolkit(
         user_id, dataset_id, masked=False, dest_dir=str(training_folder / 'dataset'))
 
+    peft_type = cfg.get('onetrainer.peft_type') or PEFT_TYPE_LORA
     launched = launch(trigger=trigger, dataset_folder=dataset_folder,
                       training_folder=str(training_folder), steps=steps,
-                      num_images=max(1, num_images), rank=32)
+                      num_images=max(1, num_images), rank=32, peft_type=peft_type)
 
     from . import checkpoint_registry
     checkpoint_registry.register_launch(

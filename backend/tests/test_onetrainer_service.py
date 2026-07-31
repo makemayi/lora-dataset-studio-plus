@@ -70,13 +70,45 @@ def test_build_job_config_overrides_only_what_this_app_owns(onetrainer, tmp_path
     assert config['cache_dir'] == str(Path(training_folder) / 'cache')
     assert config['output_model_destination'] == str(Path(training_folder) / 'lola.safetensors')
     assert config['lora_rank'] == 32
+    assert config['lora_alpha'] == 32.0     # scale factor 1.0 — MUST track rank
+    assert config['batch_size'] == 1        # matches the epochs approximation
     assert config['resolution'] == 1024
     assert config['epochs'] == 80          # ceil(2000 / 25)
+    assert config['peft_type'] == 'LORA'   # default when the caller doesn't pass one
     # Ownership boundary: everything else stays whatever OneTrainer's own
     # shipped preset says — this function must NOT invent values for them.
     assert 'model_type' not in config
     assert 'base_model_name' not in config
     assert 'training_method' not in config
+
+
+def test_build_job_config_accepts_an_explicit_peft_type(onetrainer, tmp_path):
+    ots, cfg = onetrainer
+    config = ots.build_job_config(
+        trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
+        steps=100, num_images=10, rank=32, peft_type='OFT_2')
+    assert config['peft_type'] == 'OFT_2'
+
+
+def test_build_job_config_unrecognised_peft_type_degrades_to_lora(onetrainer, tmp_path):
+    ots, cfg = onetrainer
+    config = ots.build_job_config(
+        trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
+        steps=100, num_images=10, rank=32, peft_type='NOT_A_REAL_METHOD')
+    assert config['peft_type'] == 'LORA'
+
+
+def test_build_job_config_lora_alpha_tracks_a_different_rank_too(onetrainer, tmp_path):
+    """MEASURED regression: a run left at the shipped preset's lora_alpha=1
+    with rank=32 trained a LoRA scaled to ~1/32 of its intended strength —
+    indistinguishable from non-convergence. alpha must equal whatever rank
+    THIS call was given, not a fixed number."""
+    ots, cfg = onetrainer
+    config = ots.build_job_config(
+        trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
+        steps=100, num_images=10, rank=8)
+    assert config['lora_rank'] == 8
+    assert config['lora_alpha'] == 8.0
 
 
 def test_build_job_config_epochs_is_at_least_one(onetrainer, tmp_path):
@@ -198,3 +230,43 @@ def test_launch_training_registers_and_tracks_like_an_ai_toolkit_run(
         assert rec is not None
         assert rec.source == 'local'
         assert rec.trainer == 'onetrainer'
+
+        import json as _json
+        written = _json.loads(open(result['config_path'], encoding='utf-8').read())
+        assert written['peft_type'] == 'LORA', 'default setting, no override saved'
+
+
+def test_launch_training_forwards_the_configured_peft_type(
+        onetrainer, tmp_path, monkeypatch, app):
+    from app.services import face_dataset_service as svc
+    from app.config import LOCAL_USER
+    ots, cfg = onetrainer
+    root = tmp_path / 'OneTrainer'
+    (root / 'venv' / 'Scripts').mkdir(parents=True)
+    (root / 'venv' / 'Scripts' / 'python.exe').write_text('')
+    cfg.save_config({'onetrainer': {'dir': str(root), 'peft_type': 'OFT_2'}})
+
+    class FakeProc:
+        pid = 556
+        def poll(self):
+            return None
+    monkeypatch.setattr(ots.subprocess, 'Popen', lambda *a, **k: FakeProc())
+
+    with app.app_context():
+        import os as _os
+        import json as _json
+        from PIL import Image
+        from app.models import FaceDatasetImage
+        ds = svc.create_dataset(LOCAL_USER, 'Mimi', 'mimi')
+        d = svc._dataset_dir(ds.id)
+        _os.makedirs(d, exist_ok=True)
+        Image.new('RGB', (64, 64), (200, 100, 50)).save(_os.path.join(d, 'a.png'))
+        ds.train_type = 'krea'
+        row = FaceDatasetImage(dataset_id=ds.id, filename='a.png', status='keep',
+                               caption='a photo')
+        svc.db.session.add(row)
+        svc.db.session.commit()
+
+        result = ots.launch_training(LOCAL_USER, ds.id, steps=100, check_captions=False)
+        written = _json.loads(open(result['config_path'], encoding='utf-8').read())
+        assert written['peft_type'] == 'OFT_2'

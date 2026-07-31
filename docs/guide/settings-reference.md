@@ -355,6 +355,7 @@ A second local training engine, **Krea 2 only** for now — picked per run from 
 
 - **OneTrainer directory** → `onetrainer.dir`. The folder containing OneTrainer's `scripts/train.py`. Default **empty**. No Test button yet — this slice has no Setup-wizard/install-check integration, unlike ai-toolkit's.
 - **Python interpreter (optional)** → `onetrainer.python`. Default **empty = auto-detect** a `venv/` next to `scripts/train.py`. Fill this in for conda/uv/system-Python installs with no venv folder.
+- **Training method** → `onetrainer.peft_type`. Default **`LORA`**, the adapter this app's own Krea 2 Edit inference graph loads via `LoraLoaderModelOnly`. **`OFT_2`** (Orthogonal Finetuning) is a different adapter algorithm, offered as an alternative — user-confirmed to train and load correctly, not a recommended default swap. An unrecognised value (a hand-edited config, an older save) degrades to `LORA` at launch time rather than failing the run. This also fixed a real bug: `lora_rank` was already app-owned and user-configurable, but `lora_alpha` and `batch_size` were left to the shipped preset's own defaults — a rank change without a matching alpha silently rescales a LoRA's effective strength (alpha/rank), and a mismatched batch_size changes how many optimizer steps the epoch count you asked for actually buys. Both are now pinned alongside `lora_rank` (`lora_alpha` = rank, `batch_size` = 1) so every launch trains at its intended strength regardless of which rank or training method is picked.
 
 ## Captioning & quality
 
@@ -779,6 +780,7 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `aitoolkit.python` | Full path to the Python interpreter to run ai-toolkit with. Empty = auto-detect a `venv/`/`.venv/` next to `run.py`; set it for conda/uv/system-Python and portable/embedded (`python_embeded`) installs that have no venv folder. |
 | `onetrainer.dir` | OneTrainer install directory (second local trainer, Krea 2 only). |
 | `onetrainer.python` | Full path to the Python interpreter to run OneTrainer with. Empty = auto-detect a `venv/` next to `scripts/train.py`. |
+| `onetrainer.peft_type` | The PEFT adapter OneTrainer trains: `LORA` (default) or `OFT_2` (Orthogonal Finetuning). |
 | `engines.default` | Default image-generation engine selected in the UI (`nanobanana`, `chatgpt`, `openrouter`, or `klein`). |
 | `engines.enabled` | List of engines shown as options in the UI. Doubles as the engine catalogue: an engine added by an update is merged into a stored list on read, so a new engine reaches installs that already have saved settings. An engine you removed yourself is never added back. |
 | `engines.known` | Not a setting — the ledger of which engines the app was offering the last time this list was saved. It is what tells "this engine did not exist yet" apart from "I unticked it". Written automatically; `[]` (or absent) means the app assumes the pre-OpenRouter trio. Delete it to be re-offered every engine. |
