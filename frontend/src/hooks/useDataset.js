@@ -1075,6 +1075,13 @@ export function useDataset() {
     return { ok: false, error };
   }, [refresh, toast]);
 
+  const faceSwapImage = useCallback(async (imageId) => {
+    const d = await postJson(`/api/dataset/image/${imageId}/face-swap`, {});
+    if (d.ok) { toast.success('Face swap started'); await refresh(); return { ok: true }; }
+    toast.error(d.error || 'Unexpected error');
+    return { ok: false, error: d.error };
+  }, [refresh, toast]);
+
   const purgeUnused = useCallback(async () => {
     const d = await postJson(`/api/dataset/${currentId}/purge`);
     if (d.ok) { toast.success(`${d.purged} image(s) deleted`); await refresh(); }
@@ -1428,7 +1435,7 @@ export function useDataset() {
            nonces, mirroringIds, refNonce, scoringFaceIds, recaptioningIds, create, open,
            deleteDataset, updateSettings, setCurrentId, setRef, addExtraRef, removeExtraRef,
            generate, importFiles, scrapeImport, resolveSmallImageRescue, improveImage, reimproveImage, improveBatch, classify, caption, recaption, recaptionImages,
-           setStatus, setCaption, mirrorImage, rotateImage, crop, cropRef, cropExtraRef, recropRefAuto, editReference, retryReferenceEdit, canRetryReferenceEdit, keepEditedReference, discardEditedReference, setDatasetTrainType, setDatasetFidelity, deleteImage, batchImages, replaceCaptions, writeCaptionFiles, openDatasetFolder, cancelPending, cancelCaption, regenerate, analyzeFaces, scoreFace,
+           setStatus, setCaption, mirrorImage, rotateImage, crop, cropRef, cropExtraRef, recropRefAuto, editReference, retryReferenceEdit, canRetryReferenceEdit, keepEditedReference, discardEditedReference, setDatasetTrainType, setDatasetFidelity, deleteImage, batchImages, replaceCaptions, writeCaptionFiles, openDatasetFolder, cancelPending, cancelCaption, regenerate, faceSwapImage, analyzeFaces, scoreFace,
            findWatermarks, cleanWatermarks, cleanWatermarkImages, restoreWatermarkImage, dismissWatermarks, saveWatermarkRegions,
            purgeUnused, exportZip, exportBackup, exportZipFor, exportBackupFor, importBackup, importDatasetZip, importDatasetFolder,
            backupEverything, backupJob, downloadBackup, openBackupsFolder, dismissBackup, restoreJob, dismissRestore,
