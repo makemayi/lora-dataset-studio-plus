@@ -120,6 +120,30 @@ DECLARED_THIRD_PARTY_NODES = {
     # via klein_edit_helper.KLEIN_NODE_PACKS, same preflight the Klein edit lane uses.
     'LanPaint_KSampler': 'LanPaint',
     'LayerMask: PersonMaskUltra V2': 'ComfyUI_LayerStyle',
+    # These two ARE core (docs.comfy.org lists both as built-in, and ComfySwitchNode
+    # is registered by comfy_extras' own V3 LogicExtension) — but core is not the
+    # same claim as "on THIS repo's v0.28.3 floor". ResizeImageMaskNode's own
+    # changelog entry is dated v0.9.2 (2026-01-13), i.e. newer than that floor, and
+    # ComfySwitchNode ships marked experimental with no changelog trail confirming
+    # when it landed. Declared (not VANILLA_NODE_ALLOWLIST'd) so an install missing
+    # either still gets an actionable preflight message instead of ComfyUI's raw
+    # 400 — the value here is deliberately NOT a node-pack name (there is no pack
+    # to install): it tells the user what fixes it. See klein_missing_nodes' pack=
+    # None fallback, which prints the bare class name for exactly this case.
+    'ResizeImageMaskNode': 'update ComfyUI (core node added in v0.9.2, no separate pack)',
+    'ComfySwitchNode': 'update ComfyUI (core node, no separate pack)',
+}
+
+# (class_type, field) pairs where a DECLARED_THIRD_PARTY_NODES class happens to
+# reuse a CORE_ENUMS field NAME for its own, unrelated widget — narrowly scoped so
+# exempting one collision doesn't blind the enum check to every OTHER field on
+# that same node (a future edit pinning e.g. a borrowed scheduler value on
+# LanPaint_KSampler must still be caught).
+ENUM_FIELD_NAME_COLLISIONS = {
+    # LayerMask: PersonMaskUltra V2's own segmentation-device pick ('cuda'/'cpu'),
+    # validated by ComfyUI_LayerStyle's own node registration — unrelated to
+    # CLIPLoader/UNETLoader's core `device` (default/cpu-only) selector.
+    ('LayerMask: PersonMaskUltra V2', 'device'),
 }
 
 # The Klein lane is the one that broke, and the one the app leans on hardest
@@ -155,20 +179,22 @@ def test_every_pinned_enum_value_exists_in_a_vanilla_comfyui(name, graph):
     """The regression guard for the reported bug. `beta57` fails here loudly, with
     the reason, instead of reaching a user as ComfyUI's raw 400.
 
-    A node in DECLARED_THIRD_PARTY_NODES is exempt: CORE_ENUMS models what a
-    handful of CORE loader/sampler nodes accept on a vanilla install (e.g.
-    CLIPLoader's `device`), and a third-party node's OWN widgets are validated
-    by whatever pack registers it, not by core — a field merely SHARING a name
-    (LayerMask: PersonMaskUltra V2's `device: "cuda"` is its own segmentation
-    device pick, unrelated to CLIPLoader/UNETLoader's default/cpu-only switch)
-    is not the bug this test exists to catch. That bug class — a CORE node
-    accepting a value only a pack injects into a CORE enumeration — is still
-    caught here for every node NOT in that exemption set."""
+    Only the specific (class_type, field) pairs in ENUM_FIELD_NAME_COLLISIONS are
+    exempt — not every field on a DECLARED_THIRD_PARTY_NODES class. CORE_ENUMS
+    models what a handful of CORE loader/sampler nodes accept on a vanilla
+    install (e.g. CLIPLoader's `device`); a third-party node's OWN widgets are
+    validated by whatever pack registers it, not by core, so a field merely
+    SHARING a name (LayerMask: PersonMaskUltra V2's `device: "cuda"` is its own
+    segmentation device pick, unrelated to CLIPLoader/UNETLoader's
+    default/cpu-only switch) is not the bug this test exists to catch — but any
+    OTHER field on that same node (or any field on any other declared node,
+    e.g. LanPaint_KSampler's own `scheduler`/`sampler_name`) stays checked, so a
+    future edit borrowing a value only a SECOND pack provides still gets caught."""
     offenders = []
     for node_id, node in _nodes(graph):
-        if node['class_type'] in DECLARED_THIRD_PARTY_NODES:
-            continue
         for field, value in (node.get('inputs') or {}).items():
+            if (node['class_type'], field) in ENUM_FIELD_NAME_COLLISIONS:
+                continue
             allowed = CORE_ENUMS.get(field)
             if allowed is None or not isinstance(value, str) or value in allowed:
                 continue
@@ -232,13 +258,13 @@ def test_the_klein_graphs_sample_the_way_the_rest_of_the_app_does():
 # V3 `node_id=` schema).
 VANILLA_NODE_ALLOWLIST = frozenset({
     'BasicGuider', 'BasicScheduler', 'CFGGuider', 'CLIPLoader', 'CLIPTextEncode',
-    'CheckpointLoaderSimple', 'ComfySwitchNode', 'ConditioningZeroOut',
+    'CheckpointLoaderSimple', 'ConditioningZeroOut',
     'EmptyFlux2LatentImage', 'EmptyLatentImage', 'EmptySD3LatentImage',
     'FluxGuidance', 'GetImageSize', 'ImageScale', 'ImageScaleToTotalPixels',
     'KSampler', 'KSamplerSelect', 'LatentUpscaleBy', 'LoadImage', 'LoraLoader',
     'LoraLoaderModelOnly', 'ModelSamplingFlux', 'PatchModelAddDownscale',
     'PreviewImage', 'PrimitiveFloat', 'PrimitiveInt', 'RandomNoise',
-    'ReferenceLatent', 'ResizeImageMaskNode', 'SamplerCustomAdvanced',
+    'ReferenceLatent', 'SamplerCustomAdvanced',
     'SaveImage', 'SetLatentNoiseMask', 'UNETLoader', 'VAEDecode', 'VAEEncode',
     'VAELoader',
 })
