@@ -8145,6 +8145,88 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
     return new_job_id
 
 
+def face_swap_image(user_id, image_id):
+    """Face-swap this tile in place: its CURRENT image becomes the target
+    (image1), the dataset's reference photo becomes the identity source
+    (image2), and the fixed Klein face-swap workflow overwrites the tile
+    with the result. Same cancel/trash/pending-transition shape as
+    regenerate_image, EXCEPT it does not touch variation_prompt /
+    variation_label / klein_model — a face swap is an identity post-process
+    on an already-generated tile, not a re-generation from the catalog
+    prompt, so the row keeps remembering what it originally was (and a later
+    🔄 Regenerate on this tile still falls back to its ORIGINAL engine/prompt).
+
+    Returns the new job_id, or None if the image is not owned / has no
+    current file to use as the target. Raises ValueError if the dataset has
+    no reference image (there is nothing to use as image2)."""
+    img = _owned_image(user_id, image_id)
+    if not img or not img.filename:
+        return None
+    ds = db.session.get(FaceDataset, img.dataset_id)
+    if not ds.ref_filename:
+        raise ValueError('reference image required')
+    from .face_swap_helper import enqueue_face_swap
+    from ..job_queue import queue_manager
+    target_path = os.path.join(_dataset_path(img.dataset_id), img.filename)
+    ref_path = os.path.join(_dataset_path(ds.id), ds.ref_filename)
+    old_state = {
+        field: getattr(img, field) for field in (
+            'filename', 'caption', 'status', 'fail_reason', 'fail_kind', 'job_id',
+            'watermark_state', 'watermark_bbox', 'watermark_regions',
+            'face_score', 'face_state', 'content_sig', 'content_sig_stat')
+    }
+    old_path = target_path
+    new_job_id = enqueue_face_swap(
+        user_id=str(user_id), target_path=target_path, ref_path=ref_path,
+        extra_metadata={'is_dataset': True, 'dataset_id': img.dataset_id,
+                        'variation_label': img.variation_label})
+
+    # Persist the replacement state first — the old file stays on disk until
+    # this commit succeeds, same ordering rationale as regenerate_image.
+    try:
+        _clear_watermark_metadata(img)
+        img.face_score = None
+        img.content_sig = None
+        img.content_sig_stat = None
+        img.face_state = None
+        img.filename = None
+        img.caption = None
+        img.status = 'pending'
+        img.job_id = new_job_id
+        img.fail_reason = None
+        img.fail_kind = None
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        try:
+            queue_manager.cancel_job(new_job_id, str(user_id), 'image')
+        except Exception:
+            logger.exception('face_swap: failed to cancel unlinked job %s', new_job_id)
+        raise
+
+    # The DB no longer references the old filename. If Trash itself fails,
+    # put the exact previous row state back and cancel the prepared job.
+    try:
+        if old_path and os.path.exists(old_path):
+            trash.send_to_trash(
+                old_path, context=f'dataset-{img.dataset_id}-faceswap-{img.id}')
+    except Exception:
+        try:
+            if new_job_id and not queue_manager.cancel_job(
+                    new_job_id, str(user_id), 'image', commit=False):
+                raise RuntimeError(
+                    'The replacement generation still has unconfirmed ComfyUI work.')
+            for field, value in old_state.items():
+                setattr(img, field, value)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            logger.exception('face_swap: failed to restore row %s after Trash error',
+                             image_id)
+        raise
+    return new_job_id
+
+
 # --- Fan-out generation (API engines: Nano Banana / ChatGPT) ---------------
 # Both engines share the exact generate_variation contract (refs + prompt +
 # aspect -> bytes|None), so the whole fan-out below is engine-parametric. The

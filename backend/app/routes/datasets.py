@@ -1356,6 +1356,29 @@ def dataset_image_regenerate(image_id):
     return jsonify({'ok': True, 'job_id': job_id})
 
 
+@bp.post('/dataset/image/<int:image_id>/face-swap')
+def dataset_image_face_swap(image_id):
+    """Face-swap this tile in place: its current image becomes the target,
+    the dataset's reference photo becomes the identity source, fixed Klein
+    workflow, in-place overwrite. No request body — there is nothing to
+    configure, unlike Regenerate."""
+    try:
+        job_id = svc.face_swap_image(LOCAL_USER, image_id)
+    except Exception as e:
+        from ..services.klein_edit_helper import KleinModelsMissing
+        from ..services.face_swap_helper import FaceSwapLoraMissing
+        if isinstance(e, svc.KleinNodesMissing):
+            return _klein_missing_response(e.missing, e.missing_nodes)
+        if isinstance(e, KleinModelsMissing):
+            return _klein_missing_response(e.missing)
+        if isinstance(e, FaceSwapLoraMissing):
+            return jsonify({'ok': False, 'error': str(e)}), 409
+        return _map_error(e)
+    if job_id is None:
+        return jsonify({'error': 'not found'}), 404
+    return jsonify({'ok': True, 'job_id': job_id})
+
+
 @bp.post('/dataset/<int:dataset_id>/import-zip')
 def dataset_import_zip(dataset_id):
     """Merge an EXISTING training dataset (ZIP of images + kohya-style same-stem
