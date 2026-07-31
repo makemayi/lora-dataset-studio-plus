@@ -70,6 +70,7 @@ def test_build_job_config_overrides_only_what_this_app_owns(onetrainer, tmp_path
     assert config['cache_dir'] == str(Path(training_folder) / 'cache')
     assert config['output_model_destination'] == str(Path(training_folder) / 'lola.safetensors')
     assert config['lora_rank'] == 32
+    assert config['resolution'] == 1024
     assert config['epochs'] == 80          # ceil(2000 / 25)
     # Ownership boundary: everything else stays whatever OneTrainer's own
     # shipped preset says — this function must NOT invent values for them.

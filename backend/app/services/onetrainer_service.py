@@ -63,6 +63,13 @@ def is_installed() -> bool:
     return bool(p) and p.is_file()
 
 
+# The shipped preset's own resolution (512) is tuned for its 16GB-VRAM budget,
+# not for this app's own recipe — 1024 is what this app's own launches want,
+# so it moves into the fields we own rather than a one-off edit of the
+# install's shipped preset file (which a reinstall/preset update would lose).
+KREA2_RESOLUTION = 1024
+
+
 def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
                      steps: int, num_images: int, rank: int) -> dict:
     """The OVERRIDE config this app writes to --config-path, merged by
@@ -83,6 +90,7 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
         'output_model_destination': str(training_folder / f'{trigger}.safetensors'),
         'epochs': epochs,
         'lora_rank': int(rank),
+        'resolution': KREA2_RESOLUTION,
     }
 
 
