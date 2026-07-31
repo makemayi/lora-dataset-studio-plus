@@ -3,8 +3,9 @@ rewires, and must NOT carry the rgthree Image Comparer (node '117' in the
 user-provided 'klein swap.json') — it's a display-only leaf that pulls in the
 rgthree-comfy custom-node pack for no benefit in a headless job."""
 import json
+from pathlib import Path
 
-WORKFLOW_PATH = 'backend/workflows/face swap.json'
+WORKFLOW_PATH = Path(__file__).resolve().parents[1] / 'workflows' / 'face swap.json'
 
 _REQUIRED_NODES = ('151', '121', '165:126', '165:102', '165:146',
                    '165:161', '165:156', '9')
