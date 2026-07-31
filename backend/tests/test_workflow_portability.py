@@ -116,6 +116,10 @@ DECLARED_THIRD_PARTY_NODES = {
     'ConditioningKrea2Rebalance': 'comfyui-krea2edit',
     'Krea2EditModelPatch': 'comfyui-krea2edit',
     'Krea2EditGroundedEncode': 'comfyui-krea2edit',
+    # Klein face swap ('face swap.json'). Gated by klein_edit_helper.klein_missing_nodes()
+    # via klein_edit_helper.KLEIN_NODE_PACKS, same preflight the Klein edit lane uses.
+    'LanPaint_KSampler': 'LanPaint',
+    'LayerMask: PersonMaskUltra V2': 'ComfyUI_LayerStyle',
 }
 
 # The Klein lane is the one that broke, and the one the app leans on hardest
@@ -149,9 +153,21 @@ def test_there_is_something_to_check():
 @pytest.mark.parametrize('name,graph', list(_graphs()), ids=lambda v: v if isinstance(v, str) else '')
 def test_every_pinned_enum_value_exists_in_a_vanilla_comfyui(name, graph):
     """The regression guard for the reported bug. `beta57` fails here loudly, with
-    the reason, instead of reaching a user as ComfyUI's raw 400."""
+    the reason, instead of reaching a user as ComfyUI's raw 400.
+
+    A node in DECLARED_THIRD_PARTY_NODES is exempt: CORE_ENUMS models what a
+    handful of CORE loader/sampler nodes accept on a vanilla install (e.g.
+    CLIPLoader's `device`), and a third-party node's OWN widgets are validated
+    by whatever pack registers it, not by core — a field merely SHARING a name
+    (LayerMask: PersonMaskUltra V2's `device: "cuda"` is its own segmentation
+    device pick, unrelated to CLIPLoader/UNETLoader's default/cpu-only switch)
+    is not the bug this test exists to catch. That bug class — a CORE node
+    accepting a value only a pack injects into a CORE enumeration — is still
+    caught here for every node NOT in that exemption set."""
     offenders = []
     for node_id, node in _nodes(graph):
+        if node['class_type'] in DECLARED_THIRD_PARTY_NODES:
+            continue
         for field, value in (node.get('inputs') or {}).items():
             allowed = CORE_ENUMS.get(field)
             if allowed is None or not isinstance(value, str) or value in allowed:
@@ -216,11 +232,13 @@ def test_the_klein_graphs_sample_the_way_the_rest_of_the_app_does():
 # V3 `node_id=` schema).
 VANILLA_NODE_ALLOWLIST = frozenset({
     'BasicGuider', 'BasicScheduler', 'CFGGuider', 'CLIPLoader', 'CLIPTextEncode',
-    'CheckpointLoaderSimple', 'EmptyFlux2LatentImage', 'EmptyLatentImage',
-    'EmptySD3LatentImage', 'GetImageSize', 'ImageScaleToTotalPixels', 'KSampler',
-    'KSamplerSelect', 'LatentUpscaleBy', 'LoadImage', 'LoraLoader',
+    'CheckpointLoaderSimple', 'ComfySwitchNode', 'ConditioningZeroOut',
+    'EmptyFlux2LatentImage', 'EmptyLatentImage', 'EmptySD3LatentImage',
+    'FluxGuidance', 'GetImageSize', 'ImageScale', 'ImageScaleToTotalPixels',
+    'KSampler', 'KSamplerSelect', 'LatentUpscaleBy', 'LoadImage', 'LoraLoader',
     'LoraLoaderModelOnly', 'ModelSamplingFlux', 'PatchModelAddDownscale',
-    'PreviewImage', 'PrimitiveInt', 'RandomNoise', 'ReferenceLatent',
-    'SamplerCustomAdvanced', 'SaveImage', 'UNETLoader', 'VAEDecode', 'VAEEncode',
+    'PreviewImage', 'PrimitiveFloat', 'PrimitiveInt', 'RandomNoise',
+    'ReferenceLatent', 'ResizeImageMaskNode', 'SamplerCustomAdvanced',
+    'SaveImage', 'SetLatentNoiseMask', 'UNETLoader', 'VAEDecode', 'VAEEncode',
     'VAELoader',
 })

@@ -515,6 +515,11 @@ def klein_engine_ready(comfy_ok, *, missing=None, invalid=None, unsupported_enum
 KLEIN_NODE_PACKS = {
     'TextBox1': ('RES4LYF', 'https://github.com/ClownsharkBatwing/RES4LYF'),
     'Any Switch (rgthree)': ('rgthree-comfy', 'https://github.com/rgthree/rgthree-comfy'),
+    # face swap.json (Klein face-swap workflow): LanPaint's inpainting sampler
+    # and LayerStyle's person-segmentation mask, both named in the graph.
+    'LanPaint_KSampler': ('LanPaint', 'https://github.com/scraed/LanPaint'),
+    'LayerMask: PersonMaskUltra V2': (
+        'ComfyUI_LayerStyle', 'https://github.com/chflame163/ComfyUI_LayerStyle'),
 }
 
 
