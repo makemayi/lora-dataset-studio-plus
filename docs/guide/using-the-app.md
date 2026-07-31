@@ -960,7 +960,7 @@ first, then run the passes if you want them to see it upright.
 
 ## Face-swap a tile with the reference photo
 
-Every generated tile that has a current image can run a fixed face-swap
+Every tile that has a current image can run a fixed face-swap
 pass: click **🎭↔** in the tile's action row (next to 🔄 Regenerate) and the
 tile's own image becomes the base shot, the dataset's reference photo
 supplies the face, and the result overwrites the tile — same in-place
