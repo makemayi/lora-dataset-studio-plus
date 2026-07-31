@@ -50,9 +50,9 @@ export const WHATS_NEW = [
   {
     id: '2026-07-31-regenerated-tile-red-dot',
     date: '2026-07-31',
-    title: "Regenerated a tile in a big batch? It now stays marked until you look",
+    title: "New or regenerated tiles now stay marked until you actually look",
     blurb:
-      "The green glow shows which tile is generating RIGHT NOW, but once it finished, a regenerated image looked exactly like every other tile in the grid — no way to spot the one you just redid. A small red dot now sits on the tile's corner from the moment regeneration finishes until you open it, then it's gone for good.",
+      "The green glow shows which tile is generating RIGHT NOW, but once it finished, a fresh or regenerated image looked exactly like every other tile in a big batch — no way to spot the ones you haven't checked yet. A small red dot now sits on a tile's corner from the moment it finishes until you open it, then it's gone for good.",
   },
   {
     id: '2026-07-31-onetrainer-lora-strength-fix-and-oft',

@@ -1181,7 +1181,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   onReimprove={ds.reimproveImage}
                   onView={(img) => {
                     setViewImg(img);
-                    if (img?.regenerated_unseen) ds.markImageSeen(img.id);
+                    if (img?.unseen) ds.markImageSeen(img.id);
                   }}
                   onBatch={ds.batchImages} busy={ds.busy}
                   onImproveBatch={ds.improveBatch} activity={act}

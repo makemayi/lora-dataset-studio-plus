@@ -140,19 +140,19 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
     <div tabIndex={0} aria-label={`${displayLabel(img.variation_label) || 'Dataset image'} card`}
       className={`dataset-grid-item rounded-lg ${borderCls} ${selected ? 'ring-2 ring-indigo-400' : ''} bg-app/40 overflow-hidden flex flex-col`}>
       <div className="relative aspect-square bg-black">
-        {/* Regenerated, not yet opened since it finished — the "which one did
-            I just redo" marker in a grid of many tiles (unlike the
-            in-progress emerald glow above, this one is meant to survive being
-            buried back among the others once done). Top-left/top-right are
-            both claimed (face badge, wide-tile provenance re-anchor, the
-            hover-revealed action row) — top-right corner, just outside the
-            action row's own inset, is the one spot nothing else occupies at
-            rest. Always visible, not hover-gated: cleared server-side the
-            moment the tile is opened (see onView below). */}
-        {img.regenerated_unseen && (
+        {/* Fresh content nobody has looked at yet — a first-time generation
+            OR a regenerate, not yet opened (unlike the in-progress emerald
+            glow above, this one is meant to survive being buried back among
+            the others once done). Top-left/top-right are both claimed (face
+            badge, wide-tile provenance re-anchor, the hover-revealed action
+            row) — top-right corner, just outside the action row's own inset,
+            is the one spot nothing else occupies at rest. Always visible,
+            not hover-gated: cleared server-side the moment the tile is
+            opened (see onView below). */}
+        {img.unseen && (
           <span
             className="absolute top-1.5 right-1.5 z-20 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-black/60"
-            title="Regenerated — not yet viewed" aria-label="Regenerated, not yet viewed" />
+            title="New — not yet viewed" aria-label="New, not yet viewed" />
         )}
         {onToggleSelect && img.filename && (
           <label

@@ -402,7 +402,7 @@ def test_image_seen_clears_the_regenerated_flag(client, app):
     ds_id = _create(client, 'Seen', 'seentrig').get_json()['id']
     with app.app_context():
         img = FaceDatasetImage(dataset_id=ds_id, filename='a.png', status='keep',
-                               regenerated_unseen=True)
+                               unseen=True)
         svc.db.session.add(img)
         svc.db.session.commit()
         img_id = img.id
@@ -413,7 +413,7 @@ def test_image_seen_clears_the_regenerated_flag(client, app):
 
     with app.app_context():
         row = svc.db.session.get(FaceDatasetImage, img_id)
-        assert row.regenerated_unseen is False
+        assert row.unseen is False
 
 
 def test_delete_dataset(client):

@@ -983,6 +983,27 @@ def test_regenerate_with_edited_prompt_persists_and_reaches_engine(app, monkeypa
         assert row.filename                                        # a new file was written
 
 
+def test_fresh_api_batch_generation_flags_the_tile_unseen(app, monkeypatch):
+    """A first-time generation (not a regenerate) gets the same "new, not yet
+    viewed" marker — the point of broadening it beyond regenerate-only."""
+    from app.services import face_dataset_service as svc
+    from app.models import FaceDatasetImage
+    from app.config import LOCAL_USER
+    import os
+    monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: (lambda refs, prompt, aspect_ratio=None: _png()))
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'Fresh', 'freshtrig')
+        os.makedirs(svc._dataset_dir(ds.id), exist_ok=True)
+        img = FaceDatasetImage(dataset_id=ds.id, status='pending', klein_model='nanobanana')
+        svc.db.session.add(img); svc.db.session.commit()
+        assert not img.unseen
+        svc._run_nanobanana_batch(app, [(img.id, 'p', '1:1')], [_png()], engine='nanobanana')
+        svc.db.session.expire_all()
+        row = svc.db.session.get(FaceDatasetImage, img.id)
+        assert row.filename
+        assert row.unseen is True
+
+
 def test_regenerate_flags_the_tile_as_unseen(app, monkeypatch):
     """The "which one did I just redo" marker: a regenerate sets it, and it
     survives the completed image being buried back in the grid."""
@@ -992,13 +1013,13 @@ def test_regenerate_flags_the_tile_as_unseen(app, monkeypatch):
     monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: (lambda refs, prompt, aspect_ratio=None: _png()))
     with app.app_context():
         ds, img = _ds_with_ref_and_generated(svc, FaceDatasetImage, LOCAL_USER)
-        assert not img.regenerated_unseen
+        assert not img.unseen
         svc.regenerate_image(LOCAL_USER, img.id)
         row = svc.db.session.get(FaceDatasetImage, img.id)
-        assert row.regenerated_unseen is True
+        assert row.unseen is True
 
 
-def test_clear_regenerated_flag_is_a_one_way_transition(app, monkeypatch):
+def test_clear_unseen_flag_is_a_one_way_transition(app, monkeypatch):
     from app.services import face_dataset_service as svc
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
@@ -1006,15 +1027,15 @@ def test_clear_regenerated_flag_is_a_one_way_transition(app, monkeypatch):
     with app.app_context():
         ds, img = _ds_with_ref_and_generated(svc, FaceDatasetImage, LOCAL_USER)
         svc.regenerate_image(LOCAL_USER, img.id)
-        assert svc.clear_regenerated_flag(LOCAL_USER, img.id) is True
+        assert svc.clear_unseen_flag(LOCAL_USER, img.id) is True
         row = svc.db.session.get(FaceDatasetImage, img.id)
-        assert row.regenerated_unseen is False
+        assert row.unseen is False
         # Idempotent: clearing an already-clear (or never-set) flag still
         # reports success rather than a false "not found".
-        assert svc.clear_regenerated_flag(LOCAL_USER, img.id) is True
+        assert svc.clear_unseen_flag(LOCAL_USER, img.id) is True
 
 
-def test_clear_regenerated_flag_is_scoped_to_the_owning_user(app, monkeypatch):
+def test_clear_unseen_flag_is_scoped_to_the_owning_user(app, monkeypatch):
     from app.services import face_dataset_service as svc
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
@@ -1022,26 +1043,26 @@ def test_clear_regenerated_flag_is_scoped_to_the_owning_user(app, monkeypatch):
     with app.app_context():
         ds, img = _ds_with_ref_and_generated(svc, FaceDatasetImage, LOCAL_USER)
         svc.regenerate_image(LOCAL_USER, img.id)
-        assert svc.clear_regenerated_flag('someone-else', img.id) is False
+        assert svc.clear_unseen_flag('someone-else', img.id) is False
         row = svc.db.session.get(FaceDatasetImage, img.id)
-        assert row.regenerated_unseen is True   # untouched
-        assert svc.clear_regenerated_flag(LOCAL_USER, 999999) is False
+        assert row.unseen is True   # untouched
+        assert svc.clear_unseen_flag(LOCAL_USER, 999999) is False
 
 
-def test_dataset_payload_carries_the_regenerated_unseen_flag(app, monkeypatch):
+def test_dataset_payload_carries_the_unseen_flag(app, monkeypatch):
     from app.services import face_dataset_service as svc
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
     monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: (lambda refs, prompt, aspect_ratio=None: _png()))
     with app.app_context():
         ds, img = _ds_with_ref_and_generated(svc, FaceDatasetImage, LOCAL_USER)
-        by_id = {i['id']: i['regenerated_unseen'] for i in svc.dataset_payload(LOCAL_USER, ds.id)['images']}
+        by_id = {i['id']: i['unseen'] for i in svc.dataset_payload(LOCAL_USER, ds.id)['images']}
         assert by_id[img.id] is False
         svc.regenerate_image(LOCAL_USER, img.id)
-        by_id = {i['id']: i['regenerated_unseen'] for i in svc.dataset_payload(LOCAL_USER, ds.id)['images']}
+        by_id = {i['id']: i['unseen'] for i in svc.dataset_payload(LOCAL_USER, ds.id)['images']}
         assert by_id[img.id] is True
-        svc.clear_regenerated_flag(LOCAL_USER, img.id)
-        by_id = {i['id']: i['regenerated_unseen'] for i in svc.dataset_payload(LOCAL_USER, ds.id)['images']}
+        svc.clear_unseen_flag(LOCAL_USER, img.id)
+        by_id = {i['id']: i['unseen'] for i in svc.dataset_payload(LOCAL_USER, ds.id)['images']}
         assert by_id[img.id] is False
 
 
@@ -1312,6 +1333,37 @@ def test_generate_variations_klein_raises_models_missing_when_unconfigured(app):
             svc.generate_variations(LOCAL_USER, ds.id,
                                     [{'label': 'x', 'framing': 'face', 'prompt': 'p'}],
                                     1, 'some_klein_model')
+
+
+def test_link_completed_dataset_image_success_flags_the_tile_unseen(app, monkeypatch, tmp_path):
+    """A genuine successful local-engine completion (file really lands on
+    disk) sets `unseen` — the same "which ones are new" marker a regenerate
+    sets, but here for a first-time generation."""
+    import os
+    from app import config as cfg
+    from app.services import face_dataset_service as svc
+    from app.models import FaceDatasetImage
+    from app.config import LOCAL_USER
+    with app.app_context():
+        base = tmp_path / 'Comfy'
+        out_dir = base / 'output'
+        out_dir.mkdir(parents=True)
+        cfg.save_config({'comfyui': {'base_dir': str(base)}})
+        with open(out_dir / 'result.webp', 'wb') as fh:
+            fh.write(_png())
+
+        ds = svc.create_dataset(LOCAL_USER, 'Land', 'landtrig')
+        os.makedirs(svc._dataset_dir(ds.id), exist_ok=True)
+        img = FaceDatasetImage(dataset_id=ds.id, source='generated', status='pending',
+                               job_id='job-land', klein_model='some_klein_model')
+        svc.db.session.add(img)
+        svc.db.session.commit()
+
+        svc.link_completed_dataset_image('job-land', 'result.webp', failed=False)
+        row = svc.db.session.get(FaceDatasetImage, img.id)
+        assert row.filename == 'result.webp'
+        assert row.status != 'failed'
+        assert row.unseen is True
 
 
 def test_link_completed_dataset_image_without_comfyui_configured(app, monkeypatch):

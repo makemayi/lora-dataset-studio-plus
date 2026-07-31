@@ -238,11 +238,11 @@ _SCHEMA_ADDITIONS = (
     # no groups on it, and every pinned picture keeps the geometry it had.
     ('canvas_image_node', 'group_id', 'VARCHAR(40)'),
     ('canvas_image_node', 'group_pos', 'INTEGER'),
-    # A tile a user regenerated, not yet opened since it finished — the "which
-    # one did I just redo" gap in a grid of many tiles. Cleared the moment the
-    # tile's lightbox is opened. Additive/nullable — existing rows read as
-    # never-regenerated, which is exactly correct for them.
-    ('face_dataset_image', 'regenerated_unseen', 'BOOLEAN DEFAULT 0'),
+    # A tile with fresh, unopened content — "which one is new" in a grid of
+    # many, for both a first-time generation and a regenerate. Cleared the
+    # moment the tile's lightbox opens. Additive/nullable — existing rows read
+    # as already-seen, which is exactly correct for them.
+    ('face_dataset_image', 'unseen', 'BOOLEAN DEFAULT 0'),
 )
 
 # Indexes that only a FRESH database ever got. `index=True` on a model column is

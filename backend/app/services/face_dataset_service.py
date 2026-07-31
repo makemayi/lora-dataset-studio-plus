@@ -1827,19 +1827,18 @@ def set_image_status(user_id, image_id, status):
     return True
 
 
-def clear_regenerated_flag(user_id, image_id):
-    """Mark a regenerated tile as seen (opened) — the one-way transition off
-    `regenerated_unseen`, called when the tile's lightbox opens. A no-op
-    (still returns True) when the flag is already clear, so an open on a
-    tile that was never regenerated costs nothing."""
+def clear_unseen_flag(user_id, image_id):
+    """Mark a tile as seen (opened) — the one-way transition off `unseen`,
+    called when the tile's lightbox opens. A no-op (still returns True) when
+    the flag is already clear, so opening an already-seen tile costs nothing."""
     img = db.session.get(FaceDatasetImage, image_id)
     if not img:
         return False
     ds = db.session.get(FaceDataset, img.dataset_id)
     if not ds or str(ds.user_id) != str(user_id):
         return False
-    if img.regenerated_unseen:
-        img.regenerated_unseen = False
+    if img.unseen:
+        img.unseen = False
         db.session.commit()
     return True
 
@@ -3835,9 +3834,10 @@ def dataset_payload(user_id, dataset_id):
                     # actually claimed right now, vs merely queued behind them —
                     # see the batched lookup above.
                     'is_generating': i.job_id in _running_jobs,
-                    # True once a regenerate finishes until the tile is opened —
-                    # the "which one did I just redo" marker in a big grid.
-                    'regenerated_unseen': bool(i.regenerated_unseen),
+                    # True once a generation OR regenerate finishes until the
+                    # tile is opened — the "which ones are new" marker in a
+                    # big grid.
+                    'unseen': bool(i.unseen),
                     'caption': i.caption,
                     'caption_short': i.caption_short,
                     'fail_reason': i.fail_reason,
@@ -8001,7 +8001,6 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
         img.job_id = new_job_id
         img.fail_reason = None
         img.fail_kind = None
-        img.regenerated_unseen = True
         db.session.commit()
     except Exception:
         db.session.rollback()
@@ -8120,6 +8119,7 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
                 write_image_atomic(os.path.join(_dataset_dir(img.dataset_id), fn),
                                    normalize_to_webp(out))
                 img.filename = fn
+                img.unseen = True
             else:
                 img.status = 'failed'
                 img.fail_reason = f'{engine}: {_EMPTY_MSG}'
@@ -8366,6 +8366,7 @@ def _run_nanobanana_batch(app, items, ref_bytes, engine='nanobanana', dataset_id
                     write_image_atomic(os.path.join(_dataset_dir(img.dataset_id), fn),
                                        normalize_to_webp(out))
                     img.filename = fn
+                    img.unseen = True
                 except Exception as e:
                     logger.warning(f"{engine} batch: save failed for row {image_id}: {e}")
                     img.status = 'failed'
@@ -8529,6 +8530,10 @@ def link_completed_dataset_image(job_id, filename, failed=False, reason=None):
                 img.fail_reason = ('The finished image could not be retrieved from ComfyUI '
                                    '(not on disk, and the /view API fetch failed).')
                 logger.warning(f"dataset link: file not on disk and /view API fetch failed (job {job_id})")
+        # Only a genuine success (not the late-turned-'failed' /view fetch miss
+        # right above) counts as fresh, unopened content.
+        if img.status != 'failed':
+            img.unseen = True
         # A user may have marked this in-flight improvement Keep while waiting.
         # Only the freshly linked, on-disk result may now replace its parent;
         # the helper also preserves a later explicit return to Pending.
