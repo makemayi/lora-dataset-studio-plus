@@ -98,7 +98,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
   // its OWN re-run below (same parent, current improve settings) instead.
   const isImageImproveCandidate = isImageImproveRow(img);
   const canRegenerate = canRegenerateGeneric(img, { isRescueDerived });
-  const canFaceSwap = canRegenerate && hasRef;
+  const canFaceSwap = hasRef && !!img.filename;
   const rerunImprove = onReimprove ? improveRerunAffordance(img) : null;
   const scoreFaceTitle = faceScoringBlocked
     || (scoreFaceBusy

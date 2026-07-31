@@ -25,7 +25,7 @@ test('grid forwards onFaceSwap/hasRef down to each tile', () => {
 });
 
 test('grid item renders a gated face-swap button', () => {
-  assert.match(gridItem, /const canFaceSwap = canRegenerate && hasRef;/);
+  assert.match(gridItem, /const canFaceSwap = hasRef && !!img\.filename;/);
   assert.match(gridItem, /\{canFaceSwap && onFaceSwap && \(/);
   assert.match(gridItem, /e\.stopPropagation\(\); onFaceSwap\(img\.id\)/);
   assert.match(gridItem, /Swap this tile's face with the reference image/);
