@@ -4,6 +4,7 @@ as regenerate_image, minus the provenance-column reset (variation_prompt/
 variation_label/klein_model are left untouched — a face swap is an identity
 post-process, not a re-generation from the catalog prompt)."""
 import io
+import os
 import struct
 
 import pytest
@@ -135,3 +136,53 @@ def test_face_swap_route_starts_a_job(app, client, tmp_path):
 def test_face_swap_route_404_for_unknown_image(client):
     resp = client.post('/api/dataset/image/999999/face-swap')
     assert resp.status_code == 404
+
+
+def test_face_swap_trash_failure_restores_previous_row_and_cancels_new_job(
+        app, tmp_path, monkeypatch):
+    """Highest-risk branch: the row has already been flipped to pending/no
+    filename/new job_id (DB committed) when Trash raises. Mirrors
+    test_regenerate_trash_failure_restores_previous_row_and_cancels_new_job
+    in test_data_integrity_trash.py, adapted to face_swap_image's fields."""
+    from app import config as cfg
+    from app.services import face_dataset_service as svc
+    from app.services import face_swap_helper, trash
+    from app.config import LOCAL_USER
+    from app.job_queue import queue_manager
+    with app.app_context():
+        _comfy(tmp_path, cfg)
+        ds, img = _dataset_with_image(svc, cfg, tmp_path)
+        img_id = img.id
+        old_path = os.path.join(svc._dataset_dir(ds.id), 'tile.png')
+
+        monkeypatch.setattr(face_swap_helper, 'enqueue_face_swap',
+                            lambda **_kwargs: 'new-job')
+
+        cancellations = []
+
+        def cancel(job_id, user_id=None, job_type='image', *, commit=True):
+            cancellations.append((job_id, user_id, job_type, commit))
+            return True
+
+        monkeypatch.setattr(queue_manager, 'cancel_job', cancel)
+
+        def fail_trash(_path, context=''):
+            svc.db.session.expire_all()
+            pending = svc.db.session.get(svc.FaceDatasetImage, img_id)
+            assert pending.filename is None and pending.status == 'pending'
+            assert pending.job_id == 'new-job'
+            raise OSError('injected Trash failure')
+
+        monkeypatch.setattr(trash, 'send_to_trash', fail_trash)
+
+        with pytest.raises(OSError, match='injected Trash failure'):
+            svc.face_swap_image(LOCAL_USER, img_id)
+
+        row = svc.db.session.get(svc.FaceDatasetImage, img_id)
+        assert (row.filename, row.status, row.job_id) == ('tile.png', 'finished', None)
+        # Provenance was never touched by face_swap_image in the first place,
+        # but assert it for symmetry with the regenerate rollback test.
+        assert row.variation_prompt == 'p'
+        assert row.variation_label == 'x'
+        assert os.path.isfile(old_path)
+        assert ('new-job', LOCAL_USER, 'image', False) in cancellations
