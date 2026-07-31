@@ -411,6 +411,14 @@ DEFAULTS = {
         # default, nothing to merge; see _migrate_krea_character_lora for the
         # one-time upgrade from the earlier single-slot krea.character_lora.
         'character_loras': [],
+        # OPTIONAL alternative sampler path: KreaTwoStageSampler +
+        # KreaDualResolutionSelector (a low-res stage1 handed off to an
+        # upscaled stage2, plus a stage2-only accelerator LoRA) instead of the
+        # single KSampler above. Off by default — both custom node classes
+        # must be present in the target ComfyUI, checked the same way as the
+        # base pack. Every stage1/stage2 knob is pinned to the measured export
+        # this path mirrors, not a further Settings dial.
+        'two_stage': False,
     },
     # Z-Image pipeline — the two loader refs the shipped Test Studio workflow used
     # to hardcode from the developer's own ComfyUI (reported by bobba84, GitHub #18).

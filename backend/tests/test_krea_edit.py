@@ -198,6 +198,10 @@ def test_extra_model_paths_roots_are_searched_like_comfyui_does(krea, tmp_path):
 
 def _install_everything(base):
     _write(base / 'models' / 'diffusion_models' / 'Krea' / 'krea2_turbo_fp8.safetensors')
+    # A Raw build too: two_stage's resolve_krea_unet(require_raw=True) needs
+    # one, and the single-stage tests below still resolve the Turbo build
+    # they assert on (Turbo wins the automatic preference over Raw).
+    _write(base / 'models' / 'diffusion_models' / 'Krea' / 'krea2_raw_fp8.safetensors')
     _write(base / 'models' / 'loras' / 'krea' / 'krea2_identity_edit_v1_2.safetensors')
     _write(base / 'models' / 'text_encoders' / 'qwen3vl_4b_fp8_scaled.safetensors')
     _write(base / 'models' / 'vae' / 'qwen_image_vae.safetensors')
@@ -461,6 +465,146 @@ def test_no_loader_value_is_ever_hardcoded_in_the_graph_builder():
              if n['inputs'].get(k)}
     assert names == {'Krea/base.safetensors', 'te.safetensors', 'vae.safetensors',
                      'krea/id.safetensors'}
+
+
+# --- two-stage sampler path (krea.two_stage) ---------------------------------
+
+def _two_stage_graph(**overrides):
+    from app.services import krea_edit_helper as keh
+    kwargs = dict(unet='Krea/base.safetensors', clip='te.safetensors',
+                  vae='vae.safetensors', lora_name='krea/id.safetensors',
+                  width=1024, height=1024, seed=7, two_stage=True,
+                  aspect_ratio='2:3')
+    kwargs.update(overrides)
+    return keh.build_workflow('ref.png', 'a prompt', **kwargs)
+
+
+def test_two_stage_off_leaves_the_single_stage_graph_untouched():
+    """The default (two_stage=False) must be byte-identical to the graph
+    every other test in this file already pins."""
+    g = _graph()
+    classes = [n['class_type'] for n in g.values()]
+    assert 'KSampler' in classes
+    assert 'KreaTwoStageSampler' not in classes
+    assert 'KreaDualResolutionSelector' not in classes
+
+
+def test_two_stage_swaps_in_the_dual_resolution_selector_and_sampler():
+    g = _two_stage_graph()
+    classes = [n['class_type'] for n in g.values()]
+    assert classes.count('KreaDualResolutionSelector') == 1
+    assert classes.count('KreaTwoStageSampler') == 1
+    assert 'KSampler' not in classes
+    selector = next(n for n in g.values() if n['class_type'] == 'KreaDualResolutionSelector')
+    assert selector['inputs']['aspect_ratio'] == '2:3'
+    sampler = next(n for n in g.values() if n['class_type'] == 'KreaTwoStageSampler')
+    ins = sampler['inputs']
+    assert (ins['stage1_steps'], ins['stage1_cfg']) == (52, 4.0)
+    assert (ins['stage2_steps'], ins['stage2_cfg']) == (12, 1.0)
+    assert ins['handoff_percent'] == 16.67
+    assert ins['upscale_method'] == 'bislerp'
+
+
+def test_two_stage_latent_and_final_size_both_come_from_the_selector():
+    g = _two_stage_graph()
+    selector_key = next(k for k, n in g.items()
+                        if n['class_type'] == 'KreaDualResolutionSelector')
+    latent = next(n for n in g.values() if n['class_type'] == 'EmptySD3LatentImage')
+    sampler = next(n for n in g.values() if n['class_type'] == 'KreaTwoStageSampler')
+    assert latent['inputs']['width'] == [selector_key, 0]
+    assert latent['inputs']['height'] == [selector_key, 1]
+    assert sampler['inputs']['final_width'] == [selector_key, 2]
+    assert sampler['inputs']['final_height'] == [selector_key, 3]
+    assert sampler['inputs']['seed'] == [selector_key, 4]
+
+
+def test_two_stage_without_an_aspect_ratio_derives_it_from_the_source_size():
+    g = _two_stage_graph(aspect_ratio=None, width=4000, height=3000)
+    selector = next(n for n in g.values() if n['class_type'] == 'KreaDualResolutionSelector')
+    assert selector['inputs']['aspect_ratio'] == '4:3'
+
+
+def test_two_stage_lora_chains_after_the_model_patch_and_feeds_only_stage2():
+    g = _two_stage_graph(stage2_lora_name='krea2/krea2_turbo_lora_rank_64_bf16.safetensors')
+    patch_key = next(k for k, n in g.items() if n['class_type'] == 'Krea2EditModelPatch')
+    lora = next(n for n in g.values() if n['class_type'] == 'LoraLoaderModelOnly'
+               and n['inputs']['lora_name'] == 'krea2/krea2_turbo_lora_rank_64_bf16.safetensors')
+    lora_key = next(k for k, n in g.items() if n is lora)
+    assert lora['inputs']['model'] == [patch_key, 0]
+    assert lora['inputs']['strength_model'] == 0.6
+    sampler = next(n for n in g.values() if n['class_type'] == 'KreaTwoStageSampler')
+    assert sampler['inputs']['stage1_model'] == [patch_key, 0], 'stage1 skips the accelerator LoRA'
+    assert sampler['inputs']['stage2_model'] == [lora_key, 0]
+
+
+def test_two_stage_without_a_stage2_lora_feeds_the_patch_output_to_both_stages():
+    g = _two_stage_graph(stage2_lora_name=None)
+    loras = [n for n in g.values() if n['class_type'] == 'LoraLoaderModelOnly']
+    assert len(loras) == 1, 'no stray LoRA node when no stage2 accelerator is resolved'
+    patch_key = next(k for k, n in g.items() if n['class_type'] == 'Krea2EditModelPatch')
+    sampler = next(n for n in g.values() if n['class_type'] == 'KreaTwoStageSampler')
+    assert sampler['inputs']['stage1_model'] == sampler['inputs']['stage2_model'] == [patch_key, 0]
+
+
+def test_two_stage_missing_nodes_are_checked_only_when_two_stage_is_on(krea, monkeypatch):
+    keh, _base, _config = krea
+    monkeypatch.setattr('app.utils.comfyui.fetch_object_info_classes',
+                        lambda *a, **k: set(keh.KREA_NODE_CLASSES) | {'KSampler'})
+    assert keh.krea_missing_nodes() == []
+    assert set(keh.krea_missing_nodes(two_stage=True)) == set(keh.KREA_TWO_STAGE_NODE_CLASSES)
+
+
+def test_two_stage_missing_stage2_lora_is_reported_only_when_two_stage_is_on(krea):
+    keh, base, _config = krea
+    _install_everything(base)
+    assert keh.krea_missing_assets() == []
+    assert keh.krea_missing_assets(two_stage=True) == ['krea_stage2_lora']
+
+
+def test_two_stage_stage2_lora_resolves_by_narrow_token(krea):
+    keh, base, _ = krea
+    loras = base / 'models' / 'loras'
+    assert keh.resolve_krea_stage2_lora() == (None, None)
+    _write(loras / 'krea2' / 'krea2_turbo_lora_rank_64_bf16.safetensors')
+    rel, path = keh.resolve_krea_stage2_lora()
+    assert rel == os.path.join('krea2', 'krea2_turbo_lora_rank_64_bf16.safetensors')
+    assert os.path.isfile(path)
+
+
+def test_two_stage_requires_a_raw_base_a_turbo_only_install_reports_missing(krea):
+    """MEASURED: Turbo does not hold up through the stage1/stage2 handoff —
+    two_stage must never silently hand the sampler a Turbo build."""
+    keh, base, _ = krea
+    d = base / 'models' / 'diffusion_models' / 'Krea'
+    _write(d / 'krea2_turbo_fp8.safetensors')
+    assert keh.resolve_krea_unet().endswith('krea2_turbo_fp8.safetensors')
+    assert keh.resolve_krea_unet(require_raw=True) is None
+    assert 'krea_model' not in keh.krea_missing_assets()
+    assert 'krea_model' in keh.krea_missing_assets(two_stage=True)
+    # A Raw build alongside it is picked once two_stage requires it.
+    _write(d / 'krea2_raw_fp8.safetensors')
+    assert keh.resolve_krea_unet(require_raw=True).endswith('krea2_raw_fp8.safetensors')
+    assert 'krea_model' not in keh.krea_missing_assets(two_stage=True)
+
+
+def test_two_stage_explicit_turbo_pick_still_degrades_to_automatic_raw_resolution(krea):
+    keh, base, config = krea
+    d = base / 'models' / 'diffusion_models' / 'Krea'
+    _write(d / 'krea2_turbo_fp8.safetensors')
+    _write(d / 'krea2_raw_fp8.safetensors')
+    config.save_config({'krea': {'base_model': 'krea2_turbo_fp8.safetensors'}})
+    assert keh.resolve_krea_unet().endswith('krea2_turbo_fp8.safetensors')
+    assert keh.resolve_krea_unet(require_raw=True).endswith('krea2_raw_fp8.safetensors')
+
+
+def test_two_stage_preflight_passes_once_the_stage2_lora_is_present(krea):
+    keh, base, _ = krea
+    _install_everything(base)
+    with pytest.raises(keh.KreaModelsMissing) as exc:
+        keh.preflight(two_stage=True)
+    assert exc.value.missing == ['krea_stage2_lora']
+    _write(base / 'models' / 'loras' / 'krea2' / 'krea2_turbo_lora_rank_64_bf16.safetensors')
+    keh.preflight(two_stage=True)   # must not raise now
 
 
 def test_no_character_loras_leaves_the_graph_exactly_as_before():

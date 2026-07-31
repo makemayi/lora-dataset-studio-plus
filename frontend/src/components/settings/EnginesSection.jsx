@@ -443,6 +443,36 @@ function KreaCard({ config, setField, configDefaults }) {
         <ResetToDefault label="Identity edit LoRA" section="krea" field="identity_lora" {...reset} />
       </div>
 
+      <div id="krea-two-stage" className="mt-3 sm:max-w-md">
+        <label htmlFor="krea-two-stage-toggle" className="flex items-center gap-2 text-sm font-medium text-content">
+          <input
+            id="krea-two-stage-toggle"
+            type="checkbox"
+            checked={!!krea.two_stage}
+            onChange={(e) => setField('krea', 'two_stage', e.target.checked)}
+            className="h-4 w-4 rounded border-border-strong"
+          />
+          Two-stage sampler (advanced)
+        </label>
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          Replaces the single sampler above with a low-resolution pass handed off to an
+          upscaled second pass, plus a stage-2-only accelerator LoRA
+          (<code>krea2_turbo_lora_rank_64_bf16.safetensors</code>, searched for in your loras
+          folders — it is not auto-installed). Requires a newer build of the
+          comfyui-krea2edit node pack (<code>KreaTwoStageSampler</code> /{' '}
+          <code>KreaDualResolutionSelector</code>). Every stage1/stage2 step count, cfg and
+          handoff percentage is fixed to the calibrated export this mirrors — Sampler steps
+          above only applies to the single-stage path.
+          <br />
+          <b>Forces a Raw base model.</b> The Turbo build (the default automatic pick above)
+          does not hold up through the stage1/stage2 handoff, so with this on the app ignores
+          Turbo entirely — including an explicit Base model file set to one — and looks for a
+          Raw build instead. A Turbo-only install shows the base model as missing while this
+          is on.
+        </p>
+        <ResetToDefault label="Two-stage sampler" section="krea" field="two_stage" {...reset} />
+      </div>
+
       <KreaCharacterLorasCard krea={krea} setField={setField} />
     </Card>
   )

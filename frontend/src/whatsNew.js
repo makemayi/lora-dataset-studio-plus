@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-31-krea-two-stage-sampler',
+    date: '2026-07-31',
+    title: 'Krea 2 Edit: an optional two-stage sampler for a sharper upscale pass',
+    blurb:
+      "For anyone who has tuned a custom Krea 2 workflow with a low-res-then-upscale sampler: flip Settings → Image engines → Krea 2 Edit → Two-stage sampler and the app builds that same graph (KreaTwoStageSampler + KreaDualResolutionSelector, plus a stage-2-only accelerator LoRA) instead of the single-pass sampler. It forces a Raw base model (Turbo doesn't hold up through the stage handoff) and needs a newer build of the comfyui-krea2edit node pack; off by default and a complete no-op for anyone who never touches it.",
+    to: '/settings/engines',
+  },
+  {
     id: '2026-07-31-krea-ref-boost-setting',
     date: '2026-07-31',
     title: 'Krea 2 Edit: a second consistency dial, tunable per framing',

@@ -110,6 +110,14 @@ KREA_NODE_PACK = {
     'search': 'krea2edit',
 }
 
+# The OPTIONAL two-stage sampler path (krea.two_stage): a low-res stage1
+# handed off to an upscaled stage2, replacing the single KSampler. Same node
+# pack as the two classes above — these ship in a later commit of the same
+# comfyui-krea2edit repo, not a second pack to install. Only checked/required
+# when the setting is on, so an install without them keeps the base engine
+# working exactly as before.
+KREA_TWO_STAGE_NODE_CLASSES = ('KreaTwoStageSampler', 'KreaDualResolutionSelector')
+
 # Where each asset belongs inside a ComfyUI install, for the "place it here"
 # message. Display paths only — the real lookup goes through comfy_model_paths,
 # so an extra_model_paths.yaml root works exactly the same.
@@ -232,7 +240,7 @@ def _krea_base_compatible(name):
     return not any(tok in low for tok in KREA_INCOMPATIBLE_TOKENS)
 
 
-def resolve_krea_unet(selected=None):
+def resolve_krea_unet(selected=None, require_raw=False):
     """ComfyUI-relative `unet_name` for the UNETLoader, WITH its subfolder prefix
     (e.g. 'Krea\\krea2_turbo_fp8.safetensors'), or None when no compatible Krea 2
     base is on disk.
@@ -241,8 +249,18 @@ def resolve_krea_unet(selected=None):
     matched on its BASENAME across every krea folder, so a value copied from a
     listing still resolves), then a 'turbo' build, then a 'raw' build, then the
     first candidate. Deterministic: the same install always resolves the same
-    file, which is what makes a regenerate reproduce its original render."""
+    file, which is what makes a regenerate reproduce its original render.
+
+    `require_raw=True` (the two-stage sampler path — MEASURED: the Turbo
+    build does not hold up through the stage1/stage2 handoff) narrows every
+    candidate list to filenames carrying a 'raw' token BEFORE the explicit
+    pick is even matched, same discipline as the BigLove exclusion below: a
+    Turbo build must report 'missing', never get silently handed to a
+    pipeline it cannot serve."""
     folders = _krea_unet_folders()
+    if require_raw:
+        folders = [(sub, [n for n in names if 'raw' in n.lower()]) for sub, names in folders]
+        folders = [(sub, names) for sub, names in folders if names]
     if not folders:
         return None
     pick = selected or cfg.get('krea.base_model') or ''
@@ -323,11 +341,17 @@ def resolve_krea_identity_lora():
     return None, None
 
 
-def krea_missing_assets():
-    """Which Krea assets are NOT on disk, as KREA_ASSETS keys. Disk-only,
-    network-free — safe for the readiness probe."""
+def krea_missing_assets(two_stage=False):
+    """Which Krea assets are NOT on disk, as KREA_ASSETS keys (plus
+    'krea_stage2_lora' when `two_stage` is on). Disk-only, network-free —
+    safe for the readiness probe.
+
+    `two_stage` also narrows the base-model check to a Raw build
+    (resolve_krea_unet(require_raw=True)) — a Turbo-only install reports
+    'krea_model' missing under two_stage even though the single-stage path
+    would happily use it."""
     missing = []
-    if not resolve_krea_unet():
+    if not resolve_krea_unet(require_raw=two_stage):
         missing.append('krea_model')
     if not resolve_krea_identity_lora()[0]:
         missing.append('krea_identity_lora')
@@ -335,7 +359,37 @@ def krea_missing_assets():
         missing.append('krea_text_encoder')
     if not resolve_krea_vae():
         missing.append('krea_vae')
+    if two_stage and not resolve_krea_stage2_lora()[0]:
+        missing.append('krea_stage2_lora')
     return missing
+
+
+# The stage-2-only accelerator LoRA the two-stage sampler path chains AFTER
+# Krea2EditModelPatch, feeding ONLY stage2_model — stage1 runs on the plain
+# identity-edit chain, exactly like the calibrated export this mirrors. Same
+# narrow-token discipline as the identity LoRA: canonical name first would be
+# nice, but this file has no single canonical name across installs, so it is
+# token-only. Optional: only krea.two_stage pulls this in, and it is NOT
+# auto-installable (no verified public source), so it stays out of
+# KREA_ASSETS/KREA_REQUIRED — a missing one degrades to a named 409, never a
+# fake download.
+_STAGE2_LORA_TOKENS = ('krea2_turbo_lora_rank_64', 'turbo_lora_rank_64', 'turbo_rank64_bf16')
+STAGE2_LORA_STRENGTH = 0.6
+
+KREA_STAGE2_LORA_ASSET = {
+    'kind': 'Krea 2 Turbo LoRA rank 64 (two-stage sampler, stage 2 only)',
+    'path': 'models/loras/krea/krea2_turbo_lora_rank_64_bf16.safetensors',
+    'source': 'wherever you obtained this accelerator LoRA — it is not auto-installed',
+}
+
+
+def resolve_krea_stage2_lora():
+    """(relative_name, absolute_path) of the two-stage sampler's stage-2-only
+    LoRA, or (None, None) when absent."""
+    for rel, path in sorted(comfy_model_paths.list_models('loras')):
+        if any(tok in os.path.basename(rel).lower() for tok in _STAGE2_LORA_TOKENS):
+            return rel, path
+    return None, None
 
 
 # --- Present-but-INVALID assets ---------------------------------------------
@@ -425,21 +479,31 @@ def krea_invalid_assets():
 # never block a generation (the job would still fail, with ComfyUI's own error).
 _NODES_OK_TTL_S = 300
 _nodes_ok_until = 0.0
+# Separate TTL for the two-stage classes: krea_missing_nodes(two_stage=True)
+# checks a wider set, so a positive result there must not be read back as a
+# positive for the (narrower, default) base check and vice versa.
+_two_stage_nodes_ok_until = 0.0
 
 
-def krea_missing_nodes():
-    """[class_type] of the Krea 2 Edit nodes the target ComfyUI does not expose.
-    [] when they are all present OR when /object_info is unreachable."""
-    global _nodes_ok_until
-    if time.time() < _nodes_ok_until:
+def krea_missing_nodes(two_stage=False):
+    """[class_type] of the Krea 2 Edit nodes the target ComfyUI does not
+    expose — the base two, plus KREA_TWO_STAGE_NODE_CLASSES when `two_stage`
+    is on. [] when they are all present OR when /object_info is unreachable."""
+    global _nodes_ok_until, _two_stage_nodes_ok_until
+    cache_until = _two_stage_nodes_ok_until if two_stage else _nodes_ok_until
+    if time.time() < cache_until:
         return []
     from ..utils.comfyui import fetch_object_info_classes
     available = fetch_object_info_classes()
     if available is None:
         return []
-    out = sorted(c for c in KREA_NODE_CLASSES if c not in available)
+    classes = KREA_NODE_CLASSES + (KREA_TWO_STAGE_NODE_CLASSES if two_stage else ())
+    out = sorted(c for c in classes if c not in available)
     if not out:
-        _nodes_ok_until = time.time() + _NODES_OK_TTL_S
+        if two_stage:
+            _two_stage_nodes_ok_until = time.time() + _NODES_OK_TTL_S
+        else:
+            _nodes_ok_until = time.time() + _NODES_OK_TTL_S
     return out
 
 
@@ -448,8 +512,9 @@ def clear_nodes_cache():
     after the node pack is installed: the cache only ever holds a POSITIVE result,
     but a stale positive would hide a pack the user removed, and clearing costs
     one probe."""
-    global _nodes_ok_until
+    global _nodes_ok_until, _two_stage_nodes_ok_until
     _nodes_ok_until = 0.0
+    _two_stage_nodes_ok_until = 0.0
 
 
 def krea_node_pack_installed():
@@ -482,20 +547,21 @@ def krea_node_hints(nodes):
 def missing_file_entries(missing):
     """[{path, kind, source}] for each missing asset key — again the Studio
     `files` shape, so one banner covers both engines."""
+    catalog = {**KREA_ASSETS, 'krea_stage2_lora': KREA_STAGE2_LORA_ASSET}
     out = []
     for key in missing or []:
-        meta = KREA_ASSETS.get(key)
+        meta = catalog.get(key)
         if meta:
             out.append({'path': meta['path'], 'kind': meta['kind'],
                         'source': meta['source']})
     return out
 
 
-def preflight():
+def preflight(two_stage=False):
     """Raise KreaModelsMissing when the engine cannot run. No auto-download: see
     the module docstring — the honest answer is a named gap, not a fake installer."""
-    missing = krea_missing_assets()
-    nodes = krea_missing_nodes()
+    missing = krea_missing_assets(two_stage=two_stage)
+    nodes = krea_missing_nodes(two_stage=two_stage)
     if missing or nodes:
         raise KreaModelsMissing(missing, nodes)
 
@@ -711,12 +777,41 @@ def _character_loras() -> list:
     return out
 
 
+# --- Two-stage sampler (optional, krea.two_stage) ----------------------------
+# KreaTwoStageSampler + KreaDualResolutionSelector replace the single KSampler
+# + EmptySD3LatentImage pair: a low-res stage1 handed off to an upscaled
+# stage2, plus a stage2-only accelerator LoRA. Every value below is pinned to
+# the measured export this path mirrors — not a further Settings dial (see
+# the config.py comment on krea.two_stage).
+TWO_STAGE_BASE_MEGAPIXELS = 1.0
+TWO_STAGE_HANDOFF_PERCENT = 16.67
+TWO_STAGE_STAGE1_STEPS = 52
+TWO_STAGE_STAGE1_CFG = 4.0
+TWO_STAGE_STAGE1_SAMPLER = 'euler'
+TWO_STAGE_STAGE1_SCHEDULER = 'simple'
+TWO_STAGE_STAGE2_STEPS = 12
+TWO_STAGE_STAGE2_CFG = 1.0
+TWO_STAGE_STAGE2_SAMPLER = 'euler'
+TWO_STAGE_STAGE2_SCHEDULER = 'simple'
+TWO_STAGE_UPSCALE_METHOD = 'bislerp'
+
+
+def _ratio_string(width, height):
+    """A 'W:H' string for KreaDualResolutionSelector's aspect_ratio input,
+    reduced to lowest terms so a source photo's raw pixel dimensions (e.g.
+    4032x3024) come out as the familiar '4:3' rather than a huge fraction."""
+    w, h = max(1, int(width)), max(1, int(height))
+    g = math.gcd(w, h) or 1
+    return f'{w // g}:{h // g}'
+
+
 # --- Graph -------------------------------------------------------------------
 
 def build_workflow(source_image, prompt, *, unet, clip, vae, lora_name,
                    width, height, seed, steps=None, grounding=None,
                    ref_boost=None, lora_strength=None, fit_mode='fit',
-                   filename_prefix='krea_edit', character_loras=None):
+                   filename_prefix='krea_edit', character_loras=None,
+                   two_stage=False, aspect_ratio=None, stage2_lora_name=None):
     """The ComfyUI API-format graph. Pure function of its arguments — no config
     read, no disk access — so a test can assert the exact wiring without a
     ComfyUI, and every loader value is one a resolver produced.
@@ -776,6 +871,54 @@ def build_workflow(source_image, prompt, *, unet, clip, vae, lora_name,
               'inputs': {'clip': ['2', 0], 'prompt': '', 'image': ['5', 0],
                          'grounding_px': grounding},
               '_meta': {'title': 'Negative (grounded, empty prompt)'}},
+    })
+
+    if two_stage:
+        # aspect_ratio: a catalog card's own 'W:H' string when given, else the
+        # ratio of the SOURCE geometry the caller already resolved (width,
+        # height) — a free-form reference edit keeps that frame, same
+        # contract as the single-stage path below.
+        ratio = aspect_ratio or _ratio_string(width, height)
+        stage2_model = ['7', 0]
+        if stage2_lora_name:
+            g['12'] = {'class_type': 'LoraLoaderModelOnly',
+                       'inputs': {'lora_name': stage2_lora_name,
+                                  'strength_model': STAGE2_LORA_STRENGTH,
+                                  'model': ['7', 0]},
+                       '_meta': {'title': 'Stage 2 accelerator LoRA'}}
+            stage2_model = ['12', 0]
+        g.update({
+            '10': {'class_type': 'KreaDualResolutionSelector',
+                   'inputs': {'aspect_ratio': ratio,
+                              'base_megapixels': TWO_STAGE_BASE_MEGAPIXELS,
+                              'final_megapixels': MAX_OUTPUT_MP,
+                              'multiple': _LATENT_MULTIPLE,
+                              'random_seed': seed}},
+            '11': {'class_type': 'EmptySD3LatentImage',
+                   'inputs': {'width': ['10', 0], 'height': ['10', 1], 'batch_size': 1}},
+            '13': {'class_type': 'KreaTwoStageSampler',
+                   'inputs': {'seed': ['10', 4],
+                              'handoff_percent': TWO_STAGE_HANDOFF_PERCENT,
+                              'stage1_steps': TWO_STAGE_STAGE1_STEPS,
+                              'stage1_cfg': TWO_STAGE_STAGE1_CFG,
+                              'stage1_sampler_name': TWO_STAGE_STAGE1_SAMPLER,
+                              'stage1_scheduler': TWO_STAGE_STAGE1_SCHEDULER,
+                              'stage2_steps': TWO_STAGE_STAGE2_STEPS,
+                              'stage2_cfg': TWO_STAGE_STAGE2_CFG,
+                              'stage2_sampler_name': TWO_STAGE_STAGE2_SAMPLER,
+                              'stage2_scheduler': TWO_STAGE_STAGE2_SCHEDULER,
+                              'final_width': ['10', 2], 'final_height': ['10', 3],
+                              'upscale_method': TWO_STAGE_UPSCALE_METHOD,
+                              'stage1_model': ['7', 0], 'stage2_model': stage2_model,
+                              'positive': ['8', 0], 'negative': ['9', 0],
+                              'latent_image': ['11', 0]}},
+            '14': {'class_type': 'VAEDecode', 'inputs': {'samples': ['13', 0], 'vae': ['3', 0]}},
+            '15': {'class_type': 'SaveImage',
+                   'inputs': {'filename_prefix': filename_prefix, 'images': ['14', 0]}},
+        })
+        return g
+
+    g.update({
         '10': {'class_type': 'EmptySD3LatentImage',
                'inputs': {'width': int(width), 'height': int(height), 'batch_size': 1}},
         '11': {'class_type': 'KSampler',
@@ -825,11 +968,15 @@ def enqueue_krea_edit(user_id, source_filename, edit_prompt, source_path=None,
     if not os.path.exists(source_path):
         raise ValueError(f'source image not found: {source_filename}')
 
-    preflight()
-    unet = resolve_krea_unet(krea_model)
+    two_stage = bool(cfg.get('krea.two_stage'))
+    preflight(two_stage=two_stage)
+    unet = resolve_krea_unet(krea_model, require_raw=two_stage)
     clip = resolve_krea_text_encoder()
     vae = resolve_krea_vae()
     lora_name, _lora_path = resolve_krea_identity_lora()
+    stage2_lora_name = None
+    if two_stage:
+        stage2_lora_name, _stage2_lora_path = resolve_krea_stage2_lora()
 
     # Same filesystem hand-off (and the same guard) as the Klein lane: the URL
     # being up says nothing about ComfyUI's input folder being reachable from here.
@@ -844,8 +991,15 @@ def enqueue_krea_edit(user_id, source_filename, edit_prompt, source_path=None,
     # the raw camera raster whose aspect can be transposed by orientation 5–8.
     # A dataset card may request a different output ratio; free-prompt reference
     # edits omit it and keep this source geometry.
-    width, height = fit_output_size(*_source_size(staged_source),
-                                    requested_aspect=aspect_ratio)
+    src_w, src_h = _source_size(staged_source)
+    width, height = fit_output_size(src_w, src_h, requested_aspect=aspect_ratio)
+    two_stage_ratio = None
+    if two_stage:
+        # A catalog card's own ratio wins as-is; a free-form edit (no
+        # requested aspect) keeps THIS reference's own frame — same contract
+        # fit_output_size already applies for the single-stage path above.
+        two_stage_ratio = (aspect_ratio if _aspect_ratio(aspect_ratio) is not None
+                           else _ratio_string(src_w, src_h))
     workflow = build_workflow(
         comfy_input, edit_prompt, unet=unet, clip=clip, vae=vae,
         lora_name=lora_name, width=width, height=height,
@@ -853,6 +1007,8 @@ def enqueue_krea_edit(user_id, source_filename, edit_prompt, source_path=None,
         grounding=grounding_px_for(framing), ref_boost=ref_boost_for(framing),
         lora_strength=_identity_strength(),
         character_loras=_character_loras(),
+        two_stage=two_stage, aspect_ratio=two_stage_ratio,
+        stage2_lora_name=stage2_lora_name,
         # UNIQUE prefix per job: SaveImage numbers from what is currently in the
         # output folder and the app moves each result out right after completion,
         # so a shared prefix makes the counter re-issue the same name (the Klein
