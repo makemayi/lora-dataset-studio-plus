@@ -817,6 +817,13 @@ export function useDataset() {
     await refresh();
   }, [refresh, toast]);
 
+  /* Clears the "regenerated, not yet seen" dot — call only when the tile
+     actually carries the flag; opening a normal tile should cost nothing. */
+  const markImageSeen = useCallback(async (imageId) => {
+    await postJson(`/api/dataset/image/${imageId}/seen`, {});
+    await refresh();
+  }, [refresh]);
+
   /* Returns {ok, error} — the expanded caption editor keeps the text the user
      just typed only if it can tell a refusal from a success. `silent` is for
      that caller and that caller only: it renders the refusal next to the
@@ -1427,5 +1434,5 @@ export function useDataset() {
            backupEverything, backupJob, downloadBackup, openBackupsFolder, dismissBackup, restoreJob, dismissRestore,
            refresh, train, stopTraining, continueTraining, continueTrainingInCloud,
            listCheckpoints, importCheckpoint, deleteCheckpoint,
-           trainBaseInfo, setTrainSettings, prepareBase };
+           trainBaseInfo, setTrainSettings, prepareBase, markImageSeen };
 }

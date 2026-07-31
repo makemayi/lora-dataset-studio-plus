@@ -1178,7 +1178,11 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   onMirror={ds.mirrorImage} mirroringIds={ds.mirroringIds}
                   onScoreFace={ds.scoreFace} scoringFaceIds={ds.scoringFaceIds}
                   onRegenerate={(id, loraStrength, prompt, opts) => ds.regenerate(id, loraStrength, prompt, opts)}
-                  onReimprove={ds.reimproveImage} onView={setViewImg}
+                  onReimprove={ds.reimproveImage}
+                  onView={(img) => {
+                    setViewImg(img);
+                    if (img?.regenerated_unseen) ds.markImageSeen(img.id);
+                  }}
                   onBatch={ds.batchImages} busy={ds.busy}
                   onImproveBatch={ds.improveBatch} activity={act}
                   kleinAvailable={Boolean(caps.engines?.klein)}

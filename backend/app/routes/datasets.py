@@ -1162,6 +1162,14 @@ def dataset_image_status(image_id):
     return (jsonify({'ok': True}), 200) if ok else (jsonify({'error': 'not found'}), 404)
 
 
+@bp.post('/dataset/image/<int:image_id>/seen')
+def dataset_image_seen(image_id):
+    """Clear `regenerated_unseen` — called when a tile's lightbox opens.
+    Idempotent: opening a tile that was never regenerated is a no-op 200."""
+    ok = svc.clear_regenerated_flag(LOCAL_USER, image_id)
+    return (jsonify({'ok': True}), 200) if ok else (jsonify({'error': 'not found'}), 404)
+
+
 @bp.post('/dataset/<int:dataset_id>/delete')
 def dataset_delete(dataset_id):
     try:

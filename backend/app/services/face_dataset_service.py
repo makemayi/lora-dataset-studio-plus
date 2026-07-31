@@ -1827,6 +1827,23 @@ def set_image_status(user_id, image_id, status):
     return True
 
 
+def clear_regenerated_flag(user_id, image_id):
+    """Mark a regenerated tile as seen (opened) — the one-way transition off
+    `regenerated_unseen`, called when the tile's lightbox opens. A no-op
+    (still returns True) when the flag is already clear, so an open on a
+    tile that was never regenerated costs nothing."""
+    img = db.session.get(FaceDatasetImage, image_id)
+    if not img:
+        return False
+    ds = db.session.get(FaceDataset, img.dataset_id)
+    if not ds or str(ds.user_id) != str(user_id):
+        return False
+    if img.regenerated_unseen:
+        img.regenerated_unseen = False
+        db.session.commit()
+    return True
+
+
 def _owned_image(user_id, image_id):
     img = db.session.get(FaceDatasetImage, image_id)
     if not img:
@@ -3818,6 +3835,9 @@ def dataset_payload(user_id, dataset_id):
                     # actually claimed right now, vs merely queued behind them —
                     # see the batched lookup above.
                     'is_generating': i.job_id in _running_jobs,
+                    # True once a regenerate finishes until the tile is opened —
+                    # the "which one did I just redo" marker in a big grid.
+                    'regenerated_unseen': bool(i.regenerated_unseen),
                     'caption': i.caption,
                     'caption_short': i.caption_short,
                     'fail_reason': i.fail_reason,
@@ -7981,6 +8001,7 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
         img.job_id = new_job_id
         img.fail_reason = None
         img.fail_kind = None
+        img.regenerated_unseen = True
         db.session.commit()
     except Exception:
         db.session.rollback()

@@ -390,6 +390,32 @@ def test_image_status_unknown_image_404(client):
     assert resp.status_code == 404
 
 
+def test_image_seen_unknown_image_404(client):
+    resp = client.post('/api/dataset/image/999999/seen')
+    assert resp.status_code == 404
+
+
+def test_image_seen_clears_the_regenerated_flag(client, app):
+    from app.services import face_dataset_service as svc
+    from app.models import FaceDatasetImage
+    from app.config import LOCAL_USER
+    ds_id = _create(client, 'Seen', 'seentrig').get_json()['id']
+    with app.app_context():
+        img = FaceDatasetImage(dataset_id=ds_id, filename='a.png', status='keep',
+                               regenerated_unseen=True)
+        svc.db.session.add(img)
+        svc.db.session.commit()
+        img_id = img.id
+
+    resp = client.post(f'/api/dataset/image/{img_id}/seen')
+    assert resp.status_code == 200
+    assert resp.get_json() == {'ok': True}
+
+    with app.app_context():
+        row = svc.db.session.get(FaceDatasetImage, img_id)
+        assert row.regenerated_unseen is False
+
+
 def test_delete_dataset(client):
     ds_id = _create(client, 'Trash', 'trash').get_json()['id']
     resp = client.post(f'/api/dataset/{ds_id}/delete')

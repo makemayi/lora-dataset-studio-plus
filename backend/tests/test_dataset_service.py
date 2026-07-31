@@ -983,6 +983,68 @@ def test_regenerate_with_edited_prompt_persists_and_reaches_engine(app, monkeypa
         assert row.filename                                        # a new file was written
 
 
+def test_regenerate_flags_the_tile_as_unseen(app, monkeypatch):
+    """The "which one did I just redo" marker: a regenerate sets it, and it
+    survives the completed image being buried back in the grid."""
+    from app.services import face_dataset_service as svc
+    from app.models import FaceDatasetImage
+    from app.config import LOCAL_USER
+    monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: (lambda refs, prompt, aspect_ratio=None: _png()))
+    with app.app_context():
+        ds, img = _ds_with_ref_and_generated(svc, FaceDatasetImage, LOCAL_USER)
+        assert not img.regenerated_unseen
+        svc.regenerate_image(LOCAL_USER, img.id)
+        row = svc.db.session.get(FaceDatasetImage, img.id)
+        assert row.regenerated_unseen is True
+
+
+def test_clear_regenerated_flag_is_a_one_way_transition(app, monkeypatch):
+    from app.services import face_dataset_service as svc
+    from app.models import FaceDatasetImage
+    from app.config import LOCAL_USER
+    monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: (lambda refs, prompt, aspect_ratio=None: _png()))
+    with app.app_context():
+        ds, img = _ds_with_ref_and_generated(svc, FaceDatasetImage, LOCAL_USER)
+        svc.regenerate_image(LOCAL_USER, img.id)
+        assert svc.clear_regenerated_flag(LOCAL_USER, img.id) is True
+        row = svc.db.session.get(FaceDatasetImage, img.id)
+        assert row.regenerated_unseen is False
+        # Idempotent: clearing an already-clear (or never-set) flag still
+        # reports success rather than a false "not found".
+        assert svc.clear_regenerated_flag(LOCAL_USER, img.id) is True
+
+
+def test_clear_regenerated_flag_is_scoped_to_the_owning_user(app, monkeypatch):
+    from app.services import face_dataset_service as svc
+    from app.models import FaceDatasetImage
+    from app.config import LOCAL_USER
+    monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: (lambda refs, prompt, aspect_ratio=None: _png()))
+    with app.app_context():
+        ds, img = _ds_with_ref_and_generated(svc, FaceDatasetImage, LOCAL_USER)
+        svc.regenerate_image(LOCAL_USER, img.id)
+        assert svc.clear_regenerated_flag('someone-else', img.id) is False
+        row = svc.db.session.get(FaceDatasetImage, img.id)
+        assert row.regenerated_unseen is True   # untouched
+        assert svc.clear_regenerated_flag(LOCAL_USER, 999999) is False
+
+
+def test_dataset_payload_carries_the_regenerated_unseen_flag(app, monkeypatch):
+    from app.services import face_dataset_service as svc
+    from app.models import FaceDatasetImage
+    from app.config import LOCAL_USER
+    monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: (lambda refs, prompt, aspect_ratio=None: _png()))
+    with app.app_context():
+        ds, img = _ds_with_ref_and_generated(svc, FaceDatasetImage, LOCAL_USER)
+        by_id = {i['id']: i['regenerated_unseen'] for i in svc.dataset_payload(LOCAL_USER, ds.id)['images']}
+        assert by_id[img.id] is False
+        svc.regenerate_image(LOCAL_USER, img.id)
+        by_id = {i['id']: i['regenerated_unseen'] for i in svc.dataset_payload(LOCAL_USER, ds.id)['images']}
+        assert by_id[img.id] is True
+        svc.clear_regenerated_flag(LOCAL_USER, img.id)
+        by_id = {i['id']: i['regenerated_unseen'] for i in svc.dataset_payload(LOCAL_USER, ds.id)['images']}
+        assert by_id[img.id] is False
+
+
 def test_regeneration_clears_all_watermark_metadata(app, monkeypatch):
     import os
     from app.services import face_dataset_service as svc

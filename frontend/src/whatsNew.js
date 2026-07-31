@@ -48,6 +48,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-31-regenerated-tile-red-dot',
+    date: '2026-07-31',
+    title: "Regenerated a tile in a big batch? It now stays marked until you look",
+    blurb:
+      "The green glow shows which tile is generating RIGHT NOW, but once it finished, a regenerated image looked exactly like every other tile in the grid — no way to spot the one you just redid. A small red dot now sits on the tile's corner from the moment regeneration finishes until you open it, then it's gone for good.",
+  },
+  {
     id: '2026-07-31-onetrainer-lora-strength-fix-and-oft',
     date: '2026-07-31',
     title: "OneTrainer LoRAs now train at full strength, and OFT_2 is a selectable alternative",

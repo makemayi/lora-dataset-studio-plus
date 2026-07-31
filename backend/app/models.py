@@ -224,6 +224,10 @@ class FaceDatasetImage(db.Model):
     # deliberately stays in its normal columns and is never rolled back from this
     # historical snapshot. Additive column (migration in create_app).
     bank_analysis_snapshot = db.Column(Text, nullable=True)
+    # A tile a user regenerated, not yet opened since it finished — set True by
+    # regenerate_image, cleared the moment its lightbox is opened. Additive
+    # column (migration in create_app); see _SCHEMA_ADDITIONS.
+    regenerated_unseen = db.Column(db.Boolean, nullable=True, default=False)
     created_at = db.Column(DateTime, default=db.func.current_timestamp())
 
     def __repr__(self):
