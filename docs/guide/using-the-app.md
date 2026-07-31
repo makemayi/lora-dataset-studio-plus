@@ -958,6 +958,22 @@ One caveat worth stating: the analysis passes (👤 Subject, ✨ Score, 📐 Fra
 still read the original file, so turning an image does **not** re-run them. Turn
 first, then run the passes if you want them to see it upright.
 
+## Face-swap a tile with the reference photo
+
+Every generated tile that has a current image can run a fixed face-swap
+pass: click **🎭↔** in the tile's action row (next to 🔄 Regenerate) and the
+tile's own image becomes the base shot, the dataset's reference photo
+supplies the face, and the result overwrites the tile — same in-place
+overwrite as Regenerate, no separate backup. The button only appears when
+the dataset has a reference photo (there is otherwise nothing to swap in);
+it stays hidden rather than showing a button that would fail on click.
+
+This runs one fixed ComfyUI workflow (Klein Flux.2 9B + a dedicated
+character-swap LoRA) — not a general "run any workflow" tool, and not
+configurable per-tile. The swap LoRA is a separate file from the Klein
+model Setup already installs; if it isn't on disk yet the button's error
+names the exact path to place it at.
+
 ## Clean the watermarks a bank found
 
 **🚩 Find watermarks** flags the images carrying an overlaid logo, URL or

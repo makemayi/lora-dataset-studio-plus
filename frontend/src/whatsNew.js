@@ -48,6 +48,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-01-dataset-tile-face-swap',
+    date: '2026-08-01',
+    title: 'Swap a tile\'s face with your reference photo, in one click',
+    blurb: 'The new 🎭↔ button next to Regenerate runs a dedicated face-swap pass — the tile becomes the shot, your reference photo becomes the face, done in place.',
+    to: '/datasets?section=images',
+  },
+  {
     id: '2026-07-31-regenerated-tile-red-dot',
     date: '2026-07-31',
     title: "New or regenerated tiles now stay marked until you actually look",

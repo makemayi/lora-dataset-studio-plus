@@ -1007,6 +1007,10 @@ const TOPICS = [
      'regenerate', 'no regenerate button', 'missing button', 'klein improve', 'candidate',
      'steps', 'megapixels', 'strength', 'try again', 'source image', 'parent'],
     '/datasets?section=images', 'settings-reference', 'image-engines'),
+  action('action-face-swap-tile', 'Swap a tile\'s face with the reference photo',
+    ['face swap', 'faceswap', 'swap face', 'identity swap', 'head swap',
+     'reference face', 'klein swap', 'character swap'],
+    '/datasets?section=images', 'using-the-app', 'face-swap-a-tile-with-the-reference-photo'),
   // The lightbox's ⧉ Compare with original. Its whole point is that the two
   // panes are shown at the SAME scale — the guide section explains why, and why
   // 100 % zoom is deliberately off in that mode.
