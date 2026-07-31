@@ -8,7 +8,6 @@ Klein job on this dataset; only the swap LoRA itself
 ('klein/Klein2-9B-SmartCharacterSwap.safetensors') is specific to this
 feature, so it is checked separately and never auto-downloaded."""
 from __future__ import annotations
-import logging
 import os
 import random
 import uuid
@@ -22,8 +21,6 @@ from .klein_edit_helper import (
 from ..utils import comfy_fs
 from ..utils.comfyui import load_workflow_local
 from ..job_queue import queue_manager
-
-logger = logging.getLogger(__name__)
 
 WORKFLOW_FACE_SWAP_PATH = cfg.BACKEND_DIR / 'workflows' / 'face swap.json'
 
@@ -61,6 +58,8 @@ def _face_swap_lora_abs():
 
 
 def _comfy_input_dir() -> str:
+    """Same tiny lookup klein_edit_helper/krea_edit_helper each keep their own
+    copy of, rather than importing one another's private helper."""
     d = cfg.comfyui_dir('input')
     if not d:
         raise RuntimeError('ComfyUI is not configured')
@@ -75,10 +74,10 @@ def enqueue_face_swap(user_id, target_path, ref_path, extra_metadata=None):
     Raises ValueError on a missing source image / unloadable workflow /
     missing required node, FaceSwapLoraMissing if the swap LoRA itself is
     absent, KleinModelsMissing if a SHARED Klein asset (model/VAE/text
-    encoder) is absent, RuntimeError if ComfyUI isn't configured. A
-    custom-node gap surfaces via klein_missing_nodes — callers check that
-    themselves via KleinNodesMissing (face_dataset_service), same as the
-    existing Klein regenerate path."""
+    encoder) is absent, RuntimeError if ComfyUI isn't configured, and
+    KleinNodesMissing (face_dataset_service) itself if the target ComfyUI
+    lacks a custom node this graph needs — unlike enqueue_klein_edit, that
+    check is NOT the caller's job here; this function raises it directly."""
     if not target_path or not os.path.exists(target_path):
         raise ValueError(f"target image not found: {target_path}")
     if not ref_path or not os.path.exists(ref_path):
