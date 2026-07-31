@@ -1,0 +1,441 @@
+{
+  "9": {
+    "inputs": {
+      "filename_prefix": "Flux2_dev",
+      "images": [
+        "165:104",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  },
+  "121": {
+    "inputs": {
+      "image": "gpt-image-2_00006_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "参考图"
+    }
+  },
+  "151": {
+    "inputs": {
+      "image": "krea2_identity_edit_00132_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "目标图"
+    }
+  },
+  "165:118": {
+    "inputs": {
+      "conditioning": [
+        "165:112",
+        0
+      ],
+      "latent": [
+        "165:119",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "参考Latent"
+    }
+  },
+  "165:119": {
+    "inputs": {
+      "pixels": [
+        "165:120",
+        0
+      ],
+      "vae": [
+        "165:102",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE编码"
+    }
+  },
+  "165:115": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "megapixels": [
+        "165:135",
+        0
+      ],
+      "resolution_steps": 1,
+      "image": [
+        "151",
+        0
+      ]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "缩放图像（像素）"
+    }
+  },
+  "165:125": {
+    "inputs": {
+      "pixels": [
+        "165:115",
+        0
+      ],
+      "vae": [
+        "165:102",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE编码"
+    }
+  },
+  "165:147": {
+    "inputs": {
+      "samples": [
+        "165:125",
+        0
+      ],
+      "vae": [
+        "165:102",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "165:136": {
+    "inputs": {
+      "conditioning": [
+        "165:107",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "条件零化"
+    }
+  },
+  "165:150": {
+    "inputs": {
+      "pixels": [
+        "165:149",
+        0
+      ],
+      "vae": [
+        "165:102",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE编码"
+    }
+  },
+  "165:153": {
+    "inputs": {
+      "resize_type": "scale dimensions",
+      "resize_type.width": [
+        "165:148",
+        0
+      ],
+      "resize_type.height": [
+        "165:148",
+        1
+      ],
+      "resize_type.crop": "center",
+      "scale_method": "bicubic",
+      "input": [
+        "165:164",
+        1
+      ]
+    },
+    "class_type": "ResizeImageMaskNode",
+    "_meta": {
+      "title": "调整图像/掩码大小"
+    }
+  },
+  "165:126": {
+    "inputs": {
+      "unet_name": "flux-2-klein-9b.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "165:102": {
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "165:100": {
+    "inputs": {
+      "guidance": 4,
+      "conditioning": [
+        "165:118",
+        0
+      ]
+    },
+    "class_type": "FluxGuidance",
+    "_meta": {
+      "title": "Flux引导"
+    }
+  },
+  "165:146": {
+    "inputs": {
+      "clip_name": "qwen_3_8b_fp8mixed.safetensors",
+      "type": "flux2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "165:107": {
+    "inputs": {
+      "text": "head_swap: Use image 1 as the base image, preserving its environment, background, camera perspective, framing, exposure, contrast, and lighting. Remove the head from image 1 and seamlessly replace it with the head from image 2.\nMatch the original head size, face-to-body ratio, neck thickness, shoulder alignment, and camera distance so proportions remain natural and unchanged.\n\nAdapt the inserted head to the lighting of image 1 by matching light direction, intensity, softness, color temperature, shadows, and highlights, with no independent relighting.\nPreserve the identity of image 2, including hair texture, eye color, nose structure, facial proportions, and skin details.\nMatch the pose and expression from image 1, including head tilt, rotation, eye direction, gaze, micro-expressions, and lip position.\nEnsure seamless neck and jaw blending, consistent skin tone, realistic shadow contact, natural skin texture, and uniform sharpness.\nPhotorealistic, high quality, sharp details, 4K.",
+      "clip": [
+        "165:146",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "165:149": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "width": [
+        "165:148",
+        0
+      ],
+      "height": [
+        "165:148",
+        1
+      ],
+      "crop": "center",
+      "image": [
+        "151",
+        0
+      ]
+    },
+    "class_type": "ImageScale",
+    "_meta": {
+      "title": "缩放图像"
+    }
+  },
+  "165:148": {
+    "inputs": {
+      "image": [
+        "165:147",
+        0
+      ]
+    },
+    "class_type": "GetImageSize",
+    "_meta": {
+      "title": "获取图像尺寸"
+    }
+  },
+  "165:112": {
+    "inputs": {
+      "conditioning": [
+        "165:107",
+        0
+      ],
+      "latent": [
+        "165:150",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "参考Latent"
+    }
+  },
+  "165:152": {
+    "inputs": {
+      "samples": [
+        "165:150",
+        0
+      ],
+      "mask": [
+        "165:153",
+        0
+      ]
+    },
+    "class_type": "SetLatentNoiseMask",
+    "_meta": {
+      "title": "设置Latent噪波遮罩"
+    }
+  },
+  "165:163": {
+    "inputs": {
+      "width": [
+        "165:148",
+        0
+      ],
+      "height": [
+        "165:148",
+        1
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyFlux2LatentImage",
+    "_meta": {
+      "title": "空Latent图像（Flux2）"
+    }
+  },
+  "165:135": {
+    "inputs": {
+      "value": 2
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "Float (Set Megapixels)"
+    }
+  },
+  "165:162": {
+    "inputs": {
+      "switch": true,
+      "on_false": [
+        "165:152",
+        0
+      ],
+      "on_true": [
+        "165:163",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "Switch (Disable Inpainting)"
+    }
+  },
+  "165:164": {
+    "inputs": {
+      "face": true,
+      "hair": true,
+      "body": false,
+      "clothes": false,
+      "accessories": false,
+      "background": false,
+      "confidence": 0.4,
+      "detail_method": "VITMatte",
+      "detail_erode": 6,
+      "detail_dilate": 6,
+      "black_point": 0.01,
+      "white_point": 0.99,
+      "process_detail": true,
+      "device": "cuda",
+      "max_megapixels": 2,
+      "images": [
+        "151",
+        0
+      ]
+    },
+    "class_type": "LayerMask: PersonMaskUltra V2",
+    "_meta": {
+      "title": "图层遮罩：人物遮罩 Ultra V2（高级）"
+    }
+  },
+  "165:156": {
+    "inputs": {
+      "seed": 114331154285171,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "LanPaint_NumSteps": 2,
+      "LanPaint_PromptMode": "Image First",
+      "LanPaint_Info": "LanPaint KSampler. For more info, visit https://github.com/scraed/LanPaint. If you find it useful, please give a star ⭐️!",
+      "Inpainting_mode": "🖼️ Image Inpainting",
+      "More Info, Bug Report, Star on GitHub ⭐": "lanpaint_star_button",
+      "model": [
+        "165:161",
+        0
+      ],
+      "positive": [
+        "165:100",
+        0
+      ],
+      "negative": [
+        "165:136",
+        0
+      ],
+      "latent_image": [
+        "165:162",
+        0
+      ]
+    },
+    "class_type": "LanPaint_KSampler",
+    "_meta": {
+      "title": "LanPaint KSampler"
+    }
+  },
+  "165:104": {
+    "inputs": {
+      "samples": [
+        "165:156",
+        0
+      ],
+      "vae": [
+        "165:102",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "165:161": {
+    "inputs": {
+      "lora_name": "klein\\Klein2-9B-SmartCharacterSwap.safetensors",
+      "strength_model": 1,
+      "model": [
+        "165:126",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器（仅模型）"
+    }
+  },
+  "165:120": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "megapixels": [
+        "165:135",
+        0
+      ],
+      "resolution_steps": 1,
+      "image": [
+        "121",
+        0
+      ]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "缩放图像（像素）"
+    }
+  }
+}
