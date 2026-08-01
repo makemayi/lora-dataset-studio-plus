@@ -460,9 +460,10 @@ function KreaCard({ config, setField, configDefaults }) {
           (<code>krea2_turbo_lora_rank_64_bf16.safetensors</code>, searched for in your loras
           folders — it is not auto-installed). Requires a newer build of the
           comfyui-krea2edit node pack (<code>KreaTwoStageSampler</code> /{' '}
-          <code>KreaDualResolutionSelector</code>). Every stage1/stage2 step count, cfg and
-          handoff percentage is fixed to the calibrated export this mirrors — Sampler steps
-          above only applies to the single-stage path.
+          <code>KreaDualResolutionSelector</code>). Stage1/stage2 step counts, the handoff
+          point and both megapixel targets are tunable below — CFG and sampler/scheduler
+          choices stay pinned to the calibrated export. Sampler steps above only applies to
+          the single-stage path.
           <br />
           <b>Forces a Raw base model.</b> The Turbo build (the default automatic pick above)
           does not hold up through the stage1/stage2 handoff, so with this on the app ignores
@@ -471,6 +472,98 @@ function KreaCard({ config, setField, configDefaults }) {
           is on.
         </p>
         <ResetToDefault label="Two-stage sampler" section="krea" field="two_stage" {...reset} />
+
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <div>
+            <label htmlFor="krea-ts-stage1-steps" className="block text-[0.6875rem] font-medium text-content-subtle">
+              Stage 1 steps
+            </label>
+            <input
+              id="krea-ts-stage1-steps"
+              type="number"
+              min={2}
+              max={150}
+              step={1}
+              value={krea.two_stage_stage1_steps ?? dflt('two_stage_stage1_steps')}
+              onChange={(e) => setField('krea', 'two_stage_stage1_steps',
+                e.target.value === '' ? dflt('two_stage_stage1_steps') : Number(e.target.value))}
+              className={INPUT_CLASS}
+            />
+            <ResetToDefault label="Stage 1 steps" section="krea" field="two_stage_stage1_steps" {...reset} />
+          </div>
+          <div>
+            <label htmlFor="krea-ts-stage2-steps" className="block text-[0.6875rem] font-medium text-content-subtle">
+              Stage 2 steps
+            </label>
+            <input
+              id="krea-ts-stage2-steps"
+              type="number"
+              min={2}
+              max={150}
+              step={1}
+              value={krea.two_stage_stage2_steps ?? dflt('two_stage_stage2_steps')}
+              onChange={(e) => setField('krea', 'two_stage_stage2_steps',
+                e.target.value === '' ? dflt('two_stage_stage2_steps') : Number(e.target.value))}
+              className={INPUT_CLASS}
+            />
+            <ResetToDefault label="Stage 2 steps" section="krea" field="two_stage_stage2_steps" {...reset} />
+          </div>
+          <div>
+            <label htmlFor="krea-ts-handoff" className="block text-[0.6875rem] font-medium text-content-subtle">
+              Handoff (%)
+            </label>
+            <input
+              id="krea-ts-handoff"
+              type="number"
+              min={0}
+              max={100}
+              step={0.01}
+              value={krea.two_stage_handoff_percent ?? dflt('two_stage_handoff_percent')}
+              onChange={(e) => setField('krea', 'two_stage_handoff_percent',
+                e.target.value === '' ? dflt('two_stage_handoff_percent') : Number(e.target.value))}
+              className={INPUT_CLASS}
+            />
+            <ResetToDefault label="Handoff percent" section="krea" field="two_stage_handoff_percent" {...reset} />
+          </div>
+          <div>
+            <label htmlFor="krea-ts-base-mp" className="block text-[0.6875rem] font-medium text-content-subtle">
+              Stage 1 megapixels
+            </label>
+            <input
+              id="krea-ts-base-mp"
+              type="number"
+              min={0.1}
+              max={16}
+              step={0.1}
+              value={krea.two_stage_base_megapixels ?? dflt('two_stage_base_megapixels')}
+              onChange={(e) => setField('krea', 'two_stage_base_megapixels',
+                e.target.value === '' ? dflt('two_stage_base_megapixels') : Number(e.target.value))}
+              className={INPUT_CLASS}
+            />
+            <ResetToDefault label="Stage 1 megapixels" section="krea" field="two_stage_base_megapixels" {...reset} />
+          </div>
+          <div>
+            <label htmlFor="krea-max-output-mp" className="block text-[0.6875rem] font-medium text-content-subtle">
+              Final megapixels
+            </label>
+            <input
+              id="krea-max-output-mp"
+              type="number"
+              min={0.1}
+              max={16}
+              step={0.1}
+              value={krea.max_output_mp ?? dflt('max_output_mp')}
+              onChange={(e) => setField('krea', 'max_output_mp',
+                e.target.value === '' ? dflt('max_output_mp') : Number(e.target.value))}
+              className={INPUT_CLASS}
+            />
+            <ResetToDefault label="Final megapixels" section="krea" field="max_output_mp" {...reset} />
+          </div>
+        </div>
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          Lower step counts and megapixels trade quality for speed. Final megapixels also
+          caps the single-stage sampler&rsquo;s output size, not just this path&rsquo;s.
+        </p>
       </div>
 
       <KreaCharacterLorasCard krea={krea} setField={setField} />

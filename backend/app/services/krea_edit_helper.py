@@ -780,9 +780,11 @@ def _character_loras() -> list:
 # --- Two-stage sampler (optional, krea.two_stage) ----------------------------
 # KreaTwoStageSampler + KreaDualResolutionSelector replace the single KSampler
 # + EmptySD3LatentImage pair: a low-res stage1 handed off to an upscaled
-# stage2, plus a stage2-only accelerator LoRA. Every value below is pinned to
-# the measured export this path mirrors — not a further Settings dial (see
-# the config.py comment on krea.two_stage).
+# stage2, plus a stage2-only accelerator LoRA. The 5 knobs below (step counts,
+# handoff, both megapixel targets) are Settings — krea.two_stage_stage1_steps
+# etc. — and default to exactly the calibrated export this path used to
+# hardcode; the module constants stay as the accessors' fallback default. CFG
+# and sampler/scheduler choices stay pinned, not exposed.
 TWO_STAGE_BASE_MEGAPIXELS = 1.0
 TWO_STAGE_HANDOFF_PERCENT = 16.67
 TWO_STAGE_STAGE1_STEPS = 52
@@ -794,6 +796,26 @@ TWO_STAGE_STAGE2_CFG = 1.0
 TWO_STAGE_STAGE2_SAMPLER = 'euler'
 TWO_STAGE_STAGE2_SCHEDULER = 'simple'
 TWO_STAGE_UPSCALE_METHOD = 'bislerp'
+
+
+def _krea_two_stage_stage1_steps():
+    return int(_clamp(cfg.get('krea.two_stage_stage1_steps'), 2, 150, TWO_STAGE_STAGE1_STEPS))
+
+
+def _krea_two_stage_stage2_steps():
+    return int(_clamp(cfg.get('krea.two_stage_stage2_steps'), 2, 150, TWO_STAGE_STAGE2_STEPS))
+
+
+def _krea_two_stage_handoff_percent():
+    return _clamp(cfg.get('krea.two_stage_handoff_percent'), 0.0, 100.0, TWO_STAGE_HANDOFF_PERCENT)
+
+
+def _krea_two_stage_base_megapixels():
+    return _clamp(cfg.get('krea.two_stage_base_megapixels'), 0.1, 16.0, TWO_STAGE_BASE_MEGAPIXELS)
+
+
+def _krea_max_output_mp():
+    return _clamp(cfg.get('krea.max_output_mp'), 0.1, 16.0, MAX_OUTPUT_MP)
 
 
 def _ratio_string(width, height):
@@ -811,10 +833,19 @@ def build_workflow(source_image, prompt, *, unet, clip, vae, lora_name,
                    width, height, seed, steps=None, grounding=None,
                    ref_boost=None, lora_strength=None, fit_mode='fit',
                    filename_prefix='krea_edit', character_loras=None,
-                   two_stage=False, aspect_ratio=None, stage2_lora_name=None):
+                   two_stage=False, aspect_ratio=None, stage2_lora_name=None,
+                   two_stage_stage1_steps=None, two_stage_stage2_steps=None,
+                   two_stage_handoff_percent=None, two_stage_base_megapixels=None,
+                   two_stage_max_output_mp=None):
     """The ComfyUI API-format graph. Pure function of its arguments — no config
     read, no disk access — so a test can assert the exact wiring without a
     ComfyUI, and every loader value is one a resolver produced.
+
+    The five `two_stage_*` knobs (None -> the calibrated-export module
+    constants, same fallback style as `steps`/`grounding`/`ref_boost` above)
+    only affect the graph when `two_stage` is True; the caller resolves them
+    from Settings (see `_krea_two_stage_stage1_steps` and friends) exactly
+    like it already does for `steps`/`grounding`/`ref_boost`.
 
     cfg is pinned to 1.0 and the sampler to euler/simple: the pack's reference
     workflow, and a guidance-distilled model ignores anything else. The NEGATIVE
@@ -833,6 +864,16 @@ def build_workflow(source_image, prompt, *, unet, clip, vae, lora_name,
     lora_strength = 1.0 if lora_strength is None else float(lora_strength)
     character_loras = [(str(n).strip(), float(s)) for n, s in (character_loras or [])
                        if str(n).strip()]
+    ts_stage1_steps = (TWO_STAGE_STAGE1_STEPS if two_stage_stage1_steps is None
+                       else int(two_stage_stage1_steps))
+    ts_stage2_steps = (TWO_STAGE_STAGE2_STEPS if two_stage_stage2_steps is None
+                       else int(two_stage_stage2_steps))
+    ts_handoff_percent = (TWO_STAGE_HANDOFF_PERCENT if two_stage_handoff_percent is None
+                          else float(two_stage_handoff_percent))
+    ts_base_megapixels = (TWO_STAGE_BASE_MEGAPIXELS if two_stage_base_megapixels is None
+                          else float(two_stage_base_megapixels))
+    ts_max_output_mp = (MAX_OUTPUT_MP if two_stage_max_output_mp is None
+                        else float(two_stage_max_output_mp))
     g = {
         '1': {'class_type': 'UNETLoader',
               'inputs': {'unet_name': unet, 'weight_dtype': 'default'},
@@ -890,20 +931,20 @@ def build_workflow(source_image, prompt, *, unet, clip, vae, lora_name,
         g.update({
             '10': {'class_type': 'KreaDualResolutionSelector',
                    'inputs': {'aspect_ratio': ratio,
-                              'base_megapixels': TWO_STAGE_BASE_MEGAPIXELS,
-                              'final_megapixels': MAX_OUTPUT_MP,
+                              'base_megapixels': ts_base_megapixels,
+                              'final_megapixels': ts_max_output_mp,
                               'multiple': _LATENT_MULTIPLE,
                               'random_seed': seed}},
             '11': {'class_type': 'EmptySD3LatentImage',
                    'inputs': {'width': ['10', 0], 'height': ['10', 1], 'batch_size': 1}},
             '13': {'class_type': 'KreaTwoStageSampler',
                    'inputs': {'seed': ['10', 4],
-                              'handoff_percent': TWO_STAGE_HANDOFF_PERCENT,
-                              'stage1_steps': TWO_STAGE_STAGE1_STEPS,
+                              'handoff_percent': ts_handoff_percent,
+                              'stage1_steps': ts_stage1_steps,
                               'stage1_cfg': TWO_STAGE_STAGE1_CFG,
                               'stage1_sampler_name': TWO_STAGE_STAGE1_SAMPLER,
                               'stage1_scheduler': TWO_STAGE_STAGE1_SCHEDULER,
-                              'stage2_steps': TWO_STAGE_STAGE2_STEPS,
+                              'stage2_steps': ts_stage2_steps,
                               'stage2_cfg': TWO_STAGE_STAGE2_CFG,
                               'stage2_sampler_name': TWO_STAGE_STAGE2_SAMPLER,
                               'stage2_scheduler': TWO_STAGE_STAGE2_SCHEDULER,
@@ -992,7 +1033,11 @@ def enqueue_krea_edit(user_id, source_filename, edit_prompt, source_path=None,
     # A dataset card may request a different output ratio; free-prompt reference
     # edits omit it and keep this source geometry.
     src_w, src_h = _source_size(staged_source)
-    width, height = fit_output_size(src_w, src_h, requested_aspect=aspect_ratio)
+    # Explicit max_mp: fit_output_size's own default parameter is evaluated
+    # once at import time and would never see a later config change without
+    # an app restart, so the live Settings value has to be passed in here.
+    width, height = fit_output_size(src_w, src_h, max_mp=_krea_max_output_mp(),
+                                    requested_aspect=aspect_ratio)
     two_stage_ratio = None
     if two_stage:
         # A catalog card's own ratio wins as-is; a free-form edit (no
@@ -1009,6 +1054,11 @@ def enqueue_krea_edit(user_id, source_filename, edit_prompt, source_path=None,
         character_loras=_character_loras(),
         two_stage=two_stage, aspect_ratio=two_stage_ratio,
         stage2_lora_name=stage2_lora_name,
+        two_stage_stage1_steps=_krea_two_stage_stage1_steps(),
+        two_stage_stage2_steps=_krea_two_stage_stage2_steps(),
+        two_stage_handoff_percent=_krea_two_stage_handoff_percent(),
+        two_stage_base_megapixels=_krea_two_stage_base_megapixels(),
+        two_stage_max_output_mp=_krea_max_output_mp(),
         # UNIQUE prefix per job: SaveImage numbers from what is currently in the
         # output folder and the app moves each result out right after completion,
         # so a shared prefix makes the counter re-issue the same name (the Klein

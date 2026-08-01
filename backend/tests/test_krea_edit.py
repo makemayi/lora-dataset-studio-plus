@@ -328,6 +328,18 @@ def test_output_keeps_the_source_aspect_under_two_megapixels(w, h):
     assert abs((ow / oh) - (w / h)) / (w / h) < 0.05, 'aspect must be preserved'
 
 
+def test_an_explicit_max_mp_overrides_the_shared_default_budget():
+    """enqueue_krea_edit passes krea.max_output_mp explicitly (see the module
+    docstring on fit_output_size's call site) rather than relying on the
+    function's own default, which is evaluated once at import time. A lower
+    budget must shrink the canvas; a higher one must allow a bigger one."""
+    from app.services import krea_edit_helper as keh
+    ow, oh = keh.fit_output_size(4000, 3000, max_mp=1.0)
+    assert ow * oh <= 1_000_000
+    ow2, oh2 = keh.fit_output_size(4000, 3000, max_mp=4.0)
+    assert ow2 * oh2 > 2_000_000
+
+
 @pytest.mark.parametrize(('requested_aspect', 'expected_ratio'), [
     ('1:1', 1.0),
     ('3:4', 3 / 4),
@@ -503,6 +515,63 @@ def test_two_stage_swaps_in_the_dual_resolution_selector_and_sampler():
     assert (ins['stage2_steps'], ins['stage2_cfg']) == (12, 1.0)
     assert ins['handoff_percent'] == 16.67
     assert ins['upscale_method'] == 'bislerp'
+
+
+def test_two_stage_default_megapixels_and_steps_match_the_calibrated_export():
+    """No override passed to build_workflow (mirrors an install that never
+    touches the new Settings) must still produce the exact same node inputs
+    as before this feature existed — 52/12/16.67/1.0/2.0."""
+    g = _two_stage_graph()
+    selector = next(n for n in g.values() if n['class_type'] == 'KreaDualResolutionSelector')
+    sampler = next(n for n in g.values() if n['class_type'] == 'KreaTwoStageSampler')
+    assert selector['inputs']['base_megapixels'] == 1.0
+    assert selector['inputs']['final_megapixels'] == 2.0
+    assert sampler['inputs']['stage1_steps'] == 52
+    assert sampler['inputs']['stage2_steps'] == 12
+    assert sampler['inputs']['handoff_percent'] == 16.67
+
+
+def test_two_stage_settings_override_the_graphs_steps_handoff_and_megapixels():
+    g = _two_stage_graph(two_stage_stage1_steps=30, two_stage_stage2_steps=6,
+                         two_stage_handoff_percent=25.0, two_stage_base_megapixels=0.75,
+                         two_stage_max_output_mp=3.5)
+    selector = next(n for n in g.values() if n['class_type'] == 'KreaDualResolutionSelector')
+    sampler = next(n for n in g.values() if n['class_type'] == 'KreaTwoStageSampler')
+    assert selector['inputs']['base_megapixels'] == 0.75
+    assert selector['inputs']['final_megapixels'] == 3.5
+    assert sampler['inputs']['stage1_steps'] == 30
+    assert sampler['inputs']['stage2_steps'] == 6
+    assert sampler['inputs']['handoff_percent'] == 25.0
+    # CFG and sampler/scheduler stay pinned — not exposed by this feature.
+    assert sampler['inputs']['stage1_cfg'] == 4.0
+    assert sampler['inputs']['stage2_cfg'] == 1.0
+    assert sampler['inputs']['stage1_sampler_name'] == 'euler'
+
+
+def test_two_stage_settings_flow_from_config_through_the_accessors_into_the_graph(krea):
+    """End-to-end: a config change on any of the 5 knobs reaches the built
+    workflow's node inputs via its accessor, exactly like the caller
+    (enqueue_krea_edit) threads it — and an out-of-range value is clamped
+    before it ever reaches the graph, never passed through raw."""
+    keh, _base, config = krea
+    config.save_config({'krea': {'two_stage_stage1_steps': 99999,
+                                 'two_stage_stage2_steps': 6,
+                                 'two_stage_handoff_percent': -5,
+                                 'two_stage_base_megapixels': 0.5,
+                                 'max_output_mp': 4.0}})
+    g = _two_stage_graph(
+        two_stage_stage1_steps=keh._krea_two_stage_stage1_steps(),
+        two_stage_stage2_steps=keh._krea_two_stage_stage2_steps(),
+        two_stage_handoff_percent=keh._krea_two_stage_handoff_percent(),
+        two_stage_base_megapixels=keh._krea_two_stage_base_megapixels(),
+        two_stage_max_output_mp=keh._krea_max_output_mp())
+    selector = next(n for n in g.values() if n['class_type'] == 'KreaDualResolutionSelector')
+    sampler = next(n for n in g.values() if n['class_type'] == 'KreaTwoStageSampler')
+    assert sampler['inputs']['stage1_steps'] == 150, 'clamped, not passed through raw'
+    assert sampler['inputs']['stage2_steps'] == 6
+    assert sampler['inputs']['handoff_percent'] == 0.0, 'clamped, not passed through raw'
+    assert selector['inputs']['base_megapixels'] == 0.5
+    assert selector['inputs']['final_megapixels'] == 4.0
 
 
 def test_two_stage_latent_and_final_size_both_come_from_the_selector():
@@ -721,6 +790,61 @@ def test_grounding_per_framing_override_is_clamped_and_junk_degrades_to_the_glob
     config.save_config({'krea': {'grounding_px_by_framing': {'face': 99999, 'body': 'lots'}}})
     assert keh.grounding_px_for('face') == keh.GROUNDING_PX_MAX
     assert keh.grounding_px_for('body') == keh.grounding_px() == 512, 'junk override ignored'
+
+
+def test_two_stage_settings_default_to_the_calibrated_export(krea):
+    keh, _base, config = krea
+    assert config.get('krea.two_stage_stage1_steps') == 52
+    assert config.get('krea.two_stage_stage2_steps') == 12
+    assert config.get('krea.two_stage_handoff_percent') == 16.67
+    assert config.get('krea.two_stage_base_megapixels') == 1.0
+    assert config.get('krea.max_output_mp') == 2.0
+    assert keh._krea_two_stage_stage1_steps() == 52
+    assert keh._krea_two_stage_stage2_steps() == 12
+    assert keh._krea_two_stage_handoff_percent() == 16.67
+    assert keh._krea_two_stage_base_megapixels() == 1.0
+    assert keh._krea_max_output_mp() == 2.0
+
+
+def test_two_stage_settings_are_clamped_and_junk_degrades_to_the_default(krea):
+    keh, _base, config = krea
+    config.save_config({'krea': {'two_stage_stage1_steps': 99999}})
+    assert keh._krea_two_stage_stage1_steps() == 150
+    config.save_config({'krea': {'two_stage_stage1_steps': 'lots'}})
+    assert keh._krea_two_stage_stage1_steps() == 52
+
+    config.save_config({'krea': {'two_stage_stage2_steps': -5}})
+    assert keh._krea_two_stage_stage2_steps() == 2
+    config.save_config({'krea': {'two_stage_stage2_steps': 'lots'}})
+    assert keh._krea_two_stage_stage2_steps() == 12
+
+    config.save_config({'krea': {'two_stage_handoff_percent': -5}})
+    assert keh._krea_two_stage_handoff_percent() == 0.0
+    config.save_config({'krea': {'two_stage_handoff_percent': 250}})
+    assert keh._krea_two_stage_handoff_percent() == 100.0
+    config.save_config({'krea': {'two_stage_handoff_percent': 'lots'}})
+    assert keh._krea_two_stage_handoff_percent() == 16.67
+
+    config.save_config({'krea': {'two_stage_base_megapixels': 0.0}})
+    assert keh._krea_two_stage_base_megapixels() == 0.1
+    config.save_config({'krea': {'two_stage_base_megapixels': 'lots'}})
+    assert keh._krea_two_stage_base_megapixels() == 1.0
+
+    config.save_config({'krea': {'max_output_mp': 99}})
+    assert keh._krea_max_output_mp() == 16.0
+    config.save_config({'krea': {'max_output_mp': 'lots'}})
+    assert keh._krea_max_output_mp() == 2.0
+
+
+def test_two_stage_settings_change_the_accessor_independently_of_each_other(krea):
+    """A change to one knob must not perturb the others' defaults."""
+    keh, _base, config = krea
+    config.save_config({'krea': {'two_stage_stage1_steps': 30}})
+    assert keh._krea_two_stage_stage1_steps() == 30
+    assert keh._krea_two_stage_stage2_steps() == 12
+    assert keh._krea_two_stage_handoff_percent() == 16.67
+    assert keh._krea_two_stage_base_megapixels() == 1.0
+    assert keh._krea_max_output_mp() == 2.0
 
 
 def test_character_loras_are_empty_by_default_and_off_means_off(krea):

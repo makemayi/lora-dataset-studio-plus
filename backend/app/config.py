@@ -440,9 +440,23 @@ DEFAULTS = {
         # upscaled stage2, plus a stage2-only accelerator LoRA) instead of the
         # single KSampler above. Off by default — both custom node classes
         # must be present in the target ComfyUI, checked the same way as the
-        # base pack. Every stage1/stage2 knob is pinned to the measured export
-        # this path mirrors, not a further Settings dial.
+        # base pack.
         'two_stage': False,
+        # The 5 knobs below only matter when two_stage (above) is on, except
+        # max_output_mp -- that one caps the SINGLE-stage path's output size
+        # too (fit_output_size's shared default), so it lives here rather
+        # than under a two_stage_-only umbrella. Defaults match the
+        # calibrated export this path used to hardcode -- unchanged
+        # behaviour for anyone who never touches these.
+        'two_stage_stage1_steps': 52,
+        'two_stage_stage2_steps': 12,
+        # Where stage 1 hands off to stage 2, as a percentage of the total
+        # denoising schedule (0 = stage2 only, 100 = stage1 only).
+        'two_stage_handoff_percent': 16.67,
+        'two_stage_base_megapixels': 1.0,
+        # Final output size, both paths. 2.0 is the calibrated default;
+        # raise for more detail (slower), lower to speed either path up.
+        'max_output_mp': 2.0,
     },
     # Z-Image pipeline — the two loader refs the shipped Test Studio workflow used
     # to hardcode from the developer's own ComfyUI (reported by bobba84, GitHub #18).
