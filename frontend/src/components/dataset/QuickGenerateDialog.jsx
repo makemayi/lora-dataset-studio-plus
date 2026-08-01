@@ -26,7 +26,7 @@
  * local fallback (klein, else krea) is auto-picked; if neither local engine is
  * available, the dialog says so and disables Generate rather than submitting
  * with zero engines. */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { engineBatches, ENGINES, ENGINE_LABELS, LOCAL_ENGINES } from './engineSelection.js';
 
 const FRAMINGS = ['face', 'bust', 'body'];
@@ -129,19 +129,45 @@ export default function QuickGenerateDialog({
     ...prev, [framing]: normalizeTo100(prev[framing] || {}, key, value),
   }));
 
-  /* NSFW shots only ever run on a local engine (server fail-closed rule). The
-     moment the ratio goes above 0, drop any non-local engine already in the
-     dialog's selection; if that leaves nothing selected, fall back to Klein
-     (else Krea) so the user isn't left with a silently-broken submit button.
+  /* NSFW shots only ever run on a local engine (server fail-closed rule).
+     Two DIFFERENT behaviours live in this one effect, and they must stay
+     separate:
+       1. Safety net (always applies while nsfwRatio > 0): drop any engine
+          from the selection that isn't both in LOCAL_ENGINES AND currently
+          `available` — covers a non-local engine carried over from the
+          parent's picker, and an engine that WAS available/local but flips
+          unavailable mid-session (e.g. the local server drops out).
+       2. Fallback-if-empty (only on the 0 -> positive RATIO TRANSITION,
+          i.e. the instant NSFW is switched on): if step 1 leaves nothing
+          selected, auto-pick Klein (else Krea) so the user isn't dropped
+          straight into a broken submit button. Once NSFW is already active,
+          an empty selection is left alone — the user may have deliberately
+          unchecked their only local engine, and re-adding it behind their
+          back on the next slider tick would silently override that choice.
+     `nsfwWasActiveRef` remembers whether the ratio was already positive the
+     last time this effect ran, so a same-tick re-run (e.g. `available`
+     flipping while the ratio doesn't change) is correctly treated as
+     "already active", not as a fresh transition.
      A no-op while nsfwRatio is 0 — the exact prior behaviour. */
+  const nsfwWasActiveRef = useRef(nsfwRatio > 0);
   useEffect(() => {
-    if (nsfwRatio <= 0) return;
+    const wasActive = nsfwWasActiveRef.current;
+    const isActive = nsfwRatio > 0;
+    nsfwWasActiveRef.current = isActive;
+    if (!isActive) return;
     setDialogEngines((prev) => {
-      const local = prev.filter((e) => LOCAL_ENGINES.includes(e));
-      if (local.length) return local;
+      const local = prev.filter((e) => LOCAL_ENGINES.includes(e) && available?.[e]);
+      if (local.length > 0 || wasActive) {
+        // Safety net only: either the selection already survives the
+        // local+available filter, or NSFW was already on (respect an
+        // intentionally-empty selection rather than fighting it).
+        return local.length === prev.length ? prev : local;
+      }
+      // 0 -> positive transition left nothing selected: auto-pick a
+      // fallback so Generate isn't silently disabled the moment NSFW turns on.
       if (available?.klein) return ['klein'];
       if (available?.krea) return ['krea'];
-      return [];
+      return local;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nsfwRatio, available?.klein, available?.krea]);
@@ -182,6 +208,12 @@ export default function QuickGenerateDialog({
 
   const activeFramings = useMemo(() => FRAMINGS.filter((f) => framingRatios[f] > 0), [framingRatios]);
   const noLocalEngineForNsfw = nsfwMode && nsfwRatio > 0 && dialogEngines.length === 0;
+  // Two distinct reasons the selection can be empty while NSFW is active —
+  // say the accurate one. "Neither is currently available" is only true
+  // when Klein AND Krea are both genuinely unavailable; if one of them IS
+  // available, the user just hasn't (re)checked it (e.g. a deliberate
+  // uncheck — see the effect above), so the copy must not claim otherwise.
+  const noLocalEngineAvailable = !available?.klein && !available?.krea;
   const disabled = submitting || busy || !hasRef || dialogEngines.length === 0;
 
   return (
@@ -258,7 +290,9 @@ export default function QuickGenerateDialog({
           </fieldset>
           {noLocalEngineForNsfw && (
             <span className="text-amber-300/90 text-[0.6875rem] leading-relaxed">
-              NSFW content needs a local engine (Klein or Krea 2 Edit) — neither is currently available.
+              {noLocalEngineAvailable
+                ? 'NSFW content needs a local engine (Klein or Krea 2 Edit) — neither is currently available.'
+                : 'Select at least one local engine (Klein or Krea 2 Edit) for NSFW content.'}
             </span>
           )}
         </div>

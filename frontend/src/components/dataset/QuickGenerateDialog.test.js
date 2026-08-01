@@ -82,6 +82,39 @@ test('an empty local-engine selection while NSFW is active is surfaced, not sile
   assert.match(src, /dialogEngines\.length\s*===\s*0/);  // also folded into the Generate `disabled` check
 });
 
+test('the NSFW auto-fallback only fires on the 0 -> positive ratio transition, not on every ratio change while already active', () => {
+  const effectBody = src.slice(src.indexOf('const nsfwWasActiveRef = useRef'), src.indexOf('const toggleDialogEngine'));
+  // A ref tracks whether NSFW was already active on the previous run, so a
+  // same-tick re-run (e.g. `available` flipping) isn't mistaken for a fresh
+  // 0 -> positive transition.
+  assert.match(effectBody, /useRef\(nsfwRatio\s*>\s*0\)/);
+  assert.match(effectBody, /const\s+wasActive\s*=\s*nsfwWasActiveRef\.current/);
+  assert.match(effectBody, /const\s+isActive\s*=\s*nsfwRatio\s*>\s*0/);
+  // The fallback-to-klein/krea branch must be reachable only when the guard
+  // (which short-circuits on `wasActive`) does NOT return first — i.e. it
+  // must be gated behind the transition check, not run on every tick.
+  const guardIdx = effectBody.indexOf('local.length > 0 || wasActive');
+  const fallbackIdx = effectBody.indexOf("if (available?.klein) return ['klein']");
+  assert.ok(guardIdx !== -1 && fallbackIdx !== -1 && guardIdx < fallbackIdx,
+    'the already-active/non-empty guard must precede (and be able to bypass) the klein/krea fallback');
+});
+
+test('the local-engine selection filter re-checks current availability, not just LOCAL_ENGINES membership (stale/unavailable engines must not survive)', () => {
+  const effectBody = src.slice(src.indexOf('const nsfwWasActiveRef = useRef'), src.indexOf('const toggleDialogEngine'));
+  assert.match(effectBody, /LOCAL_ENGINES\.includes\(e\)\s*&&\s*available\?\.\[e\]/,
+    'the selection filter must require both LOCAL_ENGINES membership AND current availability');
+  // The old Bug-2 shape (membership only, no availability re-check) must not
+  // reappear anywhere in this effect.
+  assert.doesNotMatch(effectBody, /prev\.filter\(\(e\)\s*=>\s*LOCAL_ENGINES\.includes\(e\)\)/);
+});
+
+test('the NSFW warning copy distinguishes "truly unavailable" from "just unselected" instead of always claiming unavailability', () => {
+  assert.match(src, /noLocalEngineAvailable/);
+  assert.match(src, /!available\?\.klein\s*&&\s*!available\?\.krea/);
+  assert.match(src, /neither is currently available/);
+  assert.match(src, /Select at least one local engine/);
+});
+
 test('normalizeTo100 uses a floor + largest-remainder allocation, which cannot go negative', () => {
   const fnBody = src.slice(src.indexOf('function normalizeTo100'), src.indexOf('export default function'));
   // Floors are non-negative by construction (Math.floor of a non-negative
