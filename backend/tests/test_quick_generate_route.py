@@ -70,3 +70,23 @@ def test_components_put_saves_and_rejects_a_shadowing_id(client):
     saved_ids = {e['id'] for e in body['saved']['face']['expression']}
     assert saved_ids == {'my_new_expr'}
     assert body['dropped'] == 1
+
+
+def test_compose_400s_instead_of_500_on_non_dict_ratio_shapes(client):
+    ds_id = _make_ds(client)
+    resp = client.post(f'/api/dataset/{ds_id}/quick-generate/compose', json={
+        'total': 5, 'framing_ratios': [1, 2, 3], 'angle_ratios': {'face': {'front': 100}}})
+    assert resp.status_code == 400
+    body = resp.get_json()
+    assert body is not None
+    assert body.get('ok') is False
+    assert 'error' in body
+
+
+def test_components_put_400s_instead_of_500_on_a_non_string_subject_type(client):
+    resp = client.put('/api/dataset/quick-generate/components', json={
+        'subject_type': 5, 'custom_components': {}})
+    assert resp.status_code == 400
+    body = resp.get_json()
+    assert body is not None
+    assert 'error' in body

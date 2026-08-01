@@ -234,7 +234,10 @@ def dataset_quick_generate_components_save():
     """Replace the custom components of ONE subject type. Sanitized again here —
     the client validates on entry, but this endpoint is the one that writes."""
     body = request.get_json(force=True, silent=True) or {}
-    st = normalize_subject_type(body.get('subject_type'))
+    raw_subject_type = body.get('subject_type')
+    if raw_subject_type is not None and not isinstance(raw_subject_type, str):
+        return jsonify({'error': "'subject_type' must be a string"}), 400
+    st = normalize_subject_type(raw_subject_type)
     custom = body.get('custom_components')
     if not isinstance(custom, dict):
         return jsonify({'error': "'custom_components' must be an object"}), 400
@@ -869,7 +872,7 @@ def dataset_quick_generate_compose(dataset_id):
             framing_ratios=data.get('framing_ratios') or {},
             angle_ratios=data.get('angle_ratios') or {},
             subject_type=normalize_subject_type(data.get('subject_type')))
-    except (ValueError, TypeError) as e:
+    except (ValueError, TypeError, AttributeError) as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
     variations = [{k: v for k, v in slot.items() if not k.startswith('_debug_')}
                   for slot in composed]
