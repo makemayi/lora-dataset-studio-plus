@@ -92,6 +92,7 @@ def test_checkpoints_route_stamps_local_and_cloud_lists(client, app, ds, monkeyp
         {'step': 1000, 'filename': 'a_000001000.safetensors',
          'run_id': 7, 'run_source': 'cloud'},
         {'step': 2000, 'filename': 'a_000002000.safetensors'}])
+    monkeypatch.setattr(lt, 'has_local_checkpoints', lambda *a, **kw: True)
     monkeypatch.setattr(ct, 'cloud_checkpoints', lambda *a, **kw: [
         {'step': 1000, 'filename': 'c_000001000.safetensors', 'run_id': 7}])
     monkeypatch.setattr(ct, 'cloud_checkpoint_groups', lambda *a, **kw: [
