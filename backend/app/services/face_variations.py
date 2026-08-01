@@ -2878,6 +2878,88 @@ def sanitize_quick_gen_custom_components(raw) -> dict:
     return out
 
 
+_MAX_QUICK_GEN_NSFW_PER_FRAMING = 100
+# Reuses _MAX_QUICK_GEN_PHRASE (300) — NSFW entries run longer than SFW
+# axis phrases (they're whole prompts, not fragments), but the existing
+# cap already comfortably covers every shipped NSFW_VARIATION_CATALOG
+# entry's length, so no separate constant is needed.
+
+
+def sanitize_quick_gen_custom_nsfw(raw) -> dict:
+    """{subject_type: {framing: [entry]}} — flatter than
+    sanitize_quick_gen_custom_components: each entry is a WHOLE
+    {id, label, prompt}, never decomposed into axes (see
+    _QUICK_GEN_NSFW_POOL's comment for why). Human-only, same rule
+    compose_quick_generate_variations already enforces elsewhere. Never
+    raises — a malformed config degrades to 'no custom NSFW content'."""
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for subject, framings in raw.items():
+        st = normalize_subject_type(subject)
+        if st != 'human' or not isinstance(framings, dict):
+            continue
+        kept_framings = {}
+        for framing, entries in framings.items():
+            if framing not in _QUICK_GEN_NSFW_POOL or not isinstance(entries, list):
+                continue
+            built_in_ids = {e['id'] for e in _QUICK_GEN_NSFW_POOL[framing]}
+            seen_ids, kept = set(), []
+            for entry in entries[:_MAX_QUICK_GEN_NSFW_PER_FRAMING]:
+                if not isinstance(entry, dict):
+                    continue
+                eid, label, prompt = entry.get('id'), entry.get('label'), entry.get('prompt')
+                if not (isinstance(eid, str) and eid.strip()
+                       and isinstance(label, str) and label.strip()
+                       and isinstance(prompt, str) and prompt.strip()):
+                    continue
+                eid, label, prompt = eid.strip(), label.strip(), prompt.strip()
+                if len(prompt) > _MAX_QUICK_GEN_PHRASE:
+                    continue
+                if eid in built_in_ids or eid in seen_ids:
+                    continue
+                seen_ids.add(eid)
+                kept.append({'id': eid, 'label': label, 'prompt': prompt})
+            if kept:
+                kept_framings[framing] = kept
+        if kept_framings:
+            out[st] = kept_framings
+    return out
+
+
+def _quick_gen_custom_nsfw_config():
+    """Lazy config read, same reasoning as _quick_gen_custom_config."""
+    try:
+        from .. import config as cfg
+        return cfg.get('quick_generate.custom_nsfw') or {}
+    except Exception:
+        return {}
+
+
+def _quick_gen_nsfw_pool_for(subject_type: str) -> dict:
+    """{framing: [entry]} — shipped _QUICK_GEN_NSFW_POOL merged with the
+    user's own additions from config.json's quick_generate.custom_nsfw.
+    Human-only; any other subject_type gets the empty shipped shape (NSFW
+    content never attaches to non-human subjects — see
+    compose_quick_generate_variations's own guard)."""
+    st = normalize_subject_type(subject_type)
+    if st != 'human':
+        return {}
+    raw_custom = _quick_gen_custom_nsfw_config()
+    if not raw_custom:
+        return _QUICK_GEN_NSFW_POOL
+    custom = sanitize_quick_gen_custom_nsfw(raw_custom).get(st, {})
+    if not custom:
+        return _QUICK_GEN_NSFW_POOL
+    merged = {framing: list(entries) for framing, entries in _QUICK_GEN_NSFW_POOL.items()}
+    for framing, entries in custom.items():
+        if framing not in merged:
+            continue
+        existing_ids = {e['id'] for e in merged[framing]}
+        merged[framing].extend(e for e in entries if e['id'] not in existing_ids)
+    return merged
+
+
 def _largest_remainder_allocation(total: int, ratios: dict) -> dict:
     """{key: count} summing to EXACTLY `total`, proportional to `ratios`
     (values need not be pre-normalized ints — only their relative size
@@ -2947,6 +3029,7 @@ def compose_quick_generate_variations(
     content to a non-human dataset."""
     st = normalize_subject_type(subject_type)
     pools = quick_gen_pools_for(subject_type)
+    nsfw_pools = _quick_gen_nsfw_pool_for(subject_type)
     used_framings = _quick_gen_validate(total, framing_ratios, angle_ratios, pools, nsfw_ratio)
     rng = rng or random.Random()
     framing_counts = _largest_remainder_allocation(
@@ -2957,7 +3040,7 @@ def compose_quick_generate_variations(
         count = framing_counts[framing]
         if not count:
             continue
-        nsfw_pool = _QUICK_GEN_NSFW_POOL.get(framing) or [] if st == 'human' else []
+        nsfw_pool = nsfw_pools.get(framing) or []
         nsfw_count = 0
         if nsfw_ratio and nsfw_pool:
             split = _largest_remainder_allocation(count, {'nsfw': nsfw_ratio, 'sfw': 100 - nsfw_ratio})

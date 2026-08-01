@@ -31,6 +31,8 @@ from ..services.face_variations import (NSFW_VARIATION_CATALOG, VARIATION_CATALO
                                         compose_quick_generate_variations,
                                         quick_gen_pools_for,
                                         sanitize_quick_gen_custom_components,
+                                        sanitize_quick_gen_custom_nsfw,
+                                        _quick_gen_nsfw_pool_for,
                                         QUICK_GEN_TOTAL_CAP)
 from ..utils.comfyui import KREA_ALLOWED_SAMPLERS, KREA_ALLOWED_SCHEDULERS, get_krea_loras
 from ._common import (_map_error, _require_comfyui, _require_no_stalled_comfyui,
@@ -276,6 +278,42 @@ def dataset_quick_generate_components_save():
     submitted_count = _count_submitted(custom)
     saved_count = sum(len(entries) for axes in saved_for_subject.values()
                       for entries in axes.values())
+    return jsonify({'subject_type': st, 'saved': saved_for_subject,
+                    'dropped': submitted_count - saved_count})
+
+
+@bp.get('/dataset/quick-generate/nsfw-components')
+def dataset_quick_generate_nsfw_components():
+    """The effective NSFW pool (shipped + custom) plus the subject's own raw
+    custom NSFW additions for round-tripping — same contract as
+    dataset_quick_generate_components, flatter shape (see
+    sanitize_quick_gen_custom_nsfw's docstring)."""
+    st = normalize_subject_type(request.args.get('subject_type'))
+    existing = cfg.get('quick_generate.custom_nsfw') or {}
+    sanitized = sanitize_quick_gen_custom_nsfw(existing)
+    return jsonify({'subject_type': st, 'pool': _quick_gen_nsfw_pool_for(st),
+                    'custom': sanitized.get(st, {})})
+
+
+@bp.put('/dataset/quick-generate/nsfw-components')
+def dataset_quick_generate_nsfw_components_save():
+    """Replace the custom NSFW entries of ONE subject type (human-only)."""
+    body = request.get_json(force=True, silent=True) or {}
+    raw_subject_type = body.get('subject_type')
+    if raw_subject_type is not None and not isinstance(raw_subject_type, str):
+        return jsonify({'error': "'subject_type' must be a string"}), 400
+    st = normalize_subject_type(raw_subject_type)
+    custom = body.get('custom_nsfw')
+    if not isinstance(custom, dict):
+        return jsonify({'error': "'custom_nsfw' must be an object"}), 400
+    existing = cfg.get('quick_generate.custom_nsfw') or {}
+    existing[st] = custom
+    sanitized = sanitize_quick_gen_custom_nsfw(existing)
+    cfg.save_config({'quick_generate': {'custom_nsfw': sanitized}})
+    saved_for_subject = sanitized.get(st, {})
+    submitted_count = sum(len(entries) for entries in custom.values() if isinstance(entries, list))
+    submitted_count += sum(1 for entries in custom.values() if not isinstance(entries, list))
+    saved_count = sum(len(entries) for entries in saved_for_subject.values())
     return jsonify({'subject_type': st, 'saved': saved_for_subject,
                     'dropped': submitted_count - saved_count})
 

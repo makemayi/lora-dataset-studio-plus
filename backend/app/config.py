@@ -504,7 +504,13 @@ DEFAULTS = {
     # rides along in the full backup. Sanitized on read by
     # face_variations.sanitize_quick_gen_custom_components — never shadows a
     # shipped id.
-    'quick_generate': {'custom_components': {}},
+    # User additions to the quick-generate NSFW pool, same storage spirit as
+    # custom_components above but flatter ({subject_type: {framing: [entry]}}
+    # — no axis nesting) since each NSFW entry is a whole self-contained
+    # state+pose+décor prompt, never decomposed into axes. Sanitized on read
+    # by face_variations.sanitize_quick_gen_custom_nsfw — never shadows a
+    # shipped id, human-only.
+    'quick_generate': {'custom_components': {}, 'custom_nsfw': {}},
     'updates': {'repo': 'perfectgf/lora-dataset-studio'},      # GitHub repo for the release feed
 }
 

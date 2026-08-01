@@ -161,3 +161,30 @@ def test_compose_400s_on_an_out_of_range_nsfw_ratio(client):
         'angle_ratios': {'face': {'front': 100}}, 'nsfw_ratio': 150,
     })
     assert resp.status_code == 400
+
+
+def test_nsfw_components_get_returns_shipped_and_custom(client, app):
+    from app import config as cfg
+    with app.app_context():
+        cfg.save_config({'quick_generate': {'custom_nsfw': {
+            'human': {'bust': [{'id': 'my_bust_x', 'label': 'My Bust X', 'prompt': 'a prompt'}]}}}})
+    resp = client.get('/api/dataset/quick-generate/nsfw-components?subject_type=human')
+    assert resp.status_code == 200
+    body = resp.get_json()
+    ids = {e['id'] for e in body['pool']['bust']}
+    assert 'my_bust_x' in ids
+    assert 'nsfw_bust_lingerie' in ids  # shipped default still present
+
+
+def test_nsfw_components_put_saves_and_rejects_a_shadowing_id(client):
+    resp = client.put('/api/dataset/quick-generate/nsfw-components', json={
+        'subject_type': 'human',
+        'custom_nsfw': {'bust': [
+            {'id': 'my_new_nsfw', 'label': 'My New', 'prompt': 'a prompt'},
+            {'id': 'nsfw_bust_lingerie', 'label': 'trying to shadow', 'prompt': 'x'},
+        ]}})
+    assert resp.status_code == 200
+    body = resp.get_json()
+    saved_ids = {e['id'] for e in body['saved']['bust']}
+    assert saved_ids == {'my_new_nsfw'}
+    assert body['dropped'] == 1
