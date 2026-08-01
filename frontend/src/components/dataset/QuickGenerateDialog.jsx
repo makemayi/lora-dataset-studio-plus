@@ -22,22 +22,45 @@ const DEFAULT_FRAMING_RATIOS = { face: 50, bust: 30, body: 20 };
 
 /** Redistribute the remainder across the OTHER keys proportionally to their
  * current weight, so nudging one slider doesn't silently zero the others out
- * — same spirit as the app's other ratio-editing UI. Always sums to 100. */
+ * — same spirit as the app's other ratio-editing UI.
+ *
+ * Uses the "largest remainder" (Hare quota) allocation method instead of
+ * per-key rounding + a final drift patch: each other key first gets
+ * Math.floor(its exact fractional share), which by construction can never be
+ * negative (remaining >= 0, weights >= 0), and the leftover integer units
+ * (always >= 0 and always <= others.length, since each key's fractional part
+ * is < 1) are handed out one at a time to the keys with the largest
+ * fractional remainder. Because the only adjustment ever made to a floor is
+ * "+1", no key can end up negative, and the shares plus the floors sum to
+ * exactly `remaining` by construction — so the full set of returned values
+ * always sums to exactly 100 with none negative. */
 function normalizeTo100(values, changedKey, changedValue) {
   const keys = Object.keys(values);
   const others = keys.filter((k) => k !== changedKey);
-  const remaining = Math.max(0, 100 - changedValue);
-  const othersTotal = others.reduce((s, k) => s + values[k], 0) || 1;
-  const next = { [changedKey]: changedValue };
-  others.forEach((k, i) => {
-    const share = i === others.length - 1
-      ? remaining - others.slice(0, i).reduce((s, ok) => s + next[ok], 0)
-      : Math.round((values[k] / othersTotal) * remaining);
-    next[k] = Math.max(0, share);
-  });
-  // Final integer-sum correction (rounding can drift by ±1-2).
-  const drift = 100 - Object.values(next).reduce((a, b) => a + b, 0);
-  if (drift !== 0) next[others[others.length - 1] || changedKey] += drift;
+  const clampedChanged = Math.max(0, Math.min(100, changedValue));
+  const next = { [changedKey]: clampedChanged };
+  if (others.length === 0) return next;
+
+  const remaining = 100 - clampedChanged;
+  const weights = others.map((k) => Math.max(0, values[k] || 0));
+  const othersTotal = weights.reduce((s, w) => s + w, 0);
+  // Exact (fractional) share per key. If every "other" weight is 0 (nothing
+  // to be proportional to), split the remainder evenly instead of the old
+  // `|| 1` fallback, which used to dump everything on the last key.
+  const exact = othersTotal > 0
+    ? weights.map((w) => (w / othersTotal) * remaining)
+    : others.map(() => remaining / others.length);
+  const floors = exact.map((v) => Math.floor(v));
+  const floorSum = floors.reduce((a, b) => a + b, 0);
+  // Clamp for safety against floating-point noise only — mathematically this
+  // is always in [0, others.length].
+  const leftover = Math.max(0, Math.min(others.length, remaining - floorSum));
+  const order = exact
+    .map((v, i) => [v - floors[i], i])
+    .sort((a, b) => b[0] - a[0]);
+  const shares = floors.slice();
+  for (let i = 0; i < leftover; i += 1) shares[order[i][1]] += 1;
+  others.forEach((k, i) => { next[k] = shares[i]; });
   return next;
 }
 
@@ -88,6 +111,11 @@ export default function QuickGenerateDialog({
   }));
 
   const submit = async () => {
+    // Re-entry guard: two click events dispatched in the same tick (before
+    // React commits the `disabled` re-render) would otherwise both pass the
+    // `disabled` check and both reach here, firing quickGenerateCompose +
+    // onGenerate twice.
+    if (submitting) return;
     setSubmitting(true);
     try {
       const activeAngleRatios = {};
