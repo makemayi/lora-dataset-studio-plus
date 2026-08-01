@@ -455,7 +455,9 @@ export function useDataset() {
     try {
       const d = await putJson('/api/dataset/quick-generate/components',
         { subject_type: subjectType || 'human', custom_components: customComponents });
-      toast.success(d.dropped ? `Saved (${d.dropped} entry/entries skipped — see reserved ids)` : 'Saved');
+      toast.success(d.dropped
+        ? `Saved (${d.dropped} entr${d.dropped === 1 ? 'y' : 'ies'} skipped as invalid or duplicate)`
+        : 'Saved');
       return d;
     } catch (e) {
       toast.error(e.message || 'Unexpected error');
