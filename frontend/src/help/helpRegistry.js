@@ -181,7 +181,7 @@ const TOPICS = [
     ['quick generate', 'random batch', 'ratio generate', 'random prompts',
      'auto generate', 'batch by percentage', 'face bust body ratio',
      'skip cards', 'without picking cards'],
-    '/datasets?section=images', 'using-the-app', 'generate-a-random-batch-by-count-and-ratio'),
+    '/datasets?section=add', 'using-the-app', 'generate-a-random-batch-by-count-and-ratio'),
   { id: 'workspace-scrape', kind: 'section', title: 'Scrape',
     keywords: ['scrape', 'scan', 'gallery', 'url', 'source', 'import', 'concept'],
     guide: { chapter: 'using-the-app', anchor: 'concept-datasets-an-object-or-action-not-a-person' },

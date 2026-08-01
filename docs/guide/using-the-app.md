@@ -270,18 +270,19 @@ card (remove it and add it again) and press **Keep** once more.
 
 Next to the variation catalog's preset buttons is **🎲 Quick generate** —
 instead of picking cards one at a time, set a total image count and a
-framing mix (face / bust / body — `back` isn't covered, there's too little
-shot variety to randomize), then within each framing a camera-angle mix
-(front / three-quarter / profile / low or high angle, depending on the
-framing). Everything else — expression, pose, outfit, background — is
+framing mix (face / bust / body), then within each framing a camera-angle
+mix (front / three-quarter / profile / low or high angle, depending on the
+framing). `back` isn't covered — there's too little shot variety to
+randomize it. Everything else — expression, pose, outfit, background — is
 drawn randomly from a component library, staying within whatever that
-angle actually allows (a pose like "over the shoulder" only ever pairs
-with the angle it already implies, never a contradictory one).
+angle actually allows: a pose like "over the shoulder" only ever pairs
+with the angle it already implies, never a contradictory one.
 
 Facial identity comes first: the expression pool is deliberately mild only
 — no laughing, no shock, nothing that changes how the face reads
-structurally. There's no preview step; the ratio rules and the
-angle-compatibility system are what make a blind batch safe to fire.
+structurally. There's no preview step; each component is only ever paired
+with angles it makes sense for, which is what makes a blind batch safe to
+fire.
 
 Manual card-picking and the existing presets are unaffected — this is an
 additional way to fill a dataset quickly, not a replacement.
