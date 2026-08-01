@@ -8,14 +8,26 @@
  *
  * Purely presentational and props-driven, same shape as ContinueDialog:
  * onResolve(payload | null) — `true` once the batch is queued, or `null` on
- * cancel/Escape. Not wired into a parent yet (that's the next task) — every
- * prop below is expected to come from the dataset panel that mounts it.
+ * cancel/Escape. Every prop below is expected to come from the dataset panel
+ * that mounts it.
  *
  * The rear-facing option exists in the component pools for other subject
  * types (object/other/creature) but is excluded here on purpose: the spec
- * for this dialog's sliders is face/bust/body only. */
+ * for this dialog's sliders is face/bust/body only.
+ *
+ * The dialog is a full-screen overlay, so the parent panel's engine picker is
+ * out of reach while it's open: this dialog owns its OWN compact engine
+ * checkbox list (`dialogEngines`), seeded from the `engines` prop on mount but
+ * independent of the parent from then on. When the `nsfwMode` prop is on (the
+ * same 🔞 toggle that gates the manual card-picking flow elsewhere), an NSFW
+ * ratio slider appears; raising it above 0 filters that list down to the
+ * LOCAL_ENGINES only, mirroring the server's fail-closed rule that NSFW shots
+ * never reach an API engine. If that filtering would empty the selection, a
+ * local fallback (klein, else krea) is auto-picked; if neither local engine is
+ * available, the dialog says so and disables Generate rather than submitting
+ * with zero engines. */
 import { useEffect, useMemo, useState } from 'react';
-import { engineBatches } from './engineSelection.js';
+import { engineBatches, ENGINES, ENGINE_LABELS, LOCAL_ENGINES } from './engineSelection.js';
 
 const FRAMINGS = ['face', 'bust', 'body'];
 const DEFAULT_FRAMING_RATIOS = { face: 50, bust: 30, body: 20 };
@@ -67,12 +79,19 @@ function normalizeTo100(values, changedKey, changedValue) {
 export default function QuickGenerateDialog({
   hasRef, engines, engineMode, klein, loraStrength, generationLoraPreset,
   onGenerate, quickGenerateCompose, quickGenerateComponents, busy, onResolve,
+  nsfwMode, available,
 }) {
   const [total, setTotal] = useState(30);
   const [framingRatios, setFramingRatios] = useState(DEFAULT_FRAMING_RATIOS);
   const [angleRatios, setAngleRatios] = useState({});
   const [pools, setPools] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [nsfwRatio, setNsfwRatio] = useState(0);
+  // Dialog-owned engine selection: seeded once from whatever was checked in
+  // the parent panel when this dialog opened, then fully independent of it
+  // (see file header — the parent's picker is behind this full-screen overlay
+  // and can't be live-mutated).
+  const [dialogEngines, setDialogEngines] = useState(() => [...engines]);
 
   useEffect(() => {
     let cancelled = false;
@@ -110,6 +129,34 @@ export default function QuickGenerateDialog({
     ...prev, [framing]: normalizeTo100(prev[framing] || {}, key, value),
   }));
 
+  /* NSFW shots only ever run on a local engine (server fail-closed rule). The
+     moment the ratio goes above 0, drop any non-local engine already in the
+     dialog's selection; if that leaves nothing selected, fall back to Klein
+     (else Krea) so the user isn't left with a silently-broken submit button.
+     A no-op while nsfwRatio is 0 — the exact prior behaviour. */
+  useEffect(() => {
+    if (nsfwRatio <= 0) return;
+    setDialogEngines((prev) => {
+      const local = prev.filter((e) => LOCAL_ENGINES.includes(e));
+      if (local.length) return local;
+      if (available?.klein) return ['klein'];
+      if (available?.krea) return ['krea'];
+      return [];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nsfwRatio, available?.klein, available?.krea]);
+
+  const toggleDialogEngine = (name) => setDialogEngines((prev) => (
+    prev.includes(name) ? prev.filter((e) => e !== name) : [...prev, name]
+  ));
+
+  /* The dialog's own picker: available engines, further narrowed to
+     LOCAL_ENGINES while an NSFW ratio is set. Order follows the canonical
+     ENGINES list, same as the parent panel's cards. */
+  const offeredEngines = useMemo(() => ENGINES.filter(
+    (name) => available?.[name] && (nsfwRatio <= 0 || LOCAL_ENGINES.includes(name)),
+  ), [available, nsfwRatio]);
+
   const submit = async () => {
     // Re-entry guard: two click events dispatched in the same tick (before
     // React commits the `disabled` re-render) would otherwise both pass the
@@ -122,9 +169,10 @@ export default function QuickGenerateDialog({
       FRAMINGS.forEach((f) => { if (framingRatios[f] > 0) activeAngleRatios[f] = angleRatios[f]; });
       const variations = await quickGenerateCompose({
         total, framing_ratios: framingRatios, angle_ratios: activeAngleRatios, subject_type: 'human',
+        nsfw_ratio: nsfwRatio,
       });
       if (!variations) return;  // compose already toasted the error
-      const batches = engineBatches(variations, engines, engineMode);
+      const batches = engineBatches(variations, dialogEngines, engineMode);
       await onGenerate(batches, 1, klein, loraStrength, generationLoraPreset);
       onResolve(true);
     } finally {
@@ -133,7 +181,8 @@ export default function QuickGenerateDialog({
   };
 
   const activeFramings = useMemo(() => FRAMINGS.filter((f) => framingRatios[f] > 0), [framingRatios]);
-  const disabled = submitting || busy || !hasRef;
+  const noLocalEngineForNsfw = nsfwMode && nsfwRatio > 0 && dialogEngines.length === 0;
+  const disabled = submitting || busy || !hasRef || dialogEngines.length === 0;
 
   return (
     <div role="dialog" aria-modal="true" aria-label="Quick generate"
@@ -177,6 +226,43 @@ export default function QuickGenerateDialog({
           ))}
         </div>
 
+        {nsfwMode && (
+          <div className="flex flex-col gap-1 border-t border-border pt-2">
+            <span className="flex justify-between items-center">
+              <span className="text-content text-[0.75rem]"><span aria-hidden>🔞</span> NSFW ratio</span>
+              <span className="text-content-muted text-[0.8125rem] font-semibold">{nsfwRatio}%</span>
+            </span>
+            <input type="range" min="0" max="100" value={nsfwRatio}
+              aria-label="NSFW share of this batch"
+              onChange={(e) => setNsfwRatio(Number(e.target.value))}
+              className="w-full accent-rose-400" />
+            <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
+              NSFW shots only run on a local engine — raising this narrows the engine list below to Klein/Krea 2 Edit.
+            </span>
+          </div>
+        )}
+
+        {/* Dialog-owned engine picker — independent of the parent panel's
+            selection while this full-screen overlay is open (see file
+            header). Filtered to local-only engines while nsfwRatio > 0. */}
+        <div className="flex flex-col gap-1 border-t border-border pt-2">
+          <span className="text-content text-[0.75rem]">Engines for this batch</span>
+          <fieldset className="flex flex-col gap-1">
+            {offeredEngines.map((name) => (
+              <label key={name} className="flex items-center gap-2 text-content-muted text-[0.75rem]">
+                <input type="checkbox" checked={dialogEngines.includes(name)}
+                  onChange={() => toggleDialogEngine(name)} />
+                {ENGINE_LABELS[name] || name}
+              </label>
+            ))}
+          </fieldset>
+          {noLocalEngineForNsfw && (
+            <span className="text-amber-300/90 text-[0.6875rem] leading-relaxed">
+              NSFW content needs a local engine (Klein or Krea 2 Edit) — neither is currently available.
+            </span>
+          )}
+        </div>
+
         {activeFramings.map((f) => (
           <div key={f} className="flex flex-col gap-2 border-t border-border pt-2">
             <span className="text-content-subtle text-[0.6875rem]">{f} angle mix</span>
@@ -199,7 +285,8 @@ export default function QuickGenerateDialog({
           <button type="button" onClick={dismiss} disabled={submitting || busy}
             className="px-3 py-1.5 rounded-lg bg-surface text-content text-sm disabled:opacity-40">Cancel</button>
           <button type="button" onClick={submit} disabled={disabled}
-            title={!hasRef ? 'Add a reference image first' : undefined}
+            title={!hasRef ? 'Add a reference image first'
+              : dialogEngines.length === 0 ? 'Pick at least one engine above' : undefined}
             className="ml-auto px-3 py-1.5 rounded-lg bg-gradient-primary text-white text-sm font-semibold disabled:opacity-40">
             {submitting ? 'Generating…' : `🎲 Generate (${total})`}
           </button>

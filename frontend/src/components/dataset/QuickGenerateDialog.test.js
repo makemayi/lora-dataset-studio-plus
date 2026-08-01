@@ -39,6 +39,49 @@ test('submit() re-entry guard blocks a second call while one is in flight (no du
     'the re-entry guard must precede setSubmitting(true)');
 });
 
+test('imports LOCAL_ENGINES from engineSelection.js instead of hardcoding the local-engine list again', () => {
+  assert.match(src, /import\s*\{[^}]*LOCAL_ENGINES[^}]*\}\s*from\s*['"]\.\/engineSelection\.js['"]/);
+  // The array literal itself must not be re-typed anywhere in this file.
+  assert.doesNotMatch(src, /\[\s*['"]klein['"]\s*,\s*['"]krea['"]\s*\]/);
+});
+
+test('an NSFW ratio slider exists, gated behind the nsfwMode prop', () => {
+  assert.match(src, /nsfwRatio/);
+  assert.match(src, /const \[nsfwRatio, setNsfwRatio\] = useState\(0\)/);
+  // The slider JSX itself must be conditioned on nsfwMode, not just present
+  // somewhere in the file — this proves the gate wraps the actual control.
+  const nsfwSection = src.slice(src.indexOf('{nsfwMode && ('), src.indexOf('Dialog-owned engine picker'));
+  assert.match(nsfwSection, /type="range"/);
+  assert.match(nsfwSection, /setNsfwRatio/);
+});
+
+test('the dialog owns its engine selection (dialogEngines), seeded from the engines prop, not the raw prop, for compose/generate', () => {
+  assert.match(src, /const \[dialogEngines, setDialogEngines\] = useState\(\(\) => \[\.\.\.engines\]\)/);
+  const submitBody = src.slice(src.indexOf('const submit = async () => {'), src.indexOf('const activeFramings'));
+  assert.match(submitBody, /engineBatches\(variations,\s*dialogEngines,\s*engineMode\)/,
+    'engineBatches must be called with the dialog-owned selection, not the raw engines prop');
+  assert.doesNotMatch(submitBody, /engineBatches\(variations,\s*engines,\s*engineMode\)/,
+    'using the raw engines prop directly would defeat the point of a dialog-owned, NSFW-filterable selection');
+});
+
+test('nsfw_ratio is threaded through to the quickGenerateCompose payload', () => {
+  const submitBody = src.slice(src.indexOf('const submit = async () => {'), src.indexOf('const activeFramings'));
+  assert.match(submitBody, /quickGenerateCompose\(\{[\s\S]*nsfw_ratio:\s*nsfwRatio/);
+});
+
+test('non-local engines are excluded from the offered picker while the NSFW ratio is active', () => {
+  const offeredBody = src.slice(src.indexOf('const offeredEngines'), src.indexOf('const submit = async'));
+  assert.match(offeredBody, /LOCAL_ENGINES\.includes\(name\)/,
+    'the offered-engines computation must gate on LOCAL_ENGINES when nsfwRatio > 0');
+  assert.match(offeredBody, /nsfwRatio\s*<=\s*0\s*\|\|\s*LOCAL_ENGINES\.includes\(name\)/);
+});
+
+test('an empty local-engine selection while NSFW is active is surfaced, not silently submitted', () => {
+  assert.match(src, /noLocalEngineForNsfw/);
+  assert.match(src, /nsfwMode\s*&&\s*nsfwRatio\s*>\s*0\s*&&\s*dialogEngines\.length\s*===\s*0/);
+  assert.match(src, /dialogEngines\.length\s*===\s*0/);  // also folded into the Generate `disabled` check
+});
+
 test('normalizeTo100 uses a floor + largest-remainder allocation, which cannot go negative', () => {
   const fnBody = src.slice(src.indexOf('function normalizeTo100'), src.indexOf('export default function'));
   // Floors are non-negative by construction (Math.floor of a non-negative

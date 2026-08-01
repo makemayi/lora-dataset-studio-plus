@@ -1690,6 +1690,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
           onGenerate={onGenerate}
           quickGenerateCompose={quickGenerateCompose}
           quickGenerateComponents={quickGenerateComponents}
+          nsfwMode={nsfwMode} available={available}
           onResolve={() => setQuickGenOpen(false)}
         />
       )}
