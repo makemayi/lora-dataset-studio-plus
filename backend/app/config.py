@@ -498,6 +498,13 @@ DEFAULTS = {
     # face_variations.sanitize_custom_shots — this file is hand-editable, and a
     # label shadowing a built-in one would hijack prompt/aspect/NSFW resolution.
     'custom_shots': {},
+    # User additions to the quick-generate component library (angle/
+    # expression/pose/outfit/background), same storage spirit as
+    # custom_shots above: optional, empty for the common case, hand-editable,
+    # rides along in the full backup. Sanitized on read by
+    # face_variations.sanitize_quick_gen_custom_components — never shadows a
+    # shipped id.
+    'quick_generate': {'custom_components': {}},
     'updates': {'repo': 'perfectgf/lora-dataset-studio'},      # GitHub repo for the release feed
 }
 

@@ -2785,6 +2785,61 @@ def _quick_gen_custom_config():
         return {}
 
 
+_QUICK_GEN_AXES_BY_FRAMING = {
+    'face': ('angle', 'expression'),
+    'bust': ('angle', 'pose', 'outfit', 'background'),
+    'body': ('angle', 'pose', 'outfit', 'background'),
+}
+_MAX_QUICK_GEN_CUSTOM_PER_AXIS = 100
+_MAX_QUICK_GEN_PHRASE = 300
+
+
+def sanitize_quick_gen_custom_components(raw) -> dict:
+    """{subject_type: {framing: {axis: [entry]}}} keeping only well-formed,
+    non-colliding entries. Never raises — a malformed config degrades to
+    'no custom components', matching sanitize_custom_shots' contract."""
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for subject, framings in raw.items():
+        st = normalize_subject_type(subject)
+        if st not in QUICK_GEN_COMPONENTS or not isinstance(framings, dict):
+            continue
+        kept_framings = {}
+        for framing, axes in framings.items():
+            if framing not in _QUICK_GEN_AXES_BY_FRAMING or not isinstance(axes, dict):
+                continue
+            kept_axes = {}
+            for axis, entries in axes.items():
+                if axis not in _QUICK_GEN_AXES_BY_FRAMING[framing] or not isinstance(entries, list):
+                    continue
+                built_in_ids = {e['id'] for e in QUICK_GEN_COMPONENTS[st][framing][axis]}
+                seen_ids, kept = set(), []
+                for entry in entries[:_MAX_QUICK_GEN_CUSTOM_PER_AXIS]:
+                    if not isinstance(entry, dict):
+                        continue
+                    eid, phrase = entry.get('id'), entry.get('phrase')
+                    if not (isinstance(eid, str) and eid.strip()
+                           and isinstance(phrase, str) and phrase.strip()):
+                        continue
+                    eid, phrase = eid.strip(), phrase.strip()
+                    if len(phrase) > _MAX_QUICK_GEN_PHRASE:
+                        continue
+                    if eid in built_in_ids or eid in seen_ids:
+                        continue
+                    ca = entry.get('compatible_angles')
+                    ca = list(ca) if isinstance(ca, list) and all(isinstance(x, str) for x in ca) else None
+                    seen_ids.add(eid)
+                    kept.append({'id': eid, 'phrase': phrase, 'compatible_angles': ca})
+                if kept:
+                    kept_axes[axis] = kept
+            if kept_axes:
+                kept_framings[framing] = kept_axes
+        if kept_framings:
+            out[st] = kept_framings
+    return out
+
+
 def _largest_remainder_allocation(total: int, ratios: dict) -> dict:
     """{key: count} summing to EXACTLY `total`, proportional to `ratios`
     (values need not be pre-normalized ints — only their relative size
