@@ -126,3 +126,38 @@ def test_components_put_reports_a_drop_for_a_structurally_malformed_framing(clie
     assert resp.status_code == 200
     body = resp.get_json()
     assert body['dropped'] >= 1
+
+
+def test_compose_accepts_nsfw_ratio_and_tags_nsfw_slots(client):
+    ds_id = _make_ds(client)
+    resp = client.post(f'/api/dataset/{ds_id}/quick-generate/compose', json={
+        'total': 10, 'framing_ratios': {'face': 100, 'bust': 0, 'body': 0},
+        'angle_ratios': {'face': {'front': 100}}, 'nsfw_ratio': 100,
+    })
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body['ok'] is True
+    assert len(body['variations']) == 10
+    for v in body['variations']:
+        assert v.get('nsfw') is True
+
+
+def test_compose_defaults_nsfw_ratio_to_zero_when_omitted(client):
+    ds_id = _make_ds(client)
+    resp = client.post(f'/api/dataset/{ds_id}/quick-generate/compose', json={
+        'total': 10, 'framing_ratios': {'face': 100, 'bust': 0, 'body': 0},
+        'angle_ratios': {'face': {'front': 100}},
+    })
+    assert resp.status_code == 200
+    body = resp.get_json()
+    for v in body['variations']:
+        assert not v.get('nsfw')
+
+
+def test_compose_400s_on_an_out_of_range_nsfw_ratio(client):
+    ds_id = _make_ds(client)
+    resp = client.post(f'/api/dataset/{ds_id}/quick-generate/compose', json={
+        'total': 5, 'framing_ratios': {'face': 100, 'bust': 0, 'body': 0},
+        'angle_ratios': {'face': {'front': 100}}, 'nsfw_ratio': 150,
+    })
+    assert resp.status_code == 400

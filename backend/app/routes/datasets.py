@@ -893,7 +893,8 @@ def dataset_quick_generate_compose(dataset_id):
             total=data.get('total'),
             framing_ratios=data.get('framing_ratios') or {},
             angle_ratios=data.get('angle_ratios') or {},
-            subject_type=normalize_subject_type(data.get('subject_type')))
+            subject_type=normalize_subject_type(data.get('subject_type')),
+            nsfw_ratio=data.get('nsfw_ratio', 0))
     except (ValueError, TypeError, AttributeError) as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
     variations = [{k: v for k, v in slot.items() if not k.startswith('_debug_')}
