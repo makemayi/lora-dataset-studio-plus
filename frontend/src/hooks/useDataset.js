@@ -5,7 +5,7 @@
  * classify/caption/status/caption-edit/crop/regenerate/export).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getCsrfToken, fetchWithCsrfRetry, CSRF_EXPIRED_MESSAGE, putJson } from '../api/fetchClient';
+import { getCsrfToken, fetchWithCsrfRetry, CSRF_EXPIRED_MESSAGE, putJson, apiFetch } from '../api/fetchClient';
 import { useToast } from '../components/common/Toast';
 import { useJobs } from '../context/JobsContext';
 import { serializeWatermarkRegions } from '../utils/watermarkRegions';
@@ -423,6 +423,45 @@ export function useDataset() {
     toast.success(`${d.created} variation(s) queued${detail}`);
     await refresh();
   }), [wrap, currentId, refresh, toast]);
+
+  // Quick generate (🎲): compose-only — returns the variations list, does
+  // NOT queue anything itself. The dialog then calls `generate()` (above)
+  // with those variations, exactly like a manual multi-select would, so
+  // the whole existing engine-picker/NSFW-gate/budget-check path applies
+  // unchanged. Deliberately does not toast/refresh — the caller chains
+  // straight into generate(), which already does both.
+  const quickGenerateCompose = useCallback(async (payload) => {
+    const d = await postJson(`/api/dataset/${currentId}/quick-generate/compose`, payload);
+    if (!d.ok) { toast.error(d.error || 'Unexpected error'); return null; }
+    return d.variations;
+  }, [currentId, toast]);
+
+  // GET — same apiFetch(url) convention as VariationCatalog's shot-catalog
+  // fetch (throws on failure; this route otherwise always answers 200).
+  const quickGenerateComponents = useCallback(async (subjectType) => {
+    try {
+      return await apiFetch(
+        `/api/dataset/quick-generate/components?subject_type=${encodeURIComponent(subjectType || 'human')}`);
+    } catch (e) {
+      toast.error(e.message || 'Unexpected error');
+      return null;
+    }
+  }, [toast]);
+
+  // PUT — same putJson() convention as saveWatermarkRegions/VariationCatalog's
+  // shot-catalog save: putJson throws on failure (no {ok,error} envelope), so
+  // errors are caught here rather than read off the response body.
+  const saveQuickGenerateCustomComponents = useCallback(async (subjectType, customComponents) => {
+    try {
+      const d = await putJson('/api/dataset/quick-generate/components',
+        { subject_type: subjectType || 'human', custom_components: customComponents });
+      toast.success(d.dropped ? `Saved (${d.dropped} entry/entries skipped — see reserved ids)` : 'Saved');
+      return d;
+    } catch (e) {
+      toast.error(e.message || 'Unexpected error');
+      return null;
+    }
+  }, [toast]);
 
   const importFiles = useCallback((files, { crop = true } = {}) => wrap(async () => {
     const fd = new FormData(); [...files].forEach((f) => fd.append('files', f));
@@ -1556,7 +1595,7 @@ export function useDataset() {
            analyzing: analyzingLive, watermarking: watermarkingLive, activity,
            nonces, mirroringIds, refNonce, scoringFaceIds, recaptioningIds, create, open,
            deleteDataset, updateSettings, setCurrentId, setRef, addExtraRef, removeExtraRef,
-           generate, importFiles, scrapeImport, resolveSmallImageRescue, improveImage, reimproveImage, improveBatch, classify, caption, recaption, recaptionImages,
+           generate, quickGenerateCompose, quickGenerateComponents, saveQuickGenerateCustomComponents, importFiles, scrapeImport, resolveSmallImageRescue, improveImage, reimproveImage, improveBatch, classify, caption, recaption, recaptionImages,
            setStatus, setCaption, mirrorImage, rotateImage, crop, cropRef, cropExtraRef, recropRefAuto, editReference, retryReferenceEdit, canRetryReferenceEdit, keepEditedReference, discardEditedReference, setDatasetTrainType, setDatasetFidelity, deleteImage, batchImages, replaceCaptions, writeCaptionFiles, openDatasetFolder, cancelPending, cancelCaption, regenerate, faceSwapImage, analyzeFaces, scoreFace,
            findWatermarks, cleanWatermarks, cleanWatermarkImages, restoreWatermarkImage, dismissWatermarks, saveWatermarkRegions,
            purgeUnused, exportZip, exportBackup, exportZipFor, exportBackupFor, importBackup, importDatasetZip, importDatasetFolder,
