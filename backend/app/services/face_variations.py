@@ -2918,6 +2918,15 @@ def sanitize_quick_gen_custom_nsfw(raw) -> dict:
                     continue
                 if eid in built_in_ids or eid in seen_ids:
                     continue
+                # is_nsfw_label() is the ONLY thing regenerate_image can consult once
+                # this entry's shot has become a DB row: there is no live nsfw=True
+                # dict at regeneration time, only the persisted variation_label. The
+                # 🔞 prefix is the established convention that label alone carries
+                # NSFW-ness durably (see is_nsfw_label) — apply it here so every
+                # custom NSFW entry stays fail-closed on regenerate, not just on its
+                # first draw (which sets nsfw=True explicitly and is unaffected).
+                if not label.startswith('🔞'):
+                    label = f'🔞 {label}'
                 seen_ids.add(eid)
                 kept.append({'id': eid, 'label': label, 'prompt': prompt})
             if kept:

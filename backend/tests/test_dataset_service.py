@@ -1210,6 +1210,39 @@ def test_regenerate_nsfw_stays_local_despite_api_engine(app, monkeypatch):
         assert seen['klein_model'] == 'flux-2-klein.safetensors'
 
 
+def test_regenerate_custom_nsfw_label_stays_local_despite_api_engine(app, monkeypatch):
+    """Same fail-closed property as test_regenerate_nsfw_stays_local_despite_api_engine,
+    but for a CUSTOM NSFW entry (quick_generate.custom_nsfw) instead of the shipped
+    catalog. sanitize_quick_gen_custom_nsfw auto-prefixes a custom entry's label with
+    🔞 (see test_quick_generate_custom_nsfw.py) precisely so the label alone — the only
+    thing regenerate_image can see once the shot is a DB row — keeps is_nsfw_label()
+    True and this same fail-closed gate firing, on a custom entry exactly like on a
+    shipped one."""
+    from app.services import face_dataset_service as svc
+    from app.services import face_variations as fv
+    from app.services import klein_edit_helper
+    from app.models import FaceDatasetImage
+    from app.config import LOCAL_USER
+    seen = {}
+    def fake_enqueue(**kwargs):
+        seen.update(kwargs)
+        return 'job-custom-nsfw'
+    monkeypatch.setattr(klein_edit_helper, 'enqueue_klein_edit', fake_enqueue)
+    monkeypatch.setattr(svc, '_api_generate_fn',
+                        lambda engine: (_ for _ in ()).throw(AssertionError('API engine must not be called')))
+    sanitized = fv.sanitize_quick_gen_custom_nsfw(
+        {'human': {'bust': [{'id': 'my_custom_nsfw', 'label': 'My Custom Bust', 'prompt': 'a prompt'}]}})
+    custom_label = sanitized['human']['bust'][0]['label']    # '🔞 My Custom Bust'
+    with app.app_context():
+        ds, img = _ds_with_ref_and_generated(svc, FaceDatasetImage, LOCAL_USER,
+                                             engine='flux-2-klein.safetensors')
+        img.variation_label = custom_label
+        svc.db.session.commit()
+        job = svc.regenerate_image(LOCAL_USER, img.id, engine='nanobanana')
+        assert job == 'job-custom-nsfw'             # Klein path, not the API one
+        assert seen['klein_model'] == 'flux-2-klein.safetensors'
+
+
 def test_regenerate_skips_engines_disabled_in_settings(app, monkeypatch):
     """A Klein-born tile must not regenerate through Klein once Klein is
     disabled in Settings (engines.enabled) — it falls back to the default

@@ -23,8 +23,11 @@ def test_sanitize_drops_malformed_entries():
         },
     }
     out = fv.sanitize_quick_gen_custom_nsfw(raw)
+    # label is auto-prefixed with 🔞 (see test_sanitize_auto_prefixes_the_nsfw_label_…
+    # below) so it stays durably recognizable as NSFW after only the label survives
+    # to the DB (regenerate_image has no live nsfw=True dict to fall back on).
     assert out == {'human': {'bust': [
-        {'id': 'my_bust_pose', 'label': 'Bust, custom pose', 'prompt': 'a valid prompt'},
+        {'id': 'my_bust_pose', 'label': '🔞 Bust, custom pose', 'prompt': 'a valid prompt'},
     ]}}
 
 
@@ -69,6 +72,33 @@ def test_custom_nsfw_entries_are_drawn_by_the_composer(app, monkeypatch):
             angle_ratios={'face': {'front': 100}}, nsfw_ratio=100,
             rng=random.Random(21))
         labels = {v['label'] for v in out}
-        assert 'My Custom NSFW Face' in labels
+        # the sanitizer auto-prefixes 🔞 (see test_sanitize_auto_prefixes_the_nsfw_label_…
+        # below) so the label the composer draws carries it too — that prefix is what
+        # keeps regenerate_image's fail-closed gate working after the first draw.
+        assert '🔞 My Custom NSFW Face' in labels
         # shipped defaults must still be reachable too, not replaced:
         assert len(labels) > 1
+
+
+def test_sanitize_auto_prefixes_the_nsfw_label_so_it_survives_to_regeneration():
+    """A custom entry's label must be durably recognizable as NSFW via
+    is_nsfw_label() alone (the 🔞 prefix convention), because
+    regenerate_image() re-derives NSFW-ness from ONLY the DB-persisted
+    label — there is no live nsfw=True dict at regeneration time. Without
+    this, a custom NSFW entry regenerates correctly the first time but
+    can silently bypass the Klein/Krea-only fail-closed gate on retry."""
+    raw = {'human': {'bust': [
+        {'id': 'my_custom_nsfw', 'label': 'My Custom Bust', 'prompt': 'a prompt'},
+    ]}}
+    out = fv.sanitize_quick_gen_custom_nsfw(raw)
+    saved_label = out['human']['bust'][0]['label']
+    assert fv.is_nsfw_label(saved_label)
+
+
+def test_sanitize_does_not_double_prefix_a_label_that_already_has_it():
+    raw = {'human': {'bust': [
+        {'id': 'my_custom_nsfw_2', 'label': '🔞 Already Tagged', 'prompt': 'a prompt'},
+    ]}}
+    out = fv.sanitize_quick_gen_custom_nsfw(raw)
+    saved_label = out['human']['bust'][0]['label']
+    assert saved_label.count('🔞') == 1
