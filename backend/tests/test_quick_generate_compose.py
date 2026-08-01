@@ -281,3 +281,29 @@ def test_default_nsfw_ratio_is_zero_for_backward_compatibility():
         total=10, framing_ratios={'face': 100, 'bust': 0, 'body': 0},
         angle_ratios={'face': {'front': 100}}, rng=_rng(18))
     assert not any(v.get('nsfw') for v in out)
+
+
+def test_nsfw_content_never_attaches_to_a_non_human_subject_type(monkeypatch):
+    """_QUICK_GEN_NSFW_POOL is exclusively human-anatomy content (lingerie/
+    topless/nude wording), but QUICK_GEN_COMPONENTS only has a 'human' key
+    today — so any other subject_type currently crashes on pools[framing]
+    before the NSFW branch is ever reached, masking whether that branch is
+    actually scoped to humans. Give 'animal' a (borrowed) SFW pool so compose
+    can run to completion, then prove that even at nsfw_ratio=100 — which
+    forces every single slot to NSFW for a human subject (see
+    test_nsfw_ratio_hundred_always_draws_nsfw_content_for_every_slot) — a
+    non-human subject_type draws ZERO nsfw slots. Without the subject_type
+    == 'human' guard in compose_quick_generate_variations, this would fail:
+    _QUICK_GEN_NSFW_POOL has real 'face'/'bust'/'body' entries regardless of
+    who's asking."""
+    monkeypatch.setitem(fv.QUICK_GEN_COMPONENTS, 'animal', fv.QUICK_GEN_COMPONENTS['human'])
+    out = fv.compose_quick_generate_variations(
+        total=20, framing_ratios={'face': 34, 'bust': 33, 'body': 33},
+        angle_ratios={
+            'face': {'front': 100},
+            'bust': {'front': 100},
+            'body': {'front': 100},
+        },
+        subject_type='animal', nsfw_ratio=100, rng=_rng(19))
+    assert len(out) == 20
+    assert not any(v.get('nsfw') for v in out)

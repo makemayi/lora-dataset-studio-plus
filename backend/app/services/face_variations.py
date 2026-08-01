@@ -2936,7 +2936,16 @@ def compose_quick_generate_variations(
     slots from the existing curated NSFW_VARIATION_CATALOG instead of the
     SFW component pools — reused verbatim (label+prompt), tagged
     nsfw=True, so the existing Klein/Krea-only fail-closed gate and
-    aspect-ratio resolution both apply automatically downstream."""
+    aspect-ratio resolution both apply automatically downstream.
+
+    `_QUICK_GEN_NSFW_POOL` is exclusively human-anatomy content, so NSFW
+    draws are gated on the subject type being 'human' regardless of what
+    that pool happens to contain — QUICK_GEN_COMPONENTS only defines a
+    'human' key today, but this guard keeps the two independent so a
+    future non-human pool (or a future caller wiring nsfw_ratio through
+    for another subject type) can never silently attach human NSFW
+    content to a non-human dataset."""
+    st = normalize_subject_type(subject_type)
     pools = quick_gen_pools_for(subject_type)
     used_framings = _quick_gen_validate(total, framing_ratios, angle_ratios, pools, nsfw_ratio)
     rng = rng or random.Random()
@@ -2948,7 +2957,7 @@ def compose_quick_generate_variations(
         count = framing_counts[framing]
         if not count:
             continue
-        nsfw_pool = _QUICK_GEN_NSFW_POOL.get(framing) or []
+        nsfw_pool = _QUICK_GEN_NSFW_POOL.get(framing) or [] if st == 'human' else []
         nsfw_count = 0
         if nsfw_ratio and nsfw_pool:
             split = _largest_remainder_allocation(count, {'nsfw': nsfw_ratio, 'sfw': 100 - nsfw_ratio})
