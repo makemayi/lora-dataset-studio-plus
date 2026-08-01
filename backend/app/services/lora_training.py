@@ -5112,6 +5112,7 @@ def list_checkpoints(user_id, dataset_id, base_model=_PERSISTED, family=None,
                 c['run_id'], c['run_source'] = rec.cloud_run_id, 'cloud'
             else:
                 c['run_id'], c['run_source'] = rec.id, 'local'
+        if c.get('final'):
             # The FINAL save has no step in its name, so it was filed under the
             # last NUMBERED one (2750 for a 3000-step run) — where the dedup of
             # the ▶ Continue list swallowed it, making the run's real end
@@ -5119,8 +5120,25 @@ def list_checkpoints(user_id, dataset_id, base_model=_PERSISTED, family=None,
             # numbers the same file at the run's target (3000): two views, two
             # truths, and a pill the panel then refused. Number it like the graph
             # does — its own run's target — whenever the record knows better.
-            if c.get('final') and (rec.steps or 0) > c['step']:
-                c['step'] = rec.steps
+            #
+            # Deliberately UNSCOPED by source (unlike the badge lookup above):
+            # this only relabels a step NUMBER, it never assigns version/
+            # lineage/record_id, so a legitimately cloud-sourced record for
+            # THIS run (e.g. a cloud launch whose result was placed in this
+            # local run dir) may still correct it — the "cloud records never
+            # qualify" rule exists to stop an UNRELATED cloud record from
+            # stealing a checkpoint's badge/lineage by mtime coincidence,
+            # a different risk than this display-only relabel.
+            try:
+                final_rec = checkpoint_registry.record_for_mtime(
+                    dataset_id, fam,
+                    os.path.getmtime(os.path.join(run, c['filename'])),
+                    base_model=effective_base or '',
+                    variant=effective_variant)
+            except OSError:
+                final_rec = None
+            if final_rec is not None and (final_rec.steps or 0) > c['step']:
+                c['step'] = final_rec.steps
     # Exact resume is checkpoint-specific.  Old saves intentionally remain
     # usable, but are labelled weights-only instead of inheriting ai-toolkit's
     # mutable optimizer.pt by accident.  Verification is done here so the UI
