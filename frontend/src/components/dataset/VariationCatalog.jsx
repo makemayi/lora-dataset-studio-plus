@@ -6,6 +6,7 @@ import SettingsLink from '../common/SettingsLink';
 import { useCapabilities } from '../../context/CapabilitiesContext';
 import { apiFetch, putJson } from '../../api/fetchClient';
 import ShotIllustration, { contextEmoji } from './ShotIllustration';
+import QuickGenerateDialog from './QuickGenerateDialog.jsx';
 import { displayLabel } from '../../utils/labels';
 import { generationLoraPresetPayload, sanitizeGenerationLoraPresets } from '../../utils/generationLoras';
 import { requestHelpTip } from '../../help/helpTips';
@@ -174,7 +175,7 @@ function EngineCard({ id, checked, available, generating, onToggle, icon, title,
   );
 }
 
-export default function VariationCatalog({ datasetId = null, onGenerate, busy, generating = null, hasRef, composition, images = [], bodyFidelity = false, promptSuffix = '', promptSuffixes = null, onSaveSuffixes = null, subjectType = 'human', onSaveSubjectType = null }) {
+export default function VariationCatalog({ datasetId = null, onGenerate, busy, generating = null, hasRef, composition, images = [], bodyFidelity = false, promptSuffix = '', promptSuffixes = null, onSaveSuffixes = null, subjectType = 'human', onSaveSubjectType = null, quickGenerateCompose = null, quickGenerateComponents = null }) {
   const toast = useToast();
   const { caps } = useCapabilities();
   const [catalog, setCatalog] = useState([]);
@@ -199,6 +200,9 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
   const [selected, setSelected] = useState(new Set());
   const [multiplier, setMultiplier] = useState(1);
   const [klein, setKlein] = useState(null);
+  // 🎲 Quick generate: compose-by-count-and-ratio dialog, mounted only while open
+  // (avoids firing its on-mount pool fetch when the panel is just sitting idle).
+  const [quickGenOpen, setQuickGenOpen] = useState(false);
   // 🔞 NSFW mode — local Klein ONLY (the backend refuses NSFW on API engines).
   // Unlocks the uncensored body catalog + a free-prompt custom variation.
   const [nsfwMode, setNsfwMode] = useState(() => {
@@ -1188,6 +1192,13 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
             className="rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-[0.625rem] font-semibold text-indigo-200 hover:bg-primary/20 disabled:opacity-40">
             ＋ Save preset
           </button>
+          <button type="button" onClick={() => setQuickGenOpen(true)}
+            disabled={busy || !hasRef}
+            title="Compose a random batch by count + ratio, no card-by-card picking"
+            aria-label="Quick generate: compose a random batch by count and ratio"
+            className="rounded-md border border-indigo-400/50 bg-indigo-500/20 px-2 py-1 text-[0.625rem] font-semibold text-indigo-100 hover:bg-indigo-500/30 disabled:opacity-40">
+            🎲 Quick generate
+          </button>
           <span className="ml-auto flex items-center gap-2 flex-wrap text-[0.625rem] text-content-subtle" aria-hidden="true">
             {['face', 'bust', 'body', 'back'].map((fr) => (
               <span key={fr} className="flex items-center gap-1">
@@ -1647,6 +1658,19 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
             : `⚡ Generate (${totalImages(selected.size, engines, engineMode, multiplier)})`}
         </button>
       </div>
+
+      {quickGenOpen && (
+        <QuickGenerateDialog
+          hasRef={hasRef} busy={busy}
+          engines={engines} engineMode={engineMode}
+          klein={klein} loraStrength={loraStrength}
+          generationLoraPreset={generationLoraPresetPayload({ isKlein, presetName: loraPresetName, presets: loraPresets })}
+          onGenerate={onGenerate}
+          quickGenerateCompose={quickGenerateCompose}
+          quickGenerateComponents={quickGenerateComponents}
+          onResolve={() => setQuickGenOpen(false)}
+        />
+      )}
     </div>
   );
 }
