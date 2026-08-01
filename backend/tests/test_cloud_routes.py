@@ -38,10 +38,12 @@ def test_cloud_train_forwards_kwargs(client, monkeypatch):
     monkeypatch.setattr('app.services.cloud_training.launch_cloud_training', fake_launch)
     r = client.post(f'/api/dataset/{ds}/train/cloud',
                     json={'steps': 500, 'variant': 'turbo', 'train_type': 'krea',
+                          'training_mode': 'full_transformer',
                           'masked': False, 'allow_caption_quality': True})
     assert r.status_code == 200
     assert r.get_json()['ok'] is True
     assert seen['steps'] == 500 and seen['train_type'] == 'krea'
+    assert seen['training_mode'] == 'full_transformer'
     assert seen['masked'] is False
     assert seen['allow_caption_quality'] is True
 
@@ -66,8 +68,10 @@ def test_cloud_offers_route_returns_tiers(client, monkeypatch):
     ds = _mkds(client)
     seen = {}
 
-    def fake_tiers(user_id, dataset_id, train_type=None, variant=None, steps=None):
-        seen.update(train_type=train_type, variant=variant, steps=steps)
+    def fake_tiers(user_id, dataset_id, train_type=None, variant=None, steps=None,
+                   training_mode='lora'):
+        seen.update(train_type=train_type, variant=variant, steps=steps,
+                    training_mode=training_mode)
         return {'tiers': [{'gpu_name': 'RTX 3090', 'dph_total': 0.13,
                            'est_minutes': 48, 'est_cost': 0.11, 'speed': 1.0}],
                 'steps': 3000, 'family': 'krea', 'max_price_per_hour': 0.8}
@@ -75,11 +79,12 @@ def test_cloud_offers_route_returns_tiers(client, monkeypatch):
     monkeypatch.setattr('app.services.cloud_training.gpu_tiers', fake_tiers)
     r = client.get(
         f'/api/dataset/{ds}/train/cloud/offers'
-        '?train_type=krea&variant=base&steps=3000')
+        '?train_type=krea&variant=base&steps=3000&training_mode=full_transformer')
     assert r.status_code == 200
     body = r.get_json()
     assert body['ok'] is True and body['tiers'][0]['gpu_name'] == 'RTX 3090'
-    assert seen == {'train_type': 'krea', 'variant': 'base', 'steps': 3000}
+    assert seen == {'train_type': 'krea', 'variant': 'base', 'steps': 3000,
+                    'training_mode': 'full_transformer'}
 
 
 def test_cloud_offers_route_gated_when_unconfigured(client):
@@ -446,7 +451,9 @@ def test_continue_local_in_cloud_route_forwards_the_choice(client, monkeypatch):
                     json={'extra_steps': 1000, 'from_step': 500,
                           'train_type': 'krea', 'variant': 'base',
                           'base_model': '', 'gpu_name': 'RTX 5090',
-                          'overrides': {'sample_every': 250}, 'masked': False})
+                          'overrides': {'sample_every': 250}, 'masked': False,
+                          # Source is local LoRA; a stale dense selector is ignored.
+                          'training_mode': 'full_transformer'})
     assert r.status_code == 200 and r.get_json()['ok'] is True
     assert seen['dataset_id'] == ds
     assert seen['from_step'] == 500 and seen['extra_steps'] == 1000
@@ -454,9 +461,34 @@ def test_continue_local_in_cloud_route_forwards_the_choice(client, monkeypatch):
     assert seen['base_model'] == '' and seen['gpu_name'] == 'RTX 5090'
     assert seen['overrides'] == {'sample_every': 250}
     assert seen['masked'] is False
+    assert seen['training_mode'] == 'lora'
+    assert seen['resume_mode'] == 'weights_only'
 
 
 def test_continue_local_in_cloud_route_404_on_unknown_dataset(client, monkeypatch):
     monkeypatch.setenv('VAST_API_KEY', 'k-test')
     r = client.post('/api/dataset/999999/train/cloud/continue-local', json={})
     assert r.status_code == 404
+
+
+def test_recheck_dense_delivery_route_returns_helper_payload(client, monkeypatch):
+    seen = []
+    expected = {
+        'ok': True, 'run_id': 42, 'artifact_status': 'available',
+        'hf_url': 'https://huggingface.co/tester/Krea-42',
+    }
+    monkeypatch.setattr(
+        'app.services.cloud_training.recheck_full_transformer_delivery',
+        lambda run_id: seen.append(run_id) or dict(expected))
+    response = client.post(
+        '/api/dataset/train/cloud/recheck-delivery', json={'run_id': 42})
+    assert response.status_code == 200
+    assert response.get_json() == expected
+    assert seen == [42]
+
+
+def test_recheck_dense_delivery_route_requires_run_id(client):
+    response = client.post(
+        '/api/dataset/train/cloud/recheck-delivery', json={})
+    assert response.status_code == 400
+    assert response.get_json()['error'] == 'run_id is required'

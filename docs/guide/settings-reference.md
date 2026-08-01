@@ -562,6 +562,8 @@ separate 3.10–3.12 interpreter.
 
 Guard-rails on cost and host quality for rented pods. The card also shows a live **Spent this month** line. Everything here has a sane default — you can leave it all alone and just add the key.
 
+Full-model Krea 2 runs also need `HF_CLOUD_TOKEN`. A separate fine-grained token is strongly recommended: grant **`repo.content.read` exactly on `krea/Krea-2-Raw`**, then **`repo.content.read` + `repo.write` on one dedicated HF user or organization namespace containing only LDS deliveries**. [Create a fine-grained token](https://huggingface.co/settings/tokens/new?tokenType=fineGrained). A classic/global token with `role=write` is also accepted, but LDS shows a broad-access warning because it can modify every repository the account can write to; [create a global write token](https://huggingface.co/settings/tokens/new?tokenType=write). Read-only tokens are rejected, and Settings validates the token as soon as it is saved.
+
 | Setting | Key | Default | Range | What it does |
 |---|---|---|---|---|
 | **Max simultaneous cloud runs** | `cloud.max_concurrent_runs` | `1` | 1–10 | How many cloud pods may train at once. |

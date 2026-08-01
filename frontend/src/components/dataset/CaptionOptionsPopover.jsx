@@ -23,6 +23,10 @@ export const ENGINE_OPTIONS = [
 // The Ollama model + pull only bite when the resolved engine can use Ollama.
 export const OLLAMA_RELEVANT = new Set(['', 'auto', 'ollama']);
 
+// Optional Krea 2 companion preset. This is deliberately a per-dataset override:
+// the global 8B abliterated default remains the safer NSFW captioning choice.
+export const KREA_2_OLLAMA_MODEL = 'qwen3-vl:4b-instruct';
+
 // Vocabulary register for nude/sexual content. '' = leave the model to its own wording.
 // 'explicit' is the NSFW lane — pair it with an abliterated Ollama vision model.
 export const VOCABULARY_OPTIONS = [
@@ -32,7 +36,7 @@ export const VOCABULARY_OPTIONS = [
   { id: 'safe', label: 'Safe — non-explicit, no crude terms' },
 ];
 
-export default function CaptionOptionsPopover({ datasetId, onClose, onSaved }) {
+export default function CaptionOptionsPopover({ datasetId, trainType, onClose, onSaved }) {
   const toast = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -45,9 +49,13 @@ export default function CaptionOptionsPopover({ datasetId, onClose, onSaved }) {
   const [pullName, setPullName] = useState('');
   const [pull, setPull] = useState(null); // {state, model, progress, log, error}
   const pollRef = useRef(null);
+  const mountedRef = useRef(false);
+  const pollGenerationRef = useRef(0);
+  const selectOllamaAfterPullRef = useRef(false);
 
   useEffect(() => {
     let alive = true;
+    mountedRef.current = true;
     (async () => {
       try {
         const [opt, mdl] = await Promise.all([
@@ -68,44 +76,85 @@ export default function CaptionOptionsPopover({ datasetId, onClose, onSaved }) {
         if (alive) setLoading(false);
       }
     })();
-    return () => { alive = false; clearInterval(pollRef.current); };
+    return () => {
+      alive = false;
+      mountedRef.current = false;
+      pollGenerationRef.current += 1;
+      clearTimeout(pollRef.current);
+      pollRef.current = null;
+      selectOllamaAfterPullRef.current = false;
+    };
   }, [datasetId, toast]);
 
-  const refreshModels = async () => {
+  const refreshModels = async (isCurrent = () => mountedRef.current) => {
     const mdl = await apiFetch('/api/ollama/models').catch(() => null);
-    if (mdl) { setModels(mdl.models || []); setModelsReachable(mdl.reachable !== false); }
+    if (mdl && isCurrent()) {
+      setModels(mdl.models || []);
+      setModelsReachable(mdl.reachable !== false);
+    }
     return mdl;
   };
 
   const poll = () => {
-    clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
+    clearTimeout(pollRef.current);
+    const generation = ++pollGenerationRef.current;
+    const isCurrent = () => (
+      mountedRef.current && pollGenerationRef.current === generation
+    );
+
+    const checkPull = async () => {
+      pollRef.current = null;
       let s;
       try { s = await apiFetch('/api/ollama/pull', { background: true }); }
-      catch { clearInterval(pollRef.current); return; }
+      catch (error) {
+        if (!isCurrent()) return;
+        const message = error?.message || 'Could not check Ollama pull status';
+        selectOllamaAfterPullRef.current = false;
+        setPull((current) => ({
+          ...(current || {}),
+          state: 'error',
+          error: message,
+        }));
+        toast.error(message);
+        return;
+      }
+      if (!isCurrent()) return;
       setPull(s);
-      if (s.state === 'running') return;
-      clearInterval(pollRef.current);
+      if (s.state === 'running') {
+        // Schedule only after this GET settled: at most one status request is in flight.
+        pollRef.current = setTimeout(checkPull, 1200);
+        return;
+      }
       if (s.state === 'success') {
+        const selectOllamaBackend = selectOllamaAfterPullRef.current;
+        selectOllamaAfterPullRef.current = false;
+        await refreshModels(isCurrent);
+        if (!isCurrent()) return;
         toast.success(`Pulled ${s.model}`);
-        await refreshModels();
         setOllamaModel(s.model);   // use what we just pulled
+        if (selectOllamaBackend) setBackend('ollama');
         setPullName('');
       } else if (s.state === 'error') {
+        selectOllamaAfterPullRef.current = false;
         toast.error(s.error || 'The pull failed');
       }
-    }, 1200);
+    };
+
+    pollRef.current = setTimeout(checkPull, 1200);
   };
 
-  const startPull = async () => {
-    const name = pullName.trim();
+  const startPullByName = async (rawName, selectOllamaBackend = false) => {
+    const name = rawName.trim();
     if (!name) return;
     const r = await postJson('/api/ollama/pull', { model: name }).catch(() => null);
-    if (!r) return;
+    if (!mountedRef.current || !r) return;
     if (!r.ok) { toast.error(r.error || 'Could not start the pull'); return; }
+    selectOllamaAfterPullRef.current = selectOllamaBackend;
     setPull({ state: 'running', model: name, progress: r.progress ?? null, log: r.log || [], error: null });
     poll();
   };
+
+  const startPull = () => startPullByName(pullName);
 
   const save = async () => {
     setSaving(true);
@@ -126,13 +175,24 @@ export default function CaptionOptionsPopover({ datasetId, onClose, onSaved }) {
   // Keep a model that isn't in the live list (pulled elsewhere) selectable.
   const modelChoices = ollamaModel && !models.includes(ollamaModel)
     ? [ollamaModel, ...models] : models;
+  const kreaModelInstalled = models.includes(KREA_2_OLLAMA_MODEL);
+  const kreaModelSelected = backend === 'ollama' && ollamaModel === KREA_2_OLLAMA_MODEL;
+  const kreaModelPulling = pulling && pull?.model === KREA_2_OLLAMA_MODEL;
+  const chooseKreaModel = () => {
+    if (kreaModelInstalled) {
+      setBackend('ollama');
+      setOllamaModel(KREA_2_OLLAMA_MODEL);
+      return;
+    }
+    startPullByName(KREA_2_OLLAMA_MODEL, true);
+  };
   const inputCls = 'w-full px-2 py-1.5 rounded-lg bg-app/60 border border-border text-content text-sm';
 
   return (
     <div className="fixed inset-0 z-[9990] flex items-center justify-center bg-black/80 p-3"
       onClick={(e) => { e.stopPropagation(); onClose(); }}
       onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } }}>
-      <div role="dialog" aria-label="Caption method options"
+      <div role="dialog" aria-modal="true" aria-label="Caption method options"
         className="w-full max-w-md max-h-[92vh] overflow-y-auto rounded-xl border border-border bg-surface-overlay p-4 shadow-2xl flex flex-col gap-4"
         onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
@@ -170,22 +230,55 @@ export default function CaptionOptionsPopover({ datasetId, onClose, onSaved }) {
                   Ollama isn’t reachable — start it from Settings to list or pull models.
                 </p>
               )}
+              {trainType === 'krea' && (
+                <section aria-labelledby="krea-caption-model-title"
+                  className="mt-2 rounded-lg border border-sky-400/30 bg-sky-500/10 p-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <h4 id="krea-caption-model-title" className="text-sm font-semibold text-content">
+                        Krea 2 companion preset
+                      </h4>
+                      <p className="mt-0.5 break-all font-mono text-xs text-sky-300">
+                        {KREA_2_OLLAMA_MODEL}
+                      </p>
+                    </div>
+                    <button type="button" onClick={chooseKreaModel}
+                      disabled={pulling || (!kreaModelInstalled && !modelsReachable)}
+                      aria-describedby="krea-caption-model-note"
+                      aria-pressed={kreaModelInstalled ? kreaModelSelected : undefined}
+                      aria-busy={kreaModelPulling}
+                      className="w-full shrink-0 rounded-lg border border-sky-400/40 bg-sky-500/20 px-3 py-2 text-xs font-semibold text-sky-100 hover:bg-sky-500/30 disabled:opacity-40 sm:w-auto">
+                      {kreaModelSelected ? 'Selected'
+                        : kreaModelPulling ? 'Pulling…'
+                        : kreaModelInstalled ? 'Use'
+                        : 'Pull & use'}
+                    </button>
+                  </div>
+                  <p id="krea-caption-model-note" className="mt-2 text-xs leading-relaxed text-content-subtle">
+                    Uses the same Qwen3-VL-4B Instruct base model family/checkpoint as Krea 2 Edit.
+                    Ollama uses a different quantization and runtime, so captions are not bit-identical.
+                    The vanilla model can refuse explicit content; the default 8B abliterated model
+                    remains the better choice for NSFW.
+                  </p>
+                </section>
+              )}
               <p className="text-xs text-content-subtle">
                 Only used when the engine is Auto or Ollama. Pull a new vision model by name:
               </p>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <input value={pullName} onChange={(e) => setPullName(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); startPull(); } }}
                   placeholder="e.g. huihui_ai/qwen3-vl-abliterated:8b-instruct"
                   aria-label="Ollama model to pull"
-                  className="flex-1 px-2 py-1.5 rounded-lg bg-app/60 border border-border text-content text-xs" />
+                  className="min-w-0 w-full flex-1 px-2 py-1.5 rounded-lg bg-app/60 border border-border text-content text-xs" />
                 <button type="button" onClick={startPull} disabled={pulling || !pullName.trim() || !modelsReachable}
-                  className="px-3 py-1.5 rounded-lg bg-surface-raised border border-border text-content text-xs font-semibold disabled:opacity-40 hover:bg-surface">
+                  className="w-full px-3 py-1.5 rounded-lg bg-surface-raised border border-border text-content text-xs font-semibold disabled:opacity-40 hover:bg-surface sm:w-auto">
                   {pulling ? 'Pulling…' : '⇩ Pull'}
                 </button>
               </div>
               {pull && (
-                <p className={`text-xs ${pull.state === 'error' ? 'text-rose-400' : 'text-content-subtle'}`}>
+                <p role="status" aria-live="polite"
+                  className={`break-words text-xs ${pull.state === 'error' ? 'text-rose-400' : 'text-content-subtle'}`}>
                   {pull.state === 'running'
                     ? `Pulling ${pull.model}${pull.progress != null ? ` — ${pull.progress}%` : ''}${pull.log?.length ? ` (${pull.log[pull.log.length - 1]})` : ''}`
                     : pull.state === 'success' ? `Pulled ${pull.model}.`

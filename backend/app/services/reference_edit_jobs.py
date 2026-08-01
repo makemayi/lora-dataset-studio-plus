@@ -7,16 +7,15 @@ background thread, exactly like the variation batch: the request returns at once
 the worker fills a CANDIDATE, and the client rediscovers it through the dataset
 payload — which survives a tab sleep AND a reload.
 
-This registry holds ONE pending edit per dataset:
-  {status: running|ready|failed, engine, prompt, candidate_filename, error,
-   token, started_at, _touched, _dir, _job_id, _act_token}
+This registry holds one pending BATCH per dataset. Its ordered engine list owns
+one candidate state per engine, while one activity token covers the whole batch.
 
 It is IN-MEMORY only (like dataset_activity) — a job dies with the process, which
 is correct for a transient candidate awaiting Keep. The candidate FILE on disk is
 reclaimed by a TTL sweep so a crashed process never leaks it.
 
 TWO LANES, ONE REGISTRY. An API edit is a blocking call made from a service
-thread, which fills this entry itself. A LOCAL edit (Klein / Krea 2 Edit) is a
+thread, which fills its candidate state. A LOCAL edit (Klein / Krea 2 Edit) is a
 ComfyUI job: it is enqueued on the app's existing image queue and the queue
 worker calls back when it lands — the same waiting path every local generation
 already uses, not a second one. `_job_id` is what lets that callback find its way
@@ -25,8 +24,8 @@ callback must close (an API worker closes its own in a ``finally``; a local one
 has no thread left to do it).
 
 Leak-proofing (what replaces the old client-held "browser GC"):
-  * Keep      -> promote + delete the candidate file, clear the entry.
-  * Discard   -> delete the candidate file, clear the entry.
+  * Keep      -> promote one named candidate, delete every sibling, clear.
+  * Discard   -> delete every candidate file and clear the batch.
   * abandoned -> TTL purge: lazy on get() (deletes the file) + a disk sweep on the
                  next start() (catches a file orphaned by a process crash).
 A compare-and-set on ``token`` means a SUPERSEDED worker (a second edit started
@@ -36,9 +35,11 @@ return False and the stale worker deletes its own candidate instead.
 Disk ownership: this module owns the candidate files end to end (create is done by
 the service worker, delete lives here), so the lifecycle stays in one place.
 """
+from contextlib import contextmanager
 import itertools
 import logging
 import os
+import secrets
 import threading
 import time
 
@@ -52,7 +53,27 @@ _TTL_SECONDS = 30 * 60
 
 _lock = threading.Lock()
 _jobs: dict = {}                 # dataset_id -> entry dict
+_revisions: dict = {}            # dataset_id -> reference mutation epoch
 _counter = itertools.count(1)
+_mutation_locks_guard = threading.Lock()
+_mutation_locks: dict = {}        # dataset_id -> re-entrant primary-reference lock
+
+
+@contextmanager
+def reference_mutation(dataset_id):
+    """Serialize physical reference mutations and Keep for one dataset.
+
+    Lock order is deliberately one-way: this per-dataset lock MAY call registry
+    helpers that acquire ``_lock``; code holding ``_lock`` must never wait for a
+    mutation lock.  RLock permits the public mutation helpers to enforce the
+    invariant themselves while callers hold it across a larger transaction.
+    Locks stay process-lifetime: removing a lock while another thread is waiting
+    on it would let two different locks protect the same dataset.
+    """
+    with _mutation_locks_guard:
+        mutation_lock = _mutation_locks.setdefault(dataset_id, threading.RLock())
+    with mutation_lock:
+        yield
 
 
 def _unlink(path):
@@ -62,32 +83,185 @@ def _unlink(path):
         pass
 
 
-def _public(e):
-    """The client-facing shape embedded in the dataset payload."""
-    return {'status': e['status'], 'engine': e.get('engine'),
-            'prompt': e.get('prompt'), 'candidate_filename': e.get('candidate_filename'),
-            'error': e.get('error'), 'started_at': e['started_at']}
+def _candidate_public(candidate):
+    return {
+        'engine': candidate['engine'],
+        'status': candidate['status'],
+        'candidate_filename': candidate.get('candidate_filename'),
+        'error': candidate.get('error'),
+        'started_at': candidate['started_at'],
+    }
+
+
+def _public(entry):
+    """Client-facing batch shape, including exact one-engine compatibility."""
+    candidates = {
+        engine: _candidate_public(entry['candidates'][engine])
+        for engine in entry['engines']
+    }
+    selected = list(entry['engines'])
+    states = [candidate['status'] for candidate in candidates.values()]
+    status = ('running' if 'running' in states
+              else 'ready' if 'ready' in states else 'failed')
+    if len(selected) == 1:
+        legacy = candidates[selected[0]]
+        engine = legacy['engine']
+        candidate_filename = legacy['candidate_filename']
+        error = legacy['error']
+    else:
+        # Partial success is usable. Old clients never create multi-engine jobs,
+        # but one unambiguous ready result is still a sensible aggregate.
+        ready = [candidate for candidate in candidates.values()
+                 if candidate['status'] == 'ready']
+        engine = ready[0]['engine'] if len(ready) == 1 else None
+        candidate_filename = (ready[0]['candidate_filename']
+                              if len(ready) == 1 else None)
+        errors = [candidate['error'] for candidate in candidates.values()
+                  if candidate['error']]
+        error = ('; '.join(errors)[:500]
+                 if status == 'failed' and errors else None)
+    return {
+        'status': status,
+        'batch_id': entry['batch_id'],
+        'engine': engine,
+        'engines': selected,
+        'prompt': entry.get('prompt'),
+        'candidate_filename': candidate_filename,
+        'error': error,
+        'started_at': entry['started_at'],
+        'candidates': candidates,
+    }
+
+
+def _candidate_for_token(entry, token):
+    for candidate in entry['candidates'].values():
+        if candidate['token'] == token:
+            return candidate
+    return None
+
+
+def _cancel_queue_job(job_id):
+    if not job_id:
+        return
+    try:
+        from ..job_queue import queue_manager
+        queue_manager.cancel_job(job_id)
+    except Exception:
+        logger.warning('reference edit: could not cancel queue job %s',
+                       job_id, exc_info=True)
+
+
+def _cleanup_entry(entry, dsdir=None):
+    """Release every resource owned by a detached batch. Never raises."""
+    directory = dsdir or entry.get('_dir')
+    for candidate in entry.get('candidates', {}).values():
+        if directory and candidate.get('candidate_filename'):
+            _unlink(os.path.join(directory, candidate['candidate_filename']))
+        if candidate.get('status') == 'running':
+            _cancel_queue_job(candidate.get('_job_id'))
+    if entry.get('_act_token') is not None and not entry.get('_activity_closed'):
+        entry['_activity_closed'] = True
+        try:
+            from . import dataset_activity
+            dataset_activity.end(entry['_act_token'])
+        except Exception:
+            logger.warning('reference edit: could not close dataset activity',
+                           exc_info=True)
+
+
+def reference_revision(dataset_id):
+    """Current mutation epoch for the dataset reference."""
+    with _lock:
+        return _revisions.get(dataset_id, 0)
+
+
+def start_batch(dataset_id, dsdir, engines, prompt, act_token=None,
+                expected_revision=None, expected_batch_id=None):
+    """Register one ordered multi-engine batch and supersede the old batch.
+
+    Returns a batch token plus one compare-and-set worker token per engine.
+    Service validation owns the editable allow-list; duplicates are removed here
+    defensively without changing the user's selection order.
+    """
+    selected = tuple(dict.fromkeys(str(engine) for engine in engines))
+    if not selected:
+        raise ValueError('at least one reference-edit engine is required')
+    now = time.time()
+    batch_token = next(_counter)
+    batch_id = secrets.token_urlsafe(18)
+    tokens = {engine: next(_counter) for engine in selected}
+    entry = {
+        'batch_id': batch_id,
+        'prompt': str(prompt),
+        'engines': selected,
+        'candidates': {
+            engine: {
+                'engine': engine,
+                'status': 'running',
+                'candidate_filename': None,
+                'error': None,
+                'token': tokens[engine],
+                'started_at': now,
+                '_job_id': None,
+                '_user_id': None,
+                '_api_dispatch_claimed': False,
+            }
+            for engine in selected
+        },
+        'batch_token': batch_token,
+        'started_at': now,
+        '_touched': now,
+        '_dir': dsdir,
+        '_act_token': act_token,
+        '_activity_closed': False,
+        '_keep_claim': None,
+    }
+    with _lock:
+        current_revision = _revisions.get(dataset_id, 0)
+        if (expected_revision is not None
+                and expected_revision != current_revision):
+            raise RuntimeError(
+                'the reference changed while the edit was starting; retry the edit')
+        previous = _jobs.get(dataset_id)
+        if expected_batch_id is not None:
+            supplied_batch_id = str(expected_batch_id)
+            try:
+                matches_expected = bool(previous) and secrets.compare_digest(
+                    previous['batch_id'], supplied_batch_id)
+            except TypeError:
+                matches_expected = False
+            if not matches_expected:
+                # Retry is a potentially paid action. Refuse it atomically if a
+                # second tab replaced the batch after the first tab last polled.
+                raise RuntimeError(
+                    'this reference edit was replaced; refresh before retrying')
+        if previous and previous.get('_keep_claim') is not None:
+            raise RuntimeError(
+                'the edited reference is being kept; try again in a moment')
+        entry['_reference_revision'] = current_revision
+        _jobs[dataset_id] = entry
+    # Queue cancellation can trigger callbacks, so cleanup stays outside the lock.
+    if previous:
+        _cleanup_entry(previous)
+    sweep(dsdir)
+    return {'batch_token': batch_token, 'batch_id': batch_id, 'tokens': tokens}
 
 
 def start(dataset_id, dsdir, engine, prompt):
-    """Register a new RUNNING edit, SUPERSEDING any previous one for this dataset
-    (its candidate file is deleted). Returns a unique token the worker echoes back
-    on set_ready/set_failed — a stale worker whose token no longer matches is
-    ignored. Also runs the on-start disk sweep for crash-orphaned candidates."""
-    now = time.time()
+    """Backward-compatible one-engine registration."""
+    started = start_batch(dataset_id, dsdir, (engine,), prompt)
+    return started['tokens'][str(engine)]
+
+
+def attach_activity(dataset_id, batch_token, act_token):
+    """Attach the one shared activity token to a newly registered batch."""
     with _lock:
-        prev = _jobs.get(dataset_id)
-        token = next(_counter)
-        _jobs[dataset_id] = {'status': 'running', 'engine': str(engine),
-                             'prompt': str(prompt), 'candidate_filename': None,
-                             'error': None, 'token': token,
-                             'started_at': now, '_touched': now, '_dir': dsdir,
-                             '_job_id': None, '_act_token': None}
-    # Disk I/O outside the lock.
-    if prev and prev.get('candidate_filename') and prev.get('_dir'):
-        _unlink(os.path.join(prev['_dir'], prev['candidate_filename']))
-    sweep(dsdir)
-    return token
+        entry = _jobs.get(dataset_id)
+        if not entry or entry['batch_token'] != batch_token:
+            return False
+        entry['_act_token'] = act_token
+        entry['_touched'] = time.time()
+        return True
 
 
 def attach_job(dataset_id, token, job_id, act_token=None, user_id=None):
@@ -100,13 +274,30 @@ def attach_job(dataset_id, token, job_id, act_token=None, user_id=None):
     file the way the API worker does: it runs in the queue thread, with no request
     and no idea who owns the dataset."""
     with _lock:
-        e = _jobs.get(dataset_id)
-        if not e or e['token'] != token:
+        entry = _jobs.get(dataset_id)
+        candidate = _candidate_for_token(entry, token) if entry else None
+        if candidate is None or candidate['status'] != 'running':
             return False
-        e['_job_id'] = str(job_id)
-        e['_act_token'] = act_token
-        e['_user_id'] = user_id
-        e['_touched'] = time.time()
+        candidate['_job_id'] = str(job_id)
+        candidate['_user_id'] = user_id
+        if act_token is not None and entry.get('_act_token') is None:
+            entry['_act_token'] = act_token
+        entry['_touched'] = time.time()
+        return True
+
+
+def claim_api_dispatch(dataset_id, token):
+    """CAS-claim the one irreversible provider dispatch for an API candidate."""
+    with _lock:
+        entry = _jobs.get(dataset_id)
+        candidate = _candidate_for_token(entry, token) if entry else None
+        if (candidate is None or candidate['status'] != 'running'
+                or candidate.get('_api_dispatch_claimed')
+                or entry.get('_reference_revision')
+                != _revisions.get(dataset_id, 0)):
+            return False
+        candidate['_api_dispatch_claimed'] = True
+        entry['_touched'] = time.time()
         return True
 
 
@@ -118,56 +309,90 @@ def find_by_job(job_id):
     user is still owed an answer, so ``get`` bumping it is the caller's job."""
     key = str(job_id)
     with _lock:
-        for dataset_id, e in _jobs.items():
-            if e.get('_job_id') == key:
-                e['_touched'] = time.time()
-                return {'dataset_id': dataset_id, 'token': e['token'],
-                        'dir': e.get('_dir'), 'act_token': e.get('_act_token'),
-                        'engine': e.get('engine'), 'user_id': e.get('_user_id')}
+        for dataset_id, entry in _jobs.items():
+            for candidate in entry['candidates'].values():
+                if candidate.get('_job_id') == key:
+                    entry['_touched'] = time.time()
+                    return {
+                        'dataset_id': dataset_id,
+                        'batch_token': entry['batch_token'],
+                        'token': candidate['token'],
+                        'dir': entry.get('_dir'),
+                        'act_token': entry.get('_act_token'),
+                        'engine': candidate['engine'],
+                        'user_id': candidate.get('_user_id'),
+                    }
     return None
 
 
 def set_ready(dataset_id, token, candidate_filename):
-    """Mark the job ready with its candidate file. Returns False when the job was
-    superseded (token no longer current) — the caller then deletes its orphan."""
+    """Mark one engine ready. False means stale or already terminal."""
     with _lock:
-        e = _jobs.get(dataset_id)
-        if not e or e['token'] != token:
+        entry = _jobs.get(dataset_id)
+        candidate = _candidate_for_token(entry, token) if entry else None
+        if candidate is None or candidate['status'] != 'running':
             return False
-        e['status'] = 'ready'
-        e['candidate_filename'] = candidate_filename
-        e['_touched'] = time.time()
+        candidate['status'] = 'ready'
+        candidate['candidate_filename'] = candidate_filename
+        candidate['error'] = None
+        entry['_touched'] = time.time()
         return True
 
 
 def set_failed(dataset_id, token, error):
-    """Mark the job failed with a verbatim provider message. False if superseded."""
+    """Mark one engine failed without affecting its siblings."""
     with _lock:
-        e = _jobs.get(dataset_id)
-        if not e or e['token'] != token:
+        entry = _jobs.get(dataset_id)
+        candidate = _candidate_for_token(entry, token) if entry else None
+        if candidate is None or candidate['status'] != 'running':
             return False
-        e['status'] = 'failed'
-        e['error'] = str(error)[:500]
-        e['_touched'] = time.time()
+        candidate['status'] = 'failed'
+        candidate['error'] = str(error)[:500]
+        entry['_touched'] = time.time()
         return True
 
 
+def activity_update(dataset_id, token):
+    """Return shared progress and atomically claim its one final end call."""
+    with _lock:
+        entry = _jobs.get(dataset_id)
+        candidate = _candidate_for_token(entry, token) if entry else None
+        if candidate is None:
+            return None
+        total = len(entry['candidates'])
+        done = sum(item['status'] != 'running'
+                   for item in entry['candidates'].values())
+        act_token = entry.get('_act_token')
+        managed = act_token is not None
+        progress_token = None
+        end_token = None
+        if managed and not entry.get('_activity_closed'):
+            progress_token = act_token
+            if done == total:
+                entry['_activity_closed'] = True
+                end_token = act_token
+        entry['_touched'] = time.time()
+        return {
+            'managed': managed,
+            'activity_token': progress_token,
+            'end_token': end_token,
+            'done': done,
+            'total': total,
+        }
+
+
 def get(dataset_id):
-    """The public entry for the payload, or None. LAZY TTL: an entry untouched for
-    longer than the TTL is dropped here and its candidate file deleted — this is
-    what makes an abandoned edit leak-proof without a cron (the payload calls get()
-    on every poll)."""
+    """Public batch, lazily purging all resources after the TTL."""
     now = time.time()
     with _lock:
-        e = _jobs.get(dataset_id)
-        if not e:
+        entry = _jobs.get(dataset_id)
+        if not entry:
             return None
-        if now - e['_touched'] <= _TTL_SECONDS:
-            return _public(e)
+        if now - entry['_touched'] <= _TTL_SECONDS:
+            return _public(entry)
         _jobs.pop(dataset_id, None)
-        expired = e
-    if expired.get('candidate_filename') and expired.get('_dir'):
-        _unlink(os.path.join(expired['_dir'], expired['candidate_filename']))
+        expired = entry
+    _cleanup_entry(expired)
     return None
 
 
@@ -176,19 +401,138 @@ def peek(dataset_id):
     the candidate even if it just aged past the TTL boundary (the user did claim
     it). None when there is no entry."""
     with _lock:
-        e = _jobs.get(dataset_id)
-        return _public(e) if e else None
+        entry = _jobs.get(dataset_id)
+        return _public(entry) if entry else None
+
+
+def pending_jobs(dataset_id):
+    """Every currently running local queue job in the batch."""
+    with _lock:
+        entry = _jobs.get(dataset_id)
+        if not entry:
+            return []
+        return [
+            {
+                'job_id': candidate.get('_job_id'),
+                'act_token': entry.get('_act_token'),
+                'engine': candidate['engine'],
+            }
+            for candidate in entry['candidates'].values()
+            if candidate['status'] == 'running' and candidate.get('_job_id')
+        ]
 
 
 def pending_job(dataset_id):
     """(queue job_id, activity token) of the edit currently registered, both None
     when there is none or it is an API edit. Read WITHOUT dropping the entry, so
     a caller about to supersede can cancel the outgoing render first."""
+    jobs = pending_jobs(dataset_id)
+    if not jobs:
+        return None, None
+    return jobs[0]['job_id'], jobs[0]['act_token']
+
+
+def claim_ready(dataset_id, engine=None, batch_id=None):
+    """Atomically validate and reserve one current ready candidate for Keep."""
+    requested = str(engine).strip().lower() if engine is not None else None
     with _lock:
-        e = _jobs.get(dataset_id)
-        if not e:
-            return None, None
-        return e.get('_job_id'), e.get('_act_token')
+        entry = _jobs.get(dataset_id)
+        if (not entry or entry.get('_keep_claim') is not None
+                or entry.get('_reference_revision')
+                != _revisions.get(dataset_id, 0)):
+            return None
+        if batch_id is None:
+            # Even a one-engine stale tab must not be able to promote a newer
+            # batch merely because its engine name happens to match.
+            return None
+        supplied_batch_id = str(batch_id)
+        try:
+            matches_batch = secrets.compare_digest(
+                entry['batch_id'], supplied_batch_id)
+        except TypeError:  # non-ASCII strings are not valid opaque IDs
+            return None
+        if not matches_batch:
+            return None
+        if requested:
+            target = requested
+        elif len(entry['engines']) == 1:
+            target = entry['engines'][0]
+        else:
+            ready = [name for name, candidate in entry['candidates'].items()
+                     if candidate['status'] == 'ready']
+            target = ready[0] if len(ready) == 1 else None
+        candidate = entry['candidates'].get(target) if target else None
+        if (candidate is None or candidate['status'] != 'ready'
+                or not candidate.get('candidate_filename')):
+            return None
+        claim_token = next(_counter)
+        entry['_keep_claim'] = (
+            claim_token, target, entry['_reference_revision'])
+        entry['_touched'] = time.time()
+        return {
+            'batch_token': entry['batch_token'],
+            'claim_token': claim_token,
+            'batch_id': entry['batch_id'],
+            'reference_revision': entry['_reference_revision'],
+            'engine': target,
+            'candidate_filename': candidate['candidate_filename'],
+            'dir': entry.get('_dir'),
+        }
+
+
+def release_claim(dataset_id, batch_token, claim_token):
+    """Release a Keep reservation after a failed promotion."""
+    with _lock:
+        entry = _jobs.get(dataset_id)
+        if (not entry or entry['batch_token'] != batch_token
+                or not entry.get('_keep_claim')
+                or entry['_keep_claim'][0] != claim_token):
+            return False
+        entry['_keep_claim'] = None
+        entry['_touched'] = time.time()
+        return True
+
+
+def clear_claimed(dataset_id, batch_token, claim_token, dsdir=None,
+                  reference_mutated=False):
+    """Drop a promoted batch iff the caller still owns its Keep claim."""
+    with _lock:
+        entry = _jobs.get(dataset_id)
+        if (not entry or entry['batch_token'] != batch_token
+                or not entry.get('_keep_claim')
+                or entry['_keep_claim'][0] != claim_token
+                or entry['_keep_claim'][2]
+                != _revisions.get(dataset_id, 0)):
+            return None
+        if reference_mutated:
+            _revisions[dataset_id] = _revisions.get(dataset_id, 0) + 1
+        _jobs.pop(dataset_id, None)
+    _cleanup_entry(entry, dsdir)
+    return entry
+
+
+def clear_batch(dataset_id, batch_token, dsdir=None):
+    """CAS-clear one known batch without ever deleting a newer replacement."""
+    with _lock:
+        entry = _jobs.get(dataset_id)
+        if (not entry or entry['batch_token'] != batch_token
+                or entry.get('_keep_claim') is not None):
+            return None
+        _jobs.pop(dataset_id, None)
+    _cleanup_entry(entry, dsdir)
+    return entry
+
+
+def invalidate(dataset_id, dsdir=None):
+    """Atomically advance the reference epoch and detach its stale edit batch."""
+    with reference_mutation(dataset_id):
+        with _lock:
+            _revisions[dataset_id] = _revisions.get(dataset_id, 0) + 1
+            entry = _jobs.pop(dataset_id, None)
+            revision = _revisions[dataset_id]
+        if entry:
+            _cleanup_entry(entry, dsdir)
+        return revision
 
 
 def clear(dataset_id, dsdir=None):
@@ -201,10 +545,12 @@ def clear(dataset_id, dsdir=None):
     the caller is the only one that can cancel/close them — dropping the entry
     silently is how the ✦ badge used to sit there until the TTL."""
     with _lock:
-        e = _jobs.pop(dataset_id, None)
-    if e and dsdir and e.get('candidate_filename'):
-        _unlink(os.path.join(dsdir, e['candidate_filename']))
-    return e
+        entry = _jobs.get(dataset_id)
+        if not entry or entry.get('_keep_claim') is not None:
+            return None
+        _jobs.pop(dataset_id, None)
+    _cleanup_entry(entry, dsdir)
+    return entry
 
 
 def sweep(dsdir):
@@ -230,3 +576,4 @@ def reset():
     """Test helper: clear the whole registry (does NOT touch files)."""
     with _lock:
         _jobs.clear()
+        _revisions.clear()

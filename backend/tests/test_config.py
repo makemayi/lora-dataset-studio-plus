@@ -1,4 +1,22 @@
-import json, importlib
+import json, importlib, os
+import pytest
+
+
+UNSAFE_SECRET_CHARS = [
+    pytest.param('\r', id='cr'),
+    pytest.param('\n', id='lf'),
+    pytest.param('\x00', id='nul'),
+    pytest.param('\x0b', id='vertical-tab'),
+    pytest.param('\x0c', id='form-feed'),
+    pytest.param('\x1c', id='file-separator'),
+    pytest.param('\x1d', id='group-separator'),
+    pytest.param('\x1e', id='record-separator'),
+    pytest.param('\x85', id='next-line'),
+    pytest.param('\u2028', id='unicode-line-separator'),
+    pytest.param('\u2029', id='unicode-paragraph-separator'),
+    pytest.param('\t', id='other-control'),
+    pytest.param('\u200b', id='unicode-format'),
+]
 
 def _fresh(monkeypatch, tmp_path):
     monkeypatch.setenv('LDS_DATA_DIR', str(tmp_path / 'data'))
@@ -40,6 +58,57 @@ def test_secrets_roundtrip(tmp_path, monkeypatch):
     assert config.secret('OPENAI_API_KEY') == 'sk-test-123'
     env_text = (config.ENV_PATH).read_text(encoding='utf-8')
     assert 'sk-test-123' in env_text
+
+
+def test_secret_printable_characters_roundtrip_exactly(tmp_path, monkeypatch):
+    config = _fresh(monkeypatch, tmp_path)
+    value = "sk printable # = ' \\\\ ü"
+
+    config.set_secrets({'OPENAI_API_KEY': value})
+
+    monkeypatch.delenv('OPENAI_API_KEY', raising=False)
+    from dotenv import load_dotenv
+    load_dotenv(config.ENV_PATH, override=True)
+    assert config.secret('OPENAI_API_KEY') == value
+
+
+@pytest.mark.parametrize('separator', UNSAFE_SECRET_CHARS)
+def test_set_secrets_rejects_controls_without_mutating_file_or_environment(
+        tmp_path, monkeypatch, separator):
+    config = _fresh(monkeypatch, tmp_path)
+    config.ENV_PATH.write_bytes(b"GEMINI_API_KEY='old-value'\n")
+    before = config.ENV_PATH.read_bytes()
+    monkeypatch.setenv('OPENAI_API_KEY', 'runtime-before')
+    monkeypatch.delenv('FLASK_DEBUG', raising=False)
+
+    with pytest.raises(ValueError, match='single line'):
+        config.set_secrets({
+            'OPENAI_API_KEY': f'new-value{separator}FLASK_DEBUG=1',
+        })
+
+    assert config.ENV_PATH.read_bytes() == before
+    assert config.secret('OPENAI_API_KEY') == 'runtime-before'
+    assert 'FLASK_DEBUG' not in os.environ
+
+
+@pytest.mark.parametrize('separator', [
+    pytest.param('\x0b', id='vertical-tab'),
+    pytest.param('\u2028', id='unicode-line-separator'),
+])
+def test_set_secrets_refuses_to_normalize_poisoned_existing_env(
+        tmp_path, monkeypatch, separator):
+    config = _fresh(monkeypatch, tmp_path)
+    poisoned = f'OPENAI_API_KEY=old{separator}FLASK_DEBUG=1\n'.encode('utf-8')
+    config.ENV_PATH.write_bytes(poisoned)
+    monkeypatch.delenv('GEMINI_API_KEY', raising=False)
+    monkeypatch.delenv('FLASK_DEBUG', raising=False)
+
+    with pytest.raises(ValueError, match='existing .env'):
+        config.set_secrets({'GEMINI_API_KEY': 'safe-value'})
+
+    assert config.ENV_PATH.read_bytes() == poisoned
+    assert 'GEMINI_API_KEY' not in os.environ
+    assert 'FLASK_DEBUG' not in os.environ
 
 def test_secret_strips_trailing_whitespace(tmp_path, monkeypatch):
     """A pasted key with a trailing newline/space must not corrupt the Bearer header."""

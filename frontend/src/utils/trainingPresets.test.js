@@ -7,6 +7,7 @@ import {
   isTrainingPresetCompatible,
   trainingPresetApplyPayload,
   trainingPresetDatasetKind,
+  trainingPresetOwnsSteps,
   trainingPresetSnapshotScope,
 } from './trainingPresets.js'
 
@@ -58,6 +59,19 @@ test('apply plan uses preset id and the explicitly selected supported variant', 
     train_type: 'zimage',
     variant: 'base',
   })
+})
+
+test('preset step ownership includes character/concept recipes, not only Style', () => {
+  assert.equal(trainingPresetOwnsSteps({
+    dataset_kind: 'character',
+    settings: { preset_steps_per_image: 100, preset_steps_min: 3000 },
+  }), true)
+  assert.equal(trainingPresetOwnsSteps({
+    dataset_kind: 'concept', settings: { preset_steps_fixed: 2250 },
+  }), true)
+  assert.equal(trainingPresetOwnsSteps({
+    dataset_kind: 'style', settings: { rank: 32 },
+  }), false)
 })
 
 test('mismatch produces no payload, so the caller performs no request', () => {

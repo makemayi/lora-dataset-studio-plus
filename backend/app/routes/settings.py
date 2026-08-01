@@ -1,4 +1,5 @@
 """Settings API: config/secrets CRUD + capability probes."""
+import os
 import sys
 
 from flask import Blueprint, current_app, jsonify, request
@@ -36,6 +37,35 @@ _TEST_TARGETS = {
 
 def _secret_presence() -> dict:
     return {name: bool(cfg.secret(name)) for name in cfg.SECRET_KEYS}
+
+
+def _hf_cloud_secret_check(status: dict) -> dict:
+    """Adapt the delivery preflight to the Settings TestResult contract."""
+    namespace = status.get('namespace')
+    warning = status.get('warning')
+    if status.get('ok'):
+        detail = warning or (
+            'HF_CLOUD_TOKEN verified: krea/Krea-2-Raw is readable; '
+            f'delivery namespace: {namespace}.')
+    else:
+        detail = (
+            status.get('error') or 'HF_CLOUD_TOKEN could not be verified.')
+    result = {
+        'ok': bool(status.get('ok')),
+        'detail': detail,
+        'code': status.get('code') or (
+            'ready' if status.get('ok') else 'invalid'),
+        'configured': bool(status.get('configured')),
+        'severity': status.get('severity') or (
+            'success' if status.get('ok') else 'error'),
+        'settings_focus': (
+            status.get('settings_focus') or 'HF_CLOUD_TOKEN'),
+    }
+    if warning:
+        result['warning'] = warning
+    if namespace:
+        result['namespace'] = namespace
+    return result
 
 
 def _lan_ip():
@@ -118,6 +148,12 @@ def _settings_payload() -> dict:
         # "running vs saved" diff instead of showing a misleading n/a:n/a.
         'runtime': {'host': current_app.config.get('LDS_BOUND_HOST'),
                     'port': current_app.config.get('LDS_BOUND_PORT'),
+                    # Docker owns the bind through LDS_HOST/LDS_PORT and the
+                    # published host port through LDS_HOST_PORT.  The UI uses
+                    # this bit to prevent saving controls that cannot take
+                    # effect inside the managed container.
+                    'bind_managed': os.environ.get('LDS_BIND_MANAGED', '').strip().lower()
+                                    in {'1', 'true', 'yes', 'on'},
                     # LAN IPv4 so the Server card can show a real, copyable
                     # http://<ip>:port/ URL instead of a <this-computer> placeholder;
                     # None (offline / loopback-only) -> the UI keeps the placeholder.
@@ -168,6 +204,15 @@ def put_settings():
     if 'secrets' in body and not isinstance(body['secrets'], dict):
         return jsonify({'error': "'secrets' must be an object"}), 400
     config_partial = body.get('config') or {}
+    secrets_partial = body.get('secrets') or {}
+    # Validate through config's persistence boundary before saving config.json
+    # too, so a rejected combined request changes neither file.  This covers all
+    # control/format/Unicode line separators and a pre-existing poisoned .env,
+    # not only literal CR/LF.
+    try:
+        cfg.validate_secrets(secrets_partial)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
     unknown = set(config_partial) - set(cfg.DEFAULTS)
     if unknown:
         return jsonify({'error': f"unknown config section '{sorted(unknown)[0]}'"}), 400
@@ -206,8 +251,19 @@ def put_settings():
         node = config_partial.get(_managed)
         if isinstance(node, dict) and 'python' in node and not str(node.get('python') or '').strip():
             node.pop('python')
+    hf_cloud_check = None
+    hf_cloud_candidate = secrets_partial.get('HF_CLOUD_TOKEN')
+    if hf_cloud_candidate:
+        from ..services import cloud_training
+        hf_cloud_check = _hf_cloud_secret_check(
+            cloud_training.full_transformer_token_status(hf_cloud_candidate))
+        if not hf_cloud_check['ok']:
+            return jsonify({
+                'error': hf_cloud_check['detail'],
+                'secret_checks': {'HF_CLOUD_TOKEN': hf_cloud_check},
+            }), 400
     cfg.save_config(config_partial)
-    cfg.set_secrets(body.get('secrets') or {})
+    cfg.set_secrets(secrets_partial)
     # A changed ComfyUI location must take effect NOW: the base/model listers cache
     # their scans for 5 min, so without this the training-base dropdowns keep showing
     # the pre-save (often empty) list right after the user points the app at ComfyUI.
@@ -216,7 +272,10 @@ def put_settings():
     if 'comfyui' in config_partial:
         from ..utils import comfyui
         comfyui.clear_model_caches()
-    return jsonify(_settings_payload())
+    payload = _settings_payload()
+    if hf_cloud_check is not None:
+        payload['secret_checks'] = {'HF_CLOUD_TOKEN': hf_cloud_check}
+    return jsonify(payload)
 
 
 @bp.delete('/settings/secret/<name>')
@@ -317,6 +376,10 @@ def scoring_python_select():
 
 @bp.post('/settings/test/<target>')
 def test_connection(target):
+    if target == 'hf_cloud':
+        from ..services import cloud_training
+        return jsonify(_hf_cloud_secret_check(
+            cloud_training.full_transformer_token_preflight()))
     probe_fn = _TEST_TARGETS.get(target)
     if probe_fn is None:
         return jsonify({'error': f"unknown test target '{target}'"}), 404
@@ -343,12 +406,13 @@ def update_check():
     from ..services import updater
     force = bool(request.args.get('force'))
     auto = bool(request.args.get('auto'))
+    docker_runtime = updater.is_docker_runtime()
     # A git checkout: the meaningful signal is commits-behind-origin (the user pushes
     # commits to a branch, not tagged releases — a release-only check reads "up to date"
     # while the tree is many commits behind). The fetch runs on an explicit check
     # (force, always fresh) or an auto check (nav badge — served from a TTL cache so
     # SPA loads don't hammer the network); never from the bare passive path.
-    if (force or auto) and updater.is_git_checkout():
+    if (force or auto) and not docker_runtime and updater.is_git_checkout():
         now = time.time()
         if auto and not force and _git_check_cache['data'] is not None \
                 and (now - _git_check_cache['ts']) < _GIT_CHECK_TTL:
@@ -364,6 +428,8 @@ def update_check():
     repo = cfg.get('updates.repo') or 'perfectgf/lora-dataset-studio'
     out = {'ok': True, 'current': APP_VERSION, 'latest': None,
            'update_available': False, 'url': f'https://github.com/{repo}/releases'}
+    if docker_runtime:
+        out.update(updater.docker_update_payload())
     sha = updater.current_sha()
     if sha:
         out['current_sha'] = sha
@@ -387,10 +453,11 @@ def update_check():
                     zip_size = int(a.get('size') or 0)
                     if 'windows' in name:
                         break
-            out['can_apply'] = bool(zip_size) or any(
-                (a.get('name') or '').lower().endswith('.zip') and a.get('browser_download_url')
-                for a in (j.get('assets') or []))
-            out['zip_size'] = zip_size          # bytes, for the "download ~XX MB" hint
+            if not docker_runtime:
+                out['can_apply'] = bool(zip_size) or any(
+                    (a.get('name') or '').lower().endswith('.zip') and a.get('browser_download_url')
+                    for a in (j.get('assets') or []))
+                out['zip_size'] = zip_size      # bytes, for the "download ~XX MB" hint
         else:
             out['reason'] = (f'release feed answered {r.status_code} '
                              '(no public release yet?)')
@@ -411,6 +478,15 @@ def update_apply():
     trivial ZIP outcomes (up to date / no ZIP asset / offline) come back inline
     just like the git path. Both defer changed requirements to the restart helper."""
     from ..services import updater
+    # Refuse before even probing .git or the release feed: /app is immutable in
+    # the GPU image and an in-container update would be both incomplete and
+    # discarded on recreation.
+    if updater.is_docker_runtime():
+        return jsonify({
+            'ok': False,
+            'reason': 'Docker GPU installs must be updated by rebuilding the image.',
+            **updater.docker_update_payload(),
+        })
     if updater.is_git_checkout():
         res = updater.apply_update()
         res['restarting'] = bool(res.get('ok') and res.get('changed'))
@@ -442,17 +518,27 @@ def settings_restart():
     troubleshooting action. Same schedule_restart() as the updater, so it
     survives both a git checkout and the packaged build.
 
-    Pins the restarted process to the SAVED host/port via env: the launcher
+    Outside a managed container, pins the restarted process to the SAVED
+    host/port via env: the launcher
     (start.bat) exports LDS_PORT, which otherwise wins over config.json forever
     — so without this, changing the port in Settings + restart would keep coming
     back on the launcher's port and the field would look broken. schedule_restart
     passes os.environ down to the relaunch, so setting it here is what makes the
     saved port actually take effect."""
-    import os
     from ..services import updater
-    os.environ['LDS_HOST'] = str(cfg.get('server.host') or '127.0.0.1')
-    os.environ['LDS_PORT'] = str(cfg.get('server.port') or 5050)
-    updater.schedule_restart()
+    bind_managed = os.environ.get('LDS_BIND_MANAGED', '').strip().lower() \
+        in {'1', 'true', 'yes', 'on'}
+    environment_updates = None if bind_managed else {
+        'LDS_HOST': str(cfg.get('server.host') or '127.0.0.1'),
+        'LDS_PORT': str(cfg.get('server.port') or 5050),
+    }
+    try:
+        updater.schedule_restart(block_during_update=True,
+                                 environment_updates=environment_updates)
+    except updater.UpdateInProgressError as exc:
+        phase = exc.phase
+        return jsonify({'ok': False, 'restarting': False, 'phase': phase,
+                        'reason': 'An update is already in progress.'}), 409
     return jsonify({'ok': True, 'restarting': True})
 
 

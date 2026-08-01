@@ -543,6 +543,22 @@ def test_improve_route_accepts_empty_json_and_returns_contract(client, monkeypat
         'ok': True, 'candidate_id': 41, 'job_id': 'route-job'}
 
 
+def test_improve_route_recovery_barrier_has_no_service_side_effect(client, monkeypatch):
+    from app.job_queue import COMFYUI_STALLED_BARRIER_KEY, queue_manager
+    from app.services import face_dataset_service as svc
+
+    with client.application.app_context():
+        queue_manager._set_system_state(
+            COMFYUI_STALLED_BARRIER_KEY, {'job_id': 'unresolved'})
+    monkeypatch.setattr(
+        svc, 'improve_existing_image',
+        lambda *_args: (_ for _ in ()).throw(AssertionError('service must not run')))
+
+    response = client.post('/api/dataset/image/7/improve', json={})
+    assert response.status_code == 409
+    assert response.get_json()['code'] == 'comfyui_recovery_required'
+
+
 def test_improve_route_maps_not_found_and_klein_missing(client, monkeypatch):
     from app.services import face_dataset_service as svc
     from app.services import klein_edit_helper as keh

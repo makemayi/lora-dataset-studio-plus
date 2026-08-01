@@ -5,6 +5,24 @@ chapter (**Getting help**) shows how to report it with one click.
 
 ---
 
+## The page is completely blank on Windows, in every browser
+
+**Symptom:** the server log looks healthy, but the page is white and no browser
+loads the interface.
+
+**Why:** Windows stores a content type for each extension in
+`HKEY_CLASSES_ROOT\<ext>\Content Type`. Another program can overwrite the
+`.js` value with `text/plain`; older LDS builds then served the bundle with
+that registry MIME type and browsers refused to execute it.
+
+**Fix:** update LoRA Dataset Studio and restart it. Current builds set the MIME
+type of served assets themselves and do not trust the Windows registry. If an
+old build must be used temporarily, repair the `.js` Content Type to a
+JavaScript MIME type, then restart the browser. Updating is safer than making a
+registry edit by hand.
+
+*(Reported and diagnosed in [GitHub #12](https://github.com/perfectgf/lora-dataset-studio/issues/12).)*
+
 ## "No Z-Image model available" in the Test Studio or training panel
 
 **Why:** the Test Studio generates through ComfyUI, so the Z-Image *base model*
@@ -74,6 +92,27 @@ shows a warning toast naming the missing model when this happens.
 variant, not *Thinking*), or click the tile's crop button and frame it by hand.
 **↺ Reset to auto** re-runs the auto-crop after the model is installed.
 
+## Ollama isn't detected (or is installed but stopped)
+
+LDS distinguishes three states instead of treating every failed API probe as
+"not installed":
+
+| State | What the app shows | Fix |
+|---|---|---|
+| **Not installed** | No Ollama binary was found on PATH or in its standard install location | Install it from [ollama.com](https://ollama.com/download), then reopen Setup/Settings |
+| **Installed but stopped** | The binary exists but the server is not answering | Click **▶ Start Ollama** in Setup/Settings; the server stays independent of LDS |
+| **Running** | The API answers; the selected vision model is checked separately | Pull/select the missing model if the capability still stays unavailable |
+
+For the shipped default:
+
+```bash
+ollama pull huihui_ai/qwen3-vl-abliterated:8b-instruct
+```
+
+Keep the **Instruct** tag. The Thinking variant reasons instead of returning the
+compact captions these workflows expect. A different vision-capable model also
+works when its exact tag is saved in **Settings → Local tools → Ollama**.
+
 ## Training log looks frozen for several minutes
 
 **Why:** ai-toolkit's output is block-buffered during model load and latent
@@ -84,6 +123,25 @@ design.
 **Fix:** nothing to fix — check GPU utilization or watch the ai-toolkit output
 folder for new files if you want proof of life. The cloud runs page has a
 stall watchdog that kills genuinely stuck runs.
+
+## Training dies immediately on an RTX 50-series card ("no kernel image is available")
+
+**Why:** an RTX 50-series/Blackwell GPU reports compute capability `sm_120`.
+An older torch build can still report `torch.cuda.is_available() == True` and
+name the card correctly while carrying no kernel for that architecture. The run
+then fails on its first real CUDA operation.
+
+**Fix:** install a CUDA 12.8 torch build **inside ai-toolkit's own Python
+environment**, not only in the LDS venv:
+
+```bash
+python -m pip install torch --index-url https://download.pytorch.org/whl/cu128
+```
+
+Run that command with the exact Python configured under **Settings → Local
+tools → ai-toolkit Python interpreter**. The preflight/failure panel recognizes
+this specific `sm_120` mismatch. For another architecture mismatch, use the
+torch build appropriate to that card instead of copying this command blindly.
 
 ## ai-toolkit isn't detected (conda / uv / no venv)
 
@@ -116,9 +174,22 @@ with 401). Takes effect immediately, no restart needed.
 ## ComfyUI shows as unreachable
 
 Check **Settings → Local tools → ComfyUI API URL** (default
-`http://127.0.0.1:8188`), confirm ComfyUI is actually running, and check that a
-firewall or a different bind interface isn't blocking the connection. The
-**Test** button answers immediately.
+`http://127.0.0.1:8188`), confirm ComfyUI is running, and check that a firewall
+or a different bind interface is not blocking the connection.
+
+The test has two different failure paths:
+
+- **Connection refused/unreachable** returns quickly and tells you to start
+  ComfyUI or correct the URL.
+- **ComfyUI answered but its node/model inventory timed out** means the process
+  may simply be slow. Large custom-node and model collections make
+  `/object_info` expensive. LDS waits **45 seconds** by default; raise
+  `comfyui.object_info_timeout_s` under **Settings → Local tools → ComfyUI**
+  and test again.
+
+Do not keep increasing the timeout for a refused connection: a genuinely stopped
+ComfyUI is detected in seconds. If the URL test succeeds but generation still
+fails, continue with the shared-filesystem case below.
 
 ## ComfyUI runs in another container (or WSL, or another machine) and generation fails
 

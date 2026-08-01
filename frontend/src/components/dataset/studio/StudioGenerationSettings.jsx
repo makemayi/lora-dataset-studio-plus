@@ -38,6 +38,27 @@ import StudioSection from './StudioSection';
 const KREA_SAMPLERS_FALLBACK = ['er_sde', 'euler', 'euler_ancestral', 'dpmpp_2m', 'dpmpp_2m_sde', 'dpmpp_sde', 'res_multistep', 'deis', 'ddim', 'uni_pc'];
 const KREA_SCHEDULERS_FALLBACK = ['simple', 'sgm_uniform', 'beta', 'normal', 'ddim_uniform', 'kl_optimal', 'linear_quadratic'];
 
+// KREA_WEIGHT_DTYPE_HELPERS_START
+const KREA_DEFAULT_WEIGHT_DTYPE = 'fp8_e4m3fn';
+const KREA_WEIGHT_DTYPES = Object.freeze([
+  'default',
+  'fp8_e4m3fn',
+  'fp8_e4m3fn_fast',
+  'fp8_e5m2',
+]);
+const KREA_LEGACY_FP8_DTYPES = KREA_WEIGHT_DTYPES.filter((dtype) => dtype !== 'default');
+
+// `wdt` predates the FP8-safe Krea default. Its old implicit `default` value must
+// therefore migrate to FP8, while `wdt_v2=default` is an explicit user choice.
+const resolveKreaWeightDtype = (versionedValue, legacyValue) => (
+  KREA_WEIGHT_DTYPES.includes(versionedValue)
+    ? versionedValue
+    : (KREA_LEGACY_FP8_DTYPES.includes(legacyValue)
+      ? legacyValue
+      : KREA_DEFAULT_WEIGHT_DTYPE)
+);
+// KREA_WEIGHT_DTYPE_HELPERS_END
+
 // Formats du Studio (whitelist backend TEST_ASPECTS) + le nom de ratio attendu
 // par <ResolutionSelector> pour afficher les VRAIES dimensions générées.
 const STUDIO_ASPECTS = [
@@ -78,7 +99,10 @@ export default function StudioGenerationSettings({ family = 'zimage', storagePre
   const [detailAmount, setDetailAmountS] = useState(() => load('detail', 0.21, parseFloat));
   const [sampler, setSamplerS] = useState(() => load('sampler', ''));
   const [scheduler, setSchedulerS] = useState(() => load('scheduler', ''));
-  const [weightDtype, setWeightDtypeS] = useState(() => load('wdt', 'default'));
+  const [weightDtype, setWeightDtypeS] = useState(() => resolveKreaWeightDtype(
+    load('wdt_v2', null),
+    load('wdt', null),
+  ));
   const [rebalanceOn, setRebalanceOnS] = useState(() => load('rebalance', true, (v) => v === 'true'));
   const [rebalanceStrength, setRebalanceStrengthS] = useState(() => load('rebalanceStr', 4.0, parseFloat));
   const [enhancerOn, setEnhancerOnS] = useState(() => load('enhancer', false, (v) => v === 'true'));
@@ -96,7 +120,7 @@ export default function StudioGenerationSettings({ family = 'zimage', storagePre
   const setDetailAmount = (v) => { setDetailAmountS(v); save('detail', v); };
   const setSampler = (v) => { setSamplerS(v); save('sampler', v); };
   const setScheduler = (v) => { setSchedulerS(v); save('scheduler', v); };
-  const setWeightDtype = (v) => { setWeightDtypeS(v); save('wdt', v); };
+  const setWeightDtype = (v) => { setWeightDtypeS(v); save('wdt_v2', v); };
   const setRebalanceOn = (v) => { setRebalanceOnS(v); save('rebalance', v); };
   const setRebalanceStrength = (v) => { setRebalanceStrengthS(v); save('rebalanceStr', v); };
   const setEnhancerOn = (v) => { setEnhancerOnS(v); save('enhancer', v); };
@@ -321,14 +345,14 @@ export default function StudioGenerationSettings({ family = 'zimage', storagePre
                 aria-label="Krea loader precision (weight dtype)"
                 className="w-full bg-app/60 border border-border rounded-md px-2 py-1.5 text-content text-[0.8125rem] focus:border-primary focus:outline-none normal-case tracking-normal"
               >
-                <option value="default">bf16 (high precision)</option>
-                <option value="fp8_e4m3fn">Fast (fp8)</option>
+                <option value="default">ComfyUI default (auto · dtype varies)</option>
+                <option value="fp8_e4m3fn">FP8 e4m3fn (recommended)</option>
                 <option value="fp8_e4m3fn_fast">Fast+ (fp8 fast)</option>
                 <option value="fp8_e5m2">fp8 e5m2 (wide range)</option>
               </select>
             </label>
             <span className="normal-case tracking-normal text-[0.625rem] text-content-muted/70 -mt-1">
-              Use bf16 if the Enhancer gives black images (fp8 overflow). Slower, same VRAM.
+              FP8 e4m3fn is the Krea-safe default. “ComfyUI default” delegates the dtype to the checkpoint and may use much more VRAM; try it only as a compatibility fallback.
             </span>
           </div>
 

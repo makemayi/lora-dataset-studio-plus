@@ -43,6 +43,35 @@ python backend/run.py
 
 **Docker (API-only):** `cp .env.example .env`, then `docker compose up --build`.
 
+**Docker (GPU, with ComfyUI inside):** `cp .env.example .env`, then
+`mkdir -p run basedir data-docker-gpu bank-images` — create those yourself, or Docker creates
+them as `root` and the app cannot write to them — then
+`docker compose -f docker-compose.gpu.yml up --build`. Needs an NVIDIA GPU and the
+NVIDIA Container Toolkit; this is the only Docker option that can do Klein/Z-Image
+generation and the Test Studio.
+
+The CUDA 12.x compatibility minimum is driver **525.60.13 on Linux** or **528.33
+on Windows/WSL**; for the default CUDA 12.9 image, use at least **575.51.03 on
+Linux** or **576.02 on Windows**. The optional CUDA 13 image needs **R580+**.
+If you reuse an existing ComfyUI tree, `LDS_COMFY_BASEDIR` must name the parent
+that directly contains `models/`, `input/`, `output/` and `custom_nodes/`, not
+the `models/` folder itself. Compose actively defaults DNS to `1.1.1.1`; set
+`LDS_DNS` to your router or Pi-hole when internal hostnames matter.
+
+Both ports are published on the host and remain reachable from the LAN. A
+Settings restart is handled by the container supervisor and keeps the fixed
+container bind. To update this Docker flavour, update and rebuild the image rather
+than trying to replace `/app` in place:
+
+```
+git pull
+docker compose -f docker-compose.gpu.yml up -d --build
+```
+
+If `/data` or existing contents beneath it are not writable, `LDS_FORCE_CHOWN=true`
+is the last resort: it recursively changes ownership only for the `LDS_DATA` mount,
+never the ComfyUI or bank mounts.
+
 The full install matrix (Windows release ZIP, GPU requirements, external tools)
 lives in the README on GitHub.
 

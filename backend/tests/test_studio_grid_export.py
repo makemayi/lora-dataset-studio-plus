@@ -237,6 +237,59 @@ def test_collect_grid_aspect_filter_isolates_one_format(app, tmp_path):
         assert len(one['blocks']) == 1 and '9:16' in one['blocks'][0]['header']
 
 
+def test_collect_canvas_grid_preserves_explicit_image_order(app, tmp_path):
+    from app.services import studio_grid_export as sge
+    from app.models import LoraTestImage
+    from app.config import LOCAL_USER
+    with app.app_context():
+        ds_id = _make_run(app, tmp_path, run_seed=808, strengths=[0.5, 1.0],
+                          checkpoints=['z image\\lora_troubeau_000002000.safetensors'])
+        rows = LoraTestImage.query.filter_by(dataset_id=ds_id).order_by(LoraTestImage.id).all()
+        rows[0].z_model = r'models\Krea-2-Turbo.safetensors'
+        rows[0].record_id = 321
+        from app.services import face_dataset_service as svc
+        svc.db.session.commit()
+        grid = sge.collect_canvas_grid(LOCAL_USER, ds_id, [rows[1].id, rows[0].id])
+        cells = grid['blocks'][0]['rows'][0]['cells']
+        assert [os.path.basename(path) for path in cells] == [rows[1].filename, rows[0].filename]
+        assert grid['blocks'][0]['col_labels'] == [
+            f'#{rows[1].id} · 12 steps · ×1.0 · seed 808',
+            f'#{rows[0].id} · run #321 · Krea-2-Turbo · 12 steps · ×0.5 · seed 808',
+        ]
+        assert grid['aspect'] == 'canvas' and grid['n_cells'] == 2
+
+
+def test_collect_canvas_grid_rejects_foreign_and_duplicate_ids(app, tmp_path):
+    import pytest
+    from app.services import studio_grid_export as sge
+    from app.models import LoraTestImage
+    from app.config import LOCAL_USER
+    with app.app_context():
+        first = _make_run(app, tmp_path, run_seed=901, strengths=[1.0],
+                          checkpoints=['z image\\lora_a_000001000.safetensors'])
+        second = _make_run(app, tmp_path, run_seed=902, strengths=[1.0],
+                           checkpoints=['z image\\lora_b_000001000.safetensors'])
+        first_id = LoraTestImage.query.filter_by(dataset_id=first).first().id
+        second_id = LoraTestImage.query.filter_by(dataset_id=second).first().id
+        with pytest.raises(ValueError, match='another dataset'):
+            sge.collect_canvas_grid(LOCAL_USER, first, [first_id, second_id])
+        with pytest.raises(ValueError, match='duplicates'):
+            sge.collect_canvas_grid(LOCAL_USER, first, [first_id, first_id])
+
+
+def test_render_canvas_strip_preserves_mixed_aspects(tmp_path):
+    from app.services import studio_grid_export as sge
+    portrait = tmp_path / 'portrait.png'
+    landscape = tmp_path / 'landscape.png'
+    _tile(portrait, 100, 200, (100, 20, 20))
+    _tile(landscape, 300, 100, (20, 100, 20))
+    image, downscaled = sge.render_canvas_strip_image(
+        'Canvas', '2 images', [str(portrait), str(landscape)], ['1', '2'],
+        cell_size=200)
+    assert image.width > image.height
+    assert downscaled is False
+
+
 # --- orchestrator: encode + options -------------------------------------------
 def test_export_grid_returns_jpeg_by_default(app, tmp_path):
     from app.services import studio_grid_export as sge

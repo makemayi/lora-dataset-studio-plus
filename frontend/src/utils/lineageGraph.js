@@ -217,6 +217,7 @@ export function buildLineageGraph(tree, { bigPreviews = false } = {}) {
       const { dx, dy } = pillOffset(i, m);
       return { step: c.step, final: !!c.final, present: c.present !== false,
         download_url: c.download_url || null, filename: c.filename,
+        resume_state: c.resume_state || null,
         // Lab inline generation: whether this checkpoint has a deployed LoRA the
         // engine can preview, and its generated preview (url + async status).
         testable: c.testable === true,

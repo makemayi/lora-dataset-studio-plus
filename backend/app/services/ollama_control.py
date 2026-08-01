@@ -134,11 +134,12 @@ def _is_loopback_url(url: str) -> bool:
     return host == 'localhost' or host == '::1' or host.startswith('127.')
 
 
-def ensure_captioning_ready() -> dict:
-    """Start a stopped local Ollama on demand and verify the configured model.
+def ensure_captioning_ready(model: str | None = None) -> dict:
+    """Start a stopped local Ollama on demand and verify the effective model.
 
     A remote configured URL is never replaced by a local process. The caller is an
-    explicit caption action, not a passive capability probe.
+    explicit caption action, not a passive capability probe. ``model=None`` keeps
+    the historical behavior and verifies the globally configured vision model.
     """
     url = _url()
     if not _reachable(url):
@@ -149,10 +150,14 @@ def ensure_captioning_ready() -> dict:
         if not started.get('ok') or not started.get('reachable'):
             return {'ok': False, 'reachable': False,
                     'error': started.get('error') or 'Ollama could not start'}
-    model = capabilities.probe_ollama_model(reachable=True)
-    if not model.get('ok'):
+    probe_kwargs = {'reachable': True}
+    if model is not None:
+        probe_kwargs['model'] = model
+    model_status = capabilities.probe_ollama_model(**probe_kwargs)
+    if not model_status.get('ok'):
         return {'ok': False, 'reachable': True,
-                'error': model.get('detail') or 'Configured Ollama vision model is not available'}
+                'error': model_status.get('detail')
+                         or 'Configured Ollama vision model is not available'}
     return {'ok': True, 'reachable': True, 'model_ready': True}
 
 
@@ -162,7 +167,36 @@ def ensure_captioning_ready() -> dict:
 # lives here (an Ollama action) rather than in setup_installer, whose fixed catalog
 # deliberately takes no client-supplied arguments. The name is validated to Ollama's
 # own reference charset (never shelled out — it's a JSON field to the local server).
-_MODEL_REF_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$')
+_MODEL_REF_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}')
+_MODEL_REF_ERROR = (
+    'Enter a valid Ollama model name (e.g. '
+    'huihui_ai/qwen3-vl-abliterated:8b-instruct).')
+
+
+def normalize_ollama_model_ref(value, *, allow_empty: bool = False) -> str:
+    """Return one validated Ollama model reference.
+
+    Surrounding horizontal whitespace is normalized for compatibility with the
+    existing picker, but line breaks are always rejected before stripping. The
+    reference itself is ASCII-only and at most 200 characters. Non-string values
+    are never coerced: API callers must send ``""`` explicitly for the global
+    default.
+    """
+    if not isinstance(value, str):
+        raise ValueError('ollama_model must be a string')
+    if '\r' in value or '\n' in value:
+        raise ValueError('invalid ollama_model: line breaks are not allowed')
+    # Normalize only horizontal ASCII padding. Other Unicode/control whitespace
+    # remains in the candidate and is rejected by the ASCII fullmatch below.
+    model = value.strip(' \t')
+    if not model:
+        if allow_empty:
+            return ''
+        raise ValueError('invalid ollama_model: a model name is required')
+    if _MODEL_REF_RE.fullmatch(model) is None:
+        raise ValueError(
+            'invalid ollama_model: use 1-200 letters, digits, ".", "_", ":", "/", or "-"')
+    return model
 
 # One pull at a time, tracked so the popover can poll {state, model, progress, log, error}.
 _pull_lock = threading.Lock()
@@ -241,20 +275,32 @@ def _finish_pull(state: str, error: str | None = None):
 
 def start_pull(model: str) -> dict:
     """Start pulling an Ollama model by name (background). Returns the pull status.
-    A blank/invalid name is rejected; a pull already running is left untouched and its
-    status returned (the UI polls it). Requires a reachable server."""
+    A blank/invalid name is rejected. A pull already running for the same model is
+    idempotent; a different model is refused so callers cannot accidentally select
+    the model from an unrelated pull. Requires a reachable server."""
     global _pull
-    model = (model or '').strip()
-    if not _MODEL_REF_RE.match(model):
+    try:
+        model = normalize_ollama_model_ref(model)
+    except ValueError:
         return {**_pull_snapshot(), 'ok': False,
-                'error': 'Enter a valid Ollama model name (e.g. '
-                         'huihui_ai/qwen3-vl-abliterated:8b-instruct).'}
+                'error': _MODEL_REF_ERROR}
     if not _reachable(_url()):
         return {**_pull_snapshot(), 'ok': False,
                 'error': 'Ollama is not reachable — start it first.'}
     with _pull_lock:
         if _pull is not None and _pull['state'] == 'running':
-            return {'ok': True, 'already_running': True, **_pull_snapshot()}
+            active = _pull_snapshot()
+            if active['model'] == model:
+                return {'ok': True, 'already_running': True, **active}
+            return {
+                'ok': False,
+                'already_running': True,
+                **active,
+                'error': (
+                    f'Ollama is already pulling "{active["model"]}". '
+                    f'Wait for it to finish before pulling "{model}".'
+                ),
+            }
         _pull = {'state': 'running', 'model': model, 'progress': None,
                  'log': [], 'error': None}
     threading.Thread(target=_run_pull, args=(model,), daemon=True).start()

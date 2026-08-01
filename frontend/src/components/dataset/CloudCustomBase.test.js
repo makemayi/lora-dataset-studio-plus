@@ -13,7 +13,7 @@ test('cloud dialog embeds the custom-base push gate and blocks launch until read
   assert.match(panel, /function CustomBasePushSection\(/);
   assert.match(panel, /train\/cloud\/custom-base\?/);           // readiness poll
   assert.match(panel, /train\/cloud\/custom-base\/push/);       // one-time push POST
-  assert.match(panel, /disabled=\{!selected \|\| launching \|\| !customBaseReady\}/);
+  assert.match(panel, /disabled=\{!selected \|\| launching \|\| !customBaseReady \|\| hfTokenBlocked\}/);
 });
 
 test('push copy states PRIVATE repo + one-time + reused, in English', () => {

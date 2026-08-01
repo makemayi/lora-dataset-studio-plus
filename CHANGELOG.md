@@ -1,7 +1,25 @@
 # Changelog
 
-Older entries rolled out of the README's [Recent improvements](README.md#recent-improvements)
-section, newest first. Everything below is live on main.
+Shipped improvements rolled out of the README, newest first. Everything below
+is live on `main`; current news and in-progress work are discussed on
+[Discord](https://discord.gg/j6hnJBFtXE).
+
+## Rolled 2026-07-31
+
+- **🔤 Find images in a bank by describing them, and pick a set that actually covers your framings** — **🔤 Find by text** ranks the current view against a phrase, reusing the embeddings Score already computed. **⚖️ Balanced pick** spreads a selection over face/bust/body/back and names any framing it cannot fill. **🎨 Pick diverse** now discounts isolated oddities instead of spending its first picks on memes and strangers. Each tool states its limits: text is a ranking rather than a filter, cannot count, and ignores negative wording.
+- **↩ Take back a bulk decision, and retune the filters where you are triaging** — bulk keep/reject, threshold auto-reject, duplicate collapse and Launch all leave one reload-proof Undo snapshot. Filter thresholds also live beside the bank filters, explain which direction catches more, and preview how many images a proposed value flags.
+- **◉ Every run you have ever trained, on one board** — the LoRA Canvas places every dataset lineage on one pan/zoom surface. Cards can be arranged persistently or tidied back into their automatic trees; checkpoints across datasets can generate together under the same prompt and seed, and every checkpoint keeps its render gallery.
+- **🧬 A second local engine that keeps a face from one photo** — Krea 2 Edit joins Klein as a local ComfyUI dataset engine. It preserves identity while restaging angle, pose and scene without a pre-existing character LoRA, and readiness messages name each missing node/model dependency.
+- **⚡ Faster Test Studio launches** — workflow/model discovery and ComfyUI node inventory are reused across a grid instead of repeated per cell. Launches perform fewer database writes and no longer contend as heavily with cloud progress updates.
+- **🛡️ Files are harder to lose** — Delete rejected now prefers the OS Recycle Bin, falls back to the app Trash, and states the destination before confirmation. It also warns when banks share or nest source folders.
+- **📦 Move a bank to another disk without losing analysis** — Move folder repoints a matching image tree while preserving scores, groups, faces, captions and decisions, with a preview before commit.
+- **🧽 Banks can remove the watermarks they find** — a model-free crop or LaMa/Klein repaint writes a separate clean file, Review supports Keep/Reject/Skip, and newly dropped source images are inventoried automatically.
+- **⚡ Faster long vision passes** — bank watermark, framing and caption calls can overlap through configurable Ollama concurrency. Score can borrow a CUDA-capable Python already present instead of installing another large torch stack.
+- **📥 Bring your own shot catalog, with real non-human catalogs** — catalogs import/export as JSON with per-entry validation, and one-off shots can be kept server-side. Animal, creature, object and other subjects have dedicated catalogs and identity wording.
+- **🔎 Failed runs identify the cause** — the failure panel extracts the line that explains the crash, recognizes the RTX 50-series `sm_120`/torch mismatch, and links the run folder even when a run dies before its first step.
+- **☁️ Cloud Stop and watchdog decisions use evidence** — a reporting run stops gracefully, a silent pod is terminated through vast.ai, frozen runs cannot bill indefinitely, and active downloads are judged by byte progress rather than training-step silence.
+
+Community reports behind this roll-up came from **wannadecryptor**, **ashish.sinha**, **bbsorry**, **vykas22**, **axelf_**, **vvilams**, **naniii2352**, **j_o_e_l** and **zigzag4794** on Discord; **bobba84**, **strouder**, **shivdbz2010** and **1Tomber** on GitHub; and **Psyko_2000** on Reddit.
 
 ## Rolled 2026-07-26 (shipped 2026-07-23 → 2026-07-24)
 

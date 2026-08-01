@@ -2137,7 +2137,8 @@ def inject_krea_loras(workflow, requested, allowed, unet_node="20", consumers=("
     Négatif autorisé (tire un slider LoRA vers son pôle négatif — même plancher
     que Z-Image/SDXL) ; les LoRA always-on restent clampés ≥0 EN AMONT par leurs
     appelants (lora_test_studio), donc ce plancher ne les élargit pas.
-    Returns the number of LoRAs injected; 0 leaves the workflow untouched.
+    An effective strength of exactly 0.0 is a true no-op: no loader node is
+    created. Returns the number of LoRAs injected; 0 leaves the workflow untouched.
     Independent of the conditioning rebalance (node 30), on the prompt path."""
     if unet_node not in workflow or not isinstance(requested, list):
         return 0
@@ -2153,6 +2154,11 @@ def inject_krea_loras(workflow, requested, allowed, unet_node="20", consumers=("
             strength = max(-2.0, min(20.0, float(item.get("strength", 1.0))))
         except (TypeError, ValueError):
             strength = 1.0
+        # Keep the graph canonical for a semantic no-op.  Current ComfyUI also
+        # short-circuits a zero-strength loader, while omitting the node avoids
+        # depending on that implementation detail in older or third-party nodes.
+        if strength == 0.0:
+            continue
         node_id = f"krea_lora_{idx}"
         workflow[node_id] = {
             "class_type": "LoraLoaderModelOnly",

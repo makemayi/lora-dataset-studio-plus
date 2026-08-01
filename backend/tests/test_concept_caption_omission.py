@@ -191,6 +191,80 @@ def _patch_joy(monkeypatch, draft):
                         lambda paths, prompt=None, **kw: {p: draft for p in paths})
 
 
+def _concept_model_passes(app, monkeypatch, *, override=None):
+    """Run expansion -> Joy refine -> omission rewrite and return model captures."""
+    from app.services import vision_ollama
+
+    monkeypatch.delenv('VISION_OLLAMA_MODEL', raising=False)
+    save_config({
+        'captioning': {'backend': 'auto'},
+        'ollama': {'vision_model': 'global-vlm:latest'},
+    })
+    ds, img = _concept_with_image()
+    if override:
+        svc.set_caption_options(LOCAL_USER, ds.id, {'ollama_model': override})
+    _patch_joy(monkeypatch, 'A woman licking ice cream, red hair, in a park.')
+    seen = []
+
+    def fake_describe(image_bytes, prompt, **kw):
+        if 'BLOCKLIST' in prompt:
+            pass_name = 'blocklist'
+            result = 'not json -> use concept-description fallback'
+        elif 'Rewrite it as ONE clean caption' in prompt:
+            pass_name = 'refine'
+            result = 'The task says we need to remove the concept and rewrite the caption.'
+        elif 'forbidden words' in prompt:
+            pass_name = 'omission'
+            result = 'A woman with red hair stands in a sunny park.'
+        else:
+            pass_name = 'direct'
+            result = 'A woman licking ice cream, red hair, in a sunny park.'
+        seen.append({
+            'pass': pass_name,
+            'explicit_model': kw.get('model'),
+            'effective_model': kw.get('model') or vision_ollama.get_vision_model(),
+        })
+        return result
+
+    monkeypatch.setattr(vision_ollama, 'describe_image_ollama', fake_describe)
+    unloaded = []
+    monkeypatch.setattr(
+        vision_ollama, 'unload_vision_model',
+        lambda *, model=None: unloaded.append(model))
+    n = svc.caption_images(LOCAL_USER, ds.id)
+    db.session.refresh(img)
+    return n, img.caption, seen, unloaded
+
+
+def test_caption_concept_all_passes_use_custom_model(app, monkeypatch):
+    """Blocklist expansion, main refine and omission repair stay on one override."""
+    with app.app_context():
+        n, caption, seen, unloaded = _concept_model_passes(
+            app, monkeypatch, override='custom-vlm:latest')
+
+    assert n == 1
+    assert caption == 'A woman with red hair stands in a sunny park.'
+    assert [item['pass'] for item in seen] == [
+        'blocklist', 'refine', 'direct', 'omission']
+    assert {item['explicit_model'] for item in seen} == {'custom-vlm:latest'}
+    assert {item['effective_model'] for item in seen} == {'custom-vlm:latest'}
+    assert unloaded == ['custom-vlm:latest']
+
+
+def test_caption_concept_without_override_uses_global_model(app, monkeypatch):
+    """No per-dataset override leaves every Concept pass on the global default."""
+    with app.app_context():
+        n, caption, seen, unloaded = _concept_model_passes(app, monkeypatch)
+
+    assert n == 1
+    assert caption == 'A woman with red hair stands in a sunny park.'
+    assert [item['pass'] for item in seen] == [
+        'blocklist', 'refine', 'direct', 'omission']
+    assert all(item['explicit_model'] is None for item in seen)
+    assert {item['effective_model'] for item in seen} == {'global-vlm:latest'}
+    assert unloaded == [None]
+
+
 def test_caption_concept_uses_clean_qwen_refine(app, monkeypatch):
     from app.services import vision_ollama
     with app.app_context():

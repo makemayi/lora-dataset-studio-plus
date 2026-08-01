@@ -442,6 +442,43 @@ def list_all_testable_checkpoints(user_id) -> list[dict]:
 
 
 # --- Guards ------------------------------------------------------------------
+def _comfyui_recovery_target() -> dict | None:
+    """Return the exact Studio view owning the durable ComfyUI barrier.
+
+    The barrier is global, so the dataset currently displayed by the UI may not
+    be the one that needs recovery.  Only expose a navigation target when the
+    durable owner, queue row and unfinished Studio cell still agree.
+    """
+    owner = queue_manager.get_comfyui_stalled_barrier()
+    if not isinstance(owner, dict) or not isinstance(owner.get('job_id'), str):
+        return None
+    job_id = owner['job_id']
+    queue_row = ImageGenerationQueue.query.filter_by(job_id=job_id, status='stalled').first()
+    cells = (LoraTestImage.query
+             .filter_by(job_id=job_id, status='pending')
+             .filter(LoraTestImage.filename.is_(None)).limit(2).all())
+    if queue_row is None or len(cells) != 1:
+        return None
+    cell = cells[0]
+    if (('dataset_id' in owner and owner.get('dataset_id') != str(cell.dataset_id))
+            or ('run_id' in owner and owner.get('run_id') != cell.run_id)
+            or ('cell_id' in owner and owner.get('cell_id') != str(cell.id))):
+        return None
+    kind = owner.get('kind', 'prompt')
+    if kind == 'unknown_submit':
+        if queue_row.comfyui_prompt_id is not None or owner.get('prompt_id') is not None:
+            return None
+    elif (kind != 'prompt'
+          or str(queue_row.comfyui_prompt_id or '') != str(owner.get('prompt_id') or '')):
+        return None
+    return {
+        'dataset_id': cell.dataset_id,
+        'run_id': cell.run_id,
+        'family': family_of_lora(cell.checkpoint) or 'zimage',
+        'kind': kind,
+    }
+
+
 def gpu_busy_reason() -> str | None:
     """Return a human error when the GPU is held by a long-running exclusive
     task (LoRA training / vision pass), else None. The queue itself serializes
@@ -451,7 +488,12 @@ def gpu_busy_reason() -> str | None:
     if queue_manager._get_system_state('vision_in_progress', False):
         return "Vision pass in progress (GPU busy) - try again in a moment."
     if queue_manager.has_comfyui_stalled_barrier():
-        return 'ComfyUI recovery is required before another Test Studio batch can start.'
+        target = _comfyui_recovery_target()
+        if target and target['kind'] == 'unknown_submit':
+            return ('A Test Studio image is paused because its ComfyUI submission outcome is unknown. '
+                    'Restart ComfyUI, open the paused test, confirm the restart, then resume it.')
+        return ('A Test Studio image is paused because ComfyUI stopped answering. '
+                'Open the paused test, click Stop to recover it, then Resume.')
     return None
 
 
@@ -614,6 +656,27 @@ def build_matrix(checkpoints, strengths, aspects=None, cfgs=None, steps_list=Non
     # du nombre de cellules / de la durée dans l'UI avant de lancer.
     return [(c, s, a, cf, sp, sp2)
             for c in cps for s in sts for a in asp for cf in cfs for sp in sps for sp2 in sps2]
+
+
+def _krea_zero_strength_first(items, run_family, strength_of) -> list:
+    """Stable-partition Krea around controls with the tested LoRA switched off.
+
+    Moving every exact-zero tested-LoRA cell before its non-zero counterparts
+    avoids returning to a tested-LoRA-free graph after Krea has begun loading
+    the tested LoRAs. Both partitions keep their original order
+    (base-model/checkpoint/aspect axes included), negative strengths remain in
+    the non-zero partition, and other model families are deliberately left
+    byte-for-byte ordered as before. Permanent/batch LoRAs remain untouched and
+    may still patch a zero-strength control.
+    """
+    planned = list(items)
+    if run_family != 'krea':
+        return planned
+    zero = []
+    nonzero = []
+    for item in planned:
+        (zero if strength_of(item) == 0.0 else nonzero).append(item)
+    return zero + nonzero
 
 
 # --- « 🔎 Describe » : image → TEST PROMPT via le modèle vision Ollama ---------
@@ -1109,23 +1172,25 @@ def _persist_and_enqueue_cell(img, user_id, dataset_id, prompt, build_workflow) 
     back is exactly the profile that starves a concurrent writer into
     'database is locked'.
 
+    The workflow is built before taking the GPU arbiter: resolving files/nodes
+    must not hold local GPU scheduling.  The arbiter is then acquired *before*
+    the first cell write and retained through the cell + queue commit.  This
+    keeps the only safe lock order (GPU_ARBITER_LOCK -> SQLite transaction) and
+    prevents a recovery barrier from appearing after ``add_job(commit=False)``
+    checked readiness but before this transaction becomes durable.
+
     On failure the half-built transaction is rolled back (dropping the queue row that
     may already have been staged) and the cell is re-inserted as 'failed' with the
     reason, so the caller's `raise` still surfaces a visible, explained tile."""
     job_id = str(uuid.uuid4())
     img.job_id = job_id
-    db.session.add(img)
+
     try:
-        # A flush is not a commit: it gives the queue metadata the exact cell id
-        # while preserving the one-transaction insert invariant below.
-        db.session.flush()
         workflow = build_workflow()
-        _enqueue_cell(user_id, dataset_id, workflow, prompt, job_id=job_id, commit=False,
-                      cell_id=img.id, run_id=img.run_id)
-        db.session.commit()
     except Exception as e:
-        # rollback expunges the pending cell + job rows; the cell object goes back to
-        # transient and can be re-added as the failed marker.
+        # Workflow construction has not touched the queue transaction.  Roll
+        # back any read/autoflush side effect from a builder before recording
+        # the explained failure marker.
         db.session.rollback()
         img.job_id = None
         img.status = 'failed'
@@ -1133,6 +1198,28 @@ def _persist_and_enqueue_cell(img, user_id, dataset_id, prompt, build_workflow) 
         db.session.add(img)
         db.session.commit()
         raise
+
+    with GPU_ARBITER_LOCK:
+        db.session.add(img)
+        try:
+            # A flush is not a commit: it gives the queue metadata the exact cell id
+            # while preserving the one-transaction insert invariant below.
+            db.session.flush()
+            _enqueue_cell(user_id, dataset_id, workflow, prompt, job_id=job_id,
+                          commit=False, cell_id=img.id, run_id=img.run_id)
+            db.session.commit()
+        except Exception as e:
+            # rollback expunges the pending cell + job rows; the cell object goes back
+            # to transient and can be re-added as the failed marker.  Keep the outer
+            # arbiter through this replacement commit too: never acquire it after a
+            # SQLite write transaction has begun.
+            db.session.rollback()
+            img.job_id = None
+            img.status = 'failed'
+            img.error = str(e)[:400] or 'enqueue failed'
+            db.session.add(img)
+            db.session.commit()
+            raise
     return job_id
 
 
@@ -1600,7 +1687,8 @@ def create_run(user_id, dataset_id, checkpoints, strengths, seed=None, prompt=No
 
     Each cell's row and its queue job land in ONE commit (`_persist_and_enqueue_cell`);
     an enqueue failure marks that row 'failed' and re-raises - already-enqueued cells
-    keep their rows AND their jobs. Returns {'created', 'seed', 'count', 'ids'}."""
+    keep their rows AND their jobs. Returns
+    {'created', 'seed', 'count', 'run_id', 'ids'}."""
     ds = fds.get_dataset(user_id, dataset_id)
     if not ds:
         raise ValueError('dataset not found')
@@ -1735,50 +1823,64 @@ def create_run(user_id, dataset_id, checkpoints, strengths, seed=None, prompt=No
     # produces (see checkpoint_origins) — the canvas gallery reads these columns,
     # it never re-parses a filename.
     origin_of = checkpoint_origins(cps_in, origins)
+    # One opaque id per invocation is the strict boundary of a render-equivalent
+    # timeline.  A later launch with the same prompt/seed/settings must never be
+    # spliced into this one; resume_run reuses the ids already stored on rows.
+    run_id = uuid.uuid4().hex
+    # Partition the complete base-model × cell plan, not each base separately:
+    # after Krea starts applying a tested LoRA, it must not return to a
+    # tested-LoRA-off control merely because the optional base axis advanced.
+    cell_plan = _krea_zero_strength_first(
+        ((zm, cell) for zm in valid_models for cell in cells),
+        run_family,
+        lambda planned: planned[1][1],
+    )
     ids = []
-    for zm in valid_models:                       # AXE modèle de base (multi-sélection)
-        for checkpoint, strength, cell_aspect, cell_cfg, cell_steps, cell_steps2 in cells:
-            # Format/CFG/steps (1 et 2) testés comme axes à part entière (multi-sélection).
-            width, height = _aspect_dims(cell_aspect, run_family, knobs['resolution_tier'],
-                                         knobs['resolution_multiplier'])
-            for batch_lora in batch_axis:  # AXE ⚖ batch : sans, puis avec chaque LoRA coché
-              row_extra = extra_loras + ([{**batch_lora, 'batch': True}] if batch_lora else [])
-              wf_extra = extra_loras + ([batch_lora] if batch_lora else [])
-              cell_extra_json = json.dumps(row_extra) if row_extra else None
-              for cell_seed in seeds:  # N images par config (seeds différents), bande dans la cellule
-                img = LoraTestImage(dataset_id=dataset_id, checkpoint=checkpoint,
-                                    strength=strength, seed=cell_seed, run_seed=seed,
-                                    status='pending', z_model=zm, aspect=cell_aspect,
-                                    prompt=prompt, cfg=cell_cfg, steps=cell_steps, steps2=cell_steps2,
-                                    extra_loras=cell_extra_json, krea_rebalance=cell_rebalance,
-                                    negative=knobs['negative'], sampler=knobs['sampler'],
-                                    scheduler=knobs['scheduler'], weight_dtype=knobs['weight_dtype'],
-                                    enhancer_strength=knobs['enhancer_strength'],
-                                    detail_amount=knobs['detail_amount'],
-                                    resolution_tier=knobs['resolution_tier'],
-                                    resolution_multiplier=knobs['resolution_multiplier'],
-                                    init_image=knobs['init_image'], denoise=knobs['denoise'],
-                                    record_id=origin_of.get(checkpoint, (None, None))[0],
-                                    step=origin_of.get(checkpoint, (None, None))[1])
-                _persist_and_enqueue_cell(
-                    img, user_id, dataset_id, prompt,
-                    lambda: _build_cell_workflow(user_id, checkpoint, strength,
-                                                 prompt, cell_seed, zm, allowed,
-                                                 width=width, height=height,
-                                                 cfg=cell_cfg, steps=cell_steps, steps2=cell_steps2,
-                                                 dataset_id=dataset_id,
-                                                 train_type=run_family, extra_loras=wf_extra,
-                                                 rebalance=cell_rebalance,
-                                                 negative=knobs['negative'], sampler=knobs['sampler'],
-                                                 scheduler=knobs['scheduler'], weight_dtype=knobs['weight_dtype'],
-                                                 enhancer_strength=knobs['enhancer_strength'],
-                                                 detail_amount=knobs['detail_amount'],
-                                                 trigger_word=ds.trigger_word,
-                                                 available_classes=available_classes))
-                ids.append(img.id)
-    logger.info(f"lora-test: run dataset {dataset_id} -> {len(ids)} cellule(s) "
+    for zm, cell in cell_plan:
+        checkpoint, strength, cell_aspect, cell_cfg, cell_steps, cell_steps2 = cell
+        # Format/CFG/steps (1 et 2) testés comme axes à part entière (multi-sélection).
+        width, height = _aspect_dims(cell_aspect, run_family, knobs['resolution_tier'],
+                                     knobs['resolution_multiplier'])
+        for batch_lora in batch_axis:  # AXE ⚖ batch : sans, puis avec chaque LoRA coché
+          row_extra = extra_loras + ([{**batch_lora, 'batch': True}] if batch_lora else [])
+          wf_extra = extra_loras + ([batch_lora] if batch_lora else [])
+          cell_extra_json = json.dumps(row_extra) if row_extra else None
+          for cell_seed in seeds:  # N images par config (seeds différents), bande dans la cellule
+            img = LoraTestImage(dataset_id=dataset_id, checkpoint=checkpoint,
+                                strength=strength, seed=cell_seed, run_seed=seed,
+                                run_id=run_id,
+                                status='pending', z_model=zm, aspect=cell_aspect,
+                                prompt=prompt, cfg=cell_cfg, steps=cell_steps, steps2=cell_steps2,
+                                extra_loras=cell_extra_json, krea_rebalance=cell_rebalance,
+                                negative=knobs['negative'], sampler=knobs['sampler'],
+                                scheduler=knobs['scheduler'], weight_dtype=knobs['weight_dtype'],
+                                enhancer_strength=knobs['enhancer_strength'],
+                                detail_amount=knobs['detail_amount'],
+                                resolution_tier=knobs['resolution_tier'],
+                                resolution_multiplier=knobs['resolution_multiplier'],
+                                init_image=knobs['init_image'], denoise=knobs['denoise'],
+                                record_id=origin_of.get(checkpoint, (None, None))[0],
+                                step=origin_of.get(checkpoint, (None, None))[1])
+            _persist_and_enqueue_cell(
+                img, user_id, dataset_id, prompt,
+                lambda: _build_cell_workflow(user_id, checkpoint, strength,
+                                             prompt, cell_seed, zm, allowed,
+                                             width=width, height=height,
+                                             cfg=cell_cfg, steps=cell_steps, steps2=cell_steps2,
+                                             dataset_id=dataset_id,
+                                             train_type=run_family, extra_loras=wf_extra,
+                                             rebalance=cell_rebalance,
+                                             negative=knobs['negative'], sampler=knobs['sampler'],
+                                             scheduler=knobs['scheduler'], weight_dtype=knobs['weight_dtype'],
+                                             enhancer_strength=knobs['enhancer_strength'],
+                                             detail_amount=knobs['detail_amount'],
+                                             trigger_word=ds.trigger_word,
+                                             available_classes=available_classes))
+            ids.append(img.id)
+    logger.info(f"lora-test: run {run_id} dataset {dataset_id} -> {len(ids)} cellule(s) "
                 f"({len(valid_models)} modèle(s)), base seed {seed} ×{count}")
-    return {'created': len(ids), 'seed': seed, 'count': count, 'ids': ids}
+    return {'created': len(ids), 'seed': seed, 'count': count,
+            'run_id': run_id, 'ids': ids}
 
 
 def create_comparison_run(user_id, selections, strengths, seed=None, prompt=None,
@@ -1919,8 +2021,21 @@ def create_comparison_run(user_id, selections, strengths, seed=None, prompt=None
          if s.get('checkpoint') and s.get('record_id') is not None
          and s.get('step') is not None})
     run_id = uuid.uuid4().hex
-    ids = []
+    # Materialize the original selection-major plan, then stable-partition it
+    # once for Krea. Zero tested-LoRA-off controls across *all* selected
+    # checkpoints therefore finish before the first non-zero tested-LoRA cell,
+    # while each group's checkpoint-major and strength order stays unchanged.
+    cell_plan = []
     for sel in selections:
+        checkpoint = sel.get('checkpoint')
+        for cell in build_matrix([checkpoint], strengths, aspects, cfgs,
+                                 steps_list, steps2_list):
+            cell_plan.append((sel, cell))
+    cell_plan = _krea_zero_strength_first(
+        cell_plan, run_type, lambda planned: planned[1][1])
+
+    ids = []
+    for sel, cell in cell_plan:
         ds, allowed = _dataset_and_checkpoints(sel.get('dataset_id'))
         if not ds:
             raise ValueError(f"dataset {sel.get('dataset_id')} not found")
@@ -1928,44 +2043,43 @@ def create_comparison_run(user_id, selections, strengths, seed=None, prompt=None
         if checkpoint not in allowed:
             raise ValueError(f'unknown checkpoint for {ds.name}: {checkpoint}')
         cell_prompt = common_prompt or identity_prompt(ds)
-        cells = build_matrix([checkpoint], strengths, aspects, cfgs, steps_list, steps2_list)
-        for cp, strength, cell_aspect, cell_cfg, cell_steps, cell_steps2 in cells:
-            width, height = _aspect_dims(cell_aspect, run_type, knobs['resolution_tier'],
-                                         knobs['resolution_multiplier'])
-            for batch_lora in batch_axis:  # AXE ⚖ batch : sans, puis avec chaque LoRA coché
-              row_extra = extra_loras + ([{**batch_lora, 'batch': True}] if batch_lora else [])
-              wf_extra = extra_loras + ([batch_lora] if batch_lora else [])
-              cell_extra_json = json.dumps(row_extra) if row_extra else None
-              for cell_seed in seeds:
-                img = LoraTestImage(dataset_id=ds.id, checkpoint=cp, strength=strength,
-                                    seed=cell_seed, run_seed=seed, run_id=run_id,
-                                    status='pending', z_model=z_model, aspect=cell_aspect,
-                                    prompt=cell_prompt, cfg=cell_cfg, steps=cell_steps, steps2=cell_steps2,
-                                    extra_loras=cell_extra_json, krea_rebalance=cell_rebalance,
-                                    negative=knobs['negative'], sampler=knobs['sampler'],
-                                    scheduler=knobs['scheduler'], weight_dtype=knobs['weight_dtype'],
-                                    enhancer_strength=knobs['enhancer_strength'],
-                                    detail_amount=knobs['detail_amount'],
-                                    resolution_tier=knobs['resolution_tier'],
-                                    resolution_multiplier=knobs['resolution_multiplier'],
-                                    init_image=knobs['init_image'], denoise=knobs['denoise'],
-                                    record_id=origin_of.get(cp, (None, None))[0],
-                                    step=origin_of.get(cp, (None, None))[1])
-                _persist_and_enqueue_cell(
-                    img, user_id, ds.id, cell_prompt,
-                    lambda: _build_cell_workflow(user_id, cp, strength, cell_prompt,
-                                         cell_seed, z_model, allowed, width=width,
-                                         height=height, cfg=cell_cfg, steps=cell_steps,
-                                         steps2=cell_steps2, dataset_id=ds.id,
-                                         train_type=run_type, extra_loras=wf_extra,
-                                         rebalance=cell_rebalance,
-                                         negative=knobs['negative'], sampler=knobs['sampler'],
-                                         scheduler=knobs['scheduler'], weight_dtype=knobs['weight_dtype'],
-                                         enhancer_strength=knobs['enhancer_strength'],
-                                         detail_amount=knobs['detail_amount'],
-                                         trigger_word=ds.trigger_word,
-                                         available_classes=available_classes))
-                ids.append(img.id)
+        cp, strength, cell_aspect, cell_cfg, cell_steps, cell_steps2 = cell
+        width, height = _aspect_dims(cell_aspect, run_type, knobs['resolution_tier'],
+                                     knobs['resolution_multiplier'])
+        for batch_lora in batch_axis:  # AXE ⚖ batch : sans, puis avec chaque LoRA coché
+          row_extra = extra_loras + ([{**batch_lora, 'batch': True}] if batch_lora else [])
+          wf_extra = extra_loras + ([batch_lora] if batch_lora else [])
+          cell_extra_json = json.dumps(row_extra) if row_extra else None
+          for cell_seed in seeds:
+            img = LoraTestImage(dataset_id=ds.id, checkpoint=cp, strength=strength,
+                                seed=cell_seed, run_seed=seed, run_id=run_id,
+                                status='pending', z_model=z_model, aspect=cell_aspect,
+                                prompt=cell_prompt, cfg=cell_cfg, steps=cell_steps, steps2=cell_steps2,
+                                extra_loras=cell_extra_json, krea_rebalance=cell_rebalance,
+                                negative=knobs['negative'], sampler=knobs['sampler'],
+                                scheduler=knobs['scheduler'], weight_dtype=knobs['weight_dtype'],
+                                enhancer_strength=knobs['enhancer_strength'],
+                                detail_amount=knobs['detail_amount'],
+                                resolution_tier=knobs['resolution_tier'],
+                                resolution_multiplier=knobs['resolution_multiplier'],
+                                init_image=knobs['init_image'], denoise=knobs['denoise'],
+                                record_id=origin_of.get(cp, (None, None))[0],
+                                step=origin_of.get(cp, (None, None))[1])
+            _persist_and_enqueue_cell(
+                img, user_id, ds.id, cell_prompt,
+                lambda: _build_cell_workflow(user_id, cp, strength, cell_prompt,
+                                     cell_seed, z_model, allowed, width=width,
+                                     height=height, cfg=cell_cfg, steps=cell_steps,
+                                     steps2=cell_steps2, dataset_id=ds.id,
+                                     train_type=run_type, extra_loras=wf_extra,
+                                     rebalance=cell_rebalance,
+                                     negative=knobs['negative'], sampler=knobs['sampler'],
+                                     scheduler=knobs['scheduler'], weight_dtype=knobs['weight_dtype'],
+                                     enhancer_strength=knobs['enhancer_strength'],
+                                     detail_amount=knobs['detail_amount'],
+                                     trigger_word=ds.trigger_word,
+                                     available_classes=available_classes))
+            ids.append(img.id)
     logger.info(f"lora-test: comparison run {run_id} -> {len(ids)} cellule(s), {len(selections)} LoRA, seed {seed}")
     return {'created': len(ids), 'seed': seed, 'count': count, 'run_id': run_id, 'ids': ids}
 
@@ -2902,6 +3016,7 @@ def studio_payload(user_id, dataset_id, family=None) -> dict | None:
         'recent_prompts': user_recent_prompts(ds.user_id),
         'gpu_busy': gpu_busy_reason(),
         'comfyui_recovery': _unknown_submit_recovery(rows, activity),
+        'comfyui_recovery_target': _comfyui_recovery_target(),
         'best_settings': best,
     }
 
@@ -2966,6 +3081,7 @@ def studio_payload_run(user_id, run_id) -> dict | None:
         'resumable': sum(1 for r in rows if r.status in ('cancelled', 'failed')),
         'gpu_busy': gpu_busy_reason(),
         'comfyui_recovery': _unknown_submit_recovery(rows, activity),
+        'comfyui_recovery_target': _comfyui_recovery_target(),
     }
 
 

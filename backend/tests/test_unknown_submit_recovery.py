@@ -51,6 +51,34 @@ def _stalled_studio_cell(app, *, run_id='recovery-run', known_prompt=False):
         return dataset.id, cell.id, job_id
 
 
+def _stalled_dataset_generation(app):
+    """Create one ordinary dataset card behind an unknown-submit barrier."""
+    from app.config import LOCAL_USER
+    from app.extensions import db
+    from app.job_queue import queue_manager
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+
+    with app.app_context():
+        dataset = svc.create_dataset(LOCAL_USER, 'Generate recovery', 'generate-recovery')
+        job_id = str(uuid.uuid4())
+        card = FaceDatasetImage(
+            dataset_id=dataset.id, source='generated', status='pending',
+            job_id=job_id)
+        db.session.add(card)
+        db.session.flush()
+        queue_manager.add_job(
+            workflow_data={'1': {}}, prompt='generation recovery prompt',
+            job_id=job_id, user_id=str(LOCAL_USER),
+            metadata={'model_name': 'klein_edit_dataset',
+                      'dataset_id': dataset.id, 'image_id': card.id},
+            commit=False)
+        db.session.commit()
+        assert queue_manager._stall_unknown_comfy_job(
+            job_id, allowed_statuses=('pending',))
+        return dataset.id, card.id, job_id
+
+
 def _assert_still_stalled(app, cell_id, job_id, *, prompt_id=None):
     from app.job_queue import queue_manager
     from app.models import ImageGenerationQueue, LoraTestImage
@@ -91,6 +119,39 @@ def test_unknown_submit_confirmation_cancels_exact_cell_barrier_and_job(app):
         assert queue.comfyui_prompt_id is None
         assert cell.status == 'cancelled'
         assert cell.job_id is None
+        assert queue_manager.get_comfyui_stalled_barrier() is None
+
+
+def test_dataset_stop_names_unknown_submit_and_confirm_route_recovers(
+        client, monkeypatch):
+    from app.job_queue import queue_manager
+    from app.models import FaceDatasetImage, ImageGenerationQueue
+
+    dataset_id, card_id, job_id = _stalled_dataset_generation(client.application)
+    stopped = client.post(f'/api/dataset/{dataset_id}/cancel')
+    assert stopped.status_code == 200
+    assert stopped.get_json() == {
+        'ok': True, 'cancelled': 0, 'recovery_pending': 1,
+        'retry_pending': 0, 'restart_required': 1, 'recovery_error': 0,
+    }
+    with client.application.app_context():
+        assert FaceDatasetImage.query.get(card_id).job_id == job_id
+        assert queue_manager.get_comfyui_stalled_barrier() is not None
+
+    missing = client.post(
+        f'/api/dataset/{dataset_id}/confirm-comfyui-restart', json={})
+    assert missing.status_code == 400
+
+    monkeypatch.setattr(
+        'app.capabilities.probe',
+        lambda *, force=False: {'comfyui': {'reachable': bool(force)}})
+    recovered = client.post(
+        f'/api/dataset/{dataset_id}/confirm-comfyui-restart', json=_CONFIRM)
+    assert recovered.status_code == 200
+    assert recovered.get_json() == {'ok': True, 'cancelled': 1}
+    with client.application.app_context():
+        assert FaceDatasetImage.query.get(card_id) is None
+        assert ImageGenerationQueue.query.filter_by(job_id=job_id).one().status == 'cancelled'
         assert queue_manager.get_comfyui_stalled_barrier() is None
 
 

@@ -137,7 +137,9 @@ test('cloud lane on a CLOUD run relaunches that run by id', () => {
   const req = canvasContinueRequest(CLOUD,
     { lane: 'cloud', extraSteps: 1000, fromStep: 2500 }, { steps: [1500, 2500, 3500] });
   assert.equal(req.url, '/api/dataset/train/cloud/continue');
-  assert.deepEqual(req.body, { run_id: 7, extra_steps: 1000, from_step: 2500 });
+  assert.deepEqual(req.body, {
+    run_id: 7, extra_steps: 1000, from_step: 2500, resume_mode: 'weights_only',
+  });
 });
 
 test('cloud lane on a LOCAL run seeds a pod from the local file (continue-local)', () => {
@@ -188,6 +190,18 @@ test('overrides ride only when the dialog produced some', () => {
   assert.deepEqual(withOv.body.overrides, { lr_factor: 0.5 });
 });
 
+test('resume mode and opaque bundle id survive all board routes', () => {
+  const req = canvasContinueRequest(LOCAL, {
+    lane: 'local',
+    extraSteps: 500,
+    fromStep: 1000,
+    resumeMode: 'full_state',
+    stateBundleId: '0123456789abcdef0123456789abcdef',
+  }, { steps: [1000, 2000] });
+  assert.equal(req.body.resume_mode, 'full_state');
+  assert.equal(req.body.state_bundle_id, '0123456789abcdef0123456789abcdef');
+});
+
 test('an unaddressable run yields no request rather than a wrong one', () => {
   assert.equal(canvasContinueRequest(null, { lane: 'local' }, {}), null);
   assert.equal(canvasContinueRequest({ ...LOCAL, dataset_id: null },
@@ -201,6 +215,7 @@ test('the board opens the SHARED ContinueDialog — no third continue form', () 
   assert.match(canvas, /<ContinueDialog/);
   assert.match(canvas, /lanes=\{continueLanes\}/);
   assert.match(canvas, /initialFromStep=\{continueTarget\.step\}/);
+  assert.match(canvas, /checkpoints=\{continueTarget\.node\.checkpoints \|\| \[\]\}/);
 });
 
 test('the popover’s ▶ Continue is a real button on the board, not a sentence', () => {

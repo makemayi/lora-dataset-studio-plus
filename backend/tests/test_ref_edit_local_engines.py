@@ -45,6 +45,16 @@ def _webp(color, size=(300, 300)):
     return b.getvalue()
 
 
+class _SyncThread:
+    def __init__(self, target=None, args=(), kwargs=None, **_unused):
+        self._target = target
+        self._args = args
+        self._kwargs = kwargs or {}
+
+    def start(self):
+        self._target(*self._args, **self._kwargs)
+
+
 @pytest.fixture(autouse=True)
 def _clean_registry():
     rej.reset()
@@ -302,3 +312,259 @@ def test_a_landing_nobody_awaits_deletes_its_output(client, monkeypatch):
     monkeypatch.setattr(svc, '_drop_comfy_output', lambda fn: dropped.append(fn))
     svc.link_completed_reference_edit('nobody-waits', 'out_00002_.png', failed=False)
     assert dropped == ['out_00002_.png']
+
+
+def test_mixed_api_local_batch_shares_snapshot_and_activity_until_local_lands(
+        app, client, monkeypatch):
+    from werkzeug.datastructures import MultiDict
+
+    did = _create_with_ref(client, monkeypatch, 'Mixed', 'zchar_mixed')
+    payload = client.get(f'/api/dataset/{did}').get_json()
+    master_path = os.path.join(svc._dataset_dir(did), payload['ref_filename'])
+    local_primary = []
+    krea_calls = []
+    from app.services import krea_edit_helper as keh
+    monkeypatch.setattr(keh, 'preflight', lambda: None)
+
+    def _enqueue_krea(**kwargs):
+        krea_calls.append(kwargs)
+        with open(kwargs['source_path'], 'rb') as fh:
+            local_primary.append(fh.read())
+        # Mutate the master after local admission. The API worker starts later
+        # but must still receive the exact launch snapshot, not these new bytes.
+        with open(master_path, 'wb') as fh:
+            fh.write(_webp((250, 250, 0)))
+        return 'mixed-krea-job'
+
+    monkeypatch.setattr(keh, 'enqueue_krea_edit', _enqueue_krea)
+    api_calls = []
+
+    def _api(engine, refs, prompt):
+        api_calls.append((engine, refs, prompt))
+        return _webp((0, 100, 250))
+
+    monkeypatch.setattr(svc, '_edit_engine_call', _api)
+    monkeypatch.setattr(svc.threading, 'Thread', _SyncThread)
+    real_end = dataset_activity.end
+    ended = []
+
+    def _end(token):
+        ended.append(token)
+        real_end(token)
+
+    monkeypatch.setattr(dataset_activity, 'end', _end)
+    response = client.post(
+        f'/api/dataset/{did}/ref/edit',
+        data=MultiDict([
+            ('prompt', 'add glasses'),
+            ('engines', 'krea'),
+            ('engines', 'chatgpt'),
+            ('ref', (io.BytesIO(_png()), 'modal-anchor.png')),
+        ]),
+        content_type='multipart/form-data')
+
+    assert response.status_code == 202
+    assert len(krea_calls) == 1
+    assert 'extra_ref_paths' not in krea_calls[0]
+    assert api_calls[0][0] == 'chatgpt'
+    assert len(api_calls[0][1]) == 2       # primary + modal upload, API only
+    assert api_calls[0][1][0] == local_primary[0]
+    current = client.get(f'/api/dataset/{did}').get_json()['reference_edit']
+    assert current['candidates']['chatgpt']['status'] == 'ready'
+    assert current['candidates']['krea']['status'] == 'running'
+    activity = dataset_activity.get(did)
+    assert activity['done'] == 1 and activity['total'] == 2
+    assert ended == []
+
+    monkeypatch.setattr(svc, '_read_comfy_output', lambda filename: _webp((7, 7, 7)))
+    monkeypatch.setattr(svc, '_drop_comfy_output', lambda filename: None)
+    svc.link_completed_reference_edit(
+        'mixed-krea-job', 'mixed-out.png', failed=False)
+
+    final = client.get(f'/api/dataset/{did}').get_json()['reference_edit']
+    assert all(candidate['status'] == 'ready'
+               for candidate in final['candidates'].values())
+    assert dataset_activity.get(did) is None
+    assert len(ended) == 1
+
+
+def test_discard_mixed_batch_cancels_all_locals_and_deletes_ready_api_candidate(
+        client, monkeypatch):
+    from werkzeug.datastructures import MultiDict
+
+    did = _create_with_ref(client, monkeypatch, 'Discard all', 'zchar_discard_all')
+    _stub_krea(monkeypatch, [], job_id='discard-krea')
+    _stub_klein(monkeypatch, [], job_id='discard-klein')
+    monkeypatch.setattr(
+        svc, '_edit_engine_call',
+        lambda engine, refs, prompt: _webp((10, 20, 30)))
+    monkeypatch.setattr(svc.threading, 'Thread', _SyncThread)
+    response = client.post(
+        f'/api/dataset/{did}/ref/edit',
+        data=MultiDict([
+            ('prompt', 'x'),
+            ('engines', 'krea'),
+            ('engines', 'klein'),
+            ('engines', 'chatgpt'),
+        ]),
+        content_type='multipart/form-data')
+    assert response.status_code == 202
+    current = client.get(f'/api/dataset/{did}').get_json()['reference_edit']
+    candidate_path = os.path.join(
+        svc._dataset_dir(did),
+        current['candidates']['chatgpt']['candidate_filename'])
+    assert os.path.exists(candidate_path)
+
+    cancelled = []
+    from app import job_queue
+    monkeypatch.setattr(
+        job_queue.queue_manager, 'cancel_job',
+        lambda job_id, **kwargs: cancelled.append(job_id) or True)
+    assert client.post(
+        f'/api/dataset/{did}/ref/edit/discard').status_code == 200
+    assert sorted(cancelled) == ['discard-klein', 'discard-krea']
+    assert not os.path.exists(candidate_path)
+    assert client.get(
+        f'/api/dataset/{did}').get_json()['reference_edit'] is None
+    assert dataset_activity.get(did) is None
+
+
+# --- untrusted Comfy completion filenames ---------------------------------
+
+def test_comfy_output_rejects_malicious_names_before_read_delete_or_view(
+        tmp_path, monkeypatch):
+    output = tmp_path / 'output'
+    output.mkdir()
+    outside = tmp_path / 'outside.webp'
+    outside.write_bytes(b'do-not-touch')
+    monkeypatch.setattr(svc, '_comfy_output_dir', lambda: str(output))
+    from app.utils import comfyui
+    view_calls = []
+    monkeypatch.setattr(
+        comfyui, 'fetch_output_image_bytes',
+        lambda name: view_calls.append(name) or b'should-not-be-returned')
+
+    malicious_names = (
+        None,
+        '',
+        '\x00evil.webp',
+        '.',
+        '..',
+        '../outside.webp',
+        r'..\outside.webp',
+        str(outside),
+        r'C:\Windows\win.ini',
+        r'\\server\share\outside.webp',
+        '/etc/passwd',
+    )
+    for filename in malicious_names:
+        assert svc._read_comfy_output(filename) is None
+        svc._drop_comfy_output(filename)
+        # Stale completions take the cleanup path even though no registry entry
+        # remains; they must be just as constrained as a live completion.
+        svc.link_completed_reference_edit(
+            'stale-malicious-output', filename, failed=False)
+
+    assert outside.read_bytes() == b'do-not-touch'
+    assert view_calls == []
+
+
+def test_comfy_output_allows_regular_contained_file(tmp_path, monkeypatch):
+    output = tmp_path / 'output'
+    output.mkdir()
+    candidate = output / 'safe-output.webp'
+    candidate.write_bytes(b'safe-bytes')
+    monkeypatch.setattr(svc, '_comfy_output_dir', lambda: str(output))
+
+    assert svc._read_comfy_output(candidate.name) == b'safe-bytes'
+    svc._drop_comfy_output(candidate.name)
+    assert not candidate.exists()
+
+
+def test_comfy_output_refuses_symlink_file_for_read_and_delete(
+        tmp_path, monkeypatch):
+    output = tmp_path / 'output'
+    output.mkdir()
+    outside = tmp_path / 'outside.webp'
+    outside.write_bytes(b'outside-secret')
+    linked = output / 'linked.webp'
+    try:
+        os.symlink(str(outside), str(linked))
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f'symlinks unavailable on this platform: {exc}')
+    monkeypatch.setattr(svc, '_comfy_output_dir', lambda: str(output))
+    from app.utils import comfyui
+    view_calls = []
+    monkeypatch.setattr(
+        comfyui, 'fetch_output_image_bytes',
+        lambda name: view_calls.append(name) or b'unsafe-fallback')
+
+    assert svc._read_comfy_output(linked.name) is None
+    svc._drop_comfy_output(linked.name)
+    svc.link_completed_reference_edit(
+        'stale-symlink-output', linked.name, failed=False)
+
+    assert os.path.lexists(linked)
+    assert outside.read_bytes() == b'outside-secret'
+    assert view_calls == []
+
+
+def test_comfy_output_refuses_symlink_or_reparse_ancestor(
+        tmp_path, monkeypatch):
+    real_output = tmp_path / 'real-output'
+    real_output.mkdir()
+    candidate = real_output / 'candidate.webp'
+    candidate.write_bytes(b'ancestor-secret')
+    linked_output = tmp_path / 'linked-output'
+    try:
+        os.symlink(str(real_output), str(linked_output), target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f'directory symlinks unavailable on this platform: {exc}')
+    monkeypatch.setattr(svc, '_comfy_output_dir', lambda: str(linked_output))
+    from app.utils import comfyui
+    view_calls = []
+    monkeypatch.setattr(
+        comfyui, 'fetch_output_image_bytes',
+        lambda name: view_calls.append(name) or b'unsafe-fallback')
+
+    assert svc._read_comfy_output(candidate.name) is None
+    svc._drop_comfy_output(candidate.name)
+
+    assert candidate.read_bytes() == b'ancestor-secret'
+    assert view_calls == []
+
+
+def test_comfy_output_deterministically_refuses_reparse_ancestor(
+        tmp_path, monkeypatch):
+    """Windows CI may lack symlink privilege; pin reparse propagation anyway."""
+    output = tmp_path / 'output'
+    output.mkdir()
+    candidate = output / 'candidate.webp'
+    candidate.write_bytes(b'reparse-secret')
+    monkeypatch.setattr(svc, '_comfy_output_dir', lambda: str(output))
+    real_lstat = svc.os.lstat
+    output_key = os.path.normcase(os.path.abspath(str(output)))
+    output_mode = real_lstat(output).st_mode
+
+    class _ReparseDirectoryStat:
+        st_mode = output_mode
+        st_file_attributes = 0x400
+
+    def _lstat_with_reparse_ancestor(path):
+        key = os.path.normcase(os.path.abspath(os.fspath(path)))
+        if key == output_key:
+            return _ReparseDirectoryStat()
+        return real_lstat(path)
+
+    monkeypatch.setattr(svc.os, 'lstat', _lstat_with_reparse_ancestor)
+    from app.utils import comfyui
+    view_calls = []
+    monkeypatch.setattr(
+        comfyui, 'fetch_output_image_bytes',
+        lambda name: view_calls.append(name) or b'unsafe-fallback')
+
+    assert svc._read_comfy_output(candidate.name) is None
+    svc._drop_comfy_output(candidate.name)
+
+    assert candidate.read_bytes() == b'reparse-secret'
+    assert view_calls == []

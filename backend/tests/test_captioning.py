@@ -131,11 +131,43 @@ def test_describe_image_ollama_starts_local_server_and_retries_once(app, monkeyp
 
     monkeypatch.setattr(vision_ollama.requests, 'post', _post)
     monkeypatch.setattr(ollama_control, 'ensure_captioning_ready',
-                        lambda: {'ok': True, 'reachable': True})
+                        lambda model=None: {'ok': True, 'reachable': True})
     with app.app_context():
         out = vision_ollama.describe_image_ollama(
             _png(), 'describe this', auto_start_local=True)
     assert out == 'caption after start' and len(calls) == 2
+
+
+def test_describe_image_ollama_auto_start_probes_custom_model(app, monkeypatch):
+    """A stopped server must be readied against the effective per-dataset model,
+    not the unrelated global default, before the one retry."""
+    from app.services import vision_ollama, ollama_control
+    posted_models = []
+    probed_models = []
+
+    def _post(*args, **kwargs):
+        posted_models.append(kwargs['json']['model'])
+        if len(posted_models) == 1:
+            raise ConnectionError('server stopped')
+        return _Resp({'response': 'caption after start'})
+
+    def _ready(model=None):
+        probed_models.append(model)
+        return {'ok': True, 'reachable': True}
+
+    # This unit test targets the restart/probe hand-off, not the GPU ownership
+    # registry; avoid leaving a synthetic custom model resident for later tests.
+    monkeypatch.setattr(vision_ollama, '_admit_local_ollama', lambda *a, **k: None)
+    monkeypatch.setattr(vision_ollama.requests, 'post', _post)
+    monkeypatch.setattr(ollama_control, 'ensure_captioning_ready', _ready)
+    with app.app_context():
+        out = vision_ollama.describe_image_ollama(
+            _png(), 'describe this', model='custom-vlm:latest',
+            auto_start_local=True)
+
+    assert out == 'caption after start'
+    assert probed_models == ['custom-vlm:latest']
+    assert posted_models == ['custom-vlm:latest', 'custom-vlm:latest']
 
 
 def test_describe_image_ollama_surfaces_failure_after_successful_start(app, monkeypatch):
@@ -144,7 +176,7 @@ def test_describe_image_ollama_surfaces_failure_after_successful_start(app, monk
     monkeypatch.setattr(vision_ollama.requests, 'post',
                         lambda *a, **k: (_ for _ in ()).throw(ConnectionError('still down')))
     monkeypatch.setattr(ollama_control, 'ensure_captioning_ready',
-                        lambda: {'ok': True, 'reachable': True})
+                        lambda model=None: {'ok': True, 'reachable': True})
     with app.app_context(), pytest.raises(RuntimeError, match='did not return a caption'):
         vision_ollama.describe_image_ollama(
             _png(), 'describe this', auto_start_local=True)
@@ -158,7 +190,7 @@ def test_caption_images_surfaces_ollama_start_failure(app, monkeypatch):
     monkeypatch.setattr(vision_ollama.requests, 'post',
                         lambda *a, **k: (_ for _ in ()).throw(ConnectionError('down')))
     monkeypatch.setattr(ollama_control, 'ensure_captioning_ready',
-                        lambda: {'ok': False, 'error': 'Ollama could not start'})
+                        lambda model=None: {'ok': False, 'error': 'Ollama could not start'})
     with app.app_context():
         save_config({'captioning': {'backend': 'ollama'}})
         ds, _ = _dataset_with_kept_image(svc, LOCAL_USER)
@@ -215,6 +247,67 @@ def test_describe_image_ollama_best_effort_logs_reason_and_returns_empty(app, mo
     assert 'this model does not support images' in caplog.text
 
 
+def test_unload_vision_model_resolved_remote_targets_custom_model(app, monkeypatch):
+    """No explicit ollama_url still resolves the configured remote endpoint and
+    unloads the effective custom model, never the unrelated global model."""
+    from app import config
+    from app.services import vision_ollama
+    calls = []
+
+    class _UnloadResponse:
+        status_code = 200
+
+    def _post(url, **kwargs):
+        calls.append((url, kwargs))
+        return _UnloadResponse()
+
+    monkeypatch.setattr(vision_ollama.requests, 'post', _post)
+    with app.app_context():
+        config.save_config({
+            'ollama': {
+                'url': 'http://remote-ollama:11434',
+                'vision_model': 'global-vlm:latest',
+            },
+        })
+        assert vision_ollama.unload_vision_model(
+            model='custom-vlm:latest') is True
+
+    assert calls == [(
+        'http://remote-ollama:11434/api/generate',
+        {
+            'json': {'model': 'custom-vlm:latest', 'keep_alive': 0},
+            'timeout': (10, 30),
+        },
+    )]
+
+
+def test_unload_vision_model_bare_local_keeps_fence_semantics(app, monkeypatch):
+    """A resolved local URL remains a bare fence release, including the custom
+    model filter; no direct POST may bypass ownership/foreign-model protection."""
+    from app import config
+    from app.services import ollama_gpu_fence, vision_ollama
+    releases = []
+
+    def _release(**kwargs):
+        releases.append(kwargs)
+        return True
+
+    monkeypatch.setattr(ollama_gpu_fence, 'release_owned_models', _release)
+    monkeypatch.setattr(
+        vision_ollama.requests, 'post',
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError('must use local fence')))
+    with app.app_context():
+        config.save_config({'ollama': {'url': 'http://127.0.0.1:11434'}})
+        assert vision_ollama.unload_vision_model() is True
+        assert vision_ollama.unload_vision_model(
+            model='custom-vlm:latest') is True
+
+    assert releases == [
+        {'ollama_url': None, 'model': None},
+        {'ollama_url': None, 'model': 'custom-vlm:latest'},
+    ]
+
+
 def test_caption_images_auto_reports_both_backend_failures(app, monkeypatch):
     """Regression for issue #6: in 'auto', JoyCaption unavailable + Ollama rejecting
     the request must surface BOTH reasons — the user otherwise sees only the Ollama
@@ -243,19 +336,22 @@ def test_caption_images_auto_reports_both_backend_failures(app, monkeypatch):
 def test_vision_ollama_never_raises_when_config_returns_none(app, monkeypatch):
     """cfg.get() returning None for every key (missing/corrupted config section)
     must never surface as an AttributeError from the url.rstrip('/') call --
-    the never-raise contract is structural, not dependent on config health.
-    requests.post is also stubbed to fail so the test doesn't depend on whether
-    a real Ollama happens to be reachable on this machine."""
+    the never-raise contract is structural, not dependent on config health. A
+    local unload with no LDS-owned model is a successful no-op and must not POST."""
     from app.services import vision_ollama
+    post_calls = []
 
-    def _raise(*a, **k):
+    def _record_then_raise(*args, **kwargs):
+        post_calls.append((args, kwargs))
         raise ConnectionError('ollama unreachable')
 
     monkeypatch.setattr(vision_ollama.cfg, 'get', lambda *a, **k: None)
-    monkeypatch.setattr(vision_ollama.requests, 'post', _raise)
+    monkeypatch.setattr(vision_ollama.requests, 'post', _record_then_raise)
     with app.app_context():
         assert vision_ollama.describe_image_ollama(b'x', 'p') == ''
-        assert vision_ollama.unload_vision_model() is False
+        assert post_calls == []
+        assert vision_ollama.unload_vision_model() is True
+        assert post_calls == []
 
 
 # --- caption_images backend selection ---------------------------------------

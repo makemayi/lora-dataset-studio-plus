@@ -110,7 +110,7 @@ if not exist frontend\dist\index.html (
   exit /b 1
 )
 rem Port 5000 is a frequent collision (macOS AirPlay, another local Flask app).
-rem Use 5050 by default; override by setting LDS_PORT before running start.bat.
+rem Use 5050 by default; backend/run.py advances automatically if it is occupied.
 if not defined LDS_PORT set "LDS_PORT=5050"
-start "" http://127.0.0.1:%LDS_PORT%/
+set "LDS_OPEN_BROWSER=1"
 "%VPY%" backend\run.py

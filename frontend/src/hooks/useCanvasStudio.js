@@ -117,6 +117,8 @@ export function useCanvasStudio(selection, family, { onDeploy, tracker } = {}) {
       generating: run.data?.generating ?? run.data?.running ?? 0,
       resumable: run.data?.resumable ?? 0,
       gpu_busy: run.data?.gpu_busy ?? base.data.gpu_busy,
+      comfyui_recovery: run.data?.comfyui_recovery ?? base.data.comfyui_recovery,
+      comfyui_recovery_target: run.data?.comfyui_recovery_target ?? base.data.comfyui_recovery_target,
     }
     : null;
 
@@ -125,6 +127,12 @@ export function useCanvasStudio(selection, family, { onDeploy, tracker } = {}) {
     launch, launching,
     cancel: run.cancel, resume: run.resume,
     refresh: base.refresh, deletePrompt: base.deletePrompt,
+    confirmComfyuiRestart: run.data?.comfyui_recovery
+      ? run.confirmComfyuiRestart
+      : base.confirmComfyuiRestart,
+    confirmingComfyuiRestart: run.data?.comfyui_recovery
+      ? run.confirmingComfyuiRestart
+      : base.confirmingComfyuiRestart,
     rate: run.rate,
   };
 }

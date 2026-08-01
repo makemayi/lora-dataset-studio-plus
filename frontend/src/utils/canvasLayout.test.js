@@ -62,6 +62,7 @@ test('nonsense sizes degrade to zero instead of NaN-ing the board', () => {
 // ---- scale -----------------------------------------------------------------
 
 test('clampScale keeps the zoom usable and survives nonsense', () => {
+  assert.equal(MAX_SCALE, 5, 'the canvas can zoom in to 500%');
   assert.equal(clampScale(0.0001), MIN_SCALE);
   assert.equal(clampScale(50), MAX_SCALE);
   assert.equal(clampScale(0.8), 0.8);

@@ -2,8 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  DOCKER_UPDATE_COMMANDS,
+  DOCKER_UPDATE_GUIDE_URL,
   formatMB,
   installMode,
+  isDockerInstall,
   zipUpdateHeadline,
   progressPercent,
   progressLabel,
@@ -16,12 +19,35 @@ test('formatMB is compact and empty for unknown sizes', () => {
   assert.equal(formatMB(150_000_000), '150 MB');   // >=100 MB -> whole number
 });
 
-test('installMode distinguishes git, zip, unavailable and unknown', () => {
+test('installMode distinguishes docker, git, zip, unavailable and unknown', () => {
+  assert.equal(installMode({ ok: true, install_mode: 'docker' }), 'docker');
   assert.equal(installMode({ ok: true, is_git: true, update_available: true }), 'git');
   assert.equal(installMode({ ok: true, is_git: false, can_apply: true }), 'zip');
   assert.equal(installMode({ ok: true, is_git: false, can_apply: false }), 'unavailable');
   assert.equal(installMode({ ok: false, reason: 'offline' }), 'unknown');
   assert.equal(installMode(null), 'unknown');
+});
+
+test('docker mode is a safety boundary even if other apply flags are present', () => {
+  const contradictory = {
+    ok: true,
+    install_mode: 'docker',
+    is_git: true,
+    can_apply: true,
+    update_available: true,
+  };
+  assert.equal(isDockerInstall(contradictory), true);
+  assert.equal(installMode(contradictory), 'docker');
+  assert.equal(isDockerInstall({ install_mode: 'git' }), false);
+});
+
+test('docker update instructions are exact, ordered and point to the GPU guide', () => {
+  assert.deepEqual(DOCKER_UPDATE_COMMANDS, [
+    'git pull',
+    'docker compose -f docker-compose.gpu.yml up -d --build',
+  ]);
+  assert.equal(Object.isFrozen(DOCKER_UPDATE_COMMANDS), true);
+  assert.match(DOCKER_UPDATE_GUIDE_URL, /#option-4--docker-gpu--comfyui$/);
 });
 
 test('zipUpdateHeadline announces the release and its size when known', () => {

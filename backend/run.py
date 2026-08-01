@@ -1,4 +1,8 @@
 import sys, os
+import threading
+import time
+import urllib.request
+import webbrowser
 
 
 def _reexec_into_venv():
@@ -49,6 +53,7 @@ from bootstrap_dependencies import ensure_pillow_consistent
 ensure_pillow_consistent()
 
 from app import create_app
+from port_utils import find_available_port
 
 try:
     from app.config import get as cfg_get
@@ -57,9 +62,28 @@ except ImportError:
 
 app = create_app()
 
+
+def _open_browser_when_ready(url, timeout=30):
+    """Open only after the selected port is serving, avoiding a startup error page."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(url + 'api/health', timeout=1) as response:
+                if response.status == 200:
+                    webbrowser.open(url)
+                    return
+        except Exception:
+            time.sleep(0.25)
+
 if __name__ == '__main__':
     host = os.environ.get('LDS_HOST') or cfg_get('server.host')
-    port = int(os.environ.get('LDS_PORT') or cfg_get('server.port'))
+    requested_port = int(os.environ.get('LDS_PORT') or cfg_get('server.port'))
+    port = (requested_port if os.environ.get('LDS_AUTO_PORT') == '0'
+            else find_available_port(host, requested_port))
+    if port != requested_port:
+        print(f"[LDS] port {requested_port} is already in use; using {port} instead.",
+              flush=True)
+    os.environ['LDS_PORT'] = str(port)
     is_lan = host not in ('127.0.0.1', 'localhost', '::1')
     if is_lan and cfg_get('server.require_token') \
             and not os.environ.get('LDS_ACCESS_TOKEN') \
@@ -89,8 +113,13 @@ if __name__ == '__main__':
     # reading cfg_get again there would lie about what's currently serving requests.
     app.config['LDS_BOUND_HOST'] = host
     app.config['LDS_BOUND_PORT'] = port
+    if os.environ.get('LDS_OPEN_BROWSER') == '1':
+        browser_host = {'0.0.0.0': '127.0.0.1', '::': '::1'}.get(host, host)
+        if ':' in browser_host and not browser_host.startswith('['):
+            browser_host = f'[{browser_host}]'
+        url = f"http://{browser_host}:{port}/"
+        threading.Thread(target=_open_browser_when_ready, args=(url,),
+                         daemon=True).start()
     app.run(debug=os.environ.get('FLASK_DEBUG', '0') == '1',
             host=host,
-            # LDS_PORT wins over config so the launcher can dodge a busy 5000
-            # (macOS AirPlay, another Flask app, …) without touching config.json.
             port=port, threaded=True, use_reloader=False)

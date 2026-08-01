@@ -2,13 +2,15 @@
  * Replaces the old fixed « +1000 » confirm/prompt: pick how many more steps, WHICH
  * checkpoint to resume from (default = latest, but an earlier, less-cooked epoch is
  * the whole point — « step 750 beat the over-cooked 1000 »), and optionally adjust
- * the handful of settings a resume can safely change (cadence + preview prompts).
+ * the handful of settings a resume can safely change. Full-state continuation
+ * keeps both save/sample cadence and the training trajectory locked.
  *
  * Purely presentational and props-driven so the local panel and the cloud Runs hub
  * share one dialog. onResolve(payload | null): payload =
- * { extraSteps, fromStep, overrides, lane } (fromStep null = resume from the latest,
- * in place), or null on cancel. overrides may carry save_every / sample_every /
- * sample_prompts / timestep_type / lr_factor — the safe subset a resume can change;
+ * { extraSteps, fromStep, overrides, lane, resumeMode, stateBundleId } (fromStep
+ * null = resume from the latest), or null on cancel. overrides may
+ * carry save_every / sample_every / sample_prompts / timestep_type / lr_factor
+ * — the safe subset a resume can change;
  * lr_factor (0.5/0.1) scales the run's current LR and is omitted for an adaptive
  * (Prodigy) run. `settings` supplies optimizer + learning_rate so the LR hint and
  * the Prodigy-disabled state are truthful.
@@ -19,6 +21,11 @@
  * own `where` back and can ignore the field. */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { HelpBadge } from '../../help/HelpMode';
+import {
+  defaultResumeMode,
+  fullStateUnavailableReason,
+  preferredCheckpointForStep,
+} from '../../utils/trainingResumeState.js';
 import { initialResumeStep, resolveInitialLane, submitBlockedReason } from './lineageContinue.js';
 
 const SAVE_CHOICES = [250, 500, 1000];
@@ -77,6 +84,21 @@ export default function ContinueDialog({
   const laneBlocked = !!lanes && laneState(lane).available === false;
   const blockedReason = submitBlockedReason({
     latest, laneBlocked, laneReason: laneState(lane).reason, lane });
+  const selectedCheckpoint = useMemo(
+    () => preferredCheckpointForStep(checkpoints, fromStep),
+    [checkpoints, fromStep]);
+  const fullStateReason = fullStateUnavailableReason(selectedCheckpoint, lane);
+  const fullStateAvailable = !fullStateReason;
+  const [resumeMode, setResumeMode] = useState(
+    () => defaultResumeMode(selectedCheckpoint, lane));
+  const trajectoryLocked = resumeMode === 'full_state';
+
+  // A bundle belongs to one checkpoint and the current cloud image cannot use
+  // one. Changing either selection therefore recomputes the safe default rather
+  // than carrying a now-invalid full-state choice to another save/lane.
+  useEffect(() => {
+    setResumeMode(defaultResumeMode(selectedCheckpoint, lane));
+  }, [fromStep, lane, selectedCheckpoint?.resume_state?.bundle_id, fullStateAvailable]);
 
   const inheritedSave = SAVE_CHOICES.includes(settings.save_every) ? settings.save_every : 250;
   const inheritedSampleEvery =
@@ -129,14 +151,22 @@ export default function ContinueDialog({
 
   const submit = () => {
     const overrides = {};
-    if (saveEvery !== inheritedSave) overrides.save_every = Number(saveEvery);
-    if (sampleEvery !== inheritedSampleEvery) overrides.sample_every = Number(sampleEvery);
+    if (!trajectoryLocked && saveEvery !== inheritedSave) {
+      overrides.save_every = Number(saveEvery);
+    }
+    if (!trajectoryLocked && sampleEvery !== inheritedSampleEvery) {
+      overrides.sample_every = Number(sampleEvery);
+    }
     if (prompts.trim() !== '') {
       overrides.sample_prompts = prompts.split('\n').map((s) => s.trim()).filter(Boolean);
     }
-    if (timestep !== '' && timestep !== inheritedTimestep) overrides.timestep_type = timestep;
+    if (!trajectoryLocked && timestep !== '' && timestep !== inheritedTimestep) {
+      overrides.timestep_type = timestep;
+    }
     // A real LR reduction only — Prodigy (adaptive) never sends it, and 1 = keep.
-    if (lrFactor !== 1 && !isAdaptiveLR) overrides.lr_factor = lrFactor;
+    if (!trajectoryLocked && lrFactor !== 1 && !isAdaptiveLR) {
+      overrides.lr_factor = lrFactor;
+    }
     onResolve({
       extraSteps: extraNum,
       // null when the newest checkpoint is chosen → the historical in-place resume.
@@ -145,6 +175,11 @@ export default function ContinueDialog({
       // Where it runs. Always sent; a caller that offers no picker gets `where`
       // back and can ignore it.
       lane,
+      // Never infer this server-side: legacy checkpoints and current cloud pods
+      // are weights-only, while a verified exact bundle opts into the bridge.
+      resumeMode,
+      stateBundleId: resumeMode === 'full_state'
+        ? selectedCheckpoint?.resume_state?.bundle_id : null,
     });
   };
 
@@ -152,6 +187,10 @@ export default function ContinueDialog({
     const tags = [];
     if (s === latest) tags.push('latest');
     if (s === bestStep) tags.push('best');
+    const state = preferredCheckpointForStep(checkpoints, s)?.resume_state;
+    if (['ready', 'complete'].includes(state?.status) && state?.integrity === 'verified'
+        && state?.state_level === 'exact') tags.push('full state');
+    else tags.push('weights only');
     return `step ${s}${tags.length ? ` — ${tags.join(', ')}` : ''}`;
   };
 
@@ -225,6 +264,37 @@ export default function ContinueDialog({
           </span>
         </div>
 
+        {/* HOW state is restored. A verified exact bundle is the local default;
+            every legacy/corrupt/cloud case visibly falls back to weights-only
+            with the concrete reason, never by implication. */}
+        <div className="flex flex-col gap-1">
+          <span className="text-content text-[0.75rem]">Resume mode</span>
+          <div role="radiogroup" aria-label="Training state to restore"
+            className="flex flex-col gap-1.5 rounded-lg border border-border bg-surface-raised p-2.5">
+            <label className={'flex items-start gap-2 text-[0.75rem] '
+              + (fullStateAvailable ? 'text-content' : 'text-content-subtle')}>
+              <input type="radio" name="resume-mode" value="full_state"
+                checked={resumeMode === 'full_state'}
+                disabled={!fullStateAvailable}
+                onChange={() => setResumeMode('full_state')} />
+              <span>
+                <b>Full state</b> — weights, optimizer, scheduler, RNG and next batch
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-content text-[0.75rem]">
+              <input type="radio" name="resume-mode" value="weights_only"
+                checked={resumeMode === 'weights_only'}
+                onChange={() => setResumeMode('weights_only')} />
+              <span><b>Weights only</b> — starts fresh optimizer/scheduler state</span>
+            </label>
+            {fullStateReason && (
+              <span className="text-amber-300/90 text-[0.6875rem] leading-relaxed">
+                {fullStateReason}
+              </span>
+            )}
+          </div>
+        </div>
+
         {/* How many more steps. */}
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2 flex-wrap">
@@ -259,18 +329,28 @@ export default function ContinueDialog({
             <div className="flex flex-col gap-2.5 rounded-lg border border-border bg-surface-raised p-2.5">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-content text-[0.75rem] w-28 shrink-0">Save checkpoint</span>
-                <select value={String(saveEvery)} onChange={(e) => setSaveEvery(Number(e.target.value))}
+                <select value={String(trajectoryLocked ? inheritedSave : saveEvery)}
+                  onChange={(e) => setSaveEvery(Number(e.target.value))}
+                  disabled={trajectoryLocked}
                   aria-label="Checkpoint frequency"
-                  className="px-2 py-1 rounded-lg border border-border bg-surface text-content text-[0.75rem]">
+                  title={trajectoryLocked
+                    ? 'Full state preserves the checkpoint save cadence'
+                    : undefined}
+                  className="px-2 py-1 rounded-lg border border-border bg-surface text-content text-[0.75rem] disabled:opacity-40">
                   {SAVE_CHOICES.map((n) => <option key={n} value={String(n)}>every {n} steps</option>)}
                 </select>
                 <span className="text-content-subtle text-[0.625rem]">how often a checkpoint is written</span>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-content text-[0.75rem] w-28 shrink-0">Preview every</span>
-                <select value={String(sampleEvery)} onChange={(e) => setSampleEvery(Number(e.target.value))}
+                <select value={String(trajectoryLocked ? inheritedSampleEvery : sampleEvery)}
+                  onChange={(e) => setSampleEvery(Number(e.target.value))}
+                  disabled={trajectoryLocked}
                   aria-label="Preview sample frequency"
-                  className="px-2 py-1 rounded-lg border border-border bg-surface text-content text-[0.75rem]">
+                  title={trajectoryLocked
+                    ? 'Full state preserves the checkpoint preview cadence'
+                    : undefined}
+                  className="px-2 py-1 rounded-lg border border-border bg-surface text-content text-[0.75rem] disabled:opacity-40">
                   {SAMPLE_EVERY_CHOICES.map((n) => <option key={n} value={String(n)}>every {n} steps</option>)}
                 </select>
                 <span className="text-content-subtle text-[0.625rem]">preview images cadence</span>
@@ -286,8 +366,12 @@ export default function ContinueDialog({
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-content text-[0.75rem] w-28 shrink-0">Timestep weighting</span>
                 <select value={timestep} onChange={(e) => setTimestep(e.target.value)}
+                  disabled={trajectoryLocked}
                   aria-label="Timestep weighting for the continuation"
-                  className="px-2 py-1 rounded-lg border border-border bg-surface text-content text-[0.75rem]">
+                  title={trajectoryLocked
+                    ? 'Full state preserves the checkpoint training trajectory'
+                    : undefined}
+                  className="px-2 py-1 rounded-lg border border-border bg-surface text-content text-[0.75rem] disabled:opacity-40">
                   <option value="">keep current</option>
                   {TIMESTEP_CHOICES.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
@@ -301,11 +385,13 @@ export default function ContinueDialog({
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-content text-[0.75rem] w-28 shrink-0">Learning rate</span>
                 <select value={String(lrFactor)} onChange={(e) => setLrFactor(Number(e.target.value))}
-                  disabled={isAdaptiveLR}
+                  disabled={isAdaptiveLR || trajectoryLocked}
                   aria-label="Learning rate for the continuation"
-                  title={isAdaptiveLR
-                    ? 'Prodigy adapts the learning rate itself (lr=1) — there is no base rate to scale'
-                    : undefined}
+                  title={trajectoryLocked
+                    ? 'Full state preserves the checkpoint training trajectory'
+                    : (isAdaptiveLR
+                      ? 'Prodigy adapts the learning rate itself (lr=1) — there is no base rate to scale'
+                      : undefined)}
                   className="px-2 py-1 rounded-lg border border-border bg-surface text-content text-[0.75rem] disabled:opacity-40">
                   {LR_FACTOR_CHOICES.map((c) => <option key={c.value} value={String(c.value)}>{c.label}</option>)}
                 </select>
@@ -325,8 +411,10 @@ export default function ContinueDialog({
                   — the Estelle run continued a rank-64 LoRA while the dataset had
                   been edited to rank 32, and nothing on screen said which won. */}
               <span className="text-content-subtle text-[0.625rem] leading-relaxed">
-                Only cadence, preview prompts, the timestep weighting and the learning rate can change on a resume —
-                rank, base, optimizer and the like are locked to the checkpoint being continued
+                {trajectoryLocked
+                  ? 'Full state keeps the learning rate, timestep trajectory and save/preview cadence exact; only preview prompts can change. '
+                  : 'Weights-only resume may also change timestep weighting and learning rate. '}
+                Rank, base, optimizer and the like are locked to the checkpoint being continued
                 {settings?.rank
                   ? <> (rank {settings.rank}{settings.alpha ? ` · alpha ${settings.alpha}` : ''}, inherited from it)</>
                   : null}.
@@ -366,7 +454,9 @@ export default function ContinueDialog({
         <div className="flex items-center gap-2 pt-1">
           <button type="button" onClick={dismiss} disabled={busy}
             className="px-3 py-1.5 rounded-lg bg-surface text-content text-sm disabled:opacity-40">Cancel</button>
-          <button type="button" onClick={submit} disabled={busy || latest === 0 || laneBlocked}
+          <button type="button" onClick={submit}
+            disabled={busy || latest === 0 || laneBlocked
+              || (resumeMode === 'full_state' && !fullStateAvailable)}
             title={laneBlocked ? laneState(lane).reason || undefined : undefined}
             className="ml-auto px-3 py-1.5 rounded-lg bg-gradient-primary text-white text-sm font-semibold disabled:opacity-40">
             {busy ? 'Starting…' : `Continue → ${target}`}

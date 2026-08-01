@@ -172,8 +172,18 @@ def _history_state() -> str:
     try:
         response = requests.get(f'{_LOCAL_API_URL}/history', timeout=(1, 3),
                                 allow_redirects=False)
+    except requests.ConnectTimeout:
+        # On Windows, Requests can surface a missing loopback listener as a
+        # ConnectTimeout rather than ConnectionError.  No TCP connection was
+        # established, so the fixed local endpoint is safe to launch.
+        return _HISTORY_DOWN
+    except requests.ReadTimeout:
+        # A connection was established but ComfyUI did not answer in time.
+        # Treat the port as occupied and never start a competing process.
+        return _HISTORY_OCCUPIED
     except requests.Timeout:
-        # A bound but busy ComfyUI can time out here; never spawn into that port.
+        # Fail closed for any unusual Timeout subtype whose connection phase is
+        # unknown.
         return _HISTORY_OCCUPIED
     except requests.ConnectionError:
         return _HISTORY_DOWN

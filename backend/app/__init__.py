@@ -131,6 +131,9 @@ _SCHEMA_ADDITIONS = (
     ('face_dataset', 'fidelity', 'VARCHAR(8)'),
     ('face_dataset', 'train_settings', 'TEXT'),
     ('face_dataset', 'train_slider', 'TEXT'),
+    # Historical rows are LoRA runs. A non-null server default makes the ALTER
+    # safe on populated SQLite databases and keeps raw SQL readers truthful.
+    ('face_dataset', 'training_mode', "VARCHAR(32) NOT NULL DEFAULT 'lora'"),
     ('face_dataset', 'train_vae_path', 'TEXT'),
     ('face_dataset', 'train_te_path', 'TEXT'),
     # Per-family memory of (base, variant) — see models.FaceDataset. Additive and

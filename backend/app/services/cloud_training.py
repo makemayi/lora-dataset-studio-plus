@@ -4,11 +4,12 @@ State machine (CloudTrainingRun.status):
   preparing -> provisioning -> uploading -> training -> downloading
   -> terminating -> done | stopped | error | error_pod_kept
 
-Leak-safety invariant: every path between create_instance() and run
-completion must end in destroy_instance() -- enforced here (provision
-try/except), by the max-runtime cap (monitor, Task 6) and by boot
-reconciliation. The local training path is untouched: a cloud run never sets
-'training_in_progress', so local generation/captioning stay available."""
+Lifecycle invariant: ordinary LoRA exits, explicit user stops and max-runtime
+caps destroy the instance. Once dense Krea training has started, unexpected
+failure keeps the pod recoverable until its direct Hugging Face delivery and
+licence metadata are verified; only then may completion destroy it. The local
+training path is untouched: a cloud run never sets 'training_in_progress', so
+local generation/captioning stay available."""
 import json
 import logging
 import os
@@ -47,6 +48,9 @@ _auto_retry_lock = threading.Lock()
 # survive a restart and is worthless when the thread meant to observe it is
 # dead or wedged.
 SUPERVISOR_INTERVAL_SECONDS = 60
+# Listing the whole vast.ai account every watchdog minute is unnecessary, but
+# terminal kept pods still need reaping while the desktop app stays open.
+_ORPHAN_RECONCILE_INTERVAL_SECONDS = 5 * 60
 # Database silence past which a monitor thread is no longer trusted to carry
 # out a stop -- it writes phase_detail every poll (~10 s), so two minutes of
 # nothing means it is not coming back in time to save a paid pod.
@@ -77,6 +81,7 @@ _TRAIN_SETTINGS_SNAPSHOT = 'train_settings_snapshot'
 # into a plain LoRA (same immutability contract as _TRAIN_SETTINGS_SNAPSHOT —
 # see _RunConfigDataset / incident 2026-07-14).
 _TRAIN_SLIDER_SNAPSHOT = 'train_slider_snapshot'
+_FULL_TRANSFORMER_ARTIFACT = 'full_transformer'
 _CONFIRMATION_FLAGS = (
     'allow_caption_mismatch',
     'allow_uncaptioned',
@@ -173,6 +178,553 @@ def _assert_official_base_reachable(repo_id, token, timeout=8):
         return
 
 
+def _make_hf_api(token):
+    """Small Hugging Face seam kept injectable for offline unit tests."""
+    try:
+        from huggingface_hub import HfApi
+    except ImportError as e:
+        raise RuntimeError('huggingface-hub is required for full_transformer '
+                           'cloud delivery') from e
+    return HfApi(token=token)
+
+
+_KREA_BASE_REPO = 'krea/Krea-2-Raw'
+_KREA_LICENSE_FILENAME = 'LICENSE.pdf'
+_KREA_LICENSE_LINK = (
+    'https://huggingface.co/krea/Krea-2-Raw/blob/main/LICENSE.pdf')
+_KREA_REQUIRED_ATTRIBUTION = (
+    'Krea 2 is licensed under the Krea 2 Community License Agreement. '
+    'For more information, visit https://krea.ai/krea-2-licensing.')
+_KREA_NOTICE = (
+    f'{_KREA_REQUIRED_ATTRIBUTION}\n\n'
+    'This repository contains a modified derivative of Krea 2. The training '
+    'dataset and resulting weights differ from the official model.\n\n'
+    'This modified derivative is unofficial, is not an official Krea product, '
+    'and is not endorsed by Krea.\n')
+
+# A Krea 2 full-transformer save is measured in tens of gigabytes.  Eight GiB
+# is deliberately conservative (well below the expected bf16 checkpoint) while
+# still rejecting an LFS pointer, empty upload, partial multipart upload, or a
+# small unrelated safetensors file.  Verification only reads Hub metadata; the
+# application never downloads the dense checkpoint.
+_FULL_TRANSFORMER_MIN_WEIGHT_BYTES = 8 * 1024 ** 3
+
+
+def _hf_token_for_mode(training_mode: str):
+    """Return the least-privilege token for one execution mode.
+
+    Dense Krea runs must never inherit the general-purpose ``HF_TOKEN``.  The
+    remote still calls its environment/settings key HF_TOKEN, but the value we
+    put there is selected here and comes exclusively from HF_CLOUD_TOKEN.
+    """
+    return cfg.secret('HF_CLOUD_TOKEN' if training_mode == 'full_transformer'
+                      else 'HF_TOKEN')
+
+
+def _hf_token_for_run(run):
+    return _hf_token_for_mode(_run_training_mode(run))
+
+
+def _permission_values(raw) -> set:
+    """Normalize one Hub permission list without guessing malformed values."""
+    if not isinstance(raw, (list, tuple)):
+        return set()
+    return {value.strip().lower() for value in raw
+            if isinstance(value, str) and value.strip()}
+
+
+def _full_transformer_delivery_namespace(who) -> str:
+    """Validate and return the token's single delivery-only namespace.
+
+    Hugging Face cannot grant write access to a repository that does not exist
+    yet.  Dense runs create a private repository per run, so the narrowest
+    technically usable contract is one *dedicated* user/org namespace scope.
+    Everything else is fail-closed: no global permission, exact read scope for
+    the gated base, exactly one namespace with read+write, and no unrelated
+    scoped permissions.  The UI/docs explicitly require that namespace to
+    contain only LDS delivery repositories.
+    """
+    access = ((who or {}).get('auth') or {}).get('accessToken') or {}
+    fine = access.get('fineGrained')
+    if not isinstance(fine, dict):
+        raise ValueError('HF_CLOUD_TOKEN has no inspectable fine-grained scopes')
+
+    raw_global = fine.get('global')
+    if not isinstance(raw_global, list) or any(
+            not isinstance(value, str) for value in raw_global):
+        raise ValueError(
+            'HF_CLOUD_TOKEN global permissions are not safely inspectable')
+    global_permissions = _permission_values(raw_global)
+    can_read_gated = fine.get('canReadGatedRepos', False)
+    if global_permissions or can_read_gated not in (False, None):
+        raise ValueError(
+            'HF_CLOUD_TOKEN must not have global or broad permissions; grant '
+            'an exact read scope for krea/Krea-2-Raw instead')
+
+    scopes = fine.get('scoped')
+    if not isinstance(scopes, list):
+        raise ValueError('HF_CLOUD_TOKEN scoped permissions are not inspectable')
+
+    base_read = False
+    delivery_scopes = []
+    for scope in scopes:
+        if not isinstance(scope, dict):
+            raise ValueError('HF_CLOUD_TOKEN contains a malformed scope')
+        raw_permissions = scope.get('permissions')
+        if not isinstance(raw_permissions, list) or any(
+                not isinstance(value, str) for value in raw_permissions):
+            raise ValueError(
+                'HF_CLOUD_TOKEN contains permissions that are not safely inspectable')
+        permissions = _permission_values(raw_permissions)
+        if not permissions:
+            continue
+        entity = scope.get('entity')
+        if not isinstance(entity, dict):
+            raise ValueError(
+                'HF_CLOUD_TOKEN permissions must identify their scoped resource')
+        entity_type = str(entity.get('type') or '').strip().lower()
+        entity_name = str(entity.get('name') or '').strip()
+
+        if entity_type == 'model' and entity_name.lower() == _KREA_BASE_REPO.lower():
+            if permissions != {'repo.content.read'}:
+                raise ValueError(
+                    'krea/Krea-2-Raw must have exact repo.content.read access only')
+            base_read = True
+            continue
+
+        if 'repo.write' in permissions:
+            if entity_type not in {'user', 'org'} or not entity_name:
+                raise ValueError(
+                    'HF_CLOUD_TOKEN write access must target one dedicated user '
+                    'or organization delivery namespace')
+            if permissions != {'repo.content.read', 'repo.write'}:
+                raise ValueError(
+                    'the delivery namespace must have only repo.content.read and '
+                    'repo.write permissions')
+            delivery_scopes.append((entity_type, entity_name))
+            continue
+
+        # Even read-only access to unrelated private resources contradicts the
+        # delivery-only credential promise and increases the token's blast
+        # radius if the paid pod is compromised.
+        raise ValueError(
+            'HF_CLOUD_TOKEN contains an unrelated scope; keep only exact Krea '
+            'base read and one dedicated delivery namespace')
+
+    if not base_read:
+        raise ValueError(
+            'HF_CLOUD_TOKEN needs exact repo.content.read access to '
+            'krea/Krea-2-Raw')
+    if len(delivery_scopes) != 1:
+        raise ValueError(
+            'HF_CLOUD_TOKEN needs exactly one dedicated delivery namespace '
+            'with repo.content.read and repo.write access')
+
+    entity_type, namespace = delivery_scopes[0]
+    identity = str((who or {}).get('name') or '').strip()
+    if entity_type == 'user':
+        if not identity or namespace.lower() != identity.lower():
+            raise ValueError(
+                'HF_CLOUD_TOKEN user scope does not match its authenticated namespace')
+    else:
+        orgs = (who or {}).get('orgs')
+        if not isinstance(orgs, list):
+            raise ValueError(
+                'HF_CLOUD_TOKEN organization membership cannot be verified')
+        org_names = {
+            str(org.get('name') if isinstance(org, dict) else org).strip().lower()
+            for org in orgs
+        }
+        if namespace.lower() not in org_names:
+            raise ValueError(
+                'HF_CLOUD_TOKEN organization scope is not owned by this identity')
+    return namespace
+
+
+_BROAD_HF_TOKEN_WARNING = (
+    'This Hugging Face token has global write access to every repository the '
+    'account can modify. It is accepted, but a dedicated fine-grained token '
+    'limited to Krea 2 reads and one LDS delivery namespace is strongly '
+    'recommended.')
+
+
+def _validate_full_transformer_token(token, _api=None):
+    """Require real Krea read rights and usable delivery write rights.
+
+    ``whoami`` proves the token type and advertised scopes; listing the gated
+    official base proves that the token/account can actually read it.  Private
+    repository creation and compliance uploads later provide the real write
+    check before a GPU is ever rented.
+    """
+    if not token:
+        raise ValueError(
+            'full_transformer cloud training requires HF_CLOUD_TOKEN with '
+            'repository write access (fine-grained recommended; global write '
+            'accepted with a warning)')
+    api = _api or _make_hf_api(token)
+    try:
+        who = api.whoami() or {}
+    except Exception:
+        raise ValueError(
+            'HF_CLOUD_TOKEN could not be authenticated; verify the token and '
+            'try again (fine-grained recommended; global write accepted)') from None
+    access = ((who.get('auth') or {}).get('accessToken') or {})
+    role = re.sub(r'[^a-z]', '', str(access.get('role') or '').lower())
+    if role == 'finegrained':
+        namespace = _full_transformer_delivery_namespace(who)
+        broad_access = False
+    elif role == 'write':
+        namespace = str((who or {}).get('name') or '').strip()
+        if not namespace:
+            raise ValueError(
+                'HF_CLOUD_TOKEN authenticated identity has no usable delivery namespace')
+        broad_access = True
+    else:
+        raise ValueError(
+            'HF_CLOUD_TOKEN requires write access to create and upload the '
+            'private delivery repository; read-only tokens cannot be used')
+    try:
+        api.list_repo_files(repo_id=_KREA_BASE_REPO, repo_type='model')
+    except Exception:
+        raise ValueError(
+            'HF_CLOUD_TOKEN cannot read krea/Krea-2-Raw; accept its licence '
+            'with the same Hugging Face account and grant this token access') from None
+    return api, str(namespace), broad_access
+
+
+def full_transformer_token_status(token, _api=None) -> dict:
+    """Return a secret-free readiness state for one prospective cloud token.
+
+    This intentionally performs the same authenticated scope/read checks as
+    launch.  Launch calls the validator again as the authoritative TOCTOU-safe
+    gate; callers may cache this serializable advisory response if desired.
+    """
+    base = {
+        'configured': bool(token),
+        'namespace': None,
+        'settings_focus': 'HF_CLOUD_TOKEN',
+        'warning': None,
+    }
+    if not token:
+        return {
+            **base, 'ok': False, 'code': 'missing', 'severity': 'error',
+            'error': ('Full-model Krea 2 cloud training requires a dedicated '
+                      'HF_CLOUD_TOKEN.'),
+        }
+    try:
+        _api_obj, namespace, broad_access = _validate_full_transformer_token(
+            token, _api=_api)
+    except Exception as exc:
+        # The validator deliberately raises only generic, token-free messages.
+        # Still scrub both the exact candidate and common token forms in case a
+        # future local seam regresses.
+        error = str(exc).replace(str(token), '[redacted]')
+        error = re.sub(r'\bhf_[A-Za-z0-9_-]{8,}\b', '[redacted]', error)
+        return {
+            **base, 'ok': False, 'code': 'invalid', 'severity': 'error',
+            'error': error,
+        }
+    if broad_access:
+        return {
+            **base, 'ok': True, 'code': 'broad_access',
+            'severity': 'warning', 'namespace': namespace, 'error': None,
+            'warning': _BROAD_HF_TOKEN_WARNING,
+        }
+    return {
+        **base, 'ok': True, 'code': 'ready', 'namespace': namespace,
+        'severity': 'success', 'warning': None, 'error': None,
+    }
+
+
+def full_transformer_token_preflight(_api=None) -> dict:
+    """Check the saved dense-training token without exposing its value."""
+    return full_transformer_token_status(
+        cfg.secret('HF_CLOUD_TOKEN'), _api=_api)
+
+
+def _full_transformer_repo_name(run) -> str:
+    """License-compliant, per-run model-repository segment.
+
+    The Krea 2 Community License requires derivative model names to start with
+    ``Krea``.  The database id makes this repository one-to-one with a cloud
+    run; a retry is a new run and intentionally receives a new repository.
+    """
+    stem = re.sub(r'[^A-Za-z0-9._-]+', '-', str(run.run_name or '')).strip('-.')
+    stem = stem[:48] or 'model'
+    return f'Krea-2-full-{int(run.id)}-{stem}'
+
+
+def _full_transformer_readme(repo_id: str) -> str:
+    model_name = repo_id.rsplit('/', 1)[-1]
+    return (
+        '---\n'
+        'license: other\n'
+        'license_name: krea-2-community-license\n'
+        f'license_link: {_KREA_LICENSE_LINK}\n'
+        f'base_model: {_KREA_BASE_REPO}\n'
+        'pipeline_tag: text-to-image\n'
+        'tags:\n'
+        '- krea-2\n'
+        '- full-transformer\n'
+        '- diffusers\n'
+        '---\n\n'
+        f'# {model_name}\n\n'
+        f'{_KREA_REQUIRED_ATTRIBUTION}\n\n'
+        'This repository contains a **modified derivative** of '
+        '`krea/Krea-2-Raw`, trained on a user-provided dataset. Its weights '
+        'differ from the official model.\n\n'
+        'This derivative is unofficial, is not an official Krea product, and '
+        'is not endorsed by Krea. See `NOTICE` and `LICENSE.pdf` in this '
+        'repository.\n')
+
+
+def _download_hf_file(api, repo_id: str, filename: str) -> bytes:
+    path = api.hf_hub_download(
+        repo_id=repo_id, filename=filename, repo_type='model')
+    return Path(path).read_bytes()
+
+
+def _full_transformer_compliance_files(api, repo_id: str) -> dict:
+    """Return exact licence/notice/model-card bytes for a dense derivative."""
+    return {
+        _KREA_LICENSE_FILENAME: _download_hf_file(
+            api, _KREA_BASE_REPO, _KREA_LICENSE_FILENAME),
+        'NOTICE': _KREA_NOTICE.encode('utf-8'),
+        'README.md': _full_transformer_readme(repo_id).encode('utf-8'),
+    }
+
+
+def _apply_full_transformer_compliance(api, repo_id: str, *, validate=True):
+    """(Re)apply files ai-toolkit may overwrite, then optionally read back."""
+    expected = _full_transformer_compliance_files(api, repo_id)
+    for filename, payload in expected.items():
+        api.upload_file(
+            path_or_fileobj=payload, path_in_repo=filename, repo_id=repo_id,
+            repo_type='model',
+            commit_message=f'Apply Krea 2 derivative compliance: {filename}')
+    if validate:
+        for filename, payload in expected.items():
+            if _download_hf_file(api, repo_id, filename) != payload:
+                raise RuntimeError(f'compliance validation failed for {filename}')
+
+
+def _create_full_transformer_repo(run, token, _api=None) -> dict:
+    """Create the private direct-delivery repository before a pod is rented.
+
+    No exception text from the SDK is persisted: authentication/network
+    errors can include request diagnostics, and secrets never belong in the
+    run JSON or application log.
+    """
+    api, namespace, _broad_access = _validate_full_transformer_token(
+        token, _api=_api)
+    repo_id = f'{namespace}/{_full_transformer_repo_name(run)}'
+    try:
+        api.create_repo(repo_id=repo_id, repo_type='model', private=True,
+                        exist_ok=False)
+    except Exception:
+        raise RuntimeError('could not create the private Hugging Face repository '
+                           'for full_transformer delivery; verify HF_CLOUD_TOKEN has '
+                           'write access and try again') from None
+    hf_url = f'https://huggingface.co/{repo_id}'
+    try:
+        # Persist immediately: if this process dies between creation and the
+        # completed launch params, the repository is still discoverable.
+        _persist_artifact_state(
+            run, 'preparing_metadata', hf_repo_id=repo_id, hf_url=hf_url,
+            artifact_status_detail='Preparing Krea 2 licence and model card')
+        _apply_full_transformer_compliance(api, repo_id, validate=True)
+    except Exception:
+        cleaned = False
+        try:
+            api.delete_repo(repo_id=repo_id, repo_type='model')
+            cleaned = True
+        except Exception:
+            pass
+        try:
+            _persist_artifact_state(
+                run, 'repository_preparation_failed', hf_repo_id=repo_id,
+                hf_url=hf_url,
+                artifact_status_detail=(
+                    'Repository preparation failed; empty repository was deleted'
+                    if cleaned else
+                    'Repository preparation failed; repository cleanup must be checked'))
+        except Exception:
+            pass
+        raise RuntimeError(
+            'could not prepare the Krea 2 licence and model card in the private '
+            'Hugging Face repository; no GPU was rented') from None
+    return {'hf_repo_id': repo_id,
+            'hf_url': hf_url}
+
+
+def _updated_artifact_params(run, status, **extra) -> dict:
+    """Build non-secret delivery metadata without committing it yet."""
+    try:
+        params = json.loads(run.train_params or '{}')
+    except (TypeError, ValueError):
+        params = {}
+    if not isinstance(params, dict):
+        params = {}
+    params['artifact_status'] = status
+    params.update(extra)
+    return params
+
+
+def _persist_artifact_state(run, status, **extra) -> dict:
+    """Persist non-secret delivery metadata and return the updated params."""
+    params = _updated_artifact_params(run, status, **extra)
+    _set(run, train_params=json.dumps(params))
+    return params
+
+
+def _metadata_value(obj, name, default=None):
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    return getattr(obj, name, default)
+
+
+def _full_transformer_weight_proof(sibling) -> dict | None:
+    """Return a non-secret integrity proof from Hub metadata, never file bytes."""
+    direct_size = _metadata_value(sibling, 'size')
+    lfs = _metadata_value(sibling, 'lfs')
+    lfs_size = _metadata_value(lfs, 'size') if lfs is not None else None
+    sizes = [value for value in (direct_size, lfs_size)
+             if isinstance(value, int) and not isinstance(value, bool)]
+    if not sizes or any(value < _FULL_TRANSFORMER_MIN_WEIGHT_BYTES
+                        for value in sizes):
+        return None
+    if len(set(sizes)) > 1:
+        return None
+
+    sha256 = (_metadata_value(lfs, 'sha256') if lfs is not None else None)
+    if not sha256 and lfs is not None:
+        sha256 = _metadata_value(lfs, 'oid')
+    sha256 = str(sha256 or '').strip().lower()
+    if not re.fullmatch(r'[0-9a-f]{64}', sha256):
+        sha256 = None
+
+    blob_id = str(_metadata_value(sibling, 'blob_id') or '').strip().lower()
+    if not re.fullmatch(r'(?:[0-9a-f]{40}|[0-9a-f]{64})', blob_id):
+        blob_id = None
+    if not sha256 and not blob_id:
+        return None
+    return {
+        'size_bytes': sizes[0],
+        'sha256': sha256,
+        'blob_id': blob_id,
+        'metadata_source': 'huggingface_repo_info_files_metadata',
+    }
+
+
+def _verify_full_transformer_artifact(run, _api=None) -> str:
+    """Verify direct HF delivery and return its explicit persisted status.
+
+    ``available`` is written only after the private repo exposes a credibly
+    sized ``.safetensors`` object plus an immutable Hub blob/LFS identifier.
+    ``repo_info(files_metadata=True)`` provides that proof without downloading
+    the ~26 GB checkpoint.  A network/API failure remains distinct from a repo
+    that answered successfully but contains no intact dense checkpoint.
+    """
+    if not _is_full_transformer_run(run):
+        return 'not_applicable'
+    repo_id = _run_param(run, 'hf_repo_id')
+    if not repo_id:
+        _persist_artifact_state(
+            run, 'missing', artifact_status_detail='Hugging Face repository was not recorded')
+        return 'missing'
+    token = cfg.secret('HF_CLOUD_TOKEN')
+    if not token and _api is None:
+        _persist_artifact_state(
+            run, 'verification_pending',
+            artifact_status_detail='HF_CLOUD_TOKEN is unavailable; delivery is not verified')
+        return 'verification_pending'
+    try:
+        api = _api or _make_hf_api(token)
+        info = api.repo_info(
+            repo_id=repo_id, repo_type='model', files_metadata=True)
+        siblings = _metadata_value(info, 'siblings')
+        if not isinstance(siblings, (list, tuple)):
+            raise RuntimeError('Hugging Face did not return file metadata')
+    except Exception:
+        # Do not log the SDK exception: request diagnostics must never risk
+        # echoing an authorization header.  The explicit state is actionable.
+        logger.warning('run %s: Hugging Face artifact verification unavailable', run.id)
+        _persist_artifact_state(
+            run, 'verification_pending',
+            artifact_status_detail='Hugging Face verification is temporarily unavailable')
+        return 'verification_pending'
+    expected_prefix = (run.job_name if str(run.job_name or '').startswith('Krea')
+                       else 'Krea')
+    matching = []
+    for sibling in siblings:
+        path = str(_metadata_value(sibling, 'rfilename') or '')
+        if (path.lower().endswith('.safetensors')
+                and Path(path).name.startswith(expected_prefix)):
+            matching.append((path, _full_transformer_weight_proof(sibling)))
+    valid = sorted((path, proof) for path, proof in matching if proof is not None)
+    checked_at = datetime.utcnow().isoformat()
+    if not valid:
+        reason = ('has no matching dense checkpoint' if not matching else
+                  'has only empty, truncated, or unverifiable matching checkpoints')
+        _persist_artifact_state(
+            run, 'missing',
+            artifact_status_detail=(
+                f'Repository {reason} ({expected_prefix}*.safetensors)'),
+            delivery_last_checked_at=checked_at)
+        return 'missing'
+    weight_path, proof = valid[-1]
+    try:
+        # ai-toolkit writes its own README while pushing. Reapply and read back
+        # every compliance file before the result can become available.
+        _apply_full_transformer_compliance(api, repo_id, validate=True)
+    except Exception:
+        logger.warning('run %s: Krea repository metadata verification unavailable',
+                       run.id)
+        _persist_artifact_state(
+            run, 'verification_pending',
+            artifact_status_detail=(
+                'Dense checkpoint exists, but Krea licence/model-card metadata '
+                'could not be reapplied and verified'),
+            delivery_last_checked_at=checked_at)
+        return 'verification_pending'
+    verified_at = datetime.utcnow().isoformat()
+    _persist_artifact_state(
+        run, 'available', hf_weight_filename=weight_path,
+        hf_artifact_proof=proof,
+        verified_at=verified_at, artifact_verified_at=verified_at,
+        delivery_last_checked_at=verified_at,
+        artifact_status_detail='Dense checkpoint and compliance metadata verified')
+    return 'available'
+
+
+def _verify_full_transformer_artifact_with_retries(run, _api=None) -> str:
+    """Bound transient HF/metadata verification without ever failing open."""
+    dense = ((cfg.get('cloud') or {}).get('full_transformer') or {})
+    attempts = max(1, int(dense.get('verification_attempts') or 3))
+    delay = max(0, int(dense.get('verification_retry_seconds') or 0))
+    state = 'verification_pending'
+    for attempt in range(1, attempts + 1):
+        try:
+            state = _verify_full_transformer_artifact(run, _api=_api)
+        except Exception:
+            # Persistence/SDK edge cases must remain fail-closed, and the
+            # exception is intentionally not interpolated (it may contain
+            # request diagnostics from an authenticated call).
+            logger.warning('run %s: dense artifact verification attempt %s/%s failed',
+                           run.id, attempt, attempts)
+            state = 'verification_pending'
+        if state != 'verification_pending':
+            return state
+        if attempt < attempts and delay:
+            _sleep(delay)
+    _persist_artifact_state(
+        run, 'verification_pending',
+        artifact_status_detail=(
+            f'Hugging Face delivery/compliance verification remained unavailable '
+            f'after {attempts} attempts'))
+    return state
+
+
 def _assert_launch_guardrails(dataset_id, fam):
     """Raise when a cloud launch cannot reserve an active slot.
 
@@ -222,6 +774,17 @@ def _run_family(run):
     return _run_param(run, 'train_type')
 
 
+def _run_training_mode(run) -> str:
+    """Frozen execution mode for a run; legacy/corrupt rows stay LoRA-safe."""
+    return ('full_transformer'
+            if _run_param(run, 'training_mode') == 'full_transformer'
+            else 'lora')
+
+
+def _is_full_transformer_run(run) -> bool:
+    return _run_training_mode(run) == 'full_transformer'
+
+
 class _RunConfigDataset:
     """Read-only view of a dataset whose config inputs are forced to the values
     stamped for this run; every other attribute delegates to the real dataset.
@@ -239,13 +802,15 @@ class _RunConfigDataset:
     no DB mutation, nothing to restore, and both concurrent runs stay isolated."""
 
     def __init__(self, ds, train_type, train_variant, train_base_model='',
-                 train_settings_snapshot=_UNSET, train_slider_snapshot=_UNSET):
+                 train_settings_snapshot=_UNSET, train_slider_snapshot=_UNSET,
+                 training_mode='lora'):
         self._ds = ds
         self._train_type = train_type
         self._train_variant = train_variant
         self._train_base_model = train_base_model
         self._train_settings_snapshot = train_settings_snapshot
         self._train_slider_snapshot = train_slider_snapshot
+        self._training_mode = lt.normalize_training_mode(training_mode)
 
     @property
     def train_type(self):
@@ -263,6 +828,12 @@ class _RunConfigDataset:
         # an empty string means the official Hugging Face base and must not
         # fall through to a base subsequently persisted on the dataset row.
         return self._train_base_model
+
+    @property
+    def training_mode(self):
+        # Dense-vs-LoRA changes the tensors being optimized and the artifact
+        # type.  It is therefore provenance, not a mutable dataset preference.
+        return self._training_mode
 
     @property
     def train_settings(self):
@@ -303,7 +874,8 @@ def _run_config_dataset(ds, params):
     base = params.get('base_model', '')
     advanced = params.get(_TRAIN_SETTINGS_SNAPSHOT, _UNSET)
     slider = params.get(_TRAIN_SLIDER_SNAPSHOT, _UNSET)
-    return _RunConfigDataset(ds, fam, var, base, advanced, slider)
+    mode = params.get('training_mode', 'lora')
+    return _RunConfigDataset(ds, fam, var, base, advanced, slider, mode)
 
 
 def _recipe_replay_diagnostic(params):
@@ -423,6 +995,10 @@ def retry_cloud_run(user_id, run_id) -> dict:
         p = {}
     if not isinstance(p, dict):
         p = {}
+    if (p.get('training_mode') == 'full_transformer'
+            and p.get('resume_ckpt_path')):
+        raise ValueError('full_transformer resume/continue is not supported in '
+                         'this MVP; launch a fresh dense Krea-2-Raw run')
     _assert_recipe_replayable(p, 'retry')
     snapshot = p.get(_TRAIN_SETTINGS_SNAPSHOT, _UNSET)
     if p.get('resume_ckpt_path'):
@@ -439,6 +1015,7 @@ def retry_cloud_run(user_id, run_id) -> dict:
         base_model=p.get('base_model', ''),
         variant=p.get('variant'),
         train_type=p.get('train_type'),
+        training_mode=p.get('training_mode', 'lora'),
         masked=p.get('masked', True),
         **_confirmation_flags(p),
         gpu_name=p.get('requested_gpu'),
@@ -448,6 +1025,24 @@ def retry_cloud_run(user_id, run_id) -> dict:
         train_slider_snapshot=p.get(_TRAIN_SLIDER_SNAPSHOT, _UNSET))
 
 
+_CLOUD_FULL_STATE_REASON = (
+    'This cloud image does not run the LDS state bridge; only the LoRA weights '
+    'were harvested. Optimizer, scheduler, RNG and dataloader state are unavailable.')
+
+
+def _cloud_resume_state() -> dict:
+    """Truthful capability stamp for a checkpoint produced by today's pod image."""
+    return {
+        'bundle_id': None,
+        'status': 'unsupported',
+        'integrity': 'unchecked',
+        'state_level': 'weights',
+        'size_bytes': 0,
+        'capabilities': {'weights': True, 'exact': False},
+        'reason': _CLOUD_FULL_STATE_REASON,
+    }
+
+
 def _run_staging_checkpoints(run) -> list:
     """This run's HARVESTED checkpoints that still live in staging (NOT the
     trash — trashed saves are moved out of staging_dir): list of
@@ -455,6 +1050,8 @@ def _run_staging_checkpoints(run) -> list:
     cloud_checkpoints' step extraction so 'continue' resumes from the exact same
     checkpoint the hub lists. The unsuffixed FINAL save (no _<step> suffix) is
     the run's target step count."""
+    if _is_full_transformer_run(run):
+        return []
     sd = run.staging_dir
     if not sd or not os.path.isdir(sd):
         return []
@@ -466,7 +1063,8 @@ def _run_staging_checkpoints(run) -> list:
         m = re.search(r'_(\d{6,})\.safetensors$', name)
         out.append({'filename': name,
                     'step': int(m.group(1)) if m else target,
-                    'path': os.path.join(sd, name)})
+                    'path': os.path.join(sd, name),
+                    'resume_state': _cloud_resume_state()})
     # step asc; a suffixed save wins ties over the unsuffixed final (deterministic).
     out.sort(key=lambda e: (e['step'], bool(re.search(r'_(\d{6,})\.safetensors$',
                                                        e['filename']))))
@@ -530,8 +1128,28 @@ def _resume_snapshot_with_recorded_topology(user_id, dataset_id, snapshot, topol
     return _merge_resume_overrides(fallback, topology) if topology else snapshot
 
 
+def _require_cloud_weights_only(resume_mode='weights_only', state_bundle_id=None):
+    """Validate the resume contract before any cloud-side effect.
+
+    The current pod image exposes only ai-toolkit's checkpoint upload seam. It
+    cannot activate LDS's in-process state bridge, so sending optimizer/RNG
+    artifacts would still replay a weights-only run. Refuse that lie explicitly
+    until the remote runtime advertises the bridge capability.
+    """
+    mode = str(resume_mode or '').strip().lower()
+    if mode not in ('weights_only', 'full_state'):
+        raise ValueError("resume_mode must be 'weights_only' or 'full_state'")
+    if mode == 'full_state':
+        raise ValueError(
+            'full-state resume is not supported by the current cloud runtime — '
+            'choose weights only, or continue this verified bundle locally')
+    if state_bundle_id is not None:
+        raise ValueError('state_bundle_id is only valid with resume_mode=full_state')
+
+
 def continue_cloud_run(user_id, run_id, extra_steps=1000, from_step=None,
-                       overrides=None) -> dict:
+                       overrides=None, resume_mode='weights_only',
+                       state_bundle_id=None) -> dict:
     """Reprend un run cloud TERMINAL (done OU en échec) depuis un checkpoint
     harvesté et vise step_de_reprise + extra_steps — le pendant cloud de
     lora_training.continue_training. C'est un VRAI launch_cloud_training (pod
@@ -548,6 +1166,7 @@ def continue_cloud_run(user_id, run_id, extra_steps=1000, from_step=None,
     ``overrides`` = mêmes réglages sûrs que le local (cadence/preview prompts),
     fusionnés dans le snapshot du run (jamais dans le dataset). register_launch
     reste un launch cloud normal — le resume est un détail d'exécution."""
+    _require_cloud_weights_only(resume_mode, state_bundle_id)
     run = db.session.get(CloudTrainingRun, int(run_id))
     if not run:
         raise ValueError('unknown cloud run')
@@ -565,6 +1184,9 @@ def continue_cloud_run(user_id, run_id, extra_steps=1000, from_step=None,
         p = {}
     if not isinstance(p, dict):
         p = {}
+    if p.get('training_mode') == 'full_transformer':
+        raise ValueError('full_transformer runs cannot be continued or resumed '
+                         'in this MVP; launch a fresh dense Krea-2-Raw run')
     _assert_recipe_replayable(p, 'continue')
     override_patch = lt.validate_resume_overrides(overrides)
     # The raw cloud snapshot historically omitted LoKr's full-rank bit, while
@@ -647,7 +1269,9 @@ def continue_local_run_in_cloud(user_id, dataset_id, extra_steps=1000,
                                 masked=None, allow_caption_mismatch=False,
                                 allow_uncaptioned=False, allow_caption_quality=False,
                                 allow_unverified_weights=False, allow_not_ready=False,
-                                gpu_name=None) -> dict:
+                                gpu_name=None, training_mode='lora',
+                                resume_mode='weights_only',
+                                state_bundle_id=None) -> dict:
     """▶ Continue a LOCAL run's checkpoint IN THE CLOUD — the mirror of
     continue_cloud_run, and the other half of "pick your lane" in the ▶ Continue
     dialog. Nothing new is invented: the pod-side resume is the SAME seam
@@ -669,9 +1293,13 @@ def continue_local_run_in_cloud(user_id, dataset_id, extra_steps=1000,
     lr_factor), merged into THIS run's settings snapshot — the dataset's own
     persisted settings are never touched (the local lane's update_train_settings
     is a local-lane behaviour, not something to replicate on a cloud launch)."""
+    _require_cloud_weights_only(resume_mode, state_bundle_id)
     ds = fds.get_dataset(user_id, dataset_id)
     if not ds:
         raise ValueError('dataset not found')
+    if lt.normalize_training_mode(training_mode) == 'full_transformer':
+        raise ValueError('full_transformer checkpoints cannot be continued or '
+                         'resumed in this MVP; launch a fresh dense Krea-2-Raw run')
     fam = lt._train_type(ds, train_type)
     var = variant or getattr(ds, 'train_variant', None) or lt._default_variant_for(fam)
     # base_model _UNSET = the dataset's persisted base (the queue's behaviour);
@@ -782,7 +1410,8 @@ def launch_cloud_training(user_id, dataset_id, steps=None, base_model=_UNSET,
                           auto_retry_count=0, auto_retry_of=None,
                           strict_gpu=False, train_settings_snapshot=_UNSET,
                           train_slider_snapshot=_UNSET,
-                          parent_record_id=None, resumed_from=None) -> dict:
+                          parent_record_id=None, resumed_from=None,
+                          training_mode='lora') -> dict:
     if not cfg.secret('VAST_API_KEY'):
         raise RuntimeError('vast.ai API key is not configured — add it in Settings')
     # A user launching after days away is exactly when an expired
@@ -802,6 +1431,7 @@ def launch_cloud_training(user_id, dataset_id, steps=None, base_model=_UNSET,
     ds = fds.get_dataset(user_id, dataset_id)
     if not ds:
         raise ValueError('dataset not found')
+    mode = lt.normalize_training_mode(training_mode)
     # Slider LoRA mode (Beta) rides the SAME pod as every other family: the
     # pod's ai-toolkit registers `concept_slider` as a built-in trainer uid
     # (extends DiffusionTrainer — the very path _cloudify_job_config targets),
@@ -853,6 +1483,33 @@ def launch_cloud_training(user_id, dataset_id, steps=None, base_model=_UNSET,
         raise ValueError('Anima cloud training is coming once the pod image is '
                          'verified — train it locally for now')
     variant = (variant or '').strip().lower()
+    if mode == 'full_transformer':
+        if fam != 'krea':
+            raise ValueError('full_transformer cloud training is supported only '
+                             'for Krea 2')
+        if variant and variant != 'base':
+            raise ValueError('full_transformer cloud training requires '
+                             'Krea-2-Raw (variant "base"); Turbo is unsupported')
+        variant = 'base'
+        if base_model:
+            raise ValueError('full_transformer cloud training requires the '
+                             'official Krea-2-Raw base; custom weights are unsupported')
+        if resume_ckpt_path or resume_step is not None or resumed_from is not None:
+            raise ValueError('full_transformer resume/continue is not supported '
+                             'in this MVP; launch a fresh dense Krea-2-Raw run')
+        slider_value = (getattr(ds, 'train_slider', None)
+                        if train_slider_snapshot is _UNSET
+                        else train_slider_snapshot)
+        slider_view = _RunConfigDataset(
+            ds, fam, variant, base_model, train_slider_snapshot=slider_value,
+            training_mode=mode)
+        if lt.slider_mode_enabled(slider_view):
+            raise ValueError('full_transformer cloud training is incompatible '
+                             'with Slider LoRA mode')
+        # Validate token type/scopes and real Krea-base readability before the
+        # reservation row exists. Repository creation later proves write
+        # access before any monitor can rent a pod.
+        _validate_full_transformer_token(cfg.secret('HF_CLOUD_TOKEN'))
     confirmations = {
         'allow_caption_mismatch': bool(allow_caption_mismatch),
         'allow_uncaptioned': bool(allow_uncaptioned),
@@ -896,7 +1553,7 @@ def launch_cloud_training(user_id, dataset_id, steps=None, base_model=_UNSET,
         # sentence that named the repo. One HEAD here costs nothing and turns that
         # into a message before a GPU is reserved.
         _assert_official_base_reachable(
-            lt.official_base_repo(ds, fam, variant), cfg.secret('HF_TOKEN'))
+            lt.official_base_repo(ds, fam, variant), _hf_token_for_mode(mode))
     # Cheap fast-fail before the image/caption preflight below. This read is
     # intentionally advisory: another Flask request can reserve a slot after
     # it, so the same checks are repeated atomically at reservation time.
@@ -936,8 +1593,15 @@ def launch_cloud_training(user_id, dataset_id, steps=None, base_model=_UNSET,
             # Stamp the family in the reservation itself. Without this, the
             # short window before the complete params are saved would make a
             # legitimate second-family launch look like an unknown-family run.
-            train_params=json.dumps({'train_type': fam, 'variant': variant,
-                                     'base_model': base_model, **confirmations}))
+            train_params=json.dumps({
+                'train_type': fam, 'variant': variant,
+                'base_model': base_model, 'training_mode': mode,
+                'artifact_kind': (_FULL_TRANSFORMER_ARTIFACT
+                                  if mode == 'full_transformer' else 'lora'),
+                'artifact_status': ('creating_repository'
+                                    if mode == 'full_transformer' else None),
+                **confirmations,
+            }))
         db.session.add(run)
         db.session.commit()
     try:
@@ -948,8 +1612,13 @@ def launch_cloud_training(user_id, dataset_id, steps=None, base_model=_UNSET,
         # the MONITOR thread (_prepare_staging), not here — this call must
         # return in well under a second or the launch dialog sits on
         # 'Launching…' for a minute (user-observed).
+        job_prefix = 'Krea_' if mode == 'full_transformer' else ''
         _set(run, vast_label=f'lds-{run.id}',
-             job_name=f'lds{run.id}_{run_name}')
+             job_name=f'{job_prefix}lds{run.id}_{run_name}')
+        artifact = {}
+        if mode == 'full_transformer':
+            artifact = _create_full_transformer_repo(
+                run, cfg.secret('HF_CLOUD_TOKEN'))
         # Mirror the LOCAL launch: persist this dataset's family/variant as its
         # remembered selection (launch_training does the same; two launch tests
         # assert it). This is now ONLY the dataset's default selection — the
@@ -958,6 +1627,7 @@ def launch_cloud_training(user_id, dataset_id, steps=None, base_model=_UNSET,
         # this row can no longer retarget an already-provisioning run's arch.
         ds.train_type = fam
         ds.train_variant = variant
+        ds.training_mode = mode
         db.session.commit()
         # Same floor as the local path — a sub-500 target produces a run with
         # zero usable snapshots.
@@ -975,7 +1645,13 @@ def launch_cloud_training(user_id, dataset_id, steps=None, base_model=_UNSET,
         # the source run's own frozen flag.
         masked = lt.resolve_masked(ds, masked)
         params = {'steps': n_steps, 'variant': variant, 'base_model': base_model,
-                  'train_type': fam, 'masked': bool(masked), **confirmations}
+                  'train_type': fam, 'training_mode': mode,
+                  'artifact_kind': (_FULL_TRANSFORMER_ARTIFACT
+                                    if mode == 'full_transformer' else 'lora'),
+                  'masked': bool(masked), **confirmations}
+        if artifact:
+            params.update(artifact)
+            params['artifact_status'] = 'pending'
         if base_repo:
             # The monitor's rebuild (and any retry/continue replay) must route
             # the pod's name_or_path to the PRIVATE repo without recomputing
@@ -1035,8 +1711,14 @@ def launch_cloud_training(user_id, dataset_id, steps=None, base_model=_UNSET,
         _set(run, status='error', error=f'launch failed: {e}',
              finished_at=datetime.utcnow())
         raise
-    return {'run_id': run.id, 'status': run.status,
-            'job_name': run.job_name, 'steps': n_steps}
+    result = {'run_id': run.id, 'status': run.status,
+              'job_name': run.job_name, 'steps': n_steps,
+              'training_mode': mode}
+    if mode == 'full_transformer':
+        result.update({'artifact_kind': _FULL_TRANSFORMER_ARTIFACT,
+                       'hf_repo_id': params.get('hf_repo_id'),
+                       'hf_url': params.get('hf_url')})
+    return result
 
 
 _AUTO_RETRY_LIMIT = 1
@@ -1157,6 +1839,7 @@ def _maybe_auto_retry(run, error):
                 base_model=params.get('base_model', ''),
                 variant=params.get('variant'),
                 train_type=params.get('train_type'),
+                training_mode=params.get('training_mode', 'lora'),
                 masked=params.get('masked', True),
                 **_confirmation_flags(params),
                 gpu_name=gpu_name,
@@ -1165,7 +1848,8 @@ def _maybe_auto_retry(run, error):
                 auto_retry_count=retry_count + 1,
                 auto_retry_of=run.id,
                 strict_gpu=bool(gpu_name),
-                train_settings_snapshot=resume_snapshot)
+                train_settings_snapshot=resume_snapshot,
+                train_slider_snapshot=params.get(_TRAIN_SLIDER_SNAPSHOT, _UNSET))
         except Exception as retry_error:
             params['auto_retry_pending'] = False
             params['auto_retry_error'] = str(retry_error)[:300]
@@ -1454,7 +2138,13 @@ def _disk_gb_for(cloud_cfg, params) -> int:
     plus its quantized working copy plus dataset/checkpoints/HF cache, so the
     bump budgets twice the base size + 30 GB of headroom. Official-base runs
     (no stamp) keep the configured value bit-for-bit."""
-    disk_gb = int(cloud_cfg.get('disk_gb') or 60)
+    if params.get('training_mode') == 'full_transformer':
+        dense = cloud_cfg.get('full_transformer') or {}
+        # Safety floor, even when an old/user-edited config carries a smaller
+        # number: base + working weights + one ~26 GB save do not fit below it.
+        disk_gb = max(200, int(dense.get('disk_gb') or 200))
+    else:
+        disk_gb = int(cloud_cfg.get('disk_gb') or 60)
     try:
         base_bytes = int(params.get('base_size_bytes') or 0)
     except (TypeError, ValueError):
@@ -1475,7 +2165,11 @@ def _provision(run):
     c = cfg.get('cloud') or {}
     params = json.loads(run.train_params or '{}')
     fam = params.get('train_type') or 'zimage'
-    min_vram = (c.get('min_vram_gb') or {}).get(fam, 24)
+    if params.get('training_mode') == 'full_transformer':
+        dense = c.get('full_transformer') or {}
+        min_vram = max(80, int(dense.get('min_vram_gb') or 80))
+    else:
+        min_vram = (c.get('min_vram_gb') or {}).get(fam, 24)
     disk_gb = _disk_gb_for(c, params)
     template_hash = (c.get('template_hash') or '').strip()
     # A transient create refusal (offer just taken -> HTTP 400/409, rate limit,
@@ -1537,7 +2231,7 @@ def _provision(run):
                 token = pysecrets.token_urlsafe(24)
                 port = int(c.get('ui_port') or 18675)
                 env = {'AI_TOOLKIT_AUTH': token, f'-p {port}:{port}': '1'}
-                hf = cfg.secret('HF_TOKEN')
+                hf = _hf_token_for_mode(params.get('training_mode') or 'lora')
                 if hf:
                     env['HF_TOKEN'] = hf
                 instance_id = vast_client.create_instance(
@@ -1878,12 +2572,26 @@ def supervise_active_runs() -> list:
                 note_progress(run, now)
                 limit = _freeze_limit_seconds(run, c)
                 if limit and _silent_seconds(run, now) > limit:
-                    res = _force_stop(
-                        run, detail=f'Frozen — no progress for {limit // 60} min; '
-                                    'pod terminated by the supervisor',
-                        error='freeze watchdog')
-                    acted.append({'run_id': run.id, 'reason': 'freeze',
-                                  'ok': res['ok']})
+                    if (_is_full_transformer_run(run)
+                            and run.status == 'training'
+                            and run.remote_job_id):
+                        _keep_full_transformer_pod(
+                            run,
+                            detail=(f'Frozen — no progress for {limit // 60} min; '
+                                    'remote job stopped if possible and pod kept '
+                                    'for dense-checkpoint recovery'),
+                            error='freeze watchdog; dense pod kept',
+                            stop_remote=True)
+                        acted.append({'run_id': run.id, 'reason': 'freeze',
+                                      'ok': True, 'pod_kept': True})
+                    else:
+                        res = _force_stop(
+                            run,
+                            detail=f'Frozen — no progress for {limit // 60} min; '
+                                   'pod terminated by the supervisor',
+                            error='freeze watchdog')
+                        acted.append({'run_id': run.id, 'reason': 'freeze',
+                                      'ok': res['ok']})
             except Exception:
                 logger.exception('supervisor: run %s could not be judged', run.id)
     except Exception:
@@ -1928,11 +2636,28 @@ def _freeze_limit_seconds(run, c=None) -> int:
     return max(minutes * 60, _SILENT_PHASE_FREEZE_SECONDS)
 
 
+def _supervisor_tick(app, *, reap_orphans=False):
+    """Run one watchdog pass; optionally perform the throttled account reap."""
+    with app.app_context():
+        supervise_active_runs()
+        reconcile_full_transformer_deliveries()
+    if reap_orphans:
+        # This helper owns its own app context and never raises.
+        reconcile_orphans(app)
+
+
 def _supervisor_loop(app):
+    last_orphan_reconcile = None
     while True:
         try:
-            with app.app_context():
-                supervise_active_runs()
+            now = time.monotonic()
+            reap_orphans = (
+                last_orphan_reconcile is None
+                or now - last_orphan_reconcile
+                >= _ORPHAN_RECONCILE_INTERVAL_SECONDS)
+            _supervisor_tick(app, reap_orphans=reap_orphans)
+            if reap_orphans:
+                last_orphan_reconcile = now
         except Exception:
             logger.exception('cloud supervisor loop failed')
         _sleep(SUPERVISOR_INTERVAL_SECONDS)
@@ -1962,9 +2687,9 @@ def reconcile_orphans(app) -> int:
     alive (checkpoint download failed at run completion) so the user can
     recover the checkpoint manually. That pod must NOT be destroyed like a
     plain orphan -- it is spared while `run.finished_at` is within
-    cloud.max_runtime_minutes of now, and only reaped past that window (with
-    the run annotated, status left untouched -- terminal states stay
-    terminal)."""
+    cloud.max_runtime_minutes of now, and only reaped past that window. A dense
+    artifact already verified becomes ``done`` when that reap confirms cleanup;
+    unverified/manual-recovery rows remain terminal and are annotated."""
     destroyed = 0
     try:
         with app.app_context():
@@ -1975,6 +2700,18 @@ def reconcile_orphans(app) -> int:
             except Exception as e:
                 logger.warning('reconcile: cannot list vast instances: %s', e)
                 return 0
+            # Absence is useful cleanup evidence only when the account listing
+            # itself is complete and structurally inspectable.  Never turn a
+            # partial/malformed response into a false "pod is gone" result.
+            if (not isinstance(instances, list)
+                    or any(not isinstance(inst, dict)
+                           or inst.get('instance_id') in (None, '')
+                           for inst in instances)):
+                logger.warning(
+                    'reconcile: vast instance listing is not safely inspectable')
+                return 0
+            live_instance_ids = {
+                str(inst['instance_id']) for inst in instances}
             keep = {str(r.vast_instance_id) for r in get_active_runs() if r.vast_instance_id}
             c = cfg.get('cloud') or {}
             max_seconds = int(c.get('max_runtime_minutes') or 480) * 60
@@ -1983,6 +2720,26 @@ def reconcile_orphans(app) -> int:
                 str(r.vast_instance_id): r
                 for r in CloudTrainingRun.query.filter_by(status='error_pod_kept').all()
                 if r.vast_instance_id}
+
+            # A DELETE may have succeeded while its response or the following
+            # DB commit failed.  A successful full account listing that no
+            # longer contains the owned instance is authoritative confirmation
+            # that billing cleanup is complete.  This is intentionally limited
+            # to already-verified dense artifacts whose only pending concern is
+            # cleanup; unverified/manual-recovery runs keep their old policy.
+            for iid, kept_run in kept_by_instance.items():
+                if iid in live_instance_ids:
+                    continue
+                if (_is_full_transformer_run(kept_run)
+                        and _run_param(kept_run, 'artifact_status') == 'available'
+                        and _run_param(
+                            kept_run, 'artifact_cleanup_status') != 'complete'):
+                    _mark_verified_full_transformer_cleanup_complete(
+                        kept_run,
+                        cleanup_detail=(
+                            'vast.ai account listing confirmed the pod is absent'),
+                        phase_detail=(
+                            'Dense checkpoint available — pod absence confirmed'))
             for inst in instances:
                 label = inst.get('label') or ''
                 if not label.startswith('lds-'):
@@ -2003,8 +2760,20 @@ def reconcile_orphans(app) -> int:
                             destroyed += 1
                             logger.warning('reconcile: reaped expired error_pod_kept '
                                            'pod %s (%s)', inst['instance_id'], label)
-                            _set(kept_run, error=(kept_run.error or '') +
-                                 ' — pod reaped after the recovery window')
+                            if (_is_full_transformer_run(kept_run)
+                                    and _run_param(
+                                        kept_run, 'artifact_status') == 'available'):
+                                _mark_verified_full_transformer_cleanup_complete(
+                                    kept_run,
+                                    cleanup_detail=(
+                                        'vast.ai pod termination confirmed by '
+                                        'expired-run reconciliation'),
+                                    phase_detail=(
+                                        'Dense checkpoint available — expired '
+                                        'pod cleanup confirmed'))
+                            else:
+                                _set(kept_run, error=(kept_run.error or '') +
+                                     ' — pod reaped after the recovery window')
                     except Exception as e:
                         logger.warning('reconcile: destroy %s failed: %s',
                                        inst['instance_id'], e)
@@ -2179,6 +2948,19 @@ def _cloudify_job_config(job_config: dict, job_name: str,
         proc['type'] = 'diffusion_trainer'
     proc['training_folder'] = pod_settings['TRAINING_FOLDER']
     proc['device'] = 'cuda:0'
+    if (run_params or {}).get('training_mode') == 'full_transformer':
+        repo_id = (run_params or {}).get('hf_repo_id')
+        if not repo_id:
+            raise RuntimeError('full_transformer run has no Hugging Face '
+                               'delivery repository')
+        if proc.get('network') is not None:
+            raise RuntimeError('full_transformer job unexpectedly contains a '
+                               'LoRA network block')
+        save = dict(proc.get('save') or {})
+        save.update({'push_to_hub': True,
+                     'hf_repo_id': repo_id,
+                     'hf_private': True})
+        proc['save'] = save
     # Dual captions are LOCAL-ONLY for now: remote.upload_dataset only ships the images
     # and their .txt sidecars (its extension filter skips the JSON caption file), so a
     # pod folder_path pointing at that missing JSON would find zero images. Revert to the
@@ -2252,9 +3034,255 @@ def _finish_if_open(run, status, detail='', error=None, destroy=True):
     return _finish(run, status, detail=detail, error=error, destroy=destroy)
 
 
+def _stop_remote_job_best_effort(run):
+    """Freeze a recoverable dense job without risking pod destruction."""
+    if not run.remote_job_id or not run.base_url:
+        return False
+    try:
+        _make_remote(run).stop_job(run.remote_job_id)
+        return True
+    except Exception:
+        # Never interpolate an authenticated remote exception into logs.
+        logger.warning('run %s: could not stop dense remote job before keeping pod',
+                       run.id)
+        return False
+
+
+def _ensure_remote_settings_without_secret(run, remote) -> dict:
+    """Configure pod auth, then immediately discard the echoed credential."""
+    raw = remote.ensure_settings(hf_token=_hf_token_for_run(run))
+    if not isinstance(raw, dict):
+        raise RuntimeError('remote settings response is invalid')
+    settings = dict(raw)
+    # RemoteAiToolkit returns the freshly saved settings, including HF_TOKEN.
+    # Training config construction only needs the folder paths; carrying the
+    # credential forward makes accidental JSON/log persistence possible.
+    settings.pop('HF_TOKEN', None)
+    return settings
+
+
+def _redacted_error_text(error) -> str:
+    """Persist an actionable error without ever echoing an HF credential."""
+    value = str(error or '')
+    for key in ('HF_CLOUD_TOKEN', 'HF_TOKEN'):
+        token = cfg.secret(key)
+        if token:
+            value = value.replace(token, '[redacted]')
+    # Defense in depth for SDK messages that render a token unknown to the
+    # current process (for example, a token rotated while the pod was alive).
+    value = re.sub(r'\bhf_[A-Za-z0-9_-]{8,}\b', '[redacted]', value)
+    value = re.sub(r'(?i)(authorization\s*:\s*bearer\s+)\S+',
+                   r'\1[redacted]', value)
+    return value[:500]
+
+
+def _keep_full_transformer_pod(run, detail, error, *, stop_remote=False,
+                               require_open=True):
+    """Close a dense run as recoverable while preserving the paid pod."""
+    if require_open:
+        _assert_run_open(run)
+    if stop_remote:
+        _stop_remote_job_best_effort(run)
+    if run.status in ACTIVE_STATES:
+        _stop_event_for(run.id).set()
+    return _finish(run, 'error_pod_kept', detail=detail, error=error,
+                   destroy=False)
+
+
+def _mark_verified_full_transformer_cleanup_complete(
+        run, *, cleanup_detail, phase_detail):
+    """Atomically expose completion after compute cleanup is proven."""
+    if run.status in ACTIVE_STATES:
+        _stop_event_for(run.id).set()
+    _clear_progress_watch(run.id)
+    params = _updated_artifact_params(
+        run, 'available', artifact_cleanup_status='complete',
+        artifact_cleanup_detail=cleanup_detail,
+        artifact_status_detail=(
+            'Dense checkpoint and compliance metadata verified; pod '
+            'termination confirmed'))
+    _set(
+        run, status='done', phase_detail=phase_detail, error=None,
+        finished_at=datetime.utcnow(), train_params=json.dumps(params))
+
+
+def _finalize_verified_full_transformer(run, *, require_open=False) -> bool:
+    """Destroy the paid pod first; publish ``done`` only after confirmation.
+
+    Artifact availability and compute cleanup are separate facts.  A failed or
+    ambiguous vast.ai termination must leave the verified model visible while
+    keeping the run retryable, otherwise reconciliation would ignore a billing
+    pod merely because Hugging Face delivery succeeded.
+    """
+    if require_open:
+        _assert_run_open(run)
+    instance_id = run.vast_instance_id
+    pod_gone = not bool(instance_id)
+    if instance_id:
+        try:
+            pod_gone = bool(vast_client.destroy_instance(instance_id))
+            if not pod_gone:
+                logger.warning(
+                    'run %s: verified dense delivery, but pod termination was '
+                    'not confirmed', run.id)
+        except Exception:
+            # Never interpolate authenticated vast.ai diagnostics.
+            pod_gone = False
+            logger.warning(
+                'run %s: verified dense delivery pod termination raised; '
+                'cleanup remains pending', run.id)
+
+    if pod_gone:
+        _mark_verified_full_transformer_cleanup_complete(
+            run, cleanup_detail='vast.ai pod termination confirmed',
+            phase_detail=(
+                'Training complete — dense checkpoint available on Hugging Face'))
+        return True
+
+    if run.status in ACTIVE_STATES:
+        _stop_event_for(run.id).set()
+    _clear_progress_watch(run.id)
+    params = _updated_artifact_params(
+        run, 'available', artifact_cleanup_status='pending',
+        artifact_cleanup_detail=(
+            'Dense model is available; vast.ai pod termination is not yet '
+            'confirmed and will be retried automatically'),
+        artifact_status_detail=(
+            'Dense checkpoint and compliance metadata verified; pod cleanup '
+            'pending'))
+    _set(
+        run, status='error_pod_kept',
+        phase_detail='Dense checkpoint available — pod cleanup pending',
+        error=(
+            f'Dense model is available on Hugging Face, but termination of '
+            f'instance {instance_id} was not confirmed. Cleanup will retry '
+            'automatically; the pod may still be billing.'),
+        # The first failure starts the bounded recovery window; retries must not
+        # extend it indefinitely.
+        finished_at=run.finished_at or datetime.utcnow(),
+        train_params=json.dumps(params))
+    return False
+
+
+def _complete_full_transformer_delivery(run, _api=None):
+    """Only verified weights+metadata may become done and destroy the pod."""
+    delivery = _verify_full_transformer_artifact_with_retries(run, _api=_api)
+    if delivery == 'available':
+        return _finalize_verified_full_transformer(run, require_open=True)
+    if delivery == 'missing':
+        detail = ('Training complete — compliant Krea dense checkpoint missing; '
+                  'pod kept')
+        error = ('Hugging Face repository contains no checkpoint matching the '
+                 'Krea job name; pod kept for recovery')
+    else:
+        detail = ('Training complete — Hugging Face delivery/compliance could '
+                  'not be verified; pod kept')
+        error = ('Hugging Face verification remained unavailable after bounded '
+                 'retries; pod kept for recovery')
+    return _keep_full_transformer_pod(run, detail, error)
+
+
+def _full_transformer_recovery_open(run, now=None) -> bool:
+    """Whether a kept dense pod remains inside its bounded recovery window."""
+    if not run.finished_at:
+        return False
+    now = now or datetime.utcnow()
+    max_seconds = int((cfg.get('cloud.max_runtime_minutes') or 480)) * 60
+    return (now - run.finished_at).total_seconds() <= max_seconds
+
+
+def recheck_full_transformer_delivery(run_id, _api=None) -> dict:
+    """Explicitly recheck one kept dense delivery without downloading weights.
+
+    This is the service contract behind the UI's "Verify HF delivery" action.
+    A late Hub propagation can therefore finish the run and release the pod;
+    pending/missing/unverifiable results remain recoverable and never pretend
+    that a checkpoint is available.
+    """
+    run = db.session.get(CloudTrainingRun, int(run_id))
+    if not run:
+        raise ValueError('unknown cloud run')
+    if not _is_full_transformer_run(run):
+        raise ValueError('delivery recheck is only available for full_transformer runs')
+    if run.status == 'done' and _run_param(run, 'artifact_status') == 'available':
+        return {
+            'ok': True, 'delivery': 'available', 'cleanup_pending': False,
+            'run': _run_payload(run),
+        }
+    if run.status != 'error_pod_kept':
+        raise ValueError('only a kept full_transformer delivery can be rechecked')
+
+    if _run_param(run, 'artifact_status') == 'available':
+        # Integrity/compliance proof is already durable; this retry is only
+        # about releasing compute and must not depend on HF availability.
+        delivery = 'available'
+    else:
+        delivery = _verify_full_transformer_artifact(run, _api=_api)
+    if delivery == 'available':
+        _finalize_verified_full_transformer(run)
+    else:
+        detail = (
+            'Hugging Face delivery is not visible or intact yet; pod kept'
+            if delivery == 'missing' else
+            'Hugging Face delivery verification is temporarily unavailable; pod kept')
+        _set(
+            run, status='error_pod_kept', phase_detail=detail,
+            error=('Dense delivery is still unverified; use Verify HF delivery '
+                   'again or recover from the kept pod.'),
+            # Preserve the original bounded recovery deadline.  A click or a
+            # periodic check must never extend paid-pod lifetime indefinitely.
+            finished_at=run.finished_at)
+    payload = _run_payload(run)
+    return {
+        'ok': True, 'delivery': delivery,
+        'cleanup_pending': bool(
+            delivery == 'available' and payload['status'] != 'done'),
+        'run': payload,
+    }
+
+
+def reconcile_full_transformer_deliveries(_api=None, now=None) -> list:
+    """One periodic late-propagation pass for recoverable dense deliveries.
+
+    Terminal ``error_pod_kept`` rows are intentionally outside ACTIVE_STATES,
+    so their original monitor is gone.  The independent supervisor invokes
+    this once per tick until the existing bounded recovery deadline.  No call
+    downloads the checkpoint; successful integrity+compliance verification is
+    the only path that marks done and destroys the pod.
+    """
+    acted = []
+    now = now or datetime.utcnow()
+    try:
+        runs = CloudTrainingRun.query.filter_by(status='error_pod_kept').all()
+        for run in runs:
+            if (not _is_full_transformer_run(run)
+                    or not _run_param(run, 'hf_repo_id')
+                    or not _full_transformer_recovery_open(run, now)):
+                continue
+            try:
+                result = recheck_full_transformer_delivery(run.id, _api=_api)
+                acted.append({
+                    'run_id': run.id,
+                    'delivery': result['delivery'],
+                    'completed': result['run']['status'] == 'done',
+                })
+            except Exception:
+                # Authenticated SDK diagnostics are deliberately omitted.
+                logger.warning(
+                    'run %s: periodic dense delivery verification failed', run.id)
+    except Exception:
+        logger.exception('periodic dense delivery reconciliation failed')
+    return acted
+
+
 def _monitor(app, run_id):
-    """Full run lifecycle. Runs in a daemon thread; every exit path goes
-    through _finish() so the pod cannot be leaked by this thread."""
+    """Full run lifecycle in a daemon thread.
+
+    Destructive exits remain mandatory for ordinary LoRA runs, explicit user
+    stops and the max-runtime cap. Once a dense job has started, unexpected
+    failures deliberately end as ``error_pod_kept`` so the only ~26 GB result
+    is recoverable; only verified Hugging Face delivery permits destruction.
+    """
     with app.app_context():
         run = CloudTrainingRun.query.get(run_id)
         if not run:
@@ -2274,6 +3302,16 @@ def _monitor(app, run_id):
         # vast_instance_id on a fresh launch. It decides the boot-readiness
         # anchor below.
         resuming_existing_pod = bool(run.vast_instance_id)
+        job_started = bool(run.remote_job_id
+                           and run.status in _JOB_STARTED_STATES)
+
+        def mark_job_start_attempt():
+            # A start POST can take effect remotely and then time out locally.
+            # Mark BEFORE the call so dense recovery fails safe in that split-
+            # brain window; LoRA's exception path does not consult this flag.
+            nonlocal job_started
+            job_started = True
+
         try:
             # -- heavy launch work, moved off the HTTP path (see launch) ----
             _prepare_staging(run)
@@ -2428,7 +3466,7 @@ def _monitor(app, run_id):
             # mid-run) skips settings/upload/create/start entirely and goes
             # straight to polling the existing remote job. ------------------
             if not run.remote_job_id:
-                pod_settings = remote.ensure_settings(hf_token=cfg.secret('HF_TOKEN'))
+                pod_settings = _ensure_remote_settings_without_secret(run, remote)
 
                 # -- upload dataset (+ masks folder if present) --------------
                 _set(run, status='uploading', phase_detail='Uploading dataset')
@@ -2471,18 +3509,28 @@ def _monitor(app, run_id):
                 if adopted:
                     # The pod already had this job (this run's earlier attempt).
                     # Never blind-start it: it may be mid-training.
-                    _ensure_remote_job_started(run, remote, job_id, pod_settings)
+                    _ensure_remote_job_started(
+                        run, remote, job_id, pod_settings,
+                        on_start_attempt=mark_job_start_attempt)
+                    # A pre-existing job whose status could not be read is
+                    # conservatively treated as started. Destroying the pod on
+                    # that uncertainty could erase a live dense checkpoint.
+                    job_started = True
                 else:
                     # Continue-in-cloud: drop the source checkpoint into the
                     # job's save_root BEFORE start so ai-toolkit auto-resumes.
                     _seed_resume_checkpoint(run, remote, pod_settings)
+                    mark_job_start_attempt()
                     remote.start_job(job_id)
                     _set(run, status='training',
                          phase_detail='Job queued on the pod')
             else:
                 job_id = run.remote_job_id
                 _set(run, phase_detail='Resuming — reattaching to running job')
-                _ensure_remote_job_started(run, remote, job_id)
+                _ensure_remote_job_started(
+                    run, remote, job_id,
+                    on_start_attempt=mark_job_start_attempt)
+                job_started = True
 
             # -- poll until terminal ------------------------------------------
             # Two watchdogs share one progress clock (last_progress_ts):
@@ -2584,6 +3632,10 @@ def _monitor(app, run_id):
                 _set(run, phase_detail=f"{status}: {info}"[:500])
 
                 if status == 'completed':
+                    if _is_full_transformer_run(run):
+                        _set(run, phase_detail='Verifying Hugging Face delivery…')
+                        _complete_full_transformer_delivery(run)
+                        return
                     ok = _try_download_checkpoint(run, remote)
                     if not ok:
                         # A host that cannot DELIVER its result (even through
@@ -2606,9 +3658,17 @@ def _monitor(app, run_id):
                     _finish_if_open(run, 'done', detail='Training complete')
                     return
                 if status in ('error', 'stopped'):
-                    _try_download_checkpoint(run, remote, allow_stale=True)
-                    _finish_if_open(run, 'error' if status == 'error' else 'stopped',
-                                    detail=f'Remote job {status}', error=info or status)
+                    if _is_full_transformer_run(run):
+                        _keep_full_transformer_pod(
+                            run,
+                            detail=f'Remote dense job unexpectedly {status}; pod kept',
+                            error=(f'remote job {status}; pod kept for recovery'),
+                            stop_remote=(status == 'error'))
+                    else:
+                        _try_download_checkpoint(run, remote, allow_stale=True)
+                        _finish_if_open(
+                            run, 'error' if status == 'error' else 'stopped',
+                            detail=f'Remote job {status}', error=info or status)
                     return
                 # -- stall watchdog: guiding rule — NEVER kill a run that
                 # progresses. The elif keeps a progressing poll from ever
@@ -2623,11 +3683,20 @@ def _monitor(app, run_id):
                         remote.stop_job(job_id)
                     except Exception:
                         pass
-                    _try_download_checkpoint(run, remote, allow_stale=True)
-                    _finish_if_open(run, 'error',
-                                    detail='Stalled — no step progress for '
-                                           f'{stall_seconds // 60} min; pod terminated',
-                                    error='stall watchdog')
+                    if _is_full_transformer_run(run):
+                        _keep_full_transformer_pod(
+                            run,
+                            detail='Stalled — no step progress for '
+                                   f'{stall_seconds // 60} min; pod kept for '
+                                   'dense-checkpoint recovery',
+                            error='stall watchdog; dense pod kept')
+                    else:
+                        _try_download_checkpoint(run, remote, allow_stale=True)
+                        _finish_if_open(
+                            run, 'error',
+                            detail='Stalled — no step progress for '
+                                   f'{stall_seconds // 60} min; pod terminated',
+                            error='stall watchdog')
                     return
                 elif last_step <= 0:
                     # -- before step 1: the same guiding rule, applied to the
@@ -2698,20 +3767,36 @@ def _monitor(app, run_id):
                     logger.exception('stand-down destroy of %s raised',
                                      run.vast_instance_id)
         except Exception as e:
-            logger.exception('cloud run %s failed', run_id)
-            error_text = str(e)[:500]
-            retryable = _is_retryable_pod_failure(error_text)
-            # Exclude the failed host before selecting the fresh pod.
-            if retryable:
-                _blacklist_run_host(
-                    run, f'transient pod failure: {error_text[:160]}')
-            pod_gone = _finish(run, 'error', detail='Run failed',
-                               error=error_text)
-            if retryable and pod_gone:
-                _maybe_auto_retry(run, error_text)
-            elif retryable:
-                _set(run, phase_detail='Run failed — automatic retry withheld '
-                                       'because pod termination was not confirmed')
+            error_text = _redacted_error_text(e)
+            if _is_full_transformer_run(run):
+                # Do not emit the raw traceback of an authenticated HF/remote
+                # request. Its exception may include request diagnostics.
+                logger.error('dense cloud run %s failed (%s job start)', run_id,
+                             'after' if job_started else 'before')
+                if job_started:
+                    _keep_full_transformer_pod(
+                        run,
+                        detail='Dense run failed after job start; remote job '
+                               'stopped if possible and pod kept for recovery',
+                        error=error_text or 'unexpected dense training failure',
+                        stop_remote=True)
+                else:
+                    _finish(run, 'error', detail='Dense run failed before step 1',
+                            error=error_text)
+            else:
+                logger.exception('cloud run %s failed', run_id)
+                retryable = _is_retryable_pod_failure(error_text)
+                # Exclude the failed host before selecting the fresh pod.
+                if retryable:
+                    _blacklist_run_host(
+                        run, f'transient pod failure: {error_text[:160]}')
+                pod_gone = _finish(run, 'error', detail='Run failed',
+                                   error=error_text)
+                if retryable and pod_gone:
+                    _maybe_auto_retry(run, error_text)
+                elif retryable:
+                    _set(run, phase_detail='Run failed — automatic retry withheld '
+                                           'because pod termination was not confirmed')
         finally:
             # This run's slot in the module maps is done with — drop it so
             # they cannot grow unbounded across the app's lifetime with many
@@ -2765,7 +3850,8 @@ def _create_or_adopt_job(run, remote, job_config):
             'this again.')
 
 
-def _ensure_remote_job_started(run, remote, job_id, pod_settings=None):
+def _ensure_remote_job_started(run, remote, job_id, pod_settings=None,
+                               on_start_attempt=None):
     """Guarantee the remote job is actually RUNNING, not merely created.
 
     ai-toolkit creates a job with status 'stopped' and only `start` moves it to
@@ -2789,6 +3875,12 @@ def _ensure_remote_job_started(run, remote, job_id, pod_settings=None):
                        'started (%s) — leaving it to the poll loop', run.id, job_id, e)
         return
     if (job.get('status') or 'stopped') != 'stopped' or (job.get('step') or 0) > 0:
+        # Remote evidence is authoritative: once a live/advanced job is seen,
+        # fail safe *before* any database write.  If the following _set raises
+        # (lock/disk failure), the monitor's exception path must keep the dense
+        # pod instead of misclassifying it as pre-start and destroying it.
+        if on_start_attempt is not None:
+            on_start_attempt()
         _set(run, status='training')     # already live (or finished) — poll it
         return
     logger.warning('run %s: job %s exists on the pod but was never started — '
@@ -2797,6 +3889,8 @@ def _ensure_remote_job_started(run, remote, job_id, pod_settings=None):
     _seed_resume_checkpoint(run, remote,
                             pod_settings if pod_settings is not None
                             else remote.get_settings())
+    if on_start_attempt is not None:
+        on_start_attempt()
     remote.start_job(job_id)
     _set(run, status='training', phase_detail='Job queued on the pod')
 
@@ -2927,6 +4021,8 @@ def _sync_latest_checkpoint(run, remote):
     same save we stop retrying it (a newer save resets the counter), and each
     attempt is capped at _SYNC_DL_TIMEOUT so a trickling stream cannot hold
     the monitor loop — and with it the stop button — for minutes."""
+    if _is_full_transformer_run(run):
+        return
     try:
         ckpt = _newest_remote_checkpoint(remote, run.remote_job_id)
         if not ckpt:
@@ -3002,6 +4098,8 @@ def _try_download_checkpoint(run, remote, allow_stale=False) -> bool:
     The COMPLETION path must stay strict (allow_stale=False): falling back to
     an older save there would silently discard the final training steps —
     error_pod_kept keeps the pod so the user can recover the real result."""
+    if _is_full_transformer_run(run):
+        return False
     try:
         ckpt = _newest_remote_checkpoint(remote, run.remote_job_id)
         if ckpt:
@@ -3035,6 +4133,8 @@ def _import_result(run):
     """Copy the downloaded checkpoint into the ComfyUI loras folder when one
     is configured; otherwise it stays in staging (served by the download
     route). Import failure must not fail the run."""
+    if _is_full_transformer_run(run):
+        return
     try:
         if not run.checkpoint_local_path:
             return
@@ -3059,6 +4159,8 @@ def _download_intermediates(run, remote):
     last epoch while a local run offers max_step_saves of them to pick the
     least-overfit one (user-observed parity gap, 2026-07-13). Best-effort per
     file: a failed intermediate never degrades the run's outcome."""
+    if _is_full_transformer_run(run):
+        return
     try:
         files = [f for f in remote.list_files(run.remote_job_id)
                  if f.get('path', '').endswith('.safetensors')]
@@ -3088,6 +4190,8 @@ def _mirror_into_local_run(run):
     like local ones everywhere downstream: the panel's checkpoint list, the
     Resume-or-Fresh prompt, Continue training. No-op when ai-toolkit isn't
     configured locally; best-effort, never fails the run."""
+    if _is_full_transformer_run(run):
+        return
     try:
         if not run.staging_dir or not os.path.isdir(run.staging_dir):
             return
@@ -3244,6 +4348,8 @@ def _annotate_preview(row, crun, rec):
 
 def _run_payload(run) -> dict:
     family = _run_family(run)
+    training_mode = _run_training_mode(run)
+    full_transformer = training_mode == 'full_transformer'
     variant = _run_param(run, 'variant')
     effective_base = _run_param(run, 'effective_base')
     training_adapter = _run_param(run, 'training_adapter')
@@ -3270,8 +4376,14 @@ def _run_payload(run) -> dict:
             # isfile, not just a stored path: the user may delete staging
             # files by hand (Explorer) — a ready flag pointing at a missing
             # file yields a download button that 404s.
-            'checkpoint_ready': bool(run.checkpoint_local_path
+            'checkpoint_ready': bool(not full_transformer
+                                     and run.checkpoint_local_path
                                      and os.path.isfile(run.checkpoint_local_path)),
+            # Dense artifacts are delivered pod -> private Hugging Face repo;
+            # there is intentionally no ~26 GB local proxy/download path.
+            'checkpoint_local_path': (None if full_transformer else
+                                      (os.path.basename(run.checkpoint_local_path)
+                                       if run.checkpoint_local_path else None)),
             # card metrics: target steps (stamped launch param) + how many
             # checkpoints the pod saved (live count of the staging downloads)
             'steps': _run_param(run, 'steps'),
@@ -3281,7 +4393,32 @@ def _run_payload(run) -> dict:
             # EARLIER epoch, not only its last (empty when staging was purged).
             'resume_steps': (sorted({c['step'] for c in _run_staging_checkpoints(run)})
                              if run.status == 'done' else []),
+            'resume_checkpoints': (
+                [{'step': c['step'], 'resume_state': c['resume_state']}
+                 for c in _run_staging_checkpoints(run)]
+                if run.status == 'done' else []),
             'train_type': family, 'variant': variant,
+            'training_mode': training_mode,
+            'artifact_kind': (_run_param(run, 'artifact_kind')
+                              or ('full_transformer' if full_transformer else 'lora')),
+            'artifact_status': _run_param(run, 'artifact_status'),
+            'artifact_status_detail': _run_param(run, 'artifact_status_detail'),
+            'hf_repo_id': _run_param(run, 'hf_repo_id'),
+            'hf_url': _run_param(run, 'hf_url'),
+            'hf_weight_filename': _run_param(run, 'hf_weight_filename'),
+            'hf_artifact_proof': _run_param(run, 'hf_artifact_proof'),
+            'artifact_cleanup_status': _run_param(
+                run, 'artifact_cleanup_status'),
+            'artifact_cleanup_detail': _run_param(
+                run, 'artifact_cleanup_detail'),
+            'delivery_last_checked_at': _run_param(
+                run, 'delivery_last_checked_at'),
+            'verified_at': (_run_param(run, 'verified_at')
+                            or _run_param(run, 'artifact_verified_at')),
+            'artifact_delivery': (
+                'Private Hugging Face repository; no checkpoint_local_path is '
+                'created for full_transformer artifacts.'
+                if full_transformer else 'Local LoRA checkpoint'),
             'effective_base': effective_base,
             'training_adapter': training_adapter,
             'recipe_version': recipe_version,
@@ -3499,6 +4636,7 @@ def _node_checkpoints(rec, crun):
             out.append({
                 'step': c['step'], 'filename': c['filename'],
                 'final': bool(final and crun.status == 'done'), 'present': True,
+                'resume_state': c['resume_state'],
                 'download_url': _checkpoint_download_url(
                     rec.dataset_id, 'cloud', crun.id, c['filename'])})
         return out
@@ -3512,6 +4650,7 @@ def _node_checkpoints(rec, crun):
         out.append({
             'step': c['step'], 'filename': c['filename'],
             'final': bool(c.get('final')), 'present': True,
+            'resume_state': c.get('resume_state'),
             'download_url': _checkpoint_download_url(
                 rec.dataset_id, 'local', rec.id, c['filename'],
                 family=rec.family, variant=rec.variant, base_model=rec.base_model)})
@@ -4932,7 +6071,7 @@ def clear_canvas_image_nodes(user_id, dataset_id) -> dict:
 
 
 def gpu_tiers(user_id, dataset_id, train_type=None, steps=None,
-              variant=None) -> dict:
+              variant=None, training_mode='lora') -> dict:
     """Live vast.ai offers for THIS dataset+family, grouped by GPU class
     (cheapest offer per class), ranked slowest -> fastest, each annotated with
     an approximate training time and total run cost. Read-only: rents nothing.
@@ -4943,6 +6082,7 @@ def gpu_tiers(user_id, dataset_id, train_type=None, steps=None,
     ds = fds.get_dataset(user_id, dataset_id)
     if not ds:
         raise ValueError('dataset not found')
+    mode = lt.normalize_training_mode(training_mode)
     fam = fds.normalize_train_type(train_type or getattr(ds, 'train_type', None))
     # Slider mode rides the same offers/pods as its family (see
     # launch_cloud_training) — no separate refusal here.
@@ -4963,12 +6103,29 @@ def gpu_tiers(user_id, dataset_id, train_type=None, steps=None,
     selected_variant = str(
         variant or getattr(ds, 'train_variant', None)
         or lt._default_variant_for(fam)).strip().lower()
+    if mode == 'full_transformer':
+        if fam != 'krea':
+            raise ValueError('full_transformer cloud training is supported only '
+                             'for Krea 2')
+        if selected_variant != 'base':
+            raise ValueError('full_transformer cloud training requires '
+                             'Krea-2-Raw (variant "base")')
+        if lt.slider_mode_enabled(ds):
+            raise ValueError('full_transformer cloud training is incompatible '
+                             'with Slider LoRA mode')
+        hf_cloud_token = full_transformer_token_preflight()
+    else:
+        hf_cloud_token = None
     if selected_variant not in lt._valid_variants_for(fam):
         selected_variant = lt._default_variant_for(fam)
     n_steps = (int(steps) if steps else lt.default_steps(
         ds, train_type=fam, variant=selected_variant))
     c = cfg.get('cloud') or {}
-    min_vram = (c.get('min_vram_gb') or {}).get(fam, 24)
+    if mode == 'full_transformer':
+        dense = c.get('full_transformer') or {}
+        min_vram = max(80, int(dense.get('min_vram_gb') or 80))
+    else:
+        min_vram = (c.get('min_vram_gb') or {}).get(fam, 24)
     price_cap = c.get('max_price_per_hour', 0.80)
     overhead_min = float(c.get('pod_overhead_minutes') or 0)
     # A wider scan than the launch default so several GPU classes surface (the
@@ -4994,25 +6151,37 @@ def gpu_tiers(user_id, dataset_id, train_type=None, steps=None,
     tiers = []
     for name, o in cheapest_by_gpu.items():
         dph = o.get('dph_total')
-        est_min = gpu_speed.estimate_minutes(name, fam, n_steps)
-        # Cost bills the whole pod life: training + boot/download/quantize.
-        est_cost = (round(dph * (est_min + overhead_min) / 60.0, 2)
-                    if dph is not None else None)
+        if mode == 'full_transformer':
+            # The empirical speed model is LoRA-only. Presenting its estimate
+            # for a dense 26 GB transformer would be fabricated precision.
+            est_min = est_cost = exceeds_cap = None
+            estimate_status = 'unavailable'
+        else:
+            est_min = gpu_speed.estimate_minutes(name, fam, n_steps)
+            # Cost bills the whole pod life: training + boot/download/quantize.
+            est_cost = (round(dph * (est_min + overhead_min) / 60.0, 2)
+                        if dph is not None else None)
+            exceeds_cap = (est_min + overhead_min) > max_runtime
+            estimate_status = 'available'
         tiers.append({
             'gpu_name': name, 'offer_id': o.get('offer_id'),
             'dph_total': round(dph, 4) if dph is not None else None,
             'gpu_ram_gb': o.get('gpu_ram_gb'),
             'speed': round(gpu_speed.speed_factor(name), 2),
-            'est_minutes': int(round(est_min)), 'est_cost': est_cost,
+            'est_minutes': (int(round(est_min)) if est_min is not None else None),
+            'est_cost': est_cost, 'estimate_status': estimate_status,
             # A tier slower than the runtime cap would be KILLED mid-training
             # (checkpoint rescued, but steps lost) — warn at pick time.
-            'exceeds_cap': (est_min + overhead_min) > max_runtime,
+            'exceeds_cap': exceeds_cap,
         })
     # slowest -> fastest (matches the launch dialog); ties broken by price.
     tiers.sort(key=lambda t: (t['speed'], t['dph_total']
                               if t['dph_total'] is not None else 9e9))
     return {'tiers': tiers, 'steps': n_steps, 'family': fam,
             'variant': selected_variant,
+            'training_mode': mode,
+            'hf_cloud_token': hf_cloud_token,
+            'disk_gb': _disk_gb_for(c, {'training_mode': mode}),
             'max_price_per_hour': price_cap,
             'max_runtime_minutes': max_runtime}
 
@@ -5029,6 +6198,10 @@ def cloud_checkpoint_groups(dataset_id, train_type=None, variant=None) -> list:
     groups = []
     for run in (CloudTrainingRun.query.filter_by(dataset_id=dataset_id)
                 .order_by(CloudTrainingRun.id.desc()).all()):
+        if _is_full_transformer_run(run):
+            # Dense outputs live exclusively in their private HF repository;
+            # never reinterpret a stray/stale staging file as a LoRA checkpoint.
+            continue
         if fam and (_run_family(run) or fam) != fam:
             continue
         if wanted_variant and (
@@ -5047,6 +6220,7 @@ def cloud_checkpoint_groups(dataset_id, train_type=None, variant=None) -> list:
             entries.append({'filename': name, 'step': step, 'cloud': True,
                             'run_id': run.id, 'version': _run_param(run, 'version'),
                             'variant': run_variant,
+                            'resume_state': _cloud_resume_state(),
                             'final': bool(not m and run.status == 'done'),
                             'active': run.status in ACTIVE_STATES,
                             'trained_at': run.created_at.isoformat()

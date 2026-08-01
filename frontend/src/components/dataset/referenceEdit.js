@@ -86,6 +86,13 @@ export function acceptsExtraEditRefs(engine) {
   return editRefSupport(engine) === 'all';
 }
 
+/** A mixed batch may keep the transient picker because at least one API engine
+ * consumes those bytes. Local engines still use only the references their graph
+ * supports; the modal says that explicitly instead of silently dropping input. */
+export function acceptsExtraEditRefsForBatch(engines) {
+  return Array.from(engines || []).some((engine) => acceptsExtraEditRefs(engine));
+}
+
 /** One sentence about what this engine does with the extra references, or null
  *  when it takes everything (nothing to warn about). Shown at PICK time.
  *
@@ -112,14 +119,31 @@ export function editRefNote(engine, { datasetExtraCount = 0 } = {}) {
  *  "Each edit is a paid API call" unconditionally; on a local engine that is
  *  simply false, and stating a price on a free render damages trust exactly as
  *  much as hiding one on a paid render. */
-export function editCostNote(engine) {
-  if (LOCAL_ENGINES.includes(engine)) {
+export function editCostNote(engineOrEngines) {
+  const engines = Array.isArray(engineOrEngines)
+    ? [...new Set(engineOrEngines)]
+    : [engineOrEngines].filter(Boolean);
+  if (!engines.length) return 'Select at least one engine to see its cost.';
+  const paid = engines.filter((engine) => API_ENGINES.includes(engine)).length;
+  const local = engines.filter((engine) => LOCAL_ENGINES.includes(engine)).length;
+  if (engines.length === 1 && local === 1) {
+    const engine = engines[0];
     return `${ENGINE_LABELS[engine] || engine} renders on your own ComfyUI — no API key, no `
       + 'bill, nothing leaves your machine, so you can retry a prompt as often as you like. '
       + 'It queues behind any generation already running on your GPU.';
   }
-  return 'Each edit is a paid API call — Discard doesn’t refund it. A “high” render can take '
-    + '1–3 minutes.';
+  if (engines.length === 1 && paid === 1) {
+    return 'Each edit is a paid API call — Discard doesn’t refund it. A “high” render can take '
+      + '1–3 minutes.';
+  }
+  const parts = [];
+  if (paid) parts.push(`${paid} paid API call${paid === 1 ? '' : 's'}`);
+  if (local) parts.push(`${local} free local ComfyUI render${local === 1 ? '' : 's'}`);
+  const count = engines.length;
+  return `${count} edit${count === 1 ? '' : 's'} will run: ${parts.join(' and ')}. `
+    + (paid ? 'Discard doesn’t refund paid calls. ' : '')
+    + (local ? 'Local renders stay on your machine and queue on your GPU. ' : '')
+    + (paid ? 'API renders can take 1–3 minutes.' : '');
 }
 
 /** The line under Before/After, which also claimed a refund that never existed. */
@@ -176,12 +200,81 @@ export function editBlockedReason(prompt, engine, engineBlocked = null) {
   return null;
 }
 
+/** Batch equivalent of editBlockedReason. Every selected engine must be runnable:
+ * accepting a batch while one selected local engine is known to be unavailable
+ * would promise a comparison the server cannot launch. */
+export function editBatchBlockedReason(prompt, engines, options = []) {
+  const selected = [...new Set(Array.from(engines || []))];
+  if (!selected.length) return 'Select at least one engine';
+  if (selected.some((engine) => !EDIT_ENGINES.includes(engine))) {
+    return editEngineChoiceMessage();
+  }
+  const blocked = selected
+    .map((engine) => options.find((option) => option.engine === engine)?.blocked)
+    .filter(Boolean);
+  if (blocked.length) return blocked.join(' · ');
+  if (!prompt || !prompt.trim()) return 'Describe the edit first';
+  return null;
+}
+
+/** Normalize the server's new per-engine candidate map while retaining the old
+ * one-engine payload as a fallback. Selection order is preserved for a stable
+ * comparison layout; unknown fields remain ignored. */
+export function referenceEditCandidates(referenceEdit) {
+  if (!referenceEdit) return [];
+  const rawCandidates = referenceEdit.candidates;
+  const keyed = {};
+  if (Array.isArray(rawCandidates)) {
+    for (const candidate of rawCandidates) {
+      if (candidate?.engine) keyed[candidate.engine] = candidate;
+    }
+  } else if (rawCandidates && typeof rawCandidates === 'object') {
+    for (const [engine, candidate] of Object.entries(rawCandidates)) {
+      keyed[engine] = candidate || {};
+    }
+  }
+  const order = [];
+  const add = (engine) => {
+    if (engine && !order.includes(engine)) order.push(engine);
+  };
+  if (Array.isArray(referenceEdit.engines)) referenceEdit.engines.forEach(add);
+  Object.keys(keyed).forEach(add);
+  if (!order.length) add(referenceEdit.engine);
+  return order.map((engine) => {
+    const candidate = keyed[engine] || {};
+    const legacy = !rawCandidates && engine === referenceEdit.engine;
+    return {
+      engine,
+      status: candidate.status || (legacy ? referenceEdit.status : 'running'),
+      candidate_filename: candidate.candidate_filename
+        || (legacy ? referenceEdit.candidate_filename : null),
+      error: candidate.error || (legacy ? referenceEdit.error : null),
+    };
+  });
+}
+
+/** Return a saved exact-retry request only while it still belongs to the batch
+ * shown by the server. A dataset id alone is not enough: another tab can replace
+ * the batch while this tab retains prompt, engine and File objects in memory. */
+export function retryRequestForReferenceEdit(request, referenceEdit) {
+  const savedBatchId = typeof request?.batchId === 'string' ? request.batchId : '';
+  const activeBatchId = typeof referenceEdit?.batch_id === 'string'
+    ? referenceEdit.batch_id : '';
+  return savedBatchId && activeBatchId && savedBatchId === activeBatchId
+    ? request : null;
+}
+
 /** The modal's phase, DERIVED from the server's `reference_edit` payload object
  *  (not local state) so it restores correctly after a tab sleep or reload:
  *  'idle' (no pending edit / form), 'running', 'ready' (Before/After), 'failed'. */
 export function editPhase(referenceEdit) {
   const s = referenceEdit?.status;
-  return (s === 'running' || s === 'ready' || s === 'failed') ? s : 'idle';
+  if (s === 'running' || s === 'ready' || s === 'failed') return s;
+  const candidates = referenceEditCandidates(referenceEdit);
+  if (!candidates.length) return 'idle';
+  if (candidates.some((candidate) => candidate.status === 'running')) return 'running';
+  if (candidates.some((candidate) => candidate.status === 'ready')) return 'ready';
+  return 'failed';
 }
 
 /** Advisory shown when a generation batch is live. A Keep is provably safe (the

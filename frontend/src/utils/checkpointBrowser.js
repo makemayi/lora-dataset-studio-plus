@@ -1,3 +1,5 @@
+import { normalizeTrainingMode } from './trainingMode.js';
+
 export function defaultCheckpointBase(bases) {
   const choices = Array.isArray(bases) ? bases : [];
   const official = choices.find((item) => item?.value === '');
@@ -63,12 +65,13 @@ export function trainingRunSelection(baseModel, trainType, variant) {
  * official sentinel. A non-empty local/custom selection then reaches the
  * authoritative server guard instead of silently falling back to official. */
 export function cloudTrainingLaunchPayload({
-  baseModel = '', variant, trainType, masked, steps, gpuName,
+  baseModel = '', variant, trainType, trainingMode, masked, steps, gpuName,
 } = {}) {
   return {
     base_model: baseModel,
     variant,
     train_type: trainType,
+    training_mode: normalizeTrainingMode(trainingMode),
     // Presence-conditional, like `masked` in canvasContinueRequest: person masking
     // is a persisted DATASET setting now, so an OMITTED key means "the server reads
     // the dataset", not "true". Sending an optimistic default from a panel whose

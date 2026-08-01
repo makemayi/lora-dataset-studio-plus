@@ -62,6 +62,51 @@ def test_studio_run_reachable_forwards_to_service(client, monkeypatch):
     assert body == {'ok': True, 'created': 2, 'seed': 42, 'count': 1, 'run_id': 'r1'}
 
 
+def test_recovery_barrier_blocks_run_and_resume_but_not_recovery_routes(
+        client, monkeypatch):
+    """Only enqueue paths are gated; cancel and explicit restart confirmation
+    remain available so the user can clear the condition."""
+    _comfy(monkeypatch, True)
+    ds_id = _create(client)
+    from app.job_queue import COMFYUI_STALLED_BARRIER_KEY, queue_manager
+    from app.services import lora_test_studio as lts
+
+    with client.application.app_context():
+        queue_manager._set_system_state(
+            COMFYUI_STALLED_BARRIER_KEY, {'job_id': 'unresolved'})
+
+    def must_not_enqueue(*_args, **_kwargs):
+        raise AssertionError('enqueue service must not run')
+
+    monkeypatch.setattr(lts, 'create_comparison_run', must_not_enqueue)
+    monkeypatch.setattr(lts, 'resume_run', must_not_enqueue)
+    monkeypatch.setattr(lts, 'create_run', must_not_enqueue)
+
+    blocked = [
+        client.post('/api/studio/run', json={}),
+        client.post('/api/studio/run/run-1/resume'),
+        client.post(f'/api/dataset/{ds_id}/lora-test/run', json={}),
+        client.post(f'/api/dataset/{ds_id}/lora-test/resume'),
+    ]
+    assert all(response.status_code == 409 for response in blocked)
+    assert all(response.get_json()['code'] == 'comfyui_recovery_required'
+               for response in blocked)
+
+    monkeypatch.setattr(lts, 'cancel_run', lambda *_args, **_kwargs: 1)
+    monkeypatch.setattr(
+        lts, 'confirm_unknown_comfyui_restart',
+        lambda *_args, **_kwargs: 1)
+    assert client.post('/api/studio/run/run-1/cancel').status_code == 200
+    assert client.post(
+        '/api/studio/run/run-1/confirm-comfyui-restart',
+        json={'confirmed_comfyui_restart': True}).status_code == 200
+    assert client.post(
+        f'/api/dataset/{ds_id}/lora-test/cancel').status_code == 200
+    assert client.post(
+        f'/api/dataset/{ds_id}/lora-test/confirm-comfyui-restart',
+        json={'confirmed_comfyui_restart': True}).status_code == 200
+
+
 # --- /api/studio/describe-image (image -> test prompt via Ollama vision) ------
 
 def _png_bytes(color=(120, 60, 30), size=(48, 64)):
@@ -550,6 +595,7 @@ def _seed_done_cell(client, ds_id, *, filename='cell.png', aspect='16:9', run_se
             strength=1.0, aspect=aspect, filename=filename, status='done',
             run_seed=run_seed, seed=run_seed, prompt='p', cfg=1.0, steps=12))
         svc.db.session.commit()
+        return LoraTestImage.query.order_by(LoraTestImage.id.desc()).first().id
 
 
 def test_export_grid_unknown_dataset_404(client):
@@ -584,6 +630,28 @@ def test_export_grid_png_format_option(client):
                        json={'format': 'png'})
     assert resp.status_code == 200
     assert resp.mimetype == 'image/png' and resp.data[:4] == b'\x89PNG'
+
+
+def test_export_grid_accepts_ordered_canvas_image_ids(client, monkeypatch):
+    _comfy(monkeypatch, False)
+    ds_id = _create(client)
+    first = _seed_done_cell(client, ds_id, filename='first.png', run_seed=11)
+    second = _seed_done_cell(client, ds_id, filename='second.png', run_seed=22)
+    resp = client.post(f'/api/dataset/{ds_id}/lora-test/export-grid',
+                       json={'image_ids': [second, first], 'format': 'png'})
+    assert resp.status_code == 200
+    assert resp.mimetype == 'image/png'
+    assert '_canvas.png' in resp.headers['Content-Disposition']
+
+
+def test_export_grid_rejects_foreign_canvas_image(client):
+    first_ds = _create(client)
+    second_ds = _create(client)
+    foreign = _seed_done_cell(client, second_ds, filename='foreign.png')
+    resp = client.post(f'/api/dataset/{first_ds}/lora-test/export-grid',
+                       json={'image_ids': [foreign]})
+    assert resp.status_code == 400
+    assert 'another dataset' in resp.get_json()['error']
 
 
 # --- /api/index_config: deterministic field inventory ------------------------

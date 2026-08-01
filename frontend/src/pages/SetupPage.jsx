@@ -426,7 +426,12 @@ export default function SetupPage() {
       ) : null
       const configPersisted = savedConfigRef.current !== null
         && JSON.stringify(config) === savedConfigRef.current
-      const comfyLauncher = comfyuiLauncherState(step, configPersisted)
+      // A just-typed folder has a live, path-pinned verdict, while `step.dirValid`
+      // describes the last saved configuration. Let a live-valid folder reveal the
+      // disabled launcher so its required Save & re-check is obvious; never let that
+      // transient verdict enable a start request.
+      const liveDirValid = !!liveCheck && liveCheck.status === 'valid'
+      const comfyLauncher = comfyuiLauncherState(step, configPersisted, liveDirValid)
       const slowComfyuiNode = step.connectionStatus === 'slow' && (
         <p className="text-xs text-amber-400" aria-live="polite">
           ComfyUI is responding slowly. Wait for it instead of starting another instance.

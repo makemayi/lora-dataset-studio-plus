@@ -175,6 +175,7 @@ export default function SettingsPage() {
 
   const handleSave = async () => {
     setSaving(true)
+    let submittedCloudToken = false
     try {
       // Only send secret fields the user actually typed into — the fields
       // stay blank on load, so an untouched field must never overwrite an
@@ -185,7 +186,12 @@ export default function SettingsPage() {
           .map(([k, v]) => [k, (v || '').trim()])
           .filter(([, v]) => v)
       )
+      submittedCloudToken = Object.prototype.hasOwnProperty.call(secrets, 'HF_CLOUD_TOKEN')
       const data = await putJson('/api/settings', { config, secrets })
+      const cloudTokenCheck = submittedCloudToken
+        ? data?.secret_checks?.HF_CLOUD_TOKEN
+        : null
+      if (cloudTokenCheck) recordTestResult('hf_cloud', cloudTokenCheck)
       setConfig(data.config)
       setSavedConfig(data.config)
       setRuntime(data.runtime || { host: null, port: null })
@@ -195,10 +201,28 @@ export default function SettingsPage() {
       // plain refresh() could leave onboarding/studio_visible stale right
       // after the config that determines them just changed.
       await refresh(true)
-      toast.success('Settings saved.')
+      if (cloudTokenCheck?.code === 'broad_access' || cloudTokenCheck?.severity === 'warning') {
+        toast.warning(
+          cloudTokenCheck.warning || cloudTokenCheck.detail
+            || 'Settings saved, but this Hugging Face token has broad access.',
+        )
+      } else if (cloudTokenCheck?.ok) {
+        toast.success('Settings saved. Dedicated Hugging Face cloud token validated.')
+      } else {
+        toast.success('Settings saved.')
+      }
       return true
     } catch (e) {
-      toast.error(`Save failed: ${e.message}`)
+      const cloudTokenCheck = submittedCloudToken
+        ? e?.body?.secret_checks?.HF_CLOUD_TOKEN
+        : null
+      if (cloudTokenCheck) {
+        recordTestResult('hf_cloud', cloudTokenCheck)
+        const detail = cloudTokenCheck.detail || e?.body?.error || e.message || 'Validation failed.'
+        toast.error(`Dedicated Hugging Face cloud token was not saved: ${detail}`)
+      } else {
+        toast.error(`Save failed: ${e.message}`)
+      }
       return false
     } finally {
       setSaving(false)

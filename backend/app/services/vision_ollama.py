@@ -286,7 +286,7 @@ def describe_image_ollama(image_bytes: bytes, prompt: str, *,
                 logger.warning('vision_ollama: %s', reject)
                 raise RuntimeError(reject) from e
             from . import ollama_control
-            ready = ollama_control.ensure_captioning_ready()
+            ready = ollama_control.ensure_captioning_ready(model=model_name)
             if not ready.get('ok'):
                 raise RuntimeError(ready.get('error') or 'Ollama is unavailable') from e
             retried = describe_image_ollama(
@@ -369,8 +369,13 @@ def unload_vision_model(*, ollama_url: str | None = None, model: str | None = No
     from . import ollama_gpu_fence
     # With no explicit endpoint a batch's finally must release every local LDS
     # model it used, including a custom model that differs from current Settings.
+    # A RESOLVED remote endpoint must still be passed to the fence so it returns
+    # None and lets the targeted remote keep_alive=0 POST below run. For a resolved
+    # local endpoint, keep the bare-call "all LDS-owned local models" behavior.
+    scope, _ = ollama_gpu_fence._endpoint_scope(url)
+    fence_url = url if ollama_url is not None or scope == 'remote' else None
     released = ollama_gpu_fence.release_owned_models(
-        ollama_url=url if ollama_url is not None else None,
+        ollama_url=fence_url,
         model=model)
     if released is not None:
         if released:

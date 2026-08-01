@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 
 from .. import capabilities
 from ..gpu_window import GpuBusyError
+from ..job_queue import ComfyUIRecoveryRequired, require_comfyui_enqueue_ready
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,19 @@ def _require_comfyui(*, force=False):
         return jsonify({'error': ('ComfyUI is answering too slowly' if slow
                                   else 'ComfyUI is not reachable'),
                         'hint': comfy.get('hint') or 'Check the URL in Settings'}), 409
+    return None
+
+
+def _require_no_stalled_comfyui():
+    """Structured route guard for the durable ComfyUI recovery barrier."""
+    try:
+        require_comfyui_enqueue_ready()
+    except ComfyUIRecoveryRequired as e:
+        return jsonify({
+            'ok': False,
+            'code': 'comfyui_recovery_required',
+            'error': str(e),
+        }), 409
     return None
 
 

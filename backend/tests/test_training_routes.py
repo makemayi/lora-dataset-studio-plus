@@ -165,6 +165,10 @@ def test_continue_forwards_kwargs(client, monkeypatch):
         'allow_uncaptioned': True,
         'allow_caption_quality': True,
         'allow_not_ready': False,   # always forwarded like the other confirm flags
+        # The source is a historical local checkpoint, therefore always a LoRA
+        # regardless of the dataset selector's current value.
+        'training_mode': 'lora',
+        'resume_mode': 'weights_only',
     }
 
 
@@ -187,6 +191,30 @@ def test_continue_forwards_from_step_and_overrides(client, monkeypatch):
     assert resp.status_code == 200
     assert captured['from_step'] == 2500
     assert captured['overrides'] == {'lr_factor': 0.5}
+
+
+def test_continue_forwards_explicit_full_state_contract(client, monkeypatch):
+    _valid(monkeypatch, True)
+    ds_id = _create(client)
+    captured = {}
+
+    monkeypatch.setattr(
+        'app.services.lora_training.continue_training',
+        lambda user_id, dataset_id, **kw:
+        captured.update(kw) or {
+            'started': True, 'resumed_from': 500, 'target_steps': 1500,
+        })
+    bundle_id = '0123456789abcdef0123456789abcdef'
+    resp = client.post(f'/api/dataset/{ds_id}/train/continue', json={
+        'extra_steps': 1000,
+        'from_step': 500,
+        'resume_mode': 'full_state',
+        'state_bundle_id': bundle_id,
+    })
+
+    assert resp.status_code == 200
+    assert captured['resume_mode'] == 'full_state'
+    assert captured['state_bundle_id'] == bundle_id
 
 
 def test_continue_from_a_vanished_checkpoint_is_refused_with_the_real_reason(
@@ -377,6 +405,8 @@ def test_stop_rejects_a_stale_local_run_card(client, monkeypatch):
 def test_checkpoints_returns_family_variant_recommendations(client, monkeypatch):
     _valid(monkeypatch, True)
     ds_id = _create(client)
+    monkeypatch.setattr('app.services.lora_training.has_local_checkpoints',
+                        lambda *a, **k: True)
     monkeypatch.setattr('app.services.lora_training.list_checkpoints',
                         lambda *a, **k: [{'step': 500, 'filename': 'x.safetensors'}])
     step_calls = []
@@ -406,7 +436,11 @@ def test_checkpoints_query_forwards_variant_to_local_and_cloud(client, monkeypat
     _valid(monkeypatch, True)
     ds_id = _create(client, name='Variant', trigger='variant')
     local_calls = []
+    evidence_calls = []
     cloud_calls = []
+    monkeypatch.setattr(
+        'app.services.lora_training.has_local_checkpoints',
+        lambda *a, **kw: evidence_calls.append(kw) or False)
     monkeypatch.setattr(
         'app.services.lora_training.list_checkpoints',
         lambda *a, **kw: local_calls.append(kw) or [])
@@ -424,8 +458,10 @@ def test_checkpoints_query_forwards_variant_to_local_and_cloud(client, monkeypat
         f'/api/dataset/{ds_id}/train/checkpoints'
         '?base_model=&train_type=zimage&variant=deturbo')
     assert resp.status_code == 200
-    assert local_calls and all(
-        call['variant'] == 'deturbo' for call in local_calls)
+    assert local_calls == [{
+        'base_model': '', 'family': 'zimage', 'variant': 'deturbo'}]
+    assert evidence_calls == [{
+        'base_model': '', 'family': 'zimage', 'variant': 'deturbo'}]
     assert cloud_calls == [(ds_id, 'zimage', 'deturbo')]
 
 

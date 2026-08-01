@@ -202,11 +202,25 @@ _QUICK_PRESET_MATRIX = {
     ('anima', 'concept'): 'builtin-concept-anima',
 }
 
+_ORIGINAL_BUILTIN_IDS = set(_QUICK_PRESET_MATRIX.values()) | {
+    'builtin-krea-raw-lokr-likeness',
+}
+
+_APPROVED_BUILTIN_IDS = {
+    'builtin-krea-raw-character-balanced',
+    'builtin-krea-raw-character-lokr-fast',
+    'builtin-krea-raw-style-compact',
+    'builtin-krea-raw-concept-16gb',
+    'builtin-zimage-turbo-character-balanced',
+}
+
 
 def test_quick_preset_catalogue_covers_every_family_and_kind(client):
     listed = client.get('/api/train/presets').get_json()['presets']
     builtins = [p for p in listed if p.get('builtin')]
-    assert len(builtins) == 18
+    assert len(builtins) == 23
+    assert {p['id'] for p in builtins} == (
+        _ORIGINAL_BUILTIN_IDS | _APPROVED_BUILTIN_IDS)
     coverage = {}
     for preset in builtins:
         coverage.setdefault((preset['train_type'], preset['dataset_kind']), set()).add(preset['id'])
@@ -214,14 +228,27 @@ def test_quick_preset_catalogue_covers_every_family_and_kind(client):
     for scope, preset_id in _QUICK_PRESET_MATRIX.items():
         assert preset_id in coverage[scope]
     assert coverage[('krea', 'character')] == {
-        'builtin-krea-character', 'builtin-krea-raw-lokr-likeness'}
+        'builtin-krea-character',
+        'builtin-krea-raw-lokr-likeness',
+        'builtin-krea-raw-character-balanced',
+        'builtin-krea-raw-character-lokr-fast',
+    }
+    assert coverage[('krea', 'style')] == {
+        'builtin-style-krea-raw', 'builtin-krea-raw-style-compact'}
+    assert coverage[('krea', 'concept')] == {
+        'builtin-concept-krea', 'builtin-krea-raw-concept-16gb'}
+    assert coverage[('zimage', 'character')] == {
+        'builtin-character-zimage', 'builtin-zimage-turbo-character-balanced'}
     for p in builtins:
-        # Why culture: every quick preset explains itself in one line, and
-        # pins its researched capacity explicitly (no silent family fallback).
+        # Why culture: every quick preset explains itself in one line.
         assert p.get('description'), p['id']
-        assert p['settings'].get('rank'), p['id']
-        assert p['settings'].get('alpha'), p['id']
         assert len(p['settings']['sample_prompts']) == 8, p['id']
+        if p['id'] in _ORIGINAL_BUILTIN_IDS:
+            # The original 18 entries remain byte-for-byte explicit about their
+            # researched capacity. Two new community recipes intentionally omit
+            # unpublished/irrelevant rank and alpha rather than inventing them.
+            assert p['settings'].get('rank'), p['id']
+            assert p['settings'].get('alpha'), p['id']
 
 
 def test_every_quick_preset_applies_by_id_with_announced_values(client, app):
@@ -281,6 +308,360 @@ def test_krea_raw_lokr_likeness_builtin_is_scoped_and_self_describing(client, ap
     with app.app_context():
         from app.services import lora_training as lt
         assert lt.snapshot_train_settings('local', ds_id) == preset['settings']
+
+
+def test_approved_builtin_metadata_scopes_and_clean_apply(client, app):
+    listed = client.get('/api/train/presets').get_json()['presets']
+    approved = {p['id']: p for p in listed if p['id'] in _APPROVED_BUILTIN_IDS}
+    assert set(approved) == _APPROVED_BUILTIN_IDS
+    expected_scope = {
+        'builtin-krea-raw-character-balanced': ('krea', 'character', ['base', 'raw']),
+        'builtin-krea-raw-character-lokr-fast': ('krea', 'character', ['base', 'raw']),
+        'builtin-krea-raw-style-compact': ('krea', 'style', ['base', 'raw']),
+        'builtin-krea-raw-concept-16gb': ('krea', 'concept', ['base', 'raw']),
+        'builtin-zimage-turbo-character-balanced': ('zimage', 'character', ['turbo']),
+    }
+    expected_sources = {
+        'builtin-krea-raw-character-balanced':
+            'https://www.reddit.com/r/StableDiffusion/comments/1upiocf/'
+            'character_loras_with_krea2_again/',
+        'builtin-krea-raw-character-lokr-fast':
+            'https://www.reddit.com/r/StableDiffusion/comments/1uyk9fz/'
+            'struggling_with_krea2_lora_training_looking_for/',
+        'builtin-krea-raw-style-compact':
+            'https://www.reddit.com/r/StableDiffusion/comments/1uzuypa/'
+            'made_another_style_lora_on_krea2/',
+        'builtin-krea-raw-concept-16gb':
+            'https://www.reddit.com/r/StableDiffusion/comments/1v9yl1u/'
+            'krea_2_lora_training_the_very_easy_guide_for_16gb/',
+        'builtin-zimage-turbo-character-balanced':
+            'https://www.reddit.com/r/StableDiffusion/comments/1q1ahx9/'
+            'some_zimageturbo_training_presets_for_12gb_vram/',
+    }
+    for idx, (preset_id, (family, kind, variants)) in enumerate(expected_scope.items()):
+        preset = approved[preset_id]
+        assert (preset['train_type'], preset['dataset_kind'], preset['variants']) == (
+            family, kind, variants)
+        assert preset['approved'] is preset['community'] is True
+        assert preset['confidence'] == 'medium'
+        assert preset['evidence_label'] == 'community-tested'
+        assert preset['source_url'] == expected_sources[preset_id]
+        assert {'min', 'max'} <= set(preset['recommended_images'])
+        assert preset['recommended_images']['min'] <= preset['recommended_images']['max']
+        steps = preset['recommended_steps']
+        assert ('fixed' in steps) ^ ({'per_image', 'min', 'max'} <= set(steps))
+        assert preset['checkpoint_targets']
+        assert all(type(step) is int and step > 0
+                   for step in preset['checkpoint_targets'])
+        assert preset['caption_guidance']
+        assert preset['limitations'] and all(
+            isinstance(item, str) and item for item in preset['limitations'])
+
+        ds_id = _create_ds(
+            client, name=f'Approved {idx}', trigger=f'approved{idx}',
+            train_type=family, kind=kind)
+        r = client.post(f'/api/dataset/{ds_id}/train/presets/apply', json={
+            'preset_id': preset_id,
+            'train_type': family,
+            'variant': variants[0],
+        })
+        assert r.status_code == 200, (preset_id, r.get_json())
+        body = r.get_json()
+        assert body['ignored'] == [] and body['rejected'] == []
+        with app.app_context():
+            from app.services import lora_training as lt
+            assert lt.snapshot_train_settings('local', ds_id) == preset['settings']
+
+
+def test_approved_presets_emit_exact_krea_and_zimage_primitives(client, app, tmp_path):
+    cases = [
+        ('builtin-krea-raw-character-balanced', 'krea', 'character', 'base'),
+        ('builtin-krea-raw-character-lokr-fast', 'krea', 'character', 'base'),
+        ('builtin-krea-raw-style-compact', 'krea', 'style', 'base'),
+        ('builtin-krea-raw-concept-16gb', 'krea', 'concept', 'base'),
+        ('builtin-zimage-turbo-character-balanced', 'zimage', 'character', 'turbo'),
+    ]
+    processes = {}
+    for idx, (preset_id, family, kind, variant) in enumerate(cases):
+        ds_id = _create_ds(
+            client, name=f'Config {idx}', trigger=f'cfg{idx}',
+            train_type=family, kind=kind)
+        r = client.post(f'/api/dataset/{ds_id}/train/presets/apply', json={
+            'preset_id': preset_id, 'train_type': family, 'variant': variant,
+        })
+        assert r.status_code == 200
+        with app.app_context():
+            from app.services import face_dataset_service as svc
+            from app.services import lora_training as lt
+            ds = svc.get_dataset('local', ds_id)
+            ds.train_variant = variant
+            processes[preset_id] = lt.build_job_config(
+                ds, str(tmp_path / preset_id), steps=2222,
+                training_folder=str(tmp_path / 'runs'))['config']['process'][0]
+
+    balanced = processes['builtin-krea-raw-character-balanced']
+    assert balanced['network'] == {
+        'type': 'lora', 'linear': 32, 'linear_alpha': 32}
+    assert balanced['train']['optimizer'] == 'automagic3'
+    assert balanced['train']['optimizer_params'] == {'weight_decay': 1e-4}
+    assert balanced['train']['timestep_type'] == 'sigmoid'
+    assert balanced['train']['content_or_style'] == 'balanced'
+    assert balanced['datasets'][0]['resolution'] == [1024]
+    assert balanced['save']['save_every'] == 500
+
+    fast = processes['builtin-krea-raw-character-lokr-fast']
+    assert {k: fast['network'][k] for k in (
+        'type', 'lokr_full_rank', 'lokr_factor')} == {
+            'type': 'lokr', 'lokr_full_rank': True, 'lokr_factor': 4}
+    assert fast['train']['optimizer'] == 'automagic2'
+    assert fast['train']['optimizer_params'] == {'weight_decay': 1e-4}
+    assert fast['train']['loss_type'] == 'mse'
+    assert fast['train']['ema_config'] == {'use_ema': True, 'ema_decay': 0.99}
+    assert fast['train']['do_differential_guidance'] is True
+    assert fast['train']['differential_guidance_scale'] == 3.0
+    assert fast['datasets'][0]['cache_text_embeddings'] is True
+
+    compact = processes['builtin-krea-raw-style-compact']
+    assert compact['network']['type'] == 'lora'
+    assert compact['network']['linear'] == compact['network']['linear_alpha'] == 16
+    assert compact['datasets'][0]['resolution'] == [512, 768]
+    assert compact['save']['save_every'] == compact['sample']['sample_every'] == 250
+
+    low_vram = processes['builtin-krea-raw-concept-16gb']
+    assert {k: low_vram['model'][k] for k in (
+        'low_vram', 'layer_offloading',
+        'layer_offloading_transformer_percent',
+        'layer_offloading_text_encoder_percent', 'qtype', 'qtype_te')} == {
+            'low_vram': True,
+            'layer_offloading': True,
+            'layer_offloading_transformer_percent': 0.5,
+            'layer_offloading_text_encoder_percent': 0.5,
+            'qtype': 'int8',
+            'qtype_te': 'int8',
+        }
+    assert low_vram['datasets'][0]['cache_text_embeddings'] is True
+    assert low_vram['train']['optimizer_params'] == {'weight_decay': 1e-4}
+
+    zimage = processes['builtin-zimage-turbo-character-balanced']
+    assert {k: zimage['network'][k] for k in (
+        'type', 'linear', 'linear_alpha', 'conv', 'conv_alpha')} == {
+            'type': 'lora', 'linear': 32, 'linear_alpha': 32,
+            'conv': 16, 'conv_alpha': 16,
+        }
+    assert zimage['train']['optimizer'] == 'adamw8bit'
+    assert zimage['train']['lr'] == 1e-4
+    assert zimage['train']['content_or_style'] == 'balanced'
+    assert zimage['model']['qtype'] == zimage['model']['qtype_te'] == 'float8'
+    assert zimage['save']['dtype'] == 'bf16'
+    assert zimage['datasets'][0]['cache_text_embeddings'] is True
+    assert zimage['datasets'][0]['resolution'] == [512, 768]
+
+
+def test_zimage_cached_preset_reports_dual_captions_as_unsupported(
+        client, app, tmp_path):
+    """The preset's cache override must not silently promise two captions."""
+    ds_id = _create_ds(
+        client, name='Z cache', trigger='zcache',
+        train_type='zimage', kind='character')
+    applied = client.post(f'/api/dataset/{ds_id}/train/presets/apply', json={
+        'preset_id': 'builtin-zimage-turbo-character-balanced',
+        'train_type': 'zimage',
+        'variant': 'turbo',
+    })
+    assert applied.status_code == 200
+
+    with app.app_context():
+        from app.services import face_dataset_service as svc
+        from app.services import lora_training as lt
+
+        lt.update_train_settings('local', ds_id, {'dual_captions': True})
+        ds = svc.get_dataset('local', ds_id)
+        ds.train_variant = 'turbo'
+        process = lt.build_job_config(
+            ds, str(tmp_path / 'dataset'), steps=3000,
+            training_folder=str(tmp_path / 'runs'))['config']['process'][0]
+
+        assert process['datasets'][0]['cache_text_embeddings'] is True
+        assert 'short_and_long_captions' not in process['train']
+        assert lt.launch_settings_snapshot(ds, family='zimage')['dual_captions'] is False
+        preflight = lt.training_preflight(
+            'local', ds_id, train_type='zimage', variant='turbo')
+        dual = next(check for check in preflight['checks']
+                    if check['id'] == 'dual_captions')
+        assert dual['status'] == 'warn'
+        assert 'short caption is ignored' in dual['detail']
+
+
+def test_approved_preset_step_policies_drive_recommendation_and_info(client, app):
+    cases = [
+        ('builtin-krea-raw-character-balanced', 'krea', 'character', 'base', 10, 2000),
+        ('builtin-krea-raw-character-lokr-fast', 'krea', 'character', 'base', 20, 2000),
+        ('builtin-krea-raw-style-compact', 'krea', 'style', 'base', 70, 2250),
+        ('builtin-krea-raw-concept-16gb', 'krea', 'concept', 'base', 60, 3250),
+        ('builtin-zimage-turbo-character-balanced',
+         'zimage', 'character', 'turbo', 35, 3500),
+    ]
+    for idx, (preset_id, family, kind, variant, count, expected) in enumerate(cases):
+        ds_id = _create_ds(
+            client, name=f'Steps {idx}', trigger=f'steps{idx}',
+            train_type=family, kind=kind)
+        r = client.post(f'/api/dataset/{ds_id}/train/presets/apply', json={
+            'preset_id': preset_id, 'train_type': family, 'variant': variant,
+        })
+        assert r.status_code == 200
+        with app.app_context():
+            from app.extensions import db
+            from app.models import FaceDatasetImage
+            from app.services import lora_training as lt
+            for image_idx in range(count):
+                db.session.add(FaceDatasetImage(
+                    dataset_id=ds_id, status='keep',
+                    filename=f'{idx}-{image_idx}.webp'))
+            db.session.commit()
+            assert lt.recommended_steps(ds_id, family, variant) == expected
+            info = lt.recommended_steps_info(ds_id, family, variant)
+            assert info['steps'] == expected
+            assert info['recipe'].startswith('preset_')
+            if preset_id == 'builtin-krea-raw-style-compact':
+                assert info['preset_steps_fixed'] == info['fixed_steps'] == 2250
+            else:
+                assert info['preset_steps_per_image'] > 0
+                assert info['preset_steps_min'] <= expected <= info['preset_steps_max']
+
+
+def test_approved_builtin_scope_mismatches_are_atomic(client, app):
+    cases = [
+        ('builtin-krea-raw-character-balanced', 'krea', 'character', 'turbo'),
+        ('builtin-krea-raw-character-lokr-fast', 'krea', 'character', 'turbo'),
+        ('builtin-krea-raw-style-compact', 'krea', 'style', 'turbo'),
+        ('builtin-krea-raw-concept-16gb', 'krea', 'concept', 'turbo'),
+        ('builtin-zimage-turbo-character-balanced', 'zimage', 'character', 'base'),
+    ]
+    for idx, (preset_id, family, kind, variant) in enumerate(cases):
+        ds_id = _create_ds(
+            client, name=f'Bad scope {idx}', trigger=f'badscope{idx}',
+            train_type=family, kind=kind)
+        with app.app_context():
+            from app.services import lora_training as lt
+            lt.update_train_settings('local', ds_id, {'rank': 64})
+        r = client.post(f'/api/dataset/{ds_id}/train/presets/apply', json={
+            'preset_id': preset_id, 'train_type': family, 'variant': variant,
+        })
+        assert r.status_code == 409
+        assert r.get_json()['error_code'] == 'PRESET_SCOPE'
+        with app.app_context():
+            from app.services import lora_training as lt
+            assert lt.snapshot_train_settings('local', ds_id) == {'rank': 64}
+
+
+def test_applied_approved_preset_cannot_leak_into_another_family(client, app):
+    """Hidden recipe fields are invalidated when the model family changes."""
+    import json
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as lt
+
+    ds_id = _create_ds(
+        client, name='Scoped approved recipe', trigger='scoped-approved',
+        kind='character', train_type='krea')
+    with app.app_context():
+        ds = svc.get_dataset(LOCAL_USER, ds_id)
+        ds.train_variant = 'raw'
+        svc.db.session.commit()
+
+    applied = client.post(
+        f'/api/dataset/{ds_id}/train/presets/apply',
+        json={'preset_id': 'builtin-krea-raw-character-balanced',
+              'train_type': 'krea', 'variant': 'raw'})
+    assert applied.status_code == 200
+
+    with app.app_context():
+        ds = svc.get_dataset(LOCAL_USER, ds_id)
+        raw = json.loads(ds.train_settings)
+        assert raw['_active_preset_scope']['train_type'] == 'krea'
+        assert raw['optimizer'] == 'automagic3'
+        assert svc.set_train_type(LOCAL_USER, ds_id, 'zimage') is True
+        ds = svc.get_dataset(LOCAL_USER, ds_id)
+        active = lt._train_settings(ds)
+        assert 'optimizer' not in active
+        assert 'preset_steps_per_image' not in active
+        persisted = json.loads(ds.train_settings or '{}')
+        assert '_active_preset_scope' not in persisted
+
+
+def test_variant_override_preflight_and_steps_ignore_out_of_scope_preset(
+        client, app, monkeypatch):
+    """The UI-selected variant is authoritative before launch persists it."""
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as lt
+
+    ds_id = _create_ds(
+        client, name='Variant context', trigger='variant-context',
+        kind='character', train_type='krea')
+    with app.app_context():
+        ds = svc.get_dataset(LOCAL_USER, ds_id)
+        ds.train_variant = 'base'
+        svc.db.session.commit()
+    applied = client.post(
+        f'/api/dataset/{ds_id}/train/presets/apply',
+        json={'preset_id': 'builtin-krea-raw-character-balanced',
+              'train_type': 'krea', 'variant': 'base'})
+    assert applied.status_code == 200
+
+    with app.app_context():
+        monkeypatch.setattr(lt, '_aitoolkit_supports_automagic3', lambda: False)
+        matching = lt.training_preflight(
+            LOCAL_USER, ds_id, train_type='krea', variant='base')
+        assert any(c['id'] == 'automagic3' for c in matching['checks'])
+        switched = lt.training_preflight(
+            LOCAL_USER, ds_id, train_type='krea', variant='turbo')
+        assert all(c['id'] != 'automagic3' for c in switched['checks'])
+        assert lt.recommended_steps(ds_id, 'krea', 'base') == 2000
+        assert lt.recommended_steps(ds_id, 'krea', 'turbo') == 1500
+
+
+def test_automagic3_grad_accum_rejection_never_leaves_invalid_candidate(client, app):
+    ds_id = _create_ds(client)
+    r = client.post(f'/api/dataset/{ds_id}/train/presets/apply', json={
+        'settings': {'optimizer': 'automagic3', 'grad_accum': 2},
+    })
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body['ignored'] == []
+    assert [item['key'] for item in body['rejected']] == ['grad_accum']
+    assert 'Automagic3' in body['rejected'][0]['reason']
+    assert 'above 1' in body['rejected'][0]['reason']
+    with app.app_context():
+        from app.services import lora_training as lt
+        assert lt.snapshot_train_settings('local', ds_id) == {
+            'optimizer': 'automagic3'}
+
+
+def test_automagic3_capability_preflight_and_16gb_vram_warning_survive(
+        client, app, monkeypatch):
+    ds_id = _create_ds(
+        client, name='16 GB', trigger='sixteen', train_type='krea', kind='concept')
+    r = client.post(f'/api/dataset/{ds_id}/train/presets/apply', json={
+        'preset_id': 'builtin-krea-raw-concept-16gb',
+        'train_type': 'krea', 'variant': 'base',
+    })
+    assert r.status_code == 200
+    with app.app_context():
+        from app import capabilities
+        from app.services import lora_training as lt
+        monkeypatch.setattr(lt, '_aitoolkit_supports_automagic3', lambda: False)
+        monkeypatch.setattr(capabilities, 'gpu_vram_gb', lambda: 16)
+        local = lt.training_preflight('local', ds_id, train_type='krea')
+        automagic = next(c for c in local['checks'] if c['id'] == 'automagic3')
+        assert automagic['status'] == 'fail'
+        assert automagic['bypassable'] is False
+        vram = next(c for c in local['checks'] if c['id'] == 'vram')
+        assert vram['status'] == 'warn'
+        assert '24 GB' in vram['detail']
+        cloud = lt.training_preflight(
+            'local', ds_id, train_type='krea', lane='cloud')
+        assert all(c['id'] != 'automagic3' for c in cloud['checks'])
 
 
 def test_apply_by_preset_id_and_delete(client):

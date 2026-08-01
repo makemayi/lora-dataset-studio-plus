@@ -14,6 +14,7 @@ pipeline, so it is patched at app.services.vision_ollama.*.
 import json
 import os
 
+import pytest
 from PIL import Image
 from sqlalchemy import text
 
@@ -66,6 +67,24 @@ def test_caption_options_defaults_and_normalization(app):
         assert len(svc.caption_options(ds)['instructions']) == svc._CAPTION_INSTRUCTIONS_MAX
 
 
+def test_caption_options_defensively_drop_invalid_stored_models(app):
+    """Legacy/manual JSON blobs cannot bypass the current model-ref validator."""
+    invalid = (None, 123, False, [], {}, 'bad model!', '/leading',
+               'valid:tag\n', 'valid:tag\r\nsecond:tag', 'valid:tag\u2028',
+               'a' * 201)
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'LegacyModels', 'zchar_legacy_models')
+        for model in invalid:
+            ds.caption_options = json.dumps({
+                'ollama_model': model,
+                'instructions': 'keep this valid option',
+            })
+            db.session.commit()
+            opts = svc.caption_options(ds)
+            assert opts['ollama_model'] == ''
+            assert opts['instructions'] == 'keep this valid option'
+
+
 def test_set_caption_options_roundtrip_and_validation(app):
     with app.app_context():
         ds = svc.create_dataset(LOCAL_USER, 'Emma', 'zchar_emma')
@@ -103,6 +122,29 @@ def test_set_caption_options_roundtrip_and_validation(app):
             assert False, 'expected ValueError'
         except ValueError as e:
             assert 'invalid caption vocabulary' in str(e)
+
+
+def test_set_caption_options_validates_ollama_model_type_format_and_length(app):
+    valid = (
+        ('qwen3-vl:8b', 'qwen3-vl:8b'),
+        (' registry.example:5000/team/model_name-1.2:latest ',
+         'registry.example:5000/team/model_name-1.2:latest'),
+        ('a' * 200, 'a' * 200),
+        ('', ''),
+    )
+    invalid = (None, 123, False, [], {}, 'bad model!', '/leading',
+               'valid:tag\n', 'valid:tag\r\nsecond:tag', 'valid:tag\u2028',
+               'a' * 201)
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'ValidatedModels', 'zchar_validated_models')
+        for raw, expected in valid:
+            opts = svc.set_caption_options(
+                LOCAL_USER, ds.id, {'ollama_model': raw})
+            assert opts['ollama_model'] == expected
+        for raw in invalid:
+            with pytest.raises(ValueError, match='ollama_model'):
+                svc.set_caption_options(
+                    LOCAL_USER, ds.id, {'ollama_model': raw})
 
 
 # --- additive migration on a legacy table ------------------------------------
@@ -226,3 +268,30 @@ def test_caption_options_routes(app, client):
 
     r = client.get('/api/dataset/999999/caption/options')
     assert r.status_code == 404
+
+
+def test_caption_options_route_rejects_invalid_ollama_models(app, client):
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'RouteModels', 'zchar_route_models')
+        ds_id = ds.id
+
+    invalid = (None, 123, False, [], {}, 'bad model!', '/leading',
+               'valid:tag\n', 'valid:tag\r\nsecond:tag', 'valid:tag\u2028',
+               'a' * 201)
+    for model in invalid:
+        r = client.post(
+            f'/api/dataset/{ds_id}/caption/options',
+            json={'ollama_model': model})
+        assert r.status_code == 400, (model, r.get_json())
+        assert 'ollama_model' in r.get_json()['error']
+
+    r = client.post(
+        f'/api/dataset/{ds_id}/caption/options',
+        json={'ollama_model': 'a' * 200})
+    assert r.status_code == 200
+    assert r.get_json()['options']['ollama_model'] == 'a' * 200
+    r = client.post(
+        f'/api/dataset/{ds_id}/caption/options',
+        json={'ollama_model': ''})
+    assert r.status_code == 200
+    assert r.get_json()['options']['ollama_model'] == ''

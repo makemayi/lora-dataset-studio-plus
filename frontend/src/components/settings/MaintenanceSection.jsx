@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { apiFetch, postJson } from '../../api/fetchClient'
 import DiagnosticReport from '../common/DiagnosticReport'
+import DockerUpdateInstructions from '../common/DockerUpdateInstructions'
 import { Card, TextField } from './primitives'
 import ResetToDefault from './ResetToDefault'
 import { installMode, zipUpdateHeadline, progressLabel, progressPercent } from './updateStatus'
@@ -77,6 +78,9 @@ function UpdatesCard() {
   }
 
   const apply = async () => {
+    // Defense in depth: Docker owns /app as image content. The button is not
+    // rendered in this mode, and a stale callback must not POST an apply anyway.
+    if (mode === 'docker') return
     setApplying(true); setPhase('pulling'); setProgress(null)
     try {
       const res = await postJson('/api/update/apply', {})
@@ -99,9 +103,12 @@ function UpdatesCard() {
   const s = status
   // In-app update is possible for a git clone (pull) or a packaged install whose
   // latest release ships a ZIP asset (download + swap). Otherwise: link out.
+  const dockerMode = mode === 'docker'
   const canPull = s && s.update_available && (mode === 'git' || mode === 'zip')
   return (
-    <Card title="Updates" help="Pull the latest version from GitHub and restart — without leaving the app.">
+    <Card title="Updates" help={dockerMode
+      ? 'Docker installs are updated by pulling the host checkout and rebuilding the image.'
+      : 'Pull the latest version from GitHub and restart — without leaving the app.'}>
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" onClick={check} disabled={checking || applying}
           className="rounded-md border border-border-strong px-3 py-1.5 text-sm font-medium text-content hover:bg-surface-raised disabled:opacity-50">
@@ -158,7 +165,15 @@ function UpdatesCard() {
 
       {!applying && s && (
         <div className="text-sm">
-          {canPull ? (
+          {dockerMode && s.update_available ? (
+            <div className="space-y-2">
+              <p className="text-content">
+                <span aria-hidden>⬆</span>{' '}
+                Update available{s.latest ? ` — v${s.latest}` : ''}. The running container cannot replace its own image.
+              </p>
+              <DockerUpdateInstructions />
+            </div>
+          ) : canPull ? (
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-content">
                 <span aria-hidden>⬆</span>{' '}

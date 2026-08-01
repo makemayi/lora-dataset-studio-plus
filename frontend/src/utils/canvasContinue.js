@@ -158,6 +158,8 @@ export function canvasContinueRequest(node, payload, { steps = [], masked = null
   const extra = { extra_steps: payload.extraSteps };
   if (fromStep != null) extra.from_step = fromStep;
   if (payload.overrides) extra.overrides = payload.overrides;
+  extra.resume_mode = payload.resumeMode || 'weights_only';
+  if (payload.stateBundleId) extra.state_bundle_id = payload.stateBundleId;
 
   if (payload.lane === 'cloud' && node.source === 'cloud' && node.run_id != null) {
     return { url: '/api/dataset/train/cloud/continue',

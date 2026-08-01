@@ -2,11 +2,29 @@
    mode/label/progress logic is unit-testable without a DOM (see updateStatus.test.js).
 
    Install modes:
+   - 'docker'      a container image: the host checkout must be pulled and the
+                   image rebuilt; files inside the running container are never
+                   replaced by the in-app updater.
    - 'git'         a git checkout: "Update & restart" fast-forwards (unchanged).
    - 'zip'         a packaged install whose latest release ships a ZIP asset: the
                    button downloads + swaps the release, with a progress bar.
    - 'unavailable' non-git and no downloadable release: don't promise an update
                    the app can't perform — link out to the releases page instead. */
+
+// Keep the two commands in one frontend-owned contract. Both the Settings card
+// and the app-wide banner render this list, so neither can drift into offering
+// an in-container update that Docker will discard on the next recreate.
+export const DOCKER_UPDATE_COMMANDS = Object.freeze([
+  'git pull',
+  'docker compose -f docker-compose.gpu.yml up -d --build',
+])
+
+export const DOCKER_UPDATE_GUIDE_URL =
+  'https://github.com/perfectgf/lora-dataset-studio#option-4--docker-gpu--comfyui'
+
+export function isDockerInstall(s) {
+  return s?.install_mode === 'docker'
+}
 
 export function formatMB(bytes) {
   if (!bytes || bytes <= 0) return ''
@@ -15,7 +33,12 @@ export function formatMB(bytes) {
 }
 
 export function installMode(s) {
-  if (!s || s.ok === false) return 'unknown'
+  if (!s) return 'unknown'
+  // Docker wins even if a defensive/future payload accidentally also reports a
+  // writable git checkout or ZIP asset. Never surface the in-app apply action in
+  // a container just because /app happens to contain .git metadata.
+  if (isDockerInstall(s)) return 'docker'
+  if (s.ok === false) return 'unknown'
   if (s.is_git) return 'git'
   if (s.can_apply) return 'zip'
   return 'unavailable'

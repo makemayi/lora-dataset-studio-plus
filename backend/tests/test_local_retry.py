@@ -120,6 +120,11 @@ def test_retry_local_run_replays_stamped_params(app, monkeypatch):
         rec = _register(app, ds, family='krea', base_model='merged/base',
                         variant='turbo', masked=False, steps=1500)
         _mark_failed(ds, rc=3221225477, log_tail='std::bad_alloc')
+        # The failed record is a local LoRA even if the panel preference changed
+        # to dense after the failure.
+        ds.training_mode = 'full_transformer'
+        from app.extensions import db
+        db.session.commit()
         captured = {}
         monkeypatch.setattr(
             lt, 'launch_training',
@@ -133,6 +138,7 @@ def test_retry_local_run_replays_stamped_params(app, monkeypatch):
         assert captured['base_model'] == 'merged/base'
         assert captured['masked'] is False
         assert captured['steps'] == 1500
+        assert captured['training_mode'] == 'lora'
 
 
 def test_retry_local_run_maps_official_base_to_none(app, monkeypatch):

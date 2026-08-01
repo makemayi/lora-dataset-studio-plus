@@ -14,21 +14,32 @@ permissions:
 jobs:
   build-and-release:
     runs-on: windows-latest
+    env:
+      # Keep the tag as data. Never splice an attacker-controlled Git ref into
+      # a PowerShell script, where characters such as `$()` would be evaluated.
+      RELEASE_REF_NAME: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v4
         with:
-          # The notes are the diff of frontend/src/whatsNew.js against the
-          # PREVIOUS tag, so the job needs real history and every tag - the
-          # default shallow, tag-less checkout cannot resolve either.
+          # Read history/tags without leaving a write-capable Git credential for
+          # npm, pip, builds or tests executed later in this job.
+          persist-credentials: false
+          # The notes are the diff of frontend/src/whatsNew.js against the tag of
+          # the LAST PUBLISHED GitHub release, so the job needs real history and
+          # every tag - the default shallow, tag-less checkout cannot resolve it.
           fetch-depth: 0
           fetch-tags: true
 
       - name: Tag must match APP_VERSION
         shell: pwsh
         run: |
+          $releaseRef = "$env:RELEASE_REF_NAME"
+          if ($releaseRef -cnotmatch '^v[0-9]{4}\.[0-9]{2}\.[0-9]{2}(?:\.[0-9]+)?$') {
+            throw "invalid release tag format"
+          }
           $v = (Select-String -Path backend/app/version.py -Pattern "APP_VERSION = '([^']+)'").Matches[0].Groups[1].Value
-          if ("v$v" -ne "${{ github.ref_name }}") {
-            throw "tag ${{ github.ref_name }} does not match APP_VERSION $v - bump backend/app/version.py first"
+          if ("v$v" -cne $releaseRef) {
+            throw "tag $releaseRef does not match APP_VERSION $v - bump backend/app/version.py first"
           }
 
       - uses: actions/setup-node@v4
@@ -40,16 +51,31 @@ jobs:
       - name: Build the release notes from 🎁 What's new
         shell: pwsh
         working-directory: frontend
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Runs BEFORE the 10-minute build on purpose: a release that announces
           # nothing must fail in seconds, not after packaging a ZIP nobody will
           # read notes for. Needs no npm install - node builtins only.
           # A deliberate plumbing-only release opts out in-band, by putting
           # [no-notes] in the annotated tag message.
-          $msg = git tag -l --format='%(contents)' "${{ github.ref_name }}"
+          $msg = git tag -l --format='%(contents)' "$env:RELEASE_REF_NAME"
           $extra = @()
           if ("$msg" -match '\[no-notes\]') { $extra += '--allow-empty' }
-          node scripts/releaseNotes.mjs --tag "${{ github.ref_name }}" --out ../release-notes.md @extra
+
+          # Failed tag workflows may leave newer Git tags with NO release. Diff
+          # from the last release users could actually download, never from the
+          # nearest tag in Git history.
+          $previousRelease = gh release list --limit 1 --exclude-drafts --exclude-pre-releases --json tagName --jq '.[0].tagName'
+          if ($LASTEXITCODE -ne 0) {
+            throw "cannot resolve the previous published GitHub release (gh release list exited $LASTEXITCODE)"
+          }
+          $previousRelease = "$previousRelease".Trim()
+          if (-not $previousRelease) {
+            throw "cannot resolve the previous published GitHub release: gh release list returned no release"
+          }
+
+          node scripts/releaseNotes.mjs --tag "$env:RELEASE_REF_NAME" --prev $previousRelease --out ../release-notes.md @extra
           if ($LASTEXITCODE -ne 0) { throw "release notes generation failed (exit $LASTEXITCODE)" }
           # Same body in the run log, so an empty or wrong release is visible
           # from the Actions page without downloading anything.
@@ -86,6 +112,14 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install the backend test environment
+        # requirements-dev is the contributor environment; the pinned CPU
+        # Torch wheel stays in a separate overlay so both contracts are clear.
+        run: python -m pip install --disable-pip-version-check -r backend/requirements-dev.txt
+
+      - name: Install the CPU Torch test overlay
+        run: python -m pip install --disable-pip-version-check --no-cache-dir -r backend/requirements-torch-tests.txt
+
       - name: Enforce release asset policy
         run: python scripts/check_release_artifacts.py
 
@@ -93,14 +127,7 @@ jobs:
         run: python -m unittest discover -s scripts/tests -p 'test_*.py'
 
       - name: Run the test suite
-        shell: pwsh
-        run: |
-          # The SAME one file ci.yml and a contributor install (it pulls
-          # requirements.txt plus the test-only numpy/cv2 extras). A release must
-          # not be gated by a different environment than the one that went green
-          # on the push — that difference is what this file's history is made of.
-          python -m pip install --disable-pip-version-check -r backend/requirements-dev.txt
-          python -m pytest backend/tests -q
+        run: python -m pytest backend/tests -q
 
       - name: Build the Windows source ZIP
         shell: pwsh
@@ -126,7 +153,7 @@ jobs:
           # main - so it contributed an empty heading plus one useful line, the
           # Full Changelog compare link, which the generator now emits itself.
           # Three releases shipped a preamble-only body before that was noticed.
-          gh release create "${{ github.ref_name }}" `
+          gh release create "$env:RELEASE_REF_NAME" `
             "packaging/dist/LoRA-Dataset-Studio-windows.zip" `
-            --title "LoRA Dataset Studio ${{ github.ref_name }}" `
+            --title "LoRA Dataset Studio $env:RELEASE_REF_NAME" `
             --notes-file release-notes.md

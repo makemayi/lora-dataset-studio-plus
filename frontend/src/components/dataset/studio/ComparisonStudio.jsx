@@ -124,6 +124,19 @@ export default function ComparisonStudio({ selection, baseModels = [], runType =
       };
       if (prompt.trim()) body.prompt = prompt.trim();
       const dResp = await postJson('/api/studio/run', body);
+      // Keep this defensive path even though apiFetch currently throws on
+      // non-2xx: alternate clients/tests may return the structured 409 body.
+      // Never announce success or retain a bogus run id in that case.
+      if (!dResp?.ok) {
+        let errorBody = dResp;
+        if (typeof dResp?.json === 'function') {
+          try { errorBody = await dResp.json(); } catch { errorBody = {}; }
+        }
+        setPreflight(errorBody?.studio_missing || null);
+        setArchMismatch(errorBody?.studio_arch_mismatch || null);
+        toast.error(errorBody?.error || 'Error on launch');
+        return;
+      }
       toast.success(`${dResp.created} generation(s) queued (seed ${dResp.seed}${dResp.count > 1 ? ` ×${dResp.count}` : ''})`);
       setRunId(dResp.run_id);
       setSeed(rollSeed());

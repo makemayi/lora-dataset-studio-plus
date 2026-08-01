@@ -11,6 +11,7 @@ The engine is ALWAYS stubbed here — no network, no dollars. Invariants pinned:
 import contextlib
 import io
 import os
+import threading
 import time
 
 import pytest
@@ -191,7 +192,9 @@ def test_keep_promotes_and_removes_candidate(app, monkeypatch):
     dsid = _run_sync(app, monkeypatch, _webp((0, 0, 255)))
     with app.app_context():
         old_ref = svc.get_dataset('local', dsid).ref_filename
-        new = svc.keep_reference_edit('local', dsid)
+        batch_id = svc.dataset_payload(
+            'local', dsid)['reference_edit']['batch_id']
+        new = svc.keep_reference_edit('local', dsid, batch_id=batch_id)
         assert new and new != old_ref
         assert svc.get_dataset('local', dsid).ref_filename == new
         assert svc.dataset_payload('local', dsid)['reference_edit'] is None
@@ -281,7 +284,10 @@ def test_route_keep_swaps_reference(client, monkeypatch):
     client.post(f'/api/dataset/{did}/ref/edit',
                 data={'prompt': 'x', 'engine': 'nanobanana'},
                 content_type='multipart/form-data')
-    resp = client.post(f'/api/dataset/{did}/ref/edit/keep')
+    batch_id = client.get(
+        f'/api/dataset/{did}').get_json()['reference_edit']['batch_id']
+    resp = client.post(
+        f'/api/dataset/{did}/ref/edit/keep', json={'batch_id': batch_id})
     assert resp.status_code == 200
     j = resp.get_json()
     assert j['ok'] is True and j['ref_filename'] != before
@@ -517,3 +523,487 @@ def test_route_edit_missing_dataset_404(client):
                        data={'prompt': 'x', 'engine': 'chatgpt'},
                        content_type='multipart/form-data')
     assert resp.status_code == 404
+
+
+# --- real multi-engine batches ---------------------------------------------
+
+def test_route_multi_engine_dedupes_and_snapshots_api_refs_once(client, monkeypatch):
+    from werkzeug.datastructures import MultiDict
+
+    did = _create_with_ref(client, monkeypatch, 'Batch', 'zchar_batch')
+    snapshot_calls = []
+    real_snapshot = svc._all_ref_bytes
+
+    def _snapshot(ds):
+        snapshot_calls.append(ds.id)
+        return real_snapshot(ds)
+
+    calls = []
+
+    def _edit(engine, refs, prompt):
+        calls.append((engine, id(refs), prompt))
+        color = (200, 10, 10) if engine == 'chatgpt' else (10, 10, 200)
+        return _webp(color)
+
+    monkeypatch.setattr(svc, '_all_ref_bytes', _snapshot)
+    monkeypatch.setattr(svc, '_edit_engine_call', _edit)
+    monkeypatch.setattr(svc.threading, 'Thread', _SyncThread)
+    response = client.post(
+        f'/api/dataset/{did}/ref/edit',
+        data=MultiDict([
+            ('prompt', 'same prompt'),
+            ('engines', ' ChatGPT '),
+            ('engines', 'chatgpt'),
+            ('engines', 'nanobanana'),
+            # A mixed-version client may send the legacy field too.
+            ('engine', 'nanobanana'),
+        ]),
+        content_type='multipart/form-data')
+
+    assert response.status_code == 202
+    assert response.get_json()['engines'] == ['chatgpt', 'nanobanana']
+    assert snapshot_calls == [did]
+    assert [call[0] for call in calls] == ['chatgpt', 'nanobanana']
+    assert len({call[1] for call in calls}) == 1
+    payload = client.get(f'/api/dataset/{did}').get_json()['reference_edit']
+    assert response.get_json()['batch_id'] == payload['batch_id']
+    assert payload['engines'] == ['chatgpt', 'nanobanana']
+    assert payload['prompt'] == 'same prompt'
+    assert set(payload['candidates']) == {'chatgpt', 'nanobanana'}
+    assert all(candidate['status'] == 'ready'
+               for candidate in payload['candidates'].values())
+    assert payload['status'] == 'ready'
+    assert dataset_activity.get(did) is None
+    candidate_paths = [
+        os.path.join(svc._dataset_dir(did), candidate['candidate_filename'])
+        for candidate in payload['candidates'].values()
+    ]
+    assert all(os.path.exists(path) for path in candidate_paths)
+    assert client.post(
+        f'/api/dataset/{did}/ref/edit/keep',
+        json={'engine': 'nanobanana',
+              'batch_id': payload['batch_id']}).status_code == 200
+    assert client.get(f'/api/dataset/{did}').get_json()['reference_edit'] is None
+    assert not any(os.path.exists(path) for path in candidate_paths)
+
+
+def test_stale_retry_batch_is_rejected_before_paid_dispatch(client, monkeypatch):
+    """A hidden second-tab replacement cannot make Retry bill the old engines."""
+    did = _create_with_ref(client, monkeypatch, 'Retry CAS', 'zchar_retry_cas')
+    provider_calls = []
+
+    def _edit(engine, refs, prompt):
+        provider_calls.append((engine, prompt))
+        return _webp((30, 60, 90))
+
+    monkeypatch.setattr(svc, '_edit_engine_call', _edit)
+    monkeypatch.setattr(svc.threading, 'Thread', _SyncThread)
+    url = f'/api/dataset/{did}/ref/edit'
+    first = client.post(
+        url, data={'prompt': 'tab A', 'engine': 'chatgpt'},
+        content_type='multipart/form-data')
+    second = client.post(
+        url, data={'prompt': 'tab B', 'engine': 'chatgpt'},
+        content_type='multipart/form-data')
+    assert first.status_code == second.status_code == 202
+    batch_a = first.get_json()['batch_id']
+    batch_b = second.get_json()['batch_id']
+    assert batch_a and batch_b and batch_a != batch_b
+    assert provider_calls == [('chatgpt', 'tab A'), ('chatgpt', 'tab B')]
+
+    stale = client.post(
+        url,
+        data={
+            'prompt': 'tab A',
+            'engine': 'chatgpt',
+            'retry_batch_id': batch_a,
+        },
+        content_type='multipart/form-data')
+    assert stale.status_code == 409
+    assert 'replaced' in stale.get_json()['error']
+    assert provider_calls == [('chatgpt', 'tab A'), ('chatgpt', 'tab B')]
+    current = client.get(f'/api/dataset/{did}').get_json()['reference_edit']
+    assert current['batch_id'] == batch_b
+
+
+def test_partial_success_can_keep_named_ready_engine_and_clears_siblings(
+        client, monkeypatch):
+    from werkzeug.datastructures import MultiDict
+
+    did = _create_with_ref(client, monkeypatch, 'Partial', 'zchar_partial')
+    before = client.get(f'/api/dataset/{did}').get_json()['ref_filename']
+    monkeypatch.setattr(
+        svc, '_edit_engine_call',
+        lambda engine, refs, prompt: (
+            _webp((0, 150, 255)) if engine == 'chatgpt' else None))
+    monkeypatch.setattr(svc.threading, 'Thread', _SyncThread)
+    response = client.post(
+        f'/api/dataset/{did}/ref/edit',
+        data=MultiDict([
+            ('prompt', 'x'),
+            ('engines', 'chatgpt'),
+            ('engines', 'nanobanana'),
+        ]),
+        content_type='multipart/form-data')
+    assert response.status_code == 202
+
+    payload = client.get(f'/api/dataset/{did}').get_json()['reference_edit']
+    assert payload['status'] == 'ready'
+    assert payload['candidates']['chatgpt']['status'] == 'ready'
+    assert payload['candidates']['nanobanana']['status'] == 'failed'
+    assert dataset_activity.get(did) is None
+
+    # A selected but failed engine cannot be promoted, and does not destroy the
+    # ready sibling. The server also ignores arbitrary filename input.
+    assert client.post(
+        f'/api/dataset/{did}/ref/edit/keep',
+        json={'engine': 'nanobanana',
+              'batch_id': payload['batch_id']}).status_code == 409
+    assert client.get(
+        f'/api/dataset/{did}').get_json()['reference_edit'] is not None
+    kept = client.post(
+        f'/api/dataset/{did}/ref/edit/keep',
+        json={'engine': 'chatgpt', 'batch_id': payload['batch_id'],
+              'candidate_filename': 'attacker.webp'})
+    assert kept.status_code == 200
+    assert kept.get_json()['ref_filename'] != before
+    final = client.get(f'/api/dataset/{did}').get_json()
+    assert final['reference_edit'] is None
+    assert not [name for name in os.listdir(svc._dataset_dir(did))
+                if rej.CANDIDATE_MARKER in name]
+
+
+def test_route_rejects_empty_unknown_and_too_many_transient_refs_before_start(
+        client, monkeypatch):
+    from werkzeug.datastructures import MultiDict
+
+    did = _create_with_ref(client, monkeypatch, 'Bounds', 'zchar_bounds')
+    starts = []
+    monkeypatch.setattr(
+        svc, 'start_reference_edit',
+        lambda *args, **kwargs: starts.append((args, kwargs)))
+
+    empty = client.post(
+        f'/api/dataset/{did}/ref/edit',
+        data=MultiDict([('prompt', 'x'), ('engines', '   ')]),
+        content_type='multipart/form-data')
+    assert empty.status_code == 400
+    assert 'at least one' in empty.get_json()['error']
+
+    unknown = client.post(
+        f'/api/dataset/{did}/ref/edit',
+        data=MultiDict([
+            ('prompt', 'x'),
+            ('engines', 'chatgpt'),
+            ('engines', 'midjourney'),
+        ]),
+        content_type='multipart/form-data')
+    assert unknown.status_code == 400
+    assert unknown.get_json()['error'] == svc.edit_engine_choice_message()
+
+    fields = [('prompt', 'x'), ('engine', 'chatgpt')]
+    fields.extend(
+        ('ref', (io.BytesIO(_png()), f'anchor-{index}.png'))
+        for index in range(svc.MAX_EDIT_REFERENCE_UPLOADS + 1))
+    too_many = client.post(
+        f'/api/dataset/{did}/ref/edit',
+        data=MultiDict(fields),
+        content_type='multipart/form-data')
+    assert too_many.status_code == 400
+    assert 'at most 3' in too_many.get_json()['error']
+    assert starts == []
+
+
+def test_batch_ttl_cancels_every_local_deletes_candidates_and_ends_once(
+        app, tmp_path, monkeypatch):
+    from app import job_queue
+
+    dataset_id = 987
+    directory = str(tmp_path)
+    act_token = dataset_activity.begin(
+        dataset_id, 'edit_reference', total=3)
+    started = rej.start_batch(
+        dataset_id, directory, ('krea', 'klein', 'chatgpt'), 'x',
+        act_token=act_token)
+    tokens = started['tokens']
+    assert rej.attach_job(dataset_id, tokens['krea'], 'krea-ttl')
+    assert rej.attach_job(dataset_id, tokens['klein'], 'klein-ttl')
+    candidate = f'local{rej.CANDIDATE_MARKER}ttl.webp'
+    open(os.path.join(directory, candidate), 'wb').close()
+    assert rej.set_ready(dataset_id, tokens['chatgpt'], candidate)
+
+    cancelled = []
+    monkeypatch.setattr(
+        job_queue.queue_manager, 'cancel_job',
+        lambda job_id, **kwargs: cancelled.append(job_id) or True)
+    real_end = dataset_activity.end
+    ended = []
+
+    def _end(token):
+        ended.append(token)
+        real_end(token)
+
+    monkeypatch.setattr(dataset_activity, 'end', _end)
+    monkeypatch.setattr(rej, '_TTL_SECONDS', -1)
+    assert rej.get(dataset_id) is None
+    assert sorted(cancelled) == ['klein-ttl', 'krea-ttl']
+    assert ended == [act_token]
+    assert dataset_activity.get(dataset_id) is None
+    assert not os.path.exists(os.path.join(directory, candidate))
+
+
+# --- security/race regressions ---------------------------------------------
+
+def test_discarded_delayed_api_worker_never_dispatches_provider(
+        client, monkeypatch):
+    """Discard is reversible state, but it must still stop an unstarted bill."""
+    did = _create_with_ref(client, monkeypatch, 'Held', 'zchar_held_dispatch')
+    held = []
+
+    class _HeldThread:
+        def __init__(self, target=None, args=(), kwargs=None, **_unused):
+            self._target = target
+            self._args = args
+            self._kwargs = kwargs or {}
+
+        def start(self):
+            held.append(self)
+
+        def run(self):
+            self._target(*self._args, **self._kwargs)
+
+    provider_calls = []
+    monkeypatch.setattr(
+        svc, '_edit_engine_call',
+        lambda *args: provider_calls.append(args) or _webp((9, 8, 7)))
+    monkeypatch.setattr(svc.threading, 'Thread', _HeldThread)
+    response = client.post(
+        f'/api/dataset/{did}/ref/edit',
+        data={'prompt': 'x', 'engine': 'chatgpt'},
+        content_type='multipart/form-data')
+    assert response.status_code == 202
+    assert len(held) == 1
+    revision = rej.reference_revision(did)
+
+    assert client.post(
+        f'/api/dataset/{did}/ref/edit/discard').status_code == 200
+    assert rej.reference_revision(did) == revision  # Discard is not a mutation.
+    held[0].run()
+
+    assert provider_calls == []
+    assert rej.get(did) is None
+    assert dataset_activity.get(did) is None
+
+
+def test_reference_epoch_is_captured_before_dataset_lookup(
+        app, client, monkeypatch):
+    """A mutation after a stale ORM read cannot register that stale snapshot."""
+    did = _create_with_ref(client, monkeypatch, 'Epoch', 'zchar_epoch_lookup')
+    real_get_dataset = svc.get_dataset
+    mutation_done = False
+
+    def _get_then_mutate(user_id, dataset_id):
+        nonlocal mutation_done
+        ds = real_get_dataset(user_id, dataset_id)
+        if dataset_id == did and not mutation_done:
+            mutation_done = True
+            svc.invalidate_reference_edit(dataset_id)
+        return ds
+
+    provider_calls = []
+    monkeypatch.setattr(svc, 'get_dataset', _get_then_mutate)
+    monkeypatch.setattr(
+        svc, '_edit_engine_call', lambda *args: provider_calls.append(args))
+    before = rej.reference_revision(did)
+    with app.app_context(), pytest.raises(RuntimeError, match='reference changed'):
+        svc.start_reference_edit(app, 'local', did, 'chatgpt', 'x')
+
+    assert mutation_done is True
+    assert rej.reference_revision(did) == before + 1
+    assert rej.get(did) is None
+    assert provider_calls == []
+
+
+def test_registered_batch_is_invalidated_before_delayed_worker_dispatch(
+        client, monkeypatch):
+    """The opposite epoch interleaving detaches the registered old-snapshot job."""
+    did = _create_with_ref(
+        client, monkeypatch, 'Invalidate', 'zchar_registered_invalidate')
+    held = []
+
+    class _HeldThread:
+        def __init__(self, target=None, args=(), kwargs=None, **_unused):
+            self._target = target
+            self._args = args
+            self._kwargs = kwargs or {}
+
+        def start(self):
+            held.append(self)
+
+        def run(self):
+            self._target(*self._args, **self._kwargs)
+
+    provider_calls = []
+    monkeypatch.setattr(
+        svc, '_edit_engine_call',
+        lambda *args: provider_calls.append(args) or _webp((1, 2, 3)))
+    monkeypatch.setattr(svc.threading, 'Thread', _HeldThread)
+    assert client.post(
+        f'/api/dataset/{did}/ref/edit',
+        data={'prompt': 'x', 'engine': 'chatgpt'},
+        content_type='multipart/form-data').status_code == 202
+    assert rej.get(did)['status'] == 'running'
+    before = rej.reference_revision(did)
+
+    svc.invalidate_reference_edit(did)
+    assert rej.reference_revision(did) == before + 1
+    assert rej.get(did) is None
+    assert dataset_activity.get(did) is None
+    held[0].run()
+
+    assert provider_calls == []
+    assert rej.get(did) is None
+
+
+def test_keep_requires_current_batch_id_even_for_single_engine(
+        client, monkeypatch):
+    """A stale tab A cannot promote the current single-engine result from tab B."""
+    did = _create_with_ref(
+        client, monkeypatch, 'Opaque', 'zchar_opaque_batch')
+    monkeypatch.setattr(
+        svc, '_edit_engine_call',
+        lambda engine, refs, prompt: _webp((10, 20, 30)))
+    monkeypatch.setattr(svc.threading, 'Thread', _SyncThread)
+
+    for prompt in ('tab A', 'tab B'):
+        assert client.post(
+            f'/api/dataset/{did}/ref/edit',
+            data={'prompt': prompt, 'engine': 'chatgpt'},
+            content_type='multipart/form-data').status_code == 202
+        current = client.get(
+            f'/api/dataset/{did}').get_json()['reference_edit']
+        if prompt == 'tab A':
+            batch_a = current['batch_id']
+        else:
+            batch_b = current['batch_id']
+
+    assert batch_a != batch_b
+    keep_url = f'/api/dataset/{did}/ref/edit/keep'
+    assert client.post(keep_url, json={'engine': 'chatgpt'}).status_code == 409
+    assert client.post(
+        keep_url,
+        json={'engine': 'chatgpt', 'batch_id': batch_a}).status_code == 409
+    assert client.get(
+        f'/api/dataset/{did}').get_json()['reference_edit']['batch_id'] == batch_b
+    assert client.post(
+        keep_url,
+        json={'engine': 'chatgpt', 'batch_id': batch_b}).status_code == 200
+    assert client.get(
+        f'/api/dataset/{did}').get_json()['reference_edit'] is None
+
+
+def test_keep_and_reference_upload_are_serialized_without_lost_update(
+        app, monkeypatch):
+    """A newer upload waits for an in-flight Keep, then wins without deletion.
+
+    This pins the exact lost-update seam: Keep is paused after claim_ready while
+    still holding the dataset mutation lock. The upload reaches that same lock
+    but cannot enter its physical-file/DB transaction until Keep has promoted and
+    advanced the epoch. It then commits second, so its reference remains current.
+    """
+    with app.app_context():
+        ds = svc.create_dataset('local', 'Locked', 'zchar_locked_keep')
+        _seed_ref(ds, original=_webp((1, 1, 1)), cropped=_webp((2, 2, 2)))
+        did = ds.id
+        dsdir = svc._dataset_dir(did)
+        started = rej.start_batch(
+            did, dsdir, ('chatgpt',), 'claimed edit',
+            expected_revision=rej.reference_revision(did))
+        candidate = f'local{rej.CANDIDATE_MARKER}locked.webp'
+        with open(os.path.join(dsdir, candidate), 'wb') as fh:
+            fh.write(_webp((30, 40, 50)))
+        assert rej.set_ready(did, started['tokens']['chatgpt'], candidate)
+        batch_id = started['batch_id']
+
+    keep_inside_commit = threading.Event()
+    allow_keep = threading.Event()
+    upload_attempted_lock = threading.Event()
+    upload_acquired_lock = threading.Event()
+    real_commit = svc.commit_edited_reference
+    real_mutation = svc.reference_mutation
+
+    def _paused_commit(*args, **kwargs):
+        keep_inside_commit.set()
+        assert allow_keep.wait(5), 'test did not release paused Keep'
+        return real_commit(*args, **kwargs)
+
+    @contextlib.contextmanager
+    def _observed_mutation(dataset_id):
+        is_upload = threading.current_thread().name == 'reference-upload'
+        if is_upload:
+            upload_attempted_lock.set()
+        with real_mutation(dataset_id):
+            if is_upload:
+                upload_acquired_lock.set()
+            yield
+
+    monkeypatch.setattr(svc, 'commit_edited_reference', _paused_commit)
+    monkeypatch.setattr(svc, 'reference_mutation', _observed_mutation)
+    results = {}
+    errors = []
+
+    def _keep():
+        try:
+            with app.app_context():
+                results['kept'] = svc.keep_reference_edit(
+                    'local', did, engine='chatgpt', batch_id=batch_id)
+        except BaseException as exc:  # surface thread failures in the test thread
+            errors.append(exc)
+
+    def _upload():
+        try:
+            with app.test_client() as upload_client:
+                response = upload_client.post(
+                    f'/api/dataset/{did}/ref',
+                    data={
+                        'file': (io.BytesIO(_webp((200, 20, 10), (900, 900))),
+                                 'new-reference.webp'),
+                        'crop': '0',
+                    },
+                    content_type='multipart/form-data')
+                results['upload_status'] = response.status_code
+                results['uploaded'] = response.get_json()
+        except BaseException as exc:  # surface thread failures in the test thread
+            errors.append(exc)
+
+    keep_thread = threading.Thread(target=_keep, name='reference-keep')
+    upload_thread = threading.Thread(target=_upload, name='reference-upload')
+    keep_thread.start()
+    assert keep_inside_commit.wait(5), 'Keep never reached the post-claim seam'
+    upload_thread.start()
+    assert upload_attempted_lock.wait(5), 'upload never reached the mutation lock'
+    assert not upload_acquired_lock.wait(0.1), (
+        'upload entered while Keep still owned the dataset mutation lock')
+
+    allow_keep.set()
+    keep_thread.join(5)
+    upload_thread.join(5)
+    assert not keep_thread.is_alive() and not upload_thread.is_alive()
+    assert errors == []
+    assert results['kept']
+    assert results['upload_status'] == 200
+    uploaded_filename = results['uploaded']['ref_filename']
+    assert uploaded_filename != results['kept']
+    with app.app_context():
+        current = svc.get_dataset('local', did)
+        assert current.ref_filename == uploaded_filename
+        assert os.path.exists(os.path.join(svc._dataset_dir(did), uploaded_filename))
+        assert rej.get(did) is None
+        assert rej.reference_revision(did) == 2
+
+
+def test_registry_reset_clears_reference_epochs(tmp_path):
+    assert rej.invalidate(4321, str(tmp_path)) == 1
+    assert rej.reference_revision(4321) == 1
+    rej.reset()
+    assert rej.reference_revision(4321) == 0

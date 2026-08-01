@@ -31,7 +31,9 @@ def test_list_models_returns_tags(app, monkeypatch):
 def test_start_pull_rejects_blank_and_invalid_names(app):
     from app.services import ollama_control
     with app.app_context():
-        for bad in ('', '   ', 'bad name!', '/leading', 'a' * 250):
+        for bad in (None, 123, False, [], {}, '', '   ', 'bad name!', '/leading',
+                    'valid:tag\n', 'valid:tag\r\nsecond:tag', 'valid:tag\u2028',
+                    'a' * 201):
             r = ollama_control.start_pull(bad)
             assert r['ok'] is False and 'valid Ollama model name' in r['error']
             assert r['state'] == 'idle'          # nothing was started
@@ -55,6 +57,31 @@ def test_start_pull_starts_and_status_reports(app, monkeypatch):
     assert r['ok'] is True and r['state'] == 'running'
     assert r['model'] == 'huihui_ai/qwen3-vl-abliterated:8b-instruct'
     assert ollama_control.pull_status()['state'] == 'running'
+
+
+def test_start_pull_is_idempotent_only_for_the_same_active_model(app, monkeypatch):
+    """A Krea preset must never adopt a different model that was already pulling."""
+    from app.services import ollama_control
+    monkeypatch.setattr(ollama_control, '_reachable', lambda url: True)
+    monkeypatch.setattr(ollama_control, '_run_pull', lambda model: None)
+
+    with app.app_context():
+        first = ollama_control.start_pull('model-a:latest')
+        different = ollama_control.start_pull('model-b:latest')
+        same = ollama_control.start_pull('model-a:latest')
+        status = ollama_control.pull_status()
+
+    assert first['ok'] is True
+    assert different['ok'] is False
+    assert different['already_running'] is True
+    assert different['model'] == 'model-a:latest'
+    assert 'already pulling "model-a:latest"' in different['error']
+    assert 'model-b:latest' in different['error']
+    assert same['ok'] is True
+    assert same['already_running'] is True
+    assert same['model'] == 'model-a:latest'
+    assert status['state'] == 'running'
+    assert status['model'] == 'model-a:latest'
 
 
 def test_run_pull_parses_progress_and_success(app, monkeypatch):

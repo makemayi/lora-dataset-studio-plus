@@ -2,6 +2,23 @@ import pathlib
 import pytest
 
 
+UNSAFE_SECRET_CHARS = [
+    pytest.param('\r', id='cr'),
+    pytest.param('\n', id='lf'),
+    pytest.param('\x00', id='nul'),
+    pytest.param('\x0b', id='vertical-tab'),
+    pytest.param('\x0c', id='form-feed'),
+    pytest.param('\x1c', id='file-separator'),
+    pytest.param('\x1d', id='group-separator'),
+    pytest.param('\x1e', id='record-separator'),
+    pytest.param('\x85', id='next-line'),
+    pytest.param('\u2028', id='unicode-line-separator'),
+    pytest.param('\u2029', id='unicode-paragraph-separator'),
+    pytest.param('\t', id='other-control'),
+    pytest.param('\u200b', id='unicode-format'),
+]
+
+
 @pytest.fixture(autouse=True)
 def _no_real_network(monkeypatch):
     """GET /api/capabilities calls probe(), which hits every reachability
@@ -51,6 +68,59 @@ def test_put_settings_persists_config_and_secret(client, tmp_path):
     assert r.status_code == 200
     assert r.get_json()['config']['ollama']['url'] == 'http://127.0.0.1:11500'
     assert r.get_json()['secrets']['GEMINI_API_KEY'] is True
+
+
+@pytest.mark.parametrize('separator', UNSAFE_SECRET_CHARS)
+def test_put_settings_rejects_secret_environment_injection(
+        client, monkeypatch, separator):
+    """A secret occupies exactly one .env assignment; it cannot introduce the
+    lifecycle variables that decide how this process updates or restarts."""
+    import os
+    before = client.get('/api/settings').get_json()['config']['ollama']['url']
+    monkeypatch.delenv('LDS_RESTART_MODE', raising=False)
+    monkeypatch.delenv('LDS_RUNTIME', raising=False)
+    monkeypatch.delenv('LDS_BIND_MANAGED', raising=False)
+    monkeypatch.delenv('FLASK_DEBUG', raising=False)
+
+    response = client.put('/api/settings', json={
+        'config': {'ollama': {'url': 'http://must-not-save.invalid'}},
+        'secrets': {'OPENAI_API_KEY': f'key{separator}FLASK_DEBUG=1'},
+    })
+
+    assert response.status_code == 400
+    assert 'single line' in response.get_json()['error']
+    assert client.get('/api/settings').get_json()['config']['ollama']['url'] == before
+    assert 'LDS_RESTART_MODE' not in os.environ
+    assert 'LDS_RUNTIME' not in os.environ
+    assert 'LDS_BIND_MANAGED' not in os.environ
+    assert 'FLASK_DEBUG' not in os.environ
+
+
+@pytest.mark.parametrize('separator', [
+    pytest.param('\x0b', id='vertical-tab'),
+    pytest.param('\u2028', id='unicode-line-separator'),
+])
+def test_put_settings_refuses_poisoned_existing_env_before_saving_config(
+        client, monkeypatch, separator):
+    import os
+    from app import config
+    before_url = client.get('/api/settings').get_json()['config']['ollama']['url']
+    poisoned = f'OPENAI_API_KEY=old{separator}FLASK_DEBUG=1\n'.encode('utf-8')
+    config.ENV_PATH.write_bytes(poisoned)
+    monkeypatch.delenv('GEMINI_API_KEY', raising=False)
+    monkeypatch.delenv('FLASK_DEBUG', raising=False)
+
+    response = client.put('/api/settings', json={
+        'config': {'ollama': {'url': 'http://must-not-save.invalid'}},
+        'secrets': {'GEMINI_API_KEY': 'safe-value'},
+    })
+
+    assert response.status_code == 400
+    assert 'existing .env' in response.get_json()['error']
+    assert client.get('/api/settings').get_json()['config']['ollama']['url'] == before_url
+    assert config.ENV_PATH.read_bytes() == poisoned
+    assert 'GEMINI_API_KEY' not in os.environ
+    assert 'FLASK_DEBUG' not in os.environ
 
 def test_put_settings_clears_skip_when_dir_provided(client, tmp_path):
     """Entering a ComfyUI directory annuls a prior "continue without ComfyUI" skip —
@@ -203,6 +273,198 @@ def test_capabilities_endpoint(client):
     caps = client.get('/api/capabilities').get_json()
     assert 'engines' in caps and 'studio_visible' in caps
 
+def _cloud_status(*, ok=True, namespace='lds-deliveries', error=None,
+                  code=None, severity=None, warning=None):
+    return {
+        'ok': ok,
+        'configured': True,
+        'code': code or ('ready' if ok else 'invalid'),
+        'severity': severity or ('success' if ok else 'error'),
+        'namespace': namespace if ok else None,
+        'settings_focus': 'HF_CLOUD_TOKEN',
+        'warning': warning,
+        'error': error,
+    }
+
+
+def test_put_settings_validates_cloud_token_candidate_before_saving(
+        client, monkeypatch):
+    import os
+    from app.services import cloud_training
+
+    candidate = 'hf_candidate_SECRET_MUST_NOT_BE_RETURNED'
+    seen = []
+
+    def validate(token, _api=None):
+        seen.append(token)
+        return _cloud_status()
+
+    monkeypatch.setattr(
+        cloud_training, 'full_transformer_token_status', validate)
+    response = client.put('/api/settings', json={
+        'secrets': {'HF_CLOUD_TOKEN': candidate},
+    })
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    check = payload['secret_checks']['HF_CLOUD_TOKEN']
+    assert seen == [candidate]
+    assert check == {
+        'ok': True,
+        'detail': (
+            'HF_CLOUD_TOKEN verified: krea/Krea-2-Raw is readable; '
+            'delivery namespace: lds-deliveries.'),
+        'code': 'ready',
+        'configured': True,
+        'severity': 'success',
+        'settings_focus': 'HF_CLOUD_TOKEN',
+        'namespace': 'lds-deliveries',
+    }
+    assert payload['secrets']['HF_CLOUD_TOKEN'] is True
+    assert os.environ['HF_CLOUD_TOKEN'] == candidate
+    assert candidate not in response.get_data(as_text=True)
+
+
+def test_put_settings_accepts_global_write_token_with_warning(
+        client, monkeypatch):
+    from app import config
+    from app.services import cloud_training
+
+    candidate = 'hf_global_write_SECRET_MUST_NOT_BE_RETURNED'
+    warning = (
+        'This global write token is accepted, but it can modify every '
+        'Hugging Face repository available to this account.')
+    monkeypatch.setattr(
+        cloud_training,
+        'full_transformer_token_status',
+        lambda token, _api=None: _cloud_status(
+            namespace='tester', code='broad_access', severity='warning',
+            warning=warning),
+    )
+
+    response = client.put('/api/settings', json={
+        'secrets': {'HF_CLOUD_TOKEN': candidate},
+    })
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    check = payload['secret_checks']['HF_CLOUD_TOKEN']
+    assert check['ok'] is True
+    assert check['code'] == 'broad_access'
+    assert check['severity'] == 'warning'
+    assert check['detail'] == warning
+    assert check['warning'] == warning
+    assert check['namespace'] == 'tester'
+    assert config.secret('HF_CLOUD_TOKEN') == candidate
+    assert candidate not in response.get_data(as_text=True)
+
+
+def test_put_settings_rejects_invalid_cloud_token_atomically(
+        client, monkeypatch):
+    import os
+    from app import config
+    from app.services import cloud_training
+
+    previous = 'hf_previous_valid_token'
+    candidate = 'hf_bad_candidate_MUST_NOT_BE_RETURNED'
+    config.set_secrets({'HF_CLOUD_TOKEN': previous})
+    before_env = config.ENV_PATH.read_bytes()
+    before_url = client.get('/api/settings').get_json()['config']['ollama']['url']
+    seen = []
+
+    def reject(token, _api=None):
+        seen.append(token)
+        return _cloud_status(
+            ok=False,
+            error=(
+                'HF_CLOUD_TOKEN needs exact repo.content.read access to '
+                'krea/Krea-2-Raw.'))
+
+    monkeypatch.setattr(
+        cloud_training, 'full_transformer_token_status', reject)
+    response = client.put('/api/settings', json={
+        'config': {'ollama': {'url': 'http://must-not-save.invalid'}},
+        'secrets': {'HF_CLOUD_TOKEN': candidate},
+    })
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    check = payload['secret_checks']['HF_CLOUD_TOKEN']
+    assert seen == [candidate]
+    assert check['ok'] is False
+    assert check['code'] == 'invalid'
+    assert 'repo.content.read' in check['detail']
+    assert candidate not in response.get_data(as_text=True)
+    assert client.get('/api/settings').get_json()['config']['ollama']['url'] == before_url
+    assert config.secret('HF_CLOUD_TOKEN') == previous
+    assert os.environ['HF_CLOUD_TOKEN'] == previous
+    assert config.ENV_PATH.read_bytes() == before_env
+
+
+def test_put_settings_skips_dense_validation_without_new_cloud_token(
+        client, monkeypatch):
+    from app.services import cloud_training
+
+    calls = []
+    monkeypatch.setattr(
+        cloud_training,
+        'full_transformer_token_status',
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    assert client.put('/api/settings', json={
+        'config': {'ollama': {'url': 'http://127.0.0.1:11501'}},
+    }).status_code == 200
+    assert client.put('/api/settings', json={
+        'secrets': {'HF_TOKEN': 'hf_classic_read_token'},
+    }).status_code == 200
+    assert calls == []
+
+
+def test_hf_cloud_connection_target_reports_ready_and_invalid(
+        client, monkeypatch):
+    from app.services import cloud_training
+
+    monkeypatch.setattr(
+        cloud_training,
+        'full_transformer_token_preflight',
+        lambda: _cloud_status(namespace='private-lds'),
+    )
+    ready = client.post('/api/settings/test/hf_cloud')
+    assert ready.status_code == 200
+    assert ready.get_json()['ok'] is True
+    assert ready.get_json()['namespace'] == 'private-lds'
+    assert 'krea/Krea-2-Raw is readable' in ready.get_json()['detail']
+
+    warning = 'Global write access is accepted with a warning.'
+    monkeypatch.setattr(
+        cloud_training,
+        'full_transformer_token_preflight',
+        lambda: _cloud_status(
+            namespace='tester', code='broad_access', severity='warning',
+            warning=warning),
+    )
+    broad = client.post('/api/settings/test/hf_cloud')
+    assert broad.status_code == 200
+    assert broad.get_json()['ok'] is True
+    assert broad.get_json()['code'] == 'broad_access'
+    assert broad.get_json()['severity'] == 'warning'
+    assert broad.get_json()['detail'] == warning
+
+    monkeypatch.setattr(
+        cloud_training,
+        'full_transformer_token_preflight',
+        lambda: _cloud_status(
+            ok=False, error=('HF_CLOUD_TOKEN requires repository write access; '
+                             'read-only tokens cannot be used.')),
+    )
+    invalid = client.post('/api/settings/test/hf_cloud')
+    assert invalid.status_code == 200
+    assert invalid.get_json()['ok'] is False
+    assert invalid.get_json()['detail'] == (
+        'HF_CLOUD_TOKEN requires repository write access; read-only tokens cannot be used.')
+
+
 def test_test_connection_unknown_target(client):
     assert client.post('/api/settings/test/nope').status_code == 404
 
@@ -312,6 +574,34 @@ def test_update_check_detects_newer_release(client, monkeypatch, _reset_update_c
     d = client.get('/api/update/check').get_json()
     assert d['update_available'] is True and d['latest'] == '9999.12.31'
     assert d['url'].endswith('v9999.12.31')
+
+
+def test_update_check_docker_reports_manual_rebuild_even_with_zip(
+        client, monkeypatch, _reset_update_cache):
+    import requests
+    from app.services import updater
+    monkeypatch.setenv('LDS_RUNTIME', 'docker-gpu')
+    monkeypatch.setattr(updater, 'is_git_checkout', lambda root=None: True)
+    monkeypatch.setattr(
+        updater, 'git_update_status',
+        lambda root=None: (_ for _ in ()).throw(
+            AssertionError('Docker checks must not fetch through the git updater')),
+    )
+    monkeypatch.setattr(requests, 'get', lambda *a, **k: _FakeResp(200, {
+        'tag_name': 'v9999.12.31',
+        'assets': [{'name': 'LoRA-Dataset-Studio-windows.zip',
+                    'browser_download_url': 'https://x/win'}],
+    }))
+
+    d = client.get('/api/update/check?force=1').get_json()
+
+    assert d['update_available'] is True
+    assert d['install_mode'] == 'docker' and d['can_apply'] is False
+    assert d['manual'] is True
+    assert d['instructions'] == [
+        'git pull',
+        'docker compose -f docker-compose.gpu.yml up -d --build',
+    ]
 
 
 def test_update_check_same_version_and_cache(client, monkeypatch, _reset_update_cache):
@@ -441,13 +731,44 @@ def test_settings_restart_pins_saved_host_port_to_env(client, monkeypatch):
     actually binds where the user asked (else the port field looks broken)."""
     import os
     from app.services import updater
-    monkeypatch.setattr(updater, 'schedule_restart', lambda *a, **k: None)
+    seen = {}
+    def fake_schedule(*args, **kwargs):
+        seen.update(kwargs)
+        os.environ.update(kwargs.get('environment_updates') or {})
+        return True
+    monkeypatch.setattr(updater, 'schedule_restart', fake_schedule)
     monkeypatch.delenv('LDS_PORT', raising=False)
     monkeypatch.delenv('LDS_HOST', raising=False)
     client.put('/api/settings', json={'config': {'server': {'host': '0.0.0.0', 'port': 5123}}})
     client.post('/api/settings/restart')
     assert os.environ['LDS_HOST'] == '0.0.0.0'
     assert os.environ['LDS_PORT'] == '5123'
+    assert seen['block_during_update'] is True
+
+
+def test_settings_restart_preserves_supervisor_managed_bind(client, monkeypatch):
+    """Inside Docker the container bind is fixed by its environment.  Saving a
+    desktop host/port must not turn the restarted backend into a loopback-only
+    process that the published port cannot reach."""
+    import os
+    from app.services import updater
+    monkeypatch.setenv('LDS_BIND_MANAGED', '1')
+    monkeypatch.setenv('LDS_HOST', '0.0.0.0')
+    monkeypatch.setenv('LDS_PORT', '5050')
+    seen = {}
+    monkeypatch.setattr(updater, 'schedule_restart',
+                        lambda *a, **k: seen.update(k) or True)
+    client.put('/api/settings', json={'config': {'server': {
+        'host': '127.0.0.1', 'port': 5999,
+    }}})
+
+    response = client.post('/api/settings/restart')
+
+    assert response.status_code == 200
+    assert os.environ['LDS_HOST'] == '0.0.0.0'
+    assert os.environ['LDS_PORT'] == '5050'
+    assert seen['block_during_update'] is True
+    assert seen['environment_updates'] is None
 
 
 def test_put_settings_saves_server_lan_and_port(client):
@@ -467,6 +788,13 @@ def test_runtime_reflects_what_run_py_stamped_on_boot(client, app):
     app.config['LDS_BOUND_PORT'] = 5000
     rt = client.get('/api/settings').get_json()['runtime']
     assert (rt['host'], rt['port']) == ('0.0.0.0', 5000)
+
+
+def test_runtime_exposes_whether_the_bind_is_managed(client, monkeypatch):
+    monkeypatch.delenv('LDS_BIND_MANAGED', raising=False)
+    assert client.get('/api/settings').get_json()['runtime']['bind_managed'] is False
+    monkeypatch.setenv('LDS_BIND_MANAGED', '1')
+    assert client.get('/api/settings').get_json()['runtime']['bind_managed'] is True
 
 
 def test_runtime_can_differ_from_saved_config_until_restart(client, app):
@@ -518,11 +846,14 @@ def test_is_cgnat_classifies_tailscale_range():
 def test_settings_restart_triggers_schedule_restart(client, monkeypatch):
     from app.services import updater
     called = []
-    monkeypatch.setattr(updater, 'schedule_restart', lambda *a, **k: called.append(1))
+    monkeypatch.setattr(updater, 'schedule_restart', lambda *a, **k: called.append(k))
     r = client.post('/api/settings/restart')
     assert r.status_code == 200
     assert r.get_json() == {'ok': True, 'restarting': True}
-    assert called == [1]
+    assert len(called) == 1
+    assert called[0]['block_during_update'] is True
+    assert called[0]['environment_updates']['LDS_HOST'] == '127.0.0.1'
+    assert called[0]['environment_updates']['LDS_PORT'] == '5050'
 
 
 def test_update_apply_defers_changed_requirements_to_restart(client, monkeypatch):
@@ -540,6 +871,45 @@ def test_update_apply_defers_changed_requirements_to_restart(client, monkeypatch
     assert response.status_code == 200
     assert response.get_json()['restarting'] is True
     assert calls == [((), {'install_requirements': True})]
+
+
+def test_update_apply_docker_refuses_before_any_pull_or_download(client, monkeypatch):
+    from app.services import updater
+    monkeypatch.setenv('LDS_RUNTIME', 'docker-gpu')
+    forbidden = lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError('Docker apply must refuse before an updater is selected'))
+    monkeypatch.setattr(updater, 'is_git_checkout', forbidden)
+    monkeypatch.setattr(updater, 'apply_update', forbidden)
+    monkeypatch.setattr(updater, 'start_zip_update', forbidden)
+
+    response = client.post('/api/update/apply')
+    body = response.get_json()
+
+    assert response.status_code == 200
+    assert body['ok'] is False and body['manual'] is True
+    assert body['install_mode'] == 'docker' and body['can_apply'] is False
+    assert body['instructions'] == [
+        'git pull',
+        'docker compose -f docker-compose.gpu.yml up -d --build',
+    ]
+
+
+def test_settings_restart_is_refused_during_active_update(client, monkeypatch):
+    import os
+    from app.services import updater
+    monkeypatch.setenv('LDS_HOST', 'keep-host')
+    monkeypatch.setenv('LDS_PORT', '4321')
+    def reject(*args, **kwargs):
+        assert kwargs['block_during_update'] is True
+        # The atomic scheduler rejects before applying these proposed values.
+        raise updater.UpdateInProgressError('restarting')
+    monkeypatch.setattr(updater, 'schedule_restart', reject)
+
+    response = client.post('/api/settings/restart')
+
+    assert response.status_code == 409
+    assert response.get_json()['phase'] == 'restarting'
+    assert os.environ['LDS_HOST'] == 'keep-host' and os.environ['LDS_PORT'] == '4321'
 
 
 def test_update_check_reports_can_apply_for_zip_release(client, monkeypatch, _reset_update_cache):

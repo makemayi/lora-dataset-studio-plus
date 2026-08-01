@@ -55,7 +55,9 @@ from ..models import BankImage, FaceDataset, FaceDatasetImage, ImageBank
 from . import (bank_jobs, bank_transfer_metadata, bank_undo, image_encoding,
                path_guard, trash)
 from .face_dataset_service import (SCRAPE_IMPORT_MAX, _dhash, _download_scrape_item,
-                                   _hamming, _SCRAPE_DL_WORKERS, _watermark_regions_payload,
+                                   _dataset_ingest_lock,
+                                   _existing_dhash_rows, _hamming, _SCRAPE_DL_WORKERS,
+                                   _watermark_regions_payload,
                                    _source_metadata_storage, bank_deterministic_analysis,
                                    import_images, _preserved_import_extension,
                                    normalize_watermark_regions)
@@ -5401,6 +5403,7 @@ def _promote_job(user_id, bank_id, ids, dataset_id):
         bank_jobs.progress(job, done=0, total=len(rows), detail='promoting')
         stats: dict = {}
         imported = failed = 0
+        dedupe_seen = _existing_dhash_rows(dataset_id)
         for c0 in range(0, len(rows), _PROMOTE_CHUNK):
             if bank_jobs.cancelled(job):
                 break
@@ -5446,7 +5449,8 @@ def _promote_job(user_id, bank_id, ids, dataset_id):
                     bank_analysis_snapshots=snapshots,
                     watermark_states=watermark_states,
                     watermark_bboxes=watermark_bboxes,
-                    watermark_regions=watermark_regions)
+                    watermark_regions=watermark_regions,
+                    dedupe_seen=dedupe_seen)
                 imported += len(new_ids)
                 failed += bad
                 # The dataset row now carries the link back (import_images writes
@@ -5477,4 +5481,9 @@ def _promote_job(user_id, bank_id, ids, dataset_id):
         if small:
             detail += f', {small} under the recommended size'
         bank_jobs.progress(job, detail=detail)
-    return run
+
+    def run_locked(job):
+        with _dataset_ingest_lock(user_id, dataset_id):
+            return run(job)
+
+    return run_locked

@@ -2,25 +2,20 @@
 
 [![CI](https://github.com/perfectgf/lora-dataset-studio/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/perfectgf/lora-dataset-studio/actions/workflows/ci.yml) [![Join our Discord](https://img.shields.io/discord/1525908170331914411?logo=discord&logoColor=white&label=Discord&color=5865F2)](https://discord.gg/j6hnJBFtXE) [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/perfectgf) [![Support on Ko-fi](https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/perfectgf)
 
-**Your whole LoRA pipeline in one self-hosted browser tab — build Character, Concept and Style datasets (generate from a reference, scrape, or triage a giant unsorted folder in the Image Bank), curate, caption, clean watermarks, then train locally or in the cloud across six model families and rank the checkpoints in a built-in Test Studio.**
+**A complete, self-hosted LoRA workflow in one browser tab:** source or generate a Character, Concept or Style dataset, curate it, caption it, clean watermarks, train locally or in the cloud, then compare checkpoints before export.
 
-🖥️ **Train locally** on your own NVIDIA GPU — or ☁️ **train in the cloud** on a rented pod (~$1–2 per run, no GPU required): same one-click flow, every epoch synced back to your machine. You can even bring your own custom base weights to either lane.
+No account, paid tier or telemetry. API engines and rented GPUs are optional; local and manual workflows remain available.
 
-📑 **Not sure which settings to use?** Eighteen built-in training starters ship — a Character and Concept recipe for every family, plus a Style recipe for five of the six and a Krea 2 Raw · LoKr likeness community starting point. One click applies the whole recipe.
+> New here? Start with [Setup & install](#setup--install), then follow the [end-to-end workflow](docs/guide/workflow.md). The [documentation index](docs/README.md) links every guide. Project news and current development live on [Discord](https://discord.gg/j6hnJBFtXE).
 
 ### ▶️ Watch the whole thing, start to finish
 
-A real Character LoRA built end to end (show case), unedited and in one take: reference photo
-in, shot list generated, grid curated, captions written, Krea 2 training launched
-in the cloud. Seven minutes, no narration —
-just the actual clicks.
+A real Character LoRA built end to end in seven minutes, unedited and without narration:
 
 https://github.com/user-attachments/assets/d51ff89c-34e9-41a9-b47d-08939a8c867b
 
-The useful part of LoRA training isn't only the training — it's building a clean, varied, well-captioned image set. That job is normally scattered across a scraper, an image editor, a captioning script, and training configs. LoRA Dataset Studio puts the whole pipeline behind one UI: **source** a character from reference photos, **import** or **scrape** material for a concept or a style, **triage** a giant unsorted folder down to its keepers, **curate** and **caption**, **scrub watermarks**, **train** locally or in the cloud, then **rank** the resulting checkpoints in a test studio — without ever leaving the page.
-
 <p align="center">
-  <img src="docs/screenshots/02-workspace.png" alt="Guided dataset workspace with a progress rail down the left mapping each stage — reference, generate, curate, caption, train — and the training panel expanded" width="820">
+  <img src="docs/screenshots/02-workspace.png" alt="Guided dataset workspace with a progress rail mapping reference, generation, curation, captioning and training" width="820">
 </p>
 <p align="center"><em>One workspace for the whole route: a progress rail shows what's done, what's next and exactly what's blocking Train.<br>All screenshots in this README use a synthetic, AI-generated demo person — no real individual is depicted.</em></p>
 
@@ -311,7 +306,7 @@ Directions, not dates. These are discussed openly on the project's Discord, and 
 
 - **🧬 Merge Lab** *(next big one)* — bake your trained LoRAs into a standalone, shareable checkpoint and merge models with guided recipes, judged side by side in the Test Studio (same seeds, A/B grids). Full model fine-tuning on large curated datasets comes later on the same path.
 - **🎬 WAN 2.1 / 2.2 video LoRAs** — ai-toolkit already trains WAN and the scraper can already pull video, so the whole pipeline (scrape, curate, caption, train, test) extends naturally to motion. Community-driven.
-- **🧠 Smarter watermark detection** — a dedicated NSFW-trained detector, and cleaning that happens **during import** instead of as a separate errand. *(Detection and manual two-pass cleaning already ship, in datasets and in the Image bank; what's missing is a detector that doesn't need a vision model, and automation you can trust unattended.)*
+- **🧠 Smarter watermark detection** — a dedicated NSFW-trained detector, and cleaning that happens **during import** instead of as a separate errand. *(Detection and manual two-pass cleaning already ship, in datasets and in the Image Bank; what's missing is a detector that doesn't need a vision model, and automation you can trust unattended.)*
 - **🧩 More base models** — additional Flux-family bases (Chroma, Qwen-Image…) with the same one-click flow as Krea 2.
 
 ### Table of contents
@@ -662,121 +657,80 @@ Nothing here locks your data in — every stage has an exit.
 
 ## Why this instead of ai-toolkit?
 
-"Instead of" is the wrong frame: this app is **not a competitor to [ai-toolkit](https://github.com/ostris/ai-toolkit) — it orchestrates it**. When you click Train, ai-toolkit is the engine running underneath. The real question is whether to drive it through this studio or by hand (its own UI and config files):
+"Instead of" is the wrong frame: this app is **not a competitor to [ai-toolkit](https://github.com/ostris/ai-toolkit) — it orchestrates it**. ai-toolkit is the training engine; LoRA Dataset Studio adds the work before, around and after a run.
 
-| Stage of the job | ai-toolkit alone | LoRA Dataset Studio |
+| Stage | ai-toolkit alone | LoRA Dataset Studio |
 |---|---|---|
-| Build the dataset from one photo | ❌ none — you arrive with your images | ✅ 3-engine fan-out, 53-shot variation catalog, 12/6/6/1 composition target |
-| Build the dataset from the web | ❌ none | ✅ Reddit search and supported gallery/search URLs into any dataset (dedup + quality filters) |
-| Triage a giant unsorted dump | ❌ none | ✅ Image bank — quality scan, dup groups, by-person clustering, aesthetic/NSFW scores, then promote keepers |
-| Curate | ❌ your file explorer | ✅ keep/reject, crop/mirror, auto-triage, multi-select, Klein candidates, composition meter and **InsightFace scoring** |
-| Captions | ❌ write them yourself | ✅ JoyCaption/Ollama, prose vs booru by family, Concept leak checks and content-only Style rules |
-| Masked training | ⚙️ consumes `mask_path` if you supply masks | ✅ generates rembg masks and writes the config for Character; safely disables them for Concept/Style |
-| Training | ✅ **it is the engine** — direct config/YAML control | ⚙️ orchestrates adaptive/scoped recipes, preflight guards, advanced controls, queue/scheduling and continue +N |
-| Pick the best checkpoint | ❌ its sample images + your eye | ✅ Z-Image/SDXL/Krea Studio grids, same-family multi-LoRA comparison, Wilson voting and optional face ranking |
-| Move or publish the dataset | ⚙️ manual file handling | ✅ training ZIP, portable backup/restore, merge from ZIP/folder, optional Hugging Face publishing |
+| Build from references | ❌ bring your own images | ✅ five engines, simultaneous multi-engine batches, subject-aware catalogs including Anime, reference edits and exact retries |
+| Build from the web | ❌ none | ✅ Reddit, Pexels and supported URL scans into a dataset or Image Bank, with deduplication and explicit provider warnings |
+| Triage a large dump | ❌ none | ✅ Image Bank scans, scores, search, filters, sorts, balanced/diverse shortlists, watermark masks and dataset round trips |
+| Curate and repair | ❌ external file tools | ✅ keep/reject, crop/mirror/rotate, InsightFace scoring, composition guidance, improve/compare and recoverable originals |
+| Captions | ❌ write or prepare them yourself | ✅ JoyCaption/Ollama, kind/family rules, Caption Lab, external `.txt` round trip and dual-caption support |
+| Masked training | ⚙️ consumes masks you supply | ✅ generates Character masks, supports Concept face masks and disables unsafe kind combinations |
+| Training | ✅ **it is the engine** — direct YAML/config control | ⚙️ guided/scoped recipes, preflight guards, advanced controls, queueing, local/cloud lanes and continuation |
+| Track experiments | ⚙️ inspect outputs manually | ✅ Runs hub, lineage graphs and a cross-dataset LoRA Canvas with notes, diffs, galleries and actions |
+| Pick a checkpoint | ❌ samples + your eye | ✅ Test Studio grids, multi-LoRA comparison, dataset-caption prompts, votes/rankings, outage-safe pause and export |
+| Move or publish | ⚙️ manual file handling | ✅ ZIP/sidecars, portable backup/restore, folder merge, ComfyUI deployment and optional Hugging Face publishing |
 
-**Honest verdict:** the studio is strongest when you want one guided path from raw images to a reviewed Character, Concept or Style LoRA. It now exposes common expert controls such as rank, optimizer, scheduler and timestep weighting, but a raw ai-toolkit config still offers the widest surface for unsupported architectures or experimental keys. The two coexist cleanly: ai-toolkit remains the engine, and the studio's standard ZIP/sidecars let you move between them at any time.
+**Honest verdict:** the studio is strongest when you want one guided path from raw images to a reviewed LoRA. A raw ai-toolkit config still exposes the widest surface for unsupported architectures and experimental keys. Standard ZIP/sidecars keep both workflows interoperable.
 
 ## Feature matrix by backend
 
-Not every feature needs every backend. The app degrades gracefully — API keys show a Configured/Not-set status in Settings, endpoint reachability can be tested via the "Test" button, and gated features simply don't appear until their dependency is satisfied.
+Missing dependencies are shown in Setup/Settings and gated features stay unavailable until their requirements are satisfied.
 
 | Feature | Requires |
 |---|---|
-| API image generation (Nano Banana Pro) | `GEMINI_API_KEY` |
-| API image generation (ChatGPT / `gpt-image-2`) | `OPENAI_API_KEY` |
-| Klein image generation / single or bulk 2 MP improvement | ComfyUI reachable + Klein model installed |
+| Nano Banana Pro generation | `GEMINI_API_KEY` |
+| ChatGPT / `gpt-image-2` generation | `OPENAI_API_KEY`, or the separate experimental ChatGPT-subscription connection |
+| OpenRouter generation | `OPENROUTER_API_KEY` plus an image-capable model slug; OpenRouter billing and the upstream provider's policy still apply |
+| Klein generation / improvement | ComfyUI reachable + Klein model stack |
+| Krea 2 Edit generation | ComfyUI reachable + `comfyui-krea2edit`, a Krea 2 base, Identity Edit LoRA, Qwen3-VL encoder and Qwen Image VAE; [exact files](docs/guide/settings-reference.md#krea-2-edit-local) |
 | Captioning | Ollama **or** ai-toolkit (JoyCaption) |
-| Auto-classify framing / auto head-crop | Ollama (vision model) |
-| Face-similarity scoring / score-based auto-triage | `backend/requirements-ml.txt` (insightface + onnxruntime) |
-| Character person masks | `backend/requirements-ml.txt` (rembg); Concept/Style intentionally disable masks |
-| Image bank scoring (aesthetic / NSFW / style / crops) | `backend/requirements-ml.txt` (Bank scoring extra) |
-| Image bank 🔤 Find by text, 🎨 Pick diverse, ⚖️ Balanced pick, 🎯 Similar to selected | ✨ Score already run on that bank — they reuse its embeddings, and nothing is downloaded for them. Balanced pick additionally needs the 📐 Framing pass |
-| Watermark detection (scraped datasets) | Ollama (vision model) |
-| Watermark inpainting (LaMa) | `backend/requirements-ml.txt` (simple-lama-inpainting) — without it, Clean crops border marks only |
-| Scrape images into a dataset (Reddit search + supported gallery/search URLs) | `backend/requirements-scrape.txt`; Pexels enumeration additionally requires `PEXELS_API_KEY` and uses the official API instead of gallery-dl |
-| Concept-caption inversion / concept-leak checks | Ollama **or** ai-toolkit (JoyCaption) |
-| LoRA training (Z-Image / Krea 2 / FLUX.1 / FLUX.2 Klein / Anima) | ai-toolkit installed and configured — **no ComfyUI needed**: the base weights come from Hugging Face |
-| LoRA training (SDXL) | ai-toolkit **and** ComfyUI — SDXL is the one family whose base is a checkpoint picked from ComfyUI's `models/checkpoints` |
-| Cloud training (vast.ai) | `VAST_API_KEY`; Z-Image / Krea 2 / FLUX.2 Klein only |
-| Test Studio (Z-Image / SDXL / Krea 2) | ComfyUI reachable + the selected family's model assets |
-| Portable backup/restore and ZIP/folder dataset merge | No external service |
-| Publish kept pairs to Hugging Face | Write-enabled `HF_TOKEN`; repositories are private by default |
+| Dual long + short captions | ai-toolkit + local vision caption derivation; local training only, and unavailable for Krea 2 / Anima |
+| Auto-framing / auto head-crop | Ollama with a vision model |
+| Face similarity / auto-triage | `backend/requirements-ml.txt` (InsightFace + ONNX Runtime) |
+| Character person masks | `backend/requirements-ml.txt` (rembg); Concept/Style intentionally disable them |
+| Image Bank scoring, crops and semantic tools | Bank scoring extra from `backend/requirements-ml.txt`; semantic search/diversity reuse an existing Score pass, and balanced picks also need Framing |
+| Watermark detection | Ollama with a vision model |
+| Watermark inpainting | LaMa extra from `backend/requirements-ml.txt`, or ComfyUI + Klein for the refine lane; crop remains model-free |
+| Scraping | `backend/requirements-scrape.txt`; Pexels also needs `PEXELS_API_KEY` and explicit authorization |
+| Local LoRA training: Z-Image / Krea 2 / FLUX.1 / FLUX.2 Klein / Anima | ai-toolkit; no ComfyUI is needed for official Hugging Face bases |
+| Local SDXL training | ai-toolkit + a base checkpoint discoverable in ComfyUI's model tree |
+| Cloud training | `VAST_API_KEY`; supported families are shown in the launch UI. Full-model Krea 2 also needs `HF_CLOUD_TOKEN` with Krea base read and repository write access; fine-grained is recommended, global `role=write` is accepted with a warning, and read-only is rejected |
+| LoRA Canvas browsing, layout, notes and diffs | No external service; generating needs ComfyUI and same-family checkpoints, continuing needs the chosen local/cloud training lane |
+| Test Studio | ComfyUI reachable + assets for a supported Studio family |
+| Backup/restore and ZIP/folder merge | No external service |
+| Hugging Face publishing | Write-enabled `HF_TOKEN`; repositories are private by default |
 
 ## Run it your way
 
-**API-only** — dataset creation, generation via Gemini/ChatGPT/OpenRouter, import, manual curation/captions, cloud training on vast.ai, publishing to Hugging Face, backup and export. Runs on any machine with Python and no GPU; this is what the Docker image ships. No ComfyUI, ai-toolkit or local ML extras required.
-
-The Docker image installs `backend/requirements.txt` only, so the scraper (`requirements-scrape.txt`) and the ML extras (`requirements-ml.txt`) are **not** in it — they can be installed from the app afterwards, but a container recreate wipes them. What the container cannot do at all is the ComfyUI half: Klein/Krea generation, the Test Studio, and deploying a trained LoRA. Local training needs ai-toolkit on the host.
-
-**Full local** — everything above plus Klein/Z-Image generation, captioning via JoyCaption, face scoring, masks, the Image bank scoring pass, training, and Test Studio. Requires ComfyUI and/or ai-toolkit running on the same host (or reachable over the network) and an NVIDIA GPU with 12 GB+ VRAM for Klein/Z-Image inference. Training VRAM depends on the model family — check the family's ai-toolkit preset before queuing a run. The face-scoring and masking helpers (`requirements-ml.txt`) run fine on CPU; they don't need the GPU.
-
-Either way, if you have no local GPU you can still train — see [No GPU? Train in the cloud](#no-gpu-train-in-the-cloud).
+| Mode | Good for | What is optional or unavailable |
+|---|---|---|
+| **API-only** | Import, API generation, scraping, manual curation/captions, cloud training, publishing, backup/export | No local ComfyUI generation, Studio or deployment; no local ai-toolkit training |
+| **Docker GPU** | The app and an isolated ComfyUI together on an NVIDIA GPU | Local training still uses host ai-toolkit or the cloud; Ollama is external |
+| **Full local** | Local engines, ML helpers, ai-toolkit training, Canvas generation and Test Studio | Install/connect only the tools you need; each capability degrades independently |
 
 ## Setup & install
 
-On first launch the **Setup** wizard scans your machine, tells you what's already installed, and walks you through the rest — but you can skip it and start building a dataset from your own photos right now, no setup required.
-
-The machine scan lists each capability as a **clickable row** that jumps straight to its install step, and the local ML extras install **per capability** rather than all-or-nothing: face scoring, person masks, Bank scoring and watermark inpainting each have their own one-click install, with an **↻ Reinstall** to repair or update just that one. When you're ready, **Install everything** queues every installable component with a live **X / N** progress bar, running heavy installs one at a time so they never clash.
-
-<details>
-<summary>📸 See the Setup wizard's Install everything step</summary>
-
-<p align="center">
-  <img src="docs/screenshots/setup/install-everything.png" alt="The Setup wizard's Install everything step: a checklist of installable components (ML extras, Ollama vision model, Klein weights) each with a status, a live X / N progress bar across the top, and a per-item ↻ Reinstall menu" width="820">
-</p>
-<p align="center"><em>Install everything queues every missing component with a live X / N bar; a per-item ↻ Reinstall repairs one without redoing the rest.</em></p>
-
-</details>
-
-The ComfyUI step can place Klein's model, consistency LoRA, text encoder and VAE in the folders the workflows expect. The Klein diffusion model is Black Forest Labs' public **9B KV** build (reference-image KV caching → faster multi-reference editing); the consistency LoRA is a community model by **[dx8152](https://huggingface.co/dx8152/Flux2-Klein-9B-Consistency)** (apache-2.0), recommended for reference edits — not an official Black Forest Labs release. Settings → Maintenance also checks for app updates, links to their details, and can update/restart a git checkout.
-
-<details>
-<summary>📸 See Setup scanning for ComfyUI, Ollama and ai-toolkit</summary>
-
-<p align="center">
-  <img src="docs/screenshots/05-setup.png" alt="Setup wizard scanning the machine for ComfyUI, Ollama, and ai-toolkit, each shown with a detected/missing status" width="820">
-</p>
-<p align="center"><em>Setup detects ComfyUI (optional), an Ollama vision model, and ai-toolkit — and helps you install whatever's missing.</em></p>
-
-</details>
+On first launch, **Setup** scans the machine and links every missing capability to its install/configuration step. You can skip optional tools and begin with imported images immediately.
 
 ### Option 1 — release ZIP + start.bat (Windows)
 
-From the [latest GitHub release](https://github.com/perfectgf/lora-dataset-studio/releases/latest),
-download **`LoRA-Dataset-Studio-windows.zip`** when that asset is present; otherwise
-use GitHub's automatically provided **Source code (zip)**. Extract the whole archive,
-then double-click:
+Download **`LoRA-Dataset-Studio-windows.zip`** from the [latest release](https://github.com/perfectgf/lora-dataset-studio/releases/latest) when that asset is present; otherwise use GitHub's **Source code (zip)**. Extract the entire archive, then double-click:
 
-```
+```text
 start.bat
 ```
 
-Releases deliberately contain an archive/source, not a prebuilt executable launcher.
-No Python is needed up front: `start.bat` looks for a compatible interpreter
-(`py -3.12/3.11/3.10` — the range with prebuilt wheels for the optional ML extras)
-and, if it finds none, **downloads a self-contained CPython 3.12** into a local
-`.python\` folder (~44 MB, once — no system install, no admin, nothing added to
-PATH). It then creates a `.venv`, installs `backend/requirements.txt`, opens
-`http://127.0.0.1:5050/` in your browser, and starts the server. (Already have
-Python 3.10–3.12? It's used as-is and nothing is downloaded. On 3.13+ only, the
-core app still runs but the ML extras can't install.) Override the port with
-`set LDS_PORT=<port>` before running.
+`start.bat` uses Python 3.10–3.12 if available. If none is installed, it downloads a self-contained CPython 3.12 into `.python\`, creates `.venv`, installs the core requirements, opens `http://127.0.0.1:5050/`, and starts the server. It requires no admin rights and changes no system PATH.
 
-You can use the same flow from a git checkout instead of the release ZIP:
+From a git checkout, the same launcher works and **Update & restart** can pull fixes directly:
 
 ```bash
 git clone https://github.com/perfectgf/lora-dataset-studio.git
 cd lora-dataset-studio
 start.bat
 ```
-
-**Prefer the clone if you can — the two do not update the same way.** From a git
-checkout, **Update & restart** runs `git pull --ff-only`, so you get every fix the
-moment it lands, often days before it is packaged into a release. From the ZIP, the
-same button compares the latest release tag to your version, so a fix shipped today
-reaches you whenever the next release is cut. Everything else is identical.
 
 ### Option 2 — manual venv (any OS)
 
@@ -786,12 +740,12 @@ Clone/download the source, open a terminal in its root, then run:
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r backend/requirements.txt
-# optional, for face scoring + masks:
+# optional local ML capabilities:
 pip install -r backend/requirements-ml.txt
 python backend/run.py
 ```
 
-If you need to rebuild the frontend (e.g. you changed something under `frontend/src`):
+Only rebuild the frontend when changing `frontend/src`:
 
 ```bash
 cd frontend
@@ -801,131 +755,96 @@ npm run build
 
 ### Option 3 — Docker (API-only)
 
-Copy `.env.example` to `.env` first — the compose file bind-mounts `./.env`, and Docker will otherwise create an empty directory in its place:
-
 ```bash
 cp .env.example .env
-```
-
-Then build and run:
-
-```bash
+mkdir -p data-docker
 docker compose up --build
 ```
 
-This builds and runs the API-only mode (see `Dockerfile` / `docker-compose.yml`) — ComfyUI and ai-toolkit are host-native tools and out of scope for the container. Data persists to `./data-docker` on the host, and your API keys are mounted in from `.env`.
+This image runs the core/API-only app. Data persists in `./data-docker`; keys come from `.env`. ComfyUI and ai-toolkit are outside this container. See [Option 4](#option-4--docker-gpu--comfyui) for bundled ComfyUI.
+
+### Option 4 — Docker (GPU + ComfyUI)
+
+**Beginner Windows flow:**
+
+1. On GitHub, choose **Code → Download ZIP**, then extract the complete folder.
+2. Start **Docker Desktop** and wait until it reports that Docker is running.
+3. Double-click **`start-docker-gpu.bat`** in the extracted folder.
+4. Leave the first build/start running; it downloads the image and ComfyUI environment. Wait for the browser to open LoRA Dataset Studio.
+
+This creates a **fresh, isolated, repo-local** Docker setup: its own ComfyUI, models, application data and Image Bank folder live beside this checkout. **It never touches an existing ComfyUI by default.**
+
+An existing ComfyUI is never mounted or modified, but stop it first if it uses port `8188` (and stop another LDS on `5050`): two processes cannot share those ports.
+
+Advanced CLI:
+
+```bash
+cp .env.example .env
+mkdir -p run basedir data-docker-gpu bank-images
+docker compose -f docker-compose.gpu.yml up --build
+```
+
+The app is served at `http://127.0.0.1:5050/` and ComfyUI at `http://127.0.0.1:8188/`. This lane requires an NVIDIA GPU, a compatible driver and NVIDIA Container Toolkit support. Storage relocation, existing-ComfyUI adoption, UID/GID, DNS, update commands, resource caps and operational limits are documented in the dedicated [Docker guide](docs/guide/docker.md).
 
 ### External tools (install once, connect in Settings)
 
-None of these are bundled — each one is optional, installed separately, and then simply pointed to from the app's Settings page. Features light up automatically once their tool is detected (the "Test" button next to each field tells you immediately whether the app can see it).
-
-| Tool | Unlocks | Get it |
+| Tool | Unlocks | Connect it |
 |---|---|---|
-| [ai-toolkit](https://github.com/ostris/ai-toolkit) (Ostris) | LoRA **training**, JoyCaption **captioning** | Follow its own install instructions — **any** way you install it works; the app only needs the Python that runs it |
-| [ComfyUI](https://github.com/comfyanonymous/ComfyUI) | **Klein** local generation/improvement, **Test Studio**, checkpoint/LoRA discovery, **SDXL training bases** | Windows portable build, git install, or the ComfyUI Desktop app; keep it running on `http://127.0.0.1:8188` |
-| [Ollama](https://ollama.com) | Auto-captioning, framing auto-classify, head-crop, watermark detection | Install, then `ollama pull huihui_ai/qwen3-vl-abliterated:8b-instruct` (the uncensored **abliterated** build; keep the **-instruct** tag, not the Thinking one — or set your own vision model in Settings) |
+| [ai-toolkit](https://github.com/ostris/ai-toolkit) | Local LoRA training and JoyCaption | Set its directory and Python interpreter in **Settings → Local tools**; conda, uv, venv and portable Python installs are supported |
+| [ComfyUI](https://github.com/comfyanonymous/ComfyUI) | Klein/Krea local generation, Studio, Canvas generation and deployment; SDXL base discovery | Keep its API reachable and set the install/models paths in **Settings → Local tools** |
+| [Ollama](https://ollama.com) | Auto-captioning, framing, head-crop and watermark detection | Install a vision model, then select/test it in **Settings → Local tools** |
 
-**ai-toolkit** — install it anywhere and **however you like**, following [its own instructions](https://github.com/ostris/ai-toolkit#installation) or any community installer. Paste the folder path into **Settings → Local tools → ai-toolkit directory** and hit Test — training and JoyCaption captioning appear once it's valid.
-
-> **A virtual environment is not required.** All this app needs is the path of the Python that can run ai-toolkit. It auto-detects one from a `venv/` or `.venv/` sitting next to `run.py` simply because that is what ai-toolkit's own installer produces — but a conda env, `uv`, the system Python, or a portable bundle that ships a `python_embeded/` folder instead are all supported installs, not broken ones. Fill in **Settings → Local tools → ai-toolkit Python interpreter** with the full path to that interpreter and everything works identically. When Setup can see a candidate interpreter inside your ai-toolkit folder, it offers it to you in one click; when it can't, it says so plainly rather than telling you to build a venv.
-
-Job configs, datasets, and outputs live under the ai-toolkit folder by default (overridable under "Advanced").
-
-**ComfyUI** — optional, and not needed to train. Only **SDXL** requires it, because an SDXL run trains on a checkpoint you pick from ComfyUI's own `models/checkpoints`; Z-Image, Krea 2, FLUX.1, FLUX.2 Klein and Anima all download official base weights and train without it. What ComfyUI *does* unlock is everything you look at: Klein generation and 2 MP improvements, the Test Studio, and one-click deployment of your trained LoRAs.
-
-This app talks to a running ComfyUI over its HTTP API and scans its `models/` folders to list checkpoints and LoRAs. Set **Settings → ComfyUI API URL** (default `http://127.0.0.1:8188`) and **ComfyUI install directory** (the folder containing `models/`, `output/`, `input/`). Each family's base model goes in the layout its scanner expects:
-
-- **Z-Image** → a sub-folder whose name contains **`z image`** (or `zimage`) under `models/unet` (or `models/diffusion_models`) — e.g. `models/unet/z image/bigLove_zt3.safetensors`. A file dropped **loose** in `models/unet` is *not* detected. The text encoder and VAE are found wherever you keep them — any capitalisation, any separator, any sub-folder, `extra_model_paths.yaml` roots included — so both `models/text_encoders/Z image/qwen_3_4b.safetensors` and ComfyUI's own flat `models/text_encoders/qwen_3_4b.safetensors` + `models/vae/ae.safetensors` work as-is. No renaming required.
-- **SDXL** → `models/checkpoints` (a `Biglove/` sub-folder is also scanned).
-- **Krea 2** → the default UNET at the root of `models/unet`; any extra Krea checkpoints under a `krea` sub-folder.
-- **FLUX.2 Klein** → wherever you already keep it. Setup *downloads* into `models/unet/klein/`, but that folder is **not a requirement**: any `klein`-named sub-folder of `models/unet` **or** `models/diffusion_models` works (any capitalisation, spaces allowed — `Flux2 Klein/` is fine), as does the **top level** of either folder when the file name itself contains `klein`. The only real limit: the model must be nameable as Klein — either the file name or its sub-folder name has to contain `klein`, which is what stops another family's checkpoint being wired into the Klein graph. **No copying and no symlink is ever needed** to satisfy a layout. (Reported by CyberTod on Reddit, who did both for nothing.)
-
-Trained LoRAs land in `models/loras/<family>` automatically after training. Generated images are pulled back over the ComfyUI API, so a custom ComfyUI output directory is fine — it doesn't need to match the install dir.
-
-**Models outside `models/`?** If your ComfyUI uses an `extra_model_paths.yaml` (portable builds and Stability Matrix installs commonly do), the app parses it the same way ComfyUI does — arbitrary profiles, `base_path` with `~`/`$VAR` expansion, `is_default` ordering and legacy aliases — so bases that live elsewhere are seen exactly as ComfyUI sees them, across Klein generation, the Setup probes, the model picker and Studio preflight. Without a yaml, nothing changes. A whole models tree that lives somewhere else entirely (a second drive, a ComfyUI launched with a relocated models directory) is handled by the **ComfyUI models folder** override in **Settings → Local tools** — again, without moving a single file.
-
-**No custom nodes required.** The Klein generation and Test Studio workflows run on a **stock ComfyUI** using only its core and built-in `comfy_extras` nodes — nothing from ComfyUI-Manager to install. As a safety net, if a graph ever references a node your ComfyUI doesn't expose, the app answers one clear "install pack X, restart ComfyUI" message instead of a raw ComfyUI validation error.
-
-**Ollama** — used as the lightweight local vision backend (auto-captioning, framing classify, head-crop, and watermark detection). Any vision-capable model works; the default the app looks for is `huihui_ai/qwen3-vl-abliterated:8b-instruct` — the **abliterated** (uncensored) build, so it captions adult datasets instead of refusing them. Stick to the **Instruct** variant — the *Thinking* variant reasons out loud instead of captioning, so avoid it. If you run a different one, set its exact tag in **Settings → Ollama vision model**. The app detects Ollama in **three states** — not installed, installed-but-stopped, or running — and when it's installed but the server isn't up, Settings/Setup show a **▶ Start Ollama** button that launches it for you (no terminal needed). If Ollama (or the model) is missing entirely, the app degrades gracefully: imports fall back to a centered crop and captioning falls back to JoyCaption or manual captions.
+The full path rules, model layouts and three-state Ollama detection are in the [settings reference](docs/guide/settings-reference.md#local-tools). If a tool remains unavailable, use the [troubleshooting guide](docs/guide/troubleshooting.md).
 
 ### Getting API keys
 
-- **Gemini** (for Nano Banana Pro): go to [aistudio.google.com](https://aistudio.google.com), click **Get API key**, and paste it into the app's Settings page.
-- **OpenAI** (for ChatGPT / `gpt-image-2`): go to [platform.openai.com](https://platform.openai.com) → **API keys**, create a key, and paste it into Settings.
-- **Hugging Face** (gated model downloads and dataset publishing): create a token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens). Read access is enough for accepted gated models; publishing requires a write-enabled token.
-- **vast.ai** (optional cloud training): create/copy your key from [cloud.vast.ai](https://cloud.vast.ai/) and save it as `VAST_API_KEY` in Settings.
+| Service | Used for | Where to create it |
+|---|---|---|
+| Gemini | Nano Banana Pro | [Google AI Studio](https://aistudio.google.com) |
+| OpenAI | ChatGPT / `gpt-image-2` | [OpenAI API keys](https://platform.openai.com/api-keys) |
+| OpenRouter | Image models through OpenRouter | [OpenRouter keys](https://openrouter.ai/keys) |
+| Pexels | Optional official-API image search | [Pexels API key](https://www.pexels.com/api/key/) |
+| Hugging Face | Gated weights and optional publishing | [Hugging Face tokens](https://huggingface.co/settings/tokens) |
+| vast.ai | Optional cloud training | [vast.ai console](https://cloud.vast.ai/) |
 
-Secrets entered through Settings are stored in a git-ignored `.env` file (see `.env.example`) — they are never written to `config.json` or committed.
+Secrets saved in Settings live in the git-ignored `.env`, never in `config.json` or a commit. Full-model Krea 2 cloud runs use a separate `HF_CLOUD_TOKEN`; a narrowly scoped fine-grained token is recommended, while a global `role=write` token is accepted with a broad-access warning and read-only is rejected. Follow the [cloud-token instructions](docs/guide/settings-reference.md#cloud-training).
+
+> **Pexels authorization required:** An API key alone does not authorize dataset or machine-learning use. Configure this integration only if Pexels has explicitly authorized this use case, and keep the attribution LDS displays. Read the [official Pexels terms and conditions](https://help.pexels.com/hc/en-us/articles/900005880463-What-are-the-Terms-and-Conditions/).
 
 ## Minimum requirements
 
-The app scales from "no GPU at all" to a full local training rig — each capability has its own floor, and everything degrades gracefully (missing pieces are simply hidden or guided through Setup).
+The app scales from "no GPU at all" to a full local training rig — each capability has its own floor, and missing pieces are hidden or guided through Setup.
 
 | Mode / capability | GPU (NVIDIA) | Disk | Notes |
 |---|---|---|---|
-| **API-only** (generate via Gemini/ChatGPT, import/scrape, curate, caption manually, export/backup) | none | ~2 GB | Any machine with Python 3.10–3.12; Docker image available |
+| **API-only** (Gemini/ChatGPT/OpenRouter generation, import/scrape, curate, manual captions, export/backup) | none | ~2 GB | Any machine with Python 3.10–3.12; Docker image available |
 | **Auto-captioning & framing** (Ollama vision, 8B model) | ~8 GB VRAM | ~7 GB | Runs alongside generation, not concurrently |
-| **Local generation** (Klein 9B **KV** fp8 via ComfyUI) | ~16 GB VRAM | ~30 GB (model + text encoder + VAE) | Free, NSFW-capable; Setup downloads the models. The KV build is up to **2.5× faster on multi-reference edits** at the same quality, and downloads publicly (no HF token) |
+| **Local generation** (Klein 9B **KV** fp8 via ComfyUI) | ~16 GB VRAM | ~30 GB (model + text encoder + VAE) | Free, local and NSFW-capable; Setup downloads the models. The KV build is up to **2.5× faster on multi-reference edits** at the same quality. Available in Docker GPU mode |
 | **LoRA training — Z-Image / SDXL** (ai-toolkit) | 16 GB+ recommended | 10 GB+ free enforced per run | Quantized (qfloat8) + low-VRAM mode |
-| **LoRA training — Krea 2** (ai-toolkit) | **24 GB VRAM** at 1024px (enforced warning) | ~24 GB base download (Raw) + 10 GB+ free | 12B model. Under 24 GB, set **Resolution → 768 only** in ⚙️ Advanced options — the main VRAM lever |
-| **LoRA training — FLUX.2 Klein** (ai-toolkit) | 4B: **16–24 GB VRAM** · 9B: **32–48 GB** (cloud lane) | base download + 10 GB+ free | Both bases gated on Hugging Face (HF token required). Train the 9B via ☁️ cloud |
-| **Face scoring / person masks / watermark inpaint** (ML extras) | none (CPU) | ~3 GB (+ a CPU torch for LaMa inpaint) | Python **3.10–3.12 required** (no wheels beyond); installable per capability from Setup |
+| **LoRA training — Krea 2** (ai-toolkit) | **24 GB VRAM** at 1024 px (enforced warning) | ~24 GB base download (Raw) + 10 GB+ free | Under 24 GB, select **Resolution → 768 only** in Advanced options |
+| **LoRA training — FLUX.2 Klein** (ai-toolkit) | 4B: **16–24 GB VRAM** · 9B: **32–48 GB** | base download + 10 GB+ free | Both bases are gated on Hugging Face; the cloud lane is practical for 9B |
+| **Face scoring / person masks / watermark inpaint** (ML extras) | none (CPU) | ~3 GB (+ CPU torch for LaMa) | Python **3.10–3.12 required** for wheels; installable per capability from Setup |
 
-- **OS**: Windows 10/11 for the full local stack (`start.bat`). Linux/macOS work for API-only + manual venv.
-- **Python**: 3.10–3.12 — but not required up front: `start.bat` fetches a self-contained CPython 3.12 if your machine has none. 3.13+ (already installed) runs the core app but can't install the ML extras.
-- **RAM**: 16 GB+ recommended when training locally.
-- Reference rig used for development: RTX 4090 (24 GB) — every number above was measured or enforced there.
+- **OS:** Windows 10/11 for the full local stack (`start.bat`). Linux/macOS work for API-only + manual venv; GPU Docker depends on host NVIDIA support.
+- **Python:** 3.10–3.12, but not required up front: `start.bat` fetches a self-contained CPython 3.12 when none is installed. Python 3.13+ can run the core app but not the ML extras.
+- **RAM:** 16 GB+ recommended for local training.
+- Reference development rig: RTX 4090 (24 GB); every number above was measured or enforced there.
 
-## Configuration & settings reference
+## Configuration & network access
 
-> **The living, complete reference is inside the app** — **Guide → Settings reference** documents every setting with its default and traps, and is mirrored on GitHub at **[docs/guide/settings-reference.md](docs/guide/settings-reference.md)**. That page now carries the full `config.json` key reference too.
+Use **Settings** for normal configuration. The complete defaults, `config.json` keys, model locations and environment overrides live in [docs/guide/settings-reference.md](docs/guide/settings-reference.md).
 
-The short version:
-
-- **Ordinary settings** are written to `config.json` (git-ignored, in your data directory). Copy `config.example.json` to `config.json` to edit by hand — but almost everything has a UI control in **Settings**.
-- **Secrets** (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `HF_TOKEN`, `VAST_API_KEY`, optional scraper keys) live in `.env`, never in `config.json` or a commit — copy `.env.example` to `.env`, or paste keys into Settings and let the app write them.
-- **A handful of environment variables** override paths for containerized setups: `LDS_DATA_DIR` (runtime data), `LDS_CONFIG` (path to `config.json`), `LDS_ENV` (path to `.env`), `LDS_HOST` (bind host, beats `server.host`), `FLASK_DEBUG` (`1` for Flask debug).
-- **The keys you most often touch** — `server.port` (default `5050`), `comfyui.api_url`, `ollama.vision_model`, `aitoolkit.dir`, `training.default_family`, the `cloud.*` guard-rails — are all in the [full reference](docs/guide/settings-reference.md#configjson-key-reference-all-keys).
-
-## Exposing the app beyond localhost
-
-The simplest path is the UI. **Settings → Server & access** has an *Available on the local network* toggle (flips the bind between `127.0.0.1` and `0.0.0.0`), an optional *Require an access token* switch (off by default — a home LAN is trusted), and an **Open it on your phone** card that shows a scannable **QR code** plus copyable URLs built from this machine's real LAN IP (and Tailscale IP, if present) — no guessing which address to type. Changing the port or the LAN toggle needs a restart; the card does it in one click.
-
-Under the hood: the app has **no user accounts**, so on `127.0.0.1` (the default) that's fine, but any other bind would hand the whole network your API keys, GPU and datasets. On a non-loopback bind you can require an **access token**: with the token gate on, `run.py` generates one at boot (printed to the console with a ready-to-open URL) unless you set `LDS_ACCESS_TOKEN` yourself. Open `http://<machine>:<port>/?token=<token>` once from the remote device — a signed session cookie takes over from there. Requests from localhost never need the token. If your network is already locked down (VPN, authenticated reverse proxy), `LDS_ALLOW_UNAUTHENTICATED=1` disables the guard explicitly.
+The server binds to `127.0.0.1` by default. Before enabling LAN access or publishing a port, read [SECURITY.md](SECURITY.md#the-default-threat-model) and configure the access-token/VPN/reverse-proxy boundary that fits your network.
 
 ## Known limitations
 
-- Krea 2's img2img workflow (`backend/workflows/krea2_turbo_img2img.json`) ships in the repo but isn't wired into a Test Studio mode yet — only the text-to-image Krea 2 workflow is currently reachable from the UI.
-- ComfyUI-dependent code paths (Klein generation, Test Studio, the consistency-LoRA path normalization for Windows ComfyUI) are covered by unit tests against a mocked ComfyUI API; they haven't all been exercised against a live ComfyUI instance yet. If something looks wrong when wiring up your own ComfyUI, check Settings → the "Test" button next to each endpoint.
-- The dataset workspace remembers your last-used generator (`localStorage`) and defaults to Nano Banana Pro on a first visit. If you've only configured an OpenAI key, the Nano Banana card shows disabled and the Generate button stays greyed out until you explicitly click the ChatGPT card — a one-click step that's easy to miss right after onboarding.
+Current boundaries and environment-specific caveats are tracked in [docs/guide/known-limitations.md](docs/guide/known-limitations.md).
 
 ## Troubleshooting
 
-**The page is completely blank (Windows), in every browser, with a healthy server log**
-Windows stores the content type of each file extension in its registry (`HKEY_CLASSES_ROOT\<ext>\Content Type`), and any installed program is free to overwrite it. When `.js` there says `text/plain`, the browser downloads the app's bundle and then refuses to execute it — a white page, and not one line of error on either side. Fixed since the wave of 2026-07-26: the app now states the content type of every file it serves instead of asking the registry, so nothing installed on the machine can silence the frontend. If you are on an older build, update and restart. Reported, diagnosed and fixed by [gessyoo](https://github.com/perfectgf/lora-dataset-studio/issues/12).
+The symptom-first fixes — including Windows blank pages, RTX 50-series PyTorch, slow/unreachable ComfyUI and Ollama's three detection states — are in [docs/guide/troubleshooting.md](docs/guide/troubleshooting.md).
 
-**`npm install` fails with `Cannot find module @rollup/rollup-<platform>-...`**
-A known npm bug ([npm/cli#4828](https://github.com/npm/cli/issues/4828)) can make `package-lock.json` "remember" the platform it was generated on. Fix: run `npm i -D @rollup/rollup-<your-platform>` for your OS/arch, or delete `frontend/node_modules` and `frontend/package-lock.json` and run `npm install` again on the target platform.
-
-**Training log looks frozen for several minutes**
-This is normal — ai-toolkit's stdout is block-buffered during model load and latent caching, so nothing prints for a while even though it's working. Check GPU utilization or watch for new files under the ai-toolkit output directory to confirm it's alive; a "warming up" state before the first logged step is expected.
-
-**Training dies immediately on an RTX 50-series card ("no kernel image is available")**
-Blackwell GPUs are compute capability `sm_120`, and stable PyTorch wheels only carry kernels up to `sm_90`. `torch.cuda.is_available()` still says True and the card is named correctly, so the run starts normally and then dies on the first real kernel launch. The app now names this trap in the failure panel and in the training preflight: install a CUDA 12.8 torch build **into ai-toolkit's own environment** (`pip install torch --index-url https://download.pytorch.org/whl/cu128`). It never guesses — on any other architecture mismatch it describes what it sees and invents no command.
-
-**ComfyUI shows as unreachable**
-Check `comfyui.api_url` in Settings, confirm ComfyUI is actually running, and check that nothing (firewall, a different bind interface) is blocking the connection between this app and ComfyUI. If ComfyUI *is* running, it may simply be slow to answer: listing its nodes and model files takes longer the more custom-node packs and weights you have installed. The app allows **45 s** for that answer (`comfyui.object_info_timeout_s`, adjustable in Settings → Local tools → ComfyUI), and a slow ComfyUI and a stopped one give different messages — one tells you to raise the timeout, the other to start ComfyUI. A ComfyUI that is genuinely off is still detected in seconds.
-
-**Ollama isn't detected (or shows as installed but stopped)**
-The app reports Ollama in three states. *Installed but stopped* — the binary is on disk but the server isn't answering — shows a **▶ Start Ollama** button in Settings/Setup; click it to launch the server (it stays running independently of this app, so it survives a restart). *Not installed* means no binary was found on your PATH or in Ollama's default install location — install it from [ollama.com](https://ollama.com/download), then reopen Settings. Once it's running, pull the vision model (`ollama pull huihui_ai/qwen3-vl-abliterated:8b-instruct`, the uncensored **Instruct** build) so captioning, framing and watermark detection light up.
-
-**Port 5000 conflicts with AirPlay Receiver on macOS**
-macOS reserves port 5000 for AirPlay Receiver by default. Change `server.port` in `config.json` to something else (e.g. `5050`) and restart.
-
-**Windows console shows garbled characters (mojibake) from `start.bat`**
-Cosmetic only — some UTF-8 text (em dashes, accents) renders incorrectly on the legacy Windows console codepage. It doesn't affect functionality.
-
-Still stuck? Open the app's **Guide → Getting help** for the one-click **diagnostic report** (version, capability status, log tail — no keys, no paths), then post it on [Discord](https://discord.gg/j6hnJBFtXE) or in a [GitHub issue](https://github.com/perfectgf/lora-dataset-studio/issues).
+Still stuck? **Guide → Getting help** generates a paste-safe diagnostic report, then [Discord](https://discord.gg/j6hnJBFtXE) and [GitHub issues](https://github.com/perfectgf/lora-dataset-studio/issues) are the best places to share it.
 
 ## Support the project
 

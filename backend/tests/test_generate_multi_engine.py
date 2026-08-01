@@ -167,6 +167,33 @@ def test_klein_preflight_refuses_before_the_api_batches_are_dispatched(client, n
     assert client.get(f'/api/dataset/{ds_id}').get_json()['images'] == []
 
 
+def test_recovery_barrier_refuses_mixed_local_run_before_any_api_dispatch(
+        client, no_threads, monkeypatch):
+    """An unresolved local prompt blocks the whole mixed request before its
+    billable API half creates rows or starts a background thread."""
+    from app.job_queue import COMFYUI_STALLED_BARRIER_KEY, queue_manager
+
+    ds_id = _dataset_with_ref(client)
+    with client.application.app_context():
+        queue_manager._set_system_state(
+            COMFYUI_STALLED_BARRIER_KEY, {'job_id': 'unresolved'})
+    monkeypatch.setattr(
+        'app.services.klein_edit_helper.klein_missing_nodes',
+        lambda: (_ for _ in ()).throw(AssertionError('preflight must not run')))
+
+    resp = client.post(f'/api/dataset/{ds_id}/generate', json={
+        'engine_batches': [
+            {'generator': 'chatgpt', 'variations': _shots(1, 'API')},
+            {'generator': 'klein', 'variations': _shots(1, 'Local')},
+        ],
+    })
+
+    assert resp.status_code == 409
+    assert resp.get_json()['code'] == 'comfyui_recovery_required'
+    assert not no_threads
+    assert client.get(f'/api/dataset/{ds_id}').get_json()['images'] == []
+
+
 def test_aggregate_fanout_cap_refuses_the_whole_run(client, no_threads):
     """MAX_FANOUT is a per-batch cap: three 25-image entries each pass on their
     own while the run totals 75. The aggregate check refuses up front instead of

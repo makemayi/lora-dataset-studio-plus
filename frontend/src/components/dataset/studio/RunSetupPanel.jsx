@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { STRENGTH_CHOICES } from './constants';
 import { fmt } from '../../../utils/studioFormat';
 import CheckpointPicker from './CheckpointPicker';
@@ -35,6 +36,7 @@ import StudioPreflightBanner from './StudioPreflightBanner';
 export default function RunSetupPanel({ d, studio, form, datasetId,
   checkpointSlot = null, launchBlocked = false, launchLabel = null, launchHint = null, actionBar = true,
   genStoragePrefix = null }) {
+  const navigate = useNavigate();
   // Réglages de génération GLOBAUX (parité Generate, hors prompt builder) remontés par
   // StudioGenerationSettings : objet snake_case déjà prêt à fusionner dans le POST /run
   // (source unique de vérité pour rebalance/enhancer/precision/format/detail/negative +
@@ -76,18 +78,31 @@ export default function RunSetupPanel({ d, studio, form, datasetId,
         onDismiss={() => { setPreflight(null); setArchMismatch(null); }} />
 
       {/* --- Garde-fous ------------------------------------------------- */}
-      {d.gpu_busy && (
-        <p className="m-0 rounded-lg border border-red-400/40 bg-red-500/10 px-3 py-2 text-red-300 text-sm" role="status">
-          {d.gpu_busy}
-        </p>
+      {d.gpu_busy && !d.comfyui_recovery?.requires_comfyui_restart_confirmation && (
+        <div className="m-0 flex flex-wrap items-center gap-2 rounded-lg border border-red-400/40 bg-red-500/10 px-3 py-2 text-red-300 text-sm" role="status">
+          <span>{d.gpu_busy}</span>
+          {d.comfyui_recovery_target?.dataset_id != null && (
+            <button type="button"
+              onClick={() => {
+                const params = new URLSearchParams({
+                  dataset: String(d.comfyui_recovery_target.dataset_id),
+                  family: d.comfyui_recovery_target.family || 'zimage',
+                });
+                navigate(`/studio?${params.toString()}`);
+              }}
+              className="ml-auto rounded-lg border border-red-300/40 bg-red-400/15 px-2.5 py-1 text-xs font-semibold text-red-100">
+              Open paused test →
+            </button>
+          )}
+        </div>
       )}
 
       {/* --- Soumission ComfyUI inconnue : confirmation humaine requise ------ */}
       {d.comfyui_recovery?.requires_comfyui_restart_confirmation && (
         <div className="flex items-center gap-2 flex-wrap rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2" role="status">
           <span aria-hidden>⚠</span>
-          <span className="text-content text-sm">A ComfyUI submission has an unknown outcome. Restart ComfyUI first, then confirm it here; the paused cell will become resumable.</span>
-          <button type="button" disabled={studio.confirmingComfyuiRestart}
+          <span className="text-content text-sm">ComfyUI could not confirm whether this image started. Restart ComfyUI, confirm it here, then click Resume test.</span>
+          <button type="button" disabled={studio.confirmingComfyuiRestart || !studio.confirmComfyuiRestart}
             onClick={studio.confirmComfyuiRestart}
             className="ml-auto px-2.5 py-1 rounded-lg bg-gradient-primary text-white text-xs font-semibold disabled:opacity-40">
             {studio.confirmingComfyuiRestart ? 'Confirming…' : '✓ J’ai redémarré ComfyUI'}

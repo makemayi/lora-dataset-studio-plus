@@ -10,6 +10,8 @@
  * testing lives outside TrainingPanel.jsx.
  */
 
+import { normalizeTrainingMode } from '../../utils/trainingMode.js';
+
 /** 'cloud' or 'local' — anything unrecognised falls back to 'local', which is
  * the server's default and the historical (unfiltered) payload. */
 export function normalizeLane(lane) {
@@ -31,10 +33,16 @@ export function laneOfPayload(payload) {
  * states it and gets the "rembg is missing, this run trains unmasked" row; a
  * caller that has no opinion (the readiness badge) omits it and gets no row,
  * rather than a warning about a mask nobody asked for. */
-export function preflightUrl(datasetId, { trainType, variant, lane, masked } = {}) {
+export function preflightUrl(datasetId, {
+  trainType, variant, baseModel, trainingMode, lane, masked,
+} = {}) {
   const qs = [];
   if (trainType) qs.push(`train_type=${encodeURIComponent(trainType)}`);
   if (variant) qs.push(`variant=${encodeURIComponent(variant)}`);
+  // Empty is meaningful: it selects the official base instead of allowing a
+  // previously persisted custom base to leak into this preflight.
+  if (baseModel !== undefined) qs.push(`base_model=${encodeURIComponent(baseModel ?? '')}`);
+  if (trainingMode) qs.push(`training_mode=${encodeURIComponent(normalizeTrainingMode(trainingMode))}`);
   if (normalizeLane(lane) === 'cloud') qs.push('lane=cloud');
   if (masked !== undefined && masked !== null) qs.push(`masked=${masked ? '1' : '0'}`);
   return `/api/dataset/${datasetId}/train/preflight${qs.length ? `?${qs.join('&')}` : ''}`;

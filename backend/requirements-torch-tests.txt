@@ -1,0 +1,5 @@
+# Optional heavyweight runtime overlay for the exact-state/bridge tests.
+# Keep this separate from requirements-dev.txt so the normal contributor setup
+# remains small and tests that need a real Torch runtime skip when it is absent.
+--index-url https://download.pytorch.org/whl/cpu
+torch==2.13.0+cpu

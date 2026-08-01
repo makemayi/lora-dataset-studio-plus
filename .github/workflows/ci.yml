@@ -3,8 +3,8 @@ name: CI
 # Heavy jobs are expensive, so we only pay for them when a run is worth it:
 #   * pull_request        -> always (external contributions are the most valuable to gate)
 #   * workflow_dispatch   -> always (manual button)
-#   * push to main        -> only when the change is large enough (see the `gate` job).
-# A CI-config or docs-only nudge to main therefore costs one cheap gate job, nothing more.
+#   * push to main        -> when large enough OR when a Torch-sensitive path changes.
+# A docs-only or small ordinary UI nudge to main therefore costs one cheap gate job.
 on:
   workflow_dispatch:
   pull_request:
@@ -58,6 +58,49 @@ jobs:
             exit 0
           fi
 
+          # The expensive CPU Torch overlay is path-gated in backend-tests. Any
+          # push that could need it must first reach that Windows job, even when
+          # the diff is smaller than the general heavy-job threshold below.
+          torch_path_patterns=(
+            '^backend/app/training_bridge/'
+            '^backend/app/job_queue\.py$'
+            '^backend/app/services/(aitoolkit_state_bridge|lora_training|run_environment|training_state_bundle|training_state_identity)\.py$'
+            '^backend/app/routes/training\.py$'
+            '^backend/app/services/checkpoint_registry\.py$'
+            '^backend/tests/conftest\.py$'
+            '^backend/tests/test_(aitoolkit_state_bridge|bank_busy_refusal|checkpoint_registry|continue_flexible|custom_base_paths|dev_requirements_contract|training_hf_auth|training_queue_atomic|training_routes|training_service|training_state_bundle|training_state_identity)\.py$'
+            '^backend/requirements[^/]*\.txt$'
+            '^backend/pytest\.ini$'
+            '^\.github/workflows/'
+          )
+
+          is_torch_sensitive() {
+            local path="$1"
+            local pattern
+            for pattern in "${torch_path_patterns[@]}"; do
+              if [[ "$path" =~ $pattern ]]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          changed_paths=$(git diff --name-only --no-renames "$BEFORE" "$AFTER" --)
+          torch_sensitive_paths=()
+          while IFS= read -r path; do
+            [ -z "${path:-}" ] && continue
+            if is_torch_sensitive "$path"; then
+              torch_sensitive_paths+=("$path")
+            fi
+          done <<< "$changed_paths"
+
+          if [ "${#torch_sensitive_paths[@]}" -gt 0 ]; then
+            printf 'Torch-sensitive path changed: %s\n' "${torch_sensitive_paths[@]}"
+            echo "Torch-sensitive push -> run the heavy jobs."
+            echo "run_heavy=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           # Count changes only in the sources that can actually break the suite.
           # frontend/dist (build output), docs/** and every *.md are deliberately
           # excluded: a dist rebuild or a doc tweak must not trigger the full CI.
@@ -93,11 +136,114 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The Torch overlay decision compares the checked-out revision with
+          # the event base. A shallow clone cannot reliably resolve that base.
+          fetch-depth: 0
+
+      - name: Decide whether Torch-dependent tests need the CPU overlay
+        id: torch_changes
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          function Write-TorchDecision {
+            param(
+              [bool] $RunTorch,
+              [string] $Reason
+            )
+
+            $value = $RunTorch.ToString().ToLowerInvariant()
+            Write-Host "$Reason -> run_torch=$value"
+            "run_torch=$value" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+
+          # A manual run is an explicit request for the complete backend suite.
+          if ($env:EVENT_NAME -eq 'workflow_dispatch') {
+            Write-TorchDecision $true 'Manual run'
+            exit 0
+          }
+
+          $base = ("$env:BASE_SHA").Trim()
+          $head = ("$env:HEAD_SHA").Trim()
+          $zero = '0000000000000000000000000000000000000000'
+
+          # Missing history, a new branch, or a rewritten base must never make
+          # the Torch tests disappear silently. Unknown means run, fail-safe.
+          if ([string]::IsNullOrWhiteSpace($base) -or $base -eq $zero) {
+            Write-TorchDecision $true 'No usable diff base'
+            exit 0
+          }
+
+          git cat-file -e "${base}^{commit}" 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            Write-TorchDecision $true "Diff base $base is unavailable"
+            exit 0
+          }
+
+          if ([string]::IsNullOrWhiteSpace($head)) {
+            Write-TorchDecision $true 'No usable diff head'
+            exit 0
+          }
+
+          git cat-file -e "${head}^{commit}" 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            Write-TorchDecision $true "Diff head $head is unavailable"
+            exit 0
+          }
+
+          $range = if ($env:EVENT_NAME -eq 'pull_request') {
+            "${base}...${head}"
+          } else {
+            "${base}..${head}"
+          }
+          $changedPaths = @(git diff --name-only --no-renames $range --)
+          if ($LASTEXITCODE -ne 0) {
+            Write-TorchDecision $true "Could not diff $range"
+            exit 0
+          }
+
+          # Keep this intentionally narrow: ordinary frontend/UI changes still
+          # run the Windows backend suite when the outer gate asks for it, but
+          # do not download the large CPU Torch wheel.
+          $torchPathPatterns = @(
+            '^backend/app/training_bridge/',
+            '^backend/app/job_queue\.py$',
+            '^backend/app/services/(aitoolkit_state_bridge|lora_training|run_environment|training_state_bundle|training_state_identity)\.py$',
+            '^backend/app/routes/training\.py$',
+            '^backend/app/services/checkpoint_registry\.py$',
+            '^backend/tests/conftest\.py$',
+            '^backend/tests/test_(aitoolkit_state_bridge|bank_busy_refusal|checkpoint_registry|continue_flexible|custom_base_paths|dev_requirements_contract|training_hf_auth|training_queue_atomic|training_routes|training_service|training_state_bundle|training_state_identity)\.py$',
+            '^backend/requirements[^/]*\.txt$',
+            '^backend/pytest\.ini$',
+            '^\.github/workflows/'
+          )
+
+          $matchedPaths = [System.Collections.Generic.List[string]]::new()
+          foreach ($changedPath in $changedPaths) {
+            $normalizedPath = "$changedPath".Replace('\', '/')
+            foreach ($pattern in $torchPathPatterns) {
+              if ($normalizedPath -match $pattern) {
+                $matchedPaths.Add($normalizedPath)
+                break
+              }
+            }
+          }
+
+          if ($matchedPaths.Count -gt 0) {
+            Write-TorchDecision $true "Torch-sensitive changes: $($matchedPaths -join ', ')"
+          } else {
+            Write-TorchDecision $false 'No Torch-sensitive changes'
+          }
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: pip
+          # Do not key/populate the shared pip cache with the large Torch wheel:
+          # UI-only runs use this base cache and must not restore Torch bytes.
           cache-dependency-path: backend/requirements-dev.txt
 
       - name: Enforce release asset policy
@@ -107,11 +253,13 @@ jobs:
         run: python -m unittest discover -s scripts/tests -p 'test_*.py'
 
       - name: Install the test environment
-        # ONE file, and the same one a contributor installs — including the
-        # test-only numpy/OpenCV extras. Listing them inline here is what let CI
-        # and a dev machine differ silently until a release tag caught it;
-        # test_dev_requirements_contract.py now fails if this line drifts.
+        # Keep the shared base environment identical to a contributor install.
+        # The large CPU Torch wheel is a separate, path-gated overlay below.
         run: python -m pip install --disable-pip-version-check -r backend/requirements-dev.txt
+
+      - name: Install the CPU Torch test overlay
+        if: steps.torch_changes.outputs.run_torch == 'true'
+        run: python -m pip install --disable-pip-version-check --no-cache-dir -r backend/requirements-torch-tests.txt
 
       - name: Run backend tests
         run: python -m pytest backend/tests -q

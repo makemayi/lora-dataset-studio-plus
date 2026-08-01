@@ -7,8 +7,6 @@ from ..services import comfyui_control
 
 bp = Blueprint('setup', __name__, url_prefix='/api/setup')
 
-_COMFYUI_START_LOOPBACKS = {'127.0.0.1', '::1', '::ffff:127.0.0.1'}
-
 
 @bp.get('/autodetect')
 def setup_autodetect():
@@ -34,12 +32,10 @@ def start_comfyui():
 
     This endpoint intentionally accepts no path, flags, query values, or JSON. The
     service reads only the already-persisted local configuration and owns no process
-    started by the user's normal ComfyUI launcher.
+    started by the user's normal ComfyUI launcher. LAN/Tailscale clients already
+    allowed by the application-wide access policy may use it; the CSRF guard still
+    applies.
     """
-    # The application-wide LAN guard can allow authenticated remote clients. Starting
-    # a local executable is stricter: it is available only to the exact local peers.
-    if request.remote_addr not in _COMFYUI_START_LOOPBACKS:
-        return jsonify({'error': 'This action is only available from this computer.'}), 403
     # No client input may influence the executable, cwd, or arguments. Do not parse a
     # body at all; reject it instead. The CSRF header remains the only required POST
     # metadata and is enforced by Flask-WTF before this handler in normal operation.

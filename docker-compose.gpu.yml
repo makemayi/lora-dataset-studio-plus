@@ -1,0 +1,116 @@
+# GPU mode: the studio AND ComfyUI in one container (see Dockerfile.gpu).
+#
+#   cp .env.example .env                                  # do this FIRST
+#   docker compose -f docker-compose.gpu.yml up --build
+#
+# Needs the NVIDIA Container Toolkit on the host. The API-only, no-GPU pair is
+# Dockerfile + docker-compose.yml and is unaffected by this file.
+#
+# Every ${...} below can be set in the same ./.env this mounts for API keys.
+
+# Its own compose project. Without this, `up` here would recreate the container
+# belonging to docker-compose.yml: both files call the service `studio`, and both
+# would otherwise inherit the same default project name from the directory.
+name: lora-dataset-studio-gpu
+
+services:
+  studio:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+      # For an RTX 50xx / newer driver, move both of these together:
+      # args:
+      #   BASE_IMAGE: mmartial/comfyui-nvidia-docker:ubuntu24_cuda13.0-latest
+      #   TORCH_INDEX: https://download.pytorch.org/whl/cu130
+      # Or drop ~7 GB by scoring on the CPU (ComfyUI still gets the whole GPU):
+      #   TORCH_INDEX: https://download.pytorch.org/whl/cpu
+    image: lora-dataset-studio-gpu
+    container_name: lora-dataset-studio-gpu
+    restart: unless-stopped
+    ports:
+      # Host side only. LDS_PORT further down is the port the app BINDS INSIDE the
+      # container — do not reuse that name here, or you publish a port nothing serves.
+      - "${LDS_HOST_PORT:-5050}:5050"
+      - "${LDS_COMFY_HOST_PORT:-8188}:8188"
+    volumes:
+      # ComfyUI's own venv, source checkout and Hugging Face cache.
+      - ${LDS_COMFY_RUN:-./run}:/comfy/mnt
+      # models, input, output, custom_nodes. Point this at their PARENT directory,
+      # never at models/ itself:  LDS_COMFY_BASEDIR=/srv/comfyui
+      - ${LDS_COMFY_BASEDIR:-./basedir}:/basedir
+      # The studio's data and its config.json. Defaults to a folder of its own,
+      # NOT the API-only stack's ./data-docker: sharing it would put two Flask
+      # processes on one SQLite database and one config.json, and would leave
+      # this container's seeder-written comfyui.base_dir=/basedir in a config
+      # the API-only container reads too, where that path does not exist.
+      - ${LDS_DATA:-./data-docker-gpu}:/data
+      # Optional, for 🗃️ Image bank: a folder of unsorted images to triage IN
+      # PLACE. Point it at a tree you already have — LDS_BANK_SOURCES=/mnt/photos —
+      # and then type the CONTAINER path in "New bank": /images, or /images/dump.
+      # The host path means nothing inside here. A bank only ever reads these
+      # files; the single exception is 🗑 Delete rejected, so append `:ro` to this
+      # line if you would rather that action fail than have it touch originals.
+      - ${LDS_BANK_SOURCES:-./bank-images}:/images
+      # API keys. `cp .env.example .env` FIRST: Docker creates a directory here
+      # otherwise, and the app then cannot read a single key.
+      - ./.env:/app/.env
+      # Do NOT mount anything at /userscripts_dir. It would shadow
+      # 50-lora-dataset-studio.sh and the studio would silently never start.
+    # Set on purpose, not inherited: upstream's init script re-installs uv from
+    # astral.sh on EVERY start and exits if a name does not resolve, and the
+    # resolver a Compose network inherits from the host is often unreachable from
+    # inside the container (`curl: (6) Could not resolve host: astral.sh`, then
+    # `!! ERROR: uv not found after installation`, then a restart loop). This
+    # REPLACES the inherited list, so set LDS_DNS to your LAN's own resolver if
+    # you depend on internal hostnames.
+    dns: ${LDS_DNS:-1.1.1.1}
+    # Optional caps, unlimited unless you set them. The first boot alone unpacks
+    # torch and ComfyUI's whole dependency tree, so a tight cap shows up as a
+    # killed install rather than a slow one.
+    mem_limit: ${LDS_MEM_LIMIT:-0}
+    # Docker's rule, not ours: this is memory + swap COMBINED, it must be >=
+    # mem_limit, and 0 means "twice mem_limit". Equal to mem_limit = no swap.
+    memswap_limit: ${LDS_MEMSWAP_LIMIT:-0}
+    cpus: ${LDS_CPUS:-0}
+    environment:
+      # --- the studio ---
+      - LDS_DATA_DIR=/data
+      - LDS_CONFIG=/data/config.json
+      - LDS_HOST=0.0.0.0
+      - LDS_PORT=5050
+      # The app cannot replace image files or own its bind address here. Restart
+      # exits back to studio_launch.sh, whose supervisor respawns it immediately.
+      - LDS_RUNTIME=docker-gpu
+      - LDS_RESTART_MODE=supervisor
+      - LDS_BIND_MANAGED=1
+      # Ollama is NOT in this image (auto-captioning, framing, watermark detection).
+      # Run it on the host, then uncomment this AND the extra_hosts block below.
+      #- LDS_OLLAMA_URL=http://ollama.internal:11434
+      # Last resort if /data or existing contents beneath it cannot be made writable
+      # from the host. This recursively adopts ONLY LDS_DATA (/data), never other mounts.
+      - LDS_FORCE_CHOWN=${LDS_FORCE_CHOWN:-false}
+      # --- upstream's ComfyUI image ---
+      # Must match the owner of the folders mounted above (`id -u` / `id -g`).
+      # On Unraid that is usually 99 / 100.
+      - WANTED_UID=${LDS_UID:-1000}
+      - WANTED_GID=${LDS_GID:-1000}
+      - BASE_DIRECTORY=/basedir
+      - SECURITY_LEVEL=normal
+      - USE_UV=true
+      - USE_NEW_MANAGER=true
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      # Extra ComfyUI flags, e.g. to leave VRAM headroom for the scoring pass:
+      #- COMFY_CMDLINE_EXTRA=--reserve-vram 1
+      # NOT the place to change ComfyUI's port: the studio's healthcheck and its
+      # seeded api_url both assume 8188, so a --port flag here would silently
+      # break both.
+    #extra_hosts:
+    #  - "ollama.internal:host-gateway"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, compute, utility]

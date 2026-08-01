@@ -29,7 +29,9 @@ export const LANE_GAP = 56;
 // datasets fits in one frame; the ceiling stops a stray pinch from blowing a
 // 264-px card up to a wall.
 export const MIN_SCALE = 0.1;
-export const MAX_SCALE = 2.5;
+// 500% lets a generated image be inspected directly on the board. The former
+// 250% ceiling was still too small after Fit had opened a large canvas at 10–50%.
+export const MAX_SCALE = 5;
 
 /** Clamp a scale into the usable range. NaN / nonsense degrades to 1 rather
  *  than blanking the board. */

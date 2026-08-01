@@ -1,3 +1,7 @@
 # Keep frontend builds reproducible across Linux CI and Windows releases.
 frontend/** text=auto eol=lf
 docs/** text=auto eol=lf
+
+# These scripts execute inside a Linux container. A CRLF shebang fails before
+# the launcher can log anything, so keep Docker shell launchers explicitly LF.
+packaging/docker/*.sh text eol=lf

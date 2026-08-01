@@ -8,7 +8,7 @@ LoRA Dataset Studio ships as a rolling release. Only the **latest release** and 
 
 By design the app runs **locally, for a single user, bound to `127.0.0.1`**. It has **no user accounts**: on loopback that's fine, because only you can reach it. Security reports are most useful when they fit that model — for example a way for a *local* attacker, a malicious dataset/image, or a crafted API response from a connected tool to do something it shouldn't (RCE, path traversal outside the data dir, leaking your API keys or config).
 
-Exposing the app to other machines is **your** decision and **out of the default threat model**. If you flip *Available on the local network*, the README's [Exposing the app beyond localhost](README.md#exposing-the-app-beyond-localhost) section is the contract: turn on the access token (or front it with a VPN / authenticated reverse proxy). "I bound it to `0.0.0.0` with the token off and someone on my network reached it" is expected behavior, not a vulnerability. A bypass of the token gate *while it's enabled* absolutely is — please report that.
+Exposing the app to other machines is **your** decision and **out of the default threat model**. If you flip *Available on the local network*, the [Settings reference — Server & access](docs/guide/settings-reference.md#server--access) section is the contract: turn on the access token (or front it with a VPN / authenticated reverse proxy). "I bound it to `0.0.0.0` with the token off and someone on my network reached it" is expected behavior, not a vulnerability. A bypass of the token gate *while it's enabled* absolutely is — please report that.
 
 ## Reporting a vulnerability
 

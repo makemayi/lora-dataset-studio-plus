@@ -16,6 +16,7 @@ import {
 import { configRows } from '../dataset/lineageDetail.js';
 import RunDeleteSection from './RunDeleteSection';
 import GeneratedImageLightbox from './GeneratedImageLightbox';
+import CheckpointTimelinePanel from './CheckpointTimelinePanel';
 
 /* 🖼 Everything one checkpoint — or one whole RUN — ever produced.
 
@@ -71,6 +72,7 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
   const [notice, setNotice] = useState(null);
   const [openGroups, setOpenGroups] = useState(() => new Set());
   const [zipping, setZipping] = useState(false);
+  const [timelineOpen, setTimelineOpen] = useState(false);
 
   const key = galleryTargetKey(target);
   const scope = galleryScope(target);
@@ -111,6 +113,7 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
     setConfirming(false);
     setNotice(null);
     setOpenGroups(new Set());
+    setTimelineOpen(false);
     load();
     return undefined;
   }, [key]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -342,11 +345,18 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
 
           {state.status === 'ready' && isRun && (
             <>
-              <p className="m-0 mb-2 text-content-muted text-[0.6875rem]">
-                {picking
-                  ? `Tap the misses, then 🗑 Delete. ${images.length} shown in the open steps.`
-                  : runGallerySummary(d)}
-              </p>
+              <div className="mb-2 flex items-start gap-2">
+                <p className="m-0 min-w-0 flex-1 text-content-muted text-[0.6875rem]">
+                  {picking
+                    ? `Tap the misses, then 🗑 Delete. ${images.length} shown in the open steps.`
+                    : runGallerySummary(d)}
+                </p>
+                <button type="button" data-testid="run-gallery-timeline"
+                  onClick={() => setTimelineOpen(true)} aria-haspopup="dialog"
+                  className="shrink-0 rounded-md border border-indigo-400/60 bg-indigo-500/15 px-2 py-1.5 text-[0.6875rem] font-semibold text-indigo-100 hover:bg-indigo-500/25">
+                  <span aria-hidden>🎞</span> Timeline
+                </button>
+              </div>
 
               {/* One foldable section per checkpoint, most-trained first: the end
                   of training is where over- and under-fitting is judged, so the
@@ -585,6 +595,10 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
             <span aria-hidden>📌</span> Pin to canvas
           </button>
         ) : null} />
+      {isRun && timelineOpen && (
+        <CheckpointTimelinePanel recordId={target.recordId}
+          onClose={() => setTimelineOpen(false)} />
+      )}
     </>
   );
 }

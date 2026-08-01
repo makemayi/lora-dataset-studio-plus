@@ -3,6 +3,7 @@ node_modules
 .venv
 data/
 data-docker/
+data-docker-gpu/
 .env
 config.json
 .superpowers
@@ -12,5 +13,8 @@ docs
 .pytest_cache/
 packaging/build/
 packaging/dist/
+run/
+basedir/
+bank-images/
 *.pyc
 __pycache__

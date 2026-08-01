@@ -41,6 +41,15 @@ COMFYUI_UNKNOWN_SUBMIT_MESSAGE = (
     'ComfyUI /prompt result was lost. Restart ComfyUI before cancelling or resuming '
     'this batch; LDS cannot safely identify the remote prompt.'
 )
+COMFYUI_RECOVERY_REQUIRED_MESSAGE = (
+    'A previous ComfyUI job has an unresolved remote state. Recover or restart '
+    'ComfyUI, then resolve the paused job (confirm the restart when prompted, or '
+    'cancel/resume it) before starting another local generation.'
+)
+
+
+class ComfyUIRecoveryRequired(RuntimeError):
+    """Raised when new ComfyUI work must wait for explicit recovery."""
 
 
 class _ComfySubmitRejected(RuntimeError):
@@ -60,6 +69,19 @@ GPU_ARBITER_LOCK = threading.RLock()
 def gpu_arbiter_lock():
     """Shared in-process lock for the two local GPU consumers."""
     return GPU_ARBITER_LOCK
+
+
+def require_comfyui_enqueue_ready() -> None:
+    """Refuse new ComfyUI work while an unresolved remote owner is recorded.
+
+    Deliberately checks only the durable recovery barrier. Training and Vision
+    are temporary scheduling fences: jobs may queue behind them. A stalled
+    ComfyUI owner is different because accepting more work would leave rows
+    looking active even though the worker is intentionally fail-closed.
+    """
+    with GPU_ARBITER_LOCK:
+        if queue_manager.has_comfyui_stalled_barrier():
+            raise ComfyUIRecoveryRequired(COMFYUI_RECOVERY_REQUIRED_MESSAGE)
 
 # A DB status check is the source of truth, but this in-process event also wakes
 # the worker immediately when it is sleeping between two history requests.
@@ -1014,8 +1036,11 @@ class JobQueueManager:
                job_id=None, metadata=None, priority=10, *, commit=True) -> str:
         """``commit=False`` leaves the queue row PENDING in the caller's session so a
         fan-out (a Studio grid) can insert its own row and the job in ONE transaction
-        — one write lock per cell instead of three. The caller MUST then commit (or
-        roll back) itself; the worker only ever sees committed rows either way."""
+        — one write lock per cell instead of three. Such a caller MUST already hold
+        ``GPU_ARBITER_LOCK`` before beginning its DB transaction and retain it until
+        its own commit/rollback; otherwise a recovery barrier could be installed
+        between this readiness check and that commit.  The worker only ever sees
+        committed rows either way."""
         if job_type != 'image':
             raise ValueError(f'unsupported job_type: {job_type!r}')
         if not workflow_data:
@@ -1030,41 +1055,75 @@ class JobQueueManager:
             priority=priority,
             job_metadata=json.dumps(metadata) if metadata else None,
         )
-        db.session.add(job)
-        if commit:
-            db.session.commit()
+        # Route preflights provide a fast, actionable response, but this is the
+        # authoritative enqueue seam: the barrier may appear between a route
+        # check and a future service call.  For commit=False this nested RLock
+        # deliberately relies on the documented outer transaction guard.
+        with GPU_ARBITER_LOCK:
+            require_comfyui_enqueue_ready()
+            db.session.add(job)
+            if commit:
+                db.session.commit()
         return job_id
 
-    def cancel_job(self, job_id, user_id=None, job_type='image', *, commit=True) -> bool:
-        """Cancel only after the exact ComfyUI ownership is proven gone.
+    def cancel_job_outcome(self, job_id, user_id=None, job_type='image', *,
+                           commit=True) -> str:
+        """Cancel one image job and name the exact recovery outcome.
 
-        Running/unknown remote work is first paused in a durable barrier. A false
-        result means the caller must preserve its row and job_id; it is not safe to
-        delete/requeue it yet.
+        ``cancel_job`` historically collapsed every non-success case to ``False``:
+        a missing/terminal row, a known prompt that merely needs another
+        reconciliation pass, and an unknown ``/prompt`` submission that can only be
+        cleared after a confirmed ComfyUI restart.  Callers consequently either
+        orphaned the durable barrier or kept harmless cards alive forever.
+
+        Returns one of ``cancelled``, ``terminal``, ``missing``, ``retry``,
+        ``restart_required`` or ``barrier_corrupt``. ``terminal``/``missing`` are
+        safe for a caller to discard only because this method first proves that
+        no corrupt barrier exists and the exact job does not own a valid one.
         """
         if job_type != 'image':
-            return False
+            return 'retry'
         with GPU_ARBITER_LOCK:
             query = ImageGenerationQueue.query.filter_by(job_id=str(job_id))
             if user_id is not None:
                 query = query.filter_by(user_id=str(user_id))
             job = query.first()
-            if job is None or job.status in ('completed', 'failed', 'cancelled'):
-                return False
+            barrier_row, _, barrier_owner, barrier_valid = \
+                self._read_comfyui_stalled_barrier()
+            if barrier_row is not None and not barrier_valid:
+                # Raw presence blocks every GPU action. With no trustworthy owner
+                # identity, deleting any UI handle would make recovery strictly
+                # worse and could orphan the global lock permanently.
+                return 'barrier_corrupt'
+            owns_barrier = bool(
+                barrier_valid and barrier_owner
+                and str(barrier_owner.get('job_id')) == str(job_id))
+            if job is None:
+                if owns_barrier:
+                    return ('restart_required'
+                            if barrier_owner.get('kind') == 'unknown_submit'
+                            else 'retry')
+                return 'missing'
+            if job.status in ('completed', 'failed', 'cancelled'):
+                if owns_barrier:
+                    return ('restart_required'
+                            if barrier_owner.get('kind') == 'unknown_submit'
+                            else 'retry')
+                return 'terminal'
 
             if not commit:
                 # A caller holding a larger DB transaction cannot perform an
                 # external proof. Refuse active work instead of silently orphaning
                 # a possibly-running ComfyUI prompt.
                 if job.status != 'pending':
-                    return False
+                    return 'retry'
                 job.update_status('cancelled')
-                return True
+                return 'cancelled'
 
             if job.status == 'pending':
                 job.update_status('cancelled')
                 db.session.commit()
-                return True
+                return 'cancelled'
 
             if job.status == 'processing':
                 # Only a re-entrant cancellation from the /prompt seam can see
@@ -1073,7 +1132,7 @@ class JobQueueManager:
                 job.status = 'cancel_requested'
                 job.last_heartbeat = datetime.utcnow()
                 db.session.commit()
-                return False
+                return 'retry'
             prompt_id = job.comfyui_prompt_id
             if job.status in ('sent_to_comfy', 'cancel_requested'):
                 if prompt_id:
@@ -1085,23 +1144,29 @@ class JobQueueManager:
                         job.job_id, allowed_statuses=(job.status,),
                         detail='cancellation requested before /prompt was durably mapped')
                 if not paused:
-                    return False
+                    return 'retry'
                 if not prompt_id:
                     logger.warning(
                         'job_queue: %s needs an external ComfyUI restart before '
                         'its unknown /prompt outcome can be resolved', job.job_id)
-                    return False
+                    return 'restart_required'
             elif job.status != 'stalled':
-                return False
+                return 'retry'
 
             if not job.comfyui_prompt_id:
                 logger.warning(
                     'job_queue: %s has an unknown /prompt barrier; do not clear it '
                     'without an externally verified ComfyUI restart', job.job_id)
-                return False
+                return 'restart_required'
             # Targeted delete / fresh absence checks happen while the exact raw
             # ownership barrier remains present.
-            return self.reconcile_stalled_comfy_job(job.job_id)
+            return ('cancelled' if self.reconcile_stalled_comfy_job(job.job_id)
+                    else 'retry')
+
+    def cancel_job(self, job_id, user_id=None, job_type='image', *, commit=True) -> bool:
+        """Compatibility boolean: only a proven cancellation is ``True``."""
+        return self.cancel_job_outcome(
+            job_id, user_id, job_type, commit=commit) == 'cancelled'
 
     def interrupt_comfyui_job(self, prompt_id, job_id) -> bool:
         """Compatibility helper: exact pending delete only; never /interrupt."""

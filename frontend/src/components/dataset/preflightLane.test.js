@@ -38,11 +38,21 @@ test('the masked intent rides in the query string, and only when stated', () => 
 test('the launch preflight actually states its masked intent', () => {
   // The URL contract above is worthless if TrainingPanel never passes it.
   assert.match(panel, /preflightUrl\([\s\S]{0,300}?masked[,\s}]/);
+  assert.match(panel, /baseModel: bm \?\? base/);
 });
 
 test('the cloud lane rides in the query string', () => {
   assert.equal(preflightUrl(7, { trainType: 'zimage', variant: 'base', lane: 'cloud' }),
     '/api/dataset/7/train/preflight?train_type=zimage&variant=base&lane=cloud');
+});
+
+test('the selected base rides in preflight, including an explicit official base', () => {
+  assert.equal(preflightUrl(7, {
+    trainType: 'krea', variant: 'base', baseModel: '', lane: 'cloud',
+  }), '/api/dataset/7/train/preflight?train_type=krea&variant=base&base_model=&lane=cloud');
+  assert.equal(preflightUrl(7, {
+    trainType: 'krea', variant: 'base', baseModel: 'D:\\models\\custom.safetensors',
+  }), '/api/dataset/7/train/preflight?train_type=krea&variant=base&base_model=D%3A%5Cmodels%5Ccustom.safetensors');
 });
 
 test('anything unrecognised falls back to the local lane', () => {
@@ -87,7 +97,7 @@ test('face_mask is NOT machine-scope — it is the inverse trap', () => {
 // --- the call sites that were skipping the gate -------------------------------
 
 test('the cloud launch runs the preflight before spending money', () => {
-  assert.match(panel, /const launchCloud = async \(gpuName\) => \{\s*(\/\/[^\n]*\n\s*)*if \(!\(await preflightOk\(\{ lane: 'cloud' \}\)\)\) return;/);
+  assert.match(panel, /const launchCloud = async \(gpuName\) => \{\s*(\/\/[^\n]*\n\s*)*if \(!\(await preflightOk\(\{ lane: 'cloud' \}\)\)\) return false;/);
 });
 
 test('▶ Continue runs it too, on whichever lane it resumes', () => {
@@ -95,7 +105,7 @@ test('▶ Continue runs it too, on whichever lane it resumes', () => {
   assert.match(panel, /const lane = laneOfPayload\(payload\);/);
   // (…and its blockers are routed INTO the still-open dialog via onRefused,
   // instead of a toast over a form that had already been thrown away.)
-  assert.match(panel, /await preflightOk\(\{ lane, trainType: checkpointTrainType,\s*variant: checkpointVariant, onRefused: setContinueError \}\)/);
+  assert.match(panel, /await preflightOk\(\{ lane, trainType: checkpointTrainType,\s*variant: checkpointVariant, baseModel: checkpointBase,\s*onRefused: setContinueError \}\)/);
 });
 
 test('the modal names the cloud lane and keeps its fix-in-place lists', () => {

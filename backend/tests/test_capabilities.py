@@ -784,6 +784,25 @@ def test_ollama_vision_model_ready_false_when_absent(app, monkeypatch):
         result = capabilities.probe_ollama_model()
     assert result['ok'] is False
 
+
+def test_ollama_requested_model_ready_when_global_is_absent(app, monkeypatch):
+    """A per-dataset model installed on its own is ready even if the global model
+    is not pulled; omitting the override still checks the global model."""
+    with app.app_context():
+        from app import capabilities, config
+        config.save_config({
+            'ollama': {'url': 'http://o', 'vision_model': 'global-vlm:latest'}})
+        monkeypatch.setattr(capabilities, '_http_ok', lambda *a, **k: True)
+        monkeypatch.setattr(
+            capabilities, '_ollama_tags', lambda *a, **k: ['custom-vlm:latest'])
+
+        custom = capabilities.probe_ollama_model(model='custom-vlm:latest')
+        global_default = capabilities.probe_ollama_model()
+
+    assert custom == {'ok': True, 'detail': 'custom-vlm:latest ready'}
+    assert global_default == {'ok': False, 'detail': 'global-vlm:latest not pulled'}
+
+
 def test_ollama_vision_model_base_tag_match(app, monkeypatch):
     with app.app_context():
         from app import capabilities, config

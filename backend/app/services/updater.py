@@ -10,8 +10,10 @@
   `config.json`, `.env`, `.venv`, `.python` — so user state and the live runtime
   survive the swap. See `_PROTECTED_TOP_LEVEL`.
 
-Dependency installation is deliberately deferred to the detached restart helper.
-Running pip inside the live Flask process can corrupt locked packages on Windows.
+Dependency installation is deliberately deferred to restart.  Desktop installs
+use the detached helper; the Docker supervisor reruns its boot-time dependency
+check after exit code 75.  Running pip inside the live Flask process can corrupt
+locked packages on Windows.
 
 `git` must be on PATH for the checkout path; if it isn't we say so rather than
 fail cryptically (a clone user has git by definition, so this only bites an
@@ -29,6 +31,32 @@ from pathlib import Path
 from ..config import REPO_ROOT, get as _cfg_get
 
 _GIT_TIMEOUT = 120
+
+# The Docker image is immutable application code: changing files below /app from
+# the web UI would be lost at the next container recreation (and most of those
+# files are intentionally root-owned anyway).  Keep the rebuild recipe in one
+# place so the API and both frontend update surfaces expose the exact same two
+# commands, in order.
+DOCKER_RUNTIME = 'docker-gpu'
+DOCKER_UPDATE_INSTRUCTIONS = (
+    'git pull',
+    'docker compose -f docker-compose.gpu.yml up -d --build',
+)
+
+
+def is_docker_runtime() -> bool:
+    """Whether this process is running in the immutable GPU Docker image."""
+    return os.environ.get('LDS_RUNTIME', '').strip().lower() == DOCKER_RUNTIME
+
+
+def docker_update_payload() -> dict:
+    """Structured manual-update contract shared by check/apply endpoints."""
+    return {
+        'install_mode': 'docker',
+        'can_apply': False,
+        'manual': True,
+        'instructions': list(DOCKER_UPDATE_INSTRUCTIONS),
+    }
 
 # Top-level entries the ZIP update must NEVER overwrite or delete: user state and
 # the live runtime. A real release ZIP contains none of these (it ships only the
@@ -482,15 +510,30 @@ def _download_file(url, dest, timeout=300, on_progress=None) -> None:
 
 # --- Async release update with progress (the UI polls /api/update/progress) ---
 
-_zip_lock = threading.Lock()
+# Restart and ZIP update are mutually exclusive lifecycle transitions.  One
+# re-entrant lock backs both historical names so callers can atomically reserve
+# either transition without a check-then-act window between separate locks.
+_lifecycle_lock = threading.RLock()
+_zip_lock = _lifecycle_lock
 _zip_state: dict = {'phase': 'idle'}
-_ACTIVE_PHASES = ('downloading', 'extracting', 'installing')
+_ACTIVE_PHASES = ('downloading', 'extracting', 'installing', 'restarting')
 
 
 def zip_update_progress() -> dict:
     """A snapshot of the running (or last) release update for the progress poll."""
     with _zip_lock:
         return dict(_zip_state)
+
+
+def zip_update_in_progress() -> bool:
+    """True until an async ZIP update has either completed or failed.
+
+    ``restarting`` is deliberately active too: the worker has already swapped
+    the files at that point and a second worker must not start in the short
+    response-flush window before the process exits.
+    """
+    with _zip_lock:
+        return _zip_state.get('phase') in _ACTIVE_PHASES
 
 
 def start_zip_update(root=None) -> dict:
@@ -516,21 +559,38 @@ def start_zip_update(root=None) -> dict:
                 'reason': 'the latest release published no downloadable ZIP asset.',
                 'url': rel.get('html_url') or f'https://github.com/{repo}/releases'}
     with _zip_lock:
+        if _restart_scheduled:
+            return {'ok': False, 'restarting': True,
+                    'reason': 'A server restart is already scheduled; try again after it returns.'}
         if _zip_state.get('phase') in _ACTIVE_PHASES:
             return {'ok': True, 'async': True, **{k: _zip_state.get(k) for k in ('from', 'to', 'total')}}
         _zip_state.clear()
         _zip_state.update(phase='downloading', downloaded=0,
                           total=rel.get('zip_size') or 0,
                           **{'from': APP_VERSION, 'to': latest})
-    threading.Thread(target=_run_zip_update, args=(root, rel), daemon=True).start()
+    try:
+        threading.Thread(target=_run_zip_update, args=(root, rel), daemon=True).start()
+    except Exception as exc:
+        # Reserving the lifecycle happens before starting the worker so two
+        # requests cannot launch competing swaps.  If the runtime cannot start
+        # the thread, release that reservation immediately and report the real
+        # pre-install failure instead of leaving the UI stuck on downloading.
+        reason = f'The update worker could not start: {exc}'
+        with _zip_lock:
+            _zip_state.update(phase='error', error=reason, changed=False,
+                              restart_required=False, rolled_back=False)
+        return {'ok': False, 'async': False, 'reason': reason,
+                'from': APP_VERSION, 'to': latest,
+                'total': rel.get('zip_size') or 0}
     return {'ok': True, 'async': True, 'from': APP_VERSION, 'to': latest,
             'total': rel.get('zip_size') or 0}
 
 
 def _run_zip_update(root, rel) -> None:
     """Worker body: run the update, mirror its phase into `_zip_state`, and on
-    success schedule the restart. Any failure lands as phase 'error' (already
-    rolled back inside apply_zip_update), which the UI surfaces honestly."""
+    success schedule the restart. Apply failures land as phase ``error`` after
+    their rollback; a later restart-scheduling failure instead records that the
+    new files are installed and still require a manual restart."""
     def cb(phase, done=0, total=0):
         with _zip_lock:
             _zip_state['phase'] = phase
@@ -547,7 +607,21 @@ def _run_zip_update(root, rel) -> None:
         else:
             _zip_state.update(phase='error', error=res.get('reason'), rolled_back=True)
     if res.get('ok') and res.get('changed'):
-        schedule_restart(install_requirements=bool(res.get('deps_changed')))
+        try:
+            schedule_restart(install_requirements=bool(res.get('deps_changed')))
+        except Exception as exc:
+            # The file swap succeeded; calling this a rollback would be both
+            # inaccurate and dangerous because the process is now running old
+            # imports over new files.  Make the lifecycle inactive so a manual
+            # restart can be retried, while telling the UI that the installed
+            # update still requires that restart.
+            reason = (
+                'The update was installed, but the automatic restart could not '
+                f'be scheduled: {exc}. Restart the app manually.'
+            )
+            with _zip_lock:
+                _zip_state.update(phase='error', error=reason, changed=True,
+                                  restart_required=True, rolled_back=False)
 
 
 def _dependency_install_command(root=None, executable=None) -> list[str]:
@@ -588,15 +662,70 @@ def _restart_helper_code(py, run_py, workdir, port, *, install_requirements=Fals
     )
 
 
-def schedule_restart(delay: float = 1.2, *, install_requirements: bool = False) -> None:
-    """Relaunch the server, then hard-exit this process. A DETACHED helper waits for our
-    port to free (this process fully gone) before binding, so we never hit the Windows
-    'address already in use' rebind race a bare os.execv can trigger. The helper inherits
-    our env, so LDS_HOST/LDS_PORT and the LDS_ACCESS_TOKEN (hence the bind + the token)
-    stay identical across the restart. When ``install_requirements`` is true,
-    pip runs in that helper only after the old port is free (and therefore after
-    this process released imported package files). ``delay`` lets the HTTP
-    response flush first."""
+_restart_lock = _lifecycle_lock
+_restart_scheduled = False
+
+
+class UpdateInProgressError(RuntimeError):
+    """A manual restart was refused because a ZIP file swap owns the lifecycle."""
+
+    def __init__(self, phase):
+        self.phase = phase
+        super().__init__(f'An update is already {phase or "in progress"}.')
+
+
+def schedule_restart(delay: float = 1.2, *, install_requirements: bool = False,
+                     block_during_update: bool = False,
+                     environment_updates: dict[str, str] | None = None) -> bool:
+    """Schedule exactly one relaunch, after allowing the HTTP response to flush.
+
+    Under the Docker supervisor, exit 75 and let the launcher be the sole owner
+    of the new process.  Desktop installs use a DETACHED helper that waits for
+    our port to free, avoiding the Windows ``address already in use`` race.  The
+    helper inherits the bind/token environment and optionally installs changed
+    requirements only after the old process has released imported files.
+    Returns ``False`` when another caller already scheduled the process-lifetime
+    restart.
+    """
+    global _restart_scheduled
+    # Multiple tabs (or an update and a manual restart landing together) must
+    # never schedule competing helpers/exits.  The flag intentionally remains
+    # set: a successful restart terminates this process, so there is no valid
+    # reason to schedule another one in the same process lifetime.
+    with _restart_lock:
+        phase = _zip_state.get('phase')
+        if block_during_update and phase in _ACTIVE_PHASES:
+            raise UpdateInProgressError(phase)
+        if _restart_scheduled:
+            return False
+        if environment_updates:
+            os.environ.update({str(key): str(value)
+                               for key, value in environment_updates.items()})
+        _restart_scheduled = True
+
+    def _start_thread(target):
+        global _restart_scheduled
+        try:
+            threading.Thread(target=target, daemon=True).start()
+        except Exception:
+            # Thread creation itself failed, so no restart is pending and a
+            # later request is allowed to retry.
+            with _restart_lock:
+                _restart_scheduled = False
+            raise
+
+    if os.environ.get('LDS_RESTART_MODE', '').strip().lower() == 'supervisor':
+        def _exit_for_supervisor():
+            import time
+            time.sleep(delay)
+            # EX_TEMPFAIL is reserved here as the launcher's explicit restart
+            # signal.  The supervisor owns the only relaunch; spawning a helper
+            # as well would create two backends racing for the same port.
+            os._exit(75)
+
+        _start_thread(_exit_for_supervisor)
+        return True
+
     py = sys.executable
     run_py = os.path.abspath(sys.argv[0])
     workdir = os.path.dirname(run_py) or None
@@ -620,4 +749,5 @@ def schedule_restart(delay: float = 1.2, *, install_requirements: bool = False) 
         finally:
             os._exit(0)
 
-    threading.Thread(target=_spawn_then_exit, daemon=True).start()
+    _start_thread(_spawn_then_exit)
+    return True

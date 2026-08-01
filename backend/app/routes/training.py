@@ -9,6 +9,7 @@ ai-toolkit isn't configured, so it degrades to `{'available': False}` instead.
 import os
 import re
 from datetime import datetime
+from threading import Lock
 
 from flask import Blueprint, current_app, request, jsonify
 
@@ -26,6 +27,34 @@ from ..utils.comfyui import get_zimage_models, get_checkpoint_models
 from ._common import _map_error
 
 bp = Blueprint('training', __name__, url_prefix='/api')
+
+
+class _CloseCallbackFile:
+    """Delegate a file while running one callback on its first real close.
+
+    ``send_file`` uses a direct WSGI file wrapper.  Some servers close that
+    wrapper without invoking ``Response.call_on_close``; tying the lease to the
+    file itself keeps response concurrency slots from leaking in that path.
+    """
+
+    def __init__(self, wrapped, callback):
+        self._wrapped = wrapped
+        self._callback = callback
+        self._closed = False
+        self._close_lock = Lock()
+
+    def __getattr__(self, name):
+        return getattr(self._wrapped, name)
+
+    def close(self):
+        with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+        try:
+            self._wrapped.close()
+        finally:
+            self._callback()
 
 
 def _require_aitoolkit():
@@ -53,6 +82,29 @@ def _require_onetrainer():
     return None
 
 
+def _full_transformer_artifact_response(run):
+    """409 redirect metadata for routes that otherwise treat a file as a LoRA.
+
+    Dense checkpoints are delivered as a private Hugging Face repository.  A
+    stray/staging ``.safetensors`` file is never sufficient proof that one can
+    be deployed to ComfyUI as an adapter.
+    """
+    if not run or not ct._is_full_transformer_run(run):
+        return None
+    return jsonify({
+        'error': ('full_transformer artifacts are delivered through Hugging Face '
+                  'and cannot be imported or downloaded as a LoRA checkpoint'),
+        'training_mode': 'full_transformer',
+        'artifact_kind': (ct._run_param(run, 'artifact_kind')
+                          or 'full_transformer'),
+        'artifact_status': ct._run_param(run, 'artifact_status'),
+        'artifact_status_detail': ct._run_param(
+            run, 'artifact_status_detail'),
+        'hf_url': ct._run_param(run, 'hf_url'),
+        'status': run.status,
+    }), 409
+
+
 @bp.post('/dataset/<int:dataset_id>/train')
 def dataset_train(dataset_id):
     d = request.get_json(silent=True) or {}
@@ -72,8 +124,21 @@ def dataset_train(dataset_id):
     gate = _require_aitoolkit()
     if gate:
         return gate
-    if not svc.get_dataset(LOCAL_USER, dataset_id):
+    ds = svc.get_dataset(LOCAL_USER, dataset_id)
+    if not ds:
         return jsonify({'error': 'not found'}), 404
+    has_training_mode = 'training_mode' in d
+    try:
+        mode = lt.training_mode(
+            ds, d.get('training_mode') if has_training_mode else None)
+    except Exception as e:
+        return _map_error(e)
+    if mode == 'full_transformer':
+        return jsonify({
+            'error': ('full_transformer training is cloud-only; choose Cloud training '
+                      'or switch to LoRA'),
+            'training_mode': mode,
+        }), 400
     try:
         # steps optionnel : None → adaptatif. base_model='' → officiel ; sinon merge
         # (doit être converti d'abord). variant règle l'adapter de de-distillation.
@@ -86,6 +151,8 @@ def dataset_train(dataset_id):
             kw['vae_path'] = d.get('vae_path')
         if 'te_path' in d:
             kw['te_path'] = d.get('te_path')
+        if has_training_mode:
+            kw['training_mode'] = mode
         res = lt.launch_training(LOCAL_USER, dataset_id, steps=d.get('steps'),
                                  base_model=d.get('base_model'),
                                  variant=d.get('variant', 'turbo'),
@@ -113,9 +180,14 @@ def dataset_train_continue(dataset_id):
     gate = _require_aitoolkit()
     if gate:
         return gate
-    if not svc.get_dataset(LOCAL_USER, dataset_id):
+    ds = svc.get_dataset(LOCAL_USER, dataset_id)
+    if not ds:
         return jsonify({'error': 'not found'}), 404
     d = request.get_json(silent=True) or {}
+    # Every checkpoint in the local ai-toolkit lane is a LoRA.  Its source
+    # artifact decides the continuation mode; today's dataset selector (or a
+    # stale client body) cannot reinterpret those weights as a dense model.
+    mode = 'lora'
     # base_model/variant = base sélectionnée (absente → base persistée du run).
     kw = {'extra_steps': d.get('extra_steps', 1000)}
     if 'base_model' in d:
@@ -130,12 +202,19 @@ def dataset_train_continue(dataset_id):
         kw['from_step'] = d.get('from_step')
     if d.get('overrides') is not None:
         kw['overrides'] = d.get('overrides')
+    # Resume semantics are always explicit on the wire. Older clients safely
+    # degrade to weights-only; a full-state request must carry the opaque bundle
+    # id that the checkpoint listing advertised.
+    kw['resume_mode'] = d.get('resume_mode', 'weights_only')
+    if d.get('state_bundle_id') is not None:
+        kw['state_bundle_id'] = d.get('state_bundle_id')
     kw['masked'] = d.get('masked')
     kw['allow_unverified_weights'] = bool(d.get('allow_unverified_weights'))
     kw['allow_caption_mismatch'] = bool(d.get('allow_caption_mismatch'))
     kw['allow_uncaptioned'] = bool(d.get('allow_uncaptioned'))
     kw['allow_caption_quality'] = bool(d.get('allow_caption_quality'))
     kw['allow_not_ready'] = bool(d.get('allow_not_ready'))
+    kw['training_mode'] = mode
     try:
         res = lt.continue_training(LOCAL_USER, dataset_id, **kw)
     except Exception as e:
@@ -172,10 +251,22 @@ def dataset_train_enqueue(dataset_id):
     gate = _require_aitoolkit()
     if gate:
         return gate
-    if not svc.get_dataset(LOCAL_USER, dataset_id):
+    ds = svc.get_dataset(LOCAL_USER, dataset_id)
+    if not ds:
         return jsonify({'error': 'not found'}), 404
+    has_training_mode = 'training_mode' in d
+    try:
+        mode = lt.training_mode(
+            ds, d.get('training_mode') if has_training_mode else None)
+    except Exception as e:
+        return _map_error(e)
+    if mode == 'full_transformer':
+        return jsonify({'error': 'full_transformer training is cloud-only and cannot be queued locally',
+                        'training_mode': mode}), 400
     # base_model/variant = base CHOISIE pour le job en file (absente → persistée).
     kw = {'extra_steps': d.get('extra_steps'), 'masked': d.get('masked')}
+    if has_training_mode:
+        kw['training_mode'] = mode
     if 'base_model' in d:
         kw['base_model'] = d.get('base_model')
     if d.get('variant'):
@@ -216,9 +307,19 @@ def dataset_train_schedule(dataset_id):
     gate = _require_aitoolkit()
     if gate:
         return gate
-    if not svc.get_dataset(LOCAL_USER, dataset_id):
+    ds = svc.get_dataset(LOCAL_USER, dataset_id)
+    if not ds:
         return jsonify({'error': 'not found'}), 404
     d = request.get_json(silent=True) or {}
+    has_training_mode = 'training_mode' in d
+    try:
+        mode = lt.training_mode(
+            ds, d.get('training_mode') if has_training_mode else None)
+    except Exception as e:
+        return _map_error(e)
+    if mode == 'full_transformer':
+        return jsonify({'error': 'full_transformer training is cloud-only and cannot be scheduled locally',
+                        'training_mode': mode}), 400
     raw = str(d.get('at') or '').strip()   # datetime-local: "YYYY-MM-DDTHH:MM"
     try:
         at = datetime.fromisoformat(raw)
@@ -231,6 +332,8 @@ def dataset_train_schedule(dataset_id):
         return jsonify({'error': 'invalid schedule time'}), 400
     kw = {'extra_steps': d.get('extra_steps'), 'not_before': at.isoformat(timespec='minutes'),
           'masked': d.get('masked')}
+    if has_training_mode:
+        kw['training_mode'] = mode
     if 'base_model' in d:
         kw['base_model'] = d.get('base_model')
     if d.get('variant'):
@@ -339,7 +442,7 @@ def dataset_train_checkpoints(dataset_id):
     # training evidence without records -> record the current state as the v1
     # baseline, so versioning covers the past, not only future runs. Runs
     # BEFORE list_checkpoints so the fresh baseline annotates this response.
-    had_training = (bool(lt.list_checkpoints(LOCAL_USER, dataset_id, **kw))
+    had_training = (lt.has_local_checkpoints(LOCAL_USER, dataset_id, **kw)
                     or any((ct._run_family(r) or fam_resolved) == fam_resolved
                            for r in CloudTrainingRun.query
                            .filter_by(dataset_id=dataset_id).all()))
@@ -465,11 +568,18 @@ def dataset_train_preflight(dataset_id):
     if not svc.get_dataset(LOCAL_USER, dataset_id):
         return jsonify({'error': 'not found'}), 404
     try:
+        preflight_kw = {}
+        # Presence matters: ``?base_model=`` is the explicit official base,
+        # whereas an absent parameter means "use the persisted selection".
+        if 'base_model' in request.args:
+            preflight_kw['base_model'] = request.args.get('base_model') or ''
         return jsonify({'ok': True, **lt.training_preflight(
             LOCAL_USER, dataset_id,
             train_type=request.args.get('train_type') or None,
             variant=request.args.get('variant') or None,
-            lane=lane, masked=masked)})
+            lane=lane, masked=masked,
+            training_mode=request.args.get('training_mode') or None,
+            **preflight_kw)})
     except Exception as e:
         return _map_error(e)
 
@@ -621,7 +731,7 @@ def dataset_train_base_info(dataset_id):
     """Bases entraînables (officielle + merges Z-Image), base/variante choisies du
     dataset, et statut de conversion - pour le sélecteur du TrainingPanel."""
     gate = _require_aitoolkit()
-    if gate:
+    if gate and not capabilities.probe().get('cloud_training'):
         return gate
     ds = svc.get_dataset(LOCAL_USER, dataset_id)
     if not ds:
@@ -685,6 +795,9 @@ def dataset_train_base_info(dataset_id):
                     'converted': converted,
                     'convert': zc.convert_status(),
                     'train_type': ds.train_type or 'zimage',
+                    # First-class provenance/launch selector. Old databases are
+                    # migrated to lora and NULL test doubles resolve identically.
+                    'training_mode': lt.training_mode(ds),
                     'comfyui_configured': comfyui_configured,
                     'models_dir': str(models_dir) if models_dir else '',
                     # Réglages avancés effectifs (persistés ∪ défauts family-aware) pour
@@ -712,14 +825,23 @@ def dataset_train_settings(dataset_id):
     """Persiste un patch de réglages avancés {rank?, resolution?, save_every?} sur le
     dataset (validé + borné côté service). Renvoie les réglages effectifs résultants."""
     gate = _require_aitoolkit()
-    if gate:
+    if gate and not capabilities.probe().get('cloud_training'):
         return gate
     d = request.get_json(silent=True) or {}
     try:
         eff = lt.update_train_settings(LOCAL_USER, dataset_id, d)
     except ValueError as e:
         return _map_error(e)
-    return jsonify({'ok': True, 'train_settings': eff})
+    ds = svc.get_dataset(LOCAL_USER, dataset_id)
+    return jsonify({'ok': True, 'train_settings': eff,
+                    'training_mode': lt.training_mode(ds),
+                    'train_type': ds.train_type,
+                    'base_model': ds.train_base_model or '',
+                    'variant': (ds.train_variant
+                                or lt._default_variant_for(ds.train_type)),
+                    # Canonical post-commit state.  The UI must only flip its
+                    # Slider switch after this response confirms ``enabled=false``.
+                    'slider': lt.effective_slider_settings(ds)})
 
 
 @bp.post('/dataset/<int:dataset_id>/train/slider')
@@ -1143,6 +1265,7 @@ def dataset_train_preset_apply(dataset_id):
     if not ds:
         return jsonify({'error': 'not found'}), 404
     applied_id = None
+    applied_scope = None
     if d.get('preset_id') is not None:
         raw_id = d.get('preset_id')
         applied_id = raw_id
@@ -1156,6 +1279,15 @@ def dataset_train_preset_apply(dataset_id):
                 return scoped
             settings = dict(builtin.get('settings') or {})
             applied_id = builtin['id']
+            applied_scope = {
+                'preset_id': applied_id,
+                'train_type': builtin.get('train_type'),
+                'dataset_kind': builtin.get('dataset_kind'),
+                'variants': builtin.get('variants') or [],
+                'selected_variant': (
+                    d.get('variant') or ds.train_variant
+                    or lt._default_variant_for(ds.train_type or 'zimage')),
+            }
         else:
             try:
                 numeric_id = int(raw_id)
@@ -1190,12 +1322,22 @@ def dataset_train_preset_apply(dataset_id):
             if not isinstance(settings, dict):
                 settings = {}
             applied_id = row.id
+            applied_scope = {
+                'preset_id': applied_id,
+                'train_type': row.train_type,
+                'dataset_kind': row.dataset_kind,
+                'variants': row_variants,
+                'selected_variant': (
+                    d.get('variant') or ds.train_variant
+                    or lt._default_variant_for(ds.train_type or 'zimage')),
+            }
     else:
         settings = d.get('settings')
         if not isinstance(settings, dict):
             return jsonify({'error': "'settings' must be an object"}), 400
     try:
-        eff, ignored, rejected = lt.apply_train_settings_dict(LOCAL_USER, dataset_id, settings)
+        eff, ignored, rejected = lt.apply_train_settings_dict(
+            LOCAL_USER, dataset_id, settings, preset_scope=applied_scope)
     except ValueError as e:
         return _map_error(e)
     return jsonify({'ok': True, 'preset_id': applied_id,
@@ -1387,7 +1529,12 @@ def dataset_train_import(dataset_id):
     if body.get('cloud_run_id'):
         from ..models import CloudTrainingRun
         crun = CloudTrainingRun.query.get(int(body['cloud_run_id']))
-        if not crun or crun.dataset_id != dataset_id or not crun.staging_dir:
+        if not crun or crun.dataset_id != dataset_id:
+            return jsonify({'error': 'unknown cloud run'}), 404
+        dense_response = _full_transformer_artifact_response(crun)
+        if dense_response:
+            return dense_response
+        if not crun.staging_dir:
             return jsonify({'error': 'unknown cloud run'}), 404
         kw['src_dir'] = crun.staging_dir
         kw['version'] = ct._run_param(crun, 'version')
@@ -1424,7 +1571,12 @@ def dataset_train_cloud(dataset_id):
     if gate:
         return gate
     d = request.get_json(silent=True) or {}
+    ds = svc.get_dataset(LOCAL_USER, dataset_id)
+    if not ds:
+        return jsonify({'error': 'not found'}), 404
     try:
+        mode = lt.training_mode(
+            ds, d.get('training_mode') if 'training_mode' in d else None)
         res = ct.launch_cloud_training(
             LOCAL_USER, dataset_id,
             # No hardcoded 'turbo' default: an absent variant now resolves to
@@ -1433,6 +1585,7 @@ def dataset_train_cloud(dataset_id):
             base_model=d.get('base_model', ''),
             variant=d.get('variant'),
             train_type=d.get('train_type'),
+            training_mode=mode,
             masked=d.get('masked'),
             allow_caption_mismatch=bool(d.get('allow_caption_mismatch')),
             allow_uncaptioned=bool(d.get('allow_uncaptioned')),
@@ -1560,10 +1713,25 @@ def dataset_train_cloud_continue():
         res = ct.continue_cloud_run(LOCAL_USER, int(d.get('run_id') or 0),
                                     extra_steps=d.get('extra_steps', 1000),
                                     from_step=d.get('from_step'),
-                                    overrides=d.get('overrides'))
+                                    overrides=d.get('overrides'),
+                                    resume_mode=d.get('resume_mode', 'weights_only'),
+                                    state_bundle_id=d.get('state_bundle_id'))
     except Exception as e:
         return _map_error(e)
     return jsonify({'ok': True, **res})
+
+
+@bp.post('/dataset/train/cloud/recheck-delivery')
+def dataset_train_cloud_recheck_delivery():
+    """Re-verify one dense run's Hugging Face delivery without renting a GPU."""
+    body = request.get_json(silent=True) or {}
+    if body.get('run_id') in (None, ''):
+        return jsonify({'error': 'run_id is required'}), 400
+    try:
+        result = ct.recheck_full_transformer_delivery(body['run_id'])
+    except Exception as exc:
+        return _map_error(exc)
+    return jsonify(result)
 
 
 @bp.post('/dataset/<int:dataset_id>/train/cloud/continue-local')
@@ -1576,10 +1744,15 @@ def dataset_train_cloud_continue_local(dataset_id):
     gate = _require_cloud()
     if gate:
         return gate
-    if not svc.get_dataset(LOCAL_USER, dataset_id):
+    ds = svc.get_dataset(LOCAL_USER, dataset_id)
+    if not ds:
         return jsonify({'error': 'not found'}), 404
     d = request.get_json(silent=True) or {}
-    kw = {'extra_steps': d.get('extra_steps', 1000)}
+    # The seed comes from the local lane, whose checkpoints are all LoRAs.
+    # Freeze the source artifact kind instead of consulting mutable UI state.
+    mode = 'lora'
+    kw = {'extra_steps': d.get('extra_steps', 1000),
+          'training_mode': mode}
     if 'base_model' in d:
         kw['base_model'] = d.get('base_model')
     if d.get('variant'):
@@ -1590,6 +1763,9 @@ def dataset_train_cloud_continue_local(dataset_id):
         kw['from_step'] = d.get('from_step')
     if d.get('overrides') is not None:
         kw['overrides'] = d.get('overrides')
+    kw['resume_mode'] = d.get('resume_mode', 'weights_only')
+    if d.get('state_bundle_id') is not None:
+        kw['state_bundle_id'] = d.get('state_bundle_id')
     if d.get('gpu_name'):
         kw['gpu_name'] = d.get('gpu_name')
     kw['masked'] = d.get('masked')
@@ -1612,11 +1788,16 @@ def dataset_train_cloud_offers(dataset_id):
     gate = _require_cloud()
     if gate:
         return gate
+    ds = svc.get_dataset(LOCAL_USER, dataset_id)
+    if not ds:
+        return jsonify({'error': 'not found'}), 404
     try:
+        mode = lt.training_mode(ds, request.args.get('training_mode') or None)
         data = ct.gpu_tiers(LOCAL_USER, dataset_id,
                             train_type=request.args.get('train_type'),
                             variant=request.args.get('variant'),
-                            steps=request.args.get('steps', type=int))
+                            steps=request.args.get('steps', type=int),
+                            training_mode=mode)
     except Exception as e:
         return _map_error(e)
     return jsonify({'ok': True, **data})
@@ -1893,6 +2074,9 @@ def dataset_train_cloud_checkpoint(dataset_id):
         run = ct.latest_run_for(dataset_id, request.args.get('train_type'))
     if not run:
         abort(404)
+    dense_response = _full_transformer_artifact_response(run)
+    if dense_response:
+        return dense_response
     # ?filename targets ONE harvested epoch in this run's staging (the ◉ Graph's
     # per-checkpoint ⬇). Path-guarded: basename only, and it must really be a
     # .safetensors sitting in THIS run's staging_dir. Absent → the run's final
@@ -2032,6 +2216,109 @@ def train_checkpoint_images_delete(record_id, step):
         return jsonify({'error': 'Could not delete these images — a file is '
                                  'locked or unreachable. Try again.'}), 500
     return jsonify({'ok': True, **out})
+
+
+@bp.get('/train/run/<int:record_id>/timeline')
+def train_run_timeline(record_id):
+    """Render-equivalent images across checkpoints, split into safe series."""
+    from ..services import checkpoint_timeline as timeline
+    try:
+        return jsonify(timeline.checkpoint_timeline(record_id))
+    except LookupError as exc:
+        return jsonify({'error': str(exc)}), 404
+
+
+@bp.get('/train/run/<int:record_id>/timeline/<series_id>/gif')
+def train_run_timeline_gif(record_id, series_id):
+    """Download a bounded animated GIF for one server-resolved timeline."""
+    from flask import send_file
+    from ..services import checkpoint_timeline as timeline
+    if not timeline.acquire_gif_response_slot():
+        response = jsonify({'error': 'too many timeline GIF downloads are active'})
+        response.status_code = 429
+        response.headers['Retry-After'] = '1'
+        return response
+    try:
+        output, filename = timeline.render_timeline_gif(
+            record_id,
+            series_id,
+            duration_ms=(request.args.get('duration_ms')
+                         if request.args.get('duration_ms') is not None
+                         else request.args.get('duration')),
+            fade_frames=(request.args.get('fade_frames')
+                         if request.args.get('fade_frames') is not None
+                         else request.args.get('fade')),
+            max_edge=request.args.get('max_edge'),
+        )
+    except timeline.GifRenderBusyError as exc:
+        timeline.release_gif_response_slot()
+        response = jsonify({'error': str(exc)})
+        response.status_code = 429
+        response.headers['Retry-After'] = '1'
+        return response
+    except timeline.GifRenderTooLargeError as exc:
+        timeline.release_gif_response_slot()
+        return jsonify({'error': str(exc)}), 413
+    except LookupError as exc:
+        timeline.release_gif_response_slot()
+        return jsonify({'error': str(exc)}), 404
+    except Exception:
+        timeline.release_gif_response_slot()
+        raise
+
+    leased_output = _CloseCallbackFile(
+        output, timeline.release_gif_response_slot)
+
+    try:
+        response = send_file(leased_output, mimetype='image/gif', as_attachment=True,
+                             download_name=filename, max_age=0)
+    except Exception:
+        leased_output.close()
+        raise
+    response.call_on_close(leased_output.close)
+    return response
+
+
+@bp.get('/train/run/<int:record_id>/timeline/<series_id>/frame/<int:image_id>')
+def train_run_timeline_frame(record_id, series_id, image_id):
+    """Serve a metadata-free bounded WebP for timeline playback and WebM."""
+    from flask import send_file
+    from ..services import checkpoint_timeline as timeline
+    if not timeline.acquire_preview_response_slot():
+        response = jsonify({'error': 'too many timeline previews are active'})
+        response.status_code = 429
+        response.headers['Retry-After'] = '1'
+        return response
+    try:
+        output, filename = timeline.render_timeline_preview(
+            record_id, series_id, image_id)
+    except timeline.GifRenderBusyError as exc:
+        timeline.release_preview_response_slot()
+        response = jsonify({'error': str(exc)})
+        response.status_code = 429
+        response.headers['Retry-After'] = '1'
+        return response
+    except timeline.GifRenderTooLargeError as exc:
+        timeline.release_preview_response_slot()
+        return jsonify({'error': str(exc)}), 413
+    except LookupError as exc:
+        timeline.release_preview_response_slot()
+        return jsonify({'error': str(exc)}), 404
+    except Exception:
+        timeline.release_preview_response_slot()
+        raise
+
+    leased_output = _CloseCallbackFile(
+        output, timeline.release_preview_response_slot)
+
+    try:
+        response = send_file(leased_output, mimetype='image/webp', as_attachment=False,
+                             download_name=filename, max_age=300, conditional=True)
+    except Exception:
+        leased_output.close()
+        raise
+    response.call_on_close(leased_output.close)
+    return response
 
 
 @bp.get('/train/run/<int:record_id>/images')

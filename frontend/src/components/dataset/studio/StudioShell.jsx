@@ -28,7 +28,7 @@ import LoraPicker from './LoraPicker';
 import LegacyDatasetStudio from './LegacyDatasetStudio';
 import ComparisonStudio from './ComparisonStudio';
 
-export default function StudioShell({ preselectDataset = null, datasetId = null }) {
+export default function StudioShell({ preselectDataset = null, preselectFamily = null, datasetId = null }) {
   // `datasetId` legacy est un alias de preselectDataset.
   const preselect = preselectDataset ?? datasetId;
 
@@ -57,7 +57,7 @@ export default function StudioShell({ preselectDataset = null, datasetId = null 
   const soloDatasetId = selection.length === 1 ? selection[0].dataset_id : preselect;
   // Famille de la LIGNE cochée → le studio solo s'ouvre sur la bonne pipeline
   // (ex. cocher « Lola [KREA] » ouvre Krea, pas le train_type par défaut du dataset).
-  const soloFamily = selection.length === 1 ? selection[0].family : null;
+  const soloFamily = selection.length === 1 ? selection[0].family : preselectFamily;
 
   return (
     <div className="flex flex-col gap-3">
@@ -72,7 +72,8 @@ export default function StudioShell({ preselectDataset = null, datasetId = null 
 
       {/* Ancre de la barre de raccourcis du bas (StudioActionBar → 🧬 LoRAs). */}
       <div id="st-loras" className="scroll-mt-16">
-        <LoraPicker preselectDataset={preselect} onSelectionChange={onSelectionChange} />
+        <LoraPicker preselectDataset={preselect} preselectFamily={preselectFamily}
+          onSelectionChange={onSelectionChange} />
       </div>
 
       {comparison ? (

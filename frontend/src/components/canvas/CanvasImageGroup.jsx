@@ -42,7 +42,7 @@ import CanvasImageNode from './CanvasImageNode';
    wide one. */
 
 export default function CanvasImageGroup({ group, datasetId, laneName, boardScale = 1,
-  onClose, onOpen, onCloseGroup, dropHint = null }) {
+  onClose, onOpen, onCloseGroup, onExportGrid, dropHint = null }) {
   const barH = groupBarHeight(boardScale, group.h);
   const count = group.members.length;
   const anchorId = group.members[0]?.node.imageId;
@@ -72,6 +72,16 @@ export default function CanvasImageGroup({ group, datasetId, laneName, boardScal
           className="min-w-0 flex-1 truncate font-semibold text-content-muted tabular-nums">
           <span aria-hidden>⠿</span> {count} images
         </span>
+        <button type="button"
+          onClick={(e) => { e.stopPropagation(); onExportGrid?.(group); }}
+          onPointerDown={(e) => e.stopPropagation()}
+          data-testid="canvas-group-export-grid"
+          style={{ height: barH, fontSize: Math.max(9, barH * 0.36) }}
+          title={`Export these ${count} images as a grid`}
+          aria-label={`Export grid from these ${count} images`}
+          className="flex shrink-0 items-center gap-1 rounded px-1.5 font-semibold text-indigo-200 hover:bg-indigo-500/25 hover:text-white">
+          <span aria-hidden>▦</span> Export grid
+        </button>
         {/* ✕ on a GROUP closes N pictures at once, so it says N and says what
             happens to them. A destructive action has to be readable before it
             is pressed, not after. */}

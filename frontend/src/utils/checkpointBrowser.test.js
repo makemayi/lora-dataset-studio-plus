@@ -49,7 +49,7 @@ test('cloud payload always sends the selected base to the server guard', () => {
   assert.deepEqual(cloudTrainingLaunchPayload({
     baseModel: '', variant: 'turbo', trainType: 'zimage', masked: false,
   }), {
-    base_model: '', variant: 'turbo', train_type: 'zimage', masked: false,
+    base_model: '', variant: 'turbo', train_type: 'zimage', training_mode: 'lora', masked: false,
   });
   assert.equal(cloudTrainingLaunchPayload({
     baseModel: 'custom/model.safetensors', variant: 'base', trainType: 'zimage',

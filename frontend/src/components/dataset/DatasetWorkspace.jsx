@@ -1997,7 +1997,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
           onClose={() => setFolderBrowseOpen(false)} />
       )}
       {captionOptionsOpen && (
-        <CaptionOptionsPopover datasetId={d.id}
+        <CaptionOptionsPopover datasetId={d.id} trainType={d.train_type}
           onClose={() => setCaptionOptionsOpen(false)} />
       )}
       {reviewQueue && reviewQueue.length > 0 && (

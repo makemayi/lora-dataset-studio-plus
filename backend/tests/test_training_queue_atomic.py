@@ -489,6 +489,7 @@ def test_queued_continue_replays_captured_base_variant_and_confirmation(monkeypa
         'allow_uncaptioned': False,
         'allow_caption_quality': False,
         'allow_not_ready': False,
+        'training_mode': 'lora',
         '_allow_dead_predecessor': True,
     }
 
@@ -511,6 +512,9 @@ def test_queued_continue_accepts_dead_predecessor_flag(monkeypatch):
         lt, 'list_checkpoints',
         lambda *_a, **_kw: [{'step': 1000, 'filename': 'ck.safetensors'}])
     monkeypatch.setattr(
+        lt, '_seed_continuation_from',
+        lambda *_a, **_kw: 'archived-run')
+    monkeypatch.setattr(
         lt, 'launch_training',
         lambda *_a, **kw: launched.update(kw) or {'started': True})
 
@@ -522,6 +526,7 @@ def test_queued_continue_accepts_dead_predecessor_flag(monkeypatch):
     assert launched['base_model'] == ''
     assert launched['variant'] == 'base'
     assert launched['train_type'] == 'zimage'
+    assert launched['training_mode'] == 'lora'
 
 
 def test_stop_holds_queue_lock_during_kill_before_watcher_advance(monkeypatch):

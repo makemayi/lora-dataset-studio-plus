@@ -187,8 +187,12 @@ def test_start_route_rejects_client_options_before_the_service(client, monkeypat
     assert query.get_json()['error'] == 'This action does not accept options.'
 
 
-@pytest.mark.parametrize('address', ['127.0.0.1', '::1', '::ffff:127.0.0.1'])
-def test_start_route_accepts_only_the_explicit_loopback_addresses(client, monkeypatch, address):
+@pytest.mark.parametrize('address', [
+    '127.0.0.1', '::1', '::ffff:127.0.0.1',
+    '192.168.1.20', '100.102.48.85',
+])
+def test_start_route_accepts_clients_allowed_by_the_global_access_guard(
+        client, monkeypatch, address):
     from app.services import comfyui_control
     monkeypatch.setattr(comfyui_control, 'start_comfyui',
                         lambda: {'ok': True, 'reachable': True})
@@ -198,17 +202,6 @@ def test_start_route_accepts_only_the_explicit_loopback_addresses(client, monkey
 
     assert response.status_code == 200
     assert response.get_json() == {'ok': True, 'reachable': True}
-
-
-def test_start_route_rejects_non_loopback_even_when_global_lan_guard_is_open(client, monkeypatch):
-    from app.services import comfyui_control
-    monkeypatch.setattr(comfyui_control, 'start_comfyui', _no_spawn)
-
-    response = client.post('/api/setup/comfyui/start',
-                           environ_overrides={'REMOTE_ADDR': '192.168.1.20'})
-
-    assert response.status_code == 403
-    assert response.get_json()['error'] == 'This action is only available from this computer.'
 
 
 def test_launch_error_never_returns_an_installation_path(tmp_path, monkeypatch):
@@ -289,6 +282,28 @@ def test_history_probe_fails_closed_except_for_a_connection_refusal(monkeypatch)
 
     monkeypatch.setattr(comfyui_control.requests, 'get', refused)
     assert comfyui_control._history_state() == comfyui_control._HISTORY_DOWN
+
+
+def test_history_probe_treats_connect_timeout_as_down(monkeypatch):
+    from app.services import comfyui_control
+
+    def connect_timeout(*_args, **_kwargs):
+        raise comfyui_control.requests.ConnectTimeout()
+
+    monkeypatch.setattr(comfyui_control.requests, 'get', connect_timeout)
+
+    assert comfyui_control._history_state() == comfyui_control._HISTORY_DOWN
+
+
+def test_history_probe_treats_read_timeout_as_occupied(monkeypatch):
+    from app.services import comfyui_control
+
+    def read_timeout(*_args, **_kwargs):
+        raise comfyui_control.requests.ReadTimeout()
+
+    monkeypatch.setattr(comfyui_control.requests, 'get', read_timeout)
+
+    assert comfyui_control._history_state() == comfyui_control._HISTORY_OCCUPIED
 
 
 def test_spawn_environment_excludes_lds_and_secret_variables(tmp_path, monkeypatch):

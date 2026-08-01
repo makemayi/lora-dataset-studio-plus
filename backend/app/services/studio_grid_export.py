@@ -45,6 +45,7 @@ MAX_CANVAS_SIDE = 8000
 # Allowed long-side per tile (2 crans, as specified). Anything else clamps here.
 CELL_SIZES = (512, 768)
 DEFAULT_CELL_SIZE = 512
+MAX_CANVAS_IMAGES = 100
 # Prompt is truncated to this many chars when the user opts to include it.
 _PROMPT_MAX_CHARS = 200
 
@@ -219,6 +220,73 @@ def collect_grid(user_id, dataset_id, *, family=None, run_seed=None, prompt=None
     }
 
 
+def collect_canvas_grid(user_id, dataset_id, image_ids) -> dict | None:
+    """Collect an explicitly ordered Canvas group without trusting client paths."""
+    ds = fds.get_dataset(user_id, dataset_id)
+    if not ds:
+        return None
+    if not isinstance(image_ids, list) or not image_ids:
+        raise ValueError('image_ids must be a non-empty list')
+    if len(image_ids) > MAX_CANVAS_IMAGES:
+        raise ValueError(f'a Canvas grid is limited to {MAX_CANVAS_IMAGES} images')
+    if any(isinstance(v, bool) or not isinstance(v, int) or v <= 0 for v in image_ids):
+        raise ValueError('image_ids must contain positive integers')
+    if len(set(image_ids)) != len(image_ids):
+        raise ValueError('image_ids must not contain duplicates')
+    rows = LoraTestImage.query.filter(LoraTestImage.id.in_(image_ids)).all()
+    by_id = {row.id: row for row in rows}
+    if len(by_id) != len(image_ids):
+        raise ValueError('one or more Canvas images were not found')
+    ds_dir = os.path.abspath(fds._dataset_dir(dataset_id))
+    paths = []
+    labels = []
+    for image_id in image_ids:
+        row = by_id[image_id]
+        if row.dataset_id != dataset_id:
+            raise ValueError('one or more Canvas images belong to another dataset')
+        if row.status != 'done' or not row.filename:
+            raise GridExportEmpty('one or more Canvas images are not ready')
+        if os.path.isabs(row.filename):
+            raise ValueError('invalid Canvas image filename')
+        path = os.path.abspath(os.path.join(ds_dir, row.filename))
+        try:
+            inside = os.path.commonpath((ds_dir, path)) == ds_dir
+        except ValueError:
+            inside = False
+        if not inside:
+            raise ValueError('invalid Canvas image filename')
+        if not os.path.isfile(path):
+            raise GridExportEmpty('one or more Canvas image files are missing')
+        paths.append(path)
+        parts = [f'#{row.id}']
+        if row.record_id is not None:
+            parts.append(f'run #{row.record_id}')
+        if row.z_model:
+            model_name = lts._basename(row.z_model).rsplit('.', 1)[0]
+            if model_name:
+                parts.append(model_name)
+        if row.step is not None:
+            parts.append(f'ckpt {row.step}')
+        if row.steps is not None:
+            gen_steps = str(row.steps)
+            if row.steps2 is not None:
+                gen_steps += f'+{row.steps2}'
+            parts.append(f'{gen_steps} steps')
+        if row.strength is not None:
+            parts.append(f'×{_fmt_strength(row.strength)}')
+        seed = row.seed if row.seed is not None else row.run_seed
+        if seed is not None:
+            parts.append(f'seed {seed}')
+        labels.append(' · '.join(parts))
+    title = (ds.trigger_word or ds.name or f'dataset {dataset_id}').strip()
+    return {
+        'title': title, 'subtitle': f'{len(paths)} Canvas images', 'family': None,
+        'aspect': 'canvas', 'run_seed': None, 'prompt': None, 'n_cells': len(paths),
+        'blocks': [{'header': 'CANVAS GROUP', 'col_labels': labels,
+                    'rows': [{'label': 'Images', 'cells': paths}]}],
+    }
+
+
 def _natural_key(s: str):
     """Split a label into text/number chunks so 'v2' < 'v10' (numeric-aware sort,
     like the frontend's localeCompare(..., {numeric:true}))."""
@@ -273,6 +341,14 @@ def _load_rgb(path, cache):
     return img
 
 
+def _image_size(path):
+    try:
+        with Image.open(path) as im:
+            return im.size
+    except Exception:
+        return None
+
+
 def _plan(blocks, cell_long, draw, cache):
     """Compute geometry for a candidate tile long-side. Returns a dict with the cell
     box per block, the shared label-column width, per-block sizes and total (W, H)."""
@@ -298,9 +374,9 @@ def _plan(blocks, cell_long, draw, cache):
         for row in b['rows']:
             found = False
             for p in row['cells']:
-                im = _load_rgb(p, cache) if p else None
-                if im:
-                    iw, ih = im.size
+                size = _image_size(p) if p else None
+                if size:
+                    iw, ih = size
                     r = cell_long / max(iw, ih)
                     cw, ch = max(1, round(iw * r)), max(1, round(ih * r))
                     found = True
@@ -369,6 +445,52 @@ def render_grid_image(title, subtitle, blocks, *, prompt=None, footer_text=FOOTE
         img.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
         downscaled = True
     return img, downscaled
+
+
+def render_canvas_strip_image(title, subtitle, paths, labels, *, footer_text=FOOTER_TEXT,
+                              cell_size=DEFAULT_CELL_SIZE, max_side=MAX_CANVAS_SIDE):
+    """Render a Canvas group at a shared height while preserving every ratio.
+
+    Sources are opened one at a time, so a large group never retains all full-size
+    RGB images in memory simultaneously.
+    """
+    sizes = [_image_size(path) for path in paths]
+    if not sizes or any(not size for size in sizes):
+        raise GridExportEmpty('one or more Canvas images could not be read')
+    height = int(cell_size)
+    gap, margin, label_h, banner_h = 10, 28, 76, 100
+
+    def widths_for(h):
+        return [max(1, round(w * h / h0)) for w, h0 in sizes]
+
+    widths = widths_for(height)
+    available = max_side - 2 * margin - gap * max(0, len(paths) - 1)
+    downscaled = sum(widths) > available
+    if downscaled:
+        height = max(48, int(height * available / max(1, sum(widths))))
+        widths = widths_for(height)
+    canvas_w = min(max_side, 2 * margin + sum(widths) + gap * max(0, len(paths) - 1))
+    canvas_h = banner_h + label_h + height + margin
+    image = Image.new('RGB', (canvas_w, canvas_h), _BG)
+    draw = ImageDraw.Draw(image)
+    draw.text((margin, 18), title or '', font=_font(32), fill=_TEXT)
+    draw.text((margin, 57), subtitle or '', font=_font(18), fill=_MUTED)
+    if footer_text:
+        fw = draw.textlength(footer_text, font=_font(14))
+        draw.text((canvas_w - margin - fw, 24), footer_text, font=_font(14), fill=_MUTED)
+    x = margin
+    for path, label, width in zip(paths, labels, widths):
+        label_font = _font(14)
+        lines = _fit_lines(draw, str(label), label_font, max(1, width - 4), max_lines=4)
+        for line_no, line in enumerate(lines):
+            draw.text((x, banner_h + line_no * 18), line, font=label_font, fill=_HEADER)
+        with Image.open(path) as source:
+            tile = source.convert('RGB')
+            tile.thumbnail((width, height), Image.Resampling.LANCZOS)
+            image.paste(tile, (x, banner_h + label_h))
+            tile.close()
+        x += width + gap
+    return image, downscaled
 
 
 def _compute_dims(title, subtitle, prompt, footer_text, plan, draw):
@@ -489,7 +611,7 @@ def _sanitize_name(s: str) -> str:
     return keep.strip('_') or 'grid'
 
 
-def export_grid(user_id, dataset_id, *, family=None, run_seed=None, prompt=None,
+def export_grid(user_id, dataset_id, *, family=None, run_seed=None, prompt=None, image_ids=None,
                 aspect=None, include_prompt=False, cell_size=None, fmt='jpeg',
                 footer=True) -> tuple[bytes, str, dict]:
     """Collect ONE run's grid, render it, encode it. Returns (bytes, mime, meta).
@@ -499,8 +621,9 @@ def export_grid(user_id, dataset_id, *, family=None, run_seed=None, prompt=None,
     unknown run; returns None-collect (unknown dataset) as ValueError to the route
     which has already 404'd. `include_prompt` defaults False (prompts can be
     personal/NSFW); when True the prompt is truncated to _PROMPT_MAX_CHARS."""
-    grid = collect_grid(user_id, dataset_id, family=family, run_seed=run_seed,
-                        prompt=prompt, aspect=aspect)
+    grid = (collect_canvas_grid(user_id, dataset_id, image_ids) if image_ids is not None
+            else collect_grid(user_id, dataset_id, family=family, run_seed=run_seed,
+                              prompt=prompt, aspect=aspect))
     if grid is None:
         raise ValueError('dataset not found')
 
@@ -515,10 +638,17 @@ def export_grid(user_id, dataset_id, *, family=None, run_seed=None, prompt=None,
         p = grid['prompt'].strip()
         shown_prompt = (p[:_PROMPT_MAX_CHARS].rstrip() + '…') if len(p) > _PROMPT_MAX_CHARS else p
 
-    image, downscaled = render_grid_image(
-        grid['title'], grid['subtitle'], grid['blocks'],
-        prompt=shown_prompt, footer_text=(FOOTER_TEXT if footer else None),
-        cell_size=cs)
+    if image_ids is not None:
+        block = grid['blocks'][0]
+        image, downscaled = render_canvas_strip_image(
+            grid['title'], grid['subtitle'], block['rows'][0]['cells'],
+            block['col_labels'], footer_text=(FOOTER_TEXT if footer else None),
+            cell_size=cs)
+    else:
+        image, downscaled = render_grid_image(
+            grid['title'], grid['subtitle'], grid['blocks'],
+            prompt=shown_prompt, footer_text=(FOOTER_TEXT if footer else None),
+            cell_size=cs)
 
     ext = 'png' if str(fmt).lower() == 'png' else 'jpg'
     mime = 'image/png' if ext == 'png' else 'image/jpeg'
@@ -530,7 +660,8 @@ def export_grid(user_id, dataset_id, *, family=None, run_seed=None, prompt=None,
     data = buf.getvalue()
 
     asp_tag = _sanitize_name(grid['aspect']) if grid['aspect'] and grid['aspect'] != 'all' else 'all'
-    name = f'lora-grid_{_sanitize_name(grid["title"])}_{asp_tag}_seed{grid["run_seed"]}.{ext}'
+    suffix = 'canvas' if image_ids is not None else f'{asp_tag}_seed{grid["run_seed"]}'
+    name = f'lora-grid_{_sanitize_name(grid["title"])}_{suffix}.{ext}'
     meta = {'downscaled': downscaled, 'width': image.size[0], 'height': image.size[1],
             'n_cells': grid['n_cells'], 'n_blocks': len(grid['blocks']),
             'download_name': name, 'format': ext}

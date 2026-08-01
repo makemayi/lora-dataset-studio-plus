@@ -103,7 +103,9 @@ def test_import_suffixes_deployed_name_with_version(app, ds_with_images, tmp_pat
         assert os.path.basename(dest) == (
             'lora_prov_000001000_Z-Image-Turbo.safetensors')
         # registered BEFORE the file was written -> _rl<record id> + _v1 suffix
-        rec = reg.register_launch(LOCAL_USER, ds_id, 'zimage', 'local')
+        rec = reg.register_launch(
+            LOCAL_USER, ds_id, 'zimage', 'local',
+            base_model='', variant='turbo')
         os.utime(ck)                        # file newer than the record
         dest = lt.import_checkpoint(LOCAL_USER, ds_id, ck.name)
         assert os.path.basename(dest) == (
@@ -140,6 +142,30 @@ def test_record_for_mtime_prefers_oldest_for_preregistry_files(app, ds_with_imag
         assert rec.id == cloud.id
 
 
+def test_record_for_mtime_scopes_local_producer_by_base_variant_and_source(
+        app, ds_with_images):
+    """A later unrelated launch must not steal a local checkpoint by mtime."""
+    import time
+    from app.services import checkpoint_registry as reg
+    ds_id, _ = ds_with_images
+    with app.app_context():
+        producer = reg.register_launch(
+            LOCAL_USER, ds_id, 'krea', 'local',
+            base_model='', variant='raw')
+        reg.register_launch(
+            LOCAL_USER, ds_id, 'krea', 'cloud',
+            base_model='', variant='raw', cloud_run_id=77)
+        reg.register_launch(
+            LOCAL_USER, ds_id, 'krea', 'local',
+            base_model='C:/models/other.safetensors', variant='turbo')
+
+        rec = reg.record_for_mtime(
+            ds_id, 'krea', time.time() + 60,
+            base_model='', variant='raw', source=('local', 'legacy'))
+
+        assert rec.id == producer.id
+
+
 def test_ensure_baseline_retrofits_pretrained_datasets(app, ds_with_images):
     """Deployed-project rule: a dataset trained BEFORE the registry existed
     (evidence: checkpoints/cloud runs, zero records) gets a retroactive v1
@@ -156,6 +182,41 @@ def test_ensure_baseline_retrofits_pretrained_datasets(app, ds_with_images):
         assert rec.version == 1 and rec.source == 'legacy'
         reg.ensure_baseline(LOCAL_USER, ds_id, 'zimage', had_training=True)
         assert reg.latest_record(ds_id, 'zimage').id == rec.id   # no duplicate
+
+
+def test_new_legacy_baseline_annotates_the_local_lane(
+        app, ds_with_images, tmp_path):
+    """Baseline rows lack historical base/variant facts but still annotate v1."""
+    from app import config as cfg
+    from app.services import checkpoint_registry as reg
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as lt
+    ds_id, _ = ds_with_images
+    with app.app_context():
+        aitk = tmp_path / 'aitk'
+        aitk.mkdir()
+        cfg.save_config({'aitoolkit': {'dir': str(aitk)}})
+        ds = svc.get_dataset(LOCAL_USER, ds_id)
+        ds.train_type = 'zimage'
+        ds.train_variant = 'turbo'
+        svc.db.session.commit()
+        run = lt._run_dir(
+            LOCAL_USER, ds_id, base_model=None,
+            family='zimage', variant='turbo')
+        os.makedirs(run, exist_ok=True)
+        checkpoint = os.path.join(
+            run, 'lora_prov_000001000.safetensors')
+        with open(checkpoint, 'wb') as stream:
+            stream.write(b'WEIGHTS')
+
+        reg.ensure_baseline(
+            LOCAL_USER, ds_id, 'zimage', had_training=True)
+        listed = lt.list_checkpoints(
+            LOCAL_USER, ds_id, base_model=None,
+            family='zimage', variant='turbo')
+
+        assert listed[0]['version'] == 1
+        assert listed[0]['source'] == 'legacy'
 
 
 def test_cloud_checkpoints_lists_synced_saves_and_checks_files(app, ds_with_images, tmp_path):

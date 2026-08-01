@@ -18,8 +18,8 @@ from ..gpu_window import gpu_exclusive_vision_window
 from ..services import face_dataset_service as fds
 from ..services import lora_test_studio as lts
 from ..utils.comfyui import get_zimage_models
-from ._common import (_map_error, _require_comfyui, _studio_arch_mismatch_response,
-                      _studio_missing_response)
+from ._common import (_map_error, _require_comfyui, _require_no_stalled_comfyui,
+                      _studio_arch_mismatch_response, _studio_missing_response)
 
 bp = Blueprint('studio', __name__, url_prefix='/api/studio')
 
@@ -138,6 +138,9 @@ def studio_run():
     gate = _require_comfyui()
     if gate:
         return gate
+    gate = _require_no_stalled_comfyui()
+    if gate:
+        return gate
     d = request.get_json(silent=True) or {}
     try:
         res = lts.create_comparison_run(
@@ -197,6 +200,9 @@ def studio_run_confirm_comfyui_restart(run_id):
 @bp.post('/run/<run_id>/resume')
 def studio_run_resume(run_id):
     gate = _require_comfyui()
+    if gate:
+        return gate
+    gate = _require_no_stalled_comfyui()
     if gate:
         return gate
     try:

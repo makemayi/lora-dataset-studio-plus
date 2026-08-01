@@ -84,10 +84,20 @@ export function nextGroupId(nodes, anchorImageId) {
   return `${base}-${Date.now()}`;
 }
 
-/** A member's aspect, from the box the user themself sized it to. The image
- *  rows carry no pixel dimensions, and this is the better proxy anyway: it is
- *  the shape the picture is currently drawn in. */
+/** A member's aspect, from the generated image's real format when available.
+ *  Older API payloads do not carry that format, so the remembered node box is
+ *  kept as a backwards-compatible fallback. */
 const aspectOf = (n) => {
+  const match = String(n?.image?.aspect ?? '').match(
+    /^\s*(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)\s*$/,
+  );
+  if (match) {
+    const imageW = Number(match[1]);
+    const imageH = Number(match[2]);
+    if (Number.isFinite(imageW) && Number.isFinite(imageH) && imageW > 0 && imageH > 0) {
+      return imageW / imageH;
+    }
+  }
   const w = Number(n?.w);
   const h = Number(n?.h);
   if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return 1;

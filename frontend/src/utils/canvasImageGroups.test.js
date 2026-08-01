@@ -105,6 +105,26 @@ test('every member shares the anchor’s height and keeps its own aspect ratio',
   assert.equal(g.members[2].w, 160, '1:2 stays 1:2');
 });
 
+test('members use the generated image format instead of a letterboxed node box', () => {
+  const portrait = { ...node(1, SQUARE, 'g1', 0), image: { ...img(1), aspect: '9:16' } };
+  const landscape = { ...node(2, SQUARE, 'g1', 1), image: { ...img(2), aspect: '16:9' } };
+  const g = groupOf(layoutImageNodes([portrait, landscape]));
+
+  assert.deepEqual(g.members.map((member) => member.w), [180, 569]);
+  assert.equal(g.members[0].x + g.members[0].w, g.members[1].x,
+    'the real formats still meet edge to edge');
+  assert.equal(g.w, 749);
+});
+
+test('missing or invalid image formats fall back to remembered node geometry', () => {
+  const invalid = { ...node(1, { ...SQUARE, w: 480 }, 'g1', 0),
+    image: { ...img(1), aspect: '9:0' } };
+  const missing = node(2, { ...SQUARE, w: 160 }, 'g1', 1);
+  const g = groupOf(layoutImageNodes([invalid, missing]));
+
+  assert.deepEqual(g.members.map((member) => member.w), [480, 160]);
+});
+
 test('the group sits where its anchor sits — the others’ own x/y are ignored', () => {
   const g = groupOf(layoutImageNodes(trio()));
   assert.equal(g.x, 100);

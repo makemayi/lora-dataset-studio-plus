@@ -56,6 +56,15 @@ export function trainingPresetApplyPayload(preset, context = {}) {
   }
 }
 
+/** Whether applying this preset must clear a temporary manual step cap. */
+export function trainingPresetOwnsSteps(preset) {
+  const settings = preset?.settings
+  if (!settings || typeof settings !== 'object') return false
+  return ['preset_steps_per_image', 'preset_steps_min',
+    'preset_steps_max', 'preset_steps_fixed']
+    .some((key) => Number.isInteger(settings[key]) && settings[key] > 0)
+}
+
 /** Scope metadata for “Save current”. Single-recipe families deliberately omit
  * `variant`; sending their UI placeholder (`turbo`) would be invalid API data. */
 export function trainingPresetSnapshotScope({ trainType, datasetKind, variant } = {}) {

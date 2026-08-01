@@ -347,12 +347,14 @@ def _model_present(configured: str, names: list) -> bool:
     return False
 
 
-def probe_ollama_model(reachable=None) -> dict:
+def probe_ollama_model(reachable=None, model=None) -> dict:
     # `reachable` lets probe() pass the reachability it already computed, so we
     # don't re-hit /api/tags a second time (and don't pay a second blocking
-    # timeout when Ollama is configured-but-down). Called standalone -> we probe.
+    # timeout when Ollama is configured-but-down). `model` lets a per-dataset
+    # caption action verify its effective override; omitted -> the configured
+    # global vision model exactly as before. Called standalone -> we probe.
     url = (cfg.get('ollama.url') or '').rstrip('/')
-    model = cfg.get('ollama.vision_model') or ''
+    model = (cfg.get('ollama.vision_model') or '') if model is None else model
     if not url:
         return {'ok': False, 'detail': 'ollama.url not configured'}
     if not model:

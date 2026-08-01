@@ -32,16 +32,17 @@ test('the cost and Keep lines come from the engine-aware helpers', () => {
 });
 
 test('the reference picker is gated, and the reference note is rendered', () => {
-  assert.ok(modal.includes('acceptsExtraEditRefs('), 'the picker must be gated per engine');
-  assert.ok(modal.includes('editRefNote(') && modal.includes('{refNote}'),
-    'the modal must SHOW what the engine does with extra references');
+  assert.ok(modal.includes('acceptsExtraEditRefsForBatch(engines)'),
+    'the picker must be gated across the selected engine batch');
+  assert.ok(modal.includes('editRefNote(') && modal.includes('localRefNotes.map('),
+    'the modal must SHOW what each selected local engine does with extra references');
 });
 
 test('an unavailable engine renders its reason, not just a disabled button', () => {
-  assert.ok(modal.includes('current?.blocked') || modal.includes('current.blocked'),
+  assert.ok(modal.includes('selectedBlocked.map('),
     'the blocked reason must reach the render');
-  assert.ok(modal.includes('editBlockedReason(prompt, engine, '),
-    'the blocked reason must also gate the Generate button');
+  assert.ok(modal.includes('editBatchBlockedReason(prompt, engines, options)'),
+    'every selected blocked engine must gate the Generate button');
 });
 
 test('the workspace hands the modal the SAME capabilities the generation panel reads', () => {
@@ -63,17 +64,39 @@ test('the engine pills wrap instead of overflowing a 400px screen', () => {
   assert.ok(pills.length > 0);
 });
 
+test('engine pills are an accessible multi-select toggle group', () => {
+  assert.match(modal, /role="group" aria-label="Edit engines"/);
+  assert.match(modal, /aria-pressed={engines\.includes\(o\.engine\)\}/);
+  assert.match(modal, /onClick={\(\) => toggleEngine\(o\.engine\)\}/);
+  assert.match(modal, /setEngines\(\(current\) => current\.includes\(engine\)/,
+    'clicking a pill must toggle membership rather than replace one engine');
+  assert.match(modal, /engines\.length === 0 && \([\s\S]*?role="alert"[\s\S]*?Select at least one engine\./,
+    'an empty toggle set must expose its validation accessibly');
+  assert.match(modal, /Generate \$\{engines\.length \|\| 0\} edit/,
+    'the submit label must name the number of engine calls');
+});
+
+test('the modal traps focus and restores it to its opener', () => {
+  assert.match(modal, /import \{ useFocusTrap \} from '\.\.\/\.\.\/hooks\/useFocusTrap';/);
+  assert.match(modal, /const dialogRef = useRef\(null\);\s*useFocusTrap\(dialogRef\);/);
+  assert.match(modal,
+    /<div ref=\{dialogRef\} role="dialog" aria-modal="true" aria-label="Edit reference photo"/,
+    'the actual modal root must own the focus trap');
+});
+
 test('Retry replays the exact session request, including transient reference files', () => {
   assert.match(modal, /onRetry = null, canRetry = false/,
     'the modal needs an explicit retry contract');
   assert.match(modal, /const retryEdit = async \(\) =>/,
     'the modal must invoke its retry callback instead of rebuilding the request');
-  assert.match(datasetHook, /const retryRequest = \{ prompt, engine, files: Array\.from\(files \|\| \[\]\) \}/,
-    'the hook must snapshot prompt, engine and File objects after a successful queue');
-  assert.match(datasetHook, /referenceEditRetryRef\.current\.set\(String\(currentId\), retryRequest\)/,
-    'the exact request must remain available for this browser session');
-  assert.match(datasetHook, /return editReference\(retryRequest\.prompt, retryRequest\.engine, retryRequest\.files\)/,
-    'retry must replay the saved prompt, engine and files');
+  assert.match(datasetHook, /const retryRequest = \{ prompt, engines, files: Array\.from\(files \|\| \[\]\) \}/,
+    'the hook must snapshot prompt, engines and File objects after a successful queue');
+  assert.match(datasetHook,
+    /referenceEditRetryRef\.current\.set\(String\(currentId\), confirmedRetry\)/,
+    'only a request confirmed against the displayed opaque batch may remain retryable');
+  assert.match(datasetHook,
+    /retryRequest\.prompt, retryRequest\.engines, retryRequest\.files,[\s\S]*?retryRequest\.batchId/,
+    'retry must replay the saved prompt, engine list, files and exact source batch');
   assert.match(workspace, /onRetry=\{ds\.retryReferenceEdit\}/,
     'the workspace must wire the hook retry callback to the modal');
 
@@ -96,8 +119,10 @@ test('Retry replays the exact session request, including transient reference fil
   const readyEnd = modal.indexOf('\n        ) : (', readyStart);
   assert.ok(readyStart > 0 && readyEnd > readyStart, 'the ready branch must be isolated');
   const ready = modal.slice(readyStart, readyEnd);
-  assert.ok(ready.indexOf('Engine used for this result:') < ready.indexOf('justify-end flex-wrap'),
-    'the result label must be visible above the action buttons');
+  assert.match(ready, /ENGINE_LABELS\[candidate\.engine\] \|\| candidate\.engine/,
+    'every result must use its canonical engine label');
+  assert.match(ready, /onClick=\{\(\) => keep\(candidate\.engine\)\}/,
+    'each successful candidate must own its Keep action');
   assert.match(ready, /Try another prompt\s*<\/button>\s*<button type="button" onClick=\{retryEdit\}/,
     'Retry must be its own action button, not nested inside another action');
 });
@@ -106,16 +131,44 @@ test('a queued edit never leaves the modal bridge locked or retryable when refre
   assert.match(datasetHook,
     /const \[, bumpReferenceEditRetryRevision\] = useState\(0\)/,
     'the transient File snapshot must have reactive availability');
+  assert.match(datasetHook, /const confirmedRetry = retryRequestForReferenceEdit\([\s\S]*?batchId: d\.batch_id[\s\S]*?refreshed\?\.data\?\.reference_edit/,
+    'the 202 batch id must match the batch returned by the subsequent refresh');
   assert.match(datasetHook,
-    /const refreshed = await refresh\(\);\s*if \(refreshed\?\.status !== 'applied'\) \{[\s\S]*?referenceEditRetryRef\.current\.delete\(String\(currentId\)\);\s*bumpReferenceEditRetryRevision\(\(revision\) => revision \+ 1\);[\s\S]*?toast\.warning\('Edit queued, but its status could not be refreshed\.[^']*'\);\s*return false;\s*\}/,
-    'a successful queue with a stale or network refresh must disable Retry before releasing the spinner');
+    /if \(refreshed\?\.status !== 'applied' \|\| !confirmedRetry\) \{[\s\S]*?referenceEditRetryRef\.current\.delete\(String\(currentId\)\);[\s\S]*?toast\.warning\('Edit queued, but its status could not be refreshed\.[^']*'\);[\s\S]*?return false;/,
+    'a stale, replaced or unavailable refresh must disable Retry before releasing the spinner');
 });
 
-test('the completed or failed candidate names the engine that actually produced it', () => {
-  assert.match(modal, /const resultEngine = referenceEdit\?\.engine \|\| engine/,
-    'the server job record, not the current picker, is the source of truth');
-  assert.match(modal, /Engine used for this result:/,
-    'the result must visibly state its effective engine');
-  assert.match(modal, /ENGINE_LABELS\[resultEngine\] \|\| resultEngine/,
-    'engine identifiers must render as their canonical user-facing labels');
+test('the completed or failed candidates come from the server per-engine registry', () => {
+  assert.match(modal, /const candidates = referenceEditCandidates\(referenceEdit\)/,
+    'the server candidate registry must drive the comparison');
+  assert.match(modal, /candidate\.status === 'ready'/);
+  assert.match(modal, /candidate\.status === 'failed'/);
+  assert.match(modal, /candidate\.error \|\| 'This engine did not produce a candidate\.'/);
+  assert.match(modal, /onKeep\(engine, referenceEdit\?\.batch_id \|\| null\)/,
+    'Keep must forward the batch that rendered the candidate so a stale tab cannot promote a newer batch');
+  assert.match(datasetHook,
+    /const keepEditedReference = useCallback\(async \(engine = null, batchId = null\) => \{/);
+  assert.match(datasetHook, /if \(engine\) payload\.engine = engine;/);
+  assert.match(datasetHook, /if \(batchId\) payload\.batch_id = batchId;/,
+    'Keep must identify both the selected engine and opaque server batch; no candidate filename comes from the client');
+});
+
+test('the hook submits and retries the exact selected engine list', () => {
+  assert.match(datasetHook, /const retryRequest = \{ prompt, engines, files: Array\.from\(files \|\| \[\]\) \}/);
+  assert.match(datasetHook,
+    /retryRequest\.engines\.forEach\(\(engine\) => fd\.append\('engines', engine\)\)/);
+  assert.match(datasetHook,
+    /if \(retryRequest\.engines\.length === 1\) fd\.append\('engine', retryRequest\.engines\[0\]\)/,
+    'single-engine requests keep the legacy field');
+  assert.match(datasetHook, /if \(retryBatchId\) fd\.append\('retry_batch_id', retryBatchId\)/,
+    'a Retry must let the server atomically reject a superseded source batch');
+  assert.match(datasetHook,
+    /const canRetryReferenceEdit = Boolean\(retryRequestForReferenceEdit\([\s\S]*?data\?\.reference_edit/,
+    'Retry availability must follow the currently displayed opaque batch');
+});
+
+test('mixed API and local batches keep the picker but explain its scope', () => {
+  assert.match(modal, /acceptsExtraEditRefsForBatch\(engines\)/);
+  assert.match(modal, /Images added here go only to the selected API engines/);
+  assert.match(modal, /selectedApiEngines\.length > 0 && selectedLocalEngines\.length > 0/);
 });

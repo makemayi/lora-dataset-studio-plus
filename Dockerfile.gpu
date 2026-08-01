@@ -1,0 +1,110 @@
+# GPU mode: the studio AND ComfyUI in one container, on the host's NVIDIA GPU.
+#
+# Layered on mmartial/comfyui-nvidia-docker, which already owns the CUDA base, the
+# ComfyUI install/upgrade cycle, the UID/GID remap and the ComfyUI-Manager security
+# levels. Three rules keep that base working, and none of them are visible in a diff:
+#   1. never set ENTRYPOINT or CMD — theirs (/comfyui-nvidia_init.bash) must survive;
+#   2. end on USER comfytoo — the container starts as comfytoo and their init script
+#      remaps `comfy` to WANTED_UID/GID before switching to it;
+#   3. never touch PATH — ComfyUI's venv activation has to keep winning, so the
+#      studio is only ever invoked through absolute paths.
+# The studio is started by /userscripts_dir/50-lora-dataset-studio.sh, the hook their
+# init script runs after the remap and before ComfyUI launches.
+#
+# The API-only, no-GPU pair is Dockerfile + docker-compose.yml and is unaffected.
+ARG BASE_IMAGE=mmartial/comfyui-nvidia-docker:ubuntu24_cuda12.9-latest
+FROM ${BASE_IMAGE}
+
+USER root
+
+# python3-venv: the base ships python3 and its headers but not the venv module.
+# libgl1 + glib: cv2 needs them at import time (insightface pulls the NON-headless
+# opencv-python as a hard dependency). The glib package was renamed in the Ubuntu 24
+# time_t transition, hence the fallback to the old name.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3-venv libgl1 \
+ && (apt-get install -y --no-install-recommends libglib2.0-0t64 \
+     || apt-get install -y --no-install-recommends libglib2.0-0) \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# The studio gets its OWN venv, separate from the one ComfyUI creates at runtime in
+# /comfy/mnt/venv. They must never share: insightface pins numpy<2 and this app pins
+# Pillow 12, both of which ComfyUI moves on its own schedule — the exact corruption
+# setup_installer._FLASK_VENV_INCOMPATIBLE exists to catch. backend/run.py re-execs
+# into <repo_root>/.venv, so /app/.venv is adopted with no further wiring.
+RUN python3 -m venv /app/.venv
+
+COPY backend/requirements.txt backend/requirements.txt
+RUN /app/.venv/bin/pip install --no-cache-dir -r backend/requirements.txt
+COPY backend/requirements-ml.txt backend/requirements-ml.txt
+# torch FIRST and from an EXPLICIT index, like the in-app installer does. cu129
+# matches the default base tag. CUDA 12.x's compatibility floor is 525.60.13 on
+# Linux / 528.33 on Windows-WSL; for this CUDA 12.9 image NVIDIA recommends
+# 575.51.03 / 576.02 respectively. Two other values, as --build-arg:
+#   https://download.pytorch.org/whl/cpu    ~7 GB smaller. The GPU stays fully
+#                                           available to ComfyUI; only ✨ Score
+#                                           falls back to CPU. (LaMa inpainting
+#                                           is broken in this container either
+#                                           way, regardless of the torch index.)
+#   https://download.pytorch.org/whl/cu130  CUDA 13 wheels, needs an r580+ driver —
+#                                           pair it with a cuda13 BASE_IMAGE tag.
+# (there is no .../whl/gpu index — an unknown path here fails the build.) torchvision
+# rides along so the later open_clip_torch install cannot pull a PyPI one built
+# against a different torch.
+ARG TORCH_INDEX=https://download.pytorch.org/whl/cu129
+RUN /app/.venv/bin/pip install --no-cache-dir --index-url ${TORCH_INDEX} \
+        torch torchvision -c backend/requirements-ml.txt
+# The ML extras, MINUS simple-lama-inpainting: its stale `pillow<10` pin has no
+# manylinux cp312 wheel, so pip would compile Pillow 9.5 from source and downgrade
+# the app's Pillow 12. --only-binary keeps any future source build a fast, loud
+# failure instead.
+RUN grep -v '^simple-lama-inpainting' backend/requirements-ml.txt > /tmp/requirements-ml.txt \
+ && /app/.venv/bin/pip install --no-cache-dir --only-binary=:all: -r /tmp/requirements-ml.txt
+# LaMa itself with --no-deps: everything it imports (torch, numpy, PIL, cv2) is
+# already installed above, and its Pillow use is Image.open/convert/fromarray only —
+# API that never changed — so the pin it would drag in is decorative here.
+RUN /app/.venv/bin/pip install --no-cache-dir --no-deps \
+        "$(grep '^simple-lama-inpainting' backend/requirements-ml.txt)"
+# Bank scoring (CLIP + the NSFW classifier). -c keeps numpy under insightface's <2
+# ABI ceiling; torch/torchvision are already satisfied by the wheels above.
+RUN /app/.venv/bin/pip install --no-cache-dir open_clip_torch transformers timm \
+        safetensors huggingface_hub -c backend/requirements-ml.txt
+
+COPY backend backend
+COPY frontend/dist frontend/dist
+COPY config.example.json .
+COPY packaging/docker packaging/docker
+
+# "skip" is the mode upstream's run_userscript uses for /userscripts_dir/*.sh: it
+# refuses a script that is not executable rather than chmod-ing it, so the bit has to
+# be set here. The 50- prefix leaves room either side for a user's own scripts.
+RUN install -D -m 755 packaging/docker/studio_launch.sh \
+        /userscripts_dir/50-lora-dataset-studio.sh
+
+# Deliberately NO build-time `chown -R /app`: rewriting every file's metadata
+# makes BuildKit copy the whole tree — torch included — into a second layer.
+# Measured on this image: 8.66 GB and 407 s for a chown to 1024:1024, a uid that
+# WANTED_UID (default 1000, 99 on Unraid) almost never matches anyway. The
+# launcher (studio_launch.sh) adopts /app/.venv at runtime instead, in the
+# background, for whatever uid actually shows up.
+
+ENV LDS_DATA_DIR=/data \
+    LDS_CONFIG=/data/config.json \
+    LDS_HOST=0.0.0.0 \
+    LDS_PORT=5050 \
+    LDS_RUNTIME=docker-gpu \
+    LDS_RESTART_MODE=supervisor \
+    LDS_BIND_MANAGED=1
+EXPOSE 5050
+EXPOSE 8188
+# Long start period on purpose: the first boot creates ComfyUI's venv and installs
+# torch, which on a cold cache takes many minutes. A shorter one would only produce
+# a container that looks broken while it is working.
+HEALTHCHECK --interval=60s --timeout=15s --start-period=1200s --retries=5 \
+    CMD ["/usr/bin/python3", "/app/packaging/docker/healthcheck.py"]
+
+# Must be the LAST directive: upstream starts as comfytoo and switches to comfy
+# itself, after the UID/GID remap.
+USER comfytoo

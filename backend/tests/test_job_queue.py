@@ -38,6 +38,31 @@ def test_add_job_empty_workflow_raises(app):
             pass
 
 
+def test_add_job_refuses_recovery_barrier_without_inserting_a_row(app):
+    from app.job_queue import (COMFYUI_STALLED_BARRIER_KEY,
+                               ComfyUIRecoveryRequired, queue_manager)
+    from app.models import ImageGenerationQueue
+
+    with app.app_context():
+        queue_manager._set_system_state(
+            COMFYUI_STALLED_BARRIER_KEY, {'job_id': 'unresolved'})
+        with pytest.raises(ComfyUIRecoveryRequired, match='Recover or restart ComfyUI'):
+            queue_manager.add_job(workflow_data={'1': {}})
+        assert ImageGenerationQueue.query.count() == 0
+
+
+@pytest.mark.parametrize('temporary_fence', ['training_in_progress', 'vision_in_progress'])
+def test_add_job_accepts_temporary_gpu_fences_without_recovery_barrier(
+        app, temporary_fence):
+    from app.job_queue import queue_manager
+    from app.models import ImageGenerationQueue
+
+    with app.app_context():
+        queue_manager._set_system_state(temporary_fence, True, ttl_seconds=60)
+        job_id = queue_manager.add_job(workflow_data={'1': {}})
+        assert ImageGenerationQueue.query.filter_by(job_id=job_id, status='pending').count() == 1
+
+
 def test_system_state_ttl(app):
     from app.job_queue import queue_manager
     with app.app_context():

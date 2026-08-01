@@ -69,6 +69,30 @@ def test_update_slider_settings_roundtrip_and_validation(app):
         assert eff['enabled'] is False and eff['positive'] == 'very muscular body'
 
 
+def test_dense_mode_refuses_slider_activation_but_disable_is_idempotent(app):
+    from app.extensions import db
+    from app.services import lora_training as lt
+
+    with app.app_context():
+        ds = _mk(app, train_type='krea', name='DenseSlider')
+        ds.training_mode = 'full_transformer'
+        ds.train_variant = 'base'
+        ds.train_slider = json.dumps({'positive': 'strong', 'negative': 'weak'})
+        db.session.commit()
+        before = ds.train_slider
+
+        with pytest.raises(ValueError, match='Switch the training mode to LoRA'):
+            lt.update_slider_settings(LOCAL_USER, ds.id, {'enabled': True})
+        db.session.refresh(ds)
+        assert ds.train_slider == before
+
+        first = lt.update_slider_settings(LOCAL_USER, ds.id, {'enabled': False})
+        second = lt.update_slider_settings(LOCAL_USER, ds.id, {'enabled': False})
+        assert first['enabled'] is second['enabled'] is False
+        assert second['positive'] == 'strong'
+        assert second['negative'] == 'weak'
+
+
 def test_slider_settings_survive_preset_apply(app):
     """A preset REPLACES train_settings; the slider column must be untouched —
     that's the whole reason it is a dedicated column."""
@@ -558,3 +582,37 @@ def test_slider_route_and_base_info_payload(app, client, monkeypatch):
     # invalid knob -> 400, never a silent clamp
     r2 = client.post(f'/api/dataset/{ds_id}/train/slider', json={'guidance': 99})
     assert r2.status_code == 400
+
+
+def test_slider_route_rejects_dense_activation_and_allows_disable(
+        app, client, monkeypatch):
+    from app import capabilities
+    from app.extensions import db
+    from app.models import FaceDataset
+
+    monkeypatch.setattr(capabilities, 'probe', lambda: {
+        'aitoolkit': {'valid': True}, 'cloud_training': False})
+    ds_id = client.post(
+        '/api/dataset/create',
+        json={'name': 'DenseSliderApi', 'trigger_word': 'dense_slider_api',
+              'train_type': 'krea'}).get_json()['id']
+    with app.app_context():
+        ds = db.session.get(FaceDataset, ds_id)
+        ds.training_mode = 'full_transformer'
+        ds.train_variant = 'base'
+        ds.train_slider = json.dumps({'positive': 'strong', 'negative': 'weak'})
+        db.session.commit()
+
+    refused = client.post(
+        f'/api/dataset/{ds_id}/train/slider', json={'enabled': True})
+    assert refused.status_code == 400
+    assert 'Switch the training mode to LoRA' in refused.get_json()['error']
+
+    for _ in range(2):
+        disabled = client.post(
+            f'/api/dataset/{ds_id}/train/slider', json={'enabled': False})
+        assert disabled.status_code == 200
+        slider = disabled.get_json()['slider']
+        assert slider['enabled'] is False
+        assert slider['positive'] == 'strong'
+        assert slider['negative'] == 'weak'

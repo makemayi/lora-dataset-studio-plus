@@ -206,6 +206,22 @@ export const WHATS_NEW = [
     to: '/settings/engines',
   },
   {
+    id: '2026-07-31-community-tested-krea-zimage-presets',
+    date: '2026-07-31',
+    title: 'Start Krea 2 Raw and Z-Image Turbo from five community-tested recipes',
+    blurb:
+      'Training now includes five source-linked community presets for Krea 2 Raw character, fast LoKr character, compact style, a reported 16 GB concept setup, and Z-Image Turbo character. Each recipe carries its own image-count, step, optimizer, memory and network settings; switching family, dataset kind or variant can no longer leave its hidden settings active, and Conv checkpoints refuse an incompatible continuation instead of failing deep inside training.',
+    to: '/datasets?section=training&panel=advanced',
+  },
+  {
+    id: '2026-07-31-generation-stop-recovers-gpu-lock',
+    date: '2026-07-31',
+    title: 'Stop generation without stranding the GPU',
+    blurb:
+      'Stopping a local generation now distinguishes a finished job, a known ComfyUI prompt that can be retried, and an unknown submission that requires a confirmed ComfyUI restart. LDS keeps the exact recovery card until it is safe, removes terminal cards cleanly, and no longer leaves the whole app stuck behind an orphaned “GPU busy” lock.',
+    to: '/datasets?section=add&panel=generate',
+  },
+  {
     id: '2026-07-30-retry-reference-edit-show-engine',
     date: '2026-07-30',
     title: 'Retry a reference edit exactly as it ran',
@@ -226,7 +242,7 @@ export const WHATS_NEW = [
     date: '2026-07-30',
     title: '🛟 A Test Studio batch now pauses safely for ComfyUI recovery',
     blurb:
-      'If ComfyUI goes away mid-batch, Studio now pauses with a paste-safe reason and submits no later prompt. Recover or restart ComfyUI, then cancel and resume the batch. Setup’s “Start ComfyUI” uses the app’s fixed local-safe profile: it never reads, changes or runs a .bat file, so your own launcher stays untouched.',
+      'If ComfyUI goes away mid-batch, Studio now pauses with a paste-safe reason and submits no later prompt. Recover or restart ComfyUI, then cancel and resume the batch. Setup’s “Start ComfyUI” also works from a phone already allowed by LDS and uses the app’s fixed safe profile: it never reads, changes or runs a .bat file, so your own launcher stays untouched.',
     to: '/studio',
   },
   {
@@ -454,6 +470,13 @@ export const WHATS_NEW = [
     blurb:
       'The 🎭 Masked toggle used to live in the browser you set it in: open the app from your phone and it quietly reverted to the default, and no run recorded which way it was set. It is now a dataset setting — shared across your devices, stamped into every run so two runs that differ only by masking no longer look identical, and read by the readiness badge, which can finally warn you that a dataset set to masked will train unmasked because rembg is missing. Existing datasets keep today’s behaviour; a browser that had turned masking off is asked once what to do with it.',
     to: '/datasets?section=training',
+  },
+  {
+    id: '2026-07-28-docker-image-with-comfyui-and-your-gpu',
+    date: '2026-07-28',
+    title: 'A Docker image that brings its own ComfyUI — and uses your GPU',
+    blurb:
+      'The Docker image could not do the ComfyUI half of the app at all: no Klein or Z-Image generation, no Test Studio, no deploying a trained LoRA, because ComfyUI was a host-native tool the container could not see. A second image now runs ComfyUI inside the same container on your NVIDIA GPU, with the folder paths already filled in — start it with "docker compose -f docker-compose.gpu.yml up --build". The API-only image is unchanged for machines without a GPU. Two honest limits: it is a large download, about 20 GB before you download a single model, and local training still needs ai-toolkit on the host.',
   },
   {
     id: '2026-07-28-notifications-are-no-longer-hidden-behind-dialogs',

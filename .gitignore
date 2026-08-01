@@ -10,6 +10,15 @@ config.json
 
 # runtime data
 data/
+
+# docker bind mounts (docker-compose.yml / docker-compose.gpu.yml). ComfyUI's
+# checkout, venv and model tree land here — tens of GB after one boot.
+run/
+basedir/
+data-docker/
+data-docker-gpu/
+bank-images/
+
 *.db
 *.db-shm
 *.db-wal

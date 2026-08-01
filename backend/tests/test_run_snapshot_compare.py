@@ -404,18 +404,27 @@ def test_torch_version_is_parsed_from_the_venv_file_not_imported(app, tmp_path, 
         run_environment.clear_cache()
 
 
-def test_base_model_identity_is_sampled_not_fully_hashed(app, tmp_path):
-    """Base models are 6-26 GB on a real install; hashing one end to end on the
-    launch path is not an option. The signature still changes when the file does."""
+def test_base_model_identity_full_hash_detects_middle_change_with_same_metadata(
+        app, tmp_path):
+    """A stale size/mtime cache must not hide a middle-byte model mutation."""
     with app.app_context():
         big = tmp_path / 'base.safetensors'
         big.write_bytes(b'A' * (3 << 20))
         run_environment.clear_cache()
         first = run_environment.base_model_identity(str(big))
-        assert first['sampled'] is True and first['size'] == (3 << 20)
-        big.write_bytes(b'B' * (3 << 20))
-        run_environment.clear_cache()
-        assert run_environment.base_model_identity(str(big))['sig'] != first['sig']
+        assert first['sampled'] is False and first['size'] == (3 << 20)
+        assert len(first['sha256']) == 64
+        before = big.stat()
+        with big.open('r+b') as stream:
+            stream.seek(1 << 20)
+            stream.write(b'B' * 4096)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.utime(big, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+        second = run_environment.base_model_identity(str(big))
+
+        assert second['sha256'] != first['sha256']
         run_environment.clear_cache()
 
 

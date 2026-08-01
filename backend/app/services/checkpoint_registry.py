@@ -17,6 +17,8 @@ import json
 import logging
 import os
 
+from sqlalchemy import and_, or_
+
 from ..extensions import db
 from ..models import FaceDatasetImage, TrainingRunRecord
 from . import face_dataset_service as fds
@@ -247,6 +249,18 @@ def network_geometry(rec):
     if network_type not in ('lora', 'lokr'):
         return out
     out['network_type'] = network_type
+    if network_type == 'lora':
+        # Conv LoRA adds a second set of adapter tensors. New snapshots record
+        # explicit nulls for linear-only; missing keys on legacy records remain
+        # unknown and are intentionally not inferred.
+        for key in ('conv', 'conv_alpha'):
+            if key not in cfg:
+                continue
+            val = cfg[key]
+            if val is None:
+                out[key] = None
+            elif isinstance(val, int) and not isinstance(val, bool) and val > 0:
+                out[key] = val
     # These keys only describe a LoKr checkpoint.  Their absence on an older
     # snapshot is meaningful: ai-toolkit's defaults changed, so guessing False
     # or auto would turn an unknown legacy fact into an unsafe assertion.
@@ -322,7 +336,11 @@ def ensure_baseline(user_id, dataset_id, family, had_training) -> None:
         logger.exception('baseline backfill failed (non-fatal)')
 
 
-def record_for_mtime(dataset_id, family, mtime_ts):
+_ANY = object()
+
+
+def record_for_mtime(dataset_id, family, mtime_ts, *, base_model=_ANY,
+                     variant=_ANY, source=_ANY):
     """The run record a FILE most plausibly belongs to: the newest record
     created BEFORE the file was written (records are created at launch, files
     after). A file older than EVERY record predates the registry — its most
@@ -331,9 +349,40 @@ def record_for_mtime(dataset_id, family, mtime_ts):
     because a cloud launch happened to be the latest record). None when
     nothing is registered."""
     from datetime import datetime
-    recs = (TrainingRunRecord.query
-            .filter_by(dataset_id=dataset_id, family=family)
-            .order_by(TrainingRunRecord.created_at.desc()).all())
+    query = TrainingRunRecord.query.filter_by(
+        dataset_id=dataset_id, family=family)
+    # A local lane is scoped by base + variant + source. Without these filters,
+    # an unrelated cloud launch recorded between the local launch and checkpoint
+    # write can steal the checkpoint's version and run lineage solely by mtime.
+    scope = []
+    if base_model is not _ANY:
+        scope.append(TrainingRunRecord.base_model == base_model)
+    if variant is not _ANY:
+        scope.append(TrainingRunRecord.variant == variant)
+    if source is not _ANY:
+        sources = (
+            tuple(source)
+            if isinstance(source, (tuple, list, set, frozenset))
+            else (source,))
+        # Legacy baselines intentionally have no trustworthy base/variant.
+        # They are the historical fallback for a local lane, while every real
+        # local record must match the precise lane. Cloud records never qualify.
+        if 'legacy' in sources and scope:
+            concrete = tuple(item for item in sources if item != 'legacy')
+            concrete_scope = list(scope)
+            if concrete:
+                concrete_scope.append(TrainingRunRecord.source.in_(concrete))
+                query = query.filter(or_(
+                    and_(*concrete_scope),
+                    TrainingRunRecord.source == 'legacy'))
+            else:
+                query = query.filter(TrainingRunRecord.source == 'legacy')
+        else:
+            query = query.filter(*scope)
+            query = query.filter(TrainingRunRecord.source.in_(sources))
+    else:
+        query = query.filter(*scope)
+    recs = query.order_by(TrainingRunRecord.created_at.desc()).all()
     if not recs:
         return None
     try:

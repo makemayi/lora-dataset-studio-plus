@@ -1,5 +1,5 @@
 """Config core: layered config.json over DEFAULTS, secrets in .env."""
-import copy, json, os, secrets as _secrets, threading
+import copy, json, os, secrets as _secrets, threading, unicodedata
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -29,8 +29,8 @@ load_dotenv(ENV_PATH)
 # (Settings > Scraping & sources). Sources read their env var at request time,
 # and set_secrets() stamps os.environ on save, so changes apply without restart.
 SECRET_KEYS = ('GEMINI_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'HF_TOKEN',
-               'VAST_API_KEY', 'REDDIT_CLIENT_ID', 'CIVITAI_API_KEY', 'PEXELS_API_KEY',
-               'QWEN_API_KEY')
+               'HF_CLOUD_TOKEN', 'VAST_API_KEY', 'REDDIT_CLIENT_ID', 'CIVITAI_API_KEY',
+               'PEXELS_API_KEY', 'QWEN_API_KEY')
 
 # A Krea install saved by a previous release can carry its old *defaults* in
 # config.json, so a changed DEFAULTS value alone would never reach it. This
@@ -245,6 +245,21 @@ DEFAULTS = {
         # 32 — le 9B (32-48 GB) est la voie cloud principale de cette famille, et un
         # pod 32 GB entraîne aussi le 4B sans problème (l'inverse serait faux).
         'min_vram_gb': {'zimage': 24, 'sdxl': 16, 'krea': 24, 'flux2klein': 32},
+        # Dedicated dense Krea 2 lane.  A full-transformer checkpoint is ~26 GB
+        # and training keeps the official base, working weights/caches and the
+        # save side by side; it must never inherit the 24 GB / 60 GB LoRA lane.
+        # Price and runtime deliberately keep using the regular cloud knobs so
+        # operators can tune those two policy limits in one place.
+        'full_transformer': {
+            'min_vram_gb': 80,
+            'disk_gb': 200,
+            # HF is eventually consistent and ai-toolkit may finish just before
+            # the uploaded files become visible through the Hub listing API.
+            # Verification is bounded: exhaustion keeps the paid pod for manual
+            # recovery instead of declaring success or destroying the only copy.
+            'verification_attempts': 3,
+            'verification_retry_seconds': 5,
+        },
         'onstart': '',                 # raw-image fallback: optional startup command
     },
     'face_scoring': {'python': '', 'models_root': '', 'green': 0.50, 'orange': 0.45},
@@ -810,17 +825,73 @@ def secret(name: str):
     val = (os.environ.get(name) or '').strip()
     return val or None
 
-def set_secrets(d: dict) -> None:
-    lines = []
-    if ENV_PATH.exists():
-        lines = ENV_PATH.read_text(encoding='utf-8').splitlines()
+
+# str.splitlines() recognizes more separators than CR/LF.  In particular, a
+# vertical tab (and the Unicode line/paragraph separators) embedded in a value
+# becomes a fresh NAME=value assignment the next time the file is rewritten.
+# CR/LF remain valid delimiters *between* .env assignments; every other
+# splitlines separator is rejected in an existing file before it can be
+# normalized into a real newline.
+_UNSAFE_ENV_FILE_SEPARATORS = frozenset(
+    '\x00\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029'
+)
+_UNSAFE_SECRET_CATEGORIES = frozenset({'Cc', 'Cf', 'Zl', 'Zp'})
+
+
+def _validated_secret_updates(d: dict) -> dict:
+    updates = {}
     for name, value in (d or {}).items():
         if name not in SECRET_KEYS or not value:
             continue
+        if (not isinstance(value, str)
+                or any(unicodedata.category(ch) in _UNSAFE_SECRET_CATEGORIES
+                       for ch in value)):
+            raise ValueError(f"secret '{name}' must be a single line of text")
+        updates[name] = value
+    return updates
+
+
+def _read_safe_env_lines() -> list[str]:
+    if not ENV_PATH.exists():
+        return []
+    raw = ENV_PATH.read_text(encoding='utf-8')
+    if any(ch in _UNSAFE_ENV_FILE_SEPARATORS for ch in raw):
+        raise ValueError(
+            'the existing .env contains an unsafe non-standard line separator'
+        )
+    return raw.splitlines()
+
+
+def validate_secrets(d: dict) -> None:
+    """Validate a prospective secret update without changing disk or process env.
+
+    Routes call this before saving config.json so an invalid combined request is
+    rejected atomically.  set_secrets repeats the checks as defence in depth for
+    non-HTTP callers.
+    """
+    updates = _validated_secret_updates(d)
+    if updates:
+        _read_safe_env_lines()
+
+
+def _quote_env_value(value: str) -> str:
+    """Return a python-dotenv single-quoted value that round-trips exactly."""
+    escaped = value.replace('\\', '\\\\').replace("'", "\\'")
+    return f"'{escaped}'"
+
+
+def set_secrets(d: dict) -> None:
+    updates = _validated_secret_updates(d)
+    if not updates:
+        return
+    lines = _read_safe_env_lines()
+    for name, value in updates.items():
         lines = [l for l in lines if not l.startswith(f'{name}=')]
-        lines.append(f'{name}={value}')
-        os.environ[name] = value
+        lines.append(f'{name}={_quote_env_value(value)}')
     ENV_PATH.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    # Do not mutate the live process until persistence has succeeded.
+    for name, value in updates.items():
+        os.environ[name] = value
     load_dotenv(ENV_PATH, override=True)
 
 def delete_secrets(names) -> None:
@@ -830,7 +901,7 @@ def delete_secrets(names) -> None:
     names = [n for n in (names or []) if n in SECRET_KEYS]
     if not names:
         return
-    lines = ENV_PATH.read_text(encoding='utf-8').splitlines() if ENV_PATH.exists() else []
+    lines = _read_safe_env_lines()
     for name in names:
         lines = [l for l in lines if not l.startswith(f'{name}=')]
         os.environ.pop(name, None)   # load_dotenv won't unset a removed line, so drop it here

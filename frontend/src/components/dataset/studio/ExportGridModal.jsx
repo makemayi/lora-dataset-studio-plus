@@ -23,7 +23,8 @@ function _nameFromDisposition(header) {
   return m ? m[1] : null;
 }
 
-export default function ExportGridModal({ open, onClose, datasetId, family, run, aspects, rows, cols }) {
+export default function ExportGridModal({ open, onClose, datasetId, family, run, aspects, rows, cols,
+  canvasMode = false, imageIds = [] }) {
   const toast = useToast();
   const ref = useRef(null);
   useFocusTrap(ref, open);
@@ -38,11 +39,12 @@ export default function ExportGridModal({ open, onClose, datasetId, family, run,
   // downscale to the 8000px cap. Blocks = 1 when a single format is picked, else
   // the number of formats present (stacked). Height dominates a tall sweep.
   const willDownscale = useMemo(() => {
-    const nBlocks = aspect === 'all' ? Math.max(1, (aspects || []).length) : 1;
-    const estW = cellSize * 1.2 + (cols || 1) * (cellSize + 12);
-    const estH = 300 + nBlocks * ((rows || 1) * (cellSize + 12) + 110);
+    const nBlocks = canvasMode ? 1 : (aspect === 'all' ? Math.max(1, (aspects || []).length) : 1);
+    const nCols = canvasMode ? Math.max(1, imageIds.length) : (cols || 1);
+    const estW = cellSize * 1.2 + nCols * (cellSize + 12);
+    const estH = 300 + nBlocks * ((canvasMode ? 1 : (rows || 1)) * (cellSize + 12) + 110);
     return Math.max(estW, estH) > MAX_CANVAS_SIDE;
-  }, [aspect, aspects, cellSize, rows, cols]);
+  }, [aspect, aspects, canvasMode, cellSize, rows, cols, imageIds.length]);
 
   if (!open) return null;
 
@@ -61,6 +63,7 @@ export default function ExportGridModal({ open, onClose, datasetId, family, run,
           cell_size: cellSize,
           format: fileFormat,
           footer,
+          ...(canvasMode ? { image_ids: imageIds } : {}),
         }),
       });
       if (!res.ok) {
@@ -103,18 +106,20 @@ export default function ExportGridModal({ open, onClose, datasetId, family, run,
             className="w-8 h-8 rounded-lg border border-border bg-app text-content-muted hover:text-content disabled:opacity-40">×</button>
         </div>
         <p className="text-content-subtle text-[0.6875rem] leading-snug">
-          Composes this run into one labelled image (checkpoints × strengths) — ready to post.
+          {canvasMode
+            ? `Composes these ${imageIds.length} Canvas images into one grid, in their current order.`
+            : 'Composes this run into one labelled image (checkpoints × strengths) — ready to post.'}
         </p>
 
         {/* Format block */}
-        <label className="flex flex-col gap-1">
+        {!canvasMode && <label className="flex flex-col gap-1">
           <span className="text-content-muted text-[0.625rem] uppercase">Format block</span>
           <select value={aspect} onChange={(e) => setAspect(e.target.value)}
             className="rounded-lg border border-border bg-app px-2 py-1.5 text-[0.75rem] text-content">
             <option value="all">All formats (stacked)</option>
             {(aspects || []).map((a) => <option key={a} value={a}>{a}</option>)}
           </select>
-        </label>
+        </label>}
 
         {/* Tile size */}
         <div className="flex flex-col gap-1">
@@ -147,13 +152,13 @@ export default function ExportGridModal({ open, onClose, datasetId, family, run,
         </div>
 
         {/* Toggles */}
-        <label className="flex items-start gap-2 cursor-pointer">
+        {!canvasMode && <label className="flex items-start gap-2 cursor-pointer">
           <input type="checkbox" checked={includePrompt}
             onChange={(e) => setIncludePrompt(e.target.checked)} className="mt-0.5" />
           <span className="text-[0.75rem] text-content">Include the prompt
             <span className="block text-content-subtle text-[0.625rem]">Off by default — prompts can be personal or NSFW.</span>
           </span>
-        </label>
+        </label>}
         <label className="flex items-center gap-2 cursor-pointer">
           <input type="checkbox" checked={footer}
             onChange={(e) => setFooter(e.target.checked)} />

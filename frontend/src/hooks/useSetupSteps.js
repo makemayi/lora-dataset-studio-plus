@@ -140,14 +140,22 @@ function comfyuiStep(caps) {
   }
 }
 
-// The server remains the authority. This only keeps the Setup button honest about
-// the already-probed, saved configuration before it makes the no-payload POST.
-export function comfyuiLauncherState(step, configPersisted) {
-  if (!step || !step.dirValid || step.reachable || step.connectionStatus === 'slow') {
+// The server remains the authority. A live-valid directory only makes the disabled
+// affordance discoverable; starting still requires the saved, freshly re-checked
+// configuration because the no-payload POST reads that configuration.
+export function comfyuiLauncherState(step, configPersisted, liveDirValid = false) {
+  // Never offer a second process while the saved probe says one is answering (or
+  // still answering slowly). This comes before the live-directory affordance.
+  if (!step || step.reachable || step.connectionStatus === 'slow') {
+    return { visible: false, enabled: false, reason: '' }
+  }
+  // The live verdict is deliberately an UNSAVED-only affordance. Once the config
+  // is saved, only the server's re-check (`step.dirValid`) can satisfy this gate.
+  if (!step.dirValid && !(liveDirValid && !configPersisted)) {
     return { visible: false, enabled: false, reason: '' }
   }
   if (!configPersisted) {
-    return { visible: true, enabled: false, reason: 'Save the ComfyUI settings before starting it from LDS.' }
+    return { visible: true, enabled: false, reason: 'Save & re-check the ComfyUI settings before starting it from LDS.' }
   }
   if (!step.portableLauncherSupported) {
     return { visible: true, enabled: false, reason: 'This button supports only the NVIDIA portable ComfyUI install. Your usual launcher is unchanged.' }

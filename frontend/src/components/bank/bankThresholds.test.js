@@ -357,8 +357,10 @@ test('only the read-time thresholds offer a live count', () => {
 test('the effect line compares candidate to current, and stays silent when it cannot', () => {
   const blur = thresholdByField('sharpness_min');
   // Thousands are grouped with the READER's separator (a French browser writes
-  // "1 240"), so the assertion normalises it away instead of pinning a locale.
-  const SEPS = [',', 160, 8239, 8201].map((c) => (typeof c === 'number' ? String.fromCharCode(c) : c));
+  // "1 240", a German one "1.240"), so the assertion normalises it away instead
+  // of pinning a locale. These are flag counts, never fractional, so a literal
+  // '.' is always a grouping separator here, not a decimal point.
+  const SEPS = [',', '.', 160, 8239, 8201].map((c) => (typeof c === 'number' ? String.fromCharCode(c) : c));
   const plain = (s) => (s === null ? null : [...s].filter((c) => !SEPS.includes(c)).join(''));
   assert.equal(plain(effectLine(blur, { blur: 3019 }, { blur: 1240 })), '1240 → 3019 images flagged ↑');
   assert.equal(plain(effectLine(blur, { blur: 900 }, { blur: 1240 })), '1240 → 900 images flagged ↓');

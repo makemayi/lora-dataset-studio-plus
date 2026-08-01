@@ -62,6 +62,25 @@ def test_network_geometry_reads_known_adapter_topology(app):
         }
 
 
+def test_network_geometry_reads_conv_and_explicit_linear_only(app):
+    from app.services import checkpoint_registry as reg
+    with app.app_context():
+        conv = _rec(1, settings={
+            'rank': 32, 'alpha': 32, 'network_type': 'lora',
+            'conv': 16, 'conv_alpha': 16,
+        })
+        assert reg.network_geometry(conv) == {
+            'rank': 32, 'alpha': 32, 'network_type': 'lora',
+            'conv': 16, 'conv_alpha': 16,
+        }
+        linear = _rec(2, settings={
+            'rank': 32, 'alpha': 32, 'network_type': 'lora',
+            'conv': None, 'conv_alpha': None,
+        })
+        assert reg.network_geometry(linear)['conv'] is None
+        assert reg.network_geometry(linear)['conv_alpha'] is None
+
+
 def test_network_geometry_keeps_legacy_lokr_full_rank_unknown(app):
     """An old LoKr snapshot must expose the missing fact, never invent False."""
     from app.services import checkpoint_registry as reg
@@ -114,6 +133,11 @@ def test_describe_geometry_conflict():
         {'rank': 64, 'alpha': 32, 'network_type': 'lokr',
          'lokr_factor': 16, 'lokr_full_rank': False}, 64, 32,
         network_type='lokr', lokr_factor=16, lokr_full_rank=False) is None
+    conv = lt.describe_geometry_conflict(
+        {'rank': 64, 'alpha': 32, 'network_type': 'lora',
+         'conv': 16, 'conv_alpha': 16}, 64, 32,
+        network_type='lora', conv=None, conv_alpha=None)
+    assert conv and 'Conv rank 16' in conv and 'Conv rank off' in conv
     # A snapshot from before topology provenance deliberately stays permissive.
     assert lt.describe_geometry_conflict({'rank': 64, 'alpha': 32}, 64, 32,
                                          network_type='lokr', lokr_factor=16,
@@ -258,6 +282,22 @@ def test_local_continue_allows_matching_lokr_geometry(app, monkeypatch):
         assert launched['parent_record_id'] == recA.id
 
 
+def test_local_continue_refuses_conv_geometry_mismatch(app, monkeypatch):
+    from app.services import lora_training as lt
+    from app.config import LOCAL_USER
+    with app.app_context():
+        ds, _, _, launched = _lane(
+            app, monkeypatch, live_rank=64,
+            parent_settings={
+                'rank': 64, 'alpha': 32, 'network_type': 'lora',
+                'conv': 16, 'conv_alpha': 16,
+            },
+            live_settings={})
+        with pytest.raises(ValueError, match='Conv rank'):
+            lt.continue_training(LOCAL_USER, ds.id, extra_steps=500)
+        assert not launched
+
+
 # --- the local→cloud lane (the one that actually burned 3000 steps) -----------
 
 def test_local_to_cloud_continue_inherits_parent_and_geometry(app, monkeypatch):
@@ -309,6 +349,30 @@ def test_local_to_cloud_inherits_known_lokr_topology(app, monkeypatch):
         network = lt._network_block(view, 64, 'krea')
         assert network['lokr_full_rank'] is True
         assert 'lokr_factor' not in network       # source's explicit auto wins over live 16
+
+
+def test_local_to_cloud_inherits_parent_conv_topology(app, monkeypatch):
+    from app.services import cloud_training as ct
+    from app.services import lora_training as lt
+    from app.config import LOCAL_USER
+    topology = {
+        'rank': 64, 'alpha': 32, 'network_type': 'lora',
+        'conv': 16, 'conv_alpha': 16,
+    }
+    with app.app_context():
+        ds, recA, _, _ = _lane(
+            app, monkeypatch, live_rank=64, parent_settings=topology)
+        monkeypatch.setattr(
+            lt, 'checkpoint_file_path',
+            lambda *a, **k: '/tmp/lora_000002500.safetensors')
+        launched = {}
+        monkeypatch.setattr(
+            ct, 'launch_cloud_training',
+            lambda *a, **k: launched.update(k) or {'run_id': 1})
+        ct.continue_local_run_in_cloud(LOCAL_USER, ds.id, extra_steps=500)
+        assert launched['parent_record_id'] == recA.id
+        snap = json.loads(launched['train_settings_snapshot'])
+        assert {k: snap[k] for k in topology} == topology
 
 
 def test_local_to_cloud_refuses_legacy_lokr_with_unknown_full_rank(app, monkeypatch):

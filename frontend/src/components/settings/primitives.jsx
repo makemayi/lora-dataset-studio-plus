@@ -32,9 +32,20 @@ export function StatusBadge({ ok, okLabel = 'Configured', missingLabel = 'Not se
 
 export function TestResult({ result }) {
   if (!result) return null
+  const level = result.severity === 'warning' || result.code === 'broad_access'
+    ? 'warning'
+    : result.ok ? 'success' : 'error'
+  const presentation = {
+    success: { glyph: '\u2713', label: 'Success', className: 'text-emerald-400' },
+    warning: { glyph: '\u26A0', label: 'Warning', className: 'text-amber-400' },
+    error: { glyph: '\u2717', label: 'Error', className: 'text-rose-400' },
+  }[level]
+  const detail = level === 'warning' ? (result.warning || result.detail) : result.detail
   return (
-    <p className={`text-xs ${result.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
-      <span aria-hidden="true">{result.ok ? '✓' : '✗'}</span> {result.detail}
+    <p role={level === 'error' ? 'alert' : 'status'} aria-live="polite"
+      className={`text-xs ${presentation.className}`}>
+      <span aria-hidden="true">{presentation.glyph}</span>{' '}
+      <span className="sr-only">{presentation.label}: </span>{detail}
     </p>
   )
 }

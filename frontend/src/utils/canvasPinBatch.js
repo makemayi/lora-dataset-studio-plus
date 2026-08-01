@@ -52,6 +52,7 @@
    them. Nothing is ever stacked quietly. */
 
 import { CARD_W } from './lineageGraph.js';
+import { nextGroupId } from './canvasImageGroups.js';
 import { IMG_DEFAULT, IMG_MAX, IMG_MIN } from './canvasImageNodes.js';
 
 /* How many pictures one click may put down. Not a technical limit — the band
@@ -116,6 +117,118 @@ export function boardObstacles(graph, imageNodes) {
 
 /** The source checkpoint of an image, as a stable key. */
 const sourceKey = (img) => `${img?.record_id ?? '?'}:${img?.step ?? '?'}`;
+const strictSourceKey = (value) => {
+  const image = value?.image || value;
+  if (image?.record_id == null || image?.step == null) return null;
+  return `${String(image.record_id)}:${String(image.step)}`;
+};
+
+/** Turn freshly pinned images into (or append them to) one strip per checkpoint.
+ * Manual mixed-source groups are never reused. The undo snapshot covers both
+ * the new images and any existing member whose membership is rewritten. */
+export function groupPinnedBatchBySource({ nodes = [], placed = [] } = {}) {
+  const before = new Map((nodes || []).filter((n) => n?.imageId != null)
+    .map((n) => [Number(n.imageId), { ...n }]));
+  const working = new Map([...before].map(([id, n]) => [id, { ...n }]));
+  const fresh = [...(placed || [])].filter((p) => p?.imageId != null)
+    .sort((a, b) => Number(a.imageId) - Number(b.imageId));
+
+  for (const p of fresh) {
+    const id = Number(p.imageId);
+    const old = before.get(id);
+    working.set(id, {
+      imageId: id, x: p.x, y: p.y, w: p.w, h: p.h, visible: true,
+      groupId: old?.groupId ?? null, groupPos: old?.groupPos ?? null,
+      image: p.image || old?.image,
+    });
+  }
+
+  const affected = new Map();
+  const undo = new Map();
+  const remember = (node) => {
+    const id = Number(node.imageId);
+    if (!undo.has(id)) {
+      const old = before.get(id);
+      undo.set(id, old ? { ...old } : {
+        ...node, visible: false, groupId: null, groupPos: null,
+      });
+    }
+    affected.set(id, node);
+  };
+
+  const freshBySource = new Map();
+  for (const p of fresh) {
+    const node = working.get(Number(p.imageId));
+    const key = strictSourceKey(node);
+    if (!key) continue;
+    if (!freshBySource.has(key)) freshBySource.set(key, []);
+    freshBySource.get(key).push(node);
+  }
+
+  for (const [key, additions] of [...freshBySource].sort(([a], [b]) => a.localeCompare(b))) {
+    const originalVisible = [...before.values()].filter((n) => n.visible !== false);
+    const groupIds = [...new Set(originalVisible.map((n) => n.groupId).filter(Boolean))].sort();
+    let members = null;
+    let groupId = null;
+    for (const gid of groupIds) {
+      const list = originalVisible.filter((n) => n.groupId === gid)
+        .sort((a, b) => (a.groupPos ?? 0) - (b.groupPos ?? 0) || a.imageId - b.imageId);
+      if (list.length >= 2 && list.every((n) => strictSourceKey(n) === key)) {
+        members = [...list, ...additions.filter((n) => !list.some((m) => m.imageId === n.imageId))];
+        groupId = gid;
+        break;
+      }
+    }
+    if (!members) {
+      const anchor = originalVisible
+        .filter((n) => !n.groupId && strictSourceKey(n) === key)
+        .sort((a, b) => a.imageId - b.imageId)[0];
+      members = [...(anchor ? [anchor] : []), ...additions]
+        .filter((n, i, all) => all.findIndex((m) => m.imageId === n.imageId) === i);
+      if (members.length < 2) continue;
+      groupId = nextGroupId([...working.values()], members[0].imageId);
+    }
+    members.forEach((member, pos) => {
+      const updated = { ...working.get(member.imageId), groupId, groupPos: pos };
+      working.set(member.imageId, updated);
+      remember(updated);
+    });
+  }
+
+  for (const p of fresh) remember(working.get(Number(p.imageId)));
+  const byId = (a, b) => a.imageId - b.imageId;
+  return { rows: [...affected.values()].sort(byId), undoRows: [...undo.values()].sort(byId) };
+}
+
+/** Turn one freshly generated/pinned lot into a single strip.
+ * Different checkpoints are intentional here: Pin all represents one
+ * generation action. Existing groups are never reused, so separate runs stay
+ * as separate strips. */
+export function groupPinnedBatchTogether({ nodes = [], placed = [] } = {}) {
+  const before = new Map((nodes || []).filter((n) => n?.imageId != null)
+    .map((n) => [Number(n.imageId), { ...n }]));
+  const fresh = [...(placed || [])].filter((p) => p?.imageId != null)
+    .sort((a, b) => Number(a.imageId) - Number(b.imageId));
+  const groupId = fresh.length >= 2
+    ? nextGroupId([...(nodes || []), ...fresh], fresh[0].imageId)
+    : null;
+  const rows = fresh.map((p, pos) => {
+    const id = Number(p.imageId);
+    const old = before.get(id);
+    return {
+      imageId: id, x: p.x, y: p.y, w: p.w, h: p.h, visible: true,
+      groupId, groupPos: groupId ? pos : null,
+      image: p.image || old?.image,
+    };
+  });
+  const undoRows = rows.map((row) => {
+    const old = before.get(row.imageId);
+    return old ? { ...old } : {
+      ...row, visible: false, groupId: null, groupPos: null,
+    };
+  });
+  return { rows, undoRows };
+}
 
 /**
  * Where a source's column WANTS to start, horizontally: the x of the card that

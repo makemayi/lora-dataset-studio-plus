@@ -4,6 +4,7 @@ ComfyUI is never contacted: `queue_manager.add_job`/`_build_cell_workflow` are
 monkeypatched for the enqueue-path tests, and the workflow-build test loads
 the real copied workflow JSON but stops short of a network call."""
 import struct
+import threading
 import pytest
 
 # Smallest structurally-valid safetensors header (8-byte LE length + '{}'). The
@@ -79,6 +80,60 @@ def test_cell_workflow_carries_negative_strength_unclamped(app):
                       if isinstance(n, dict) and n.get('class_type') == 'LoraLoaderModelOnly']
         tested = [n for n in lora_nodes if n['inputs']['lora_name'] == checkpoint]
         assert tested and tested[0]['inputs']['strength_model'] == -1.5
+
+
+def test_inject_krea_loras_zero_strength_is_true_noop(app):
+    """A zero-strength Krea LoRA must not install model hooks at all."""
+    from app.utils.comfyui import inject_krea_loras
+    workflow = {
+        '20': {'class_type': 'UNETLoader', 'inputs': {'unet_name': 'krea2_turbo_fp8.safetensors'}},
+        '26': {'class_type': 'KSampler', 'inputs': {'model': ['20', 0]}},
+    }
+
+    n = inject_krea_loras(
+        workflow,
+        [{'filename': 'krea\\zero.safetensors', 'strength': 0.0}],
+        allowed={'krea\\zero.safetensors'},
+    )
+
+    assert n == 0
+    assert not any(node.get('class_type') == 'LoraLoaderModelOnly'
+                   for node in workflow.values())
+    assert workflow['26']['inputs']['model'] == ['20', 0]
+
+
+def test_inject_krea_loras_skips_zero_and_chains_nonzero_loras(app):
+    """A zero entry between active LoRAs must not break their model chain."""
+    from app.utils.comfyui import inject_krea_loras
+    workflow = {
+        '20': {'class_type': 'UNETLoader', 'inputs': {'unet_name': 'krea2_turbo_fp8.safetensors'}},
+        '26': {'class_type': 'KSampler', 'inputs': {'model': ['20', 0]}},
+    }
+    requested = [
+        {'filename': 'krea\\first.safetensors', 'strength': 0.75},
+        {'filename': 'krea\\zero.safetensors', 'strength': 0.0},
+        {'filename': 'krea\\last.safetensors', 'strength': 1.25},
+    ]
+
+    n = inject_krea_loras(
+        workflow,
+        requested,
+        allowed={item['filename'] for item in requested},
+    )
+
+    assert n == 2
+    assert 'krea_lora_1' not in workflow
+    assert workflow['krea_lora_0']['inputs'] == {
+        'lora_name': 'krea\\first.safetensors',
+        'strength_model': 0.75,
+        'model': ['20', 0],
+    }
+    assert workflow['krea_lora_2']['inputs'] == {
+        'lora_name': 'krea\\last.safetensors',
+        'strength_model': 1.25,
+        'model': ['krea_lora_0', 0],
+    }
+    assert workflow['26']['inputs']['model'] == ['krea_lora_2', 0]
 
 
 def test_inject_krea_loras_passes_negative_strength(app):
@@ -170,9 +225,12 @@ def test_create_run_commits_rows_before_enqueue(app, monkeypatch, tmp_path):
         # before the insert, so row + queue job land in one commit) -- capture what
         # the enqueue was handed and assert the row matches it.
         seen = []
+        seen_run_ids = []
 
-        def fake_enqueue(user_id, dataset_id, workflow, prompt, job_id=None, commit=True):
+        def fake_enqueue(user_id, dataset_id, workflow, prompt, job_id=None,
+                         commit=True, **_metadata):
             seen.append(job_id)
+            seen_run_ids.append(_metadata.get('run_id'))
             return job_id
         monkeypatch.setattr(lts, '_enqueue_cell', fake_enqueue)
         monkeypatch.setattr(lts, 'gpu_busy_reason', lambda: None)
@@ -182,6 +240,109 @@ def test_create_run_commits_rows_before_enqueue(app, monkeypatch, tmp_path):
         assert seen and all(j for j in seen)
         assert sorted(r.job_id for r in rows) == sorted(seen)
         assert all(r.status == 'pending' for r in rows)
+        assert len(out['run_id']) == 32
+        assert {r.run_id for r in rows} == {out['run_id']}
+        assert set(seen_run_ids) == {out['run_id']}
+
+
+def test_cell_enqueue_holds_gpu_arbiter_until_commit_before_recovery_barrier(
+        app, monkeypatch):
+    """A recovery writer cannot slip between add_job(commit=False) and commit.
+
+    The events make the contested window deterministic: the Studio thread has
+    staged both rows but pauses immediately after add_job returns.  A recovery
+    thread then attempts the same arbiter.  It must remain blocked until Studio
+    is allowed to commit and release the outer lock.
+    """
+    from app.config import LOCAL_USER
+    from app.job_queue import (COMFYUI_STALLED_BARRIER_KEY, GPU_ARBITER_LOCK,
+                               queue_manager)
+    from app.models import ImageGenerationQueue, LoraTestImage
+    from app.services import face_dataset_service as svc
+    from app.services import lora_test_studio as lts
+
+    with app.app_context():
+        dataset = svc.create_dataset(LOCAL_USER, 'Atomic Studio', 'atomicstudio')
+        dataset_id = dataset.id
+
+    after_add_job = threading.Event()
+    release_commit = threading.Event()
+    barrier_attempted = threading.Event()
+    barrier_lock_acquired = threading.Event()
+    barrier_written = threading.Event()
+    errors = []
+    build_lock_state = []
+    real_enqueue = lts._enqueue_cell
+
+    def gated_enqueue(*args, **kwargs):
+        result = real_enqueue(*args, **kwargs)
+        after_add_job.set()
+        if not release_commit.wait(timeout=10):
+            raise TimeoutError('test did not release the Studio commit')
+        return result
+
+    monkeypatch.setattr(lts, '_enqueue_cell', gated_enqueue)
+
+    def studio_writer():
+        try:
+            with app.app_context():
+                image = LoraTestImage(
+                    dataset_id=dataset_id,
+                    checkpoint='z image\\atomic.safetensors',
+                    strength=1.0,
+                    status='pending',
+                )
+
+                def build_workflow():
+                    build_lock_state.append(GPU_ARBITER_LOCK._is_owned())
+                    return {'1': {}}
+
+                lts._persist_and_enqueue_cell(
+                    image, LOCAL_USER, dataset_id, 'atomic prompt', build_workflow)
+        except BaseException as exc:
+            errors.append(exc)
+
+    def recovery_writer():
+        try:
+            barrier_attempted.set()
+            with GPU_ARBITER_LOCK:
+                barrier_lock_acquired.set()
+                with app.app_context():
+                    queue_manager._set_system_state(
+                        COMFYUI_STALLED_BARRIER_KEY,
+                        {
+                            'job_id': 'concurrent-recovery',
+                            'client_id': 'concurrent-recovery',
+                            'prompt_id': None,
+                            'kind': 'unknown_submit',
+                        },
+                    )
+                barrier_written.set()
+        except BaseException as exc:
+            errors.append(exc)
+
+    studio_thread = threading.Thread(target=studio_writer)
+    recovery_thread = threading.Thread(target=recovery_writer)
+    studio_thread.start()
+    assert after_add_job.wait(timeout=10), 'Studio never reached its pre-commit window'
+    recovery_thread.start()
+    assert barrier_attempted.wait(timeout=10), 'recovery writer did not start'
+    assert not barrier_lock_acquired.wait(timeout=0.1), (
+        'recovery acquired GPU_ARBITER_LOCK before the Studio transaction committed')
+
+    release_commit.set()
+    studio_thread.join(timeout=10)
+    recovery_thread.join(timeout=10)
+    assert not studio_thread.is_alive() and not recovery_thread.is_alive()
+    assert errors == []
+    assert build_lock_state == [False]  # workflow resolution does not reserve the GPU
+    assert barrier_lock_acquired.is_set() and barrier_written.is_set()
+
+    with app.app_context():
+        cell = LoraTestImage.query.filter_by(dataset_id=dataset_id).one()
+        queued = ImageGenerationQueue.query.filter_by(job_id=cell.job_id).one()
+        assert cell.status == queued.status == 'pending'
+        assert queue_manager.get_comfyui_stalled_barrier()['job_id'] == 'concurrent-recovery'
 
 
 def test_create_run_with_resolution_tier_resolves_dims_via_lifted_resolution_module(app, monkeypatch, tmp_path):
@@ -328,6 +489,112 @@ def _studio_fixture(tmp_path, monkeypatch, name, trigger, steps=(2000,)):
     return svc.create_dataset(LOCAL_USER, name, trigger), cks
 
 
+def _capture_krea_enqueue(monkeypatch, lts, checkpoints, base_models=()):
+    """Remove external Krea/Comfy dependencies and capture materialization order."""
+    seen = []
+    monkeypatch.setattr(lts, 'gpu_busy_reason', lambda: None)
+    monkeypatch.setattr(lts, '_active_run_count', lambda *args: 0)
+    monkeypatch.setattr(
+        lts, 'list_test_checkpoints',
+        lambda _ds, _family=None: [{'filename': checkpoint}
+                                    for checkpoint in checkpoints],
+    )
+    monkeypatch.setattr(lts, 'permanent_lora_candidates', lambda _family: [])
+    monkeypatch.setattr(lts, 'get_krea_models', lambda: list(base_models))
+    monkeypatch.setattr(lts, '_preflight_checkpoint_arch', lambda *args, **kwargs: None)
+    monkeypatch.setattr(lts, '_preflight_run', lambda *args, **kwargs: None)
+    monkeypatch.setattr(lts, '_target_node_classes', lambda: None)
+    monkeypatch.setattr(
+        lts, 'checkpoint_origins',
+        lambda selected, explicit=None: {checkpoint: (None, None)
+                                         for checkpoint in selected},
+    )
+
+    def capture(img, *_args, **_kwargs):
+        seen.append((img.z_model, img.checkpoint, img.strength))
+
+    monkeypatch.setattr(lts, '_persist_and_enqueue_cell', capture)
+    return seen
+
+
+def test_create_run_krea_enqueues_all_zero_cells_before_stable_nonzero_cells(
+        app, monkeypatch):
+    """Krea's tested-LoRA-off controls lead; model/checkpoint order stays stable.
+
+    A negative force is deliberately part of the patched/non-zero partition.
+    """
+    from app.services import lora_test_studio as lts, face_dataset_service as svc
+    from app.config import LOCAL_USER
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'Krea order', 'korder')
+        checkpoints = [
+            'krea\\lora_korder_a.safetensors',
+            'krea\\lora_korder_b.safetensors',
+        ]
+        alt_base = 'krea\\alternate_base.safetensors'
+        seen = _capture_krea_enqueue(
+            monkeypatch, lts, checkpoints, base_models=[alt_base])
+
+        out = lts.create_run(
+            LOCAL_USER, ds.id, checkpoints, [1.0, 0.0, -0.5, 0.75],
+            prompt='p', count=1, z_models=[None, alt_base])
+
+        expected = []
+        for base in (None, alt_base):
+            expected.extend((base, checkpoint, 0.0) for checkpoint in checkpoints)
+        for base in (None, alt_base):
+            for checkpoint in checkpoints:
+                expected.extend([
+                    (base, checkpoint, 1.0),
+                    (base, checkpoint, -0.5),
+                    (base, checkpoint, 0.75),
+                ])
+        assert out['created'] == len(seen) == len(expected)
+        assert seen == expected
+
+
+def test_create_comparison_run_krea_enqueues_all_zero_cells_before_stable_nonzero_cells(
+        app, monkeypatch):
+    """Comparison plans are partitioned globally, not once per selection."""
+    from app.services import lora_test_studio as lts, face_dataset_service as svc
+    from app.config import LOCAL_USER
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'Krea compare order', 'kcompare')
+        checkpoints = [
+            'krea\\lora_kcompare_a.safetensors',
+            'krea\\lora_kcompare_b.safetensors',
+        ]
+        seen = _capture_krea_enqueue(monkeypatch, lts, checkpoints)
+
+        out = lts.create_comparison_run(
+            LOCAL_USER,
+            [{'dataset_id': ds.id, 'checkpoint': checkpoint}
+             for checkpoint in checkpoints],
+            [1.0, 0.0, -0.5, 0.75],
+            prompt='p',
+            count=1,
+        )
+
+        expected = [(None, checkpoint, 0.0) for checkpoint in checkpoints]
+        for checkpoint in checkpoints:
+            expected.extend([
+                (None, checkpoint, 1.0),
+                (None, checkpoint, -0.5),
+                (None, checkpoint, 0.75),
+            ])
+        assert out['created'] == len(seen) == len(expected)
+        assert seen == expected
+
+
+def test_zero_first_partition_does_not_reorder_other_families(app):
+    """Klein/Z-Image/SDXL retain the exact historical enqueue order."""
+    from app.services.lora_test_studio import _krea_zero_strength_first
+    original = [('a', 1.0), ('a', 0.0), ('b', -0.5), ('b', 0.0)]
+    for family in ('klein', 'zimage', 'sdxl'):
+        assert _krea_zero_strength_first(
+            original, family, lambda item: item[1]) == original
+
+
 def test_create_comparison_run_commits_rows_before_enqueue(app, monkeypatch, tmp_path):
     """Same anti-orphan guarantee as create_run on the multi-LoRA comparison path:
     every created cell is COMMITTED, already carrying the job_id its enqueue used."""
@@ -338,7 +605,8 @@ def test_create_comparison_run_commits_rows_before_enqueue(app, monkeypatch, tmp
         ds, cks = _studio_fixture(tmp_path, monkeypatch, 'C', 'c')
         seen = []
 
-        def fake_enqueue(user_id, dataset_id, workflow, prompt, job_id=None, commit=True):
+        def fake_enqueue(user_id, dataset_id, workflow, prompt, job_id=None,
+                         commit=True, **_metadata):
             seen.append(job_id)
             return job_id
         monkeypatch.setattr(lts, '_build_cell_workflow', lambda *a, **k: {'1': {}})
@@ -367,12 +635,13 @@ def test_comparison_run_failure_keeps_previous_cells_and_marks_the_failed_one(ap
         calls = {'n': 0}
         real_enqueue = lts._enqueue_cell
 
-        def flaky_enqueue(user_id, dataset_id, workflow, prompt, job_id=None, commit=True):
+        def flaky_enqueue(user_id, dataset_id, workflow, prompt, job_id=None,
+                           commit=True, **metadata):
             calls['n'] += 1
             if calls['n'] == 3:              # blow up on the THIRD of five cells
                 raise RuntimeError('comfy exploded')
             return real_enqueue(user_id, dataset_id, workflow, prompt,
-                                job_id=job_id, commit=commit)
+                                job_id=job_id, commit=commit, **metadata)
         monkeypatch.setattr(lts, '_build_cell_workflow', lambda *a, **k: {'1': {}})
         monkeypatch.setattr(lts, '_enqueue_cell', flaky_enqueue)
         monkeypatch.setattr(lts, 'gpu_busy_reason', lambda: None)
@@ -520,11 +789,12 @@ def test_studio_payload_run_queue_counts_are_scoped_to_run_id(app):
         assert len(payload['cells']) == 2
 
 
-def test_cancel_run_commits_whole_batch_before_interrupting_comfyui(app):
+def test_cancel_run_reconciles_exact_running_prompt_and_cancels_whole_batch(app):
     from unittest.mock import patch
     from app.services import lora_test_studio as lts, face_dataset_service as svc
     from app.job_queue import queue_manager
     from app.models import ImageGenerationQueue, LoraTestImage
+    from app.utils.comfyui import ComfyPromptState
     from app.config import LOCAL_USER
     with app.app_context():
         ds = svc.create_dataset(LOCAL_USER, 'Stop batch', 'stopbatch')
@@ -540,15 +810,19 @@ def test_cancel_run_commits_whole_batch_before_interrupting_comfyui(app):
         ])
         svc.db.session.commit()
 
-        def assert_batch_is_already_stopped(_prompt_id, _job_id):
-            assert {j.status for j in ImageGenerationQueue.query.all()} == {'cancelled'}
-            assert {c.status for c in LoraTestImage.query.all()} == {'cancelled'}
-            return True
-
-        with patch.object(queue_manager, 'interrupt_comfyui_job',
-                          side_effect=assert_batch_is_already_stopped) as interrupt:
+        # The queue owns the exact remote proof now: targeted delete followed by
+        # fresh queue absence. No real ComfyUI request belongs in this service test.
+        with patch('app.utils.comfyui.cancel_comfyui_prompt_state',
+                   return_value=ComfyPromptState.DELETED) as cancel_prompt, \
+             patch('app.utils.comfyui.comfyui_prompt_is_absent',
+                   return_value=True) as prompt_absent:
             assert lts.cancel_run(LOCAL_USER, run_id='run-stop') == 2
-        interrupt.assert_called_once_with('prompt-stop', running_id)
+        cancel_prompt.assert_called_once_with('prompt-stop', running_id)
+        prompt_absent.assert_called_once_with('prompt-stop')
+        assert {j.status for j in ImageGenerationQueue.query.all()} == {'cancelled'}
+        cells = LoraTestImage.query.order_by(LoraTestImage.id).all()
+        assert {cell.status for cell in cells} == {'cancelled'}
+        assert all(cell.job_id is None for cell in cells)
 
 
 def json_dump_keys(payload):

@@ -29,8 +29,8 @@ from ..services.face_variations import (NSFW_VARIATION_CATALOG, VARIATION_CATALO
                                         sanitize_custom_shots,
                                         MAX_CUSTOM_SHOTS_PER_SUBJECT)
 from ..utils.comfyui import KREA_ALLOWED_SAMPLERS, KREA_ALLOWED_SCHEDULERS, get_krea_loras
-from ._common import (_map_error, _require_comfyui, _studio_arch_mismatch_response,
-                      _studio_missing_response)
+from ._common import (_map_error, _require_comfyui, _require_no_stalled_comfyui,
+                      _studio_arch_mismatch_response, _studio_missing_response)
 
 bp = Blueprint('datasets', __name__, url_prefix='/api')
 
@@ -122,7 +122,10 @@ def dataset_set_train_type(dataset_id):
     Dataset metadata — NOT ai-toolkit-gated, so you can organize the menu even
     before training is configured. Keeps the TrainingPanel and the grouped menu in sync."""
     data = request.get_json(silent=True) or {}
-    ok = svc.set_train_type(LOCAL_USER, dataset_id, data.get('train_type'))
+    try:
+        ok = svc.set_train_type(LOCAL_USER, dataset_id, data.get('train_type'))
+    except ValueError as e:
+        return _map_error(e)
     return (jsonify({'ok': True}), 200) if ok else (jsonify({'error': 'not found'}), 404)
 
 
@@ -277,19 +280,22 @@ def dataset_set_ref(dataset_id):
                 raw, pad=svc.REF_CROP_PAD, return_detected=True, use_vision=False)
     except Exception as e:
         return _map_error(e)
-    dsdir = ensure_dataset_dir(dataset_id)
-    # Keep the full-frame ORIGINAL (aspect-kept, capped ~2048) so the crop editor can
-    # widen back out later — the auto head-crop is only the default framing, not a
-    # one-way lossy door (the old behavior discarded it and re-crops could only tighten).
-    orig_fn = f"{LOCAL_USER}_datasetreforig_{uuid.uuid4().hex[:8]}.webp"
-    svc.write_image_atomic(os.path.join(dsdir, orig_fn),
-                           svc.normalize_to_webp(raw, size=2048))
-    fn = f"{LOCAL_USER}_datasetref_{uuid.uuid4().hex[:8]}.webp"
-    svc.write_image_atomic(os.path.join(dsdir, fn), webp)
-    ds.ref_original_filename = orig_fn
-    ds.ref_filename = fn
-    svc.db.session.commit()
-    svc.invalidate_reference_edit(dataset_id)   # any pending Before/After is now stale
+    # Serialize the physical files, DB pointer, and edit-epoch invalidation with
+    # Keep. A claimed stale candidate must never overwrite/delete this upload.
+    with svc.reference_mutation(dataset_id):
+        dsdir = ensure_dataset_dir(dataset_id)
+        # Keep the full-frame ORIGINAL (aspect-kept, capped ~2048) so the crop editor can
+        # widen back out later — the auto head-crop is only the default framing, not a
+        # one-way lossy door (the old behavior discarded it and re-crops could only tighten).
+        orig_fn = f"{LOCAL_USER}_datasetreforig_{uuid.uuid4().hex[:8]}.webp"
+        svc.write_image_atomic(os.path.join(dsdir, orig_fn),
+                               svc.normalize_to_webp(raw, size=2048))
+        fn = f"{LOCAL_USER}_datasetref_{uuid.uuid4().hex[:8]}.webp"
+        svc.write_image_atomic(os.path.join(dsdir, fn), webp)
+        ds.ref_original_filename = orig_fn
+        ds.ref_filename = fn
+        svc.db.session.commit()
+        svc.invalidate_reference_edit(dataset_id)   # pending Before/After is now stale
     resp = {'ok': True, 'ref_filename': fn, 'head_crop': head_detected}
     if want_auto and not head_detected:
         # GUARD-RAIL: don't silently ship a body-centered crop when auto WAS asked.
@@ -405,18 +411,25 @@ def dataset_ref_edit(dataset_id):
     if not svc.get_dataset(LOCAL_USER, dataset_id):
         return jsonify({'error': 'not found'}), 404
     prompt = (request.form.get('prompt') or '').strip()
-    engine = (request.form.get('engine') or '').strip()
-    if engine not in svc.editable_engines():
-        return jsonify({'error': svc.edit_engine_choice_message()}), 400
+    # New clients repeat engines; legacy clients send one engine. Combining then
+    # normalizing makes mixed-version retries deterministic and de-duplicates
+    # without changing the requested order.
+    raw_engines = (request.form.getlist('engines')
+                   + request.form.getlist('engine'))
     # Transient edit-reference images added in the modal — ride along as identity
-    # anchors for THIS call only, never persisted as dataset extra refs. The local
-    # engines refuse them rather than drop them silently (see
-    # svc.LOCAL_EDIT_REF_SUPPORT); the modal hides the picker for those engines.
+    # anchors for THIS call only, never persisted as dataset extra refs. A local-
+    # only request refuses them; in a mixed batch they go to API engines only.
     try:
+        engines = svc.normalize_edit_engines(raw_engines)
         extra_bytes = []
-        for index, upload in enumerate(request.files.getlist('ref'), 1):
-            if not upload or not upload.filename:
-                continue
+        uploads = [upload for upload in request.files.getlist('ref')
+                   if upload and upload.filename]
+        # Reject before reading upload #4 (indeed before reading any upload), so
+        # the request-thread snapshot has both a per-file and a total-count bound.
+        if len(uploads) > svc.MAX_EDIT_REFERENCE_UPLOADS:
+            raise ValueError(
+                f'add at most {svc.MAX_EDIT_REFERENCE_UPLOADS} extra edit references')
+        for index, upload in enumerate(uploads, 1):
             # Bound the request-thread snapshot itself. The service repeats the
             # cap + full image sanitation before any external API worker starts.
             try:
@@ -428,8 +441,12 @@ def dataset_ref_edit(dataset_id):
                     f'extra edit reference {index} is too large '
                     f'(max {svc.EXTERNAL_REFERENCE_MAX_BYTES // (1024 * 1024)} MiB)')
             extra_bytes.append(raw)
-        svc.start_reference_edit(current_app._get_current_object(), LOCAL_USER,
-                                 dataset_id, engine, prompt, extra_edit_ref_bytes=extra_bytes)
+        retry_batch_id = request.form.get('retry_batch_id') or None
+        batch_id = svc.start_reference_edit(
+            current_app._get_current_object(), LOCAL_USER,
+            dataset_id, engines, prompt,
+            extra_edit_ref_bytes=extra_bytes,
+            retry_batch_id=retry_batch_id)
     except Exception as e:
         from ..services.klein_edit_helper import KleinModelsMissing
         from ..services.krea_edit_helper import KreaModelsMissing
@@ -438,7 +455,8 @@ def dataset_ref_edit(dataset_id):
         if isinstance(e, KreaModelsMissing):
             return _krea_missing_response(e)
         return _map_error(e)
-    return jsonify({'ok': True, 'status': 'running'}), 202
+    return jsonify({'ok': True, 'status': 'running',
+                    'engines': list(engines), 'batch_id': batch_id}), 202
 
 
 @bp.post('/dataset/<int:dataset_id>/ref/edit/keep')
@@ -448,8 +466,20 @@ def dataset_ref_edit_keep(dataset_id):
     then delete the candidate. 409 when there is no ready candidate to keep."""
     if not svc.get_dataset(LOCAL_USER, dataset_id):
         return jsonify({'error': 'not found'}), 404
+    body = request.get_json(silent=True)
+    raw_engine = body.get('engine') if isinstance(body, dict) else None
+    raw_batch_id = body.get('batch_id') if isinstance(body, dict) else None
+    if raw_engine is None:
+        raw_engine = request.form.get('engine')
+    if raw_batch_id is None:
+        raw_batch_id = request.form.get('batch_id')
+    engine = str(raw_engine).strip().lower() if raw_engine is not None else None
+    batch_id = str(raw_batch_id) if raw_batch_id is not None else None
     try:
-        fn = svc.keep_reference_edit(LOCAL_USER, dataset_id)
+        # The server resolves the filename from the current batch. Any client-
+        # supplied filename is intentionally ignored.
+        fn = svc.keep_reference_edit(LOCAL_USER, dataset_id, engine=engine,
+                                     batch_id=batch_id)
     except Exception:
         logger.exception('reference edit keep failed (dataset %s)', dataset_id)
         return jsonify({'error': "Couldn't save the edited reference — the previous "
@@ -716,6 +746,10 @@ def dataset_generate(dataset_id):
     # first, since it ran the preflight itself).
     if not svc.get_dataset(LOCAL_USER, dataset_id):
         return jsonify({'ok': False, 'error': 'dataset not found'}), 400
+    if any(generator in svc.LOCAL_ENGINES for generator, _ in batches):
+        gate = _require_no_stalled_comfyui()
+        if gate:
+            return gate
     # Runs BEFORE any dispatch, and covers the MODEL FILES as well as the nodes:
     # generate_variations checks the assets itself, but by then the API batches of
     # a mixed run would already be in flight — the user would be told the batch
@@ -970,7 +1004,11 @@ def dataset_image_caption_preview(dataset_id, image_id):
     ds = svc.get_dataset(LOCAL_USER, dataset_id)
     if not ds:
         return jsonify({'error': 'not found'}), 404
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        return jsonify({'error': 'JSON body must be an object'}), 400
     active = dataset_activity.get(dataset_id)
     if active and active.get('kind') in dataset_activity.CANCELLABLE_KINDS:
         return jsonify({'error': 'a captioning batch is in progress on this dataset'}), 409
@@ -979,7 +1017,7 @@ def dataset_image_caption_preview(dataset_id, image_id):
         with gpu_exclusive_vision_window(flag_ttl=600):
             result = svc.preview_caption(
                 LOCAL_USER, dataset_id, image_id,
-                backend=data.get('backend'), ollama_model=data.get('ollama_model'),
+                backend=data.get('backend'), ollama_model=data.get('ollama_model', ''),
                 vocabulary=data.get('vocabulary'), instructions=data.get('instructions'),
                 should_cancel=lambda: dataset_activity.cancel_requested(dataset_id))
     except Exception as e:
@@ -1185,8 +1223,30 @@ def dataset_delete(dataset_id):
 def dataset_cancel(dataset_id):
     if not svc.get_dataset(LOCAL_USER, dataset_id):
         return jsonify({'error': 'not found'}), 404
-    n = svc.cancel_pending(LOCAL_USER, dataset_id)
-    return jsonify({'ok': True, 'cancelled': n})
+    result = svc.cancel_pending(LOCAL_USER, dataset_id)
+    return jsonify({'ok': True, **result})
+
+
+@bp.post('/dataset/<int:dataset_id>/confirm-comfyui-restart')
+def dataset_confirm_comfyui_restart(dataset_id):
+    """Resolve an unknown generation submission after an explicit restart."""
+    if not svc.get_dataset(LOCAL_USER, dataset_id):
+        return jsonify({'error': 'not found'}), 404
+    data = request.get_json(silent=True) or {}
+    if data.get('confirmed_comfyui_restart') is not True:
+        return jsonify({
+            'error': 'Confirm that you restarted ComfyUI before clearing this paused job.',
+        }), 400
+    # Confirmation is meaningful only when the replacement ComfyUI answers now.
+    gate = _require_comfyui(force=True)
+    if gate:
+        return gate
+    try:
+        cancelled = svc.confirm_unknown_generation_restart(
+            LOCAL_USER, dataset_id, restart_confirmed=True)
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, 'cancelled': cancelled})
 
 
 @bp.post('/dataset/image/<int:image_id>/delete')
@@ -1259,6 +1319,9 @@ def dataset_klein_model_set(dataset_id):
 @bp.post('/dataset/image/<int:image_id>/improve')
 def dataset_image_improve(image_id):
     """Create a regular Klein-upscaled candidate without touching the source."""
+    gate = _require_no_stalled_comfyui()
+    if gate:
+        return gate
     try:
         result = svc.improve_existing_image(LOCAL_USER, image_id)
     except Exception as e:
@@ -1280,6 +1343,9 @@ def dataset_image_reimprove(image_id):
 
     The generic /regenerate route stays closed to these rows on purpose (it would
     restart from the dataset reference and make an unrelated variation)."""
+    gate = _require_no_stalled_comfyui()
+    if gate:
+        return gate
     try:
         result = svc.reimprove_image(LOCAL_USER, image_id)
     except Exception as e:
@@ -1305,6 +1371,9 @@ def dataset_improve_batch(dataset_id):
     ids = data.get('image_ids')
     if not isinstance(ids, list):
         return jsonify({'error': 'image_ids must be a list'}), 400
+    gate = _require_no_stalled_comfyui()
+    if gate:
+        return gate
     try:
         result = svc.start_bulk_improve(
             current_app._get_current_object(), LOCAL_USER, dataset_id, ids)
@@ -1667,6 +1736,9 @@ def lora_test_run(dataset_id):
     gate = _require_comfyui()
     if gate:
         return gate
+    gate = _require_no_stalled_comfyui()
+    if gate:
+        return gate
     d = request.get_json(silent=True) or {}
     try:
         res = lts.create_run(LOCAL_USER, dataset_id,
@@ -1736,6 +1808,9 @@ def lora_test_confirm_comfyui_restart(dataset_id):
 @bp.post('/dataset/<int:dataset_id>/lora-test/resume')
 def lora_test_resume(dataset_id):
     gate = _require_comfyui()
+    if gate:
+        return gate
+    gate = _require_no_stalled_comfyui()
     if gate:
         return gate
     if not svc.get_dataset(LOCAL_USER, dataset_id):
@@ -1812,6 +1887,7 @@ def lora_test_export_grid(dataset_id):
         data, mime, meta = sge.export_grid(
             LOCAL_USER, dataset_id,
             family=d.get('family'), run_seed=d.get('run_seed'), prompt=d.get('prompt'),
+            image_ids=d.get('image_ids') if 'image_ids' in d else None,
             aspect=d.get('aspect'), include_prompt=bool(d.get('include_prompt')),
             cell_size=d.get('cell_size'), fmt=d.get('format'),
             footer=d.get('footer', True))

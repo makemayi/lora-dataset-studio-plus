@@ -3,6 +3,7 @@ image and returns the text WITHOUT persisting it (ephemeral A/B probe). The Olla
 vision seam is mocked so the pass is hermetic, exactly like the image-bank tests."""
 import os
 
+import pytest
 from PIL import Image
 
 
@@ -21,6 +22,7 @@ def _mock_vision(monkeypatch, caption='a plain description', capture=None):
     def fake_describe(image_bytes, prompt, *a, **k):
         if capture is not None:
             capture['prompt'] = prompt
+            capture['model'] = k.get('model')
         return caption
 
     monkeypatch.setattr(vision_ollama, 'describe_image_ollama', fake_describe)
@@ -97,6 +99,23 @@ def test_preview_default_backend_leaves_prompt_clean(client, app, monkeypatch):
     assert 'crude anatomical terms' not in capture['prompt']
 
 
+def test_preview_accepts_valid_or_empty_ollama_model(client, app, monkeypatch):
+    _use_ollama_backend(app)
+    ds_id, img_id = _dataset_with_image(client, app)
+    capture = {}
+    _mock_vision(monkeypatch, capture=capture)
+
+    model = 'registry.example:5000/team/' + ('a' * 160) + ':latest'
+    assert len(model) <= 200
+    r = _preview(client, ds_id, img_id, ollama_model=f'  {model}  ')
+    assert r.status_code == 200, r.get_json()
+    assert capture['model'] == model
+
+    r = _preview(client, ds_id, img_id, ollama_model='')
+    assert r.status_code == 200, r.get_json()
+    assert capture['model'] is None
+
+
 # --- guards -------------------------------------------------------------------
 def test_preview_409_when_batch_in_progress(client, app, monkeypatch):
     _use_ollama_backend(app)
@@ -123,6 +142,37 @@ def test_preview_400_on_invalid_backend(client, app):
     ds_id, img_id = _dataset_with_image(client, app)
     r = _preview(client, ds_id, img_id, backend='nonsense')
     assert r.status_code == 400
+
+
+def test_preview_route_400_on_invalid_ollama_model(client, app):
+    ds_id, img_id = _dataset_with_image(client, app)
+    invalid = (None, 123, False, [], {}, 'bad model!', '/leading',
+               'valid:tag\n', 'valid:tag\r\nsecond:tag', 'valid:tag\u2028',
+               'a' * 201)
+    for model in invalid:
+        r = _preview(client, ds_id, img_id, ollama_model=model)
+        assert r.status_code == 400, (model, r.get_json())
+        assert 'ollama_model' in r.get_json()['error']
+
+
+def test_preview_route_400_on_non_object_body(client, app):
+    ds_id, img_id = _dataset_with_image(client, app)
+    url = f'/api/dataset/{ds_id}/image/{img_id}/caption/preview'
+    for body in ([], ['model'], 123, False, 'model'):
+        r = client.post(url, json=body)
+        assert r.status_code == 400, (body, r.get_json())
+        assert 'object' in r.get_json()['error']
+
+
+def test_preview_service_rejects_non_string_ollama_model(client, app):
+    ds_id, img_id = _dataset_with_image(client, app)
+    with app.app_context():
+        from app.config import LOCAL_USER
+        from app.services import face_dataset_service as svc
+        for model in (None, 123, False, [], {}):
+            with pytest.raises(ValueError, match='ollama_model'):
+                svc.preview_caption(
+                    LOCAL_USER, ds_id, img_id, ollama_model=model)
 
 
 def test_preview_404_on_unknown_dataset(client, app):

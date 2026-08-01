@@ -233,3 +233,21 @@ def test_route_starts_the_job_and_refuses_a_second_one(app, client, monkeypatch)
 
     bad = client.post(f'/api/dataset/{dataset_id}/improve/batch', json={})
     assert bad.status_code == 400
+
+
+def test_batch_route_recovery_barrier_has_no_service_side_effect(
+        client, monkeypatch):
+    from app.job_queue import COMFYUI_STALLED_BARRIER_KEY, queue_manager
+    from app.services import face_dataset_service as svc
+
+    with client.application.app_context():
+        queue_manager._set_system_state(
+            COMFYUI_STALLED_BARRIER_KEY, {'job_id': 'unresolved'})
+    monkeypatch.setattr(
+        svc, 'start_bulk_improve',
+        lambda *_args: (_ for _ in ()).throw(AssertionError('service must not run')))
+
+    response = client.post(
+        '/api/dataset/1/improve/batch', json={'image_ids': [1]})
+    assert response.status_code == 409
+    assert response.get_json()['code'] == 'comfyui_recovery_required'

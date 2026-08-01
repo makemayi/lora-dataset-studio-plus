@@ -1,4 +1,4 @@
-# Everything needed to RUN THE TEST SUITE, and nothing else.
+# The lightweight BASE needed to run the test suite, and nothing else.
 #
 # WHY THIS FILE EXISTS
 # --------------------
@@ -15,13 +15,21 @@
 #      locally and fail only in CI. Nine tests went out green and came back red on
 #      the release tag.
 #
-# So: this file is the ONE answer to "what do I need to run the tests", it is what
-# CI installs (ci.yml and release.yml, asserted by test_dev_requirements_contract),
-# and it pins rather than floats — a suite that passes on a different pytest than
-# CI's is not evidence about CI.
+# So: this file is the common lightweight test baseline. CI and release both
+# install it (asserted by test_dev_requirements_contract), and it pins rather than
+# floats — a suite that passes on a different pytest than CI's is not evidence
+# about CI. The separately declared Torch overlay below completes runtime coverage.
 #
 #   python -m pip install -r backend/requirements-dev.txt
 #   python -m pytest backend/tests -q
+#
+# Torch is intentionally a separate, pinned CPU-only overlay:
+#
+#   python -m pip install --no-cache-dir -r backend/requirements-torch-tests.txt
+#
+# Runtime tests for exact-state resume and the ai-toolkit bridge skip when that
+# overlay is absent. CI installs it only when exact-state/bridge-sensitive paths
+# change; release validation always installs it.
 #
 # NOTE on plugins: the suite runs with `-p no:flask` (backend/pytest.ini). Having
 # pytest-flask installed anyway is harmless — it is disabled, deliberately, so a
@@ -32,13 +40,19 @@
 -r requirements.txt
 
 # Pinned, not floated: CI and a contributor must run the SAME collector.
-pytest==8.3.5
+pytest==9.0.3
+
+# Torch's official CPU index otherwise resolves an old vulnerable setuptools.
+# Install the audited build backend from PyPI in the base environment first so
+# the optional overlay reuses it instead of downgrading through that index.
+setuptools==83.0.0
 
 # Test-only ML extras. These are never in requirements.txt on purpose: the app
 # installs them into dedicated environments on demand (see requirements-ml.txt).
 # A handful of suites — test_watermarks.py above all — exercise real numpy/OpenCV
 # pixel maths and the Telea fallback that runs when LaMa is absent, so these two
-# (and ONLY these two: never torch, never LaMa) make those tests run for real
-# while keeping "LaMa absent" true.
+# (and ONLY these two in the lightweight base: Torch has its own overlay, while
+# LaMa stays absent) make those tests run for real while keeping "LaMa absent"
+# true.
 numpy>=1.26,<2
 opencv-python-headless>=4.9

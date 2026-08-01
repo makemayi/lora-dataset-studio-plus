@@ -89,13 +89,13 @@ def test_double_mirror_restores_pixels_and_preserves_metadata(app):
             name: getattr(before, name) for name in (
                 'dataset_id', 'filename', 'source', 'status', 'framing', 'caption',
                 'variation_label', 'variation_prompt', 'klein_model',
-                'derivation_kind', 'upscale_ratio', 'face_score', 'face_state',
-                'source_metadata', 'created_at',
+                'derivation_kind', 'upscale_ratio', 'source_metadata', 'created_at',
             )
         }
         svc.mirror_image(LOCAL_USER, image_id)
         row = svc.db.session.get(FaceDatasetImage, image_id)
         assert all(getattr(row, name) == value for name, value in stable.items())
+        assert (row.face_score, row.face_state) == (None, None)
         assert (row.watermark_state, row.watermark_bbox, row.watermark_regions) == (
             None, None, None)
         svc.mirror_image(LOCAL_USER, image_id)

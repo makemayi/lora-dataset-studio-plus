@@ -1262,6 +1262,35 @@ preview prompts, the timestep weighting and the learning rate. Rank, base and
 optimizer are locked to the checkpoint being continued; they are not things a
 resume can change.
 
+The dialog also names **what “resume” means**; it never silently guesses:
+
+- **Full training state** is offered only for a local checkpoint carrying a
+  complete, hash-verified state bundle. It restores the raw adapter parameters,
+  optimizer, scheduler, scaler, EMA, Python/NumPy/Torch/CUDA random generators,
+  dataloader order and cursor, bucket/crop geometry, the exact latent/text-cache
+  bytes, and the exact next step. Exported image, caption and mask contents,
+  dataset topology, base, network shape, training recipe, ai-toolkit revision,
+  GPU identity and the complete installed Python-package map must still match.
+  In this mode only the preview prompts can change. Save/preview cadence,
+  learning rate and timestep weighting stay locked because changing any of them
+  would change the trajectory the state belongs to.
+- **LoRA weights only** is the explicit fallback and is available for legacy
+  checkpoints. The chosen `.safetensors` is copied into a clean run folder;
+  optimizer, scheduler, scaler, RNG and dataloader progress restart. The source
+  run is renamed aside, not deleted, so all its saves remain recoverable.
+
+Each checkpoint says why full state is unavailable when its bundle is missing,
+incomplete, corrupt or incompatible. Cloud continuation currently supports
+weights only; choosing full state there is refused before a pod is created.
+State bundles are published atomically and the newest two are retained alongside
+the public checkpoints, so a crash during capture cannot masquerade as a usable
+exact save.
+
+One deliberately conservative boundary remains: low-level Torch/CUDA backend
+flags changed externally after LDS performs its runtime preflight are not yet
+part of the compatibility fingerprint. Do not change deterministic/TF32/cuDNN
+flags between the original process and an exact continuation.
+
 Read the step field as **extra** steps, not a total: the line beside it spells
 out where you land ("→ target step 3500") and so does the button. Resuming step
 2500 of a run that ended at 3500 is the whole point of opening this from a pill

@@ -44,7 +44,13 @@ def bundle_dir() -> Path:
 
 def _port_free(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex(("127.0.0.1", port)) != 0   # nothing listening -> free
+        try:
+            if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            s.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
 
 
 def pick_port() -> int:
@@ -75,6 +81,7 @@ def start_server(bundle: Path, port: int) -> subprocess.Popen:
     env["LDS_ENV"] = str(data / ".env")
     env["LDS_HOST"] = "127.0.0.1"
     env["LDS_PORT"] = str(port)
+    env["LDS_AUTO_PORT"] = "0"
     flags = CREATE_NO_WINDOW if os.name == "nt" else 0
     log = open(data / "server.log", "ab", buffering=0)   # keep the server's own diagnostics
     return subprocess.Popen(

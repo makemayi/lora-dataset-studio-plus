@@ -324,7 +324,12 @@ def test_continue_bypasses_custom_weight_sniff_after_caption_preflight(
         ds.train_base_model = _mkfile(tmp_path, 'w.safetensors', _FLUX_KEYS)
         svc.db.session.commit()
         monkeypatch.setattr(lt, 'assert_trainable', lambda *_a, **_kw: None)
-        monkeypatch.setattr(lt, 'list_checkpoints', lambda *a, **k: [{'step': 800}])
+        monkeypatch.setattr(
+            lt, 'list_checkpoints',
+            lambda *a, **k: [{'step': 800, 'filename': 'resume.safetensors'}])
+        monkeypatch.setattr(
+            lt, '_seed_continuation_from',
+            lambda *a, **k: str(tmp_path / 'archived-run'))
         monkeypatch.setattr(lt, 'launch_training', fake_launch)
         lt.continue_training(LOCAL_USER, ds.id, extra_steps=500)
     assert captured['allow_unverified_weights'] is True

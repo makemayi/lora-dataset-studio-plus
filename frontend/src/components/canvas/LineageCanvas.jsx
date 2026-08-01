@@ -44,6 +44,7 @@ import { canvasRunDatasetIds, readyImageCount, runPinCandidates } from '../../ut
 import { isNodeControlTarget, nodePointerIntent } from '../../utils/canvasNodeChrome';
 import {
   pinBatchAnnouncement, pinBatchPendingAcrossLanes, placeImageBatch,
+  groupPinnedBatchBySource, groupPinnedBatchTogether,
 } from '../../utils/canvasPinBatch';
 import { cardClickAction, runGalleryTarget } from '../../utils/canvasCardClick';
 import { loraFolderLabel } from '../../utils/checkpointBrowser';
@@ -52,6 +53,7 @@ import CanvasGenerationPanel from './CanvasGenerationPanel';
 import CanvasRunTracker from './CanvasRunTracker';
 import CanvasImageNode from './CanvasImageNode';
 import CanvasImageGroup from './CanvasImageGroup';
+import ExportGridModal from '../dataset/studio/ExportGridModal';
 import CheckpointGalleryPanel from '../shared/CheckpointGalleryPanel';
 import { useToast } from '../common/Toast';
 import { useCapabilities } from '../../context/CapabilitiesContext';
@@ -197,7 +199,7 @@ function LaneGraph({ lane, isLit, onHover, onNodeClick, diffRole, noteOf, lifted
  *
  *  Its own <svg>, sized 1x1 and overflow-visible, because a pinned image may sit
  *  well outside the tree's box and the tree's <svg> is sized to the tree. */
-function LaneImages({ lane, layout, onGeometry, onClose, onOpen, onCloseGroup,
+function LaneImages({ lane, layout, onGeometry, onClose, onOpen, onCloseGroup, onExportGrid,
   boardScale, hint }) {
   if (!layout.length) return null;
   // Edges are drawn from where each picture actually IS — a member's slot in
@@ -211,7 +213,7 @@ function LaneImages({ lane, layout, onGeometry, onClose, onOpen, onCloseGroup,
       {layout.map((r) => (r.kind === 'group' ? (
         <CanvasImageGroup key={r.key} group={r} datasetId={lane.datasetId}
           laneName={lane.name} onClose={onClose} onOpen={onOpen}
-          onCloseGroup={onCloseGroup} boardScale={boardScale}
+          onCloseGroup={onCloseGroup} onExportGrid={onExportGrid} boardScale={boardScale}
           dropHint={hint?.leaving && hint.groupId === r.groupId ? 'leaving' : null} />
       ) : (
         <CanvasImageNode key={r.key} node={r.node} datasetId={lane.datasetId}
@@ -242,7 +244,7 @@ function LaneImages({ lane, layout, onGeometry, onClose, onOpen, onCloseGroup,
   );
 }
 
-export default function LineageCanvas({ entries, positions, imageNodes, onPinLane,
+export default function LineageCanvas({ entries, positions, imageNodes, allImageNodes = imageNodes, onPinLane,
   onSaveImageNodes, onTidyUp, onRefetchDataset }) {
   const toast = useToast();
   // ▶ Continue's LOCAL lane guard (is ai-toolkit set up at all) — the app's own
@@ -256,6 +258,7 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
   const [selectedForDiff, setSelectedForDiff] = useState([]);
   const [noteEdits, setNoteEdits] = useState({});
   const [deletedIds, setDeletedIds] = useState([]);
+  const [exportGroup, setExportGroup] = useState(null);
 
   // A gone run removed from the inspector disappears without a refetch. It is
   // taken out of the TREE and the lane is laid out again — NOT filtered out of
@@ -1139,12 +1142,19 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
   const handlePinImage = useCallback((img) => {
     const dsId = img?.dataset_id;
     if (dsId == null || img?.id == null) return;
-    const map = imageNodes?.[dsId] || {};
+    const map = allImageNodes?.[dsId] || {};
     const lane = placedRef.current.find((l) => l.datasetId === dsId);
     const geo = openGeometry(map, img.id,
       defaultImageSpot(lane?.graph, img.record_id, img.step, visibleImageNodes(map)));
-    onSaveImageNodes?.(dsId, [{ image_id: img.id, ...geo, visible: true, image: img }]);
-  }, [imageNodes, onSaveImageNodes]);
+    const grouped = groupPinnedBatchBySource({
+      nodes: Object.values(map),
+      placed: [{ imageId: img.id, ...geo, image: img }],
+    });
+    onSaveImageNodes?.(dsId, grouped.rows.map((row) => ({
+      image_id: row.imageId, x: row.x, y: row.y, w: row.w, h: row.h,
+      visible: row.visible, group_id: row.groupId, group_pos: row.groupPos, image: row.image,
+    })));
+  }, [allImageNodes, onSaveImageNodes]);
 
   /* 📌 Pin ALL of a finished run's images, in one click.
      A lot spanning four checkpoints used to mean opening four galleries and
@@ -1161,8 +1171,8 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
   const pinCandidates = useMemo(
     () => runPinCandidates(tracker.run.data), [tracker.run.data]);
   const pinPending = useMemo(
-    () => pinBatchPendingAcrossLanes(pinCandidates, imageNodes).pending,
-    [pinCandidates, imageNodes]);
+    () => pinBatchPendingAcrossLanes(pinCandidates, allImageNodes).pending,
+    [pinCandidates, allImageNodes]);
 
   const handlePinAll = useCallback(async () => {
     const wanted = new Set(pinPending.map((c) => c.id));
@@ -1189,31 +1199,33 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
     const undo = [];
     for (const [dsId, images] of byLane) {
       const lane = placedRef.current.find((l) => l.datasetId === dsId);
-      const laneMap = imageNodes?.[dsId] || {};
+      const laneMap = allImageNodes?.[dsId] || {};
       const res = placeImageBatch({
         graph: lane?.graph,
         // The boxes actually OCCUPIED: a strip, not the members' remembered
         // spots — a fresh pin landing squarely on a group would be exactly the
         // "nothing lands on top of anything" promise broken.
-        existing: layoutBoxes(layoutRef.current[dsId] || []),
+        existing: layoutBoxes(layoutImageNodes(visibleImageNodes(laneMap))),
         images,
         remembered: laneMap,
       });
       if (!res.placed.length) continue;
+      const grouped = groupPinnedBatchTogether({
+        nodes: Object.values(laneMap), placed: res.placed,
+      });
       placedTotal += res.placed.length;
       skippedTotal += res.skipped.length;
-      onSaveImageNodes?.(dsId, res.placed.map((p) => ({
+      onSaveImageNodes?.(dsId, grouped.rows.map((p) => ({
         image_id: p.imageId, x: p.x, y: p.y, w: p.w, h: p.h,
-        visible: true, image: p.image,
+        visible: p.visible, group_id: p.groupId, group_pos: p.groupPos, image: p.image,
       })));
       // What Undo has to put back: these rows, closed again, at the geometry
       // they had BEFORE (a picture that had been closed keeps the spot it was
       // closed at, so undoing does not quietly rewrite it).
-      undo.push({ datasetId: dsId, rows: res.placed.map((p) => {
-        const was = laneMap[p.imageId];
-        return { image_id: p.imageId, visible: false, image: p.image,
-          x: was?.x ?? p.x, y: was?.y ?? p.y, w: was?.w ?? p.w, h: was?.h ?? p.h };
-      }) });
+      undo.push({ datasetId: dsId, rows: grouped.undoRows.map((p) => ({
+        image_id: p.imageId, x: p.x, y: p.y, w: p.w, h: p.h,
+        visible: p.visible, group_id: p.groupId, group_pos: p.groupPos, image: p.image,
+      })) });
     }
     const missing = wanted.size - placedTotal - skippedTotal;
     setPinAllState({
@@ -1223,7 +1235,7 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
       }),
       undo,
     });
-  }, [pinPending, trackerTargets, imageNodes, onSaveImageNodes]);
+  }, [pinPending, trackerTargets, allImageNodes, onSaveImageNodes]);
 
   /* The way back. Pinning thirty pictures with one tap and offering no way out
      would be the board rearranging itself on the user's behalf; this closes
@@ -1428,6 +1440,10 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
                 <LaneImages lane={lane} layout={layoutByLane[lane.datasetId] || []}
                   onGeometry={handleImageGeometry} onClose={handleCloseImage}
                   onCloseGroup={handleCloseGroup}
+                  onExportGrid={(group) => setExportGroup({
+                    datasetId: lane.datasetId,
+                    imageIds: group.members.map((member) => member.node.imageId),
+                  })}
                   onOpen={(n) => setPinnedZoom(n.image)}
                   hint={dropHint?.datasetId === lane.datasetId ? dropHint : null}
                   boardScale={clampScale(view.scale)} />
@@ -1502,7 +1518,7 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
           lanes={continueLanes}
           // This run's OWN saves — not the dataset's current selection. On a
           // board holding ten datasets that distinction is the feature.
-          checkpoints={continueSteps.map((step) => ({ step }))}
+          checkpoints={continueTarget.node.checkpoints || []}
           // THE point of opening from a pill: step 2500 of a 3500-step run, not
           // "the latest". initialResumeStep honours it only when it is a real
           // save of this run (unit-tested in lineageContinue.js).
@@ -1561,6 +1577,10 @@ export default function LineageCanvas({ entries, positions, imageNodes, onPinLan
           the facts stay one click away rather than crammed onto a thumbnail. */}
       <GeneratedImageLightbox img={pinnedZoom} alt="Pinned generated image"
         onClose={() => setPinnedZoom(null)} />
+
+      <ExportGridModal open={Boolean(exportGroup)} onClose={() => setExportGroup(null)}
+        datasetId={exportGroup?.datasetId} imageIds={exportGroup?.imageIds || []}
+        canvasMode />
 
       {/* An untouched board with picks waiting: say so, because the settings panel
           may be closed and the ✓ boxes are small. Also the only place the

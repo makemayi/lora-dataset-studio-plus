@@ -491,6 +491,10 @@ def test_regenerate_applies_the_preset_regardless_of_label(app, tmp_path, monkey
         captured = []
         monkeypatch.setattr(queue_manager, 'add_job',
                             lambda **kw: (captured.append(kw), kw['job_id'])[1])
+        # This test only exercises preset resolution. Its first mocked enqueue
+        # does not create a durable queue row, so make the next regenerate's
+        # cancellation proof explicit instead of weakening the production fence.
+        monkeypatch.setattr(queue_manager, 'cancel_job', lambda *args, **kwargs: True)
         svc.regenerate_image(LOCAL_USER, img.id, generation_lora_preset='Just one')
         assert _gen_chain(captured[0]['workflow_data']) == \
             [os.path.join('klein', 'gen-a.safetensors')]

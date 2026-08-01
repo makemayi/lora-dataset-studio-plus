@@ -33,7 +33,7 @@ const familyBadgeClass = (fam) => ({
   krea: 'border-amber-400/40 bg-amber-500/10 text-amber-300',
 }[fam] || 'border-border-strong bg-white/5 text-content-muted');
 
-export default function LoraPicker({ preselectDataset, onSelectionChange }) {
+export default function LoraPicker({ preselectDataset, preselectFamily = null, onSelectionChange }) {
   const toast = useToast();
   const [loras, setLoras] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -65,12 +65,15 @@ export default function LoraPicker({ preselectDataset, onSelectionChange }) {
   // chargée : checkpoint par défaut = le 1er (= le final côté backend).
   useEffect(() => {
     if (preselectedRef.current || !preselectDataset || !loras.length) return;
-    const target = loras.find((l) => String(l.dataset_id) === String(preselectDataset));
+    const target = loras.find((l) => (
+      String(l.dataset_id) === String(preselectDataset)
+      && (!preselectFamily || famOf(l) === preselectFamily)
+    ));
     if (target && target.checkpoints?.length) {
       preselectedRef.current = true;
       setPicked({ [keyOf(target)]: target.checkpoints[0].filename });
     }
-  }, [preselectDataset, loras]);
+  }, [preselectDataset, preselectFamily, loras]);
 
   // Restaure la sélection du DERNIER passage (recharger la page ne perd plus les
   // LoRA cochés ni leurs checkpoints — demande user 2026-07-03). L'URL

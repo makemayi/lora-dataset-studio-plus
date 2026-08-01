@@ -165,13 +165,16 @@ def test_install_that_has_beta57_still_sends_beta57(app, probe, monkeypatch):
     sent = {}
 
     class _Ok:
+        status_code = 200
+
         def raise_for_status(self):
             pass
 
         def json(self):
             return {'prompt_id': 'p1'}
 
-    def fake_post(url, json=None, headers=None, timeout=None):
+    def fake_post(url, json=None, headers=None, timeout=None, **kwargs):
+        assert kwargs.get('allow_redirects') is False
         sent.update(json or {})
         return _Ok()
 
@@ -219,15 +222,20 @@ def test_unreachable_object_info_never_blocks_a_working_install(app, probe, monk
     sent = {}
 
     class _Ok:
+        status_code = 200
+
         def raise_for_status(self):
             pass
 
         def json(self):
             return {'prompt_id': 'p2'}
 
-    monkeypatch.setattr(comfyui.requests, 'post',
-                        lambda url, json=None, headers=None, timeout=None:
-                        (sent.update(json or {}), _Ok())[1])
+    def fake_post(url, json=None, headers=None, timeout=None, **kwargs):
+        assert kwargs.get('allow_redirects') is False
+        sent.update(json or {})
+        return _Ok()
+
+    monkeypatch.setattr(comfyui.requests, 'post', fake_post)
     monkeypatch.setattr(comfyui, '_ensure_comfyui_before_generation', lambda: (True, 'up'))
 
     wf = _klein_like_workflow()

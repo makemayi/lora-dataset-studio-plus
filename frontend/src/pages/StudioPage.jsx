@@ -19,6 +19,7 @@ export default function StudioPage() {
   const { caps } = useCapabilities();
   // /dataset/studio/:id (legacy), or /studio?dataset=… (launcher), or nothing (standalone).
   const preselectDataset = id || sp.get('dataset') || null;
+  const preselectFamily = sp.get('family') || null;
 
   if (!caps.studio_visible) {
     return (
@@ -35,7 +36,7 @@ export default function StudioPage() {
   // leaves room so it never covers the last row of results.
   return (
     <div className="pb-24">
-      <StudioShell preselectDataset={preselectDataset} />
+      <StudioShell preselectDataset={preselectDataset} preselectFamily={preselectFamily} />
     </div>
   );
 }

@@ -69,6 +69,12 @@ class FaceDataset(db.Model):
     # Famille de modèle entraînée : 'zimage' (défaut/None) ou 'sdxl'. Pilote la
     # branche de build_job_config (arch/scheduler/base) et le dossier loras d'import.
     train_type = db.Column(String(16), nullable=True)
+    # Nature des poids optimisés. `lora` est le comportement historique et reste
+    # le défaut explicite des nouvelles lignes comme des bases migrées. Le MVP
+    # dense (`full_transformer`) entraîne uniquement le transformer Krea 2 Raw et
+    # n'est exécutable que dans la lane cloud (voir services.lora_training).
+    training_mode = db.Column(String(32), nullable=False, default='lora',
+                              server_default='lora')
     # Nature du dataset : NULL/'character' (défaut historique) ou 'concept'. Orthogonale
     # à train_type — un concept s'entraîne sur n'importe quelle base. Inverse la logique
     # import/caption (cf face_dataset_service : is_concept). Colonne ajoutée après coup

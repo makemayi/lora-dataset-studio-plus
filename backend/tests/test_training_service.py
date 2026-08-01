@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 import time
 
 import pytest
@@ -456,15 +457,20 @@ def test_enqueue_snapshots_steps_and_not_before(app, monkeypatch):
                             allow_caption_quality=True)
         q = lt.get_train_queue()
         assert q[0]['steps'] == 2000 and q[0]['not_before'].startswith('2999')
+        assert q[0]['training_mode'] == 'lora'
         assert q[0]['allow_caption_mismatch'] is True
         assert q[0]['allow_uncaptioned'] is True
         assert q[0]['allow_caption_quality'] is True
         assert lt._due_index(q) is None                   # scheduled in the future -> not due
 
         captured = {}
+        # A later selector change cannot reinterpret the queued execution plan.
+        ds.training_mode = 'full_transformer'
+        svc.db.session.commit()
         monkeypatch.setattr(lt, 'launch_training',
                             lambda *a, **kw: captured.update(kw) or {'started': True})
         lt._launch_queued_item(q[0])
+        assert captured['training_mode'] == 'lora'
         assert captured['allow_caption_mismatch'] is True
         assert captured['allow_uncaptioned'] is True
         assert captured['allow_caption_quality'] is True
@@ -504,6 +510,9 @@ def test_continue_revalidates_current_dataset_then_forwards_confirmations(
         monkeypatch.setattr(
             lt, 'list_checkpoints',
             lambda *a, **kw: [{'step': 750, 'filename': 'resume.safetensors'}])
+        monkeypatch.setattr(
+            lt, '_seed_continuation_from',
+            lambda *a, **kw: 'archived-run')
         monkeypatch.setattr(
             lt, 'launch_training',
             lambda *a, **kw: calls.append(('launch', kw)) or {'started': True})
@@ -565,6 +574,7 @@ def test_queued_resume_replays_confirmation_flags(monkeypatch):
     assert captured['allow_caption_mismatch'] is True
     assert captured['allow_uncaptioned'] is True
     assert captured['allow_caption_quality'] is True
+    assert captured['training_mode'] == 'lora'  # legacy queue item => historical LoRA
 
 
 def test_step_cap_floor_500(app, tmp_path, monkeypatch):
@@ -608,6 +618,284 @@ def test_step_cap_floor_500(app, tmp_path, monkeypatch):
         assert train_cfg['steps'] == 500
         ds0 = config['config']['process'][0]['datasets'][0]
         assert 'mask_path' not in ds0
+
+
+def test_post_popen_identity_failure_stays_fail_closed_without_raising(
+        app, tmp_path, monkeypatch):
+    """Once Popen returns, PID persistence cannot trigger caller rollback."""
+    from pathlib import Path
+
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as lt
+
+    _configure_aitoolkit(tmp_path, monkeypatch, app)
+    monkeypatch.setattr(lt.subprocess, 'Popen', lambda *_a, **_k: _FakeProc(8181))
+    monkeypatch.setattr(lt, '_watch_training', lambda *a, **k: None)
+    monkeypatch.setattr(
+        lt,
+        '_record_training_process_identity',
+        lambda _pid: (_ for _ in ()).throw(
+            RuntimeError('simulated durable PID write failure')),
+    )
+    exported = tmp_path / 'post-popen-export'
+    exported.mkdir()
+    monkeypatch.setattr(
+        lt, 'export_dataset_to_aitoolkit',
+        lambda *_a, **_k: str(exported))
+
+    with app.app_context():
+        ds = svc.create_dataset(
+            LOCAL_USER, 'Post Popen boundary', 'post_popen_boundary')
+        output = Path(lt._output_dir())
+        output.mkdir(parents=True, exist_ok=True)
+        live = output / 'post_popen_live'
+        archived = output / 'post_popen_live_superseded_test'
+        live.mkdir()
+        archived.mkdir()
+        journal, _ = lt._new_exact_resume_journal(
+            ds.id, live, archived)
+
+        result = lt.launch_training(
+            LOCAL_USER,
+            ds.id,
+            steps=500,
+            check_captions=False,
+            masked=False,
+            _state_resume_journal=str(journal),
+        )
+
+        assert result['started'] is True and result['pid'] == 8181
+        persisted = lt._read_exact_resume_journal(journal)
+        assert persisted['phase'] == 'spawned'
+        assert persisted['pid'] == 8181
+        assert persisted['pid_create_time'] is None
+        assert live.is_dir() and archived.is_dir()
+        assert lt.queue_manager._get_system_state(
+            'training_in_progress', False) is True
+        assert lt.queue_manager._get_system_state(
+            'training_run_token', None) == result['run_token']
+        lt._clear_training_identity(ttl_seconds=1)
+
+
+def test_partial_pre_spawn_identity_failure_clears_fence_and_never_spawns(
+        app, tmp_path, monkeypatch):
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as lt
+
+    _configure_aitoolkit(tmp_path, monkeypatch, app)
+    spawned = []
+
+    def fake_popen(args, **_kwargs):
+        if any(str(item).replace('\\', '/').endswith('/run.py')
+               or str(item) == 'run.py' for item in args):
+            spawned.append(True)
+        return _FakeProc()
+
+    monkeypatch.setattr(lt.subprocess, 'Popen', fake_popen)
+    monkeypatch.setattr(lt, '_watch_training', lambda *a, **k: None)
+    exported = tmp_path / 'partial-fence-export'
+    exported.mkdir()
+    monkeypatch.setattr(
+        lt, 'export_dataset_to_aitoolkit',
+        lambda *_a, **_k: str(exported))
+
+    original_set = lt.queue_manager._set_system_state
+    failed = False
+
+    def fail_after_first_fence_write(key, value, **kwargs):
+        nonlocal failed
+        if key == 'training_dataset_id' and not failed:
+            failed = True
+            raise RuntimeError('simulated partial identity write failure')
+        return original_set(key, value, **kwargs)
+
+    with app.app_context():
+        ds = svc.create_dataset(
+            LOCAL_USER, 'Partial fence', 'partial_fence')
+        monkeypatch.setattr(
+            lt.queue_manager, '_set_system_state', fail_after_first_fence_write)
+
+        with pytest.raises(
+                RuntimeError, match='partial identity write failure'):
+            lt.launch_training(
+                LOCAL_USER,
+                ds.id,
+                steps=500,
+                check_captions=False,
+                masked=False,
+            )
+
+        assert failed is True and spawned == []
+        assert lt.queue_manager._get_system_state(
+            'training_in_progress', False) is False
+        for key in lt._TRAIN_IDENTITY_KEYS:
+            assert lt.queue_manager._get_system_state(key, None) is None
+
+
+def test_two_launches_cannot_enter_dataset_export_concurrently(
+        app, tmp_path, monkeypatch):
+    from app.config import LOCAL_USER
+    from app.services import aitoolkit_state_bridge
+    from app.services import checkpoint_registry
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as lt
+    from app.services import ollama_gpu_fence
+
+    _configure_aitoolkit(tmp_path, monkeypatch, app)
+    monkeypatch.setattr(lt, 'assert_interpreter_ready', lambda: None)
+    monkeypatch.setattr(lt, 'assert_free_disk', lambda *a, **k: None)
+    monkeypatch.setattr(lt, '_assert_no_vision_pass_on_gpu', lambda: None)
+    monkeypatch.setattr(
+        lt.queue_manager, 'has_comfyui_work', lambda: False)
+    monkeypatch.setattr(
+        ollama_gpu_fence, 'ensure_released_for_comfy', lambda: True)
+    monkeypatch.setattr(
+        aitoolkit_state_bridge, 'probe',
+        lambda _root: {'supported': False, 'reasons': ['test-disabled']})
+    monkeypatch.setattr(
+        checkpoint_registry, 'prepare_launch',
+        lambda *_a, **_k: {'manifest': [], 'snapshot': {}})
+    monkeypatch.setattr(
+        checkpoint_registry, 'register_launch', lambda *_a, **_k: None)
+    monkeypatch.setattr(lt.subprocess, 'Popen', lambda *_a, **_k: _FakeProc(9191))
+    monkeypatch.setattr(
+        lt, '_record_training_process_identity', lambda _pid: None)
+    monkeypatch.setattr(lt, '_watch_training', lambda *a, **k: None)
+
+    first_inside_export = threading.Event()
+    release_first = threading.Event()
+    second_attempted = threading.Event()
+    export_calls = []
+    outcomes = []
+
+    with app.app_context():
+        lt._clear_training_identity(ttl_seconds=1)
+        first_ds = svc.create_dataset(
+            LOCAL_USER, 'Launch serial one', 'launch_serial_one')
+        second_ds = svc.create_dataset(
+            LOCAL_USER, 'Launch serial two', 'launch_serial_two')
+        first_id, second_id = first_ds.id, second_ds.id
+
+    def fake_export(_user_id, dataset_id, **_kwargs):
+        export_calls.append(dataset_id)
+        if dataset_id == first_id:
+            first_inside_export.set()
+            assert release_first.wait(timeout=5)
+        folder = tmp_path / f'export-{dataset_id}'
+        folder.mkdir(exist_ok=True)
+        return str(folder)
+
+    monkeypatch.setattr(lt, 'export_dataset_to_aitoolkit', fake_export)
+
+    def run(dataset_id, *, second=False):
+        if second:
+            second_attempted.set()
+        try:
+            with app.app_context():
+                result = lt.launch_training(
+                    LOCAL_USER,
+                    dataset_id,
+                    steps=500,
+                    check_captions=False,
+                    masked=False,
+                )
+            outcomes.append((dataset_id, result['started']))
+        except ValueError as exc:
+            outcomes.append((dataset_id, str(exc)))
+
+    first = threading.Thread(target=run, args=(first_id,))
+    second = threading.Thread(
+        target=run, args=(second_id,), kwargs={'second': True})
+    first.start()
+    assert first_inside_export.wait(timeout=5)
+    second.start()
+    assert second_attempted.wait(timeout=5)
+    assert export_calls == [first_id]
+    release_first.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert not first.is_alive() and not second.is_alive()
+    assert export_calls == [first_id]
+    assert (first_id, True) in outcomes
+    assert any(
+        dataset_id == second_id and 'already in progress' in str(result)
+        for dataset_id, result in outcomes)
+    with app.app_context():
+        lt._clear_training_identity(ttl_seconds=1)
+
+
+def test_direct_launch_refuses_unresolved_exact_resume_before_preflight(
+        app, monkeypatch):
+    from app.services import lora_training as lt
+
+    observed = []
+
+    def unresolved():
+        assert lt._launch_transaction_lock._is_owned()
+        assert lt._queue_lock._is_owned()
+        observed.append('reconciled')
+        return True
+
+    monkeypatch.setattr(
+        lt, '_reconcile_exact_resume_journals', unresolved)
+    monkeypatch.setattr(
+        lt, 'is_installed',
+        lambda: pytest.fail('launch preflight must not run while a lane is held'))
+
+    with app.app_context(), pytest.raises(
+            ValueError, match='requires operator recovery'):
+        lt.launch_training('local', 999)
+
+    assert observed == ['reconciled']
+
+
+def test_exact_failure_watcher_rolls_lane_back_under_launch_transaction(
+        app, monkeypatch):
+    from app.services import lora_training as lt
+
+    class FailedProc:
+        returncode = 78
+
+        def wait(self):
+            return None
+
+    observed = []
+
+    def rollback(_training_folder, _archived):
+        assert lt._launch_transaction_lock._is_owned()
+        assert lt._queue_lock._is_owned()
+        observed.append('rollback')
+
+    monkeypatch.setattr(
+        lt, '_clear_exact_resume_journal_after_boundary', lambda _tx: False)
+    monkeypatch.setattr(
+        lt, '_exact_resume_bridge_failure', lambda *_a: 'bootstrap failed')
+    monkeypatch.setattr(
+        lt, '_crash_payload',
+        lambda *_a: {'excerpt': {'text': 'failed'}, 'log_tail': ''})
+    monkeypatch.setattr(lt, '_rollback_unlaunched_exact_resume', rollback)
+    monkeypatch.setattr(
+        lt, '_delete_exact_resume_journal',
+        lambda _path: observed.append('journal-deleted'))
+    monkeypatch.setattr(lt, 'process_training_queue', lambda: None)
+
+    lt._watch_training(
+        app,
+        FailedProc(),
+        'unused.log',
+        999,
+        {
+            'training_folder': 'live',
+            'archived': 'archived',
+            'status_path': 'status.json',
+            'journal_path': 'journal.json',
+        },
+    )
+
+    assert observed == ['rollback', 'journal-deleted']
 
 
 def test_masked_training_zero_written_disables_masks(app, tmp_path, monkeypatch):

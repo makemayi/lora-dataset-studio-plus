@@ -138,3 +138,43 @@ def test_caption_ready_never_starts_local_process_for_remote_url(app, monkeypatc
                             lambda: (_ for _ in ()).throw(AssertionError('must not spawn')))
         result = ollama_control.ensure_captioning_ready()
     assert result['ok'] is False and 'remote' in result['error'].lower()
+
+
+def test_caption_ready_probes_requested_model(app, monkeypatch):
+    """Once reachable, readiness checks the model requested by this caption run."""
+    from app import capabilities
+    from app.services import ollama_control
+    probed = []
+
+    monkeypatch.setattr(ollama_control, '_reachable', lambda url: True)
+
+    def _probe(*, reachable=None, model=None):
+        probed.append((reachable, model))
+        return {'ok': True, 'detail': f'{model} ready'}
+
+    monkeypatch.setattr(capabilities, 'probe_ollama_model', _probe)
+    with app.app_context():
+        result = ollama_control.ensure_captioning_ready('custom-vlm:latest')
+
+    assert result['ok'] is True
+    assert probed == [(True, 'custom-vlm:latest')]
+
+
+def test_caption_ready_without_override_keeps_global_probe_contract(app, monkeypatch):
+    """No argument remains compatible with the historical global-model probe."""
+    from app import capabilities
+    from app.services import ollama_control
+    probed = []
+
+    monkeypatch.setattr(ollama_control, '_reachable', lambda url: True)
+
+    def _probe(*, reachable=None):
+        probed.append(reachable)
+        return {'ok': True, 'detail': 'global ready'}
+
+    monkeypatch.setattr(capabilities, 'probe_ollama_model', _probe)
+    with app.app_context():
+        result = ollama_control.ensure_captioning_ready()
+
+    assert result['ok'] is True
+    assert probed == [True]

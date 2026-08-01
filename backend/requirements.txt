@@ -12,5 +12,5 @@ PyYAML>=6.0               # Parse ComfyUI's extra_model_paths.yaml (was only tra
 Send2Trash>=1.8           # Bank "Delete rejected from disk" -> OS trash instead of a hard delete (pure-python, tiny); guarded import degrades to os.remove if absent
 # Test dependencies are NOT here: this file is what every end user installs
 # (start.bat), and it shipped a test runner nobody runs. They live in
-# requirements-dev.txt, which is also exactly what CI installs -- see the header
-# there for the release this divergence cost.
+# requirements-dev.txt, the common CI/release test baseline. Runtime bridge tests
+# add the separate CPU-only requirements-torch-tests.txt overlay -- see its header.

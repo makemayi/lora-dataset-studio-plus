@@ -352,6 +352,22 @@ test('a pill keeps the SIZE of its gallery, not only its newest preview', () => 
   assert.equal(plain.preview_count, 0);          // absent → 0, never undefined
 });
 
+test('a pill keeps its exact-resume capability for the shared dialog', () => {
+  const resumeState = {
+    bundle_id: '0123456789abcdef0123456789abcdef',
+    status: 'ready',
+    integrity: 'verified',
+    state_level: 'exact',
+  };
+  const g = buildLineageGraph({
+    root_id: 1, current_id: 1, single: true,
+    nodes: [{ record_id: 1, parent_record_id: null, is_current: true,
+      checkpoints: [ck(500, { resume_state: resumeState })] }],
+    edges: [],
+  });
+  assert.deepEqual(g.nodes[0].checkpoints[0].resume_state, resumeState);
+});
+
 test('empty / missing payloads return a safe empty shape', () => {
   for (const bad of [null, undefined, {}, { nodes: [] }]) {
     const g = buildLineageGraph(bad);
