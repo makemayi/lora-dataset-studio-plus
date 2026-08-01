@@ -48,6 +48,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-01-krea-camera-angle-eye-contact',
+    date: '2026-08-01',
+    title: 'Krea 2 Edit: three-quarter and low/high-angle shots hold their camera angle now',
+    blurb: 'These shots used to lose their turn back toward the reference photo\'s own angle, with no eye contact reinforced either. Each now gets its own mandatory camera-position + direct-eye-contact instruction, and the generic front-view framing text (which was actively fighting it) is dropped for these shots.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-01-dataset-tile-face-swap',
     date: '2026-08-01',
     title: 'Swap a tile\'s face with your reference photo, in one click',

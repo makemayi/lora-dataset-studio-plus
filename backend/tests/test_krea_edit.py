@@ -856,7 +856,7 @@ def test_krea_pose_cards_override_conflicting_generic_framing_details(
                                  label=entry['label'])
     final_card = fv.krea_card_pose_priority(
         fv._krea_builtin_card_prompt(entry['prompt'], entry['label'], 'human'),
-        true_profile=entry_id == 'face_profile_l')
+        angle_kind='profile' if entry_id == 'face_profile_l' else None)
 
     assert requested_card_text in out
     assert conflicting_detail not in out
@@ -900,10 +900,14 @@ def test_krea_card_priority_stays_human_and_uses_the_current_regenerate_prompt()
 
 
 def test_krea_three_quarter_profile_is_not_rewritten_as_a_true_side_profile():
+    """A three-quarter shot gets ITS OWN priority reinforcement (idea by the
+    user, 2026-08-01) — not the true-profile one, which would over-rotate a
+    genuine 3/4 shot into a strict side view."""
     out = fv.wrap_variation_krea('close-up portrait, three-quarter profile, smiling',
                                  framing='face', label='Face 3/4')
-    assert 'both eyes in crisp focus' in out
-    assert fv.KREA_CARD_POSE_PRIORITY_PREFIX not in out
+    assert 'both eyes in crisp focus' not in out
+    assert fv.KREA_CARD_POSE_PRIORITY_PREFIX in out
+    assert fv.KREA_THREE_QUARTER_REQUIREMENT in out
     assert fv.KREA_TRUE_PROFILE_REQUIREMENT not in out
 
 
@@ -912,6 +916,61 @@ def test_krea_profile_priority_is_not_disabled_by_an_age():
                                  framing='face', label='Profile left')
     assert 'both eyes in crisp focus' not in out
     assert fv.KREA_TRUE_PROFILE_REQUIREMENT in out
+
+
+@pytest.mark.parametrize(
+    ('entry_id', 'requirement_attr'),
+    [
+        ('bust_low_angle', 'KREA_LOW_ANGLE_REQUIREMENT'),
+        ('bust_high_angle', 'KREA_HIGH_ANGLE_REQUIREMENT'),
+        ('face_34l_smile', 'KREA_THREE_QUARTER_REQUIREMENT'),
+    ],
+)
+def test_krea_camera_angle_cards_get_their_own_priority_and_eye_contact(
+        entry_id, requirement_attr):
+    """Idea by the user (2026-08-01): a three-quarter or low/high-angle card
+    names a specific camera POSITION and gaze, which the generic framing detail
+    (still tuned for a front view) does nothing to hold — and Krea's own
+    reference grounding otherwise pulls the angle back toward the reference
+    photo. Each of these now gets its own reinforcement, same mechanism as the
+    existing true-profile fix, naming the required eye contact with the lens."""
+    entry = next(e for e in fv.VARIATION_CATALOG if e['id'] == entry_id)
+    out = fv.wrap_variation_krea(entry['prompt'], framing=entry['framing'],
+                                 label=entry['label'])
+    requirement = getattr(fv, requirement_attr)
+    assert out.endswith(requirement)
+    assert fv.KREA_CARD_POSE_PRIORITY_PREFIX in out
+    # The generic framing detail (tuned for a front view) must not survive
+    # alongside the angle-specific requirement — they actively contradict.
+    generic_detail = fv.get_identity_prompt(f"framing_{entry['framing']}", 'human')
+    assert generic_detail not in out
+    # Only the ONE matching requirement fires, never a sibling angle's text.
+    for other_attr in ('KREA_TRUE_PROFILE_REQUIREMENT', 'KREA_THREE_QUARTER_REQUIREMENT',
+                       'KREA_LOW_ANGLE_REQUIREMENT', 'KREA_HIGH_ANGLE_REQUIREMENT'):
+        if other_attr != requirement_attr:
+            assert getattr(fv, other_attr) not in out
+
+
+def test_krea_body_low_angle_card_gets_the_low_angle_requirement():
+    """The body framing's own priority trigger (non-standing poses) is now
+    joined by a low/high-angle detector, so a standing-but-low-angle card
+    (camera below, looking up) still gets reinforced even though the subject
+    IS standing."""
+    entry = next(e for e in fv.VARIATION_CATALOG if e['id'] == 'body_close_low')
+    out = fv.wrap_variation_krea(entry['prompt'], framing='body', label=entry['label'])
+    assert out.endswith(fv.KREA_LOW_ANGLE_REQUIREMENT)
+    assert 'ENTIRE body visible from head to toe' not in out
+
+
+def test_krea_angle_kind_resolves_one_category_at_a_time():
+    """Direct unit coverage of the classifier: profile wins over three-quarter
+    when both cues somehow appear, and an ordinary front-view text matches
+    nothing."""
+    assert fv._krea_angle_kind('strict left profile view') == 'profile'
+    assert fv._krea_angle_kind('three-quarter left view') == 'three_quarter'
+    assert fv._krea_angle_kind('low angle, looking up') == 'low_angle'
+    assert fv._krea_angle_kind('high-angle shot from above') == 'high_angle'
+    assert fv._krea_angle_kind('front view, neutral expression') is None
 
 
 def test_krea_card_priority_does_not_duplicate_a_dataset_suffix():
@@ -927,7 +986,7 @@ def test_krea_card_priority_does_not_repeat_edited_or_custom_prompt_text():
     custom = 'left profile view, ' + ('deliberate detail ' * 800)
     out = fv.wrap_variation_krea(custom, framing='face', label='Custom profile')
     assert out.count(custom) == 1
-    assert out.endswith(fv.krea_card_pose_priority(true_profile=True))
+    assert out.endswith(fv.krea_card_pose_priority(angle_kind='profile'))
     assert not out.endswith(fv.krea_card_pose_priority(custom))
 
 
@@ -944,7 +1003,7 @@ def test_krea_card_priority_tail_is_not_built_from_the_editable_palette(monkeypa
         fv.get_identity_prompt('klein_identity', 'human'))
     assert out.endswith(fv.krea_card_pose_priority(
         fv._krea_builtin_card_prompt(entry['prompt'], entry['label'], 'human'),
-        true_profile=True))
+        angle_kind='profile'))
 
 
 def test_the_wrapper_respects_the_subject_type_and_the_nsfw_switch():

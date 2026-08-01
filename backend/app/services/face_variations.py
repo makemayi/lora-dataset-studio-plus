@@ -983,6 +983,15 @@ _KREA_PROFILE_VIEW = re.compile(
     r'\b(?:strict\s+)?profile(?:\s+view)?\b|\bside[- ]view\b', re.I)
 _KREA_THREE_QUARTER_VIEW = re.compile(
     r'\b(?:three[- ]quarter|3\s*(?:/|-)\s*4)\b', re.I)
+# Low/high-angle cues: both the short adjective form ("low angle", "low-angle")
+# and the catalog's own longer phrasing ("low camera angle", "camera angled
+# slightly upward from below" / "...downward from above").
+_KREA_LOW_ANGLE_VIEW = re.compile(
+    r'\blow[- ]angle\b|\blow camera angle\b|'
+    r'\bcamera angled?\s+slightly\s+upward\b', re.I)
+_KREA_HIGH_ANGLE_VIEW = re.compile(
+    r'\bhigh[- ]angle\b|\bhigh camera angle\b|'
+    r'\bcamera angled?\s+slightly\s+downward\b', re.I)
 _KREA_NON_STANDING_BODY_POSE = re.compile(
     r'\b(?:sitting|seated|sit|lying|reclining|kneeling|crouching|squatting|'
     r'walking|running|jumping|dancing)\b', re.I)
@@ -993,6 +1002,32 @@ KREA_CARD_POSE_PRIORITY_SUFFIX = (
 KREA_TRUE_PROFILE_REQUIREMENT = (
     'For a profile shot, rotate the face to a true 90-degree side view with only '
     'the nearer eye visible.')
+# Camera-geometry requirements (idea by the user, 2026-08-01): a three-quarter or
+# low/high-angle card asks for a specific camera POSITION, which the generic
+# "both eyes in crisp focus" framing detail (still tuned for a front view) does
+# nothing to enforce — and Krea's own reference grounding pulls back toward the
+# reference photo's angle unless the prompt pushes hard the other way. Each of
+# these also states the gaze explicitly: a three-quarter portrait defaults to
+# looking at the camera, and a low/high angle is the classic case for direct eye
+# contact with the lens (looking down/up INTO it) — leaving the gaze unstated let
+# the edit default back to whatever the reference photo happened to be doing.
+KREA_THREE_QUARTER_REQUIREMENT = (
+    'For a three-quarter shot, turn the head to a genuine three-quarter angle — '
+    'not a near-frontal view — and make direct eye contact with the camera lens.')
+KREA_LOW_ANGLE_REQUIREMENT = (
+    'For a low-angle shot, the camera is positioned BELOW the subject looking '
+    'upward; the subject looks DOWN into the lens, in direct eye contact with '
+    'the camera.')
+KREA_HIGH_ANGLE_REQUIREMENT = (
+    'For a high-angle shot, the camera is positioned ABOVE the subject looking '
+    'downward; the subject looks UP into the lens, in direct eye contact with '
+    'the camera.')
+_KREA_ANGLE_REQUIREMENTS = {
+    'profile': KREA_TRUE_PROFILE_REQUIREMENT,
+    'three_quarter': KREA_THREE_QUARTER_REQUIREMENT,
+    'low_angle': KREA_LOW_ANGLE_REQUIREMENT,
+    'high_angle': KREA_HIGH_ANGLE_REQUIREMENT,
+}
 KREA_CARD_POSE_PRIORITY_GENERIC = (
     f'{KREA_CARD_POSE_PRIORITY_PREFIX} honor exactly the pose, camera angle and '
     f'framing already stated in the shot description. {KREA_CARD_POSE_PRIORITY_SUFFIX}')
@@ -1005,7 +1040,7 @@ _KREA_CATALOG_OUTFIT = 'wearing a varied casual outfit'
 _KREA_CATALOG_EXPRESSION = 'a calm neutral facial expression'
 
 
-def krea_card_pose_priority(card_prompt: str = '', *, true_profile: bool = False) -> str:
+def krea_card_pose_priority(card_prompt: str = '', *, angle_kind: str | None = None) -> str:
     """Return Krea's final pose imperative without moving free-form text after SFW.
 
     A concrete prompt is only accepted here after `_krea_builtin_card_prompt`
@@ -1020,10 +1055,12 @@ def krea_card_pose_priority(card_prompt: str = '', *, true_profile: bool = False
         priority = (
             f'{KREA_CARD_POSE_PRIORITY_PREFIX} {shot}. '
             f'{KREA_CARD_POSE_PRIORITY_SUFFIX}')
-    # ``true_profile`` comes from a pose classifier before the locks, but only
-    # selects this static instruction; no free-form request text moves after SFW.
-    return (f'{priority} {KREA_TRUE_PROFILE_REQUIREMENT}'
-            if true_profile else priority)
+    # ``angle_kind`` comes from a pose classifier before the locks, but only
+    # selects one of these static instructions; no free-form request text moves
+    # after SFW. None (e.g. a non-standing body pose with no angle cue) adds
+    # nothing, matching the historical true_profile=False behaviour.
+    extra = _KREA_ANGLE_REQUIREMENTS.get(angle_kind or '')
+    return f'{priority} {extra}' if extra else priority
 
 
 def _krea_card_pose_needs_priority(prompt: str, framing: str | None,
@@ -1035,9 +1072,12 @@ def _krea_card_pose_needs_priority(prompt: str, framing: str | None,
         return False
     text = prompt or ''
     return (
-        framing == 'face' and _krea_true_profile_view(text)
+        framing in ('face', 'bust') and _krea_angle_kind(text) is not None
     ) or (
-        framing == 'body' and bool(_KREA_NON_STANDING_BODY_POSE.search(text))
+        framing == 'body' and (
+            bool(_KREA_NON_STANDING_BODY_POSE.search(text))
+            or _krea_angle_kind(text) in ('low_angle', 'high_angle')
+        )
     )
 
 
@@ -1045,6 +1085,23 @@ def _krea_true_profile_view(text: str) -> bool:
     """A real side profile, never a three-quarter view with both eyes visible."""
     return (bool(_KREA_PROFILE_VIEW.search(text or ''))
             and not bool(_KREA_THREE_QUARTER_VIEW.search(text or '')))
+
+
+def _krea_angle_kind(text: str) -> str | None:
+    """Which camera-angle category (if any) this shot's text names — selects the
+    matching Krea priority reinforcement (see _KREA_ANGLE_REQUIREMENTS). Checked
+    in this fixed order because a true profile can otherwise also read as
+    "angled": profile is the narrowest, most specific match and must win."""
+    text = text or ''
+    if _krea_true_profile_view(text):
+        return 'profile'
+    if _KREA_LOW_ANGLE_VIEW.search(text):
+        return 'low_angle'
+    if _KREA_HIGH_ANGLE_VIEW.search(text):
+        return 'high_angle'
+    if _KREA_THREE_QUARTER_VIEW.search(text):
+        return 'three_quarter'
+    return None
 
 
 def _krea_builtin_card_prompt(prompt: str, label: str, subject_type: str) -> str:
@@ -1115,8 +1172,7 @@ def _compose_edit_prompt(prompt: str, *, nsfw: bool, framing, suffix: str,
     # cards get the bounded generic imperative instead.
     prioritize_card = card_pose_priority and _krea_card_pose_needs_priority(
         prompt, framing, st)
-    true_profile = (prioritize_card and framing == 'face'
-                    and _krea_true_profile_view(prompt))
+    angle_kind = _krea_angle_kind(prompt) if prioritize_card else None
     final_card = (_krea_builtin_card_prompt(prompt, label, st)
                   if prioritize_card else '')
     if prioritize_card:
@@ -1129,7 +1185,7 @@ def _compose_edit_prompt(prompt: str, *, nsfw: bool, framing, suffix: str,
         + (f"{detail} " if detail else "")
         + (f"{lock} " if lock else "")
         + f"{get_identity_prompt('klein_identity', st)} {ending}"
-        + (f" {krea_card_pose_priority(final_card, true_profile=true_profile)}"
+        + (f" {krea_card_pose_priority(final_card, angle_kind=angle_kind)}"
            if prioritize_card else ""))
 
 
