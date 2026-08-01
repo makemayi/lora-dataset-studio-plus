@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-01-quick-random-generate',
+    date: '2026-08-01',
+    title: 'Fill a dataset with one click: set a count and a ratio, skip the card-by-card picking',
+    blurb:
+      'The new 🎲 Quick generate button composes a random, angle-aware batch from an independent component library instead of hand-picked cards — set a total + a face/bust/body and angle mix, everything else (expression, pose, outfit, background) is drawn to fit. Mild expressions only; identity comes first.',
+    to: '/datasets?section=images',
+  },
+  {
     id: '2026-08-01-krea-camera-angle-eye-contact',
     date: '2026-08-01',
     title: 'Krea 2 Edit: three-quarter and low/high-angle shots hold their camera angle now',

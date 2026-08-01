@@ -43,6 +43,7 @@ Four ways to fill a dataset, and one choice at creation that rewires everything 
 | **Character / Concept / Style** | One choice at creation rewires captioning, masking and step-scaling — it isn't just a label |
 | **✨ Generate from references** | Nano Banana Pro (Gemini), ChatGPT (`gpt-image-2`) or a local Klein/ComfyUI model, each request wrapped in identity-preservation instructions |
 | **Variation catalog** | Fans out expression / angle / lighting / framing / outfit / background without you writing a prompt — with its own catalog per subject type (person, animal, creature, object, other), extendable from a JSON file |
+| **🎲 Quick generate** | Fill a dataset by count and a face/bust/body + camera-angle mix instead of picking cards one at a time; the rest is drawn from a component library within what the angle allows |
 | **📥 Import your own** | Drag photos in — full frame for Concept/Style, optional auto head-crop for Character |
 | **🌐 Scrape the web** | Reddit keyword search, Pexels via its official API, or a supported gallery / album / direct-media URL — into the open dataset, or straight into an **Image bank**. The dataset route filters on the way in (under 768 px, wider than 3:1, near-duplicates are dropped before you see them); the bank route stores what it downloaded and lets the bank's own passes judge it |
 | **✏️ Edit the prompt, regenerate** | Every generated tile reopens its exact prompt inline and re-renders through the same engine, identity guard included |
