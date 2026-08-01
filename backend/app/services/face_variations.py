@@ -2803,7 +2803,9 @@ def _largest_remainder_allocation(total: int, ratios: dict) -> dict:
     return counts
 
 
-def _quick_gen_validate(total, framing_ratios, angle_ratios):
+def _quick_gen_validate(total, framing_ratios, angle_ratios, pools):
+    if not isinstance(total, int) or isinstance(total, bool):
+        raise ValueError('total must be an integer')
     if total < 1 or total > QUICK_GEN_TOTAL_CAP:
         raise ValueError(f'total must be between 1 and {QUICK_GEN_TOTAL_CAP}')
     used_framings = [f for f in _QUICK_GEN_FRAMING_ORDER if framing_ratios.get(f, 0) > 0]
@@ -2814,6 +2816,11 @@ def _quick_gen_validate(total, framing_ratios, angle_ratios):
         if sum(ratios.values()) != 100:
             raise ValueError(f"angle_ratios['{framing}'] must sum to 100 when "
                              f"framing_ratios['{framing}'] > 0")
+        valid_angle_ids = {e['id'] for e in pools[framing]['angle']}
+        for angle_id in ratios:
+            if angle_id not in valid_angle_ids:
+                raise ValueError(f"angle_ratios['{framing}'] has an unknown angle id: "
+                                 f"'{angle_id}'")
     return used_framings
 
 
@@ -2828,9 +2835,9 @@ def compose_quick_generate_variations(
     bad ratio shape or a total outside [1, QUICK_GEN_TOTAL_CAP] — the route
     turns that into a 400, same convention as every other validated input
     in this file."""
-    used_framings = _quick_gen_validate(total, framing_ratios, angle_ratios)
-    rng = rng or random.Random()
     pools = quick_gen_pools_for(subject_type)
+    used_framings = _quick_gen_validate(total, framing_ratios, angle_ratios, pools)
+    rng = rng or random.Random()
     framing_counts = _largest_remainder_allocation(
         total, {f: framing_ratios[f] for f in used_framings})
 

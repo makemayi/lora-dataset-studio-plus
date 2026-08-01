@@ -138,3 +138,28 @@ def test_a_framings_angle_ratios_must_sum_to_100_when_that_framing_is_used():
         fv.compose_quick_generate_variations(
             total=5, framing_ratios={'face': 100, 'bust': 0, 'body': 0},
             angle_ratios={'face': {'front': 50}})
+
+
+def test_unknown_angle_id_in_angle_ratios_raises_a_clean_value_error():
+    with pytest.raises(ValueError, match='unknown angle id'):
+        fv.compose_quick_generate_variations(
+            total=5, framing_ratios={'face': 100, 'bust': 0, 'body': 0},
+            angle_ratios={'face': {'not_a_real_angle': 100}})
+
+
+def test_total_must_be_an_int_not_a_float():
+    with pytest.raises(ValueError, match='total must be an integer'):
+        fv.compose_quick_generate_variations(
+            total=7.5, framing_ratios={'face': 100, 'bust': 0, 'body': 0},
+            angle_ratios={'face': {'front': 100}})
+
+
+def test_every_framing_pose_pool_has_at_least_one_universally_compatible_pose():
+    """If a future catalog edit leaves a framing's pose axis with no
+    angle-independent entry, `_compose_one_slot` can draw an empty
+    pose_candidates list and crash with IndexError. Guard this invariant so
+    a regression fails loudly here instead of during a real compose call."""
+    for framing in ('bust', 'body'):
+        axes = fv.QUICK_GEN_COMPONENTS['human'][framing]
+        assert any(p['compatible_angles'] is None for p in axes['pose']), (
+            f"{framing}'s pose pool has no angle-independent (compatible_angles=None) entry")
