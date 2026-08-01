@@ -223,10 +223,18 @@ def dataset_shot_catalog_save():
 @bp.get('/dataset/quick-generate/components')
 def dataset_quick_generate_components():
     """The effective component pool for a subject type — shipped defaults merged
-    with the user's own custom additions (mirrors `dataset_shot_catalog`'s GET)."""
+    with the user's own custom additions (mirrors `dataset_shot_catalog`'s GET).
+
+    Also returns 'custom': the user's own raw additions for this subject only
+    (not merged with the shipped pool), so an editor can round-trip exactly
+    what was previously saved instead of starting blank — the PUT route below
+    replaces a subject's whole custom set per call, so a client that always
+    started from '{}' would silently wipe prior entries on the next save."""
     st = normalize_subject_type(request.args.get('subject_type'))
+    existing = cfg.get('quick_generate.custom_components') or {}
+    sanitized = sanitize_quick_gen_custom_components(existing)
     return jsonify({'subject_type': st, 'pools': quick_gen_pools_for(st),
-                    'total_cap': QUICK_GEN_TOTAL_CAP})
+                    'total_cap': QUICK_GEN_TOTAL_CAP, 'custom': sanitized.get(st, {})})
 
 
 @bp.put('/dataset/quick-generate/components')

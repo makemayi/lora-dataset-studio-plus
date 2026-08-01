@@ -7,6 +7,7 @@ import { useCapabilities } from '../../context/CapabilitiesContext';
 import { apiFetch, putJson } from '../../api/fetchClient';
 import ShotIllustration, { contextEmoji } from './ShotIllustration';
 import QuickGenerateDialog from './QuickGenerateDialog.jsx';
+import QuickGenerateComponentsEditor from './QuickGenerateComponentsEditor.jsx';
 import { displayLabel } from '../../utils/labels';
 import { generationLoraPresetPayload, sanitizeGenerationLoraPresets } from '../../utils/generationLoras';
 import { requestHelpTip } from '../../help/helpTips';
@@ -175,7 +176,7 @@ function EngineCard({ id, checked, available, generating, onToggle, icon, title,
   );
 }
 
-export default function VariationCatalog({ datasetId = null, onGenerate, busy, generating = null, hasRef, composition, images = [], bodyFidelity = false, promptSuffix = '', promptSuffixes = null, onSaveSuffixes = null, subjectType = 'human', onSaveSubjectType = null, quickGenerateCompose = null, quickGenerateComponents = null }) {
+export default function VariationCatalog({ datasetId = null, onGenerate, busy, generating = null, hasRef, composition, images = [], bodyFidelity = false, promptSuffix = '', promptSuffixes = null, onSaveSuffixes = null, subjectType = 'human', onSaveSubjectType = null, quickGenerateCompose = null, quickGenerateComponents = null, saveQuickGenerateCustomComponents = null }) {
   const toast = useToast();
   const { caps } = useCapabilities();
   const [catalog, setCatalog] = useState([]);
@@ -1565,6 +1566,27 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
               </div>
             </div>
           )}
+        </div>
+      </details>
+
+      {/* 🎲 Quick-generate custom components — advanced, hand-edited JSON
+          additions to the 🎲 Quick generate dialog's pools (angle/expression/
+          pose/outfit/background per framing). Collapsed by default; loads
+          whatever was previously saved so reopening never shows a blank
+          editor (see QuickGenerateComponentsEditor.jsx for why that matters —
+          the save route replaces the whole set, so a blank start would wipe
+          prior entries on the next save). */}
+      <details className="rounded-lg border border-border bg-app/30 open:pb-2">
+        <summary className="cursor-pointer select-none px-2.5 py-1.5 text-[0.75rem] text-content font-semibold">
+          🎲 Quick-generate custom components
+          <span className="ml-2 font-normal text-content-subtle text-[0.625rem]">
+            advanced — hand-edit the JSON pool used by 🎲 Quick generate
+          </span>
+        </summary>
+        <div className="px-2.5 pt-1">
+          <QuickGenerateComponentsEditor subjectType={subject}
+            quickGenerateComponents={quickGenerateComponents}
+            saveQuickGenerateCustomComponents={saveQuickGenerateCustomComponents} />
         </div>
       </details>
 
