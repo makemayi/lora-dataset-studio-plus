@@ -203,7 +203,7 @@ def test_nsfw_ratio_zero_never_draws_nsfw_content():
     assert not any(v.get('nsfw') for v in out)
 
 
-def test_nsfw_ratio_hundred_always_draws_nsfw_content_for_every_slot():
+def test_nsfw_ratio_hundred_always_draws_nsfw_content_for_every_slot(app):
     out = fv.compose_quick_generate_variations(
         total=20, framing_ratios={'face': 34, 'bust': 33, 'body': 33},
         angle_ratios={
@@ -217,11 +217,19 @@ def test_nsfw_ratio_hundred_always_draws_nsfw_content_for_every_slot():
         assert v.get('nsfw') is True
 
 
-def test_nsfw_slots_reuse_the_curated_catalog_label_and_prompt_verbatim():
+def test_nsfw_slots_reuse_the_curated_catalog_label_and_prompt_verbatim(app):
     """An NSFW quick-gen slot must be a byte-for-byte NSFW_VARIATION_CATALOG
     entry's label+prompt, not a newly-composed one — this is what makes
     is_nsfw_label() and aspect_for_label() resolve it correctly downstream
-    with zero extra plumbing."""
+    with zero extra plumbing.
+
+    Uses the `app` fixture (unused directly, but its setup monkeypatches
+    LDS_CONFIG to a fresh tmp_path and resets config's module-level cache)
+    so this reads an empty quick_generate.custom_nsfw instead of whatever
+    real content happens to be in the developer's on-disk config.json —
+    otherwise a legitimately-added custom NSFW entry there makes a composed
+    slot correctly NOT match the shipped-only catalog, which looks like a
+    composer bug but is actually a test isolation gap."""
     catalog_by_framing = {}
     for e in fv.NSFW_VARIATION_CATALOG:
         catalog_by_framing.setdefault(e['framing'], []).append((e['label'], e['prompt']))
@@ -238,7 +246,7 @@ def test_nsfw_slots_reuse_the_curated_catalog_label_and_prompt_verbatim():
         assert fv.is_nsfw_label(v['label'])
 
 
-def test_nsfw_ratio_partial_gives_a_mix_and_still_sums_to_total():
+def test_nsfw_ratio_partial_gives_a_mix_and_still_sums_to_total(app):
     out = fv.compose_quick_generate_variations(
         total=40, framing_ratios={'face': 34, 'bust': 33, 'body': 33},
         angle_ratios={
@@ -253,7 +261,7 @@ def test_nsfw_ratio_partial_gives_a_mix_and_still_sums_to_total():
     assert nsfw_count > 0 and sfw_count > 0
 
 
-def test_sfw_slots_never_carry_an_nsfw_flag():
+def test_sfw_slots_never_carry_an_nsfw_flag(app):
     out = fv.compose_quick_generate_variations(
         total=20, framing_ratios={'face': 100, 'bust': 0, 'body': 0},
         angle_ratios={'face': {'front': 100}},
@@ -263,7 +271,7 @@ def test_sfw_slots_never_carry_an_nsfw_flag():
             assert v['prompt'].startswith('close-up portrait,')
 
 
-def test_nsfw_ratio_out_of_range_raises_value_error():
+def test_nsfw_ratio_out_of_range_raises_value_error(app):
     with pytest.raises(ValueError):
         fv.compose_quick_generate_variations(
             total=5, framing_ratios={'face': 100, 'bust': 0, 'body': 0},
@@ -283,7 +291,7 @@ def test_default_nsfw_ratio_is_zero_for_backward_compatibility():
     assert not any(v.get('nsfw') for v in out)
 
 
-def test_nsfw_content_never_attaches_to_a_non_human_subject_type(monkeypatch):
+def test_nsfw_content_never_attaches_to_a_non_human_subject_type(app, monkeypatch):
     """_QUICK_GEN_NSFW_POOL is exclusively human-anatomy content (lingerie/
     topless/nude wording), but QUICK_GEN_COMPONENTS only has a 'human' key
     today — so any other subject_type currently crashes on pools[framing]
