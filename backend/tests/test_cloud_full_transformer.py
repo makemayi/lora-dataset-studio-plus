@@ -109,7 +109,7 @@ class _FakeHfApi:
 def ct(app, monkeypatch):
     monkeypatch.setenv('VAST_API_KEY', 'vast-test')
     monkeypatch.setenv('HF_TOKEN', 'hf-general-must-not-reach-dense')
-    monkeypatch.setenv('HF_CLOUD_TOKEN', 'hf-cloud-secret-test')
+    monkeypatch.setenv('HF_CLOUD_TOKEN', 'hf-secret-test')
     from app.services import cloud_training
     monkeypatch.setattr(cloud_training, '_start_monitor', lambda *a, **k: None)
     monkeypatch.setattr(cloud_training, '_reconcile_before_launch', lambda *a, **k: None)
@@ -156,7 +156,7 @@ def test_full_launch_creates_private_per_run_repo_and_freezes_mode(
             'repo_id': params['hf_repo_id'], 'repo_type': 'model',
             'private': True, 'exist_ok': False,
         }]
-        assert seen_tokens and set(seen_tokens) == {'hf-cloud-secret-test'}
+        assert seen_tokens and set(seen_tokens) == {'hf-secret-test'}
         assert {name for repo, name in api.uploaded
                 if repo == params['hf_repo_id']} == {
                     'LICENSE.pdf', 'NOTICE', 'README.md'}
@@ -173,9 +173,9 @@ def test_full_launch_creates_private_per_run_repo_and_freezes_mode(
         ds.training_mode = 'lora'
         ct.db.session.commit()
         assert view.training_mode == 'full_transformer'
-        assert 'hf-cloud-secret-test' not in run.train_params
+        assert 'hf-secret-test' not in run.train_params
         assert 'hf-general-must-not-reach-dense' not in run.train_params
-        assert 'hf-cloud-secret-test' not in json.dumps(ct._run_payload(run))
+        assert 'hf-secret-test' not in json.dumps(ct._run_payload(run))
 
 
 @pytest.mark.parametrize('kwargs,message', [
@@ -427,11 +427,11 @@ def test_hf_verification_controls_availability_and_serialization(
                 tmp_path, ['README.md', 'model/stray.safetensors'])) == 'missing'
         assert ct._run_param(run, 'artifact_status') == 'missing'
 
-        malicious = RuntimeError('Bearer hf-cloud-secret-test')
+        malicious = RuntimeError('Bearer hf-secret-test')
         assert ct._verify_full_transformer_artifact(
             run, _api=_FakeHfApi(tmp_path, failure=malicious)) == 'verification_pending'
-        assert 'hf-cloud-secret-test' not in caplog.text
-        assert 'hf-cloud-secret-test' not in run.train_params
+        assert 'hf-secret-test' not in caplog.text
+        assert 'hf-secret-test' not in run.train_params
 
 
 def test_dense_completion_is_fail_closed_and_keeps_unverified_pods(
@@ -467,7 +467,7 @@ def test_dense_completion_is_fail_closed_and_keeps_unverified_pods(
 
         pending = make_run('pending')
         pending_api = _FakeHfApi(
-            tmp_path, failure=RuntimeError('Bearer hf-cloud-secret-test'))
+            tmp_path, failure=RuntimeError('Bearer hf-secret-test'))
         ct._complete_full_transformer_delivery(pending, _api=pending_api)
         assert pending.status == 'error_pod_kept'
         assert ct._run_param(pending, 'artifact_status') == 'verification_pending'
@@ -805,7 +805,7 @@ def test_dense_repo_preparation_failure_is_cleaned_and_repo_id_persisted(
         ct.db.session.commit()
         with pytest.raises(RuntimeError, match='no GPU was rented'):
             ct._create_full_transformer_repo(
-                run, 'hf-cloud-secret-test', _api=api)
+                run, 'hf-secret-test', _api=api)
         repo_id = ct._run_param(run, 'hf_repo_id')
         assert repo_id == f'tester/{ct._full_transformer_repo_name(run)}'
         assert ct._run_param(run, 'artifact_status') == 'repository_preparation_failed'
@@ -932,10 +932,10 @@ def test_echoed_remote_hf_token_is_discarded_immediately(ct):
     run = SimpleNamespace(train_params=json.dumps({
         'training_mode': 'full_transformer'}))
     settings = ct._ensure_remote_settings_without_secret(run, Remote())
-    assert received == ['hf-cloud-secret-test']
+    assert received == ['hf-secret-test']
     assert settings == {
         'DATASETS_FOLDER': '/datasets', 'TRAINING_FOLDER': '/output'}
-    assert 'hf-cloud-secret-test' not in json.dumps(settings)
+    assert 'hf-secret-test' not in json.dumps(settings)
     assert 'hf-general-must-not-reach-dense' not in json.dumps(settings)
 
 
