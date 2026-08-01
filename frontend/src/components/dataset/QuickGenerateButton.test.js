@@ -13,3 +13,13 @@ test('the dialog receives the same engine/generate wiring the manual Generate bu
   assert.match(src, /quickGenerateCompose=\{/);
   assert.match(src, /onGenerate=\{onGenerate\}/);
 });
+
+test('the Quick generate button click opens the dialog', () => {
+  assert.match(src, /onClick=\{\(\) => setQuickGenOpen\(true\)\}/);
+});
+
+test('the dialog mount is guarded by quickGenOpen, so its on-mount pool fetch never fires while closed', () => {
+  // Specific to the QuickGenerateDialog mount (not just any `quickGenOpen` use
+  // in the file): the guard must wrap the JSX that renders the dialog.
+  assert.match(src, /\{quickGenOpen\s*&&\s*\(\s*<QuickGenerateDialog/);
+});
