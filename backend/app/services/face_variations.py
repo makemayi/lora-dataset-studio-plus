@@ -2765,6 +2765,20 @@ QUICK_GEN_COMPONENTS = {
 QUICK_GEN_TOTAL_CAP = 200
 _QUICK_GEN_FRAMING_ORDER = ('face', 'bust', 'body')
 
+# NSFW quick-generate slots reuse the existing curated NSFW_VARIATION_CATALOG
+# entries WHOLE (id/label/prompt), rather than decomposing them into
+# independent axes the way the SFW face/bust/body pools work: each catalog
+# entry is already a deliberately-worded, self-contained "state + pose +
+# décor, never an act, face always visible" prompt, and reusing the label
+# VERBATIM means is_nsfw_label()/aspect_for_label() resolve it correctly
+# downstream (Klein-only fail-closed gate, curated aspect ratio) with zero
+# extra plumbing. 'back' is excluded — Quick Generate doesn't support it
+# (see the design's non-goals).
+_QUICK_GEN_NSFW_POOL = {
+    framing: [e for e in NSFW_VARIATION_CATALOG if e['framing'] == framing]
+    for framing in ('face', 'bust', 'body')
+}
+
 
 def quick_gen_pools_for(subject_type: str) -> dict:
     """{framing: {axis: [entries]}} — shipped defaults merged with the
@@ -2882,11 +2896,13 @@ def _largest_remainder_allocation(total: int, ratios: dict) -> dict:
     return counts
 
 
-def _quick_gen_validate(total, framing_ratios, angle_ratios, pools):
+def _quick_gen_validate(total, framing_ratios, angle_ratios, pools, nsfw_ratio):
     if not isinstance(total, int) or isinstance(total, bool):
         raise ValueError('total must be an integer')
     if total < 1 or total > QUICK_GEN_TOTAL_CAP:
         raise ValueError(f'total must be between 1 and {QUICK_GEN_TOTAL_CAP}')
+    if not isinstance(nsfw_ratio, int) or isinstance(nsfw_ratio, bool) or not (0 <= nsfw_ratio <= 100):
+        raise ValueError('nsfw_ratio must be an integer between 0 and 100')
     used_framings = [f for f in _QUICK_GEN_FRAMING_ORDER if framing_ratios.get(f, 0) > 0]
     if sum(framing_ratios.get(f, 0) for f in _QUICK_GEN_FRAMING_ORDER) != 100:
         raise ValueError('framing_ratios must sum to 100')
@@ -2905,7 +2921,8 @@ def _quick_gen_validate(total, framing_ratios, angle_ratios, pools):
 
 def compose_quick_generate_variations(
     total: int, framing_ratios: dict, angle_ratios: dict,
-    subject_type: str = 'human', *, rng: random.Random | None = None,
+    subject_type: str = 'human', *, nsfw_ratio: int = 0,
+    rng: random.Random | None = None,
 ) -> list[dict]:
     """Returns `total` distinct {id, framing, label, prompt} entries, ready
     to feed straight into the same shape generate_variations already accepts
@@ -2913,9 +2930,15 @@ def compose_quick_generate_variations(
     a real call leaves it None (fresh randomness). Raises ValueError on a
     bad ratio shape or a total outside [1, QUICK_GEN_TOTAL_CAP] — the route
     turns that into a 400, same convention as every other validated input
-    in this file."""
+    in this file.
+
+    nsfw_ratio (0-100, default 0) draws that percentage of EACH framing's
+    slots from the existing curated NSFW_VARIATION_CATALOG instead of the
+    SFW component pools — reused verbatim (label+prompt), tagged
+    nsfw=True, so the existing Klein/Krea-only fail-closed gate and
+    aspect-ratio resolution both apply automatically downstream."""
     pools = quick_gen_pools_for(subject_type)
-    used_framings = _quick_gen_validate(total, framing_ratios, angle_ratios, pools)
+    used_framings = _quick_gen_validate(total, framing_ratios, angle_ratios, pools, nsfw_ratio)
     rng = rng or random.Random()
     framing_counts = _largest_remainder_allocation(
         total, {f: framing_ratios[f] for f in used_framings})
@@ -2925,14 +2948,25 @@ def compose_quick_generate_variations(
         count = framing_counts[framing]
         if not count:
             continue
-        angle_pool = {e['id']: e for e in pools[framing]['angle']}
-        angle_counts = _largest_remainder_allocation(count, angle_ratios[framing])
-        # Expand to a flat, shuffled list of angle ids so slot order doesn't
-        # correlate with angle (a UI/log skim shouldn't see all-front-first).
-        angle_sequence = [aid for aid, n in angle_counts.items() for _ in range(n)]
-        rng.shuffle(angle_sequence)
-        for angle_id in angle_sequence:
-            out.append(_compose_one_slot(framing, angle_id, angle_pool, pools[framing], rng))
+        nsfw_pool = _QUICK_GEN_NSFW_POOL.get(framing) or []
+        nsfw_count = 0
+        if nsfw_ratio and nsfw_pool:
+            split = _largest_remainder_allocation(count, {'nsfw': nsfw_ratio, 'sfw': 100 - nsfw_ratio})
+            nsfw_count = split['nsfw']
+        for _ in range(nsfw_count):
+            entry = rng.choice(nsfw_pool)
+            out.append({'framing': framing, 'label': entry['label'],
+                        'prompt': entry['prompt'], 'nsfw': True})
+        sfw_count = count - nsfw_count
+        if sfw_count:
+            angle_pool = {e['id']: e for e in pools[framing]['angle']}
+            angle_counts = _largest_remainder_allocation(sfw_count, angle_ratios[framing])
+            # Expand to a flat, shuffled list of angle ids so slot order doesn't
+            # correlate with angle (a UI/log skim shouldn't see all-front-first).
+            angle_sequence = [aid for aid, n in angle_counts.items() for _ in range(n)]
+            rng.shuffle(angle_sequence)
+            for angle_id in angle_sequence:
+                out.append(_compose_one_slot(framing, angle_id, angle_pool, pools[framing], rng))
     rng.shuffle(out)
     for i, v in enumerate(out, 1):
         v['id'] = f"quick_{v['framing']}_{i:04d}"

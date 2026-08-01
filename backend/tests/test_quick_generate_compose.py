@@ -189,3 +189,95 @@ def test_every_framing_pose_pool_has_at_least_one_universally_compatible_pose():
         axes = fv.QUICK_GEN_COMPONENTS['human'][framing]
         assert any(p['compatible_angles'] is None for p in axes['pose']), (
             f"{framing}'s pose pool has no angle-independent (compatible_angles=None) entry")
+
+
+def test_nsfw_ratio_zero_never_draws_nsfw_content():
+    out = fv.compose_quick_generate_variations(
+        total=20, framing_ratios={'face': 34, 'bust': 33, 'body': 33},
+        angle_ratios={
+            'face': {'front': 100},
+            'bust': {'front': 100},
+            'body': {'front': 100},
+        },
+        nsfw_ratio=0, rng=_rng(11))
+    assert not any(v.get('nsfw') for v in out)
+
+
+def test_nsfw_ratio_hundred_always_draws_nsfw_content_for_every_slot():
+    out = fv.compose_quick_generate_variations(
+        total=20, framing_ratios={'face': 34, 'bust': 33, 'body': 33},
+        angle_ratios={
+            'face': {'front': 100},
+            'bust': {'front': 100},
+            'body': {'front': 100},
+        },
+        nsfw_ratio=100, rng=_rng(12))
+    assert len(out) == 20
+    for v in out:
+        assert v.get('nsfw') is True
+
+
+def test_nsfw_slots_reuse_the_curated_catalog_label_and_prompt_verbatim():
+    """An NSFW quick-gen slot must be a byte-for-byte NSFW_VARIATION_CATALOG
+    entry's label+prompt, not a newly-composed one — this is what makes
+    is_nsfw_label() and aspect_for_label() resolve it correctly downstream
+    with zero extra plumbing."""
+    catalog_by_framing = {}
+    for e in fv.NSFW_VARIATION_CATALOG:
+        catalog_by_framing.setdefault(e['framing'], []).append((e['label'], e['prompt']))
+    out = fv.compose_quick_generate_variations(
+        total=15, framing_ratios={'face': 34, 'bust': 33, 'body': 33},
+        angle_ratios={
+            'face': {'front': 100},
+            'bust': {'front': 100},
+            'body': {'front': 100},
+        },
+        nsfw_ratio=100, rng=_rng(13))
+    for v in out:
+        assert (v['label'], v['prompt']) in catalog_by_framing[v['framing']]
+        assert fv.is_nsfw_label(v['label'])
+
+
+def test_nsfw_ratio_partial_gives_a_mix_and_still_sums_to_total():
+    out = fv.compose_quick_generate_variations(
+        total=40, framing_ratios={'face': 34, 'bust': 33, 'body': 33},
+        angle_ratios={
+            'face': {'front': 100},
+            'bust': {'front': 100},
+            'body': {'front': 100},
+        },
+        nsfw_ratio=50, rng=_rng(14))
+    assert len(out) == 40
+    nsfw_count = sum(1 for v in out if v.get('nsfw'))
+    sfw_count = len(out) - nsfw_count
+    assert nsfw_count > 0 and sfw_count > 0
+
+
+def test_sfw_slots_never_carry_an_nsfw_flag():
+    out = fv.compose_quick_generate_variations(
+        total=20, framing_ratios={'face': 100, 'bust': 0, 'body': 0},
+        angle_ratios={'face': {'front': 100}},
+        nsfw_ratio=30, rng=_rng(15))
+    for v in out:
+        if not v.get('nsfw'):
+            assert v['prompt'].startswith('close-up portrait,')
+
+
+def test_nsfw_ratio_out_of_range_raises_value_error():
+    with pytest.raises(ValueError):
+        fv.compose_quick_generate_variations(
+            total=5, framing_ratios={'face': 100, 'bust': 0, 'body': 0},
+            angle_ratios={'face': {'front': 100}}, nsfw_ratio=101, rng=_rng(16))
+    with pytest.raises(ValueError):
+        fv.compose_quick_generate_variations(
+            total=5, framing_ratios={'face': 100, 'bust': 0, 'body': 0},
+            angle_ratios={'face': {'front': 100}}, nsfw_ratio=-1, rng=_rng(17))
+
+
+def test_default_nsfw_ratio_is_zero_for_backward_compatibility():
+    """Existing callers that never pass nsfw_ratio must see IDENTICAL
+    behavior to before this change — no NSFW content, ever."""
+    out = fv.compose_quick_generate_variations(
+        total=10, framing_ratios={'face': 100, 'bust': 0, 'body': 0},
+        angle_ratios={'face': {'front': 100}}, rng=_rng(18))
+    assert not any(v.get('nsfw') for v in out)
