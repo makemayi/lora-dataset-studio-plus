@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-02-krea-two-stage-settings',
+    date: '2026-08-02',
+    title: 'Krea 2 Edit: the two-stage sampler\'s step counts and resolution are tunable now',
+    blurb:
+      'The two-stage sampler (Settings → Image engines → Krea 2 Edit) used to pin stage1/stage2 steps, the handoff point and both megapixel targets to one calibrated export — too slow for some setups. All five are now sliders under the toggle, same defaults until you touch one.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-01-quick-generate-nsfw-ratio',
     date: '2026-08-01',
     title: '🎲 Quick generate can now include NSFW shots, at whatever ratio you set',
