@@ -38,17 +38,22 @@ def test_add_job_empty_workflow_raises(app):
             pass
 
 
-def test_add_job_refuses_recovery_barrier_without_inserting_a_row(app):
-    from app.job_queue import (COMFYUI_STALLED_BARRIER_KEY,
-                               ComfyUIRecoveryRequired, queue_manager)
+def test_add_job_still_queues_behind_a_recovery_barrier(app):
+    """A stalled ComfyUI must not stop new work from QUEUING (status 'pending') —
+    only actual submission (process_one) is gated on the barrier. Route-level
+    callers that want to fail fast with a friendlier message can call
+    require_comfyui_enqueue_ready()/_require_no_stalled_comfyui() themselves
+    BEFORE reaching add_job; add_job itself stays unconditional so direct
+    callers (fan-outs, tests, internal services) never get silently blocked."""
+    from app.job_queue import COMFYUI_STALLED_BARRIER_KEY, queue_manager
     from app.models import ImageGenerationQueue
 
     with app.app_context():
         queue_manager._set_system_state(
             COMFYUI_STALLED_BARRIER_KEY, {'job_id': 'unresolved'})
-        with pytest.raises(ComfyUIRecoveryRequired, match='Recover or restart ComfyUI'):
-            queue_manager.add_job(workflow_data={'1': {}})
-        assert ImageGenerationQueue.query.count() == 0
+        job_id = queue_manager.add_job(workflow_data={'1': {}})
+        assert ImageGenerationQueue.query.filter_by(
+            job_id=job_id, status='pending').count() == 1
 
 
 @pytest.mark.parametrize('temporary_fence', ['training_in_progress', 'vision_in_progress'])

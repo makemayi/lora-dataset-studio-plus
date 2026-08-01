@@ -1036,11 +1036,14 @@ class JobQueueManager:
                job_id=None, metadata=None, priority=10, *, commit=True) -> str:
         """``commit=False`` leaves the queue row PENDING in the caller's session so a
         fan-out (a Studio grid) can insert its own row and the job in ONE transaction
-        — one write lock per cell instead of three. Such a caller MUST already hold
-        ``GPU_ARBITER_LOCK`` before beginning its DB transaction and retain it until
-        its own commit/rollback; otherwise a recovery barrier could be installed
-        between this readiness check and that commit.  The worker only ever sees
-        committed rows either way."""
+        — one write lock per cell instead of three. The caller MUST then commit (or
+        roll back) itself; the worker only ever sees committed rows either way.
+
+        Deliberately does NOT gate on ``has_comfyui_stalled_barrier()`` — a stalled
+        ComfyUI must still let jobs queue (status 'pending'); only actual submission
+        to ComfyUI (``process_one``) is blocked by the barrier. Route-level callers
+        that want to fail fast with a friendlier message before even reaching here
+        can call ``require_comfyui_enqueue_ready()`` themselves (see routes/_common.py)."""
         if job_type != 'image':
             raise ValueError(f'unsupported job_type: {job_type!r}')
         if not workflow_data:
@@ -1055,15 +1058,9 @@ class JobQueueManager:
             priority=priority,
             job_metadata=json.dumps(metadata) if metadata else None,
         )
-        # Route preflights provide a fast, actionable response, but this is the
-        # authoritative enqueue seam: the barrier may appear between a route
-        # check and a future service call.  For commit=False this nested RLock
-        # deliberately relies on the documented outer transaction guard.
-        with GPU_ARBITER_LOCK:
-            require_comfyui_enqueue_ready()
-            db.session.add(job)
-            if commit:
-                db.session.commit()
+        db.session.add(job)
+        if commit:
+            db.session.commit()
         return job_id
 
     def cancel_job_outcome(self, job_id, user_id=None, job_type='image', *,
