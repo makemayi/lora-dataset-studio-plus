@@ -2591,10 +2591,12 @@ def select_preset(name: str, subject_type: str = 'human'):
 def _qc(id, phrase, *, compatible_angles=None):
     """One quick-generate component entry. `compatible_angles=None` means
     compatible with every angle in that framing's own angle pool; a list
-    restricts it to exactly those angle ids; an empty list means the phrase
-    ALREADY states its own camera position (e.g. "over the shoulder") — the
-    composer never draws a separate angle line for it (see
-    compose_quick_generate_variations)."""
+    restricts it to exactly those angle ids; an empty list means NO angle in
+    the pool is compatible — either because the phrase already states its own
+    camera position (e.g. "over the shoulder"), or because every angle would
+    contradict it outright (e.g. "lying on the back, looking upward" vs. any
+    of the standing-camera angle phrases). Either way the composer never
+    draws a separate angle line for it (see compose_quick_generate_variations)."""
     return {'id': id, 'phrase': phrase, 'compatible_angles': compatible_angles}
 
 
@@ -2690,14 +2692,18 @@ QUICK_GEN_COMPONENTS = {
                 _qc('standing', 'standing'),
                 _qc('walking', 'walking, dynamic pose',
                     compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
-                _qc('sitting_chair', 'sitting on a chair, relaxed'),
-                _qc('sitting_floor', 'sitting on the floor, legs to one side, relaxed posture'),
-                _qc('sitting_cross', 'sitting cross-legged on the ground, relaxed'),
-                _qc('sitting_steps', 'sitting on outdoor steps, elbows resting on the knees, casual'),
+                _qc('sitting_chair', 'sitting on a chair, relaxed',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+                _qc('sitting_floor', 'sitting on the floor, legs to one side, relaxed posture',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+                _qc('sitting_cross', 'sitting cross-legged on the ground, relaxed',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+                _qc('sitting_steps', 'sitting on outdoor steps, elbows resting on the knees, casual',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
                 _qc('crouching', 'crouching low, forearms resting on the knees, looking at the camera',
-                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right',
-                                       'low_angle_close']),
-                _qc('crouch_side', 'crouching on one knee, side angle, balanced pose'),
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+                _qc('crouch_side', 'crouching on one knee, side angle, balanced pose',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
                 _qc('lying_front', 'lying on the front, propped up on the elbows, looking at the camera',
                     compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
                 _qc('lying_back', 'lying on the back, looking upward, relaxed',
