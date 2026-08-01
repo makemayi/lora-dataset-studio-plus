@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-01-quick-generate-nsfw-ratio',
+    date: '2026-08-01',
+    title: '🎲 Quick generate can now include NSFW shots, at whatever ratio you set',
+    blurb:
+      'With 🔞 already on, the dialog gets an NSFW% slider — set it above 0 and that share of the batch draws from the existing curated NSFW catalog instead of the SFW pools, automatically restricted to Klein/Krea 2 Edit (NSFW never runs on API engines, same rule as everywhere else in the app).',
+    to: '/datasets?section=add',
+  },
+  {
     id: '2026-08-01-quick-random-generate',
     date: '2026-08-01',
     title: 'Fill a dataset with one click: set a count and a ratio, skip the card-by-card picking',

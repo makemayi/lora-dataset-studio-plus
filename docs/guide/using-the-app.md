@@ -287,6 +287,15 @@ fire.
 Manual card-picking and the existing presets are unaffected — this is an
 additional way to fill a dataset quickly, not a replacement.
 
+With the app's 🔞 NSFW toggle on, the dialog gains an **NSFW ratio** slider.
+Above 0%, that share of the batch is drawn from the existing curated NSFW
+catalog instead of the SFW component pools — fixed state + pose + décor
+combinations (face always visible), the same ones the manual NSFW
+card-picking flow already uses, not randomly assembled from parts. Because
+NSFW generation in this app never runs on API engines, turning the ratio on
+automatically narrows the engine list to the local-only Klein and Krea 2
+Edit.
+
 Want to add your own angle/expression/pose/outfit/background phrases? The
 **🎲 Quick-generate custom components (advanced)** section under the
 catalog takes a small JSON snippet, same idea as importing a custom shot

@@ -180,7 +180,7 @@ const TOPICS = [
   action('action-quick-generate', 'Generate a random batch by count and ratio',
     ['quick generate', 'random batch', 'ratio generate', 'random prompts',
      'auto generate', 'batch by percentage', 'face bust body ratio',
-     'skip cards', 'without picking cards'],
+     'skip cards', 'without picking cards', 'nsfw ratio', 'nsfw quick generate'],
     '/datasets?section=add', 'using-the-app', 'generate-a-random-batch-by-count-and-ratio'),
   { id: 'workspace-scrape', kind: 'section', title: 'Scrape',
     keywords: ['scrape', 'scan', 'gallery', 'url', 'source', 'import', 'concept'],
