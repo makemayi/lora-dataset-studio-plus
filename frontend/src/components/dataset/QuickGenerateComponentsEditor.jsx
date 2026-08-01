@@ -45,7 +45,12 @@ export default function QuickGenerateComponentsEditor({
       return;
     }
     // saveQuickGenerateCustomComponents already toasts success/error itself.
-    await saveQuickGenerateCustomComponents(subjectType, parsed);
+    const result = await saveQuickGenerateCustomComponents(subjectType, parsed);
+    // Reflect what actually landed: if any entries were dropped (a shadowing
+    // id, a malformed framing/axis), the textarea should show the canonical
+    // saved result — not the user's original input — so the drop is visible
+    // immediately instead of only after closing and reopening the editor.
+    if (result) setText(JSON.stringify(result.saved || {}, null, 2));
   };
 
   if (!loaded) return null;

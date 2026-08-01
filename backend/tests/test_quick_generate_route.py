@@ -113,3 +113,16 @@ def test_components_get_includes_the_users_own_custom_entries_for_round_tripping
     assert custom_ids == {'my_custom_expr'}
     # The shipped built-in must appear only in 'pools', never leak into 'custom'.
     assert 'neutral' not in custom_ids
+
+
+def test_components_put_reports_a_drop_for_a_structurally_malformed_framing(client):
+    # 'face' should map to a dict of axes (e.g. {'expression': [...]}), not a
+    # bare list. Everything under it is discarded by sanitization, but the
+    # user still typed something — the response must say so via 'dropped',
+    # not silently report a clean save.
+    resp = client.put('/api/dataset/quick-generate/components', json={
+        'subject_type': 'human',
+        'custom_components': {'face': ['not', 'a', 'dict']}})
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body['dropped'] >= 1

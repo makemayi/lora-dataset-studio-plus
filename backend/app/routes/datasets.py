@@ -257,9 +257,23 @@ def dataset_quick_generate_components_save():
     # Report what actually landed: an entry dropped here (an id shadowing a
     # built-in, an axis/framing outside the enum) must not look like it was
     # saved — same contract as dataset_shot_catalog_save's `dropped` count.
-    submitted_count = sum(len(entries) for axes in custom.values()
-                          if isinstance(axes, dict) for entries in axes.values()
-                          if isinstance(entries, list))
+    # A whole framing/axis that is structurally wrong (e.g. a list where a
+    # dict was expected) still counts as at least 1 attempted-but-invalid
+    # unit here, so it can never vanish from `dropped` just because it
+    # couldn't be broken down into individual entries.
+    def _count_submitted(payload):
+        count = 0
+        for axes in payload.values():
+            if not isinstance(axes, dict):
+                count += 1
+                continue
+            for entries in axes.values():
+                if not isinstance(entries, list):
+                    count += 1
+                    continue
+                count += len(entries)
+        return count
+    submitted_count = _count_submitted(custom)
     saved_count = sum(len(entries) for axes in saved_for_subject.values()
                       for entries in axes.values())
     return jsonify({'subject_type': st, 'saved': saved_for_subject,
