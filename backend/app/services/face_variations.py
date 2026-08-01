@@ -639,6 +639,14 @@ OUTFIT_VARY = ('wearing a different casual everyday outfit, varied in style and 
                '(not the outfit from the reference image)')
 EXPRESSION_NEUTRAL = ('a calm neutral facial expression, not copying the expression from '
                       'the reference image')
+# Same fallback role as OUTFIT_VARY, for the one framing (Quick Generate's face
+# slot) that never carries its own background text at all — see the composer's
+# face branch in _compose_one_slot. IDENTITY_GUARD already says "do NOT copy
+# the background", but a bare prohibition with no alternative offered is the
+# exact gap OUTFIT_VARY exists to close for outfit; background gets the same
+# concrete-target treatment here rather than being left to the guard alone.
+BACKGROUND_VARY = ('in a different setting and background than the reference image, varied '
+                   'in location and lighting (not the background from the reference image)')
 
 # Détecteurs « le texte nomme-t-il DÉJÀ une tenue / une expression ? » (mots entiers).
 # Servent à n'ajouter la directive par défaut qu'aux entrées qui n'en portent pas —
@@ -2629,6 +2637,22 @@ QUICK_GEN_COMPONENTS = {
                 _qc('thoughtful', 'thoughtful expression'),
                 _qc('relaxed_natural', 'relaxed, natural expression'),
             ],
+            # Face varies only angle + expression otherwise — at a high face
+            # ratio (e.g. 50% of a 30-image batch = 15 shots), that reads as
+            # visually repetitive even when every combination is textually
+            # distinct, because nothing else about the shot ever changes.
+            # Lighting is a third, fully independent axis: it never
+            # contradicts any angle or expression, so it needs no
+            # compatible_angles gating, just its own uniform random draw.
+            'lighting': [
+                _qc('soft_window', 'soft natural window light from the side'),
+                _qc('studio', 'even studio lighting, plain background'),
+                _qc('golden_hour', 'warm golden hour light, outdoor'),
+                _qc('overcast', 'soft overcast daylight, diffuse and even'),
+                _qc('rim_light', 'cinematic rim light, dramatic shadow'),
+                _qc('indoor_lamp', 'warm indoor lamp light'),
+                _qc('daylight_outdoor', 'bright natural daylight, outdoor'),
+            ],
         },
         'bust': {
             'angle': [
@@ -2699,7 +2723,7 @@ QUICK_GEN_COMPONENTS = {
                     compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
                 _qc('sitting_cross', 'sitting cross-legged on the ground, relaxed',
                     compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
-                _qc('sitting_steps', 'sitting on outdoor steps, elbows resting on the knees, casual',
+                _qc('sitting_steps', 'sitting on steps, elbows resting on the knees, casual',
                     compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
                 _qc('crouching', 'crouching low, forearms resting on the knees, looking at the camera',
                     compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
@@ -2786,7 +2810,7 @@ def _quick_gen_custom_config():
 
 
 _QUICK_GEN_AXES_BY_FRAMING = {
-    'face': ('angle', 'expression'),
+    'face': ('angle', 'expression', 'lighting'),
     'bust': ('angle', 'pose', 'outfit', 'background'),
     'body': ('angle', 'pose', 'outfit', 'background'),
 }
@@ -2919,8 +2943,16 @@ def _compose_one_slot(framing, angle_id, angle_pool, framing_pools, rng) -> dict
     angle_entry = angle_pool[angle_id]
     if framing == 'face':
         expr = rng.choice(framing_pools['expression'])
+        lighting = rng.choice(framing_pools['lighting'])
         label = f"Quick {framing.title()}: {_quick_gen_pretty(angle_id)}, {_quick_gen_pretty(expr['id'])}"
-        prompt = f"close-up portrait, {angle_entry['phrase']}, {expr['phrase']}"
+        # Face has no outfit/background axis of its own (by design — see the
+        # module docstring above), so without an explicit fallback here the
+        # composed prompt names nothing for either, and edit models tend to
+        # default back to the reference photo's own clothing/setting despite
+        # IDENTITY_GUARD's generic "do NOT copy" line — the same gap
+        # OUTFIT_VARY exists to close for the old hand-picked catalog.
+        prompt = (f"close-up portrait, {angle_entry['phrase']}, {expr['phrase']}, "
+                 f"{lighting['phrase']}, {OUTFIT_VARY}, {BACKGROUND_VARY}")
         return {'framing': framing, 'label': label, 'prompt': prompt,
                 '_debug_angle_id': angle_id, '_debug_pose_id': None}
 

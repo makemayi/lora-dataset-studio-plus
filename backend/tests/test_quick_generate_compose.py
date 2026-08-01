@@ -93,12 +93,38 @@ def test_expression_pool_never_yields_a_filtered_out_entry():
         assert 'surprised' not in v['prompt'].lower()
 
 
-def test_face_prompt_has_no_pose_outfit_or_background_clause():
+def test_face_prompt_has_no_pose_clause_but_carries_outfit_and_background_fallbacks():
+    """Face has no pose axis (never will — a close-up has no body pose to
+    vary), but it also has no outfit/background axis of its own, so without
+    an explicit fallback here the model tends to default back to the
+    reference photo's clothing/setting despite IDENTITY_GUARD's generic
+    'do NOT copy' line. Every face prompt must therefore always carry
+    OUTFIT_VARY and BACKGROUND_VARY verbatim."""
     out = fv.compose_quick_generate_variations(
         total=5, framing_ratios={'face': 100, 'bust': 0, 'body': 0},
         angle_ratios={'face': {'front': 100}}, rng=_rng(6))
     for v in out:
         assert v['prompt'].startswith('close-up portrait,')
+        assert fv.OUTFIT_VARY in v['prompt']
+        assert fv.BACKGROUND_VARY in v['prompt']
+
+
+def test_face_prompt_draws_a_lighting_phrase_for_visual_variety():
+    """Angle + expression alone reads repetitive at a high face ratio (e.g.
+    15 of a 30-image batch) even when every combination is textually
+    distinct — lighting is a third, independent axis that must show up in
+    the composed prompt."""
+    lighting_phrases = {e['phrase'] for e in fv.QUICK_GEN_COMPONENTS['human']['face']['lighting']}
+    out = fv.compose_quick_generate_variations(
+        total=20, framing_ratios={'face': 100, 'bust': 0, 'body': 0},
+        angle_ratios={'face': {'front': 100}}, rng=_rng(9))
+    used = set()
+    for v in out:
+        matches = [p for p in lighting_phrases if p in v['prompt']]
+        assert len(matches) == 1, f"expected exactly one lighting phrase in {v['prompt']!r}"
+        used.add(matches[0])
+    # 20 draws from 7 lighting options should hit more than just one or two.
+    assert len(used) >= 4
 
 
 def test_bust_and_body_prompts_use_their_own_opening_clause():

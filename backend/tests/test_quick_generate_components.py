@@ -41,8 +41,8 @@ def test_compatible_angles_only_name_real_angle_ids():
 
 
 def test_face_has_no_pose_axis():
-    """A close-up face shot has no body pose to vary — only angle/expression."""
-    assert set(fv.QUICK_GEN_COMPONENTS['human']['face']) == {'angle', 'expression'}
+    """A close-up face shot has no body pose to vary — angle/expression/lighting only."""
+    assert set(fv.QUICK_GEN_COMPONENTS['human']['face']) == {'angle', 'expression', 'lighting'}
 
 
 def test_bust_and_body_have_no_expression_axis():
