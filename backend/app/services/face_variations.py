@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import json
+import random
 import re
 import zlib
 
@@ -2735,6 +2736,151 @@ QUICK_GEN_COMPONENTS = {
         },
     },
 }
+
+
+QUICK_GEN_TOTAL_CAP = 200
+_QUICK_GEN_FRAMING_ORDER = ('face', 'bust', 'body')
+
+
+def quick_gen_pools_for(subject_type: str) -> dict:
+    """{framing: {axis: [entries]}} — shipped defaults merged with the
+    user's own additions from config.json's quick_generate.custom_components
+    (empty for the common case). A custom entry never overrides a built-in
+    id; it can only ADD a new one to an existing axis (same non-shadowing
+    rule custom_shots enforces on labels).
+
+    NB: the sanitizer (`sanitize_quick_gen_custom_components`) is only
+    called when a raw custom-components config is actually present. This
+    keeps the common (empty-config) path from depending on that function's
+    definition order in the module — it is added in a later task, right
+    after this one, and this guard means the two land independently."""
+    st = normalize_subject_type(subject_type)
+    base = QUICK_GEN_COMPONENTS.get(st, {})
+    raw_custom = _quick_gen_custom_config()
+    if not raw_custom:
+        return base
+    custom = sanitize_quick_gen_custom_components(raw_custom).get(st, {})
+    if not custom:
+        return base
+    merged = {framing: {axis: list(entries) for axis, entries in axes.items()}
+             for framing, axes in base.items()}
+    for framing, axes in custom.items():
+        if framing not in merged:
+            continue
+        for axis, entries in axes.items():
+            if axis not in merged[framing]:
+                continue
+            existing_ids = {e['id'] for e in merged[framing][axis]}
+            merged[framing][axis].extend(e for e in entries if e['id'] not in existing_ids)
+    return merged
+
+
+def _quick_gen_custom_config():
+    """Lazy config read so this module stays importable/testable with no
+    Flask app context — mirrors how get_identity_prompt reads config."""
+    try:
+        from .. import config as cfg
+        return cfg.get('quick_generate.custom_components') or {}
+    except Exception:
+        return {}
+
+
+def _largest_remainder_allocation(total: int, ratios: dict) -> dict:
+    """{key: count} summing to EXACTLY `total`, proportional to `ratios`
+    (values need not be pre-normalized ints — only their relative size
+    matters). Standard largest-remainder / Hamilton apportionment: floor
+    each share, then hand out the leftover seats to the largest fractional
+    remainders first. Deterministic tie-break by dict iteration order."""
+    weight_total = sum(ratios.values())
+    if weight_total <= 0 or total <= 0:
+        return {k: 0 for k in ratios}
+    shares = {k: (total * w / weight_total) for k, w in ratios.items()}
+    counts = {k: int(s) for k, s in shares.items()}
+    remainder = total - sum(counts.values())
+    order = sorted(ratios, key=lambda k: shares[k] - counts[k], reverse=True)
+    for k in order[:remainder]:
+        counts[k] += 1
+    return counts
+
+
+def _quick_gen_validate(total, framing_ratios, angle_ratios):
+    if total < 1 or total > QUICK_GEN_TOTAL_CAP:
+        raise ValueError(f'total must be between 1 and {QUICK_GEN_TOTAL_CAP}')
+    used_framings = [f for f in _QUICK_GEN_FRAMING_ORDER if framing_ratios.get(f, 0) > 0]
+    if sum(framing_ratios.get(f, 0) for f in _QUICK_GEN_FRAMING_ORDER) != 100:
+        raise ValueError('framing_ratios must sum to 100')
+    for framing in used_framings:
+        ratios = angle_ratios.get(framing) or {}
+        if sum(ratios.values()) != 100:
+            raise ValueError(f"angle_ratios['{framing}'] must sum to 100 when "
+                             f"framing_ratios['{framing}'] > 0")
+    return used_framings
+
+
+def compose_quick_generate_variations(
+    total: int, framing_ratios: dict, angle_ratios: dict,
+    subject_type: str = 'human', *, rng: random.Random | None = None,
+) -> list[dict]:
+    """Returns `total` distinct {id, framing, label, prompt} entries, ready
+    to feed straight into the same shape generate_variations already accepts
+    from a manual multi-select. `rng` is injectable for deterministic tests;
+    a real call leaves it None (fresh randomness). Raises ValueError on a
+    bad ratio shape or a total outside [1, QUICK_GEN_TOTAL_CAP] — the route
+    turns that into a 400, same convention as every other validated input
+    in this file."""
+    used_framings = _quick_gen_validate(total, framing_ratios, angle_ratios)
+    rng = rng or random.Random()
+    pools = quick_gen_pools_for(subject_type)
+    framing_counts = _largest_remainder_allocation(
+        total, {f: framing_ratios[f] for f in used_framings})
+
+    out = []
+    for framing in used_framings:
+        count = framing_counts[framing]
+        if not count:
+            continue
+        angle_pool = {e['id']: e for e in pools[framing]['angle']}
+        angle_counts = _largest_remainder_allocation(count, angle_ratios[framing])
+        # Expand to a flat, shuffled list of angle ids so slot order doesn't
+        # correlate with angle (a UI/log skim shouldn't see all-front-first).
+        angle_sequence = [aid for aid, n in angle_counts.items() for _ in range(n)]
+        rng.shuffle(angle_sequence)
+        for angle_id in angle_sequence:
+            out.append(_compose_one_slot(framing, angle_id, angle_pool, pools[framing], rng))
+    rng.shuffle(out)
+    for i, v in enumerate(out, 1):
+        v['id'] = f"quick_{v['framing']}_{i:04d}"
+    return out
+
+
+def _compose_one_slot(framing, angle_id, angle_pool, framing_pools, rng) -> dict:
+    angle_entry = angle_pool[angle_id]
+    if framing == 'face':
+        expr = rng.choice(framing_pools['expression'])
+        label = f"Quick {framing.title()}: {_quick_gen_pretty(angle_id)}, {_quick_gen_pretty(expr['id'])}"
+        prompt = f"close-up portrait, {angle_entry['phrase']}, {expr['phrase']}"
+        return {'framing': framing, 'label': label, 'prompt': prompt,
+                '_debug_angle_id': angle_id, '_debug_pose_id': None}
+
+    pose_candidates = [p for p in framing_pools['pose']
+                       if p['compatible_angles'] is None or angle_id in p['compatible_angles']
+                       or p['compatible_angles'] == []]
+    pose = rng.choice(pose_candidates)
+    outfit = rng.choice(framing_pools['outfit'])
+    background = rng.choice(framing_pools['background'])
+    self_describing = pose['compatible_angles'] == []
+    opening = 'upper body portrait' if framing == 'bust' else 'full body shot'
+    used_angle_id = None if self_describing else angle_id
+    parts = [pose['phrase']] if self_describing else [angle_entry['phrase'], pose['phrase']]
+    parts += [outfit['phrase'], background['phrase']]
+    prompt = f"{opening}, " + ', '.join(parts)
+    label = f"Quick {framing.title()}: {_quick_gen_pretty(pose['id'])}"
+    return {'framing': framing, 'label': label, 'prompt': prompt,
+            '_debug_angle_id': used_angle_id, '_debug_pose_id': pose['id']}
+
+
+def _quick_gen_pretty(component_id: str) -> str:
+    return component_id.replace('_', ' ').title()
 
 
 # --- Custom shot catalogs (imported from JSON) --------------------------------
