@@ -2571,6 +2571,166 @@ def select_preset(name: str, subject_type: str = 'human'):
     return [by_id[i] for i in presets_for(st).get(name, []) if i in by_id]
 
 
+# --- Quick random generate: ratio-driven prompt composer ---------------------
+# Idea by the user (2026-08-01): instead of hand-picking individual variation
+# cards, set a total count + a framing/angle ratio and let the app compose
+# that many DISTINCT prompts from an independent component library. Facial
+# identity is priority one — the expression pool is deliberately mild only
+# (no laughing/surprised/shock: anything that visibly changes how the face
+# reads structurally is excluded), and a pose that already names its own
+# camera position (e.g. "over the shoulder") is never stacked with a second,
+# possibly-contradictory angle phrase — see `compatible_angles` below.
+#
+# Storage split mirrors `custom_shots`: this dict is the shipped, versioned
+# DEFAULT library (code, not config.json). A user's own additions live in
+# config.json under `quick_generate.custom_components`, merged in at lookup
+# time by `quick_gen_pools_for` — see the "Custom shot catalogs" section
+# below for the parallel custom_shots mechanism this one is modeled on.
+
+
+def _qc(id, phrase, *, compatible_angles=None):
+    """One quick-generate component entry. `compatible_angles=None` means
+    compatible with every angle in that framing's own angle pool; a list
+    restricts it to exactly those angle ids; an empty list means the phrase
+    ALREADY states its own camera position (e.g. "over the shoulder") — the
+    composer never draws a separate angle line for it (see
+    compose_quick_generate_variations)."""
+    return {'id': id, 'phrase': phrase, 'compatible_angles': compatible_angles}
+
+
+QUICK_GEN_COMPONENTS = {
+    'human': {
+        'face': {
+            'angle': [
+                _qc('front', 'front view'),
+                _qc('three_quarter_left', 'three-quarter left view'),
+                _qc('three_quarter_right', 'three-quarter right view'),
+                _qc('profile_left', 'strict left profile view'),
+                _qc('profile_right', 'strict right profile view'),
+                _qc('look_up', 'looking slightly upward'),
+                _qc('look_down', 'looking slightly downward'),
+            ],
+            'expression': [
+                _qc('neutral', 'neutral expression'),
+                _qc('slight_smile', 'slight smile'),
+                _qc('serious', 'serious expression'),
+                _qc('gentle', 'gentle expression'),
+                _qc('pensive', 'pensive expression'),
+                _qc('soft_closed_smile', 'soft, closed-mouth smile'),
+                _qc('pursed_lips', 'lips pressed together in a soft smile'),
+                _qc('playful', 'playful, slightly mischievous expression'),
+                _qc('eye_roll_playful', 'eyes rolled slightly to the side, playful expression'),
+                _qc('warm', 'warm, soft expression'),
+                _qc('calm_confident', 'calm, confident expression'),
+                _qc('curious', 'curious expression, head tilted slightly'),
+                _qc('thoughtful', 'thoughtful expression'),
+                _qc('relaxed_natural', 'relaxed, natural expression'),
+            ],
+        },
+        'bust': {
+            'angle': [
+                _qc('front', 'front view'),
+                _qc('three_quarter_left', 'three-quarter left view'),
+                _qc('three_quarter_right', 'three-quarter right view'),
+                _qc('profile_left', 'strict left profile view, looking away from camera'),
+                _qc('profile_right', 'strict right profile view, looking away from camera'),
+                _qc('low_angle', 'camera angled slightly upward from below, looking down '
+                                 'toward the lens, dramatic perspective'),
+                _qc('high_angle', 'camera angled slightly downward from above, looking up '
+                                  'toward the lens'),
+            ],
+            'pose': [
+                _qc('natural', 'natural relaxed pose'),
+                _qc('arms_crossed', 'arms crossed, confident stance',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+                _qc('over_shoulder', 'body and shoulders turned away, looking back over the '
+                                     'shoulder toward the camera, strict three-quarter rear angle',
+                    compatible_angles=[]),
+                _qc('hand_near_face', 'one hand resting gently near the chin'),
+                _qc('hair_tuck', 'one hand lightly tucking hair behind the ear'),
+                _qc('shoulder_lean', 'leaning slightly to one side, weight on one shoulder'),
+                _qc('hands_clasped', 'hands loosely clasped in front'),
+                _qc('looking_over_frame', 'gaze directed just past the camera, contemplative',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+            ],
+            'outfit': [
+                _qc('casual_top', 'wearing a casual top different from the reference outfit'),
+                _qc('jacket', 'wearing a jacket different from the reference outfit'),
+                _qc('evening', 'elegant evening look, different from the reference outfit'),
+                _qc('fitted_top', 'fitted ribbed knit top'),
+                _qc('summer_dress', 'fitted summer dress with thin straps'),
+                _qc('swim_bikini_top', 'wearing a bikini top'),
+                _qc('knit_sweater', 'wearing a soft knit sweater different from the reference outfit'),
+                _qc('blazer_smart', 'wearing a tailored blazer over a plain top, different '
+                                    'from the reference outfit'),
+            ],
+            'background': [
+                _qc('outdoor_park', 'outdoor park background'),
+                _qc('studio_plain', 'studio backdrop'),
+                _qc('urban', 'urban background'),
+                _qc('dim_ambient', 'dim ambient light'),
+                _qc('window_indoor', 'soft natural window light from the side, indoor'),
+                _qc('cafe_indoor', 'softly lit café interior, blurred background'),
+                _qc('garden_outdoor', 'outdoor garden setting, blurred greenery background'),
+            ],
+        },
+        'body': {
+            'angle': [
+                _qc('front', 'front view'),
+                _qc('three_quarter_left', 'three-quarter left view'),
+                _qc('three_quarter_right', 'three-quarter right view'),
+                _qc('low_angle_close', 'low camera angle looking up, the subject standing '
+                                       'closer to the camera than a typical full-body shot so '
+                                       'the face reads clearly, dramatic perspective'),
+                _qc('lean_close', 'standing noticeably closer to the camera than usual and '
+                                  'leaning slightly forward, wide-angle perspective, the face '
+                                  'clearly visible and well lit'),
+            ],
+            'pose': [
+                _qc('standing', 'standing'),
+                _qc('walking', 'walking, dynamic pose',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+                _qc('sitting_chair', 'sitting on a chair, relaxed'),
+                _qc('sitting_floor', 'sitting on the floor, legs to one side, relaxed posture'),
+                _qc('sitting_cross', 'sitting cross-legged on the ground, relaxed'),
+                _qc('sitting_steps', 'sitting on outdoor steps, elbows resting on the knees, casual'),
+                _qc('crouching', 'crouching low, forearms resting on the knees, looking at the camera',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right',
+                                       'low_angle_close']),
+                _qc('crouch_side', 'crouching on one knee, side angle, balanced pose'),
+                _qc('lying_front', 'lying on the front, propped up on the elbows, looking at the camera',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+                _qc('lying_back', 'lying on the back, looking upward, relaxed',
+                    compatible_angles=[]),
+                _qc('lying_side', 'lying on the side, relaxed pose, resting the head on one hand',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+            ],
+            'outfit': [
+                _qc('street_casual', 'casual clothes different from the reference outfit'),
+                _qc('bodycon_dress', 'elegant fitted bodycon evening dress'),
+                _qc('athletic_sportswear', 'athletic sportswear, fitted leggings and sports top'),
+                _qc('bikini_beach', 'wearing a bikini'),
+                _qc('swimsuit_pool', 'one-piece swimsuit'),
+                _qc('fitted_jeans', 'fitted high-waisted jeans and tucked-in top'),
+                _qc('sundress_casual', 'light casual sundress, different from the reference outfit'),
+                _qc('coat_layered', 'layered casual coat over a plain top, different from '
+                                    'the reference outfit'),
+            ],
+            'background': [
+                _qc('street', 'on a city street'),
+                _qc('cafe', 'standing in a cafe, warm light'),
+                _qc('beach', 'on a sunny beach, daylight'),
+                _qc('outdoor_landscape', 'in a wide natural landscape, daylight'),
+                _qc('open_field', 'in an open field, soft daylight'),
+                _qc('urban_plaza', 'in an urban plaza'),
+                _qc('gym_setting', 'in a gym setting'),
+                _qc('park_path', 'on a walking path in a park, greenery on both sides'),
+            ],
+        },
+    },
+}
+
+
 # --- Custom shot catalogs (imported from JSON) --------------------------------
 # Idea by ashish.sinha (Discord): instead of typing 30-40 shots by hand, export
 # the catalog, have an LLM write more, import the result. The shots live in the
