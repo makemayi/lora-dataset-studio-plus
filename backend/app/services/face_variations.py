@@ -2725,7 +2725,7 @@ QUICK_GEN_COMPONENTS = {
             ],
             'background': [
                 _qc('street', 'on a city street'),
-                _qc('cafe', 'standing in a cafe, warm light'),
+                _qc('cafe', 'in a cafe, warm light'),
                 _qc('beach', 'on a sunny beach, daylight'),
                 _qc('outdoor_landscape', 'in a wide natural landscape, daylight'),
                 _qc('open_field', 'in an open field, soft daylight'),

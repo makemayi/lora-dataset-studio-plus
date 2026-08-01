@@ -62,3 +62,28 @@ def test_expression_pool_excludes_strong_face_distorting_entries():
 def test_every_framing_angle_pool_is_nonempty():
     for framing, axes in fv.QUICK_GEN_COMPONENTS['human'].items():
         assert axes['angle'], f'{framing} has an empty angle pool'
+
+
+import re
+
+# Matches a posture word used as the SUBJECT's verb (leading the phrase, or
+# leading a comma-separated clause) — e.g. 'standing in a cafe'. Deliberately
+# NOT a bare substring check: 'on a walking path' names a location, not the
+# subject's posture, and must not trip this.
+_POSTURE_CLAUSE = re.compile(
+    r'(^|,\s*)(standing|sitting|kneeling|crouching|lying)\b')
+
+
+def test_outfit_and_background_phrases_never_encode_posture():
+    """outfit/background compose freely with ANY pose in the same slot — a
+    phrase like 'standing in a cafe' silently contradicts a pose like 'lying
+    on the side' since nothing filters background against pose. Posture
+    belongs to the pose axis alone."""
+    for framing, axes in fv.QUICK_GEN_COMPONENTS['human'].items():
+        for axis in ('outfit', 'background'):
+            for e in axes.get(axis, []):
+                low = e['phrase'].lower()
+                m = _POSTURE_CLAUSE.search(low)
+                assert not m, (
+                    f"{framing}.{axis}.{e['id']} encodes posture ({m.group(2)!r}): "
+                    f"{e['phrase']!r} — this can contradict an unrelated pose draw")
