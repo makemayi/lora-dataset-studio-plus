@@ -27,7 +27,11 @@ from ..services.face_variations import (NSFW_VARIATION_CATALOG, VARIATION_CATALO
                                         nsfw_variation_catalog, presets_for,
                                         preset_meta_for, all_catalog_labels,
                                         sanitize_custom_shots,
-                                        MAX_CUSTOM_SHOTS_PER_SUBJECT)
+                                        MAX_CUSTOM_SHOTS_PER_SUBJECT,
+                                        compose_quick_generate_variations,
+                                        quick_gen_pools_for,
+                                        sanitize_quick_gen_custom_components,
+                                        QUICK_GEN_TOTAL_CAP)
 from ..utils.comfyui import KREA_ALLOWED_SAMPLERS, KREA_ALLOWED_SCHEDULERS, get_krea_loras
 from ._common import (_map_error, _require_comfyui, _require_no_stalled_comfyui,
                       _studio_arch_mismatch_response, _studio_missing_response)
@@ -214,6 +218,41 @@ def dataset_shot_catalog_save():
     # Report what actually landed: a shot dropped here (a label shadowing a
     # built-in, a framing outside the enum) must not look like it was saved.
     return jsonify({'subject_type': st, 'shots': kept, 'dropped': len(shots) - len(kept)})
+
+
+@bp.get('/dataset/quick-generate/components')
+def dataset_quick_generate_components():
+    """The effective component pool for a subject type — shipped defaults merged
+    with the user's own custom additions (mirrors `dataset_shot_catalog`'s GET)."""
+    st = normalize_subject_type(request.args.get('subject_type'))
+    return jsonify({'subject_type': st, 'pools': quick_gen_pools_for(st),
+                    'total_cap': QUICK_GEN_TOTAL_CAP})
+
+
+@bp.put('/dataset/quick-generate/components')
+def dataset_quick_generate_components_save():
+    """Replace the custom components of ONE subject type. Sanitized again here —
+    the client validates on entry, but this endpoint is the one that writes."""
+    body = request.get_json(force=True, silent=True) or {}
+    st = normalize_subject_type(body.get('subject_type'))
+    custom = body.get('custom_components')
+    if not isinstance(custom, dict):
+        return jsonify({'error': "'custom_components' must be an object"}), 400
+    existing = cfg.get('quick_generate.custom_components') or {}
+    existing[st] = custom
+    sanitized = sanitize_quick_gen_custom_components(existing)
+    cfg.save_config({'quick_generate': {'custom_components': sanitized}})
+    saved_for_subject = sanitized.get(st, {})
+    # Report what actually landed: an entry dropped here (an id shadowing a
+    # built-in, an axis/framing outside the enum) must not look like it was
+    # saved — same contract as dataset_shot_catalog_save's `dropped` count.
+    submitted_count = sum(len(entries) for axes in custom.values()
+                          if isinstance(axes, dict) for entries in axes.values()
+                          if isinstance(entries, list))
+    saved_count = sum(len(entries) for axes in saved_for_subject.values()
+                      for entries in axes.values())
+    return jsonify({'subject_type': st, 'saved': saved_for_subject,
+                    'dropped': submitted_count - saved_count})
 
 
 @bp.get('/dataset/list')
@@ -813,6 +852,28 @@ def dataset_generate(dataset_id):
             return _krea_missing_response(e)
         return _map_error(e)
     return jsonify({'ok': True, 'created': created, 'per_engine': per_engine})
+
+
+@bp.post('/dataset/<int:dataset_id>/quick-generate/compose')
+def dataset_quick_generate_compose(dataset_id):
+    """Pure composition — no queuing, no engine dispatch. The frontend feeds
+    the returned `variations` straight into the SAME engineBatches()/generate
+    flow the manual multi-select already uses; this route owns nothing past
+    producing that list."""
+    if not svc.get_dataset(LOCAL_USER, dataset_id):
+        return jsonify({'ok': False, 'error': 'dataset not found'}), 404
+    data = request.get_json(silent=True) or {}
+    try:
+        composed = compose_quick_generate_variations(
+            total=data.get('total'),
+            framing_ratios=data.get('framing_ratios') or {},
+            angle_ratios=data.get('angle_ratios') or {},
+            subject_type=normalize_subject_type(data.get('subject_type')))
+    except (ValueError, TypeError) as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    variations = [{k: v for k, v in slot.items() if not k.startswith('_debug_')}
+                  for slot in composed]
+    return jsonify({'ok': True, 'variations': variations})
 
 
 @bp.post('/dataset/<int:dataset_id>/import')
