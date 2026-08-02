@@ -18,7 +18,7 @@ import uuid
 from datetime import datetime
 
 from .extensions import db
-from .models import ImageGenerationQueue, SystemState
+from .models import FaceDatasetImage, ImageGenerationQueue, LoraTestImage, SystemState
 
 logger = logging.getLogger(__name__)
 
@@ -878,6 +878,19 @@ class JobQueueManager:
         blocks every generation in the app FOREVER and only a hand-written SQL
         DELETE can lift it. That is not a safety property, it is a dead end.
 
+        For an `unknown_submit` barrier specifically, a queue row surviving alone
+        is the SAME dead end: `confirm_unknown_comfyui_restart` (both the dataset
+        and Test Studio callers) only ever reaches it by first finding the
+        FaceDatasetImage/LoraTestImage card still waiting on it — that card is
+        what the user restarts ComfyUI to unblock. Deleting the card does not
+        cascade-delete the queue row, so a card removed while its job was
+        stalled leaves a queue row nothing can ever reach again. That row is
+        finalized here (cancelled) before the barrier is dropped, so it stops
+        permanently pinning `has_comfyui_stalled_barrier()`. A `prompt`-kind
+        barrier is exempt from this extra check: its own resolution asks
+        ComfyUI directly whether the prompt id is still known, independent of
+        any app-side card, so a missing card there proves nothing either way.
+
         Deliberately not a general escape hatch: callers must first establish
         that the remote side is settled (proof for a known prompt, a confirmed
         restart for an unknown submit). This only handles "there is nothing left
@@ -887,14 +900,25 @@ class JobQueueManager:
             _, raw, owner, valid = self._read_comfyui_stalled_barrier()
             if not valid or owner is None:
                 return False
-            still_owned = (ImageGenerationQueue.query
-                           .filter_by(job_id=str(owner['job_id']))
-                           .filter(ImageGenerationQueue.status.in_(
-                               ('pending', 'processing', 'sent_to_comfy',
-                                'cancel_requested', 'stalled')))
-                           .first())
-            if still_owned is not None:
-                return False
+            job_id = str(owner['job_id'])
+            queue_row = (ImageGenerationQueue.query
+                        .filter_by(job_id=job_id)
+                        .filter(ImageGenerationQueue.status.in_(
+                            ('pending', 'processing', 'sent_to_comfy',
+                             'cancel_requested', 'stalled')))
+                        .first())
+            if queue_row is not None:
+                if owner.get('kind') != 'unknown_submit':
+                    return False
+                card_alive = (
+                    FaceDatasetImage.query.filter_by(job_id=job_id).first()
+                    or LoraTestImage.query.filter_by(job_id=job_id).first())
+                if card_alive is not None:
+                    return False
+                # The queue row survived its card — cancel it directly, the same
+                # terminal state every other resolver leaves behind, so nothing
+                # keeps re-detecting it as "still owned" on a later poll.
+                queue_row.status = 'cancelled'
             deleted = (SystemState.query
                        .filter_by(key=COMFYUI_STALLED_BARRIER_KEY, value=raw)
                        .delete(synchronize_session=False))
@@ -908,8 +932,8 @@ class JobQueueManager:
                 logger.exception('job_queue: could not discard the orphan ComfyUI barrier')
                 return False
             logger.warning(
-                'job_queue: discarded the ComfyUI recovery barrier for job %s — its '
-                'queue row no longer exists, so nothing was left to reconcile',
+                'job_queue: discarded the ComfyUI recovery barrier for job %s — '
+                'nothing on the app side still owned it, so nothing was left to reconcile',
                 owner.get('job_id'))
             return True
 

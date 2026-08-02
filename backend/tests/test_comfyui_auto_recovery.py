@@ -205,6 +205,25 @@ def test_a_live_queue_row_is_never_treated_as_an_orphan(app):
         assert queue_manager.has_comfyui_stalled_barrier()
 
 
+def test_an_unknown_submit_row_orphaned_by_a_deleted_card_is_discarded(app):
+    """The lived bug: the card an unknown-submit job was generating for gets
+    deleted (rejected/purged) while the job itself is still `stalled` — the
+    queue row survives its card (no cascade), so every resolver that matches
+    a card first can never reach it, and the barrier it owns blocks every
+    local generation FOREVER unless this fallback finalizes the orphaned row."""
+    from app.job_queue import queue_manager
+    with app.app_context():
+        job_id = _stalled_unknown_submit_barrier(app, metadata={'dataset_id': 99999})
+        # No FaceDatasetImage/LoraTestImage row was ever created for this job_id
+        # (the fixture only creates the raw queue row) — exactly the state left
+        # behind once the owning card is gone.
+        assert queue_manager.discard_orphan_comfyui_barrier() is True
+        assert not queue_manager.has_comfyui_stalled_barrier()
+        from app.models import ImageGenerationQueue
+        row = ImageGenerationQueue.query.filter_by(job_id=job_id).one()
+        assert row.status == 'cancelled'
+
+
 def test_corrupt_barrier_is_never_auto_resolved(app):
     """An unreadable record still blocks — and no code may guess its way out."""
     from app.extensions import db
@@ -341,6 +360,27 @@ def test_global_resolve_button_clears_an_unknown_submit_from_another_dataset(app
                           json={'confirmed_comfyui_restart': True})
     assert res.status_code == 200 and res.get_json()['cleared'] == 1
     assert seen == {'dataset_id': owner_id, 'restart_confirmed': True}
+
+
+def test_global_resolve_button_clears_a_card_deleted_out_from_under_its_job(app, client):
+    """Same lived bug as the unit-level orphan test, exercised through the real
+    route + the real (unmocked) `confirm_unknown_generation_restart`: the card
+    is gone, so that resolver finds nothing to iterate — the button must still
+    succeed via the orphan fallback instead of leaving the barrier stuck."""
+    with app.app_context():
+        owner = _dataset(app, 'Card deleted mid-stall')
+        owner_id = owner.id
+        _stalled_unknown_submit_barrier(app, metadata={'dataset_id': owner_id})
+    with patch('app.routes._common.capabilities.probe',
+               return_value={'comfyui': {'reachable': True}}):
+        res = client.post('/api/system/comfyui-recovery/resolve',
+                          json={'confirmed_comfyui_restart': True})
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body['ok'] is True and body.get('discarded_orphan') is True
+    with app.app_context():
+        from app.job_queue import queue_manager
+        assert not queue_manager.has_comfyui_stalled_barrier()
 
 
 def test_global_resolve_refuses_without_the_explicit_confirmation(app, client):
