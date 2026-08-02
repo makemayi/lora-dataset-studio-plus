@@ -458,7 +458,7 @@ def update_check():
     if (_update_cache['data'] is not None and (now - _update_cache['ts']) < _UPDATE_TTL
             and not force):
         return jsonify(_update_cache['data'])
-    repo = cfg.get('updates.repo') or 'perfectgf/lora-dataset-studio'
+    repo = cfg.get('updates.repo') or 'makemayi/lora-dataset-studio-plus'
     out = {'ok': True, 'current': APP_VERSION, 'latest': None,
            'update_available': False, 'url': f'https://github.com/{repo}/releases'}
     if docker_runtime:

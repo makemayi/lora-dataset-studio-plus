@@ -583,7 +583,7 @@ DEFAULTS = {
     # by face_variations.sanitize_quick_gen_custom_nsfw — never shadows a
     # shipped id, human-only.
     'quick_generate': {'custom_components': {}, 'custom_nsfw': {}},
-    'updates': {'repo': 'perfectgf/lora-dataset-studio'},      # GitHub repo for the release feed
+    'updates': {'repo': 'makemayi/lora-dataset-studio-plus'},  # GitHub repo for the release feed
 }
 
 _lock = threading.Lock()
