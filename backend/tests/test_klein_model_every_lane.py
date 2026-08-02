@@ -57,6 +57,24 @@ def _comfy_with(tmp_path, *names):
 
 
 # --------------------------------------------------------------------------
+def _start_reference_edit(svc, ds, prompt):
+    """Drive ONE local (Klein) reference edit through the lane's real entry point.
+
+    The multi-engine compare batch (f55ae7a) renamed `_start_local_reference_edit`
+    to `_enqueue_local_reference_edit` and gave it the batch's per-engine token, so
+    this helper registers the batch the enqueue attaches itself to — the same two
+    steps `start_reference_edit` performs. Calling the private enqueue directly
+    keeps the assertions on the KLEIN arguments instead of on the batch plumbing,
+    which has its own file (test_ref_edit_local_engines.py)."""
+    from app.config import LOCAL_USER
+    from app.services import reference_edit_jobs as rej
+    dsdir = svc._dataset_dir(ds.id)
+    started = rej.start_batch(ds.id, dsdir, ('klein',), prompt)
+    return svc._enqueue_local_reference_edit(
+        LOCAL_USER, ds.id, ds, 'klein', prompt, started['tokens']['klein'],
+        os.path.join(dsdir, ds.ref_filename), [])
+
+
 # Lanes 1 & 2 — a dataset in hand, so the dataset's pick
 # --------------------------------------------------------------------------
 @pytest.fixture()
@@ -95,15 +113,7 @@ def lanes(app, monkeypatch):
             with open(os.path.join(svc._dataset_dir(ds.id), 'ref.png'), 'wb') as fh:
                 fh.write(_png())
             svc.db.session.commit()
-            # Public entry point (the private per-engine enqueue this used to call
-            # directly, _start_local_reference_edit, was renamed/restructured into
-            # _enqueue_local_reference_edit and now needs a batch token that only
-            # start_reference_edit's own start_batch/attach_job setup provides —
-            # going through it here is simpler than hand-building that state, and
-            # it still reaches the same monkeypatched keh.enqueue_klein_edit for
-            # the 'klein' engine).
-            svc.start_reference_edit(app, LOCAL_USER, ds.id, 'klein',
-                                     'make it sharper')
+            _start_reference_edit(svc, ds, 'make it sharper')
             return ds
 
         @staticmethod
@@ -152,7 +162,7 @@ def test_reference_edit_refuses_a_vanished_model_by_name(app, tmp_path):
         svc.set_dataset_klein_model(LOCAL_USER, ds.id, OTHER_FILE)
 
         with pytest.raises(ValueError) as exc:
-            svc.start_reference_edit(app, LOCAL_USER, ds.id, 'klein', 'sharper')
+            _start_reference_edit(svc, ds, 'sharper')
         assert OTHER_FILE in str(exc.value)
 
 

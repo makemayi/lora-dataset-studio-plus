@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { HashRouter, Routes, Route, Navigate, Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
+import { HashRouter, Routes, Route, Navigate, Outlet, NavLink, useLocation } from 'react-router'
 import { apiFetch, postJson } from './api/fetchClient'
 import { JobsProvider } from './context/JobsContext'
 import { ToastProvider, useToast } from './components/common/Toast'
@@ -8,6 +8,8 @@ import { setToastRef } from './api/fetchClient'
 import ErrorBoundary from './components/common/ErrorBoundary'
 import { WhatsNewButton, WhatsNewModal } from './components/common/WhatsNew'
 import ConnectionBanner from './components/common/ConnectionBanner'
+import SetupHealthNotice from './components/setup/SetupHealthNotice'
+import ComfyRecoveryBanner from './components/common/ComfyRecoveryBanner'
 import DockerUpdateInstructions from './components/common/DockerUpdateInstructions'
 import DatasetPage from './pages/DatasetPage'
 import BankPage from './pages/BankPage'
@@ -403,29 +405,12 @@ function UpdateBanner() {
   )
 }
 
-// sessionStorage key shared with SetupPage's "Skip setup" link (defense in depth).
-const SETUP_REDIRECT_KEY = 'lds_setup_redirected'
-
-/** Onboarding: a never-configured backend (no config.json yet) sends the
- * user straight to Settings instead of a workspace with nothing wired up.
- * Fires AT MOST ONCE per browser session: `caps.configured` stays false for
- * the whole session once the user skips setup (or just navigates away without
- * finishing it), so re-running this on every render would bounce every later
- * navigation — including "Skip setup" and a manual click on Settings — straight
- * back to #/setup, trapping the user. The sessionStorage flag remembers that
- * the redirect already happened; it dies with the tab, so a NEW tab (or next
- * browser session) re-offers Setup once — fine; an in-session trap is not. */
-function OnboardingRedirect() {
-  const { caps, loading } = useCapabilities()
-  const navigate = useNavigate()
-  useEffect(() => {
-    if (loading || caps.configured) return
-    if (sessionStorage.getItem(SETUP_REDIRECT_KEY)) return
-    sessionStorage.setItem(SETUP_REDIRECT_KEY, '1')
-    navigate('/setup', { replace: true })
-  }, [loading, caps.configured, navigate])
-  return null
-}
+/* Onboarding + the background setup re-check both live in SetupHealthNotice:
+ * they are the same decision seen from two sides ("has this install ever been
+ * seen working?"), and splitting them meant asking the server twice and letting
+ * the two answers disagree. A never-verified backend still gets the classic
+ * once-per-session redirect to the wizard; a verified one is never interrupted
+ * again and re-verifies quietly in the background. */
 
 function Shell() {
   const { pathname } = useLocation();
@@ -433,11 +418,17 @@ function Shell() {
   return (
     <>
       <NavBar />
-      <OnboardingRedirect />
       <WhatsNewModal />
       {/* Above the update banner: "can I reach the server at all" outranks
-          "there is a newer version". */}
+          "there is a newer version". Same ladder for the setup notice: a part of
+          the install that stopped working matters more than a new version being
+          out, and less than not reaching the server at all. */}
       <ConnectionBanner />
+      {/* Below the setup notice, above the update banner: a paused ComfyUI job
+          blocks work right now, which outranks "a newer version exists" and is
+          outranked by a broken install. */}
+      <SetupHealthNotice />
+      <ComfyRecoveryBanner />
       <UpdateBanner />
       <main id="main-content" tabIndex={-1}
         className={canvasRoute

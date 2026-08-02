@@ -1,0 +1,14 @@
+# Versioned settings for start-docker.bat: Studio uses an existing host ComfyUI.
+# The machine-specific bind source lives in the ignored generated override.
+services:
+  studio:
+    labels:
+      io.lora-dataset-studio.launch-mode: external
+    environment:
+      LDS_RUNTIME: docker-external-comfy
+      LDS_DOCKER_COMFY_MODE: external
+      LDS_DOCKER_HAS_COMFYUI: "1"
+      LDS_COMFYUI_API_URL: http://host.docker.internal:8188
+      LDS_COMFYUI_BASE_DIR: /external-comfyui
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

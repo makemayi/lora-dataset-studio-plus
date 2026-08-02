@@ -19,7 +19,8 @@ function fmtSize(b) {
 // state instead of a dead-looking button.
 export default function InstallRunner({ action, buttonLabel, onDone }) {
   const toast = useToast()
-  const [state, setState] = useState('idle')  // idle|queued|running|success|error
+  const [state, setState] = useState('idle')  // idle|queued|running|success|error|cancelled
+  const [cancelling, setCancelling] = useState(false)
   const [log, setLog] = useState([])
   const [returncode, setReturncode] = useState(null)
   const [progress, setProgress] = useState(null)  // {done,total,pct} for streaming downloads
@@ -30,6 +31,7 @@ export default function InstallRunner({ action, buttonLabel, onDone }) {
   const apply = (s) => {
     setState(s.state); setLog(s.log || []); setReturncode(s.returncode)
     setProgress(s.progress || null)
+    if (s.state !== 'running') setCancelling(false)
   }
 
   const poll = async () => {
@@ -44,6 +46,8 @@ export default function InstallRunner({ action, buttonLabel, onDone }) {
         toast.success('Installed.'); onDone?.()
       } else if (s.state === 'error') {
         toast.error('Install failed — click to try again.')
+      } else if (s.state === 'cancelled') {
+        toast.info('Download cancelled.')
       }
     } catch {
       if (!mountedRef.current) return
@@ -73,7 +77,8 @@ export default function InstallRunner({ action, buttonLabel, onDone }) {
   }, [action])
 
   const start = async () => {
-    setLog([]); setReturncode(null); setProgress(null); setState('running'); fails.current = 0
+    setLog([]); setReturncode(null); setProgress(null); setState('running')
+    setCancelling(false); fails.current = 0
     try {
       const s = await postJson(`/api/setup/install/${action}`, {})
       if (mountedRef.current && s && s.state) apply(s)  // immediate queued/running feedback
@@ -84,14 +89,37 @@ export default function InstallRunner({ action, buttonLabel, onDone }) {
     }
   }
 
+  const cancel = async () => {
+    if (action !== 'ollama_model' || state !== 'running' || cancelling) return
+    setCancelling(true)
+    try {
+      const s = await postJson(`/api/setup/install/${action}/cancel`, {})
+      if (!mountedRef.current) return
+      apply(s)
+      clearTimeout(timer.current)
+      timer.current = setTimeout(poll, 0)
+    } catch (error) {
+      setCancelling(false)
+      toast.error(error.message || 'Could not cancel the download.')
+    }
+  }
+
   const running = state === 'running'
   const busy = running || state === 'queued'
   return (
     <div className="space-y-2">
-      <button type="button" onClick={start} disabled={busy}
-        className="rounded-md bg-gradient-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
-        {state === 'queued' ? 'Queued…' : running ? 'Installing…' : buttonLabel}
-      </button>
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" onClick={start} disabled={busy}
+          className="rounded-md bg-gradient-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
+          {state === 'queued' ? 'Queued…' : running ? 'Installing…' : buttonLabel}
+        </button>
+        {action === 'ollama_model' && running && (
+          <button type="button" onClick={cancel} disabled={cancelling}
+            className="rounded-md border border-border-strong px-3 py-1.5 text-xs font-medium text-content hover:bg-surface-raised disabled:opacity-50">
+            {cancelling ? 'Cancelling…' : 'Cancel download'}
+          </button>
+        )}
+      </div>
       {state === 'queued' && (
         <p className="text-[11px] text-content-muted">
           Another install is running — this one starts automatically when it finishes.
@@ -121,6 +149,12 @@ export default function InstallRunner({ action, buttonLabel, onDone }) {
           {returncode != null
             ? `Install failed (exit ${returncode}). Click "${buttonLabel}" to try again — it repairs in place.`
             : 'Could not start the install. Click to try again.'}
+        </p>
+      )}
+      {state === 'cancelled' && (
+        <p className="text-xs text-content-muted">
+          Download cancelled. The partial Ollama transfer can be resumed safely by clicking
+          “{buttonLabel}” again.
         </p>
       )}
     </div>

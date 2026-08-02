@@ -1,7 +1,7 @@
 // react-frontend/src/components/dataset/TrainingPanel.jsx
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { getCsrfToken } from '../../api/fetchClient';
 import { useCapabilities } from '../../context/CapabilitiesContext';
 import { postJson } from '../../hooks/useDataset';
@@ -43,6 +43,7 @@ import {
 } from '../../utils/trainingPresets';
 import { runConfirmableTrainingRequest } from '../../utils/trainingConfirmations';
 import { continueAttemptOutcome } from '../../utils/continueOutcome';
+import { launchButtonLabel } from '../../utils/launchProgress';
 import { HelpBadge } from '../../help/HelpMode';
 import { requestHelpTip } from '../../help/helpTips';
 import { useToast } from '../common/Toast';
@@ -1742,7 +1743,14 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
       toastTrainError(d, 'Cloud training failed');
       return false;
     }
-    // Success needs no toast — the 5s cloud-status poll picks it up.
+    // The dialog closes on success and the panel's own launch view only appears
+    // on the next 5 s poll — a silent close read as "nothing happened". Name the
+    // run that now exists and where its launch steps are visible.
+    if (d) {
+      toast.info(d.run_id != null
+        ? `Cloud run #${d.run_id} created — follow its launch on the Runs page.`
+        : 'Cloud run created — follow its launch on the Runs page.');
+    }
     return !!d;
   };
 
@@ -4008,6 +4016,10 @@ function CloudLaunchDialog({
   const [data, setData] = useState(null);     // {tiers, steps, family, max_price_per_hour}
   const [selected, setSelected] = useState(null);
   const [launching, setLaunching] = useState(false);
+  // Seconds since the click. The launch POST freezes the dataset, checks the
+  // base repository and (full model) creates the delivery repository, so it can
+  // run for tens of seconds — a motionless 'Launching…' was reported as a hang.
+  const [launchElapsed, setLaunchElapsed] = useState(0);
   const fullMode = normalizeTrainingMode(trainingMode) === TRAINING_MODE_FULL_TRANSFORMER;
   // Custom base ('' = official): the launch stays blocked until the private
   // repo on the user's HF account carries the base (pushed once, reused).
@@ -4053,10 +4065,15 @@ function CloudLaunchDialog({
   const go = async () => {
     if (!selected) return;
     setLaunching(true);
+    setLaunchElapsed(0);
+    const started = Date.now();
+    const tick = setInterval(
+      () => setLaunchElapsed(Math.round((Date.now() - started) / 1000)), 1000);
     try {
       const launched = await onLaunch(selected);      // owns its own error toasts
       if (launched) onClose();
     } finally {
+      clearInterval(tick);
       setLaunching(false);
     }
   };
@@ -4068,6 +4085,12 @@ function CloudLaunchDialog({
     cloudTierEstimateView(tier, { fullMode }).available
   ));
   const offerTokenReadiness = fullMode ? hfCloudTokenReadiness(data || {}) : null;
+  // The saved token is verified server-side on every offer fetch. Repeating
+  // "configure it before renting the GPU" once it has passed reads as a refusal
+  // and sent users hunting for a Settings problem that does not exist.
+  const offerTokenStatus = fullMode ? (data?.hf_cloud_token || null) : null;
+  const hfTokenVerified = offerTokenStatus?.ok === true;
+  const hfTokenBroad = hfTokenVerified && offerTokenStatus?.code === 'broad_access';
   const hfTokenIssue = fullMode && (preflightTokenIssue
     || (offerTokenReadiness?.blocked
       ? offerTokenReadiness.detail
@@ -4087,14 +4110,32 @@ function CloudLaunchDialog({
             : 'Choose GPU speed for this run'}
         </h3>
 
-        {fullMode && (
-          <p className="m-0 rounded-lg border border-amber-400/35 bg-amber-500/[0.08] px-3 py-2 text-amber-100 text-[0.75rem] leading-relaxed">
-            This run requires an <code>HF_CLOUD_TOKEN</code> that can read <code>krea/Krea-2-Raw</code> and
-            write the delivery repository. A tightly scoped fine-grained token is recommended. A global
-            write token is also accepted with a warning. Configure it in{' '}
-            <SettingsLink section="local-tools" focus="HF_CLOUD_TOKEN" tone="warning">Settings ▸ Local tools</SettingsLink>
-            {' '}before renting the GPU.
-          </p>
+        {fullMode && !hfTokenIssue && (
+          hfTokenVerified ? (
+            <p className={`m-0 rounded-lg border px-3 py-2 text-[0.75rem] leading-relaxed ${
+              hfTokenBroad
+                ? 'border-amber-400/35 bg-amber-500/[0.08] text-amber-100'
+                : 'border-emerald-400/35 bg-emerald-500/[0.08] text-emerald-100'}`}>
+              <span className="font-semibold">
+                {hfTokenBroad
+                  ? 'Hugging Face delivery ready (broad token).'
+                  : 'Hugging Face delivery ready.'}
+              </span>{' '}
+              {hfTokenBroad
+                ? (offerTokenStatus?.warning
+                  || 'This token has global write access. It works, but a fine-grained token limited to Krea 2 reads and one delivery namespace is safer.')
+                : 'The dedicated token can read the official base and write the delivery repository.'}
+              {offerTokenStatus?.namespace ? ` Delivery namespace: ${offerTokenStatus.namespace}.` : ''}
+            </p>
+          ) : (
+            <p className="m-0 rounded-lg border border-amber-400/35 bg-amber-500/[0.08] px-3 py-2 text-amber-100 text-[0.75rem] leading-relaxed">
+              This run requires an <code>HF_CLOUD_TOKEN</code> that can read <code>krea/Krea-2-Raw</code> and
+              write the delivery repository. A tightly scoped fine-grained token is recommended. A global
+              write token is also accepted with a warning. Configure it in{' '}
+              <SettingsLink section="local-tools" focus="HF_CLOUD_TOKEN" tone="warning">Settings ▸ Local tools</SettingsLink>
+              {' '}before renting the GPU.
+            </p>
+          )
         )}
 
         {hfTokenIssue && (
@@ -4167,6 +4208,19 @@ function CloudLaunchDialog({
             : '. Time & cost are approximate; the pod is auto-terminated when done.'}
         </p>
 
+        {/* What the frozen button is actually waiting on. Announced once (the
+            text does not change as the counter runs, so it cannot re-announce
+            every second) and wrapped for a 400 px phone. */}
+        {launching && (
+          <p aria-live="polite"
+            className="m-0 rounded-lg border border-sky-400/35 bg-sky-500/[0.08] px-3 py-2 text-sky-100 text-[0.75rem] leading-relaxed">
+            Reserving the run: freezing the dataset and checking the base model
+            {fullMode ? ' and the Hugging Face delivery repository' : ''}. This can take
+            up to a minute. The GPU is rented right after, and the run then follows
+            its own progress on the Runs page — you can close this window once it opens.
+          </p>
+        )}
+
         <div className="flex items-center gap-2">
           <button type="button" onClick={go}
             disabled={!selected || launching || !customBaseReady || hfTokenBlocked}
@@ -4174,7 +4228,7 @@ function CloudLaunchDialog({
               ? 'Configure a valid HF_CLOUD_TOKEN with the required permissions before launching'
               : !customBaseReady ? 'Push the custom base to your Hugging Face account first' : undefined}
             className="px-3 py-1.5 rounded-lg bg-gradient-primary text-white text-sm font-semibold disabled:opacity-40">
-            {launching ? 'Launching…' : fullMode ? '☁️ Rent GPU & train full model' : '☁️ Rent & train'}
+            {launchButtonLabel({ launching, elapsedSeconds: launchElapsed, fullMode })}
           </button>
           <button type="button" onClick={onClose} disabled={launching}
             className="ml-auto px-3 py-1.5 rounded-lg text-content-muted hover:text-content text-sm disabled:opacity-40">

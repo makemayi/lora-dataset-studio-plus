@@ -83,6 +83,105 @@ def require_comfyui_enqueue_ready() -> None:
         if queue_manager.has_comfyui_stalled_barrier():
             raise ComfyUIRecoveryRequired(COMFYUI_RECOVERY_REQUIRED_MESSAGE)
 
+
+# --- automatic recovery ------------------------------------------------------
+# One recovery case, and only one, is provable without a human: a *known prompt*
+# barrier whose id ComfyUI no longer knows. If ComfyUI answers and neither its
+# /queue nor its /history contains that prompt, the remote work is gone (the
+# ordinary "ComfyUI was restarted / the machine died" case) and keeping the
+# barrier only blocks every dataset in the app for a job nobody can act on.
+# The three refusals are deliberate, not conservatism for its own sake:
+#   * ComfyUI unreachable        -> no evidence at all, so no decision.
+#   * the prompt is still there  -> the job is ALIVE; clearing it would strand
+#                                   real GPU work whose outputs still arrive.
+#   * an unknown_submit barrier  -> no prompt id exists to ask about, and a
+#                                   timed-out POST can still land later; only a
+#                                   person who restarted ComfyUI can rule it out.
+COMFYUI_AUTO_RESOLVED_MESSAGE = (
+    'A stalled generation from a previous session was cleared automatically '
+    '(ComfyUI was restarted).'
+)
+AUTO_RECOVERY_NOTICE_TTL_SECONDS = 600
+_auto_recovery_notice = None
+_auto_recovery_notice_lock = threading.Lock()
+
+
+def _record_auto_recovery_notice(owner) -> dict:
+    """Remember one automatic clear so the UI can say it out loud.
+
+    In-process on purpose: this is a transient courtesy message, not recovery
+    state. The durable record of what happened is the queue row plus the log
+    line — this only decides whether a toast appears.
+    """
+    global _auto_recovery_notice
+    notice = {'id': uuid.uuid4().hex,
+              'message': COMFYUI_AUTO_RESOLVED_MESSAGE,
+              'job_id': owner.get('job_id'),
+              'dataset_id': owner.get('dataset_id'),
+              'run_id': owner.get('run_id')}
+    with _auto_recovery_notice_lock:
+        _auto_recovery_notice = (notice, time.monotonic() + AUTO_RECOVERY_NOTICE_TTL_SECONDS)
+    return notice
+
+
+def peek_auto_recovery_notice() -> dict | None:
+    """The pending automatic-clear notice, or None once it has aged out."""
+    global _auto_recovery_notice
+    with _auto_recovery_notice_lock:
+        entry = _auto_recovery_notice
+        if entry is None:
+            return None
+        notice, expires_at = entry
+        if time.monotonic() >= expires_at:
+            _auto_recovery_notice = None
+            return None
+        return dict(notice)
+
+
+def clear_auto_recovery_notice() -> None:
+    """Drop the pending notice (tests, and an explicit user dismissal)."""
+    global _auto_recovery_notice
+    with _auto_recovery_notice_lock:
+        _auto_recovery_notice = None
+
+
+def auto_resolve_comfyui_barrier() -> dict | None:
+    """Clear the recovery barrier when the remote prompt is PROVABLY gone.
+
+    Returns the resolved barrier owner, or None when nothing was resolved.
+    Never raises: a failed probe is simply an absence of proof.
+    """
+    owner = queue_manager.get_comfyui_stalled_barrier()
+    if owner is None:
+        # No barrier, or a corrupt one. A corrupt record is exactly the case
+        # where a machine must not guess: it still blocks, and it needs eyes.
+        return None
+    if owner.get('kind') != 'prompt' or not owner.get('prompt_id'):
+        return None
+    prompt_id = owner['prompt_id']
+    try:
+        from .utils.comfyui import comfyui_prompt_is_absent
+        # True *only* after a healthy /queue answer proved the id absent.
+        # False = still pending/running; None = unreachable or unparseable.
+        if comfyui_prompt_is_absent(prompt_id) is not True:
+            return None
+        # reconcile_stalled_comfy_job re-verifies queue absence on both sides of
+        # a /history read and refuses an unhealthy history. This is its only
+        # caller that runs without anyone asking, so it borrows those checks
+        # rather than repeating a weaker version of them.
+        if not queue_manager.reconcile_stalled_comfy_job(owner['job_id']):
+            return None
+    except Exception:
+        logger.exception('job_queue: automatic ComfyUI recovery probe failed')
+        return None
+    logger.warning(
+        'job_queue: automatically cleared the ComfyUI recovery barrier for job %s — '
+        'prompt %s is absent from both /queue and /history (ComfyUI was restarted)',
+        owner.get('job_id'), prompt_id)
+    _record_auto_recovery_notice(owner)
+    return owner
+
+
 # A DB status check is the source of truth, but this in-process event also wakes
 # the worker immediately when it is sleeping between two history requests.
 _poll_cancel_events: dict[str, threading.Event] = {}
@@ -307,7 +406,16 @@ DATASET_IMAGE_JOB_NAMES = frozenset({
     'klein_edit_dataset',           # Klein (FLUX.2)
     'krea_identity_edit_dataset',   # Krea 2 Identity Edit
     'klein_face_swap_dataset',      # Klein face swap (fixed workflow)
+    'seedvr2_upscale',              # SeedVR2 (fidelity upscale)
 })
+# It happened a SECOND time, with SeedVR2, for the same reason and with the same
+# clean logs: rendered, `execution_success`, 2.2 MB PNG on disk, candidate row
+# still pending with a NULL filename. The guard written after Krea promised to
+# catch exactly that and could not — it walked a hardcoded tuple of two helper
+# modules, so a third helper was invisible to it. `test_dataset_job_harvest.py`
+# now DISCOVERS the engines (AST over app/services) and forces every stamped job
+# name to be classified, and `_harvest_unlinked_completed_jobs` below repairs the
+# rows a future miss would strand instead of requiring hand-written SQL.
 
 
 def _drop_staged_inputs(md) -> None:
@@ -744,6 +852,10 @@ class JobQueueManager:
             return
         with self._app.app_context():
             self._recover_stuck_jobs()
+            # AFTER recovery on purpose: that pass moves every uncertain job to
+            # `stalled`, and _dispatch_completion refuses to route a stalled job.
+            # So the harvest can only ever see rows whose outcome is settled.
+            self._harvest_unlinked_completed_jobs()
             self._prune_staged_inputs()
         self._running = True
         self._thread = threading.Thread(target=self._run_loop, name='job-queue-worker', daemon=True)
@@ -799,6 +911,53 @@ class JobQueueManager:
                     logger.critical(
                         'job_queue: startup could not durably pause uncertain job %s; '
                         'leaving it active and blocking new GPU work', job.job_id)
+
+    def _harvest_unlinked_completed_jobs(self):
+        """Attach results that FINISHED but were never linked to their row.
+
+        The net under the routing table. Twice now an engine has shipped
+        stamping a job name `_dispatch_completion` did not know: the image
+        rendered, the queue row went `completed` with its filename, and the
+        dataset row stayed `pending` with a NULL filename — no error, no log,
+        nothing on screen. Fixing the table repairs the NEXT run; it does not
+        give anyone back the images they already paid GPU time for, and the only
+        remedy was hand-written SQL. This is that remedy, run automatically at
+        boot, so an "Update & restart" is the whole fix.
+
+        Driven from the ROWS, not from the queue: candidates are dataset images
+        still `pending` with no file and a job id — naturally a handful, even on
+        an install with tens of thousands of finished jobs. A row is only
+        re-dispatched when its queue row is genuinely TERMINAL; anything still in
+        flight (or paused by the recovery above, which runs first) is left alone.
+
+        Guarded end to end: this runs before the worker starts, and a boot that
+        cannot repair must still boot.
+        """
+        try:
+            from .models import FaceDatasetImage
+            stranded = (FaceDatasetImage.query
+                        .filter(FaceDatasetImage.status == 'pending',
+                                FaceDatasetImage.filename.is_(None),
+                                FaceDatasetImage.job_id.isnot(None))
+                        .all())
+            if not stranded:
+                return
+            repaired = 0
+            for row in stranded:
+                job = ImageGenerationQueue.query.filter_by(job_id=row.job_id).first()
+                if job is None or job.status not in ('completed', 'failed'):
+                    continue          # never finished, or still owed a real dispatch
+                try:
+                    _dispatch_completion(job, job.result_filename,
+                                         job.status == 'failed')
+                    repaired += 1
+                except Exception:
+                    logger.exception('job_queue: harvest failed for job %s', job.job_id)
+            if repaired:
+                logger.info('job_queue: harvested %d finished job(s) whose result had '
+                            'never been linked to its row', repaired)
+        except Exception:
+            logger.exception('job_queue: unlinked-result harvest failed')
 
     def _prune_staged_inputs(self):
         """Boot sweep for staged input copies no live job can still need.

@@ -153,3 +153,28 @@ def test_index_pin_is_empty_and_never_raises_without_one(app):
         ds.best_settings = json.dumps({'zimage': {'strength': 1.0}})   # pinned, no file
         db.session.commit()
         assert ct.canvas_dataset_index('local')['datasets'][0]['best_settings_loras'] == []
+
+
+def test_index_carries_the_dataset_reference_face_and_its_kind(app):
+    """🪪 The canvas draws the reference beside each lane's name — a board full
+    of renders of a person with the person nowhere on it made every likeness
+    check a memory test. Both fields come off the dataset row the index already
+    holds, so the "no extra query, no disk" invariant of this endpoint still
+    holds. `kind` travels because only a CHARACTER dataset has a reference face;
+    a concept or a style must not be shown an empty frame."""
+    from app.extensions import db
+    from app.services import cloud_training as ct
+    with app.app_context():
+        person = _dataset('Person')
+        person.ref_filename = 'local_datasetref_abcd1234.webp'
+        concept = _dataset('A concept')
+        concept.kind = 'concept'
+        db.session.commit()
+        _rec(person.id)
+        _rec(concept.id)
+
+        rows = {d['name']: d for d in ct.canvas_dataset_index('local')['datasets']}
+        assert rows['Person']['ref_filename'] == 'local_datasetref_abcd1234.webp'
+        assert rows['Person']['kind'] == 'character'
+        assert rows['A concept']['kind'] == 'concept'
+        assert rows['A concept']['ref_filename'] is None

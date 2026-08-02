@@ -240,3 +240,131 @@ def test_leaves_no_temp_file_behind(seeder, tmp_path, monkeypatch):
     assert seeder.main() == 0
 
     assert [p.name for p in tmp_path.iterdir()] == ['config.json']
+
+
+def test_external_comfy_values_are_authoritative_and_preserve_other_keys(
+        seeder, tmp_path, monkeypatch):
+    config = tmp_path / 'config.json'
+    config.write_text(json.dumps({
+        'comfyui': {
+            'api_url': 'http://old.invalid',
+            'base_dir': '/old',
+            'custom_setting': 'keep',
+        },
+        'paths': {'dataset_images_root': '/keep/me'},
+    }), encoding='utf-8')
+    monkeypatch.setenv('LDS_CONFIG', str(config))
+    monkeypatch.setenv('LDS_DOCKER_COMFY_MODE', 'external')
+
+    assert seeder.main() == 0
+
+    written = json.loads(config.read_text(encoding='utf-8'))
+    assert written['comfyui'] == {
+        'api_url': 'http://host.docker.internal:8188',
+        'base_dir': '/external-comfyui',
+        'custom_setting': 'keep',
+    }
+    assert written['paths'] == {'dataset_images_root': '/keep/me'}
+
+
+def test_external_comfy_blank_env_values_fall_back_to_container_defaults(
+        seeder, tmp_path, monkeypatch):
+    config = tmp_path / 'config.json'
+    monkeypatch.setenv('LDS_CONFIG', str(config))
+    monkeypatch.setenv('LDS_DOCKER_COMFY_MODE', 'external')
+    monkeypatch.setenv('LDS_COMFYUI_API_URL', '   ')
+    monkeypatch.setenv('LDS_COMFYUI_BASE_DIR', '   ')
+
+    assert seeder.main() == 0
+
+    written = json.loads(config.read_text(encoding='utf-8'))
+    assert written['comfyui']['api_url'] == 'http://host.docker.internal:8188'
+    assert written['comfyui']['base_dir'] == '/external-comfyui'
+
+
+def test_no_comfy_mode_does_not_create_a_comfyui_section(
+        seeder, tmp_path, monkeypatch):
+    config = tmp_path / 'config.json'
+    monkeypatch.setenv('LDS_CONFIG', str(config))
+    monkeypatch.setenv('LDS_DOCKER_COMFY_MODE', 'none')
+
+    assert seeder.main() == 0
+
+    assert not config.exists()
+
+
+def test_legacy_has_comfy_false_maps_to_no_comfy_mode(
+        seeder, tmp_path, monkeypatch):
+    config = tmp_path / 'config.json'
+    monkeypatch.setenv('LDS_CONFIG', str(config))
+    monkeypatch.delenv('LDS_DOCKER_COMFY_MODE', raising=False)
+    monkeypatch.setenv('LDS_DOCKER_HAS_COMFYUI', '0')
+
+    assert seeder.main() == 0
+
+    assert not config.exists()
+
+
+@pytest.mark.parametrize(
+    ('mode', 'expected_url'),
+    [
+        ('host', 'http://host.docker.internal:11434'),
+        ('docker', 'http://ollama:11434'),
+    ],
+)
+def test_persisted_ollama_mode_sets_its_container_reachable_url(
+        seeder, tmp_path, monkeypatch, mode, expected_url):
+    config = tmp_path / 'config.json'
+    config.write_text(json.dumps({
+        'ollama': {
+            'deployment_mode': mode,
+            'url': 'http://old.invalid',
+            'model': 'keep-model',
+        },
+    }), encoding='utf-8')
+    monkeypatch.setenv('LDS_CONFIG', str(config))
+    monkeypatch.setenv('LDS_DOCKER_COMFY_MODE', 'none')
+
+    assert seeder.main() == 0
+
+    written = json.loads(config.read_text(encoding='utf-8'))
+    assert written['ollama'] == {
+        'deployment_mode': mode,
+        'url': expected_url,
+        'model': 'keep-model',
+    }
+
+
+def test_none_ollama_mode_leaves_a_manual_url_untouched(
+        seeder, tmp_path, monkeypatch):
+    config = tmp_path / 'config.json'
+    original = {
+        'ollama': {
+            'deployment_mode': 'none',
+            'url': 'http://manual.invalid',
+        },
+    }
+    config.write_text(json.dumps(original), encoding='utf-8')
+    monkeypatch.setenv('LDS_CONFIG', str(config))
+    monkeypatch.setenv('LDS_DOCKER_COMFY_MODE', 'none')
+
+    assert seeder.main() == 0
+
+    assert json.loads(config.read_text(encoding='utf-8')) == original
+
+
+def test_api_image_runs_the_seeder_before_execing_the_backend():
+    dockerfile = (REPO_ROOT / 'Dockerfile').read_text(encoding='utf-8')
+    entrypoint = (
+        REPO_ROOT / 'packaging' / 'docker' / 'studio_api_entrypoint.sh'
+    ).read_text(encoding='utf-8')
+
+    assert 'COPY packaging/docker/seed_comfy_config.py' in dockerfile
+    assert 'COPY packaging/docker/studio_api_entrypoint.sh' in dockerfile
+    assert 'ENTRYPOINT ["/usr/local/bin/studio-api-entrypoint.sh"]' in dockerfile
+    assert entrypoint.index('seed_comfy_config.py') < entrypoint.index(
+        'exec python backend/run.py'
+    )
+    assert entrypoint.startswith('#!/bin/sh\nset -u\n')
+    entrypoint_bytes = (REPO_ROOT / 'packaging' / 'docker' / 'studio_api_entrypoint.sh').read_bytes()
+    assert b'\r\n' not in entrypoint_bytes

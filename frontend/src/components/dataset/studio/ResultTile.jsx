@@ -83,6 +83,14 @@ export default function ResultTile({ cell, row, strength, variant, datasetId, on
           + {cell.batch_lora}
         </span>
       )}
+      {/* Pile combinée : les LoRA chargés EN PLUS de celui de la colonne, avec leur
+          poids — sans ce badge une image de pile serait indiscernable d'un run solo. */}
+      {Array.isArray(cell.combined_loras) && cell.combined_loras.length > 0 && (
+        <span className="max-w-[5rem] truncate px-1 py-px rounded border border-sky-400/50 bg-sky-400/15 text-sky-300 text-[0.5625rem] font-semibold"
+          title={`Combined with: ${cell.combined_loras.map((e) => `${e.label} @ ${e.weight}`).join(', ')}`}>
+          🧬 +{cell.combined_loras.length}
+        </span>
+      )}
       {/* Votes only make sense for a finished image — a failed/pending/stopped tile
           has nothing to judge and must not pollute the ranking (P0-b). */}
       {cell.status === 'done' && (

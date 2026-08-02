@@ -465,6 +465,70 @@ def test_checkpoints_query_forwards_variant_to_local_and_cloud(client, monkeypat
     assert cloud_calls == [(ds_id, 'zimage', 'deturbo')]
 
 
+def test_checkpoints_without_aitoolkit_answers_200_and_skips_the_local_scan(
+        client, monkeypatch):
+    """A cloud-only install must still see its own cloud saves.
+
+    Both local scans go through `_run_dir`, which raises RuntimeError with no
+    ai-toolkit — so they are not merely tolerated here, they must not be called
+    at all. The old `_require_aitoolkit()` 409 made `listCheckpoints` fall back
+    to an empty list client-side, hiding cloud checkpoints the user paid for.
+    """
+    _valid(monkeypatch, False)
+    ds_id = _create(client, name='Cloudy', trigger='cloudy')
+
+    def _unconfigured(*a, **kw):
+        raise RuntimeError('ai-toolkit is not configured')
+
+    monkeypatch.setattr('app.services.lora_training.has_local_checkpoints',
+                        _unconfigured)
+    monkeypatch.setattr('app.services.lora_training.list_checkpoints',
+                        _unconfigured)
+    monkeypatch.setattr(
+        'app.services.cloud_training.cloud_checkpoints',
+        lambda dataset_id, train_type=None, variant=None:
+        [{'step': 1000, 'filename': 'lds7_run.safetensors'}])
+    resp = client.get(f'/api/dataset/{ds_id}/train/checkpoints')
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body['checkpoints'] == []
+    assert [c['filename'] for c in body['cloud_checkpoints']] \
+        == ['lds7_run.safetensors']
+
+
+def test_checkpoints_unknown_dataset_still_404s_without_aitoolkit(
+        client, monkeypatch):
+    """Dropping the capability gate must not turn a bad id into a 200."""
+    _valid(monkeypatch, False)
+    assert client.get('/api/dataset/999999/train/checkpoints').status_code == 404
+
+
+def test_deployed_checkpoint_delete_works_on_a_cloud_only_install(
+        client, monkeypatch):
+    """Cloud-trained LoRAs land in ComfyUI's loras folder and are listed; a
+    cloud-only install must be able to delete them there too."""
+    monkeypatch.setattr('app.capabilities.probe', lambda *a, **k: {
+        'aitoolkit': {'valid': False}, 'cloud_training': True})
+    ds_id = _create(client, name='Cloudy', trigger='cloudy')
+    monkeypatch.setattr(
+        'app.services.lora_training.delete_imported_checkpoint',
+        lambda *a, **kw: 'lds7_run.safetensors')
+    resp = client.post(f'/api/dataset/{ds_id}/train/checkpoint/delete',
+                       json={'filename': 'zimage/lds7_run.safetensors'})
+    assert resp.status_code == 200
+    assert resp.get_json() == {'ok': True, 'removed': 'lds7_run.safetensors'}
+
+
+def test_deployed_checkpoint_delete_still_409s_with_neither_lane(
+        client, monkeypatch):
+    monkeypatch.setattr('app.capabilities.probe', lambda *a, **k: {
+        'aitoolkit': {'valid': False}, 'cloud_training': False})
+    ds_id = _create(client, name='Bare', trigger='bare')
+    resp = client.post(f'/api/dataset/{ds_id}/train/checkpoint/delete',
+                       json={'filename': 'x.safetensors'})
+    assert resp.status_code == 409
+
+
 # --- /train/base-info ---------------------------------------------------------
 
 def test_base_info_returns_bases_by_type(client, monkeypatch):

@@ -141,13 +141,36 @@ walks through five steps — each one unlocks a set of features:
 2. **ComfyUI** — unlocks local (Klein) generation and the Test Studio.
 3. **Ollama** — the local vision model behind auto-captioning, framing
    auto-classify and head-crop.
-4. **Quality tools** — face-similarity scoring and person masks (a one-click
-   `pip install`).
+4. **Quality tools** — face-similarity scoring, person masks, watermark
+   inpainting and bank scoring (a one-click `pip install`).
 5. **ai-toolkit** — the training engine.
+
+Each optional helper says what it unlocks and what still works without it, and
+installs on its own — or all at once, which is usually what you want on a fresh
+machine.
+
+<p align="center">
+  <img src="../screenshots/setup/install-everything.png" alt="Setup step 4 listing each ML helper with its own Install button and an Install all option" width="760">
+</p>
 
 Nothing is mandatory: **Skip setup** is always available, and every step can be
 revisited later from **Settings**, where each tool has a Test button that tells
 you immediately whether the app can see it.
+
+**Setup is a first run, not a toll gate.** Once the app has seen your install
+working — configured, with at least one image engine answering — it stops
+sending you to the wizard. Coming back later (a new tab, a new browser, another
+machine on your network, or a restarted server) drops you straight into the app,
+and the same checks the wizard runs happen in the background while you work. A
+short line in the corner says so and then fades.
+
+You are only interrupted when something that *used to* work has stopped —
+an API key that no longer answers, an ML helper that no longer imports. The
+warning names what broke and links to Setup. It does **not** fire because
+ComfyUI or Ollama simply isn't running (you start those on demand), and it does
+not fire because something was never installed in the first place. If you
+removed a component deliberately, **That was on purpose** stops the app
+mentioning it again.
 
 ## Around the app
 

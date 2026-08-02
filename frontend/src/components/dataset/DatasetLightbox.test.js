@@ -78,13 +78,16 @@ test('dataset hook starts improvement, reports the preserved original, then refr
 });
 
 test('the bulk improvement is ONE call that starts a server job, not a per-image loop', () => {
-  assert.match(hook, /`\/api\/dataset\/\$\{currentId\}\/improve\/batch`, \{ image_ids: ids \}/);
-  assert.match(grid, /onImproveBatch\(eligible\.map\(\(image\) => image\.id\)\)/);
+  assert.match(hook, /`\/api\/dataset\/\$\{currentId\}\/improve\/batch`,/);
+  assert.match(hook, /\{ image_ids: ids, engine \}/);
+  // The engine the user pressed rides along; absent, the server falls back to the
+  // improve.engine setting (which is what the single-tile pass uses).
+  assert.match(grid, /onImproveBatch\(eligible\.map\(\(image\) => image\.id\), engineId\)/);
   // No client-side sequential driver survives: that loop is what walked into the
   // fan-out cap and made ⏹ Stop powerless.
   assert.doesNotMatch(grid, /runSequentialKleinImprove/);
   // Progress is read from the server activity, so it survives a reload.
-  assert.match(grid, /kleinImproveBatchLabel\(activity\)/);
+  assert.match(grid, /improveBatchLabel\(activity\)/);
   // ⏹ Stop generation stays reachable (and enabled) for a running batch. The
   // enabled-ness itself is decided by isStopGenerationBlocked (unit-tested in
   // scraperState.test.js) — this earlier inline expression only exempted

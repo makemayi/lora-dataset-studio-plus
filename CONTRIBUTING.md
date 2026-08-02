@@ -39,7 +39,7 @@ python backend/run.py
 
 ### Frontend
 
-The repo **ships the frontend prebuilt** in `frontend/dist/` (that folder is committed on purpose — `start.bat` and the Docker/portable builds serve it directly and never run Node). So:
+Use **Node.js 22.22 or newer**. The repo **ships the frontend prebuilt** in `frontend/dist/` (that folder is committed on purpose — `start.bat` and the Docker/portable builds serve it directly and never run Node). So:
 
 ```bash
 cd frontend
@@ -58,10 +58,12 @@ The backend has a large test suite (950+ tests) and it must stay green:
 
 ```bash
 pip install -r backend/requirements-dev.txt   # pytest + the two test-only ML extras
+# optional: execute the 16 Torch/ai-toolkit bridge runtime tests instead of skipping them
+pip install -r backend/requirements-torch-tests.txt
 python -m pytest backend/tests -q
 ```
 
-`requirements-dev.txt` is **exactly** what CI and the release job install — that is the point of it. A suite green against a different set of packages is not evidence about CI: a stray `pytest-flask` on one dev machine once made nine tests pass locally and fail on the release tag. (The suite runs with `-p no:flask` for that reason; you do not need to uninstall anything.)
+`requirements-dev.txt` is the common CI/release baseline. CI adds the CPU-only `requirements-torch-tests.txt` overlay when training-state code changes (and for manual runs), while the release job always adds it. A suite green against a different set of packages is not evidence about CI: a stray `pytest-flask` on one dev machine once made nine tests pass locally and fail on the release tag. (The suite runs with `-p no:flask` for that reason; you do not need to uninstall anything.)
 
 This is exactly what CI runs on a release tag, so run it locally before you open a PR. If you add or change behavior, add or update a test for it. The suite mocks external tools (ComfyUI, ai-toolkit, Ollama), so it runs without a GPU or any of those installed.
 

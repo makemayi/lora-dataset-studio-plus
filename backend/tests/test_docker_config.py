@@ -58,7 +58,9 @@ def test_container_runtime_tracks_server_defaults():
     assert image_env['LDS_PORT'] == str(port)
     assert f'EXPOSE {port}' in dockerfile
     assert f'http://127.0.0.1:{port}/api/health' in dockerfile
-    assert f'ports: ["{port}:{port}"]' in compose
+    assert f'- target: {port}' in compose
+    assert f'published: "${{LDS_HOST_PORT:-{port}}}"' in compose
+    assert 'protocol: tcp' in compose
     assert f'LDS_PORT={port}' in compose
     assert 'LDS_HOST=0.0.0.0' in compose
     assert 'LDS_CONFIG=/data/config.json' in compose
@@ -219,8 +221,11 @@ def test_gpu_compose_publishes_both_uis_and_reserves_the_gpu():
     port = DEFAULTS['server']['port']
 
     assert 'dockerfile: Dockerfile.gpu' in compose
-    assert f'"${{LDS_HOST_PORT:-{port}}}:{port}"' in compose
-    assert '"${LDS_COMFY_HOST_PORT:-8188}:8188"' in compose
+    assert f'- target: {port}' in compose
+    assert f'published: "${{LDS_HOST_PORT:-{port}}}"' in compose
+    assert '- target: 8188' in compose
+    assert 'published: "${LDS_COMFY_HOST_PORT:-8188}"' in compose
+    assert compose.count('protocol: tcp') >= 2
     for mount in (':/comfy/mnt', ':/basedir', ':/data', ':/images', './.env:/app/.env'):
         assert mount in compose, mount
     assert 'driver: nvidia' in compose

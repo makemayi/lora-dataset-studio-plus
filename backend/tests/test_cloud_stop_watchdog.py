@@ -161,12 +161,18 @@ def test_supervisor_cuts_a_frozen_training_run(ct, app, monkeypatch):
 
 
 def test_supervisor_spares_a_legitimately_slow_phase(ct, app, monkeypatch):
-    """Uploading a big dataset / booting a pod / downloading the base weights
-    are silent by construction — the watchdog must never fire on them."""
+    """Staging a dataset / booting a pod / downloading the base weights are
+    silent by construction — the watchdog must never fire on them.
+
+    'uploading' was in this list until 2026-08-02 and deliberately left it: it
+    now reports the bytes it pushes, so silence there means 'nothing reached
+    the machine' rather than 'nobody wrote a row', and it is judged on its own
+    much shorter limit (see test_cloud_upload_progress.py). The three phases
+    below still have no evidence of their own and keep the generous floor."""
     with app.app_context():
         ct.cfg.save_config({'cloud': {'freeze_watchdog_minutes': 45}})
         destroyed = _stub_destroy(ct, monkeypatch)
-        for status in ('preparing', 'provisioning', 'uploading', 'downloading'):
+        for status in ('preparing', 'provisioning', 'downloading'):
             _mkrun(ct, status=status,
                    updated_at=datetime.utcnow() - timedelta(minutes=90))
         assert ct.supervise_active_runs() == []

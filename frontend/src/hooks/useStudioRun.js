@@ -12,7 +12,14 @@
  *             rating, seed, run_seed, status, prompt, z_model, cfg, steps}],
  *     lora_ranking:[{dataset_id, lora_label, dataset_name, likes, dislikes,
  *                    voted, net, wilson}],
+ *     stack: null | [{filename, label, weight, trigger, dataset_id, head}],
+ *     stack_variants:[{run_id, active, weights:[{filename,label,weight}],
+ *                     likes, dislikes, done, cells:[…]}],
  *     pending, queued, generating, running, resumable, gpu_busy }
+ *
+ * `stack` is non-null only for a COMBINED run (several LoRAs in the same image); it
+ * is what the stack results view renders instead of the per-LoRA grid + ranking, and
+ * `stack_variants` are the other runs of that same stack (same LoRAs, other weights).
  */
 import { useCallback, useEffect, useState } from 'react';
 import { useToast } from '../components/common/Toast';

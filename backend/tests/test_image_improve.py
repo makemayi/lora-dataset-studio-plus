@@ -536,7 +536,7 @@ def test_improve_route_accepts_empty_json_and_returns_contract(client, monkeypat
 
     monkeypatch.setattr(
         svc, 'improve_existing_image',
-        lambda user_id, image_id: {'candidate_id': 41, 'job_id': 'route-job'})
+        lambda user_id, image_id, engine=None: {'candidate_id': 41, 'job_id': 'route-job'})
     response = client.post('/api/dataset/image/7/improve', json={})
     assert response.status_code == 200
     assert response.get_json() == {
@@ -552,7 +552,7 @@ def test_improve_route_recovery_barrier_has_no_service_side_effect(client, monke
             COMFYUI_STALLED_BARRIER_KEY, {'job_id': 'unresolved'})
     monkeypatch.setattr(
         svc, 'improve_existing_image',
-        lambda *_args: (_ for _ in ()).throw(AssertionError('service must not run')))
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError('service must not run')))
 
     response = client.post('/api/dataset/image/7/improve', json={})
     assert response.status_code == 409
@@ -567,12 +567,12 @@ def test_improve_route_maps_not_found_and_klein_missing(client, monkeypatch):
     monkeypatch.setattr(
         keh, 'klein_missing_nodes',
         lambda: (_ for _ in ()).throw(AssertionError('route must not preflight before ownership')))
-    monkeypatch.setattr(svc, 'improve_existing_image', lambda *_args: None)
+    monkeypatch.setattr(svc, 'improve_existing_image', lambda *_a, **_k: None)
     assert client.post('/api/dataset/image/404/improve').status_code == 404
 
     monkeypatch.setattr(
         svc, 'improve_existing_image',
-        lambda *_args: (_ for _ in ()).throw(KleinModelsMissing(['klein_model'])))
+        lambda *_a, **_k: (_ for _ in ()).throw(KleinModelsMissing(['klein_model'])))
     response = client.post('/api/dataset/image/8/improve', json={})
     assert response.status_code == 409
     assert response.get_json()['ok'] is False
@@ -584,7 +584,7 @@ def test_improve_route_preflights_missing_nodes(client, monkeypatch):
     missing = [{'class_type': 'ExampleNode', 'pack': None, 'url': None}]
     monkeypatch.setattr(
         svc, 'improve_existing_image',
-        lambda *_args: (_ for _ in ()).throw(svc.KleinNodesMissing([], missing)))
+        lambda *_a, **_k: (_ for _ in ()).throw(svc.KleinNodesMissing([], missing)))
     response = client.post('/api/dataset/image/8/improve', json={})
     assert response.status_code == 409
     assert response.get_json()['klein_nodes_missing'] == missing

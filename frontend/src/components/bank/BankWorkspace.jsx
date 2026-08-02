@@ -193,7 +193,10 @@ function ProgressBar({ activity, onCancel, offline = false }) {
             : ({ scan: 'Quality scan', faces: 'Face pass', score: 'Scoring pass',
               semantic_dedup: 'Crops & variants', watermark: 'Watermark scan',
               framing: 'Framing pass', caption: 'Captioning', promote: 'Promotion',
-              bank_promote: 'Copying into the new bank' }[kind] || 'Job') + ' running'}
+              bank_promote: 'Copying into the new bank',
+              // The one destructive pass: it must NAME itself in the bar, not
+              // ride under the anonymous "Job running" fallback.
+              delete_rejected: 'Deleting rejected files' }[kind] || 'Job') + ' running'}
           {' — '}{done}{total ? ` / ${total}` : ''}{detail ? ` · ${detail}` : ''}
         </span>
         {pct != null && (

@@ -345,6 +345,11 @@ export default function CanvasPage() {
       // dataset panel does. Travels on the lane, and the canvas reads the lane of
       // whichever checkpoint popover is open.
       bestSettingsLoras: row?.best_settings_loras || [],
+      // 🪪 The reference face this dataset was built around, so the board can
+      // show WHO the renders are supposed to be. `kind` decides whether there
+      // is one to show at all — a concept or a style dataset has no reference.
+      refFilename: row?.ref_filename || null,
+      kind: row?.kind || 'character',
       status: state?.status || 'loading',
       error: state?.error || null,
       // The RAW tree, not a laid-out graph: the canvas has to be able to lay it

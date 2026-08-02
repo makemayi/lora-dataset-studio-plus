@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { getHelpTopic, topicGuideHref, getHelpTip, guideHref } from './helpRegistry'
 import { shouldShowTip, markTipSeen, TIP_EVENT } from './helpTips'
 

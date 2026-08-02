@@ -16,10 +16,27 @@ test('folderSyncToast: new files are announced (the counters must never move mut
   assert.match(t.text, /42 new image\(s\)/);
 });
 
-test('folderSyncToast: a refusal (max files) surfaces as an error', () => {
-  const t = folderSyncToast({ ...clean, error: 'the folder now holds more than 50000 images — the new files were not added' });
+test('folderSyncToast: a real failure still surfaces as an error', () => {
+  const t = folderSyncToast({ ...clean, error: 'the folder could not be read' });
   assert.equal(t.type, 'error');
-  assert.match(t.text, /were not added/);
+  assert.match(t.text, /could not be read/);
+});
+
+test('folderSyncToast: hitting the ceiling warns with BOTH numbers and a remedy', () => {
+  // The ceiling no longer refuses the batch, so the toast has to say what DID
+  // land as well as what did not — and what to do about it.
+  const t = folderSyncToast({ ...clean, added: 120, not_added: 30, limit: 200000 });
+  assert.equal(t.type, 'warning');
+  assert.match(t.text, /120 new image\(s\) added/);
+  assert.match(t.text, /30 were not/);
+  assert.match(t.text, /200,000/);
+  assert.match(t.text, /second bank/);
+});
+
+test('folderSyncToast: nothing fitted at all is still spoken, not silent', () => {
+  const t = folderSyncToast({ ...clean, added: 0, not_added: 500, limit: 200000 });
+  assert.equal(t.type, 'warning');
+  assert.match(t.text, /500 were not/);
 });
 
 test('bankListSyncToast: aggregates one line for the whole list', () => {
@@ -31,6 +48,16 @@ test('bankListSyncToast: aggregates one line for the whole list', () => {
     { folder_sync: { ...clean, added: 4 } },
   ]);
   assert.match(many.text, /7 new image\(s\) found across 2 banks/);
+});
+
+test('bankListSyncToast: a bank at its ceiling warns from the LIST too', () => {
+  const t = bankListSyncToast([
+    { folder_sync: { ...clean, added: 10 } },
+    { folder_sync: { ...clean, added: 0, not_added: 7 } },
+  ]);
+  assert.equal(t.type, 'warning');
+  assert.match(t.text, /10 new image\(s\) added/);
+  assert.match(t.text, /7 were not/);
 });
 
 test('folderSyncNote: in sync -> no note', () => {

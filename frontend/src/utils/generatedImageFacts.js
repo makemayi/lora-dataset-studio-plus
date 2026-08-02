@@ -36,14 +36,22 @@ export function checkpointFileLabel(value) {
 }
 
 /** `extra_loras` is stored as a JSON list of {filename, strength}. Bad JSON is
- *  an absent line, never a crash — this row is a nicety and the picture is not. */
-export function extraLoraSummary(raw) {
+ *  an absent line, never a crash — this row is a nicety and the picture is not.
+ *
+ *  `only` splits the two populations that share this column: entries tagged
+ *  `combined` are the OTHER LoRAs of a combined stack (co-stars of the run,
+ *  each chosen at its own weight), everything else is an always-on style LoRA.
+ *  They read as opposites to a user, so they cannot share one label. */
+export function extraLoraSummary(raw, { only = 'all' } = {}) {
   if (!has(raw)) return '';
   let list = raw;
   if (typeof raw === 'string') {
     try { list = JSON.parse(raw); } catch { return ''; }
   }
   if (!Array.isArray(list) || !list.length) return '';
+  if (only === 'combined') list = list.filter((l) => l?.combined);
+  else if (only === 'always-on') list = list.filter((l) => !l?.combined);
+  if (!list.length) return '';
   return list
     .map((l) => {
       const name = checkpointFileLabel(l?.filename);
@@ -93,7 +101,10 @@ export function imageSettingFacts(img) {
   push('cfg', 'CFG', exact(img?.cfg));
   push('steps', 'Sampling steps', exact(img?.steps));
   push('aspect', 'Format', img?.aspect);
-  push('extra_loras', 'Always-on LoRAs', extraLoraSummary(img?.extra_loras));
+  push('combined_loras', 'Combined LoRAs',
+    extraLoraSummary(img?.extra_loras, { only: 'combined' }));
+  push('extra_loras', 'Always-on LoRAs',
+    extraLoraSummary(img?.extra_loras, { only: 'always-on' }));
   if (has(img?.face_score)) {
     const n = Number(img.face_score);
     push('face_score', 'Face similarity', Number.isFinite(n) ? n.toFixed(3) : '');

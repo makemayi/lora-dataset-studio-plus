@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import { deriveCapabilitySummary, capabilityDestination } from '../../hooks/useSetupSteps'
 
 /* The health map in full: the sidebar LEDs summarized as tiles, plus where to

@@ -82,8 +82,8 @@ def test_batch_larger_than_max_fanout_eventually_processes_everything(app, monke
 
         real_improve = svc.improve_existing_image
 
-        def _tracked(user_id, image_id):
-            result = real_improve(user_id, image_id)
+        def _tracked(user_id, image_id, engine=None):
+            result = real_improve(user_id, image_id, engine=engine)
             peaks.append(svc._improve_in_flight(ds.id))
             return result
 
@@ -118,8 +118,8 @@ def test_stop_generation_really_ends_the_batch(app, monkeypatch):
         token = da.begin(ds.id, 'improve', total=len(source_ids))
         real_improve = svc.improve_existing_image
 
-        def _stop_after_three(user_id, image_id):
-            result = real_improve(user_id, image_id)
+        def _stop_after_three(user_id, image_id, engine=None):
+            result = real_improve(user_id, image_id, engine=engine)
             if len(jobs) == 3:
                 svc.cancel_pending(LOCAL_USER, ds.id)   # the ⏹ Stop button path
             return result
@@ -216,7 +216,8 @@ def test_route_starts_the_job_and_refuses_a_second_one(app, client, monkeypatch)
     resp = client.post(f'/api/dataset/{dataset_id}/improve/batch',
                        json={'image_ids': [*source_ids, 424242]})
     assert resp.status_code == 200
-    assert resp.get_json() == {'ok': True, 'queued': 4, 'skipped': 1}
+    assert resp.get_json() == {'ok': True, 'queued': 4, 'skipped': 1,
+                               'engine': 'klein'}
     assert len(jobs) == 4
 
     # A live batch refuses a second one (409) — two workers racing the same cap

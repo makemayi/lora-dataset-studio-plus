@@ -94,24 +94,17 @@ variant, not *Thinking*), or click the tile's crop button and frame it by hand.
 
 ## Ollama isn't detected (or is installed but stopped)
 
-LDS distinguishes three states instead of treating every failed API probe as
-"not installed":
+In Docker, host binary detection is not the deployment selector. Open **Setup → Ollama** and choose:
 
-| State | What the app shows | Fix |
+| Docker choice | Expected state | Fix |
 |---|---|---|
-| **Not installed** | No Ollama binary was found on PATH or in its standard install location | Install it from [ollama.com](https://ollama.com/download), then reopen Setup/Settings |
-| **Installed but stopped** | The binary exists but the server is not answering | Click **▶ Start Ollama** in Setup/Settings; the server stays independent of LDS |
-| **Running** | The API answers; the selected vision model is checked separately | Pull/select the missing model if the capability still stays unavailable |
+| **No Ollama** | Disabled by choice | Choose another card only if you want the Ollama features |
+| **Existing host Ollama** | API at `http://host.docker.internal:11434` | Start Ollama on the host, bind it so Docker can reach it, and restrict port 11434 to Docker/private networks |
+| **Docker Ollama** | Companion API at `http://ollama:11434` | If the companion is absent, rerun the same LDS Docker launcher |
 
-For the shipped default:
+On a native install, LDS still distinguishes **not installed**, **installed but stopped**, and **running**. The **▶ Start Ollama** button applies only to a detected native binary.
 
-```bash
-ollama pull huihui_ai/qwen3-vl-abliterated:8b-instruct
-```
-
-Keep the **Instruct** tag. The Thinking variant reasons instead of returning the
-compact captions these workflows expect. A different vision-capable model also
-works when its exact tag is saved in **Settings → Local tools → Ollama**.
+No launcher or **Install everything** action pulls the large vision model. Once the selected service is reachable, use the explicit **Pull** button in LDS Setup; it shows progress and supports cancellation/resume. Keep the **Instruct** tag. The Thinking variant reasons instead of returning the compact captions these workflows expect.
 
 ## Training log looks frozen for several minutes
 

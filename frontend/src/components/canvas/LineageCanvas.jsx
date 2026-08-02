@@ -101,12 +101,39 @@ const DRAG_SLOP = 4;
 
 /** One dataset's title strip above its tree. Inside the zoomed world, so it
  *  scales with the board it labels — a lane whose name floated at a constant
- *  size would drift off its tree the moment you zoomed out. */
-function LaneHeader({ lane }) {
+ *  size would drift off its tree the moment you zoomed out.
+ *
+ *  🪪 It opens with the dataset's REFERENCE face. A board whose whole job is
+ *  judging whether a checkpoint got the likeness right showed every render and
+ *  never the person, so the comparison happened from memory. It lives in the
+ *  header rather than as a node on the board on purpose: it is not a pinned
+ *  picture — it cannot be moved, closed, grouped or exported — and giving it a
+ *  node would have made it look like one. Being inside the zoomed world it
+ *  grows with the pins as you zoom in on them, and one click opens it full
+ *  size against the renders.
+ *
+ *  Only a CHARACTER dataset has one: a concept or a style dataset is not built
+ *  around a face, and `kind` says so rather than a filename being guessed at. */
+function LaneHeader({ lane, onZoomRef }) {
+  const showRef = lane.kind !== 'concept' && lane.kind !== 'style' && Boolean(lane.refFilename);
+  const refUrl = showRef
+    ? `/api/dataset/${lane.datasetId}/img/${encodeURIComponent(lane.refFilename)}`
+    : null;
   return (
     <div style={{ position: 'absolute', left: 0, top: lane.y, height: LANE_HEADER_H,
       width: Math.max(lane.width, CARD_W) }}
       className="flex items-center gap-2 overflow-hidden">
+      {refUrl && (
+        <button type="button" data-canvas-control
+          onClick={() => onZoomRef?.({ url: refUrl, name: lane.name })}
+          title={`Reference image — ${lane.name} (click to enlarge)`}
+          aria-label={`Reference image of ${lane.name} — click to enlarge`}
+          className="shrink-0 overflow-hidden rounded border border-border bg-app/60 hover:border-indigo-400/60"
+          style={{ width: LANE_HEADER_H - 4, height: LANE_HEADER_H - 4 }}>
+          <img src={refUrl} alt="" loading="lazy" draggable={false}
+            className="h-full w-full object-cover" />
+        </button>
+      )}
       <span className="truncate text-[0.8125rem] font-semibold text-content" title={lane.name}>
         {lane.name}
       </span>
@@ -1139,6 +1166,10 @@ export default function LineageCanvas({ entries, positions, imageNodes, allImage
      beside the card that produced it, sliding down past the pins already
      there. */
   const [pinnedZoom, setPinnedZoom] = useState(null);
+  // 🪪 The lane's reference face, full size — the other half of the comparison
+  // the thumbnail starts. Its own state, not the pinned-image one: a reference
+  // is not a generated image and has no seed, prompt or settings to show.
+  const [refZoom, setRefZoom] = useState(null);
   const handlePinImage = useCallback((img) => {
     const dsId = img?.dataset_id;
     if (dsId == null || img?.id == null) return;
@@ -1436,7 +1467,7 @@ export default function LineageCanvas({ entries, positions, imageNodes, allImage
             transform: viewTransform(view), transformOrigin: '0 0' }}>
             {world.lanes.map((lane) => (
               <div key={lane.datasetId}>
-                <LaneHeader lane={lane} />
+                <LaneHeader lane={lane} onZoomRef={setRefZoom} />
                 <LaneImages lane={lane} layout={layoutByLane[lane.datasetId] || []}
                   onGeometry={handleImageGeometry} onClose={handleCloseImage}
                   onCloseGroup={handleCloseGroup}
@@ -1577,6 +1608,12 @@ export default function LineageCanvas({ entries, positions, imageNodes, allImage
           the facts stay one click away rather than crammed onto a thumbnail. */}
       <GeneratedImageLightbox img={pinnedZoom} alt="Pinned generated image"
         onClose={() => setPinnedZoom(null)} />
+
+      {/* 🪪 The lane's reference face, full size — and only that. A reference
+          has no seed, no sampler and no prompt, so it gets no facts column. */}
+      <GeneratedImageLightbox img={refZoom ? { url: refZoom.url } : null}
+        alt={`Reference image of ${refZoom?.name || 'the dataset'}`}
+        facts={false} onClose={() => setRefZoom(null)} />
 
       <ExportGridModal open={Boolean(exportGroup)} onClose={() => setExportGroup(null)}
         datasetId={exportGroup?.datasetId} imageIds={exportGroup?.imageIds || []}

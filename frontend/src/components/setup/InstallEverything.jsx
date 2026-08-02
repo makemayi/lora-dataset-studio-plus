@@ -4,6 +4,7 @@ import { useToast } from '../common/Toast'
 import { INSTALL_ALL_ACTION_LABELS, installCatalog } from '../../hooks/useSetupSteps'
 import InstallRunner from './InstallRunner'
 import KreaInstallCard from './KreaInstallCard'
+import SeedVr2InstallCard from './SeedVr2InstallCard'
 import { HelpBadge } from '../../help/HelpMode'
 
 const POLL_MS = 1200
@@ -243,6 +244,7 @@ export default function InstallEverything({ plan, caps, onDone }) {
       {/* Path 2 — one click per OPTIONAL engine. Krea is ~20 GB, so it is installed
           when it is asked for rather than by the unattended shortcut above. */}
       <KreaInstallCard caps={caps} onDone={onDone} />
+      <SeedVr2InstallCard caps={caps} onDone={onDone} />
 
       {/* Path 3 — the one-by-one menu, always visible (install/repair a single component). */}
       <section className="rounded-xl border border-border bg-surface p-5">

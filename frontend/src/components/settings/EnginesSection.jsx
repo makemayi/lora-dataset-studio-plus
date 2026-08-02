@@ -6,6 +6,7 @@ import PromptOverrideField from '../common/PromptOverrideField'
 import PromptPreview from './PromptPreview'
 import ResetToDefault from './ResetToDefault'
 import { defaultValueAt } from './settingDefaults.js'
+import { kreaStrengthRange, KREA_LORA_STRENGTH_DEFAULT } from '../../utils/kreaGenerationLoras'
 import {
   identityPromptFields, PROMPT_SUBJECT_TYPES,
   readIdentityPrompt, writeIdentityPrompt, subjectHasOverride,
@@ -35,15 +36,16 @@ const ENGINE_OPTIONS = [
   { id: 'krea', label: 'Krea 2 Edit (ComfyUI, local)' },
 ]
 
-/* Optional generation-LoRA PRESETS for the local Klein engine (Idea by
-   @waltm — Discord feature request): named combinations of user-pointed LoRA
-   files (any files, any purpose — texture, anatomy, style…). Inside a preset
-   the rows chain after the consistency LoRA in LIST ORDER (file + strength,
-   reorderable, capped at 8). Per run the workspace's 🖥️ Klein tuning panel
+/* Optional generation-LoRA PRESETS, originally for the local Klein engine
+   (Idea by @waltm — Discord feature request) and now shared with the local
+   Krea 2 Edit engine too: named combinations of user-pointed LoRA files (any
+   files, any purpose — texture, anatomy, style…). Inside a preset the rows
+   chain after the consistency/identity-edit LoRA in LIST ORDER (file +
+   strength, reorderable, capped at 8). Per run each engine's own tuning panel
    just PICKS a preset ("None" by default) — the choice carries the intent,
    there is no automatic gating. The app never ships or hardcodes a LoRA name. */
-const MAX_GENERATION_LORAS = 8        // mirrors backend klein_edit_helper caps
-const MAX_GENERATION_LORA_PRESETS = 12
+const MAX_GENERATION_LORAS = 8        // mirrors the klein_edit_helper AND
+const MAX_GENERATION_LORA_PRESETS = 12 // krea_edit_helper caps — both the same
 
 const SMALL_BTN = 'grid h-6 w-6 place-items-center rounded border border-border text-xs ' +
   'text-content-muted hover:bg-surface-raised disabled:opacity-30'
@@ -60,7 +62,12 @@ function freeName(presets, base) {
   }
 }
 
-function KleinLoraPresetCard({ preset, index, presets, save, loraScan }) {
+/* One preset: its name, its ordered LoRA rows, and the row controls. Shared by
+   the Klein and the Krea cards — the shapes are identical, only the strength
+   range, its default and the engine the badge judges for differ. */
+function LoraPresetCard({ preset, index, presets, save, loraScan,
+                          engineLabel = 'Klein', strengthRange, defaultStrength,
+                          placeholder = 'klein/my-lora.safetensors' }) {
   const rows = Array.isArray(preset?.loras) ? preset.loras : []
   const patchPreset = (p) => save(presets.map((x, j) => (j === index ? { ...x, ...p } : x)))
   const patchRow = (i, p) => patchPreset({ loras: rows.map((r, j) => (j === i ? { ...r, ...p } : r)) })
@@ -98,7 +105,8 @@ function KleinLoraPresetCard({ preset, index, presets, save, loraScan }) {
         <p className="text-xs text-content-muted">Empty preset — add a LoRA below.</p>
       )}
       {rows.map((row, i) => {
-        const strength = Number.isFinite(Number(row?.strength)) ? Number(row.strength) : 0.6
+        const strength = Number.isFinite(Number(row?.strength)) ? Number(row.strength) : defaultStrength
+        const range = strengthRange(row?.file || '')
         return (
           <div key={i} className="flex items-center gap-2 flex-wrap">
             <span className="text-xs text-content-muted w-4 shrink-0" aria-hidden="true">{i + 1}.</span>
@@ -106,12 +114,14 @@ function KleinLoraPresetCard({ preset, index, presets, save, loraScan }) {
               ariaLabel={`Preset ${index + 1} LoRA file ${i + 1}`}
               value={row?.file || ''}
               onChange={(next) => patchRow(i, { file: next })}
+              engineLabel={engineLabel}
+              placeholder={placeholder}
               {...loraScan}
             />
             <label className="flex items-center gap-1.5 text-xs text-content-muted">
               <span className="whitespace-nowrap">{strength.toFixed(2)}</span>
               <input
-                type="range" min={0} max={1.5} step={0.05} value={strength}
+                type="range" min={range.min} max={range.max} step={0.05} value={strength}
                 aria-label={`Preset ${index + 1} LoRA ${i + 1} strength`}
                 onChange={(e) => patchRow(i, { strength: Number(e.target.value) })}
                 className="w-28 accent-indigo-500"
@@ -130,7 +140,7 @@ function KleinLoraPresetCard({ preset, index, presets, save, loraScan }) {
       <div className="flex items-center gap-3">
         <button
           type="button" className={TEXT_BTN}
-          onClick={() => patchPreset({ loras: [...rows, { file: '', strength: 0.6 }] })}
+          onClick={() => patchPreset({ loras: [...rows, { file: '', strength: defaultStrength }] })}
           disabled={rows.length >= MAX_GENERATION_LORAS}
         >
           ＋ Add LoRA
@@ -158,7 +168,10 @@ function KleinLorasCard({ config, setField }) {
         <p className="text-sm text-content-muted">No presets yet — create your first combination below.</p>
       )}
       {presets.map((preset, i) => (
-        <KleinLoraPresetCard key={i} preset={preset} index={i} presets={presets} save={save} loraScan={loraScan} />
+        <LoraPresetCard key={i} preset={preset} index={i} presets={presets} save={save}
+          loraScan={loraScan} engineLabel="Klein"
+          strengthRange={() => ({ min: 0, max: 1.5 })}
+          defaultStrength={0.6} />
       ))}
       <div className="flex items-center gap-3">
         <button
@@ -182,6 +195,7 @@ function KleinLorasCard({ config, setField }) {
    card, next to the other Klein knobs and clearly NOT the "Upscale & improve"
    steps, which drive a different pass. */
 const KLEIN_GENERATION_STEPS_MAX = 50   // face_dataset_service._IMPROVE_MAX_STEPS
+const KLEIN_EDIT_LORA_MAX = 2           // face_dataset_service._IMPROVE_MAX_STRENGTH
 
 function KleinGenerationCard({ config, setField, configDefaults }) {
   // The shipped 5 is read from the server payload, never retyped here: it used
@@ -189,11 +203,17 @@ function KleinGenerationCard({ config, setField, configDefaults }) {
   // that nothing kept in sync.
   const shipped = defaultValueAt(configDefaults, 'klein', 'generation_steps')
   const steps = config.klein?.generation_steps ?? shipped
+  // Enhancement LoRA on the EDIT lanes. The workflow pins node 139 at 0.8 and no
+  // lane but "Upscale & improve" overrode it, which only became visible once
+  // Setup started downloading the file: every edit gained a style LoRA at 0.8.
+  // Default 0 = the render before that download existed.
+  const editLoraShipped = defaultValueAt(configDefaults, 'klein', 'edit_base_lora_strength')
+  const editLora = config.klein?.edit_base_lora_strength ?? editLoraShipped
   return (
     <Card
       id="klein-generation"
       title="Klein generation quality"
-      help="How many sampler steps the local Klein engine spends on each generated variation. 5 is the value the app used before this was exposed, so leaving it alone keeps today's result. More steps render more cleanly but take proportionally longer — 10 steps is roughly twice the wait per image. It will not fix a wrong prompt: anatomy problems (extra limbs, tails) come from the identity prompt, not from the step count. Raised by ashish.sinha (Discord)."
+      help="How many sampler steps the local Klein engine spends on each generated variation, and how much of the enhancement LoRA it mixes in. 5 steps is the value the app used before this was exposed, so leaving it alone keeps today's result. More steps render more cleanly but take proportionally longer — 10 steps is roughly twice the wait per image. It will not fix a wrong prompt: anatomy problems (extra limbs, tails) come from the identity prompt, not from the step count. Raised by ashish.sinha (Discord)."
     >
       <div className="sm:max-w-xs">
         <label htmlFor="klein-generation-steps" className="block text-xs font-medium text-content">
@@ -218,6 +238,32 @@ function KleinGenerationCard({ config, setField, configDefaults }) {
         <ResetToDefault label="Generation steps" section="klein" field="generation_steps"
           config={config} configDefaults={configDefaults} setField={setField} />
       </div>
+      <div className="mt-4 sm:max-w-xs">
+        <label htmlFor="klein-edit-lora" className="block text-xs font-medium text-content">
+          Enhancement LoRA on edits
+        </label>
+        <input
+          id="klein-edit-lora"
+          type="number"
+          min={0}
+          max={KLEIN_EDIT_LORA_MAX}
+          step={0.05}
+          value={editLora}
+          onChange={(e) => setField('klein', 'edit_base_lora_strength',
+            e.target.value === '' ? editLoraShipped : Number(e.target.value))}
+          className={INPUT_CLASS}
+        />
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          0 = off. The workflow carries a detail LoRA (klein/realistic.safetensors) at
+          0.8, and until now nothing turned it down on an edit — it pulled results
+          away from the instruction you typed. Raise it to add its detail on purpose.
+          Applies to reference edits, variations, regenerations and the small-image
+          rescue — “Upscale &amp; improve” keeps its own Enhancement LoRA below.
+        </p>
+        <ResetToDefault label="Enhancement LoRA on edits"
+          section="klein" field="edit_base_lora_strength"
+          config={config} configDefaults={configDefaults} setField={setField} />
+      </div>
     </Card>
   )
 }
@@ -234,6 +280,16 @@ const KREA_GROUNDING_MAX = 1536     // mirrors krea_edit_helper.GROUNDING_PX_MAX
 const KREA_REF_BOOST_MIN = 0        // mirrors krea_edit_helper.REF_BOOST_MIN
 const KREA_REF_BOOST_MAX = 10       // mirrors krea_edit_helper.REF_BOOST_MAX
 const KREA_STEPS_MAX = 50
+
+// Mirror seedvr2_helper's clamps. The SERVER stays the authority (it re-clamps
+// every value), these only stop the input offering a number that would be
+// silently corrected.
+const SEEDVR2_RESOLUTION_MIN = 256
+const SEEDVR2_RESOLUTION_MAX = 4096
+const SEEDVR2_MAX_RESOLUTION_MAX = 8192
+const SEEDVR2_BLOCKS_MAX = 36
+// seedvr2_helper.COLOR_CORRECTIONS — the node's own enum, in its own order.
+const SEEDVR2_COLOR_MODES = ['lab', 'wavelet', 'wavelet_adaptive', 'hsv', 'adain', 'none']
 
 function KreaCard({ config, setField, configDefaults }) {
   const krea = config.krea || {}
@@ -630,6 +686,238 @@ function KreaCharacterLorasCard({ krea, setField }) {
         </div>
       ))}
     </div>
+  )
+}
+
+/* SeedVR2 — the FIDELITY upscaler (issue #32, requested by SurpassHR).
+
+   It is not a generation engine and deliberately does not appear in the enabled-
+   engines list above: nothing in the variation catalog can be produced by it. It
+   is the OTHER way to run ✨ Upscale & improve — the one that resolves detail
+   without reinterpreting it — so its settings live next to the engines that feed
+   the same pass, not in a section of their own. */
+function SeedVr2Card({ config, setField, configDefaults, caps }) {
+  const svr = config.seedvr2 || {}
+  const improve = config.improve || {}
+  const reset = { config, configDefaults, setField }
+  const dflt = (key) => defaultValueAt(configDefaults, 'seedvr2', key)
+  const comfy = (caps && caps.comfyui) || {}
+  const ready = comfy.seedvr2_ready === true
+  const [models, setModels] = useState(null)
+  // Which builds are ON DISK — asked once per readiness change, never polled:
+  // it is a directory listing, and the card is not a monitor.
+  useEffect(() => {
+    let live = true
+    fetch('/api/seedvr2/models')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (live) setModels(d) })
+      .catch(() => { if (live) setModels(null) })
+    return () => { live = false }
+  }, [ready])
+  const installed = (models && models.installed) || []
+  const catalog = (models && models.catalog) || []
+  return (
+    <Card
+      id="seedvr2-engine"
+      title="SeedVR2 upscaling (local)"
+      help="The fidelity half of ✨ Upscale & improve. Klein re-renders detail from a prompt — sharper, but skin and colour can shift; SeedVR2 resolves detail at a higher resolution and leaves the original look alone. Pick it per batch from the bulk actions in the dataset workspace, or make it the default for the single-image pass below. It needs the ComfyUI-SeedVR2_VideoUpscaler node pack in ComfyUI plus two model files — Setup ▸ ComfyUI downloads the models and says what is missing."
+    >
+      <p className={ready ? 'text-[0.6875rem] text-emerald-300' : 'text-[0.6875rem] text-amber-300'}>
+        {ready
+          ? 'Ready — SeedVR2 appears in the workspace bulk actions.'
+          : 'Not ready yet. Setup ▸ ComfyUI lists what is missing and can download the weights; the node pack itself is installed from ComfyUI (search “SeedVR2” in ComfyUI-Manager), then restart ComfyUI.'}
+      </p>
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="improve-engine" className="block text-xs font-medium text-content">
+          Default engine for ✨ Upscale &amp; improve
+        </label>
+        <select
+          id="improve-engine"
+          value={improve.engine ?? defaultValueAt(configDefaults, 'improve', 'engine')}
+          onChange={(e) => setField('improve', 'engine', e.target.value)}
+          className={INPUT_CLASS}
+        >
+          <option value="klein">Klein — re-renders detail (can shift skin and colour)</option>
+          <option value="seedvr2">SeedVR2 — resolves detail, keeps the original look</option>
+        </select>
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          Used by the ✨ button on a single tile and by ↻ Re-improve. Bulk runs always
+          state their engine on the button you press, so this never decides a batch
+          behind your back.
+        </p>
+        <ResetToDefault label="Default improve engine" section="improve" field="engine"
+          config={config} configDefaults={configDefaults} setField={setField} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="seedvr2-model" className="block text-xs font-medium text-content">
+          Model build (optional)
+        </label>
+        <select
+          id="seedvr2-model"
+          value={svr.model ?? ''}
+          onChange={(e) => setField('seedvr2', 'model', e.target.value)}
+          className={INPUT_CLASS}
+        >
+          <option value="">auto — the 3B FP8 build, or whatever is installed</option>
+          {installed.map((name) => <option key={name} value={name}>{name}</option>)}
+        </select>
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          Only builds already in your ComfyUI&rsquo;s <code>models/SEEDVR2</code> folder are
+          listed: the pack&rsquo;s loader downloads an unknown name on first use, and a
+          dropdown must not start a multi-gigabyte download. To use another build, put the
+          file in that folder — it then appears here.
+        </p>
+        {catalog.length > 0 && (
+          <ul className="mt-1 space-y-0.5 text-[0.6875rem] text-content-subtle">
+            {catalog.map((v) => (
+              <li key={v.file}>
+                {v.installed ? '✓' : '·'} <b>{v.label}</b> — {v.size_gb} GB, ~{v.vram_gb} GB
+                {' '}VRAM{v.recommended ? ' (recommended)' : ''}
+              </li>
+            ))}
+          </ul>
+        )}
+        <ResetToDefault label="Model build" section="seedvr2" field="model" {...reset} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="seedvr2-resolution" className="block text-xs font-medium text-content">
+          Target resolution (short edge, px)
+        </label>
+        <input
+          id="seedvr2-resolution"
+          type="number"
+          min={SEEDVR2_RESOLUTION_MIN}
+          max={SEEDVR2_RESOLUTION_MAX}
+          step={2}
+          value={svr.resolution ?? dflt('resolution')}
+          onChange={(e) => setField('seedvr2', 'resolution',
+            e.target.value === '' ? dflt('resolution') : Number(e.target.value))}
+          className={INPUT_CLASS}
+        />
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          The SHORT edge is scaled to this and the aspect ratio is kept, so 1080 on a 3:2
+          photo gives 1620&times;1080. LoRA training buckets rarely go above 1024&ndash;1280,
+          so higher mostly costs VRAM and time.
+        </p>
+        <ResetToDefault label="Target resolution" section="seedvr2" field="resolution" {...reset} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="seedvr2-max-resolution" className="block text-xs font-medium text-content">
+          Maximum long edge (px, 0 = no limit)
+        </label>
+        <input
+          id="seedvr2-max-resolution"
+          type="number"
+          min={0}
+          max={SEEDVR2_MAX_RESOLUTION_MAX}
+          step={2}
+          value={svr.max_resolution ?? dflt('max_resolution')}
+          onChange={(e) => setField('seedvr2', 'max_resolution',
+            e.target.value === '' ? dflt('max_resolution') : Number(e.target.value))}
+          className={INPUT_CLASS}
+        />
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          The safety valve on a wide crop: at a 1080 short edge a 4:1 panorama becomes
+          4320 px across, which is where a run runs out of VRAM.
+        </p>
+        <ResetToDefault label="Maximum long edge" section="seedvr2" field="max_resolution" {...reset} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="seedvr2-color" className="block text-xs font-medium text-content">
+          Colour correction
+        </label>
+        <select
+          id="seedvr2-color"
+          value={svr.color_correction ?? dflt('color_correction')}
+          onChange={(e) => setField('seedvr2', 'color_correction', e.target.value)}
+          className={INPUT_CLASS}
+        >
+          {SEEDVR2_COLOR_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          How the result is graded back onto the source&rsquo;s colours. <b>lab</b> is the
+          model&rsquo;s own default and the most conservative; <b>wavelet</b> holds broad tone
+          better on heavily degraded sources; <b>none</b> shows the raw output. Colour
+          fidelity is the reason this engine exists, so it is worth trying both ways on one
+          image before a big batch.
+        </p>
+        <ResetToDefault label="Colour correction" section="seedvr2" field="color_correction" {...reset} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="seedvr2-swap" className="block text-xs font-medium text-content">
+          Blocks offloaded to system RAM
+        </label>
+        <input
+          id="seedvr2-swap"
+          type="number"
+          min={0}
+          max={SEEDVR2_BLOCKS_MAX}
+          step={1}
+          value={svr.blocks_to_swap ?? dflt('blocks_to_swap')}
+          onChange={(e) => setField('seedvr2', 'blocks_to_swap',
+            e.target.value === '' ? dflt('blocks_to_swap') : Number(e.target.value))}
+          className={INPUT_CLASS}
+        />
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          0 = none, and fastest. Raise it to fit a bigger build on a smaller card: it trades
+          speed for VRAM headroom and does not change the result.
+        </p>
+        <ResetToDefault label="Blocks offloaded" section="seedvr2" field="blocks_to_swap" {...reset} />
+      </div>
+
+      <p className="mt-3 text-[0.6875rem] text-content-subtle">
+        <b>No batch size here, on purpose.</b> SeedVR2&rsquo;s batch size is a <i>video</i> window
+        whose frames share attention to stay coherent — feeding it unrelated photos would let
+        them bleed into each other. Dataset images are upscaled one per job; the throughput
+        comes from the normal generation queue.
+      </p>
+    </Card>
+  )
+}
+
+/* Krea's own always-on LoRA presets. Same shape as the Klein card — the two lanes
+   are deliberate copies — with two differences that matter: the strength ceiling
+   opens to 20 for utility LoRAs (the bypass ones do nothing below ~10), and the
+   picker judges compatibility against the KREA graph, so a Klein LoRA is badged
+   incompatible here instead of compatible. */
+function KreaLorasCard({ config, setField }) {
+  const presets = Array.isArray(config.krea?.generation_lora_presets)
+    ? config.krea.generation_lora_presets : []
+  const save = (next) => setField('krea', 'generation_lora_presets', next)
+  // ONE scan per card, judged for Krea. Degrades to free text — see the hook.
+  const loraScan = useKleinGenerationLoras('krea')
+  return (
+    <Card
+      id="krea-generation-lora-presets"
+      title="Krea 2 Edit generation LoRA presets (optional)"
+      help={`Named combinations of your own LoRA files, chained after the identity-edit LoRA when Krea 2 Edit generates dataset images — inside a preset the order is the chain order (max ${MAX_GENERATION_LORAS} LoRAs each, ${MAX_GENERATION_LORA_PRESETS} presets). Pick each row from the LoRAs found under ComfyUI's models/loras; Krea-compatible ones are listed first, and a LoRA of another architecture is badged because ComfyUI would load it as a silent no-op here. Strength goes to 6, or to 20 for utility LoRAs whose filename says filter-bypass — those have no effect below ~10. Per run, pick a preset in the workspace's 🧬 Krea 2 Edit tuning panel ("None" by default). Only the model side is patched, so a LoRA's text-encoder weights are ignored. Preset mechanism by @waltm (Discord).`}
+    >
+      {presets.length === 0 && (
+        <p className="text-sm text-content-muted">No presets yet — create your first combination below.</p>
+      )}
+      {presets.map((preset, i) => (
+        <LoraPresetCard key={i} preset={preset} index={i} presets={presets} save={save}
+          loraScan={loraScan} engineLabel="Krea 2"
+          strengthRange={kreaStrengthRange} defaultStrength={KREA_LORA_STRENGTH_DEFAULT}
+          placeholder="krea/my-lora.safetensors" />
+      ))}
+      <div className="flex items-center gap-3">
+        <button
+          type="button" className={TEXT_BTN}
+          onClick={() => save([...presets, { name: freeName(presets, 'My preset'), loras: [] }])}
+          disabled={presets.length >= MAX_GENERATION_LORA_PRESETS}
+        >
+          ＋ New preset
+        </button>
+        <span className="text-xs text-content-muted">{presets.length}/{MAX_GENERATION_LORA_PRESETS}</span>
+      </div>
+    </Card>
   )
 }
 
@@ -1245,6 +1533,11 @@ export default function EnginesSection(props) {
       <KleinLorasCard config={config} setField={setField} />
 
       <KreaCard config={config} setField={setField} configDefaults={configDefaults} />
+
+      <KreaLorasCard config={config} setField={setField} />
+
+      <SeedVr2Card config={config} setField={setField} configDefaults={configDefaults}
+        caps={caps} />
 
       <IdentityPromptsCard config={config} setField={setField} promptDefaults={props.promptDefaults}
         promptDefaultsBySubject={props.promptDefaultsBySubject}

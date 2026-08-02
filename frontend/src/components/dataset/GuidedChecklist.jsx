@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 
 /* Vertical, numbered progress checklist — the workspace's left sidebar. Same step
    data as the old horizontal GuidedStepper (from useGuidedFlow): every step is a

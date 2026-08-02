@@ -9,7 +9,7 @@
  * Gated on `caps.studio_visible` (ComfyUI reachable): the nav link already
  * hides the entry, but this guards direct URL access too.
  */
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router';
 import { useCapabilities } from '../context/CapabilitiesContext';
 import StudioShell from '../components/dataset/studio/StudioShell';
 

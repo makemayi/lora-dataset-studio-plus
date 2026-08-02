@@ -1553,7 +1553,7 @@ class _FakeRemote:
     def ensure_settings(self, hf_token=None):
         return self._settings
 
-    def upload_dataset(self, name, folder):
+    def upload_dataset(self, name, folder, on_progress=None):
         self.calls.append(('upload_dataset', name))
         return 1
 

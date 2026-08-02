@@ -307,6 +307,25 @@ def _generation_steps() -> int:
     (reported by ashish.sinha, Discord). Default 5 = that exact behaviour; a bad
     config value degrades to it rather than crashing the enqueue."""
     return _improve_int('generation_steps', 5)
+
+
+def _generation_base_lora_strength() -> float:
+    """Enhancement-LoRA strength (node 139, klein/realistic.safetensors) for every
+    Klein lane that is NOT "Upscale & improve": the reference edit, variations,
+    regenerate, and the small-image rescue.
+
+    The shipped workflow pins that node at 0.8 and none of those lanes ever passed
+    a value, so the LoRA applied at full 0.8 with nothing to turn it down. That was
+    invisible while the file existed on no install (enqueue_klein_edit bypasses a
+    missing LoRA), and became real the day Setup started downloading it
+    (klein_enhancement_lora, 031766f): a detail/style LoRA at 0.8 on top of every
+    edit steers the render toward its own look instead of the instruction — the
+    "Klein edits are not conformant" report.
+
+    Default 0.0 = what every install rendered before that download existed, and the
+    same default the improve pass already carries. Raising it is now a choice, on a
+    setting, instead of a hardcoded workflow widget."""
+    return _improve_float('edit_base_lora_strength', 0.0)
 # KLEIN_IMAGE_IMPROVE_PROMPT is the shipped DEFAULT of the editable klein_improve
 # prompt (imported from face_variations, which owns the identity/quality prompt
 # registry). Re-exported here so `svc.KLEIN_IMAGE_IMPROVE_PROMPT` keeps resolving.
@@ -3598,7 +3617,12 @@ def _enqueue_local_reference_edit(user_id, dataset_id, ds, engine, prompt, token
                 # the last place that should run on a different model than the
                 # images it anchors. None (never chose) = the historical auto pick.
                 klein_model=dataset_klein_model(ds),
-                sampler_steps=_generation_steps(), extra_metadata=meta)
+                sampler_steps=_generation_steps(),
+                # An EDIT must obey the instruction, not a style LoRA nobody
+                # picked: node 139 is pinned at 0.8 in the workflow file and the
+                # setting (default 0) is what decides it here.
+                base_lora_strength=_generation_base_lora_strength(),
+                extra_metadata=meta)
     except Exception as exc:
         from .klein_edit_helper import KleinModelsMissing
         from .krea_edit_helper import KreaModelsMissing
@@ -5419,6 +5443,7 @@ def _save_small_scrape_pair(user_id, dataset_id, raw, prompt, source_metadata=No
             # to stop. None (never chose) = the historical auto pick.
             klein_model=dataset_klein_model(get_dataset(user_id, dataset_id)),
             edit_prompt=prompt, sampler_steps=_generation_steps(),
+            base_lora_strength=_generation_base_lora_strength(),
             extra_metadata={'is_dataset': True, 'dataset_id': dataset_id,
                             'variation_label': label,
                             'derivation_kind': KLEIN_SMALL_IMAGE,
@@ -7698,6 +7723,7 @@ def generate_variations(user_id, dataset_id, variations, multiplier, klein_model
                         klein_model=klein_model,
                         lora_strength=lora_strength, extra_ref_paths=extra_paths,
                         generation_loras=run_loras, sampler_steps=_generation_steps(),
+                        base_lora_strength=_generation_base_lora_strength(),
                         extra_metadata={'is_dataset': True, 'dataset_id': dataset_id,
                                         'variation_label': v.get('label')})
                 except Exception:
@@ -7712,16 +7738,22 @@ def generate_variations(user_id, dataset_id, variations, multiplier, klein_model
     return ids
 
 
-def generate_variations_krea(user_id, dataset_id, variations, multiplier):
+def generate_variations_krea(user_id, dataset_id, variations, multiplier,
+                            generation_lora_preset=None):
     """Krea 2 Identity Edit fan-out — the second LOCAL engine, same contract as
     `generate_variations` (Klein): one pending row committed BEFORE its job is
     enqueued, the whole batch preflighted up front, the created ids returned.
 
-    Deliberately fewer knobs than the Klein path: Krea has no consistency LoRA
-    and no generation-LoRA presets (its identity LoRA IS the pipeline, and
-    stacking untested LoRAs on an edit model is how you get noise). The one dial
-    it does have — `grounding_px` — is a SETTING, not a per-run argument, because
-    it changes the meaning of every shot in the batch identically.
+    Fewer knobs than the Klein path, but no longer none: Krea has no consistency
+    LoRA, and its identity LoRA IS the pipeline. Stacking untested LoRAs on an
+    edit model still degrades it — that caution was this lane's reason for having
+    no LoRA input at all, and it is now the USER's call per run instead of ours:
+    Krea 2 cannot render some registers a dataset needs, and a LoRA is the only
+    lever that reaches them. `generation_lora_preset` NAMES a preset from config
+    (absent = none, which is still the default and still the byte-identical
+    graph). The other dial, `grounding_px`, remains a SETTING rather than a
+    per-run argument, because it changes the meaning of every shot in the batch
+    identically.
 
     The row stores the ENGINE ID in `klein_model`, like the API rows do, so the
     grid badge can say "Krea 2 Edit"; the base model itself is re-resolved
@@ -7735,6 +7767,10 @@ def generate_variations_krea(user_id, dataset_id, variations, multiplier):
     # Assets AND custom nodes, before any row exists: a missing piece then
     # surfaces as one actionable 409 instead of a grid of silently-failing tiles.
     keh.preflight()
+    # Resolved ONCE per run, not per variation: every cell of a run gets the same
+    # always-on stack (that is what "always-on" means), and one config read is
+    # enough. Unknown/blank name -> [] (fail-closed, see the resolver).
+    run_loras = keh.resolve_generation_lora_preset(generation_lora_preset)
     mult = max(1, int(multiplier))
     total = len(variations) * mult
     if total > MAX_FANOUT:
@@ -7773,6 +7809,7 @@ def generate_variations_krea(user_id, dataset_id, variations, multiplier):
                         # Krea v1.2 fit geometry accepts the catalog canvas even
                         # when it differs from the dataset reference.
                         aspect_ratio=aspect_for_label(v.get('label'), v.get('framing')),
+                        generation_loras=run_loras,
                         extra_metadata={'is_dataset': True, 'dataset_id': dataset_id,
                                         'variation_label': v.get('label')})
                 except Exception:
@@ -7835,7 +7872,7 @@ def _improve_enqueue_profile(ds=None) -> dict:
     }
 
 
-def _improve_extra_metadata(source, label) -> dict:
+def _improve_extra_metadata(source, label, engine='klein') -> dict:
     return {
         'is_dataset': True,
         'dataset_id': source.dataset_id,
@@ -7844,19 +7881,95 @@ def _improve_extra_metadata(source, label) -> dict:
         'parent_image_id': source.id,
         'source_image_id': source.id,
         'action': 'upscale_improve',
+        # WHICH engine produced this candidate. Additive: `derivation_kind` and
+        # `action` keep the values every existing row and every reader already
+        # carries (they are stored, and stored ids are never renamed here), so a
+        # SeedVR2 result curates, undoes and re-improves exactly like a Klein one.
+        'improve_engine': engine,
     }
 
 
-def improve_existing_image(user_id, image_id):
+# --- Which engine runs the ✨ improve pass ------------------------------------
+# Two passes, one lane. Klein REWRITES (a diffusion edit that re-renders skin
+# and micro-detail from a prompt: it fixes a soft photo and it changes it);
+# SeedVR2 RESTORES (one-step diffusion super-resolution that leaves the content
+# where it was). Which one you want depends on whether the frame's exact look is
+# the thing you are training on — so it is a choice, not a default we can pick
+# for everyone. Requested in issue #32 by SurpassHR, whose complaint was exactly
+# that Klein "tends to change the detail and color of the original image".
+IMPROVE_ENGINES = ('klein', 'seedvr2')
+
+
+def resolve_improve_engine(requested=None):
+    """The engine an improve request will run on: the explicit pick when it names
+    a known engine, else the `improve.engine` setting, else Klein.
+
+    Fail-SAFE rather than fail-closed: an unknown name falls back instead of
+    raising, because a stale tab must degrade to the historical behaviour rather
+    than refuse a batch. Klein is the fallback because it is what every improve
+    did before this setting existed."""
+    for candidate in (requested, cfg.get('improve.engine')):
+        name = str(candidate or '').strip().lower()
+        if name in IMPROVE_ENGINES:
+            return name
+        if name:
+            logger.warning('unknown improve engine %r — falling back to klein', candidate)
+    return 'klein'
+
+
+def _improve_preflight(engine):
+    """Raise the engine's structured missing-assets exception when it cannot run.
+
+    Called BEFORE any candidate row is created, so a missing model surfaces once
+    per batch instead of once per image. Each engine keeps its own exception type
+    (KleinModelsMissing / KleinNodesMissing / SeedVR2ModelsMissing) — the routes
+    already turn each into its own actionable 409 body, and collapsing them into
+    one would lose the "install the node pack" vs "place the weights" distinction
+    that makes those bodies useful."""
+    if engine == 'seedvr2':
+        from . import seedvr2_helper
+        seedvr2_helper.preflight()
+        return
+    from . import klein_edit_helper as keh
+    missing = keh.klein_missing_assets()
+    missing_nodes = keh.klein_missing_nodes()
+    if missing_nodes:
+        raise KleinNodesMissing(missing, missing_nodes)
+    if any(asset in missing for asset in keh.KLEIN_REQUIRED):
+        raise keh.KleinModelsMissing(missing)
+
+
+def _enqueue_improve(engine, *, user_id, source, source_path, prompt, label,
+                     dataset):
+    """Hand ONE improve off to the chosen engine and return its job id.
+
+    The two engines take deliberately different arguments — Klein needs a prompt,
+    a consistency-LoRA strength and a step count; SeedVR2 needs none of them
+    (there is no prompt in a restoration) — so this is where that difference
+    stops, and every caller above it stays engine-agnostic."""
+    meta = _improve_extra_metadata(source, label, engine=engine)
+    if engine == 'seedvr2':
+        from . import seedvr2_helper
+        return seedvr2_helper.enqueue_seedvr2_upscale(
+            user_id=str(user_id), source_filename=source.filename,
+            source_path=source_path, extra_metadata=meta)
+    from . import klein_edit_helper as keh
+    return keh.enqueue_klein_edit(
+        user_id=str(user_id), source_filename=source.filename,
+        source_path=source_path, edit_prompt=prompt,
+        **_improve_enqueue_profile(dataset), extra_metadata=meta)
+
+
+def improve_existing_image(user_id, image_id, engine=None):
     """Serialize one source's improve request, including the queue hand-off."""
     lock = _IMAGE_IMPROVE_LOCKS[hash((str(user_id), image_id))
                                 % len(_IMAGE_IMPROVE_LOCKS)]
     with lock:
-        return _improve_existing_image_locked(user_id, image_id)
+        return _improve_existing_image_locked(user_id, image_id, engine=engine)
 
 
-def _improve_existing_image_locked(user_id, image_id):
-    """Queue one non-destructive Klein upscale/improvement of an existing image.
+def _improve_existing_image_locked(user_id, image_id, engine=None):
+    """Queue one non-destructive upscale/improvement of an existing image.
 
     The source row and file are deliberately never modified.  The result is a
     regular generated dataset image linked back to the source only for
@@ -7896,13 +8009,8 @@ def _improve_existing_image_locked(user_id, image_id):
         # Refuse a concurrent click rather than creating a second candidate.
         raise RuntimeError('this image improvement is already being queued')
 
-    from . import klein_edit_helper as keh
-    missing = keh.klein_missing_assets()
-    missing_nodes = keh.klein_missing_nodes()
-    if missing_nodes:
-        raise KleinNodesMissing(missing, missing_nodes)
-    if any(asset in missing for asset in keh.KLEIN_REQUIRED):
-        raise keh.KleinModelsMissing(missing)
+    engine = resolve_improve_engine(engine)
+    _improve_preflight(engine)
 
     in_flight = (FaceDatasetImage.query
                  .filter_by(dataset_id=img.dataset_id, status='pending')
@@ -7912,7 +8020,12 @@ def _improve_existing_image_locked(user_id, image_id):
             f'too many generations in flight ({in_flight}), wait or cancel')
 
     prompt = _improve_prompt()
-    stored_prompt = prompt[:500]
+    # What the tile SHOWS as the prompt behind this candidate. A SeedVR2 run has
+    # no prompt at all — it is a restoration — so storing the Klein improve
+    # prompt on one would put a sentence on screen that had no effect on the
+    # image. The honest value is the pass that ran.
+    stored_prompt = (prompt[:500] if engine == 'klein'
+                     else 'SeedVR2 upscale (no prompt — restoration pass)')
     label = _improve_candidate_label(img)
     candidate = FaceDatasetImage(
         dataset_id=img.dataset_id, source='generated', status='pending',
@@ -7927,12 +8040,10 @@ def _improve_existing_image_locked(user_id, image_id):
     db.session.commit()
 
     try:
-        job_id = keh.enqueue_klein_edit(
-            user_id=str(user_id), source_filename=img.filename,
-            source_path=source_path, edit_prompt=prompt,
-            **_improve_enqueue_profile(get_dataset(user_id, img.dataset_id)),
-            extra_metadata=_improve_extra_metadata(img, label),
-        )
+        job_id = _enqueue_improve(
+            engine, user_id=user_id, source=img, source_path=source_path,
+            prompt=prompt, label=label,
+            dataset=get_dataset(user_id, img.dataset_id))
     except Exception:
         # No broken tile: the original is still untouched and the user can retry
         # as soon as the queue/ComfyUI issue is fixed.
@@ -8012,13 +8123,12 @@ def _reimprove_image_locked(user_id, image_id):
     if not os.path.isfile(source_path):
         raise ValueError(REIMPROVE_SOURCE_FILE_GONE)
 
-    from . import klein_edit_helper as keh
-    missing = keh.klein_missing_assets()
-    missing_nodes = keh.klein_missing_nodes()
-    if missing_nodes:
-        raise KleinNodesMissing(missing, missing_nodes)
-    if any(asset in missing for asset in keh.KLEIN_REQUIRED):
-        raise keh.KleinModelsMissing(missing)
+    # A re-run uses the CURRENTLY selected engine, not the one that produced the
+    # row: "re-improve" means "try again with what I have set now", and someone
+    # who switched to SeedVR2 precisely because the Klein result changed too much
+    # would otherwise get the same Klein result back.
+    engine = resolve_improve_engine()
+    _improve_preflight(engine)
 
     in_flight = (FaceDatasetImage.query
                  .filter_by(dataset_id=img.dataset_id, status='pending')
@@ -8040,12 +8150,10 @@ def _reimprove_image_locked(user_id, image_id):
     expected_transition_caption = (old_state['caption']
                                    if old_state['caption'] else parent.caption)
     old_path = _img_path(img) if img.filename else None
-    job_id = keh.enqueue_klein_edit(
-        user_id=str(user_id), source_filename=parent.filename,
-        source_path=source_path, edit_prompt=prompt,
-        **_improve_enqueue_profile(get_dataset(user_id, img.dataset_id)),
-        extra_metadata=_improve_extra_metadata(parent, label),
-    )
+    job_id = _enqueue_improve(
+        engine, user_id=user_id, source=parent, source_path=source_path,
+        prompt=prompt, label=label,
+        dataset=get_dataset(user_id, img.dataset_id))
 
     try:
         # Do this while the candidate is still Keep.  The CAS observes both
@@ -8180,26 +8288,22 @@ def bulk_improve_eligible_ids(user_id, dataset_id, image_ids):
     return eligible
 
 
-def start_bulk_improve(app, user_id, dataset_id, image_ids):
-    """Start the server-side ✨ Klein upscale & improve batch over ``image_ids``.
+def start_bulk_improve(app, user_id, dataset_id, image_ids, engine=None):
+    """Start the server-side ✨ Upscale & improve batch over ``image_ids``.
 
-    Returns ``{'queued', 'skipped'}`` — how many images the job will process and
-    how many of the selection were not eligible. Raises ValueError (-> 400) on an
-    unknown dataset / an empty eligible set, RuntimeError (-> 409) when a batch is
-    already running, and the Klein missing-assets exceptions (-> structured 409)
-    so a missing model surfaces ONCE instead of once per image."""
+    Returns ``{'queued', 'skipped', 'engine'}`` — how many images the job will
+    process, how many of the selection were not eligible, and which engine ran
+    (the caller echoes it so the toast can name it). Raises ValueError (-> 400) on
+    an unknown dataset / an empty eligible set, RuntimeError (-> 409) when a batch
+    is already running, and the engine's missing-assets exceptions (-> structured
+    409) so a missing model surfaces ONCE instead of once per image."""
     ds = get_dataset(user_id, dataset_id)
     if not ds:
         raise ValueError('dataset not found')
     if dataset_activity.running(dataset_id, dataset_activity.IMPROVE_KINDS):
         raise RuntimeError('an improvement batch is already running on this dataset')
-    from . import klein_edit_helper as keh
-    missing = keh.klein_missing_assets()
-    missing_nodes = keh.klein_missing_nodes()
-    if missing_nodes:
-        raise KleinNodesMissing(missing, missing_nodes)
-    if any(asset in missing for asset in keh.KLEIN_REQUIRED):
-        raise keh.KleinModelsMissing(missing)
+    engine = resolve_improve_engine(engine)
+    _improve_preflight(engine)
     eligible = bulk_improve_eligible_ids(user_id, dataset_id, image_ids)
     if not eligible:
         raise ValueError('no selected image is eligible for improvement')
@@ -8207,12 +8311,13 @@ def start_bulk_improve(app, user_id, dataset_id, image_ids):
     total = len(eligible)
     token = dataset_activity.begin(dataset_id, 'improve', total=total,
                                    detail=f'Queuing improvements… 0/{total}',
-                                   engine='klein')
+                                   engine=engine)
 
     def _run():
         try:
             with app.app_context():
-                _drain_improve_queue(user_id, dataset_id, eligible, token)
+                _drain_improve_queue(user_id, dataset_id, eligible, token,
+                                     engine=engine)
         except Exception:   # noqa: BLE001 — a background crash must not strand the indicator
             logger.exception('bulk improve batch failed on dataset %s', dataset_id)
         finally:
@@ -8227,10 +8332,11 @@ def start_bulk_improve(app, user_id, dataset_id, image_ids):
     else:
         threading.Thread(target=_run, daemon=True,
                          name=f'ds-{dataset_id}-improve').start()
-    return {'queued': total, 'skipped': skipped}
+    return {'queued': total, 'skipped': skipped, 'engine': engine}
 
 
-def _drain_improve_queue(user_id, dataset_id, image_ids, token, sleep=time.sleep):
+def _drain_improve_queue(user_id, dataset_id, image_ids, token, sleep=time.sleep,
+                         engine=None):
     """Queue one improvement per id, in WAVES that respect the MAX_FANOUT
     concurrency cap: when the dataset already has that many generations in flight
     the worker WAITS for a slot (the count drops as ComfyUI writes the files) rather
@@ -8265,7 +8371,7 @@ def _drain_improve_queue(user_id, dataset_id, image_ids, token, sleep=time.sleep
             break
         waited = 0.0
         try:
-            improve_existing_image(user_id, image_id)
+            improve_existing_image(user_id, image_id, engine=engine)
             queued += 1
         except Exception as exc:   # noqa: BLE001 — one refusal never sinks the batch
             failed += 1
@@ -8304,7 +8410,10 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
     row born on an API engine switches to Klein (its klein_model column holds
     an engine TAG, not a real model file).
     `generation_lora_preset` (optional): NAME of the generation-LoRA preset
-    picked in the workspace (Idea by @waltm), Klein path only — resolved from
+    picked in the workspace (Idea by @waltm). Both local engines resolve it —
+    Klein and Krea each from their OWN config list (`klein.generation_lora_presets`
+    / `krea.generation_lora_presets`), so the same name can mean two different
+    chains depending on which engine `target` resolves to below — resolved from
     the CONFIG only (fail-closed; unknown name degrades to no extra LoRAs)."""
     img = _owned_image(user_id, image_id)
     if not img or img.source != 'generated':
@@ -8390,6 +8499,7 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
                 subject_type=subject_type_of(ds),
                 label=img.variation_label or ''),
             aspect_ratio=aspect_for_label(img.variation_label, img.framing),
+            generation_loras=_keh.resolve_generation_lora_preset(generation_lora_preset),
             extra_metadata={'is_dataset': True, 'dataset_id': img.dataset_id,
                             'variation_label': img.variation_label})
     else:
@@ -8429,6 +8539,7 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
             lora_strength=lora_strength, extra_ref_paths=extra_paths,
             generation_loras=resolve_generation_lora_preset(generation_lora_preset),
             sampler_steps=_generation_steps(),
+            base_lora_strength=_generation_base_lora_strength(),
             extra_metadata={'is_dataset': True, 'dataset_id': img.dataset_id,
                             'variation_label': img.variation_label})
 

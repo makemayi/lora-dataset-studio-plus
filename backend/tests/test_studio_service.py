@@ -1584,6 +1584,14 @@ def test_embedded_workflow_model_refs_are_all_layout_independent():
             ('Z image\\qwen_3_4b.safetensors', 'RESOLVED'),
         ('ZImage_bigLove_ZT3_optimal.json', '3', 'vae_name'):
             ('z ae.safetensors', 'RESOLVED'),
+        ('face swap.json', '165:102', 'vae_name'):
+            ('flux2-vae.safetensors', 'RESOLVED'),
+        ('face swap.json', '165:126', 'unet_name'):
+            ('flux-2-klein-9b.safetensors', 'RESOLVED'),
+        ('face swap.json', '165:146', 'clip_name'):
+            ('qwen_3_8b_fp8mixed.safetensors', 'RESOLVED'),
+        ('face swap.json', '165:161', 'lora_name'):
+            (os.path.join('klein', 'Klein2-9B-SmartCharacterSwap.safetensors'), 'PREFLIGHT'),
         ('image_real_HQ.json', '1', 'ckpt_name'):
             ('Biglove\\mopMixtureOfPervertsDMD_v40.safetensors', 'OVERRIDDEN'),
         ('image_real_HQ.json', '10', 'lora_name'):
@@ -1631,3 +1639,377 @@ def test_embedded_workflow_model_refs_are_all_layout_independent():
                 if isinstance(ref, str) and ref.strip():
                     actual[(name, nid, k)] = ref
     assert actual == {k: ref for k, (ref, _cat) in EXPECTED.items()}
+
+
+# --- Combine mode: several LoRAs loaded in the SAME generation ----------------
+
+def test_prompt_with_triggers_prefixes_every_trigger_in_order(app):
+    """A combined stack injects ALL its triggers, first LoRA first, and never twice."""
+    from app.services.lora_test_studio import _prompt_with_triggers
+    assert _prompt_with_triggers('portrait', ['aaa', 'bbb']) == 'aaa, bbb, portrait'
+    # already present as a whole token -> not repeated (case-insensitive)
+    assert _prompt_with_triggers('BBB on a roof', ['aaa', 'bbb']) == 'aaa, BBB on a roof'
+    # two LoRAs sharing one trigger collapse to a single token
+    assert _prompt_with_triggers('portrait', ['aaa', 'aaa']) == 'aaa, portrait'
+    # empty / missing triggers are skipped, a bare string keeps the old behaviour
+    assert _prompt_with_triggers('portrait', ['aaa', '', None]) == 'aaa, portrait'
+    assert _prompt_with_triggers('portrait', 'aaa') == 'aaa, portrait'
+    assert _prompt_with_triggers('portrait', None) == 'portrait'
+
+
+def test_combine_run_stacks_every_lora_with_its_own_weight_and_all_triggers(
+        app, monkeypatch, tmp_path):
+    """THE contract of combine mode, read off the arguments the workflow builder gets:
+    ONE cell, the tested LoRA at its own weight, every other selected LoRA chained as an
+    extra at ITS weight, and every dataset's trigger word carried into the prompt."""
+    from app.services import lora_test_studio as lts, face_dataset_service as svc
+    from app.config import LOCAL_USER
+    from app.models import LoraTestImage
+    with app.app_context():
+        ds_a, cks_a = _studio_fixture(tmp_path, monkeypatch, 'Alpha', 'aaa')
+        ds_b = svc.create_dataset(LOCAL_USER, 'Beta', 'bbb')
+        name_b = 'lora_bbb_000002000.safetensors'
+        cp_b = 'z image' + chr(92) + name_b
+        (tmp_path / 'Comfy' / 'models' / 'loras' / 'z image' / name_b).write_bytes(_ST)
+        by_ds = {ds_a.id: [{'filename': cks_a[0]}], ds_b.id: [{'filename': cp_b}]}
+        monkeypatch.setattr(lts, 'list_test_checkpoints',
+                            lambda ds, _family=None: by_ds[ds.id])
+        monkeypatch.setattr(lts, 'gpu_busy_reason', lambda: None)
+        monkeypatch.setattr(lts, '_active_run_count', lambda *a: 0)
+        monkeypatch.setattr(lts, '_preflight_checkpoint_arch', lambda *a, **k: None)
+        monkeypatch.setattr(lts, '_preflight_run', lambda *a, **k: None)
+        monkeypatch.setattr(lts, '_target_node_classes', lambda: None)
+        monkeypatch.setattr(lts, 'permanent_lora_candidates', lambda _f: [])
+        built = []
+        monkeypatch.setattr(lts, '_build_cell_workflow',
+                            lambda *a, **k: (built.append(k), {'1': {}})[1])
+        monkeypatch.setattr(lts, '_enqueue_cell', lambda *a, job_id=None, **k: job_id)
+
+        out = lts.create_comparison_run(
+            LOCAL_USER,
+            [{'dataset_id': ds_a.id, 'checkpoint': cks_a[0], 'weight': 0.9},
+             {'dataset_id': ds_b.id, 'checkpoint': cp_b, 'weight': 0.55}],
+            [0.6, 0.8, 1.0],            # sweep axis: meaningless here, must be dropped
+            prompt='on a rooftop', count=1, combine=True)
+
+        # ONE cell: the strength sweep is replaced by the per-LoRA weights.
+        assert out['created'] == 1 and len(built) == 1
+        kw = built[0]
+        assert kw['extra_loras'] == [{'filename': cp_b, 'strength': 0.55}]
+        assert kw['trigger_word'] == ['aaa', 'bbb']
+        assert kw['train_type'] == 'zimage'
+
+        row = LoraTestImage.query.filter_by(run_id=out['run_id']).one()
+        assert row.checkpoint == cks_a[0] and row.strength == 0.9
+        combined = lts._combined_lora_labels(row)
+        assert len(combined) == 1 and combined[0]['weight'] == 0.55
+        assert combined[0]['label']
+
+
+def test_combine_run_rejects_a_checkpoint_its_dataset_does_not_own(
+        app, monkeypatch, tmp_path):
+    """The extras channel is permissive at build time, so the secondaries of a stack
+    are re-validated against the checkpoints their OWN dataset really deployed -
+    otherwise a crafted selection would be a path-injection hole into the LoRA folder."""
+    from app.services import lora_test_studio as lts, face_dataset_service as svc
+    from app.config import LOCAL_USER
+    with app.app_context():
+        ds_a, cks_a = _studio_fixture(tmp_path, monkeypatch, 'Gamma', 'ggg')
+        ds_b = svc.create_dataset(LOCAL_USER, 'Delta', 'ddd')
+        by_ds = {ds_a.id: [{'filename': cks_a[0]}], ds_b.id: []}
+        monkeypatch.setattr(lts, 'list_test_checkpoints',
+                            lambda ds, _family=None: by_ds[ds.id])
+        monkeypatch.setattr(lts, 'gpu_busy_reason', lambda: None)
+        monkeypatch.setattr(lts, '_active_run_count', lambda *a: 0)
+        monkeypatch.setattr(lts, '_preflight_checkpoint_arch', lambda *a, **k: None)
+        monkeypatch.setattr(lts, '_preflight_run', lambda *a, **k: None)
+        monkeypatch.setattr(lts, '_target_node_classes', lambda: None)
+        monkeypatch.setattr(lts, 'permanent_lora_candidates', lambda _f: [])
+        evil = 'z image' + chr(92) + '..' + chr(92) + 'evil.safetensors'
+        with pytest.raises(ValueError, match='unknown checkpoint'):
+            lts.create_comparison_run(
+                LOCAL_USER,
+                [{'dataset_id': ds_a.id, 'checkpoint': cks_a[0]},
+                 {'dataset_id': ds_b.id, 'checkpoint': evil}],
+                [1.0], combine=True)
+
+
+def test_combine_run_refuses_to_mix_families_and_names_them(app, monkeypatch):
+    """Two LoRAs from different families need different bases AND workflows: refused,
+    with both family names in the message (the picker blocks it too, belt + braces)."""
+    from app.services import lora_test_studio as lts
+    from app.config import LOCAL_USER
+    with app.app_context():
+        monkeypatch.setattr(lts, 'gpu_busy_reason', lambda: None)
+        monkeypatch.setattr(lts, '_active_run_count', lambda *a: 0)
+        with pytest.raises(ValueError) as excinfo:
+            lts.create_comparison_run(
+                LOCAL_USER,
+                [{'dataset_id': 1, 'checkpoint': 'krea' + chr(92) + 'lora_a.safetensors'},
+                 {'dataset_id': 2, 'checkpoint': 'sdxl' + chr(92) + 'lora_b.safetensors'}],
+                [1.0], combine=True)
+        msg = str(excinfo.value)
+        assert 'Krea 2 Turbo' in msg and 'SDXL' in msg and 'one family per run' in msg
+
+
+def test_combine_weight_is_clamped_and_defaults_to_one(app):
+    from app.services.lora_test_studio import _combine_weight
+    assert _combine_weight({'weight': 0.5555}) == 0.56
+    assert _combine_weight({'weight': 9}) == 2.0
+    assert _combine_weight({'weight': -3}) == 0.0
+    assert _combine_weight({'weight': 'oops'}) == 1.0
+    assert _combine_weight({}) == 1.0 and _combine_weight(None) == 1.0
+
+
+def test_combine_of_a_single_selection_stays_a_normal_run(app, monkeypatch, tmp_path):
+    """`combine` on one LoRA is a no-op: the strength sweep still applies."""
+    from app.services import lora_test_studio as lts
+    from app.config import LOCAL_USER
+    with app.app_context():
+        ds, cks = _studio_fixture(tmp_path, monkeypatch, 'Solo', 'sss')
+        monkeypatch.setattr(lts, 'gpu_busy_reason', lambda: None)
+        monkeypatch.setattr(lts, '_preflight_run', lambda *a, **k: None)
+        monkeypatch.setattr(lts, '_build_cell_workflow', lambda *a, **k: {'1': {}})
+        monkeypatch.setattr(lts, '_enqueue_cell', lambda *a, job_id=None, **k: job_id)
+        out = lts.create_comparison_run(
+            LOCAL_USER, [{'dataset_id': ds.id, 'checkpoint': cks[0]}],
+            [0.6, 0.8], prompt='p', count=1, combine=True)
+        assert out['created'] == 2
+
+
+def test_combined_stack_reaches_the_real_zimage_graph_as_chained_loaders(app):
+    """End of the chain, on the REAL workflow JSON: two combined LoRAs become two
+    chained LoraLoaderModelOnly nodes at their own strengths, and both triggers are
+    prefixed to the prompt that reaches the text encoder."""
+    from app.services import lora_test_studio as lts
+    from app.config import LOCAL_USER
+    with app.app_context():
+        cp_a = 'z image' + chr(92) + 'lora_aaa.safetensors'
+        cp_b = 'z image' + chr(92) + 'lora_bbb.safetensors'
+        wf = lts._build_cell_workflow(
+            LOCAL_USER, cp_a, 0.9, 'on a rooftop', 42, 'zmodel.safetensors',
+            {cp_a}, train_type='zimage',
+            extra_loras=[{'filename': cp_b, 'strength': 0.55}],
+            trigger_word=['aaa', 'bbb'])
+        loaders = {nid: n for nid, n in wf.items()
+                   if n.get('class_type') == 'LoraLoaderModelOnly'}
+        assert {(n['inputs']['lora_name'], n['inputs']['strength_model'])
+                for n in loaders.values()} == {(cp_a, 0.9), (cp_b, 0.55)}
+        # chained, not parallel: exactly one loader is fed by another loader
+        fed_by_loader = [n for n in loaders.values()
+                         if n['inputs']['model'][0] in loaders]
+        assert len(fed_by_loader) == 1
+        texts = [n['inputs'].get('text') for n in wf.values()
+                 if isinstance(n.get('inputs', {}).get('text'), str)]
+        assert any(t.startswith('aaa, bbb, on a rooftop') for t in texts)
+
+
+# --- Stack results view: composition, weight variants, best setting ----------
+
+def _stack_run(lts, svc, LOCAL_USER, tmp_path, monkeypatch, weights):
+    """Launch ONE combined run of a fixed two-LoRA stack at `weights`, returning
+    (run_id, ds_a, ds_b, checkpoints). Callers relaunch it at other weights to build
+    the variant history the stack view is supposed to line up."""
+    ds_a, cks_a = _studio_fixture(tmp_path, monkeypatch, 'Alpha', 'aaa')
+    ds_b = svc.create_dataset(LOCAL_USER, 'Beta', 'bbb')
+    name_b = 'lora_bbb_000002000.safetensors'
+    cp_b = 'z image' + chr(92) + name_b
+    (tmp_path / 'Comfy' / 'models' / 'loras' / 'z image' / name_b).write_bytes(_ST)
+    by_ds = {ds_a.id: [{'filename': cks_a[0]}], ds_b.id: [{'filename': cp_b}]}
+    monkeypatch.setattr(lts, 'list_test_checkpoints', lambda ds, _family=None: by_ds[ds.id])
+    monkeypatch.setattr(lts, 'gpu_busy_reason', lambda: None)
+    monkeypatch.setattr(lts, '_active_run_count', lambda *a: 0)
+    monkeypatch.setattr(lts, '_preflight_checkpoint_arch', lambda *a, **k: None)
+    monkeypatch.setattr(lts, '_preflight_run', lambda *a, **k: None)
+    monkeypatch.setattr(lts, '_target_node_classes', lambda: None)
+    monkeypatch.setattr(lts, 'permanent_lora_candidates', lambda _f: [])
+    monkeypatch.setattr(lts, '_build_cell_workflow', lambda *a, **k: {'1': {}})
+    monkeypatch.setattr(lts, '_enqueue_cell', lambda *a, job_id=None, **k: job_id)
+
+    def launch(w_a, w_b):
+        return lts.create_comparison_run(
+            LOCAL_USER,
+            [{'dataset_id': ds_a.id, 'checkpoint': cks_a[0], 'weight': w_a},
+             {'dataset_id': ds_b.id, 'checkpoint': cp_b, 'weight': w_b}],
+            [1.0], prompt='on a rooftop', count=1, combine=True)['run_id']
+
+    return launch, ds_a, ds_b, cks_a[0], cp_b
+
+
+def test_stack_composition_names_every_lora_with_its_weight_and_trigger(
+        app, monkeypatch, tmp_path):
+    """The panel's whole point: a stacked run must say WHAT is in the stack. The head
+    LoRA carries the cell's own strength, the stacked one its weight, and both name
+    their trigger word - otherwise a stack is a single anonymous column."""
+    from app.services import lora_test_studio as lts, face_dataset_service as svc
+    from app.config import LOCAL_USER
+    from app.models import LoraTestImage
+    with app.app_context():
+        launch, ds_a, ds_b, cp_a, cp_b = _stack_run(
+            lts, svc, LOCAL_USER, tmp_path, monkeypatch, None)
+        run_id = launch(0.9, 0.55)
+        row = LoraTestImage.query.filter_by(run_id=run_id).one()
+        members = lts.stack_of_row(row)
+        assert [(m['filename'], m['weight'], m['trigger'], m['head']) for m in members] == [
+            (cp_a, 0.9, 'aaa', True), (cp_b, 0.55, 'bbb', False)]
+        assert [m['dataset_id'] for m in members] == [ds_a.id, ds_b.id]
+        # A comparison (non-combined) cell is NOT a stack and must stay one.
+        row.extra_loras = None
+        assert lts.stack_of_row(row) is None
+
+
+def test_stack_variants_line_up_the_relaunches_of_the_same_stack(
+        app, monkeypatch, tmp_path):
+    """Relaunching the same two LoRAs at other weights must produce COMPARABLE columns:
+    same members = same stack, so every relaunch shows up as a weight variant with its
+    own vector and its own votes, current run first. A run whose members differ is a
+    different stack and must not be mixed in."""
+    from app.services import lora_test_studio as lts, face_dataset_service as svc
+    from app.config import LOCAL_USER
+    from app.models import LoraTestImage
+    from app import db
+    with app.app_context():
+        launch, ds_a, _ds_b, cp_a, cp_b = _stack_run(
+            lts, svc, LOCAL_USER, tmp_path, monkeypatch, None)
+        first = launch(1.0, 1.0)
+        second = launch(1.0, 0.6)
+        # A vote on the first variant, so the summary is not all zeros.
+        row_first = LoraTestImage.query.filter_by(run_id=first).one()
+        row_first.rating = 1
+        row_first.status, row_first.filename = 'done', 'a.png'
+        db.session.commit()
+
+        payload = lts.studio_payload_run(LOCAL_USER, second)
+        assert [m['weight'] for m in payload['stack']] == [1.0, 0.6]
+        variants = payload['stack_variants']
+        assert [v['run_id'] for v in variants] == [second, first]
+        assert variants[0]['active'] is True and variants[1]['active'] is False
+        assert [w['weight'] for w in variants[1]['weights']] == [1.0, 1.0]
+        assert variants[1]['likes'] == 1 and variants[1]['dislikes'] == 0
+        assert variants[1]['done'] == 1
+        # Cells travel with their variant so each column is votable in place.
+        assert variants[0]['cells'][0]['id']
+
+        # A run of the SAME head LoRA alone is not a variant of this stack.
+        solo = lts.create_comparison_run(
+            LOCAL_USER, [{'dataset_id': ds_a.id, 'checkpoint': cp_a}],
+            [1.0], prompt='p', count=1)['run_id']
+        assert solo not in {v['run_id'] for v in
+                            lts.studio_payload_run(LOCAL_USER, second)['stack_variants']}
+        # And a comparison run has no stack block at all.
+        assert lts.studio_payload_run(LOCAL_USER, solo)['stack'] is None
+        assert lts.studio_payload_run(LOCAL_USER, solo)['stack_variants'] == []
+
+
+def test_best_setting_of_a_stack_stores_its_weights_and_pins_every_member(
+        app, monkeypatch, tmp_path):
+    """"Best setting" for a stack is its WEIGHTS, not one checkpoint. The head stays in
+    `lora_filename`/`strength` so every existing reader keeps working, the stacked LoRAs
+    ride along in `stack`, and the delete guard-rail sees them all."""
+    from app.services import lora_test_studio as lts, face_dataset_service as svc
+    from app.config import LOCAL_USER
+    with app.app_context():
+        launch, ds_a, ds_b, cp_a, cp_b = _stack_run(
+            lts, svc, LOCAL_USER, tmp_path, monkeypatch, None)
+        best = lts.set_best_settings(
+            LOCAL_USER, ds_a.id, cp_a, 0.9,
+            stack=[{'dataset_id': ds_b.id, 'lora_filename': cp_b, 'weight': 0.55}])
+        assert best['lora_filename'] == cp_a and best['strength'] == 0.9
+        assert best['stack'] == [{'lora_filename': cp_b, 'dataset_id': ds_b.id,
+                                  'weight': 0.55, 'trigger': 'bbb'}]
+        ds = svc.get_dataset(LOCAL_USER, ds_a.id)
+        assert lts.best_settings_lora_filenames(ds) == [cp_a, cp_b]
+
+        # No stack -> no `stack` key: a mono-LoRA setting is byte-for-byte what it was.
+        assert 'stack' not in lts.set_best_settings(LOCAL_USER, ds_a.id, cp_a, 0.9)
+        # A member checkpoint its dataset never deployed is refused (path injection).
+        evil = 'z image' + chr(92) + '..' + chr(92) + 'evil.safetensors'
+        with pytest.raises(ValueError, match='unknown checkpoint in stack'):
+            lts.set_best_settings(LOCAL_USER, ds_a.id, cp_a, 0.9,
+                                  stack=[{'dataset_id': ds_b.id, 'lora_filename': evil}])
+
+
+# --- Enhance: prompt enrichment through the existing Ollama client ------------
+
+def test_enhance_test_prompt_uses_the_captioning_ollama_client(app, monkeypatch):
+    from app.services import lora_test_studio as lts, vision_ollama, ollama_control
+    monkeypatch.setattr(ollama_control, 'ensure_captioning_ready',
+                        lambda *a, **k: {'ok': True})
+    seen = {}
+
+    def fake_generate(prompt, **kwargs):
+        seen['prompt'] = prompt
+        return '"  a richer prompt  "'
+    monkeypatch.setattr(vision_ollama, 'generate_text_ollama', fake_generate)
+    with app.app_context():
+        assert lts.enhance_test_prompt('a girl') == 'a richer prompt'
+    assert 'a girl' in seen['prompt']
+    assert 'trigger word' in seen['prompt']       # the model is told to leave it alone
+
+
+def test_enhance_test_prompt_fails_loudly_without_ollama(app, monkeypatch):
+    """No Ollama = a 409-mapped RuntimeError naming what to do, never a silent no-op
+    (generate_text_ollama itself returns '' best-effort - that must not reach the UI)."""
+    from app.services import lora_test_studio as lts, ollama_control
+    monkeypatch.setattr(ollama_control, 'ensure_captioning_ready',
+                        lambda *a, **k: {'ok': False, 'error': 'Ollama could not start'})
+    with app.app_context():
+        with pytest.raises(RuntimeError, match='Ollama could not start'):
+            lts.enhance_test_prompt('a girl')
+
+
+def test_enhance_test_prompt_rejects_empty_and_oversized_prompts(app):
+    from app.services import lora_test_studio as lts
+    with app.app_context():
+        for bad in ('', '   ', None):
+            with pytest.raises(ValueError, match='nothing to enhance'):
+                lts.enhance_test_prompt(bad)
+        with pytest.raises(ValueError, match='too long'):
+            lts.enhance_test_prompt('x' * (lts.STUDIO_ENHANCE_MAX_CHARS + 1))
+
+
+def test_enhance_test_prompt_carries_the_real_refusal_not_an_empty_answer(app, monkeypatch):
+    """A refusal from the local-Ollama fence must reach the user WORDED AS ITSELF.
+
+    The fence blocks when a model is loaded outside LDS; the cure is to unload it.
+    generate_text_ollama used to collapse every failure to "" best-effort, so the
+    Studio could only report "the model returned an empty prompt - check the
+    configured Ollama model in Settings" - pointing at a setting that was correct
+    and hiding the one action that fixes it.
+    """
+    from app.services import lora_test_studio as lts, vision_ollama, ollama_control
+    monkeypatch.setattr(ollama_control, 'ensure_captioning_ready',
+                        lambda *a, **k: {'ok': True})
+
+    def blocked(url, model):
+        raise vision_ollama.LocalOllamaFenceError(
+            'A local Ollama model is already in use outside LDS. LDS will not change '
+            'it; unload it first or configure a dedicated Ollama endpoint for LDS.')
+    monkeypatch.setattr(vision_ollama, '_admit_local_ollama', blocked)
+
+    with app.app_context():
+        with pytest.raises(RuntimeError, match='already in use outside LDS'):
+            lts.enhance_test_prompt('a girl')
+
+
+def test_generate_text_ollama_stays_best_effort_for_the_batch_captioner(app, monkeypatch):
+    """The strict path is opt-in: the caption shortener has a long caption to fall
+    back on, so a refusal there must stay a silent "" and never raise."""
+    from app.services import vision_ollama
+
+    def blocked(url, model):
+        raise vision_ollama.LocalOllamaFenceError('fence says no')
+    monkeypatch.setattr(vision_ollama, '_admit_local_ollama', blocked)
+
+    with app.app_context():
+        assert vision_ollama.generate_text_ollama('shorten this') == ''
+
+
+def test_enhance_test_prompt_raises_when_the_model_answers_nothing(app, monkeypatch):
+    from app.services import lora_test_studio as lts, vision_ollama, ollama_control
+    monkeypatch.setattr(ollama_control, 'ensure_captioning_ready',
+                        lambda *a, **k: {'ok': True})
+    monkeypatch.setattr(vision_ollama, 'generate_text_ollama', lambda *a, **k: '')
+    with app.app_context():
+        with pytest.raises(RuntimeError, match='empty prompt'):
+            lts.enhance_test_prompt('a girl')

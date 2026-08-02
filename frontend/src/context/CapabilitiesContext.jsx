@@ -32,13 +32,22 @@ export function CapabilitiesProvider({ children }) {
   const [caps, setCaps] = useState(EMPTY_CAPS)
   const [loading, setLoading] = useState(true)
 
-  const refresh = useCallback(async (force = false) => {
+  // Return the fetched snapshot on success and null on failure. Most callers
+  // only need the state update, while managed-runtime polling needs the verdict:
+  // it must keep retrying if the lightweight probe turned ready but this fuller
+  // refresh failed. `options.background` keeps that automatic retry silent.
+  const refresh = useCallback(async (force = false, options = {}) => {
     try {
-      const data = await apiFetch(`/api/capabilities${force ? '?force=1' : ''}`)
+      const data = await apiFetch(
+        `/api/capabilities${force ? '?force=1' : ''}`,
+        options,
+      )
       setCaps(data)
+      return data
     } catch {
       // Keep the last-known caps on a transient network error rather than
       // resetting to EMPTY_CAPS — that would bounce the user into onboarding.
+      return null
     } finally {
       setLoading(false)
     }

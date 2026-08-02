@@ -89,3 +89,26 @@ test('the tooltip line carries the facts and never the prompt', () => {
   assert.equal(line, 'Step 2500 · Seed 208607443 · LoRA strength 0');
   assert.equal(line.includes('portrait'), false);
 });
+
+// A combined stack and an always-on style LoRA share the extra_loras column but
+// are opposites to a user: co-stars chosen at their own weight vs a utility LoRA
+// left on. One label for both said "Always-on LoRAs" over a combined run.
+test('a combined stack is labelled as combined, not as always-on', () => {
+  const stacked = JSON.stringify([
+    { filename: 'z image\\lora_veldt.safetensors', strength: 0.55, combined: true },
+    { filename: 'style\\Film.safetensors', strength: 0.4 },
+  ]);
+  const by = Object.fromEntries(
+    imageSettingFacts({ extra_loras: stacked }).map((r) => [r.key, r.value]));
+  assert.equal(by.combined_loras, 'lora_veldt @ 0.55');
+  assert.equal(by.extra_loras, 'Film @ 0.4');
+});
+
+test('a run with no stack still shows only the always-on row', () => {
+  const by = Object.fromEntries(
+    imageSettingFacts({ extra_loras: '[{"filename":"style\\\\Film.safetensors","strength":0.4}]' })
+      .map((r) => [r.key, r.value]));
+  assert.equal(by.extra_loras, 'Film @ 0.4');
+  assert.equal(by.combined_loras, undefined);
+});
+

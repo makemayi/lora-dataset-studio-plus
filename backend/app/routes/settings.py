@@ -296,24 +296,57 @@ def get_capabilities():
 
 @bp.get('/loras/list')
 def loras_list():
-    """LoRAs on disk for the Klein generation-LoRA preset picker: the whole loras
-    tree (base ``models/loras`` + every ``extra_model_paths.yaml`` root, recursive),
+    """LoRAs on disk for the generation-LoRA preset picker, shared by the
+    Klein and the Krea 2 Edit cards: the whole loras tree (base
+    ``models/loras`` + every ``extra_model_paths.yaml`` root, recursive),
     each badged with its architecture — ``{loras: [{name, arch, label, compatible}]}``,
     Klein-compatible first. ``name`` is the exact ComfyUI-relative value a preset row
     stores and the generate path resolves (``comfy_model_paths.list_models('loras')``).
-    ``compatible`` is judged against the Klein graph (its only consumer today).
+    ``compatible`` is judged against ``?family=`` (default the Klein graph); the
+    Krea preset card asks for ``family=krea``.
     ``?force=1`` bypasses the mtime cache (the ↻ rescan button). Degrades to
     ``{loras: []}`` — never an error — when no loras root exists (ComfyUI
     unconfigured) or the scan fails, so the picker falls back to a free-text field
     instead of a blocking empty dropdown."""
     from ..services import klein_lora_picker
     force = bool(request.args.get('force'))
+    # The picker of whichever engine is asking. Unknown values fall back to the
+    # default inside the scanner, so this stays a plain pass-through.
+    family = (request.args.get('family') or '').strip() or klein_lora_picker._KLEIN_FAMILY
     try:
-        loras = klein_lora_picker.scan_generation_loras(force=force)
+        loras = klein_lora_picker.scan_generation_loras(force=force, family=family)
     except Exception:
         current_app.logger.exception('loras list scan failed')
         loras = []
     return jsonify({'loras': loras})
+
+
+@bp.get('/seedvr2/models')
+def seedvr2_models_list():
+    """The SeedVR2 DiT builds actually PRESENT in this install's SEEDVR2 folder(s),
+    plus the catalog of builds the app can talk about.
+
+    ``{installed: [name], catalog: [{file, label, size_gb, vram_gb, recommended,
+    installed}], resolved: name|null, vae: name|null}``.
+
+    Only installed builds are offered as a pin: the pack's loader nodes download
+    an unknown name on first use, so a picker listing everything would turn a
+    dropdown into a silent multi-gigabyte download. The catalog is still returned
+    so the card can SHOW what else exists (with its size and VRAM guidance) and
+    say it has to be placed in the folder — informing is not fetching.
+
+    Degrades to empty lists rather than an error when ComfyUI is unconfigured."""
+    from ..services import seedvr2_helper as svr
+    try:
+        installed = svr.installed_dit_models()
+        resolved = svr.resolve_seedvr2_dit()
+        vae = svr.resolve_seedvr2_vae()
+    except Exception:
+        current_app.logger.exception('seedvr2 model scan failed')
+        installed, resolved, vae = [], None, None
+    catalog = [{**v, 'installed': v['file'] in installed} for v in svr.DIT_VARIANTS]
+    return jsonify({'installed': installed, 'catalog': catalog,
+                    'resolved': resolved, 'vae': vae})
 
 
 @bp.get('/scoring-python')

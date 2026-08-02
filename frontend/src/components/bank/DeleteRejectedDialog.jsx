@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { apiFetch, postJson } from '../../api/fetchClient'
 import { useToast } from '../common/Toast'
 import {
-  datasetConflictBlock, deleteDestination, deletePreviewState, isRecoverable,
-  sharedFileCount, sharedFilesWarning,
+  datasetConflictBlock, deleteDestination, deletePreviewState,
+  deleteRejectedStart, isRecoverable, sharedFileCount, sharedFilesWarning,
 } from './bankOverlap'
 
 /** 🗑 Delete rejected from disk — the ONE bank action that writes to the source
@@ -45,14 +45,12 @@ export default function DeleteRejectedDialog({ bankId, count, sourcePath, onClos
     setBusy(true)
     try {
       const d = await postJson(`/api/bank/${bankId}/delete-rejected`, {})
-      const gone = (d.deleted || 0) + (d.trashed || 0) + (d.already_absent || 0)
-      const where = isRecoverable(d.mode)
-        ? `moved to ${deleteDestination(d.mode)}`
-        : 'permanently deleted'
-      let msg = `${gone} rejected file(s) ${where}.`
-      if (d.skipped?.length) msg += ` ${d.skipped.length} skipped (see console).`
       if (d.skipped?.length) console.warn('Delete rejected — skipped files:', d.skipped)
-      toast.success(msg)
+      const note = deleteRejectedStart(d, {
+        destination: deleteDestination(d.mode),
+        recoverable: isRecoverable(d.mode),
+      })
+      toast[note.type](note.text)
       onDone?.()
     } catch (e) {
       toast.error(e?.message || 'Delete failed.')

@@ -343,3 +343,121 @@ test('a run card and its pill block are ONE obstacle, pinned images are the rest
   assert.equal(cardRect.w, CARD_W);
   assert.ok(cardRect.h >= 64 + 20, 'the pills under the card are inside the rect');
 });
+
+/* ── Two runs are two lots, and a strip reads by epoch ──────────────────────
+
+   The two things a board built to COMPARE checkpoints has to get right, and
+   the two it was getting wrong:
+
+     • a second generation fired at the same checkpoint had its pictures
+       APPENDED to the first generation's strip, so two runs read as one lot.
+       The only thing a strip could be keyed on was "same checkpoint", which is
+       true of both runs. `run_id` — already in the database, now published by
+       the gallery — is the thing that actually differs;
+     • the order inside a strip came from `${record_id}:${step}` compared as
+       TEXT, which puts step 1000 before step 500. An epoch axis sorted
+       alphabetically is not an epoch axis. */
+
+const runImg = (id, recordId, step, runId) => ({
+  id, dataset_id: 3, record_id: recordId, step, run_id: runId,
+  url: `/img/${id}.png`,
+});
+const runPlaced = (id, recordId, step, runId) => ({
+  imageId: id, x: id * 10, y: 500, w: 320, h: 320,
+  image: runImg(id, recordId, step, runId),
+});
+// Pin one picture the way the gallery does, and fold the result back into the
+// board — the sequence that produced the reported bug.
+const pinOneByOne = (laneMap, image) => {
+  const grouped = groupPinnedBatchBySource({
+    nodes: Object.values(laneMap),
+    placed: [{ imageId: image.id, x: 0, y: 0, w: 320, h: 320, image }],
+  });
+  for (const r of grouped.rows) laneMap[r.imageId] = r;
+  return laneMap;
+};
+
+test('two generations of the SAME checkpoint stay two strips', () => {
+  const lane = {};
+  // Run A, pinned one by one from the checkpoint gallery.
+  pinOneByOne(lane, runImg(11, 7, 500, 'runA'));
+  pinOneByOne(lane, runImg(12, 7, 500, 'runA'));
+  // Run B — a LATER generation, same checkpoint, same dataset.
+  pinOneByOne(lane, runImg(21, 7, 500, 'runB'));
+  pinOneByOne(lane, runImg(22, 7, 500, 'runB'));
+
+  const groupOf = (id) => lane[id].groupId;
+  assert.ok(groupOf(11), 'run A formed a strip');
+  assert.equal(groupOf(11), groupOf(12));
+  assert.ok(groupOf(21), 'run B formed its own strip');
+  assert.equal(groupOf(21), groupOf(22));
+  assert.notEqual(groupOf(11), groupOf(21),
+    'run B must NOT be concatenated onto run A');
+});
+
+test('images with no run id keep the old per-checkpoint behaviour', () => {
+  // A board that predates the published run id must draw what it always drew:
+  // successive pins of one checkpoint still gather into one strip.
+  const lane = {};
+  pinOneByOne(lane, { id: 31, dataset_id: 3, record_id: 7, step: 500 });
+  pinOneByOne(lane, { id: 32, dataset_id: 3, record_id: 7, step: 500 });
+  assert.ok(lane[31].groupId);
+  assert.equal(lane[31].groupId, lane[32].groupId);
+});
+
+test('a strip reads in TRAINING order, not alphabetical order', () => {
+  // 1000 < 500 as text; as epochs it is the other way round.
+  const result = groupPinnedBatchTogether({ placed: [
+    runPlaced(1, 82, 1000, 'r1'), runPlaced(2, 82, 500, 'r1'),
+    runPlaced(3, 82, 2000, 'r1'), runPlaced(4, 82, 1500, 'r1'),
+  ] });
+  const strip = [...result.rows].sort((a, b) => a.groupPos - b.groupPos);
+  assert.deepEqual(strip.map((r) => r.image.step), [500, 1000, 1500, 2000]);
+  assert.deepEqual(strip.map((r) => r.groupPos), [0, 1, 2, 3]);
+});
+
+test('a picture pinned later at an EARLIER epoch lands at the head of the strip', () => {
+  const lane = {};
+  pinOneByOne(lane, runImg(41, 7, 2000, 'runC'));
+  pinOneByOne(lane, runImg(42, 7, 3000, 'runC'));
+  pinOneByOne(lane, runImg(43, 7, 1000, 'runC'));
+  const strip = Object.values(lane).sort((a, b) => a.groupPos - b.groupPos);
+  assert.deepEqual(strip.map((r) => r.image.step), [1000, 2000, 3000]);
+});
+
+test('a lot that carries two runs is SPLIT, never concatenated', () => {
+  const result = groupPinnedBatchTogether({ placed: [
+    runPlaced(1, 82, 500, 'r1'), runPlaced(2, 82, 1000, 'r1'),
+    runPlaced(3, 82, 500, 'r2'), runPlaced(4, 82, 1000, 'r2'),
+  ] });
+  const by = Object.fromEntries(result.rows.map((r) => [r.imageId, r.groupId]));
+  assert.equal(by[1], by[2]);
+  assert.equal(by[3], by[4]);
+  assert.notEqual(by[1], by[3]);
+});
+
+test('the band lays its columns out in epoch order', () => {
+  // One card, so every checkpoint anchors at the same x and the tie-break is
+  // the whole answer. Left to right must be 500, 1000, 1500 — it was
+  // 1000, 1500, 500 while the tie was broken by the alphabet.
+  const graph = { nodes: [{ x: 0, y: 0, cellH: 100, node: { record_id: 9 } }] };
+  const { placed: out } = placeImageBatch({ graph, existing: [], images: [
+    img(51, 9, 1000), img(52, 9, 500), img(53, 9, 1500),
+  ] });
+  const xOf = (id) => out.find((p) => p.imageId === id).x;
+  assert.ok(xOf(52) < xOf(51), 'step 500 sits left of step 1000');
+  assert.ok(xOf(51) < xOf(53), 'step 1000 sits left of step 1500');
+});
+
+test('an over-cap lot keeps the EARLY epochs and says what it dropped', () => {
+  const graph = { nodes: [{ x: 0, y: 0, cellH: 100, node: { record_id: 9 } }] };
+  const images = Array.from({ length: PIN_BATCH_MAX + 3 },
+    (_, i) => img(600 + i, 9, (i + 1) * 100));
+  const res = placeImageBatch({ graph, existing: [], images });
+  assert.equal(res.placed.length, PIN_BATCH_MAX);
+  assert.equal(res.skipped.length, 3);
+  const droppedSteps = res.skipped.map((s) => s.image.step);
+  const keptSteps = res.placed.map((p) => p.image.step);
+  assert.ok(Math.min(...droppedSteps) > Math.max(...keptSteps),
+    'the tail of the training is what gets refused, not an arbitrary slice');
+});

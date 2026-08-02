@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router'
 import { apiFetch, getCsrfToken, putJson, postJson } from '../api/fetchClient'
 import { useToast } from '../components/common/Toast'
 import { useCapabilities } from '../context/CapabilitiesContext'
@@ -47,6 +47,7 @@ const TOTAL_TOOLS = SETUP_STEP_IDS.length
 
 const STATUS_META = {
   ready: { glyph: '✓', label: 'Ready', cls: 'text-emerald-400' },
+  initializing: { glyph: '↻', label: 'Initializing…', cls: 'text-amber-400' },
   partial: { glyph: '◐', label: 'Almost there', cls: 'text-amber-400' },
   available: { glyph: '○', label: 'Not set up', cls: 'text-content-subtle' },
   // Neutral, deliberately not red: the user chose to continue without ComfyUI.
@@ -106,6 +107,9 @@ export default function SetupPage() {
   const [advancing, setAdvancing] = useState(false) // Next is mid save-&-recheck
   const [startingOllama, setStartingOllama] = useState(false) // "Start Ollama" in flight
   const [startingComfyui, setStartingComfyui] = useState(false) // secure portable launch in flight
+  const [savingOllamaMode, setSavingOllamaMode] = useState(false)
+  const [runtimeReadiness, setRuntimeReadiness] = useState(null)
+  const [readinessRevision, setReadinessRevision] = useState(0)
   const [dirCheck, setDirCheck] = useState(null)    // live classify of the typed ComfyUI dir
   const [skipConfirm, setSkipConfirm] = useState(false) // "continue without ComfyUI" panel open
   const autodetectedRef = useRef(false)             // run the on-load autodetect only once
@@ -166,6 +170,58 @@ export default function SetupPage() {
   // panel, so it never re-appears stale when the user comes back to this step.
   useEffect(() => { setSkipConfirm(false) }, [screen])
 
+  // Docker-owned services can need longer than the app container to boot. Poll a
+  // dedicated one-second endpoint instead of re-running the expensive capability
+  // scan. Recursive timeouts avoid overlapping requests; unmount aborts the active
+  // fetch and clears the pending timer.
+  useEffect(() => {
+    let alive = true
+    let timer = null
+    let controller = null
+    let previous = null
+    let capabilityRefreshPending = false
+
+    function schedule(delay) {
+      if (alive) timer = setTimeout(check, delay)
+    }
+    async function check() {
+      controller = new AbortController()
+      try {
+        const next = await apiFetch('/api/setup/runtime-readiness', {
+          background: true,
+          cache: 'no-store',
+          signal: controller.signal,
+        })
+        if (!alive) return
+        const comfyBecameReady = next.comfyui?.mode === 'integrated'
+          && next.comfyui.ready && !previous?.comfyui?.ready
+        const ollamaBecameReady = ['docker', 'host'].includes(next.ollama?.mode)
+          && next.ollama.ready && !previous?.ollama?.ready
+        if (comfyBecameReady || ollamaBecameReady) capabilityRefreshPending = true
+        if (capabilityRefreshPending) {
+          const refreshed = await refresh(true, { background: true })
+          capabilityRefreshPending = !refreshed
+        }
+        if (!alive) return
+        previous = next
+        setRuntimeReadiness(next)
+        // A ready lightweight probe is not enough: the cards consume the full
+        // capability snapshot. Keep polling until that refresh is acknowledged,
+        // otherwise one silent 500 leaves stale caps and stops forever.
+        if (next.comfyui?.poll || next.ollama?.poll || capabilityRefreshPending) schedule(3000)
+      } catch {
+        if (alive) schedule(5000)
+      }
+    }
+
+    check()
+    return () => {
+      alive = false
+      if (timer) clearTimeout(timer)
+      controller?.abort()
+    }
+  }, [refresh, readinessRevision])
+
   // Live, SAVE-FREE classification of the typed ComfyUI directory, so the field gives
   // an actionable verdict (wrong path / empty folder / launcher-parent-with-a-child)
   // while the user is still typing — not only after a "Save & re-check". Debounced;
@@ -196,7 +252,10 @@ export default function SetupPage() {
     } catch (e) { toast.error(`Save failed: ${e.message}`) }
   }
 
-  const steps = useMemo(() => deriveSetupSteps(caps), [caps])
+  const steps = useMemo(
+    () => deriveSetupSteps(caps, runtimeReadiness),
+    [caps, runtimeReadiness],
+  )
   const summary = useMemo(() => deriveCapabilitySummary(caps), [caps])
   // Everything "Install everything" can queue right now (mirrors the backend plan).
   const installPlan = useMemo(() => installAllPlan(caps), [caps])
@@ -278,6 +337,29 @@ export default function SetupPage() {
       toast.error(e.message || "ComfyUI couldn't start. Check the portable install, then try again.")
     } finally {
       setStartingComfyui(false)
+    }
+  }
+
+  const chooseOllamaDeployment = async (mode) => {
+    setSavingOllamaMode(true)
+    try {
+      const data = await putJson('/api/setup/ollama-deployment', { mode })
+      setConfig(data.config)
+      savedConfigRef.current = JSON.stringify(data.config)
+      setRuntimeReadiness((previous) => ({
+        ...(previous || {}),
+        ollama: data.readiness,
+      }))
+      // A first-run page has already stopped polling at "unconfigured". Restart
+      // the lightweight loop so a launcher waiting on config.json and its sidecar
+      // can become ready without a reload.
+      setReadinessRevision((value) => value + 1)
+      await refresh(true, { background: true })
+      toast.success(mode === 'none' ? 'Ollama skipped.' : 'Ollama deployment saved.')
+    } catch (error) {
+      toast.error(error.message || 'Could not save the Ollama deployment.')
+    } finally {
+      setSavingOllamaMode(false)
     }
   }
 
@@ -489,7 +571,8 @@ export default function SetupPage() {
               nothing rather than inventing a gap — so every file being on disk is
               NOT a clean bill of health, and this says so rather than letting an
               empty warning list read as one. */}
-          {!step.reachable && step.kleinFilesReady && step.dirValid && (
+          {!step.reachable && !step.managedInitializing
+            && step.kleinFilesReady && step.dirValid && (
             <p className="break-words text-xs text-amber-300">
               ⚠ Not checked — every Klein file is on disk and readable, but ComfyUI isn't
               answering, so the app could not verify that Klein actually runs here. Start
@@ -587,7 +670,8 @@ export default function SetupPage() {
           {/* Discoverable, explicit skip: only when there's genuinely nothing here
               (no dir, not reachable, not already skipped) — a running/configured
               ComfyUI never offers to be skipped. */}
-          {!typedDir && !step.reachable && !step.skipped && (
+          {!typedDir && !step.reachable && !step.skipped
+            && !step.managedInitializing && step.managedMode !== 'external-host' && (
             <button type="button" onClick={() => setSkipConfirm(true)}
               className="text-xs text-content-subtle underline hover:text-content">
               Don't want local generation? Continue without ComfyUI →
@@ -637,6 +721,58 @@ export default function SetupPage() {
           {fields}
         </div>
       )
+      if (step.managedInitializing) {
+        return (
+          <div className="space-y-4">
+            <div role="status" aria-live="polite"
+              className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-content">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-border-strong border-t-amber-400"
+                  aria-hidden="true" />
+                Initializing ComfyUI…
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-content-muted">
+                The integrated GPU container is starting ComfyUI for you. The first startup can
+                take several minutes while its environment is prepared; this page will switch to
+                Ready automatically.
+              </p>
+            </div>
+            {fields}
+          </div>
+        )
+      }
+      if (step.managedMode === 'external-host' && !step.reachable) {
+        return (
+          <div className="space-y-4">
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-3">
+              <p className="text-sm font-medium text-content">
+                This Docker installation uses your existing host ComfyUI, but its API is not reachable.
+              </p>
+              <div className="mt-1 space-y-1.5 text-xs leading-relaxed text-content-muted">
+                <p>
+                  <span className="font-medium text-content">Windows:</span> start ComfyUI with its
+                  usual launcher and allow it to listen on an address Docker can reach, not only
+                  <span className="font-mono"> 127.0.0.1</span>. Keep port 8188 restricted to Docker
+                  or your trusted private network in Windows Firewall. If its folder changed, run
+                  <span className="font-mono"> start-docker.bat --configure</span> again on the host.
+                </p>
+                <p>
+                  <span className="font-medium text-content">Linux / manual Compose:</span> mount the
+                  existing ComfyUI folder at <span className="font-mono">/external-comfyui</span> and
+                  configure a host-reachable API address in your Compose override. Start ComfyUI on
+                  the host; this container intentionally never starts it for you.
+                </p>
+              </div>
+              <a href="https://github.com/perfectgf/lora-dataset-studio/blob/main/docs/guide/docker.md"
+                target="_blank" rel="noreferrer"
+                className="mt-2 inline-block text-xs text-primary underline">
+                Docker setup guide →
+              </a>
+            </div>
+            {fields}
+          </div>
+        )
+      }
       if (skipConfirm) return skipPanel
       // Already skipped by choice: neutral confirmation (not a warning) + the fields,
       // so typing a directory silently un-skips and re-enables local generation.
@@ -689,6 +825,42 @@ export default function SetupPage() {
     if (id === 'ollama') {
       // The vision MODEL is the point, not just Ollama being up. When reachable but
       // the model isn't pulled, lead with the pull action (this is the required gate).
+      const dockerLauncher = runtimeReadiness?.comfyui?.mode === 'integrated'
+        ? 'start-docker-gpu.bat' : 'start-docker.bat'
+      const deploymentChoices = [
+        { mode: 'none', title: 'No Ollama',
+          body: 'Skip captioning and auto-framing. Nothing is downloaded.' },
+        { mode: 'host', title: 'Existing host Ollama',
+          body: 'Use Ollama already running on this computer.' },
+        { mode: 'docker', title: 'Docker Ollama',
+          body: 'Use an isolated companion container. Models stay opt-in.' },
+      ]
+      const deploymentCards = step.dockerManaged && (
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-content">Choose how this Docker install uses Ollama</p>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {deploymentChoices.map((choice) => {
+              const selected = step.deploymentMode === choice.mode
+              return (
+                <button key={choice.mode} type="button"
+                  aria-pressed={selected}
+                  disabled={savingOllamaMode}
+                  onClick={() => chooseOllamaDeployment(choice.mode)}
+                  className={`rounded-md border p-3 text-left transition-colors disabled:opacity-50 ${selected
+                    ? 'border-primary bg-primary/10'
+                    : 'border-border bg-surface-raised hover:border-border-strong'}`}>
+                  <span className="block text-sm font-semibold text-content">
+                    {selected ? '✓ ' : ''}{choice.title}
+                  </span>
+                  <span className="mt-1 block text-xs leading-relaxed text-content-muted">
+                    {choice.body}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )
       const model = step.visionModel || DEFAULT_VISION_MODEL
       const pullBlock = step.reachable && !step.visionModelReady && (
         <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
@@ -698,14 +870,23 @@ export default function SetupPage() {
           <p className="mb-2 text-xs text-content-muted">
             <span className="font-mono">{model}</span> — uncensored, needed for concept captions · {VISION_MODEL_VRAM}
           </p>
+          <p className="mb-2 text-xs text-content-subtle">
+            No model is downloaded automatically. This button streams the pull through LDS
+            and shows its progress here.
+          </p>
           <InstallRunner action="ollama_model" buttonLabel={`Pull ${model}`}
-            manualCommand={`ollama pull ${model}`}
             onDone={() => refresh(true)} />
         </div>
       )
       const fields = (
         <>
-          {guidedField('Ollama URL', 'ollama', 'url', 'http://127.0.0.1:11434')}
+          {!step.dockerManaged
+            && guidedField('Ollama URL', 'ollama', 'url', 'http://127.0.0.1:11434')}
+          {step.dockerManaged && step.deploymentUrl && (
+            <p className="text-xs text-content-muted">
+              Managed endpoint: <span className="font-mono">{step.deploymentUrl}</span>
+            </p>
+          )}
           {guidedField('Vision model', 'ollama', 'vision_model', DEFAULT_VISION_MODEL)}
           <p className="text-xs text-content-subtle">
             Use the ABLITERATED Qwen3-VL ({VISION_MODEL_VRAM}) — the vanilla model refuses NSFW.
@@ -714,15 +895,116 @@ export default function SetupPage() {
           {saveRecheckBtn}
         </>
       )
+      if (step.unconfigured) {
+        return (
+          <div className="space-y-4">
+            <div className="rounded-md border border-border bg-surface-raised px-3 py-3">
+              <p className="text-sm font-medium text-content">Ollama is optional.</p>
+              <p className="mt-1 text-xs leading-relaxed text-content-muted">
+                Choose one deployment below. Selecting Docker starts only its service;
+                the vision model remains absent until you explicitly pull it from this page.
+              </p>
+            </div>
+            {deploymentCards}
+          </div>
+        )
+      }
+      if (step.disabled) {
+        return (
+          <div className="space-y-4">
+            <div role="status" className="rounded-md border border-border bg-surface-raised px-3 py-3">
+              <p className="text-sm font-medium text-content">Ollama is optional and disabled.</p>
+              <p className="mt-1 text-xs leading-relaxed text-content-muted">
+                Nothing is waiting in the background and no model will be downloaded.
+                Choose another card below whenever you want to enable it.
+              </p>
+            </div>
+            {deploymentCards}
+          </div>
+        )
+      }
+      if (step.managedInitializing) {
+        return (
+          <div className="space-y-4">
+            {deploymentCards}
+            <div role="status" aria-live="polite"
+              className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-content">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-border-strong border-t-amber-400"
+                  aria-hidden="true" />
+                Starting Ollama…
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-content-muted">
+                The companion Ollama container is starting. This page checks it quietly and
+                updates automatically. No model is pulled during startup.
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-content-muted">
+                If the launcher window is still open, leave it running. If you closed it,
+                relaunch <span className="font-mono">{dockerLauncher}</span>.
+              </p>
+            </div>
+            {fields}
+          </div>
+        )
+      }
       if (step.reachable) {
         return (
           <div className="space-y-4">
+            {deploymentCards}
             {step.visionModelReady ? (
               <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-content">
                 ✓ Ollama is running at <span className="font-mono">{step.url || 'the configured URL'}</span> and
                 the vision model <span className="font-mono">{step.visionModel}</span> is ready. Nothing to do here.
               </div>
             ) : pullBlock}
+            {fields}
+          </div>
+        )
+      }
+      if (step.deploymentState === 'misconfigured') {
+        return (
+          <div className="space-y-4">
+            <div className="rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-3">
+              <p className="text-sm font-medium text-content">The configured Ollama URL is invalid.</p>
+              <p className="mt-1 text-xs leading-relaxed text-content-muted">
+                Enter an absolute <span className="font-mono">http://</span> or
+                <span className="font-mono"> https://</span> origin with no path,
+                credentials, query or fragment, then save and re-check.
+              </p>
+            </div>
+            {fields}
+          </div>
+        )
+      }
+      if (step.deploymentMode === 'host') {
+        return (
+          <div className="space-y-4">
+            {deploymentCards}
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-3">
+              <p className="text-sm font-medium text-content">
+                Host Ollama is selected, but it is not reachable from this container.
+              </p>
+              <div className="mt-1 space-y-1.5 text-xs leading-relaxed text-content-muted">
+                <p>
+                  <span className="font-medium text-content">Windows:</span> start Ollama on the
+                  host, set <span className="font-mono">OLLAMA_HOST=0.0.0.0:11434</span>, then
+                  restart Ollama. In Windows Firewall, allow TCP 11434 only from Docker or your
+                  trusted private network — never expose it to the public Internet.
+                </p>
+                <p>
+                  <span className="font-medium text-content">Linux:</span> bind Ollama to a host
+                  address reachable from the Docker bridge and restrict port 11434 to that bridge
+                  with your firewall. The saved LDS endpoint remains
+                  <span className="font-mono"> http://host.docker.internal:11434</span>.
+                </p>
+                <p>After changing the host service, click this selected card again to test it.</p>
+              </div>
+              <a href="https://github.com/perfectgf/lora-dataset-studio/blob/main/docs/guide/docker.md"
+                target="_blank" rel="noreferrer"
+                className="mt-2 inline-block text-xs text-primary underline">
+                Docker setup guide →
+              </a>
+            </div>
             {fields}
           </div>
         )
@@ -915,7 +1197,7 @@ export default function SetupPage() {
   const kind = SCREENS[screen]
   const DONE = SCREENS.length - 1
   const INSTALL = SCREENS.indexOf('install')   // the install/reinstall step, after config
-  const isReady = (id) => stepById[id].status === 'ready'
+  const isReady = (id) => stepById[id].status === 'ready' || stepById[id].disabled
   const toolIdx = (id) => SETUP_STEP_IDS.indexOf(id)
   const screenOf = (id) => SETUP_STEP_IDS.indexOf(id) + 1   // welcome=0, tools=1..N
   const allReady = SETUP_STEP_IDS.every(isReady)
@@ -938,8 +1220,17 @@ export default function SetupPage() {
   // Pure gate check on a derived step object, so it can be re-evaluated against FRESH
   // capabilities after a save (not just the render-time snapshot).
   const ollamaGateReason = (s) => {
-    if (!s || s.status === 'ready') return null
+    if (!s || s.status === 'ready' || s.disabled) return null
+    if (s.unconfigured) {
+      return 'Choose No Ollama, Existing host Ollama or Docker Ollama on this page before continuing.'
+    }
+    if (s.managedInitializing) {
+      return 'The companion Ollama container is still starting. This page will continue automatically when it is ready.'
+    }
     if (!s.reachable) {
+      if (s.deploymentMode === 'host') {
+        return 'Host Ollama is selected but unreachable from Docker. Start it on the host and make port 11434 reachable from Docker, or choose Docker Ollama on this page.'
+      }
       // Installed-but-stopped gets a Start nudge; genuinely absent gets install.
       if (!s.installed) return "Ollama isn't installed — download it and start it (port 11434) to continue."
       return 'Ollama is installed but not running — click ▶ Start Ollama below to continue.'
@@ -995,7 +1286,10 @@ export default function SetupPage() {
     if (kind === 'comfyui') {
       const cfgDir = ((config.comfyui && config.comfyui.base_dir) || '').trim()
       const s = stepById.comfyui
-      if (!cfgDir && !s.reachable && !s.skipped) { setSkipConfirm(true); return }
+      if (!cfgDir && !s.reachable && !s.skipped && !s.managedInitializing
+          && s.managedMode !== 'external-host') {
+        setSkipConfirm(true); return
+      }
     }
     setAdvancing(true)
     try {
@@ -1003,7 +1297,9 @@ export default function SetupPage() {
       let fresh = null
       try { fresh = await apiFetch('/api/capabilities') } catch { /* keep going */ }
       if (fresh && kind === 'ollama') {
-        const reason = ollamaGateReason(deriveSetupSteps(fresh).find((x) => x.id === 'ollama'))
+        const reason = ollamaGateReason(
+          deriveSetupSteps(fresh, runtimeReadiness).find((x) => x.id === 'ollama'),
+        )
         if (reason) { toast.warning(reason); return }
       }
       goNext()
@@ -1066,11 +1362,15 @@ export default function SetupPage() {
     // button fixes it), and genuinely absent (✗). The old triState collapsed the stopped
     // case into "✗ not found", which read as "you don't have Ollama".
     const oll = stepById.ollama
-    const ollamaScan = oll.reachable
-      ? { state: oll.visionModelReady ? 'ready' : 'partial', partial: 'running — pull the vision model' }
-      : oll.installed
-        ? { state: 'partial', partial: 'installed — not running' }
-        : { state: 'missing', partial: '' }
+    const ollamaScan = oll.disabled
+      ? { state: 'skipped', partial: 'disabled by this deployment' }
+      : oll.managedInitializing
+        ? { state: 'initializing', partial: 'companion container is starting' }
+        : oll.reachable
+          ? { state: oll.visionModelReady ? 'ready' : 'partial', partial: 'running — pull the vision model' }
+          : oll.installed
+            ? { state: 'partial', partial: 'installed — not running' }
+            : { state: 'missing', partial: '' }
     // stepId: which wizard step (SETUP_STEP_IDS) installs/configures this capability —
     // each row is a direct link to that step's screen, whether or not it's ready yet.
     const scanRows = [
@@ -1078,10 +1378,12 @@ export default function SetupPage() {
         // A conscious skip reads as "skipped" (neutral), not "not found" — the probe
         // doesn't keep nagging about a choice the user already made. (partial text is
         // only used for the reachable-but-incomplete case.)
-        state: stepById.comfyui.skipped ? 'skipped'
-          : triState(stepById.comfyui.reachable, stepById.comfyui.hasKlein),
-        partial: 'running — Klein model optional' },
-      { label: 'Captioning — Ollama + vision model', stepId: 'ollama',
+        state: stepById.comfyui.managedInitializing ? 'initializing'
+          : stepById.comfyui.skipped ? 'skipped'
+            : triState(stepById.comfyui.reachable, stepById.comfyui.hasKlein),
+        partial: stepById.comfyui.managedInitializing
+          ? 'first startup in progress' : 'running — Klein model optional' },
+      { label: 'Captioning — Ollama + vision model', optional: oll.disabled, stepId: 'ollama',
         state: ollamaScan.state, partial: ollamaScan.partial },
       { label: 'LoRA training — ai-toolkit', stepId: 'training',
         state: stepById.training.valid ? 'ready'
@@ -1090,6 +1392,7 @@ export default function SetupPage() {
     ]
     const SCAN_META = {
       ready: { glyph: '✓', cls: 'text-emerald-400', word: 'ready' },
+      initializing: { glyph: '↻', cls: 'text-amber-400', word: '' },
       partial: { glyph: '⚠', cls: 'text-amber-400', word: '' },
       missing: { glyph: '✗', cls: 'text-content-subtle', word: 'not found' },
       skipped: { glyph: '⊘', cls: 'text-content-subtle', word: 'skipped' },
@@ -1121,9 +1424,11 @@ export default function SetupPage() {
           </div>
           <ul className="mt-4 space-y-1">
             {scanRows.map((r) => {
-              const soft = r.optional && r.state !== 'ready'   // optional + not ready → neutral, not a warning
+              const soft = r.optional && !['ready', 'initializing'].includes(r.state)
+              // optional + not ready → neutral, except a real managed boot state.
               const m = soft ? { ...SCAN_META[r.state], ...NEUTRAL } : SCAN_META[r.state]
-              const word = r.state === 'partial' ? r.partial
+              const word = ['partial', 'initializing'].includes(r.state) ? r.partial
+                : r.state === 'skipped' && r.partial ? r.partial
                 : r.state === 'missing' ? (r.optional ? 'optional' : m.word)
                 : m.word
               return (

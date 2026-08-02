@@ -3,11 +3,15 @@ import DatasetGridItem from './DatasetGridItem';
 import TileSizeControl from '../shared/TileSizeControl';
 import KleinImproveNote from './KleinImproveNote';
 import { isSmallImageRescueRow } from '../../utils/smallImageRescue';
+import { partitionKleinImproveSelection } from '../../utils/kleinBulkImprove';
 import {
-  describeKleinImproveLaunch,
-  kleinImproveBatchLabel,
-  partitionKleinImproveSelection,
-} from '../../utils/kleinBulkImprove';
+  availableImproveEngines,
+  describeImproveLaunch,
+  improveBatchLabel,
+  improveConfirmMessage,
+  improveEngineBlockedReason,
+} from '../../utils/improveEngines';
+import { useCapabilities } from '../../context/CapabilitiesContext';
 import { useToast } from '../common/Toast';
 import { autoTriageAvailable } from './faceScoringGate.js';
 
@@ -169,11 +173,16 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
                                       faceScoringBlocked = null,
                                       activity = null }) {
   const toast = useToast();
+  const { caps } = useCapabilities();
   const [selected, setSelected] = useState(() => new Set());
   // Only the LAUNCH request is tracked locally; the batch's own progress comes
   // from the server (`activity`), so it survives a reload and a closed tab.
   const [launchingImprove, setLaunchingImprove] = useState(false);
-  const improveLabel = kleinImproveBatchLabel(activity);
+  const improveLabel = improveBatchLabel(activity);
+  // Klein is always offered (its button carries the reason when it can't run);
+  // SeedVR2 joins the toolbar only once it is actually installed — until then it
+  // is a Setup task, not a choice.
+  const improveEngines = useMemo(() => availableImproveEngines(caps), [caps]);
   const bulkBusy = busy || launchingImprove;
   useEffect(() => {
     setSelected(new Set());
@@ -235,24 +244,23 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
   // Hand the whole selection to the server in ONE call. The client keeps the
   // eligibility partition (it already holds the rows, and the confirm must state
   // what will be skipped); the server re-checks it and owns the pacing.
-  const improveSelected = async () => {
+  const improveSelected = async (engineId) => {
     const { eligible, excluded } = partitionKleinImproveSelection(improveUniverse, ids);
-    if (!onImproveBatch || !kleinAvailable || !eligible.length || bulkBusy) return;
-    const skipped = excluded.length
-      ? `\n\n${excluded.length} selected image(s) will be skipped: ${exclusionSummary}.`
-      : '';
-    if (!window.confirm(
-      `Create a separate 2 MP Klein improvement candidate for ${eligible.length} image(s)?`
-      + `${skipped}\n\nThey are queued a few at a time in the background — you can close`
-      + ' this tab, and ⏹ Stop generation ends the batch.'
-      + '\n\nOriginal images stay unchanged until you review the candidates.',
-    )) return;
+    if (!onImproveBatch || !eligible.length || bulkBusy) return;
+    if (improveEngineBlockedReason(engineId, {
+      caps, engines: caps?.engines, eligibleCount: eligible.length,
+    })) return;
+    if (!window.confirm(improveConfirmMessage(engineId, {
+      eligibleCount: eligible.length,
+      excludedCount: excluded.length,
+      exclusionSummary,
+    }))) return;
     setLaunchingImprove(true);
     try {
-      const result = await onImproveBatch(eligible.map((image) => image.id));
+      const result = await onImproveBatch(eligible.map((image) => image.id), engineId);
       if (result?.ok) {
         setSelected(new Set());
-        toast.success(describeKleinImproveLaunch(result));
+        toast.success(describeImproveLaunch(result));
       }
       // A failed launch already surfaced its own error toast (and the selection is
       // kept so the user can retry once the reason is fixed).
@@ -295,19 +303,31 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
               <button type="button" disabled={bulkBusy} onClick={() => act('clear_caption')}
                 title="Delete the selected images' captions (the Caption button then regenerates them)"
                 className={`${batchBtn} bg-surface text-content border border-border`}>🧹 Clear captions</button>
-              {onImproveBatch && (
-                <button type="button" onClick={improveSelected}
-                  disabled={bulkBusy || !!improveLabel || !kleinAvailable
-                            || !improveSelection.eligible.length}
-                  title={!kleinAvailable
-                    ? 'Klein is not available in this setup'
-                    : improveSelection.eligible.length
-                      ? `Runs in the background, a few at a time — survives a page reload.${exclusionSummary ? ` Excluded: ${exclusionSummary}.` : ''}`
-                      : `No selected image is eligible.${exclusionSummary ? ` ${exclusionSummary}.` : ''}`}
-                  className={`${batchBtn} border border-indigo-400/50 bg-indigo-500/20 text-indigo-100`}>
-                  {improveLabel || `✨ Improve via Klein (${improveSelection.eligible.length})`}
-                </button>
-              )}
+              {/* One button per engine that can actually run, because the two
+                  passes are a CHOICE, not two qualities of the same thing:
+                  Klein re-renders detail (and can move skin and colour),
+                  SeedVR2 resolves it and leaves the look alone (issue #32,
+                  SurpassHR). Each button's title carries that sentence, so the
+                  difference is readable before the click, not after a ruined
+                  batch. They wrap onto their own line on a narrow screen — the
+                  toolbar is already flex-wrap. */}
+              {onImproveBatch && improveEngines.map((engine) => {
+                const blocked = improveEngineBlockedReason(engine.id, {
+                  caps, engines: caps?.engines,
+                  eligibleCount: improveSelection.eligible.length,
+                });
+                return (
+                  <button key={engine.id} type="button"
+                    onClick={() => improveSelected(engine.id)}
+                    disabled={bulkBusy || !!improveLabel || !!blocked}
+                    title={blocked
+                      ? `${blocked}${exclusionSummary ? ` ${exclusionSummary}.` : ''}`
+                      : `${engine.summary} Runs in the background, a few at a time — survives a page reload.${exclusionSummary ? ` Excluded: ${exclusionSummary}.` : ''}`}
+                    className={`${batchBtn} border border-indigo-400/50 bg-indigo-500/20 text-indigo-100`}>
+                    {improveLabel || `${engine.emoji} ${engine.action} (${improveSelection.eligible.length})`}
+                  </button>
+                );
+              })}
               {onImproveBatch && improveSelection.excluded.length > 0 && (
                 <span className="text-content-subtle" title={exclusionSummary}>
                   {improveSelection.excluded.length} not eligible
@@ -326,6 +346,8 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
                   turned ONE anime tile realistic is about to run on the whole
                   selection. w-full = its own line under the buttons, at every
                   width (Qeeyana, Reddit). */}
+              {/* The anime-realism warning is about KLEIN's rewrite specifically —
+                  a SeedVR2 pass does not restyle, so the note follows Klein. */}
               {onImproveBatch && kleinAvailable && improveSelection.eligible.length > 0 && (
                 <KleinImproveNote subjectType={subjectType} datasetId={datasetId}
                   className="w-full border-t border-indigo-400/20 pt-1.5" />

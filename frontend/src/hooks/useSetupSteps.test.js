@@ -364,16 +364,14 @@ test('installAllPlan skips face/masks on an unsupported Python but keeps waterma
   assert.deepEqual(installAllPlan(caps), ['watermark_inpaint']);
 });
 
-test('installAllPlan queues the vision model only when Ollama is up and named', () => {
-  const up = { ...fullCaps(),
-    ollama: { reachable: true, vision_model_ready: false, vision_model: 'qwen3-vl:8b' } };
-  assert.ok(installAllPlan(up).includes('ollama_model'));
-  const noName = { ...fullCaps(),
-    ollama: { reachable: true, vision_model_ready: false, vision_model: '' } };
-  assert.ok(!installAllPlan(noName).includes('ollama_model'));
-  const down = { ...fullCaps(),
-    ollama: { reachable: false, vision_model_ready: false, vision_model: 'qwen3-vl:8b' } };
-  assert.ok(!installAllPlan(down).includes('ollama_model'));
+test('installAllPlan never pulls the Ollama model implicitly', () => {
+  for (const ollama of [
+    { reachable: true, vision_model_ready: false, vision_model: 'qwen3-vl:8b' },
+    { reachable: true, vision_model_ready: false, vision_model: '' },
+    { reachable: false, vision_model_ready: false, vision_model: 'qwen3-vl:8b' },
+  ]) {
+    assert.ok(!installAllPlan({ ...fullCaps(), ollama }).includes('ollama_model'));
+  }
 });
 
 test('installAllPlan takes Klein weights only into a validated ComfyUI, in order', () => {

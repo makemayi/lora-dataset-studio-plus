@@ -741,6 +741,92 @@ def _krea_missing_response(e):
                                      'node_packs': node_packs}}), 409
 
 
+def _seedvr2_missing_response(e):
+    """Turn a SeedVR2ModelsMissing into a structured 409, in the same
+    `{files, nodes, node_packs}` vocabulary as the Krea one so a single banner
+    renders every engine.
+
+    The one real difference is the node pack: this app INSTALLS Krea's (it has no
+    pip dependencies) and deliberately does NOT install this one, whose thirteen
+    dependencies belong in ComfyUI's interpreter (see seedvr2_helper's module
+    docstring). So the weights auto-start exactly like Klein's and Krea's, and
+    the pack gets an instruction naming ComfyUI-Manager — the tool that installs
+    a pack's requirements properly."""
+    from .. import capabilities, config as cfg
+    from ..services import seedvr2_helper as svr
+    files = svr.missing_file_entries(e.missing)
+    node_packs = svr.seedvr2_node_hints(e.missing_nodes)
+    dir_valid = capabilities.resolve_comfyui_base(cfg.get('comfyui.base_dir') or '')['valid']
+    started = _autostart_seedvr2_downloads(e.missing) if dir_valid else []
+    parts = ["SeedVR2 can't run yet."]
+    if not dir_valid:
+        parts.append('Point the app at your ComfyUI install folder in Setup ▸ ComfyUI '
+                     'and the app can download the weights for you; until then, by hand:')
+    if e.missing_nodes:
+        if svr.seedvr2_node_pack_installed():
+            # On disk, absent from /object_info: the ONE thing no installer can do.
+            parts.append(
+                f"The “{svr.SEEDVR2_NODE_PACK['pack']}” node pack is already installed "
+                "but ComfyUI has not loaded it — RESTART ComfyUI (it only registers "
+                "custom nodes at startup). If it still doesn't appear, its Python "
+                "dependencies failed to install: check ComfyUI's console.")
+        else:
+            parts.append(
+                f"Install the “{svr.SEEDVR2_NODE_PACK['pack']}” custom-node pack in "
+                f"ComfyUI (search “{svr.SEEDVR2_NODE_PACK['search']}” in ComfyUI-Manager, "
+                f"or clone {svr.SEEDVR2_NODE_PACK['url']} and install its "
+                "requirements.txt), then restart ComfyUI — it provides "
+                f"{', '.join(e.missing_nodes)}.")
+    if started:
+        names = ', '.join(svr.SEEDVR2_ASSETS[a]['kind'] for a in started
+                          if a in svr.SEEDVR2_ASSETS)
+        parts.append(f"I've started downloading {names} into your ComfyUI folder "
+                     "(~3.9 GB in total) — watch progress in Setup ▸ ComfyUI.")
+    else:
+        # Nothing could be started: the by-hand answer is still owed in full.
+        for f in files:
+            parts.append(f"Missing {f['kind']}: place it at {f['path']} inside your "
+                         f"ComfyUI folder (from {f['source']}).")
+    parts.append('Then retry.')
+    return jsonify({'ok': False, 'error': ' '.join(parts),
+                    'downloading': started,
+                    'seedvr2_missing': {'assets': e.missing, 'files': files,
+                                        'nodes': e.missing_nodes,
+                                        'node_packs': node_packs}}), 409
+
+
+def _autostart_seedvr2_downloads(missing):
+    """Start the weight downloads that close a SeedVR2 preflight miss. Returns the
+    actions actually started; never raises, so a download that can't start leaves
+    the manual instructions standing."""
+    from .. import setup_installer
+    started = []
+    for action in (missing or []):
+        if action not in setup_installer.INSTALL_ACTIONS:
+            continue
+        try:
+            setup_installer.start(action)
+            started.append(action)
+        except Exception:   # noqa: BLE001 — already running / disk precondition
+            continue
+    return started
+
+
+def _improve_engine_error(e):
+    """The (body, 409) for an improve preflight miss, whichever engine raised it,
+    or None when `e` is not one of those. Every improve route answers the same
+    three exception types, so the mapping lives once."""
+    from ..services.klein_edit_helper import KleinModelsMissing
+    from ..services.seedvr2_helper import SeedVR2ModelsMissing
+    if isinstance(e, svc.KleinNodesMissing):
+        return _klein_missing_response(e.missing, e.missing_nodes)
+    if isinstance(e, KleinModelsMissing):
+        return _klein_missing_response(e.missing)
+    if isinstance(e, SeedVR2ModelsMissing):
+        return _seedvr2_missing_response(e)
+    return None
+
+
 def _autostart_krea_install(missing, missing_nodes):
     """Kick off the installs that close a Krea preflight miss: the node pack (a
     small git clone) and each missing weight. Returns the action names actually
@@ -892,8 +978,11 @@ def dataset_generate(dataset_id):
                 # Second LOCAL path (Krea 2 Identity Edit): GPU-bound like Klein,
                 # free, NSFW-capable. Its one dial (grounding_px) is a setting,
                 # not a per-run argument — see krea_edit_helper.grounding_px.
-                ids = svc.generate_variations_krea(LOCAL_USER, dataset_id,
-                                                   variations, multiplier)
+                # Its own preset key, NOT Klein's: one request can dispatch to
+                # both engines, so a single key would be ambiguous.
+                ids = svc.generate_variations_krea(
+                    LOCAL_USER, dataset_id, variations, multiplier,
+                    generation_lora_preset=data.get('krea_generation_lora_preset'))
             else:
                 ids = svc.generate_variations(LOCAL_USER, dataset_id,
                                               variations, multiplier,
@@ -1443,18 +1532,21 @@ def dataset_klein_model_set(dataset_id):
 
 @bp.post('/dataset/image/<int:image_id>/improve')
 def dataset_image_improve(image_id):
-    """Create a regular Klein-upscaled candidate without touching the source."""
+    """Create an upscaled candidate without touching the source.
+
+    `engine` (optional): 'klein' (rewrites detail) or 'seedvr2' (restores it).
+    Absent = the improve.engine setting, which defaults to the historical Klein."""
     gate = _require_no_stalled_comfyui()
     if gate:
         return gate
+    data = request.get_json(silent=True) or {}
+    engine = (data.get('engine') or '').strip() or None
     try:
-        result = svc.improve_existing_image(LOCAL_USER, image_id)
+        result = svc.improve_existing_image(LOCAL_USER, image_id, engine=engine)
     except Exception as e:
-        from ..services.klein_edit_helper import KleinModelsMissing
-        if isinstance(e, svc.KleinNodesMissing):
-            return _klein_missing_response(e.missing, e.missing_nodes)
-        if isinstance(e, KleinModelsMissing):
-            return _klein_missing_response(e.missing)
+        engine_error = _improve_engine_error(e)
+        if engine_error:
+            return engine_error
         return _map_error(e)
     if result is None:
         return jsonify({'error': 'not found'}), 404
@@ -1474,11 +1566,9 @@ def dataset_image_reimprove(image_id):
     try:
         result = svc.reimprove_image(LOCAL_USER, image_id)
     except Exception as e:
-        from ..services.klein_edit_helper import KleinModelsMissing
-        if isinstance(e, svc.KleinNodesMissing):
-            return _klein_missing_response(e.missing, e.missing_nodes)
-        if isinstance(e, KleinModelsMissing):
-            return _klein_missing_response(e.missing)
+        engine_error = _improve_engine_error(e)
+        if engine_error:
+            return engine_error
         return _map_error(e)
     if result is None:
         return jsonify({'error': 'not found'}), 404
@@ -1487,27 +1577,31 @@ def dataset_image_reimprove(image_id):
 
 @bp.post('/dataset/<int:dataset_id>/improve/batch')
 def dataset_improve_batch(dataset_id):
-    """Start the SERVER-side ✨ Klein upscale & improve batch over a selection.
+    """Start the SERVER-side ✨ Upscale & improve batch over a selection.
 
-    Returns immediately with {queued, skipped}; progress rides on the dataset's
-    `activity` (kind 'improve'), so it survives a reload, and ⏹ Stop generation
-    stops it. The browser no longer loops one request per image."""
+    Returns immediately with {queued, skipped, engine}; progress rides on the
+    dataset's `activity` (kind 'improve'), so it survives a reload, and ⏹ Stop
+    generation stops it. The browser no longer loops one request per image.
+
+    `engine` (optional): 'klein' or 'seedvr2' — absent = the improve.engine
+    setting. The choice is made ONCE for the whole batch, so a mixed selection
+    can never come back half-rewritten and half-restored."""
     data = request.get_json(silent=True) or {}
     ids = data.get('image_ids')
     if not isinstance(ids, list):
         return jsonify({'error': 'image_ids must be a list'}), 400
+    engine = (data.get('engine') or '').strip() or None
     gate = _require_no_stalled_comfyui()
     if gate:
         return gate
     try:
         result = svc.start_bulk_improve(
-            current_app._get_current_object(), LOCAL_USER, dataset_id, ids)
+            current_app._get_current_object(), LOCAL_USER, dataset_id, ids,
+            engine=engine)
     except Exception as e:
-        from ..services.klein_edit_helper import KleinModelsMissing
-        if isinstance(e, svc.KleinNodesMissing):
-            return _klein_missing_response(e.missing, e.missing_nodes)
-        if isinstance(e, KleinModelsMissing):
-            return _klein_missing_response(e.missing)
+        engine_error = _improve_engine_error(e)
+        if engine_error:
+            return engine_error
         return _map_error(e)
     return jsonify({'ok': True, **result})
 
@@ -1955,7 +2049,9 @@ def lora_test_best(dataset_id):
                                      d.get('checkpoint'), d.get('strength'),
                                      z_model=d.get('z_model'), cfg=d.get('cfg'),
                                      steps=d.get('steps'), steps2=d.get('steps2'),
-                                     aspect=d.get('aspect'))
+                                     aspect=d.get('aspect'),
+                                     # 🧬 pile : les LoRA empilés AVEC celui de tête.
+                                     stack=d.get('stack'))
     except ValueError as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
     return jsonify({'ok': True, 'best_settings': best})

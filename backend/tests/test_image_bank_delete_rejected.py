@@ -64,8 +64,11 @@ def test_delete_rejected_removes_only_rejected_files(client, tmp_path, monkeypat
     _reject(client, bank_id, [by['bad1.jpg']['id'], by['bad2.jpg']['id']])
 
     r = client.post(f'/api/bank/{bank_id}/delete-rejected', json={})
-    assert r.status_code == 200, r.get_json()
+    # 202: the pass is a background bank job now. Under TESTING bank_jobs runs it
+    # inline, so the outcome is already in the body.
+    assert r.status_code == 202, r.get_json()
     out = r.get_json()
+    assert out['total'] == 2
     assert out['mode'] == 'trash'
     assert out['trashed'] == 2 and out['deleted'] == 0
     assert out['rows_removed'] == 2 and out['skipped'] == []
@@ -216,3 +219,68 @@ def test_delete_rejected_never_escapes_bank_folder(client, app, tmp_path, monkey
     assert out['skipped'] and out['skipped'][0]['reason'] == 'unsafe_path'
     assert out['rows_removed'] == 0
     assert outside.exists()                 # the escaping path was refused
+
+
+# --- observability: it is a JOB, with a count and a Stop ---------------------
+def test_the_run_reports_progress_and_a_countable_outcome(client, app, tmp_path,
+                                                          monkeypatch):
+    """THE WAIT THIS REPLACES: the deletion ran inside the POST, so a bank with
+    thousands of rejects sat on "Deleting…" for minutes with no number and no
+    way to tell a slow run from a crashed one. It is an ordinary bank job now —
+    same registry, same progress bar, same completion toast."""
+    _force_trash(monkeypatch)
+    names = [f'bad{i}.jpg' for i in range(5)]
+    bank_id, src = _mkbank(client, tmp_path, names + ['keep.jpg'])
+    by = _by_name(client, bank_id)
+    _reject(client, bank_id, [by[n]['id'] for n in names])
+
+    seen = []
+    from app.services import bank_jobs
+    real = bank_jobs.progress
+
+    def spy(job, done=None, total=None, detail=None):
+        real(job, done=done, total=total, detail=detail)
+        seen.append((job['done'], job['total'], job['detail']))
+
+    monkeypatch.setattr(bank_jobs, 'progress', spy)
+    r = client.post(f'/api/bank/{bank_id}/delete-rejected', json={})
+    assert r.status_code == 202
+    assert r.get_json()['total'] == 5
+
+    # Counted from 0/5 to 5/5, one report per file — that is the bar's content.
+    assert seen[0][:2] == (0, 5)
+    assert [d for d, _t, _x in seen] == [0, 1, 2, 3, 4, 5, 5]
+    # The detail says where the files GO; repeating "5 / 5" next to the bar's own
+    # "5 / 5" would spend the width (and a 400 px phone's width) on nothing.
+    assert seen[0][2] == 'moving files to the Recycle Bin'
+    assert '/' not in seen[-2][2]
+    # The last report is the sentence the workspace toasts when the job lands.
+    assert '5 rejected file(s)' in seen[-1][2]
+    assert (src / 'keep.jpg').exists()
+
+
+def test_stop_leaves_a_consistent_bank(client, app, tmp_path, monkeypatch):
+    """Cancel between files: whatever left the disk has lost its row too, and
+    the rest are still there to be deleted on a second run."""
+    _force_trash(monkeypatch)
+    names = [f'bad{i}.jpg' for i in range(4)]
+    bank_id, src = _mkbank(client, tmp_path, names)
+    by = _by_name(client, bank_id)
+    _reject(client, bank_id, [by[n]['id'] for n in names])
+
+    from app.services import bank_jobs
+    real = bank_jobs.cancelled
+    calls = {'n': 0}
+
+    def stop_after_two(job):
+        calls['n'] += 1
+        return calls['n'] > 2 or real(job)
+
+    monkeypatch.setattr(bank_jobs, 'cancelled', stop_after_two)
+    out = client.post(f'/api/bank/{bank_id}/delete-rejected', json={}).get_json()
+    assert out['cancelled'] is True
+    assert out['trashed'] == 2 and out['rows_removed'] == 2
+    # Exactly the two whose files went are gone from the bank; the others stayed.
+    left = set(_by_name(client, bank_id))
+    on_disk = {p.name for p in src.iterdir()}
+    assert left == on_disk and len(left) == 2

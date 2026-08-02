@@ -17,16 +17,22 @@ import StrengthPicker from './StrengthPicker';
 import RecentPrompts from './RecentPrompts';
 import DescribeImageModal from './DescribeImageModal';
 import DatasetCaptionControl from './DatasetCaptionControl';
+import EnhancePromptButton from './EnhancePromptButton';
+import { cellCount } from './loraStack';
 
 export default function StudioRunSetup({
   selectionCount, strengths, onToggleStrength,
   prompt, onPrompt, seed, onReroll, count, onCount,
-  onLaunch, launching, gpuBusy, batchMult = 1,
+  onLaunch, launching, gpuBusy, batchMult = 1, combine = false, combineBlocked = null,
 }) {
   // batchMult = 1 + nb de LoRA cochés « ⚖ batch » (axe sans/avec) — le backend
   // multiplie les cellules d'autant, le compteur de coût doit suivre.
-  const cells = selectionCount * strengths.length * count * batchMult;
-  const canLaunch = selectionCount > 0 && strengths.length > 0 && cells > 0 && !launching && !gpuBusy;
+  // En mode « pile » (combine) l'axe strengths disparaît : chaque LoRA porte son
+  // propre poids, la pile ne produit donc qu'UNE configuration.
+  const cells = cellCount({
+    selectionCount, strengthCount: strengths.length, count, batchMult, combine,
+  });
+  const canLaunch = cells > 0 && !launching && !gpuBusy && !combineBlocked;
 
   // Prompts de test récents GLOBAUX (tous datasets — la comparaison n'en avait
   // aucun avant). Rechargé après un lancement (nouveau prompt mémorisé) et après
@@ -63,7 +69,9 @@ export default function StudioRunSetup({
         </p>
       )}
 
-      <StrengthPicker choices={STRENGTH_CHOICES} selected={strengths} onToggle={onToggleStrength} fmt={fmt} />
+      {!combine && (
+        <StrengthPicker choices={STRENGTH_CHOICES} selected={strengths} onToggle={onToggleStrength} fmt={fmt} />
+      )}
 
       <div className="flex flex-col gap-1">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -72,6 +80,7 @@ export default function StudioRunSetup({
           </label>
           <div className="flex max-w-full flex-wrap items-center justify-end gap-1">
             <DatasetCaptionControl onCaption={applyCaption} />
+            <EnhancePromptButton prompt={prompt} onResult={onPrompt} />
           <button type="button" onClick={() => setDescribeOpen(true)}
             title="Describe an image into a test prompt (vision model)"
             className="px-2 py-0.5 rounded border border-border bg-surface text-content-subtle text-[0.625rem] hover:text-content">
@@ -112,8 +121,12 @@ export default function StudioRunSetup({
 
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-content-subtle text-[0.6875rem]"
-          title={`GPU cost: checked LoRAs × strengths × images per config${batchMult > 1 ? ` × ${batchMult} (⚖ batch axis: without + with each checked LoRA)` : ''}`}>
-          {selectionCount} LoRA × {strengths.length} strength × {count}
+          title={combine
+            ? `GPU cost: one combined stack of ${selectionCount} LoRAs × images per config`
+            : `GPU cost: checked LoRAs × strengths × images per config${batchMult > 1 ? ` × ${batchMult} (⚖ batch axis: without + with each checked LoRA)` : ''}`}>
+          {combine
+            ? <>1 stack of {selectionCount} LoRA × {count}</>
+            : <>{selectionCount} LoRA × {strengths.length} strength × {count}</>}
           {batchMult > 1 && <span className="text-amber-300"> × {batchMult} ⚖</span>} ={' '}
           <span className={`tabular-nums font-semibold ${cells > 0 ? 'text-content' : 'text-content-subtle'}`}>{cells}</span>{' '}
           cell(s) to generate
@@ -126,6 +139,9 @@ export default function StudioRunSetup({
       </div>
       {selectionCount === 0 && (
         <p className="m-0 text-amber-300 text-[0.6875rem]">Check at least one LoRA above.</p>
+      )}
+      {combineBlocked && (
+        <p className="m-0 text-amber-300 text-[0.6875rem]" role="status">{combineBlocked}</p>
       )}
     </div>
   );

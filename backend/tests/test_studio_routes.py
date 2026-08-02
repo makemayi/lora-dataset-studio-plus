@@ -666,3 +666,59 @@ def test_index_config_returns_documented_fields(client):
     assert body['krea_loras'] == []
     assert 'er_sde' in body['krea_samplers']
     assert 'simple' in body['krea_schedulers']
+
+
+# --- /api/studio/run: combine flag + /api/studio/enhance-prompt ---------------
+
+def test_studio_run_forwards_the_combine_flag_and_per_lora_weights(client, monkeypatch):
+    """The route is a pass-through: `combine` and the per-selection `weight` must reach
+    the service untouched, or the stack silently degrades into a comparison grid."""
+    _comfy(monkeypatch, True)
+    seen = {}
+
+    def fake(user_id, selections, strengths, **kwargs):
+        seen['selections'] = selections
+        seen['strengths'] = strengths
+        seen['combine'] = kwargs.get('combine')
+        return {'created': 1, 'seed': 7, 'count': 1, 'run_id': 'r1', 'ids': [1]}
+    monkeypatch.setattr('app.services.lora_test_studio.create_comparison_run', fake)
+    resp = client.post('/api/studio/run', json={
+        'selections': [{'dataset_id': 1, 'checkpoint': 'a.safetensors', 'weight': 0.9},
+                       {'dataset_id': 2, 'checkpoint': 'b.safetensors', 'weight': 0.55}],
+        'combine': True, 'count': 1})
+    assert resp.status_code == 200
+    assert seen['combine'] is True
+    assert [s.get('weight') for s in seen['selections']] == [0.9, 0.55]
+
+
+def test_studio_enhance_prompt_returns_the_enriched_prompt(client, monkeypatch):
+    monkeypatch.setattr('app.services.lora_test_studio.enhance_test_prompt',
+                        lambda p: f'{p}, cinematic lighting')
+    resp = client.post('/api/studio/enhance-prompt', json={'prompt': 'a girl'})
+    assert resp.status_code == 200
+    assert resp.get_json() == {'ok': True, 'prompt': 'a girl, cinematic lighting'}
+
+
+def test_studio_enhance_prompt_maps_a_missing_ollama_to_409(client, monkeypatch):
+    def boom(_p):
+        raise RuntimeError('Ollama could not start')
+    monkeypatch.setattr('app.services.lora_test_studio.enhance_test_prompt', boom)
+    resp = client.post('/api/studio/enhance-prompt', json={'prompt': 'a girl'})
+    assert resp.status_code == 409
+    assert 'Ollama' in resp.get_json()['error']
+
+
+def test_studio_enhance_prompt_maps_an_empty_prompt_to_400(client, monkeypatch):
+    resp = client.post('/api/studio/enhance-prompt', json={'prompt': '  '})
+    assert resp.status_code == 400
+    assert 'nothing to enhance' in resp.get_json()['error']
+
+
+def test_studio_enhance_prompt_is_not_gated_on_comfyui(client, monkeypatch):
+    """Enhance touches Ollama, not ComfyUI: a stopped ComfyUI must not block it
+    (the Describe route is ungated for the same reason)."""
+    _comfy(monkeypatch, False)
+    monkeypatch.setattr('app.services.lora_test_studio.enhance_test_prompt',
+                        lambda p: 'enriched')
+    resp = client.post('/api/studio/enhance-prompt', json={'prompt': 'a girl'})
+    assert resp.status_code == 200

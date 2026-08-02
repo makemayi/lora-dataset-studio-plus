@@ -121,8 +121,17 @@ export function isNodeControlTarget(target) {
   // A group's own ✕ is on the strip, not inside any one picture, so it needs
   // naming here too — otherwise the frame captures its pointer and the button
   // never hears the click, which is exactly the bug this guard exists for.
+  //
+  // `data-canvas-control` is the OPEN version of the same rule, for a control
+  // that lives in the zoomed world without belonging to a pinned node — the
+  // lane header's 🪪 reference thumbnail was the first. It was written, it was
+  // correct, and a real click on it did nothing at all: the frame captured the
+  // pointer and the click that followed was retargeted away from the button.
+  // Anything added to the world from now on can opt out by wearing this
+  // attribute instead of rediscovering the trap.
   return !!(target.closest('[data-canvas-image] button')
-    || target.closest('[data-canvas-group-bar] button'));
+    || target.closest('[data-canvas-group-bar] button')
+    || target.closest('[data-canvas-control]'));
 }
 
 /**
@@ -142,7 +151,8 @@ export function isNodeControlTarget(target) {
 export function nodePointerIntent(target, pointerType) {
   if (!target || typeof target.closest !== 'function') return 'press';
   if (target.closest('[data-canvas-image] button')
-    || target.closest('[data-canvas-group-bar] button')) return 'control';
+    || target.closest('[data-canvas-group-bar] button')
+    || target.closest('[data-canvas-control]')) return 'control';
   if (target.closest('[data-canvas-group-bar]')) return 'group-move';
   if (target.closest('[data-canvas-image-resize]')) return 'resize';
   return pointerType === 'touch' ? 'press' : 'move';

@@ -13,6 +13,20 @@ export function folderSyncToast(sync) {
   if (!sync) return null
   if (sync.error) return { type: 'error', text: `Folder refresh — ${sync.error}` }
   const added = Number(sync.added) || 0
+  const notAdded = Number(sync.not_added) || 0
+  // The per-bank ceiling used to REFUSE the whole batch. It now takes what fits
+  // and says what it left, so the user learns the number and the remedy instead
+  // of a flat no. Zero images added is still worth a toast in this case — that
+  // is precisely the case where silence would look like a bug.
+  if (notAdded > 0) {
+    const limit = Number(sync.limit) || 0
+    return {
+      type: 'warning',
+      text: `${added} new image(s) added; ${notAdded} were not — this bank is at its `
+        + `ceiling of ${limit.toLocaleString('en-US')} images. Move the rest into a `
+        + 'second bank, or delete images from the folder to make room.',
+    }
+  }
   if (added > 0) {
     return {
       type: 'success',
@@ -28,9 +42,20 @@ export function bankListSyncToast(banks) {
   const rows = Array.isArray(banks) ? banks : []
   let added = 0
   let n = 0
+  let notAdded = 0
   for (const b of rows) {
     const a = Number(b?.folder_sync?.added) || 0
+    notAdded += Number(b?.folder_sync?.not_added) || 0
     if (a > 0) { added += a; n += 1 }
+  }
+  // A bank at its ceiling must say so from the LIST too — that is where a user
+  // who just dumped a scrape into the folder looks first.
+  if (notAdded > 0) {
+    return {
+      type: 'warning',
+      text: `${added} new image(s) added; ${notAdded} were not — a bank is at its `
+        + 'image ceiling. Open it to see which, and split the folder or make room.',
+    }
   }
   if (added <= 0) return null
   return {

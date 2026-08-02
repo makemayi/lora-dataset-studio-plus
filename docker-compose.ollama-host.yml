@@ -1,0 +1,6 @@
+# Connect the Studio container to an Ollama already running on Windows.
+services:
+  studio:
+    environment:
+      LDS_OLLAMA_MODE: host
+      LDS_OLLAMA_URL: http://host.docker.internal:11434

@@ -8,7 +8,7 @@
  *  HERE, start it. It's a background job (bank_jobs), so we follow the very
  *  snapshot the bank page follows — the one embedded in the banks payload. */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { apiFetch, postJson } from '../../api/fetchClient';
 import { useToast } from '../common/Toast';
 import {

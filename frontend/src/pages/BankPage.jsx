@@ -72,7 +72,7 @@ export default function BankPage() {
       // The server re-walked every source folder before answering: say so when
       // it found something, so the counters never move without an explanation.
       const note = bankListSyncToast(d.banks)
-      if (note) toast.success(note.text)
+      if (note) toast[note.type](note.text)
     } catch (e) {
       toast.error(e?.message || 'Could not load the banks.')
       setBanks([])

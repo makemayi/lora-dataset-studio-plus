@@ -225,6 +225,40 @@ best one**. Later checkpoints know the identity better but obey prompts worse.
    expression/angle regardless of prompt, outfits from the dataset bleeding in.
 4. Save the winning settings (★) — they're reused as the dataset's defaults.
 
+### Compare LoRAs — or combine them
+
+Check two or more LoRAs and Studio asks what you want to do with them:
+
+- **⚖ Compare** (the default) tests each LoRA **on its own**, one column per LoRA,
+  swept across the strengths you picked. This is what you want to answer "which of
+  these is better".
+- **🧬 Combine** loads them **together in the same image**, each at its own weight,
+  and injects **every trigger word** into the prompt for you. This is what you want
+  to answer "do these two work together" — a character plus a style, or two of your
+  own characters in one shot.
+
+In Combine mode the strength sweep disappears: each LoRA already carries its own
+weight, so the run is one configuration instead of a grid. Start both around
+0.7-0.9 — two LoRAs at 1.0 usually fight each other, and the one you care about
+most should be the heavier of the two. Result tiles from a stack carry a **🧬 +N**
+badge naming what was loaded alongside.
+
+**One family per run, always.** A Krea LoRA and an SDXL LoRA cannot be combined:
+they need different base models and different workflows. The picker greys out the
+other families as soon as you check one, and a run that somehow mixes them is
+refused with both family names in the message.
+
+### Enhance a short prompt
+
+**✨ Enhance** rewrites what you typed into a fuller prompt using your local Ollama
+model — it adds framing, pose, lighting, background and mood, and deliberately
+leaves identity and trigger words alone (the LoRA supplies the identity, and Studio
+injects the trigger itself at generation time).
+
+It is a local feature: without Ollama installed, running, and with its model pulled,
+the button is **greyed out and says which of the three is missing** rather than
+failing when you press it. Install or start it from **Settings › Local tools**.
+
 ### Reuse a dataset caption in Studio
 
 Press **🎲 Caption** for a realistic test prompt from work you already curated.

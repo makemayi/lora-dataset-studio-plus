@@ -67,9 +67,15 @@ from .image_provenance import ORIGINS, provenance_metrics
 logger = logging.getLogger(__name__)
 
 IMG_EXTS = ('.jpg', '.jpeg', '.png', '.webp', '.bmp')
-# Sanity cap — a bank is a triage layer, not a filesystem indexer. Way above
-# the founding 9 000-image case, low enough to catch "I pointed it at C:\".
-BANK_MAX_FILES = 50000
+# Sanity cap — a bank is a triage layer, not a filesystem indexer: this is what
+# catches "I pointed it at a whole drive", nothing more. Measured on a synthetic
+# tree of 200 000 files (50 subfolders, warm cache): the walk refresh_bank runs
+# costs 2.5 s, the per-file getsize 1.8 s, the chunked INSERT of every row 0.2 s,
+# and reading the known-relpath set back 0.14 s. The walk is the only real cost and
+# it is already cooldown-limited (FOLDER_SYNC_COOLDOWN), so 50 000 was far below
+# what the code can carry; the per-image passes that ARE expensive have always
+# been background jobs with their own progress bar.
+BANK_MAX_FILES = 200_000
 THUMB_MAX_SIDE = 320
 _COMMIT_EVERY = 25          # scan DB flush cadence
 _PROMOTE_CHUNK = 20         # files per import_images call (bounded memory)
@@ -344,21 +350,41 @@ def create_bank(user_id, name, folder):
             if f.lower().endswith(IMG_EXTS):
                 rels.append(os.path.relpath(os.path.join(root, f), folder))
                 if len(rels) > BANK_MAX_FILES:
+                    # Bail on the walk itself: a bank pointed at a whole drive
+                    # must not be counted to the end before being refused.
                     raise ValueError(
-                        f'too many images in the folder (max {BANK_MAX_FILES})')
+                        f'this folder holds more than {BANK_MAX_FILES:,} images '
+                        '— point the bank at a subfolder, or split it in two')
     bank = ImageBank(user_id=user_id, name=name, source_path=folder)
     db.session.add(bank)
     db.session.flush()          # need bank.id for the child rows
-    for i, rel in enumerate(rels, 1):
+    _insert_bank_images(bank.id, folder, rels)
+    db.session.commit()
+    return bank, len(rels)
+
+
+_INSERT_CHUNK = 2000
+
+
+def _insert_bank_images(bank_id, folder, rels) -> int:
+    """Insert one BankImage per relpath, in chunks, through a CORE insert.
+
+    Row-by-row ``db.session.add`` costs ~141 us/file (measured: 7.1 s for a
+    50 000-image folder), which at the folder sizes this app now accepts would
+    hold the HTTP request open for half a minute. The same rows through a
+    chunked core insert cost a fraction of that, and Python-side column defaults
+    (status, timestamps) are applied exactly as the ORM would."""
+    rows = []
+    for rel in rels:
         try:
             size = os.path.getsize(os.path.join(folder, rel))
         except OSError:
             size = None
-        db.session.add(BankImage(bank_id=bank.id, relpath=rel, file_size=size))
-        if i % 500 == 0:
-            db.session.flush()
-    db.session.commit()
-    return bank, len(rels)
+        rows.append({'bank_id': bank_id, 'relpath': rel, 'file_size': size})
+    for i0 in range(0, len(rows), _INSERT_CHUNK):
+        db.session.execute(BankImage.__table__.insert(),
+                           rows[i0:i0 + _INSERT_CHUNK])
+    return len(rows)
 
 
 # --- folder sync (incremental re-inventory) ---------------------------------
@@ -369,7 +395,8 @@ def create_bank(user_id, name, folder):
 # poll from hitting the disk (possibly a spun-down external drive) constantly.
 FOLDER_SYNC_COOLDOWN = 60.0
 _folder_sync = {}       # bank_id -> {'at': monotonic, 'result': {...}}
-_EMPTY_SYNC = {'added': 0, 'missing': 0, 'unavailable': False, 'error': None}
+_EMPTY_SYNC = {'added': 0, 'missing': 0, 'unavailable': False, 'error': None,
+               'not_added': 0, 'limit': BANK_MAX_FILES}
 
 
 def reset_folder_sync():
@@ -379,10 +406,11 @@ def reset_folder_sync():
 
 
 def _sync_cached(bank_id) -> dict:
-    """The last known folder state, with ``added`` zeroed — nothing was added by
-    the call that is being answered from the cache."""
+    """The last known folder state, with the per-walk EVENTS zeroed — nothing was
+    added, and nothing was left out, by the call being answered from the cache.
+    Reporting them again would re-toast one walk's outcome on every 2 s poll."""
     last = _folder_sync.get(bank_id)
-    return {**(last['result'] if last else _EMPTY_SYNC), 'added': 0}
+    return {**(last['result'] if last else _EMPTY_SYNC), 'added': 0, 'not_added': 0}
 
 
 def refresh_bank(user_id, bank_id, force=False) -> dict | None:
@@ -401,8 +429,14 @@ def refresh_bank(user_id, bank_id, force=False) -> dict | None:
     drive or a renamed folder would otherwise wipe a whole triage in one silent
     pass. The count is surfaced so the user can decide.
 
-    Returns {'added', 'missing', 'unavailable', 'error'}, or None when the bank
-    is unknown. ``force`` bypasses the cooldown (bank opened by hand)."""
+    The BANK_MAX_FILES ceiling is counted against what the walk found ON DISK,
+    never against the bank's row history, and it no longer refuses the batch: as
+    many new files as fit are added and the remainder is reported in
+    ``not_added``. See the comment at the check for the bug that motivated both.
+
+    Returns {'added', 'missing', 'unavailable', 'error', 'not_added', 'limit'},
+    or None when the bank is unknown. ``force`` bypasses the cooldown (bank
+    opened by hand)."""
     bank = get_bank(user_id, bank_id)
     if bank is None:
         return None
@@ -439,27 +473,36 @@ def refresh_bank(user_id, bank_id, force=False) -> dict | None:
         # every row: a partial walk must never be read as "these files are gone".
         return _remember_sync(bank_id, now, {**_EMPTY_SYNC, 'unavailable': True})
 
-    error = None
-    if new_rels and len(known) + len(new_rels) > BANK_MAX_FILES:
-        # Same sanity cap as create_bank, applied to the TOTAL after the add.
-        # Nothing is inserted: a half-imported folder is worse than an honest no.
-        new_rels, error = [], (f'the folder now holds more than {BANK_MAX_FILES} '
-                               'images — the new files were not added')
-    new_rels.sort()
-    for i, rel in enumerate(new_rels, 1):
-        try:
-            size = os.path.getsize(os.path.join(folder, rel))
-        except OSError:
-            size = None
-        db.session.add(BankImage(bank_id=bank_id, relpath=rel, file_size=size))
-        if i % 500 == 0:
-            db.session.flush()
+    new_rels.sort()             # deterministic order — a partial add takes a PREFIX
+    # The cap is a property of the FOLDER, not of the bank's history. ``seen`` is
+    # what the walk just found on disk (surviving rows + new files); rows whose
+    # file the user deleted are NOT in it and must not consume the budget.
+    #
+    # THE BUG THIS REPLACES: the test was `len(known) + len(new_rels) > cap`,
+    # where `known` is every relpath ever inventoried — refresh is deliberately
+    # additive and never drops a row for a vanished file. So a folder that once
+    # held 50 000 images and now holds 10 000 still counted as 50 000 for ever,
+    # and the refusal told the user "the folder now holds more than 50000
+    # images" about a folder holding a fifth of that. Measured before the fix:
+    # 10 001 files on disk, 50 000 rows, one new file → refused.
+    not_added = 0
+    over = len(seen) - BANK_MAX_FILES
+    if over > 0:
+        # Non-blocking: add what fits (oldest-first by name) instead of refusing
+        # the whole batch. Everything already in the bank keeps working, and the
+        # count that was left out is reported so the user can act on it.
+        keep = max(len(new_rels) - over, 0)
+        not_added = len(new_rels) - keep
+        new_rels = new_rels[:keep]
     if new_rels:
+        _insert_bank_images(bank_id, folder, new_rels)
         db.session.commit()
     return _remember_sync(bank_id, now, {
         'added': len(new_rels),
         'missing': sum(1 for k in known if k not in seen),
-        'unavailable': False, 'error': error})
+        'unavailable': False, 'error': None,
+        # Reported every time so the UI can phrase a partial add honestly.
+        'not_added': not_added, 'limit': BANK_MAX_FILES})
 
 
 def _remember_sync(bank_id, at, result) -> dict:
@@ -2858,7 +2901,79 @@ def _delete_mode() -> str:
     return trash.disposal_mode()
 
 
-def delete_rejected(user_id, bank_id) -> dict:
+def _delete_rejected_guard(user_id, bank_id, check_busy=True):
+    """The three refusals 🗑 Delete rejected owes the caller BEFORE anything is
+    touched — unknown bank, occupied bank, folder shared with a dataset. Split
+    out so the route can answer 404/409/400 synchronously while the deletion
+    itself runs in the background. ``check_busy`` is off for the job's own body:
+    by then the registry holds OUR job and would refuse us."""
+    bank = get_bank(user_id, bank_id)
+    if not bank:
+        raise ValueError('bank not found')
+    if check_busy and bank_jobs.running(bank_id):
+        raise RuntimeError('a job is running on this bank — stop it first')
+    # An install that predates the create-time guard can still hold a bank whose
+    # folder IS a dataset's. Here, and only here, that stops being cosmetic: these
+    # "rejects" are the dataset's images. Refuse — never silently delete, never
+    # silently clean up on the user's behalf.
+    conflict = bank_dataset_conflict(user_id, bank_id)
+    if conflict:
+        raise BankSharesDataset(
+            'This bank points at a dataset\'s own image folder, so deleting its '
+            'rejected files would delete images out of the dataset. Nothing was '
+            f'deleted. {conflict["message"]}')
+    return bank
+
+
+_DELETE_DETAIL = {
+    'trash': 'moving files to the Recycle Bin',
+    'app_trash': 'moving files to the app Trash',
+    'delete': 'deleting files permanently',
+}
+
+
+def delete_rejected_summary(out: dict) -> str:
+    """One plain sentence for the progress bar / completion toast. The workspace
+    already toasts a finished job's ``detail``, so this IS the outcome the user
+    reads — it must carry the numbers, not the word "done"."""
+    gone = out['deleted'] + out['trashed'] + out['already_absent']
+    where = ('permanently deleted' if out['mode'] == 'delete'
+             else 'moved to the app Trash' if out['mode'] == 'app_trash'
+             else 'moved to the Recycle Bin')
+    text = f'{gone} rejected file(s) {where}'
+    if out['skipped']:
+        text += f' · {len(out["skipped"])} could not be removed and kept their row'
+    return text
+
+
+def start_delete_rejected(app, user_id, bank_id) -> dict:
+    """Start 🗑 Delete rejected as a background bank job and return immediately.
+
+    THE WAIT THIS REPLACES: the deletion ran inside the POST. On a bank with
+    thousands of rejects — every file individually handed to the OS Recycle Bin,
+    which is not fast — the dialog sat on "Deleting…" for minutes with no count,
+    no way to stop, and no way to tell a slow run from a crashed one. It is now
+    an ordinary bank job: the same one-per-bank registry, the same progress bar,
+    the same Stop button, the same completion toast as every other pass.
+
+    Cancelling is safe by construction — each file is removed then its row
+    dropped, so a stopped run leaves a consistent bank and simply has rejects
+    left over. Returns {'total', 'job'}; ``job['result']`` holds the full
+    outcome once it has finished (immediately so under TESTING, where bank_jobs
+    runs inline)."""
+    _delete_rejected_guard(user_id, bank_id)
+    total = BankImage.query.filter_by(bank_id=bank_id, status='reject').count()
+
+    def _run(job):
+        out = delete_rejected(user_id, bank_id, job=job)
+        job['result'] = out
+        bank_jobs.progress(job, detail=delete_rejected_summary(out))
+
+    job = bank_jobs.start(app, bank_id, 'delete_rejected', _run, total=total)
+    return {'total': total, 'job': job}
+
+
+def delete_rejected(user_id, bank_id, job=None) -> dict:
     """Delete the SOURCE files of every status='reject' image from disk, then
     drop their bank_image rows.
 
@@ -2876,58 +2991,74 @@ def delete_rejected(user_id, bank_id) -> dict:
     the batch. A row is dropped only when its file is gone afterwards (deleted,
     trashed, or already absent) — a file we failed to remove keeps its row so the
     user can see and retry it. Returns
-    {'mode', 'deleted', 'trashed', 'already_absent', 'rows_removed', 'skipped'}
-    where 'trashed' counts everything that stayed recoverable.
-    """
-    bank = get_bank(user_id, bank_id)
-    if not bank:
-        raise ValueError('bank not found')
-    if bank_jobs.running(bank_id):
-        raise RuntimeError('a job is running on this bank — stop it first')
-    # An install that predates the create-time guard can still hold a bank whose
-    # folder IS a dataset's. Here, and only here, that stops being cosmetic: these
-    # "rejects" are the dataset's images. Refuse — never silently delete, never
-    # silently clean up on the user's behalf.
-    conflict = bank_dataset_conflict(user_id, bank_id)
-    if conflict:
-        raise BankSharesDataset(
-            'This bank points at a dataset\'s own image folder, so deleting its '
-            'rejected files would delete images out of the dataset. Nothing was '
-            f'deleted. {conflict["message"]}')
+    {'mode', 'deleted', 'trashed', 'already_absent', 'rows_removed', 'skipped',
+    'cancelled'} where 'trashed' counts everything that stayed recoverable.
 
-    rows = BankImage.query.filter_by(bank_id=bank_id, status='reject').all()
+    ``job`` is the bank_jobs snapshot when this runs as a background pass (the
+    normal path — see start_delete_rejected): progress is reported per file and
+    Stop is honoured between files.
+    """
+    bank = _delete_rejected_guard(user_id, bank_id, check_busy=job is None)
+
+    # (id, relpath) tuples, not ORM rows, and ONE realpath for the whole batch:
+    # the loop commits as it goes, which expires live ORM objects and would make
+    # every later row pay a re-SELECT (and abs_image_path a realpath) per file.
+    rows = (db.session.query(BankImage.id, BankImage.relpath)
+            .filter_by(bank_id=bank_id, status='reject').all())
+    root = os.path.realpath(bank.source_path)
     out = {'mode': 'trash', 'deleted': 0, 'trashed': 0, 'already_absent': 0,
-           'rows_removed': 0, 'skipped': []}
-    remove_ids = []
+           'rows_removed': 0, 'skipped': [], 'cancelled': False}
+    if job is not None:
+        # The bar already prints "done / total"; a detail repeating it would just
+        # say the same numbers twice. Spend the width on where the files GO.
+        bank_jobs.progress(job, done=0, total=len(rows),
+                           detail=_DELETE_DETAIL.get(_delete_mode(),
+                                                     'removing files'))
+    pending_ids, removed = [], 0
     modes_used = set()
-    for row in rows:
-        path = abs_image_path(bank, row)
+
+    def _drop(ids):
+        """Commit one chunk of row removals. Done as we go, not at the end: a
+        Stop (or a crash) must not leave files gone from disk with their rows
+        still claiming they are there."""
+        for i0 in range(0, len(ids), _SQL_IN_CHUNK):
+            BankImage.query.filter(
+                BankImage.id.in_(ids[i0:i0 + _SQL_IN_CHUNK])
+            ).delete(synchronize_session=False)
+        db.session.commit()
+
+    for i, (row_id, relpath) in enumerate(rows, 1):
+        if job is not None and bank_jobs.cancelled(job):
+            out['cancelled'] = True
+            break
+        path = _abs_under(root, relpath)
         if path is None:
             # relpath escapes the bank folder — refuse to touch it, keep the row.
-            out['skipped'].append({'relpath': row.relpath, 'reason': 'unsafe_path'})
-            continue
-        if not os.path.exists(path):
+            out['skipped'].append({'relpath': relpath, 'reason': 'unsafe_path'})
+        elif not os.path.exists(path):
             out['already_absent'] += 1
-            remove_ids.append(row.id)
-            continue
-        try:
-            mode = _trash_or_remove(path)
-        except OSError as e:
-            out['skipped'].append({'relpath': row.relpath, 'reason': str(e)})
-            continue
-        modes_used.add(mode)
-        if mode == 'delete':
-            out['deleted'] += 1
+            pending_ids.append(row_id)
         else:
-            out['trashed'] += 1          # OS trash or app trash — recoverable
-        remove_ids.append(row.id)
+            try:
+                mode = _trash_or_remove(path)
+            except OSError as e:
+                out['skipped'].append({'relpath': relpath, 'reason': str(e)})
+            else:
+                modes_used.add(mode)
+                if mode == 'delete':
+                    out['deleted'] += 1
+                else:
+                    out['trashed'] += 1   # OS trash or app trash — recoverable
+                pending_ids.append(row_id)
+        if job is not None:
+            bank_jobs.progress(job, done=i)
+        if len(pending_ids) >= _SQL_IN_CHUNK:
+            _drop(pending_ids)
+            removed += len(pending_ids)
+            pending_ids = []
 
-    for i0 in range(0, len(remove_ids), _SQL_IN_CHUNK):
-        BankImage.query.filter(
-            BankImage.id.in_(remove_ids[i0:i0 + _SQL_IN_CHUNK])
-        ).delete(synchronize_session=False)
-    out['rows_removed'] = len(remove_ids)
-    db.session.commit()
+    _drop(pending_ids)
+    out['rows_removed'] = removed + len(pending_ids)
     # The pending ↩ offer points at rows this run just dropped — restoring them
     # would find nothing. Withdraw it rather than advertise a restore we cannot
     # perform (the files themselves went to a trash only the user can reach).
@@ -2984,6 +3115,27 @@ def _stopped_detail(noun, data, cache_path, total):
     remaining = int(remaining) if remaining is not None else max(0, int(total) - n)
     return (f'Stopped — {n} {noun} ({remaining} remaining); '
             'relaunch to finish and cluster')
+
+
+def _release_db_before_inference():
+    """End the session's transaction before an inference subprocess we may sit
+    in for an HOUR (bank scoring on CPU is measured near that on a big bank).
+
+    The pass reads its rows, hands a path list to a child process, waits, then
+    writes the results back. Reading first is fine; keeping the SAME session
+    transaction open across the wait is not. WAL (app/__init__.py) buys concurrent
+    READERS, never concurrent writers: one stray write joining the transaction
+    ahead of the child — a status stamp, a counter, a `flush()` inherited from the
+    caller — takes the single write lock and holds it for the whole inference, so
+    every other writer in the app dies on `database is locked` after the 5 s
+    busy_timeout. That is the exact failure that abandoned two paid cloud runs on
+    2026-07-26 (see cloud_training._COMMIT_RETRIES), for a five-second holder;
+    this one would hold it for an hour.
+
+    Committing here costs nothing on the nominal path (nothing is pending) and
+    removes the trap for good. Callers must not hold ORM objects across it:
+    `expire_on_commit` is on, so rows are re-fetched after the child returns."""
+    db.session.commit()
 
 
 def _drive_infer_subprocess(job, python, script, payload, cache_path,
@@ -3142,6 +3294,7 @@ def _faces_job(bank_id):
         })
         python = cfg.get('face_scoring.python') or sys.executable
         window = gpu_exclusive_vision_window(flag_ttl=1800) if use_gpu else nullcontext()
+        _release_db_before_inference()
         data, stderr_tail, returncode = _drive_infer_subprocess(
             job, python, _EMBED_SCRIPT, payload, cache_path, _PROGRESS_RE, window)
         # Stopped by the user — say exactly what's kept, never a mute ✗ (the cached
@@ -3309,6 +3462,7 @@ def _score_job(bank_id):
         # unusable, the work slow anyway.
         window = (gpu_exclusive_vision_window(flag_ttl=1800) if use_gpu
                   else nullcontext())
+        _release_db_before_inference()
         data, stderr_tail, returncode = _drive_infer_subprocess(
             job, python, _SCORE_SCRIPT, payload, cache_path, _SCORE_PROGRESS_RE,
             window)
@@ -3420,7 +3574,7 @@ def _watermark_job(bank_id, rescan):
         bank_jobs.progress(job, done=0, total=len(rows), detail='watermark scan')
         if not rows:
             return
-        detected = clean = errors = checked = unanswered = 0
+        detected = clean = errors = unanswered = 0
 
         def prepared():
             """Yielded on the JOB's thread, one image per free slot in the pool.
@@ -3482,10 +3636,23 @@ def _watermark_job(bank_id, rescan):
                             row.watermark_state = 'none'
                             row.watermark_bbox = None
                             clean += 1
-                        checked += 1
-                        if checked % 25 == 0:
-                            db.session.commit()
                     bank_jobs.bump(job)
+                    # Never sit in an Ollama call with a transaction open. This
+                    # loop WRITES — the 'error' stamp above, the states, and the
+                    # destructive discard in prepared() — and the next iteration
+                    # waits on a call measured at ~1.7 s, tens of thousands of
+                    # times over a big bank. The rhythm used to be "commit every
+                    # 25 PARSED answers", which is not a rhythm at all: a pass
+                    # whose files erroured, or whose model answered nothing,
+                    # never incremented that counter, so the single write lock
+                    # was held across an UNBOUNDED number of calls and every
+                    # other writer in the app died on `database is locked` past
+                    # the 5 s busy_timeout (the failure that abandoned two paid
+                    # cloud runs on 2026-07-26 — see
+                    # _release_db_before_inference). Committing once per image
+                    # bounds the hold by the work traversed whatever the answers
+                    # look like, and costs a millisecond against a 1.7 s call.
+                    db.session.commit()
             finally:
                 db.session.commit()
                 unload_vision_model()  # hand the VRAM back to ComfyUI

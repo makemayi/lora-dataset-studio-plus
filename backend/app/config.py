@@ -235,9 +235,13 @@ DEFAULTS = {
         'first_step_download_budget_minutes': 180,  # hard ceiling on the pre-step-1 phase
         # Out-of-monitor freeze watchdog: a training run whose own monitor stopped
         # reporting for this long is terminated by the supervisor (0 = only warn
-        # in the UI, never cut). Slow-by-design phases (boot/upload/download) are
+        # in the UI, never cut). Slow-by-design phases (boot/download) are
         # never judged on this value -- they get a fixed 2 h floor.
         'freeze_watchdog_minutes': 45,
+        # ... and the dataset upload's own version of it. Not a budget for the
+        # transfer (a 24 GB dataset may legitimately take hours) but the time
+        # allowed with NO byte at all reaching the pod. 0 = never cut.
+        'upload_stall_minutes': 25,
         'unreachable_grace_minutes': 6,  # tolerated mid-run network blackout before giving up on the pod
         'monthly_budget_usd': 0,       # 0 = unlimited; launches blocked past this
         'disk_gb': 60,                 # instance disk (base model + dataset + checkpoints)
@@ -349,6 +353,19 @@ DEFAULTS = {
               # Raised on request by ashish.sinha (Discord). Separate from improve_steps,
               # which drives the manual "Upscale & improve" pass only.
               'generation_steps': 5,
+              # Enhancement LoRA strength for every Klein EDIT/generation lane
+              # (reference edit, variations, regenerate, small-image rescue) —
+              # node 139 of improve skin.json, klein/realistic.safetensors.
+              # The workflow pins that node at 0.8 and NO lane except "Upscale &
+              # improve" ever overrode it, which did not matter while the file
+              # shipped with nobody: the node was bypassed on every install. Once
+              # Setup started downloading it (klein_enhancement_lora), a detail/
+              # style LoRA at 0.8 quietly joined every edit and pulled results
+              # away from the instruction — the "edits are not conformant" report.
+              # 0.0 = the behaviour every install had before the LoRA existed
+              # locally. Raise it to let the LoRA add detail on purpose.
+              # Mirror of improve_base_lora_strength, which already defaults to 0.
+              'edit_base_lora_strength': 0.0,
               # Manual "Upscale & improve" quality profile. Its INSTRUCTION was
               # already editable (identity_prompts.klein_improve) but the knobs
               # deciding how much the pass actually changes were hardcoded at the
@@ -387,6 +404,14 @@ DEFAULTS = {
         # the resolver scans the loras roots for a krea2_identity_edit* file, so a
         # renamed download still works.
         'identity_lora': 'krea/krea2_identity_edit_v1_2.safetensors',
+        # Optional always-on generation LoRAs, as NAMED presets (mirrors
+        # klein.generation_lora_presets — the mechanism is @waltm's idea). Pure
+        # user data: [{name, loras: [{file, strength}]}], empty by default, and
+        # the ONLY source of truth for which files may chain and in what order.
+        # Krea never had the legacy single-slot LoRA keys Klein carries, so there
+        # is no migration and no save carve-out — _deep_merge preserves a list
+        # the incoming partial doesn't mention.
+        'generation_lora_presets': [],
         # THE consistency <-> prompt-adherence dial, in pixels: the resolution the
         # reference is shown to the vision text-encoder at. LOW = follows the
         # PROMPT (more variety, weaker likeness); HIGH = RESEMBLES the reference
@@ -457,6 +482,39 @@ DEFAULTS = {
         # Final output size, both paths. 2.0 is the calibrated default;
         # raise for more detail (slower), lower to speed either path up.
         'max_output_mp': 2.0,
+    },
+    # The ✨ Upscale & improve pass — which engine runs it. Its own namespace
+    # rather than a key under `klein`, because the whole point of the setting is
+    # that the pass is no longer Klein-only: 'klein' rewrites detail, 'seedvr2'
+    # restores it without reinterpreting. 'klein' is the default because it is
+    # what every improve did before this setting existed.
+    'improve': {'engine': 'klein'},
+    # SeedVR2 — the FIDELITY upscaler (services/seedvr2_helper.py, issue #32 by
+    # SurpassHR). Not a generation engine: it restores detail and leaves the
+    # content alone, which is the opposite trade from Klein's ✨ improve. Same
+    # discipline as every other engine block: blank means "find it yourself",
+    # never a machine path.
+    'seedvr2': {
+        # Blank = auto-resolve: the canonical 3B FP8 build when present, else the
+        # first build in the SEEDVR2 folder. Set it to a filename to pin one (a
+        # 7B build you dropped in yourself resolves exactly the same way).
+        'model': '',
+        # Target for the SHORT edge in pixels; the long edge follows the source
+        # aspect. 1080 is the node's own default and a sane dataset target — LoRA
+        # training buckets rarely exceed it, so going higher mostly costs VRAM.
+        'resolution': 1080,
+        # Hard cap on the LONG edge, 0 = none. The VRAM safety valve on a wide
+        # panorama, where a 1080 short edge can mean 4000+ px across.
+        'max_resolution': 0,
+        # How the result is graded back onto the source's colours. 'lab' is the
+        # node's default and the most conservative; 'wavelet' preserves broad
+        # tone better on heavily degraded sources. Colour fidelity is the whole
+        # reason this engine exists, so this is deliberately exposed.
+        'color_correction': 'lab',
+        # Transformer blocks offloaded to system RAM during inference. 0 = none
+        # (fastest). Raise it to fit a bigger build on a smaller card; it trades
+        # speed for VRAM headroom, it does not change the result.
+        'blocks_to_swap': 0,
     },
     # Z-Image pipeline — the two loader refs the shipped Test Studio workflow used
     # to hardcode from the developer's own ComfyUI (reported by bobba84, GitHub #18).

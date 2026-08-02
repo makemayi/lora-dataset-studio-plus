@@ -99,3 +99,30 @@ export function deletePreviewState(preview) {
   }
   return { ready: true, state: 'ready', title: '', text: '' }
 }
+
+/** What to say the moment 🗑 Delete rejected comes back.
+ *
+ *  The deletion is now a background bank job, so the usual answer is "it
+ *  started, watch the bar" — the dialog closing on a silent 202 was the whole
+ *  complaint (minutes of nothing, no count, no way to tell a slow run from a
+ *  dead one). A run that already finished when the response arrives still
+ *  reports its NUMBERS, because it has them.
+ *
+ *  Returns {type: 'info'|'success', text}. */
+export function deleteRejectedStart(res, { destination, recoverable } = {}) {
+  const d = res || {}
+  if (d.rows_removed === undefined) {
+    const n = Number(d.total) || 0
+    return {
+      type: 'info',
+      text: `Deleting ${n} rejected file(s) — progress shows in the bar at the top `
+        + 'of the bank, and you can stop it there.',
+    }
+  }
+  const gone = (Number(d.deleted) || 0) + (Number(d.trashed) || 0)
+    + (Number(d.already_absent) || 0)
+  const where = recoverable ? `moved to ${destination}` : 'permanently deleted'
+  let text = `${gone} rejected file(s) ${where}.`
+  if (d.skipped?.length) text += ` ${d.skipped.length} skipped (see console).`
+  return { type: 'success', text }
+}

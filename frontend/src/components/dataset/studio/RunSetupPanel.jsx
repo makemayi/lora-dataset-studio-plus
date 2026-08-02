@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { STRENGTH_CHOICES } from './constants';
 import { fmt } from '../../../utils/studioFormat';
 import CheckpointPicker from './CheckpointPicker';

@@ -100,7 +100,8 @@ def test_refresh_adds_new_files_and_never_touches_existing_triage(client, app, t
     assert r.status_code == 200
     payload = r.get_json()
     assert payload['folder_sync'] == {'added': 2, 'missing': 0,
-                                      'unavailable': False, 'error': None}
+                                      'unavailable': False, 'error': None,
+                                      'not_added': 0, 'limit': 200000}
     assert payload['counts']['total'] == 6
 
     after = _rows(app, bank_id)
@@ -204,17 +205,46 @@ def test_unavailable_folder_reports_and_changes_nothing(client, app, tmp_path):
 
 
 # --- guards -----------------------------------------------------------------
-def test_refresh_respects_the_max_files_cap(client, app, tmp_path, monkeypatch):
+def test_refresh_fills_the_cap_then_reports_what_it_left(client, app, tmp_path,
+                                                         monkeypatch):
+    """The ceiling is not a flat refusal any more: what fits is added, the rest
+    is REPORTED. A half-full batch beats an all-or-nothing no."""
     bank_id, src = _mkbank(client, tmp_path, {'a.jpg': _photo(seed=1)})
     from app.services import image_bank_service as banks
     monkeypatch.setattr(banks, 'BANK_MAX_FILES', 2)
     _write(src, 'b.jpg', _photo(seed=2))
     _write(src, 'c.jpg', _photo(seed=3))
 
-    payload = client.get(f'/api/bank/{bank_id}?refresh=1').get_json()
-    assert payload['folder_sync']['added'] == 0
-    assert 'were not added' in (payload['folder_sync']['error'] or '')
-    assert payload['counts']['total'] == 1
+    sync = client.get(f'/api/bank/{bank_id}?refresh=1').get_json()['folder_sync']
+    assert sync['added'] == 1                 # b.jpg — sorted, so the prefix
+    assert sync['not_added'] == 1             # c.jpg — over the ceiling
+    assert sync['limit'] == 2
+    assert sync['error'] is None              # a partial add is not a failure
+    assert client.get(f'/api/bank/{bank_id}').get_json()['counts']['total'] == 2
+
+
+def test_rows_of_files_deleted_from_the_folder_do_not_eat_the_cap(
+        client, app, tmp_path, monkeypatch):
+    """THE BUG. refresh is additive on purpose — a file deleted from the folder
+    keeps its row. The cap used to be counted against those rows, so a folder
+    that once held its limit could never accept a new image again, and said so
+    with a sentence about what "the folder now holds". Proven at real scale
+    before the fix: 10 001 files on disk, 50 000 rows, cap 50 000, one new file
+    → refused."""
+    from app.services import image_bank_service as banks
+    bank_id, src = _mkbank(client, tmp_path, {
+        'a.jpg': _photo(seed=1), 'b.jpg': _photo(seed=2), 'c.jpg': _photo(seed=3)})
+    monkeypatch.setattr(banks, 'BANK_MAX_FILES', 3)   # the bank is exactly full
+
+    os.remove(src / 'a.jpg')                          # the user cleans up…
+    os.remove(src / 'b.jpg')
+    _write(src, 'new.jpg', _photo(seed=4))            # …then drops one image in
+
+    sync = client.get(f'/api/bank/{bank_id}?refresh=1').get_json()['folder_sync']
+    assert sync['added'] == 1, sync                   # was 0, with a false error
+    assert sync['not_added'] == 0
+    assert sync['error'] is None
+    assert sync['missing'] == 2                       # still reported, never dropped
 
 
 def test_refresh_is_idempotent_and_case_stable(client, app, tmp_path):

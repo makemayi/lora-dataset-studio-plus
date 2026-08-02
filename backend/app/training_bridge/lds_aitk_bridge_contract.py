@@ -173,7 +173,8 @@ def _ensure_safe_parent(parent: Path) -> None:
             or stat.S_ISLNK(info.st_mode)
             or (getattr(info, "st_file_attributes", 0) & _REPARSE_POINT)
         ):
-            raise OSError("status parent is not a real directory")
+            raise OSError(
+                "status parent is a link, reparse point or non-directory")
         break
     _assert_no_link_components(current)
     for directory in reversed(missing):

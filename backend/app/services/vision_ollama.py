@@ -312,6 +312,7 @@ def generate_text_ollama(prompt: str, *,
                          num_ctx: int = 4096,
                          repeat_penalty: float = 1.1,
                          keep_alive: str | int = 0,
+                         strict: bool = False,
                          timeout: tuple[float, float] | float = (10, 120)) -> str:
     """Text-only generation via the SAME Ollama model as the vision seam (no image
     attached). Used to derive a SHORT caption from an already-stored long one — a pure
@@ -319,7 +320,15 @@ def generate_text_ollama(prompt: str, *,
     Reusing the abliterated Qwen3-VL matters: a vanilla text model would refuse to
     shorten the NSFW captions this app produces. Returns the text, or "" best-effort on
     any failure (the caller degrades to keeping the long caption). Same response/thinking
-    extraction as describe_image_ollama so the -instruct answer is read correctly."""
+    extraction as describe_image_ollama so the -instruct answer is read correctly.
+
+    `strict=True` for a caller that has no degraded mode and must TELL the user why:
+    the refusal keeps its own wording instead of collapsing to "". Silently returning
+    "" makes every distinct cause — the local fence holding a model loaded outside LDS,
+    an unreachable daemon, a missing model — arrive at the UI as the one message the
+    empty string can justify ("the model returned nothing"), which sends the user to
+    check a Settings value that was never the problem. The batch captioner keeps the
+    default: it has a long caption to fall back on, so a failure there is not an error."""
     try:
         url = (ollama_url or _ollama_url()).rstrip('/')
         model_name = model or get_vision_model()
@@ -345,7 +354,10 @@ def generate_text_ollama(prompt: str, *,
             return parts[-1] if parts else thinking
         return ''
     except Exception as e:
-        logger.warning('vision_ollama: text generate skipped: %s', _ollama_reject_message(e) or e)
+        reason = _ollama_reject_message(e) or str(e)
+        logger.warning('vision_ollama: text generate skipped: %s', reason)
+        if strict:
+            raise RuntimeError(reason) from e
         return ''
 
 

@@ -418,9 +418,18 @@ def dataset_train_stop():
 
 @bp.get('/dataset/<int:dataset_id>/train/checkpoints')
 def dataset_train_checkpoints(dataset_id):
-    gate = _require_aitoolkit()
-    if gate:
-        return gate
+    """Every save this dataset owns, LOCAL and CLOUD, in one payload.
+
+    NOT gated on ai-toolkit. This response carries both lanes, and a cloud-only
+    install (vast.ai key, no ai-toolkit — `_require_cloud` lets it launch) has
+    no ai-toolkit by definition: the historical 409 hid its OWN cloud
+    checkpoints from it, silently, because `listCheckpoints` turns any non-200
+    into an empty list. So the ai-toolkit capability now degrades the LOCAL
+    half to empty instead of refusing the whole request — same reasoning as the
+    lane-aware gate on `train/preflight` above. The cloud half, the imported
+    list (a ComfyUI folder scan) and disk usage never needed ai-toolkit.
+    """
+    local_ok = capabilities.probe()['aitoolkit']['valid']
     if not svc.get_dataset(LOCAL_USER, dataset_id):
         return jsonify({'error': 'not found'}), 404
     # base_model = base sélectionnée dans le dropdown (param absent → base persistée).
@@ -442,7 +451,7 @@ def dataset_train_checkpoints(dataset_id):
     # training evidence without records -> record the current state as the v1
     # baseline, so versioning covers the past, not only future runs. Runs
     # BEFORE list_checkpoints so the fresh baseline annotates this response.
-    had_training = (lt.has_local_checkpoints(LOCAL_USER, dataset_id, **kw)
+    had_training = ((local_ok and lt.has_local_checkpoints(LOCAL_USER, dataset_id, **kw))
                     or any((ct._run_family(r) or fam_resolved) == fam_resolved
                            for r in CloudTrainingRun.query
                            .filter_by(dataset_id=dataset_id).all()))
@@ -454,7 +463,8 @@ def dataset_train_checkpoints(dataset_id):
     # aim the undeploy at the right ComfyUI file. Local rows name their own run,
     # so they are grouped by run; a cloud group IS one run.
     local_cks = ct.annotate_deployed_by_run(
-        dataset_id, fam_resolved, lt.list_checkpoints(LOCAL_USER, dataset_id, **kw))
+        dataset_id, fam_resolved,
+        lt.list_checkpoints(LOCAL_USER, dataset_id, **kw) if local_ok else [])
     cloud_groups = ct.cloud_checkpoint_groups(dataset_id, fam_resolved, variant=variant)
     for _g in cloud_groups:
         ct.annotate_deployed_checkpoints(dataset_id, fam_resolved,
@@ -1398,8 +1408,13 @@ def dataset_train_open_folder(dataset_id):
 
 @bp.post('/dataset/<int:dataset_id>/train/checkpoint/delete')
 def dataset_train_checkpoint_delete(dataset_id):
+    # Deleting a DEPLOYED LoRA is a ComfyUI-folder operation that never touches
+    # ai-toolkit, and `list_imported_checkpoints` deliberately lists cloud-trained
+    # files too (they are auto-imported into the same folder). Gating this on the
+    # local trainer left a cloud-only install able to SEE those files and unable
+    # to remove them — same cloud escape its run-checkpoint sibling already has.
     gate = _require_aitoolkit()
-    if gate:
+    if gate and not capabilities.probe().get('cloud_training'):
         return gate
     if not svc.get_dataset(LOCAL_USER, dataset_id):
         return jsonify({'error': 'not found'}), 404

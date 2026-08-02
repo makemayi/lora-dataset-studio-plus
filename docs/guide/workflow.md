@@ -200,6 +200,34 @@ Every continuation records the exact checkpoint it resumed from. The per-dataset
   <img src="../screenshots/07-lineage-graph.png" alt="Run lineage graph with checkpoint pills and continuation edges" width="820">
 </p>
 
+Clicking a checkpoint pill opens its actions on the board — download that exact
+epoch, or resume training from it — without leaving the graph.
+
+<p align="center">
+  <img src="../screenshots/08-lineage-checkpoint-actions.png" alt="Checkpoint pill popover offering Download and Continue from here" width="620">
+</p>
+
+Clicking a run card opens its recipe: rank, alpha, learning rate, optimizer,
+timestep weighting, network type and EMA, as they were frozen at launch.
+
+<p align="center">
+  <img src="../screenshots/lineage/lineage-04-inspector.png" alt="Run inspector panel listing the frozen training config of a run" width="820">
+</p>
+
+Shift-click two runs and the compare drawer answers "what did I change between
+v2 and v3" — differing settings highlighted, identical ones folded away.
+
+<p align="center">
+  <img src="../screenshots/lineage/lineage-05-diff.png" alt="Compare runs drawer highlighting the six settings that differ between two runs" width="820">
+</p>
+
+**🔍 Big previews** blows the same-prompt/same-seed thumbnails up into a grid on
+the board itself, so several epochs can be judged side by side before picking one.
+
+<p align="center">
+  <img src="../screenshots/lineage/lineage-06-previews-grid.png" alt="Lineage graph with Big previews on, showing checkpoint previews as large tiles" width="820">
+</p>
+
 The separate **LoRA Canvas** puts every dataset's lineage on one pan/zoom board. It adds persistent card placement, cross-dataset run diffs, same-family checkpoint generation on one prompt/seed, galleries, movable/resizable pinned images, side-by-side fused image strips, bulk pinning and continuation from a checkpoint. A checkpoint not yet deployed is copied only after the launch button says so; mixed model families are refused before generation.
 
 The detailed board controls are in [The LoRA Canvas](using-the-app.md#the-lora-canvas-every-run-on-one-board).

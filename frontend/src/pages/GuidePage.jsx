@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import Markdown, { markdownHeadingId } from '../components/common/Markdown'
 import DiagnosticReport from '../components/common/DiagnosticReport'
 import { helpTopicsForChapter } from '../help/helpRegistry'

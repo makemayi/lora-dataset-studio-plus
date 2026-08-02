@@ -350,7 +350,10 @@ touching the folder itself:
    for the next scan — your existing keep/reject decisions, scores and captions
    are never touched. Files you removed from the folder are reported at the top
    of the bank, never deleted from it, so an unplugged drive can't wipe your
-   triage.
+   triage. One bank holds up to **200,000 images**; past that the refresh adds
+   as many as fit and tells you how many it left out, so nothing you already
+   triaged stops working. That ceiling counts what is in the folder now — files
+   you deleted from it don't count against it.
 1bis. **🕸 Scrape the web into a bank** — you don't need a folder you prepared
    by hand. Unfold **🕸 Scrape the web into a bank** on the bank list, choose a
    destination (a **new bank**, or **add to an existing one**), then scan a
@@ -476,6 +479,11 @@ app's own Trash otherwise (recoverable until you empty it from Settings), and a
 permanent delete only when neither can take the file. Kept and undecided images
 are never touched, and a file it can't remove (locked, read-only) is reported
 and left alone rather than aborting the batch.
+
+It runs as a normal bank pass: the confirmation closes straight away and the
+progress bar at the top of the bank counts the files as they go, with a **Stop**
+that takes effect between files. Stopping is safe — whatever already left the
+disk has left the bank too, and the rest are still marked ✕ for a second run.
 
 ⚠️ A bank doesn't own its folder, so two banks can point at nested folders and
 list the **same files**. That's harmless while you triage — decisions live on
@@ -1226,6 +1234,13 @@ zoom, and **Fit** puts the whole board back in view. The board only fits itself
 automatically until you first touch it — after that a dataset finishing its load
 never yanks your view away.
 
+**The reference face.** A character dataset's lane opens with its reference
+image, next to the dataset name — the person the renders on that lane are meant
+to be. Click it to open it full size against them. It is part of the lane label,
+not a pinned picture: it cannot be moved, closed, grouped or exported. Concept
+and style datasets show nothing there, because they are not built around a
+reference face.
+
 **Reading a run.** Click a run card to open **everything that run produced**:
 its images grouped by the checkpoint that made them, most-trained step first, so
 you can see where the LoRA stopped getting better without opening one pill at a
@@ -1463,6 +1478,14 @@ the board without opening a single gallery.
   pill. The band starts below everything already on the lane, which is what makes
   the guarantee a real one: **nothing is ever placed on top of a run card, a
   checkpoint pill or a picture you positioned yourself.**
+- **One strip per generation, always in training order.** The pictures of one
+  run fuse into a single strip that reads left to right by step — 500, 1000,
+  1500 — so the strip is an epoch axis. A **second** generation, even fired at
+  the same checkpoint, gets its **own** strip: two runs stay two runs on the
+  board, which is the only way to compare them. Pinning one picture at a time
+  from a gallery follows the same rule — it joins the strip of the generation it
+  came from, in its place in the order, never the end. Images generated before
+  LDS recorded which launch made them fall back to grouping by checkpoint.
 - **Big lots become a contact sheet.** A pair of renders lands full size; twenty
   or thirty land as thumbnails, which is the size you actually compare that many
   pictures at. Each one is still resizable afterwards like any other node.

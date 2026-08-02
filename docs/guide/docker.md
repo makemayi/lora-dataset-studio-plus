@@ -2,25 +2,41 @@
 
 [← Documentation index](../README.md) · [Quick install](../../README.md#setup--install) · [Troubleshooting](troubleshooting.md)
 
-LoRA Dataset Studio ships two Compose stacks:
+LoRA Dataset Studio provides two beginner Windows launchers:
 
-| Stack | Compose file | Includes | Default data |
-|---|---|---|---|
-| **API-only** | `docker-compose.yml` | Core app only | `./data-docker` |
-| **GPU + ComfyUI** | `docker-compose.gpu.yml` | Core app, ML extras and ComfyUI in one NVIDIA container | `./data-docker-gpu` plus repo-local ComfyUI folders |
+| Launcher | Use it when | ComfyUI |
+|---|---|---|
+| **`start-docker.bat`** | You already have ComfyUI on this computer | Keeps your normal host ComfyUI; asks for its folder once |
+| **`start-docker-gpu.bat`** | You want a completely fresh NVIDIA Docker setup | Creates an isolated ComfyUI and isolated model/data folders |
 
-The stacks use separate Compose project names and separate application data. Do not point both at the same `LDS_DATA`: two Flask processes must not share one SQLite database and `config.json`.
+Each launcher remembers its own stack and data. Do not run two LDS containers against the same data folder: two Flask processes must not share one SQLite database and `config.json`.
+
+## Beginner Windows install with an existing ComfyUI
+
+1. On GitHub, choose **Code → Download ZIP** and extract the complete folder.
+2. Start **Docker Desktop** and wait until it reports that Docker is running.
+3. Double-click **`start-docker.bat`**.
+4. On first launch, choose either the ComfyUI root containing `main.py` and `models/`, or the portable parent containing `ComfyUI\main.py`.
+5. Start ComfyUI with your usual launcher. LDS opens automatically on the first free Studio port.
+
+The selected folder is validated, mounted read/write at `/external-comfyui`, and remembered in a generated local override. If it moves, run **`configure-docker.bat`**. From Docker, LDS connects to the host API at `http://host.docker.internal:8188`.
+
+On **Docker Desktop for Windows** a ComfyUI listening only on `127.0.0.1` is reachable as-is — Docker Desktop proxies that name from the host side, so the default portable launcher needs no change and no firewall hole. This was measured, not assumed. On a **Linux host**, `host.docker.internal` resolves to the host gateway and a loopback-only ComfyUI is genuinely unreachable: start it with `--listen 0.0.0.0` and restrict port 8188 to Docker or your private network. If Studio reports it cannot reach ComfyUI, the launcher prints that same guidance.
 
 ## Beginner Windows GPU install
 
 1. On GitHub, choose **Code → Download ZIP** and extract the complete folder.
 2. Start **Docker Desktop** and wait for it to report that Docker is running.
 3. Double-click **`start-docker-gpu.bat`**.
-4. Keep the first build/start open. The browser opens when LoRA Dataset Studio is ready.
+4. Keep the first build/start open. The launcher prints both actual addresses and opens Studio as soon as Studio responds. Its batch window keeps working until ComfyUI becomes healthy; no second ComfyUI window needs to appear.
 
 The launcher **always forces** the four repo-local folders `./run`, `./basedir`, `./data-docker-gpu` and `./bank-images` for ComfyUI, models, app data and bank sources. It does this even when `.env` contains custom `LDS_COMFY_RUN`, `LDS_COMFY_BASEDIR`, `LDS_DATA` or `LDS_BANK_SOURCES` values, specifically so a double-click can never touch an existing ComfyUI. To relocate or reuse storage, do not use the launcher; use the [advanced CLI](#advanced-gpu-cli), which respects those `.env` values.
 
-An existing ComfyUI is never mounted or modified, but stop it first if it uses port `8188` (and stop another LDS on `5050`): two processes cannot share those ports.
+The double-click launcher picks both host ports itself, by testing them on the host: Studio between `5050` and `5149`, ComfyUI between `8188` and `8287`, taking the first that is genuinely free. The usual addresses therefore remain `http://127.0.0.1:5050/` and `http://127.0.0.1:8188/`, but an existing LDS, ComfyUI or unrelated service can keep either default port: the launcher leaves it running and selects another one automatically. It prints both final addresses and opens the mapped Studio URL.
+
+The launcher probes rather than handing Docker a port range, because Docker's allocator only tracks the ports it assigned itself: given a range it will still choose a port another program already holds and then fail to start with `ports are not available`. Each resolved port is published as a single fixed port, so `docker stop` followed by `docker start` keeps the address you bookmarked instead of moving it.
+
+Re-running the launcher from the **same checkout** while its container is already running reuses the existing Docker mappings and opens Studio without recreating the container. If the fixed Compose container identity belongs to a different checkout, the launcher stops with a clear collision error rather than modifying or replacing it. It never stops an existing service and does not write the selected ports to `.env`; the allocation applies only to that launcher run.
 
 On Windows, the double-click launcher also sets `LDS_UID=0` and `LDS_GID=0` **for its Docker process only** because Docker Desktop presents these bind mounts as owner `0:0`; it does not edit `.env`. Advanced CLI and Linux launches keep the UID/GID values from `.env`, which should match the host folders as described under [Linux, Unraid and permissions](#linux-unraid-and-permissions).
 
@@ -38,12 +54,14 @@ docker compose -f docker-compose.gpu.yml up --build
 
 Create bind-mount source folders before the first CLI start. Docker may otherwise create them as root while the container runs as your configured user, leaving the app unable to write.
 
-When healthy:
+When healthy, the advanced CLI defaults to:
 
 - Studio: `http://127.0.0.1:5050/`
 - ComfyUI: `http://127.0.0.1:8188/`
 
-Compose publishes both ports on host interfaces by default. Before using the LAN addresses, read [Security](../../SECURITY.md#the-default-threat-model) and enable the app's access token or place the service behind an authenticated boundary. ComfyUI's own port has no LDS token gate.
+Advanced CLI mode does not scan the launcher ranges. Set `LDS_HOST_PORT` and `LDS_COMFY_HOST_PORT` in `.env` when those defaults are unavailable; Compose continues to respect those explicit values.
+
+Compose binds published ports to **127.0.0.1 by default**. LAN access is an explicit opt-in: set `LDS_BIND_ADDRESS=0.0.0.0`, enable the LDS access token, and restrict the ports with Windows Firewall or another trusted-network boundary. ComfyUI's own port has no LDS token gate, so never expose it publicly.
 
 ## Persistent storage
 
@@ -73,9 +91,9 @@ On Linux, use native absolute paths. Docker Desktop must have permission to shar
 
 ### Deliberately reuse existing ComfyUI data
 
-The double-click launcher cannot opt in to an existing ComfyUI. In **advanced CLI mode**, point `LDS_COMFY_BASEDIR` at the **parent** that directly contains the existing `models/`, `input/`, `output/` and `custom_nodes/` directories — never at `models/` itself. Pointing only the model tree at the wrong level makes path discovery look successful while file-based generation cannot share input/output.
+Use **`start-docker.bat`** to opt in to an existing ComfyUI. Select the ComfyUI root containing `main.py` and `models/`, or its portable parent; never select `models/` itself. The launcher validates the path before generating its local Compose override.
 
-Keep `LDS_COMFY_RUN` separate unless you intentionally want the container to own and update that ComfyUI runtime too. Mounting existing model/data folders is a filesystem operation: verify the resolved host paths before launch and make a backup if another application also writes there.
+Use **`start-docker-gpu.bat`** when you do not want Docker to touch that existing installation. Its `run/` and `basedir/` folders stay isolated beside the checkout.
 
 For a bank, enter the **container path** in the UI: `/images` or a subfolder such as `/images/telegram-export`. The host path stored in `LDS_BANK_SOURCES` does not exist inside the container. Mount the source read-only if originals must be untouchable; **Delete rejected** is the bank action that otherwise removes source files.
 
@@ -132,14 +150,11 @@ GPU allocation is controlled by Docker/NVIDIA rather than these CPU/RAM variable
 
 An in-app restart exits back to the container supervisor, which respawns LDS on the fixed container bind. It does not create a second loopback-only process.
 
-The in-app source updater cannot replace the immutable `/app` files in an image. From a git checkout, update and recreate instead:
+The in-app source updater cannot replace the immutable `/app` files in an image. For a GitHub ZIP installation, double-click **`update-docker.bat`**: it downloads the latest stable Release, keeps the previously selected launcher, rebuilds the image, and preserves `.env`, app data, ComfyUI folders, bank sources, `ollama-data/` and the generated external-ComfyUI override. Pass `main` only when you explicitly want the preview branch.
 
-```bash
-git pull
-docker compose -f docker-compose.gpu.yml up -d --build
-```
+The code swap is transactional. The updater keeps the previous code aside, then calls the launcher with `--update-rebuild`, which returns only once Docker reports the Studio container healthy. On that confirmation the update is committed and the backup is removed; on any failure the previous code is put back and its launcher is restarted, so a failed update leaves you on the version you already had.
 
-For a GitHub ZIP, download/extract the newer ZIP into a new folder, stop the old stack, and either keep the new repo-local defaults or carry over explicit `.env` storage paths. Do not copy an old SQLite database while either stack is running.
+A git checkout is never reset or merged by the updater. Run `git pull --ff-only` yourself, then rerun the same Docker launcher with `--update-rebuild`. Rebuilding replaces containers and code, not bind-mounted user data.
 
 Rebuilding the image does not delete bind-mounted data. `docker compose down` removes containers and the Compose network, not the host folders listed above.
 
@@ -147,24 +162,18 @@ Rebuilding the image does not delete bind-mounted data. `docker compose down` re
 
 - Budget roughly **20 GB before model downloads**: the CUDA image and its persistent ComfyUI environment are both large. Model stacks add substantially more.
 - Building the LDS-side torch dependencies from the CPU wheel index can save several gigabytes, but Image Bank Score then runs on CPU; ComfyUI still owns the GPU.
-- **Ollama is not included.** Captioning, framing, head-crop and watermark detection need an Ollama on the host or another reachable machine. Configure `LDS_OLLAMA_URL`/the Compose host mapping, then test it in Settings.
+- **Ollama is optional and selected inside LDS Setup.** Choose no Ollama, an existing host Ollama, or the isolated official Docker companion. No model is pulled automatically; start the explicit model download in LDS to see progress or cancel it. The companion publishes no host port and keeps models in `./ollama-data`.
 - **Local training is not included.** Connect ai-toolkit on the host where its filesystem is visible, or use cloud training. ComfyUI inside this image is for generation, Studio, Canvas generation and deployment.
 - Watermark inpainting is currently listed as unsupported in this Docker lane; model-free crop remains available. Track this and other boundaries in [Known limitations](known-limitations.md).
 - Immediately after a container recreate, an extra install can briefly fail while the launcher adopts the large internal virtual environment. The image already ships the ML extras; wait for the adoption message in the log before repairing an optional package.
 - Mounting your own `/userscripts_dir` shadows the LDS launcher shipped there. If only ComfyUI starts, remove that override.
 - Both published ports are unauthenticated at the container layer. LDS can gate its own remote UI; ComfyUI needs its own firewall, VPN or authenticated proxy if it is exposed.
 
-## API-only stack
+## Existing-host ComfyUI stack
 
-The smaller stack is useful for imports, API generation, manual curation/captions, scraping installed after launch, cloud training, backup and publishing:
+The smaller `start-docker.bat` stack runs LDS in Docker and connects to the ComfyUI you already maintain on the host. It does not install or launch a second ComfyUI. Its first-run folder picker creates the strict local mount override required for model discovery and shared input/output files.
 
-```bash
-cp .env.example .env
-mkdir -p data-docker
-docker compose up --build
-```
-
-It installs `backend/requirements.txt` only. Scraping and ML extras can be installed from the app, but container recreation removes packages installed only into the container layer. ComfyUI features and local ai-toolkit training remain outside this stack.
+The image installs `backend/requirements.txt` only. Optional scraping and ML extras can be installed from LDS; local ai-toolkit training remains a separate host/cloud tool.
 
 ## Quick diagnostics
 

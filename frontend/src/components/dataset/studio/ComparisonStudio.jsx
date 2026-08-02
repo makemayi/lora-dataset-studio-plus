@@ -20,7 +20,12 @@ import { useQuickVote } from '../../../hooks/useQuickVote';
 import { fmt } from '../../../utils/studioFormat';
 import { flipOrder } from './flipOrder';
 import { DEFAULT_STRENGTHS, FAMILY_LABELS } from './constants';
+import { buildSelectionsPayload, combineBlocker } from './loraStack';
+import { isStackRun, stackMembers } from './stackResults';
 import StudioRunSetup from './StudioRunSetup';
+import LoraStackPanel from './LoraStackPanel';
+import StackCompositionPanel from './StackCompositionPanel';
+import StackVariantsGrid from './StackVariantsGrid';
 import StudioGenerationSettings from './StudioGenerationSettings';
 import StudioActionBar from './StudioActionBar';
 import StudioPreflightBanner from './StudioPreflightBanner';
@@ -46,6 +51,18 @@ export default function ComparisonStudio({ selection, baseModels = [], runType =
     try { return localStorage.getItem('studioComp_prompt') || ''; } catch { return ''; }
   });
   const [seed, setSeed] = useState(() => rollSeed());
+  // 'compare' (historique : un LoRA seul par cellule) ou 'combine' (pile : tous les
+  // LoRA cochés dans la MÊME image, chacun à son poids). Persisté comme le reste.
+  const [mode, setMode] = useState(() => {
+    try { return localStorage.getItem('studioComp_mode') === 'combine' ? 'combine' : 'compare'; }
+    catch { return 'compare'; }
+  });
+  // Poids par LoRA de la pile, indexés par `${dataset_id}:${checkpoint}` → un poids
+  // réglé survit au décochage d'un AUTRE LoRA.
+  const [stackWeights, setStackWeights] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('studioComp_weights') || '{}') || {}; }
+    catch { return {}; }
+  });
   const [count, setCount] = useState(() => {
     try { return Math.max(1, parseInt(localStorage.getItem('studioComp_count'), 10) || 1); } catch { return 1; }
   });
@@ -54,8 +71,10 @@ export default function ComparisonStudio({ selection, baseModels = [], runType =
       localStorage.setItem('studioComp_strengths', JSON.stringify(strengths));
       localStorage.setItem('studioComp_prompt', prompt);
       localStorage.setItem('studioComp_count', String(count));
+      localStorage.setItem('studioComp_mode', mode);
+      localStorage.setItem('studioComp_weights', JSON.stringify(stackWeights));
     } catch { /* private mode */ }
-  }, [strengths, prompt, count]);
+  }, [strengths, prompt, count, mode, stackWeights]);
   const [launching, setLaunching] = useState(false);
   // 409 `studio_missing` au lancement (P0-a) → bandeau des modèles/nodes manquants.
   const [preflight, setPreflight] = useState(null);
@@ -89,30 +108,86 @@ export default function ComparisonStudio({ selection, baseModels = [], runType =
     setLbImg((p) => (p && p.id === id ? { ...p, rating: nv } : p));
   };
 
+  // Les cellules RÉELLEMENT à l'écran. Sur une pile ce sont celles de toutes les
+  // variantes de poids affichées, pas seulement celles du run ouvert : le vote rapide
+  // et la lightbox doivent porter sur ce que l'utilisateur voit, sinon « 3 à voter »
+  // en annonce 3 alors que 6 tuiles non votées sont sous ses yeux.
+  const displayedCells = useMemo(() => {
+    const variantCells = (data?.stack_variants || []).flatMap((v) => v.cells || []);
+    if (!variantCells.length) return cells;
+    const seen = new Set(variantCells.map((c) => c.id));
+    return [...variantCells, ...cells.filter((c) => !seen.has(c.id))];
+  }, [cells, data]);
+
   const unvoted = useMemo(
-    () => cells.filter((c) => c.status === 'done' && c.filename && !c.rating),
-    [cells],
+    () => displayedCells.filter((c) => c.status === 'done' && c.filename && !c.rating),
+    [displayedCells],
   );
   const greens = useMemo(
-    () => cells.filter((c) => c.status === 'done' && c.filename && c.rating === 1),
-    [cells],
+    () => displayedCells.filter((c) => c.status === 'done' && c.filename && c.rating === 1),
+    [displayedCells],
   );
 
   // Set navigable de la lightbox : les strengths d'un même rendu (même LoRA + même
   // seed) adjacentes → LoRA (dataset_id) → aspect → seed → STRENGTH en dernier. Ici
   // les cellules sont live (déjà dans ce composant) → on passe le set directement.
+  // `displayedCells` et non `cells` : sur une pile, ouvrir une image d'une AUTRE
+  // variante donnerait sinon une lightbox sans flèches (index -1 dans le set).
   const navImages = useMemo(
-    () => flipOrder(cells, (c) => [c.dataset_id ?? 0, c.aspect || '', c.seed ?? 0, c.strength ?? 0]),
-    [cells],
+    () => flipOrder(displayedCells,
+      (c) => [c.dataset_id ?? 0, c.aspect || '', c.seed ?? 0, c.strength ?? 0]),
+    [displayedCells],
   );
 
+  const combine = mode === 'combine';
+  const combineBlocked = combine ? combineBlocker(selection) : null;
+
+  // --- Vue PILE ---------------------------------------------------------------
+  // Décidée par le RUN AFFICHÉ, pas par la bascule Compare/Combine : on peut ouvrir
+  // une pile lancée hier alors que la bascule est repassée sur Compare, et l'inverse.
+  const shownStack = useMemo(() => stackMembers(data), [data]);
+  const showStackView = isStackRun(data);
+  const [savingBest, setSavingBest] = useState(false);
+  const [bestSavedAt, setBestSavedAt] = useState(null);
+  // Changer de run efface la confirmation : « ★ Saved » sous une AUTRE pile que celle
+  // qu'on vient d'épingler serait un mensonge.
+  useEffect(() => { setBestSavedAt(null); }, [runId]);
+
+  const saveStackBest = async ({ dataset_id: dsId, ...body }) => {
+    setSavingBest(true);
+    try {
+      await postJson(`/api/dataset/${dsId}/lora-test/best`, body);
+      setBestSavedAt(Date.now());
+      toast.success('★ Stack weights saved as the best setting');
+    } catch (e) {
+      toast.error(e.message || 'Could not save the best setting');
+    } finally {
+      setSavingBest(false);
+    }
+  };
+
+  // « Use these weights » : recharge les poids d'une variante dans les curseurs. Les
+  // clés sont celles de loraStack.stackKey, donc les sliders les relisent tels quels.
+  const useVariantWeights = (map) => {
+    if (!map || Object.keys(map).length === 0) {
+      toast.error('This run did not record enough to reload its weights');
+      return;
+    }
+    setStackWeights((cur) => ({ ...cur, ...map }));
+    setMode('combine');
+    toast.success('Weights loaded — adjust them and run again to add a variant');
+  };
+
   const launch = async () => {
-    if (!selection.length || !strengths.length) return;
+    if (!selection.length || combineBlocked) return;
+    if (!combine && !strengths.length) return;
     setLaunching(true);
     try {
       const body = {
-        selections: selection.map((s) => ({ dataset_id: s.dataset_id, checkpoint: s.checkpoint })),
-        strengths,
+        selections: buildSelectionsPayload(selection, { combine, weights: stackWeights }),
+        // En combine chaque LoRA porte son poids : l'axe strengths n'est plus envoyé
+        // (le backend le remplace par le poids du LoRA de tête).
+        ...(combine ? { combine: true } : { strengths }),
         seed,
         count,
         // Base du run : '' (entrée « Official », Krea) ou rien de coché → absent,
@@ -176,6 +251,9 @@ export default function ComparisonStudio({ selection, baseModels = [], runType =
             </select>
           </div>
         )}
+        <LoraStackPanel selection={selection} mode={mode} onMode={setMode}
+          weights={stackWeights}
+          onWeight={(k, v) => setStackWeights((cur) => ({ ...cur, [k]: v }))} />
         <div id="st-setup" className="scroll-mt-16">
           <StudioRunSetup
             selectionCount={selection.length}
@@ -191,6 +269,8 @@ export default function ComparisonStudio({ selection, baseModels = [], runType =
             launching={launching}
             gpuBusy={data?.gpu_busy}
             batchMult={1 + ((genSettings.batch_loras || []).length)}
+            combine={combine}
+            combineBlocked={combineBlocked}
           />
         </div>
         {/* Réglages de génération globaux (parité Generate, hors prompt builder).
@@ -204,7 +284,14 @@ export default function ComparisonStudio({ selection, baseModels = [], runType =
           aspectPicker
           onChange={setGenSettings}
         />
-        <LoraRankingPanel ranking={data?.lora_ranking} />
+        {/* Une pile n'a qu'un LoRA « testé » : son classement par-LoRA n'a qu'une
+            ligne et n'apprend rien. À sa place, ce qui la définit — sa composition. */}
+        {showStackView ? (
+          <StackCompositionPanel members={shownStack} onSaveBest={saveStackBest}
+            saving={savingBest} savedAt={bestSavedAt} />
+        ) : (
+          <LoraRankingPanel ranking={data?.lora_ranking} />
+        )}
       </aside>
 
       <main id="st-results" className="flex flex-col gap-3 min-w-0 scroll-mt-16">
@@ -247,7 +334,9 @@ export default function ComparisonStudio({ selection, baseModels = [], runType =
 
         {!runId ? (
           <p className="text-content-subtle text-sm rounded-lg border border-border bg-surface px-3 py-6 text-center">
-            Set up the run on the left then “🚀 Launch the test” to compare the {selection.length} LoRAs side by side.
+            Set up the run on the left then “🚀 Run the test”{combine
+              ? ` to render the ${selection.length} LoRAs together in one image.`
+              : ` to compare the ${selection.length} LoRAs side by side.`}
           </p>
         ) : (
           <div className="flex flex-col gap-2">
@@ -263,9 +352,13 @@ export default function ComparisonStudio({ selection, baseModels = [], runType =
               showResults={showResults}
               onToggleResults={() => setShowResults((v) => !v)}
             />
-            {showResults && (
+            {showResults && (showStackView ? (
+              <StackVariantsGrid members={shownStack} variants={data?.stack_variants}
+                onRate={run.rate} onOpen={setLbImg} onSelectRun={setRunId}
+                onUseWeights={useVariantWeights} />
+            ) : (
               <LoraComparisonGrid loras={loras} cells={cells} onRate={run.rate} onOpen={setLbImg} />
-            )}
+            ))}
           </div>
         )}
       </main>

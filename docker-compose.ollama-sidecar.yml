@@ -1,0 +1,23 @@
+# Optional official Ollama sidecar. It publishes no host port and downloads no
+# model by itself; models are pulled only from the Studio Setup UI.
+services:
+  studio:
+    environment:
+      LDS_OLLAMA_MODE: docker
+      LDS_OLLAMA_URL: http://ollama:11434
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: "${COMPOSE_PROJECT_NAME:-lora-dataset-studio}-ollama"
+    profiles: [ollama]
+    restart: unless-stopped
+    labels:
+      io.lora-dataset-studio.role: ollama
+    volumes:
+      - ${LDS_OLLAMA_DATA:-./ollama-data}:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s

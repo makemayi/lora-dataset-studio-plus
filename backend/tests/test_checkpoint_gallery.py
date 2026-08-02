@@ -405,3 +405,30 @@ def test_a_studio_launch_recovers_the_origin_from_the_deploy_tag(client, app):
         # …and an untagged pick is left unlinked rather than attached to a guess.
         assert checkpoint_origins(['krea\\lora_nova.safetensors']) == {
             'krea\\lora_nova.safetensors': (None, None)}
+
+
+def test_the_gallery_publishes_WHICH_LAUNCH_made_each_image(client, app):
+    """``run_id`` groups every cell of one "Generate" and had never left the
+    database. The ◉ Canvas needs it: two runs fired at the SAME checkpoint are
+    otherwise indistinguishable, so pinning the second one appended its pictures
+    to the first one's strip and the board showed one lot where there were two.
+    Null on images that predate the column — the canvas falls back to the
+    checkpoint there, so an old board draws what it always drew."""
+    from app.extensions import db
+    from app.services import cloud_training as ct
+    with app.app_context():
+        ds = _create(client)
+        rec = _record(db, ds)
+        _image(db, ds, 'a.safetensors', record_id=rec.id, step=1000,
+               filename='a.png', run_id='launch-A')
+        _image(db, ds, 'a.safetensors', record_id=rec.id, step=1000,
+               filename='b.png', run_id='launch-B')
+        _image(db, ds, 'a.safetensors', record_id=rec.id, step=1000,
+               filename='legacy.png')
+        db.session.commit()
+
+        by_url = {i['url'].rsplit('/', 1)[-1]: i
+                  for i in ct.checkpoint_gallery(rec.id, 1000)['images']}
+        assert by_url['a.png']['run_id'] == 'launch-A'
+        assert by_url['b.png']['run_id'] == 'launch-B'
+        assert by_url['legacy.png']['run_id'] is None

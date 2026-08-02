@@ -6,7 +6,8 @@ from sqlalchemy.exc import IntegrityError
 
 from .. import capabilities
 from ..gpu_window import GpuBusyError
-from ..job_queue import ComfyUIRecoveryRequired, require_comfyui_enqueue_ready
+from ..job_queue import (ComfyUIRecoveryRequired, auto_resolve_comfyui_barrier,
+                         require_comfyui_enqueue_ready)
 
 logger = logging.getLogger(__name__)
 
@@ -50,10 +51,24 @@ def _require_comfyui(*, force=False):
 
 
 def _require_no_stalled_comfyui():
-    """Structured route guard for the durable ComfyUI recovery barrier."""
+    """Structured route guard for the durable ComfyUI recovery barrier.
+
+    The moment of refusal is also the best moment to check whether the barrier
+    is still real: the user is here, ComfyUI is presumably back (that is what
+    the message told them to do), and a prompt id ComfyUI no longer knows is
+    proof the remote job is gone. So try the provable clear once before
+    refusing — the barrier survives every unprovable case untouched, which is
+    what keeps this safe.
+    """
     try:
         require_comfyui_enqueue_ready()
     except ComfyUIRecoveryRequired as e:
+        if auto_resolve_comfyui_barrier() is not None:
+            try:
+                require_comfyui_enqueue_ready()
+                return None
+            except ComfyUIRecoveryRequired as retried:
+                e = retried  # another barrier appeared meanwhile: still refuse
         return jsonify({
             'ok': False,
             'code': 'comfyui_recovery_required',

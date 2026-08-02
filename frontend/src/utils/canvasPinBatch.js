@@ -115,23 +115,68 @@ export function boardObstacles(graph, imageNodes) {
   return out;
 }
 
-/** The source checkpoint of an image, as a stable key. */
+/** The source checkpoint of an image, as a stable key. One BAND COLUMN each —
+ *  which is a question about where a picture came from on the tree, not about
+ *  which click produced it. */
 const sourceKey = (img) => `${img?.record_id ?? '?'}:${img?.step ?? '?'}`;
-const strictSourceKey = (value) => {
-  const image = value?.image || value;
-  if (image?.record_id == null || image?.step == null) return null;
-  return `${String(image.record_id)}:${String(image.step)}`;
-};
 
-/** Turn freshly pinned images into (or append them to) one strip per checkpoint.
- * Manual mixed-source groups are never reused. The undo snapshot covers both
- * the new images and any existing member whose membership is rewritten. */
+/**
+ * WHICH GENERATION made a picture — the identity two lots must never share.
+ *
+ * `lora_test_image.run_id` already groups every cell of one launch (it is what
+ * the Test Studio resumes a grid from); the checkpoint gallery now publishes
+ * it. Without it, "same checkpoint" was the only thing a strip could be keyed
+ * on, so a second run fired at the same checkpoint had its pictures appended to
+ * the first run's strip — the two runs read as one lot, which is precisely what
+ * a board built to COMPARE runs must never do.
+ *
+ * An image made before that column was backfilled carries no run id and falls
+ * back to its checkpoint, so a board that predates this draws exactly what it
+ * drew before rather than silently regrouping itself.
+ */
+export function imageBatchKey(value) {
+  const image = value?.image || value;
+  const runId = image?.run_id;
+  if (runId != null && String(runId) !== '') return `run:${String(runId)}`;
+  if (image?.record_id == null || image?.step == null) return null;
+  return `ckpt:${String(image.record_id)}:${String(image.step)}`;
+}
+
+/**
+ * TRAINING order: the step that made the picture, ascending. The one order a
+ * strip of checkpoints is allowed to have — reading epoch 500 next to epoch
+ * 2000 is the entire reason the pictures are side by side.
+ *
+ * It was `${record_id}:${step}` compared as TEXT, which sorts step 1000 before
+ * step 500 and put a four-checkpoint lot on the board shuffled. Steps are
+ * numbers here, and a missing one sorts last rather than colliding with 0.
+ */
+export function byTrainingOrder(a, b) {
+  const imageA = a?.image || a;
+  const imageB = b?.image || b;
+  const rawA = Number(imageA?.step);
+  const rawB = Number(imageB?.step);
+  const stepA = Number.isFinite(rawA) ? rawA : Infinity;
+  const stepB = Number.isFinite(rawB) ? rawB : Infinity;
+  if (stepA !== stepB) return stepA - stepB;
+  const recA = Number(imageA?.record_id) || 0;
+  const recB = Number(imageB?.record_id) || 0;
+  if (recA !== recB) return recA - recB;
+  return (Number(a?.id ?? a?.imageId) || 0) - (Number(b?.id ?? b?.imageId) || 0);
+}
+
+/** Turn freshly pinned images into (or append them to) one strip per GENERATION
+ * RUN (imageBatchKey) — not per checkpoint. Pinning a picture from a gallery
+ * joins the strip of the lot it belongs to; a picture from a LATER run of the
+ * same checkpoint starts its own. Manual mixed groups are never reused. The
+ * undo snapshot covers both the new images and any existing member whose
+ * membership is rewritten. */
 export function groupPinnedBatchBySource({ nodes = [], placed = [] } = {}) {
   const before = new Map((nodes || []).filter((n) => n?.imageId != null)
     .map((n) => [Number(n.imageId), { ...n }]));
   const working = new Map([...before].map(([id, n]) => [id, { ...n }]));
   const fresh = [...(placed || [])].filter((p) => p?.imageId != null)
-    .sort((a, b) => Number(a.imageId) - Number(b.imageId));
+    .sort(byTrainingOrder);
 
   for (const p of fresh) {
     const id = Number(p.imageId);
@@ -156,16 +201,16 @@ export function groupPinnedBatchBySource({ nodes = [], placed = [] } = {}) {
     affected.set(id, node);
   };
 
-  const freshBySource = new Map();
+  const freshByBatch = new Map();
   for (const p of fresh) {
     const node = working.get(Number(p.imageId));
-    const key = strictSourceKey(node);
+    const key = imageBatchKey(node);
     if (!key) continue;
-    if (!freshBySource.has(key)) freshBySource.set(key, []);
-    freshBySource.get(key).push(node);
+    if (!freshByBatch.has(key)) freshByBatch.set(key, []);
+    freshByBatch.get(key).push(node);
   }
 
-  for (const [key, additions] of [...freshBySource].sort(([a], [b]) => a.localeCompare(b))) {
+  for (const [key, additions] of [...freshByBatch].sort(([a], [b]) => a.localeCompare(b))) {
     const originalVisible = [...before.values()].filter((n) => n.visible !== false);
     const groupIds = [...new Set(originalVisible.map((n) => n.groupId).filter(Boolean))].sort();
     let members = null;
@@ -173,7 +218,7 @@ export function groupPinnedBatchBySource({ nodes = [], placed = [] } = {}) {
     for (const gid of groupIds) {
       const list = originalVisible.filter((n) => n.groupId === gid)
         .sort((a, b) => (a.groupPos ?? 0) - (b.groupPos ?? 0) || a.imageId - b.imageId);
-      if (list.length >= 2 && list.every((n) => strictSourceKey(n) === key)) {
+      if (list.length >= 2 && list.every((n) => imageBatchKey(n) === key)) {
         members = [...list, ...additions.filter((n) => !list.some((m) => m.imageId === n.imageId))];
         groupId = gid;
         break;
@@ -181,13 +226,19 @@ export function groupPinnedBatchBySource({ nodes = [], placed = [] } = {}) {
     }
     if (!members) {
       const anchor = originalVisible
-        .filter((n) => !n.groupId && strictSourceKey(n) === key)
-        .sort((a, b) => a.imageId - b.imageId)[0];
+        .filter((n) => !n.groupId && imageBatchKey(n) === key)
+        .sort(byTrainingOrder)[0];
       members = [...(anchor ? [anchor] : []), ...additions]
         .filter((n, i, all) => all.findIndex((m) => m.imageId === n.imageId) === i);
       if (members.length < 2) continue;
       groupId = nextGroupId([...working.values()], members[0].imageId);
     }
+    // ALWAYS training order, even when the picture that just arrived belongs
+    // earlier than everything already in the strip: pinning epoch 500 after
+    // epoch 2000 must not put 500 on the right-hand end. Nothing is lost by
+    // re-sorting — an automatic strip's order is never hand-set (dragging a
+    // member around INSIDE its strip is a no-op, see canvasImageGroups).
+    members.sort(byTrainingOrder);
     members.forEach((member, pos) => {
       const updated = { ...working.get(member.imageId), groupId, groupPos: pos };
       working.set(member.imageId, updated);
@@ -200,24 +251,52 @@ export function groupPinnedBatchBySource({ nodes = [], placed = [] } = {}) {
   return { rows: [...affected.values()].sort(byId), undoRows: [...undo.values()].sort(byId) };
 }
 
-/** Turn one freshly generated/pinned lot into a single strip.
- * Different checkpoints are intentional here: Pin all represents one
- * generation action. Existing groups are never reused, so separate runs stay
- * as separate strips. */
+/** Turn one freshly generated/pinned lot into a strip PER GENERATION RUN,
+ * ordered by training step.
+ *
+ * Different checkpoints belong together here — 📌 Pin all is one generation
+ * action and the strip is that action's contact sheet. Two runs never can:
+ * existing groups are never reused, and a lot that somehow carried images from
+ * two runs is split by `run_id` rather than concatenated. Images with no run id
+ * (made before the column was backfilled) keep the old whole-gesture strip,
+ * which is safe — this function cannot merge into anything that was already on
+ * the board. */
 export function groupPinnedBatchTogether({ nodes = [], placed = [] } = {}) {
   const before = new Map((nodes || []).filter((n) => n?.imageId != null)
     .map((n) => [Number(n.imageId), { ...n }]));
   const fresh = [...(placed || [])].filter((p) => p?.imageId != null)
-    .sort((a, b) => Number(a.imageId) - Number(b.imageId));
-  const groupId = fresh.length >= 2
-    ? nextGroupId([...(nodes || []), ...fresh], fresh[0].imageId)
-    : null;
-  const rows = fresh.map((p, pos) => {
+    .sort(byTrainingOrder);
+
+  const runOf = (p) => {
+    const runId = (p?.image || p)?.run_id;
+    return runId != null && String(runId) !== '' ? `run:${String(runId)}` : 'gesture';
+  };
+  const lots = new Map();
+  for (const p of fresh) {
+    const key = runOf(p);
+    if (!lots.has(key)) lots.set(key, []);
+    lots.get(key).push(p);
+  }
+  const groupOf = new Map();
+  const posOf = new Map();
+  const taken = [...(nodes || []), ...fresh];
+  for (const [, lot] of lots) {
+    if (lot.length < 2) continue;
+    const groupId = nextGroupId(taken, lot[0].imageId);
+    taken.push({ groupId });
+    lot.forEach((p, pos) => {
+      groupOf.set(Number(p.imageId), groupId);
+      posOf.set(Number(p.imageId), pos);
+    });
+  }
+
+  const rows = fresh.map((p) => {
     const id = Number(p.imageId);
     const old = before.get(id);
+    const groupId = groupOf.get(id) ?? null;
     return {
       imageId: id, x: p.x, y: p.y, w: p.w, h: p.h, visible: true,
-      groupId, groupPos: groupId ? pos : null,
+      groupId, groupPos: groupId ? posOf.get(id) : null,
       image: p.image || old?.image,
     };
   });
@@ -311,9 +390,10 @@ export function placeImageBatch({ graph, existing, images, remembered, max } = {
   const all = (Array.isArray(images) ? images : []).filter((i) => i?.id != null);
 
   // Deterministic order FIRST, cap SECOND: which images are refused must not
-  // depend on the order the API happened to list the run's cells in.
-  const ordered = [...all].sort((a, b) => (
-    String(sourceKey(a)).localeCompare(String(sourceKey(b))) || (a.id - b.id)));
+  // depend on the order the API happened to list the run's cells in. Training
+  // order, so an over-cap lot keeps the EARLY epochs and drops the tail —
+  // "which checkpoint starts working" is the question the band is read for.
+  const ordered = [...all].sort(byTrainingOrder);
   const taking = ordered.slice(0, cap);
   const skipped = ordered.slice(cap).map((image) => ({ image, reason: 'over-cap' }));
 
@@ -353,12 +433,15 @@ export function placeImageBatch({ graph, existing, images, remembered, max } = {
     for (const image of band) {
       const key = sourceKey(image);
       if (!groups.has(key)) {
-        groups.set(key, { key, ax: anchorX(graph, image.record_id), images: [] });
+        groups.set(key, { key, first: image, ax: anchorX(graph, image.record_id), images: [] });
       }
       groups.get(key).images.push(image);
     }
+    // Columns read left to right in TRAINING order when two checkpoints anchor
+    // at the same place — a tie broken by the alphabet put step 1000 left of
+    // step 500.
     const ordering = [...groups.values()].sort((a, b) => (a.ax - b.ax)
-      || String(a.key).localeCompare(String(b.key)));
+      || byTrainingOrder(a.first, b.first));
 
     // Columns are RESERVED before they are filled: a group takes the first free
     // column at or right of the one its own source sits over. Two runs at the
@@ -375,7 +458,7 @@ export function placeImageBatch({ graph, existing, images, remembered, max } = {
       const preferred = Math.max(0, Math.round(group.ax / colW));
       let col = takeColumn(preferred);
       let row = 0;
-      for (const image of group.images.sort((a, b) => a.id - b.id)) {
+      for (const image of group.images.sort(byTrainingOrder)) {
         if (row >= COLUMN_ROWS) { col = takeColumn(col + 1); row = 0; }
         const box = { x: col * colW, y: bandTop + row * rowH, w: size, h: size };
         occupied.push(box);
@@ -385,7 +468,7 @@ export function placeImageBatch({ graph, existing, images, remembered, max } = {
     }
   }
 
-  placed.sort((a, b) => a.imageId - b.imageId);
+  placed.sort(byTrainingOrder);
   return { size, placed, skipped };
 }
 

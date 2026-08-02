@@ -57,8 +57,9 @@ function kleinMissingRequired(c) {
 // self-annuls the moment a path is entered. We only treat the step as skipped when
 // ComfyUI is ALSO not reachable — a running ComfyUI is worth surfacing (partial/
 // ready) even if the user once clicked skip.
-function comfyuiStep(caps) {
+function comfyuiStep(caps, runtimeReadiness) {
   const c = caps.comfyui || {}
+  const managed = (runtimeReadiness && runtimeReadiness.comfyui) || {}
   const missingRequired = kleinMissingRequired(c)
   // The BACKEND's verdict on each local engine, plus the one sentence explaining
   // it. Setup renders these; it no longer decides them. See localEngineReadiness.
@@ -98,12 +99,18 @@ function comfyuiStep(caps) {
     : (derivedHasKlein ? [] : ['klein_model'])
   // Skipped is neutral, not a warning — but only when there's genuinely nothing to
   // show (unreachable). It never overrides a reachable ComfyUI's real status.
-  const skipped = !!c.skipped && !c.reachable
-  const status = skipped ? 'skipped' : gateStatus(c.reachable, hasKlein)
+  const managedInitializing = managed.mode === 'integrated'
+    && managed.state === 'starting' && !c.reachable
+  const skipped = !!c.skipped && !c.reachable && !managedInitializing
+  const status = managedInitializing
+    ? 'initializing'
+    : (skipped ? 'skipped' : gateStatus(c.reachable, hasKlein))
   return {
     id: 'comfyui', title: 'ComfyUI — local generation & Test Studio', recommended: false,
     unlocks: ['Klein engine', 'Test Studio'],
     status, reachable: !!c.reachable,
+    managedMode: managed.mode || 'external',
+    managedInitializing,
     connectionStatus: c.status || (c.reachable ? 'ok' : 'unreachable'),
     hasKlein, kleinMissing, kleinInvalid, apiUrl: c.api_url || '',
     skipped,
@@ -144,6 +151,13 @@ function comfyuiStep(caps) {
 // affordance discoverable; starting still requires the saved, freshly re-checked
 // configuration because the no-payload POST reads that configuration.
 export function comfyuiLauncherState(step, configPersisted, liveDirValid = false) {
+  // Docker either owns the integrated process or connects to a process on the
+  // host. In neither case can a button inside the app safely launch a Windows
+  // portable executable. Hide it for the whole deployment lifetime, including
+  // the brief window where runtime readiness is ahead of the full caps refresh.
+  if (step && ['integrated', 'external-host'].includes(step.managedMode)) {
+    return { visible: false, enabled: false, reason: '' }
+  }
   // Never offer a second process while the saved probe says one is answering (or
   // still answering slowly). This comes before the live-directory affordance.
   if (!step || step.reachable || step.connectionStatus === 'slow') {
@@ -291,14 +305,43 @@ export function aitoolkitVerdict(step, dir) {
   }
 }
 
-function ollamaStep(caps) {
+function ollamaStep(caps, runtimeReadiness) {
   const o = caps.ollama || {}
-  const status = gateStatus(o.reachable, o.vision_model_ready)
+  const managed = (runtimeReadiness && runtimeReadiness.ollama) || {}
+  const deploymentMode = managed.mode || 'local'
+  const deploymentState = managed.state || ''
+  const dockerManaged = ['unconfigured', 'none', 'host', 'docker'].includes(deploymentMode)
+  const deploymentConfigured = deploymentMode !== 'unconfigured'
+  const deploymentUrl = deploymentMode === 'host'
+    ? 'http://host.docker.internal:11434'
+    : deploymentMode === 'docker' ? 'http://ollama:11434' : ''
+  const normalizedCapabilityUrl = String(o.url || '').replace(/\/+$/, '')
+  // Lightweight runtime readiness owns reachability in Docker. The full caps
+  // snapshot may still describe the previous endpoint while its refresh retries;
+  // never transfer a model-ready verdict across that endpoint switch.
+  const capabilityMatchesDeployment = !dockerManaged || !deploymentUrl
+    || normalizedCapabilityUrl === deploymentUrl
+  const reachable = dockerManaged ? !!managed.ready : !!o.reachable
+  const visionModelReady = reachable && capabilityMatchesDeployment
+    && !!o.vision_model_ready
+  const disabled = deploymentMode === 'none'
+  const unconfigured = deploymentMode === 'unconfigured'
+  const managedInitializing = deploymentMode === 'docker'
+    && managed.state === 'starting' && !managed.ready
+  const status = unconfigured
+    ? 'available'
+    : disabled
+    ? 'skipped'
+    : (managedInitializing
+        ? 'initializing'
+        : gateStatus(reachable, visionModelReady))
   return {
     id: 'ollama', title: 'Ollama — captioning & auto-framing', recommended: false,
     unlocks: ['Captioning', 'Auto-classify framing', 'Auto head-crop'],
-    status, reachable: !!o.reachable, visionModelReady: !!o.vision_model_ready,
-    url: o.url || '', visionModel: o.vision_model || '',
+    status, reachable, visionModelReady,
+    deploymentMode, deploymentState, deploymentConfigured, deploymentUrl,
+    dockerManaged, disabled, unconfigured, managedInitializing,
+    url: deploymentUrl || o.url || '', visionModel: o.vision_model || '',
     // Execution-independent install signal (binary on disk) vs `reachable` (server
     // answering): installed && !reachable -> "installed but stopped", offer a Start.
     installed: !!o.installed, binaryPath: o.binary_path || '',
@@ -338,9 +381,10 @@ function trainingStep(caps) {
   }
 }
 
-export function deriveSetupSteps(caps) {
+export function deriveSetupSteps(caps, runtimeReadiness = null) {
   const c = caps || {}
-  return [imageStep(c), comfyuiStep(c), ollamaStep(c), qualityStep(c), trainingStep(c)]
+  return [imageStep(c), comfyuiStep(c, runtimeReadiness),
+    ollamaStep(c, runtimeReadiness), qualityStep(c), trainingStep(c)]
 }
 
 // The user's live capability checklist (Summary card). Watermark inpainting is a
@@ -483,6 +527,8 @@ export const INSTALL_ALL_ACTION_LABELS = {
   krea_text_encoder: 'Krea 2 text encoder',
   krea_vae: 'Krea 2 VAE',
   krea_identity_lora: 'Krea 2 Identity Edit LoRA',
+  seedvr2_model: 'SeedVR2 model (3B FP8)',
+  seedvr2_vae: 'SeedVR2 VAE',
 }
 
 // The Krea 2 Edit engine, installable in ONE click but deliberately NOT part of
@@ -529,11 +575,39 @@ export function kreaNeedsComfyuiRestart(caps) {
     && Array.isArray(cu.krea_nodes_missing) && cu.krea_nodes_missing.length)
 }
 
-// Grouped by capability area (ML extras → vision model → Klein weights). The backend
+/** What the "Install SeedVR2" button would queue — the missing weights only.
+ *  Mirror of setup_installer.install_group_plan('seedvr2', caps), which stays the
+ *  authority.
+ *
+ *  There is NO node-pack action here, and that is the difference from Krea: this
+ *  pack declares thirteen pip dependencies that belong in ComfyUI's own
+ *  interpreter, which the app does not own and must never pip into. Cloning it
+ *  alone would land a pack that fails to import — so the pack is explained, and
+ *  only the weights are installed. */
+export const SEEDVR2_INSTALL_ORDER = ['seedvr2_model', 'seedvr2_vae']
+
+export function seedvr2InstallPlan(caps) {
+  const cu = (caps || {}).comfyui || {}
+  if (!cu.dir_valid) return []
+  const missing = brokenOrMissing(cu.seedvr2_missing, cu.seedvr2_invalid)
+  return SEEDVR2_INSTALL_ORDER.filter((a) => missing.includes(a))
+}
+
+/** The one thing an install cannot do: ComfyUI registers custom nodes at STARTUP
+ *  only, so a pack on disk but absent from /object_info means "restart ComfyUI".
+ *  Same rule as Krea's — here it also covers the case where the pack's Python
+ *  dependencies failed to install, which looks identical from outside. */
+export function seedvr2NeedsComfyuiRestart(caps) {
+  const cu = (caps || {}).comfyui || {}
+  return !!(cu.seedvr2_nodes_installed
+    && Array.isArray(cu.seedvr2_nodes_missing) && cu.seedvr2_nodes_missing.length)
+}
+
+// Grouped by capability area (ML extras → Klein weights). The backend
 // serializes pip and parallelizes downloads regardless of fire order, so this order
 // only drives the progress list; it must match the backend's _INSTALL_ALL_ORDER.
 export const INSTALL_ALL_ORDER = [
-  'face_scoring', 'masks', 'watermark_inpaint', 'ollama_model',
+  'face_scoring', 'masks', 'watermark_inpaint',
   'klein_model', 'klein_text_encoder', 'klein_vae', 'klein_lora',
 ]
 
@@ -544,7 +618,6 @@ export function installAllPlan(caps) {
   // info => assume supported (older payloads). watermark_inpaint builds its own venv, so
   // it stays runnable regardless.
   const mlOk = !(c.python && c.python.ml_supported === false)
-  const o = c.ollama || {}
   const cu = c.comfyui || {}
   // Broken counts as missing: an interrupted download leaves a file that every
   // presence check calls installed and no loader can open.
@@ -552,9 +625,6 @@ export function installAllPlan(caps) {
   const needed = (a) => {
     if (a === 'face_scoring' || a === 'masks') return mlOk && !c[a]
     if (a === 'watermark_inpaint') return !c.watermark_inpaint
-    if (a === 'ollama_model') {
-      return !!(o.reachable && !o.vision_model_ready && (o.vision_model || '').trim())
-    }
     // klein_* — only into a validated ComfyUI tree.
     return !!cu.dir_valid && kleinMissing.includes(a)
   }

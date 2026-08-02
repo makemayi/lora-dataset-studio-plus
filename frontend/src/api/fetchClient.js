@@ -1,7 +1,9 @@
 /**
  * Centralized API fetch client with global error interception via toast.
  */
-import { reportRequestFailure, reportRequestSuccess } from '../utils/connectionStatus';
+/* Extension spelled out: this module is imported directly by `node --test`
+   (api/fetchClientBackground.test.js), and Node's ESM resolver does not guess. */
+import { reportRequestFailure, reportRequestSuccess } from '../utils/connectionStatus.js';
 
 let toastRef = null;
 
@@ -81,9 +83,17 @@ export const CONNECTION_BACK_MESSAGE = 'Back online.';
  *   `background: true` marks an AUTOMATIC, periodic request — a progress poll,
  *   a live indicator. Its failure is expected weather, not news: it updates the
  *   shared connection state (which drives the persistent "Offline —
- *   reconnecting…" indicator) and says nothing. Everything else keeps today's
- *   behaviour, so no existing call site changes meaning by staying silent about
- *   the flag; only pollers opt in.
+ *   reconnecting…" indicator) and says nothing. That silence covers BOTH ways a
+ *   poll fails — the request never landing, and the server answering 401/429/5xx
+ *   — because a poll repeating on a timer would repeat the toast on the timer
+ *   too. The rejection still reaches the caller either way.
+ *
+ *   Recovery is the one thing a background call is still allowed to announce:
+ *   during an outage nobody is clicking, so the poll IS what notices the server
+ *   came back, and reportRequestSuccess() already fires only on that one edge.
+ *
+ *   Everything else keeps today's behaviour, so no existing call site changes
+ *   meaning by staying silent about the flag; only pollers opt in.
  */
 export async function apiFetch(url, options = {}) {
   const { background = false, ...init } = options;
@@ -116,12 +126,26 @@ export async function apiFetch(url, options = {}) {
       // an unrecoverable CSRF rejection — surface the actionable message, not
       // the raw "HTTP 400".
       msg = CSRF_EXPIRED_MESSAGE;
+    } else if (background) {
+      // The server ANSWERED — the connection store is right to call the outage
+      // closed — but it answered badly, and a poll retrying every 2-3 s would
+      // repeat that answer forever. A container still booting says 503 for a
+      // minute; that used to be twenty "Server error" toasts. The caller still
+      // gets the rejection and decides what to draw.
     } else if (res.status === 401) {
       toastRef?.error('Session expired. Please log in again.');
     } else if (res.status === 429) {
       toastRef?.warning('Too many requests. Please wait a moment.');
     } else if (res.status >= 500) {
       toastRef?.error('Server error. Please try again later.');
+    }
+
+    // A stalled ComfyUI job blocks generation app-wide, and this refusal is the
+    // one moment we know the user is watching. Announce it so the shell's
+    // recovery banner appears immediately, wherever the call came from —
+    // otherwise the way out stays hidden until the next 20-second poll.
+    if (body?.code === 'comfyui_recovery_required') {
+      globalThis.dispatchEvent?.(new Event('lds:comfyui-recovery-required'));
     }
 
     const err = new Error(msg);

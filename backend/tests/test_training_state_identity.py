@@ -411,7 +411,7 @@ def test_identity_publish_refuses_symlink_parent(tmp_path):
     except (OSError, NotImplementedError):
         pytest.skip('directory symlink creation is unavailable on this platform')
 
-    with pytest.raises(OSError, match='not a real directory'):
+    with pytest.raises(OSError, match='unsafe|link|reparse'):
         identity.write_identity(linked / 'context.json', {'schema': 'test'})
 
     assert not (real / 'context.json').exists()

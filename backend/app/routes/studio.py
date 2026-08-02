@@ -133,6 +133,23 @@ def studio_describe_image():
     return jsonify({'ok': True, 'prompt': prompt})
 
 
+@bp.post('/enhance-prompt')
+def studio_enhance_prompt():
+    """Enrich the typed test prompt with the local Ollama text model (same client and
+    same model as captioning). Runs inside the GPU-exclusive vision window so it never
+    fights a queued generation for VRAM.
+
+    400 = empty/oversized prompt · 409 = Ollama unavailable or answered nothing (its own
+    reason carried through) · 503 = GPU busy."""
+    d = request.get_json(silent=True) or {}
+    try:
+        with gpu_exclusive_vision_window(flag_ttl=600):
+            enhanced = lts.enhance_test_prompt(d.get('prompt'))
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, 'prompt': enhanced})
+
+
 @bp.post('/run')
 def studio_run():
     gate = _require_comfyui()
@@ -157,7 +174,8 @@ def studio_run():
             enhancer_strength=d.get('enhancer_strength'), detail_amount=d.get('detail_amount'),
             resolution_tier=d.get('resolution_tier'),
             resolution_multiplier=d.get('resolution_multiplier'),
-            init_image=d.get('init_image'), denoise=d.get('denoise'))
+            init_image=d.get('init_image'), denoise=d.get('denoise'),
+            combine=d.get('combine'))
     except Exception as e:
         from ..services.lora_test_studio import StudioArchMismatch, StudioAssetsMissing
         if isinstance(e, StudioArchMismatch):   # wrong-arch checkpoint → actionable 409

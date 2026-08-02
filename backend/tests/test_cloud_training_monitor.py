@@ -42,8 +42,13 @@ class FakeRemote:
     def ensure_settings(self, hf_token=None):
         return self.get_settings()
 
-    def upload_dataset(self, name, folder):
+    def upload_dataset(self, name, folder, on_progress=None):
+        # The real driver reports its progress as it goes (a 24 GB dataset is
+        # 1 553 POSTs and used to report nothing — run #138). The double calls
+        # the callback once so the monitor's wiring is exercised here too.
         self.uploaded[name] = len(os.listdir(folder))
+        if on_progress:
+            on_progress(self.uploaded[name], self.uploaded[name], 1, 1)
         return self.uploaded[name]
 
     def create_job(self, name, job_config, gpu_ids='0'):
@@ -970,6 +975,85 @@ def test_set_leaves_a_usable_session_when_it_gives_up(ct, app, monkeypatch):
         fresh = ct.db.session.get(ct.CloudTrainingRun, run_id)
         assert fresh.status == 'error'
         assert fresh.error == 'pod unreachable'
+
+
+def test_progress_heartbeat_survives_a_lock_that_outlives_the_retries(
+        ct, app, monkeypatch):
+    """A cosmetic progress write must never end a healthy paid run.
+
+    Regression 2026-08-01, run #137: an unrelated long write transaction held
+    the SQLite write lock for over an hour. The monitor's per-poll heartbeat --
+    which only refreshes phase_detail text -- exhausted its retry budget, raised
+    out of _monitor, and a run that was training normally on a rented 5090 was
+    recorded status='error' with error='database is locked'.
+    """
+    import sqlite3
+
+    from sqlalchemy import event
+
+    monkeypatch.setattr(ct, '_sleep', lambda s: None)
+    with app.app_context():
+        run = ct.CloudTrainingRun(dataset_id=1, status='training',
+                                  job_name='j', vast_label='lds-1',
+                                  phase_detail='running: Training')
+        ct.db.session.add(run)
+        ct.db.session.commit()
+        run_id = run.id
+
+        engine = ct.db.session.get_bind()
+        refused = {'n': 0}
+
+        @event.listens_for(engine, 'before_cursor_execute')
+        def _refuse_every_update(conn, cursor, statement, parameters,
+                                 context, executemany):
+            if statement.lstrip().upper().startswith('UPDATE'):
+                refused['n'] += 1
+                raise sqlite3.OperationalError('database is locked')
+
+        try:
+            landed = ct._set_soft(run, phase_detail='running: step 1164')
+        finally:
+            event.remove(engine, 'before_cursor_execute', _refuse_every_update)
+
+        assert landed is False                       # the miss is reported...
+        assert refused['n'] == ct._COMMIT_RETRIES    # ...after a real budget
+        # The run is untouched: still training, never marked failed.
+        fresh = ct.db.session.get(ct.CloudTrainingRun, run_id)
+        assert fresh.status == 'training'
+        assert fresh.error is None
+        # And the session is still usable for the next poll's write.
+        ct._set(run, phase_detail='running: step 1200')
+        assert ct.db.session.get(
+            ct.CloudTrainingRun, run_id).phase_detail == 'running: step 1200'
+
+
+def test_progress_heartbeat_still_raises_on_a_real_database_error(ct, app,
+                                                                  monkeypatch):
+    """Only the lock is tolerated — a genuine schema/IO fault stays loud."""
+    from sqlalchemy.exc import OperationalError
+
+    monkeypatch.setattr(ct, '_sleep', lambda s: None)
+    with app.app_context():
+        run = ct.CloudTrainingRun(dataset_id=1, status='training',
+                                  job_name='j', vast_label='lds-1')
+        ct.db.session.add(run)
+        ct.db.session.commit()
+
+        def broken_commit():
+            raise OperationalError('UPDATE cloud_training_run ...', {},
+                                   Exception('no such column: nope'))
+
+        monkeypatch.setattr(ct.db.session, 'commit', broken_commit)
+        with pytest.raises(OperationalError):
+            ct._set_soft(run, phase_detail='running: step 1164')
+
+
+def test_monitor_uses_the_soft_write_for_its_progress_heartbeat(ct):
+    """The heartbeat seam must stay wired, or the regression returns silently."""
+    import inspect
+
+    source = inspect.getsource(ct._monitor)
+    assert '_set_soft(run, phase_detail=f"{status}: {info}"[:500])' in source
 
 
 def test_set_still_raises_on_a_non_lock_database_error(ct, app, monkeypatch):

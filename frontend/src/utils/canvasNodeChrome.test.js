@@ -149,3 +149,19 @@ test('groupBarHeight survives nonsense', () => {
   assert.equal(groupBarHeight(NaN, 400), 26);
   assert.ok(Number.isFinite(groupBarHeight(1, NaN)));
 });
+
+/* 🪪 A control that lives in the zoomed world WITHOUT belonging to a pinned
+   node — the lane header's reference thumbnail is the first one. Caught in the
+   browser, not by a test: the button was correct, its handler was correct, and
+   clicking it did nothing, because the frame captured the pointer and the click
+   that followed was retargeted away from it. The generic marker exists so the
+   next thing added to the world opts out instead of rediscovering this. */
+const LANE_CONTROL = el('[data-canvas-control]');
+
+test('a control in the world opts out of the board gesture by marker alone', () => {
+  assert.ok(isNodeControlTarget(LANE_CONTROL),
+    'no capture ⇒ the click reaches the button');
+  assert.equal(nodePointerIntent(LANE_CONTROL, 'mouse'), 'control');
+  assert.equal(nodePointerIntent(LANE_CONTROL, 'touch'), 'control',
+    'and it never arms the long press either');
+});

@@ -68,10 +68,42 @@ class RemoteAiToolkit:
         return st
 
     # -- dataset upload -----------------------------------------------------
-    def upload_dataset(self, name: str, folder: str) -> int:
+    def upload_dataset(self, name: str, folder: str, on_progress=None) -> int:
+        """Push a staged dataset folder to the pod, eight files per POST.
+
+        on_progress(files_done, files_total, bytes_done, bytes_total) is called
+        once before the first batch and after every batch that lands, for the
+        same reason _download takes one: a caller has to be able to prove to
+        its own watchdogs that a long transfer is alive. That is not a
+        theoretical need here — a dataset of 12 422 files and 24 GB is 1 553
+        sequential POSTs, and with no callback the whole thing was a single
+        blocking call that reported nothing for hours (run #138). Same
+        contract as the download side: the callback is never allowed to break
+        the upload — a raising one is logged and disabled.
+        """
         names = sorted(f for f in os.listdir(folder)
                        if f.lower().endswith(_DATA_EXTS))
+        sizes = {}
+        for fn in names:
+            try:
+                sizes[fn] = os.path.getsize(os.path.join(folder, fn))
+            except OSError:
+                sizes[fn] = 0        # counted as a file, worth zero bytes
+        total_bytes = sum(sizes.values())
+
+        def notify(done, sent):
+            nonlocal on_progress
+            if not on_progress:
+                return
+            try:
+                on_progress(done, len(names), sent, total_bytes)
+            except Exception:
+                on_progress = None
+                logger.debug('upload progress callback disabled', exc_info=True)
+
         total = 0
+        sent_bytes = 0
+        notify(0, 0)
         for i in range(0, len(names), _UPLOAD_BATCH):
             batch = names[i:i + _UPLOAD_BATCH]
             handles = [open(os.path.join(folder, fn), 'rb') for fn in batch]
@@ -82,9 +114,11 @@ class RemoteAiToolkit:
                 if r.status_code != 200:
                     raise RemoteError(f'dataset upload -> HTTP {r.status_code}: {r.text[:200]}')
                 total += len(batch)
+                sent_bytes += sum(sizes.get(fn, 0) for fn in batch)
             finally:
                 for fh in handles:
                     fh.close()
+            notify(total, sent_bytes)
         return total
 
     def seed_checkpoint(self, datasets_folder: str, dest_dir: str,

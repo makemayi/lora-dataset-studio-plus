@@ -48,6 +48,7 @@ export const JOB_LABELS = {
   bank_promote: '⬆ Copy into a new bank',
   import: '📥 Import',
   pipeline: '🚀 Launch all',
+  delete_rejected: '🗑 Delete rejected',
 };
 
 export function jobLabel(kind) {

@@ -174,6 +174,25 @@ Settings:
   - **Handoff (%)** → `krea.two_stage_handoff_percent` (default `16.67`, 0–100). Where stage 1 hands off to stage 2 in the denoising schedule — `0` uses only stage 2, `100` uses only stage 1.
   - **Stage 1 megapixels** → `krea.two_stage_base_megapixels` (default `1.0`, 0.1–16.0). The low-resolution first pass's target size.
   - **Final megapixels** → `krea.max_output_mp` (default `2.0`, 0.1–16.0). The two-stage path's final upscaled size — **and** the single-stage sampler's output-size cap above, since both share the same sizing call. Lowering it speeds up either path.
+- **Krea 2 Edit generation LoRA presets** → `krea.generation_lora_presets`. Named,
+  ordered combinations of **your own** LoRA files, chained after the identity-edit
+  LoRA when Krea 2 Edit generates dataset images. Max 8 LoRAs per preset, 12
+  presets; inside a preset the row order **is** the chain order. Per run you pick
+  one preset (or None, the default on every visit) in the workspace's 🧬 Krea 2
+  Edit tuning panel — the run sends only the preset's NAME and the app resolves
+  the files from this list, so renaming a preset can never make a run load
+  something you didn't configure. Strength runs to 6, and to **20** for utility
+  LoRAs whose filename says `filter-bypass`: those have no measurable effect below
+  about 10. Limits worth knowing: the LoRA must be trained for **Krea 2** (another
+  architecture loads as a silent no-op — the picker badges it), only the **model**
+  side is patched so a LoRA's text-encoder weights are ignored, a row whose file
+  has moved is **skipped** with the rest of the chain still applied, and the 🔄
+  single-image regenerate in the workspace does **not** carry a preset. A row
+  pointing at the **same file as Identity edit LoRA** is skipped too — it would
+  chain the identity LoRA a second time on top of itself, summing both strengths
+  into one delta well past what the file was trained for (visible as blocky,
+  posterized output, not a subtler quality loss). Empty by default. *(Preset
+  mechanism by @waltm, Discord.)*
 
 The pipeline's reference boost is an internal Krea calibration, not a second user-facing likeness slider; use **Reference grounding** for that trade-off.
 
@@ -183,6 +202,35 @@ Two behaviours worth knowing before you build a dataset with it:
 - **Extra reference images are ignored.** Identity comes from the primary reference alone. Klein and the API engines still use your extra refs.
 
 Outfits and expressions are steered differently here than on the other engines: this model preserves anything it is not *positively* told to change, so the catalog's "a different outfit (not the one in the reference)" phrasing is rewritten at generation time into a concrete garment ("wearing a red knit sweater"), picked from the shot's own name — so outfits genuinely differ across the dataset while regenerating one shot reproduces its own.
+
+### SeedVR2 upscaling (local)
+
+*Requested by SurpassHR ([GitHub #32](https://github.com/perfectgf/lora-dataset-studio/issues/32)).*
+
+The **fidelity** half of ✨ Upscale & improve. The two passes are a choice, not two qualities of the same thing:
+
+| | what it does | when you want it |
+| --- | --- | --- |
+| **Klein** | re-renders detail and texture from a prompt | a genuinely soft or low-detail photo you are willing to see changed |
+| **SeedVR2** | resolves detail at a higher resolution, content untouched | the frame is right and you only want it sharper — the exact skin tone, grain and colour are part of what you are training |
+
+Both are **non-destructive**: they create a separate candidate and never touch the source file.
+
+**What it needs** (Setup ▸ ComfyUI ▸ *SeedVR2 — optional fidelity upscaler* handles the models):
+
+- the **[ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler)** node pack (Apache-2.0) in ComfyUI, then a ComfyUI restart. **The app does not install this one for you**, unlike the Krea pack: it pulls thirteen Python packages that have to land in ComfyUI's own environment, and a bare copy of the folder would fail to import. Install it from ComfyUI-Manager (search "SeedVR2"), which does the dependencies properly.
+- two model files in `<ComfyUI>/models/SEEDVR2` — from [numz/SeedVR2_comfyUI](https://huggingface.co/numz/SeedVR2_comfyUI) (Apache-2.0, public, no account): `seedvr2_ema_3b_fp8_e4m3fn.safetensors` (3.4 GB) and `ema_vae_fp16.safetensors` (0.5 GB). The Setup card downloads both on a click; an `extra_model_paths.yaml` root for `SEEDVR2` works too.
+
+Settings:
+
+- **Default engine for ✨ Upscale & improve** → `improve.engine`. One of `klein`, `seedvr2`. Default **`klein`** — what every improve did before this setting existed. It governs the ✨ button on a single tile and ↻ Re-improve. **Bulk runs are never decided by it**: the selection toolbar shows one button per available engine and each states its trade-off, so a batch always says which pass it is about to run.
+- **Model build** → `seedvr2.model`. Blank (default) = the app resolves it: the 3B FP8 build when present, else whatever is in the folder. Only builds **already on disk** are offered in the dropdown — the pack's loader node downloads an unknown name on first use, and a dropdown must never start a multi-gigabyte download. To use a 7B or a GGUF build, drop the file in `models/SEEDVR2` and it appears in the list. Guidance from the pack: 3B FP8 ≈ 8–12 GB VRAM, 3B FP16 ≈ 12–16, 7B FP8 ≈ 16–20, 7B FP16 ≈ 24+.
+- **Target resolution (short edge)** → `seedvr2.resolution`. Range `256`–`4096`, default **`1080`**. The **short** edge is scaled to this and the aspect ratio is kept, so 1080 on a 3:2 photo gives 1620×1080. LoRA training buckets rarely exceed 1024–1280, so higher mostly costs VRAM and time.
+- **Maximum long edge** → `seedvr2.max_resolution`. `0` (default) = no limit. The VRAM safety valve on a wide crop: at a 1080 short edge a 4:1 panorama becomes 4320 px across.
+- **Colour correction** → `seedvr2.color_correction`. One of `lab`, `wavelet`, `wavelet_adaptive`, `hsv`, `adain`, `none`. Default **`lab`** — the model's own default and the most conservative. `wavelet` holds broad tone better on heavily degraded sources; `none` shows the raw output. Colour fidelity is the reason this engine exists, so it is worth trying two modes on one image before a long batch.
+- **Blocks offloaded to system RAM** → `seedvr2.blocks_to_swap`. Range `0`–`36`, default **`0`** (none, and fastest). Raise it to fit a bigger build on a smaller card: it trades speed for VRAM headroom and does not change the result.
+
+**There is no batch-size setting, on purpose.** SeedVR2's `batch_size` is a *video* window whose frames share temporal attention to stay coherent — feeding it unrelated dataset photos would let them bleed into each other. Images are upscaled one per job; throughput comes from the normal generation queue and its fan-out cap.
 
 ### Klein generation LoRA presets (optional)
 
@@ -201,12 +249,15 @@ How presets are used matters:
 - Resolution happens **by name** on the server, and it's **fail-closed**: if a run references a preset name that no longer exists, it runs **with no extra LoRAs** rather than erroring.
 - **Trap:** *renaming* a preset does **not** follow a run that referenced it by the old name — that run silently falls back to no extra LoRAs. Rename before you queue, or re-pick the preset on the run.
 - There is deliberately **no automatic NSFW gating** on individual LoRAs — the preset you pick carries the intent. If you want an "NSFW full" stack, make it a preset.
+- **Trap:** a row pointing at the **same file as the consistency LoRA** (`klein.consistency_lora`) is skipped — it would chain that LoRA a second time on top of itself, summing both strengths into one delta well past what the file was trained for (visible as blocky, posterized output).
 
 ### Klein generation quality
 
 *Raised by ashish.sinha.* **Generation steps** → `klein.generation_steps` (1–50, default **5**). How many sampler steps the local **Klein** engine spends on each generated image — variations, regenerations and the automatic small-image rescue. The shipped workflow had this pinned at **5** with no way to change it; the default is that same 5, so nothing moves until you raise it. More steps usually render more cleanly and cost proportionally more time (10 steps ≈ twice the wait per image).
 
 It is a **rendering** knob, not an anatomy fix: extra limbs, tails or wrong body parts come from the identity prompt describing the wrong kind of subject (see the subject-type note below), and no number of steps repairs that.
+
+**Enhancement LoRA on edits** → `klein.edit_base_lora_strength` (0–2, default **0**). How much of the detail LoRA (`klein/realistic.safetensors`) Klein mixes into an **edit**: the ✦ reference edit, variations, regenerations and the small-image rescue. The shipped workflow carries that LoRA at **0.8** and nothing on these lanes ever turned it down — which stayed invisible while the file existed on no install (the node was skipped), and became real once Setup started downloading it: from then on every Klein edit ran with a style LoRA at 0.8 pulling the result away from the instruction you typed. The default **0** is the render every install had before that download existed; raise it to let the LoRA add detail on purpose. “Upscale & improve” is unaffected — it has its own `klein.improve_base_lora_strength`.
 
 Separate from **Upscale & improve ▸ Steps** (`klein.improve_steps`), which drives the manual improve pass only.
 
@@ -333,6 +384,10 @@ This now includes the **training** bases, which were the last exception: an SDXL
 The card shows Ollama's live state and, when the binary is installed but the server isn't running, a **▶ Start Ollama** button that launches it for you — no terminal needed.
 
 - **Ollama URL** → `ollama.url`. Where Ollama is listening. Default **`http://127.0.0.1:11434`**.
+
+In Docker, choose the deployment only from **Setup → Ollama**: `none` disables it, `host` uses the existing host service at the authoritative `http://host.docker.internal:11434`, and `docker` uses the isolated companion at the authoritative `http://ollama:11434`. The managed URL is read-only. Neither launcher downloads a model: use the explicit **Pull** button in LDS to see progress and cancel or resume the transfer.
+
+- **Docker deployment mode** → `ollama.deployment_mode`: `none`, `host`, or `docker`. This setting is selected by Setup and applies only to Docker; native installs keep their normal URL-based behavior.
 - **Ollama vision model** → `ollama.vision_model`. The vision model used for auto-captioning, framing auto-classify, head-crop and watermark detection. Default **`huihui_ai/qwen3-vl-abliterated:8b-instruct`** — the **abliterated** (uncensored) build, so it captions adult datasets instead of refusing them. **Trap:** keep the **`-instruct`** tag. The plain `:8b` tag is the *Thinking* variant, which reasons out loud instead of captioning and produces garbage here.
 
 - **Images analysed at once** → `ollama.vision_concurrency`. How many images a bank pass sends to Ollama at the same time. Default **4**. The passes that read every image in a bank — watermark scan, framing, captions — spend most of each request waiting on the round-trip rather than on the GPU, so overlapping them roughly **halves** a long pass (measured 2.0× at 4). Going higher gains little: 6 and 8 buy single-digit percentages unless your Ollama is configured for more parallel requests (`OLLAMA_NUM_PARALLEL`), and they make **Stop** take a few seconds longer because it waits for the calls already in flight. Set it to **1** to get the old strictly-one-at-a-time behaviour back. Any value the app can't read falls back to 4, and anything above 16 is clamped — a bad value costs you speed, never the pass.
@@ -577,7 +632,8 @@ Full-model Krea 2 runs also need `HF_CLOUD_TOKEN`. A separate fine-grained token
 | **First-step timeout (minutes)** | `cloud.first_step_timeout_minutes` | `45` | 5–240 | Idle budget for the phase *before* training starts, while the pod downloads its base model (tens of GB). The clock **restarts every time the pod reports more downloaded bytes**, so an honestly slow download is never cut — only a pod that reports no bytes and no step for this long is terminated. A frozen byte counter counts as silence even when the log line keeps redrawing. |
 | **Base-model download ceiling (minutes, 0 = none)** | `cloud.first_step_download_budget_minutes` | `180` | 0 or 5–480 | The **absolute** ceiling on that same phase. Because advancing bytes restart the timeout above, a host too slow to ever finish would keep its download — and your rental — alive until the runtime cap; past this it is terminated regardless. `0` removes the ceiling and leaves the runtime cap as the only backstop. |
 | **Max runtime (minutes)** | `cloud.max_runtime_minutes` | `480` | 30–1440 | Hard stop on the whole run, whatever it is doing: the newest checkpoint is rescued, then the pod is terminated. Enforced by the out-of-run supervisor too, so it holds even if the run's own supervision dies. |
-| **Freeze watchdog (minutes, 0 = warn only)** | `cloud.freeze_watchdog_minutes` | `45` | 0 or 15–480 | Last-resort net for a run whose own supervision stopped answering (an app restart, a wedged connection to the pod): if a **training** run reports no progress at all for this long, the pod is terminated from outside — the stall timeout above can only act while the run is still being watched. Checkpoints already downloaded are kept. Set to `0` to only see the warning on the run card and never cut automatically. **"No progress" means the pod, not the app.** The clock is kept in the database and advances only when something actually moves on the host (the training step, the download's byte counter, a checkpoint landing), so restarting the app no longer sets it back to zero, and a run whose supervision keeps repeating the same sentence is no longer counted as alive. Phases that are silent by design (booting, uploading, downloading the result) are never judged on this value; they get a fixed 2 h floor and the runtime cap as backstop. |
+| **Freeze watchdog (minutes, 0 = warn only)** | `cloud.freeze_watchdog_minutes` | `45` | 0 or 15–480 | Last-resort net for a run whose own supervision stopped answering (an app restart, a wedged connection to the pod): if a **training** run reports no progress at all for this long, the pod is terminated from outside — the stall timeout above can only act while the run is still being watched. Checkpoints already downloaded are kept. Set to `0` to only see the warning on the run card and never cut automatically. **"No progress" means the pod, not the app.** The clock is kept in the database and advances only when something actually moves on the host (the training step, the download's byte counter, a checkpoint landing), so restarting the app no longer sets it back to zero, and a run whose supervision keeps repeating the same sentence is no longer counted as alive. Phases that are silent by design (booting, downloading the result) are never judged on this value; they get a fixed 2 h floor and the runtime cap as backstop. The **dataset upload** used to be one of them and is not any more — it reports the bytes it pushes, so it has its own, much shorter setting below. |
+| **Dataset upload stall (minutes, 0 = never cut)** | `cloud.upload_stall_minutes` | `25` | 0 or 5–480 | **Not a time limit on the upload.** A large dataset is allowed to take as long as it needs — the run card shows the files and gigabytes going across — and this value is how long the rented machine may sit with **no data at all** arriving before the run is given up and the pod released. It exists because that phase used to report nothing: a 24 GB dataset that never reached the pod billed for two hours before anyone could tell a slow upload from a dead one. Set `0` to never cut; turning the freeze watchdog off turns this off too. |
 | **Unreachable grace (minutes)** | `cloud.unreachable_grace_minutes` | `6` | 1–60 | How long a running pod may stay unreachable (a vast.ai network blackout) before the run is given up and auto-retried on a fresh host. Raise it if healthy runs die with *pod unreachable*. |
 | **Min host reliability** | `cloud.min_reliability` | `0.98` | 0.9–0.999 | vast.ai reliability floor. Lowering toward 0.95 surfaces cheaper hosts at a higher boot-failure risk. |
 | **Verified hosts only** | `cloud.verified_only` | **on** | toggle | Restrict to vast.ai's verified hosts (the historical, safer behaviour). |
@@ -776,6 +832,7 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `comfyui.object_info_timeout_s` | Seconds ComfyUI may take to enumerate its nodes and model files (default `45`, clamped to 5-300). Raise it on an install with many custom nodes; a ComfyUI that is simply stopped is still detected in ~3 s regardless. Editable in Settings → Local tools. |
 | `comfyui.loras_dir` | Explicit override for ComfyUI's LoRA folder — where trained LoRAs are installed. Wins over `extra_model_paths.yaml`; left empty, the deploy folder follows the yaml's `is_default` LoRA root, else `<install>/models/loras`. Editable in Settings → Local tools. |
 | `ollama.url` | Base URL of your Ollama instance (default `http://127.0.0.1:11434`). |
+| `ollama.deployment_mode` | Docker-only deployment selected in LDS Setup: `none`, `host`, or `docker`. Host and companion modes force `http://host.docker.internal:11434` and `http://ollama:11434` respectively; their URL is not user-editable. |
 | `ollama.vision_model` | Ollama vision model used for auto-classify and auto head-crop (default `huihui_ai/qwen3-vl-abliterated:8b-instruct`, the uncensored **abliterated** build — use the Instruct, not Thinking, variant). |
 | `ollama.vision_concurrency` | How many images a bank vision pass (watermark / framing / captions) sends to Ollama at once (default `4`, clamped to 1-16). Higher overlaps more waiting; `1` restores the old one-at-a-time behaviour. |
 | `ollama.vision_keep_warm_seconds` | How long a one-off vision job (auto head-crop, Describe) may leave the model loaded when nothing else wants the GPU (default `120`, `0` = always unload, capped at 600). The lease is revoked as soon as a generation or a training starts. |
@@ -805,6 +862,7 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `cloud.first_step_download_budget_minutes` | Absolute ceiling on the pre-training base-model download, even while it is progressing (default `180`; `0` = no ceiling). Also in Settings → Training. |
 | `cloud.max_runtime_minutes` | Hard stop on the whole run (default `480`, 30–1440); the newest checkpoint is rescued first. Enforced by the out-of-run supervisor too. Also in Settings → Training. |
 | `cloud.freeze_watchdog_minutes` | Terminate a training run whose **pod** shows no progress for this long (step, download bytes or a new checkpoint), from outside the run's own supervision; the clock is durable and survives an app restart (default `45`; `0` = warn on the card only). |
+| `cloud.upload_stall_minutes` | Give up a run whose dataset upload has had **no byte at all** reach the pod for this long, and release the machine (default `25`; `0` = never cut). Not a ceiling on the transfer's duration — a slow upload that keeps moving is never cut. Also in Settings → Training. |
 | `cloud.min_reliability` | vast.ai host-reliability floor (default `0.98`, 0.9–0.999); lower surfaces cheaper, riskier hosts. |
 | `cloud.verified_only` | Restrict to vast.ai verified hosts (default `true`). |
 | `cloud.secure_cloud_only` | Restrict to vast.ai's Secure Cloud (datacenter) tier (default `false`; narrows the market, raises price). |
@@ -822,6 +880,7 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `klein.consistency_lora` | Filename of the Klein consistency LoRA, relative to ComfyUI's LoRA folder. |
 | `klein.consistency_strength` | Strength (0–1) applied to the Klein consistency LoRA. |
 | `klein.generation_steps` | Sampler steps for Klein **generation** (variations, regenerate, small-image rescue). Default `5` = the value hardcoded in the shipped workflow; 1–50. Not the improve pass (`klein.improve_steps`). |
+| `klein.edit_base_lora_strength` | Strength of the enhancement LoRA (`klein/realistic.safetensors`, node 139) on Klein **edits** — reference edit, variations, regenerate, small-image rescue. Default `0` = off, the render before that LoRA became a Setup download; 0–2. Not the improve pass (`klein.improve_base_lora_strength`). |
 | `klein.generation_lora_presets` | Named generation-LoRA stacks (default empty) picked per run in Klein tuning; each has a name and up to 8 `{file, strength}` rows. Managed in Settings → Image engines. |
 | `identity_prompts.markings_lock` | Krea's “hold the skin” order — forbids inventing or redrawing marks. Blank = shipped default. Naming a body feature here summons it. |
 | `identity_prompts.outfit_vary` | The outfit directive injected into every human shot with no named garment. Blank = shipped default. |

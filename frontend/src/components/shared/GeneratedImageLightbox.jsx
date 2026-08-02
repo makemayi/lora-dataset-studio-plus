@@ -101,8 +101,16 @@ function PromptBlock({ block }) {
  * `img` is a gallery image row (see services.cloud_training._gallery_image).
  * `alt` names it. `actions` is an optional node rendered in the metadata
  * column's footer — the canvas puts its 📌 Pin button there.
+ *
+ * `facts={false}` drops the metadata column entirely, for a picture that is
+ * NOT a generated render: the canvas shows a dataset's 🪪 reference face here,
+ * and a reference has no seed, no sampler and no prompt. Rendered anyway, the
+ * column announced "SEED —" and offered a Download whose file name is built
+ * from a run and a step this picture does not have. An empty table is not a
+ * neutral default; it is a wrong answer.
  */
-export default function GeneratedImageLightbox({ img, alt, actions = null, onClose }) {
+export default function GeneratedImageLightbox({ img, alt, actions = null,
+  facts = true, onClose }) {
   const dialogRef = useRef(null);
   const closeRef = useRef(null);
   const dl = useImageDownload();
@@ -143,6 +151,7 @@ export default function GeneratedImageLightbox({ img, alt, actions = null, onClo
           `lg` and the panel's own width below it — either way the prose has a
           reading width, never the width of the screen. Its own scroll, so the
           image never shrinks to make room for a long prompt. */}
+      {facts && (
       <aside onClick={(e) => e.stopPropagation()}
         data-testid="generated-image-facts"
         /* OPAQUE, not a tint. At 60 % the page behind it stayed legible through
@@ -214,6 +223,7 @@ export default function GeneratedImageLightbox({ img, alt, actions = null, onClo
           )}
         </div>
       </aside>
+      )}
     </div>
   );
 }

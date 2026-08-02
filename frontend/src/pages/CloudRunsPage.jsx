@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router';
 import { postJson } from '../api/fetchClient';
 import { useToast } from '../components/common/Toast';
 import { useCapabilities } from '../context/CapabilitiesContext';
 import TrainingProgress from '../components/dataset/TrainingProgress';
+import LaunchProgress from '../components/dataset/LaunchProgress';
 import ContinueDialog from '../components/dataset/ContinueDialog';
 import RunLineageTree from '../components/dataset/RunLineageTree';
 import { BaseModelChip, DatasetVersionChip, RunIdChip } from '../components/dataset/RunIdentityBadges';
@@ -26,6 +27,7 @@ import {
   RETRY_CONFIRMABLE_REFUSALS,
 } from '../utils/trainingRefusals';
 import { continueAttemptOutcome } from '../utils/continueOutcome';
+import { podBootFailureView, stopButtonLabel, uploadStallFailureView } from '../utils/launchProgress';
 import { runSilenceWarning, stopOutcomeMessage } from '../utils/runSilence';
 import { runsHubContinueLanes } from '../utils/runsHubContinueLanes';
 import {
@@ -852,6 +854,21 @@ export default function CloudRunsPage() {
               {run.error}
             </p>
           )}
+          {/* The boot timeout said in full: the raw error names the timer but
+              never what became of the machine that was rented, which is the one
+              thing worth knowing before relaunching. */}
+          {(() => {
+            // Same shape for both launch teardowns: what the machine did, and
+            // what became of it. They are mutually exclusive (each matches its
+            // own error string), so the first one that answers is rendered.
+            const failure = podBootFailureView(run) || uploadStallFailureView(run);
+            return failure && (
+              <div className="rounded border border-amber-400/40 bg-amber-500/10 px-2 py-1.5 text-amber-100 text-[0.6875rem] leading-snug">
+                <div className="font-semibold">{failure.title}</div>
+                <p className="m-0 mt-0.5 break-words text-amber-200/90">{failure.message}</p>
+              </div>
+            );
+          })()}
           {fullModel && (
             <FullArtifactStatus run={run} onRecheck={recheckFullDelivery}
               rechecking={!!recheckingDelivery[run.run_id]} />
@@ -1114,16 +1131,29 @@ export default function CloudRunsPage() {
 
               <RecipeWarning run={run} />
               <SilenceWarning run={run} />
-              <TrainingProgress datasetId={run.dataset_id} trainType={run.train_type} variant={run.variant} cloud />
+              {/* THIS run's launch, read from its own payload. The progress poll
+                  below is addressed by dataset+family, so on a dataset that has
+                  several runs it answers for the newest one — fine for a step
+                  counter, wrong for a checklist that says "your launch is here". */}
+              <LaunchProgress launch={run.launch} />
+              <TrainingProgress datasetId={run.dataset_id} trainType={run.train_type}
+                variant={run.variant} cloud showLaunch={false} />
               {isFullTransformerRun(run) && (
                 <FullArtifactStatus run={run} onRecheck={recheckFullDelivery}
                   rechecking={!!recheckingDelivery[run.run_id]} />
               )}
 
               <div className="flex flex-wrap items-center gap-2">
+                {/* A launch has no checkpoint to lose, so the button that ends
+                    it must not read like the one that abandons a trained run.
+                    Same endpoint either way: the boot wait honours the stop and
+                    destroys the pod (there is no job yet to rescue). */}
                 <button type="button" onClick={() => stop(run)} disabled={stopping[run.run_id]}
+                  title={stopButtonLabel(run.status) === 'Cancel launch'
+                    ? 'Give up this launch and release the machine — nothing has been trained yet'
+                    : 'Stop this run; checkpoints already synced are kept'}
                   className="px-3 py-1.5 rounded-lg bg-red-600/80 text-white text-xs font-semibold disabled:opacity-40">
-                  {stopping[run.run_id] ? 'Stopping…' : 'Stop run'}
+                  {stopping[run.run_id] ? 'Stopping…' : stopButtonLabel(run.status)}
                 </button>
                 {!isFullTransformerRun(run) && run.checkpoint_ready && (
                   <a href={checkpointHref(run)}

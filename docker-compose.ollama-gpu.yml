@@ -1,0 +1,11 @@
+# NVIDIA acceleration for the optional Ollama sidecar. The lightweight launcher
+# intentionally omits this overlay so it stays portable on CPU-only machines.
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, compute, utility]

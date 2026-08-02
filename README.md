@@ -8,6 +8,10 @@ No account, paid tier or telemetry. API engines and rented GPUs are optional; lo
 
 > New here? Start with [Setup & install](#setup--install), then follow the [end-to-end workflow](docs/guide/workflow.md). The [documentation index](docs/README.md) links every guide. Project news and current development live on [Discord](https://discord.gg/j6hnJBFtXE).
 
+### 📖 [The complete guide — every feature, screen by screen →](docs/guide/using-the-app.md)
+
+Everything the app can do, in one long read: [getting started](docs/guide/getting-started.md) · [the full workflow](docs/guide/workflow.md) · [every setting explained](docs/guide/settings-reference.md) · [Docker](docs/guide/docker.md) · [troubleshooting](docs/guide/troubleshooting.md).
+
 ### ▶️ Watch the whole thing, start to finish
 
 A real Character LoRA built end to end in seven minutes, unedited and without narration:
@@ -96,7 +100,7 @@ A grid built for real curation work, not a file explorer — with a numeric answ
 
 | Sub-feature | What it gets you |
 | :-- | :-- |
-| **Grid actions** | Resize, zoom, crop, mirror or rotate a tile — losslessly, in the file's own format — then multi-select to Keep / Reject / Undecide, clear captions, delete, or Improve via Klein |
+| **Grid actions** | Resize, zoom, crop, mirror or rotate a tile — losslessly, in the file's own format — then multi-select to Keep / Reject / Undecide, clear captions, delete, or upscale via Klein (re-renders detail, sharper but skin/colour can shift) or SeedVR2 (resolves detail, leaves the original look alone) |
 | **👤 Face-similarity scoring** | InsightFace scores every image against your reference and badges it green (strong) or orange (borderline) |
 | **Auto-triage** | Applies a score threshold to undecided, scorable images — re-appliable, and a manual status change wins |
 | **📐 Auto-framing badges** | A local vision model tags each image face / bust / body / back |
@@ -224,6 +228,7 @@ A LoRA that's *trained* isn't necessarily a LoRA that's *good*. Compare them on 
 | :-- | :-- |
 | **Checkpoint × strength sweep** | 0 → 2.0 by default, an over-cook range up to 4.0, and negative strengths down to −2.0 for slider LoRAs |
 | **Multi-LoRA grids** | Select several LoRAs of the same family and compare them against strength |
+| **🧬 Combine** | Render several of your LoRAs together in one image, each at its own weight, with every trigger word injected for you — weight variants compared side by side |
 | **🔎 Describe** | Drop any image and the local Ollama vision model turns it into a test prompt — never the identity or trigger |
 | **🎲 Caption** | Choose a dataset once, then use a random nonblank caption from one of its kept images as the test prompt; ▾ changes the source and typed text is confirmed before replacement |
 | **Vote & rank** | Quick votes feed a Wilson ranking; Character results can also be ranked by face similarity |
@@ -285,6 +290,8 @@ This README follows the app itself: the road you actually walk, from an empty da
 
 ### Recent improvements
 
+- **🆕 SeedVR2 — a second upscale engine that doesn't repaint your images** — Klein's ✨ Upscale & improve re-renders detail from a prompt, which can shift skin tone and colour along the way. **SeedVR2** is now the other option: it resolves detail at a higher resolution and leaves the content alone. Pick either one from the bulk actions on a selection, or set your default for the single-image pass in Settings ▸ Image engines — Setup ▸ ComfyUI downloads the two models (~3.9 GB) and tells you how to add the node pack. Requested by SurpassHR (GitHub #32).
+- **🧬 Test Studio can now COMBINE your LoRAs into one image, not just compare them** — switch to 🧬 Combine, give each of your LoRAs its own weight, and they render together in one image with every trigger word injected for you. Mixing families stays blocked — Krea and SDXL LoRAs need different base models — and the message now names which two you picked.
 - **📐 Krea 2 Edit holds a three-quarter or low/high-angle shot instead of drifting back toward the reference photo** — these camera-position cards had nothing pushing back against Krea's own reference grounding, which pulls the edit toward the reference's own angle, or against the generic front-view framing text, which was actively fighting them (a low/high angle stopped being "the camera looks up/down at the subject" and just became a portrait again). Each now gets a mandatory camera-position instruction naming exactly where the camera sits and that the subject makes direct eye contact with the lens — the same fix already shipped for true profile shots, extended to the angles that needed it most. Idea by the user.
 - **🎭↔ Swap a tile's face with your reference photo, in one click** — every tile with a current image gets a **🎭↔** button next to 🔄 Regenerate: the tile becomes the base shot, the dataset's reference photo supplies the face, and a fixed Klein face-swap workflow overwrites the tile in place. It's one workflow, not a configurable pipeline, and it only appears once the dataset has a reference photo to swap in.
 - **🔤 Find images in a bank by describing them, and pick a set that actually covers your framings** — three things the Bank could not do. **🔤 Find by text** ranks what you're looking at against a phrase (*"brunette outdoors, wide shot"*), reusing the embeddings ✨ Score already computed — no new model, no download, no GPU. **⚖️ Balanced pick** spreads a selection evenly over face / bust / body / back instead of returning the top of one ranking: on a real bank, "the 20 most varied" had been giving **0 face shots and 0 back views**, silently. And **🎨 Pick diverse** stopped spending its first picks on memes and strangers — "most spread out" was computed as "most isolated", which are not the same thing. All three state their own limits rather than looking confident: the text search is a **ranking, not a filter**, it cannot count and it **ignores "without"**; a balanced pick **names the framing it could not fill** instead of padding it.
@@ -467,7 +474,7 @@ If you have a ChatGPT Plus/Pro subscription you can run the ChatGPT engine on yo
 
 A big pile of images isn't a dataset. This is where you cut it down to the shots that actually teach the model — on a grid built for real curation work, not a file explorer.
 
-- **Grid actions** — resize thumbnails, zoom, crop, mirror or **↺ / ↻ rotate** individual images, then multi-select to **Keep, Reject, Undecide, clear captions, delete, or Improve via Klein**. Editing a tile keeps the file's own format and doesn't re-compress it: crop the same shot ten times and the tenth is identical to the first, and a PNG or WEBP comes back pixel-for-pixel after four quarter turns (JPEG has no lossless mode, so it's re-saved at the highest practical quality). A crop is never *enlarged* beyond what you selected — it is only scaled down when a side exceeds the import resolution (1024 px by default, adjustable in Settings, up to keeping the original) — so cropping far into a photo produces a genuinely small tile, and the composition meter flags it as **⚠ Under training resolution** rather than letting it pass. Images edited before this shipped keep the pixels they already have; nothing is reprocessed retroactively. Klein improvements run sequentially as separate 2 MP candidates and leave every source untouched; the panel names the model they will run on and, when your ComfyUI holds several, lets you pick which — saved on the dataset, shared with Klein generation. On mouse/trackpad the per-image controls stay out of the way until hover/focus; on touch devices they remain visible. Long server-side batches (captioning, face analysis, framing, watermark) show a live progress indicator that **survives a page reload** — refresh mid-run and the button picks the batch back up instead of looking idle.
+- **Grid actions** — resize thumbnails, zoom, crop, mirror or **↺ / ↻ rotate** individual images, then multi-select to **Keep, Reject, Undecide, clear captions, delete, or upscale via Klein or SeedVR2**. Editing a tile keeps the file's own format and doesn't re-compress it: crop the same shot ten times and the tenth is identical to the first, and a PNG or WEBP comes back pixel-for-pixel after four quarter turns (JPEG has no lossless mode, so it's re-saved at the highest practical quality). A crop is never *enlarged* beyond what you selected — it is only scaled down when a side exceeds the import resolution (1024 px by default, adjustable in Settings, up to keeping the original) — so cropping far into a photo produces a genuinely small tile, and the composition meter flags it as **⚠ Under training resolution** rather than letting it pass. Images edited before this shipped keep the pixels they already have; nothing is reprocessed retroactively. Klein improvements run sequentially as separate 2 MP candidates and leave every source untouched, re-rendering detail from a prompt — sharper, but skin and colour can shift; SeedVR2 is the fidelity alternative, resolving detail at a higher resolution without reinterpreting it. Either panel names the model/build it will run on and, when your ComfyUI holds several, lets you pick which — saved on the dataset, shared with Klein generation. On mouse/trackpad the per-image controls stay out of the way until hover/focus; on touch devices they remain visible. Long server-side batches (captioning, face analysis, framing, watermark) show a live progress indicator that **survives a page reload** — refresh mid-run and the button picks the batch back up instead of looking idle.
 - **👤 Face-similarity scoring + auto-triage** — before an off-identity shot can poison training, **InsightFace** scores every image against your reference and badges it green (strong match) or orange (borderline), with thresholds you set in Settings. The badges you see on the grid (e.g. `0.63` green, `0.47 to review`) are exactly this: a numeric, sortable answer to *"is this even the right person?"* that your eye alone misses on shot 40. **Auto-triage** applies a chosen score threshold to currently undecided, scorable images (skipping images with no face score); during the same session you can move the threshold and re-apply it, and a later manual status change removes that row from the replay set.
 - **📐 Auto-framing + the 12/6/6/1 meter** — a local vision model classifies each image **face / bust / body / back** and stamps a badge on the tile. That feeds the **composition meter** for Character sets: as you keep and reject, it tracks your framing mix against the **12 face · 6 bust · 6 body · 1 back** target and tells you what's still missing (*"needs more full-body shots"*) — the difference between a dataset that renders faces well and one that also knows the body.
 
@@ -686,6 +693,7 @@ Missing dependencies are shown in Setup/Settings and gated features stay unavail
 | ChatGPT / `gpt-image-2` generation | `OPENAI_API_KEY`, or the separate experimental ChatGPT-subscription connection |
 | OpenRouter generation | `OPENROUTER_API_KEY` plus an image-capable model slug; OpenRouter billing and the upstream provider's policy still apply |
 | Klein generation / improvement | ComfyUI reachable + Klein model stack |
+| SeedVR2 upscaling | ComfyUI reachable + the `ComfyUI-SeedVR2_VideoUpscaler` node pack (installed from ComfyUI, not by this app — it has its own Python dependencies) + two model files the Setup step downloads (~3.9 GB); [exact files](docs/guide/settings-reference.md#seedvr2-upscaling-local) |
 | Krea 2 Edit generation | ComfyUI reachable + `comfyui-krea2edit`, a Krea 2 base, Identity Edit LoRA, Qwen3-VL encoder and Qwen Image VAE; [exact files](docs/guide/settings-reference.md#krea-2-edit-local) |
 | Captioning | Ollama **or** ai-toolkit (JoyCaption) |
 | Dual long + short captions | ai-toolkit + local vision caption derivation; local training only, and unavailable for Krea 2 / Anima |
@@ -708,8 +716,8 @@ Missing dependencies are shown in Setup/Settings and gated features stay unavail
 
 | Mode | Good for | What is optional or unavailable |
 |---|---|---|
-| **API-only** | Import, API generation, scraping, manual curation/captions, cloud training, publishing, backup/export | No local ComfyUI generation, Studio or deployment; no local ai-toolkit training |
-| **Docker GPU** | The app and an isolated ComfyUI together on an NVIDIA GPU | Local training still uses host ai-toolkit or the cloud; Ollama is external |
+| **Docker + existing ComfyUI** | Run LDS in Docker while keeping the ComfyUI already installed on the host | The launcher asks for the ComfyUI folder once; local training still uses host ai-toolkit or the cloud |
+| **Docker GPU + fresh ComfyUI** | Run LDS and a new isolated ComfyUI together on an NVIDIA GPU | Existing ComfyUI/models stay untouched; local training still uses host ai-toolkit or the cloud |
 | **Full local** | Local engines, ML helpers, ai-toolkit training, Canvas generation and Test Studio | Install/connect only the tools you need; each capability degrades independently |
 
 ## Setup & install
@@ -755,15 +763,11 @@ npm install
 npm run build
 ```
 
-### Option 3 — Docker (API-only)
+### Option 3 — Docker + your existing ComfyUI
 
-```bash
-cp .env.example .env
-mkdir -p data-docker
-docker compose up --build
-```
+**Beginner Windows flow:** download/extract the GitHub ZIP, start Docker Desktop, then double-click **`start-docker.bat`**. On the first run, select either the ComfyUI folder containing `main.py` and `models`, or its portable parent containing `ComfyUI\main.py`. LDS validates the folder and remembers it for this checkout.
 
-This image runs the core/API-only app. Data persists in `./data-docker`; keys come from `.env`. ComfyUI and ai-toolkit are outside this container. See [Option 4](#option-4--docker-gpu--comfyui) for bundled ComfyUI.
+Start your usual ComfyUI on the host. LDS uses `http://host.docker.internal:8188` from its container and mounts the selected folder at `/external-comfyui`. If the folder later moves, double-click **`configure-docker.bat`**. The launcher chooses a free Studio port and opens the browser automatically.
 
 ### Option 4 — Docker (GPU + ComfyUI)
 
@@ -772,11 +776,13 @@ This image runs the core/API-only app. Data persists in `./data-docker`; keys co
 1. On GitHub, choose **Code → Download ZIP**, then extract the complete folder.
 2. Start **Docker Desktop** and wait until it reports that Docker is running.
 3. Double-click **`start-docker-gpu.bat`** in the extracted folder.
-4. Leave the first build/start running; it downloads the image and ComfyUI environment. Wait for the browser to open LoRA Dataset Studio.
+4. Leave the first build/start running; it downloads the image and ComfyUI environment. The launcher prints both actual addresses and opens Studio as soon as Studio responds, while its batch window stays open until ComfyUI finishes its first boot. You do not need to open a second ComfyUI window.
 
 This creates a **fresh, isolated, repo-local** Docker setup: its own ComfyUI, models, application data and Image Bank folder live beside this checkout. **It never touches an existing ComfyUI by default.**
 
-An existing ComfyUI is never mounted or modified, but stop it first if it uses port `8188` (and stop another LDS on `5050`): two processes cannot share those ports.
+For either Docker launcher, choose Ollama only inside **LDS Setup**: **No Ollama**, **Existing host Ollama**, or **Docker Ollama**. The Docker companion is started only after that explicit choice, and no vision model is downloaded automatically. Pull the selected model from the LDS Ollama card to see progress and cancel it if needed.
+
+The double-click launcher allocates free host ports atomically: Studio uses the first available port in `5050-5149`, and ComfyUI the first available port in `8188-8287`. If `5050` or `8188` is already occupied, the existing service is left running and another port is chosen automatically. Re-running the launcher from the same checkout reopens its current mapped ports without recreating the running container; a conflicting container owned by another checkout is reported and left untouched. The launcher does not edit `.env`.
 
 Advanced CLI:
 
@@ -786,7 +792,7 @@ mkdir -p run basedir data-docker-gpu bank-images
 docker compose -f docker-compose.gpu.yml up --build
 ```
 
-The app is served at `http://127.0.0.1:5050/` and ComfyUI at `http://127.0.0.1:8188/`. This lane requires an NVIDIA GPU, a compatible driver and NVIDIA Container Toolkit support. Storage relocation, existing-ComfyUI adoption, UID/GID, DNS, update commands, resource caps and operational limits are documented in the dedicated [Docker guide](docs/guide/docker.md).
+For the advanced CLI, the default addresses remain `http://127.0.0.1:5050/` for Studio and `http://127.0.0.1:8188/` for ComfyUI; `.env` can override them. This lane requires an NVIDIA GPU, a compatible driver and NVIDIA Container Toolkit support. Storage relocation, ports, existing-ComfyUI adoption, UID/GID, DNS, update commands, resource caps and operational limits are documented in the dedicated [Docker guide](docs/guide/docker.md).
 
 ### External tools (install once, connect in Settings)
 
@@ -794,9 +800,9 @@ The app is served at `http://127.0.0.1:5050/` and ComfyUI at `http://127.0.0.1:8
 |---|---|---|
 | [ai-toolkit](https://github.com/ostris/ai-toolkit) | Local LoRA training and JoyCaption | Set its directory and Python interpreter in **Settings → Local tools**; conda, uv, venv and portable Python installs are supported |
 | [ComfyUI](https://github.com/comfyanonymous/ComfyUI) | Klein/Krea local generation, Studio, Canvas generation and deployment; SDXL base discovery | Keep its API reachable and set the install/models paths in **Settings → Local tools** |
-| [Ollama](https://ollama.com) | Auto-captioning, framing, head-crop and watermark detection | Install a vision model, then select/test it in **Settings → Local tools** |
+| [Ollama](https://ollama.com) | Auto-captioning, framing, head-crop and watermark detection | In Docker, choose none/host/companion in **Setup**, then pull the model explicitly from LDS; native installs can use their configured URL |
 
-The full path rules, model layouts and three-state Ollama detection are in the [settings reference](docs/guide/settings-reference.md#local-tools). If a tool remains unavailable, use the [troubleshooting guide](docs/guide/troubleshooting.md).
+The full path rules, model layouts and Ollama deployment/model states are in the [settings reference](docs/guide/settings-reference.md#local-tools). If a tool remains unavailable, use the [troubleshooting guide](docs/guide/troubleshooting.md).
 
 ### Getting API keys
 

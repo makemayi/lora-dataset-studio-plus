@@ -1,12 +1,28 @@
-# API-only mode: ComfyUI and ai-toolkit are host-native and out of scope for this container.
+# Lightweight mode: LoRA Dataset Studio without an embedded ComfyUI.
+# Manual Compose keeps its historic port/data defaults. The Windows launcher
+# overrides them only for its managed, mode-switchable installation.
+name: lora-dataset-studio
+
 services:
   studio:
     build: .
-    ports: ["5050:5050"]
+    image: lora-dataset-studio
+    container_name: "${COMPOSE_PROJECT_NAME:-lora-dataset-studio}"
+    restart: unless-stopped
+    labels:
+      io.lora-dataset-studio.launch-mode: studio
+    ports:
+      - target: 5050
+        published: "${LDS_HOST_PORT:-5050}"
+        host_ip: "${LDS_BIND_ADDRESS:-127.0.0.1}"
+        protocol: tcp
     volumes:
-      - ./data-docker:/data
+      - ${LDS_DATA:-./data-docker}:/data
       - ./.env:/app/.env
     environment:
       - LDS_CONFIG=/data/config.json
       - LDS_HOST=0.0.0.0
       - LDS_PORT=5050
+      - LDS_DOCKER_HAS_COMFYUI=0
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

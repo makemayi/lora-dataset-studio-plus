@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
-  datasetConflictBlock, deleteDestination, deletePreviewState, isRecoverable,
-  overlapNotice, sharedFileCount, sharedFilesWarning,
+  datasetConflictBlock, deleteDestination, deletePreviewState,
+  deleteRejectedStart, isRecoverable, overlapNotice, sharedFileCount,
+  sharedFilesWarning,
 } from './bankOverlap.js';
 
 test('a permanent delete is never described as recoverable', () => {
@@ -119,4 +120,32 @@ test('the workspace disables 🗑 Delete rejected on a bank that sits on a datas
   const src = fs.readFileSync(new URL('./BankWorkspace.jsx', import.meta.url), 'utf8');
   assert.match(src, /disabled=\{live \|\| !\(counts\?\.reject > 0\) \|\| !!payload\?\.dataset_conflict\}/);
   assert.match(src, /payload\?\.dataset_conflict && \(/);
+});
+
+test('deleteRejectedStart: a started run points at the bar instead of going quiet', () => {
+  // The complaint this answers: the dialog closed and nothing said whether the
+  // deletion was running, finished, or dead.
+  const n = deleteRejectedStart({ ok: true, total: 4200 });
+  assert.equal(n.type, 'info');
+  assert.match(n.text, /4200 rejected file\(s\)/);
+  assert.match(n.text, /top of the bank/);
+  assert.match(n.text, /stop it/);
+});
+
+test('deleteRejectedStart: a run that already finished reports its numbers', () => {
+  const n = deleteRejectedStart(
+    { total: 3, mode: 'trash', deleted: 0, trashed: 2, already_absent: 1,
+      rows_removed: 3, skipped: [] },
+    { destination: 'the Recycle Bin', recoverable: true });
+  assert.equal(n.type, 'success');
+  assert.match(n.text, /3 rejected file\(s\) moved to the Recycle Bin/);
+});
+
+test('deleteRejectedStart: a permanent delete is never called recoverable', () => {
+  const n = deleteRejectedStart(
+    { mode: 'delete', deleted: 2, trashed: 0, already_absent: 0, rows_removed: 2,
+      skipped: [{ relpath: 'a.jpg', reason: 'locked' }] },
+    { destination: 'nowhere', recoverable: false });
+  assert.match(n.text, /permanently deleted/);
+  assert.match(n.text, /1 skipped/);
 });

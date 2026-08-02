@@ -38,11 +38,10 @@ def test_manual_command_quotes_paths_with_spaces(monkeypatch):
     cmd = setup_installer.manual_command('ml_extras')
     assert '"C:\\LoRA Dataset Studio\\python\\python.exe"' in cmd
 
-def test_manual_command_ollama_model(app):
-    from app import setup_installer, config
-    with app.app_context():
-        config.save_config({'ollama': {'vision_model': 'qwen3-vl:8b'}})
-        assert setup_installer.manual_command('ollama_model') == 'ollama pull qwen3-vl:8b'
+def test_ollama_model_has_no_cli_fallback():
+    from app import setup_installer
+
+    assert setup_installer.manual_command('ollama_model') == ''
 
 def test_status_includes_manual_command_while_running():
     from app import setup_installer
@@ -136,18 +135,40 @@ def test_run_ml_extras_captures_output(monkeypatch):
     assert any('rembg' in line for line in setup_installer._runs['ml_extras']['log'])
 
 
-def test_run_ollama_model_streams(app, monkeypatch):
+def test_run_ollama_model_streams_progress_over_http(app, monkeypatch):
     from app import setup_installer, config
+    seen = {}
+
     class FakeResp:
         status_code = 200
-        def iter_lines(self): return [b'{"status":"pulling"}', b'{"status":"success"}']
+        closed = False
+
+        def iter_content(self, chunk_size):
+            assert chunk_size == setup_installer._OLLAMA_STREAM_CHUNK
+            yield b'{"status":"pulling","completed":25,"total":100}\n'
+            yield b'{"status":"success","completed":100,"total":100}\n'
+
+        def close(self):
+            self.closed = True
+
+    response = FakeResp()
+
+    def fake_post(url, **kwargs):
+        seen.update(url=url, **kwargs)
+        return response
+
     with app.app_context():
         config.save_config({'ollama': {'url': 'http://o', 'vision_model': 'qwen3-vl:8b'}})
-        monkeypatch.setattr(setup_installer.requests, 'post', lambda *a, **k: FakeResp())
+        monkeypatch.setattr(setup_installer.requests, 'post', fake_post)
         setup_installer._runs['ollama_model'] = setup_installer._new_run()
         rc = setup_installer._run_ollama_model('ollama_model')
+
     assert rc == 0
-    assert any('success' in line for line in setup_installer._runs['ollama_model']['log'])
+    assert seen['url'] == 'http://o/api/pull'
+    assert seen['json'] == {'model': 'qwen3-vl:8b', 'stream': True}
+    assert seen['stream'] is True and seen['allow_redirects'] is False
+    assert setup_installer._runs['ollama_model']['progress']['pct'] == 100
+    assert response.closed is True
 
 
 def test_start_ollama_model_precondition(app):
@@ -265,16 +286,17 @@ def test_install_actions_include_klein_downloads():
         assert a in setup_installer.INSTALL_ACTIONS
 
 
-def test_every_action_has_a_worker_and_manual_command(app):
-    """Structural invariant: EVERY whitelisted action must have a worker (a
-    missing entry died at runtime as \"error: 'scrape_extras'\" — the action was
-    in INSTALL_ACTIONS/manual_command but absent from _WORKERS) and a non-empty
-    manual fallback so the UI can always show a copy-paste alternative."""
+def test_every_action_has_a_worker_and_only_ollama_omits_manual_command(app):
+    """Ollama pulls through its configured HTTP service; the container does not
+    require a host CLI. Every other action retains its diagnostic fallback."""
     from app import setup_installer
     with app.app_context():
-        for a in setup_installer.INSTALL_ACTIONS:
-            assert a in setup_installer._WORKERS, f'no worker for {a}'
-            assert setup_installer.manual_command(a), f'no manual command for {a}'
+        for action in setup_installer.INSTALL_ACTIONS:
+            assert action in setup_installer._WORKERS, f'no worker for {action}'
+            if action == 'ollama_model':
+                assert setup_installer.manual_command(action) == ''
+            else:
+                assert setup_installer.manual_command(action), f'no manual command for {action}'
 
 
 def test_run_scrape_extras_targets_scrape_requirements(monkeypatch):
@@ -1396,17 +1418,15 @@ def test_install_all_plan_includes_missing_scrape_extras():
     assert setup_installer.install_all_plan(_caps(scrape_deps=True)) == []
 
 
-def test_install_all_plan_ollama_model_only_when_reachable_and_named():
+def test_install_all_never_pulls_an_ollama_model_implicitly():
     from app import setup_installer
-    # reachable + model configured + not pulled -> queue the pull
-    caps = _caps(ollama={'reachable': True, 'vision_model_ready': False, 'vision_model': 'qwen3-vl:8b'})
-    assert 'ollama_model' in setup_installer.install_all_plan(caps)
-    # reachable but NO model name configured -> nothing to pull, skip it
-    caps = _caps(ollama={'reachable': True, 'vision_model_ready': False, 'vision_model': ''})
-    assert 'ollama_model' not in setup_installer.install_all_plan(caps)
-    # Ollama not running -> can't pull, skip (Ollama itself isn't auto-installed)
-    caps = _caps(ollama={'reachable': False, 'vision_model_ready': False, 'vision_model': 'qwen3-vl:8b'})
-    assert 'ollama_model' not in setup_installer.install_all_plan(caps)
+
+    for ollama in (
+        {'reachable': True, 'vision_model_ready': False, 'vision_model': 'qwen3-vl:8b'},
+        {'reachable': True, 'vision_model_ready': False, 'vision_model': ''},
+        {'reachable': False, 'vision_model_ready': False, 'vision_model': 'qwen3-vl:8b'},
+    ):
+        assert 'ollama_model' not in setup_installer.install_all_plan(_caps(ollama=ollama))
 
 
 def test_install_all_plan_klein_only_into_valid_comfyui():
@@ -1423,8 +1443,8 @@ def test_install_all_plan_klein_only_into_valid_comfyui():
 
 
 def test_install_all_plan_full_order():
-    """Everything missing at once: the plan is grouped ML -> vision model -> Klein, in a
-    stable order (drives the 'X / N' progress list)."""
+    """Everything missing: unattended installs stay ML -> Klein. The large Ollama
+    model remains an explicit action on the Ollama Setup card."""
     from app import setup_installer
     caps = _caps(
         scrape_deps=False,
@@ -1433,7 +1453,7 @@ def test_install_all_plan_full_order():
         comfyui={'dir_valid': True,
                  'klein_missing': ['klein_model', 'klein_text_encoder', 'klein_vae', 'klein_lora']})
     assert setup_installer.install_all_plan(caps) == [
-        'scrape_extras', 'face_scoring', 'masks', 'watermark_inpaint', 'ollama_model',
+        'scrape_extras', 'face_scoring', 'masks', 'watermark_inpaint',
         'klein_model', 'klein_text_encoder', 'klein_vae', 'klein_lora']
 
 

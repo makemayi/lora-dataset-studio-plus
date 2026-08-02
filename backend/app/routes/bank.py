@@ -791,9 +791,14 @@ def bank_delete_rejected(bank_id):
     """Destructive: delete the SOURCE files of every rejected image from disk
     (OS trash, else the app's own trash, else a permanent delete) and drop their
     rows. The ONLY bank action that writes to the source folder — the front-end
-    gates it behind a type-DELETE confirmation fed by the preview above."""
+    gates it behind a type-DELETE confirmation fed by the preview above.
+
+    202 + a background bank job: handing thousands of files to the Recycle Bin
+    one by one takes minutes, and it used to do that inside this request with no
+    count and no Stop. The refusals (404 / 409 / dataset conflict) still happen
+    HERE, before a single file moves, so the dialog gets them synchronously."""
     try:
-        out = banks.delete_rejected(LOCAL_USER, bank_id)
+        res = banks.start_delete_rejected(_app(), LOCAL_USER, bank_id)
     except banks.BankSharesDataset as e:
         # Not "not found": the bank exists, and the refusal is the whole point —
         # its folder is a dataset's, so this delete would amputate the dataset.
@@ -807,7 +812,13 @@ def bank_delete_rejected(bank_id):
         snap = bank_jobs.get(bank_id)
         return jsonify({'error': str(e),
                         'busy_kind': (snap or {}).get('kind')}), 409
-    return jsonify({'ok': True, **out})
+    except bank_jobs.BankJobBusy as e:
+        return _busy(e)
+    # Under TESTING bank_jobs runs the pass inline, so the full outcome is
+    # already there and rides back; in production the client watches the bank's
+    # progress bar like it does for every other pass.
+    return jsonify({'ok': True, 'total': res['total'],
+                    **(res['job'].get('result') or {})}), 202
 
 
 def _row_or_404(bank_id, image_id):

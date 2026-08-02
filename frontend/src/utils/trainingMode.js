@@ -128,12 +128,48 @@ export function fullTransformerArtifactView(run = {}) {
     };
   }
   if (status === 'creating_repository' || status === 'pending' || status === 'uploading') {
+    // 'pending' is stamped at LAUNCH and covers the whole run, so on its own it
+    // cannot say whether weights are moving. Announcing 'Uploading full
+    // model…' from it claimed a transfer that had not been started and could
+    // not be: for the two hours run #138 spent pushing its DATASET to the pod,
+    // this panel described the model going up to Hugging Face, next to a link
+    // offering to inspect a repository holding nothing but licence files. The
+    // run's own phase is what distinguishes them, and it is already here.
+    const runStatus = String(run.status || '');
+    const beforeTraining = ['preparing', 'provisioning', 'uploading'].includes(runStatus);
+    const training = runStatus === 'training';
+    // Delivery is the very end of a run, so anything that is no longer running
+    // and still reads 'pending' never got there. Saying 'Uploading full model…'
+    // on a terminated run is the worst version of this: it also tells the user
+    // to keep a pod alive that the supervisor already destroyed.
+    // An ABSENT status is not a finished run (an older payload, a caller that
+    // does not carry one): claiming a delivery never happened is a statement,
+    // and it is only made about a run whose phase actually says so.
+    const ended = !!runStatus && !['preparing', 'provisioning', 'uploading',
+      'training', 'downloading', 'terminating'].includes(runStatus);
+    let label = 'Uploading full model…';
+    let fallbackDetail = 'Keep the run and pod active until the repository is verified.';
+    if (status === 'creating_repository') {
+      label = 'Creating Hugging Face repository…';
+    } else if (beforeTraining) {
+      label = 'Full model not created yet';
+      fallbackDetail = 'The run is still starting up — the weights are created on Hugging '
+        + 'Face once training produces them. Nothing is uploading to Hugging Face yet.';
+    } else if (training) {
+      label = 'Full model not delivered yet';
+      fallbackDetail = 'Training is running. The weights are delivered to Hugging Face at '
+        + 'the end of the run — keep the run and pod active until then.';
+    } else if (ended) {
+      label = 'Full model was never delivered';
+      fallbackDetail = 'The run ended before any weights reached Hugging Face, so the '
+        + 'repository holds only the licence and model card. Check the run error above.';
+    }
     return {
-      status, available: false, href: null, repositoryHref, tone: 'info',
-      label: status === 'creating_repository'
-        ? 'Creating Hugging Face repository…'
-        : 'Uploading full model…',
-      detail: detail || 'Keep the run and pod active until the repository is verified.',
+      status, available: false, href: null, repositoryHref,
+      // A run that ended empty-handed is not neutral information.
+      tone: ended && status !== 'creating_repository' ? 'warning' : 'info',
+      label,
+      detail: detail || fallbackDetail,
     };
   }
   return {

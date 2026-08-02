@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {
   ENDPOINT_JOB_KIND, JOB_LABELS, bankIsBusy, busyLine, busyRefusal, jobLabel,
   jobProgress, passButtonState, passOutcome, passSettled, settledActivity,
@@ -213,4 +214,13 @@ test('only OUR finished snapshot is quoted in the outcome', () => {
   assert.equal(settledActivity(mine, 'scan'), null);
   assert.equal(settledActivity({ kind: 'scan', finished: false }, 'scan'), null);
   assert.equal(settledActivity(null, 'scan'), null);
+});
+
+test('the progress bar names the destructive pass instead of "Job running"', () => {
+  // The bar keeps its OWN kind->label map (it renders shorter, un-emoji'd
+  // wording); a kind missing from it falls through to the anonymous fallback,
+  // which is the last thing a delete should do.
+  const src = fs.readFileSync(new URL('./BankWorkspace.jsx', import.meta.url), 'utf8');
+  assert.match(src, /delete_rejected: 'Deleting rejected files'/);
+  assert.equal(jobLabel('delete_rejected'), '\u{1F5D1} Delete rejected');
 });

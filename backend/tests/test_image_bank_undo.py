@@ -220,7 +220,7 @@ def test_delete_rejected_offers_no_undo_and_invalidates_the_previous_one(client,
     assert _offer(client, bank_id) is not None
 
     r = client.post(f'/api/bank/{bank_id}/delete-rejected', json={})
-    assert r.status_code == 200, r.get_json()
+    assert r.status_code == 202, r.get_json()      # background bank job
     assert _offer(client, bank_id) is None
     assert client.post(f'/api/bank/{bank_id}/undo', json={}).status_code == 400
 

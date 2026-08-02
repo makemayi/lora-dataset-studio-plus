@@ -1,6 +1,6 @@
 # frontend
 
-React 18 + Vite + Tailwind SPA, served by Flask from `frontend/dist` at `/`.
+React 19 + Vite + Tailwind SPA, served by Flask from `frontend/dist` at `/`.
 
 ```bash
 npm install

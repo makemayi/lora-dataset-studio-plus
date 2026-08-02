@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 
@@ -49,7 +50,7 @@ _ZIMAGE_RE = re.compile(r'z[ -]?image', re.IGNORECASE)
 _MODEL_SUFFIXES = ('.safetensors', '.gguf', '.sft')
 
 
-def _http_ok(url, timeout=3, reason=None) -> bool:
+def _http_ok(url, timeout=3, reason=None, *, readiness=False) -> bool:
     """True when `url` answers with anything below 500.
 
     `reason`, when a dict is passed, is FILLED with why a False was returned:
@@ -59,15 +60,33 @@ def _http_ok(url, timeout=3, reason=None) -> bool:
     network seam the whole test suite patches (`lambda *a, **k: False`), and a
     stub that ignores the dict simply leaves the reason unknown instead of
     breaking. Callers must treat an unfilled dict as "don't know"."""
+    effective_timeout = timeout
+    request_options = {}
+    if readiness:
+        # Setup polls this endpoint continuously during managed-container boot.
+        # Keep both halves of the request bounded even if a future caller passes
+        # a larger value, do not follow a redirect to an arbitrary/body-heavy
+        # destination, and never download the response body.
+        try:
+            effective_timeout = max(0.05, min(float(timeout), _SETUP_READINESS_TIMEOUT))
+        except (TypeError, ValueError):
+            effective_timeout = _SETUP_READINESS_TIMEOUT
+        request_options = {'allow_redirects': False, 'stream': True}
+    resp = None
     try:
-        resp = requests.get(url, timeout=timeout)
+        resp = requests.get(url, timeout=effective_timeout, **request_options)
         return resp.status_code < 500
     except Exception as e:
         if isinstance(reason, dict):
             reason['why'] = ('timeout' if isinstance(e, requests.exceptions.Timeout)
                              else 'unreachable')
-            reason['waited'] = timeout
+            reason['waited'] = effective_timeout
         return False
+    finally:
+        if readiness and resp is not None:
+            close = getattr(resp, 'close', None)
+            if callable(close):
+                close()
 
 
 def _import_ok(python: str, module_expr: str, timeout=_IMPORT_TIMEOUT):
@@ -840,6 +859,140 @@ def _scan_models() -> dict:
 # folder found on disk (a guess → the UI confirms before writing it).
 _OLLAMA_DEFAULT_URL = 'http://127.0.0.1:11434'
 _COMFYUI_DEFAULT_URL = 'http://127.0.0.1:8188'
+_SETUP_READINESS_TIMEOUT = 1.0
+_DOCKER_OLLAMA_URLS = {
+    'host': 'http://host.docker.internal:11434',
+    'docker': 'http://ollama:11434',
+}
+
+
+def _validated_setup_http_base(value) -> str:
+    """Return a strict HTTP(S) origin for a lightweight readiness probe.
+
+    Launcher-provided endpoints are trusted configuration, but still validate
+    their shape before handing them to requests: no credentials, path, query or
+    fragment, and no malformed port. An invalid value is a configuration error,
+    never a reason to fall back to a stale app setting.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return ''
+    raw = value.strip().rstrip('/')
+    try:
+        parsed = urlsplit(raw)
+        if (parsed.scheme not in ('http', 'https') or not parsed.hostname
+                or parsed.username is not None or parsed.password is not None
+                or parsed.path not in ('', '/') or parsed.query or parsed.fragment):
+            return ''
+        parsed.port  # validate a numeric/in-range port without resolving the host
+    except (TypeError, ValueError):
+        return ''
+    return raw
+
+
+def setup_comfyui_mode() -> str:
+    """Classify who owns ComfyUI for Setup UI/actions (path-free enum only)."""
+    runtime = (os.environ.get('LDS_RUNTIME') or '').strip().lower()
+    docker_mode = (os.environ.get('LDS_DOCKER_COMFY_MODE') or '').strip().lower()
+    if runtime == 'docker-gpu':
+        return 'integrated'
+    if runtime == 'docker-external-comfy' and docker_mode == 'external':
+        return 'external-host'
+    return 'external'
+
+
+def setup_is_docker_runtime() -> bool:
+    """Whether Setup is running inside one of LDS's Docker deployments."""
+    return (os.environ.get('LDS_RUNTIME') or '').strip().lower().startswith('docker')
+
+
+def setup_ollama_deployment_url(mode: str) -> str:
+    """The fixed in-container endpoint for a persisted Docker deployment mode."""
+    return _DOCKER_OLLAMA_URLS.get(mode, '')
+
+
+def _setup_ollama_base_url(docker_runtime: bool, mode: str) -> str:
+    """Resolve the authoritative probe endpoint without exposing it in readiness."""
+    if mode == 'none':
+        return ''
+    if docker_runtime:
+        # The in-app deployment choice is authoritative. Never fall back to an
+        # environment variable or an old native 127.0.0.1 setting: either could
+        # silently probe a different service than the one Setup says is selected.
+        raw = setup_ollama_deployment_url(mode)
+    else:
+        raw = cfg.get('ollama.url') or _OLLAMA_DEFAULT_URL
+    return _validated_setup_http_base(raw)
+
+
+def setup_runtime_readiness() -> dict:
+    """Return the small, paste-safe boot snapshot used by Setup polling.
+
+    Only services owned by the selected deployment are ever reported as
+    ``starting``: integrated ComfyUI in the GPU stack, and the companion
+    Ollama container when explicitly requested.  An external/lightweight
+    Docker ComfyUI remains manual, while ``host`` Ollama is unreachable rather
+    than indefinitely starting and ``none`` is explicitly disabled.
+
+    This deliberately avoids the full capability probe (filesystem walks,
+    imports and model inspection).  Probes are bounded to one second and the
+    response contains enums/booleans only -- never configured URLs or paths.
+    Integrated ComfyUI uses its fixed internal loopback endpoint instead of a
+    user-configured URL.
+    """
+    runtime = (os.environ.get('LDS_RUNTIME') or '').strip().lower()
+    docker_runtime = runtime.startswith('docker')
+    comfy_mode = setup_comfyui_mode()
+    integrated_comfyui = comfy_mode == 'integrated'
+    comfy_ready = False
+    if integrated_comfyui:
+        comfy_ready = _http_ok(
+            f'{_COMFYUI_DEFAULT_URL}/history',
+            timeout=_SETUP_READINESS_TIMEOUT,
+            readiness=True,
+        )
+    comfy = {
+        'mode': comfy_mode,
+        'state': (
+            'ready' if comfy_ready else 'starting'
+        ) if integrated_comfyui else 'manual',
+        'ready': comfy_ready,
+        'poll': integrated_comfyui and not comfy_ready,
+    }
+
+    if docker_runtime:
+        configured_mode = cfg.get('ollama.deployment_mode', '')
+        configured_mode = (configured_mode.strip().lower()
+                           if isinstance(configured_mode, str) else '')
+        ollama_mode = (configured_mode if configured_mode in ('none', 'host', 'docker')
+                       else 'unconfigured')
+    else:
+        # Native installs keep their historical URL-based behavior. A deployment
+        # choice saved while using Docker must not disable or redirect native Ollama.
+        ollama_mode = 'local'
+
+    ollama_ready = False
+    ollama_url = _setup_ollama_base_url(docker_runtime, ollama_mode)
+    if ollama_mode not in ('none', 'unconfigured') and ollama_url:
+        ollama_ready = _http_ok(
+            f'{ollama_url}/api/tags',
+            timeout=_SETUP_READINESS_TIMEOUT,
+            readiness=True,
+        )
+    ollama_state = (
+        'unconfigured' if ollama_mode == 'unconfigured'
+        else 'disabled' if ollama_mode == 'none'
+        else 'misconfigured' if not ollama_url
+        else 'ready' if ollama_ready
+        else 'starting' if ollama_mode == 'docker'
+        else 'unreachable'
+    )
+    ollama = {
+        'mode': ollama_mode,
+        'state': ollama_state,
+        'ready': ollama_ready,
+        'poll': ollama_mode == 'docker' and bool(ollama_url) and not ollama_ready,
+    }
+    return {'comfyui': comfy, 'ollama': ollama}
 
 
 def _common_roots() -> list:
@@ -1391,6 +1544,20 @@ def probe(force=False) -> dict:
     krea_blocking_invalid = any(i['blocking'] for i in krea_invalid)
     krea_ready = (comfy['ok'] and not krea_missing and not krea_nodes_missing
                   and not krea_blocking_invalid)
+    # SeedVR2 — the fidelity upscaler (issue #32). Same three-part shape as Krea
+    # (weights on disk / node pack present / weights actually loadable), because
+    # it has the same three ways to be half-installed. It is NOT a generation
+    # engine: nothing in the dataset catalog can be produced by it, so it is
+    # published as an upscaler capability and the engine picker that offers it is
+    # the ✨ improve pass's, not the variation catalog's.
+    from .services import seedvr2_helper as _svr
+    seedvr2_missing = _svr.seedvr2_missing_assets()
+    seedvr2_nodes_missing = _svr.seedvr2_missing_nodes() if comfy['ok'] else []
+    seedvr2_nodes_installed = _svr.seedvr2_node_pack_installed()
+    seedvr2_invalid = _svr.seedvr2_invalid_assets()
+    seedvr2_ready = _svr.engine_ready(comfy['ok'], missing=seedvr2_missing,
+                                      invalid=seedvr2_invalid,
+                                      nodes_missing=seedvr2_nodes_missing)
     base_dir = cfg.get('comfyui.base_dir') or ''
     from .services import comfyui_control
     comfy_launcher = comfyui_control.launcher_status()
@@ -1474,6 +1641,18 @@ def probe(force=False) -> dict:
             # [{asset, filename, verdict, blocking, reason}] shape as
             # klein_invalid, so one banner covers both engines.
             'krea_invalid': krea_invalid,
+            # SeedVR2 gaps, kept apart from the generation engines' for the same
+            # reason theirs are kept apart from each other: "download the
+            # weights" and "install the node pack in ComfyUI" are different
+            # actions with different buttons.
+            'seedvr2_missing': seedvr2_missing,
+            'seedvr2_nodes_missing': seedvr2_nodes_missing,
+            'seedvr2_nodes_installed': seedvr2_nodes_installed,
+            'seedvr2_invalid': seedvr2_invalid,
+            # The single verdict every SeedVR2 surface reads (Settings card,
+            # Setup step, the improve engine picker) so none of them re-derives
+            # readiness from a different subset of the four gaps above.
+            'seedvr2_ready': seedvr2_ready,
             # Klein assets PRESENT on disk but not real, loadable weights:
             # [{asset, filename, verdict, blocking, reason}]. Distinct from
             # klein_missing (the file exists, it just can't load) — drives the Setup

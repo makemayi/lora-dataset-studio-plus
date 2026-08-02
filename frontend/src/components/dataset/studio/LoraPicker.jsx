@@ -9,7 +9,7 @@
  * famille). D'où la clé COMPOSITE `${dataset_id}:${family}` : sans elle, deux lignes du
  * même dataset auraient la même clé React et un état `picked` ambigu.
  *
- * Émet `onSelectionChange([{dataset_id, checkpoint, lora_label, train_type, family}])` à
+ * Émet `onSelectionChange([{dataset_id, checkpoint, lora_label, trigger_word, train_type, family}])` à
  * chaque changement (coche/décoche/choix de checkpoint). Affiche un badge
  * « Comparaison » dès que ≥2 LoRA sont cochés.
  *
@@ -117,6 +117,9 @@ export default function LoraPicker({ preselectDataset, preselectFamily = null, o
         dataset_id: l.dataset_id,
         checkpoint: cp,
         lora_label: l.lora_label,
+        // Remonté pour le mode « pile » (LoraStackPanel affiche le trigger de CHAQUE
+        // LoRA combiné — le backend les injecte tous dans le prompt).
+        trigger_word: l.trigger_word || null,
         train_type: famOf(l),
         family: famOf(l),
       });
@@ -149,9 +152,13 @@ export default function LoraPicker({ preselectDataset, preselectFamily = null, o
     <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-3">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-content-muted text-[0.6875rem] uppercase">LoRA to test</span>
+        {/* Ce badge annonçait « ⚖ Comparaison » dès 2 LoRA cochés — faux depuis que
+            la pile (🧬 Combine) est un mode à part entière, et le mode réel est
+            choisi juste en dessous (LoraStackPanel). On n'annonce plus que le FAIT
+            d'avoir plusieurs LoRA, pas ce qu'on va en faire. */}
         {count >= 2 && (
           <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-amber-400/15 border border-amber-400/40 text-amber-200">
-            ⚖ Comparison ({count})
+            Multi-LoRA ({count})
           </span>
         )}
         <span className="ml-auto text-content-subtle text-[0.6875rem]">{count} checked</span>

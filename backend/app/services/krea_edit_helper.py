@@ -827,16 +827,141 @@ def _ratio_string(width, height):
     return f'{w // g}:{h // g}'
 
 
+# --- Optional always-on generation LoRAs -------------------------------------
+# Hard caps, mirroring klein_edit_helper.MAX_GENERATION_LORAS /
+# MAX_GENERATION_LORA_PRESETS. The two lanes are deliberate copies (like
+# comfyui.inject_krea_loras / inject_zimage_loras / inject_sdxl_loras are): the
+# shapes match, the clamps do not. Keep the numbers in step by hand if one moves.
+MAX_GENERATION_LORAS = 8          # LoRAs chained per preset
+MAX_GENERATION_LORA_PRESETS = 12  # named presets
+
+# Strength ceiling — comfyui.inject_krea_loras' clamp, deliberately NOT Klein's
+# 1.5. The utility LoRAs this feature exists for (filter-bypass) have no effect
+# below ~10, so a 1.5 ceiling would ship a knob that cannot reach. This is the
+# anti-absurd guard only; the 0-6 UX range lives on the front-end slider.
+LORA_STRENGTH_MAX = 20.0
+DEFAULT_ROW_STRENGTH = 1.0
+
+
+def configured_generation_lora_presets():
+    """Sanitized `krea.generation_lora_presets`: ordered
+    [{name, loras: [{file, strength}]}] with blank/duplicate names and
+    blank/malformed rows dropped, strengths clamped to [0, LORA_STRENGTH_MAX]
+    (junk -> DEFAULT_ROW_STRENGTH), rows capped at MAX_GENERATION_LORAS per
+    preset and presets at MAX_GENERATION_LORA_PRESETS.
+
+    THE single source of truth for which files may chain and in what order — a
+    /generate request can only NAME a preset from here, never define files or an
+    order."""
+    raw = cfg.get('krea.generation_lora_presets')
+    out, seen = [], set()
+    for p in (raw if isinstance(raw, list) else []):
+        if not isinstance(p, dict):
+            continue
+        name = p.get('name')
+        name = name.strip() if isinstance(name, str) else ''
+        if not name or name in seen:
+            continue
+        rows = []
+        loras = p.get('loras')
+        for e in (loras if isinstance(loras, list) else []):
+            if not isinstance(e, dict):
+                continue
+            f = e.get('file')
+            f = f.strip() if isinstance(f, str) else ''
+            if not f:
+                continue
+            s = e.get('strength')
+            s = float(s) if isinstance(s, (int, float)) else DEFAULT_ROW_STRENGTH
+            rows.append({'file': f, 'strength': max(0.0, min(LORA_STRENGTH_MAX, s))})
+            if len(rows) >= MAX_GENERATION_LORAS:
+                break
+        seen.add(name)
+        out.append({'name': name, 'loras': rows})
+        if len(out) >= MAX_GENERATION_LORA_PRESETS:
+            break
+    return out
+
+
+def resolve_generation_lora_preset(preset_name):
+    """Ordered [{file, strength}] rows of the CONFIG preset named `preset_name`.
+
+    Fail-closed by design: blank/None/non-string -> [] (no preset picked, the
+    default run); an unknown name -> [] with a warning, because a stale UI or a
+    preset renamed in Settings must degrade to 'no extra LoRAs' rather than block
+    a dataset run. Rows are copies — a caller mutating them cannot corrupt the
+    next resolution."""
+    name = preset_name.strip() if isinstance(preset_name, str) else ''
+    if not name:
+        return []
+    for p in configured_generation_lora_presets():
+        if p['name'] == name:
+            return [dict(e) for e in p['loras']]
+    logger.warning('krea generation-LoRA preset %r is not configured — '
+                   'running with no extra LoRAs', name)
+    return []
+
+
+def _existing_generation_lora_rows(rows, identity_lora=None):
+    """The subset of `rows` that can actually chain, in order, capped at
+    MAX_GENERATION_LORAS.
+
+    This is where the disk is touched — build_workflow stays pure. Degradation is
+    PER ROW and never raises: a preset whose third LoRA was moved still applies
+    its other two, because a dataset run must not die over an optional LoRA. Each
+    dropped row says why in the log, so a silent no-op is diagnosable.
+
+    `identity_lora`: the resolved relative name already loaded at node 4 (fixed
+    identity slot, strength krea.identity_lora_strength). A row pointing at the
+    SAME file would chain the identical LoRA a second time — not a no-op like a
+    missing file, but the two strengths summing into one delta well past what
+    the file was trained for (an 0.8 row on top of the identity slot's default
+    1.0 measured as visible macro-blocking, reported by waltm on Discord). Path
+    comparison is normcase+normpath so a '/' vs '\\' or case difference can't
+    dodge the guard."""
+    identity_key = (os.path.normcase(os.path.normpath(identity_lora))
+                    if identity_lora else None)
+    out = []
+    for entry in (rows or []):
+        if len(out) >= MAX_GENERATION_LORAS:
+            break
+        if not isinstance(entry, dict):
+            continue
+        name = (entry.get('file') or '')
+        name = name.replace('/', os.sep) if isinstance(name, str) else ''
+        if not name:
+            continue
+        try:
+            strength = max(0.0, min(LORA_STRENGTH_MAX, float(entry.get('strength'))))
+        except (TypeError, ValueError):
+            strength = 0.0
+        if strength <= 0:
+            logger.info('krea generation LoRA %r at strength 0 — skipped (row off)',
+                        name)
+            continue
+        if identity_key and os.path.normcase(os.path.normpath(name)) == identity_key:
+            logger.warning('krea generation LoRA %r is the identity-edit LoRA — '
+                           'skipped (already applied at krea.identity_lora_strength, '
+                           'a second copy would double-stack it)', name)
+            continue
+        if not _lora_abs(name):
+            logger.warning('krea generation LoRA %r not found under any loras root '
+                           '— skipped', name)
+            continue
+        out.append({'file': name, 'strength': strength})
+    return out
+
+
 # --- Graph -------------------------------------------------------------------
 
 def build_workflow(source_image, prompt, *, unet, clip, vae, lora_name,
                    width, height, seed, steps=None, grounding=None,
                    ref_boost=None, lora_strength=None, fit_mode='fit',
                    filename_prefix='krea_edit', character_loras=None,
-                   two_stage=False, aspect_ratio=None, stage2_lora_name=None,
-                   two_stage_stage1_steps=None, two_stage_stage2_steps=None,
-                   two_stage_handoff_percent=None, two_stage_base_megapixels=None,
-                   two_stage_max_output_mp=None):
+                   generation_loras=None, two_stage=False, aspect_ratio=None,
+                   stage2_lora_name=None, two_stage_stage1_steps=None,
+                   two_stage_stage2_steps=None, two_stage_handoff_percent=None,
+                   two_stage_base_megapixels=None, two_stage_max_output_mp=None):
     """The ComfyUI API-format graph. Pure function of its arguments — no config
     read, no disk access — so a test can assert the exact wiring without a
     ComfyUI, and every loader value is one a resolver produced.
@@ -857,7 +982,13 @@ def build_workflow(source_image, prompt, *, unet, clip, vae, lora_name,
     after the identity-edit LoRA (closer to the sampler) — the same "chain
     after the structural one" order Klein's generation-LoRA presets use.
     None/[] leaves the graph byte-identical to before this existed (still a
-    single-LoRA chain)."""
+    single-LoRA chain).
+
+    `generation_loras` (optional): ordered [{file, strength}] rows of the run's
+    always-on LoRA preset, chained AFTER `character_loras` and before the model
+    patch (7). Rows arrive ALREADY existence-checked and clamped from
+    enqueue_krea_edit — this function must stay pure, so it neither reads config
+    nor touches the disk. None/[] leaves the graph exactly as it was."""
     steps = 8 if steps is None else max(1, int(steps))
     grounding = 512 if grounding is None else int(grounding)
     ref_boost = 4.0 if ref_boost is None else float(ref_boost)
@@ -896,6 +1027,22 @@ def build_workflow(source_image, prompt, *, unet, clip, vae, lora_name,
                       'inputs': {'lora_name': name, 'strength_model': strength,
                                  'model': model_out},
                       '_meta': {'title': f'Character LoRA {i + 1} (extra consistency)'}}
+        model_out = [node_id, 0]
+    # Always-on generation LoRAs: chained AFTER character_loras and BEFORE the
+    # model patch, in list order, so the patch (and through it the KSampler, in
+    # both the single- and two-stage graphs) sees the whole stack. Named node
+    # keys — this graph is ours, unlike Klein's foreign JSON, so they cannot
+    # collide with '1'..'13' and they read in a ComfyUI error message.
+    for i, entry in enumerate((generation_loras or [])[:MAX_GENERATION_LORAS], start=1):
+        node_id = f'gen_lora_{i}'
+        g[node_id] = {
+            'class_type': 'LoraLoaderModelOnly',
+            'inputs': {'lora_name': entry['file'],
+                       'strength_model': float(entry['strength']),
+                       'model': model_out},
+            '_meta': {'title': f"Generation LoRA {i}: "
+                               f"{os.path.basename(entry['file'])}"},
+        }
         model_out = [node_id, 0]
     g.update({
         # Source latent in context + the pixel path that keeps the result sharp.
@@ -983,7 +1130,7 @@ def _comfy_input_dir() -> str:
 
 def enqueue_krea_edit(user_id, source_filename, edit_prompt, source_path=None,
                       extra_metadata=None, krea_model=None, framing=None,
-                      aspect_ratio=None):
+                      aspect_ratio=None, generation_loras=None):
     """Copy the reference into ComfyUI's input folder, build the Krea 2 Edit
     graph against what is ACTUALLY installed, and enqueue it. Returns the app
     job_id.
@@ -1000,7 +1147,12 @@ def enqueue_krea_edit(user_id, source_filename, edit_prompt, source_path=None,
     SECOND source (`source_latent_b` / `source_image_b`) and no more, and we have
     not measured what a second reference does to identity here. Shipping an
     unmeasured multi-ref path would be guessing — the dataset's extra refs are
-    simply ignored by this engine, and the UI says so."""
+    simply ignored by this engine, and the UI says so.
+
+    `generation_loras`: ordered [{file, strength}] rows of the run's always-on
+    LoRA preset (already resolved from config by the caller — a request only ever
+    names a preset). Rows whose file is absent, or whose strength is 0, are
+    dropped individually with a log line."""
     if source_path is None:
         out_dir = cfg.comfyui_dir('output')
         if not out_dir:
@@ -1052,6 +1204,7 @@ def enqueue_krea_edit(user_id, source_filename, edit_prompt, source_path=None,
         grounding=grounding_px_for(framing), ref_boost=ref_boost_for(framing),
         lora_strength=_identity_strength(),
         character_loras=_character_loras(),
+        generation_loras=_existing_generation_lora_rows(generation_loras, identity_lora=lora_name),
         two_stage=two_stage, aspect_ratio=two_stage_ratio,
         stage2_lora_name=stage2_lora_name,
         two_stage_stage1_steps=_krea_two_stage_stage1_steps(),

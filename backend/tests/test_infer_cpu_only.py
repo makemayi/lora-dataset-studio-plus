@@ -53,7 +53,7 @@ def test_face_score_uses_cpu_provider_and_negative_context_id(monkeypatch):
     module = _load_infer('face_score_infer')
     monkeypatch.setattr(module, '_repair_nested_antelopev2', lambda _root: None)
     monkeypatch.setattr(sys, 'stdin', io.StringIO(json.dumps({
-        'ref': 'reference.jpg', 'images': ['candidate.jpg'], 'models_root': '/models',
+        'refs': ['reference.jpg'], 'images': ['candidate.jpg'], 'models_root': '/models',
     })))
 
     assert module.main() == 1  # no fake face is intentional; initialization still ran

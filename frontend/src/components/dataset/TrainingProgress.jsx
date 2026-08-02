@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { formatDownloadProgress } from '../../utils/downloadProgress';
+import LaunchProgress from './LaunchProgress';
 
 /* Live view of the CURRENT run (mounted by TrainingPanel while this dataset
    trains): progress bar, loss sparkline, and the sample previews ai-toolkit
@@ -90,7 +91,12 @@ function DownloadProgress({ download }) {
   );
 }
 
-export default function TrainingProgress({ datasetId, base, trainType, variant, cloud = false }) {
+/* `showLaunch` is false where the CALLER already renders the launch checklist
+   from the run's own payload (the Runs hub card): the poll answers for the
+   dataset's newest run, so letting both draw it would print two checklists
+   that can disagree. */
+export default function TrainingProgress({ datasetId, base, trainType, variant,
+                                          cloud = false, showLaunch = true }) {
   const [prog, setProg] = useState(null);
   const timer = useRef(null);
   useEffect(() => {
@@ -126,15 +132,23 @@ export default function TrainingProgress({ datasetId, base, trainType, variant, 
     return (
       <div className="flex flex-col gap-1">
         {masksWarn}
-        {cloud && prog?.phase ? (
+        {/* The cloud progress poll is addressed by dataset + family, so on a
+            dataset that has already trained it answers for the NEWEST run —
+            which is why a live card could carry 'error — Run failed' from a
+            previous run underneath its own healthy status. A payload the
+            backend marks inactive says nothing about the run being watched, so
+            it is shown as nothing. */}
+        {cloud && showLaunch && prog?.launch ? (
+          <LaunchProgress launch={prog.launch} />
+        ) : cloud && prog?.phase && prog.active !== false ? (
           <p className="m-0 text-sky-300 text-[0.625rem]">
             ☁ {prog.phase}{prog.phase_detail ? ` — ${prog.phase_detail}` : ''}
           </p>
-        ) : (
+        ) : (!cloud || prog?.active !== false) ? (
           <p className="m-0 text-content-subtle text-[0.625rem]">
             Starting up… (the log appears once ai-toolkit begins writing)
           </p>
-        )}
+        ) : null}
       </div>
     );
   }
@@ -143,7 +157,7 @@ export default function TrainingProgress({ datasetId, base, trainType, variant, 
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface px-3 py-2">
       {masksWarn}
-      {cloud && prog.phase && (
+      {cloud && showLaunch && prog.launch ? <LaunchProgress launch={prog.launch} /> : cloud && prog.phase && (
         <p className="m-0 text-sky-300 text-[0.625rem]">{prog.phase}{prog.phase_detail ? ` — ${prog.phase_detail}` : ''}</p>
       )}
       <DownloadProgress download={prog.download} />

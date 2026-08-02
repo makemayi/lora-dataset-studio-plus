@@ -240,9 +240,29 @@ function CloudTrainingCard({ config, setField, configDefaults }) {
             className={INPUT_CLASS}
           />
           <p className="mt-1 text-[0.6875rem] text-content-subtle">
-            Last-resort net when a training run stops reporting altogether (a restart, a connection wedged against the pod): the pod is terminated from outside the run, so it can't keep billing unnoticed. Checkpoints already downloaded are kept. Set 0 to only get the warning on the run card. Booting, uploading and downloading are never cut by this.
+            Last-resort net when a training run stops reporting altogether (a restart, a connection wedged against the pod): the pod is terminated from outside the run, so it can't keep billing unnoticed. Checkpoints already downloaded are kept. Set 0 to only get the warning on the run card. Booting and downloading are never cut by this; the dataset upload has its own setting below.
           </p>
           <ResetToDefault label="Freeze watchdog" section="cloud" field="freeze_watchdog_minutes"
+            config={config} configDefaults={configDefaults} setField={setField} />
+        </div>
+        <div>
+          <label htmlFor="cloud-upload-stall" className="block text-sm font-medium text-content">
+            Dataset upload stall (minutes, 0 = never cut)
+          </label>
+          <input
+            id="cloud-upload-stall"
+            type="number"
+            min="0"
+            max="480"
+            step="1"
+            value={config.cloud?.upload_stall_minutes ?? dflt('upload_stall_minutes')}
+            onChange={(e) => setField('cloud', 'upload_stall_minutes', Math.max(0, parseInt(e.target.value, 10) || 0))}
+            className={INPUT_CLASS}
+          />
+          <p className="mt-1 text-[0.6875rem] text-content-subtle">
+            This is <strong>not</strong> a time limit on the upload — a large dataset is allowed to take as long as it needs, and the run card shows the files and gigabytes going across. It is how long the machine may sit with <strong>no data at all</strong> arriving before the run is given up and the pod released, so a wedged transfer stops billing in minutes instead of hours. Set 0 to never cut. Turning the freeze watchdog off turns this off too.
+          </p>
+          <ResetToDefault label="Dataset upload stall" section="cloud" field="upload_stall_minutes"
             config={config} configDefaults={configDefaults} setField={setField} />
         </div>
         <div>
