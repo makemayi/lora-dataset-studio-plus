@@ -71,8 +71,15 @@ def default_timeout(n_images: int) -> int:
 
 
 def score_dataset_faces(ref_path, image_paths, timeout: int | None = None,
-                        on_progress=None):
+                        on_progress=None, extra_ref_paths=None):
     """Retourne ({path: {state, sim?, det, bbox_frac, yaw}}, error|None).
+
+    Chaque image candidate est comparee a `ref_path` PLUS tout `extra_ref_paths`
+    fourni (best-match-of-N : la meilleure ressemblance gagne, pas une moyenne,
+    pas besoin que toutes les refs soient d'accord). `ref_path` reste
+    obligatoire — la reference primaire ne devient jamais optionnelle, seuls les
+    extras le sont ; `extra_ref_paths=None` (defaut) se comporte EXACTEMENT
+    comme avant, refs = [ref_path] seul.
 
     `on_progress(done, total)` — optionnel — est appelé à chaque image finie par
     le scorer, depuis un thread de lecture (donc PAS dans un contexte Flask :
@@ -81,7 +88,7 @@ def score_dataset_faces(ref_path, image_paths, timeout: int | None = None,
 
     `error` est None quand le scorer a tourne, sinon {'kind', 'detail'} :
     'unavailable' (extras ML absents), 'failed' (subprocess/JSON casse — detail
-    = derniere ligne du traceback), 'ref_unusable' (la reference n'a pas de
+    = derniere ligne du traceback), 'ref_unusable' (aucune des references n'a de
     visage exploitable). Les echecs restent NON-fatals ({} + error) mais
     doivent etre VISIBLES : les avaler en {} muet transformait un scorer casse
     en « Face scoring done — 0/14 » avec toast vert (user-reported)."""
@@ -93,7 +100,8 @@ def score_dataset_faces(ref_path, image_paths, timeout: int | None = None,
                     'detail': 'face scoring is not installed (Quality tools step in Setup)'}
     if timeout is None:
         timeout = default_timeout(len(image_paths))
-    payload = json.dumps({"ref": ref_path, "images": image_paths,
+    refs = [ref_path] + [p for p in (extra_ref_paths or []) if p and os.path.isfile(p)]
+    payload = json.dumps({"refs": refs, "images": image_paths,
                           "models_root": cfg.get('face_scoring.models_root') or None})
     try:
         stdout, stderr_lines, returncode, timed_out = _run_scorer(

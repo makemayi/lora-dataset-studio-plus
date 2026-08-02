@@ -2829,7 +2829,8 @@ def score_faces(user_id, dataset_id, family=None) -> dict:
     from .face_similarity import score_dataset_faces
     # scoring_error ({kind, detail} | None) remonte jusqu'au toast : un scorer
     # cassé doit dire POURQUOI, pas « done — 0/14 » en vert (user-reported).
-    results, scoring_error = score_dataset_faces(ref_path, list(by_path.keys()))
+    results, scoring_error = score_dataset_faces(
+        ref_path, list(by_path.keys()), extra_ref_paths=fds._extra_ref_paths(ds))
     scored = 0
     for p, r in by_path.items():
         res = results.get(p)

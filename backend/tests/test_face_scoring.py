@@ -84,7 +84,7 @@ def test_analyze_faces_skips_score_when_pixels_change_during_inference(
         img.content_sig, img.content_sig_stat = 'old-content', '1:1'
         svc.db.session.commit()
 
-        def _edit_while_scoring(_ref_path, image_paths, on_progress=None):
+        def _edit_while_scoring(_ref_path, image_paths, on_progress=None, extra_ref_paths=None):
             assert image_paths == [image_path]
             if edit == 'crop':
                 assert svc.crop_image(LOCAL_USER, image_id, 0, 0, 32, 32)
@@ -199,6 +199,116 @@ def test_score_dataset_faces_stdin_payload_includes_models_root(app, monkeypatch
             fsim.score_dataset_faces(ref, [img_path])
     payload = json.loads(captured['input'])
     assert payload['models_root'] == 'C:/models/insightface'
+
+
+def test_score_dataset_faces_stdin_payload_refs_is_a_single_item_list_by_default(app, monkeypatch):
+    """No extra_ref_paths passed -> refs = [ref_path] only, same observable
+    behavior as before the multi-reference feature existed (just wrapped in
+    the new plural wire-format)."""
+    from app.services import face_similarity as fsim
+
+    monkeypatch.setattr(fsim, 'is_available', lambda: True)
+    captured = {}
+
+    def _fake_run(*args, **kwargs):
+        captured['input'] = args[1]
+        return _scorer(json.dumps({"ref_ok": True, "results": {}}))
+
+    monkeypatch.setattr('app.services.face_similarity._run_scorer', _fake_run)
+    with app.app_context():
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            ref = os.path.join(d, 'ref.png')
+            img_path = os.path.join(d, 'img.png')
+            with open(ref, 'wb') as fh:
+                fh.write(_png())
+            with open(img_path, 'wb') as fh:
+                fh.write(_png())
+            fsim.score_dataset_faces(ref, [img_path])
+    payload = json.loads(captured['input'])
+    assert payload['refs'] == [ref]
+
+
+def test_score_dataset_faces_includes_existing_extra_refs_in_the_payload(app, monkeypatch):
+    from app.services import face_similarity as fsim
+
+    monkeypatch.setattr(fsim, 'is_available', lambda: True)
+    captured = {}
+
+    def _fake_run(*args, **kwargs):
+        captured['input'] = args[1]
+        return _scorer(json.dumps({"ref_ok": True, "results": {}}))
+
+    monkeypatch.setattr('app.services.face_similarity._run_scorer', _fake_run)
+    with app.app_context():
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            ref = os.path.join(d, 'ref.png')
+            extra1 = os.path.join(d, 'extra1.png')
+            extra2 = os.path.join(d, 'extra2.png')
+            img_path = os.path.join(d, 'img.png')
+            for f in (ref, extra1, extra2, img_path):
+                with open(f, 'wb') as fh:
+                    fh.write(_png())
+            fsim.score_dataset_faces(ref, [img_path], extra_ref_paths=[extra1, extra2])
+    payload = json.loads(captured['input'])
+    assert payload['refs'] == [ref, extra1, extra2]
+
+
+def test_score_dataset_faces_silently_drops_a_missing_extra_ref(app, monkeypatch):
+    from app.services import face_similarity as fsim
+
+    monkeypatch.setattr(fsim, 'is_available', lambda: True)
+    captured = {}
+
+    def _fake_run(*args, **kwargs):
+        captured['input'] = args[1]
+        return _scorer(json.dumps({"ref_ok": True, "results": {}}))
+
+    monkeypatch.setattr('app.services.face_similarity._run_scorer', _fake_run)
+    with app.app_context():
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            ref = os.path.join(d, 'ref.png')
+            img_path = os.path.join(d, 'img.png')
+            for f in (ref, img_path):
+                with open(f, 'wb') as fh:
+                    fh.write(_png())
+            fsim.score_dataset_faces(
+                ref, [img_path], extra_ref_paths=[os.path.join(d, 'does_not_exist.png')])
+    payload = json.loads(captured['input'])
+    assert payload['refs'] == [ref]
+
+
+def test_analyze_faces_passes_extra_reference_photos_to_the_scorer(app, monkeypatch):
+    """End-to-end: a dataset with extra references reaches the scorer with
+    ALL of them, not just the primary — this is what makes best-match-of-N
+    scoring actually happen."""
+    from app.services import face_dataset_service as svc
+    from app.services import face_similarity as fsim
+    from app.config import LOCAL_USER
+    import json as _json
+
+    with app.app_context():
+        ds, img = _dataset_with_ref_and_kept_image(svc, LOCAL_USER)
+        d = svc._dataset_dir(ds.id)
+        with open(os.path.join(d, 'extra.webp'), 'wb') as fh:
+            fh.write(_png((0, 0, 255)))
+        ds.ref_extra_filenames = _json.dumps(['extra.webp'])
+        svc.db.session.commit()
+
+        captured = {}
+        monkeypatch.setattr(fsim, 'is_available', lambda: True)
+
+        def _fake_run(*args, **kwargs):
+            captured['input'] = args[1]
+            return _scorer(json.dumps({"ref_ok": True, "results": {}}))
+
+        monkeypatch.setattr(fsim, '_run_scorer', _fake_run)
+        svc.analyze_faces(LOCAL_USER, ds.id)
+
+    payload = json.loads(captured['input'])
+    assert payload['refs'] == [svc._ref_path(ds), os.path.join(d, 'extra.webp')]
 
 
 def test_score_dataset_faces_stdin_payload_models_root_none_when_unconfigured(app, monkeypatch):
@@ -405,7 +515,7 @@ def test_score_faces_payload_carries_scoring_error(app, monkeypatch):
 
     monkeypatch.setattr(
         'app.services.face_similarity.score_dataset_faces',
-        lambda ref, paths, timeout=900: ({}, {'kind': 'failed', 'detail': 'AssertionError'}))
+        lambda ref, paths, timeout=900, **_kwargs: ({}, {'kind': 'failed', 'detail': 'AssertionError'}))
     with app.app_context():
         ds, img = _dataset_with_ref_and_kept_image(svc, LOCAL_USER)
         cell_path = os.path.join(svc._dataset_dir(ds.id), 'cell.webp')
@@ -597,7 +707,7 @@ def test_analyze_image_face_scores_only_requested_path_and_persists(app, monkeyp
         svc.db.session.commit()
         image_path = svc._img_path(img)
 
-        def _fake(ref_path, image_paths):
+        def _fake(ref_path, image_paths, extra_ref_paths=None):
             calls.append((ref_path, image_paths))
             return {image_path: {'state': 'scorable', 'sim': 0.64}}, None
 
@@ -633,7 +743,7 @@ def test_analyze_image_face_operational_errors_leave_score_untouched(app, monkey
             svc.db.session.commit()
             monkeypatch.setattr(
                 fsim, 'score_dataset_faces',
-                lambda _ref, _paths, _results=results, _error=scoring_error:
+                lambda _ref, _paths, _results=results, _error=scoring_error, **_kwargs:
                 (_results, _error),
             )
 
@@ -659,7 +769,7 @@ def test_analyze_image_face_honors_subject_gate_without_mutation(app, monkeypatc
         svc.db.session.commit()
         monkeypatch.setattr(
             fsim, 'score_dataset_faces',
-            lambda *_args: pytest.fail('the subject gate must run before the scorer'),
+            lambda *_args, **_kwargs: pytest.fail('the subject gate must run before the scorer'),
         )
 
         result = svc.analyze_image_face(LOCAL_USER, img.id)
@@ -680,7 +790,7 @@ def test_analyze_image_face_validates_status_and_file(app, monkeypatch):
         _ds, img = _dataset_with_ref_and_kept_image(svc, LOCAL_USER)
         monkeypatch.setattr(
             fsim, 'score_dataset_faces',
-            lambda *_args: pytest.fail('invalid rows must not reach the scorer'),
+            lambda *_args, **_kwargs: pytest.fail('invalid rows must not reach the scorer'),
         )
         img.status = 'reject'
         svc.db.session.commit()
@@ -705,7 +815,7 @@ def test_analyze_image_face_route_returns_stable_payload_and_hides_foreign_rows(
         image_path = svc._img_path(img)
         monkeypatch.setattr(
             fsim, 'score_dataset_faces',
-            lambda _ref, paths: ({paths[0]: {'state': 'scorable', 'sim': 0.63}}, None),
+            lambda _ref, paths, **_kwargs: ({paths[0]: {'state': 'scorable', 'sim': 0.63}}, None),
         )
         image_id = img.id
         _other_ds, foreign = _dataset_with_ref_and_kept_image(svc, 'other-user')
@@ -813,7 +923,7 @@ def test_analyze_image_face_marks_stale_when_row_changes_during_scoring(
         img.face_state, img.face_score = 'scorable', 0.91
         svc.db.session.commit()
 
-        def _score_then_replace(_ref_path, _image_paths):
+        def _score_then_replace(_ref_path, _image_paths, extra_ref_paths=None):
             svc.db.session.execute(
                 update(FaceDatasetImage)
                 .where(FaceDatasetImage.id == image_id)
@@ -853,7 +963,7 @@ def test_analyze_image_face_route_reports_busy_without_spawning_scorer(
         assert lock.acquire(blocking=False)
         monkeypatch.setattr(
             fsim, 'score_dataset_faces',
-            lambda *_args: pytest.fail('a busy request must not start the scorer'),
+            lambda *_args, **_kwargs: pytest.fail('a busy request must not start the scorer'),
         )
     try:
         response = client.post(f'/api/dataset/image/{image_id}/analyze-face')
@@ -909,7 +1019,7 @@ def test_analyze_image_face_never_persists_after_pixel_edit(
         img.content_sig, img.content_sig_stat = 'old-content', '1:1'
         svc.db.session.commit()
 
-        def _edit_while_scoring(_ref_path, _image_paths):
+        def _edit_while_scoring(_ref_path, _image_paths, extra_ref_paths=None):
             if edit == 'crop':
                 assert svc.crop_image(LOCAL_USER, image_id, 0, 0, 32, 32)
             elif edit == 'mirror':

@@ -488,6 +488,19 @@ def _all_ref_bytes(ds) -> list:
     return out
 
 
+def _extra_ref_paths(ds) -> list:
+    """Existing extra reference photos as full paths, for callers (face
+    scoring) that want every reference this dataset has, not just the
+    primary. Missing/deleted files are silently skipped — same tolerance
+    _all_ref_bytes already applies to a corrupt/unreadable extra."""
+    out = []
+    for fn in extra_ref_filenames(ds):
+        p = os.path.join(_dataset_dir(ds.id), fn)
+        if os.path.isfile(p):
+            out.append(p)
+    return out
+
+
 _EXTRA_REF_MARKER = '_datasetrefx_'
 _EXTRA_REF_ORIG_MARKER = '_datasetrefxorig_'
 
@@ -6715,7 +6728,8 @@ def analyze_faces(user_id, dataset_id) -> dict:
         results, scoring_error = score_dataset_faces(
             ref_path, list(reserved_by_path.keys()),
             on_progress=lambda done, total: dataset_activity.progress(
-                token, done=done, total=total))
+                token, done=done, total=total),
+            extra_ref_paths=_extra_ref_paths(ds))
         counts = {}
         # The counter is already at N: the persist loop below is a fraction of the
         # pass (no model load, no inference), so it does NOT bump — doing so would
@@ -6840,7 +6854,7 @@ def analyze_image_face(user_id, image_id):
 
         try:
             results, scoring_error = face_similarity.score_dataset_faces(
-                ref_path, [image_path])
+                ref_path, [image_path], extra_ref_paths=_extra_ref_paths(ds))
         except Exception as e:
             logger.warning('single face scoring failed for image %s: %s', image_id, e)
             return _result({'kind': 'failed', 'detail': str(e) or 'face scoring failed'})

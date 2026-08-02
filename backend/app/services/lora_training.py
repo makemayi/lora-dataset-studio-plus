@@ -8907,7 +8907,8 @@ def score_checkpoint_samples(user_id, dataset_id, base_model=_PERSISTED, family=
         return {'available': False, 'reason': 'no training samples yet (they appear every 250 steps)'}
     sdir = _samples_dir(user_id, dataset_id, base_model, family, variant)
     paths = [os.path.join(sdir, s['filename']) for s in samples]
-    results, scoring_error = face_similarity.score_dataset_faces(ref_path, paths)
+    results, scoring_error = face_similarity.score_dataset_faces(
+        ref_path, paths, extra_ref_paths=fds._extra_ref_paths(ds))
     if not results:
         detail = (scoring_error or {}).get('detail')
         return {'available': False,
