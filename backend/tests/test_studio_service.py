@@ -1981,14 +1981,17 @@ def test_enhance_test_prompt_carries_the_real_refusal_not_an_empty_answer(app, m
     monkeypatch.setattr(ollama_control, 'ensure_captioning_ready',
                         lambda *a, **k: {'ok': True})
 
-    def blocked(url, model):
+    def blocked(url, model, keep_alive=None):
         raise vision_ollama.LocalOllamaFenceError(
             'A local Ollama model is already in use outside LDS. LDS will not change '
             'it; unload it first or configure a dedicated Ollama endpoint for LDS.')
     monkeypatch.setattr(vision_ollama, '_admit_local_ollama', blocked)
 
     with app.app_context():
-        with pytest.raises(RuntimeError, match='already in use outside LDS'):
+        # The TYPE survives too, not just the sentence: the route turns it into
+        # the `ollama_fence_blocked` code that earns the unload button.
+        with pytest.raises(vision_ollama.LocalOllamaFenceError,
+                           match='already in use outside LDS'):
             lts.enhance_test_prompt('a girl')
 
 

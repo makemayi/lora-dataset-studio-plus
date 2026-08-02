@@ -72,6 +72,29 @@ export const WHATS_NEW = [
     to: '/settings/engines',
   },
   {
+    id: '2026-08-02-writes-refuse-an-unreadable-body',
+    date: '2026-08-02',
+    title: 'A save that cannot be read now says so instead of answering OK and storing nothing',
+    blurb:
+      'If you drive the API yourself — a script, a curl command, your own tooling — a request body the app could not parse used to be treated as an empty one: it answered 200 OK, rewrote your settings, and the value you sent was simply gone, with nothing in the log. The most common cause is a raw Windows path, since a lone backslash is not valid JSON. Those requests are now refused with the real parse error and the escaping to use, and nothing on disk is touched. The app\'s own screens were never affected.',
+  },
+  {
+    id: '2026-08-02-ollama-fence-waits-and-offers-the-unload',
+    date: '2026-08-02',
+    title: 'When another tool is holding the Ollama model, LDS now waits for it — or takes it, if you say so',
+    blurb:
+      'If you run another AI tool on the same machine, ✨ Enhance and 🔎 Describe would sometimes refuse with "a local Ollama model is already in use outside LDS". That refusal was right — LDS must never unload a model another app is using — but it was also a dead end: it told you to go unload it by hand, then forgot what you had asked for. Now the refusal carries its own way out. LDS keeps watching, and the moment the model is free (Ollama unloads an idle one by itself after a few minutes) your Enhance or Describe starts again on its own, with the prompt and the image you had. If you would rather not wait, one click on "Unload it and continue" evicts the other model and resumes — and nothing evicts it without that click. One more thing fixed while we were here: restarting LDS while its OWN model was still warm used to make it mistake that model for a stranger\'s and block itself out of it.',
+    to: '/studio',
+  },
+  {
+    id: '2026-08-02-anima-shows-its-own-base',
+    date: '2026-08-02',
+    title: 'Anima no longer says it trains on a Z-Image base',
+    blurb:
+      'Picking the Anima family left the Base selector — and the summary line under the Train button — announcing "Official - Z-Image-Turbo", and offered your Z-Image merges as if an Anima run could load them. Anima now names its own base, Anima-Base, and offers nothing else. Your runs were never affected: the launcher always used the official Anima base and ignored the foreign selection, so this was the panel lying about a run it was going to get right. The cloud button on Anima also stops pretending: it says Anima is local-only until the pod image is verified, instead of enabling itself and being refused after the click.',
+    to: '/datasets?section=training&panel=advanced',
+  },
+  {
     id: '2026-08-02-seedvr2-results-come-back',
     date: '2026-08-02',
     title: 'SeedVR2 upscales now actually appear — and the ones you already ran are recovered',

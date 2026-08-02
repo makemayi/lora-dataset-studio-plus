@@ -288,7 +288,57 @@ def test_cloud_launch_guard_refuses_another_familys_base(app, style_ds):
                                            'a-token')
 
 
-# --- 6) the memory survives a round trip through JSON --------------------------
+# --- 6) the LIST of bases is family-scoped too, not just the chosen one --------
+
+def test_every_family_gets_its_own_base_list(app, client, aitoolkit, style_ds):
+    """The panel reads `bases_by_type[family] || bases`, and `bases` is the
+    Z-Image list. A family missing from the map therefore does not show an empty
+    selector — it shows Z-Image's, complete with this install's Z-Image merges.
+
+    Anima was that family: `MODEL FAMILY = Anima (~20 img)` with
+    `BASE = Official - Z-Image-Turbo (recommended)`, and the summary line under
+    the Train button repeating it. Parametrising over TRAIN_TYPES is the point:
+    the next family added pays for the omission here, not in a screenshot."""
+    from app.services.face_dataset_service import TRAIN_TYPES
+    body = client.get(f'/api/dataset/{style_ds}/train/base-info').get_json()
+    missing = [f for f in TRAIN_TYPES if f not in body['bases_by_type']]
+    assert not missing, f'families falling back to the Z-Image list: {missing}'
+
+
+def test_the_anima_selector_offers_the_anima_base_and_nothing_else(
+        app, client, aitoolkit, style_ds):
+    """Anima has exactly one official base and no custom lane, so its selector
+    must name it. Nothing Z-Image may appear there: a Z-Image merge is a
+    different architecture, and picking one is an act the run then ignores."""
+    from app.services import lora_training as lt
+    client.post(f'/api/dataset/{style_ds}/train-type', json={'train_type': 'anima'})
+    body = client.get(f'/api/dataset/{style_ds}/train/base-info').get_json()
+    anima = body['bases_by_type']['anima']
+    assert [b['value'] for b in anima] == ['']
+    assert lt.ANIMA_BASE_LABEL in anima[0]['label']
+    assert 'Z-Image' not in anima[0]['label']
+
+
+def test_a_z_image_base_left_on_anima_never_reaches_the_job_config(app, style_ds):
+    """The gravity verdict, pinned. While the selector was lying, a user could
+    pick a Z-Image merge under Anima — so this asserts the run itself was never
+    corrupted: the builder gates on an ABSOLUTE path, so a merge NAME falls back
+    to the official Anima base. The defect was the display, and this test is
+    what keeps it that way."""
+    from app.services import lora_training as lt
+    from app.services import face_dataset_service as svc
+    with app.app_context():
+        ds = svc.get_dataset(LOCAL_USER, style_ds)
+        ds.train_type = 'anima'
+        ds.train_base_model = ZIMAGE_MERGE
+        svc.db.session.commit()
+        cfg = lt._build_job_config_anima(ds, 'folder', 100, training_folder='out')
+    model = cfg['config']['process'][0]['model']
+    assert model['name_or_path'] == lt.ANIMA_BASE
+    assert model['arch'] == 'anima'
+
+
+# --- 7) the memory survives a round trip through JSON --------------------------
 
 def test_memory_is_plain_json_on_the_row(app, style_ds):
     from app.services import face_dataset_service as svc

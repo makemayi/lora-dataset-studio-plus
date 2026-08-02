@@ -441,7 +441,10 @@ const TOPICS = [
   action('studio-enhance-prompt', '✨ Enhance: enrich the test prompt with the local model',
     ['studio', 'test studio', 'enhance', 'enhance prompt', 'improve prompt', 'better prompt',
      'rewrite prompt', 'llm', 'ollama', 'local model', 'prompt magic', 'button greyed out',
-     'enhance disabled', 'ollama not running', 'model not downloaded'],
+     'enhance disabled', 'ollama not running', 'model not downloaded',
+     // The fence: the words people type when another tool is holding the model.
+     'already in use outside LDS', 'model in use', 'unload it and continue',
+     'unload model', 'waiting for the model', 'model busy', 'another app is using ollama'],
     '/studio', 'dataset-guide', '6-after-training-pick-the-right-checkpoint'),
   action('studio-random-dataset-caption', '🎲 Caption: use a random kept dataset caption',
     ['studio', 'test studio', 'caption', 'random caption', 'dataset caption', 'caption button',

@@ -10,8 +10,12 @@ from __future__ import annotations
 
 import errno
 import ipaddress
+import json
 import logging
+import os
 import threading
+import time
+from datetime import datetime
 from urllib.parse import urlsplit
 
 import requests
@@ -26,6 +30,21 @@ _owned_models: dict[str, set[str]] = {}
 # Endpoint seen with a pre-existing / otherwise unowned model. It may be a
 # user's own Ollama session, so it is never automatically unloaded.
 _foreign_local_endpoints: set[str] = set()
+
+# Ownership that survives a restart. `_owned_models` is process memory, and a
+# keep-warm lease outlives the process that took it: restarting LDS while its
+# OWN model was still resident made LDS read that model as a stranger's and
+# fence itself out until the lease expired. The claims below are the missing
+# half — written when a model is admitted with a keep-alive, and re-adopted at
+# boot only when the runner's own `expires_at` still matches the claim.
+#
+# Adoption is deliberately hard to earn. Over-adopting is the dangerous
+# direction: it would let LDS unload a model another app loaded. So a claim is
+# honoured only while it is fresh, and only when the residency Ollama reports
+# could NOT be a later load by someone else.
+_CLAIM_SLACK_S = 30.0        # request round-trip between our call and expires_at
+_CLAIM_MAX_AGE_S = 3600.0    # a claim never speaks for a runner an hour later
+_claims_loaded = False
 
 
 def _exception_chain(exc):
@@ -89,7 +108,160 @@ def _endpoint_scope(url) -> tuple[str, str | None]:
     return 'local', f'{parsed.scheme}://{authority}'
 
 
-def mark_before_generate(url, model) -> str:
+def _keep_alive_seconds(value) -> float | None:
+    """Seconds a ``keep_alive`` asks Ollama to hold the model, or ``None``.
+
+    ``None`` means "no bounded claim to record": either the value unloads the
+    model straight away (0) or it is a form this fence will not guess at. A
+    claim we cannot bound is a claim we refuse to write, which costs one cold
+    reload after a restart and never costs someone else's model.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        seconds = float(value)
+        return seconds if seconds > 0 else None
+    if not isinstance(value, str):
+        return None
+    text = value.strip().lower()
+    if not text:
+        return None
+    units = {'s': 1.0, 'm': 60.0, 'h': 3600.0}
+    factor = units.get(text[-1:])
+    if factor is not None:
+        text = text[:-1]
+    else:
+        factor = 1.0
+    try:
+        seconds = float(text) * factor
+    except ValueError:
+        return None
+    # A negative keep_alive means "resident until something unloads it". There
+    # is no deadline to compare an expires_at against, so no claim is written.
+    return seconds if seconds > 0 else None
+
+
+def _parse_expires_at(value) -> float | None:
+    """RFC3339 ``expires_at`` from /api/ps as an epoch float, or ``None``."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith('Z'):
+        text = f'{text[:-1]}+00:00'
+    # Ollama emits nanosecond precision; datetime accepts at most microseconds.
+    if '.' in text:
+        head, _, tail = text.partition('.')
+        digits = ''
+        while tail and tail[0].isdigit():
+            digits, tail = digits + tail[0], tail[1:]
+        text = f'{head}.{digits[:6]}{tail}' if digits else head + tail
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.timestamp()
+    return parsed.timestamp()
+
+
+def _claims_path():
+    try:
+        from ..config import data_dir
+        return data_dir() / 'ollama_fence_claims.json'
+    except Exception:
+        return None
+
+
+def _read_claims() -> dict:
+    path = _claims_path()
+    if path is None:
+        return {}
+    try:
+        with open(path, 'r', encoding='utf-8') as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    claims = data.get('claims')
+    return claims if isinstance(claims, dict) else {}
+
+
+def _write_claims(claims: dict) -> None:
+    path = _claims_path()
+    if path is None:
+        return
+    payload = {'version': 1, 'claims': claims}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = f'{path}.tmp'
+        with open(temporary, 'w', encoding='utf-8') as handle:
+            json.dump(payload, handle)
+        os.replace(temporary, path)
+    except OSError as exc:
+        # Ownership that does not survive a restart is exactly today's
+        # behaviour, so a read-only data dir degrades instead of failing.
+        logger.debug('ollama GPU fence: could not persist ownership claim (%s)', exc)
+
+
+def _record_claim(endpoint, model, keep_alive) -> None:
+    seconds = _keep_alive_seconds(keep_alive)
+    if seconds is None:
+        return
+    with _lock:
+        claims = _read_claims()
+        endpoint_claims = claims.get(endpoint)
+        if not isinstance(endpoint_claims, dict):
+            endpoint_claims = {}
+        endpoint_claims[model] = {'deadline': time.time() + seconds}
+        claims[endpoint] = endpoint_claims
+        _write_claims(claims)
+
+
+def _drop_claims(endpoint) -> None:
+    with _lock:
+        claims = _read_claims()
+        if claims.pop(endpoint, None) is not None:
+            _write_claims(claims)
+
+
+def _adopt_persisted(endpoint, loaded, expiry) -> set[str]:
+    """Models on ``endpoint`` a persisted claim still proves are LDS's own.
+
+    Two independent facts must agree: the claim has not expired (so LDS asked
+    for this residency recently enough that it can still be the one on screen),
+    and the residency Ollama reports ends no later than the claim does. A model
+    another app loaded after our restart carries its own, later ``expires_at``
+    and is therefore never adopted.
+    """
+    if not loaded:
+        return set()
+    claims = _read_claims().get(endpoint)
+    if not isinstance(claims, dict):
+        return set()
+    now = time.time()
+    adopted = set()
+    for model in loaded:
+        entry = claims.get(model)
+        if not isinstance(entry, dict):
+            continue
+        deadline = entry.get('deadline')
+        if not isinstance(deadline, (int, float)) or isinstance(deadline, bool):
+            continue
+        horizon = float(deadline) + _CLAIM_SLACK_S
+        if now > horizon or now > float(deadline) + _CLAIM_MAX_AGE_S:
+            continue
+        observed = expiry.get(model)
+        if observed is not None and observed > horizon:
+            continue  # a later load: someone else owns this residency now
+        adopted.add(model)
+    if adopted:
+        logger.info('ollama GPU fence: re-adopted %d model(s) LDS loaded before it restarted',
+                    len(adopted))
+    return adopted
+
+
+def mark_before_generate(url, model, keep_alive=None) -> str:
     """Return ``local``, ``remote`` or ``blocked`` before an Ollama request.
 
     A shared Ollama daemon exposes no client owner id. LDS probes before its
@@ -106,10 +278,8 @@ def mark_before_generate(url, model) -> str:
         return 'blocked'
 
     model = model.strip()
-    with _lock:
-        owned = set(_owned_models.get(endpoint, set()))
 
-    state, loaded = _probe(endpoint)
+    state, loaded, expiry = _probe(endpoint)
     with _lock:
         # Re-read process ownership after the probe: concurrent LDS requests may
         # have claimed another model, but they never make an external model safe
@@ -117,42 +287,61 @@ def mark_before_generate(url, model) -> str:
         owned = set(_owned_models.get(endpoint, set()))
         if state == 'unknown':
             return 'blocked'
+        if state != 'empty' and not loaded.issubset(owned):
+            # Before calling a resident model a stranger's, ask the claims LDS
+            # wrote down: after a restart this is its own keep-warm lease.
+            owned |= _adopt_persisted(endpoint, loaded - owned, expiry)
+            if loaded.issubset(owned):
+                _owned_models.setdefault(endpoint, set()).update(owned)
         if state == 'empty' or loaded.issubset(owned):
             _owned_models.setdefault(endpoint, set()).add(model)
             _foreign_local_endpoints.discard(endpoint)
-            return 'local'
-
-        _foreign_local_endpoints.add(endpoint)
+            claim = True
+        else:
+            _foreign_local_endpoints.add(endpoint)
+            claim = False
+    if claim:
+        _record_claim(endpoint, model, keep_alive)
+        return 'local'
     logger.info('ollama GPU fence: preserving a pre-existing local model; LDS inference is blocked')
     return 'blocked'
 
 
 def _probe(endpoint):
-    """Return (``empty`` | ``models`` | ``unknown``, model names)."""
+    """Return (``empty`` | ``models`` | ``unknown``, names, name -> expires_at).
+
+    ``expires_at`` is epoch seconds when Ollama reported a parseable one. It is
+    only ever used to REFUSE an ownership claim, so a missing value is not a
+    failure — it simply leaves the claim to be judged on its own freshness.
+    """
     try:
         response = requests.get(f'{endpoint}/api/ps', timeout=(3, 5), allow_redirects=False)
         status = getattr(response, 'status_code', None)
         if type(status) is not int or not 200 <= status < 300:
-            return 'unknown', set()
+            return 'unknown', set(), {}
         data = response.json()
         models = data.get('models') if isinstance(data, dict) else None
         if not isinstance(models, list):
-            return 'unknown', set()
-        names = set()
+            return 'unknown', set(), {}
+        names, expiry = set(), {}
         for item in models:
             if not isinstance(item, dict):
-                return 'unknown', set()
+                return 'unknown', set(), {}
             name = item.get('name') or item.get('model')
             if not isinstance(name, str) or not name.strip():
-                return 'unknown', set()
-            names.add(name.strip())
-        return ('empty' if not names else 'models'), names
+                return 'unknown', set(), {}
+            name = name.strip()
+            names.add(name)
+            parsed = _parse_expires_at(item.get('expires_at'))
+            if parsed is not None:
+                expiry[name] = parsed
+        return ('empty' if not names else 'models'), names, expiry
     except (requests.RequestException, OSError) as exc:
         if _connection_refused(exc):
-            return 'empty', set()
-        return 'unknown', set()
+            return 'empty', set(), {}
+        return 'unknown', set(), {}
     except Exception:
-        return 'unknown', set()
+        return 'unknown', set(), {}
 
 
 def _post_unload(endpoint, model) -> bool:
@@ -169,17 +358,23 @@ def _post_unload(endpoint, model) -> bool:
 
 def _release_endpoint(endpoint, expected_models) -> bool:
     """Unload only LDS-owned models and prove the runner is empty afterwards."""
-    state, loaded = _probe(endpoint)
+    state, loaded, expiry = _probe(endpoint)
     if state == 'unknown':
         return False
     if state == 'empty':
         with _lock:
             _owned_models.pop(endpoint, None)
             _foreign_local_endpoints.discard(endpoint)
+        _drop_claims(endpoint)
         return True
 
     with _lock:
         foreign = endpoint in _foreign_local_endpoints
+        if not foreign and loaded - expected_models:
+            # Same restart case as the admission path: a model this process has
+            # no memory of may still be one it loaded a moment ago.
+            expected_models = set(expected_models) | _adopt_persisted(
+                endpoint, loaded - expected_models, expiry)
     if foreign:
         # A later /api/ps empty response is the only way this endpoint becomes
         # safe again. Never infer that a same-named resident model is still ours.
@@ -195,12 +390,13 @@ def _release_endpoint(endpoint, expected_models) -> bool:
     for model in loaded:
         if not _post_unload(endpoint, model):
             return False
-    state, remaining = _probe(endpoint)
+    state, remaining, _ = _probe(endpoint)
     if state != 'empty' or remaining:
         return False
     with _lock:
         _owned_models.pop(endpoint, None)
         _foreign_local_endpoints.discard(endpoint)
+    _drop_claims(endpoint)
     return True
 
 
@@ -275,6 +471,85 @@ def ensure_released_for_comfy() -> bool:
         if not _release_endpoint(local_endpoint, expected):
             return False
     return True
+
+
+FENCE_BLOCKED_MESSAGE = (
+    'A local Ollama model is already in use outside LDS. LDS will not change it; '
+    'unload it first or configure a dedicated Ollama endpoint for LDS.')
+
+
+def fence_status() -> dict:
+    """What the fence would say about the CONFIGURED local endpoint, right now.
+
+    A read-only /api/ps probe, so it is safe to poll: the surfaces that were
+    refused use it to notice the moment the other model goes away (Ollama's own
+    idle unload does that on its own after a few minutes) and resume by
+    themselves. ``blocked`` is the whole answer; ``models`` only names what is
+    standing in the way so the user is not told to hunt for it.
+    """
+    scope, endpoint = _configured_local_endpoint()
+    if scope == 'remote':
+        return {'applies': False, 'blocked': False, 'scope': 'remote', 'models': []}
+    if scope != 'local':
+        return {'applies': False, 'blocked': False, 'scope': scope, 'models': []}
+
+    state, loaded, expiry = _probe(endpoint)
+    if state == 'unknown':
+        # Not reachable / not answering usefully: that is not this fence's
+        # story to tell, and reporting "blocked" here would offer an unload
+        # button for a daemon nobody can talk to.
+        return {'applies': True, 'blocked': False, 'scope': 'local',
+                'reachable': False, 'models': []}
+    with _lock:
+        owned = set(_owned_models.get(endpoint, set()))
+        if state != 'empty' and not loaded.issubset(owned):
+            owned |= _adopt_persisted(endpoint, loaded - owned, expiry)
+            if loaded and loaded.issubset(owned):
+                _owned_models.setdefault(endpoint, set()).update(owned)
+                _foreign_local_endpoints.discard(endpoint)
+    foreign = sorted(loaded - owned)
+    return {'applies': True, 'blocked': bool(foreign), 'scope': 'local',
+            'reachable': True, 'models': foreign}
+
+
+def unload_foreign_models() -> dict:
+    """Unload the models blocking the local endpoint — ON EXPLICIT CONSENT ONLY.
+
+    Everything else in this module refuses rather than touch a model another
+    tool loaded, and that default does not move: this function exists so a user
+    who KNOWS what the other model is can say "take it, I'll reload it" in one
+    click instead of leaving the app to go find an Ollama prompt. Nothing calls
+    it on a timer, on a retry, or as a fallback — only a route behind a
+    confirmed flag does.
+    """
+    scope, endpoint = _configured_local_endpoint()
+    if scope != 'local':
+        return {'ok': False, 'reason': 'not-local', 'unloaded': [], 'still_loaded': []}
+    state, loaded, _ = _probe(endpoint)
+    if state == 'unknown':
+        return {'ok': False, 'reason': 'unreachable', 'unloaded': [], 'still_loaded': []}
+    if state == 'empty':
+        with _lock:
+            _owned_models.pop(endpoint, None)
+            _foreign_local_endpoints.discard(endpoint)
+        _drop_claims(endpoint)
+        return {'ok': True, 'reason': 'already-free', 'unloaded': [], 'still_loaded': []}
+
+    unloaded = [model for model in sorted(loaded) if _post_unload(endpoint, model)]
+    state, remaining, _ = _probe(endpoint)
+    if state != 'empty' or remaining:
+        # Ollama acknowledged but the runner is not empty (a request still in
+        # flight holds it). Say so rather than let the caller retry into the
+        # same wall.
+        return {'ok': False, 'reason': 'still-loaded', 'unloaded': unloaded,
+                'still_loaded': sorted(remaining)}
+    with _lock:
+        _owned_models.pop(endpoint, None)
+        _foreign_local_endpoints.discard(endpoint)
+    _drop_claims(endpoint)
+    logger.info('ollama GPU fence: user consented to unloading %d external model(s)',
+                len(unloaded))
+    return {'ok': True, 'reason': 'unloaded', 'unloaded': unloaded, 'still_loaded': []}
 
 
 def reset_for_tests() -> None:

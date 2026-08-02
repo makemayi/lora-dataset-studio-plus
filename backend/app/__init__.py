@@ -458,6 +458,11 @@ def create_app(config_object=None):
     from .netguard import install_network_guard
     install_network_guard(app)
 
+    # Registered last of the write-path guards, so a caller still has to clear CSRF
+    # and the access token before we tell them anything about their own body.
+    from .routes._common import reject_unparsable_json_body
+    app.before_request(reject_unparsable_json_body)
+
     @app.get('/api/health')
     def health():
         return {'ok': True}

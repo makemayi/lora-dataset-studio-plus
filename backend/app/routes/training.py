@@ -769,6 +769,12 @@ def dataset_train_base_info(dataset_id):
     # FLUX.2 Klein : bases officielles fixes (gated HF) — le choix 4B/9B se fait via
     # le sélecteur `variant` (comme Raw/Turbo pour Krea), pas ici → label neutre.
     flux2klein_bases = [{'value': '', 'label': 'Official - FLUX.2 Klein'}]
+    # Anima : une seule base officielle publique, pas de checkpoint custom. Sans
+    # cette entrée le panneau retombait sur les bases Z-Image et annonçait
+    # « Official - Z-Image-Turbo » sous la famille Anima — jusque dans la ligne de
+    # résumé du bouton Train (le repli côté panneau est mort depuis, cf.
+    # trainingFamilyScope.js ; l'entrée reste la source de vérité).
+    anima_bases = [{'value': '', 'label': f'Official - {lt.ANIMA_BASE_LABEL}'}]
     # Les listers de bases (get_checkpoint_models / get_zimage_models) résolvent le
     # dossier des modèles depuis comfyui.base_dir → vides tant qu'il n'est pas
     # configuré. On expose ce fait pour que l'UI dise « configure ComfyUI dans Setup »
@@ -825,9 +831,13 @@ def dataset_train_base_info(dataset_id):
                     # The panel uses it to stay quiet instead of recommending Anima to
                     # someone who cannot run it.
                     'anima_supported': lt._aitoolkit_supports_anima(),
+                    # Une entrée par famille de TRAIN_TYPES, sans exception : c'est
+                    # ce que le panneau lit pour peupler son sélecteur de base
+                    # (test_every_family_gets_its_own_base_list).
                     'bases_by_type': {'zimage': bases, 'sdxl': sdxl_bases,
                                       'krea': krea_bases, 'flux': flux_bases,
-                                      'flux2klein': flux2klein_bases}})
+                                      'flux2klein': flux2klein_bases,
+                                      'anima': anima_bases}})
 
 
 @bp.post('/dataset/<int:dataset_id>/train/settings')

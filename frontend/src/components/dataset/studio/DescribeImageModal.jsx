@@ -6,6 +6,9 @@
 import { useRef, useState } from 'react';
 import { useFocusTrap } from '../../../hooks/useFocusTrap';
 import { fetchWithCsrfRetry, getCsrfToken } from '../../../api/fetchClient';
+import useOllamaFence from '../../../hooks/useOllamaFence';
+import OllamaFenceNotice from '../../common/OllamaFenceNotice';
+import { OLLAMA_FENCE_CODE } from '../../../utils/ollamaFence';
 
 const ACCEPT = 'image/png,image/jpeg,image/webp';
 const MAX_BYTES = 20 * 1024 * 1024; // mirror lts.STUDIO_DESCRIBE_MAX_BYTES
@@ -18,6 +21,7 @@ export default function DescribeImageModal({ open, onClose, onResult }) {
   const [error, setError] = useState(null);
   const [fileName, setFileName] = useState(null);
   const [dragOver, setDragOver] = useState(false);
+  const { fence, runGuarded, unloadAndRetry, stopWaiting } = useOllamaFence();
 
   if (!open) return null;
 
@@ -35,32 +39,46 @@ export default function DescribeImageModal({ open, onClose, onResult }) {
     setFileName(file.name);
     setBusy(true);
     try {
-      const fd = new FormData();
-      fd.append('image', file);
-      fd.append('csrf_token', getCsrfToken());
-      const res = await fetchWithCsrfRetry('/api/studio/describe-image', {
-        method: 'POST',
-        headers: { 'X-CSRFToken': getCsrfToken() },
-        body: fd,
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        // The server carries the real, actionable reason (Ollama unreachable/rejected,
-        // GPU busy, bad file) in `error` — surface it verbatim inside the modal.
-        setError(body.error || `Describe failed (HTTP ${res.status})`);
-        return;
-      }
-      if (!body.prompt) {
-        setError('The vision model returned an empty description.');
-        return;
-      }
-      onResult(body.prompt);
-      onClose();
+      // The guard keeps this closure and replays it if the local Ollama fence
+      // refused: the same file is described again once the model is free,
+      // without the user re-picking it.
+      await runGuarded(() => send(file));
     } catch {
       setError('Describe failed — check that the app can reach Ollama, then try again.');
     } finally {
       setBusy(false);
     }
+  }
+
+  async function send(file) {
+    const fd = new FormData();
+    fd.append('image', file);
+    fd.append('csrf_token', getCsrfToken());
+    const res = await fetchWithCsrfRetry('/api/studio/describe-image', {
+      method: 'POST',
+      headers: { 'X-CSRFToken': getCsrfToken() },
+      body: fd,
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (body.code === OLLAMA_FENCE_CODE) {
+        // Not an error to print: the notice below owns this one, and it will
+        // finish the job. Raw Response path, so the code is carried by hand.
+        const fenced = new Error(body.error || 'A local Ollama model is in use outside LDS.');
+        fenced.code = OLLAMA_FENCE_CODE;
+        throw fenced;
+      }
+      // The server carries the real, actionable reason (Ollama unreachable/rejected,
+      // GPU busy, bad file) in `error` — surface it verbatim inside the modal.
+      setError(body.error || `Describe failed (HTTP ${res.status})`);
+      return;
+    }
+    if (!body.prompt) {
+      setError('The vision model returned an empty description.');
+      return;
+    }
+    onResult(body.prompt);
+    onClose();
   }
 
   return (
@@ -114,6 +132,8 @@ export default function DescribeImageModal({ open, onClose, onResult }) {
             {error}
           </p>
         )}
+
+        <OllamaFenceNotice fence={fence} onUnload={unloadAndRetry} onStop={stopWaiting} />
 
         <div className="flex items-center justify-end pt-1">
           <button type="button" onClick={onClose} disabled={busy}

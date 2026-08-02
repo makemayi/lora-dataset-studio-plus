@@ -206,3 +206,45 @@ def comfyui_recovery_resolve():
     return jsonify({'ok': False, 'error': (
         'The paused job could not be cleared. Refresh the page and try again; '
         'if it persists, check the server log.')}), 409
+
+
+@bp.get('/ollama-fence')
+def ollama_fence_state():
+    """Is the local Ollama fence standing in the way, and because of what?
+
+    Polled by the surfaces the fence refused. It is a read-only /api/ps probe
+    on the configured local endpoint, which is what makes waiting worth doing:
+    Ollama unloads an idle model by itself after a few minutes, so most of
+    these blocks end without anyone touching anything.
+    """
+    from ..services import ollama_gpu_fence
+    return jsonify({'ok': True, **ollama_gpu_fence.fence_status()})
+
+
+@bp.post('/ollama-fence/unload')
+def ollama_fence_unload():
+    """"Unload it and continue" — the ONE place LDS evicts a model it does not own.
+
+    The default everywhere else is to refuse, because on a machine running
+    another AI tool the resident model is usually that tool's legitimate work.
+    The consent flag is what lifts that refusal, and it is required: this route
+    is never reached by a retry, a poll or a fallback.
+    """
+    data = request.get_json(silent=True) or {}
+    if data.get('confirmed_unload_external') is not True:
+        return jsonify({'error': 'Confirm the unload of the external Ollama model '
+                                 'before LDS touches it.'}), 400
+    from ..services import ollama_gpu_fence
+    result = ollama_gpu_fence.unload_foreign_models()
+    if result['ok']:
+        return jsonify({'ok': True, **result})
+    reasons = {
+        'not-local': 'LDS is configured with a remote Ollama endpoint, so there is '
+                     'no local model for it to unload.',
+        'unreachable': 'Ollama did not answer. Check that it is running, then try again.',
+        'still-loaded': 'Ollama still reports a model in memory — a request may still '
+                        'be running there. Wait a moment and try again.',
+    }
+    return jsonify({'ok': False, 'error': reasons.get(result['reason'],
+                                                      'The model could not be unloaded.'),
+                    **result}), 409

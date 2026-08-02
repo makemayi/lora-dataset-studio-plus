@@ -77,6 +77,33 @@ def _no_live_comfyui_vram_release(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_live_ollama_fence_probe(monkeypatch):
+    """ensure_released_for_comfy() — called before every local training
+    launch/retry/continue — makes a live `requests.get('<ollama>/api/ps')`
+    with no mock. On a developer machine that actually has Ollama or LDS
+    itself running (a real model resident), the probe finds it and correctly
+    — but spuriously, for a test that has nothing to do with the fence —
+    refuses with 'GPU busy'. Same undeclared-dependency shape as the ComfyUI
+    /free POST above, one call path over: 2026-08-03, ensure_released_for_comfy
+    gained a caller inside lora_training's local-start path, and every test
+    exercising retry/continue/start started depending on whatever happens to
+    be loaded on whichever machine runs the suite.
+
+    Default to 'nothing local to find' — a bare `requests.get`/`post` raising
+    ConnectionRefusedError reads exactly like no Ollama running, which is the
+    safe, deterministic answer for a test that is not ABOUT the fence. Tests
+    that ARE about it (test_ollama_gpu_fence.py, test_ollama_fence_routes.py)
+    patch `requests.get`/`post` themselves inside their own narrower `with`
+    block, which wins over this default for its duration."""
+    from app.services import ollama_gpu_fence
+
+    def _refused(*_a, **_k):
+        raise ConnectionRefusedError('no Ollama on this test machine, by default')
+    monkeypatch.setattr(ollama_gpu_fence.requests, 'get', _refused)
+    monkeypatch.setattr(ollama_gpu_fence.requests, 'post', _refused)
+
+
+@pytest.fixture(autouse=True)
 def _reset_inmemory_registries():
     """dataset_activity is a process-global in-memory store (a batch dies with the
     process, not the request). With :memory: DBs each test restarts dataset ids at

@@ -157,14 +157,17 @@ class LocalOllamaFenceError(RuntimeError):
     """A local inference lost its verified Vision GPU ownership."""
 
 
-def _admit_local_ollama(url, model) -> None:
-    """Record a local request and renew its outer Vision ownership when present."""
+def _admit_local_ollama(url, model, keep_alive=None) -> None:
+    """Record a local request and renew its outer Vision ownership when present.
+
+    `keep_alive` is passed through so the fence can write down how long THIS
+    residency is meant to last: that claim is what lets a restarted LDS
+    recognise its own warm model instead of fencing itself out of it.
+    """
     from . import ollama_gpu_fence
-    scope = ollama_gpu_fence.mark_before_generate(url, model)
+    scope = ollama_gpu_fence.mark_before_generate(url, model, keep_alive=keep_alive)
     if scope == 'blocked':
-        raise LocalOllamaFenceError(
-            'A local Ollama model is already in use outside LDS. LDS will not change it; '
-            'unload it first or configure a dedicated Ollama endpoint for LDS.')
+        raise LocalOllamaFenceError(ollama_gpu_fence.FENCE_BLOCKED_MESSAGE)
     if scope != 'local':
         return
     from ..gpu_window import renew_gpu_exclusive_vision_window, vision_window_is_owned
@@ -236,7 +239,7 @@ def describe_image_ollama(image_bytes: bytes, prompt: str, *,
         # stops the abliterated model from rambling prose instead of the object.
         if fmt:
             payload['format'] = fmt
-        _admit_local_ollama(url, model_name)
+        _admit_local_ollama(url, model_name, keep_alive=keep_alive)
         resp = requests.post(f'{url}/api/generate', json=payload, timeout=timeout)
         resp.raise_for_status()
         data = resp.json()
@@ -341,7 +344,7 @@ def generate_text_ollama(prompt: str, *,
                         'repeat_penalty': float(repeat_penalty)},
             'keep_alive': keep_alive,
         }
-        _admit_local_ollama(url, model_name)
+        _admit_local_ollama(url, model_name, keep_alive=keep_alive)
         resp = requests.post(f'{url}/api/generate', json=payload, timeout=timeout)
         resp.raise_for_status()
         data = resp.json()
@@ -357,6 +360,12 @@ def generate_text_ollama(prompt: str, *,
         reason = _ollama_reject_message(e) or str(e)
         logger.warning('vision_ollama: text generate skipped: %s', reason)
         if strict:
+            # Keep the fence's own exception TYPE, not just its sentence: the
+            # route turns that type into a machine-readable code, which is what
+            # lets the UI offer the unload button instead of printing a wall of
+            # text the user can only read.
+            if isinstance(e, LocalOllamaFenceError):
+                raise
             raise RuntimeError(reason) from e
         return ''
 

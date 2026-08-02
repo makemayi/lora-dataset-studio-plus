@@ -53,6 +53,7 @@ import RunLineageGraph from './RunLineageGraph';
 import TrainingProgress from './TrainingProgress';
 import PreflightModal from './PreflightModal';
 import { laneOfPayload, preflightUrl } from './preflightLane.js';
+import { basesForFamily, cloudUnsupportedFamilyReason } from './trainingFamilyScope.js';
 import { failureView } from './trainingFailure';
 import {
   MEMORY_KEYS, MEMORY_LABELS, memoryAdviceText, memoryIsOverridden, memoryPatchFor,
@@ -457,7 +458,9 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   }, [baseInfo?.convert?.status, getBaseInfo, caps.training_visible]);
 
   // Bases selon le type choisi (zimage : officiel + merges ; sdxl : checkpoints ComfyUI).
-  const currentBases = baseInfo?.bases_by_type?.[trainType] || baseInfo?.bases || [];
+  // Une famille non énumérée par le serveur repart VIDE (→ le placeholder
+  // family-aware plus bas), jamais avec le catalogue Z-Image.
+  const currentBases = basesForFamily(baseInfo, trainType);
   // base_dir non configuré → les listers renvoient [] : distinguer « aucun modèle de
   // cette famille » de « ComfyUI pas encore pointé » (le vrai motif sur un clone neuf).
   // Défaut true tant que baseInfo n'est pas chargé, pour ne pas flasher la CTA au montage.
@@ -1528,7 +1531,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   const stepsRecipeFamily = stepsInfo?.family_label || trainFamilyLabel(stepsRecipeType);
   const stepsRecipeVariant = stepsInfo?.variant_label
     || checkpointVariantLabel(stepsRecipeType, stepsInfo?.variant || variant);
-  const checkpointBasesRaw = baseInfo?.bases_by_type?.[checkpointTrainType] || baseInfo?.bases || [];
+  const checkpointBasesRaw = basesForFamily(baseInfo, checkpointTrainType);
   const checkpointBaseOptions = checkpointBase && !checkpointBasesRaw.some((item) => item.value === checkpointBase)
     ? [{ value: checkpointBase, label: `custom: ${baseName(checkpointBase)}` }, ...checkpointBasesRaw]
     : checkpointBasesRaw;
@@ -1649,15 +1652,17 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   const belowFloor = keptCount < trainMinFloor && !allowNotReady;
   const cloudTooFewImages = belowFloor;
   const cloudLimitReached = actives.length >= (cloudStatus.limit || 1);
+  // Familles que la voie cloud ne sert pas — miroir des refus AVANT réservation
+  // côté serveur. Anima y manquait : au-dessus du plancher d'images le bouton
+  // s'activait et n'était refusé qu'après le clic.
+  const cloudFamilyBlock = cloudUnsupportedFamilyReason(trainType);
   const cloudDisabledReason =
     !caps.cloud_training
       ? 'Cloud training needs a vast.ai API key — add it in Settings'
     : fullMode && !fullTransformerEligible
       ? (fullTransformerReason || 'Full-model training requires the official Krea 2 Raw base')
-    : trainType === 'sdxl'
-      ? 'SDXL trains locally only — the cloud lane covers Z-Image, Krea 2 and FLUX.2 Klein'
-    : trainType === 'flux'
-      ? 'FLUX.1 trains locally only — the cloud lane covers Z-Image, Krea 2 and FLUX.2 Klein'
+    : cloudFamilyBlock
+      ? cloudFamilyBlock
     : (vaePath || tePath)
       ? 'Custom VAE/text-encoder overrides are local-only — clear them in Advanced options to train in the cloud'
     : customWeightsEmpty
@@ -2678,7 +2683,8 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                 VRAM lever. <b className="text-content-muted font-medium">How:</b> multi-scale trains at two sizes so
                 the LoRA holds up from a close-up face to a full-body shot; single 1024 is a bit faster.
                 <b className="text-content-muted font-medium"> 768 only</b> cuts memory use sharply and trains much
-                faster — your best shot at Krea 2 on a GPU under 24 GB, at some cost in fine detail.
+                faster — on the 12B families (Krea 2, FLUX) it is your best shot on a GPU under
+                24 GB, at some cost in fine detail.
                 {sliderOn && (
                   <span className="block mt-1 text-purple-200/90">
                     <b className="font-medium">Slider default: 768 only</b> — the slider loss makes several passes per

@@ -537,7 +537,11 @@ def test_base_info_returns_bases_by_type(client, monkeypatch):
     resp = client.get(f'/api/dataset/{ds_id}/train/base-info')
     assert resp.status_code == 200
     body = resp.get_json()
-    assert set(body['bases_by_type']) == {'zimage', 'sdxl', 'krea', 'flux', 'flux2klein'}
+    # Derived from TRAIN_TYPES, never a hand-written set: the literal five frozen
+    # here said "correct" while Anima was missing, and the panel silently served
+    # the Z-Image bases under the Anima family for as long as it stood.
+    from app.services.face_dataset_service import TRAIN_TYPES
+    assert set(body['bases_by_type']) == set(TRAIN_TYPES)
     assert body['train_type'] == 'zimage'
 
 

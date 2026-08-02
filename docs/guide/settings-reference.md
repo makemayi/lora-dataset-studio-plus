@@ -385,6 +385,17 @@ The card shows Ollama's live state and, when the binary is installed but the ser
 
 - **Ollama URL** → `ollama.url`. Where Ollama is listening. Default **`http://127.0.0.1:11434`**.
 
+**Sharing one Ollama with another tool.** A single local Ollama runs one model
+at a time, so if another app has one loaded, LDS refuses to start its own rather
+than evict work that isn't its. When that happens, ✨ Enhance and 🔎 Describe say
+so and then **wait**: Ollama unloads an idle model by itself after a few minutes,
+and your action restarts on its own the moment the model is free — no clicking,
+nothing retyped. If you would rather not wait, **Unload it and continue** frees
+the other model and resumes; that click is the only thing that ever unloads a
+model LDS did not load. Pointing LDS at a *second* Ollama instance on another
+port (or another machine) removes the contention entirely. A **remote** URL is
+never probed or unloaded — it isn't sharing this machine's GPU.
+
 In Docker, choose the deployment only from **Setup → Ollama**: `none` disables it, `host` uses the existing host service at the authoritative `http://host.docker.internal:11434`, and `docker` uses the isolated companion at the authoritative `http://ollama:11434`. The managed URL is read-only. Neither launcher downloads a model: use the explicit **Pull** button in LDS to see progress and cancel or resume the transfer.
 
 - **Docker deployment mode** → `ollama.deployment_mode`: `none`, `host`, or `docker`. This setting is selected by Setup and applies only to Docker; native installs keep their normal URL-based behavior.
