@@ -136,6 +136,9 @@ def test_concept_badge_counts_real_leaks(app):
         assert payload['caption_leak'] == {'leaking': 2, 'captioned': 3}
         flagged = [i for i in payload['images'] if i['leak']]
         assert len(flagged) == 2
+        assert all(f['leak_terms'] for f in flagged)
+        clean = [i for i in payload['images'] if not i['leak'] and i['caption']]
+        assert clean[0]['leak_terms'] == []
 
 
 def test_concept_badge_zero_when_captions_are_clean(app):

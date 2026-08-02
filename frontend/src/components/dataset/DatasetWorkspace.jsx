@@ -18,6 +18,7 @@ import SmallImageRescueReview from './SmallImageRescueReview';
 import CaptionToolsBar from './CaptionToolsBar';
 import CaptionOptionsPopover from './CaptionOptionsPopover';
 import { recaptionConfirmation } from './captionCategory';
+import { splitCaptionByLeakTerms } from '../../utils/captionLeakHighlight.js';
 import CropModal from './CropModal';
 import ReferenceEditModal from './ReferenceEditModal';
 import { defaultEditEngine } from './referenceEdit';
@@ -1684,6 +1685,18 @@ export default function DatasetWorkspace({ ds, onBack }) {
                               alt={img.variation_label || 'dataset image'} loading="lazy"
                               className="w-14 h-14 rounded-lg object-cover shrink-0 bg-black" />
                             <div className="flex-1 min-w-0 flex flex-col gap-1">
+                              {/* Read-only highlight of the exact words the detector
+                                  matched — a textarea can't colour substrings, so this
+                                  sits above the editable one instead of inside it. */}
+                              {img.leak_terms?.length > 0 && (
+                                <p aria-hidden className="m-0 text-[0.6875rem] leading-relaxed text-content-subtle">
+                                  {splitCaptionByLeakTerms(img.caption, img.leak_terms).map((run, idx) => (
+                                    run.leak
+                                      ? <mark key={idx} className="bg-red-500/25 text-red-300 rounded px-0.5">{run.text}</mark>
+                                      : <span key={idx}>{run.text}</span>
+                                  ))}
+                                </p>
+                              )}
                               <textarea defaultValue={img.caption || ''} rows={2}
                                 key={`${img.id}:${img.caption || ''}`}
                                 onBlur={(e) => {

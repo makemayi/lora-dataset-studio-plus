@@ -3907,6 +3907,18 @@ def caption_has_identity_leak(caption, body=False) -> bool:
     return bool(_IDENTITY_LEAK.search(caption) or (body and _BODY_LEAK.search(caption)))
 
 
+def identity_leak_terms(caption, body=False) -> list:
+    """The identity-leak words actually PRESENT in `caption` (deduped, sorted, lower-
+    cased). Empty = clean. The concept-leak twin of caption_concept_leaks — drives the
+    in-caption highlight so the words to remove are pointed at, not just counted."""
+    if not caption:
+        return []
+    matches = {m.group(0).lower() for m in _IDENTITY_LEAK.finditer(caption)}
+    if body:
+        matches |= {m.group(0).lower() for m in _BODY_LEAK.finditer(caption)}
+    return sorted(matches)
+
+
 # Post-filtre : drop les PHRASES decrivant un trait d'identite. Avec le prompt
 # "Straightforward", la rare fuite est isolee dans sa propre phrase -> suppression
 # propre (pas de casse grammaticale). NE drop PAS expression ("eyes closed") ni

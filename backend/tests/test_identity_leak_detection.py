@@ -54,6 +54,36 @@ def test_empty_caption_is_not_a_leak():
     assert fv.caption_has_identity_leak(None) is False
 
 
+# --- identity_leak_terms: the exact words, for the in-caption highlight --------
+
+def test_identity_leak_terms_returns_the_exact_matched_words():
+    cap = 'a woman with long blonde hair and blue eyes, pale skin, freckles'
+    assert fv.identity_leak_terms(cap) == ['blue eyes', 'freckles', 'hair', 'skin']
+
+
+def test_identity_leak_terms_is_empty_for_a_clean_or_empty_caption():
+    assert fv.identity_leak_terms('a neutral expression, outdoor cafe') == []
+    assert fv.identity_leak_terms('') == []
+    assert fv.identity_leak_terms(None) == []
+
+
+def test_identity_leak_terms_agrees_with_the_boolean_detector():
+    captions = [
+        'a woman with long blonde hair', 'close-up, blue eyes looking at the viewer',
+        'the subject has pale skin', 'a strong, defined jawline',
+        'the subject sits with eyes closed, warm shadow on the face',
+        'looking away, dark room, dramatic lighting',
+    ]
+    for cap in captions:
+        assert bool(fv.identity_leak_terms(cap)) == fv.caption_has_identity_leak(cap), cap
+
+
+def test_identity_leak_terms_includes_body_marks_only_when_asked():
+    cap = 'a tattooed forearm, neutral expression'
+    assert fv.identity_leak_terms(cap) == []
+    assert fv.identity_leak_terms(cap, body=True) == ['tattooed']
+
+
 # --- payload badge: counts, character-only gating, per-image flag -------------
 
 def _add(dataset_id, caption, status='keep'):
@@ -78,6 +108,9 @@ def test_badge_counts_only_kept_captioned_and_flags_offenders(app):
         flagged = [i for i in payload['images'] if i['leak']]
         assert len(flagged) == 1
         assert 'hair' in flagged[0]['caption']
+        assert flagged[0]['leak_terms'] == ['blue eyes', 'hair']
+        clean = [i for i in payload['images'] if not i['leak'] and i['caption']]
+        assert clean[0]['leak_terms'] == []
 
 
 def test_badge_is_zero_when_captions_are_clean(app):

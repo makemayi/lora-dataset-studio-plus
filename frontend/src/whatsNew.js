@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-03-caption-leak-words-highlighted',
+    date: '2026-08-03',
+    title: 'Leaking captions now show you exactly which words to remove',
+    blurb:
+      'The identity/concept-leak review listed offending captions, but not what in them was the problem — you had to reread the whole sentence to spot the leaking word. The exact words the detector matched (hair, eye colour, the concept itself...) are now highlighted in red right above the editable caption.',
+    to: '/datasets?section=images',
+  },
+  {
     id: '2026-08-02-catalog-clothing-pose-nsfw',
     date: '2026-08-02',
     title: '90 new shot cards: outfits, poses and NSFW scenes',

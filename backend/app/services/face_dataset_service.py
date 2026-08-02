@@ -53,6 +53,7 @@ from .face_variations import (CAPTION_PROMPT, CAPTION_PROMPT_BOORU,
                               JOYCAPTION_PROMPT, aspect_for_label, caption_prompt_for,
                               caption_prompt_for_style, caption_prompt_for_concept,
                               caption_has_identity_leak, caption_has_concept_leak,
+                              identity_leak_terms, caption_concept_leaks,
                               compose_prompt_suffix, concept_lexical_field,
                               drop_identity_sentences, drop_identity_tags,
                               is_nsfw_label, prompt_by_label, wrap_variation,
@@ -4174,6 +4175,18 @@ def dataset_payload(user_id, dataset_id):
             return False
         return caption_has_identity_leak(i.caption, body=body)
 
+    def _img_leak_terms(i):
+        """The exact leaking words for i, so the caption-leak review can highlight
+        them in place instead of just counting them. Same kind branching as
+        _img_leaks — empty whenever that returns False."""
+        if i.status != 'keep' or not i.caption:
+            return []
+        if kind_concept:
+            return caption_concept_leaks(i.caption, ds.concept_desc, _concept_terms)
+        if kind_style:
+            return []
+        return identity_leak_terms(i.caption, body=body)
+
     # Which pending rows are ACTUALLY being worked on right now, vs merely
     # queued behind them — a 50-shot batch left every not-yet-done tile on the
     # same amber "pending" border, with no way to tell which one the worker is
@@ -4286,6 +4299,9 @@ def dataset_payload(user_id, dataset_id):
                     # never for style): lets the UI LIST the offending captions for quick
                     # manual treatment (the aggregate badge alone forced a grid hunt).
                     'leak': _img_leaks(i),
+                    # The exact leaking words, so the review panel can highlight them
+                    # inside the caption instead of leaving the user to hunt by eye.
+                    'leak_terms': _img_leak_terms(i),
                     'face_score': i.face_score, 'face_state': i.face_state,
                     # Watermark V1: state drives the tile badge (🚩 detected / ⊘ dismissed
                     # / ✨ cleaned / ⚠ failed) and the "Clean (N)" count; bbox lets the UI
