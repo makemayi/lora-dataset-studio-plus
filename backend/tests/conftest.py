@@ -125,6 +125,27 @@ def _reset_inmemory_registries():
     clip_text_encoder.forget_memory_cache()
     clip_text_encoder.release()
 
+@pytest.fixture(autouse=True)
+def _isolate_config_by_default(tmp_path, monkeypatch):
+    """Every test gets an isolated LDS_CONFIG/LDS_DATA_DIR, whether or not it
+    requests the `app` fixture below.
+
+    config.save_config() falls back to the REAL repo config.json whenever
+    LDS_CONFIG is unset. A test reachable only through a bare helper (no `app`
+    in its signature — e.g. test_comfyui_control.py's `_configure(tmp_path)`)
+    used to write straight into that real file, silently overwriting a real
+    user's `comfyui.base_dir` with a throwaway pytest path on every full-suite
+    run. `app` re-applies the same isolation (and resets the extra caches) for
+    tests that use it; this is the floor underneath every other test, so a
+    test that forgets `app` can no longer reach the real file."""
+    monkeypatch.setenv('LDS_DATA_DIR', str(tmp_path / 'data'))
+    monkeypatch.setenv('LDS_CONFIG', str(tmp_path / 'config.json'))
+    monkeypatch.setenv('LDS_ENV', str(tmp_path / '.env'))
+    import app.config as _cfg
+    monkeypatch.setattr(_cfg, 'ENV_PATH', tmp_path / '.env')
+    monkeypatch.setattr(_cfg, '_cache', None)
+
+
 @pytest.fixture()
 def app(tmp_path, monkeypatch):
     monkeypatch.setenv('LDS_DATA_DIR', str(tmp_path / 'data'))
