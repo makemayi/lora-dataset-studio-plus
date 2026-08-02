@@ -8,6 +8,8 @@ No account, paid tier or telemetry. API engines and rented GPUs are optional; lo
 
 > New here? Start with [Setup & install](#setup--install), then follow the [end-to-end workflow](docs/guide/workflow.md). The [documentation index](docs/README.md) links every guide. Project news and current development live on [Discord](https://discord.gg/j6hnJBFtXE).
 
+> **This is an independent fork** ([`makemayi/lora-dataset-studio-plus`](https://github.com/makemayi/lora-dataset-studio-plus)) of [`perfectgf/lora-dataset-studio`](https://github.com/perfectgf/lora-dataset-studio), no longer tracking upstream. On top of everything below it also has: **🎲 Quick generate** (one-click ratio-driven batch fill), **🎭 single-tile face swap**, a **5-slot Krea character-LoRA chain** + **two-stage sampler** + **per-framing grounding/boost tuning**, an **OneTrainer** local-training backend alongside ai-toolkit, a **Qwen Image (DashScope)** generation engine, and several rounds of **variation-catalog growth** (up to 131 shots + a 90-card NSFW/outfit/pose refill). Full list, including pending work: **[DIFFERENCES.md](DIFFERENCES.md)**.
+
 ### 📖 [The complete guide — every feature, screen by screen →](docs/guide/using-the-app.md)
 
 Everything the app can do, in one long read: [getting started](docs/guide/getting-started.md) · [the full workflow](docs/guide/workflow.md) · [every setting explained](docs/guide/settings-reference.md) · [Docker](docs/guide/docker.md) · [troubleshooting](docs/guide/troubleshooting.md).
