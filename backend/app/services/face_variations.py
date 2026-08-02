@@ -861,6 +861,10 @@ KREA_OUTFIT_PALETTE = (
     'a soft lavender satin halter jumpsuit',
     'a pale pink animal-print chiffon wrap dress',
     'a soft gold metallic bandeau top with a matching mini skirt',
+    # 72: the +30 pose catalog (community request) added 30 more eligible shots
+    # (no named garment of their own) with nothing to hold on to; one more slot
+    # keeps the crc32 % len distribution under the balance test's max-4 bound.
+    'a sage green cropped denim jacket',
 )
 
 
@@ -1373,6 +1377,102 @@ VARIATION_CATALOG = [
     _e('body_silhouette', 'lighting', 'body', 'Body, backlit silhouette',
        'full body shot, backlit near a large window, figure outlined by rim light, elegant '
        'fitted dress, moody interior', co=True, cb=True),
+    # --- Clothing / outfit variety (community request, +30) : le registre "outfit"
+    # n'avait qu'une dizaine d'entrées (veste, robe d'été, maillot, sport, jean) —
+    # trop peu pour couvrir la garde-robe d'un dataset. Chaque entrée nomme un
+    # vêtement CONCRET et le mot "outfit" (garantit le match _HAS_OUTFIT, donc pas
+    # de double directive) au lieu de laisser la directive générique OUTFIT_VARY
+    # décrire un vêtement non spécifié.
+    _e('bust_turtleneck', 'outfit', 'bust', 'Bust, turtleneck sweater',
+       'upper body portrait, front view, wearing a chunky knit turtleneck sweater, '
+       'different from the reference outfit, cozy indoor light', co=True, cb=True),
+    _e('bust_denim_jacket', 'outfit', 'bust', 'Bust, denim jacket',
+       'upper body portrait, three-quarter view, wearing a denim jacket over a plain top, '
+       'different from the reference outfit, urban afternoon light', co=True, cb=True),
+    _e('bust_blazer', 'outfit', 'bust', 'Bust, blazer',
+       'upper body portrait, front view, wearing a tailored blazer, different from the '
+       'reference outfit, modern office background', co=True, cb=True),
+    _e('bust_cardigan', 'outfit', 'bust', 'Bust, cardigan',
+       'upper body portrait, three-quarter view, wearing a soft open cardigan over a top, '
+       'different from the reference outfit, home library background', co=True, cb=True),
+    _e('bust_silk_blouse', 'outfit', 'bust', 'Bust, silk blouse',
+       'upper body portrait, front view, wearing a flowing silk blouse, different from the '
+       'reference outfit, softly lit restaurant background', co=True, cb=True),
+    _e('bust_hoodie', 'outfit', 'bust', 'Bust, hoodie',
+       'upper body portrait, three-quarter view, wearing an oversized hoodie, different '
+       'from the reference outfit, casual outdoor park background', co=True, cb=True),
+    _e('bust_trench', 'outfit', 'bust', 'Bust, trench coat',
+       'upper body portrait, front view, wearing a buttoned trench coat, different from '
+       'the reference outfit, rainy city street background', co=True, cb=True),
+    _e('bust_off_shoulder', 'outfit', 'bust', 'Bust, off-shoulder top',
+       'upper body portrait, three-quarter view, wearing an off-shoulder top, different '
+       'from the reference outfit, sunset beach background', co=True, cb=True),
+    _e('bust_sundress', 'outfit', 'bust', 'Bust, floral sundress',
+       'upper body portrait, front view, wearing a floral print sundress, different from '
+       'the reference outfit, sunny garden background', co=True, cb=True),
+    _e('bust_leather_jacket', 'outfit', 'bust', 'Bust, leather jacket',
+       'upper body portrait, three-quarter view, wearing a fitted leather jacket, different '
+       'from the reference outfit, night city lights background', co=True, cb=True),
+    _e('bust_wool_coat', 'outfit', 'bust', 'Bust, wool coat',
+       'upper body portrait, front view, wearing a heavy wool coat buttoned to the neck, '
+       'different from the reference outfit, snowy street background', co=True, cb=True),
+    _e('bust_kimono', 'outfit', 'bust', 'Bust, kimono wrap',
+       'upper body portrait, three-quarter view, wearing a patterned kimono-style wrap top, '
+       'different from the reference outfit, tea room interior background', co=True, cb=True),
+    _e('bust_uniform_shirt', 'outfit', 'bust', 'Bust, uniform shirt',
+       'upper body portrait, front view, wearing a collared uniform shirt and tie, '
+       'different from the reference outfit, office background', co=True, cb=True),
+    _e('bust_tank_top', 'outfit', 'bust', 'Bust, tank top',
+       'upper body portrait, three-quarter view, wearing a fitted tank top, different from '
+       'the reference outfit, sunny outdoor background', co=True, cb=True),
+    _e('bust_halter_dress', 'outfit', 'bust', 'Bust, halter dress',
+       'upper body portrait, front view, wearing a halter-neck dress, different from the '
+       'reference outfit, evening rooftop background', co=True, cb=True),
+    _e('body_business_suit', 'outfit', 'body', 'Body, business suit',
+       'full body shot, standing, wearing a tailored business pantsuit, different from the '
+       'reference outfit, office lobby background', co=True, cb=True),
+    _e('body_overalls', 'outfit', 'body', 'Body, denim overalls',
+       'full body shot, standing, wearing denim overalls over a t-shirt, different from '
+       'the reference outfit, rustic farm background', co=True, cb=True),
+    _e('body_ball_gown', 'outfit', 'body', 'Body, ball gown',
+       'full body shot, standing, wearing a flowing formal ball gown, different from the '
+       'reference outfit, grand hall background', co=True, cb=True, aspect='3:4'),
+    _e('body_raincoat', 'outfit', 'body', 'Body, raincoat',
+       'full body shot, standing, wearing a yellow raincoat holding an umbrella, different '
+       'from the reference outfit, rainy street background', co=True, cb=True),
+    _e('body_parka', 'outfit', 'body', 'Body, winter parka',
+       'full body shot, standing, wearing a thick puffer parka, different from the '
+       'reference outfit, snowy mountain trail background', co=True, cb=True),
+    _e('body_sport_uniform', 'outfit', 'body', 'Body, sport uniform',
+       'full body shot, standing, wearing a team sport uniform, different from the '
+       'reference outfit, outdoor sports field background', co=True, cb=True),
+    _e('body_kimono_full', 'outfit', 'body', 'Body, kimono',
+       'full body shot, standing, wearing a full-length kimono, different from the '
+       'reference outfit, traditional garden background', co=True, cb=True),
+    _e('body_cargo_street', 'outfit', 'body', 'Body, cargo pants street',
+       'full body shot, standing, wearing cargo pants and a cropped top, different from '
+       'the reference outfit, urban skatepark background', co=True, cb=True),
+    _e('body_wetsuit', 'outfit', 'body', 'Body, wetsuit',
+       'full body shot, standing, wearing a fitted wetsuit, different from the reference '
+       'outfit, ocean shore background', co=True, cb=True, aspect='3:4'),
+    _e('body_hiking_gear', 'outfit', 'body', 'Body, hiking gear',
+       'full body shot, standing, wearing a hiking jacket with a backpack, different from '
+       'the reference outfit, mountain trail background', co=True, cb=True),
+    _e('body_denim_shorts', 'outfit', 'body', 'Body, denim shorts',
+       'full body shot, standing, wearing denim shorts and a cropped top, different from '
+       'the reference outfit, sunny street background', co=True, cb=True),
+    _e('body_chef_apron', 'outfit', 'body', 'Body, chef apron',
+       'full body shot, standing, wearing an apron over casual clothes, different from '
+       'the reference outfit, kitchen background', co=True, cb=True),
+    _e('body_motorcycle_leathers', 'outfit', 'body', 'Body, motorcycle leathers',
+       'full body shot, standing, wearing a full leather riding suit, different from the '
+       'reference outfit, garage background', co=True, cb=True),
+    _e('body_wrap_dress', 'outfit', 'body', 'Body, wrap dress',
+       'full body shot, standing, wearing a fitted wrap dress, different from the '
+       'reference outfit, city street background', co=True, cb=True),
+    _e('body_pajamas', 'outfit', 'body', 'Body, pajama set',
+       'full body shot, standing, wearing a cozy pajama set, different from the reference '
+       'outfit, bedroom morning light background', co=True, cb=True),
     # --- Full-body pose variety (community request) : le catalogue plein-pied était
     # presque entièrement debout — assis/accroupi/allongé manquaient, et aucun plan
     # plein-pied ne rapprochait le visage. Chaque pose garde "full body shot" et
@@ -1415,6 +1515,99 @@ VARIATION_CATALOG = [
        'full body shot, the entire body still visible from head to toe, standing noticeably '
        'closer to the camera than usual and leaning slightly forward, wide-angle perspective, '
        'the face clearly visible and well lit', co=True, cb=True),
+    # --- Pose variety (community request, +30) : candid/action/lifestyle poses that
+    # were entirely missing (only sit/crouch/lying/stand existed) — leaning, walking
+    # actions, dynamic movement, seated props, hands/arms gestures.
+    _e('body_lean_wall', 'framing', 'body', 'Body, leaning against a wall',
+       'full body shot, standing, leaning casually against a wall, one foot resting on the '
+       'surface behind, urban alley background', co=True, cb=True),
+    _e('body_hands_pockets', 'framing', 'body', 'Body, hands in pockets',
+       'full body shot, standing, hands tucked in pockets, relaxed posture, city sidewalk '
+       'background', co=True, cb=True),
+    _e('body_look_back_walk', 'framing', 'body', 'Body, walking, looking back',
+       'full body shot, walking away from camera, glancing back over the shoulder, street '
+       'background', co=True, cb=True),
+    _e('body_run', 'framing', 'body', 'Body, running',
+       'full body shot, running, dynamic mid-stride action, outdoor park path', co=True,
+       cb=True, aspect='16:9'),
+    _e('body_jump', 'framing', 'body', 'Body, jumping',
+       'full body shot, jumping in the air, joyful energetic pose, open field background',
+       co=True, cb=True, aspect='16:9'),
+    _e('body_dance', 'framing', 'body', 'Body, dancing',
+       'full body shot, mid-dance movement, flowing motion, studio background', co=True,
+       cb=True, aspect='16:9'),
+    _e('body_yoga_stretch', 'framing', 'body', 'Body, yoga stretch',
+       'full body shot, standing in a simple yoga stretch pose, one arm raised overhead, '
+       'calm indoor studio background', co=True, cb=True),
+    _e('body_stretch_arms', 'framing', 'body', 'Body, arms overhead stretch',
+       'full body shot, standing, both arms stretched overhead, relaxed morning stretch, '
+       'bedroom background', co=True, cb=True),
+    _e('body_stairs_sit', 'framing', 'body', 'Body, sitting on stairs',
+       'full body shot, sitting on outdoor stairs, elbows on knees, casual urban '
+       'background', co=True, cb=True),
+    _e('body_chin_hand', 'framing', 'body', 'Body, resting chin on hand',
+       'full body shot, sitting, chin resting thoughtfully on one hand, cafe background',
+       co=True, cb=True),
+    _e('body_hip_pop', 'framing', 'body', 'Body, hip pop stance',
+       'full body shot, standing, weight shifted to one leg with hip popped to the side, '
+       'confident pose, studio background', co=True, cb=True),
+    _e('body_arms_wide', 'framing', 'body', 'Body, arms wide open',
+       'full body shot, standing, arms spread wide open, joyful expression, open field '
+       'background', co=True, cb=True, aspect='16:9'),
+    _e('body_phone_look', 'framing', 'body', 'Body, looking at phone',
+       'full body shot, standing, looking down at a phone in hand, casual street '
+       'background', co=True, cb=True),
+    _e('body_reading_book', 'framing', 'body', 'Body, reading a book',
+       'full body shot, sitting, reading an open book, cozy library background', co=True,
+       cb=True),
+    _e('body_hair_touch', 'framing', 'body', 'Body, playing with hair',
+       'full body shot, standing, one hand playing with a strand of hair, soft candid '
+       'pose, outdoor background', co=True, cb=True),
+    _e('body_laugh_candid', 'framing', 'body', 'Body, candid laugh',
+       'full body shot, standing, caught mid laugh, candid joyful moment, city street '
+       'background', co=True, cb=True),
+    _e('body_bench_sit', 'framing', 'body', 'Body, sitting on a bench',
+       'full body shot, sitting on an outdoor bench, relaxed posture, park background',
+       co=True, cb=True),
+    _e('body_lean_car', 'framing', 'body', 'Body, leaning on a car',
+       'full body shot, standing, leaning back against a parked car, casual pose, street '
+       'background', co=True, cb=True),
+    _e('body_umbrella_walk', 'framing', 'body', 'Body, walking with an umbrella',
+       'full body shot, walking, holding an open umbrella, rainy street background',
+       co=True, cb=True),
+    _e('body_backpack_walk', 'framing', 'body', 'Body, walking with a backpack',
+       'full body shot, walking, wearing a backpack over one shoulder, campus background',
+       co=True, cb=True),
+    _e('body_jacket_shoulder', 'framing', 'body', 'Body, jacket over the shoulder',
+       'full body shot, standing, a jacket casually slung over one shoulder, urban '
+       'background', co=True, cb=True),
+    _e('body_doorway_lean', 'framing', 'body', 'Body, leaning in a doorway',
+       'full body shot, standing, leaning against a doorway frame, indoor hallway '
+       'background', co=True, cb=True),
+    _e('body_window_sit', 'framing', 'body', 'Body, sitting on a windowsill',
+       'full body shot, sitting on a windowsill, one leg bent, soft daylight from outside',
+       co=True, cb=True),
+    _e('body_picnic_sit', 'framing', 'body', 'Body, sitting on a picnic blanket',
+       'full body shot, sitting on a picnic blanket, relaxed pose, sunny park background',
+       co=True, cb=True),
+    _e('body_twirl', 'framing', 'body', 'Body, twirling',
+       'full body shot, twirling with movement in the clothing, dynamic motion, open '
+       'plaza background', co=True, cb=True, aspect='16:9'),
+    _e('body_one_knee', 'framing', 'body', 'Body, kneeling on one knee',
+       'full body shot, kneeling on one knee, the other foot planted, confident pose, '
+       'studio background', co=True, cb=True),
+    _e('body_hands_hips', 'framing', 'body', 'Body, hands on hips',
+       'full body shot, standing, hands resting on the hips, confident stance, plain '
+       'background', co=True, cb=True),
+    _e('bust_chin_rest', 'framing', 'bust', 'Bust, chin resting on hand',
+       'upper body portrait, sitting, chin resting gently on one hand, thoughtful '
+       'expression, soft indoor light', co=True, cb=True),
+    _e('bust_hair_tuck', 'framing', 'bust', 'Bust, tucking hair behind ear',
+       'upper body portrait, three-quarter view, tucking a strand of hair behind the ear, '
+       'candid moment, soft natural light', co=True, cb=True),
+    _e('back_walk_away', 'framing', 'back', 'Back, walking away',
+       'full body shot from behind, walking away from the camera, natural stride, street '
+       'background', co=True, cb=True),
     # Gros plans VISAGE en formats variés (preset visage-centré) : la robustesse de
     # format sur le visage lui-même, sans plan corps (corps reste générique).
     _e('face_land', 'framing', 'face', 'Face, landscape framing',
@@ -1549,6 +1742,104 @@ NSFW_VARIATION_CATALOG = [
        'full body shot, nude, kneeling upright with the hands resting flat on the thighs, '
        'shoulders back, the face fully visible and looking directly at the camera, soft studio '
        'light', co=True, cb=True, aspect='3:4'),
+    # --- More states/poses/décors (community request, +30) : same register as above
+    # — state + pose + décor, never an act, face always visible/framed in.
+    _e('nsfw_face_robe', 'nsfw', 'face', 'Face, silk bathrobe',
+       'close-up portrait, front view, wearing a loosely tied silk bathrobe with one '
+       'shoulder bare, bedroom, soft morning light', co=True, cb=True),
+    _e('nsfw_face_bath', 'nsfw', 'face', 'Face, in the bath',
+       'close-up portrait, sitting in a bathtub, bare shoulders above the water line, steam '
+       'in the background, warm bathroom light', co=True, cb=True),
+    _e('nsfw_face_mirror', 'nsfw', 'face', 'Face, mirror reflection',
+       'close-up portrait, reflected in a bathroom mirror, damp hair, bare shoulders, soft '
+       'artificial light', co=True, cb=True),
+    _e('nsfw_face_morning_light', 'nsfw', 'face', 'Face, morning light in bed',
+       'close-up portrait, lying in bed, bare shoulder visible above the sheet, warm '
+       'morning sunlight through the curtains', co=True, cb=True),
+    _e('nsfw_face_towel_turban', 'nsfw', 'face', 'Face, hair towel',
+       'close-up portrait, bare shoulders, hair wrapped in a towel turban, bathroom, soft '
+       'light', co=True, cb=True),
+    _e('nsfw_bust_robe_open', 'nsfw', 'bust', 'Bust, open bathrobe',
+       'bust shot, wearing an open silk bathrobe, bare chest partially visible, bedroom, '
+       'soft evening light', co=True, cb=True),
+    _e('nsfw_bust_sheer', 'nsfw', 'bust', 'Bust, sheer lingerie',
+       'bust shot, wearing sheer lace lingerie, dim bedroom lighting', co=True, cb=True),
+    _e('nsfw_bust_necklace', 'nsfw', 'bust', 'Bust, topless with necklace',
+       'bust shot, topless, wearing only a delicate necklace, warm candlelight, bedroom',
+       co=True, cb=True),
+    _e('nsfw_bust_oversized_shirt', 'nsfw', 'bust', 'Bust, oversized shirt only',
+       'bust shot, wearing an oversized unbuttoned shirt with bare shoulders underneath, '
+       'soft morning light, bedroom', co=True, cb=True),
+    _e('nsfw_bust_bath_foam', 'nsfw', 'bust', 'Bust, bath with foam',
+       'bust shot, sitting in a bathtub, bubble foam covering the chest, damp hair, warm '
+       'bathroom light', co=True, cb=True),
+    _e('nsfw_bust_kitchen', 'nsfw', 'bust', 'Bust, topless in the kitchen',
+       'bust shot, topless, standing in a kitchen holding a mug, soft morning light',
+       co=True, cb=True),
+    _e('nsfw_bust_balcony', 'nsfw', 'bust', 'Bust, lingerie on the balcony',
+       'bust shot, wearing lingerie, standing on a balcony, city skyline in the '
+       'background, warm evening light', co=True, cb=True),
+    _e('nsfw_bust_book', 'nsfw', 'bust', 'Bust, topless reading',
+       'bust shot, topless, holding an open book, sitting in bed, soft lamp light',
+       co=True, cb=True),
+    _e('nsfw_bust_coffee', 'nsfw', 'bust', 'Bust, lingerie with coffee',
+       'bust shot, wearing lingerie, holding a coffee cup, sunlit kitchen window',
+       co=True, cb=True),
+    _e('nsfw_bust_brushing_hair', 'nsfw', 'bust', 'Bust, topless brushing hair',
+       'bust shot, topless, brushing hair with one hand raised, bathroom mirror light',
+       co=True, cb=True),
+    _e('nsfw_body_robe_untied', 'nsfw', 'body', 'Body, bathrobe untied',
+       'full body shot, standing, silk bathrobe untied and open, nude underneath, '
+       'bedroom, soft evening light, the face fully visible', co=True, cb=True,
+       aspect='3:4'),
+    _e('nsfw_body_sunbathing', 'nsfw', 'body', 'Body, nude sunbathing',
+       'full body shot, lying on a towel sunbathing nude in a private garden, bright '
+       'daylight, the face fully visible, sunglasses pushed up', co=True, cb=True,
+       aspect='4:3'),
+    _e('nsfw_body_yoga', 'nsfw', 'body', 'Body, nude yoga pose',
+       'full body shot, nude, standing in a simple yoga balance pose, one leg raised, '
+       'soft studio light, the face fully visible', co=True, cb=True, aspect='3:4'),
+    _e('nsfw_body_blanket_wrap', 'nsfw', 'body', 'Body, wrapped in a blanket',
+       'full body shot, nude wrapped loosely in a knit blanket, sitting on the floor by a '
+       'fireplace, warm light, the face fully visible', co=True, cb=True, aspect='3:4'),
+    _e('nsfw_body_kneel_rug', 'nsfw', 'body', 'Body, kneeling on a rug',
+       'full body shot, nude, kneeling upright on a soft rug, hands resting on the '
+       'thighs, warm indoor light, the face fully visible', co=True, cb=True, aspect='3:4'),
+    _e('nsfw_body_side_reading', 'nsfw', 'body', 'Body, side lying, reading',
+       'full body shot, nude, lying on the side propped on one elbow reading a book, '
+       'soft bedroom light, the face fully visible', co=True, cb=True, aspect='4:3'),
+    _e('nsfw_body_couch_lounge', 'nsfw', 'body', 'Body, nude lounging on a couch',
+       'full body shot, nude, reclining on a couch, relaxed pose, warm living room '
+       'light, the face fully visible', co=True, cb=True, aspect='4:3'),
+    _e('nsfw_body_arms_above_bed', 'nsfw', 'body', 'Body, arms above the head in bed',
+       'full body shot, nude, lying on the back in bed, both arms stretched above the '
+       'head, soft morning light, the face fully visible', co=True, cb=True,
+       aspect='4:3'),
+    _e('nsfw_body_vanity_mirror', 'nsfw', 'body', 'Body, nude at the vanity mirror',
+       'full body shot, nude, sitting at a vanity table, reflected in the mirror, soft '
+       'warm light, the face fully visible in the reflection', co=True, cb=True,
+       aspect='3:4'),
+    _e('nsfw_body_arm_cover', 'nsfw', 'body', 'Body, nude, arm covering the chest',
+       'full body shot, nude standing, one arm crossed over the chest, weight on one '
+       'leg, soft studio light, the face fully visible', co=True, cb=True, aspect='3:4'),
+    _e('nsfw_body_bath_mat_kneel', 'nsfw', 'body', 'Body, kneeling on the bath mat',
+       'full body shot, nude, kneeling on a bath mat, damp skin, towel nearby, soft '
+       'bathroom light, the face fully visible', co=True, cb=True, aspect='3:4'),
+    _e('nsfw_body_wall_stand', 'nsfw', 'body', 'Body, nude standing against a wall',
+       'full body shot, nude, standing with the back against a plain wall, relaxed '
+       'posture, soft studio light, the face fully visible', co=True, cb=True,
+       aspect='3:4'),
+    _e('nsfw_body_staircase', 'nsfw', 'body', 'Body, nude on a staircase',
+       'full body shot, nude, sitting on an interior staircase, one hand on the '
+       'railing, warm ambient light, the face fully visible', co=True, cb=True,
+       aspect='3:4'),
+    _e('nsfw_body_curtain_silhouette', 'nsfw', 'body', 'Body, nude silhouette by a curtain',
+       'full body shot, nude, standing behind a sheer curtain with soft backlight, '
+       'figure gently visible through the fabric, the face turned toward the camera and '
+       'clearly visible', co=True, cb=True, aspect='3:4'),
+    _e('nsfw_back_kneel', 'nsfw', 'back', 'Back, kneeling, nude',
+       'full body shot from behind, nude, kneeling upright, back and shoulders visible, '
+       'soft bedroom light', co=True, cb=True),
 ]
 
 # Bake the default outfit-variation / neutral-expression directives into every entry
@@ -2237,6 +2528,99 @@ LEGACY_LABEL_ALIASES = {
     'Corps, nu, serviette qui glisse': 'Body, nude, towel about to drop',
     'Corps, nu, étirement allongé': 'Body, nude, lying stretch',
     'Corps, nu, agenouillé mains sur les cuisses': 'Body, nude, kneeling, hands on thighs',
+    # Clothing / outfit variety (+30)
+    'Buste, pull col roulé': 'Bust, turtleneck sweater',
+    'Buste, veste en jean': 'Bust, denim jacket',
+    'Buste, blazer': 'Bust, blazer',
+    'Buste, cardigan': 'Bust, cardigan',
+    'Buste, chemisier en soie': 'Bust, silk blouse',
+    'Buste, sweat à capuche': 'Bust, hoodie',
+    'Buste, trench-coat': 'Bust, trench coat',
+    'Buste, haut épaules dénudées': 'Bust, off-shoulder top',
+    'Buste, robe fleurie': 'Bust, floral sundress',
+    'Buste, veste en cuir': 'Bust, leather jacket',
+    'Buste, manteau en laine': 'Bust, wool coat',
+    'Buste, kimono': 'Bust, kimono wrap',
+    'Buste, chemise uniforme': 'Bust, uniform shirt',
+    'Buste, débardeur': 'Bust, tank top',
+    'Buste, robe dos-nu': 'Bust, halter dress',
+    'Corps, tailleur professionnel': 'Body, business suit',
+    'Corps, salopette en jean': 'Body, denim overalls',
+    'Corps, robe de bal': 'Body, ball gown',
+    'Corps, imperméable': 'Body, raincoat',
+    "Corps, parka d'hiver": 'Body, winter parka',
+    "Corps, tenue d'équipe": 'Body, sport uniform',
+    'Corps, kimono': 'Body, kimono',
+    'Corps, pantalon cargo urbain': 'Body, cargo pants street',
+    'Corps, combinaison de plongée': 'Body, wetsuit',
+    'Corps, tenue de randonnée': 'Body, hiking gear',
+    'Corps, short en jean': 'Body, denim shorts',
+    'Corps, tablier de cuisine': 'Body, chef apron',
+    'Corps, combinaison moto': 'Body, motorcycle leathers',
+    'Corps, robe portefeuille': 'Body, wrap dress',
+    'Corps, pyjama': 'Body, pajama set',
+    # Pose variety (+30)
+    'Corps, appuyé contre un mur': 'Body, leaning against a wall',
+    'Corps, mains dans les poches': 'Body, hands in pockets',
+    'Corps, marche, regard arrière': 'Body, walking, looking back',
+    'Corps, en train de courir': 'Body, running',
+    'Corps, en train de sauter': 'Body, jumping',
+    'Corps, en train de danser': 'Body, dancing',
+    'Corps, étirement yoga': 'Body, yoga stretch',
+    'Corps, étirement bras levés': 'Body, arms overhead stretch',
+    'Corps, assis dans les escaliers': 'Body, sitting on stairs',
+    'Corps, menton sur la main': 'Body, resting chin on hand',
+    'Corps, hanche en avant': 'Body, hip pop stance',
+    'Corps, bras grands ouverts': 'Body, arms wide open',
+    'Corps, regard vers le téléphone': 'Body, looking at phone',
+    'Corps, en train de lire': 'Body, reading a book',
+    'Corps, joue avec ses cheveux': 'Body, playing with hair',
+    'Corps, rire spontané': 'Body, candid laugh',
+    'Corps, assis sur un banc': 'Body, sitting on a bench',
+    'Corps, appuyé sur une voiture': 'Body, leaning on a car',
+    'Corps, marche avec parapluie': 'Body, walking with an umbrella',
+    'Corps, marche avec sac à dos': 'Body, walking with a backpack',
+    "Corps, veste sur l'épaule": 'Body, jacket over the shoulder',
+    "Corps, appuyé dans l'embrasure": 'Body, leaning in a doorway',
+    'Corps, assis sur le rebord de fenêtre': 'Body, sitting on a windowsill',
+    'Corps, assis sur une couverture de pique-nique': 'Body, sitting on a picnic blanket',
+    'Corps, en train de tournoyer': 'Body, twirling',
+    'Corps, agenouillé sur un genou': 'Body, kneeling on one knee',
+    'Corps, mains sur les hanches': 'Body, hands on hips',
+    'Buste, menton sur la main': 'Bust, chin resting on hand',
+    "Buste, cheveux derrière l'oreille": 'Bust, tucking hair behind ear',
+    'Dos, en train de partir': 'Back, walking away',
+    # NSFW catalog additions (+30, local Klein only)
+    'Visage, robe de soie': 'Face, silk bathrobe',
+    'Visage, dans le bain': 'Face, in the bath',
+    'Visage, reflet miroir': 'Face, mirror reflection',
+    'Visage, lumière du matin au lit': 'Face, morning light in bed',
+    'Visage, turban serviette': 'Face, hair towel',
+    'Buste, robe ouverte': 'Bust, open bathrobe',
+    'Buste, lingerie transparente': 'Bust, sheer lingerie',
+    'Buste, topless avec collier': 'Bust, topless with necklace',
+    'Buste, chemise ample seule': 'Bust, oversized shirt only',
+    'Buste, bain moussant': 'Bust, bath with foam',
+    'Buste, topless en cuisine': 'Bust, topless in the kitchen',
+    'Buste, lingerie au balcon': 'Bust, lingerie on the balcony',
+    'Buste, topless lecture': 'Bust, topless reading',
+    'Buste, lingerie avec café': 'Bust, lingerie with coffee',
+    'Buste, topless brossage cheveux': 'Bust, topless brushing hair',
+    'Corps, robe dénouée': 'Body, bathrobe untied',
+    'Corps, bain de soleil nu': 'Body, nude sunbathing',
+    'Corps, posture de yoga nue': 'Body, nude yoga pose',
+    'Corps, enveloppé dans une couverture': 'Body, wrapped in a blanket',
+    'Corps, agenouillé sur un tapis': 'Body, kneeling on a rug',
+    'Corps, allongé sur le côté, lecture': 'Body, side lying, reading',
+    'Corps, allongé nu sur un canapé': 'Body, nude lounging on a couch',
+    'Corps, bras au-dessus de la tête au lit': 'Body, arms above the head in bed',
+    'Corps, nu à la coiffeuse': 'Body, nude at the vanity mirror',
+    'Corps, nu, bras couvrant la poitrine': 'Body, nude, arm covering the chest',
+    'Corps, agenouillé sur le tapis de bain': 'Body, kneeling on the bath mat',
+    'Corps, nu debout contre un mur': 'Body, nude standing against a wall',
+    'Corps, nu dans un escalier': 'Body, nude on a staircase',
+    'Corps, silhouette nue derrière un rideau': 'Body, nude silhouette by a curtain',
+    'Dos, agenouillé, nu': 'Back, kneeling, nude',
 }
 
 
@@ -2690,6 +3074,22 @@ QUICK_GEN_COMPONENTS = {
                 _qc('knit_sweater', 'wearing a soft knit sweater different from the reference outfit'),
                 _qc('blazer_smart', 'wearing a tailored blazer over a plain top, different '
                                     'from the reference outfit'),
+                # +14 from the clothing-catalog expansion (community request);
+                # 'blazer' is skipped here, already covered by blazer_smart above.
+                _qc('turtleneck_sweater', 'wearing a chunky knit turtleneck sweater'),
+                _qc('denim_jacket', 'wearing a denim jacket over a plain top'),
+                _qc('cardigan_soft', 'wearing a soft open cardigan over a top'),
+                _qc('silk_blouse', 'wearing a flowing silk blouse'),
+                _qc('hoodie_oversized', 'wearing an oversized hoodie'),
+                _qc('trench_coat', 'wearing a buttoned trench coat'),
+                _qc('off_shoulder_top', 'wearing an off-shoulder top'),
+                _qc('floral_sundress', 'wearing a floral print sundress'),
+                _qc('leather_jacket', 'wearing a fitted leather jacket'),
+                _qc('wool_coat', 'wearing a heavy wool coat buttoned to the neck'),
+                _qc('kimono_wrap', 'wearing a patterned kimono-style wrap top'),
+                _qc('uniform_shirt', 'wearing a collared uniform shirt and tie'),
+                _qc('tank_top', 'wearing a fitted tank top'),
+                _qc('halter_dress', 'wearing a halter-neck dress'),
             ],
             'background': [
                 _qc('outdoor_park', 'outdoor park background'),
@@ -2735,6 +3135,51 @@ QUICK_GEN_COMPONENTS = {
                     compatible_angles=[]),
                 _qc('lying_side', 'lying on the side, relaxed pose, resting the head on one hand',
                     compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+                # +27 from the pose-catalog expansion (community request): candid,
+                # action and lifestyle poses that were entirely missing.
+                _qc('lean_wall', 'leaning casually against a wall, one foot resting on the '
+                                 'surface behind'),
+                _qc('hands_pockets', 'standing, hands tucked in pockets, relaxed posture'),
+                _qc('look_back_walk', 'walking away from camera, glancing back over the shoulder',
+                    compatible_angles=[]),
+                _qc('running', 'running, dynamic mid-stride action',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+                _qc('jumping', 'jumping in the air, joyful energetic pose',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+                _qc('dancing', 'mid-dance movement, flowing motion',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+                _qc('yoga_stretch', 'standing in a simple yoga stretch pose, one arm raised overhead'),
+                _qc('stretch_arms', 'standing, both arms stretched overhead, relaxed morning stretch'),
+                _qc('stairs_sit', 'sitting on stairs, elbows on knees, casual',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+                _qc('chin_hand', 'sitting, chin resting thoughtfully on one hand',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+                _qc('hip_pop', 'standing, weight shifted to one leg with hip popped to the side, '
+                               'confident pose'),
+                _qc('arms_wide', 'standing, arms spread wide open, joyful expression'),
+                _qc('phone_look', 'standing, looking down at a phone in hand'),
+                _qc('reading_book', 'sitting, reading an open book',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+                _qc('hair_touch', 'standing, one hand playing with a strand of hair, soft candid pose'),
+                _qc('laugh_candid', 'standing, caught mid laugh, candid joyful moment'),
+                _qc('bench_sit', 'sitting on a bench, relaxed posture',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+                _qc('lean_car', 'standing, leaning back against a parked car, casual pose'),
+                _qc('umbrella_walk', 'walking, holding an open umbrella',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+                _qc('backpack_walk', 'walking, wearing a backpack over one shoulder',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+                _qc('jacket_shoulder', 'standing, a jacket casually slung over one shoulder'),
+                _qc('doorway_lean', 'standing, leaning against a doorway frame'),
+                _qc('window_sit', 'sitting on a windowsill, one leg bent',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+                _qc('picnic_sit', 'sitting on a picnic blanket, relaxed pose',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+                _qc('twirling', 'twirling with movement in the clothing, dynamic motion',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+                _qc('one_knee', 'kneeling on one knee, the other foot planted, confident pose',
+                    compatible_angles=['front', 'three_quarter_left', 'three_quarter_right']),
+                _qc('hands_hips', 'standing, hands resting on the hips, confident stance'),
             ],
             'outfit': [
                 _qc('street_casual', 'casual clothes different from the reference outfit'),
@@ -2746,6 +3191,22 @@ QUICK_GEN_COMPONENTS = {
                 _qc('sundress_casual', 'light casual sundress, different from the reference outfit'),
                 _qc('coat_layered', 'layered casual coat over a plain top, different from '
                                     'the reference outfit'),
+                # +15 from the clothing-catalog expansion (community request).
+                _qc('business_suit', 'wearing a tailored business pantsuit'),
+                _qc('denim_overalls', 'wearing denim overalls over a t-shirt'),
+                _qc('ball_gown', 'wearing a flowing formal ball gown'),
+                _qc('raincoat_yellow', 'wearing a yellow raincoat, holding an umbrella'),
+                _qc('winter_parka', 'wearing a thick puffer parka'),
+                _qc('sport_uniform', 'wearing a team sport uniform'),
+                _qc('kimono_full', 'wearing a full-length kimono'),
+                _qc('cargo_street', 'wearing cargo pants and a cropped top'),
+                _qc('wetsuit_fitted', 'wearing a fitted wetsuit'),
+                _qc('hiking_gear', 'wearing a hiking jacket with a backpack'),
+                _qc('denim_shorts', 'wearing denim shorts and a cropped top'),
+                _qc('chef_apron', 'wearing an apron over casual clothes'),
+                _qc('motorcycle_leathers', 'wearing a full leather riding suit'),
+                _qc('wrap_dress', 'wearing a fitted wrap dress'),
+                _qc('pajama_set', 'wearing a cozy pajama set'),
             ],
             'background': [
                 _qc('street', 'on a city street'),

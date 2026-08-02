@@ -74,12 +74,15 @@ def test_self_describing_pose_prompt_has_no_redundant_angle_clause():
     """over_shoulder's own phrase already says the angle — the assembled
     prompt must not ALSO contain a second, independently-drawn angle phrase
     (e.g. 'front view') stacked in front of it."""
+    # total widened from 30 (bust outfit pool grew 8 -> 22 for the clothing-catalog
+    # expansion, which shifts the rng stream enough that 30 slots at seed 4 no
+    # longer draw over_shoulder at all — see the docstring note below).
     out = fv.compose_quick_generate_variations(
-        total=30, framing_ratios={'face': 0, 'bust': 100, 'body': 0},
+        total=120, framing_ratios={'face': 0, 'bust': 100, 'body': 0},
         angle_ratios={'bust': {'front': 100}},  # forces angle draw attempts
         rng=_rng(4))
     over_shoulder_hits = [v for v in out if 'over the shoulder' in v['prompt']]
-    assert over_shoulder_hits, 'over_shoulder pose never got drawn across 30 slots — widen the seed/pool if this flakes'
+    assert over_shoulder_hits, 'over_shoulder pose never got drawn across 120 slots — widen the seed/pool if this flakes'
     for v in over_shoulder_hits:
         assert 'front view' not in v['prompt']
 

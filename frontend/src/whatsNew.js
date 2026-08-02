@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-02-catalog-clothing-pose-nsfw',
+    date: '2026-08-02',
+    title: '90 new shot cards: outfits, poses and NSFW scenes',
+    blurb:
+      'The variation catalog gets a big refill — 30 new outfits (blazer, trench coat, kimono, ball gown, hiking gear and more), 30 new candid poses (leaning, walking, dancing, sitting on stairs...), and 30 new NSFW states/décors for the local-Klein-only catalog. Same rules as before: face stays visible, never an act. The new outfits and poses also feed 🎲 Quick generate\'s random mix, not just the manual card grid.',
+    to: '/datasets?section=images',
+  },
+  {
     id: '2026-08-02-face-scoring-multi-reference',
     date: '2026-08-02',
     title: 'Face scoring now checks every reference photo, not just the first one',

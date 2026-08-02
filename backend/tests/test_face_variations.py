@@ -9,10 +9,10 @@ from app.services.face_variations import (VARIATION_CATALOG, NSFW_VARIATION_CATA
 
 
 def test_catalog_shape():
-    assert len(VARIATION_CATALOG) == 71          # 63 existing + 8 bust angle/lighting/pose shots
+    assert len(VARIATION_CATALOG) == 131         # 71 existing + 30 clothing/outfit + 30 pose
     frames = [e['framing'] for e in VARIATION_CATALOG]
-    assert frames.count('face') == 25 and frames.count('bust') == 18
-    assert frames.count('body') == 27 and frames.count('back') == 1
+    assert frames.count('face') == 25 and frames.count('bust') == 35
+    assert frames.count('body') == 69 and frames.count('back') == 2
     for e in VARIATION_CATALOG:
         assert set(e) >= {'id', 'axis', 'framing', 'label', 'prompt'}
 
