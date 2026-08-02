@@ -56,6 +56,16 @@ The workspace offers five engines:
 
 The variation catalog fans out expression, angle, lighting, framing, outfit and background. Each subject type has its own catalog, catalogs import/export as JSON, and a one-off custom shot can be kept permanently.
 
+<p align="center">
+  <img src="../screenshots/generate/engines-and-shots.png" alt="Generate panel with the subject type, the five engine cards and the shot catalog grouped by face, bust, body and back" width="820">
+</p>
+
+Ticking more than one engine adds a second decision. **Split across engines** sends each shot to a single engine, so the batch costs what one engine would cost but the dataset gains variety; **All engines** renders every shot on every engine for a side-by-side comparison, and multiplies the cost accordingly. The same panel imports real photos, opens the scraper and pulls keepers out of an Image Bank.
+
+<p align="center">
+  <img src="../screenshots/generate/multi-engine-batch.png" alt="Split across engines versus All engines, the shot selection, and the import, scrape and bank entry points below" width="820">
+</p>
+
 Every generated tile reopens the exact prompt used to make it. The separate reference editor also supports **Retry**, which repeats the exact prompt, engine and temporary references of that candidate; choose **Try another prompt** only when changing the instruction.
 
 Provider limits are part of the workflow:
@@ -78,6 +88,12 @@ Nothing in a source folder is removed unless you explicitly choose **Delete reje
 
 <p align="center">
   <img src="../screenshots/bank/bank-overview.png" alt="Image Bank grid with quality flags, scores and action zones" width="820">
+</p>
+
+**Launch all** chains the passes you tick into one unattended run, in a fixed order. A pass whose tool is not installed is announced as *will skip* before you start and never fails the run, and the dialog lists exactly what is about to execute.
+
+<p align="center">
+  <img src="../screenshots/bank/bank-launch-all.png" alt="Launch all dialog listing the chained bank passes, with unavailable ones marked will skip" width="420">
 </p>
 
 ### The built-in web scraper
@@ -111,6 +127,34 @@ Long captioning, face, framing and watermark jobs are server-side and reconnect 
   <img src="../screenshots/03-curate.png" alt="Curation grid with framing and face-similarity badges" width="820">
 </p>
 
+The **Curation** step itself holds the passes that run over the whole set rather than one image: face resemblance against the reference, and watermark find & clean.
+
+<p align="center">
+  <img src="../screenshots/curate/curation-passes.png" alt="Curation step offering Analyze faces and Find watermarks over the kept set" width="820">
+</p>
+
+Each tile carries its own actions on hover — regenerate the variation with a new seed, edit the prompt before regenerating, crop, mirror, rotate or delete.
+
+<p align="center">
+  <img src="../screenshots/curate/tile-actions.png" alt="Tile hover toolbar with the tooltip Regenerate this variation, new seed" width="360">
+</p>
+
+<p align="center">
+  <img src="../screenshots/curate/edit-prompt-regenerate.png" alt="Edit prompt and regenerate dialog holding the exact prompt used for that variation" width="440">
+</p>
+
+Clicking a tile opens it full size with the same actions plus **Review improvement first**, so a candidate is judged before it replaces anything.
+
+<p align="center">
+  <img src="../screenshots/curate/lightbox-actions.png" alt="Full-size image view with crop, mirror, rotate and review-improvement actions" width="820">
+</p>
+
+An upscale candidate is always shown against its original at the same scale. Klein re-renders detail — sharper, but skin and colour can shift, as the comparison below shows — while SeedVR2 resolves detail and leaves the look alone. Neither touches the original until you keep the candidate.
+
+<p align="center">
+  <img src="../screenshots/curate/improve-compare.png" alt="Original versus improved comparison of the same shot at the same scale" width="820">
+</p>
+
 ## 4. Caption for the model
 
 Captions are the text the trainer actually reads. The target family selects the broad form (prose or booru tags), while the dataset kind decides what must stay implicit.
@@ -134,7 +178,19 @@ External captioners also work as a round trip:
 See [Caption your images in another tool](using-the-app.md#caption-your-images-in-another-tool) for the exact conflict rules.
 
 <p align="center">
-  <img src="../screenshots/caption/caption-options.png" alt="Caption engine, vision model and vocabulary controls" width="820">
+  <img src="../screenshots/caption/caption-options.png" alt="Caption engine, vision model and vocabulary controls" width="460">
+</p>
+
+A running batch reports its position, can be stopped at any point, and shows the identity-leak scan result as captions land.
+
+<p align="center">
+  <img src="../screenshots/caption/captioning-progress.png" alt="Captions panel mid-batch with a Stop button and the identity-leak scan result" width="820">
+</p>
+
+**Caption Lab** tries up to four caption configurations on one image and shows them next to the current caption, so an engine, vocabulary and vision model can be compared before either keeping one wording or making the configuration the dataset default. Nothing is saved until you pick.
+
+<p align="center">
+  <img src="../screenshots/caption/caption-lab.png" alt="Caption Lab comparing a candidate caption configuration against the current caption of the same image" width="820">
 </p>
 
 ## 5. Scrub watermarks
@@ -171,9 +227,39 @@ Readiness messages distinguish a quality warning you may explicitly accept from 
   <img src="../screenshots/training/training-presets.png" alt="Training panel with family-scoped starters and advanced options" width="820">
 </p>
 
+**Advanced options** exposes the levers behind the starter — base and variant, rank, resolution, save and preview cadence — and every one of them carries the *why* and the *how* inline instead of a bare label.
+
+<p align="center">
+  <img src="../screenshots/training/advanced-options.png" alt="Advanced training options with a preset picker and per-setting explanations" width="820">
+</p>
+
+Below them, **Expert — last-mile levers** holds what should only move one variable at a time: network type, EMA, dual captions, face masking, memory saving, alpha, dropout, timestep weighting and optimizer. The memory-saving block reads the detected card and states what it costs to switch the options off.
+
+<p align="center">
+  <img src="../screenshots/training/expert-levers.png" alt="Expert last-mile levers including memory saving, alpha, dropout, timestep weighting and optimizer" width="480">
+</p>
+
+The final check runs before the launch, not during it. Near-duplicate pairs are shown side by side with a per-image **Reject this**, because repeated content is what the model overfits — and **Start anyway** stays available once you have seen what you are accepting.
+
+<p align="center">
+  <img src="../screenshots/training/preflight-duplicates.png" alt="Before training dialog listing near-duplicate pairs with a reject action on each image" width="480">
+</p>
+
 ### No GPU? Train in the cloud
 
 The cloud lane rents a vast.ai GPU for one run, stages the same dataset/config, streams progress and saved epochs home, and terminates the pod automatically. Stop and freeze handling are evidence-based so a silent pod cannot keep billing indefinitely; downloads use byte progress rather than the training-step watchdog.
+
+The offer list is priced per run, not per hour alone: each candidate GPU shows its hourly rate, the estimated duration for *this* dataset and step count, and the resulting total. Estimates, as the dialog says.
+
+<p align="center">
+  <img src="../screenshots/training/cloud-gpu-picker.png" alt="Cloud GPU picker listing candidate cards with hourly rate, estimated duration and estimated total" width="440">
+</p>
+
+Once rented, the launch reports each stage — searching for an offer, booting the pod, uploading the dataset, starting the job — so a stall is attributable. A pod that shows no boot progress for 25 minutes is released automatically.
+
+<p align="center">
+  <img src="../screenshots/training/cloud-provisioning.png" alt="Runs hub showing a cloud run provisioning, with each boot stage listed and a Cancel launch action" width="820">
+</p>
 
 Cloud support is family-specific and shown in the launch UI. Dense Krea 2 uses a separate, narrowly scoped Hugging Face delivery token; follow [Cloud training](settings-reference.md#cloud-training) before the first paid run.
 
@@ -230,6 +316,12 @@ the board itself, so several epochs can be judged side by side before picking on
 
 The separate **LoRA Canvas** puts every dataset's lineage on one pan/zoom board. It adds persistent card placement, cross-dataset run diffs, same-family checkpoint generation on one prompt/seed, galleries, movable/resizable pinned images, side-by-side fused image strips, bulk pinning and continuation from a checkpoint. A checkpoint not yet deployed is copied only after the launch button says so; mixed model families are refused before generation.
 
+Clicking a run there opens the same inspector as the per-dataset graph: the frozen recipe of that run, its notes, and — in its own section — the deletion that takes the checkpoints and generated images with it.
+
+<p align="center">
+  <img src="../screenshots/canvas/canvas-board.png" alt="LoRA Canvas board with a dataset lane, run cards and checkpoint pills, and the run inspector open on the frozen training settings" width="820">
+</p>
+
 The detailed board controls are in [The LoRA Canvas](using-the-app.md#the-lora-canvas-every-run-on-one-board).
 
 ## 8. Pick the best checkpoint
@@ -262,6 +354,10 @@ Nothing in the workflow locks data into the app:
 | **Trash** | App-managed deletions remain recoverable until Trash is emptied |
 
 When trained LoRAs are included in a portable backup, restore can rebuild both dataset state and training history on another installation.
+
+<p align="center">
+  <img src="../screenshots/export/import-export.png" alt="Import and export step with the ZIP round trip, bank promotion, portable backup and Hugging Face publishing" width="820">
+</p>
 
 ---
 

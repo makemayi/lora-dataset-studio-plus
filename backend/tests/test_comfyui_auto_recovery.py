@@ -140,6 +140,71 @@ def test_never_auto_resolves_an_unknown_submit_barrier(app):
         assert barrier and barrier['job_id'] == job_id and barrier['kind'] == 'unknown_submit'
 
 
+def test_auto_resolution_settles_the_dataset_card_too(app):
+    """Unblocking the app is not enough: the tile must stop saying "in progress".
+
+    Otherwise the dataset keeps showing a generation that no longer exists until
+    someone presses a Stop they have no reason to press.
+    """
+    from app.extensions import db
+    from app.job_queue import auto_resolve_comfyui_barrier
+    from app.models import FaceDatasetImage
+    with app.app_context():
+        owner = _dataset(app, 'Anna')
+        job_id = _stalled_prompt_barrier(
+            app, metadata={'model_name': 'klein_edit_dataset', 'is_dataset': True,
+                           'dataset_id': owner.id, 'variation_label': 'portrait'})
+        db.session.add(FaceDatasetImage(dataset_id=owner.id, status='pending',
+                                        filename=None, job_id=job_id,
+                                        variation_label='portrait'))
+        db.session.commit()
+        with _comfyui_forgot_the_prompt():
+            assert auto_resolve_comfyui_barrier() is not None
+        card = FaceDatasetImage.query.filter_by(job_id=job_id).one()
+        assert card.status != 'pending'
+
+
+def test_orphan_barrier_is_dropped_once_the_prompt_is_proven_gone(app):
+    """A barrier whose queue row no longer exists guards nothing.
+
+    Every resolver matches on a `stalled` row, so without this the barrier
+    blocks every generation in the app forever and only a hand-written SQL
+    DELETE lifts it — which is exactly what had to be done by hand once.
+    """
+    from app.extensions import db
+    from app.job_queue import auto_resolve_comfyui_barrier, queue_manager
+    from app.models import ImageGenerationQueue
+    with app.app_context():
+        job_id = _stalled_prompt_barrier(app)
+        ImageGenerationQueue.query.filter_by(job_id=job_id).delete()
+        db.session.commit()
+        with _comfyui_forgot_the_prompt():
+            assert auto_resolve_comfyui_barrier() is not None
+        assert not queue_manager.has_comfyui_stalled_barrier()
+
+
+def test_orphan_barrier_survives_an_unreachable_comfyui(app):
+    """"Nothing left to cancel locally" is not "the remote job is gone"."""
+    from app.extensions import db
+    from app.job_queue import auto_resolve_comfyui_barrier, queue_manager
+    from app.models import ImageGenerationQueue
+    with app.app_context():
+        job_id = _stalled_prompt_barrier(app)
+        ImageGenerationQueue.query.filter_by(job_id=job_id).delete()
+        db.session.commit()
+        with patch('app.utils.comfyui.comfyui_prompt_is_absent', return_value=None):
+            assert auto_resolve_comfyui_barrier() is None
+        assert queue_manager.has_comfyui_stalled_barrier()
+
+
+def test_a_live_queue_row_is_never_treated_as_an_orphan(app):
+    from app.job_queue import queue_manager
+    with app.app_context():
+        _stalled_prompt_barrier(app)
+        assert queue_manager.discard_orphan_comfyui_barrier() is False
+        assert queue_manager.has_comfyui_stalled_barrier()
+
+
 def test_corrupt_barrier_is_never_auto_resolved(app):
     """An unreadable record still blocks — and no code may guess its way out."""
     from app.extensions import db
@@ -196,6 +261,41 @@ def test_recovery_state_is_visible_from_anywhere_not_just_the_owning_dataset(app
     assert recovery['dataset_id'] == owner_id and recovery['dataset_name'] == owner_name
     assert recovery['variation_label'] == 'portrait'
     assert recovery['stalled_since'] and recovery['can_confirm_restart'] is True
+
+
+def test_a_stalled_prompt_has_no_invite_on_its_own_dataset_but_has_the_banner(app, client):
+    """The dead end, pinned down.
+
+    Opening the OWNING dataset and pressing Stop does not surface a confirm
+    invite for a `stalled` job that has a prompt id: `restart_required` — the
+    only counter the workspace turns into a confirmation — is raised solely for
+    a submission with no prompt id. Everything else comes back as "wait and
+    press Stop again", forever, while ComfyUI is unreachable. The global state
+    is therefore not a convenience; it is the only exit that exists.
+    """
+    from app.config import LOCAL_USER
+    from app.extensions import db
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as fds
+    with app.app_context():
+        owner = _dataset(app, 'Anna')
+        job_id = _stalled_prompt_barrier(app, metadata={'dataset_id': owner.id,
+                                                        'variation_label': 'portrait'})
+        # The card the user is staring at: a pending tile that owns the job, so
+        # Stop really walks this row instead of finding nothing to report on.
+        db.session.add(FaceDatasetImage(dataset_id=owner.id, status='pending',
+                                        filename=None, job_id=job_id,
+                                        variation_label='portrait'))
+        db.session.commit()
+        with patch('app.utils.comfyui.comfyui_prompt_is_absent', return_value=None):
+            outcome = fds.cancel_pending(LOCAL_USER, owner.id)
+        assert outcome['restart_required'] == 0        # no invite, on its own dataset
+        assert outcome['recovery_pending'] >= 1        # yet still blocking
+
+    with patch('app.utils.comfyui.comfyui_prompt_is_absent', return_value=None):
+        recovery = client.get('/api/system/comfyui-recovery').get_json()['recovery']
+    assert recovery['kind'] == 'prompt' and recovery['can_confirm_restart'] is True
+    assert recovery['dataset_name'] == 'Anna'
 
 
 def test_recovery_state_reports_nothing_when_clear(app, client):

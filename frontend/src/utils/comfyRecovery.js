@@ -70,16 +70,19 @@ export function recoveryBannerModel(state, { now = Date.now() } = {}) {
 
   const since = stalledForText(recovery.stalled_since, now);
   const sinceText = since ? ` It has been paused for ${since}.` : '';
-  const restarted = recovery.kind === 'unknown_submit'
-    // No prompt id exists to check, so this one genuinely needs the user's word.
-    ? ' LDS cannot identify the remote job, so it needs you to confirm the restart.'
-    : '';
+  // The two kinds need genuinely different sentences. A known prompt id is
+  // checkable, so restarting ComfyUI is the whole fix and LDS finishes the job
+  // on its own; an unknown submission has no id to check, so it will still be
+  // waiting for a person once ComfyUI is back.
+  const next = recovery.kind === 'unknown_submit'
+    ? ' Restart ComfyUI if it is not running. LDS cannot identify the remote job,'
+      + ' so it needs you to confirm the restart before clearing it.'
+    : ' Restart ComfyUI if it is not running — LDS clears this by itself once'
+      + ' ComfyUI answers and no longer knows the job.';
   return {
     tone: 'warning',
     headline: 'A paused ComfyUI job is blocking new generations',
-    detail: `${jobDescription(recovery)} stopped without a known outcome.${sinceText}`
-      + ' Restart ComfyUI if it is not running, then clear the paused job.'
-      + restarted,
+    detail: `${jobDescription(recovery)} stopped without a known outcome.${sinceText}${next}`,
     actionLabel: 'I restarted ComfyUI — clear it',
     canConfirm: recovery.can_confirm_restart !== false,
     datasetId: recovery.dataset_id ?? null,

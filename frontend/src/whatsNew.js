@@ -76,7 +76,7 @@ export const WHATS_NEW = [
     date: '2026-08-02',
     title: 'SeedVR2 upscales now actually appear — and the ones you already ran are recovered',
     blurb:
-      'The first SeedVR2 build rendered correctly and then dropped the result on the floor: ComfyUI finished the image, the job was marked done, and the candidate stayed blank forever with nothing in the log, because nothing had failed. The finished image is now attached to its tile. Any upscale you already ran and never saw is picked up automatically the next time the app starts — the image is still there, it just never made it home. Reported by Jeremy from a real run.',
+      'The first SeedVR2 build rendered correctly and then dropped the result on the floor: ComfyUI finished the image, the job was marked done, and the candidate stayed blank forever with nothing in the log, because nothing had failed. The finished image is now attached to its tile. Any upscale you already ran and never saw is picked up automatically the next time the app starts — the image is still there, it just never made it home. Caught on a real run the day it shipped.',
     to: '/datasets',
   },
   {
@@ -84,7 +84,7 @@ export const WHATS_NEW = [
     date: '2026-08-02',
     title: 'A ComfyUI job that died in a past session no longer blocks you forever',
     blurb:
-      'When a generation stops without a known outcome — ComfyUI killed, the machine out of disk — LDS pauses everything on purpose, so it never abandons work that might still be running on the GPU. The catch: the way to resolve it lived only inside the dataset that owned the job, so if you were working anywhere else you kept being refused with no button in sight. Now LDS checks first: if ComfyUI is back and no longer knows that job, it clears it on its own and just tells you. When it cannot prove that — ComfyUI unreachable, the job still running there, or a submission it cannot identify — a banner appears wherever you are, names the dataset and the variation and how long it has been stuck, and clears it in one click once you confirm the restart. A job that is genuinely still running is never touched.',
+      'When a generation stops without a known outcome — ComfyUI killed, the machine out of disk — LDS pauses everything on purpose, so it never abandons work that might still be running on the GPU. The catch: there was no way to resolve it. Opening the dataset that owned the job showed nothing either; you were simply refused, everywhere, for as long as the record lasted. Now LDS checks first: if ComfyUI is back and no longer knows that job, it clears it on its own and just tells you. When it cannot prove that — ComfyUI unreachable, the job still running there, or a submission it cannot identify — a banner appears wherever you are, names the dataset and the variation and how long it has been stuck, and clears it in one click once you confirm the restart. A job that is genuinely still running is never touched.',
   },
   {
     id: '2026-08-02-seedvr2-upscaling',

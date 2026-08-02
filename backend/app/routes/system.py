@@ -166,7 +166,7 @@ def comfyui_recovery_resolve():
     if state['kind'] == 'unreadable':
         return jsonify({'ok': False, 'error': state['detail']}), 409
 
-    from ..job_queue import auto_resolve_comfyui_barrier
+    from ..job_queue import auto_resolve_comfyui_barrier, queue_manager
     if state['kind'] == 'prompt':
         # A known prompt id is checkable, so the user's word is not the
         # authority here — ComfyUI's answer is. Still queued/running means the
@@ -178,6 +178,7 @@ def comfyui_recovery_resolve():
             'just restarted it, wait a few seconds and try again; if the job is '
             'still running there, let it finish.')}), 409
 
+    cleared = 0
     try:
         if state.get('run_id'):
             from ..services import lora_test_studio as lts
@@ -191,14 +192,17 @@ def comfyui_recovery_resolve():
             from ..services import face_dataset_service as fds
             cleared = fds.confirm_unknown_generation_restart(
                 LOCAL_USER, state['dataset_id'], restart_confirmed=True)
-        else:
-            return jsonify({'ok': False, 'error': (
-                'LDS cannot tell which dataset or run this paused job belongs to. '
-                'Restart LDS and check the server log.')}), 409
     except Exception as e:
         return _map_error(e)
-    if not cleared:
-        return jsonify({'ok': False, 'error': (
-            'The paused job could not be cleared. Refresh the page and try again; '
-            'if it persists, check the server log.')}), 409
-    return jsonify({'ok': True, 'cleared': cleared})
+    if cleared:
+        return jsonify({'ok': True, 'cleared': cleared})
+    # The services match on a live queue row and its card, and a barrier with no
+    # identity at all reaches here having called none of them. Either way, if the
+    # row is already gone the barrier guards nothing and NO resolver can ever
+    # lift it — with a confirmed restart and a ComfyUI that answers, dropping it
+    # is the difference between a working button and a hand-written SQL DELETE.
+    if queue_manager.discard_orphan_comfyui_barrier():
+        return jsonify({'ok': True, 'cleared': 1, 'discarded_orphan': True})
+    return jsonify({'ok': False, 'error': (
+        'The paused job could not be cleared. Refresh the page and try again; '
+        'if it persists, check the server log.')}), 409

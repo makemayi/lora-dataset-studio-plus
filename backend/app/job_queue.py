@@ -145,6 +145,24 @@ def clear_auto_recovery_notice() -> None:
         _auto_recovery_notice = None
 
 
+def _dispatch_auto_resolved_cancellation(job_id) -> None:
+    """Settle the linked card of a job the machine just cancelled.
+
+    Best effort by design: the barrier is already gone and the app already
+    unblocked, so a service callback that fails must not turn into a failed
+    recovery. `_dispatch_completion` refuses a row still marked `stalled`, which
+    is the guard that keeps this from touching anything unresolved.
+    """
+    try:
+        job = ImageGenerationQueue.query.filter_by(
+            job_id=str(job_id), status='cancelled').first()
+        if job is not None:
+            _dispatch_completion(job, None, True)
+    except Exception:
+        logger.exception(
+            'job_queue: could not settle the linked card of auto-resolved job %s', job_id)
+
+
 def auto_resolve_comfyui_barrier() -> dict | None:
     """Clear the recovery barrier when the remote prompt is PROVABLY gone.
 
@@ -170,7 +188,19 @@ def auto_resolve_comfyui_barrier() -> dict | None:
         # caller that runs without anyone asking, so it borrows those checks
         # rather than repeating a weaker version of them.
         if not queue_manager.reconcile_stalled_comfy_job(owner['job_id']):
-            return None
+            # It can refuse for two very different reasons. Either the remote
+            # state is not settled after all — leave it alone — or there is no
+            # stalled row left to cancel, in which case the barrier is an orphan
+            # that nothing will ever clear. The prompt was just proven absent
+            # from ComfyUI, so the second case is safe to drop.
+            if not queue_manager.discard_orphan_comfyui_barrier():
+                return None
+        else:
+            # Unblocking the app is not the whole job: the dataset card that
+            # owns this generation is still drawn as "in progress". Route the
+            # cancellation through the normal completion seam so the tile
+            # settles too, instead of waiting for a Stop nobody knows to press.
+            _dispatch_auto_resolved_cancellation(owner['job_id'])
     except Exception:
         logger.exception('job_queue: automatic ComfyUI recovery probe failed')
         return None
@@ -836,6 +866,51 @@ class JobQueueManager:
                 db.session.rollback()
                 logger.exception('job_queue: could not confirm unknown ComfyUI restart')
                 return False
+            return True
+
+    def discard_orphan_comfyui_barrier(self) -> bool:
+        """Delete a barrier that no longer guards anything.
+
+        The barrier's whole job is to keep new work out while a queue row still
+        claims uncertain remote ownership. If that row is gone — deleted by a
+        cascade, or already finalized — the barrier guards nothing: no code path
+        can ever reconcile it (every resolver matches on a `stalled` row), so it
+        blocks every generation in the app FOREVER and only a hand-written SQL
+        DELETE can lift it. That is not a safety property, it is a dead end.
+
+        Deliberately not a general escape hatch: callers must first establish
+        that the remote side is settled (proof for a known prompt, a confirmed
+        restart for an unknown submit). This only handles "there is nothing left
+        to cancel locally".
+        """
+        with GPU_ARBITER_LOCK:
+            _, raw, owner, valid = self._read_comfyui_stalled_barrier()
+            if not valid or owner is None:
+                return False
+            still_owned = (ImageGenerationQueue.query
+                           .filter_by(job_id=str(owner['job_id']))
+                           .filter(ImageGenerationQueue.status.in_(
+                               ('pending', 'processing', 'sent_to_comfy',
+                                'cancel_requested', 'stalled')))
+                           .first())
+            if still_owned is not None:
+                return False
+            deleted = (SystemState.query
+                       .filter_by(key=COMFYUI_STALLED_BARRIER_KEY, value=raw)
+                       .delete(synchronize_session=False))
+            if deleted != 1:
+                db.session.rollback()
+                return False
+            try:
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                logger.exception('job_queue: could not discard the orphan ComfyUI barrier')
+                return False
+            logger.warning(
+                'job_queue: discarded the ComfyUI recovery barrier for job %s — its '
+                'queue row no longer exists, so nothing was left to reconcile',
+                owner.get('job_id'))
             return True
 
     def has_comfyui_work(self) -> bool:

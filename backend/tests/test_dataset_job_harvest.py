@@ -1,7 +1,7 @@
 """The finished image must come BACK, and an engine that forgets to say so must
 fail a test rather than a user's batch.
 
-WHAT HAPPENED (reported by Jeremy from a real run, 2026-08-02)
+WHAT HAPPENED (reported by the maintainer from a real run, 2026-08-02)
 ---------------------------------------------------------------
 SeedVR2 rendered perfectly. ComfyUI reported `execution_success`, the queue row
 went `completed` with `result_filename` set, and the 2.2 MB PNG sat in ComfyUI's

@@ -52,6 +52,15 @@ test('an unknown submission says why LDS needs the user\'s word', () => {
   assert.equal(model.canConfirm, true);
 });
 
+/* A known prompt id resolves itself: promising the user a click they don't
+   need — or leaving them to think a restart is not enough — is the whole
+   reason this text is a tested function and not a string in JSX. */
+test('a known prompt says the restart alone is enough', () => {
+  const model = recoveryBannerModel(OTHER_DATASET, { now: NOW });
+  assert.match(model.detail, /clears this by itself/);
+  assert.doesNotMatch(model.detail, /cannot identify/);
+});
+
 test('an unreadable record offers no button it could only refuse', () => {
   const model = recoveryBannerModel({ recovery: { kind: 'unreadable',
     detail: 'LDS found an invalid ComfyUI recovery record.' } });
