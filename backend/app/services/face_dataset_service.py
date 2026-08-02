@@ -1936,6 +1936,18 @@ def clear_unseen_flag(user_id, image_id):
     return True
 
 
+def set_image_locked(user_id, image_id, locked):
+    """Toggle the delete-guard flag. Locking/unlocking never touches content —
+    reject/regenerate/face-swap/crop/mirror stay available either way."""
+    img = _owned_image(user_id, image_id)
+    if not img:
+        return False
+    if bool(img.is_locked) != bool(locked):
+        img.is_locked = bool(locked)
+        db.session.commit()
+    return True
+
+
 def _owned_image(user_id, image_id):
     img = db.session.get(FaceDatasetImage, image_id)
     if not img:
@@ -2457,6 +2469,8 @@ def delete_image(user_id, image_id):
     img = _owned_image(user_id, image_id)
     if not img:
         return False
+    if img.is_locked:
+        raise RuntimeError('This image is locked — unlock it before deleting.')
     if img.derivation_kind in _SMALL_IMAGE_DERIVATIONS:
         raise ValueError('resolve the small-image rescue pair before cleanup')
     original_path = (os.path.join(_dataset_path(img.dataset_id), img.filename)
@@ -2537,6 +2551,11 @@ def delete_dataset(user_id, dataset_id):
     except ImportError:
         pass
     imgs = FaceDatasetImage.query.filter_by(dataset_id=dataset_id).all()
+    locked_count = sum(1 for img in imgs if img.is_locked)
+    if locked_count:
+        raise RuntimeError(
+            f'{locked_count} locked image(s) — unlock them or delete them '
+            'individually before deleting the whole dataset.')
     studio_rows = LoraTestImage.query.filter_by(dataset_id=dataset_id).all()
     # ◉ LoRA Canvas card positions. The model declares a relationship() to
     # face_dataset so the unit of work orders the DELETEs, but a mapper-level
@@ -2730,7 +2749,8 @@ def purge_unused(user_id, dataset_id):
             .filter_by(dataset_id=dataset_id)
             .filter(FaceDatasetImage.status.in_(('reject', 'failed')))
             .filter(FaceDatasetImage.derivation_kind.notin_(_SMALL_IMAGE_DERIVATIONS)
-                    | FaceDatasetImage.derivation_kind.is_(None)).all())
+                    | FaceDatasetImage.derivation_kind.is_(None))
+            .filter(FaceDatasetImage.is_locked.isnot(True)).all())
     n = 0
     for img in rows:
         if delete_image(user_id, img.id):
@@ -3300,29 +3320,36 @@ def batch_image_action(user_id, dataset_id, image_ids, action):
     """Apply one whitelisted action to a set of this dataset's images in one call
     (the grid's multi-select). Ownership is checked once on the dataset; ids that
     don't belong to it (or don't exist) are silently skipped, so a stale selection
-    after a poll refresh can't touch another dataset's rows. Returns the number of
-    images actually affected."""
+    after a poll refresh can't touch another dataset's rows. Returns
+    (affected, skipped_locked) — the latter is always 0 for actions other than
+    'delete' (locked rows are otherwise untouched, never refused)."""
     if action not in BATCH_ACTIONS:
         raise ValueError('invalid action')
     ds = get_dataset(user_id, dataset_id)
     if not ds:
-        return 0
+        return 0, 0
     ids = [int(i) for i in (image_ids or []) if isinstance(i, (int, float, str)) and str(i).lstrip('-').isdigit()]
     if not ids:
-        return 0
+        return 0, 0
     rows = (FaceDatasetImage.query
             .filter_by(dataset_id=dataset_id)
             .filter(FaceDatasetImage.id.in_(ids)).all())
     n = 0
+    skipped_locked = 0
     if action != 'clear_caption' and any(
             img.derivation_kind in _SMALL_IMAGE_DERIVATIONS for img in rows):
         raise ValueError('resolve small-image rescue pairs with the dedicated review action')
     if action == 'delete':
         # Per-image path: reuses delete_image (file removal + pending-job cancel).
+        # A locked row is a partial success, not a refusal — skip it and keep
+        # going, same as an id that doesn't belong to this dataset.
         for img in rows:
+            if img.is_locked:
+                skipped_locked += 1
+                continue
             if delete_image(user_id, img.id):
                 n += 1
-        return n
+        return n, skipped_locked
     for img in rows:
         if action == 'clear_caption':
             img.caption = None
@@ -3343,7 +3370,7 @@ def batch_image_action(user_id, dataset_id, image_ids, action):
             if img.status == 'keep':
                 _unkeep_parent_for_kept_improvement(img)
     db.session.commit()
-    return n
+    return n, skipped_locked
 
 
 def _ref_crop_source_path(ds) -> str:
@@ -4281,6 +4308,7 @@ def dataset_payload(user_id, dataset_id):
                     # tile is opened — the "which ones are new" marker in a
                     # big grid.
                     'unseen': bool(i.unseen),
+                    'is_locked': bool(i.is_locked),
                     'caption': i.caption,
                     'caption_short': i.caption_short,
                     'fail_reason': i.fail_reason,

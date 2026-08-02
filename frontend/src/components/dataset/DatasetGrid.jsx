@@ -160,7 +160,7 @@ function AutoTriageBar({ images, datasetId, faceThresholds, onBatch, busy }) {
 }
 
 export default function DatasetGrid({ images, datasetId, onStatus, onCaption, onCrop, onDelete,
-                                      onMirror, onRegenerate, onScoreFace, scoringFaceIds,
+                                      onLockToggle, onMirror, onRegenerate, onScoreFace, scoringFaceIds,
                                       onFaceSwap, hasRef = false, onReimprove, onView, onBatch, busy, nonces,
                                       mirroringIds, faceThresholds, datasetKind = 'character',
                                       onImproveBatch, kleinAvailable = false,
@@ -360,7 +360,7 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
       <div className={`grid ${TILE_SIZE_COLS[tileSize]} gap-2`}>
         {images.map((img) => (
           <DatasetGridItem key={img.id} img={img} datasetId={datasetId} onStatus={onStatus} onCaption={onCaption}
-            onCrop={onCrop} onDelete={onDelete} onMirror={onMirror}
+            onCrop={onCrop} onDelete={onDelete} onLockToggle={onLockToggle} onMirror={onMirror}
             mirrorBusy={Boolean(mirroringIds?.has(img.id))} busy={bulkBusy}
             onScoreFace={onScoreFace} scoreFaceBusy={Boolean(scoringFaceIds?.has(img.id))}
             faceScoringBusy={Boolean(scoringFaceIds?.size)}

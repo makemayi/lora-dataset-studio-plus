@@ -70,7 +70,7 @@ const WATERMARK_BADGE = {
 };
 
 export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, onCrop, onDelete,
-                                          onMirror, mirrorBusy = false, busy = false,
+                                          onLockToggle, onMirror, mirrorBusy = false, busy = false,
                                           onScoreFace, scoreFaceBusy = false, faceScoringBusy = false, faceScoringBlocked = null,
                                           onRegenerate, onReimprove, onFaceSwap, hasRef = false, onView, nonce = 0, faceThresholds,
                                           selected = false, onToggleSelect, tileSize = 'M',
@@ -154,6 +154,16 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
           <span
             className="absolute top-1.5 right-1.5 z-20 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-black/60"
             title="New — not yet viewed" aria-label="New, not yet viewed" />
+        )}
+        {/* Locked state, always visible (not hover-gated) so it reads at a
+            glance while browsing the grid, same rule as the unseen dot above —
+            top-left is the one corner nothing else claims at rest. */}
+        {img.is_locked && (
+          <span
+            className="absolute top-1.5 left-1.5 z-20 grid place-items-center w-5 h-5 rounded-full bg-black/70 text-amber-300 text-[11px]"
+            title="Locked — cannot be deleted until unlocked" aria-label="Locked, cannot be deleted">
+            🔒
+          </span>
         )}
         {onToggleSelect && img.filename && (
           <label
@@ -291,11 +301,27 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               title="Crop" aria-label="Crop"
               className="px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px]">✂</button>
           )}
+          {onLockToggle && (
+            <button type="button"
+              onClick={(e) => { e.stopPropagation(); onLockToggle(img.id, !img.is_locked); }}
+              title={img.is_locked ? 'Unlock (allow delete again)' : 'Lock (cannot be deleted)'}
+              aria-label={img.is_locked ? 'Unlock this image' : 'Lock this image against deletion'}
+              aria-pressed={!!img.is_locked}
+              className={`px-1.5 py-0.5 rounded text-[10px] ${img.is_locked ? 'bg-amber-500/80 text-black' : 'bg-black/60 text-white'}`}>
+              {img.is_locked ? '🔒' : '🔓'}
+            </button>
+          )}
           {!isRescueDerived && (
             <button type="button"
-              onClick={(e) => { e.stopPropagation(); if (window.confirm('Permanently delete this image?')) onDelete(img.id); }}
-              title="Delete permanently" aria-label="Delete permanently"
-              className="px-1.5 py-0.5 rounded bg-red-700/80 text-white text-[10px]">🗑</button>
+              onClick={(e) => {
+                e.stopPropagation();
+                if (img.is_locked) return;
+                if (window.confirm('Permanently delete this image?')) onDelete(img.id);
+              }}
+              disabled={img.is_locked}
+              title={img.is_locked ? 'Locked — unlock to delete' : 'Delete permanently'}
+              aria-label={img.is_locked ? 'Locked — unlock to delete' : 'Delete permanently'}
+              className="px-1.5 py-0.5 rounded bg-red-700/80 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-40">🗑</button>
           )}
         </div>
         {editingPrompt && (

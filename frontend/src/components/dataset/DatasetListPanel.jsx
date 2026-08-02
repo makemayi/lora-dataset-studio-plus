@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import ShotIllustration from './ShotIllustration';
 import TileSizeControl from '../shared/TileSizeControl';
 import FullBackupControls from './FullBackupControls';
+import DatasetSettingsModal from './DatasetSettingsModal';
 import { HelpBadge } from '../../help/HelpMode';
 import { requestHelpTip } from '../../help/helpTips';
+import { useToast } from '../common/Toast';
 import {
   datasetKind, datasetMatches, groupDatasets, kindsPresent,
   normalizeCollapsedMap, normalizeTileSize,
@@ -144,7 +146,8 @@ function tileStats(d) {
 }
 
 /** Photo-first tile: the reference face IS the identity — lead with it. */
-function DatasetTile({ d, onOpen, onDelete, onExportZip, onExportBackup, showPreviews }) {
+function DatasetTile({ d, onOpen, onDelete, onExportZip, onExportBackup, onSettings,
+                       settingsLoading = false, showPreviews }) {
   const canExportZip = (d.images_kept ?? 0) > 0;
   return (
     <div className="library-card group relative overflow-hidden rounded-xl border border-border bg-surface transition-colors hover:border-primary/40">
@@ -212,15 +215,28 @@ function DatasetTile({ d, onOpen, onDelete, onExportZip, onExportBackup, showPre
           💾 Backup
         </button>
       </div>
-      {onDelete && (
-        <button type="button"
-          onClick={() => {
-            if (window.confirm(`Permanently delete the dataset "${d.name}" and all its images? This cannot be undone.`)) onDelete(d.id);
-          }}
-          title="Delete this dataset" aria-label={`Delete the dataset ${d.name}`}
-          className="library-card__actions absolute right-1.5 top-1.5 rounded-lg border border-red-500/40 bg-black/50 px-2 py-1 text-xs text-red-300 opacity-70 backdrop-blur-sm transition-opacity hover:bg-red-500/25 hover:opacity-100">
-          🗑
-        </button>
+      {(onSettings || onDelete) && (
+        <div className="library-card__actions absolute right-1.5 top-1.5 flex gap-1">
+          {onSettings && (
+            <button type="button" onClick={() => onSettings(d.id)}
+              disabled={settingsLoading}
+              title="Edit dataset settings (name, trigger, prompt suffixes)"
+              aria-label={`Edit settings for ${d.name}`}
+              className="rounded-lg border border-border bg-black/50 px-2 py-1 text-xs text-content-muted opacity-70 backdrop-blur-sm transition-opacity hover:bg-surface-raised hover:opacity-100 disabled:cursor-wait disabled:opacity-100">
+              {settingsLoading ? '…' : '⚙️'}
+            </button>
+          )}
+          {onDelete && (
+            <button type="button"
+              onClick={() => {
+                if (window.confirm(`Permanently delete the dataset "${d.name}" and all its images? This cannot be undone.`)) onDelete(d.id);
+              }}
+              title="Delete this dataset" aria-label={`Delete the dataset ${d.name}`}
+              className="rounded-lg border border-red-500/40 bg-black/50 px-2 py-1 text-xs text-red-300 opacity-70 backdrop-blur-sm transition-opacity hover:bg-red-500/25 hover:opacity-100">
+              🗑
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -228,7 +244,8 @@ function DatasetTile({ d, onOpen, onDelete, onExportZip, onExportBackup, showPre
 
 /** Compact row for the S size: identity at a glance, one dataset per line,
  *  icon-only actions. Everything the photo tile shows, at list density. */
-function DatasetRow({ d, onOpen, onDelete, onExportZip, onExportBackup, showPreviews }) {
+function DatasetRow({ d, onOpen, onDelete, onExportZip, onExportBackup, onSettings,
+                      settingsLoading = false, showPreviews }) {
   const canExportZip = (d.images_kept ?? 0) > 0;
   const kind = datasetKind(d);
   const iconBtn = 'grid h-7 w-7 shrink-0 place-items-center rounded-md border border-border bg-app/50 text-xs text-content-muted transition-colors hover:border-primary/40 hover:bg-surface-raised hover:text-content';
@@ -290,6 +307,14 @@ function DatasetRow({ d, onOpen, onDelete, onExportZip, onExportBackup, showPrev
           className={iconBtn}>
           💾
         </button>
+        {onSettings && (
+          <button type="button" onClick={() => onSettings(d.id)} disabled={settingsLoading}
+            title="Edit dataset settings (name, trigger, prompt suffixes)"
+            aria-label={`Edit settings for ${d.name}`}
+            className={`${iconBtn} disabled:cursor-wait`}>
+            {settingsLoading ? '…' : '⚙️'}
+          </button>
+        )}
         {onDelete && (
           <button type="button"
             onClick={() => {
@@ -454,7 +479,31 @@ function NewDatasetForm({ onCreate, onClose }) {
 
 export default function DatasetListPanel({
   datasets, onOpen, onCreate, onDelete, onRestore, onExportZip, onExportBackup, backup,
+  onSettingsSave,
 }) {
+  const toast = useToast();
+  // The list only holds the summary payload (GET /api/dataset/list) — missing
+  // concept_desc/prompt_suffixes/images the settings modal needs — so opening
+  // it here fetches the full one on demand. Loading is local to the clicked
+  // card, deliberately not routed through any shared "busy" flag: nothing else
+  // on this page is scoped to one dataset the way this fetch is.
+  const [settingsId, setSettingsId] = useState(null);
+  const [settingsData, setSettingsData] = useState(null);
+  const [settingsLoadingId, setSettingsLoadingId] = useState(null);
+  const openSettings = async (id) => {
+    setSettingsLoadingId(id);
+    try {
+      const r = await fetch(`/api/dataset/${id}`, { credentials: 'include' });
+      if (!r.ok) { toast.error('Could not load dataset settings'); return; }
+      setSettingsData(await r.json());
+      setSettingsId(id);
+    } catch {
+      toast.error('Could not load dataset settings');
+    } finally {
+      setSettingsLoadingId(null);
+    }
+  };
+  const closeSettings = () => { setSettingsId(null); setSettingsData(null); };
   // Library-first: the creation form stays folded behind "+ New dataset" so the
   // page opens on the collection — except on an empty library, where creating
   // is the only meaningful action.
@@ -616,6 +665,8 @@ export default function DatasetListPanel({
                       {items.map((d) => (
                         <DatasetRow key={d.id} d={d} onOpen={onOpen} onDelete={onDelete}
                           onExportZip={onExportZip} onExportBackup={onExportBackup}
+                          onSettings={onSettingsSave ? openSettings : undefined}
+                          settingsLoading={settingsLoadingId === d.id}
                           showPreviews={showPreviews} />
                       ))}
                     </div>
@@ -624,6 +675,8 @@ export default function DatasetListPanel({
                       {items.map((d) => (
                         <DatasetTile key={d.id} d={d} onOpen={onOpen} onDelete={onDelete}
                           onExportZip={onExportZip} onExportBackup={onExportBackup}
+                          onSettings={onSettingsSave ? openSettings : undefined}
+                          settingsLoading={settingsLoadingId === d.id}
                           showPreviews={showPreviews} />
                       ))}
                     </div>
@@ -633,6 +686,11 @@ export default function DatasetListPanel({
             );
           })}
         </>
+      )}
+      {settingsId && settingsData && (
+        <DatasetSettingsModal d={settingsData} busy={false}
+          onSave={(patch) => onSettingsSave(settingsId, patch)}
+          onClose={closeSettings} />
       )}
     </div>
   );

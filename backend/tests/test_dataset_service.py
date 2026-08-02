@@ -227,11 +227,11 @@ def test_batch_keep_and_clear_caption(app):
     with app.app_context():
         ds = svc.create_dataset(LOCAL_USER, 'Bk', 'bk')
         ids = _seed_images(svc, ds.id)
-        assert svc.batch_image_action(LOCAL_USER, ds.id, ids, 'keep') == 3
+        assert svc.batch_image_action(LOCAL_USER, ds.id, ids, 'keep') == (3, 0)
         rows = FaceDatasetImage.query.filter(FaceDatasetImage.id.in_(ids)).all()
         assert all(r.status == 'keep' for r in rows)
         rows[0].caption = 'a caption'; svc.db.session.commit()
-        assert svc.batch_image_action(LOCAL_USER, ds.id, [ids[0]], 'clear_caption') == 1
+        assert svc.batch_image_action(LOCAL_USER, ds.id, [ids[0]], 'clear_caption') == (1, 0)
         assert svc.db.session.get(FaceDatasetImage, ids[0]).caption is None
 
 
@@ -243,7 +243,7 @@ def test_batch_delete_removes_rows_and_files(app):
     with app.app_context():
         ds = svc.create_dataset(LOCAL_USER, 'Bd', 'bd')
         ids = _seed_images(svc, ds.id)
-        assert svc.batch_image_action(LOCAL_USER, ds.id, ids, 'delete') == 3
+        assert svc.batch_image_action(LOCAL_USER, ds.id, ids, 'delete') == (3, 0)
         assert FaceDatasetImage.query.filter_by(dataset_id=ds.id).count() == 0
         assert not any(f.startswith('img') for f in os.listdir(svc._dataset_dir(ds.id)))
 
@@ -260,8 +260,9 @@ def test_batch_skips_foreign_and_failed(app):
         own = _seed_images(svc, ds1.id, n=1)
         foreign = _seed_images(svc, ds2.id, n=1)
         failed = _seed_images(svc, ds1.id, n=1, status='failed')
-        n = svc.batch_image_action(LOCAL_USER, ds1.id, own + foreign + failed, 'keep')
+        n, skipped_locked = svc.batch_image_action(LOCAL_USER, ds1.id, own + foreign + failed, 'keep')
         assert n == 1   # own only; failed skipped, foreign filtered out
+        assert skipped_locked == 0
         assert svc.db.session.get(FaceDatasetImage, foreign[0]).status == 'pending'
         assert svc.db.session.get(FaceDatasetImage, failed[0]).status == 'failed'
 

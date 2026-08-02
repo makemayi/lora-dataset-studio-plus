@@ -246,6 +246,8 @@ _SCHEMA_ADDITIONS = (
     # moment the tile's lightbox opens. Additive/nullable — existing rows read
     # as already-seen, which is exactly correct for them.
     ('face_dataset_image', 'unseen', 'BOOLEAN DEFAULT 0'),
+    # Per-image delete guard (feature request) — see FaceDatasetImage.is_locked.
+    ('face_dataset_image', 'is_locked', 'BOOLEAN DEFAULT 0'),
 )
 
 # Indexes that only a FRESH database ever got. `index=True` on a model column is

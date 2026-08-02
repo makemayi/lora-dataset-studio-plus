@@ -20,6 +20,7 @@ export default function DatasetPage() {
         <DatasetListPanel datasets={ds.datasets} onOpen={ds.open} onCreate={ds.create}
           onDelete={ds.deleteDataset} onRestore={ds.importBackup}
           onExportZip={ds.exportZipFor} onExportBackup={ds.exportBackupFor}
+          onSettingsSave={ds.updateSettingsFor}
           backup={{
             start: ds.backupEverything, job: ds.backupJob,
             download: ds.downloadBackup, openFolder: ds.openBackupsFolder,

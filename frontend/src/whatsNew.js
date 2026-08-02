@@ -48,6 +48,22 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-03-dataset-settings-from-the-library',
+    date: '2026-08-03',
+    title: 'Rename a dataset or change its trigger word without opening it first',
+    blurb:
+      'The settings editor (name, trigger word, prompt suffixes) only ever lived behind a workspace\'s "⋯ More" menu — you had to open a specific dataset just to find it. A ⚙️ button now sits right on every card in the library, next to 🗑 Delete.',
+    to: '/datasets',
+  },
+  {
+    id: '2026-08-03-image-lock',
+    date: '2026-08-03',
+    title: 'Lock a photo so it survives a batch delete or a purge',
+    blurb:
+      'A 🔒/🔓 button on every tile marks it undeletable — the single delete button, batch delete and 🧹 purge all skip it, while everything else (reject, regenerate, face-swap, crop) still works normally. A dataset with any locked photo refuses a whole-dataset delete instead of quietly taking the rest.',
+    to: '/datasets?section=images',
+  },
+  {
     id: '2026-08-03-caption-leak-words-highlighted',
     date: '2026-08-03',
     title: 'Leaking captions now show you exactly which words to remove',

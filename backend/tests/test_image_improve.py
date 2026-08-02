@@ -282,7 +282,7 @@ def test_batch_keep_makes_improvement_win_after_all_selected_rows_are_kept(app):
         assert candidate.id < parent.id
 
         assert svc.batch_image_action(
-            LOCAL_USER, ds.id, [candidate.id, parent.id], 'keep') == 2
+            LOCAL_USER, ds.id, [candidate.id, parent.id], 'keep') == (2, 0)
 
         svc.db.session.expire_all()
         assert svc.db.session.get(FaceDatasetImage, candidate.id).status == 'keep'

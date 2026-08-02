@@ -321,11 +321,14 @@ export function useDataset() {
   // in progress → the !ok branch surfaces the message) and nudges a re-caption.
   // Refreshes both views. prompt_suffix / prompt_suffixes (creative direction) ride
   // along: applied at generation time only, '' / {} clears, absent leaves untouched.
-  const updateSettings = useCallback(async ({
+  // Extracted from updateSettings so a dataset can be edited by explicit id —
+  // the library-page ⚙️ button has no currentId (no dataset is open there).
+  // updateSettings(patch, opts) keeps its exact old behavior as a thin wrapper.
+  const updateSettingsFor = useCallback(async (id, {
     name, trigger_word, concept_desc, kind, prompt_suffix, prompt_suffixes, subject_type,
   }, opts = {}) => {
-    if (!currentId) return { ok: false };
-    const d = await postJson(`/api/dataset/${currentId}/settings`,
+    if (!id) return { ok: false };
+    const d = await postJson(`/api/dataset/${id}/settings`,
       { name, trigger_word, concept_desc, kind, prompt_suffix, prompt_suffixes, subject_type });
     if (!d.ok) { toast.error(d.error || 'Could not save settings'); return d; }
     // quiet: the generation panel persists suffix edits silently right before a
@@ -349,10 +352,16 @@ export function useDataset() {
           : 'Settings saved');
       }
     }
-    await refresh();
+    // The open workspace (if it happens to be showing this exact dataset)
+    // stays in sync; the library list always does, since name/trigger shown
+    // there can change from either entry point.
+    if (id === currentIdRef.current) await refresh(id);
     fetchList();
     return d;
-  }, [currentId, refresh, fetchList, toast]);
+  }, [refresh, fetchList, toast]);
+
+  const updateSettings = useCallback((patch, opts = {}) =>
+    updateSettingsFor(currentId, patch, opts), [currentId, updateSettingsFor]);
 
   const deleteDataset = useCallback(async (id) => {
     const d = await postJson(`/api/dataset/${id}/delete`);
@@ -874,6 +883,15 @@ export function useDataset() {
     await refresh();
   }, [refresh, toast]);
 
+  /* Locked/unlocked is a delete-guard only — reject/regenerate/face-swap/crop/
+     mirror all stay available on a locked image. The lock icon itself is the
+     feedback, so this stays quiet on success and only speaks up on refusal. */
+  const lockImage = useCallback(async (imageId, locked) => {
+    const d = await postJson(`/api/dataset/image/${imageId}/lock`, { locked });
+    if (!d.ok) { toast.error(d.error || 'Unexpected error'); return; }
+    await refresh();
+  }, [refresh, toast]);
+
   /* Clears the "regenerated, not yet seen" dot — call only when the tile
      actually carries the flag; opening a normal tile should cost nothing. */
   const markImageSeen = useCallback(async (imageId) => {
@@ -1118,6 +1136,7 @@ export function useDataset() {
     const d = await postJson(`/api/dataset/${currentId}/images/batch`, { ids, action });
     if (!d.ok) { toast.error(d.error || 'Unexpected error'); return 0; }
     if (!silent) toast.success(`${d.affected} image(s) updated`);
+    if (d.skipped_locked) toast.warning(`${d.skipped_locked} locked image(s) skipped`);
     await refresh();
     return d.affected;
   }, [currentId, refresh, toast]);
@@ -1601,9 +1620,9 @@ export function useDataset() {
   return { datasets, currentId, data, busy: busyLive, localBusy: busy, captioning: captioningLive,
            analyzing: analyzingLive, watermarking: watermarkingLive, activity,
            nonces, mirroringIds, refNonce, scoringFaceIds, recaptioningIds, create, open,
-           deleteDataset, updateSettings, setCurrentId, setRef, addExtraRef, removeExtraRef,
+           deleteDataset, updateSettings, updateSettingsFor, fetchList, setCurrentId, setRef, addExtraRef, removeExtraRef,
            generate, quickGenerateCompose, quickGenerateComponents, saveQuickGenerateCustomComponents, importFiles, scrapeImport, resolveSmallImageRescue, improveImage, reimproveImage, improveBatch, classify, caption, recaption, recaptionImages,
-           setStatus, setCaption, mirrorImage, rotateImage, crop, cropRef, cropExtraRef, recropRefAuto, editReference, retryReferenceEdit, canRetryReferenceEdit, keepEditedReference, discardEditedReference, setDatasetTrainType, setDatasetFidelity, deleteImage, batchImages, replaceCaptions, writeCaptionFiles, openDatasetFolder, cancelPending, cancelCaption, regenerate, faceSwapImage, analyzeFaces, scoreFace,
+           setStatus, setCaption, mirrorImage, rotateImage, crop, cropRef, cropExtraRef, recropRefAuto, editReference, retryReferenceEdit, canRetryReferenceEdit, keepEditedReference, discardEditedReference, setDatasetTrainType, setDatasetFidelity, deleteImage, lockImage, batchImages, replaceCaptions, writeCaptionFiles, openDatasetFolder, cancelPending, cancelCaption, regenerate, faceSwapImage, analyzeFaces, scoreFace,
            findWatermarks, cleanWatermarks, cleanWatermarkImages, restoreWatermarkImage, dismissWatermarks, saveWatermarkRegions,
            purgeUnused, exportZip, exportBackup, exportZipFor, exportBackupFor, importBackup, importDatasetZip, importDatasetFolder,
            backupEverything, backupJob, downloadBackup, openBackupsFolder, dismissBackup, restoreJob, dismissRestore,

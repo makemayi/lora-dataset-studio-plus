@@ -237,6 +237,10 @@ class FaceDatasetImage(db.Model):
     # for the API engines), cleared the moment its lightbox opens. Additive
     # column (migration in create_app); see _SCHEMA_ADDITIONS.
     unseen = db.Column(db.Boolean, nullable=True, default=False)
+    # Delete-guard only — reject/regenerate/face-swap/crop/mirror stay available
+    # on a locked image; it just refuses single delete, batch delete and purge.
+    # Additive column (migration in create_app); see _SCHEMA_ADDITIONS.
+    is_locked = db.Column(db.Boolean, nullable=True, default=False)
     created_at = db.Column(DateTime, default=db.func.current_timestamp())
 
     def __repr__(self):

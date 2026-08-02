@@ -103,6 +103,7 @@ A grid built for real curation work, not a file explorer — with a numeric answ
 | Sub-feature | What it gets you |
 | :-- | :-- |
 | **Grid actions** | Resize, zoom, crop, mirror or rotate a tile — losslessly, in the file's own format — then multi-select to Keep / Reject / Undecide, clear captions, delete, or upscale via Klein (re-renders detail, sharper but skin/colour can shift) or SeedVR2 (resolves detail, leaves the original look alone) |
+| **🔒 Lock a tile** | Marks it undeletable — single delete, batch delete and 🧹 purge all skip it; reject/regenerate/face-swap/crop stay available. A dataset with any locked photo refuses a whole-dataset delete instead of quietly deleting the rest |
 | **👤 Face-similarity scoring** | InsightFace scores every image against your reference and badges it green (strong) or orange (borderline) |
 | **Auto-triage** | Applies a score threshold to undecided, scorable images — re-appliable, and a manual status change wins |
 | **📐 Auto-framing badges** | A local vision model tags each image face / bust / body / back |

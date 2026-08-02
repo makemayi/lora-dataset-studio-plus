@@ -1414,6 +1414,14 @@ def dataset_image_status(image_id):
     return (jsonify({'ok': True}), 200) if ok else (jsonify({'error': 'not found'}), 404)
 
 
+@bp.post('/dataset/image/<int:image_id>/lock')
+def dataset_image_lock(image_id):
+    """Toggle the per-image delete guard. Body: {locked: bool}."""
+    data = request.get_json(silent=True) or {}
+    ok = svc.set_image_locked(LOCAL_USER, image_id, bool(data.get('locked')))
+    return (jsonify({'ok': True}), 200) if ok else (jsonify({'error': 'not found'}), 404)
+
+
 @bp.post('/dataset/image/<int:image_id>/seen')
 def dataset_image_seen(image_id):
     """Clear `unseen` — called when a tile's lightbox opens. Idempotent:
@@ -1770,10 +1778,13 @@ def dataset_images_batch(dataset_id):
     if not svc.get_dataset(LOCAL_USER, dataset_id):
         return jsonify({'error': 'not found'}), 404
     try:
-        n = svc.batch_image_action(LOCAL_USER, dataset_id, ids, action)
+        n, skipped_locked = svc.batch_image_action(LOCAL_USER, dataset_id, ids, action)
     except Exception as e:
         return _map_error(e)
-    return jsonify({'ok': True, 'affected': n})
+    resp = {'ok': True, 'affected': n}
+    if skipped_locked:
+        resp['skipped_locked'] = skipped_locked
+    return jsonify(resp)
 
 
 @bp.post('/dataset/<int:dataset_id>/purge')

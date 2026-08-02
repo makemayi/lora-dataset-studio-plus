@@ -350,7 +350,7 @@ def test_reject_clears_all_watermark_metadata_before_restore(app, via_batch):
         img = _kept_image(svc, ds.id, 'reject.webp', bbox=bbox, regions=[bbox])
 
         if via_batch:
-            assert svc.batch_image_action(LOCAL_USER, ds.id, [img.id], 'reject') == 1
+            assert svc.batch_image_action(LOCAL_USER, ds.id, [img.id], 'reject') == (1, 0)
         else:
             assert svc.set_image_status(LOCAL_USER, img.id, 'reject') is True
 
