@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-02-face-scoring-multi-reference',
+    date: '2026-08-02',
+    title: 'Face scoring now checks every reference photo, not just the first one',
+    blurb:
+      'A dataset\'s extra reference photos only ever helped generation — face-similarity scoring compared against the primary photo alone, so a genuinely good match at a different angle could still score falsely low. Every reference is now compared and the best match wins.',
+    to: '/datasets?section=images',
+  },
+  {
     id: '2026-08-02-krea-two-stage-settings',
     date: '2026-08-02',
     title: 'Krea 2 Edit: the two-stage sampler\'s step counts and resolution are tunable now',
