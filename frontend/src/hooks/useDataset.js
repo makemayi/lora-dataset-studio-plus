@@ -412,6 +412,41 @@ export function useDataset() {
     await refresh();
   }, [currentId, refresh, toast]);
 
+  // Angle reference photos (Krea 2 Edit only) — a fixed set of pose_key slots
+  // (left45/right45 now; back/left90/right90 reserved). Upload never enables a
+  // slot; enabling is the separate togglePoseSlotEnabled call.
+  const setPoseSlot = useCallback((poseKey, file) => wrap(async () => {
+    const fd = new FormData(); fd.append('file', file);
+    const d = await postJson(`/api/dataset/${currentId}/ref/pose/${poseKey}`, fd, true);
+    if (!d.ok) { toast.error(d.error || 'Unexpected error'); return; }
+    toast.success('Angle reference set — adjust with ✂ Crop if needed');
+    await refresh();
+  }), [wrap, currentId, refresh, toast]);
+
+  const cropPoseSlot = useCallback(async (poseKey, box) => {
+    const d = await postJson(`/api/dataset/${currentId}/ref/pose/${poseKey}/crop`, box);
+    if (!d.ok) { toast.error(d.error || 'Unexpected error'); return; }
+    await refresh();
+  }, [currentId, refresh, toast]);
+
+  const mirrorPoseSlot = useCallback((poseKey) => wrap(async () => {
+    const d = await postJson(`/api/dataset/${currentId}/ref/pose/${poseKey}/mirror`, {});
+    if (!d.ok) { toast.error(d.error || 'Unexpected error'); return; }
+    await refresh();
+  }), [wrap, currentId, refresh, toast]);
+
+  const togglePoseSlotEnabled = useCallback(async (poseKey, enabled) => {
+    const d = await postJson(`/api/dataset/${currentId}/ref/pose/${poseKey}/enable`, { enabled });
+    if (!d.ok) { toast.error(d.error || 'Unexpected error'); return; }
+    await refresh();
+  }, [currentId, refresh, toast]);
+
+  const removePoseSlot = useCallback(async (poseKey) => {
+    const d = await postJson(`/api/dataset/${currentId}/ref/pose/${poseKey}/delete`, {});
+    if (!d.ok) { toast.error(d.error || 'Unexpected error'); return; }
+    await refresh();
+  }, [currentId, refresh, toast]);
+
   // `batches`: [{generator, variations}] — one entry per selected engine, the
   // shots already shared between them by engineSelection.js (API engines first,
   // the GPU-bound Klein one last). The server re-validates every entry and
@@ -1621,6 +1656,7 @@ export function useDataset() {
            analyzing: analyzingLive, watermarking: watermarkingLive, activity,
            nonces, mirroringIds, refNonce, scoringFaceIds, recaptioningIds, create, open,
            deleteDataset, updateSettings, updateSettingsFor, fetchList, setCurrentId, setRef, addExtraRef, removeExtraRef,
+           setPoseSlot, cropPoseSlot, mirrorPoseSlot, togglePoseSlotEnabled, removePoseSlot,
            generate, quickGenerateCompose, quickGenerateComponents, saveQuickGenerateCustomComponents, importFiles, scrapeImport, resolveSmallImageRescue, improveImage, reimproveImage, improveBatch, classify, caption, recaption, recaptionImages,
            setStatus, setCaption, mirrorImage, rotateImage, crop, cropRef, cropExtraRef, recropRefAuto, editReference, retryReferenceEdit, canRetryReferenceEdit, keepEditedReference, discardEditedReference, setDatasetTrainType, setDatasetFidelity, deleteImage, lockImage, batchImages, replaceCaptions, writeCaptionFiles, openDatasetFolder, cancelPending, cancelCaption, regenerate, faceSwapImage, analyzeFaces, scoreFace,
            findWatermarks, cleanWatermarks, cleanWatermarkImages, restoreWatermarkImage, dismissWatermarks, saveWatermarkRegions,
