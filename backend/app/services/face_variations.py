@@ -1124,22 +1124,22 @@ def _krea_angle_kind(text: str) -> str | None:
 # behaviour never silently moves the other.
 _KREA_POSE_BACK = re.compile(
     r'\bfrom (?:the )?behind\b|\brear[- ]view\b|\bback[- ]view\b|\bbehind\b|'
-    r'背面|从背后|后视', re.I)
+    r'背面|从背后|后视|后面|从后面', re.I)
 _KREA_POSE_LEFT = re.compile(
     r'\bleft\s+(?:profile|side|three[- ]quarter)\b|'
     r'\b(?:profile|side|three[- ]quarter)(?:\s+view)?\s+left\b|'
-    r'左侧|左边|左45|左脸|左半侧', re.I)
+    r'左侧|左边|左45|左脸|左半侧|左半边', re.I)
 _KREA_POSE_RIGHT = re.compile(
     r'\bright\s+(?:profile|side|three[- ]quarter)\b|'
     r'\b(?:profile|side|three[- ]quarter)(?:\s+view)?\s+right\b|'
-    r'右侧|右边|右45|右脸|右半侧', re.I)
+    r'右侧|右边|右45|右脸|右半侧|右半边', re.I)
 # _krea_true_profile_view / _KREA_THREE_QUARTER_VIEW (the "is this side-ish at
 # all" gate shared with _krea_angle_kind) only recognise English cues, so a
 # bare Chinese side/three-quarter phrase would otherwise never clear the gate
 # below even once left/right/back-in-Chinese matched. This mirrors that gate
 # for Chinese without touching the two shared regexes themselves, so the
 # English-only agreement invariant with _krea_angle_kind is unaffected.
-_KREA_POSE_SIDE_ISH_CN = re.compile(r'侧脸|侧面|半侧|三分之二')
+_KREA_POSE_SIDE_ISH_CN = re.compile(r'侧脸|侧面|半侧|半边|三分之二')
 
 
 def krea_pose_direction(text: str) -> str | None:
@@ -1150,9 +1150,13 @@ def krea_pose_direction(text: str) -> str | None:
     all, the front reference is correct).
 
     Reuses _krea_true_profile_view / _KREA_THREE_QUARTER_VIEW for "is this
-    side-ish at all" so this and _krea_angle_kind never disagree about what
-    counts as a side/three-quarter shot — see
+    side-ish at all" so this and _krea_angle_kind never disagree, FOR ENGLISH
+    INPUT, about what counts as a side/three-quarter shot — see
     test_krea_pose_direction_agrees_with_krea_angle_kind_on_what_counts_as_side_ish.
+    _krea_angle_kind has no Chinese support at all, so for Chinese text the two
+    intentionally diverge: e.g. krea_pose_direction('侧面照') is 'ambiguous'
+    while _krea_angle_kind('侧面照') is None. Do not assume the "never
+    disagree" guarantee holds across languages.
     """
     text = text or ''
     if _KREA_POSE_BACK.search(text):

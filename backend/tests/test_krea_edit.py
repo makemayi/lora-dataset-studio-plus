@@ -1107,12 +1107,21 @@ def test_krea_pose_direction_reads_chinese_left_right():
     assert fv.krea_pose_direction('左侧脸,自然表情') == 'left'
     assert fv.krea_pose_direction('右半侧三分之二视角') == 'right'
     assert fv.krea_pose_direction('右45度侧脸') == 'right'
+    assert fv.krea_pose_direction('左半边脸,自然表情') == 'left'
+    assert fv.krea_pose_direction('右半边脸,自然表情') == 'right'
+
+
+def test_krea_pose_direction_mixed_english_and_chinese():
+    assert fv.krea_pose_direction('left profile, 自然表情') == 'left'
 
 
 def test_krea_pose_direction_back():
     assert fv.krea_pose_direction('shot from behind, full body') == 'back'
     assert fv.krea_pose_direction('rear view of the subject') == 'back'
     assert fv.krea_pose_direction('背面视角,自然站姿') == 'back'
+    assert fv.krea_pose_direction('从后面看,自然站姿') == 'back'
+    assert fv.krea_pose_direction('从背后拍摄,自然站姿') == 'back'
+    assert fv.krea_pose_direction('后视图,自然站姿') == 'back'
 
 
 def test_krea_pose_direction_ambiguous_when_no_direction_word():
