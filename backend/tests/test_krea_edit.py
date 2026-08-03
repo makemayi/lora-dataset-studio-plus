@@ -1097,6 +1097,47 @@ def test_krea_angle_kind_resolves_one_category_at_a_time():
     assert fv._krea_angle_kind('front view, neutral expression') is None
 
 
+def test_krea_pose_direction_reads_english_left_right():
+    assert fv.krea_pose_direction('left profile view, neutral expression') == 'left'
+    assert fv.krea_pose_direction('three-quarter view, right side') == 'right'
+    assert fv.krea_pose_direction('right side-view portrait') == 'right'
+
+
+def test_krea_pose_direction_reads_chinese_left_right():
+    assert fv.krea_pose_direction('左侧脸,自然表情') == 'left'
+    assert fv.krea_pose_direction('右半侧三分之二视角') == 'right'
+    assert fv.krea_pose_direction('右45度侧脸') == 'right'
+
+
+def test_krea_pose_direction_back():
+    assert fv.krea_pose_direction('shot from behind, full body') == 'back'
+    assert fv.krea_pose_direction('rear view of the subject') == 'back'
+    assert fv.krea_pose_direction('背面视角,自然站姿') == 'back'
+
+
+def test_krea_pose_direction_ambiguous_when_no_direction_word():
+    assert fv.krea_pose_direction('side-view portrait, neutral expression') == 'ambiguous'
+    assert fv.krea_pose_direction('a three-quarter shot, looking at camera') == 'ambiguous'
+    assert fv.krea_pose_direction('侧面照,自然表情') == 'ambiguous'
+
+
+def test_krea_pose_direction_none_for_a_front_shot():
+    assert fv.krea_pose_direction('front view, neutral expression') is None
+    assert fv.krea_pose_direction('') is None
+    assert fv.krea_pose_direction(None) is None
+
+
+def test_krea_pose_direction_agrees_with_krea_angle_kind_on_what_counts_as_side_ish():
+    """The two classifiers must never disagree about whether a text IS a
+    profile/three-quarter shot — only about which angle-kind SUBTYPE or which
+    direction it is. Reuses the same underlying patterns on purpose."""
+    for text in ('strict left profile view', 'three-quarter left view',
+                 'right side-view portrait', 'front view, neutral expression'):
+        is_side_ish_by_angle_kind = fv._krea_angle_kind(text) in ('profile', 'three_quarter')
+        has_a_direction = fv.krea_pose_direction(text) in ('left', 'right', 'ambiguous')
+        assert is_side_ish_by_angle_kind == has_a_direction
+
+
 def test_krea_card_priority_does_not_duplicate_a_dataset_suffix():
     entry = next(e for e in fv.VARIATION_CATALOG if e['id'] == 'face_profile_l')
     suffix = 'shot on 35mm film'

@@ -1117,6 +1117,58 @@ def _krea_angle_kind(text: str) -> str | None:
     return None
 
 
+# Which angle-reference PHOTO (if any) should replace the primary reference for
+# one shot — a DIFFERENT question from _krea_angle_kind above (that one decides
+# whether to reinforce the shot's pose in TEXT; this one decides which FILE Krea
+# generation hands the model). Kept as its own function so a change to one
+# behaviour never silently moves the other.
+_KREA_POSE_BACK = re.compile(
+    r'\bfrom (?:the )?behind\b|\brear[- ]view\b|\bback[- ]view\b|\bbehind\b|'
+    r'背面|从背后|后视', re.I)
+_KREA_POSE_LEFT = re.compile(
+    r'\bleft\s+(?:profile|side|three[- ]quarter)\b|'
+    r'\b(?:profile|side|three[- ]quarter)(?:\s+view)?\s+left\b|'
+    r'左侧|左边|左45|左脸|左半侧', re.I)
+_KREA_POSE_RIGHT = re.compile(
+    r'\bright\s+(?:profile|side|three[- ]quarter)\b|'
+    r'\b(?:profile|side|three[- ]quarter)(?:\s+view)?\s+right\b|'
+    r'右侧|右边|右45|右脸|右半侧', re.I)
+# _krea_true_profile_view / _KREA_THREE_QUARTER_VIEW (the "is this side-ish at
+# all" gate shared with _krea_angle_kind) only recognise English cues, so a
+# bare Chinese side/three-quarter phrase would otherwise never clear the gate
+# below even once left/right/back-in-Chinese matched. This mirrors that gate
+# for Chinese without touching the two shared regexes themselves, so the
+# English-only agreement invariant with _krea_angle_kind is unaffected.
+_KREA_POSE_SIDE_ISH_CN = re.compile(r'侧脸|侧面|半侧|三分之二')
+
+
+def krea_pose_direction(text: str) -> str | None:
+    """Which angle-slot direction this shot's text asks for.
+
+    Returns 'left' | 'right' | 'back' | 'ambiguous' (a side/three-quarter cue
+    with no left/right word — e.g. bare "side view") | None (no angle cue at
+    all, the front reference is correct).
+
+    Reuses _krea_true_profile_view / _KREA_THREE_QUARTER_VIEW for "is this
+    side-ish at all" so this and _krea_angle_kind never disagree about what
+    counts as a side/three-quarter shot — see
+    test_krea_pose_direction_agrees_with_krea_angle_kind_on_what_counts_as_side_ish.
+    """
+    text = text or ''
+    if _KREA_POSE_BACK.search(text):
+        return 'back'
+    side_ish = (_krea_true_profile_view(text)
+                or bool(_KREA_THREE_QUARTER_VIEW.search(text))
+                or bool(_KREA_POSE_SIDE_ISH_CN.search(text)))
+    if not side_ish:
+        return None
+    if _KREA_POSE_LEFT.search(text):
+        return 'left'
+    if _KREA_POSE_RIGHT.search(text):
+        return 'right'
+    return 'ambiguous'
+
+
 def _krea_builtin_card_prompt(prompt: str, label: str, subject_type: str) -> str:
     """Return a bounded catalog card for a final Krea imperative, if exact.
 
