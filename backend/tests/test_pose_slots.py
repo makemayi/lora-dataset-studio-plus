@@ -177,3 +177,16 @@ def test_remove_pose_slot_on_missing_slot_returns_false(app):
     with app.app_context():
         ds = _dataset_with_ref()
         assert svc.remove_pose_slot('local', ds.id, 'left45') is False
+
+
+def test_dataset_payload_lists_all_five_pose_keys_even_when_unused(app):
+    with app.app_context():
+        ds = _dataset_with_ref()
+        svc.set_pose_slot('local', ds.id, 'left45', _png(800, 800))
+        svc.set_pose_slot_enabled('local', ds.id, 'left45', True)
+        payload = svc.dataset_payload('local', ds.id)
+        assert set(payload['pose_slots'].keys()) == set(svc.POSE_SLOT_KEYS)
+        left = payload['pose_slots']['left45']
+        assert left['filename'] and left['enabled'] is True
+        right = payload['pose_slots']['right45']
+        assert right == {'filename': None, 'original_filename': '', 'enabled': False}

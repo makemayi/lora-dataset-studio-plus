@@ -4372,6 +4372,7 @@ def dataset_payload(user_id, dataset_id):
     # concept_desc + the derived body/pose field, so the badge and the caption-time
     # enforcement agree on what "leaking" means. Ignored for non-concept kinds.
     _concept_terms = ds.concept_terms if kind_concept else None
+    _pose_rows = pose_slot_rows(ds)
 
     def _img_leaks(i):
         if i.status != 'keep' or not i.caption:
@@ -4461,6 +4462,12 @@ def dataset_payload(user_id, dataset_id):
         # kept, else the extra itself) — aligned index-by-index with the list above.
         'ref_extra_crop_sources': [extra_ref_crop_source(ds, fn)
                                    for fn in extra_ref_filenames(ds)],
+        'pose_slots': {
+            key: ({'filename': r.filename, 'original_filename': r.original_filename or '',
+                  'enabled': bool(r.enabled)} if (r := _pose_rows.get(key)) else
+                  {'filename': None, 'original_filename': '', 'enabled': False})
+            for key in POSE_SLOT_KEYS
+        },
         'composition': comp,
         'composition_upscaled': comp_upscaled,
         # Réglages gagnants du Studio (JSON → objet). Manquait du payload : le badge
