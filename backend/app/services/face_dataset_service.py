@@ -690,8 +690,7 @@ def set_pose_slot(user_id, dataset_id, pose_key, image_bytes) -> str:
     if not ds:
         raise ValueError('dataset not found')
     dsdir = _dataset_dir(dataset_id)
-    webp, _detected = face_crop_to_square_webp(
-        image_bytes, pad=REF_CROP_PAD, return_detected=True, use_vision=False)
+    webp = face_crop_to_square_webp(image_bytes, pad=REF_CROP_PAD, use_vision=False)
     uid = uuid.uuid4().hex[:8]
     orig_fn = f"{user_id}_datasetrefpose_{pose_key}orig_{uid}.webp"
     fn = f"{user_id}_datasetrefpose_{pose_key}_{uid}.webp"
@@ -724,7 +723,11 @@ def crop_pose_slot(user_id, dataset_id, pose_key, x, y, w, h) -> bool:
     """Manually crop ONE angle reference to (x,y,w,h), same contract as
     crop_reference: the box is in the ORIGINAL's pixel space, and only
     `filename` (never `original_filename`) is overwritten — so re-cropping can
-    widen back out any number of times."""
+    widen back out any number of times.
+
+    If mirror_pose_slot ran first, this silently undoes it: the crop always
+    re-derives `filename` from the untouched `original_filename` — known
+    limitation, not handled."""
     ds = get_dataset(user_id, dataset_id)
     if not ds:
         return False
@@ -744,19 +747,28 @@ def mirror_pose_slot(user_id, dataset_id, pose_key) -> bool:
     the pixel primitive `_mirrored_image_bytes` (see `mirror_image`) but skips
     `_edit_image_in_place`: that wrapper is keyed to a FaceDatasetImage row and
     clears watermark metadata a pose slot doesn't have. `original_filename` (the
-    pre-crop full frame) is untouched, same as `mirror_image`'s contract."""
+    pre-crop full frame) is untouched, same as `mirror_image`'s contract.
+
+    A later crop_pose_slot call re-derives `filename` from the untouched
+    `original_filename` and will silently undo this mirror — known
+    limitation, not handled.
+
+    The row lookup, path resolution and existence check all happen INSIDE the
+    lock: nothing about which file gets mirrored may be decided before the
+    lock is held, or a concurrent set_pose_slot on the same slot could swap
+    the file out from under an in-flight mirror."""
     ds = get_dataset(user_id, dataset_id)
     if not ds:
-        return False
-    row = _pose_slot_row(ds, pose_key)
-    if not row or not row.filename:
-        return False
-    path = os.path.join(_dataset_dir(dataset_id), row.filename)
-    if not os.path.isfile(path):
         return False
     lock = _IMAGE_PIXEL_EDIT_LOCKS[
         hash((str(user_id), 'pose', dataset_id, pose_key)) % len(_IMAGE_PIXEL_EDIT_LOCKS)]
     with lock:
+        row = _pose_slot_row(ds, pose_key)
+        if not row or not row.filename:
+            return False
+        path = os.path.join(_dataset_dir(dataset_id), row.filename)
+        if not os.path.isfile(path):
+            return False
         payload = _mirrored_image_bytes(path)
         write_image_atomic(path, payload)
     return True
@@ -785,17 +797,27 @@ def remove_pose_slot(user_id, dataset_id, pose_key) -> bool:
     if not row:
         return False
     dsdir = _dataset_path(dataset_id)
-    for fn in (row.filename, row.original_filename):
-        if not fn:
-            continue
-        p = os.path.join(dsdir, fn)
-        if os.path.exists(p):
-            try:
-                trash.send_to_trash(p, context=f'dataset-{dataset_id}-pose-{pose_key}')
-            except OSError:
-                logger.warning(f'dataset {dataset_id}: could not trash pose slot file {fn}')
-    db.session.delete(row)
-    db.session.commit()
+    fn, orig = row.filename, row.original_filename
+    original_path = os.path.join(dsdir, fn) if fn else None
+    trashed_path = None
+    if original_path and os.path.exists(original_path):
+        trashed_path = trash.send_to_trash(
+            original_path, context=f'dataset-{dataset_id}-pose-{pose_key}')
+    try:
+        db.session.delete(row)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        _restore_from_trash(trashed_path, original_path)
+        raise
+    # The kept original follows its file to the trash — never leave it orphaned in
+    # the dataset folder. Best effort: losing the main file itself is what matters.
+    orig_path = os.path.join(dsdir, orig) if orig else None
+    if orig_path and os.path.exists(orig_path):
+        try:
+            trash.send_to_trash(orig_path, context=f'dataset-{dataset_id}-pose-{pose_key}')
+        except OSError:
+            logger.warning(f'dataset {dataset_id}: could not trash pose slot original {orig}')
     return True
 
 
