@@ -18,7 +18,7 @@ export default function PoseSlotPanel({ datasetId, poseSlots = {}, busy, importB
   const imgUrl = (fn) => `/api/dataset/${datasetId}/img/${encodeURIComponent(fn)}${nonce ? `?v=${nonce}` : ''}`;
 
   return (
-    <div className="flex items-center gap-2 flex-wrap border-t border-border pt-2">
+    <div className="flex items-center gap-2 flex-nowrap overflow-x-auto border-t border-border pt-2">
       <span className="text-content-subtle text-[0.6875rem]">
         Angle references <span className="opacity-70">(Krea 2 Edit — matched to the shot's angle)</span>
       </span>

@@ -62,6 +62,12 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
         </div>
       </div>
 
+      {refFilename && (
+        <PoseSlotPanel datasetId={datasetId} poseSlots={poseSlots} busy={busy}
+          importBusy={importBusy} nonce={nonce} onSetPoseSlot={onSetPoseSlot}
+          onCropPoseSlot={onCropPoseSlot} onMirrorPoseSlot={onMirrorPoseSlot}
+          onTogglePoseSlotEnabled={onTogglePoseSlotEnabled} onRemovePoseSlot={onRemovePoseSlot} />
+      )}
       {/* Références additionnelles — identité multi-angles, consommées par TOUS
           les moteurs : Nano Banana & ChatGPT (jointes à l'appel API) et Klein
           (chaînées en ReferenceLatent natifs). Recadrables une par une (✂ sur la
@@ -107,12 +113,6 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
           <input ref={inpExtra} type="file" accept="image/*" className="hidden" disabled={importBusy}
             onChange={(e) => { if (e.target.files[0]) onAddExtraRef?.(e.target.files[0]); e.target.value = ''; }} />
         </div>
-      )}
-      {refFilename && (
-        <PoseSlotPanel datasetId={datasetId} poseSlots={poseSlots} busy={busy}
-          importBusy={importBusy} nonce={nonce} onSetPoseSlot={onSetPoseSlot}
-          onCropPoseSlot={onCropPoseSlot} onMirrorPoseSlot={onMirrorPoseSlot}
-          onTogglePoseSlotEnabled={onTogglePoseSlotEnabled} onRemovePoseSlot={onRemovePoseSlot} />
       )}
       {/* The modal edits the prompts of THIS dataset's subject — a human lock
           shown on an Animal dataset is what made an animal-tuned text leak into
