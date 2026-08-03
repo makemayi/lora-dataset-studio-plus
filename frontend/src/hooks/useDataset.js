@@ -427,12 +427,14 @@ export function useDataset() {
     const d = await postJson(`/api/dataset/${currentId}/ref/pose/${poseKey}/crop`, box);
     if (!d.ok) { toast.error(d.error || 'Unexpected error'); return; }
     await refresh();
+    setRefNonce((n) => n + 1);
   }, [currentId, refresh, toast]);
 
   const mirrorPoseSlot = useCallback((poseKey) => wrap(async () => {
     const d = await postJson(`/api/dataset/${currentId}/ref/pose/${poseKey}/mirror`, {});
     if (!d.ok) { toast.error(d.error || 'Unexpected error'); return; }
     await refresh();
+    setRefNonce((n) => n + 1);
   }), [wrap, currentId, refresh, toast]);
 
   const togglePoseSlotEnabled = useCallback(async (poseKey, enabled) => {
