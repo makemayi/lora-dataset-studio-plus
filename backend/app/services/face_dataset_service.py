@@ -834,8 +834,13 @@ def _krea_pose_source_path(ds, prompt_text) -> str:
     direction = krea_pose_direction(prompt_text)
     enabled = enabled_pose_slot_paths(ds)
     if direction == 'ambiguous':
-        if len(enabled) == 1:
-            return next(iter(enabled.values()))
+        # Only left45/right45 are side-facing candidates for this heuristic —
+        # 'ambiguous' means "some side/three-quarter cue, no left/right word",
+        # so a lone 'back' (or a future left90/right90) slot must NOT be picked
+        # up here: it answers a different question than the prompt asked.
+        side_enabled = {k: v for k, v in enabled.items() if k in POSE_SLOT_ACTIVE_KEYS}
+        if len(side_enabled) == 1:
+            return next(iter(side_enabled.values()))
         return _ref_path(ds)
     pose_key = _POSE_DIRECTION_TO_KEY.get(direction)
     if pose_key and pose_key in enabled:

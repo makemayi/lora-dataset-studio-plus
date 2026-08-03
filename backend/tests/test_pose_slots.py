@@ -346,6 +346,24 @@ def test_ambiguous_direction_with_both_sides_enabled_falls_back_to_front(app, mo
     assert seen[0]['source_path'] == expected_front
 
 
+def test_ambiguous_direction_with_only_a_back_slot_enabled_falls_back_to_front(app, monkeypatch):
+    """'back' is a valid POSE_SLOT_KEY (reachable via direct API even with no
+    UI for it yet), but it is NOT a side-facing slot: an ambiguous prompt like
+    'side view' must never resolve to the back-of-head photo just because it
+    is the only enabled slot."""
+    from app.services import krea_edit_helper as keh
+    seen = []
+    monkeypatch.setattr(keh, 'preflight', lambda *a, **k: None)
+    monkeypatch.setattr(keh, 'enqueue_krea_edit',
+                        lambda **kw: (seen.append(kw), 'job')[1])
+    with app.app_context():
+        ds = _krea_dataset_with_pose_slot('back', enabled=True)
+        svc.generate_variations_krea(
+            'local', ds.id, [{'label': 'a', 'prompt': 'side view', 'framing': 'face'}], 1)
+        expected_front = svc._ref_path(ds)
+    assert seen[0]['source_path'] == expected_front
+
+
 def test_each_variation_in_one_batch_picks_its_own_source(app, monkeypatch):
     """A single generate_variations_krea call can carry a front shot and a left
     profile shot together — each must get its OWN source_path, not whichever
