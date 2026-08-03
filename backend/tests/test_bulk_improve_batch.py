@@ -42,10 +42,9 @@ def _dataset_with_sources(svc, image_cls, user_id, count):
     return ds, ids
 
 
-def _stub_klein(monkeypatch, keh, jobs):
-    monkeypatch.setattr(keh, 'klein_missing_assets', lambda: [])
-    monkeypatch.setattr(keh, 'klein_missing_nodes', lambda: [])
-    monkeypatch.setattr(keh, 'enqueue_klein_edit',
+def _stub_klein(monkeypatch, khh, jobs):
+    monkeypatch.setattr(khh, 'preflight', lambda: None)
+    monkeypatch.setattr(khh, 'enqueue_krea_hq_improve',
                         lambda **kwargs: (jobs.append(kwargs) or f'job-{len(jobs)}'))
 
 
@@ -57,10 +56,10 @@ def test_batch_larger_than_max_fanout_eventually_processes_everything(app, monke
     from app.models import FaceDatasetImage
     from app.services import dataset_activity as da
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
+    from app.services import krea_hq_helper as khh
 
     jobs = []
-    _stub_klein(monkeypatch, keh, jobs)
+    _stub_klein(monkeypatch, khh, jobs)
     monkeypatch.setattr(svc, 'MAX_FANOUT', 3)   # a cap we can walk into in a test
 
     with app.app_context():
@@ -107,10 +106,10 @@ def test_stop_generation_really_ends_the_batch(app, monkeypatch):
     from app.models import FaceDatasetImage
     from app.services import dataset_activity as da
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
+    from app.services import krea_hq_helper as khh
 
     jobs = []
-    _stub_klein(monkeypatch, keh, jobs)
+    _stub_klein(monkeypatch, khh, jobs)
 
     with app.app_context():
         da.reset()
@@ -203,10 +202,10 @@ def test_route_starts_the_job_and_refuses_a_second_one(app, client, monkeypatch)
     from app.models import FaceDatasetImage
     from app.services import dataset_activity as da
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
+    from app.services import krea_hq_helper as khh
 
     jobs = []
-    _stub_klein(monkeypatch, keh, jobs)
+    _stub_klein(monkeypatch, khh, jobs)
 
     with app.app_context():
         da.reset()

@@ -17,7 +17,7 @@ test('lightbox exposes an accessible responsive image improvement action', () =>
   assert.match(lightbox, /Review improvement first/);
   assert.match(lightbox, /aria-busy=\{improvementActive\}/);
   assert.match(lightbox, /w-full sm:w-auto/);
-  assert.match(lightbox, /Klein creates a new 2 MP version to validate and leaves the original intact/);
+  assert.match(lightbox, /Creates a new upscaled version to validate and leaves the original intact/);
   assert.match(lightbox, /busy \|\| improvementActive \|\| improveReady \|\| !kleinAvailable/);
 });
 
@@ -67,7 +67,10 @@ test('workspace guards rescue rows and detects a pending improvement child', () 
   assert.match(workspace, /image\.parent_image_id === viewImgLive\.id/);
   assert.match(workspace, /const viewImgImproving[\s\S]*image\.status === 'pending'[\s\S]*\)\) : false/);
   assert.match(workspace, /const viewImgImprovementReady[\s\S]*image\.status === 'pending'[\s\S]*!!image\.filename/);
-  assert.match(workspace, /kleinAvailable=\{Boolean\(caps\.engines\?\.klein\)\}/);
+  // The improve pass no longer runs Flux.2 Klein 9B for its 'klein' engine (see
+  // krea_hq_helper), so it is no longer gated behind caps.engines.klein — a real
+  // missing asset still surfaces as a 409 on click.
+  assert.match(workspace, /\/\/ kleinAvailable gates the improve button/);
 });
 
 test('dataset hook starts improvement, reports the preserved original, then refreshes', () => {

@@ -8109,31 +8109,6 @@ def _improve_candidate_label(source) -> str:
     return (f'{base_label} · {source_label}' if source_label else base_label)[:120]
 
 
-def _improve_enqueue_profile(ds=None) -> dict:
-    """Profile reproduced from the user-provided ComfyUI PNG metadata: the
-    dataset's Klein model plus the sampling/LoRA/resolution overrides.
-
-    `ds` is the dataset the improved image belongs to. Reading its model HERE is
-    what makes the choice reach all three improve lanes at once: the single pass,
-    the 🔄 re-run, and the batch (which drains through improve_existing_image).
-    None / a dataset that never chose yields klein_model=None — the exact value
-    every improve sent before this setting existed.
-
-    The defaults (1.0 / 4 / 0.0 / 2.0) are the values that were once hardcoded,
-    so an untouched install behaves exactly as before. Clamped, because a bad
-    config value must degrade the pass, never crash the enqueue. Each fallback
-    MUST equal the shipped config default: _improve_float treats "still at its
-    default" as "the user has not set this", which is what lets a value saved
-    under the old key name speak for it."""
-    return {
-        'klein_model': dataset_klein_model(ds),
-        'lora_strength': _improve_float('improve_consistency_strength', 1.0, 1.5),
-        'sampler_steps': _improve_int('improve_steps', 4),
-        'base_lora_strength': _improve_float('improve_base_lora_strength', 0.0),
-        'output_megapixels': _improve_float('improve_megapixels', 2.0, 8.0),
-    }
-
-
 def _improve_extra_metadata(source, label, engine='klein') -> dict:
     return {
         'is_dataset': True,
@@ -8192,34 +8167,31 @@ def _improve_preflight(engine):
         from . import seedvr2_helper
         seedvr2_helper.preflight()
         return
-    from . import klein_edit_helper as keh
-    missing = keh.klein_missing_assets()
-    missing_nodes = keh.klein_missing_nodes()
-    if missing_nodes:
-        raise KleinNodesMissing(missing, missing_nodes)
-    if any(asset in missing for asset in keh.KLEIN_REQUIRED):
-        raise keh.KleinModelsMissing(missing)
+    # 'klein' engine id kept as-is (stored in derivation_kind/improve_engine on
+    # existing rows — never renamed, see CLAUDE.md), but as of the Krea2 Ostris
+    # Edit + SeedVR2 workflow swap it no longer runs Flux.2 Klein 9B for THIS
+    # lane; klein_edit_helper stays the engine for every other Klein call site
+    # (regenerate, variation restaging, small-image rescue).
+    from . import krea_hq_helper as khh
+    khh.preflight()
 
 
-def _enqueue_improve(engine, *, user_id, source, source_path, prompt, label,
-                     dataset):
+def _enqueue_improve(engine, *, user_id, source, source_path, prompt, label):
     """Hand ONE improve off to the chosen engine and return its job id.
 
-    The two engines take deliberately different arguments — Klein needs a prompt,
-    a consistency-LoRA strength and a step count; SeedVR2 needs none of them
-    (there is no prompt in a restoration) — so this is where that difference
-    stops, and every caller above it stays engine-agnostic."""
+    SeedVR2 needs no prompt (there is no prompt in a restoration); the
+    'klein' engine's Krea2+SeedVR2 pipeline reuses the SAME editable
+    klein_improve `prompt` for its Krea2 edit stage."""
     meta = _improve_extra_metadata(source, label, engine=engine)
     if engine == 'seedvr2':
         from . import seedvr2_helper
         return seedvr2_helper.enqueue_seedvr2_upscale(
             user_id=str(user_id), source_filename=source.filename,
             source_path=source_path, extra_metadata=meta)
-    from . import klein_edit_helper as keh
-    return keh.enqueue_klein_edit(
+    from . import krea_hq_helper as khh
+    return khh.enqueue_krea_hq_improve(
         user_id=str(user_id), source_filename=source.filename,
-        source_path=source_path, edit_prompt=prompt,
-        **_improve_enqueue_profile(dataset), extra_metadata=meta)
+        source_path=source_path, edit_prompt=prompt, extra_metadata=meta)
 
 
 def improve_existing_image(user_id, image_id, engine=None):
@@ -8304,8 +8276,7 @@ def _improve_existing_image_locked(user_id, image_id, engine=None):
     try:
         job_id = _enqueue_improve(
             engine, user_id=user_id, source=img, source_path=source_path,
-            prompt=prompt, label=label,
-            dataset=get_dataset(user_id, img.dataset_id))
+            prompt=prompt, label=label)
     except Exception:
         # No broken tile: the original is still untouched and the user can retry
         # as soon as the queue/ComfyUI issue is fixed.
@@ -8414,8 +8385,7 @@ def _reimprove_image_locked(user_id, image_id):
     old_path = _img_path(img) if img.filename else None
     job_id = _enqueue_improve(
         engine, user_id=user_id, source=parent, source_path=source_path,
-        prompt=prompt, label=label,
-        dataset=get_dataset(user_id, img.dataset_id))
+        prompt=prompt, label=label)
 
     try:
         # Do this while the candidate is still Keep.  The CAS observes both

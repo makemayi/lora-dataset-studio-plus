@@ -1612,6 +1612,25 @@ def test_embedded_workflow_model_refs_are_all_layout_independent():
             ('flux2-vae.safetensors', 'RESOLVED'),
         ('klein_inpaint.json', '90', 'clip_name'):
             ('qwen_3_8b_fp8mixed.safetensors', 'RESOLVED'),
+        # 'krea2 high resolution.json' — the ✨ Upscale & improve 'klein' engine's
+        # Krea 2 Ostris Edit + SeedVR2 restore graph (krea_hq_helper). Every one of
+        # these six loader fields is unconditionally overwritten with the resolved
+        # on-disk file right before enqueue (same RESOLVED pattern as Klein/face
+        # swap above) — the shipped literal never reaches ComfyUI. Absence of any
+        # of them raises KreaHQModelsMissing (a 409 naming the exact file) before
+        # the job is ever built.
+        ('krea2 high resolution.json', '41730', 'unet_name'):
+            ('Krea2_Turbo_convrot_int8mixed.safetensors', 'RESOLVED'),
+        ('krea2 high resolution.json', '41727:41600', 'vae_name'):
+            ('qwen_image_vae.safetensors', 'RESOLVED'),
+        ('krea2 high resolution.json', '41727:41604', 'clip_name'):
+            ('Qwen3-VL-4B-Instruct-Unredacted-MAX .safetensors', 'RESOLVED'),
+        ('krea2 high resolution.json', '41729', 'lora_name'):
+            (os.path.join('krea2', 'high quality.safetensors'), 'RESOLVED'),
+        ('krea2 high resolution.json', '41770:41760', 'unet_name'):
+            ('seedvr2_7b_sharp_int8_convrot.safetensors', 'RESOLVED'),
+        ('krea2 high resolution.json', '41770:41761', 'vae_name'):
+            ('ema_vae_fp16.safetensors', 'RESOLVED'),
         ('krea2_turbo.json', '20', 'unet_name'):
             ('Krea\\krea2_turbo_fp8.safetensors', 'OVERRIDDEN'),
         ('krea2_turbo.json', '21', 'clip_name'):

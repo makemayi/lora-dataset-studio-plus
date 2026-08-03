@@ -1,10 +1,17 @@
-"""Proof that the "Upscale & improve" settings actually reach ComfyUI.
+"""`klein_edit_helper.enqueue_klein_edit`'s own parameter-to-node contract:
+lora_strength/sampler_steps/base_lora_strength/output_megapixels each have to
+survive the call and land on the RIGHT node in `improve skin.json`. Calls the
+helper DIRECTLY (the queue_manager.add_job seam), no GPU, repeatable.
 
-The knobs were exposed in Settings, but exposing a field proves nothing: the value
-still has to survive the config read, the call site, and the workflow patch, and
-land on the RIGHT node. This captures the exact workflow dict that would be sent
-to ComfyUI (the queue_manager.add_job seam) and asserts each value on its node —
-no GPU, and repeatable, unlike trying one image by hand.
+Historical note: this file used to prove the ✨ Upscale & improve Settings
+(`klein.improve_steps` etc.) reached ComfyUI through THIS helper — as of the
+Krea2 Ostris Edit + SeedVR2 swap (see krea_hq_helper) the improve pass no
+longer calls `enqueue_klein_edit` at all, so those specific Settings are
+currently orphaned (nothing reads them). The fixture below still drives real
+numbers through `fds._improve_float`/`_improve_int` as a convenient source of
+test doubles, but the contract being pinned is `enqueue_klein_edit`'s own
+argument-to-node wiring — still load-bearing for every OTHER Klein call site
+(regenerate, variation restaging) — not the improve pass.
 
 Node map of `improve skin.json`, verified against the shipped file:
   139 LoraLoaderModelOnly  -> strength_model : the enhancement LoRA (realistic detail)

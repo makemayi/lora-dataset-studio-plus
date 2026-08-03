@@ -131,25 +131,6 @@ test('a target computed at runtime still resolves — the setup verdict case', (
   assert.match(read('../src/pages/SetupPage.jsx'), /focus=\{verdict\.settingsFocus\}/)
 })
 
-// ---- the reported link -----------------------------------------------------
-
-test('the two improve pointers land on the two things they name', () => {
-  // Both live in KleinImproveNote now (rendered by the lightbox AND the grid's
-  // bulk toolbar) instead of a lone link in the lightbox: the strength knobs
-  // never answered "why did my anime turn realistic" — the instruction did.
-  const note = read('../src/components/dataset/KleinImproveNote.jsx')
-  const tags = [...note.matchAll(/<SettingsLink\b[\s\S]*?>/g)].map((m) => m[0])
-  assert.equal(tags.length, 2, 'the note must offer the instruction AND the strength')
-  for (const tag of tags) assert.match(tag, /section="engines"/)
-  assert.ok(tags.some((t) => /focus="identity-prompt-klein-improve"/.test(t)))
-  assert.ok(tags.some((t) => /focus="klein-improve-strength"/.test(t)))
-  // Each target is the thing its label names, not a section that contains it.
-  const engines = read('../src/components/settings/EnginesSection.jsx')
-  assert.match(engines, /id="klein-improve-strength"/)
-  assert.match(engines, /id="klein-improve-strength"[^>]*>\s*[\s\S]{0,200}?Upscale &amp; improve — strength/)
-  assert.match(engines, /id="identity-prompt-klein-improve"/)
-})
-
 // ---- nothing ships targetless by accident ---------------------------------
 
 test('a link without a target is one we decided to leave section-wide', () => {

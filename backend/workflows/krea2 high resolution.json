@@ -1,0 +1,430 @@
+{
+  "41728": {
+    "inputs": {
+      "kv_cache": true,
+      "model": [
+        "41730",
+        0
+      ]
+    },
+    "class_type": "Krea2OstrisEditModelPatch",
+    "_meta": {
+      "title": "Krea 2 Ostris Edit Model Patch"
+    }
+  },
+  "41729": {
+    "inputs": {
+      "lora_name": "krea2\\high quality.safetensors",
+      "strength_model": 0.9,
+      "model": [
+        "41728",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器（仅模型）"
+    }
+  },
+  "41730": {
+    "inputs": {
+      "unet_name": "Krea2_Turbo_convrot_int8mixed.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "41735": {
+    "inputs": {
+      "filename_prefix": "Flux2-Klein",
+      "images": [
+        "41770:41767",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  },
+  "41771": {
+    "inputs": {
+      "image": "image_00021_ (2).png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "41727:41598": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "K采样器选择"
+    }
+  },
+  "41727:41602": {
+    "inputs": {
+      "width": [
+        "41727:41603",
+        0
+      ],
+      "height": [
+        "41727:41603",
+        1
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "空Latent图像"
+    }
+  },
+  "41727:41607": {
+    "inputs": {
+      "noise": [
+        "41727:41734",
+        0
+      ],
+      "guider": [
+        "41727:41601",
+        0
+      ],
+      "sampler": [
+        "41727:41598",
+        0
+      ],
+      "sigmas": [
+        "41727:41599",
+        0
+      ],
+      "latent_image": [
+        "41727:41602",
+        0
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "自定义采样器（高级）"
+    }
+  },
+  "41727:41601": {
+    "inputs": {
+      "model": [
+        "41729",
+        0
+      ],
+      "conditioning": [
+        "41727:41597",
+        0
+      ]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "基本引导器"
+    }
+  },
+  "41727:41600": {
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "41727:41597": {
+    "inputs": {
+      "reference_latents_method": "offset",
+      "conditioning": [
+        "41727:41605",
+        0
+      ]
+    },
+    "class_type": "FluxKontextMultiReferenceLatentMethod",
+    "_meta": {
+      "title": "FluxKontext多参考潜在方法"
+    }
+  },
+  "41727:41603": {
+    "inputs": {
+      "image": [
+        "41727:41608",
+        0
+      ]
+    },
+    "class_type": "GetImageSize",
+    "_meta": {
+      "title": "获取图像尺寸"
+    }
+  },
+  "41727:41605": {
+    "inputs": {
+      "prompt": "photorealistic",
+      "clip": [
+        "41727:41604",
+        0
+      ],
+      "vae": [
+        "41727:41600",
+        0
+      ],
+      "image1": [
+        "41727:41608",
+        0
+      ]
+    },
+    "class_type": "TextEncodeKrea2OstrisEdit",
+    "_meta": {
+      "title": "Text Encode Krea 2 Ostris Edit"
+    }
+  },
+  "41727:41604": {
+    "inputs": {
+      "clip_name": "Qwen3-VL-4B-Instruct-Unredacted-MAX .safetensors",
+      "type": "krea2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "41727:41608": {
+    "inputs": {
+      "image": [
+        "41727:41733",
+        0
+      ]
+    },
+    "class_type": "FluxKontextImageScale",
+    "_meta": {
+      "title": "图像缩放为FluxKontext"
+    }
+  },
+  "41727:41606": {
+    "inputs": {
+      "samples": [
+        "41727:41607",
+        0
+      ],
+      "vae": [
+        "41727:41600",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "41727:41734": {
+    "inputs": {
+      "noise_seed": 10
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "随机噪波"
+    }
+  },
+  "41727:41599": {
+    "inputs": {
+      "scheduler": "simple",
+      "steps": 10,
+      "denoise": 1,
+      "model": [
+        "41729",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "基本调度器"
+    }
+  },
+  "41727:41733": {
+    "inputs": {
+      "longer_edge": 512,
+      "images": [
+        "41771",
+        0
+      ]
+    },
+    "class_type": "ResizeImagesByLongerEdge",
+    "_meta": {
+      "title": "缩放图像（长边）"
+    }
+  },
+  "41727:41759": {
+    "inputs": {
+      "method": "reinhard_lab",
+      "source_stats": "per_frame",
+      "strength": 1,
+      "image_target": [
+        "41727:41606",
+        0
+      ],
+      "image_ref": [
+        "41771",
+        0
+      ]
+    },
+    "class_type": "ColorTransfer",
+    "_meta": {
+      "title": "ColorTransfer"
+    }
+  },
+  "41770:41760": {
+    "inputs": {
+      "unet_name": "seedvr2_7b_sharp_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "41770:41761": {
+    "inputs": {
+      "vae_name": "ema_vae_fp16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "41770:41762": {
+    "inputs": {
+      "resized_images": [
+        "41770:41763",
+        0
+      ]
+    },
+    "class_type": "SeedVR2Preprocess",
+    "_meta": {
+      "title": "Pre-Process SeedVR2 Input"
+    }
+  },
+  "41770:41763": {
+    "inputs": {
+      "resize_type": "scale shorter dimension",
+      "resize_type.shorter_size": 1536,
+      "scale_method": "lanczos",
+      "input": [
+        "41727:41759",
+        0
+      ]
+    },
+    "class_type": "ResizeImageMaskNode",
+    "_meta": {
+      "title": "调整图像/掩码大小"
+    }
+  },
+  "41770:41764": {
+    "inputs": {
+      "tile_size": 512,
+      "overlap": 128,
+      "temporal_size": 1536,
+      "temporal_overlap": 8,
+      "pixels": [
+        "41770:41762",
+        0
+      ],
+      "vae": [
+        "41770:41761",
+        0
+      ]
+    },
+    "class_type": "VAEEncodeTiled",
+    "_meta": {
+      "title": "VAE编码分块）"
+    }
+  },
+  "41770:41765": {
+    "inputs": {
+      "model": [
+        "41770:41760",
+        0
+      ],
+      "vae_conditioning": [
+        "41770:41764",
+        0
+      ]
+    },
+    "class_type": "SeedVR2Conditioning",
+    "_meta": {
+      "title": "Apply SeedVR2 Conditioning"
+    }
+  },
+  "41770:41766": {
+    "inputs": {
+      "seed": 9527,
+      "steps": 1,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "41770:41760",
+        0
+      ],
+      "positive": [
+        "41770:41765",
+        0
+      ],
+      "negative": [
+        "41770:41765",
+        1
+      ],
+      "latent_image": [
+        "41770:41764",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "K采样器"
+    }
+  },
+  "41770:41767": {
+    "inputs": {
+      "color_correction_method": "lab",
+      "images": [
+        "41770:41768",
+        0
+      ],
+      "original_resized_images": [
+        "41770:41763",
+        0
+      ]
+    },
+    "class_type": "SeedVR2PostProcessing",
+    "_meta": {
+      "title": "Post-Process SeedVR2 Output"
+    }
+  },
+  "41770:41768": {
+    "inputs": {
+      "tile_size": 512,
+      "overlap": 128,
+      "temporal_size": 1536,
+      "temporal_overlap": 8,
+      "samples": [
+        "41770:41766",
+        0
+      ],
+      "vae": [
+        "41770:41761",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeTiled",
+    "_meta": {
+      "title": "VAE解码（分块）"
+    }
+  }
+}

@@ -24,11 +24,10 @@ def _png(color=(25, 50, 75)):
     return buf.getvalue()
 
 
-def _stub_klein(monkeypatch, keh, queued):
-    monkeypatch.setattr(keh, 'klein_missing_assets', lambda: [])
-    monkeypatch.setattr(keh, 'klein_missing_nodes', lambda: [])
+def _stub_klein(monkeypatch, khh, queued):
+    monkeypatch.setattr(khh, 'preflight', lambda: None)
     monkeypatch.setattr(
-        keh, 'enqueue_klein_edit',
+        khh, 'enqueue_krea_hq_improve',
         lambda **kwargs: (queued.append(kwargs) or f'improve-job-{len(queued)}'))
 
 
@@ -67,16 +66,17 @@ def _improved_pair(svc, image_cls, user_id, *, parent_filename='parent.png',
 
 def test_reimprove_reruns_the_pass_from_the_parent_with_todays_settings(app, monkeypatch):
     """The whole point: the pass restarts from the PARENT's pixels (never the
-    dataset reference), with the improve knobs as they are NOW — a user who edits
-    klein.improve_steps must be able to see the effect without deleting the tile."""
+    dataset reference), with the improve instruction as it is NOW — a user who
+    edits identity_prompts.klein_improve must be able to see the effect without
+    deleting the tile."""
     from app import config as app_cfg
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
+    from app.services import krea_hq_helper as khh
 
     queued, trashed = [], []
-    _stub_klein(monkeypatch, keh, queued)
+    _stub_klein(monkeypatch, khh, queued)
     monkeypatch.setattr(svc.trash, 'send_to_trash',
                         lambda path, context=None: trashed.append(path))
     monkeypatch.setattr(svc, '_sync_generate_activity', lambda dataset_id: None)
@@ -87,8 +87,8 @@ def test_reimprove_reruns_the_pass_from_the_parent_with_todays_settings(app, mon
         parent_path = svc._img_path(parent)
         old_candidate_path = svc._img_path(candidate)
         # The user tunes the pass AFTER the first result exists.
-        app_cfg.save_config({'klein': {'improve_steps': 9,
-                                       'improve_megapixels': 4.0}})
+        app_cfg.save_config({'identity_prompts': {
+            'klein_improve': 'sharpen only, current setting not the first-run one'}})
 
         result = svc.reimprove_image(LOCAL_USER, candidate_id)
 
@@ -97,8 +97,8 @@ def test_reimprove_reruns_the_pass_from_the_parent_with_todays_settings(app, mon
         job = queued[0]
         assert job['source_path'] == parent_path, 'the pass must start from the parent'
         assert job['source_filename'] == parent.filename
-        assert job['sampler_steps'] == 9, 'current setting, not the one used first time'
-        assert job['output_megapixels'] == 4.0
+        assert job['edit_prompt'] == 'sharpen only, current setting not the first-run one', \
+            'current setting, not the one used first time'
         assert job['extra_metadata']['parent_image_id'] == parent_id
         assert job['extra_metadata']['derivation_kind'] == svc.KLEIN_IMAGE_IMPROVE
 
@@ -128,10 +128,10 @@ def test_reimprove_kept_candidate_restores_parent_as_fallback_after_late_failure
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
+    from app.services import krea_hq_helper as khh
 
     queued = []
-    _stub_klein(monkeypatch, keh, queued)
+    _stub_klein(monkeypatch, khh, queued)
     monkeypatch.setattr(svc.trash, 'send_to_trash', lambda *_args, **_kwargs: None)
     monkeypatch.setattr(svc, '_sync_generate_activity', lambda _dataset_id: None)
 
@@ -159,10 +159,10 @@ def test_reimprove_trash_failure_restores_candidate_and_parent_states(app, monke
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
+    from app.services import krea_hq_helper as khh
 
     queued = []
-    _stub_klein(monkeypatch, keh, queued)
+    _stub_klein(monkeypatch, khh, queued)
     monkeypatch.setattr(
         svc.trash, 'send_to_trash',
         lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError('Trash unavailable')))
@@ -193,11 +193,10 @@ def test_reimprove_never_overwrites_a_candidate_changed_during_enqueue(app, monk
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
+    from app.services import krea_hq_helper as khh
 
     cancelled, trashed = [], []
-    monkeypatch.setattr(keh, 'klein_missing_assets', lambda: [])
-    monkeypatch.setattr(keh, 'klein_missing_nodes', lambda: [])
+    monkeypatch.setattr(khh, 'preflight', lambda: None)
     monkeypatch.setattr(job_queue.queue_manager, 'cancel_job',
                         lambda *args, **_kwargs: cancelled.append(args))
     monkeypatch.setattr(svc.trash, 'send_to_trash',
@@ -221,7 +220,7 @@ def test_reimprove_never_overwrites_a_candidate_changed_during_enqueue(app, monk
             svc.db.session.commit()
             return 'race-job'
 
-        monkeypatch.setattr(keh, 'enqueue_klein_edit', enqueue)
+        monkeypatch.setattr(khh, 'enqueue_krea_hq_improve', enqueue)
         with pytest.raises(RuntimeError, match='changed while it was being re-queued'):
             svc.reimprove_image(LOCAL_USER, candidate_id)
 
@@ -239,10 +238,9 @@ def test_reimprove_preserves_a_caption_edited_during_enqueue(app, monkeypatch, o
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
+    from app.services import krea_hq_helper as khh
 
-    monkeypatch.setattr(keh, 'klein_missing_assets', lambda: [])
-    monkeypatch.setattr(keh, 'klein_missing_nodes', lambda: [])
+    monkeypatch.setattr(khh, 'preflight', lambda: None)
     monkeypatch.setattr(svc.trash, 'send_to_trash', lambda *_args, **_kwargs: None)
     monkeypatch.setattr(svc, '_sync_generate_activity', lambda _dataset_id: None)
 
@@ -261,7 +259,7 @@ def test_reimprove_preserves_a_caption_edited_during_enqueue(app, monkeypatch, o
             svc.db.session.commit()
             return 'caption-race-job'
 
-        monkeypatch.setattr(keh, 'enqueue_klein_edit', enqueue)
+        monkeypatch.setattr(khh, 'enqueue_krea_hq_improve', enqueue)
         result = svc.reimprove_image(LOCAL_USER, candidate_id)
 
         svc.db.session.expire_all()
@@ -279,10 +277,10 @@ def test_reimprove_trash_rollback_preserves_a_concurrent_candidate_decision(
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
+    from app.services import krea_hq_helper as khh
 
     queued = []
-    _stub_klein(monkeypatch, keh, queued)
+    _stub_klein(monkeypatch, khh, queued)
     monkeypatch.setattr(job_queue.queue_manager, 'cancel_job', lambda *_args, **_kwargs: True)
 
     with app.app_context():
@@ -318,10 +316,10 @@ def test_reimprove_trash_rollback_preserves_a_caption_edited_during_trash(
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
+    from app.services import krea_hq_helper as khh
 
     queued = []
-    _stub_klein(monkeypatch, keh, queued)
+    _stub_klein(monkeypatch, khh, queued)
     monkeypatch.setattr(job_queue.queue_manager, 'cancel_job', lambda *_args, **_kwargs: True)
 
     with app.app_context():
@@ -357,10 +355,10 @@ def test_reimprove_trash_rollback_restores_an_unchanged_blank_caption(app, monke
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
+    from app.services import krea_hq_helper as khh
 
     queued = []
-    _stub_klein(monkeypatch, keh, queued)
+    _stub_klein(monkeypatch, khh, queued)
     monkeypatch.setattr(job_queue.queue_manager, 'cancel_job', lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
         svc.trash, 'send_to_trash',
@@ -392,10 +390,10 @@ def test_generic_regenerate_still_refuses_an_improvement(app, monkeypatch):
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
+    from app.services import krea_hq_helper as khh
 
     queued = []
-    _stub_klein(monkeypatch, keh, queued)
+    _stub_klein(monkeypatch, khh, queued)
 
     with app.app_context():
         ds, parent, candidate = _improved_pair(svc, FaceDatasetImage, LOCAL_USER)
@@ -411,10 +409,10 @@ def test_reimprove_refuses_when_the_parent_is_gone(app, monkeypatch):
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
+    from app.services import krea_hq_helper as khh
 
     queued, trashed = [], []
-    _stub_klein(monkeypatch, keh, queued)
+    _stub_klein(monkeypatch, khh, queued)
     monkeypatch.setattr(svc.trash, 'send_to_trash',
                         lambda path, context=None: trashed.append(path))
 
@@ -441,10 +439,10 @@ def test_reimprove_refuses_while_the_pass_is_still_running(app, monkeypatch):
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
+    from app.services import krea_hq_helper as khh
 
     queued = []
-    _stub_klein(monkeypatch, keh, queued)
+    _stub_klein(monkeypatch, khh, queued)
 
     with app.app_context():
         ds, parent, candidate = _improved_pair(svc, FaceDatasetImage, LOCAL_USER,
@@ -462,10 +460,10 @@ def test_reimprove_refuses_a_row_that_is_not_an_improvement(app, monkeypatch):
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
+    from app.services import krea_hq_helper as khh
 
     queued = []
-    _stub_klein(monkeypatch, keh, queued)
+    _stub_klein(monkeypatch, khh, queued)
 
     with app.app_context():
         ds, parent, candidate = _improved_pair(svc, FaceDatasetImage, LOCAL_USER)

@@ -217,12 +217,12 @@ Mirror then crop, in that order, silently loses the mirror: crop always re-deriv
 
 *Requested by SurpassHR ([GitHub #32](https://github.com/perfectgf/lora-dataset-studio/issues/32)).*
 
-The **fidelity** half of ✨ Upscale & improve. The two passes are a choice, not two qualities of the same thing:
+The **fidelity** half of ✨ Upscale & improve. The two engine choices are not "Klein vs SeedVR2" any more — the `klein` engine id itself now RUNS a small Krea 2 edit pass followed by SeedVR2 restoration (colour-corrected back to your original between the two stages), because a pure Klein repaint shifted skin tone and micro-detail along with the fix it was making. The standalone `seedvr2` engine below stays the simpler, edit-free path:
 
 | | what it does | when you want it |
 | --- | --- | --- |
-| **Klein** | re-renders detail and texture from a prompt | a genuinely soft or low-detail photo you are willing to see changed |
-| **SeedVR2** | resolves detail at a higher resolution, content untouched | the frame is right and you only want it sharper — the exact skin tone, grain and colour are part of what you are training |
+| **`klein`** (Krea 2 edit + SeedVR2 restore) | a small edit pass for sharpness/clarity, colour-matched back to your original, then SeedVR2 for the actual detail restoration | the default — closer to the source than the old pure-Klein repaint, still adds a touch of directed sharpening |
+| **`seedvr2`** (standalone) | resolves detail at a higher resolution, content untouched, no edit pass at all | the frame is right and you want the most conservative pass possible — the exact skin tone, grain and colour are part of what you are training |
 
 Both are **non-destructive**: they create a separate candidate and never touch the source file.
 
@@ -241,6 +241,8 @@ Settings:
 - **Blocks offloaded to system RAM** → `seedvr2.blocks_to_swap`. Range `0`–`36`, default **`0`** (none, and fastest). Raise it to fit a bigger build on a smaller card: it trades speed for VRAM headroom and does not change the result.
 
 **There is no batch-size setting, on purpose.** SeedVR2's `batch_size` is a *video* window whose frames share temporal attention to stay coherent — feeding it unrelated dataset photos would let them bleed into each other. Images are upscaled one per job; throughput comes from the normal generation queue and its fan-out cap.
+
+**What the `klein` engine needs**, separately from the standalone SeedVR2 pack above: a Krea 2 Turbo base model, its Qwen3-VL text encoder and Qwen Image VAE (auto-resolved the same way the Krea 2 Edit engine's do), a Krea 2 "high quality" LoRA, and its OWN SeedVR2 build (a specific 7B-sharp int8 model loaded through a plain UNETLoader, not the SeedVR2LoadDiTModel node above — different node pack, same `models/SEEDVR2` folder). None of this is auto-downloaded — a missing file surfaces as a named error on the next ✨ click, telling you exactly where to place it. There is no Settings UI for any of it; every loader value is resolved automatically.
 
 ### Klein generation LoRA presets (optional)
 
@@ -267,19 +269,17 @@ How presets are used matters:
 
 It is a **rendering** knob, not an anatomy fix: extra limbs, tails or wrong body parts come from the identity prompt describing the wrong kind of subject (see the subject-type note below), and no number of steps repairs that.
 
-**Enhancement LoRA on edits** → `klein.edit_base_lora_strength` (0–2, default **0**). How much of the detail LoRA (`klein/realistic.safetensors`) Klein mixes into an **edit**: the ✦ reference edit, variations, regenerations and the small-image rescue. The shipped workflow carries that LoRA at **0.8** and nothing on these lanes ever turned it down — which stayed invisible while the file existed on no install (the node was skipped), and became real once Setup started downloading it: from then on every Klein edit ran with a style LoRA at 0.8 pulling the result away from the instruction you typed. The default **0** is the render every install had before that download existed; raise it to let the LoRA add detail on purpose. “Upscale & improve” is unaffected — it has its own `klein.improve_base_lora_strength`.
-
-Separate from **Upscale & improve ▸ Steps** (`klein.improve_steps`), which drives the manual improve pass only.
+**Enhancement LoRA on edits** → `klein.edit_base_lora_strength` (0–2, default **0**). How much of the detail LoRA (`klein/realistic.safetensors`) Klein mixes into an **edit**: the ✦ reference edit, variations, regenerations and the small-image rescue. The shipped workflow carries that LoRA at **0.8** and nothing on these lanes ever turned it down — which stayed invisible while the file existed on no install (the node was skipped), and became real once Setup started downloading it: from then on every Klein edit ran with a style LoRA at 0.8 pulling the result away from the instruction you typed. The default **0** is the render every install had before that download existed; raise it to let the LoRA add detail on purpose. Does not apply to “Upscale & improve” — see below.
 
 ### Klein model (per dataset)
 
-Not in Settings — it lives on the **dataset**, in the 🖥️ *Klein tuning* block of the generation panel and next to the ✨ **Upscale & improve** action itself. One setting, deliberately: generation and improve drive the same loader in the same workflow, so two near-identical model dropdowns would only be a lasting source of confusion. If you ever need to improve with a heavier model than the one you generate with, say so — splitting one stored value into two is additive; merging two back into one would have to throw one of your answers away.
+Not in Settings — it lives on the **dataset**, in the 🖥️ *Klein tuning* block of the generation panel. It used to also show next to the ✨ **Upscale & improve** action, back when that action ran Flux.2 Klein 9B directly; as of the Krea 2 edit + SeedVR2 restore swap above, improve auto-resolves its own models and this dataset choice no longer reaches it (removing a picker that would have quietly done nothing was the point — see *What the `klein` engine needs* above).
 
 **Default is Auto**, and Auto is exactly what every dataset did before this setting existed: Studio resolves the model itself (the canonical download first, then the first loadable Klein file it finds). Choosing nothing changes nothing.
 
 **The list is detected, never typed.** It comes from the same scan ComfyUI itself would do — `models/unet`, `models/diffusion_models`, every root declared in `extra_model_paths.yaml`, and a relocated models folder (`comfyui.models_dir`) — in a `klein`-named subfolder **or** loose at the root. The one real constraint is that the model must be *nameable* as Klein: either the file name or its folder name has to contain `klein`. See *Where the Klein model can live* in the README.
 
-**What it applies to:** every piece of Klein work that dataset starts — the single ✨ improve, the 🔄✨ re-run, the whole improve batch, Klein generation (variations and regenerations), the **reference edit** on the Klein engine, the **rescue of scraped images under 768 px**, and the **🧽 watermark clean** on the Klein engine (bulk and per-image).
+**What it applies to:** Klein **generation** (variations and regenerations), the **reference edit** on the Klein engine, the **rescue of scraped images under 768 px**, and the **🧽 watermark clean** on the Klein engine (bulk and per-image). Not ✨ Upscale & improve — see above.
 
 **The one exception is a bank**, which has no dataset and therefore nothing to inherit: its 🧽 Klein inpaint resolves the model automatically, and the panel says which one. Naming the model and choosing it are separate questions — a bank can be told, it just has nowhere to store an answer.
 
@@ -287,7 +287,7 @@ Not in Settings — it lives on the **dataset**, in the 🖥️ *Klein tuning* b
 
 **If the model you chose is later moved or deleted**, the run **refuses by name** and tells you which file is gone. It does not quietly fall back to another model: that swap produces a result that looks perfectly fine and is not the one you asked for.
 
-**Coming from an older version:** the generation picker used to save to your **browser** (`editPage_flux2KleinModel_v1`), which improve never read — that is why improve had no model option anywhere. That browser value is still honoured for generation and is now offered, once, to be saved onto the dataset. Nothing is adopted behind your back: until you accept, improve keeps resolving Auto exactly as before.
+**Coming from an older version:** the generation picker used to save to your **browser** (`editPage_flux2KleinModel_v1`). That browser value is still honoured for generation and is offered, once, to be saved onto the dataset. Nothing is adopted behind your back.
 
 ### Identity & Klein prompts (advanced)
 
@@ -310,14 +310,8 @@ Storage follows that split, and nothing was renamed or migrated: the **Human** o
 - **API engine — identity lock (single reference)** → `identity_prompts.face_single`. Prepended to Nano Banana / ChatGPT variations built from **one** reference photo.
 - **API engine — identity lock (multiple references)** → `identity_prompts.face_multi`. The same, for variations built from **several** reference photos — it tells the model every reference is the same person and to use them together.
 - **Klein — restage & face-identity block** → `identity_prompts.klein_identity`. The instruction block the local **Klein** engine uses to restage the shot (pose, framing, outfit, expression) while keeping the face identical.
-- **Klein upscale & improve prompt** → `identity_prompts.klein_improve`, with an on/off toggle `identity_prompts.klein_improve_enabled` (default **on**). The fixed instruction the manual **Klein upscale & improve** action sends to add texture and detail. The shipped text is `add detailed texture, add sharp details, add candid shot, add soft focus effect` — read it before you blame the model: those four clauses describe a **photograph**, and they are applied to every dataset, drawn ones included. **Turn the toggle off** to run that action with **no prompt at all** — a pure upscale with no added styling. Both the text in force and these two levers are now quoted and linked from the ✨ **Upscale & improve** button itself (lightbox and bulk toolbar), so you no longer have to know this setting exists to find it.
-- **Upscale & improve — strength** → `klein.improve_megapixels`, `klein.improve_base_lora_strength`, `klein.improve_consistency_strength`, `klein.improve_steps`. The output resolution, and how much that pass is allowed to change the image. Until these were exposed the whole profile was hardcoded — **both LoRA strengths pinned to 0**, so the *enhancement* LoRA baked into the workflow never applied at all, and the size was fixed at 2 MP whatever the source was worth. Defaults are those same historical values (**2 MP / 0 / 0 / 4 steps**), so leaving them alone keeps today's result exactly. These are read at each run, so to try a new value on an image you already improved, use the **🔄✨** button on that tile: it re-runs the pass on the same source image with the settings as they are now, and replaces the result in place. (The ordinary 🔄 stays hidden there — it would restart from the dataset's reference photo and make an unrelated image.)
-  - **Output size (MP)** (0.5–8, default **2**) — the source is rescaled to this pixel budget before sampling, so it *is* the result's resolution. This is the knob that makes "Upscale" actually upscale.
-  - **Enhancement LoRA** (0–2, default **0**) — the workflow's own detail LoRA. At 0 it does nothing; try **0.5–0.8**. It needs its weights file (`klein/realistic.safetensors`): when that file is missing the node is skipped entirely and this value changes nothing. **Setup ▸ Install everything downloads it** with the other Klein assets (from [dx8152/Flux2-Klein-9B-Enhanced-Details](https://huggingface.co/dx8152/Flux2-Klein-9B-Enhanced-Details), Apache-2.0) — run it first if the slider seems inert.
-  - **Consistency LoRA** (0–1.5, default **1**) — anchors the **composition and background**, not identity. Deliberately high here: an improve pass should add detail *without* redrawing the shot, so the resistance to editing that makes 0.8–1.0 a poor choice for restaging is exactly what you want. (Shipped briefly as `improve_character_lora_strength`, a misnomer; a value saved under that name is still honoured.)
-  - **Steps** (1–50, default **4**) — more steps is slower and usually cleaner.
-  - Out-of-range or malformed values are **clamped**, never rejected: a bad config weakens the pass instead of failing your click.
-  - **A strength you raised is never silently dropped.** If a LoRA's weights file is missing while its strength is above 0, the pass reports the missing asset (which is what triggers its download) instead of running without it and leaving you to wonder why nothing changed. At strength 0 it stays a quiet skip — nothing is lost by not loading a LoRA you did not ask for.
+- **Upscale & improve prompt** → `identity_prompts.klein_improve`, with an on/off toggle `identity_prompts.klein_improve_enabled` (default **on**). The instruction the ✨ **Upscale & improve** `klein` engine's Krea 2 edit stage sends. The shipped text is `remove blur, remove noise, add sharp fine detail, add crisp in-focus clarity, correct soft or out-of-focus areas, high-definition`. **Turning the toggle off does not fully silence it**: the Krea 2 edit node this pipeline uses was never tested with a blank prompt, so an empty/disabled instruction falls back to a neutral `photorealistic` rather than running with nothing — unlike the old Flux.2 Klein pass, this one has no true "prompt-free" mode. Editable per subject type is **not** offered here — like the identity locks below, `klein_improve` stays global.
+- ~~**Upscale & improve — strength** → `klein.improve_megapixels`, `klein.improve_base_lora_strength`, `klein.improve_consistency_strength`, `klein.improve_steps`.~~ **Currently has no effect.** These four still save in Settings, but nothing reads them any more: they configured the OLD Flux.2 Klein 9B improve pass, and the Krea 2 edit + SeedVR2 pipeline that replaced it (see *SeedVR2 upscaling* above) has no equivalent knobs — output size, LoRA strength and step count are fixed inside the shipped workflow instead. Left in place rather than ripped out mid-iteration; if you are reading this and they are still here, they may simply not have been cleaned up yet.
 
 Each field is a plain textarea; there's no Test button — you see the effect on your next generation. If an override ever makes results worse, hit **Restore default**.
 

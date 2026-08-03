@@ -9,7 +9,6 @@
  * decision and its stability guarantees.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import KleinImproveNote from './KleinImproveNote';
 import {
   decideActionPlacement, rememberImageRatio, readImageRatio,
 } from './lightboxActionPlacement';
@@ -17,7 +16,7 @@ import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { displayLabel } from '../../utils/labels';
 import PexelsAttribution from './PexelsAttribution';
 
-const IMPROVE_HELP = 'Klein creates a new 2 MP version to validate and leaves the original intact.';
+const IMPROVE_HELP = 'Creates a new upscaled version to validate and leaves the original intact.';
 const COMPARE_HELP = 'Show the original this image was made from, next to it, at the same scale.';
 
 /**
@@ -323,24 +322,6 @@ export default function DatasetLightbox({
               ? '✓ Review improvement first'
               : improvementActive ? '✨ Improving…' : '✨ Upscale & improve'}
           </button>
-        )}
-        {/* Its strength, step count and instruction are all editable, and nothing
-            here said so — the reported case for making settings discoverable from
-            where the action happens. A link alone was not enough: it pointed at
-            the strength knobs while the complaint ("anime comes back realistic",
-            Qeeyana on Reddit) is caused by the INSTRUCTION. The note quotes that
-            instruction live and links to both. */}
-        {/* It stays glued to ✨, in both placements. It is what the button is
-            about to ask the model for, so it is only worth reading in the
-            second before clicking — parked anywhere else it becomes a stray
-            paragraph. The rail is where it fits BEST: it is prose, and a 15rem
-            column is a better shape for prose than a strip squeezed to the
-            right of six buttons. A rule above it ties it to the ✨ it explains. */}
-        {onImprove && !improvementActive && (
-          <KleinImproveNote subjectType={subjectType} datasetId={datasetId}
-            className={rail
-              ? 'w-full border-t border-white/10 pt-2'
-              : 'w-full sm:w-auto sm:max-w-md'} />
         )}
       </div>
     </div>

@@ -1,25 +1,24 @@
-"""The Klein model used by ✨ Upscale & improve is a CHOICE, and it is the dataset's.
+"""The Klein model a dataset runs on is a CHOICE, stored on the dataset (not per
+browser) — originally shipped so ✨ Upscale & improve could honour it too.
 
-Reported by the maintainer: "I have no option anywhere to choose the Klein model
-used for improve and upgrade". Both halves were true. `improve_existing_image`
-took no model parameter, so `enqueue_klein_edit` always received `klein_model=None`
-and fell back to whatever `resolve_klein_unet(None)` happened to find — while the
-GENERATION lane had had a picker for months, whose value was persisted per BROWSER
-(`editPage_flux2KleinModel_v1`) even though it describes what the dataset contains.
+That pass no longer runs Klein at all as of the Krea2 Ostris Edit + SeedVR2
+swap (see krea_hq_helper): its model choice is auto-resolved, not user-picked,
+so the "the stored choice reaches enqueue_klein_edit on all three improve
+lanes" pinning that used to live here is gone with it. Everything below is
+about `dataset_klein_model` / `enqueue_klein_edit` as they still stand for
+every OTHER Klein call site (regenerate, variation restaging).
 
 What this file pins:
 
-* the stored choice reaches `enqueue_klein_edit` on all THREE improve lanes
-  (single, re-improve, batch) — a choice honoured by one of them would be worse
-  than no choice at all;
 * a dataset that never chose still resolves EXACTLY the model it resolved before
-  (the anti-regression that makes this migration a no-op);
+  (the anti-regression that made the original migration a no-op);
 * a stored model that has since left the disk is refused BY NAME instead of being
   silently swapped for another one — the old `resolve_klein_unet(selected)`
   fallback chain did the swap without a word;
 * every on-disk layout the resolver accepts is also OFFERED by the picker, layout
   by layout (the list is imported from test_klein_model_locations_documented so
-  the two can never drift apart).
+  the two can never drift apart);
+* the choice is stored on the dataset, sanitized against path traversal.
 """
 import io
 import os
@@ -40,99 +39,7 @@ def _png():
     return buf.getvalue()
 
 
-def _dataset_with_source(svc, image_cls, user_id, filename='source.png'):
-    ds = svc.create_dataset(user_id, 'Improve model', 'improvemodel')
-    os.makedirs(svc._dataset_dir(ds.id), exist_ok=True)
-    with open(os.path.join(svc._dataset_dir(ds.id), filename), 'wb') as fh:
-        fh.write(_png())
-    image = image_cls(dataset_id=ds.id, filename=filename, source='import',
-                      status='keep', framing='body', caption='a caption',
-                      variation_label='Imported', variation_prompt='p')
-    svc.db.session.add(image)
-    svc.db.session.commit()
-    return ds, image
-
-
-@pytest.fixture()
-def lanes(app, monkeypatch):
-    """The three improve lanes, each returning the kwargs enqueue_klein_edit saw."""
-    from app.config import LOCAL_USER
-    from app.models import FaceDatasetImage
-    from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
-
-    queued = []
-    monkeypatch.setattr(keh, 'klein_missing_assets', lambda: [])
-    monkeypatch.setattr(keh, 'klein_missing_nodes', lambda: [])
-    monkeypatch.setattr(svc, '_sync_generate_activity', lambda *a, **k: None)
-    counter = {'n': 0}
-
-    def _enqueue(**kwargs):
-        queued.append(kwargs)
-        counter['n'] += 1
-        return f'job-{counter["n"]}'
-
-    monkeypatch.setattr(keh, 'enqueue_klein_edit', _enqueue)
-
-    class Lanes:
-        calls = queued
-
-        @staticmethod
-        def single(stored=None):
-            ds, src = _dataset_with_source(svc, FaceDatasetImage, LOCAL_USER)
-            if stored is not None:
-                svc.set_dataset_klein_model(LOCAL_USER, ds.id, stored)
-            svc.improve_existing_image(LOCAL_USER, src.id)
-            return ds, src
-
-        @staticmethod
-        def reimprove(stored=None):
-            ds, src = _dataset_with_source(svc, FaceDatasetImage, LOCAL_USER)
-            if stored is not None:
-                svc.set_dataset_klein_model(LOCAL_USER, ds.id, stored)
-            res = svc.improve_existing_image(LOCAL_USER, src.id)
-            candidate = FaceDatasetImage.query.get(res['candidate_id'])
-            # A re-improve only runs on a FINISHED candidate.
-            candidate.filename = 'improved.png'
-            with open(os.path.join(svc._dataset_dir(ds.id), 'improved.png'), 'wb') as fh:
-                fh.write(_png())
-            candidate.status = 'keep'
-            svc.db.session.commit()
-            queued.clear()
-            svc.reimprove_image(LOCAL_USER, candidate.id)
-            return ds, candidate
-
-        @staticmethod
-        def batch(stored=None):
-            ds, src = _dataset_with_source(svc, FaceDatasetImage, LOCAL_USER)
-            if stored is not None:
-                svc.set_dataset_klein_model(LOCAL_USER, ds.id, stored)
-            svc.start_bulk_improve(app, LOCAL_USER, ds.id, [src.id])
-            return ds, src
-
-    with app.app_context():
-        yield Lanes
-
-
-# --- 1. The choice reaches the queue, on all three lanes ---------------------
-@pytest.mark.parametrize('lane', ['single', 'reimprove', 'batch'])
-def test_the_stored_choice_reaches_enqueue_on_every_lane(lanes, lane):
-    getattr(lanes, lane)(stored=OTHER_FILE)
-    assert lanes.calls, f'{lane} enqueued nothing'
-    assert lanes.calls[-1].get('klein_model') == OTHER_FILE, lane
-
-
-# --- 2. Anti-regression: a dataset that never chose is untouched -------------
-@pytest.mark.parametrize('lane', ['single', 'reimprove', 'batch'])
-def test_a_dataset_that_never_chose_keeps_todays_model(lanes, lane):
-    """`klein_model=None` is what every improve sent before this feature existed,
-    and it is what makes resolve_klein_unet pick the canonical download. Anything
-    else here means the migration changed the output of an untouched install."""
-    getattr(lanes, lane)()
-    assert lanes.calls[-1].get('klein_model') is None, lane
-
-
-# --- 3. A model that left the disk is refused BY NAME -----------------------
+# --- A model that left the disk is refused BY NAME ---------------------------
 def test_a_vanished_model_is_refused_by_name_not_swapped(app, tmp_path):
     """The old chain resolved an unknown pick to the canonical file and ran the
     job on it. A user who chose a 32B model and got a 9B result had no way to

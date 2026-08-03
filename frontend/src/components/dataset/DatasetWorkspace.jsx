@@ -1189,7 +1189,6 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   }}
                   onBatch={ds.batchImages} busy={ds.busy}
                   onImproveBatch={ds.improveBatch} activity={act}
-                  kleinAvailable={Boolean(caps.engines?.klein)}
                   subjectType={d.subject_type || 'human'}
                   eligibilityImages={images}
                   nonces={ds.nonces} faceThresholds={d.face_thresholds} datasetKind={d.kind || 'character'}
@@ -2005,7 +2004,11 @@ export default function DatasetWorkspace({ ds, onBack }) {
           improvePending={viewImgImproving}
           improveReady={viewImgImprovementReady}
           busy={ds.busy}
-          kleinAvailable={Boolean(caps.engines?.klein)}
+          // kleinAvailable gates the improve button, not dataset generation — the
+          // improve pass's 'klein' engine no longer runs the Flux.2 Klein 9B that
+          // caps.engines.klein checks (see krea_hq_helper); a real missing asset
+          // still surfaces as a 409 on click.
+          kleinAvailable
           subjectType={d.subject_type || 'human'}
           onCrop={viewImgLive._rescueReviewPreview
             ? undefined

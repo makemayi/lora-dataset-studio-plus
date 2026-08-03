@@ -20,7 +20,9 @@ const read = (p) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
 
 // file → whether that surface also lets the model be CHOSEN (it has a dataset).
 const SURFACES = {
-  '../dataset/KleinImproveNote.jsx': true,      // ✨ Upscale & improve (shipped first)
+  // ✨ Upscale & improve no longer runs Klein at all (Krea2 Ostris Edit +
+  // SeedVR2, see krea_hq_helper) — its KleinImproveNote/KleinModelSetting
+  // pairing was removed, not left pointing at a control with no effect.
   '../dataset/VariationCatalog.jsx': true,      // Klein generation
   '../dataset/ReferenceEditModal.jsx': true,    // local reference edit
   '../dataset/ConceptSourcesPanel.jsx': true,   // rescue of small scraped images

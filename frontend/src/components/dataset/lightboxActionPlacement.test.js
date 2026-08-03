@@ -200,7 +200,6 @@ test('tab order follows the eye: one DOM order, no CSS reordering', () => {
     'Rotate left',
     'Rotate right',
     '✨ Upscale & improve',
-    '<KleinImproveNote',
   ].map(at);
   for (let i = 1; i < order.length; i += 1) {
     assert.ok(order[i] > order[i - 1], 'the action DOM order must not change');

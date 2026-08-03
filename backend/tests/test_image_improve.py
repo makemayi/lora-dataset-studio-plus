@@ -298,14 +298,13 @@ def test_improve_existing_image_is_non_destructive_and_uses_metadata_profile(
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
+    from app.services import krea_hq_helper as khh
 
     queued = []
     syncs = []
-    monkeypatch.setattr(keh, 'klein_missing_assets', lambda: [])
-    monkeypatch.setattr(keh, 'klein_missing_nodes', lambda: [])
+    monkeypatch.setattr(khh, 'preflight', lambda: None)
     monkeypatch.setattr(
-        keh, 'enqueue_klein_edit',
+        khh, 'enqueue_krea_hq_improve',
         lambda **kwargs: (queued.append(kwargs) or 'improve-job-1'))
     monkeypatch.setattr(
         svc.cfg, 'get',
@@ -347,14 +346,6 @@ def test_improve_existing_image_is_non_destructive_and_uses_metadata_profile(
         assert queued[0]['source_filename'] == source.filename
         assert queued[0]['source_path'] == svc._img_path(source)
         assert queued[0]['edit_prompt'] == svc.KLEIN_IMAGE_IMPROVE_PROMPT
-        # The shipped improve profile, now settings-driven (klein.improve_*): a HIGH
-        # consistency because this pass must add detail without redrawing the
-        # composition, the enhancement LoRA off until the user raises it, 4 steps and
-        # the historical 2 MP output budget.
-        assert queued[0]['lora_strength'] == 1.0
-        assert queued[0]['sampler_steps'] == 4
-        assert queued[0]['base_lora_strength'] == 0.0
-        assert queued[0]['output_megapixels'] == 2.0
         assert queued[0]['extra_metadata']['source_image_id'] == source_id
         assert queued[0]['extra_metadata']['derivation_kind'] == svc.KLEIN_IMAGE_IMPROVE
         assert syncs == [ds.id]
@@ -364,7 +355,7 @@ def test_improve_existing_image_returns_active_candidate_idempotently(app, monke
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
+    from app.services import krea_hq_helper as khh
 
     with app.app_context():
         ds, source, _raw = _source(svc, FaceDatasetImage, LOCAL_USER)
@@ -377,13 +368,10 @@ def test_improve_existing_image_returns_active_candidate_idempotently(app, monke
         active_id = active.id
 
         monkeypatch.setattr(
-            keh, 'klein_missing_assets',
+            khh, 'preflight',
             lambda: (_ for _ in ()).throw(AssertionError('idempotent path must not preflight')))
         monkeypatch.setattr(
-            keh, 'klein_missing_nodes',
-            lambda: (_ for _ in ()).throw(AssertionError('idempotent path must not preflight')))
-        monkeypatch.setattr(
-            keh, 'enqueue_klein_edit',
+            khh, 'enqueue_krea_hq_improve',
             lambda **_kwargs: (_ for _ in ()).throw(AssertionError('must not enqueue twice')))
 
         first = svc.improve_existing_image(LOCAL_USER, source.id)
@@ -399,10 +387,9 @@ def test_improve_existing_image_rejects_missing_and_review_sources(app, monkeypa
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
+    from app.services import krea_hq_helper as khh
 
-    monkeypatch.setattr(keh, 'klein_missing_assets', lambda: [])
-    monkeypatch.setattr(keh, 'klein_missing_nodes', lambda: [])
+    monkeypatch.setattr(khh, 'preflight', lambda: None)
     with app.app_context():
         assert svc.improve_existing_image(LOCAL_USER, 999999) is None
 
@@ -437,19 +424,20 @@ def test_improve_existing_image_preflights_models_and_fanout(app, monkeypatch):
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
-    from app.services.klein_edit_helper import KleinModelsMissing
+    from app.services import krea_hq_helper as khh
+    from app.services.krea_hq_helper import KreaHQModelsMissing
 
     with app.app_context():
         ds, source, _raw = _source(svc, FaceDatasetImage, LOCAL_USER)
-        monkeypatch.setattr(keh, 'klein_missing_assets', lambda: ['klein_model'])
-        monkeypatch.setattr(keh, 'klein_missing_nodes', lambda: [])
-        with pytest.raises(KleinModelsMissing):
+        monkeypatch.setattr(
+            khh, 'preflight',
+            lambda: (_ for _ in ()).throw(KreaHQModelsMissing(['krea_model'])))
+        with pytest.raises(KreaHQModelsMissing):
             svc.improve_existing_image(LOCAL_USER, source.id)
         assert FaceDatasetImage.query.filter_by(
             derivation_kind=svc.KLEIN_IMAGE_IMPROVE).count() == 0
 
-        monkeypatch.setattr(keh, 'klein_missing_assets', lambda: [])
+        monkeypatch.setattr(khh, 'preflight', lambda: None)
         for _ in range(svc.MAX_FANOUT):
             svc.db.session.add(FaceDatasetImage(
                 dataset_id=ds.id, source='generated', status='pending'))
@@ -464,12 +452,11 @@ def test_improve_existing_image_removes_candidate_when_enqueue_fails(app, monkey
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
+    from app.services import krea_hq_helper as khh
 
-    monkeypatch.setattr(keh, 'klein_missing_assets', lambda: [])
-    monkeypatch.setattr(keh, 'klein_missing_nodes', lambda: [])
+    monkeypatch.setattr(khh, 'preflight', lambda: None)
     monkeypatch.setattr(
-        keh, 'enqueue_klein_edit',
+        khh, 'enqueue_krea_hq_improve',
         lambda **_kwargs: (_ for _ in ()).throw(RuntimeError('ComfyUI offline')))
     with app.app_context():
         _ds, source, raw = _source(svc, FaceDatasetImage, LOCAL_USER)
@@ -488,7 +475,7 @@ def test_concurrent_improve_requests_enqueue_only_once(app, monkeypatch):
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
+    from app.services import krea_hq_helper as khh
 
     entered = threading.Event()
     release = threading.Event()
@@ -500,9 +487,8 @@ def test_concurrent_improve_requests_enqueue_only_once(app, monkeypatch):
         assert release.wait(3), 'test did not release the fake enqueue'
         return 'one-concurrent-job'
 
-    monkeypatch.setattr(keh, 'klein_missing_assets', lambda: [])
-    monkeypatch.setattr(keh, 'klein_missing_nodes', lambda: [])
-    monkeypatch.setattr(keh, 'enqueue_klein_edit', enqueue)
+    monkeypatch.setattr(khh, 'preflight', lambda: None)
+    monkeypatch.setattr(khh, 'enqueue_krea_hq_improve', enqueue)
     monkeypatch.setattr(svc, '_sync_generate_activity', lambda _dataset_id: None)
     with app.app_context():
         _ds, source, _raw = _source(svc, FaceDatasetImage, LOCAL_USER)

@@ -132,6 +132,25 @@ DECLARED_THIRD_PARTY_NODES = {
     # None fallback, which prints the bare class name for exactly this case.
     'ResizeImageMaskNode': 'update ComfyUI (core node added in v0.9.2, no separate pack)',
     'ComfySwitchNode': 'update ComfyUI (core node, no separate pack)',
+    # 'krea2 high resolution.json' — the ✨ Upscale & improve 'klein' engine's Krea 2
+    # Ostris Edit + SeedVR2 restore graph (see krea_hq_helper). Gated by
+    # krea_hq_helper.krea_hq_missing_nodes(), which scans the WHOLE graph against
+    # /object_info generically rather than a hand-picked required-node list — so
+    # every class below is genuinely preflighted at runtime even though most of
+    # these pack attributions are inferred, not measured against a live install
+    # (see the module docstring for exactly which).
+    'FluxKontextImageScale': 'update ComfyUI (Flux.1 Kontext core support, inferred not measured)',
+    'FluxKontextMultiReferenceLatentMethod':
+        'update ComfyUI (Flux.1 Kontext core support, inferred not measured)',
+    'VAEEncodeTiled': 'update ComfyUI (core tiled VAE node, inferred not measured)',
+    'VAEDecodeTiled': 'update ComfyUI (core tiled VAE node, inferred not measured)',
+    'Krea2OstrisEditModelPatch': 'unknown pack — a Krea 2 Ostris Edit variant, not comfyui-krea2edit above',
+    'TextEncodeKrea2OstrisEdit': 'unknown pack — a Krea 2 Ostris Edit variant, not comfyui-krea2edit above',
+    'ResizeImagesByLongerEdge': 'unknown pack',
+    'ColorTransfer': 'unknown pack',
+    'SeedVR2Preprocess': 'ComfyUI-SeedVR2_VideoUpscaler (inferred: same author/folder convention as SeedVR2VideoUpscaler above, not measured against a live install)',
+    'SeedVR2Conditioning': 'ComfyUI-SeedVR2_VideoUpscaler (inferred: same author/folder convention as SeedVR2VideoUpscaler above, not measured against a live install)',
+    'SeedVR2PostProcessing': 'ComfyUI-SeedVR2_VideoUpscaler (inferred: same author/folder convention as SeedVR2VideoUpscaler above, not measured against a live install)',
 }
 
 # (class_type, field) pairs where a DECLARED_THIRD_PARTY_NODES class happens to

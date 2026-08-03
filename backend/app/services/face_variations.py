@@ -64,7 +64,8 @@ IDENTITY_GUARD_KLEIN = (
 # ONE default registry; face_dataset_service re-imports it under the same name so
 # `svc.KLEIN_IMAGE_IMPROVE_PROMPT` (persisted-in-tests) keeps resolving.
 KLEIN_IMAGE_IMPROVE_PROMPT = (
-    'add detailed texture, add sharp details, add candid shot, add soft focus effect')
+    'remove blur, remove noise, add sharp fine detail, add crisp in-focus clarity, '
+    'correct soft or out-of-focus areas, high-definition')
 
 
 # --- Editable identity / quality prompts (feature request @bbsorry / 雨田壹) ---

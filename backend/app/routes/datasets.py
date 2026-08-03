@@ -870,16 +870,52 @@ def _autostart_seedvr2_downloads(missing):
 def _improve_engine_error(e):
     """The (body, 409) for an improve preflight miss, whichever engine raised it,
     or None when `e` is not one of those. Every improve route answers the same
-    three exception types, so the mapping lives once."""
+    exception types, so the mapping lives once.
+
+    KleinNodesMissing/KleinModelsMissing stay here for every OTHER Klein call
+    site (regenerate, variation restaging) — the improve 'klein' engine itself
+    now raises KreaHQModelsMissing (see krea_hq_helper), since as of the
+    Krea2+SeedVR2 workflow swap it no longer runs Flux.2 Klein 9B."""
     from ..services.klein_edit_helper import KleinModelsMissing
     from ..services.seedvr2_helper import SeedVR2ModelsMissing
+    from ..services.krea_hq_helper import KreaHQModelsMissing
     if isinstance(e, svc.KleinNodesMissing):
         return _klein_missing_response(e.missing, e.missing_nodes)
     if isinstance(e, KleinModelsMissing):
         return _klein_missing_response(e.missing)
     if isinstance(e, SeedVR2ModelsMissing):
         return _seedvr2_missing_response(e)
+    if isinstance(e, KreaHQModelsMissing):
+        return _krea_hq_missing_response(e)
     return None
+
+
+def _krea_hq_missing_response(e):
+    """Turn a KreaHQModelsMissing into a structured 409, same `{files, nodes,
+    node_packs}` vocabulary as the other engines' 409s. NO auto-install
+    (unlike Klein/Krea/SeedVR2's own preflight misses): every asset here is
+    either the user's own curated file with no verified public URL, or a
+    Krea2 asset that's ALREADY presumably present (this is the improve pass
+    the user just finished testing) — so the honest answer is exactly where
+    to place a genuinely missing file, never a fake installer button."""
+    from ..services import krea_hq_helper as khh
+    files = khh.missing_file_entries(e.missing)
+    node_packs = khh.node_hints(e.missing_nodes)
+    parts = ["The Krea2+SeedVR2 restore pass can't run yet."]
+    if e.missing_nodes:
+        named = ', '.join(n['class_type'] for n in e.missing_nodes)
+        parts.append(f"ComfyUI is missing these node classes: {named}. Install the pack(s) "
+                     f"providing them (the SeedVR2 tiled nodes ship in "
+                     f"“{khh.KREA_HQ_NODE_PACK['pack']}”, "
+                     f"{khh.KREA_HQ_NODE_PACK['url']}) and restart ComfyUI.")
+    for f in files:
+        parts.append(f"Missing {f['kind']}: place it at {f['path']} inside your ComfyUI "
+                     f"folder ({f['source']}).")
+    parts.append('Then retry.')
+    return jsonify({'ok': False, 'error': ' '.join(parts),
+                    'krea_hq_missing': {'assets': e.missing, 'files': files,
+                                        'nodes': e.missing_nodes,
+                                        'node_packs': node_packs}}), 409
 
 
 def _autostart_krea_install(missing, missing_nodes):

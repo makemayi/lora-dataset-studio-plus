@@ -155,11 +155,10 @@ def _run_improve(app, monkeypatch, overrides):
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
-    from app.services import klein_edit_helper as keh
+    from app.services import krea_hq_helper as khh
     queued = []
-    monkeypatch.setattr(keh, 'klein_missing_assets', lambda: [])
-    monkeypatch.setattr(keh, 'klein_missing_nodes', lambda: [])
-    monkeypatch.setattr(keh, 'enqueue_klein_edit',
+    monkeypatch.setattr(khh, 'preflight', lambda: None)
+    monkeypatch.setattr(khh, 'enqueue_krea_hq_improve',
                         lambda **kw: (queued.append(kw) or 'improve-job'))
     monkeypatch.setattr(svc, '_sync_generate_activity', lambda _d: None)
 

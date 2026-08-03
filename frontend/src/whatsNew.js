@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-04-improve-restores-instead-of-rewriting',
+    date: '2026-08-04',
+    title: '✨ Upscale & improve now restores detail instead of redrawing the photo',
+    blurb:
+      "The old pass was a full Klein repaint — it fixed a soft photo but could shift skin tone and micro-detail along with it. Improve now runs a small edit pass for sharpness/clarity, colour-corrects the result back to your original's exact tone, then hands it to SeedVR2 for the actual detail restoration — closer to the source, sharper result. Same button, same place.",
+    to: '/datasets?section=images&panel=review',
+  },
+  {
     id: '2026-08-03-paste-to-upload-reference-photos',
     date: '2026-08-03',
     title: 'Paste a reference photo instead of hunting for it in a file picker',
