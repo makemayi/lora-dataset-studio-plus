@@ -247,6 +247,8 @@ export default function DatasetWorkspace({ ds, onBack }) {
   const [refEdit, setRefEdit] = useState(false);
   // Filename of the extra reference being cropped (extras have no numeric id).
   const [extraRefCrop, setExtraRefCrop] = useState(null);
+  // Pose key ('left'/'right'/'back'/...) of the pose slot photo being cropped.
+  const [poseSlotCrop, setPoseSlotCrop] = useState(null);
   const [viewImg, setViewImg] = useState(null);
   const [captionMode, setCaptionMode] = useState(null);   // null → défaut auto selon train_type
   const [showLeaks, setShowLeaks] = useState(false);       // liste dépliée des captions qui fuient
@@ -1224,7 +1226,12 @@ export default function DatasetWorkspace({ ds, onBack }) {
                       extraRefs={d.ref_extra_filenames || []}
                       onAddExtraRef={ds.addExtraRef} onRemoveExtraRef={ds.removeExtraRef}
                       onCropExtraRef={(fn) => setExtraRefCrop(fn)}
-                      subjectType={d.subject_type || 'human'} />
+                      subjectType={d.subject_type || 'human'}
+                      poseSlots={d.pose_slots || {}}
+                      onSetPoseSlot={ds.setPoseSlot} onMirrorPoseSlot={ds.mirrorPoseSlot}
+                      onTogglePoseSlotEnabled={ds.togglePoseSlotEnabled}
+                      onRemovePoseSlot={ds.removePoseSlot}
+                      onCropPoseSlot={(poseKey) => setPoseSlotCrop(poseKey)} />
                   </div>
                 </div>
 
@@ -1975,6 +1982,14 @@ export default function DatasetWorkspace({ ds, onBack }) {
           ds.refNonce ? `?v=${ds.refNonce}` : ''}`}
           onCancel={() => setExtraRefCrop(null)}
           onConfirm={async (box) => { await ds.cropExtraRef(extraRefCrop, box); setExtraRefCrop(null); }} />
+      )}
+      {poseSlotCrop && d.pose_slots?.[poseSlotCrop]?.filename && (
+        <CropModal imageUrl={`/api/dataset/${d.id}/img/${encodeURIComponent(
+          d.pose_slots[poseSlotCrop].original_filename || d.pose_slots[poseSlotCrop].filename)}${
+          ds.refNonce ? `?v=${ds.refNonce}` : ''}`}
+          defaultAspect={1}
+          onCancel={() => setPoseSlotCrop(null)}
+          onConfirm={async (box) => { await ds.cropPoseSlot(poseSlotCrop, box); setPoseSlotCrop(null); }} />
       )}
       {viewImgLive && (
         <DatasetLightbox img={viewImgLive} datasetId={d.id}

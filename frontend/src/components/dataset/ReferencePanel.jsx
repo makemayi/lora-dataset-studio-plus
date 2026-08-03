@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import IdentityPromptModal from './IdentityPromptModal';
+import PoseSlotPanel from './PoseSlotPanel';
 // Engine names come from the derived edit list — spelling them out here is how
 // this tooltip ended up naming two engines while a third could already edit.
 import { editEngineNames } from './referenceEdit';
@@ -10,7 +11,10 @@ const MAX_EXTRA_REFS = 3;
 export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCropRef, onEditRef, busy,
                                          importBusy = busy, visionBusy = false, nonce = 0,
                                          extraRefs = [], onAddExtraRef, onRemoveExtraRef,
-                                         onCropExtraRef, subjectType = 'human' }) {
+                                         onCropExtraRef, subjectType = 'human',
+                                         poseSlots = {}, onSetPoseSlot, onCropPoseSlot,
+                                         onMirrorPoseSlot, onTogglePoseSlotEnabled,
+                                         onRemovePoseSlot }) {
   const inp = useRef(null);
   const inpExtra = useRef(null);
   // Auto head-crop = OPT-IN (vision pass, pauses ComfyUI). Default OFF: upload is
@@ -103,6 +107,12 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
           <input ref={inpExtra} type="file" accept="image/*" className="hidden" disabled={importBusy}
             onChange={(e) => { if (e.target.files[0]) onAddExtraRef?.(e.target.files[0]); e.target.value = ''; }} />
         </div>
+      )}
+      {refFilename && (
+        <PoseSlotPanel datasetId={datasetId} poseSlots={poseSlots} busy={busy}
+          importBusy={importBusy} nonce={nonce} onSetPoseSlot={onSetPoseSlot}
+          onCropPoseSlot={onCropPoseSlot} onMirrorPoseSlot={onMirrorPoseSlot}
+          onTogglePoseSlotEnabled={onTogglePoseSlotEnabled} onRemovePoseSlot={onRemovePoseSlot} />
       )}
       {/* The modal edits the prompts of THIS dataset's subject — a human lock
           shown on an Animal dataset is what made an animal-tuned text leak into
