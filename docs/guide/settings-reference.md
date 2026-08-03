@@ -211,6 +211,8 @@ Per dataset, you can upload a **Left 45°** and/or **Right 45°** reference phot
 
 A dataset that never uploads an angle photo behaves exactly as it always has — this is purely additive. Klein and the API engines never read these photos at all; they are Krea 2 Edit only. `back`, `left 90°` and `right 90°` slots are reserved for a later wave.
 
+Mirror then crop, in that order, silently loses the mirror: crop always re-derives the working photo from the untouched original you uploaded, so it has no way to know a mirror ever happened. Crop first if you need both.
+
 ### SeedVR2 upscaling (local)
 
 *Requested by SurpassHR ([GitHub #32](https://github.com/perfectgf/lora-dataset-studio/issues/32)).*
