@@ -2,6 +2,7 @@
 back/left90/right90 reserved for a later wave. See
 docs/superpowers/specs/2026-08-03-krea-pose-slots-design.md.
 """
+import io
 import os
 
 from app.extensions import db
@@ -190,3 +191,62 @@ def test_dataset_payload_lists_all_five_pose_keys_even_when_unused(app):
         assert left['filename'] and left['enabled'] is True
         right = payload['pose_slots']['right45']
         assert right == {'filename': None, 'original_filename': '', 'enabled': False}
+
+
+def test_pose_slot_upload_route(client, app):
+    with app.app_context():
+        ds = _dataset_with_ref()
+        dsid = ds.id
+    r = client.post(f'/api/dataset/{dsid}/ref/pose/left45',
+                    data={'file': (io.BytesIO(_png(800, 800)), 'p.png')},
+                    content_type='multipart/form-data')
+    assert r.status_code == 200 and r.get_json()['ok'] is True
+
+    r = client.post(f'/api/dataset/{dsid}/ref/pose/upsidedown',
+                    data={'file': (io.BytesIO(_png(800, 800)), 'p.png')},
+                    content_type='multipart/form-data')
+    assert r.status_code == 400
+
+
+def test_pose_slot_enable_and_delete_routes(client, app):
+    with app.app_context():
+        ds = _dataset_with_ref()
+        dsid = ds.id
+    client.post(f'/api/dataset/{dsid}/ref/pose/left45',
+                data={'file': (io.BytesIO(_png(800, 800)), 'p.png')},
+                content_type='multipart/form-data')
+
+    r = client.post(f'/api/dataset/{dsid}/ref/pose/left45/enable', json={'enabled': True})
+    assert r.status_code == 200 and r.get_json()['ok'] is True
+
+    r = client.post(f'/api/dataset/{dsid}/ref/pose/right45/enable', json={'enabled': True})
+    assert r.status_code == 404   # nothing uploaded there yet
+
+    r = client.post(f'/api/dataset/{dsid}/ref/pose/left45/delete')
+    assert r.status_code == 200 and r.get_json()['ok'] is True
+
+    r = client.post(f'/api/dataset/{dsid}/ref/pose/left45/delete')
+    assert r.status_code == 404   # already gone
+
+
+def test_pose_slot_crop_and_mirror_routes(client, app):
+    with app.app_context():
+        ds = _dataset_with_ref()
+        dsid = ds.id
+    client.post(f'/api/dataset/{dsid}/ref/pose/right45',
+                data={'file': (io.BytesIO(_png(800, 800)), 'p.png')},
+                content_type='multipart/form-data')
+
+    r = client.post(f'/api/dataset/{dsid}/ref/pose/right45/crop',
+                    json={'x': 10, 'y': 10, 'w': 300, 'h': 300})
+    assert r.status_code == 200 and r.get_json()['ok'] is True
+
+    r = client.post(f'/api/dataset/{dsid}/ref/pose/right45/crop',
+                    json={'x': 'nope', 'y': 0, 'w': 10, 'h': 10})
+    assert r.status_code == 400
+
+    r = client.post(f'/api/dataset/{dsid}/ref/pose/right45/mirror')
+    assert r.status_code == 200 and r.get_json()['ok'] is True
+
+    r = client.post(f'/api/dataset/{dsid}/ref/pose/left45/mirror')
+    assert r.status_code == 404   # nothing uploaded there

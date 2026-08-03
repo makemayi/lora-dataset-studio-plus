@@ -453,6 +453,61 @@ def dataset_crop_extra_ref(dataset_id):
     return (jsonify({'ok': True}), 200) if ok else (jsonify({'error': 'not found'}), 404)
 
 
+@bp.post('/dataset/<int:dataset_id>/ref/pose/<pose_key>')
+def dataset_set_pose_slot(dataset_id, pose_key):
+    if pose_key not in svc.POSE_SLOT_KEYS:
+        return jsonify({'error': 'invalid pose_key'}), 400
+    ds = svc.get_dataset(LOCAL_USER, dataset_id)
+    if not ds:
+        return jsonify({'error': 'not found'}), 404
+    f = request.files.get('file')
+    if not f or not f.filename:
+        return jsonify({'error': 'no file'}), 400
+    try:
+        fn = svc.set_pose_slot(LOCAL_USER, dataset_id, pose_key, f.read())
+    except ValueError as e:
+        return _map_error(e)
+    return jsonify({'ok': True, 'filename': fn})
+
+
+@bp.post('/dataset/<int:dataset_id>/ref/pose/<pose_key>/crop')
+def dataset_crop_pose_slot(dataset_id, pose_key):
+    if pose_key not in svc.POSE_SLOT_KEYS:
+        return jsonify({'error': 'invalid pose_key'}), 400
+    data = request.get_json(silent=True) or {}
+    try:
+        ok = svc.crop_pose_slot(LOCAL_USER, dataset_id, pose_key,
+                                int(data['x']), int(data['y']), int(data['w']), int(data['h']))
+    except (KeyError, ValueError, TypeError):
+        return jsonify({'error': 'invalid crop box'}), 400
+    return (jsonify({'ok': True}), 200) if ok else (jsonify({'error': 'not found'}), 404)
+
+
+@bp.post('/dataset/<int:dataset_id>/ref/pose/<pose_key>/mirror')
+def dataset_mirror_pose_slot(dataset_id, pose_key):
+    if pose_key not in svc.POSE_SLOT_KEYS:
+        return jsonify({'error': 'invalid pose_key'}), 400
+    ok = svc.mirror_pose_slot(LOCAL_USER, dataset_id, pose_key)
+    return (jsonify({'ok': True}), 200) if ok else (jsonify({'error': 'not found'}), 404)
+
+
+@bp.post('/dataset/<int:dataset_id>/ref/pose/<pose_key>/enable')
+def dataset_enable_pose_slot(dataset_id, pose_key):
+    if pose_key not in svc.POSE_SLOT_KEYS:
+        return jsonify({'error': 'invalid pose_key'}), 400
+    data = request.get_json(silent=True) or {}
+    ok = svc.set_pose_slot_enabled(LOCAL_USER, dataset_id, pose_key, bool(data.get('enabled')))
+    return (jsonify({'ok': True}), 200) if ok else (jsonify({'error': 'not found'}), 404)
+
+
+@bp.post('/dataset/<int:dataset_id>/ref/pose/<pose_key>/delete')
+def dataset_delete_pose_slot(dataset_id, pose_key):
+    if pose_key not in svc.POSE_SLOT_KEYS:
+        return jsonify({'error': 'invalid pose_key'}), 400
+    ok = svc.remove_pose_slot(LOCAL_USER, dataset_id, pose_key)
+    return (jsonify({'ok': True}), 200) if ok else (jsonify({'error': 'not found'}), 404)
+
+
 @bp.post('/dataset/<int:dataset_id>/ref/crop')
 def dataset_ref_crop(dataset_id):
     data = request.get_json(silent=True) or {}
