@@ -59,6 +59,7 @@ from .face_variations import (CAPTION_PROMPT, CAPTION_PROMPT_BOORU,
                               drop_identity_sentences, drop_identity_tags,
                               is_nsfw_label, prompt_by_label, wrap_variation,
                               wrap_variation_klein, wrap_variation_krea,
+                              krea_pose_direction,
                               get_identity_prompt,
                               normalize_subject_type,
                               KLEIN_IMAGE_IMPROVE_PROMPT)
@@ -819,6 +820,27 @@ def remove_pose_slot(user_id, dataset_id, pose_key) -> bool:
         except OSError:
             logger.warning(f'dataset {dataset_id}: could not trash pose slot original {orig}')
     return True
+
+
+_POSE_DIRECTION_TO_KEY = {'left': 'left45', 'right': 'right45', 'back': 'back'}
+
+
+def _krea_pose_source_path(ds, prompt_text) -> str:
+    """Which file this Krea shot should read as its reference. Front
+    (`_ref_path`) is the default AND the entire zero-slot-data path: a dataset
+    with no RefPoseSlot rows gets {} from enabled_pose_slot_paths, so every
+    branch below falls through to the last line — byte-identical to before
+    this feature existed."""
+    direction = krea_pose_direction(prompt_text)
+    enabled = enabled_pose_slot_paths(ds)
+    if direction == 'ambiguous':
+        if len(enabled) == 1:
+            return next(iter(enabled.values()))
+        return _ref_path(ds)
+    pose_key = _POSE_DIRECTION_TO_KEY.get(direction)
+    if pose_key and pose_key in enabled:
+        return enabled[pose_key]
+    return _ref_path(ds)
 
 
 # --- CRUD ------------------------------------------------------------------
@@ -8015,10 +8037,10 @@ def generate_variations_krea(user_id, dataset_id, variations, multiplier,
                  .filter(FaceDatasetImage.filename.is_(None)).count())
     if in_flight + total > MAX_FANOUT:
         raise ValueError(f'too many generations in flight ({in_flight}), wait or cancel')
-    ref_path = _ref_path(ds)
     ids = []
     try:
         for v in variations:
+            source_path = _krea_pose_source_path(ds, v.get('prompt') or '')
             for _ in range(mult):
                 img = FaceDatasetImage(dataset_id=dataset_id, source='generated',
                                        status='pending', variation_label=v.get('label'),
@@ -8030,8 +8052,8 @@ def generate_variations_krea(user_id, dataset_id, variations, multiplier,
                 nsfw = bool(v.get('nsfw')) or is_nsfw_label(v.get('label'))
                 try:
                     job_id = keh.enqueue_krea_edit(
-                        user_id=str(user_id), source_filename=ds.ref_filename,
-                        source_path=ref_path, framing=v.get('framing'),
+                        user_id=str(user_id), source_filename=os.path.basename(source_path),
+                        source_path=source_path, framing=v.get('framing'),
                         # Suffix applied AT WRAP, like Klein: the row keeps the raw
                         # catalog prompt so a regenerate re-applies the CURRENT
                         # suffix exactly once. The label rides along because it

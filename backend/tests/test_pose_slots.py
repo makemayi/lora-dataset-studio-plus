@@ -250,3 +250,118 @@ def test_pose_slot_crop_and_mirror_routes(client, app):
 
     r = client.post(f'/api/dataset/{dsid}/ref/pose/left45/mirror')
     assert r.status_code == 404   # nothing uploaded there
+
+
+def _krea_dataset_with_pose_slot(pose_key='left45', enabled=True):
+    """Mirrors test_krea_generation_loras._krea_dataset, plus one pose slot."""
+    ds = svc.create_dataset('local', 'ds', 'trg', train_type='krea')
+    folder = svc._dataset_path(ds.id)
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, 'ref.webp'), 'wb') as fh:
+        fh.write(svc.normalize_to_webp(_png(512, 512)))
+    ds.ref_filename = 'ref.webp'
+    db.session.commit()
+    svc.set_pose_slot('local', ds.id, pose_key, _png(600, 600, (30, 30, 30)))
+    if enabled:
+        svc.set_pose_slot_enabled('local', ds.id, pose_key, True)
+    return ds
+
+
+def test_zero_pose_slot_data_is_byte_identical_to_the_old_behaviour(app, monkeypatch):
+    """The regression guard: a dataset with NO RefPoseSlot rows must keep using
+    the primary reference for every shot, exactly like before this feature."""
+    from app.services import krea_edit_helper as keh
+    seen = []
+    monkeypatch.setattr(keh, 'preflight', lambda *a, **k: None)
+    monkeypatch.setattr(keh, 'enqueue_krea_edit',
+                        lambda **kw: (seen.append(kw), 'job')[1])
+    with app.app_context():
+        ds = _dataset_with_ref()
+        ref_path = svc._ref_path(ds)
+        svc.generate_variations_krea(
+            'local', ds.id,
+            [{'label': 'a', 'prompt': 'left profile view', 'framing': 'face'}], 1)
+    assert seen[0]['source_path'] == ref_path
+
+
+def test_a_matched_enabled_slot_becomes_the_source_for_that_shot(app, monkeypatch):
+    from app.services import krea_edit_helper as keh
+    seen = []
+    monkeypatch.setattr(keh, 'preflight', lambda *a, **k: None)
+    monkeypatch.setattr(keh, 'enqueue_krea_edit',
+                        lambda **kw: (seen.append(kw), 'job')[1])
+    with app.app_context():
+        ds = _krea_dataset_with_pose_slot('left45', enabled=True)
+        expected = svc.enabled_pose_slot_paths(ds)['left45']
+        svc.generate_variations_krea(
+            'local', ds.id,
+            [{'label': 'a', 'prompt': 'left profile view, neutral expression', 'framing': 'face'}], 1)
+    assert seen[0]['source_path'] == expected
+    assert seen[0]['source_filename'] == os.path.basename(expected)
+
+
+def test_a_matched_but_disabled_slot_falls_back_to_front(app, monkeypatch):
+    from app.services import krea_edit_helper as keh
+    seen = []
+    monkeypatch.setattr(keh, 'preflight', lambda *a, **k: None)
+    monkeypatch.setattr(keh, 'enqueue_krea_edit',
+                        lambda **kw: (seen.append(kw), 'job')[1])
+    with app.app_context():
+        ds = _krea_dataset_with_pose_slot('left45', enabled=False)
+        svc.generate_variations_krea(
+            'local', ds.id,
+            [{'label': 'a', 'prompt': 'left profile view', 'framing': 'face'}], 1)
+        expected_front = svc._ref_path(ds)
+    assert seen[0]['source_path'] == expected_front
+
+
+def test_ambiguous_direction_uses_the_single_enabled_slot(app, monkeypatch):
+    from app.services import krea_edit_helper as keh
+    seen = []
+    monkeypatch.setattr(keh, 'preflight', lambda *a, **k: None)
+    monkeypatch.setattr(keh, 'enqueue_krea_edit',
+                        lambda **kw: (seen.append(kw), 'job')[1])
+    with app.app_context():
+        ds = _krea_dataset_with_pose_slot('right45', enabled=True)
+        expected = svc.enabled_pose_slot_paths(ds)['right45']
+        # No left/right word — ambiguous — but only ONE non-front slot is enabled.
+        svc.generate_variations_krea(
+            'local', ds.id, [{'label': 'a', 'prompt': 'side view', 'framing': 'face'}], 1)
+    assert seen[0]['source_path'] == expected
+
+
+def test_ambiguous_direction_with_both_sides_enabled_falls_back_to_front(app, monkeypatch):
+    from app.services import krea_edit_helper as keh
+    seen = []
+    monkeypatch.setattr(keh, 'preflight', lambda *a, **k: None)
+    monkeypatch.setattr(keh, 'enqueue_krea_edit',
+                        lambda **kw: (seen.append(kw), 'job')[1])
+    with app.app_context():
+        ds = _krea_dataset_with_pose_slot('left45', enabled=True)
+        svc.set_pose_slot('local', ds.id, 'right45', _png(600, 600))
+        svc.set_pose_slot_enabled('local', ds.id, 'right45', True)
+        svc.generate_variations_krea(
+            'local', ds.id, [{'label': 'a', 'prompt': 'side view', 'framing': 'face'}], 1)
+        expected_front = svc._ref_path(ds)
+    assert seen[0]['source_path'] == expected_front
+
+
+def test_each_variation_in_one_batch_picks_its_own_source(app, monkeypatch):
+    """A single generate_variations_krea call can carry a front shot and a left
+    profile shot together — each must get its OWN source_path, not whichever
+    was computed for the first variation."""
+    from app.services import krea_edit_helper as keh
+    seen = []
+    monkeypatch.setattr(keh, 'preflight', lambda *a, **k: None)
+    monkeypatch.setattr(keh, 'enqueue_krea_edit',
+                        lambda **kw: (seen.append(kw), 'job')[1])
+    with app.app_context():
+        ds = _krea_dataset_with_pose_slot('left45', enabled=True)
+        expected_left = svc.enabled_pose_slot_paths(ds)['left45']
+        expected_front = svc._ref_path(ds)
+        svc.generate_variations_krea(
+            'local', ds.id,
+            [{'label': 'a', 'prompt': 'front view, neutral expression', 'framing': 'face'},
+             {'label': 'b', 'prompt': 'left profile view', 'framing': 'face'}], 1)
+    assert seen[0]['source_path'] == expected_front
+    assert seen[1]['source_path'] == expected_left
