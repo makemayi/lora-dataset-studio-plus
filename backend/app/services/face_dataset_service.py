@@ -4462,6 +4462,10 @@ def dataset_payload(user_id, dataset_id):
         # kept, else the extra itself) — aligned index-by-index with the list above.
         'ref_extra_crop_sources': [extra_ref_crop_source(ds, fn)
                                    for fn in extra_ref_filenames(ds)],
+        # ALL 5 POSE_SLOT_KEYS, always — deliberately the opposite shape from
+        # pose_slot_rows() (which omits keys with no upload). This lets the
+        # frontend render every slot's card the same way, with no
+        # "never uploaded" special-casing on a missing dict key.
         'pose_slots': {
             key: ({'filename': r.filename, 'original_filename': r.original_filename or '',
                   'enabled': bool(r.enabled)} if (r := _pose_rows.get(key)) else
