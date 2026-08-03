@@ -744,6 +744,40 @@ class CheckpointNote(db.Model):
                                           name='uq_checkpoint_note'),)
 
 
+class RefPoseSlot(db.Model):
+    """One ANGLE reference photo for a face dataset, beyond the primary (front)
+    reference — 'left45', 'right45', 'back', 'left90' or 'right90'. Used ONLY by
+    Krea 2 Edit generation (generate_variations_krea): when a shot's prompt asks
+    for a matching angle, its file replaces the primary reference for that one
+    shot instead of fighting the front photo's pull with text alone. Klein and
+    Nano Banana never read this table — they always use FaceDataset.ref_filename,
+    unchanged.
+
+    `front` deliberately does NOT live here: it stays FaceDataset.ref_filename /
+    ref_original_filename, so every other engine and every pre-existing dataset
+    needs zero migration and zero behaviour change.
+
+    New table -> created by db.create_all(), no migration (see CheckpointNote
+    above for the same reasoning)."""
+    __tablename__ = 'ref_pose_slot'
+    id = db.Column(db.Integer, primary_key=True)
+    dataset_id = db.Column(
+        db.Integer, db.ForeignKey('face_dataset.id', ondelete='CASCADE'),
+        nullable=False, index=True)
+    pose_key = db.Column(db.String(16), nullable=False)
+    filename = db.Column(db.String(255), nullable=True)
+    # Full-frame ORIGINAL kept beside `filename`, same role as
+    # FaceDataset.ref_original_filename: crop_pose_slot reads this and writes
+    # `filename`, so a re-crop can widen back out instead of only tightening.
+    original_filename = db.Column(db.String(255), nullable=True)
+    # Uploading a photo does NOT enable it — the user ticks a separate checkbox.
+    # Two enabled slots on the same side (there are none, but see 'ambiguous' in
+    # krea_pose_direction) must never be a surprise default.
+    enabled = db.Column(db.Boolean, nullable=False, default=False)
+    __table_args__ = (db.UniqueConstraint('dataset_id', 'pose_key',
+                                          name='uq_ref_pose_slot'),)
+
+
 class CheckpointPreview(db.Model):
     """The Lab's inline-generated preview for one checkpoint (record_id, step):
     a same-prompt/same-seed image so an experienced user can eyeball how the LoRA
