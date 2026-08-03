@@ -32,7 +32,8 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 from ..extensions import db
 from ..models import (CanvasImageNode, CanvasNodePosition, FaceDataset,
-                      FaceDatasetImage, ImageGenerationQueue, LoraTestImage)
+                      FaceDatasetImage, ImageGenerationQueue, LoraTestImage,
+                      RefPoseSlot)
 from .. import config as cfg
 from . import (bank_transfer_metadata, dataset_activity, image_encoding,
                reference_edit_jobs, trash)
@@ -638,6 +639,163 @@ def remove_extra_ref(user_id, dataset_id, filename) -> bool:
             trash.send_to_trash(orig_path, context=f'dataset-{dataset_id}-extra-ref')
         except OSError:
             logger.warning(f'dataset {dataset_id}: could not trash extra-ref original {orig}')
+    return True
+
+
+# --- Angle reference photos (pose slots) — Krea 2 Edit only -----------------
+# `front` is NOT one of these — it stays FaceDataset.ref_filename/ref_original_filename.
+POSE_SLOT_KEYS = ('left45', 'right45', 'back', 'left90', 'right90')
+# v1 wires only these two through the upload UI and the Krea detector's direct
+# hits. The other three exist in the schema/API today (a later wave opens the
+# UI button, nothing else) — 'back' already resolves through
+# krea_pose_direction, it just has no enabled row to find yet on any dataset.
+POSE_SLOT_ACTIVE_KEYS = ('left45', 'right45')
+
+
+def _pose_slot_row(ds, pose_key):
+    return RefPoseSlot.query.filter_by(dataset_id=ds.id, pose_key=pose_key).first()
+
+
+def pose_slot_rows(ds) -> dict:
+    """{pose_key: RefPoseSlot} for every row this dataset actually has — a
+    pose_key with no upload yet is simply absent, never a placeholder row."""
+    rows = RefPoseSlot.query.filter_by(dataset_id=ds.id).all()
+    return {r.pose_key: r for r in rows}
+
+
+def enabled_pose_slot_paths(ds) -> dict:
+    """{pose_key: absolute path} for rows the user enabled AND whose file still
+    exists on disk. The ONLY reader Krea generation trusts — an uploaded-but-
+    disabled or since-deleted file must never be picked up silently."""
+    dsdir = _dataset_dir(ds.id)
+    out = {}
+    for pose_key, row in pose_slot_rows(ds).items():
+        if row.enabled and row.filename:
+            path = os.path.join(dsdir, row.filename)
+            if os.path.isfile(path):
+                out[pose_key] = path
+    return out
+
+
+def set_pose_slot(user_id, dataset_id, pose_key, image_bytes) -> str:
+    """Upload/replace ONE angle reference. Head-cropped like the PRIMARY
+    reference (it substitutes for it during Krea generation) — a different
+    role from the aspect-preserved extra-ref upload. Enabling is a SEPARATE,
+    explicit step (set_pose_slot_enabled): uploading alone never turns a slot
+    on, and re-uploading over an already-enabled slot leaves it enabled.
+    Returns the new filename; ValueError on an unknown pose_key or dataset."""
+    if pose_key not in POSE_SLOT_KEYS:
+        raise ValueError('invalid pose_key')
+    ds = get_dataset(user_id, dataset_id)
+    if not ds:
+        raise ValueError('dataset not found')
+    dsdir = _dataset_dir(dataset_id)
+    webp, _detected = face_crop_to_square_webp(
+        image_bytes, pad=REF_CROP_PAD, return_detected=True, use_vision=False)
+    uid = uuid.uuid4().hex[:8]
+    orig_fn = f"{user_id}_datasetrefpose_{pose_key}orig_{uid}.webp"
+    fn = f"{user_id}_datasetrefpose_{pose_key}_{uid}.webp"
+    write_image_atomic(os.path.join(dsdir, orig_fn), normalize_to_webp(image_bytes, size=2048))
+    write_image_atomic(os.path.join(dsdir, fn), webp)
+
+    row = _pose_slot_row(ds, pose_key)
+    old_fn, old_orig = (row.filename, row.original_filename) if row else (None, None)
+    if row is None:
+        row = RefPoseSlot(dataset_id=dataset_id, pose_key=pose_key, enabled=False)
+        db.session.add(row)
+    row.filename = fn
+    row.original_filename = orig_fn
+    db.session.commit()
+
+    for stale in (old_fn, old_orig):
+        if not stale:
+            continue
+        stale_path = os.path.join(dsdir, stale)
+        if os.path.isfile(stale_path):
+            try:
+                trash.send_to_trash(stale_path, context=f'dataset-{dataset_id}-pose-{pose_key}')
+            except OSError:
+                logger.warning(
+                    f'dataset {dataset_id}: could not trash stale pose slot file {stale}')
+    return fn
+
+
+def crop_pose_slot(user_id, dataset_id, pose_key, x, y, w, h) -> bool:
+    """Manually crop ONE angle reference to (x,y,w,h), same contract as
+    crop_reference: the box is in the ORIGINAL's pixel space, and only
+    `filename` (never `original_filename`) is overwritten — so re-cropping can
+    widen back out any number of times."""
+    ds = get_dataset(user_id, dataset_id)
+    if not ds:
+        return False
+    row = _pose_slot_row(ds, pose_key)
+    if not row or not row.filename:
+        return False
+    dsdir = _dataset_dir(dataset_id)
+    src = os.path.join(dsdir, row.original_filename) if row.original_filename else None
+    if not src or not os.path.isfile(src):
+        src = os.path.join(dsdir, row.filename)
+    ok, _scale = _crop_resize_file(src, x, y, w, h, dst=os.path.join(dsdir, row.filename))
+    return ok
+
+
+def mirror_pose_slot(user_id, dataset_id, pose_key) -> bool:
+    """Flip ONE angle reference horizontally, in place, same filename. Reuses
+    the pixel primitive `_mirrored_image_bytes` (see `mirror_image`) but skips
+    `_edit_image_in_place`: that wrapper is keyed to a FaceDatasetImage row and
+    clears watermark metadata a pose slot doesn't have. `original_filename` (the
+    pre-crop full frame) is untouched, same as `mirror_image`'s contract."""
+    ds = get_dataset(user_id, dataset_id)
+    if not ds:
+        return False
+    row = _pose_slot_row(ds, pose_key)
+    if not row or not row.filename:
+        return False
+    path = os.path.join(_dataset_dir(dataset_id), row.filename)
+    if not os.path.isfile(path):
+        return False
+    lock = _IMAGE_PIXEL_EDIT_LOCKS[
+        hash((str(user_id), 'pose', dataset_id, pose_key)) % len(_IMAGE_PIXEL_EDIT_LOCKS)]
+    with lock:
+        payload = _mirrored_image_bytes(path)
+        write_image_atomic(path, payload)
+    return True
+
+
+def set_pose_slot_enabled(user_id, dataset_id, pose_key, enabled) -> bool:
+    """Explicit user opt-in/out. Refused (False) when nothing has been
+    uploaded to this pose_key yet — there is nothing to enable."""
+    ds = get_dataset(user_id, dataset_id)
+    if not ds:
+        return False
+    row = _pose_slot_row(ds, pose_key)
+    if not row or not row.filename:
+        return False
+    row.enabled = bool(enabled)
+    db.session.commit()
+    return True
+
+
+def remove_pose_slot(user_id, dataset_id, pose_key) -> bool:
+    """Delete ONE angle reference (row + both files, trashed not unlinked)."""
+    ds = get_dataset(user_id, dataset_id)
+    if not ds:
+        return False
+    row = _pose_slot_row(ds, pose_key)
+    if not row:
+        return False
+    dsdir = _dataset_path(dataset_id)
+    for fn in (row.filename, row.original_filename):
+        if not fn:
+            continue
+        p = os.path.join(dsdir, fn)
+        if os.path.exists(p):
+            try:
+                trash.send_to_trash(p, context=f'dataset-{dataset_id}-pose-{pose_key}')
+            except OSError:
+                logger.warning(f'dataset {dataset_id}: could not trash pose slot file {fn}')
+    db.session.delete(row)
+    db.session.commit()
     return True
 
 
