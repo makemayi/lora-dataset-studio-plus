@@ -13,7 +13,7 @@ const POSE_LABELS = {
 
 export default function PoseSlotPanel({ datasetId, poseSlots = {}, busy, importBusy = busy,
                                        nonce = 0, onSetPoseSlot, onCropPoseSlot,
-                                       onMirrorPoseSlot, onToggleEnabled, onRemovePoseSlot }) {
+                                       onMirrorPoseSlot, onTogglePoseSlotEnabled, onRemovePoseSlot }) {
   const inputs = useRef({});
   const imgUrl = (fn) => `/api/dataset/${datasetId}/img/${encodeURIComponent(fn)}${nonce ? `?v=${nonce}` : ''}`;
 
@@ -62,7 +62,7 @@ export default function PoseSlotPanel({ datasetId, poseSlots = {}, busy, importB
             {slot.filename && (
               <label className="flex items-center gap-1 text-[0.625rem] text-content-muted cursor-pointer">
                 <input type="checkbox" checked={!!slot.enabled} disabled={busy}
-                  onChange={(e) => onToggleEnabled?.(poseKey, e.target.checked)}
+                  onChange={(e) => onTogglePoseSlotEnabled?.(poseKey, e.target.checked)}
                   className="accent-indigo-500 w-3 h-3" />
                 On
               </label>
