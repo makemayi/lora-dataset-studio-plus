@@ -135,6 +135,16 @@ const TOPICS = [
       'nsfw', 'policy', 'bikini', 'lingerie'],
     guide: { chapter: 'settings-reference', anchor: 'image-engines' },
     app: { route: '/datasets?section=add' } },
+  // Krea-only per-dataset angle references (Left 45° / Right 45°) that swap in
+  // for the front photo on a matching shot. Anchor is the shared Krea 2 Edit
+  // H2 ('image-engines') like every other krea.* topic — settings-reference
+  // only exposes H2s as deep-link anchors, so the new subsection below lives
+  // under that same anchor rather than minting its own.
+  { id: 'krea-pose-slots', kind: 'setting', title: 'Angle reference photos (Krea 2 Edit)',
+    keywords: ['pose slot', 'angle reference', 'left45', 'right45', 'side view', 'profile',
+      'three-quarter', 'krea', 'mirror', 'flip', '180'],
+    guide: { chapter: 'settings-reference', anchor: 'image-engines' },
+    app: { route: '/datasets?section=add&panel=reference' } },
   { id: 'dataset-engine-mode', kind: 'setting', title: 'Engines & how they share a batch',
     keywords: ['engine', 'engines', 'multiple engines', 'several engines', 'split',
       'all engines', 'compare engines', 'klein', 'krea', 'krea 2 edit', 'nano banana',

@@ -199,9 +199,17 @@ The pipeline's reference boost is an internal Krea calibration, not a second use
 Two behaviours worth knowing before you build a dataset with it:
 
 - **The selected card's framing is honored.** Krea Fit v1.2 uses the selected catalog card's framing and aspect ratio (including its 1:1 / 3:4 shape) instead of copying the source photo's shape.
-- **Extra reference images are ignored.** Identity comes from the primary reference alone. Klein and the API engines still use your extra refs.
+- **Extra reference images (the "+" row, up to 3) are still ignored** — those exist for Nano Banana/Klein identity locking, not Krea. **Angle reference photos are different**: see below.
 
 Outfits and expressions are steered differently here than on the other engines: this model preserves anything it is not *positively* told to change, so the catalog's "a different outfit (not the one in the reference)" phrasing is rewritten at generation time into a concrete garment ("wearing a red knit sweater"), picked from the shot's own name — so outfits genuinely differ across the dataset while regenerating one shot reproduces its own.
+
+### Krea 2 angle reference photos
+
+A shot that asks for a side or three-quarter view still only had the FRONT reference to work from, so its pull constantly fought the prompt's angle request — often winning, which is why a "left profile" card could render close to front-on anyway.
+
+Per dataset, you can upload a **Left 45°** and/or **Right 45°** reference photo next to the primary one (✂ crop and a one-click 180° mirror both work the same way as the primary reference). Each one has its own **On** checkbox — uploading a photo does NOT enable it by itself. When a shot's prompt names a matching angle (English or Chinese: "left profile", "右侧", "three-quarter left", "左45度"...) and that slot is enabled, Krea uses ITS photo instead of the front one for that one shot; every other shot keeps using the front reference exactly as before. A side/three-quarter request with no left/right word (bare "side view") uses whichever ONE angle slot is enabled — if both are enabled, or neither is, it falls back to the front reference rather than guess.
+
+A dataset that never uploads an angle photo behaves exactly as it always has — this is purely additive. Klein and the API engines never read these photos at all; they are Krea 2 Edit only. `back`, `left 90°` and `right 90°` slots are reserved for a later wave.
 
 ### SeedVR2 upscaling (local)
 
