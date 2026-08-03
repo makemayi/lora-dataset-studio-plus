@@ -1,9 +1,10 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import IdentityPromptModal from './IdentityPromptModal';
 import PoseSlotPanel from './PoseSlotPanel';
 // Engine names come from the derived edit list — spelling them out here is how
 // this tooltip ended up naming two engines while a third could already edit.
 import { editEngineNames } from './referenceEdit';
+import { imageFromClipboard } from './clipboardImage';
 
 // Cap identique à MAX_EXTRA_REFS côté backend (face_dataset_service).
 const MAX_EXTRA_REFS = 3;
@@ -25,10 +26,37 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
   // here, in the one place where the user is thinking about identity locking.
   const [promptModal, setPromptModal] = useState(false);
   const imgUrl = (fn) => `/api/dataset/${datasetId}/img/${encodeURIComponent(fn)}${nonce ? `?v=${nonce}` : ''}`;
+
+  // Paste-to-upload: hover the reference tile, Ctrl+V an image instead of
+  // always opening the file picker. Hover state lives in a ref (not React
+  // state) since it only needs to be read inside the paste handler, never
+  // rendered. `refHover`/`extraHover` are mutually exclusive — the mouse can
+  // only be over one tile at a time — so a single document listener with two
+  // hover flags never double-fires.
+  const refHover = useRef(false);
+  const extraHover = useRef(false);
+  useEffect(() => {
+    const onPaste = (e) => {
+      if (!refHover.current && !extraHover.current) return;
+      const file = imageFromClipboard(e);
+      if (!file) return;
+      e.preventDefault();
+      if (refHover.current) {
+        if (!importBusy) onSetRef(file, { autoCrop: autoCrop && !visionBusy });
+      } else if (extraHover.current && extraRefs.length < MAX_EXTRA_REFS && !importBusy) {
+        onAddExtraRef?.(file);
+      }
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  }, [onSetRef, onAddExtraRef, autoCrop, visionBusy, importBusy, extraRefs.length]);
+
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-3">
       <div className="flex items-center gap-3">
-        <div className="w-20 h-20 rounded-lg bg-black overflow-hidden shrink-0 flex items-center justify-center">
+        <div className="w-20 h-20 rounded-lg bg-black overflow-hidden shrink-0 flex items-center justify-center"
+          onMouseEnter={() => { refHover.current = true; }} onMouseLeave={() => { refHover.current = false; }}
+          title="Hover and press Ctrl+V to paste an image here">
           {refFilename
             ? <img src={imgUrl(refFilename)} alt="ref" className="w-full h-full object-cover" />
             : <span className="text-content-subtle text-xs">none</span>}
@@ -73,7 +101,9 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
           (chaînées en ReferenceLatent natifs). Recadrables une par une (✂ sur la
           vignette) ; le scoring reste sur la principale. */}
       {refFilename && (
-        <div className="flex items-center gap-2 flex-wrap border-t border-border pt-2">
+        <div className="flex items-center gap-2 flex-wrap border-t border-border pt-2"
+          onMouseEnter={() => { extraHover.current = true; }} onMouseLeave={() => { extraHover.current = false; }}
+          title="Hover and press Ctrl+V to paste a new extra reference">
           <span className="text-content-subtle text-[0.6875rem]">
             Extra refs <span className="opacity-70">(all engines — stronger identity lock)</span>
           </span>

@@ -36,3 +36,12 @@ test('the pose slot crop modal uses the square defaultAspect, like the primary r
   assert.match(modalBlock, /original_filename \|\| .*\.filename/);
   assert.match(modalBlock, /ds\.cropPoseSlot\(poseSlotCrop, box\)/);
 });
+
+test('hovering the primary ref or extra-refs row and pressing Ctrl+V pastes an image', () => {
+  assert.match(src, /import \{ imageFromClipboard \} from '\.\/clipboardImage'/);
+  assert.match(src, /addEventListener\('paste'/);
+  assert.match(src, /refHover\.current = true/);
+  assert.match(src, /extraHover\.current = true/);
+  assert.match(src, /onSetRef\(file, \{ autoCrop/);
+  assert.match(src, /onAddExtraRef\?\.\(file\)/);
+});

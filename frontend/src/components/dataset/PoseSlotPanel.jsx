@@ -1,4 +1,5 @@
-import { useRef } from 'react';
+import { useRef, useEffect } from 'react';
+import { imageFromClipboard } from './clipboardImage';
 
 // v1 wires only these two through the backend detector (krea_pose_direction).
 // The other three (back/left90/right90) exist in the API/schema already — this
@@ -17,6 +18,23 @@ export default function PoseSlotPanel({ datasetId, poseSlots = {}, busy, importB
   const inputs = useRef({});
   const imgUrl = (fn) => `/api/dataset/${datasetId}/img/${encodeURIComponent(fn)}${nonce ? `?v=${nonce}` : ''}`;
 
+  // Paste-to-upload: hover a card, Ctrl+V an image instead of opening the
+  // file picker. See ReferencePanel.jsx for the same pattern on the primary
+  // ref / extra refs.
+  const hoverKey = useRef(null);
+  useEffect(() => {
+    const onPaste = (e) => {
+      const poseKey = hoverKey.current;
+      if (!poseKey || importBusy) return;
+      const file = imageFromClipboard(e);
+      if (!file) return;
+      e.preventDefault();
+      onSetPoseSlot?.(poseKey, file);
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  }, [onSetPoseSlot, importBusy]);
+
   return (
     <div className="flex items-center gap-2 flex-nowrap overflow-x-auto border-t border-border pt-2">
       <span className="text-content-subtle text-[0.6875rem]">
@@ -26,7 +44,9 @@ export default function PoseSlotPanel({ datasetId, poseSlots = {}, busy, importB
         const slot = poseSlots[poseKey] || { filename: null, enabled: false };
         return (
           <div key={poseKey} className="flex flex-col items-center gap-1 w-16">
-            <div className="relative w-16 h-16 rounded-lg overflow-hidden bg-black shrink-0">
+            <div className="relative w-16 h-16 rounded-lg overflow-hidden bg-black shrink-0"
+              onMouseEnter={() => { hoverKey.current = poseKey; }} onMouseLeave={() => { hoverKey.current = null; }}
+              title={`Hover and press Ctrl+V to paste the ${POSE_LABELS[poseKey]} reference`}>
               {slot.filename
                 ? <img src={imgUrl(slot.filename)} alt={`${POSE_LABELS[poseKey]} reference`}
                     className="w-full h-full object-cover" />

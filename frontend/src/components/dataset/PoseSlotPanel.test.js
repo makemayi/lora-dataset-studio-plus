@@ -27,3 +27,9 @@ test('each active card offers upload, crop, mirror and an enabled checkbox', () 
 test('the mirror action is labelled as a 180-degree horizontal flip', () => {
   assert.match(src, /180|mirror|flip/i);
 });
+
+test('hovering a card and pressing Ctrl+V pastes into that pose_key, not a fixed one', () => {
+  assert.match(src, /addEventListener\('paste'/);
+  assert.match(src, /onMouseEnter=\{.*hoverKey\.current = poseKey/);
+  assert.match(src, /onSetPoseSlot\?\.\(poseKey, file\)/);
+});
