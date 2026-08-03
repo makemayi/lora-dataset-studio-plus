@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-03-krea-angle-reference-photos',
+    date: '2026-08-03',
+    title: "Give Krea 2 a real side photo instead of fighting your front one",
+    blurb:
+      "Krea 2 Edit only ever had your front reference to work from, so a shot asking for a side or three-quarter view had to fight that photo's pull with words alone — and often lost, drifting back toward the front angle. You can now upload a Left 45° and/or Right 45° reference photo (with crop and a one-click 180° mirror); when a shot's prompt matches, Krea swaps in that photo instead. No upload, no change — every dataset behaves exactly as before.",
+    to: '/datasets?section=add&panel=reference',
+  },
+  {
     id: '2026-08-03-dataset-settings-from-the-library',
     date: '2026-08-03',
     title: 'Rename a dataset or change its trigger word without opening it first',
