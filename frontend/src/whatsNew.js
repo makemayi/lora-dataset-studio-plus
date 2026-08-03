@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-03-paste-to-upload-reference-photos',
+    date: '2026-08-03',
+    title: 'Paste a reference photo instead of hunting for it in a file picker',
+    blurb:
+      "Setting or replacing the main reference, an extra ref, or a Left/Right 45° angle photo meant opening a file picker every single time. Hover the tile and press Ctrl+V instead — a copied image (from a screenshot tool, a browser, another app) uploads straight in.",
+    to: '/datasets?section=add&panel=reference',
+  },
+  {
     id: '2026-08-03-krea-angle-reference-photos',
     date: '2026-08-03',
     title: "Give Krea 2 a real side photo instead of fighting your front one",
