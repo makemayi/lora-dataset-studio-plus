@@ -1291,7 +1291,7 @@ def classify_images(user_id, dataset_id):
 # the time the reach-back import resolves.
 from .face_dataset_service import (
     get_dataset, dataset_klein_model, normalize_to_webp, write_image_atomic,
-    _img_path, _dataset_dir, _crop_resize_file, _coerce_archive_stream, _cap_caption,
+    _img_path, _dataset_dir, _crop_resize_file, _cap_caption,
     _source_metadata_from_scrape_item, _source_metadata_storage,
     _generation_steps, _generation_base_lora_strength,
     CAPTION_MAX_CHARS, KLEIN_SMALL_IMAGE, SMALL_IMAGE_SOURCE, MAX_FANOUT,
@@ -1301,3 +1301,4 @@ from .face_dataset_service import (
 # re-export: routing a cross-module borrow through the parent would make the
 # ORDER of the parent's re-export blocks load-bearing.
 from .dataset_generation_service import _sync_generate_activity
+from .dataset_backup_service import _coerce_archive_stream

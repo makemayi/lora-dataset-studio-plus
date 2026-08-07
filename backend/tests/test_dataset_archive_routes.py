@@ -206,10 +206,11 @@ def test_archive_services_accept_streams_without_closing_callers(app):
 def test_backup_metadata_cap_is_checked_before_inflation(app, monkeypatch):
     from app.config import LOCAL_USER
     from app.services import face_dataset_service as service
+    from app.services import dataset_backup_service
 
     from app.services import dataset_import_service
     data = _empty_backup(service, manifest_extra={'padding': 'x' * 512})
-    monkeypatch.setattr(service, '_BACKUP_MAX_METADATA_BYTES', 128)
+    monkeypatch.setattr(dataset_backup_service, '_BACKUP_MAX_METADATA_BYTES', 128)
 
     def forbidden_read(*_args, **_kwargs):
         raise AssertionError('oversized metadata must not be inflated')
@@ -222,6 +223,7 @@ def test_backup_metadata_cap_is_checked_before_inflation(app, monkeypatch):
 def test_backup_uncompressed_cap_counts_unknown_entries(app, monkeypatch):
     from app.config import LOCAL_USER
     from app.services import face_dataset_service as service
+    from app.services import dataset_backup_service
 
     from app.services import dataset_import_service
     output = io.BytesIO()
@@ -232,7 +234,7 @@ def test_backup_uncompressed_cap_counts_unknown_entries(app, monkeypatch):
         }))
         archive.writestr('images.json', '[]')
         archive.writestr('ignored.bin', b'x' * 256)
-    monkeypatch.setattr(service, '_BACKUP_MAX_BYTES', 128)
+    monkeypatch.setattr(dataset_backup_service, '_BACKUP_MAX_BYTES', 128)
 
     with app.app_context(), pytest.raises(ValueError, match='backup too large'):
         service.import_backup_zip(LOCAL_USER, io.BytesIO(output.getvalue()))
