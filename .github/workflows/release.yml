@@ -63,17 +63,34 @@ jobs:
           $extra = @()
           if ("$msg" -match '\[no-notes\]') { $extra += '--allow-empty' }
 
-          # Failed tag workflows may leave newer Git tags with NO release. Diff
-          # from the last release users could actually download, never from the
-          # nearest tag in Git history.
-          $previousRelease = gh release list --limit 1 --exclude-drafts --exclude-pre-releases --json tagName --jq '.[0].tagName'
-          if ($LASTEXITCODE -ne 0) {
-            throw "cannot resolve the previous published GitHub release (gh release list exited $LASTEXITCODE)"
+          # Where the notes start, in priority order:
+          #  1. [notes-since: <ref>] in the annotated tag message. An explicit
+          #     override - and the ONLY way to cut the FIRST release of a repo
+          #     that has none yet, where step 2 has nothing to find.
+          #  2. The last PUBLISHED release. Failed tag workflows may leave newer
+          #     Git tags with NO release, so diff from what users could actually
+          #     download, never from the nearest tag in Git history.
+          # There is no step 3: guessing would dump the entire changelog into
+          # one release, so an unresolvable baseline says what to do instead.
+          $previousRelease = ''
+          if ("$msg" -match '\[notes-since:\s*([^\]\s]+)\s*\]') {
+            $previousRelease = $Matches[1]
+            Write-Host "notes baseline from the tag message: $previousRelease"
           }
-          $previousRelease = "$previousRelease".Trim()
           if (-not $previousRelease) {
-            throw "cannot resolve the previous published GitHub release: gh release list returned no release"
+            $previousRelease = gh release list --limit 1 --exclude-drafts --exclude-pre-releases --json tagName --jq '.[0].tagName'
+            if ($LASTEXITCODE -ne 0) {
+              throw "cannot resolve the previous published GitHub release (gh release list exited $LASTEXITCODE)"
+            }
+            $previousRelease = "$previousRelease".Trim()
           }
+          if (-not $previousRelease) {
+            throw "cannot resolve the previous published GitHub release: gh release list returned no release. If this is the FIRST release of this repository, put [notes-since: <tag-or-commit>] in the annotated tag message to say where the notes start."
+          }
+          # A plain commit SHA is a valid baseline: releaseNotes.mjs reads it as
+          # `git show <ref>:frontend/src/whatsNew.js`, and GitHub's /compare
+          # accepts a SHA. That matters when the repo carries history from an
+          # upstream whose tags were never pushed here.
 
           node scripts/releaseNotes.mjs --tag "$env:RELEASE_REF_NAME" --prev $previousRelease --out ../release-notes.md @extra
           if ($LASTEXITCODE -ne 0) { throw "release notes generation failed (exit $LASTEXITCODE)" }

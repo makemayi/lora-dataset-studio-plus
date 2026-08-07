@@ -47,7 +47,11 @@ import { readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 
-export const REPO_URL = 'https://github.com/perfectgf/lora-dataset-studio';
+// THIS fork, not upstream: the compare link at the bottom of every release body
+// resolves against the repository the tags actually live in. Pointing it at
+// perfectgf/lora-dataset-studio (where these tags do not exist) 404s for every
+// reader. `updates.repo` in updater.py already defaults to the same fork.
+export const REPO_URL = 'https://github.com/makemayi/lora-dataset-studio-plus';
 
 // Path of the changelog module inside the repo, as git wants it.
 export const WHATS_NEW_REPO_PATH = 'frontend/src/whatsNew.js';
