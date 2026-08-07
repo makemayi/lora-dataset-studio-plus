@@ -843,11 +843,11 @@ def _scored_generated_image(svc, user_id):
 
 def test_regenerate_image_clears_prior_face_score(app, monkeypatch):
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
 
-    monkeypatch.setattr(
-        svc, '_api_generate_fn',
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn',
         lambda _engine: lambda _refs, _prompt, aspect_ratio=None: _png((0, 200, 0)),
     )
     monkeypatch.setattr(svc.trash, 'send_to_trash', lambda *_args, **_kwargs: None)
@@ -867,11 +867,11 @@ def test_regenerate_image_clears_prior_face_score(app, monkeypatch):
 
 def test_regenerate_image_restores_prior_face_score_when_trash_fails(app, monkeypatch):
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
 
-    monkeypatch.setattr(
-        svc, '_api_generate_fn',
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn',
         lambda _engine: lambda _refs, _prompt, aspect_ratio=None: _png((0, 200, 0)),
     )
 

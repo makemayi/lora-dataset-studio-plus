@@ -913,11 +913,12 @@ def test_api_batch_skips_cancelled_rows(app, monkeypatch):
     not generate-then-discard."""
     import concurrent.futures
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
     monkeypatch.setattr(concurrent.futures, 'ThreadPoolExecutor', _SerialPool)
     calls = []
-    monkeypatch.setattr(svc, '_api_generate_fn',
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn',
                         lambda engine: (lambda *a, **k: calls.append(1) or _png()))
     with app.app_context():
         ds = svc.create_dataset(LOCAL_USER, 'Stop', 'stop')
@@ -943,12 +944,13 @@ def test_api_batch_failure_stores_reason(app, monkeypatch):
     instead of a mute 'failed'. Exposed in the payload; cleared on regenerate."""
     import concurrent.futures
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
     monkeypatch.setattr(concurrent.futures, 'ThreadPoolExecutor', _SerialPool)
     def boom(*a, **k):
         raise RuntimeError('quota exceeded (429)')
-    monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: boom)
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn', lambda engine: boom)
     with app.app_context():
         ds = svc.create_dataset(LOCAL_USER, 'Fr', 'fr')
         import os
@@ -988,6 +990,7 @@ def test_regenerate_with_edited_prompt_persists_and_reaches_engine(app, monkeypa
     variation_prompt AND reaches the API engine wrapped by the identity guard
     (the face lock stays applied on top of the user's creative edit)."""
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.services.face_variations import IDENTITY_GUARD
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
@@ -995,7 +998,7 @@ def test_regenerate_with_edited_prompt_persists_and_reaches_engine(app, monkeypa
     def fake_generate(refs, prompt, aspect_ratio=None):
         seen['prompt'] = prompt
         return _png()
-    monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: fake_generate)
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn', lambda engine: fake_generate)
     with app.app_context():
         ds, img = _ds_with_ref_and_generated(svc, FaceDatasetImage, LOCAL_USER)
         svc.regenerate_image(LOCAL_USER, img.id, prompt='a candid mirror selfie')  # app=None -> sync
@@ -1011,10 +1014,11 @@ def test_fresh_api_batch_generation_flags_the_tile_unseen(app, monkeypatch):
     """A first-time generation (not a regenerate) gets the same "new, not yet
     viewed" marker — the point of broadening it beyond regenerate-only."""
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
     import os
-    monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: (lambda refs, prompt, aspect_ratio=None: _png()))
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn', lambda engine: (lambda refs, prompt, aspect_ratio=None: _png()))
     with app.app_context():
         ds = svc.create_dataset(LOCAL_USER, 'Fresh', 'freshtrig')
         os.makedirs(svc._dataset_dir(ds.id), exist_ok=True)
@@ -1032,9 +1036,10 @@ def test_regenerate_flags_the_tile_as_unseen(app, monkeypatch):
     """The "which one did I just redo" marker: a regenerate sets it, and it
     survives the completed image being buried back in the grid."""
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
-    monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: (lambda refs, prompt, aspect_ratio=None: _png()))
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn', lambda engine: (lambda refs, prompt, aspect_ratio=None: _png()))
     with app.app_context():
         ds, img = _ds_with_ref_and_generated(svc, FaceDatasetImage, LOCAL_USER)
         assert not img.unseen
@@ -1045,9 +1050,10 @@ def test_regenerate_flags_the_tile_as_unseen(app, monkeypatch):
 
 def test_clear_unseen_flag_is_a_one_way_transition(app, monkeypatch):
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
-    monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: (lambda refs, prompt, aspect_ratio=None: _png()))
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn', lambda engine: (lambda refs, prompt, aspect_ratio=None: _png()))
     with app.app_context():
         ds, img = _ds_with_ref_and_generated(svc, FaceDatasetImage, LOCAL_USER)
         svc.regenerate_image(LOCAL_USER, img.id)
@@ -1061,9 +1067,10 @@ def test_clear_unseen_flag_is_a_one_way_transition(app, monkeypatch):
 
 def test_clear_unseen_flag_is_scoped_to_the_owning_user(app, monkeypatch):
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
-    monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: (lambda refs, prompt, aspect_ratio=None: _png()))
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn', lambda engine: (lambda refs, prompt, aspect_ratio=None: _png()))
     with app.app_context():
         ds, img = _ds_with_ref_and_generated(svc, FaceDatasetImage, LOCAL_USER)
         svc.regenerate_image(LOCAL_USER, img.id)
@@ -1075,9 +1082,10 @@ def test_clear_unseen_flag_is_scoped_to_the_owning_user(app, monkeypatch):
 
 def test_dataset_payload_carries_the_unseen_flag(app, monkeypatch):
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
-    monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: (lambda refs, prompt, aspect_ratio=None: _png()))
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn', lambda engine: (lambda refs, prompt, aspect_ratio=None: _png()))
     with app.app_context():
         ds, img = _ds_with_ref_and_generated(svc, FaceDatasetImage, LOCAL_USER)
         by_id = {i['id']: i['unseen'] for i in svc.dataset_payload(LOCAL_USER, ds.id)['images']}
@@ -1093,11 +1101,11 @@ def test_dataset_payload_carries_the_unseen_flag(app, monkeypatch):
 def test_regeneration_clears_all_watermark_metadata(app, monkeypatch):
     import os
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
 
-    monkeypatch.setattr(
-        svc, '_api_generate_fn',
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn',
         lambda engine: (lambda refs, prompt, aspect_ratio=None: _png((0, 200, 0))),
     )
     with app.app_context():
@@ -1124,10 +1132,11 @@ def test_regenerate_without_prompt_keeps_existing(app, monkeypatch):
     """Empty/omitted prompt = current behaviour: variation_prompt is unchanged
     and the stored prompt is what feeds the engine (plain 🔄 / reject path)."""
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
     seen = {}
-    monkeypatch.setattr(svc, '_api_generate_fn',
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn',
                         lambda engine: (lambda refs, prompt, aspect_ratio=None: (seen.update(prompt=prompt) or _png())))
     with app.app_context():
         ds, img = _ds_with_ref_and_generated(svc, FaceDatasetImage, LOCAL_USER)
@@ -1145,13 +1154,14 @@ def test_regenerate_honors_currently_selected_api_engine(app, monkeypatch):
     """A tile born on Klein regenerates through the CURRENTLY selected engine
     when the workspace sends one — the row's origin no longer pins it."""
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
     seen = {}
     def make(engine):
         seen['engine'] = engine
         return lambda refs, prompt, aspect_ratio=None: _png()
-    monkeypatch.setattr(svc, '_api_generate_fn', make)
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn', make)
     with app.app_context():
         ds, img = _ds_with_ref_and_generated(svc, FaceDatasetImage, LOCAL_USER,
                                              engine='flux-2-klein.safetensors')  # Klein-born
@@ -1191,6 +1201,7 @@ def test_regenerate_nsfw_stays_local_despite_api_engine(app, monkeypatch):
     even when the workspace's selected engine is an API one (mirrors the batch
     rule — NSFW never reaches a third-party API)."""
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.services import klein_edit_helper
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
@@ -1199,7 +1210,7 @@ def test_regenerate_nsfw_stays_local_despite_api_engine(app, monkeypatch):
         seen.update(kwargs)
         return 'job-nsfw'
     monkeypatch.setattr(klein_edit_helper, 'enqueue_klein_edit', fake_enqueue)
-    monkeypatch.setattr(svc, '_api_generate_fn',
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn',
                         lambda engine: (_ for _ in ()).throw(AssertionError('API engine must not be called')))
     with app.app_context():
         ds, img = _ds_with_ref_and_generated(svc, FaceDatasetImage, LOCAL_USER,
@@ -1220,6 +1231,7 @@ def test_regenerate_custom_nsfw_label_stays_local_despite_api_engine(app, monkey
     True and this same fail-closed gate firing, on a custom entry exactly like on a
     shipped one."""
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.services import face_variations as fv
     from app.services import klein_edit_helper
     from app.models import FaceDatasetImage
@@ -1229,7 +1241,7 @@ def test_regenerate_custom_nsfw_label_stays_local_despite_api_engine(app, monkey
         seen.update(kwargs)
         return 'job-custom-nsfw'
     monkeypatch.setattr(klein_edit_helper, 'enqueue_klein_edit', fake_enqueue)
-    monkeypatch.setattr(svc, '_api_generate_fn',
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn',
                         lambda engine: (_ for _ in ()).throw(AssertionError('API engine must not be called')))
     sanitized = fv.sanitize_quick_gen_custom_nsfw(
         {'human': {'bust': [{'id': 'my_custom_nsfw', 'label': 'My Custom Bust', 'prompt': 'a prompt'}]}})
@@ -1249,6 +1261,7 @@ def test_regenerate_skips_engines_disabled_in_settings(app, monkeypatch):
     disabled in Settings (engines.enabled) — it falls back to the default
     enabled engine, even when the client sends no engine at all."""
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app import config as cfg
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
@@ -1256,7 +1269,7 @@ def test_regenerate_skips_engines_disabled_in_settings(app, monkeypatch):
     def make(engine):
         seen['engine'] = engine
         return lambda refs, prompt, aspect_ratio=None: _png()
-    monkeypatch.setattr(svc, '_api_generate_fn', make)
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn', make)
     with app.app_context():
         cfg.save_config({'engines': {'enabled': ['nanobanana', 'chatgpt'],
                                      'default': 'nanobanana'}})
@@ -1282,9 +1295,10 @@ def test_regenerate_rejects_unknown_engine(app):
 def test_regenerate_prompt_truncated_to_column_limit(app, monkeypatch):
     """A very long edited prompt is truncated to the variation_prompt column (500)."""
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
-    monkeypatch.setattr(svc, '_api_generate_fn',
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn',
                         lambda engine: (lambda refs, prompt, aspect_ratio=None: _png()))
     with app.app_context():
         ds, img = _ds_with_ref_and_generated(svc, FaceDatasetImage, LOCAL_USER)
@@ -1297,9 +1311,10 @@ def test_regenerate_edited_prompt_exposed_in_payload(app, monkeypatch):
     """After an edit, dataset_payload carries variation_prompt so the ✏️ bubble
     reopens seeded with the current prompt (not blank)."""
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
-    monkeypatch.setattr(svc, '_api_generate_fn',
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn',
                         lambda engine: (lambda refs, prompt, aspect_ratio=None: _png()))
     with app.app_context():
         ds, img = _ds_with_ref_and_generated(svc, FaceDatasetImage, LOCAL_USER)
@@ -1452,6 +1467,7 @@ def test_api_batch_advertises_generate_activity_then_clears(app, monkeypatch):
     past the launch request (busyLive = busy OR activity)."""
     import concurrent.futures, os
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.services import dataset_activity as da
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
@@ -1468,7 +1484,7 @@ def test_api_batch_advertises_generate_activity_then_clears(app, monkeypatch):
         def gen(*a, **k):
             seen.append(da.get(ds.id))   # live indicator captured MID-batch
             return _png()
-        monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: gen)
+        monkeypatch.setattr(dataset_generation_service, '_api_generate_fn', lambda engine: gen)
         svc._run_nanobanana_batch(app, items, [_png()], engine='nanobanana', dataset_id=ds.id)
         assert seen and seen[0]['kind'] == 'generate' and seen[0]['total'] == 3
         assert seen[0]['engine'] == 'nanobanana'
@@ -1733,6 +1749,7 @@ def test_subscription_quota_fails_remaining_rows_fast(app, monkeypatch):
     to the paid API key."""
     import concurrent.futures
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.services.chatgpt_image import SubscriptionQuotaExceeded
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
@@ -1741,7 +1758,7 @@ def test_subscription_quota_fails_remaining_rows_fast(app, monkeypatch):
     def boom(*a, **k):
         calls.append(1)
         raise SubscriptionQuotaExceeded('quota reached')
-    monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: boom)
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn', lambda engine: boom)
     with app.app_context():
         ds = svc.create_dataset(LOCAL_USER, 'Q', 'q')
         import os
@@ -1768,6 +1785,7 @@ def test_subscription_disconnect_never_falls_back_to_api_key(app, monkeypatch):
     instead of silently calling the API-key path."""
     import concurrent.futures
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.services import chatgpt_image
     from app.services.chatgpt_image import SubscriptionUnavailable
     from app.models import FaceDatasetImage
@@ -1779,7 +1797,7 @@ def test_subscription_disconnect_never_falls_back_to_api_key(app, monkeypatch):
     def boom(*a, **k):
         calls.append(1)
         raise SubscriptionUnavailable('ChatGPT connection lost — reconnect in Settings')
-    monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: boom)
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn', lambda engine: boom)
     with app.app_context():
         ds = svc.create_dataset(LOCAL_USER, 'L', 'l')
         import os

@@ -412,6 +412,7 @@ def test_a_fatal_failure_stops_the_batch_instead_of_paying_per_row(app, monkeypa
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.services.openrouter import OpenRouterFatal
     monkeypatch.setattr(concurrent.futures, 'ThreadPoolExecutor', _SerialPool)
     calls = []
@@ -420,7 +421,7 @@ def test_a_fatal_failure_stops_the_batch_instead_of_paying_per_row(app, monkeypa
         calls.append(1)
         raise OpenRouterFatal(fatal_message)
 
-    monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: boom)
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn', lambda engine: boom)
     with app.app_context():
         import os
         ds = svc.create_dataset(LOCAL_USER, 'OR', 'or')
@@ -447,6 +448,7 @@ def test_a_transient_failure_does_not_stop_the_batch(app, monkeypatch):
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.services.openrouter import OpenRouterError
     monkeypatch.setattr(concurrent.futures, 'ThreadPoolExecutor', _SerialPool)
     calls = []
@@ -457,7 +459,7 @@ def test_a_transient_failure_does_not_stop_the_batch(app, monkeypatch):
             raise OpenRouterError('OpenRouter rate-limited the request (HTTP 429)')
         return _real_png()
 
-    monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: flaky)
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn', lambda engine: flaky)
     with app.app_context():
         import os
         ds = svc.create_dataset(LOCAL_USER, 'OR2', 'or2')
@@ -482,8 +484,9 @@ def test_a_generated_file_is_tagged_with_the_engine_that_made_it(app, monkeypatc
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     monkeypatch.setattr(concurrent.futures, 'ThreadPoolExecutor', _SerialPool)
-    monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: (lambda *a, **k: _real_png()))
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn', lambda engine: (lambda *a, **k: _real_png()))
     with app.app_context():
         import os
         ds = svc.create_dataset(LOCAL_USER, 'OR3', 'or3')

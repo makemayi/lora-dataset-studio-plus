@@ -162,9 +162,10 @@ def _stub_enqueue(monkeypatch, calls):
 
 def test_the_variation_lane_passes_it(app, monkeypatch):
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     calls = []
     _stub_enqueue(monkeypatch, calls)
-    monkeypatch.setattr(svc, '_sync_generate_activity', lambda _d: None)
+    monkeypatch.setattr(dataset_generation_service, '_sync_generate_activity', lambda _d: None)
     with app.app_context():
         ds = svc.create_dataset(LOCAL_USER, 'Conform', 'zconform')
         ds.ref_filename = 'ref.png'

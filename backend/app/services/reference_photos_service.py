@@ -439,8 +439,14 @@ def remove_pose_slot(user_id, dataset_id, pose_key) -> bool:
 # regardless of which of the two modules gets imported first.
 from .face_dataset_service import (
     get_dataset, _ref_path, _dataset_dir, _dataset_path,
-    _read_external_reference, _preserved_import_header_extension,
+    _read_external_reference,
     _restore_from_trash, _crop_resize_file, _mirrored_image_bytes,
-    face_crop_to_square_webp, write_image_atomic, normalize_to_webp,
+    write_image_atomic, normalize_to_webp,
     REF_CROP_PAD, _IMAGE_PIXEL_EDIT_LOCKS, logger,
+)
+# Straight from the module that OWNS them, not via face_dataset_service's
+# re-export: routing a cross-module borrow through the parent would make the
+# ORDER of the parent's re-export blocks load-bearing.
+from .dataset_import_service import (
+    face_crop_to_square_webp, _preserved_import_header_extension,
 )

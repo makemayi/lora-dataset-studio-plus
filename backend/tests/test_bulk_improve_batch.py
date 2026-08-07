@@ -56,11 +56,15 @@ def test_batch_larger_than_max_fanout_eventually_processes_everything(app, monke
     from app.models import FaceDatasetImage
     from app.services import dataset_activity as da
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.services import krea_hq_helper as khh
 
     jobs = []
     _stub_klein(monkeypatch, khh, jobs)
-    monkeypatch.setattr(svc, 'MAX_FANOUT', 3)   # a cap we can walk into in a test
+    monkeypatch.setattr(dataset_generation_service, 'MAX_FANOUT', 3)
+    # ^ patched on the module that READS it. MAX_FANOUT still lives in
+    # face_dataset_service, but dataset_generation_service borrowed it at import
+    # time, so its global is a snapshot the parent's value no longer drives.
 
     with app.app_context():
         da.reset()
@@ -86,7 +90,7 @@ def test_batch_larger_than_max_fanout_eventually_processes_everything(app, monke
             peaks.append(svc._improve_in_flight(ds.id))
             return result
 
-        monkeypatch.setattr(svc, 'improve_existing_image', _tracked)
+        monkeypatch.setattr(dataset_generation_service, 'improve_existing_image', _tracked)
         summary = svc._drain_improve_queue(LOCAL_USER, ds.id, source_ids, token,
                                            sleep=_free_one_slot)
         da.end(token)
@@ -106,6 +110,7 @@ def test_stop_generation_really_ends_the_batch(app, monkeypatch):
     from app.models import FaceDatasetImage
     from app.services import dataset_activity as da
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.services import krea_hq_helper as khh
 
     jobs = []
@@ -123,7 +128,7 @@ def test_stop_generation_really_ends_the_batch(app, monkeypatch):
                 svc.cancel_pending(LOCAL_USER, ds.id)   # the ⏹ Stop button path
             return result
 
-        monkeypatch.setattr(svc, 'improve_existing_image', _stop_after_three)
+        monkeypatch.setattr(dataset_generation_service, 'improve_existing_image', _stop_after_three)
         summary = svc._drain_improve_queue(LOCAL_USER, ds.id, source_ids, token)
         assert da.cancel_requested(ds.id, da.IMPROVE_KINDS) is True
         da.end(token)

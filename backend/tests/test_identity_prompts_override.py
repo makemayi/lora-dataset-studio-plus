@@ -155,12 +155,13 @@ def _run_improve(app, monkeypatch, overrides):
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.services import krea_hq_helper as khh
     queued = []
     monkeypatch.setattr(khh, 'preflight', lambda: None)
     monkeypatch.setattr(khh, 'enqueue_krea_hq_improve',
                         lambda **kw: (queued.append(kw) or 'improve-job'))
-    monkeypatch.setattr(svc, '_sync_generate_activity', lambda _d: None)
+    monkeypatch.setattr(dataset_generation_service, '_sync_generate_activity', lambda _d: None)
 
     def fake_get(key, default=None):
         if key.startswith('identity_prompts.'):

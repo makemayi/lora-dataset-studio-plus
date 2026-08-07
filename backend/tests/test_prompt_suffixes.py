@@ -244,6 +244,7 @@ def test_api_batch_wraps_with_suffix_and_legacy_items_unchanged(app, monkeypatch
     import concurrent.futures
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
 
     class _SerialPool:
         def __init__(self, *a, **k): pass
@@ -253,7 +254,7 @@ def test_api_batch_wraps_with_suffix_and_legacy_items_unchanged(app, monkeypatch
 
     monkeypatch.setattr(concurrent.futures, 'ThreadPoolExecutor', _SerialPool)
     prompts = []
-    monkeypatch.setattr(svc, '_api_generate_fn',
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn',
                         lambda engine: (lambda refs, prompt, **k: prompts.append(prompt) or _png()))
     with app.app_context():
         ds = _ds_with_ref(svc, name='NB', trigger='nb')
@@ -275,8 +276,9 @@ def test_api_regenerate_sync_path_applies_suffix_once(app, monkeypatch):
     with the dataset suffix, exactly once, and keeps the stored prompt raw."""
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     prompts = []
-    monkeypatch.setattr(svc, '_api_generate_fn',
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn',
                         lambda engine: (lambda refs, prompt, **k: prompts.append(prompt) or _png()))
     with app.app_context():
         ds = _ds_with_ref(svc, name='NBr', trigger='nbr', prompt_suffix='golden hour')

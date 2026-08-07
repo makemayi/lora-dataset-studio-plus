@@ -1280,6 +1280,7 @@ def test_plain_krea_retry_uses_row_engine_without_klein_preflight(client, app, m
     from app.extensions import db
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.services import krea_edit_helper as keh
     from app.services import klein_edit_helper as kleh
 
@@ -1287,8 +1288,7 @@ def test_plain_krea_retry_uses_row_engine_without_klein_preflight(client, app, m
     monkeypatch.setattr(
         kleh, 'klein_missing_nodes',
         lambda: (_ for _ in ()).throw(AssertionError('Klein preflight must not run for Krea')))
-    monkeypatch.setattr(
-        svc, '_api_generate_fn',
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn',
         lambda _engine: (_ for _ in ()).throw(AssertionError('API must not run for Krea')))
     monkeypatch.setattr(
         keh, 'enqueue_krea_edit',

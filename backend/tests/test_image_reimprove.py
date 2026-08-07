@@ -73,13 +73,14 @@ def test_reimprove_reruns_the_pass_from_the_parent_with_todays_settings(app, mon
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.services import krea_hq_helper as khh
 
     queued, trashed = [], []
     _stub_klein(monkeypatch, khh, queued)
     monkeypatch.setattr(svc.trash, 'send_to_trash',
                         lambda path, context=None: trashed.append(path))
-    monkeypatch.setattr(svc, '_sync_generate_activity', lambda dataset_id: None)
+    monkeypatch.setattr(dataset_generation_service, '_sync_generate_activity', lambda dataset_id: None)
 
     with app.app_context():
         ds, parent, candidate = _improved_pair(svc, FaceDatasetImage, LOCAL_USER)
@@ -128,12 +129,13 @@ def test_reimprove_kept_candidate_restores_parent_as_fallback_after_late_failure
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.services import krea_hq_helper as khh
 
     queued = []
     _stub_klein(monkeypatch, khh, queued)
     monkeypatch.setattr(svc.trash, 'send_to_trash', lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(svc, '_sync_generate_activity', lambda _dataset_id: None)
+    monkeypatch.setattr(dataset_generation_service, '_sync_generate_activity', lambda _dataset_id: None)
 
     with app.app_context():
         ds, parent, candidate = _improved_pair(svc, FaceDatasetImage, LOCAL_USER)
@@ -238,11 +240,12 @@ def test_reimprove_preserves_a_caption_edited_during_enqueue(app, monkeypatch, o
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.services import krea_hq_helper as khh
 
     monkeypatch.setattr(khh, 'preflight', lambda: None)
     monkeypatch.setattr(svc.trash, 'send_to_trash', lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(svc, '_sync_generate_activity', lambda _dataset_id: None)
+    monkeypatch.setattr(dataset_generation_service, '_sync_generate_activity', lambda _dataset_id: None)
 
     with app.app_context():
         ds, parent, candidate = _improved_pair(svc, FaceDatasetImage, LOCAL_USER)

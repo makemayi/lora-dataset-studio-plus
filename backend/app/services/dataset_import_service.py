@@ -5,10 +5,7 @@ import, and the Qwen3-VL passes that classify a freshly imported image or find
 its head / watermark bounding box.
 
 Split out of face_dataset_service.py (2026-08, Phase 4 of a multi-phase file
-split) -- pure move, no behavior change. This module is re-exported FIRST by
-face_dataset_service.py: reference_photos_service and watermark_service borrow
-names that live here (`face_crop_to_square_webp`, `_dhash`, `classify_images`,
-...), and a borrow can only resolve once the parent has bound the name.
+split) -- pure move, no behavior change.
 """
 import io
 import json
@@ -1296,7 +1293,11 @@ from .face_dataset_service import (
     get_dataset, dataset_klein_model, normalize_to_webp, write_image_atomic,
     _img_path, _dataset_dir, _crop_resize_file, _coerce_archive_stream, _cap_caption,
     _source_metadata_from_scrape_item, _source_metadata_storage,
-    _sync_generate_activity, _generation_steps, _generation_base_lora_strength,
+    _generation_steps, _generation_base_lora_strength,
     CAPTION_MAX_CHARS, KLEIN_SMALL_IMAGE, SMALL_IMAGE_SOURCE, MAX_FANOUT,
     UPSCALE_WARN_THRESHOLD, _VISION_BATCH_KEEPALIVE, logger,
 )
+# Straight from the module that OWNS it, not via face_dataset_service's
+# re-export: routing a cross-module borrow through the parent would make the
+# ORDER of the parent's re-export blocks load-bearing.
+from .dataset_generation_service import _sync_generate_activity

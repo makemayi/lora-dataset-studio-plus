@@ -235,6 +235,7 @@ def test_regenerate_preflight_failure_keeps_current_file_out_of_trash(
     from app.extensions import db
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.services import trash
 
     with app.app_context():
@@ -251,7 +252,7 @@ def test_regenerate_preflight_failure_keeps_current_file_out_of_trash(
         db.session.commit()
         image_id = image.id
         calls = []
-        monkeypatch.setattr(svc, '_api_generate_fn', lambda _engine: lambda *_a, **_k: b'new')
+        monkeypatch.setattr(dataset_generation_service, '_api_generate_fn', lambda _engine: lambda *_a, **_k: b'new')
         monkeypatch.setattr(
             trash, 'send_to_trash',
             lambda *args, **kwargs: calls.append((args, kwargs)))

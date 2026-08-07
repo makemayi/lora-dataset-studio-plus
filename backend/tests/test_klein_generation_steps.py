@@ -26,6 +26,7 @@ def _reset_config_cache():
 def _generate(app, monkeypatch, config_steps=None):
     """Run ONE Klein variation and return the kwargs the enqueue received."""
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.services import klein_edit_helper as keh
     queued = []
     monkeypatch.setattr(keh, 'klein_missing_assets', lambda: [])
@@ -33,7 +34,7 @@ def _generate(app, monkeypatch, config_steps=None):
     monkeypatch.setattr(keh, 'enqueue_klein_edit',
                         lambda **kw: (queued.append(kw) or 'job-1'))
     monkeypatch.setattr(keh, 'resolve_generation_lora_preset', lambda _n: [])
-    monkeypatch.setattr(svc, '_sync_generate_activity', lambda _d: None)
+    monkeypatch.setattr(dataset_generation_service, '_sync_generate_activity', lambda _d: None)
     if config_steps is not None:
         import app.config as cfg
         cfg.save_config({'klein': {'generation_steps': config_steps}})

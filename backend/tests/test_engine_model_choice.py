@@ -480,6 +480,7 @@ def test_a_wrong_model_stops_the_batch_on_every_engine(app, monkeypatch, engine,
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     mod_name, cls_name = exc_path.rsplit('.', 1)
     fatal_cls = getattr(importlib.import_module(mod_name), cls_name)
     monkeypatch.setattr(concurrent.futures, 'ThreadPoolExecutor', _SerialPool)
@@ -490,7 +491,7 @@ def test_a_wrong_model_stops_the_batch_on_every_engine(app, monkeypatch, engine,
         raise fatal_cls('does not serve the model "typo-9000" — check the model '
                         'in Settings > Image engines')
 
-    monkeypatch.setattr(svc, '_api_generate_fn', lambda e: boom)
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn', lambda e: boom)
     with app.app_context():
         import io
         import os

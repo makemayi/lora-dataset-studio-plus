@@ -25,7 +25,13 @@ from pathlib import Path
 
 import pytest
 
-from app.services import face_dataset_service as svc
+# The engine lists and the message derived from them moved to
+# dataset_generation_service (2026-08 split). This file MUTATES those module
+# attributes to prove the message is derived, and the functions read them as
+# their own module globals -- so it has to drive the owning module, not the
+# re-exported references on face_dataset_service.
+from app.services import dataset_generation_service as svc
+from app.services import face_dataset_service as fsvc
 
 _JS = (Path(__file__).resolve().parents[2]
        / 'frontend' / 'src' / 'components' / 'dataset' / 'engineSelection.js')
@@ -89,10 +95,10 @@ def test_the_local_engines_reference_support_matches_on_both_sides():
     claiming different things is the silent drop the whole feature avoids — the
     user would be told Klein takes the extra angles and get an edit that ignored
     them, or the reverse."""
-    assert _js_edit_ref_support() == svc.LOCAL_EDIT_REF_SUPPORT
+    assert _js_edit_ref_support() == fsvc.LOCAL_EDIT_REF_SUPPORT
     # And every local engine has an answer: a new one must not default to "all".
     for engine in svc.LOCAL_ENGINES:
-        assert engine in svc.LOCAL_EDIT_REF_SUPPORT, engine
+        assert engine in fsvc.LOCAL_EDIT_REF_SUPPORT, engine
 
 
 def test_the_engine_labels_are_worded_identically_on_both_sides():

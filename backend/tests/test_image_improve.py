@@ -298,6 +298,7 @@ def test_improve_existing_image_is_non_destructive_and_uses_metadata_profile(
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.services import krea_hq_helper as khh
 
     queued = []
@@ -310,7 +311,7 @@ def test_improve_existing_image_is_non_destructive_and_uses_metadata_profile(
         svc.cfg, 'get',
         lambda key, default=None: configured_prompt
         if key == 'klein.small_image_prompt' else default)
-    monkeypatch.setattr(svc, '_sync_generate_activity', syncs.append)
+    monkeypatch.setattr(dataset_generation_service, '_sync_generate_activity', syncs.append)
 
     with app.app_context():
         ds, source, raw = _source(svc, FaceDatasetImage, LOCAL_USER)
@@ -475,6 +476,7 @@ def test_concurrent_improve_requests_enqueue_only_once(app, monkeypatch):
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.services import krea_hq_helper as khh
 
     entered = threading.Event()
@@ -489,7 +491,7 @@ def test_concurrent_improve_requests_enqueue_only_once(app, monkeypatch):
 
     monkeypatch.setattr(khh, 'preflight', lambda: None)
     monkeypatch.setattr(khh, 'enqueue_krea_hq_improve', enqueue)
-    monkeypatch.setattr(svc, '_sync_generate_activity', lambda _dataset_id: None)
+    monkeypatch.setattr(dataset_generation_service, '_sync_generate_activity', lambda _dataset_id: None)
     with app.app_context():
         _ds, source, _raw = _source(svc, FaceDatasetImage, LOCAL_USER)
         source_id = source.id

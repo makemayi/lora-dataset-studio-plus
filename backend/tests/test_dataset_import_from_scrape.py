@@ -21,6 +21,7 @@ from app.models import FaceDatasetImage
 from app.scrape.sources.base import Match
 from app.scrape.sources.pexels import PexelsSource
 from app.services import face_dataset_service as svc
+from app.services import dataset_generation_service
 # Patched on dataset_import_service, which OWNS the moved names: their callers
 # live in that same module and resolve them as module globals, so patching the
 # re-exported reference on face_dataset_service is not seen (2026-08 split).
@@ -443,7 +444,7 @@ def test_late_rescue_callback_ignores_activity_sync_failure(app, monkeypatch):
         def broken_sync(_dataset_id):
             raise RuntimeError('activity registry unavailable')
 
-        monkeypatch.setattr(svc, '_sync_generate_activity', broken_sync)
+        monkeypatch.setattr(dataset_generation_service, '_sync_generate_activity', broken_sync)
         # Must not propagate to job_queue._dispatch_completion and must not alter
         # either terminal status.
         svc.link_completed_dataset_image(

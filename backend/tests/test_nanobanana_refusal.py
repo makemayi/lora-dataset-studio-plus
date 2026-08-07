@@ -269,6 +269,7 @@ def test_a_batch_with_refusals_finishes_every_row_and_counts_them_exactly(
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.services.nanobanana import NanoBananaRefused
     monkeypatch.setattr(concurrent.futures, 'ThreadPoolExecutor', _SerialPool)
     caplog.set_level(logging.INFO)
@@ -284,7 +285,7 @@ def test_a_batch_with_refusals_finishes_every_row_and_counts_them_exactly(
                 'That filter is not configurable — LDS cannot turn it off.')
         return _real_png()
 
-    monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: flaky)
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn', lambda engine: flaky)
     with app.app_context():
         import os
         ds = svc.create_dataset(LOCAL_USER, 'NB', 'nb')
@@ -320,6 +321,7 @@ def test_a_refusal_is_not_fatal_but_a_rejected_key_still_is(app, monkeypatch):
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     from app.services.nanobanana import NanoBananaFatal, NanoBananaRefused
     monkeypatch.setattr(concurrent.futures, 'ThreadPoolExecutor', _SerialPool)
 
@@ -332,7 +334,7 @@ def test_a_refusal_is_not_fatal_but_a_rejected_key_still_is(app, monkeypatch):
             calls.append(1)
             raise _e
 
-        monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: boom)
+        monkeypatch.setattr(dataset_generation_service, '_api_generate_fn', lambda engine: boom)
         with app.app_context():
             import os
             ds = svc.create_dataset(LOCAL_USER, f'NB{expect_kind}', f'nb{expect_kind}')
@@ -361,8 +363,9 @@ def test_an_engine_that_cannot_explain_itself_says_that_instead_of_guessing(
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     monkeypatch.setattr(concurrent.futures, 'ThreadPoolExecutor', _SerialPool)
-    monkeypatch.setattr(svc, '_api_generate_fn', lambda engine: (lambda *a, **k: None))
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn', lambda engine: (lambda *a, **k: None))
     with app.app_context():
         import os
         ds = svc.create_dataset(LOCAL_USER, 'ORX', 'orx')
@@ -444,8 +447,9 @@ def test_a_successful_batch_row_records_no_failure_kind(app, monkeypatch):
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
     monkeypatch.setattr(concurrent.futures, 'ThreadPoolExecutor', _SerialPool)
-    monkeypatch.setattr(svc, '_api_generate_fn',
+    monkeypatch.setattr(dataset_generation_service, '_api_generate_fn',
                         lambda engine: (lambda *a, **k: _real_png()))
     with app.app_context():
         import os

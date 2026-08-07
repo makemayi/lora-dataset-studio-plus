@@ -749,9 +749,15 @@ def restore_watermark_original(user_id, dataset_id, image_id) -> dict | None:
 # and raise ImportError; last, every name this module owns already exists no
 # matter which side gets imported first.
 from .face_dataset_service import (
-    get_dataset, batch_image_action, classify_images, dataset_klein_model,
+    get_dataset, batch_image_action, dataset_klein_model,
     write_image_atomic, _img_path, _dhash, _existing_dhashes, _safe_json,
     _valid_icc_profile, _VISION_BATCH_KEEPALIVE,
-    _parse_watermark_bbox, _watermark_regions_payload, _watermark_route_payload,
+    _watermark_regions_payload, _watermark_route_payload,
     logger,
+)
+# Straight from the module that OWNS them, not via face_dataset_service's
+# re-export: routing a cross-module borrow through the parent would make the
+# ORDER of the parent's re-export blocks load-bearing.
+from .dataset_import_service import (
+    classify_images, _dhash, _existing_dhashes, _parse_watermark_bbox,
 )
