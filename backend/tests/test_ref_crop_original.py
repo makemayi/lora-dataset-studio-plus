@@ -15,6 +15,8 @@ from PIL import Image
 from app.services import face_dataset_service as svc
 
 
+
+from app.services import dataset_import_service
 def _webp(color, size=(600, 400)):
     b = io.BytesIO()
     Image.new('RGB', size, color).save(b, 'WEBP')
@@ -76,7 +78,7 @@ def test_recrop_reference_auto_reruns_head_crop_on_original(app, monkeypatch):
         ds = svc.create_dataset('local', 'Mia', 'zchar_mia')
         d, _o, ref_fn = _seed_ref(
             ds, original=_webp((255, 0, 0), (400, 400)), cropped=_webp((0, 255, 0), (64, 64)))
-        monkeypatch.setattr(svc, 'detect_head_bbox', lambda *a, **k: (0.25, 0.25, 0.75, 0.75))
+        monkeypatch.setattr(dataset_import_service, 'detect_head_bbox', lambda *a, **k: (0.25, 0.25, 0.75, 0.75))
         ok, detected = svc.recrop_reference_auto('local', ds.id)
         assert ok is True and detected is True
         im = Image.open(os.path.join(d, ref_fn)).convert('RGB')

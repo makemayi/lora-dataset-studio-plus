@@ -30,6 +30,7 @@ from PIL import Image
 
 from app.config import LOCAL_USER
 from app.services import face_dataset_service as fsvc
+from app.services import dataset_import_service
 from app.services import image_bank_service as banks
 
 
@@ -264,7 +265,7 @@ def test_dataset_scrape_import_still_filters_and_dedupes(app):
         by_url = {'http://x/a.jpg': _img_bytes(grad='ltr', fmt='JPEG'),
                   'http://x/dupe.png': _img_bytes(grad='ltr', fmt='PNG'),
                   'http://x/tiny.jpg': _img_bytes(320, 240, grad='rtl')}
-        with patch.object(fsvc, '_download_scrape_item', _fake_downloader(by_url)):
+        with patch.object(dataset_import_service, '_download_scrape_item', _fake_downloader(by_url)):
             res = fsvc.scrape_import_urls(
                 LOCAL_USER, c.id, [_item('http://x/a.jpg'), _item('http://x/dupe.png'),
                                    _item('http://x/tiny.jpg')])

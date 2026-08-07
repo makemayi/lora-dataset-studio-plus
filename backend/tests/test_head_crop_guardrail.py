@@ -18,6 +18,8 @@ from PIL import Image
 from app.services import face_dataset_service as svc
 
 
+
+from app.services import dataset_import_service
 def _png(w=256, h=256):
     b = io.BytesIO()
     Image.new('RGB', (w, h), (120, 40, 40)).save(b, 'PNG')
@@ -64,14 +66,14 @@ def test_detect_head_bbox_empty_response_is_none(app, monkeypatch):
 # --- face_crop reports whether it head-cropped ------------------------------
 def test_face_crop_reports_detection(app, monkeypatch):
     with app.app_context():
-        monkeypatch.setattr(svc, 'detect_head_bbox', lambda *a, **k: (0.25, 0.15, 0.75, 0.85))
+        monkeypatch.setattr(dataset_import_service, 'detect_head_bbox', lambda *a, **k: (0.25, 0.15, 0.75, 0.85))
         webp, detected = svc.face_crop_to_square_webp(_png(), return_detected=True)
         assert detected is True and webp[:4] == b'RIFF'  # WEBP container
 
 
 def test_face_crop_reports_fallback_when_no_head(app, monkeypatch):
     with app.app_context():
-        monkeypatch.setattr(svc, 'detect_head_bbox', lambda *a, **k: None)
+        monkeypatch.setattr(dataset_import_service, 'detect_head_bbox', lambda *a, **k: None)
         webp, detected = svc.face_crop_to_square_webp(_png(), return_detected=True)
         assert detected is False and webp  # still a valid centered crop
 

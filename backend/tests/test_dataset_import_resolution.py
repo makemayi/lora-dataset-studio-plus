@@ -61,6 +61,7 @@ def test_default_non_cropped_import_preserves_bytes_and_content_extension(
     from app.config import LOCAL_USER
     from app.services import face_dataset_service as svc
 
+    from app.services import dataset_import_service
     raw = _image_bytes(fmt, seed=len(fmt))
     with app.app_context():
         policy = svc.import_encode_policy()
@@ -112,10 +113,11 @@ def test_preserve_rejects_unsupported_or_animated_format_clearly(app):
 def test_head_crop_remains_an_intentional_webp_derivative(app, monkeypatch):
     from app.config import LOCAL_USER
     from app.services import face_dataset_service as svc
+    from app.services import dataset_import_service
 
     raw = _image_bytes('PNG')
     derived = _image_bytes('WEBP', size=(64, 64))
-    monkeypatch.setattr(svc, 'face_crop_to_square_webp',
+    monkeypatch.setattr(dataset_import_service, 'face_crop_to_square_webp',
                         lambda _raw, return_scale=False: (derived, 1.0))
     with app.app_context():
         dataset = svc.create_dataset(LOCAL_USER, 'Crop derives', 'crop_derives')
@@ -200,6 +202,7 @@ def test_import_header_budget_rejects_before_decode_for_every_ingress_lane(app, 
     """Manual, ZIP, scrape, crop and normalisation share the 16 Mi-pixel gate."""
     from app.config import LOCAL_USER
     from app.services import face_dataset_service as svc
+    from app.services import dataset_import_service
 
     monkeypatch.setattr(svc.Image, 'open', lambda *_args, **_kwargs: _OversizedImageHeader())
     archive = io.BytesIO()
@@ -217,7 +220,7 @@ def test_import_header_budget_rejects_before_decode_for_every_ingress_lane(app, 
 
         scraped = svc.create_dataset(LOCAL_USER, 'Scrape guarded', 'scrape_guarded',
                                      kind='concept', concept_desc='a guarded concept')
-        monkeypatch.setattr(svc, '_download_scrape_item',
+        monkeypatch.setattr(dataset_import_service, '_download_scrape_item',
                             lambda _item: ('ok', b'header-only'))
         result = svc.scrape_import_urls(
             LOCAL_USER, scraped.id, [{'url': 'https://example.invalid/unsafe.jpg'}])

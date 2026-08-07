@@ -27,6 +27,7 @@ def test_archive_limit_override_runs_before_csrf_form_parsing(app, client):
     from app.config import LOCAL_USER
     from app.services import face_dataset_service as service
 
+    from app.services import dataset_import_service
     with app.app_context():
         dataset = service.create_dataset(LOCAL_USER, 'Source', 'source')
         backup = service.build_backup_zip(LOCAL_USER, dataset.id)
@@ -90,6 +91,7 @@ def test_both_archive_import_routes_pass_seekable_streams(app, client, monkeypat
     from app.config import LOCAL_USER
     from app.services import face_dataset_service as service
 
+    from app.services import dataset_import_service
     with app.app_context():
         dataset = service.create_dataset(LOCAL_USER, 'Merge target', 'merge_target')
         dataset_id = dataset.id
@@ -132,6 +134,7 @@ def test_archive_exports_roll_to_disk_and_close_with_response(
     from app.config import LOCAL_USER
     from app.services import face_dataset_service as service
 
+    from app.services import dataset_import_service
     with app.app_context():
         dataset = service.create_dataset(LOCAL_USER, 'Export source', 'export_source')
         dataset_id = dataset.id
@@ -160,6 +163,7 @@ def test_archive_export_writer_failure_closes_spool(app, client, monkeypatch):
     from app.config import LOCAL_USER
     from app.services import face_dataset_service as service
 
+    from app.services import dataset_import_service
     with app.app_context():
         dataset = service.create_dataset(LOCAL_USER, 'Broken export', 'broken_export')
         dataset_id = dataset.id
@@ -181,6 +185,7 @@ def test_archive_services_accept_streams_without_closing_callers(app):
     from app.config import LOCAL_USER
     from app.services import face_dataset_service as service
 
+    from app.services import dataset_import_service
     with app.app_context():
         source = service.create_dataset(LOCAL_USER, 'Stream source', 'stream_source')
         backup_output = io.BytesIO()
@@ -202,6 +207,7 @@ def test_backup_metadata_cap_is_checked_before_inflation(app, monkeypatch):
     from app.config import LOCAL_USER
     from app.services import face_dataset_service as service
 
+    from app.services import dataset_import_service
     data = _empty_backup(service, manifest_extra={'padding': 'x' * 512})
     monkeypatch.setattr(service, '_BACKUP_MAX_METADATA_BYTES', 128)
 
@@ -217,6 +223,7 @@ def test_backup_uncompressed_cap_counts_unknown_entries(app, monkeypatch):
     from app.config import LOCAL_USER
     from app.services import face_dataset_service as service
 
+    from app.services import dataset_import_service
     output = io.BytesIO()
     with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
         archive.writestr('manifest.json', json.dumps({
@@ -235,13 +242,14 @@ def test_training_zip_rejects_oversized_image_before_read(app, monkeypatch):
     from app.config import LOCAL_USER
     from app.services import face_dataset_service as service
 
+    from app.services import dataset_import_service
     with app.app_context():
         dataset = service.create_dataset(LOCAL_USER, 'Oversized image', 'oversized_image')
         assert service.DATASET_ZIP_MAX_IMAGE_BYTES == 128 * 1024 * 1024
         archive_stream = io.BytesIO()
         with zipfile.ZipFile(archive_stream, 'w', zipfile.ZIP_DEFLATED) as archive:
             archive.writestr('image.png', b'x' * 256)
-        monkeypatch.setattr(service, 'DATASET_ZIP_MAX_IMAGE_BYTES', 128)
+        monkeypatch.setattr(dataset_import_service, 'DATASET_ZIP_MAX_IMAGE_BYTES', 128)
 
         def forbidden_read(*_args, **_kwargs):
             raise AssertionError('oversized image must be rejected before ZipFile.read')
@@ -263,6 +271,7 @@ def test_backup_rejects_exact_and_casefold_duplicates_before_extraction(
     from app.config import LOCAL_USER
     from app.services import face_dataset_service as service
 
+    from app.services import dataset_import_service
     output = io.BytesIO()
     with pytest.warns(UserWarning) if entries[0] == entries[1] else nullcontext():
         with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
@@ -297,6 +306,7 @@ def test_malformed_backup_types_are_value_errors_and_route_400(
     from app.config import LOCAL_USER
     from app.services import face_dataset_service as service
 
+    from app.services import dataset_import_service
     data = _empty_backup(
         service, manifest_extra=manifest_extra, images_meta=images_meta)
     with app.app_context(), pytest.raises(ValueError, match=message):

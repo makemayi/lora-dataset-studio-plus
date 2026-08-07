@@ -20,6 +20,8 @@ import pytest
 from PIL import Image
 
 from app.services import face_dataset_service as svc
+
+from app.services import dataset_import_service
 from app.models import FaceDatasetImage
 from app.config import LOCAL_USER
 
@@ -36,7 +38,7 @@ def test_return_scale_reports_upscale_for_small_detected_box(app, monkeypatch):
     so the LANCZOS resize enlarges it (scale > 1) -- the exact pattern described in
     the thread: crop, then super-resolve, biasing training toward that patch."""
     with app.app_context():
-        monkeypatch.setattr(svc, 'detect_head_bbox', lambda *a, **k: (0.4, 0.4, 0.6, 0.6))
+        monkeypatch.setattr(dataset_import_service, 'detect_head_bbox', lambda *a, **k: (0.4, 0.4, 0.6, 0.6))
         webp, detected, scale = svc.face_crop_to_square_webp(
             _png(1000, 1000), return_detected=True, return_scale=True)
         assert detected is True and webp[:4] == b'RIFF'
@@ -47,7 +49,7 @@ def test_return_scale_no_upscale_for_large_detected_box(app, monkeypatch):
     """A generously-sized source crop shouldn't be flagged: the box is already
     bigger than the 1024 target, so the resize downsamples (scale <= 1)."""
     with app.app_context():
-        monkeypatch.setattr(svc, 'detect_head_bbox', lambda *a, **k: (0.2, 0.2, 0.8, 0.8))
+        monkeypatch.setattr(dataset_import_service, 'detect_head_bbox', lambda *a, **k: (0.2, 0.2, 0.8, 0.8))
         _webp, _detected, scale = svc.face_crop_to_square_webp(
             _png(3000, 3000), return_detected=True, return_scale=True)
         assert scale <= 1.0
@@ -65,7 +67,7 @@ def test_return_scale_is_additive_to_return_detected_alone():
 def test_import_crop_stores_upscale_ratio(app, monkeypatch):
     with app.app_context():
         ds = svc.create_dataset(LOCAL_USER, 'Amy', 'zchar_amy')
-        monkeypatch.setattr(svc, 'detect_head_bbox', lambda *a, **k: (0.4, 0.4, 0.6, 0.6))
+        monkeypatch.setattr(dataset_import_service, 'detect_head_bbox', lambda *a, **k: (0.4, 0.4, 0.6, 0.6))
         ids, failed = svc.import_images(LOCAL_USER, ds.id, [_png(1000, 1000)], crop=True)
         assert failed == 0 and len(ids) == 1
         img = svc.db.session.get(FaceDatasetImage, ids[0])

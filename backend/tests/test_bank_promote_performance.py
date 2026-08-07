@@ -36,6 +36,7 @@ def test_promote_loads_dataset_dhashes_once_and_dedupes_across_chunks(
         from app.extensions import db
         from app.models import BankImage, FaceDatasetImage
         from app.services import face_dataset_service as datasets
+        from app.services import dataset_import_service
         from app.services import image_bank_service as banks
 
         source = tmp_path / 'bank'
@@ -62,7 +63,7 @@ def test_promote_loads_dataset_dhashes_once_and_dedupes_across_chunks(
             existing_calls.append(dataset_id)
             return real_existing(dataset_id)
 
-        monkeypatch.setattr(datasets, '_existing_dhash_rows', counted_existing)
+        monkeypatch.setattr(dataset_import_service, '_existing_dhash_rows', counted_existing)
         monkeypatch.setattr(banks, '_existing_dhash_rows', counted_existing)
         monkeypatch.setattr(banks, '_PROMOTE_CHUNK', 2)
 
@@ -86,6 +87,7 @@ def test_two_banks_promoting_same_image_to_one_dataset_create_one_row(
         from app.extensions import db
         from app.models import BankImage, FaceDatasetImage
         from app.services import face_dataset_service as datasets
+        from app.services import dataset_import_service
         from app.services import image_bank_service as banks
 
         payload = _png(40)
@@ -160,6 +162,7 @@ def test_stale_cached_dhash_after_dataset_file_replacement_is_revalidated(app):
         from app.models import FaceDatasetImage
         from app.services import face_dataset_service as datasets
 
+        from app.services import dataset_import_service
         dataset = datasets.create_dataset(
             'local', 'Stale hash target', 'stalehashtarget')
         original, replacement = _png(70), _png(71)
@@ -198,6 +201,7 @@ def test_import_images_default_still_loads_and_commits_per_image(app, monkeypatc
         from app.models import FaceDatasetImage
         from app.services import face_dataset_service as datasets
 
+        from app.services import dataset_import_service
         dataset = datasets.create_dataset('local', 'Ordinary', 'ordinaryperf')
         real_existing = datasets._existing_dhash_rows
         existing_calls = []
@@ -206,7 +210,7 @@ def test_import_images_default_still_loads_and_commits_per_image(app, monkeypatc
             existing_calls.append(dataset_id)
             return real_existing(dataset_id)
 
-        monkeypatch.setattr(datasets, '_existing_dhash_rows', counted_existing)
+        monkeypatch.setattr(dataset_import_service, '_existing_dhash_rows', counted_existing)
         session = db.session()
         real_commit = session.commit
         commit_calls = []

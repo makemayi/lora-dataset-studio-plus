@@ -21,6 +21,10 @@ from app.models import FaceDatasetImage
 from app.scrape.sources.base import Match
 from app.scrape.sources.pexels import PexelsSource
 from app.services import face_dataset_service as svc
+# Patched on dataset_import_service, which OWNS the moved names: their callers
+# live in that same module and resolve them as module globals, so patching the
+# re-exported reference on face_dataset_service is not seen (2026-08 split).
+from app.services import dataset_import_service
 from app.config import LOCAL_USER
 
 
@@ -86,7 +90,7 @@ def test_scrape_import_happy_path(app):
         c = _concept()
         by_url = {'http://x/a.jpg': _img_bytes(grad='ltr'),
                   'http://x/b.jpg': _img_bytes(grad='rtl')}
-        with patch.object(svc, '_download_scrape_item', _fake_downloader(by_url)):
+        with patch.object(dataset_import_service, '_download_scrape_item', _fake_downloader(by_url)):
             res = svc.scrape_import_urls(LOCAL_USER, c.id, [_item('http://x/a.jpg'), _item('http://x/b.jpg')])
         assert res['imported'] == 2
         assert all(v == 0 for v in res['skipped'].values()), res['skipped']
@@ -100,7 +104,7 @@ def test_scrape_import_keeps_the_downloaded_master_bytes(app):
     with app.app_context():
         dataset = _concept()
         raw = _img_bytes(grad='ltr')
-        with patch.object(svc, '_download_scrape_item',
+        with patch.object(dataset_import_service, '_download_scrape_item',
                           _fake_downloader({'http://x/master.jpg': raw})):
             result = svc.scrape_import_urls(LOCAL_USER, dataset.id,
                                             [_item('http://x/master.jpg')])
@@ -140,7 +144,7 @@ def test_pexels_scan_import_payload_and_backup_preserve_provenance(app, monkeypa
         assert error is None and len(scanned) == 1
         item = scanned[0]
         data = _img_bytes(grad='ltr')
-        with patch.object(svc, '_download_scrape_item',
+        with patch.object(dataset_import_service, '_download_scrape_item',
                           _fake_downloader({item['url']: data})):
             res = svc.scrape_import_urls(LOCAL_USER, c.id, [item])
 
@@ -167,7 +171,7 @@ def test_spoofed_pexels_links_are_dropped_without_blocking_import(app):
         item = _pexels_item('2718')
         item['source_url'] = 'https://evil.example/pexels-lookalike'
         data = _img_bytes(grad='ltr')
-        with patch.object(svc, '_download_scrape_item',
+        with patch.object(dataset_import_service, '_download_scrape_item',
                           _fake_downloader({item['url']: data})):
             res = svc.scrape_import_urls(LOCAL_USER, c.id, [item])
 
@@ -197,7 +201,7 @@ def test_scrape_import_filters(app):
         }
         urls = ['low', 'wide', 'dup1', 'dup2', 'dead']
         items = [_item(f'http://x/{u}.jpg') for u in urls]
-        with patch.object(svc, '_download_scrape_item', _fake_downloader(by_url)):
+        with patch.object(dataset_import_service, '_download_scrape_item', _fake_downloader(by_url)):
             res = svc.scrape_import_urls(LOCAL_USER, c.id, items)
         assert res['imported'] == 1  # dup1 seul survit
         assert res['skipped'] == {'duplicates': 1, 'low_res': 1, 'extreme_ratio': 1,
@@ -210,7 +214,7 @@ def test_scrape_import_dedup_vs_existing(app):
         data = _img_bytes(grad='ltr')
         ids, _ = svc.import_images(LOCAL_USER, c.id, [data], crop=False)  # déjà présente (master préservé)
         assert len(ids) == 1
-        with patch.object(svc, '_download_scrape_item', _fake_downloader({'http://x/again.jpg': data})):
+        with patch.object(dataset_import_service, '_download_scrape_item', _fake_downloader({'http://x/again.jpg': data})):
             res = svc.scrape_import_urls(LOCAL_USER, c.id, [_item('http://x/again.jpg')])
         assert res['imported'] == 0 and res['skipped']['duplicates'] == 1
 
@@ -221,7 +225,7 @@ def test_scrape_import_maps_not_image(app):
 
         def _dl(item):
             return ('not_image', None)
-        with patch.object(svc, '_download_scrape_item', _dl):
+        with patch.object(dataset_import_service, '_download_scrape_item', _dl):
             res = svc.scrape_import_urls(LOCAL_USER, c.id, [_item('http://x/a.gif')])
         assert res['imported'] == 0 and res['skipped']['not_image'] == 1
 
@@ -237,7 +241,7 @@ def test_small_rescue_is_opt_in_and_does_not_preflight_when_disabled(app):
     with app.app_context():
         c = _concept()
         data = _img_bytes(700, 500)
-        with patch.object(svc, '_download_scrape_item',
+        with patch.object(dataset_import_service, '_download_scrape_item',
                           _fake_downloader({'http://x/small.jpg': data})), \
              patch('app.services.klein_edit_helper.klein_missing_assets') as preflight:
             res = svc.scrape_import_urls(
@@ -264,7 +268,7 @@ def test_small_rescue_preserves_original_and_queues_empty_prompt(app):
         def config_get(key, default=None):
             return '' if key == 'klein.small_image_prompt' else real_get(key, default)
 
-        with patch.object(svc, '_download_scrape_item',
+        with patch.object(dataset_import_service, '_download_scrape_item',
                           _fake_downloader({'http://x/small.jpg': data})), \
              patch('app.services.klein_edit_helper.klein_missing_assets', return_value=[]), \
              patch('app.services.klein_edit_helper.enqueue_klein_edit', side_effect=enqueue), \
@@ -294,7 +298,7 @@ def test_small_rescue_enqueue_failure_keeps_original_and_failed_candidate(app):
     with app.app_context():
         c = _concept()
         data = _img_bytes(700, 500)
-        with patch.object(svc, '_download_scrape_item',
+        with patch.object(dataset_import_service, '_download_scrape_item',
                           _fake_downloader({'http://x/small.jpg': data})), \
              patch('app.services.klein_edit_helper.klein_missing_assets', return_value=[]), \
              patch('app.services.klein_edit_helper.enqueue_klein_edit',
@@ -321,7 +325,7 @@ def test_small_rescue_hd_duplicate_wins_before_klein_preflight(app):
         low = _img_bytes(700, 500, grad='ltr')
         high = _img_bytes(1280, 960, grad='ltr')
         by_url = {'http://x/low.jpg': low, 'http://x/high.jpg': high}
-        with patch.object(svc, '_download_scrape_item', _fake_downloader(by_url)), \
+        with patch.object(dataset_import_service, '_download_scrape_item', _fake_downloader(by_url)), \
              patch('app.services.klein_edit_helper.klein_missing_assets') as preflight:
             res = svc.scrape_import_urls(
                 LOCAL_USER, c.id,
@@ -340,7 +344,7 @@ def test_rescue_sort_keeps_metadata_attached_to_winning_pexels_bytes(app):
         low = _img_bytes(700, 500, grad='ltr')
         high = _img_bytes(1280, 960, grad='ltr')
         by_url = {low_item['url']: low, high_item['url']: high}
-        with patch.object(svc, '_download_scrape_item', _fake_downloader(by_url)), \
+        with patch.object(dataset_import_service, '_download_scrape_item', _fake_downloader(by_url)), \
              patch('app.services.klein_edit_helper.klein_missing_assets') as preflight:
             res = svc.scrape_import_urls(
                 LOCAL_USER, c.id, [low_item, high_item], rescue_small=True)
@@ -357,7 +361,7 @@ def test_small_rescue_source_and_candidate_keep_pexels_provenance(app):
         c = _concept()
         item = _pexels_item('8080')
         data = _img_bytes(700, 500)
-        with patch.object(svc, '_download_scrape_item',
+        with patch.object(dataset_import_service, '_download_scrape_item',
                           _fake_downloader({item['url']: data})), \
              patch('app.services.klein_edit_helper.klein_missing_assets', return_value=[]), \
              patch('app.services.klein_edit_helper.enqueue_klein_edit',
