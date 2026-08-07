@@ -118,7 +118,7 @@ def _site_packages_candidates(python_path: Path):
     """Plausible site-packages dirs for an interpreter, without running it.
     Windows keeps them at `<env>/Lib/site-packages`, POSIX at
     `<env>/lib/python3.X/site-packages` — both layouts are tried because LDS runs
-    on Windows, on Linux and inside the Docker image."""
+    on Windows and on Linux."""
     env = python_path.parent.parent      # .../Scripts/python.exe -> env root
     yield env / 'Lib' / 'site-packages'
     lib = env / 'lib'

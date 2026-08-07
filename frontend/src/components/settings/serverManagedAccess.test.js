@@ -144,7 +144,8 @@ test('managed UI wires URLs and status to browser access, never runtime LAN data
   assert.match(source, /url: `\$\{access\.origin\}\/\$\{tokenQS\}`/)
   assert.match(source, /Opened at:[\s\S]{0,120}\{access\.origin\}/)
   assert.match(source, /Current browser address uses a network host/)
-  assert.match(source, /That does not reveal whether Docker is exposed/)
-  assert.match(source, /any device that can reach this Docker service/)
-  assert.doesNotMatch(source, /Change the Docker host mapping to expose it/)
+  assert.match(source, /That does not reveal whether the service is exposed/)
+  assert.match(source, /any device that can reach this service/)
+  // The copy must describe the situation, never name a deployment we removed.
+  assert.doesNotMatch(source, /docker/i)
 })

@@ -576,34 +576,6 @@ def test_update_check_detects_newer_release(client, monkeypatch, _reset_update_c
     assert d['url'].endswith('v9999.12.31')
 
 
-def test_update_check_docker_reports_manual_rebuild_even_with_zip(
-        client, monkeypatch, _reset_update_cache):
-    import requests
-    from app.services import updater
-    monkeypatch.setenv('LDS_RUNTIME', 'docker-gpu')
-    monkeypatch.setattr(updater, 'is_git_checkout', lambda root=None: True)
-    monkeypatch.setattr(
-        updater, 'git_update_status',
-        lambda root=None: (_ for _ in ()).throw(
-            AssertionError('Docker checks must not fetch through the git updater')),
-    )
-    monkeypatch.setattr(requests, 'get', lambda *a, **k: _FakeResp(200, {
-        'tag_name': 'v9999.12.31',
-        'assets': [{'name': 'LoRA-Dataset-Studio-windows.zip',
-                    'browser_download_url': 'https://x/win'}],
-    }))
-
-    d = client.get('/api/update/check?force=1').get_json()
-
-    assert d['update_available'] is True
-    assert d['install_mode'] == 'docker' and d['can_apply'] is False
-    assert d['manual'] is True
-    assert d['instructions'] == [
-        'git pull',
-        'docker compose -f docker-compose.gpu.yml up -d --build',
-    ]
-
-
 def test_update_check_same_version_and_cache(client, monkeypatch, _reset_update_cache):
     import requests
     from app.version import APP_VERSION
@@ -747,7 +719,7 @@ def test_settings_restart_pins_saved_host_port_to_env(client, monkeypatch):
 
 
 def test_settings_restart_preserves_supervisor_managed_bind(client, monkeypatch):
-    """Inside Docker the container bind is fixed by its environment.  Saving a
+    """Under a managed bind the host/port are fixed by the environment.  Saving a
     desktop host/port must not turn the restarted backend into a loopback-only
     process that the published port cannot reach."""
     import os
@@ -871,27 +843,6 @@ def test_update_apply_defers_changed_requirements_to_restart(client, monkeypatch
     assert response.status_code == 200
     assert response.get_json()['restarting'] is True
     assert calls == [((), {'install_requirements': True})]
-
-
-def test_update_apply_docker_refuses_before_any_pull_or_download(client, monkeypatch):
-    from app.services import updater
-    monkeypatch.setenv('LDS_RUNTIME', 'docker-gpu')
-    forbidden = lambda *a, **k: (_ for _ in ()).throw(
-        AssertionError('Docker apply must refuse before an updater is selected'))
-    monkeypatch.setattr(updater, 'is_git_checkout', forbidden)
-    monkeypatch.setattr(updater, 'apply_update', forbidden)
-    monkeypatch.setattr(updater, 'start_zip_update', forbidden)
-
-    response = client.post('/api/update/apply')
-    body = response.get_json()
-
-    assert response.status_code == 200
-    assert body['ok'] is False and body['manual'] is True
-    assert body['install_mode'] == 'docker' and body['can_apply'] is False
-    assert body['instructions'] == [
-        'git pull',
-        'docker compose -f docker-compose.gpu.yml up -d --build',
-    ]
 
 
 def test_settings_restart_is_refused_during_active_update(client, monkeypatch):

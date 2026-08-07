@@ -17,7 +17,7 @@ The difference between a five-minute fix and a week of guessing is almost
 always the same four things:
 
 1. **Version** — shown in Settings → Maintenance → Updates ("Current build").
-2. **Environment** — OS, and whether you run API-only, full local, or Docker.
+2. **Environment** — OS, and whether you run API-only or full local.
 3. **What you did → what you expected → what happened** — three short lines
    beat three paragraphs.
 4. **The log** — the last lines of the server log usually name the real error.

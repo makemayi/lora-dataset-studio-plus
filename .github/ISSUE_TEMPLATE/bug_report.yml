@@ -39,7 +39,6 @@ body:
       options:
         - API-only (no ComfyUI / ai-toolkit)
         - Full local (ComfyUI and/or ai-toolkit)
-        - Docker
         - Not sure
     validations:
       required: false

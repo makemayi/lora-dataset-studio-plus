@@ -36,44 +36,15 @@ export function setupHealthPhase({ state, checking, result }) {
   return (result.regressions || []).length ? 'regressed' : 'ok'
 }
 
-/** Is this install still owing the one Docker choice only Setup can take?
- *
- *  `unconfigured` is emitted for a Docker runtime and nothing else — a native
- *  install reports `local` — so this doubles as the "am I in Docker" test. It
- *  reads a readiness payload, never a URL or a path. */
-export function needsDockerDeploymentChoice(readiness) {
-  return readiness?.ollama?.mode === 'unconfigured'
-}
-
-/** Should we spend a request finding that out?
- *
- *  Only in the one case that would otherwise be waved through: a machine the
- *  server has never seen working, which nevertheless looks configured. The
- *  nominal path — an install already verified — returns before this and keeps
- *  costing exactly one round-trip. */
-export function shouldProbeDockerChoice({ state, caps }) {
-  if (!state || state.verified) return false
-  return !!(caps && caps.configured)
-}
-
 /** Does the onboarding redirect still apply?
  *  A verified install is NEVER bounced to the wizard, whatever the tab-local
  *  flag says — that flag is what made this repeat once per browser session.
- *  Everything else keeps the previous behaviour exactly: an unconfigured
- *  backend is offered Setup once, and the flag stops it becoming a trap.
- *
- *  One addition, for the Docker GPU lane: ComfyUI is bundled there, so `caps`
- *  reports `configured` from the very first boot and the wizard was skipped on
- *  a brand-new install — while the launcher stood waiting up to 15 minutes for
- *  an Ollama deployment choice that only Setup can offer. A pending choice
- *  therefore beats `configured`; the once-per-session flag still applies, so
- *  this cannot become a loop. */
-export function shouldRedirectToSetup({
-  loading, caps, state, alreadyRedirected, pendingDockerChoice,
-}) {
+ *  An unconfigured backend is offered Setup once, and the flag stops it
+ *  becoming a trap. */
+export function shouldRedirectToSetup({ loading, caps, state, alreadyRedirected }) {
   if (loading || !state) return false          // never redirect on a guess
   if (state.verified) return false
-  if (caps && caps.configured && !pendingDockerChoice) return false
+  if (caps && caps.configured) return false
   return !alreadyRedirected
 }
 

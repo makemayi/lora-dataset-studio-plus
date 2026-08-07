@@ -15,8 +15,7 @@ This is the documentation index for LoRA Dataset Studio. The root [README](../RE
 
 | Guide | Covers |
 |---|---|
-| [README — Setup & install](../README.md#setup--install) | Windows launcher, manual venv, API-only Docker and the beginner GPU Docker path |
-| [Docker guide](guide/docker.md) | GPU-container CLI, storage, existing ComfyUI data, UID/GID, DNS, updates, resources and limits |
+| [README — Setup & install](../README.md#setup--install) | Windows launcher and manual venv |
 | [Settings reference](guide/settings-reference.md) | Every UI setting, dependency, model location, environment override and `config.json` key |
 | [Security policy](../SECURITY.md) | Threat model, safe network exposure and private vulnerability reporting |
 
@@ -24,7 +23,7 @@ This is the documentation index for LoRA Dataset Studio. The root [README](../RE
 
 | Guide | Covers |
 |---|---|
-| [Troubleshooting](guide/troubleshooting.md) | Symptom-first fixes for models, ComfyUI, Ollama, training, Docker-adjacent paths and platform issues |
+| [Troubleshooting](guide/troubleshooting.md) | Symptom-first fixes for models, ComfyUI, Ollama, training, path and platform issues |
 | [Known limitations](guide/known-limitations.md) | Current product boundaries and environment-specific caveats |
 | [Getting help](guide/getting-help.md) | Paste-safe diagnostic reports and what to include in a bug report |
 

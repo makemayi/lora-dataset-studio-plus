@@ -148,10 +148,10 @@ def _settings_payload() -> dict:
         # "running vs saved" diff instead of showing a misleading n/a:n/a.
         'runtime': {'host': current_app.config.get('LDS_BOUND_HOST'),
                     'port': current_app.config.get('LDS_BOUND_PORT'),
-                    # Docker owns the bind through LDS_HOST/LDS_PORT and the
-                    # published host port through LDS_HOST_PORT.  The UI uses
-                    # this bit to prevent saving controls that cannot take
-                    # effect inside the managed container.
+                    # A managed host (a supervisor unit, a reverse proxy, a
+                    # hosted pod) owns the bind through LDS_HOST/LDS_PORT and
+                    # sets this flag.  The UI uses the bit to prevent saving
+                    # controls that cannot take effect where it is set.
                     'bind_managed': os.environ.get('LDS_BIND_MANAGED', '').strip().lower()
                                     in {'1', 'true', 'yes', 'on'},
                     # LAN IPv4 so the Server card can show a real, copyable
@@ -439,13 +439,12 @@ def update_check():
     from ..services import updater
     force = bool(request.args.get('force'))
     auto = bool(request.args.get('auto'))
-    docker_runtime = updater.is_docker_runtime()
     # A git checkout: the meaningful signal is commits-behind-origin (the user pushes
     # commits to a branch, not tagged releases — a release-only check reads "up to date"
     # while the tree is many commits behind). The fetch runs on an explicit check
     # (force, always fresh) or an auto check (nav badge — served from a TTL cache so
     # SPA loads don't hammer the network); never from the bare passive path.
-    if (force or auto) and not docker_runtime and updater.is_git_checkout():
+    if (force or auto) and updater.is_git_checkout():
         now = time.time()
         if auto and not force and _git_check_cache['data'] is not None \
                 and (now - _git_check_cache['ts']) < _GIT_CHECK_TTL:
@@ -461,8 +460,6 @@ def update_check():
     repo = cfg.get('updates.repo') or 'makemayi/lora-dataset-studio-plus'
     out = {'ok': True, 'current': APP_VERSION, 'latest': None,
            'update_available': False, 'url': f'https://github.com/{repo}/releases'}
-    if docker_runtime:
-        out.update(updater.docker_update_payload())
     sha = updater.current_sha()
     if sha:
         out['current_sha'] = sha
@@ -486,11 +483,10 @@ def update_check():
                     zip_size = int(a.get('size') or 0)
                     if 'windows' in name:
                         break
-            if not docker_runtime:
-                out['can_apply'] = bool(zip_size) or any(
-                    (a.get('name') or '').lower().endswith('.zip') and a.get('browser_download_url')
-                    for a in (j.get('assets') or []))
-                out['zip_size'] = zip_size      # bytes, for the "download ~XX MB" hint
+            out['can_apply'] = bool(zip_size) or any(
+                (a.get('name') or '').lower().endswith('.zip') and a.get('browser_download_url')
+                for a in (j.get('assets') or []))
+            out['zip_size'] = zip_size      # bytes, for the "download ~XX MB" hint
         else:
             out['reason'] = (f'release feed answered {r.status_code} '
                              '(no public release yet?)')
@@ -511,15 +507,6 @@ def update_apply():
     trivial ZIP outcomes (up to date / no ZIP asset / offline) come back inline
     just like the git path. Both defer changed requirements to the restart helper."""
     from ..services import updater
-    # Refuse before even probing .git or the release feed: /app is immutable in
-    # the GPU image and an in-container update would be both incomplete and
-    # discarded on recreation.
-    if updater.is_docker_runtime():
-        return jsonify({
-            'ok': False,
-            'reason': 'Docker GPU installs must be updated by rebuilding the image.',
-            **updater.docker_update_payload(),
-        })
     if updater.is_git_checkout():
         res = updater.apply_update()
         res['restarting'] = bool(res.get('ok') and res.get('changed'))

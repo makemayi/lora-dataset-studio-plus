@@ -349,7 +349,7 @@ _IMAGE_PIXEL_EDIT_LOCKS = tuple(threading.Lock() for _ in range(64))
 # requests serial without retaining an unbounded lock map; a collision only
 # makes an unrelated request retry, never permits concurrent scorers.
 _FACE_SCORING_LOCKS = tuple(threading.Lock() for _ in range(64))
-# LDS runs one threaded Flask process (backend/run.py and Dockerfile). Striped
+# LDS runs one threaded Flask process (backend/run.py). Striped
 # locks therefore serialize dataset dedupe snapshots without an unbounded map.
 # RLock permits a promotion to hold the stripe across all chunks while nested
 # import_images calls retain the same protection.

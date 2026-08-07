@@ -11,9 +11,10 @@
   survive the swap. See `_PROTECTED_TOP_LEVEL`.
 
 Dependency installation is deliberately deferred to restart.  Desktop installs
-use the detached helper; the Docker supervisor reruns its boot-time dependency
-check after exit code 75.  Running pip inside the live Flask process can corrupt
-locked packages on Windows.
+use the detached helper; a process run under an external supervisor
+(`LDS_RESTART_MODE=supervisor`) exits 75 and lets that supervisor relaunch.
+Running pip inside the live Flask process can corrupt locked packages on
+Windows.
 
 `git` must be on PATH for the checkout path; if it isn't we say so rather than
 fail cryptically (a clone user has git by definition, so this only bites an
@@ -31,32 +32,6 @@ from pathlib import Path
 from ..config import REPO_ROOT, get as _cfg_get
 
 _GIT_TIMEOUT = 120
-
-# The Docker image is immutable application code: changing files below /app from
-# the web UI would be lost at the next container recreation (and most of those
-# files are intentionally root-owned anyway).  Keep the rebuild recipe in one
-# place so the API and both frontend update surfaces expose the exact same two
-# commands, in order.
-DOCKER_RUNTIME = 'docker-gpu'
-DOCKER_UPDATE_INSTRUCTIONS = (
-    'git pull',
-    'docker compose -f docker-compose.gpu.yml up -d --build',
-)
-
-
-def is_docker_runtime() -> bool:
-    """Whether this process is running in the immutable GPU Docker image."""
-    return os.environ.get('LDS_RUNTIME', '').strip().lower() == DOCKER_RUNTIME
-
-
-def docker_update_payload() -> dict:
-    """Structured manual-update contract shared by check/apply endpoints."""
-    return {
-        'install_mode': 'docker',
-        'can_apply': False,
-        'manual': True,
-        'instructions': list(DOCKER_UPDATE_INSTRUCTIONS),
-    }
 
 # Top-level entries the ZIP update must NEVER overwrite or delete: user state and
 # the live runtime. A real release ZIP contains none of these (it ships only the
@@ -679,8 +654,8 @@ def schedule_restart(delay: float = 1.2, *, install_requirements: bool = False,
                      environment_updates: dict[str, str] | None = None) -> bool:
     """Schedule exactly one relaunch, after allowing the HTTP response to flush.
 
-    Under the Docker supervisor, exit 75 and let the launcher be the sole owner
-    of the new process.  Desktop installs use a DETACHED helper that waits for
+    Under an external supervisor, exit 75 and let it be the sole owner of the
+    new process.  Desktop installs use a DETACHED helper that waits for
     our port to free, avoiding the Windows ``address already in use`` race.  The
     helper inherits the bind/token environment and optionally installs changed
     requirements only after the old process has released imported files.

@@ -94,15 +94,7 @@ variant, not *Thinking*), or click the tile's crop button and frame it by hand.
 
 ## Ollama isn't detected (or is installed but stopped)
 
-In Docker, host binary detection is not the deployment selector. Open **Setup → Ollama** and choose:
-
-| Docker choice | Expected state | Fix |
-|---|---|---|
-| **No Ollama** | Disabled by choice | Choose another card only if you want the Ollama features |
-| **Existing host Ollama** | API at `http://host.docker.internal:11434` | Start Ollama on the host, bind it so Docker can reach it, and restrict port 11434 to Docker/private networks |
-| **Docker Ollama** | Companion API at `http://ollama:11434` | If the companion is absent, rerun the same LDS Docker launcher |
-
-On a native install, LDS still distinguishes **not installed**, **installed but stopped**, and **running**. The **▶ Start Ollama** button applies only to a detected native binary.
+LDS distinguishes **not installed**, **installed but stopped**, and **running**. The **▶ Start Ollama** button applies only to a detected native binary.
 
 No launcher or **Install everything** action pulls the large vision model. Once the selected service is reachable, use the explicit **Pull** button in LDS Setup; it shows progress and supports cancellation/resume. Keep the **Instruct** tag. The Thinking variant reasons instead of returning the compact captions these workflows expect.
 
@@ -215,19 +207,9 @@ and then the copy writes into a folder ComfyUI cannot see, or fails outright.
   matching paths in **Settings → Local tools → Advanced: ComfyUI folder overrides**.
   Those fields take the path **as seen by the app**.
 
-With Docker, that means bind-mounting the same host folders into both containers at
-identical paths, e.g.:
-
-```yaml
-# both services
-volumes:
-  - /srv/comfyui/input:/srv/comfyui/input
-  - /srv/comfyui/output:/srv/comfyui/output
-```
-
-and then pointing the two override fields at `/srv/comfyui/input` and
-`/srv/comfyui/output`. The shipped `docker-compose.yml` deliberately does **not**
-do this: it runs the app in API-only mode, where ComfyUI is out of scope.
+If the app and ComfyUI run in separate containers or on separate machines, the
+two must see those folders at **identical paths**, and the override fields take
+the path as the app sees it.
 
 **How you'll know:** the failure now says so. Settings flags an override folder it
 cannot write into, the Setup wizard warns while you configure (a warning, never a
@@ -262,7 +244,7 @@ rather than "one model is missing".
 
 **Fixed:** the app now reads the spelling from the ComfyUI it is actually talking
 to and matches it. This also covers the reverse case — the app on Windows driving
-a ComfyUI in WSL, Docker or on another machine, which needs forward slashes — so
+a ComfyUI in WSL or on another machine, which needs forward slashes — so
 there is nothing to configure either way.
 
 *(Found and diagnosed by 1Tomber, [GitHub #21](https://github.com/perfectgf/lora-dataset-studio/issues/21).)*

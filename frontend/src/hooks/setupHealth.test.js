@@ -1,8 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { setupHealthPhase, shouldRedirectToSetup, joinLabels, regressionNotice,
-  statusMessage, needsDockerDeploymentChoice,
-  shouldProbeDockerChoice } from './setupHealth.js'
+  statusMessage } from './setupHealth.js'
 
 const VERIFIED = { verified: true, checks: {}, regressions: [] }
 const FRESH = { verified: false, checks: {}, regressions: [] }
@@ -40,53 +39,6 @@ test('a configured-but-never-verified backend is left alone', () => {
   assert.equal(shouldRedirectToSetup({
     loading: false, caps: { configured: true }, state: FRESH, alreadyRedirected: false,
   }), false)
-})
-
-// --- the Docker GPU first boot ------------------------------------------------
-
-test('a fresh Docker install owing its Ollama choice IS sent to the wizard', () => {
-  // The GPU lane bundles ComfyUI, so caps.configured is true on the very first
-  // boot and the rule above waved the install straight past Setup -- while the
-  // launcher sat waiting up to 15 minutes for a choice only Setup can offer.
-  assert.equal(shouldRedirectToSetup({
-    loading: false, caps: { configured: true }, state: FRESH,
-    alreadyRedirected: false, pendingDockerChoice: true,
-  }), true)
-})
-
-test('even a pending Docker choice is only offered once', () => {
-  assert.equal(shouldRedirectToSetup({
-    loading: false, caps: { configured: true }, state: FRESH,
-    alreadyRedirected: true, pendingDockerChoice: true,
-  }), false)
-})
-
-test('a verified install is still never bounced, choice pending or not', () => {
-  assert.equal(shouldRedirectToSetup({
-    loading: false, caps: { configured: true }, state: VERIFIED,
-    alreadyRedirected: false, pendingDockerChoice: true,
-  }), false)
-})
-
-test('only an unconfigured deployment counts as a pending choice', () => {
-  assert.equal(needsDockerDeploymentChoice({ ollama: { mode: 'unconfigured' } }), true)
-  // A native install reports 'local', and a Docker one that already chose
-  // reports its choice -- neither is owed anything.
-  for (const mode of ['local', 'none', 'host', 'docker']) {
-    assert.equal(needsDockerDeploymentChoice({ ollama: { mode } }), false)
-  }
-  assert.equal(needsDockerDeploymentChoice(null), false)
-  assert.equal(needsDockerDeploymentChoice({}), false)
-})
-
-test('the extra request is spent only where it can change the answer', () => {
-  // The nominal path (already verified) must not gain a round-trip.
-  assert.equal(shouldProbeDockerChoice({ state: VERIFIED, caps: { configured: true } }), false)
-  // Never-configured already redirects on its own; asking would be wasted.
-  assert.equal(shouldProbeDockerChoice({ state: FRESH, caps: { configured: false } }), false)
-  // The one ambiguous case.
-  assert.equal(shouldProbeDockerChoice({ state: FRESH, caps: { configured: true } }), true)
-  assert.equal(shouldProbeDockerChoice({ state: null, caps: { configured: true } }), false)
 })
 
 test('nothing is decided before the answers are in', () => {

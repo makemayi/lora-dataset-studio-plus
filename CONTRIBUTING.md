@@ -39,7 +39,7 @@ python backend/run.py
 
 ### Frontend
 
-Use **Node.js 22.22 or newer**. The repo **ships the frontend prebuilt** in `frontend/dist/` (that folder is committed on purpose — `start.bat` and the Docker/portable builds serve it directly and never run Node). So:
+Use **Node.js 22.22 or newer**. The repo **ships the frontend prebuilt** in `frontend/dist/` (that folder is committed on purpose — `start.bat` and the portable builds serve it directly and never run Node). So:
 
 ```bash
 cd frontend

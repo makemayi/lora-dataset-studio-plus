@@ -163,20 +163,18 @@ export default function ServerSection({ config, setField, runtime, handleSave, c
   return (
     <Card title="Server"
       help={bindManaged
-        ? 'Docker Compose manages the host and port; change the host-side mapping and recreate the container.'
+        ? 'The host and port are set by whatever launched this process; change them there and restart it.'
         : 'Where the app listens. Host/port and LAN access need a restart to take effect — edit below, then use “Restart to apply”.'}>
       {bindManaged && (
         <div id="server-bind-managed-note" role="note"
           className="rounded-lg border border-sky-400/30 bg-sky-500/10 px-3 py-2.5 text-sm text-content">
-          <p className="font-medium">Host and port are managed by Docker Compose.</p>
+          <p className="font-medium">Host and port are managed outside the app.</p>
           <p className="mt-1 text-xs text-content-muted">
-            Set <code className="text-content">LDS_HOST_PORT</code> in the host checkout&apos;s{' '}
-            <code className="text-content">.env</code> (for example <code className="text-content">127.0.0.1:5050</code>),
-            then recreate the container:
+            This process was started with <code className="text-content">LDS_HOST</code>/
+            <code className="text-content">LDS_PORT</code> and{' '}
+            <code className="text-content">LDS_BIND_MANAGED</code> set, so editing them here would
+            not take effect. Change them wherever the process is launched, then restart it.
           </p>
-          <code className="mt-2 block overflow-x-auto whitespace-nowrap rounded bg-app/70 px-2 py-1.5 text-xs text-content">
-            docker compose -f docker-compose.gpu.yml up -d --force-recreate
-          </code>
         </div>
       )}
       <div>
@@ -204,8 +202,8 @@ export default function ServerSection({ config, setField, runtime, handleSave, c
           <p className="mt-0.5 text-xs text-content-muted">
             {bindManaged
               ? (lan
-                ? 'On because this browser is using a non-loopback address. Docker and network rules still determine which other devices can reach it.'
-                : 'Off because this browser is using a loopback address. That does not reveal whether Docker is exposed; open the app through the host’s LAN address to get a shareable link and QR code.')
+                ? 'On because this browser is using a non-loopback address. The host’s own network rules still determine which other devices can reach it.'
+                : 'Off because this browser is using a loopback address. That does not reveal whether the service is exposed; open the app through the host’s LAN address to get a shareable link and QR code.')
               : 'Off (default): only this computer can open the app. On: any device on your Wi-Fi/LAN can reach it — e.g. from your phone — using the plain URL below.'}
           </p>
         </div>
@@ -231,8 +229,8 @@ export default function ServerSection({ config, setField, runtime, handleSave, c
               <p className="mt-0.5 text-xs text-content-muted">
                 {bindManaged
                   ? (requireToken
-                    ? 'On: devices that can reach this Docker service must open a tokenized URL once (a session cookie takes over after).'
-                    : 'Off: any device that can reach this Docker service can open it with no password. Docker and network rules determine whether it is exposed.')
+                    ? 'On: devices that can reach this service must open a tokenized URL once (a session cookie takes over after).'
+                    : 'Off: any device that can reach this service can open it with no password. The host’s network rules determine whether it is exposed.')
                   : (requireToken
                     ? 'On: remote devices must open the URL WITH the token once (a session cookie takes over after). Extra safety on a shared or untrusted network.'
                     : 'Off (default): anyone on your Wi-Fi/LAN can open the app with no password. Fine for a home network; turn on if the network is shared or untrusted.')}
@@ -290,7 +288,7 @@ export default function ServerSection({ config, setField, runtime, handleSave, c
                   <div className="min-w-0 flex-1 space-y-2">
                     <p className="text-xs text-content-muted">
                       {bindManaged
-                        ? 'Open the same address below from another device that can reach this Docker host.'
+                        ? 'Open the same address below from another device that can reach this host.'
                         : 'Point your phone camera at the code — or open a link below. The LAN link needs the phone on the same Wi-Fi; the Tailscale link works from anywhere.'}
                     </p>
                     {reachUrls.map((u) => (
@@ -343,7 +341,7 @@ export default function ServerSection({ config, setField, runtime, handleSave, c
             </span>
           )}
           {bindManaged ? (
-            <span className="ml-auto text-sky-300">Docker-managed bind</span>
+            <span className="ml-auto text-sky-300">Externally managed bind</span>
           ) : dirty ? (
             <button type="button" onClick={restart} disabled={restarting}
               className="ml-auto shrink-0 rounded-md bg-gradient-primary px-3 py-1 text-xs font-semibold text-white disabled:opacity-50">

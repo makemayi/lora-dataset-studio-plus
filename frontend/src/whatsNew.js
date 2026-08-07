@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-07-docker-deployments-removed',
+    date: '2026-08-07',
+    title: 'The Docker deployments are gone — LDS now runs one way',
+    blurb:
+      "The two Docker lanes (API-only, and GPU with a bundled ComfyUI) have been removed, along with their launchers, compose files and the Ollama deployment picker in Setup. If you ran LDS that way, move to the Windows launcher or a manual venv — your data folder, config.json and models are untouched by this, but your containers will not be rebuilt. Everything else is unchanged: Setup now simply asks for the URL of the ComfyUI and Ollama you already run.",
+    to: '/setup',
+  },
+  {
     id: '2026-08-07-improve-finds-its-seedvr2-model',
     date: '2026-08-07',
     title: '✨ Upscale & improve no longer asks for a model you already installed',

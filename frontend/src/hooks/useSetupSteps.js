@@ -99,18 +99,13 @@ function comfyuiStep(caps, runtimeReadiness) {
     : (derivedHasKlein ? [] : ['klein_model'])
   // Skipped is neutral, not a warning — but only when there's genuinely nothing to
   // show (unreachable). It never overrides a reachable ComfyUI's real status.
-  const managedInitializing = managed.mode === 'integrated'
-    && managed.state === 'starting' && !c.reachable
-  const skipped = !!c.skipped && !c.reachable && !managedInitializing
-  const status = managedInitializing
-    ? 'initializing'
-    : (skipped ? 'skipped' : gateStatus(c.reachable, hasKlein))
+  const skipped = !!c.skipped && !c.reachable
+  const status = skipped ? 'skipped' : gateStatus(c.reachable, hasKlein)
   return {
     id: 'comfyui', title: 'ComfyUI — local generation & Test Studio', recommended: false,
     unlocks: ['Klein engine', 'Test Studio'],
     status, reachable: !!c.reachable,
     managedMode: managed.mode || 'external',
-    managedInitializing,
     connectionStatus: c.status || (c.reachable ? 'ok' : 'unreachable'),
     hasKlein, kleinMissing, kleinInvalid, apiUrl: c.api_url || '',
     skipped,
@@ -151,13 +146,6 @@ function comfyuiStep(caps, runtimeReadiness) {
 // affordance discoverable; starting still requires the saved, freshly re-checked
 // configuration because the no-payload POST reads that configuration.
 export function comfyuiLauncherState(step, configPersisted, liveDirValid = false) {
-  // Docker either owns the integrated process or connects to a process on the
-  // host. In neither case can a button inside the app safely launch a Windows
-  // portable executable. Hide it for the whole deployment lifetime, including
-  // the brief window where runtime readiness is ahead of the full caps refresh.
-  if (step && ['integrated', 'external-host'].includes(step.managedMode)) {
-    return { visible: false, enabled: false, reason: '' }
-  }
   // Never offer a second process while the saved probe says one is answering (or
   // still answering slowly). This comes before the live-directory affordance.
   if (!step || step.reachable || step.connectionStatus === 'slow') {
@@ -308,40 +296,15 @@ export function aitoolkitVerdict(step, dir) {
 function ollamaStep(caps, runtimeReadiness) {
   const o = caps.ollama || {}
   const managed = (runtimeReadiness && runtimeReadiness.ollama) || {}
-  const deploymentMode = managed.mode || 'local'
   const deploymentState = managed.state || ''
-  const dockerManaged = ['unconfigured', 'none', 'host', 'docker'].includes(deploymentMode)
-  const deploymentConfigured = deploymentMode !== 'unconfigured'
-  const deploymentUrl = deploymentMode === 'host'
-    ? 'http://host.docker.internal:11434'
-    : deploymentMode === 'docker' ? 'http://ollama:11434' : ''
-  const normalizedCapabilityUrl = String(o.url || '').replace(/\/+$/, '')
-  // Lightweight runtime readiness owns reachability in Docker. The full caps
-  // snapshot may still describe the previous endpoint while its refresh retries;
-  // never transfer a model-ready verdict across that endpoint switch.
-  const capabilityMatchesDeployment = !dockerManaged || !deploymentUrl
-    || normalizedCapabilityUrl === deploymentUrl
-  const reachable = dockerManaged ? !!managed.ready : !!o.reachable
-  const visionModelReady = reachable && capabilityMatchesDeployment
-    && !!o.vision_model_ready
-  const disabled = deploymentMode === 'none'
-  const unconfigured = deploymentMode === 'unconfigured'
-  const managedInitializing = deploymentMode === 'docker'
-    && managed.state === 'starting' && !managed.ready
-  const status = unconfigured
-    ? 'available'
-    : disabled
-    ? 'skipped'
-    : (managedInitializing
-        ? 'initializing'
-        : gateStatus(reachable, visionModelReady))
+  const reachable = !!o.reachable
+  const visionModelReady = reachable && !!o.vision_model_ready
+  const status = gateStatus(reachable, visionModelReady)
   return {
     id: 'ollama', title: 'Ollama — captioning & auto-framing', recommended: false,
     unlocks: ['Captioning', 'Auto-classify framing', 'Auto head-crop'],
-    status, reachable, visionModelReady,
-    deploymentMode, deploymentState, deploymentConfigured, deploymentUrl,
-    dockerManaged, disabled, unconfigured, managedInitializing,
-    url: deploymentUrl || o.url || '', visionModel: o.vision_model || '',
+    status, reachable, visionModelReady, deploymentState,
+    url: o.url || '', visionModel: o.vision_model || '',
     // Execution-independent install signal (binary on disk) vs `reachable` (server
     // answering): installed && !reachable -> "installed but stopped", offer a Start.
     installed: !!o.installed, binaryPath: o.binary_path || '',

@@ -10,7 +10,6 @@ import { WhatsNewButton, WhatsNewModal } from './components/common/WhatsNew'
 import ConnectionBanner from './components/common/ConnectionBanner'
 import SetupHealthNotice from './components/setup/SetupHealthNotice'
 import ComfyRecoveryBanner from './components/common/ComfyRecoveryBanner'
-import DockerUpdateInstructions from './components/common/DockerUpdateInstructions'
 import DatasetPage from './pages/DatasetPage'
 import BankPage from './pages/BankPage'
 import StudioPage from './pages/StudioPage'
@@ -25,7 +24,6 @@ import HeaderMenu from './components/common/HeaderMenu'
 import { versionLabel } from './utils/versionLabel'
 import { useTrainingActivity } from './hooks/useTrainingActivity'
 import { activityLabel } from './utils/trainingActivity'
-import { installMode } from './components/settings/updateStatus'
 
 // px-2 up to `lg`: the desktop bar starts at `md` (768 px) and now carries five
 // workspaces (Datasets · Bank · Runs · Canvas · Test Studio) plus the utility
@@ -329,9 +327,6 @@ function UpdateBanner() {
   // One-click pull + restart, same backend action as the Settings card. A packaged
   // build (no git) comes back {manual:true} → fall back to the download page.
   const apply = async () => {
-    // Docker owns /app as image content. The action is hidden below, but keep a
-    // hard guard so an already-bound/stale callback cannot call the endpoint.
-    if (installMode(info) === 'docker') return
     setApplying(true); setPhase('pulling'); setError(null)
     try {
       const res = await postJson('/api/update/apply', {})
@@ -352,7 +347,6 @@ function UpdateBanner() {
   }
 
   if (!info) return null
-  const dockerMode = installMode(info) === 'docker'
   return (
     <div className="mx-auto max-w-5xl px-4 pt-3">
       <div role="status"
@@ -375,23 +369,17 @@ function UpdateBanner() {
                     : 'a new version'}
               </span> (you run v{info.current}).
             </span>
-            {dockerMode ? (
-              <DockerUpdateInstructions />
-            ) : (
-              <>
-                <button type="button" onClick={apply}
-                  className="rounded-md bg-gradient-primary px-3 py-1 text-xs font-semibold text-white transition-transform hover:-translate-y-px">
-                  Update &amp; restart
-                </button>
-                {/* Download link only for packaged builds (a git checkout updates in
-                    place via the button — a release ZIP would be the wrong artifact). */}
-                {!info.is_git && (
-                  <a href={info.url} target="_blank" rel="noreferrer"
-                    className="text-emerald-300 underline">
-                    Download
-                  </a>
-                )}
-              </>
+            <button type="button" onClick={apply}
+              className="rounded-md bg-gradient-primary px-3 py-1 text-xs font-semibold text-white transition-transform hover:-translate-y-px">
+              Update &amp; restart
+            </button>
+            {/* Download link only for packaged builds (a git checkout updates in
+                place via the button — a release ZIP would be the wrong artifact). */}
+            {!info.is_git && (
+              <a href={info.url} target="_blank" rel="noreferrer"
+                className="text-emerald-300 underline">
+                Download
+              </a>
             )}
             {error && <span className="text-rose-300">{error}</span>}
             <button type="button"

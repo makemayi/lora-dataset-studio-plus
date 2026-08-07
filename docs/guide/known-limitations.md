@@ -11,7 +11,6 @@ These are current boundaries, not setup failures.
 | **Canvas comparison generation** | A single launch requires checkpoints from one model family | Run separate same-family comparisons; cross-family workflows do not share one base graph |
 | **Dual captions** | Local training only; Krea 2 and Anima cache text embeddings and use the long caption alone | Keep the long caption complete for every family |
 | **Cloud training** | Support is family- and variant-specific, and full-state continuation is local-only | Trust the launch UI's live compatibility reason before renting a pod |
-| **GPU Docker** | Ollama and local ai-toolkit training are not bundled; watermark inpainting is not currently available in this lane | Connect external Ollama/ai-toolkit, use cloud training, and use model-free watermark crop where suitable |
 | **Remote access** | The app has no user accounts and ComfyUI's published port is not protected by the LDS access token | Keep loopback defaults or use tokens, firewall/VPN and an authenticated reverse proxy as described in [Security](../../SECURITY.md) |
 | **Browser-local preferences** | Some convenience choices, such as the last generator, are remembered per browser | Explicitly select a configured engine after moving to a new browser/profile |
 

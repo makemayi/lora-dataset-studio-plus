@@ -107,20 +107,6 @@ def test_apply_manual_when_not_git(monkeypatch):
     assert r['ok'] is False and r['manual'] is True and 'releases' in r['url']
 
 
-def test_docker_runtime_has_a_structured_manual_rebuild_contract(monkeypatch):
-    monkeypatch.setenv('LDS_RUNTIME', 'docker-gpu')
-    assert updater.is_docker_runtime() is True
-    assert updater.docker_update_payload() == {
-        'install_mode': 'docker',
-        'can_apply': False,
-        'manual': True,
-        'instructions': [
-            'git pull',
-            'docker compose -f docker-compose.gpu.yml up -d --build',
-        ],
-    }
-
-
 def test_apply_no_change(monkeypatch):
     def resp(a):
         if a[:2] == ('rev-parse', '--abbrev-ref'):

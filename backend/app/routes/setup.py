@@ -2,7 +2,6 @@
 from flask import Blueprint, jsonify, request
 
 from .. import capabilities
-from .. import config as cfg
 from .. import setup_installer
 from ..services import comfyui_control
 
@@ -19,7 +18,7 @@ def setup_autodetect():
 
 @bp.get('/runtime-readiness')
 def setup_runtime_readiness():
-    """Cheap boot-state poll for services managed by Docker deployments.
+    """Cheap boot-state poll for the services Setup reports on.
 
     Unlike a forced capability refresh this performs no disk/model/import
     scan, and its response exposes no configured URL or filesystem path.
@@ -31,27 +30,16 @@ def setup_runtime_readiness():
 
 @bp.put('/ollama-deployment')
 def save_ollama_deployment():
-    """Persist the Docker Ollama choice made inside LDS Setup.
+    """Gone with the Docker deployments — kept as an explicit 410.
 
-    The client selects only an enum; endpoints are fixed here so a stale/native
-    URL cannot disagree with the deployment shown by Setup. This never starts a
-    service and never pulls a model -- the launcher and explicit install action
-    retain those separate responsibilities.
+    The endpoint only ever chose between two in-container Ollama endpoints.
+    Deleting the route outright would answer a stale SPA (one served from a
+    browser tab open across the update) with the SPA's generic 404 handling;
+    a named 410 says what happened instead. `ollama.url` in Settings is now
+    the single source of truth, as it always was for native installs.
     """
-    if not capabilities.setup_is_docker_runtime():
-        return jsonify({'error': 'Ollama deployment choices apply only to Docker.'}), 409
-    body = request.get_json(force=True, silent=True)
-    if not isinstance(body, dict) or set(body) != {'mode'}:
-        return jsonify({'error': "body must contain only 'mode'"}), 400
-    mode = body.get('mode')
-    if not isinstance(mode, str) or mode not in ('none', 'host', 'docker'):
-        return jsonify({'error': "mode must be 'none', 'host' or 'docker'"}), 400
-    saved = cfg.save_config({'ollama': {
-        'deployment_mode': mode,
-        'url': capabilities.setup_ollama_deployment_url(mode),
-    }})
-    readiness = capabilities.setup_runtime_readiness()['ollama']
-    return jsonify({'config': saved, 'readiness': readiness})
+    return jsonify({'error': 'Ollama deployment modes were removed with the Docker '
+                             'deployments. Set ollama.url in Settings instead.'}), 410
 
 
 @bp.get('/comfyui-dir')
@@ -79,14 +67,6 @@ def start_comfyui():
     # metadata and is enforced by Flask-WTF before this handler in normal operation.
     if request.query_string or request.content_length not in (None, 0) or request.content_type:
         return jsonify({'error': 'This action does not accept options.'}), 400
-    comfy_mode = capabilities.setup_comfyui_mode()
-    if comfy_mode in ('integrated', 'external-host'):
-        if comfy_mode == 'integrated':
-            detail = 'ComfyUI is managed by this Docker deployment.'
-        else:
-            detail = ('This Docker deployment uses ComfyUI on the host. Start it '
-                      'on the host and make its API reachable from Docker.')
-        return jsonify({'error': detail}), 409
     return jsonify(comfyui_control.start_comfyui()), 200
 
 

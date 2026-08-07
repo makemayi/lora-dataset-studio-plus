@@ -131,8 +131,7 @@ jobs:
     needs: gate
     if: needs.gate.outputs.run_heavy == 'true'
     # The portable app and its ai-toolkit/ComfyUI path contracts target Windows,
-    # so the unit suite runs on the platform it ships for. Linux runtime viability
-    # is covered independently by docker-smoke below.
+    # so the unit suite runs on the platform it ships for.
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -293,46 +292,3 @@ jobs:
         # (release.yml), not on every commit -- that keeps concurrent frontend
         # work from going red on a dist that simply has not been rebuilt yet.
         run: npm run build
-
-  docker-smoke:
-    name: Docker smoke test
-    needs: gate
-    if: needs.gate.outputs.run_heavy == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build image
-        run: docker build --tag lds-ci:${{ github.sha }} .
-
-      - name: Start container
-        run: docker run --detach --name lds-ci --publish 5050:5050 lds-ci:${{ github.sha }}
-
-      - name: Wait for API health
-        shell: bash
-        run: |
-          deadline=$((SECONDS + 120))
-          until curl --fail --silent --show-error http://127.0.0.1:5050/api/health >/dev/null; do
-            if (( SECONDS >= deadline )); then
-              echo "::error::Docker API did not become healthy within 120 seconds"
-              exit 1
-            fi
-            sleep 2
-          done
-
-      - name: Show container logs on failure
-        if: failure()
-        shell: bash
-        run: |
-          if docker container inspect lds-ci >/dev/null 2>&1; then
-            docker logs lds-ci
-          fi
-
-      - name: Remove smoke-test container
-        if: always()
-        shell: bash
-        run: |
-          if docker container inspect lds-ci >/dev/null 2>&1; then
-            docker rm --force lds-ci
-          fi
