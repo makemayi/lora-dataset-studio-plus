@@ -21,10 +21,13 @@ this is NOT krea_edit_helper's Krea2 pack (`Krea2EditModelPatch` /
 seedvr2_helper's SeedVR2 pack (`SeedVR2LoadDiTModel` / `SeedVR2VideoUpscaler`,
 models under the `SEEDVR2` folder type) — it is a lower-level tiled pipeline
 (`SeedVR2Preprocess` / `SeedVR2Conditioning` / `SeedVR2PostProcessing` +
-plain `UNETLoader`/`VAELoader` + core `VAEEncodeTiled`/`VAEDecodeTiled`),
-though it shares the SAME `SEEDVR2` model folder and even the same VAE
-filename (`ema_vae_fp16.safetensors`) as that pack — so its weights search
-reuses `seedvr2_helper.MODEL_FOLDER`. The three `SeedVR2Xxx` node classes
+plain `UNETLoader`/`VAELoader` + core `VAEEncodeTiled`/`VAEDecodeTiled`).
+It shares the same VAE FILENAME (`ema_vae_fp16.safetensors`) as that pack,
+but NOT its folder: seedvr2_helper's own nodes load from the pack-private
+`SEEDVR2` folder, while a core `UNETLoader`/`VAELoader` can only see
+`models/diffusion_models` and `models/vae` — so this module's two SeedVR2
+resolvers scan THOSE folders (measured against /object_info's UNETLoader
+list), not `seedvr2_helper.MODEL_FOLDER`. The three `SeedVR2Xxx` node classes
 here are INFERRED to ship in the same `ComfyUI-SeedVR2_VideoUpscaler` pack
 (same author ecosystem, same folder convention) — not measured live against
 that pack's current /object_info, unlike the rest of this app's node-pack
@@ -75,8 +78,14 @@ def _comfy_input_dir() -> str:
 # this graph wants are the SAME assets that engine already resolves. -------
 
 def krea_unet():
+    """`require_turbo=True`: this graph's BasicScheduler is pinned to 10 steps,
+    which is a DISTILLED build's step count. Handed a Raw build — which is what
+    the shared `krea.base_model` setting resolves to on an install that picked
+    one for the other Krea lanes — the pass does not fail, it under-samples, and
+    a soft noisy improve looks like the pipeline simply isn't very good. So this
+    lane ignores that setting and takes a Turbo build or reports missing."""
     from . import krea_edit_helper as keh
-    return keh.resolve_krea_unet()
+    return keh.resolve_krea_unet(require_turbo=True)
 
 
 def krea_clip():
@@ -115,53 +124,68 @@ def resolve_quality_lora():
     return None, None
 
 
-# --- SeedVR2 assets: same `SEEDVR2` model folder as seedvr2_helper (its
-# canonical VAE filename is byte-identical to what this graph wants), but
-# THIS graph's UNETLoader wants a specific 7B-sharp-int8 build seedvr2_helper
-# has no concept of, so the DiT resolver is its own narrow scan. -----------
+# --- SeedVR2 assets. NOT seedvr2_helper's folder: this graph loads them
+# through a CORE `UNETLoader`/`VAELoader`, whose widget lists come from
+# ComfyUI's `diffusion_models` and `vae` folders. A build sitting in the
+# pack-private `SEEDVR2` folder is invisible to those nodes, so resolving
+# from there produced both halves of the same bug — a false "missing" 409
+# for a file that WAS installed correctly (measured: /object_info's
+# UNETLoader listed it from `diffusion_models` while this said missing), and,
+# had it matched, a name ComfyUI would have rejected with a bare 400. -----
 _SEEDVR2_UNET_CANONICAL = 'seedvr2_7b_sharp_int8_convrot.safetensors'
 _SEEDVR2_UNET_TOKENS = ('7b_sharp', 'sharp_int8')
 
+_SEEDVR2_VAE_CANONICAL = 'ema_vae_fp16.safetensors'
+_SEEDVR2_VAE_TOKENS = ('ema_vae',)
 
-def resolve_seedvr2_unet():
-    """Bare filename for the SeedVR2 UNETLoader, or None. Canonical name
-    first, else a narrow '7B sharp' token match across every SEEDVR2 search
-    root — a WRONG DiT build is worse than a missing one (different
-    parameter count, different weights), so this never falls back to
-    whatever else happens to be in the folder (unlike seedvr2_helper's own
-    DiT resolver, which serves a picker UI where any build is a valid
-    choice)."""
-    from . import seedvr2_helper
-    listings = []
-    for root in comfy_model_paths.search_roots(seedvr2_helper.MODEL_FOLDER):
-        try:
-            names = sorted(n for n in os.listdir(root)
-                           if n.lower().endswith(('.safetensors', '.gguf')))
-        except OSError:
-            continue
-        listings.append(names)
-    if any(_SEEDVR2_UNET_CANONICAL in names for names in listings):
-        return _SEEDVR2_UNET_CANONICAL
-    for names in listings:
-        for n in names:
-            if seedvr2_helper._is_vae_name(n):
-                continue
-            if any(tok in n.lower() for tok in _SEEDVR2_UNET_TOKENS):
-                return n
+
+def _resolve_in_folder(folder, canonical, tokens, prefer_sub=None):
+    """(relative_name) of `canonical` under any `folder` search root, else the
+    first loadable file whose basename carries one of `tokens`, else None.
+    Relative — WITH its subfolder prefix, which is exactly what the loader
+    widget lists. Never a blind first-file guess: for both assets below a
+    WRONG file is worse than a missing one (different parameter count for the
+    DiT; a non-SeedVR2 VAE fails deep inside the node), and the `vae` folder
+    in particular is full of unrelated VAEs."""
+    listings = [(rel, ab) for rel, ab in sorted(comfy_model_paths.list_models(folder))
+                if comfy_model_paths.is_loadable_model(os.path.basename(rel))]
+    canon = [rel for rel, _ab in listings
+             if os.path.basename(rel).lower() == canonical.lower()]
+    if canon:
+        if prefer_sub:
+            for rel in canon:
+                if prefer_sub in rel.lower():
+                    return rel
+        return canon[0]
+    for rel, _ab in listings:
+        low = os.path.basename(rel).lower()
+        if any(tok in low for tok in tokens):
+            return rel
     return None
 
 
+def resolve_seedvr2_unet():
+    """`unet_name` for this graph's core UNETLoader — ComfyUI-relative, from
+    the `diffusion_models` folder. Canonical build first, else a narrow
+    '7B sharp' token match."""
+    return _resolve_in_folder('diffusion_models', _SEEDVR2_UNET_CANONICAL,
+                              _SEEDVR2_UNET_TOKENS)
+
+
 def resolve_seedvr2_vae():
-    """SeedVR2 VAE — byte-identical canonical filename to seedvr2_helper's
-    own VAE (`ema_vae_fp16.safetensors`), same folder, so this just IS that
-    resolver."""
-    from . import seedvr2_helper
-    return seedvr2_helper.resolve_seedvr2_vae()
+    """`vae_name` for this graph's core VAELoader — ComfyUI-relative, from the
+    `vae` folder. Same canonical FILENAME as seedvr2_helper's own VAE, but
+    that helper's copy lives in the pack-private SEEDVR2 folder a core
+    VAELoader cannot see, so this is its own scan."""
+    return _resolve_in_folder('vae', _SEEDVR2_VAE_CANONICAL, _SEEDVR2_VAE_TOKENS)
 
 
 KREA_HQ_ASSETS = {
     'krea_model': {
-        'kind': 'Krea 2 Turbo base model',
+        # A Turbo build specifically — a Raw one does not satisfy this lane, see
+        # krea_unet() — hence the explicit wording in `kind`.
+        'kind': 'Krea 2 Turbo base model (a Turbo/distilled build — a Raw one '
+                'will not do: this graph samples in 10 steps)',
         'path': 'models/diffusion_models/Krea/Krea2_Turbo_convrot_int8mixed.safetensors',
         'source': 'https://huggingface.co/Comfy-Org/Krea-2/tree/main/diffusion_models '
                   '(or your own converted Turbo build)',
@@ -183,13 +207,18 @@ KREA_HQ_ASSETS = {
     },
     'seedvr2_model': {
         'kind': 'SeedVR2 7B Sharp (int8, convrot) DiT model',
-        'path': 'models/SEEDVR2/seedvr2_7b_sharp_int8_convrot.safetensors',
+        # diffusion_models, NOT the SEEDVR2 folder: this graph loads it through
+        # a core UNETLoader, which only lists that folder.
+        'path': 'models/diffusion_models/seedvr2_7b_sharp_int8_convrot.safetensors',
         'source': 'wherever you obtained this specific build — not auto-fetched '
-                  '(the SeedVR2 setup card installs a different variant/node interface)',
+                  '(the SeedVR2 setup card installs a different variant/node interface, '
+                  'into models/SEEDVR2, where this graph cannot load it from)',
     },
     'seedvr2_vae': {
         'kind': 'SeedVR2 VAE',
-        'path': 'models/SEEDVR2/ema_vae_fp16.safetensors',
+        # Same file the SeedVR2 setup card puts in models/SEEDVR2 — this graph's
+        # core VAELoader needs a copy in models/vae.
+        'path': 'models/vae/ema_vae_fp16.safetensors',
         'source': 'https://huggingface.co/numz/SeedVR2_comfyUI',
     },
 }

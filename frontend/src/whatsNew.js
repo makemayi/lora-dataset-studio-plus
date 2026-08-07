@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-07-improve-finds-its-seedvr2-model',
+    date: '2026-08-07',
+    title: '✨ Upscale & improve no longer asks for a model you already installed',
+    blurb:
+      "Improve refused to run with \"missing SeedVR2 model\" even when the file was sitting in ComfyUI exactly where its loader reads from — and the error pointed at models/SEEDVR2, a folder this pass can't load from at all. It now looks in the right places (models/diffusion_models for the DiT build, models/vae for its VAE), and if something really is missing the message names the folder that will actually work. Same fix run: if your Krea 2 base model setting points at a Raw build, improve no longer picks it up — that pass runs in 10 steps and needs a Turbo build, and a Raw one there came back soft and noisy instead of saying anything.",
+    to: '/datasets?section=images&panel=review',
+  },
+  {
     id: '2026-08-04-improve-restores-instead-of-rewriting',
     date: '2026-08-04',
     title: '✨ Upscale & improve now restores detail instead of redrawing the photo',

@@ -240,7 +240,7 @@ def _krea_base_compatible(name):
     return not any(tok in low for tok in KREA_INCOMPATIBLE_TOKENS)
 
 
-def resolve_krea_unet(selected=None, require_raw=False):
+def resolve_krea_unet(selected=None, require_raw=False, require_turbo=False):
     """ComfyUI-relative `unet_name` for the UNETLoader, WITH its subfolder prefix
     (e.g. 'Krea\\krea2_turbo_fp8.safetensors'), or None when no compatible Krea 2
     base is on disk.
@@ -256,10 +256,20 @@ def resolve_krea_unet(selected=None, require_raw=False):
     candidate list to filenames carrying a 'raw' token BEFORE the explicit
     pick is even matched, same discipline as the BigLove exclusion below: a
     Turbo build must report 'missing', never get silently handed to a
-    pipeline it cannot serve."""
-    folders = _krea_unet_folders()
-    if require_raw:
-        folders = [(sub, [n for n in names if 'raw' in n.lower()]) for sub, names in folders]
+    pipeline it cannot serve.
+
+    `require_turbo=True` is the mirror image, for a graph whose step count is
+    tuned to a distilled build (krea_hq_helper's 10-step BasicScheduler). A
+    Raw build there does not fail, it under-samples — a soft, noisy result
+    from a pipeline that looks like it ran fine — so the `krea.base_model`
+    setting, which is about the OTHER Krea lanes, must not reach it."""
+    if require_raw and require_turbo:
+        raise ValueError('require_raw and require_turbo are mutually exclusive')
+    all_folders = _krea_unet_folders()
+    folders = all_folders
+    build = 'raw' if require_raw else 'turbo' if require_turbo else None
+    if build:
+        folders = [(sub, [n for n in names if build in n.lower()]) for sub, names in all_folders]
         folders = [(sub, names) for sub, names in folders if names]
     if not folders:
         return None
@@ -269,8 +279,15 @@ def resolve_krea_unet(selected=None, require_raw=False):
         for sub, names in folders:
             if bare_pick in names:
                 return os.path.join(sub, bare_pick)
-        logger.warning('krea.base_model %r not found under any krea folder — '
-                       'falling back to automatic resolution', pick)
+        if build and any(bare_pick in names for _sub, names in all_folders):
+            # Not "not found": it is on disk, it is the wrong BUILD for this
+            # pipeline. Saying so is what keeps the log from sending someone
+            # looking for a file that is sitting right there.
+            logger.info('krea.base_model %r is not a %s build — this pipeline '
+                        'resolves its own', pick, build)
+        else:
+            logger.warning('krea.base_model %r not found under any krea folder — '
+                           'falling back to automatic resolution', pick)
     # Automatic resolution must never PICK a file a loader cannot open: the
     # token match is on the NAME, and a .gguf named …turbo… would win here.
     folders = [(sub, [n for n in names if comfy_model_paths.is_loadable_model(n)])
