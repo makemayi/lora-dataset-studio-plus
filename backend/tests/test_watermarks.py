@@ -1024,6 +1024,10 @@ def test_set_watermark_regions_rechecks_detected_state_at_write(app, monkeypatch
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
+    # Patched on watermark_service, which OWNS both functions: set_watermark_regions
+    # resolves normalize_watermark_regions as its own module global, so patching the
+    # re-exported reference on face_dataset_service would not be seen (2026-08 split).
+    from app.services import watermark_service
     with app.app_context():
         ds = svc.create_dataset(LOCAL_USER, 'Concurrent state', 'concurrent-state')
         img = _kept_image(svc, ds.id, 'concurrent.webp', state='detected',
@@ -1038,7 +1042,8 @@ def test_set_watermark_regions_rechecks_detected_state_at_write(app, monkeypatch
             return original_normalize(value, allow_null=allow_null)
 
         monkeypatch.setattr(
-            svc, 'normalize_watermark_regions', change_state_between_check_and_write,
+            watermark_service, 'normalize_watermark_regions',
+            change_state_between_check_and_write,
         )
 
         with pytest.raises(RuntimeError, match='no longer detected'):
