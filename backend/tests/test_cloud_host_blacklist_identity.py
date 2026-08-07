@@ -16,8 +16,10 @@ import json
 import pytest
 
 # Reused rather than re-created: the launch suite already owns the fixture that
-# seeds a trainable dataset.
-from tests.test_cloud_training_launch import seeded_dataset  # noqa: F401
+# seeds a trainable dataset. Imported as a SIBLING module — see the note in
+# test_bank_busy_refusal: `tests` is a namespace package here, so an installed
+# distribution shipping its own top-level `tests` shadows it.
+from test_cloud_training_launch import seeded_dataset  # noqa: F401
 
 # Stand-ins for the two hosts of the incident. The real ids and address are
 # deliberately NOT here: a public repo is no place for a third party's machine
@@ -110,7 +112,7 @@ def test_the_rented_pods_address_is_what_gets_banned(ct, app):
 
 def test_provision_stamps_every_identity_the_offer_carried(ct, app, seeded_dataset,
                                                            monkeypatch):
-    from tests.test_cloud_training_launch import _fake_export
+    from test_cloud_training_launch import _fake_export
     monkeypatch.setenv('VAST_API_KEY', 'k-test')
     monkeypatch.setattr(ct, '_reconcile_before_launch', lambda a: None)
     _fake_export(monkeypatch, ct)

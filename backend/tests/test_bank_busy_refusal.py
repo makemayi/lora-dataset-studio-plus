@@ -15,7 +15,12 @@ import time
 
 import pytest
 
-from tests.test_image_bank import checkerboard  # noqa: F401 — image factory
+# Sibling module, not `tests.test_image_bank`: this directory is not a package,
+# so `tests` only ever resolved as a namespace package — and any installed
+# distribution that ships a top-level `tests` (ultralytics does) is a regular
+# package, which wins over a namespace one no matter what sys.path says. That
+# turned an unrelated pip install into a collection error here.
+from test_image_bank import checkerboard  # noqa: F401 — image factory
 
 
 def _mkbank(client, tmp_path, names):

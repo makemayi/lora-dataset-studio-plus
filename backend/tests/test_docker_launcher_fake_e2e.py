@@ -8,6 +8,7 @@ import contextlib
 import itertools
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -349,6 +350,20 @@ def _run_launcher(
     return checkout, result, final_state, calls
 
 
+def _stderr_says(result, message):
+    """Whether the launcher's stderr carries `message`, ignoring whitespace.
+
+    A `throw` reaches stderr through PowerShell's HOST formatter, which hard-
+    wraps the error record at the console width — and it breaks mid-WORD, so
+    'folder' can arrive as 'fol\\n    der'. Neither the literal string nor a
+    whitespace-COLLAPSED one survives that. The message itself is unchanged;
+    only its rendering moves, so an assertion on the raw text is really an
+    assertion about how wide the terminal was: green at 120 columns, red in a
+    narrow one. Strip whitespace from both sides and compare what was said."""
+    squash = lambda text: re.sub(r"\s+", "", text or "")   # noqa: E731
+    return squash(message) in squash(result.stderr)
+
+
 def _is_port_in(value, first, last):
     return bool(value) and value.isdigit() and first <= int(value) <= last
 
@@ -453,7 +468,7 @@ def test_update_rebuild_returns_nonzero_when_health_is_unhealthy(tmp_path):
     )
 
     assert result.returncode != 0
-    assert "became unhealthy" in result.stderr
+    assert _stderr_says(result, "became unhealthy")
     assert "LoRA Dataset Studio is healthy at" not in result.stdout
     assert "Choose the Ollama deployment mode" not in result.stdout
     assert not _compose_calls(calls, "up", "ollama")
@@ -546,7 +561,7 @@ def test_foreign_container_collision_fails_without_compose_mutation(tmp_path):
     )
 
     assert result.returncode == 1
-    assert "belongs to another project or folder" in result.stderr
+    assert _stderr_says(result, "belongs to another project or folder")
     assert not _compose_calls(calls, "up", "studio")
     assert not _compose_calls(calls, "stop", "ollama")
     assert [call for call in calls if "logs" in call["args"]]

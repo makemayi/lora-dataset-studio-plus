@@ -20,14 +20,17 @@ import pytest
 
 try:
     import torch
+    from torch.utils.data import DataLoader, TensorDataset
 except ModuleNotFoundError as exc:
-    if exc.name != "torch":
+    # Not just "torch is absent". A half-removed install leaves an empty
+    # `site-packages/torch` directory behind, which Python happily imports as a
+    # NAMESPACE package — `import torch` succeeds and `torch.utils` is what
+    # raises. Guarding only the outer import turned that into a collection
+    # error for the whole file instead of the skip these tests are written to
+    # take on a machine with no torch.
+    if not (exc.name or "").startswith("torch"):
         raise
     torch = None
-
-if torch is not None:
-    from torch.utils.data import DataLoader, TensorDataset
-else:
     DataLoader = TensorDataset = None
 
 from app.services import aitoolkit_state_bridge as activation
