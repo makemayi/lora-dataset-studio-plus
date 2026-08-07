@@ -18,6 +18,7 @@ import pytest
 from PIL import Image
 
 from app.services import face_dataset_service as svc
+from app.services import reference_edit_service
 from app.services import reference_edit_jobs as rej
 from app.services import dataset_activity
 
@@ -113,7 +114,7 @@ def _run_sync(app, monkeypatch, out_bytes, *, engine='chatgpt', prompt='add glas
     with app.app_context():
         ds = svc.create_dataset('local', 'W', f'zchar_{time.time_ns()}')
         _seed_ref(ds, original=None, cropped=_webp((5, 5, 5)))
-        monkeypatch.setattr(svc, '_edit_engine_call', lambda e, refs, p: out_bytes)
+        monkeypatch.setattr(reference_edit_service, '_edit_engine_call', lambda e, refs, p: out_bytes)
         token = rej.start(ds.id, svc._dataset_dir(ds.id), engine, prompt)
         act = dataset_activity.begin(ds.id, 'edit_reference', total=1, engine=engine)
         svc._run_reference_edit(app, 'local', ds.id, token, act, engine,
@@ -149,7 +150,7 @@ def test_worker_superseded_discards_its_candidate(app, monkeypatch):
         dsdir = svc._dataset_dir(ds.id)
         stale = rej.start(ds.id, dsdir, 'chatgpt', 'p')
         rej.start(ds.id, dsdir, 'chatgpt', 'p2')      # supersedes -> stale token
-        monkeypatch.setattr(svc, '_edit_engine_call', lambda e, refs, p: _webp((1, 2, 3)))
+        monkeypatch.setattr(reference_edit_service, '_edit_engine_call', lambda e, refs, p: _webp((1, 2, 3)))
         act = dataset_activity.begin(ds.id, 'edit_reference')
         svc._run_reference_edit(app, 'local', ds.id, stale, act, 'chatgpt',
                                 [_webp((5, 5, 5))], 'p')
@@ -165,7 +166,7 @@ def test_worker_quota_exceeded_verbatim(app, monkeypatch):
         _seed_ref(ds, original=None, cropped=_webp((5, 5, 5)))
         def boom(e, refs, p):
             raise svc.SubscriptionQuotaExceeded('quota reached — rerun in API-key mode')
-        monkeypatch.setattr(svc, '_edit_engine_call', boom)
+        monkeypatch.setattr(reference_edit_service, '_edit_engine_call', boom)
         token = rej.start(ds.id, svc._dataset_dir(ds.id), 'chatgpt', 'p')
         act = dataset_activity.begin(ds.id, 'edit_reference')
         svc._run_reference_edit(app, 'local', ds.id, token, act, 'chatgpt',
@@ -266,7 +267,7 @@ def _create_with_ref(client, monkeypatch, name, trig):
 
 def test_route_edit_returns_202_and_payload_exposes_ready(client, monkeypatch):
     did = _create_with_ref(client, monkeypatch, 'Zoe', 'zchar_zoe')
-    monkeypatch.setattr(svc, '_edit_engine_call', lambda e, refs, p: _webp((0, 0, 255)))
+    monkeypatch.setattr(reference_edit_service, '_edit_engine_call', lambda e, refs, p: _webp((0, 0, 255)))
     monkeypatch.setattr(svc.threading, 'Thread', _SyncThread)   # run worker inline
     resp = client.post(f'/api/dataset/{did}/ref/edit',
                        data={'prompt': 'add glasses', 'engine': 'chatgpt'},
@@ -279,7 +280,7 @@ def test_route_edit_returns_202_and_payload_exposes_ready(client, monkeypatch):
 def test_route_keep_swaps_reference(client, monkeypatch):
     did = _create_with_ref(client, monkeypatch, 'Ivy', 'zchar_ivy')
     before = client.get(f'/api/dataset/{did}').get_json()['ref_filename']
-    monkeypatch.setattr(svc, '_edit_engine_call', lambda e, refs, p: _webp((0, 0, 255)))
+    monkeypatch.setattr(reference_edit_service, '_edit_engine_call', lambda e, refs, p: _webp((0, 0, 255)))
     monkeypatch.setattr(svc.threading, 'Thread', _SyncThread)
     client.post(f'/api/dataset/{did}/ref/edit',
                 data={'prompt': 'x', 'engine': 'nanobanana'},
@@ -301,7 +302,7 @@ def test_route_keep_without_ready_409(client, monkeypatch):
 
 def test_route_discard_clears(client, monkeypatch):
     did = _create_with_ref(client, monkeypatch, 'Di', 'zchar_di')
-    monkeypatch.setattr(svc, '_edit_engine_call', lambda e, refs, p: _webp((0, 0, 255)))
+    monkeypatch.setattr(reference_edit_service, '_edit_engine_call', lambda e, refs, p: _webp((0, 0, 255)))
     monkeypatch.setattr(svc.threading, 'Thread', _SyncThread)
     client.post(f'/api/dataset/{did}/ref/edit',
                 data={'prompt': 'x', 'engine': 'chatgpt'},
@@ -449,7 +450,7 @@ def test_external_edit_rejects_invalid_transient_ref_before_provider(client, mon
     """Malformed modal bytes must not start a paid provider worker."""
     did = _create_with_ref(client, monkeypatch, 'Bad ref', 'zchar_bad_ref')
     calls = []
-    monkeypatch.setattr(svc, '_edit_engine_call',
+    monkeypatch.setattr(reference_edit_service, '_edit_engine_call',
                         lambda *args: calls.append(args) or _webp((9, 9, 9)))
 
     response = client.post(
@@ -545,8 +546,8 @@ def test_route_multi_engine_dedupes_and_snapshots_api_refs_once(client, monkeypa
         color = (200, 10, 10) if engine == 'chatgpt' else (10, 10, 200)
         return _webp(color)
 
-    monkeypatch.setattr(svc, '_all_ref_bytes', _snapshot)
-    monkeypatch.setattr(svc, '_edit_engine_call', _edit)
+    monkeypatch.setattr(reference_edit_service, '_all_ref_bytes', _snapshot)
+    monkeypatch.setattr(reference_edit_service, '_edit_engine_call', _edit)
     monkeypatch.setattr(svc.threading, 'Thread', _SyncThread)
     response = client.post(
         f'/api/dataset/{did}/ref/edit',
@@ -596,7 +597,7 @@ def test_stale_retry_batch_is_rejected_before_paid_dispatch(client, monkeypatch)
         provider_calls.append((engine, prompt))
         return _webp((30, 60, 90))
 
-    monkeypatch.setattr(svc, '_edit_engine_call', _edit)
+    monkeypatch.setattr(reference_edit_service, '_edit_engine_call', _edit)
     monkeypatch.setattr(svc.threading, 'Thread', _SyncThread)
     url = f'/api/dataset/{did}/ref/edit'
     first = client.post(
@@ -632,8 +633,7 @@ def test_partial_success_can_keep_named_ready_engine_and_clears_siblings(
 
     did = _create_with_ref(client, monkeypatch, 'Partial', 'zchar_partial')
     before = client.get(f'/api/dataset/{did}').get_json()['ref_filename']
-    monkeypatch.setattr(
-        svc, '_edit_engine_call',
+    monkeypatch.setattr(reference_edit_service, '_edit_engine_call',
         lambda engine, refs, prompt: (
             _webp((0, 150, 255)) if engine == 'chatgpt' else None))
     monkeypatch.setattr(svc.threading, 'Thread', _SyncThread)
@@ -773,8 +773,7 @@ def test_discarded_delayed_api_worker_never_dispatches_provider(
             self._target(*self._args, **self._kwargs)
 
     provider_calls = []
-    monkeypatch.setattr(
-        svc, '_edit_engine_call',
+    monkeypatch.setattr(reference_edit_service, '_edit_engine_call',
         lambda *args: provider_calls.append(args) or _webp((9, 8, 7)))
     monkeypatch.setattr(svc.threading, 'Thread', _HeldThread)
     response = client.post(
@@ -811,9 +810,8 @@ def test_reference_epoch_is_captured_before_dataset_lookup(
         return ds
 
     provider_calls = []
-    monkeypatch.setattr(svc, 'get_dataset', _get_then_mutate)
-    monkeypatch.setattr(
-        svc, '_edit_engine_call', lambda *args: provider_calls.append(args))
+    monkeypatch.setattr(reference_edit_service, 'get_dataset', _get_then_mutate)
+    monkeypatch.setattr(reference_edit_service, '_edit_engine_call', lambda *args: provider_calls.append(args))
     before = rej.reference_revision(did)
     with app.app_context(), pytest.raises(RuntimeError, match='reference changed'):
         svc.start_reference_edit(app, 'local', did, 'chatgpt', 'x')
@@ -844,8 +842,7 @@ def test_registered_batch_is_invalidated_before_delayed_worker_dispatch(
             self._target(*self._args, **self._kwargs)
 
     provider_calls = []
-    monkeypatch.setattr(
-        svc, '_edit_engine_call',
+    monkeypatch.setattr(reference_edit_service, '_edit_engine_call',
         lambda *args: provider_calls.append(args) or _webp((1, 2, 3)))
     monkeypatch.setattr(svc.threading, 'Thread', _HeldThread)
     assert client.post(
@@ -870,8 +867,7 @@ def test_keep_requires_current_batch_id_even_for_single_engine(
     """A stale tab A cannot promote the current single-engine result from tab B."""
     did = _create_with_ref(
         client, monkeypatch, 'Opaque', 'zchar_opaque_batch')
-    monkeypatch.setattr(
-        svc, '_edit_engine_call',
+    monkeypatch.setattr(reference_edit_service, '_edit_engine_call',
         lambda engine, refs, prompt: _webp((10, 20, 30)))
     monkeypatch.setattr(svc.threading, 'Thread', _SyncThread)
 
@@ -947,7 +943,12 @@ def test_keep_and_reference_upload_are_serialized_without_lost_update(
                 upload_acquired_lock.set()
             yield
 
-    monkeypatch.setattr(svc, 'commit_edited_reference', _paused_commit)
+    monkeypatch.setattr(reference_edit_service, 'commit_edited_reference', _paused_commit)
+    # BOTH seams: keep_reference_edit resolves it as a module global inside
+    # reference_edit_service, while the /ref upload route reaches it as
+    # svc.reference_mutation and so goes through the re-export. The point of the
+    # test is that the two paths share one lock, so both must be observed.
+    monkeypatch.setattr(reference_edit_service, 'reference_mutation', _observed_mutation)
     monkeypatch.setattr(svc, 'reference_mutation', _observed_mutation)
     results = {}
     errors = []

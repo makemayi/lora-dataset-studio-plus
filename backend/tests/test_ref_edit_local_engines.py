@@ -29,6 +29,7 @@ import pytest
 from PIL import Image
 
 from app.services import face_dataset_service as svc
+from app.services import reference_edit_service
 from app.services import reference_edit_jobs as rej
 from app.services import dataset_activity
 
@@ -221,8 +222,8 @@ def test_the_queue_callback_fills_the_candidate_the_modal_polls(client, monkeypa
                 content_type='multipart/form-data')
     # The render "landed": bytes come back through the /view fallback, so the test
     # needs no ComfyUI output folder at all.
-    monkeypatch.setattr(svc, '_read_comfy_output', lambda fn: _webp((7, 7, 7)))
-    monkeypatch.setattr(svc, '_drop_comfy_output', lambda fn: None)
+    monkeypatch.setattr(reference_edit_service, '_read_comfy_output', lambda fn: _webp((7, 7, 7)))
+    monkeypatch.setattr(reference_edit_service, '_drop_comfy_output', lambda fn: None)
 
     svc.link_completed_reference_edit('krea-job-1', 'out_00001_.png', failed=False)
 
@@ -294,7 +295,7 @@ def test_switching_to_an_api_engine_cancels_the_local_render_it_supersedes(
 
         def start(self):
             self._t(*self._a)
-    monkeypatch.setattr(svc, '_edit_engine_call', lambda e, refs, p: _webp((0, 0, 255)))
+    monkeypatch.setattr(reference_edit_service, '_edit_engine_call', lambda e, refs, p: _webp((0, 0, 255)))
     monkeypatch.setattr(svc.threading, 'Thread', _SyncThread)
     client.post(f'/api/dataset/{did}/ref/edit',
                 data={'prompt': 'y', 'engine': 'chatgpt'},
@@ -309,7 +310,7 @@ def test_a_landing_nobody_awaits_deletes_its_output(client, monkeypatch):
     """Discarded/superseded while ComfyUI rendered: the finished file is removed
     rather than left in the output folder for the user to wonder about."""
     dropped = []
-    monkeypatch.setattr(svc, '_drop_comfy_output', lambda fn: dropped.append(fn))
+    monkeypatch.setattr(reference_edit_service, '_drop_comfy_output', lambda fn: dropped.append(fn))
     svc.link_completed_reference_edit('nobody-waits', 'out_00002_.png', failed=False)
     assert dropped == ['out_00002_.png']
 
@@ -343,7 +344,7 @@ def test_mixed_api_local_batch_shares_snapshot_and_activity_until_local_lands(
         api_calls.append((engine, refs, prompt))
         return _webp((0, 100, 250))
 
-    monkeypatch.setattr(svc, '_edit_engine_call', _api)
+    monkeypatch.setattr(reference_edit_service, '_edit_engine_call', _api)
     monkeypatch.setattr(svc.threading, 'Thread', _SyncThread)
     real_end = dataset_activity.end
     ended = []
@@ -376,8 +377,8 @@ def test_mixed_api_local_batch_shares_snapshot_and_activity_until_local_lands(
     assert activity['done'] == 1 and activity['total'] == 2
     assert ended == []
 
-    monkeypatch.setattr(svc, '_read_comfy_output', lambda filename: _webp((7, 7, 7)))
-    monkeypatch.setattr(svc, '_drop_comfy_output', lambda filename: None)
+    monkeypatch.setattr(reference_edit_service, '_read_comfy_output', lambda filename: _webp((7, 7, 7)))
+    monkeypatch.setattr(reference_edit_service, '_drop_comfy_output', lambda filename: None)
     svc.link_completed_reference_edit(
         'mixed-krea-job', 'mixed-out.png', failed=False)
 
@@ -395,8 +396,7 @@ def test_discard_mixed_batch_cancels_all_locals_and_deletes_ready_api_candidate(
     did = _create_with_ref(client, monkeypatch, 'Discard all', 'zchar_discard_all')
     _stub_krea(monkeypatch, [], job_id='discard-krea')
     _stub_klein(monkeypatch, [], job_id='discard-klein')
-    monkeypatch.setattr(
-        svc, '_edit_engine_call',
+    monkeypatch.setattr(reference_edit_service, '_edit_engine_call',
         lambda engine, refs, prompt: _webp((10, 20, 30)))
     monkeypatch.setattr(svc.threading, 'Thread', _SyncThread)
     response = client.post(
@@ -437,7 +437,7 @@ def test_comfy_output_rejects_malicious_names_before_read_delete_or_view(
     output.mkdir()
     outside = tmp_path / 'outside.webp'
     outside.write_bytes(b'do-not-touch')
-    monkeypatch.setattr(svc, '_comfy_output_dir', lambda: str(output))
+    monkeypatch.setattr(reference_edit_service, '_comfy_output_dir', lambda: str(output))
     from app.utils import comfyui
     view_calls = []
     monkeypatch.setattr(
@@ -474,7 +474,7 @@ def test_comfy_output_allows_regular_contained_file(tmp_path, monkeypatch):
     output.mkdir()
     candidate = output / 'safe-output.webp'
     candidate.write_bytes(b'safe-bytes')
-    monkeypatch.setattr(svc, '_comfy_output_dir', lambda: str(output))
+    monkeypatch.setattr(reference_edit_service, '_comfy_output_dir', lambda: str(output))
 
     assert svc._read_comfy_output(candidate.name) == b'safe-bytes'
     svc._drop_comfy_output(candidate.name)
@@ -492,7 +492,7 @@ def test_comfy_output_refuses_symlink_file_for_read_and_delete(
         os.symlink(str(outside), str(linked))
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f'symlinks unavailable on this platform: {exc}')
-    monkeypatch.setattr(svc, '_comfy_output_dir', lambda: str(output))
+    monkeypatch.setattr(reference_edit_service, '_comfy_output_dir', lambda: str(output))
     from app.utils import comfyui
     view_calls = []
     monkeypatch.setattr(
@@ -520,7 +520,7 @@ def test_comfy_output_refuses_symlink_or_reparse_ancestor(
         os.symlink(str(real_output), str(linked_output), target_is_directory=True)
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f'directory symlinks unavailable on this platform: {exc}')
-    monkeypatch.setattr(svc, '_comfy_output_dir', lambda: str(linked_output))
+    monkeypatch.setattr(reference_edit_service, '_comfy_output_dir', lambda: str(linked_output))
     from app.utils import comfyui
     view_calls = []
     monkeypatch.setattr(
@@ -541,7 +541,7 @@ def test_comfy_output_deterministically_refuses_reparse_ancestor(
     output.mkdir()
     candidate = output / 'candidate.webp'
     candidate.write_bytes(b'reparse-secret')
-    monkeypatch.setattr(svc, '_comfy_output_dir', lambda: str(output))
+    monkeypatch.setattr(reference_edit_service, '_comfy_output_dir', lambda: str(output))
     real_lstat = svc.os.lstat
     output_key = os.path.normcase(os.path.abspath(str(output)))
     output_mode = real_lstat(output).st_mode
