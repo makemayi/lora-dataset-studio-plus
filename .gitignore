@@ -55,6 +55,13 @@ Thumbs.db
 # internal planning artifacts (local machine paths) — keep local, never publish
 docs/superpowers/
 
+# Hand-debugged ComfyUI graphs dropped at the repo root while wiring an engine.
+# They are references, never deliverables: the app builds its graphs in code, and
+# an exported workflow carries the author's own prompts and filenames. Ignored so
+# a `git add .` cannot publish one.
+/*.json
+!/config.example.json
+
 # Local privacy guard-rail: the identifiers test_no_personal_data.py must never
 # find in tracked files. Kept OUT of the repo — writing them down here would
 # publish exactly what they forbid.

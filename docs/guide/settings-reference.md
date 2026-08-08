@@ -213,6 +213,73 @@ A dataset that never uploads an angle photo behaves exactly as it always has —
 
 Mirror then crop, in that order, silently loses the mirror: crop always re-derives the working photo from the untouched original you uploaded, so it has no way to know a mirror ever happened. Crop first if you need both.
 
+### MiniMax H3 (local)
+
+The **third** local engine, and the only one that reaches a still photo through a
+**video** model. Given one reference photo it samples a short packet of frames,
+then keeps the single best one. Identity comes from that one photo with no
+character LoRA, exactly like Krea 2 Edit — what differs is the cost and one
+prerequisite that lives outside the app.
+
+**Start ComfyUI with `--disable-dynamic-vram`.** This is not a setting here and
+nothing will error without it. H3 loads about 40 GB of weights (text encoder
+14.6 GB + model 19.5 GB + video VAE 4.9 GB + CLIP-Vision 1.2 GB); on a 24 GB card
+ComfyUI's dynamic staging then keeps two of them staged at once and the driver
+pages VRAM to system memory. Measured on an RTX 3090: identical runs took
+anywhere from **69 s to 397 s** without the flag, and a steady **77.5 s** with it.
+The app shows a warning on the engine card and in Settings when it can see that
+the flag is missing.
+
+What it costs, measured on that same card at the defaults: **~78 s for a new shot
+description, ~38 s for another image of the same one**. The difference is the
+text encode, which depends only on the prompt — so a batch queues every copy of a
+card together and pays that cost once per card, not once per image.
+
+- **Reference size** → `minimax_h3.ref_image_size`. `match` (default) or `max`.
+  **The** likeness dial of this engine: `match` scales your reference to the
+  output's pixel area, `max` uses the model's 2048px reference pipeline for the
+  best identity and is, by the model's own documentation, several times slower —
+  reference tokens ride through every sampling step.
+- **Frames per shot** → `minimax_h3.length`. Default **`5`**, the model's own
+  minimum; it only accepts 5, 22, 39 … (5 + 17n). One frame is kept whatever you
+  choose, so a higher value buys the selector more candidates at full sampling
+  cost each.
+- **Frame pick: likeness weight** → `minimax_h3.frame_weight_reference`. Default
+  **`1.0`**, range 0–5. How much "looks like the reference" counts against
+  sharpness and exposure when choosing which frame to keep; 0 ignores likeness.
+  Honest limit: on a 5-frame packet, changing this produced a **pixel-identical**
+  image in testing — the sharpest frame was also the most reference-like. It has
+  something to decide only at higher frame counts.
+- **Sampler steps** → `minimax_h3.steps`. Default **`25`**. Paid once per frame
+  in the packet.
+- **Reference downscaled to** → `minimax_h3.ref_longer_edge`. Default **`1024`**
+  px. The reference is shrunk to this before it reaches the 32B vision encoder;
+  every reference pixel is paid for again on each new shot description.
+- **Optional accelerators** → `minimax_h3.use_speed_nodes`,
+  `minimax_h3.use_rtx_upscale`. Both default **on**, and both are used only when
+  your ComfyUI actually exposes the nodes, so leaving them on costs nothing on an
+  install that lacks them. The speed nodes (Spectrum step forecasting + Sage
+  attention) do not change the image. The RTX 2× upscale is NVIDIA RTX only —
+  without it you lose the upscale, not the engine.
+- **Ref2VA model file** → `minimax_h3.base_model`. Blank (default) finds any
+  Ref2VA build on its own — int8, int4 or mixed. The `fl2va` sibling is never
+  picked: it loads and then does a different job. A filename that is no longer on
+  disk falls back to auto rather than failing.
+
+Three limits worth knowing before you build a dataset with it:
+
+- **Nothing is auto-downloaded.** Klein and Krea can be installed from Setup;
+  H3's five files are ~40 GB, several of them community re-quantisations, and
+  none of them is wired into the installer. The engine card names each missing
+  file and where it goes. The `MinimaxH3-Image` custom-node pack is required and
+  is likewise a manual install (then restart ComfyUI).
+- **It generates; it does not edit your reference photo.** The ✦ Edit reference
+  modal offers Klein, Krea and the API engines, not H3.
+- **H3 copies what the reference carries.** A reference cropped from a broadcast
+  still will reproduce its title card and channel logo in the output, and those
+  would be trained into your LoRA. Crop them off the reference first — cheaper
+  than cleaning every generated image afterwards.
+
 ### SeedVR2 upscaling (local)
 
 *Requested by SurpassHR ([GitHub #32](https://github.com/perfectgf/lora-dataset-studio/issues/32)).*

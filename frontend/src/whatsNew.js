@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-08-minimax-h3-engine',
+    date: '2026-08-08',
+    title: 'A third free local engine: MiniMax H3 builds your dataset from one photo',
+    blurb:
+      "MiniMax H3 joins Klein and Krea 2 Edit in the engine picker — identity from a single reference photo, no character LoRA, on your own GPU, NSFW allowed. It gets there through a video model: it samples a short packet of frames per shot and keeps the best one, so it is the slowest of the three (~78s for a new shot card, ~38s for another image of the same card — the batch is ordered to make that difference count). Two things stated up front: nothing is auto-downloaded (five model files plus the MinimaxH3-Image node pack, all manual — the engine card names each gap), and ComfyUI must be started with --disable-dynamic-vram or generations randomly take up to six times longer. The app warns you when it can see that flag missing.",
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-07-docker-deployments-removed',
     date: '2026-08-07',
     title: 'The Docker deployments are gone — LDS now runs one way',

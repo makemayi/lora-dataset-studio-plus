@@ -715,6 +715,47 @@ const TOPICS = [
      // "value_not_in_list" — these terms are what someone stuck on it searches for.
      'gguf', 'quant', 'quantised', 'quantized', 'q4_k_m', 'q8', 'value not in list',
      'not in list', 'not detecting', 'model not found', 'unet_name', 'safetensors']),
+  // MiniMax H3 — the third LOCAL engine. `ref_image_size` first for the same
+  // reason krea.grounding_px leads its group: it is THE likeness dial, and the
+  // bare word "match" means nothing without the sentence next to it.
+  setting('minimax_h3.ref_image_size', 'engines', 'h3-ref-size',
+    'MiniMax H3 reference size',
+    ['minimax', 'minimax h3', 'h3', 'ref_image_size', 'reference size', 'match', 'max',
+     'likeness', 'identity', 'resemblance', 'slower', 'dial', 'local engine']),
+  setting('minimax_h3.length', 'engines', 'h3-length',
+    'MiniMax H3 frames per shot',
+    ['minimax', 'minimax h3', 'h3', 'length', 'frames', 'frame packet', 'video',
+     'candidates', 'slower', 'faster', 'local engine']),
+  setting('minimax_h3.frame_weight_reference', 'engines', 'h3-frame-weight',
+    'MiniMax H3 frame pick likeness weight',
+    ['minimax', 'minimax h3', 'h3', 'frame select', 'h3frameselect', 'weight_reference',
+     'likeness', 'sharpness', 'exposure', 'which frame', 'best frame', 'local engine']),
+  setting('minimax_h3.steps', 'engines', 'h3-steps', 'MiniMax H3 sampler steps',
+    ['minimax', 'minimax h3', 'h3', 'steps', 'sampler', 'slower', 'local engine']),
+  setting('minimax_h3.ref_longer_edge', 'engines', 'h3-ref-edge',
+    'MiniMax H3 reference downscale',
+    ['minimax', 'minimax h3', 'h3', 'reference', 'downscale', 'longer edge', 'resize',
+     'vision encoder', 'tokens', 'slow', 'encode', 'local engine']),
+  setting('minimax_h3.use_speed_nodes', 'engines', 'h3-speed-nodes',
+    'MiniMax H3 optional accelerators',
+    ['minimax', 'minimax h3', 'h3', 'spectrum', 'sage attention', 'sageattention',
+     'speed', 'faster', 'node pack', 'optional', 'local engine']),
+  setting('minimax_h3.use_rtx_upscale', 'engines', 'h3-rtx-upscale',
+    'MiniMax H3 RTX super resolution',
+    ['minimax', 'minimax h3', 'h3', 'rtx', 'super resolution', 'upscale', '2x', 'nvidia',
+     'optional', 'node pack', 'local engine']),
+  setting('minimax_h3.base_model', 'engines', 'h3-base',
+    'MiniMax H3 Ref2VA model',
+    ['minimax', 'minimax h3', 'h3', 'ref2va', 'fl2va', 'base model', 'unet',
+     'diffusion model', 'int8', 'int4', 'convrot', 'quant', 'safetensors',
+     'model not found', 'local engine',
+     // The one thing about this engine that no setting can fix and every user
+     // will hit, so it is searchable from here: it loads more weights than a
+     // 24 GB card holds, and ComfyUI must be LAUNCHED with a flag or runs
+     // randomly take up to 6x longer. The sentence itself is published by
+     // capabilities and shown on both cards; this only makes it findable.
+     'disable-dynamic-vram', 'dynamic vram', 'slow', 'vram', 'out of memory',
+     'paging', 'inconsistent', 'sometimes slow']),
   setting('krea.identity_lora', 'engines', 'krea-identity-lora', 'Krea 2 Edit identity LoRA',
     ['krea', 'identity', 'edit lora', 'lora', 'krea2_identity_edit', 'civitai',
      'node pack', 'comfyui-krea2edit', 'missing', 'local engine']),
