@@ -13,18 +13,21 @@ Split out of face_dataset_service.py (2026-08, Phase 7 of a multi-phase file
 split) -- pure move, no behavior change.
 """
 import io
+import math
 import json
 import ntpath
 import os
 import posixpath
 import re
+import stat
 import shutil
 import time
 import uuid
 import zipfile
+import zlib
 from typing import BinaryIO
 
-from . import dataset_activity
+from . import caption_origin, dataset_activity
 from ..extensions import db
 from ..models import FaceDataset, FaceDatasetImage
 from .. import config as cfg
@@ -56,6 +59,12 @@ _BACKUP_MAX_CENTRAL_DIRECTORY_BYTES = 16 * 1024 * 1024
 # archive entry incapable of filling a disk or RAM by itself.
 _BACKUP_MAX_IMAGE_BYTES = 96 * 1024 * 1024
 _BACKUP_NAME_RE = re.compile(r'^[\w.-]+\.(webp|jpg|jpeg|png|bmp)$', re.IGNORECASE)
+# Windows reserves these device names at every path depth: a member called
+# "NUL.jpg" is refused before extraction rather than written to a device.
+_BACKUP_WINDOWS_DEVICE_RE = re.compile(
+    r'^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])$', re.IGNORECASE)
+_BACKUP_ANALYSIS_CACHE_RE = re.compile(
+    r'^analysis-cache/(?P<ref>(?:[0-9a-f]{32}|[0-9a-f]{64}))\.npz$')
 _BACKUP_EXTENSION_CANONICAL = {
     '.jpg': '.jpg', '.jpeg': '.jpg', '.png': '.png', '.webp': '.webp', '.bmp': '.bmp',
 }
@@ -289,6 +298,10 @@ def _normalized_backup_image_meta(meta, *, version=BACKUP_VERSION):
         except (TypeError, ValueError, RecursionError, MemoryError):
             raise ValueError(f'invalid backup image {field}')
         boxes = parsed if many else [parsed]
+        # Resolved at CALL time: watermark_service owns this and the parent's
+        # re-export of it lands after face_dataset_service imports THIS module,
+        # so neither a top-level nor a bottom-borrow import can see it yet.
+        from .watermark_service import WATERMARK_REGION_LIMIT
         if not isinstance(boxes, list) or len(boxes) > WATERMARK_REGION_LIMIT:
             raise ValueError(f'invalid backup image {field}')
         normalized = []
@@ -1185,7 +1198,7 @@ def _import_backup_zipfile(user_id: int, z: zipfile.ZipFile):
 # is imported from that module directly, never through the parent's re-export.
 from .face_dataset_service import (
     get_dataset, create_dataset, normalize_source_metadata, _dataset_ingest_lock,
-    _bank_analysis_cache_dir,
+    _bank_analysis_cache_dir, FIDELITIES, TRAIN_TYPES, CAPTION_MAX_CHARS,
     _source_metadata_storage, _SMALL_IMAGE_DERIVATIONS, _dataset_dir,
     KLEIN_IMAGE_IMPROVE, KLEIN_SMALL_IMAGE, SMALL_IMAGE_SOURCE, logger,
 )

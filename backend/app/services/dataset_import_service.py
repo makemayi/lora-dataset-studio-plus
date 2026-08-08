@@ -86,6 +86,11 @@ PRESERVED_IMPORT_MAX_SIDE = IMPORT_MAX_SIDE_CEILING
 PRESERVED_IMPORT_MAX_PIXELS = image_encoding.INPUT_MAX_PIXELS
 
 
+def preserved_import_limits() -> tuple[int, int]:
+    """The effective (max_side, max_pixels) ingress budget; 0 = no limit."""
+    return image_encoding.input_budget()
+
+
 def import_encode_policy() -> dict:
     """What an imported image will ACTUALLY be stored as, resolved once so the
     UI, the toast and the encoder all quote the same policy.
@@ -1453,13 +1458,22 @@ def classify_images(user_id, dataset_id):
         return 0
     rows = FaceDatasetImage.query.filter_by(
         dataset_id=dataset_id, source='import', framing=None).all()
+    # Ids, not ORM objects: see _live_image_row. The commit at the bottom of this
+    # loop expires every row it has not reached, and a tile deleted from the grid
+    # meanwhile used to kill the whole classification.
+    row_ids = [img.id for img in rows]
     n = 0
+    vanished = 0
     # Persistent progress indicator (survives a page reload): try/finally guarantees
     # end() runs even if the batch raises → no phantom "Classifying…" spinner.
-    token = dataset_activity.begin(dataset_id, 'classify', total=len(rows))
+    token = dataset_activity.begin(dataset_id, 'classify', total=len(row_ids))
     try:
-        for i, img in enumerate(rows):
+        for i, image_id in enumerate(row_ids):
             dataset_activity.progress(token, done=i + 1)
+            img = _live_image_row(image_id)
+            if img is None:      # deleted while the pass ran
+                vanished += 1
+                continue
             path = _img_path(img) if img.filename else ''
             if not os.path.exists(path):
                 continue
@@ -1479,7 +1493,11 @@ def classify_images(user_id, dataset_id):
     finally:
         unload_vision_model()  # libère la VRAM pour ComfyUI en fin de batch
         dataset_activity.end(token)
+    if vanished:
+        logger.info('classify: %s image(s) were deleted while the pass ran, skipped',
+                    vanished)
     return n
+
 
 # --- Borrow: face_dataset_service.py primitives -----------------------------
 # MUST stay at the bottom of this file, same reason as in the sibling split
@@ -1566,6 +1584,7 @@ def rollback_imported_images(user_id, dataset_id, image_ids,
 
 
 from .face_dataset_service import (
+    _live_image_row,
     _guard_not_bank_export,
     get_dataset, dataset_klein_model, normalize_to_webp, write_image_atomic,
     _img_path, _dataset_dir, _crop_resize_file, _cap_caption,

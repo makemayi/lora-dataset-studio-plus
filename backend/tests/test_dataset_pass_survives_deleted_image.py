@@ -378,9 +378,14 @@ def test_improve_survives_stop_deleting_its_candidate(ctx, monkeypatch):
             db.session.commit()
         return 'job-improve-1'
 
-    monkeypatch.setattr(svc, '_enqueue_improve', fake_enqueue)
-    monkeypatch.setattr(svc, 'resolve_improve_engine', lambda requested=None: 'klein')
-    monkeypatch.setattr(svc, '_improve_preflight', lambda engine: None)
+    # Patched on the OWNING module, not on face_dataset_service: this fork moved
+    # the improve lane into dataset_generation_service, and that module reads
+    # these three as its own globals — a patch on the parent's re-export would
+    # silently do nothing, exactly as the comment above says for enqueue_klein_edit.
+    from app.services import dataset_generation_service as gen
+    monkeypatch.setattr(gen, '_enqueue_improve', fake_enqueue)
+    monkeypatch.setattr(gen, 'resolve_improve_engine', lambda requested=None: 'klein')
+    monkeypatch.setattr(gen, '_improve_preflight', lambda engine: None)
     out = svc.improve_existing_image(LOCAL_USER, image_id)
     assert out is None or out.get('candidate_id') is None, (
         f'improve reported a candidate Stop had already deleted: {out}')

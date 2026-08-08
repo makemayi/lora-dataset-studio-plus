@@ -3538,6 +3538,9 @@ from .dataset_backup_service import (
     _BACKUP_NAME_RE, _BACKUP_EXTENSION_CANONICAL, _BACKUP_IMG_FIELDS,
     write_backup_zip, build_backup_zip, import_backup_zip,
     _backup_basename, _read_validated_backup_image, _backup_extra_ref_names,
+    _backup_file_generation, _write_backup_file_member, _write_backup_zip_locked,
+    _BACKUP_WINDOWS_DEVICE_RE, _BACKUP_ANALYSIS_CACHE_RE,
+    _BACKUP_MAX_CENTRAL_DIRECTORY_BYTES,
     _portable_train_base_model, _coerce_archive_stream, _import_backup_zipfile,
 )
 
@@ -3590,7 +3593,7 @@ from .dataset_import_service import (
     SCRAPE_DHASH_MAX_DISTANCE, BANK_ANALYSIS_MAX_SIDE, BANK_ANALYSIS_MAX_PIXELS,
     _IMPORT_ENCODINGS, _PRESERVED_IMPORT_EXTENSIONS, _WATERMARK_BBOX_MARGIN,
     _DATASET_ZIP_IMG_EXTS, _SCRAPE_DL_TYPES, _SCRAPE_DL_MAX_BYTES, _SCRAPE_DL_WORKERS,
-    import_encode_policy, import_store_image, import_encode, import_images,
+    preserved_import_limits, import_encode_policy, import_store_image, import_encode, import_images,
     import_dataset_zip, import_dataset_folder, scrape_import_urls,
     detect_head_bbox, detect_watermark_bbox, classify_images,
     face_crop_to_square_webp, bank_deterministic_analysis,
@@ -3643,7 +3646,7 @@ from .watermark_service import (
 # names included on purpose: test_concept_dataset and test_concept_caption_omission
 # address five of them directly.
 from .captioning_service import (
-    CAPTION_BACKENDS, caption_preset_instructions,
+    CAPTION_BACKENDS, CAPTION_LENGTHS, caption_preset_instructions,
     vocabulary_instruction, caption_images, caption_paths,
     preview_caption, derive_short_captions,
     _refine_output_ok, _usable_caption, _fallback_concept_terms, _concept_terms_re,

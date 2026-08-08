@@ -641,8 +641,13 @@ def clean_watermarks(user_id, dataset_id, image_ids=None, device='cpu', method='
                if isinstance(i, (int, float, str)) and str(i).lstrip('-').isdigit()]
         q = q.filter(FaceDatasetImage.id.in_(ids or [-1]))   # empty subset -> match nothing
     rows = q.all()
+    row_ids = [img.id for img in rows]
     out = {'cropped': 0, 'inpainted': 0, 'inpainted_klein': 0, 'needs_review': 0,
            'failed': 0, 'skipped': 0}
+    # NOT a key in `out`: that dict is the route's response shape and existing
+    # tests pin it. 'skipped' already means "engine unavailable" and must not be
+    # overloaded with "the image no longer exists". Logged at the end instead.
+    vanished = 0
     error = None
     lama_ok = watermark_lama.is_available()
     klein_ok = method == 'klein' and watermark_klein.is_available()
@@ -658,9 +663,11 @@ def clean_watermarks(user_id, dataset_id, image_ids=None, device='cpu', method='
         from . import klein_edit_helper as keh
         if not keh.klein_model_on_disk(klein_model):
             raise keh.KleinModelGone(klein_model)
-    # (img, live_path, staged_path, bboxes, manual_regions). The VLM/browser
-    # boxes apply to the staged upright file; the master is replaced only after
-    # a successful engine result has passed verification.
+    # (image_id, live_path, staged_path, bboxes, manual_regions). An ID, not an
+    # ORM row: this list is carried across the whole per-image loop AND across
+    # the LaMa batch, which runs for minutes -- by the time the tail loop writes,
+    # those rows have been expired by a dozen commits and any one of them may
+    # have been deleted from the grid. See _live_image_row.
     lama_pending = []
 
     def _backup_failed(img, staged_path=None):
@@ -723,8 +730,12 @@ def clean_watermarks(user_id, dataset_id, image_ids=None, device='cpu', method='
         dataset_id, 'watermark_clean', total=len(rows),
         detail=f'Cleaning watermarks on {device_label}…')
     try:
-        for i, img in enumerate(rows):
+        for i, image_id in enumerate(row_ids):
             dataset_activity.progress(token, done=i + 1)
+            img = _live_image_row(image_id)
+            if img is None:      # deleted while the pass ran
+                vanished += 1
+                continue
             path = _img_path(img)
             if img.watermark_regions is not None:
                 try:
@@ -764,7 +775,7 @@ def clean_watermarks(user_id, dataset_id, image_ids=None, device='cpu', method='
                     _backup_failed(img, staged)
                     db.session.commit()
                     continue
-                lama_pending.append((img, path, staged, regions, True))
+                lama_pending.append((img.id, path, staged, regions, True))
                 continue
             bbox = _safe_json(img.watermark_bbox)
             if not (isinstance(bbox, list) and len(bbox) == 4):
@@ -821,7 +832,7 @@ def clean_watermarks(user_id, dataset_id, image_ids=None, device='cpu', method='
                         staged = _stage_oriented_watermark_edit(path)
                         if staged:
                             if _preserve_original(path):
-                                lama_pending.append((img, path, staged, [bbox], False))
+                                lama_pending.append((img.id, path, staged, [bbox], False))
                             else:
                                 _backup_failed(img, staged)
                         else:
@@ -835,7 +846,7 @@ def clean_watermarks(user_id, dataset_id, image_ids=None, device='cpu', method='
         if lama_pending:
             try:
                 if len(lama_pending) == 1:
-                    img, live_path, staged_path, boxes, manual = lama_pending[0]
+                    _pid, live_path, staged_path, boxes, manual = lama_pending[0]
                     if manual:
                         ok, err = watermark_lama.inpaint_watermarks(
                             staged_path, boxes,
@@ -848,10 +859,18 @@ def clean_watermarks(user_id, dataset_id, image_ids=None, device='cpu', method='
                 else:
                     results = watermark_lama.inpaint_batch(
                         [{'image_path': staged_path, 'bboxes': boxes}
-                         for _img, _live_path, staged_path, boxes, _manual in lama_pending],
+                         for _pid, _live_path, staged_path, boxes, _manual in lama_pending],
                         device=device,
                     )
-                for img, live_path, staged_path, _boxes, manual in lama_pending:
+                for pending_id, live_path, staged_path, _boxes, manual in lama_pending:
+                    img = _live_image_row(pending_id)
+                    if img is None:
+                        # Deleted while the batch ran: there is no row left to
+                        # point at the repainted file, so drop the staged edit
+                        # rather than promote it over a master nobody owns.
+                        _discard_staged_watermark_edit(staged_path)
+                        vanished += 1
+                        continue
                     ok, err = results.get(
                         staged_path,
                         (False, {'kind': 'failed', 'detail': 'missing inpaint result'}),
@@ -881,7 +900,11 @@ def clean_watermarks(user_id, dataset_id, image_ids=None, device='cpu', method='
             except Exception as exc:  # engine/process faults must not leak a staged edit
                 logger.exception('watermark: LaMa execution failed for dataset %s', dataset_id)
                 error = {'kind': 'failed', 'detail': f'watermark inpaint failed: {exc}'}
-                for img, _live_path, _staged_path, _boxes, manual in lama_pending:
+                for pending_id, _live_path, _staged_path, _boxes, manual in lama_pending:
+                    img = _live_image_row(pending_id)
+                    if img is None:
+                        vanished += 1
+                        continue
                     if not manual:
                         img.watermark_state = 'failed'
                     out['failed'] += 1
@@ -890,8 +913,11 @@ def clean_watermarks(user_id, dataset_id, image_ids=None, device='cpu', method='
                 # The engine can crash before returning a result; in that case its
                 # disposable EXIF-oriented copy still has to disappear, while the
                 # master remains exactly where it was.
-                for _img, _live_path, staged_path, _boxes, _manual in lama_pending:
+                for _pid, _live_path, staged_path, _boxes, _manual in lama_pending:
                     _discard_staged_watermark_edit(staged_path)
+        if vanished:
+            logger.info('watermark clean: %s image(s) were deleted while the pass '
+                        'ran, skipped', vanished)
         return out, error
     finally:
         dataset_activity.end(token)

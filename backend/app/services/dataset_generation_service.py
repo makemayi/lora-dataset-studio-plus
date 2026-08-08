@@ -128,6 +128,10 @@ def generate_variations(user_id, dataset_id, variations, multiplier, klein_model
                                        variation_prompt=v['prompt'], klein_model=klein_model)
                 db.session.add(img)
                 db.session.commit()
+                # Captured NOW, while the row certainly exists: ⏹ Stop
+                # deletes exactly this shape (pending + no filename) and it
+                # can land while the enqueue below is in flight.
+                image_id = img.id
                 # NSFW (flag explicite OU label du catalogue NSFW) : wrapper sans le
                 # clamp SFW — chemin Klein local uniquement, les moteurs API sont
                 # refusés en amont (route + generate_variations_nanobanana).
@@ -153,12 +157,17 @@ def generate_variations(user_id, dataset_id, variations, multiplier, klein_model
                         extra_metadata={'is_dataset': True, 'dataset_id': dataset_id,
                                         'variation_label': v.get('label')})
                 except Exception:
-                    img.status = 'failed'
-                    db.session.commit()
+                    row = _live_image_row(image_id)
+                    if row is not None:
+                        row.status = 'failed'
+                        db.session.commit()
                     raise
-                img.job_id = job_id
+                row = _live_image_row(image_id)
+                if row is None:
+                    continue     # Stop removed it mid-enqueue; nothing to report
+                row.job_id = job_id
                 db.session.commit()
-                ids.append(img.id)
+                ids.append(image_id)
     finally:
         _sync_generate_activity(dataset_id)
     return ids
@@ -219,6 +228,10 @@ def generate_variations_krea(user_id, dataset_id, variations, multiplier,
                                        klein_model=KREA_ENGINE)
                 db.session.add(img)
                 db.session.commit()
+                # Captured NOW, while the row certainly exists: ⏹ Stop
+                # deletes exactly this shape (pending + no filename) and it
+                # can land while the enqueue below is in flight.
+                image_id = img.id
                 nsfw = bool(v.get('nsfw')) or is_nsfw_label(v.get('label'))
                 try:
                     job_id = keh.enqueue_krea_edit(
@@ -240,12 +253,17 @@ def generate_variations_krea(user_id, dataset_id, variations, multiplier,
                         extra_metadata={'is_dataset': True, 'dataset_id': dataset_id,
                                         'variation_label': v.get('label')})
                 except Exception:
-                    img.status = 'failed'
-                    db.session.commit()
+                    row = _live_image_row(image_id)
+                    if row is not None:
+                        row.status = 'failed'
+                        db.session.commit()
                     raise
-                img.job_id = job_id
+                row = _live_image_row(image_id)
+                if row is None:
+                    continue     # Stop removed it mid-enqueue; nothing to report
+                row.job_id = job_id
                 db.session.commit()
-                ids.append(img.id)
+                ids.append(image_id)
     finally:
         _sync_generate_activity(dataset_id)
     return ids
@@ -307,6 +325,10 @@ def generate_variations_minimax_h3(user_id, dataset_id, variations, multiplier):
                                        klein_model=MINIMAX_H3_ENGINE)
                 db.session.add(img)
                 db.session.commit()
+                # Captured NOW, while the row certainly exists: ⏹ Stop
+                # deletes exactly this shape (pending + no filename) and it
+                # can land while the enqueue below is in flight.
+                image_id = img.id
                 nsfw = bool(v.get('nsfw')) or is_nsfw_label(v.get('label'))
                 try:
                     job_id = mh.enqueue_minimax_h3(
@@ -324,12 +346,17 @@ def generate_variations_minimax_h3(user_id, dataset_id, variations, multiplier):
                         extra_metadata={'is_dataset': True, 'dataset_id': dataset_id,
                                         'variation_label': v.get('label')})
                 except Exception:
-                    img.status = 'failed'
-                    db.session.commit()
+                    row = _live_image_row(image_id)
+                    if row is not None:
+                        row.status = 'failed'
+                        db.session.commit()
                     raise
-                img.job_id = job_id
+                row = _live_image_row(image_id)
+                if row is None:
+                    continue     # Stop removed it mid-enqueue; nothing to report
+                row.job_id = job_id
                 db.session.commit()
-                ids.append(img.id)
+                ids.append(image_id)
     finally:
         _sync_generate_activity(dataset_id)
     return ids
@@ -351,9 +378,18 @@ def _improve_prompt() -> str:
     return ''
 
 
-def _improve_candidate_label(source) -> str:
-    """Label of the candidate produced from ``source`` (its parent image)."""
-    base_label = 'Klein upscale & improve'
+_IMPROVE_LABELS = {
+    'klein': 'Klein upscale & improve',   # NEVER change: stored in user databases
+    'seedvr2': 'SeedVR2 upscale',
+}
+
+
+def _improve_candidate_label(source, engine='klein') -> str:
+    """Label of the candidate produced from ``source`` (its parent image).
+
+    Names the engine that ACTUALLY ran: a SeedVR2 result labelled "Klein upscale
+    & improve" tells the user the one thing they chose this pass to avoid."""
+    base_label = _IMPROVE_LABELS.get(engine, _IMPROVE_LABELS['klein'])
     source_label = (source.variation_label or '').strip()
     return (f'{base_label} · {source_label}' if source_label else base_label)[:120]
 
@@ -470,6 +506,7 @@ def _improve_existing_image_locked(user_id, image_id, engine=None):
     img = _owned_image(user_id, image_id)
     if not img:
         return None
+    _guard_not_bank_export(img.dataset_id)
     if img.derivation_kind in _SMALL_IMAGE_DERIVATIONS:
         raise ValueError(
             'resolve the small-image rescue pair before improving either image')
@@ -513,11 +550,16 @@ def _improve_existing_image_locked(user_id, image_id, engine=None):
     # image. The honest value is the pass that ran.
     stored_prompt = (prompt[:500] if engine == 'klein'
                      else 'SeedVR2 upscale (no prompt — restoration pass)')
-    label = _improve_candidate_label(img)
+    label = _improve_candidate_label(img, engine)
     candidate = FaceDatasetImage(
         dataset_id=img.dataset_id, source='generated', status='pending',
         parent_image_id=img.id, derivation_kind=KLEIN_IMAGE_IMPROVE,
+        # The stamp travels with the sentence it describes: a candidate that
+        # inherits a hand-written caption inherits the protection on it, or the
+        # first forced pass would rewrite the words on the copy while sparing them
+        # on the original.
         framing=img.framing, caption=img.caption,
+        caption_origin=img.caption_origin,
         variation_label=label, variation_prompt=stored_prompt,
         # The generated candidate remains derived from the credited source.
         # Revalidate before copying so a malformed legacy row cannot surface.
@@ -525,22 +567,38 @@ def _improve_existing_image_locked(user_id, image_id, engine=None):
     )
     db.session.add(candidate)
     db.session.commit()
+    # Captured while both rows certainly exist: the commit above expires them,
+    # and ⏹ Stop deletes exactly this candidate's shape (pending, no filename)
+    # — the enqueue below is the window, same as the variation paths.
+    candidate_id = candidate.id
+    dataset_id_of_source = img.dataset_id
 
     try:
         job_id = _enqueue_improve(
             engine, user_id=user_id, source=img, source_path=source_path,
-            prompt=prompt, label=label)
+            prompt=prompt, label=label,
+            dataset=get_dataset(user_id, dataset_id_of_source))
     except Exception:
         # No broken tile: the original is still untouched and the user can retry
-        # as soon as the queue/ComfyUI issue is fixed.
-        db.session.delete(candidate)
-        db.session.commit()
+        # as soon as the queue/ComfyUI issue is fixed. Nothing to remove if Stop
+        # already removed it — and trying would raise from inside this `except`,
+        # replacing the real enqueue error with a database one.
+        row = _live_image_row(candidate_id)
+        if row is not None:
+            db.session.delete(row)
+            db.session.commit()
         raise
 
-    candidate.job_id = job_id
+    row = _live_image_row(candidate_id)
+    if row is None:
+        # Stop removed the candidate mid-enqueue. Reporting its id would have the
+        # tile poll for a generation that can never arrive.
+        _sync_generate_activity(dataset_id_of_source)
+        return None
+    row.job_id = job_id
     db.session.commit()
-    _sync_generate_activity(img.dataset_id)
-    return {'candidate_id': candidate.id, 'job_id': job_id}
+    _sync_generate_activity(dataset_id_of_source)
+    return {'candidate_id': candidate_id, 'job_id': job_id}
 
 
 # The three ways a re-run can be impossible, worded as the user reads them. The
@@ -1636,6 +1694,7 @@ def generate_variations_nanobanana(app, user_id, dataset_id, variations, multipl
 # other, and whichever side loads first must find the other fully defined by
 # the time the reach-back import resolves.
 from .face_dataset_service import (
+    _live_image_row,
     _guard_not_bank_export,
     get_dataset, dataset_klein_model, dataset_prompt_suffix, subject_type_of,
     normalize_to_webp, write_image_atomic, cancel_pending,

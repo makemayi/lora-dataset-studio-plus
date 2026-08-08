@@ -545,9 +545,13 @@ def test_a_second_reference_does_not_move_the_boost_off_the_primary():
     first. Adding an angle demotes the primary to first — without the handoff the
     user's tuned value would land on the extra and the primary would silently
     fall back to the hardcoded 1.0."""
+    # The DEFAULT is read from the graph builder, not written here: this fork
+    # calibrates krea.ref_boost differently from upstream (4.0, with a migration
+    # in config.py), and the invariant under test is the HANDOFF, not the number.
     one, two = _patch_inputs(_graph()), _patch_inputs(_graph_with_extra())
-    assert (one['ref_boost'], one['ref_boost_a']) == (0.25, 1.0)
-    assert two['ref_boost'] == two['ref_boost_a'] == 0.25
+    default_boost = one['ref_boost']
+    assert one['ref_boost_a'] == 1.0
+    assert two['ref_boost'] == two['ref_boost_a'] == default_boost
 
 
 def test_no_second_reference_leaves_the_graph_exactly_as_it_was():
