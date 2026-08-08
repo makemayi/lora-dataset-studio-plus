@@ -13,8 +13,16 @@
  *      pas un checkpoint isolé.
  *
  * Le backend fournit `stack` (composition, null si ce n'est pas une pile) et
- * `stack_variants` (les relances de la MÊME pile, la courante marquée `active`).
+ * `stack_variants` (les combinaisons de la MÊME pile, celles du run affiché
+ * marquées `active`).
+ *
+ * ⚠️ Depuis le balayage 🧬, « une variante » n'est plus « un run » : un seul run
+ * porte N combinaisons de poids. Une variante est donc identifiée par le COUPLE
+ * (run, vecteur de poids) — cf. `variantKey`.
  */
+// Extension explicite : ce module est importé par `node --test`, qui ne résout
+// pas les spécificateurs sans extension.
+import { blendComboLabel } from './loraStack.js';
 
 /** Composition de la pile du run affiché, [] si le run n'est pas une pile. */
 export function stackMembers(data) {
@@ -46,6 +54,29 @@ export function fmtWeight(weight) {
  */
 export function weightVectorText(weights) {
   return (weights || []).map((w) => fmtWeight(w?.weight)).join(' / ');
+}
+
+/**
+ * Identité d'une variante DANS la liste. Le run ne suffit plus : depuis le
+ * balayage 🧬, un même run porte plusieurs combinaisons, et les distinguer par
+ * leur seul `run_id` collerait la même clé React à des colonnes différentes.
+ */
+export function variantKey(v) {
+  return `${v?.run_id}:${weightVectorText(v?.weights)}`;
+}
+
+/**
+ * L'étiquette LISIBLE d'une combinaison — « margot 0.8 × telegram 0.6 ».
+ * Délègue à loraStack.blendComboLabel, celui-là même que le panneau utilise pour
+ * annoncer le balayage AVANT lancement : ce qui est promis et ce qui est affiché
+ * sortent de la même fonction.
+ */
+export function comboLabelText(weights) {
+  const list = weights || [];
+  return blendComboLabel(
+    list.map((w) => ({ lora_label: w?.label || w?.filename || '' })),
+    list.map((w) => w?.weight),
+  );
 }
 
 /**

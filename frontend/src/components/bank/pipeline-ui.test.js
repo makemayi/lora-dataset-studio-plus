@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
+import { defaultPipelineStepKeys } from './bankSemanticEngine.js';
 
 const dialog = fs.readFileSync(new URL('./LaunchAllDialog.jsx', import.meta.url), 'utf8');
 const report = fs.readFileSync(new URL('./PipelineReport.jsx', import.meta.url), 'utf8');
@@ -26,12 +27,15 @@ test('the overnight dialog offers no non-verdict flag; the attended button print
 });
 
 test('captioning is OFF by default; auto-reject defaults to blur+uniform and keep-best dedup', () => {
-  // Default checked set never includes caption.
-  const m = dialog.match(/useState\(\(\)\s*=>\s*new Set\(\s*\[([^\]]*)\]/);
-  assert.ok(m, 'found the default step set');
-  assert.doesNotMatch(m[1], /caption/);
-  assert.match(m[1], /'scan'/);
-  assert.match(m[1], /'auto_reject'/);
+  const ready = Object.fromEntries([
+    'scan', 'auto_reject', 'score', 'semantic_index', 'semantic_dedup',
+    'watermark', 'faces', 'framing', 'caption',
+  ].map((key) => [key, true]));
+  const defaults = defaultPipelineStepKeys('siglip2', ready);
+  assert.equal(defaults.includes('caption'), false);
+  assert.equal(defaults.includes('scan'), true);
+  assert.equal(defaults.includes('auto_reject'), true);
+  assert.match(dialog, /defaultPipelineStepKeys\(engine, ready\)/);
   assert.match(dialog, /new Set\(\['blur',\s*'uniform'\]\)/);
   assert.match(dialog, /useState\(true\)/);            // resolveDups defaults on
 });
@@ -40,8 +44,15 @@ test('a heavy pass whose tool is not ready is auto-unchecked and flagged "will s
   assert.match(dialog, /score:\s*!!caps\?\.bank_scoring/);
   assert.match(dialog, /watermark:\s*!!visionReady/);
   assert.match(dialog, /faces:\s*!!caps\?\.face_scoring/);
-  assert.match(dialog, /\.filter\(\(k\)\s*=>\s*ready\[k\]\)/);   // default set intersects readiness
+  assert.equal(defaultPipelineStepKeys('siglip2', { scan: true, semantic_index: false })
+    .includes('semantic_index'), false);
   assert.match(dialog, /will skip/);
+});
+
+test('Launch all receives the Bank engine and only offers the SigLIP2 index step there', () => {
+  assert.match(ws, /<LaunchAllDialog[\s\S]*?semanticEngine=\{semanticState\.engine\}/);
+  assert.match(dialog, /pipelineStepKeys\(engine\)/);
+  assert.match(dialog, /key:\s*'semantic_index'/);
 });
 
 test('the progress bar understands the pipeline kind (step X/N + per-step chips)', () => {

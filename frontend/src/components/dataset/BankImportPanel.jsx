@@ -136,8 +136,9 @@ export default function BankImportPanel({ datasetId, onImported, disabled = fals
         </button>
       </div>
       <p className="text-content-subtle text-[0.6875rem]">
-        Only KEPT images are copied, and only those not already here — normalized to webp,
-        near-duplicates skipped. The bank and its source folder are left untouched.
+        Only KEPT images are copied, and only those not already here. Their bytes and
+        Bank analysis travel together; near-duplicates are skipped. The bank and its
+        source folder are left untouched.
       </p>
 
       {banks == null ? (

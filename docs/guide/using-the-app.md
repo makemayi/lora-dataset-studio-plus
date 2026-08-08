@@ -31,8 +31,12 @@ captioning rules and a few guards change with the dataset kind.
    per edit, on the model set in *Settings › Image engines*. The engines differ in
    what else they look at: the API ones take the dataset's extra references *and*
    images you drop into the dialog, Klein takes the dataset's extra references,
-   and Krea edits the main reference only — the dialog says which, before you
-   press Generate.
+   and Krea takes none of them — it reads **one image you add in the dialog
+   itself**, because its spare slot was trained for a *different* subject
+   (another person, or a scene to place yours in) rather than another angle of
+   the same face. So: extra angles go on the reference card and strengthen
+   identity everywhere; Krea's second image goes in the dialog and composes that
+   one edit. The dialog says all of this before you press Generate.
 3. **Generate variations** — pick an engine (Nano Banana Pro, ChatGPT,
    OpenRouter, or local Klein) and fire the **variation catalog**: 53 shots
    across expression, angle, lighting, framing, outfit and background, each
@@ -86,6 +90,122 @@ its actions. Click it to open Studio with that run’s dataset already selected 
 there is no need to return to the library and find the dataset first. The button
 is also available on a folded Recent dataset group, so you can start comparing
 checkpoints without expanding its run history.
+
+## Using a full model you trained
+
+Training the **whole model** (rather than a LoRA adapter) produces something
+different from a checkpoint, and **📦 Checkpoints & LoRAs** lists it in its own
+**🧱 Full models** block for exactly that reason.
+
+A delivered run leaves up to two files, and they are not interchangeable:
+
+- the **full-precision master** (~26 GB). This is the only file you can train
+  again or resume from. It is **never** sent to ComfyUI — 26 GB of a model folder
+  to do a job the smaller file does better;
+- the **fp8 twin** (~13 GB). This is the inference format: the file ComfyUI loads
+  with **Load Diffusion Model**.
+
+If the run has a master but no twin, **✨ Quantize to fp8** makes one. It works
+whether the master is on this computer or only in the run's private Hugging Face
+repository — in the second case it is downloaded first, with progress, and the
+transfer can be stopped and resumed. Once the twin exists, **→ Send to ComfyUI**
+puts it where ComfyUI looks. On the same drive that is a hard link: instant, and
+it costs no extra disk space.
+
+**🗑 Trash** moves one of those files to the app trash, so a mis-click on a file
+that cost hours of GPU is recoverable.
+
+**A run whose model is only on Hugging Face is not a lost run.** It shows
+**☁ on Hugging Face** on the board and in its card, and the app refuses to remove
+it: doing so would discard the only record of where that model is.
+
+### Testing a full model
+
+Once the fp8 twin is in ComfyUI, the **Test Studio** lists it as a base and
+**🧪 Test in Studio** opens straight onto it, with its own sample settings filled
+in. That matters: a full model trained here is **undistilled**, so it wants a
+real CFG and a real step count (CFG 4 / 25 steps for Krea 2). The family's
+few-step Turbo defaults render a blurry sketch on it that reads as a failed
+training.
+
+One limit worth knowing before you go looking for a button that is not there:
+**the Test Studio is entered through a LoRA of the dataset.** A dataset trained
+only as a full model has none, so it cannot open the Studio at all. If you have
+any LoRA of that dataset deployed, pick it and set its **strength to 0** — no
+LoRA node is added at 0, so you generate with the bare model.
+
+## Merge a LoRA into a base checkpoint
+
+This is the step between *"I trained a LoRA"* and *"I have a model to publish"*,
+and it is how most of the community checkpoints you can download were actually
+made. Of the Krea 2 checkpoints whose authors describe their method, the ones
+that explain themselves describe a **merge**, not a training run: train a LoRA on
+Raw, fold it into a base, quantize, upload.
+
+You will find it in **📦 Checkpoints & LoRAs**, as **🧬 Merge a LoRA into a base
+checkpoint**. Inside a full model's card the same tool appears with that model
+already filled in as the base.
+
+**Say what you are merging.** Pick a full-precision base, then add one or more
+LoRAs, each with a weight. `1.0` applies a LoRA exactly as it was trained;
+lower blends it in more gently; a negative weight subtracts it. Several LoRAs
+stack — that is what "baked in LoRAs with balanced weights" means when you read
+it on a model page.
+
+**Nothing starts on the first click.** The plan is computed from the file headers
+alone — no weight is read — and it tells you how many tensors change, exactly how
+big the output is, which drive it lands on, roughly how long it takes, and what
+happens if it fails. On a 26 GB Krea 2 base, a measured merge took **about two
+minutes** and rewrote 256 of 430 tensors.
+
+**Nothing is ever overwritten.** The result is written next to the base under a
+new timestamped name, through a temporary file that is only renamed once the
+merge finishes. A merge that fails, or that you stop, leaves the base, the LoRAs
+and any earlier merge exactly as they were.
+
+### It is a merged model, and it says so
+
+The file's own metadata records that it came from a merge, which base it used,
+which LoRAs at which weights, and when. That matters because **file names lie**,
+and because on the model sites "finetune" is routinely used for exactly this
+object — by authors who describe the merge themselves a sentence later. LDS does
+not copy that vocabulary: what comes out of here is a base with LoRAs folded into
+its weights, not a model that was trained as a whole, and the header keeps saying
+so after the file is renamed or re-uploaded.
+
+### Getting the speed back (the Turbo transplant)
+
+A full-model run in this app targets **Raw**, which is undistilled and therefore
+slow. Krea publishes a re-distillation LoRA for Turbo; merging it at **0.8-1.0**
+into a model trained on Raw is the published route people use to get few-step
+behaviour back, and it is how the same model ends up on the model sites in both a
+Raw and a Turbo flavour.
+
+**We have not tested this ourselves.** It is an approximation, not an identity —
+generate a few comparisons before you publish anything on the strength of it.
+
+### Merge first, quantize after
+
+Merging into an **already quantized** file is refused, on purpose. It would
+dequantize every weight, modify it and re-quantize it: lossy on the way in and
+again on the way out, and the loss compounds each time somebody does it. Merge
+into the full-precision (bf16) model, then quantize the merged result with the
+fp8 tool — which is the order the refusal points you at.
+
+### Two things it will tell you about, rather than hide
+
+- **A LoRA that does not belong to the base** is refused before anything is
+  written, naming the weights it expected to find. A LoRA trained for another
+  model has nothing to merge into.
+- **Tensors that are not part of the model** are reported, not dropped. Not every
+  `.safetensors` contains only a model: one community Krea 2 file circulating
+  today carries about 75 MB of an image in two tensors hiding under a legitimate
+  name. Nothing we do not understand is modified — it is copied through, and the
+  plan names it so you know it is there.
+
+**What the merge needs:** the same Python that quantization uses — one with
+`torch` available. If it is missing, the plan says so with the command to fix it,
+before you click anything.
 
 ## Recover a paused Test Studio batch
 
@@ -345,10 +465,14 @@ touching the folder itself:
    inventories every image in place (subfolders included). Nothing is copied,
    nothing is modified; rejecting an image is a reversible status, never a file
    deletion. The folder stays LIVE: keep dropping images into it and they are
-   picked up automatically the next time you open the bank list or the bank
-   itself ("42 new image(s) found in the folder"), as undecided images ready
-   for the next scan — your existing keep/reject decisions, scores and captions
-   are never touched. Files you removed from the folder are reported at the top
+   picked up automatically the next time you OPEN the bank ("42 new image(s)
+   found in the folder"), as undecided images ready for the next scan — your
+   existing keep/reject decisions, scores and captions are never touched. The
+   bank LIST does not re-check the folders by itself: on a big library that was
+   a full inventory of every image on disk each time you walked past the page.
+   It tells you how fresh its counts are, and **🔄 Rescan folders** checks them
+   all on demand. A folder that went missing (unplugged drive, renamed folder)
+   is still flagged from the list without any rescan. Files you removed from the folder are reported at the top
    of the bank, never deleted from it, so an unplugged drive can't wipe your
    triage. One bank holds up to **200,000 images**; past that the refresh adds
    as many as fit and tells you how many it left out, so nothing you already
@@ -387,9 +511,23 @@ touching the folder itself:
    🧇 Soft detail, 🎞 Black bars, ≈ Duplicates) to review the worst
    offenders first. **🧹 Auto-reject
    flagged…** clears whole categories in one click (your manual ✓/✕ are never
-   flipped). In the Duplicates view, resolve every group at once with **keep
-   best** (highest resolution, then sharpest) or **keep first**, or pick the
-   keeper by eye.
+   flipped). The number beside each checkbox is what *that click* would reject —
+   still-undecided images only, which is why it is usually smaller than the
+   count on the matching filter chip: the chip shows every image carrying the
+   flag, including the ones a previous auto-reject already threw away — and it
+   counts them **inside whatever else you have filtered**, so it always states
+   the size of the page it opens. (Each chip is measured with your other filters
+   applied and its own value lifted, so picking one never blanks its
+   neighbours, and a chip stays on offer even when it holds nothing under the
+   current filter. The auto-reject number stays whole-bank on purpose: that pass
+   runs over the bank, not over the view.) Run it
+   twice and the second run legitimately says **0 to reject**: there is nothing
+   left it is allowed to touch. A flag also warns when its pass never ran, and
+   the panel says how many images have **never been scanned** — those are
+   invisible to every quality flag until 🔎 Scan measures them, which is not the
+   same thing as being clean. In the Duplicates view, resolve every group at
+   once with **keep best** (highest resolution, then sharpest) or **keep
+   first**, or pick the keeper by eye.
 4. **👥 Group by person** — the face pass (needs the Quality tools from Setup)
    detects the dominant face of every remaining image and clusters the bank by
    person, *no reference photo needed*. Click a person card to see only them,
@@ -417,8 +555,9 @@ always know what's been used where.
 
 **🎨 Curate down to the right subset.** Culling removes the bad shots; curation
 picks the *good* subset — and it's most of what makes a LoRA good. Once **✨
-Score** has run (it caches a CLIP embedding per image), the **Curate** row under
-the selection bar offers two selectors that cost no extra GPU time:
+Score** has run (the default CLIP semantic index), or the Bank's optional
+**SigLIP 2 semantic index** is ready, the **Curate** row under the selection bar
+offers two selectors that cost no extra inference:
 
 - **🎨 Pick diverse** — enter a number and it selects the images that best
   *cover the variety* of what you're looking at (varied angles, outfits, scenes),
@@ -466,6 +605,30 @@ pure maths on data the passes already computed, so it costs no GPU. The
 framing-balance line needs the 📐 Framing pass to have run; without it the panel
 still covers person mix, style spread and resolution and hints to run framing.
 
+Those are all **labels**, and labels have a blind spot: they cannot tell two
+hundred near-identical shots from two hundred different ones, and they say
+nothing about outfits, lighting or camera angle. Two things you may already have
+on disk can, so the panel also reads them when they exist:
+
+- **Visual spread**, from the Bank's selected semantic index. It reports
+  the average similarity across the pool — *"91% average similarity — a set this
+  repetitive teaches one look"*. The bands were calibrated by measuring real
+  banks: an ordinary one sits near 65%, an image plus its nearest neighbours
+  lands around 79-90% with CLIP. SigLIP 2 has its own score distribution, so LDS
+  shows its measured similarity but deliberately gives it no *varied/alike* band
+  until that engine has been calibrated on real Banks. Without the selected index
+  it says **Not measured** — never "varied", because nothing looked.
+- **Caption variety**, from the captions the 🏷️ pass wrote, read by the same
+  lexicon the dataset Coverage panel uses. It reports which camera views,
+  lightings, settings, outfits and expressions your captions mention and which
+  they never do.
+
+Both limits are on the panel, not just here. The caption read looks at **words,
+not pixels**: a profile shot the captioner never called a profile is invisible,
+and *"not smiling"* still counts as a smile. A bank has no character/concept/style
+kind the way a dataset does, so it is judged as a **character source** — the same
+assumption the framing target and the person-mix advice already make.
+
 The advice becomes a gesture with **⚖️ Pick a balanced set…** at the bottom of
 the panel — see [Pick a balanced set](#pick-a-balanced-set).
 
@@ -504,6 +667,222 @@ pass left **off by default** (it's the slowest GPU pass and a clean-up run
 rarely needs a description on every shot). Stop it any time — and when you come
 back, a saved report at the top of the bank tells you exactly what ran, what was
 skipped and why, with the headline counts.
+
+## Choosing where a bank pass runs
+
+Every pass button in the bank ends in `…` and opens a **launch window** before
+anything runs. The window is not a settings panel — it says three separate
+things, and keeping them apart is the point.
+
+**This run — where it applies, and how big that is.** Five lines, and each one
+quotes the number of images *that pass* would actually walk:
+
+| Line | What it means |
+|---|---|
+| Kept + undecided | What every pass has always run on. The default; picking it sends exactly the request the app sent before this window existed. |
+| ✓ Kept only | The images you already decided to keep. |
+| Undecided only | The ones you have not ruled on. |
+| ✕ Unkept only (the bin) | Images you rejected. Nothing is deleted or un-rejected — but the run spends its time on shots you set aside, and the window says what that costs for this particular pass. |
+| All three, the bin included | Everything. |
+
+If you have images **selected**, that becomes the first line and wins by
+default — the pass runs on your selection, narrowed by what it still has to do.
+It says *"up to N"*, never a bare N, because the server intersects your selection
+with the pass's own pool and the run can only ever be shorter.
+
+Under those lines sits the **"do it again"** tick: *also re-measure images that
+were already scanned*, *throw the cached embeddings away*, and so on. This is
+where the old **Rescan all** and **Rescore all** buttons went. They were never
+separate passes — they were this scope, wearing a button's clothes — so they now
+sit next to the pool they re-run, unticked, with their price written next to
+them.
+
+**Settings this pass reads.** Only what the *calculation* consumes, with where
+each value lives. 🔎 Scan quality, for instance, reads exactly one of the twelve
+🎚 filter thresholds (`dup_distance`), and it reads it for the duplicate grouping
+at the end — not for the measuring.
+
+**Not decided here.** The knobs that only change how the grid is **sorted and
+flagged**. Those re-apply the moment you save them, with no pass at all. The
+sharpness, noise and aesthetic thresholds live here: nudging one costs you
+nothing.
+
+Three passes **refuse a partial scope**, and the window shows the option greyed
+out with the reason rather than hiding it: **✨ Score**, **👥 Group by person**
+and **✂ Find crops & variants** each produce one numbering of the *whole* bank,
+recomputed from scratch on every run. Handed a slice, they would number that
+slice from 1 and land those ids on top of unrelated groups already saved.
+
+Two things the scope does **not** cover, stated in the windows that need it:
+🔎 Scan's duplicate grouping always covers the whole bank (it works from stored
+hashes and renumbers them together), and 🎨 Classify medium also runs chained
+inside ✨ Score with the default scope.
+
+A run with **nothing to do** is refused before it starts, with the reason and a
+suggestion — not launched and then reported as a success.
+
+**The two watermark cleaning levels take the same scope**, and they are the two
+where it matters most: ✂ **Auto-crop** and 🧽 **Repaint** are the only actions on
+this page that produce a new image file. Their windows list the same five lines,
+with one difference — their pool is not a pile but *the flagged images carrying a
+usable mark*, so a scope narrows that set and can never widen it. The count on
+each line is the pool the level **walks**; ✂ then crops only the marks that sit
+in a border band, which is the narrower number written on the button itself.
+Both windows state what is reversible before you start: your own files are never
+written to, the cleaned pixels live in the bank's own copy, and ↩ **Undo
+cleaning** deletes those copies and re-flags the images. Undo is bank-wide rather
+than per run, and two things are out of its reach — an image you already promoted
+(that copy was written into the dataset) and an image whose source file changed
+on disk since the clean.
+
+## When a folder is already one person
+
+Scraped material usually arrives sorted: one folder per person. **👤 Group by
+person** does not know that, so it pays one face embedding per image to
+rediscover what the folder name already said — thousands of inferences for an
+answer you had before you started.
+
+Scope the grid to a folder with the **Subfolder** picker and the panel under it
+offers **👤 Single person here**. One click groups every image of that folder as
+one person, instantly, with no pass at all — and the next 👤 Group by person run
+**skips those images entirely**. That skip is the saving: on a bank of 9 000
+images where 8 000 sit in asserted folders, the pass embeds 1 000.
+
+It is a rule, not a stamp. It survives re-scans, and an image you drop into the
+folder tomorrow joins the group the moment the bank sees it. It is also
+reversible at any time — **↩ Not one person after all** dissolves the group and
+puts the folder back in the way of normal clustering. Nothing is deleted either
+way.
+
+**Check a sample (15 images)** is the honest counterweight. It picks about
+fifteen images spread across the whole folder (not the first fifteen — those are
+usually one shoot), embeds *only those*, and compares them at the same
+similarity threshold the clustering uses. You get either *sample consistent
+(14/15 same person)* or *2 different faces in the sample — check this folder*.
+Two limits, stated plainly: fifteen images cannot prove a folder is clean, only
+that the sample looked one way; and whatever it finds, **your assertion stands**
+until you revoke it. It informs, it never overrules you.
+
+Images in the folder that the face machinery could not read — no face in frame,
+a face too small or too turned — are listed as *worth a look*. They stay in the
+group: "I could not see a face here" is not "this is someone else".
+
+### The app asks the question for you
+
+You should not have to guess which of your forty folders are worth declaring, so
+the same sampling runs by itself and **suggests**. A folder it sampled and found
+consistent gets a **👤?** next to its name in the Subfolder picker, and scoping
+to it says *Looks like one person (15/15 of the 15 sampled) — assert?* next to
+the button. A folder holding several people says so too, which is just as useful.
+
+**It suggests. It never asserts.** Confirming is always the same single click it
+always was. This is deliberate: a wrong assertion made silently would corrupt
+your person grouping with something you never said, and you would have no reason
+to go looking for it.
+
+It runs in three places, and the difference is when you are asked:
+
+- **as the preflight of 👤 Group by person** — the default path, described in the
+  next section. You are asked at launch time, before the expensive pass runs.
+- **automatically at the end of 👤 Group by person** — free. That pass has just
+  cached an embedding for every image, so sampling every folder adds no
+  inference at all and no GPU time. The pass's line then ends with *N folder(s)
+  look like a single person*.
+- **on demand, with 🔎 Scan folders** — a secondary path now, for asking well
+  before you launch anything. This one pays about fifteen embeddings per folder,
+  so it says how many folders it will cover before you click, and covers the
+  twenty biggest first when there are more. It tells you what it did not reach
+  rather than leaving you to assume the rest are not one person.
+
+A suggestion expires when the folder changes. If images arrive or leave, the
+verdict no longer describes what is in front of you, so it is dropped and the
+folder goes back into the queue instead of advising you from stale evidence.
+
+## Checking your folders before the person pass
+
+Everything above used to be reachable only from the Subfolder panel — and the
+first thing anyone does with a fresh bank is press **🚀 Launch all**, so they
+never opened it and paid the full face pass over forty folders that each held
+one person. A saving the default path walks past is not a saving.
+
+So the sampling now runs **as the preamble of the pass itself**. Press **👥 Group
+by person**, or **🚀 Launch all** with the person pass ticked, and before
+anything expensive starts the bank samples about fifteen images in each
+subfolder it has not been told about, then asks you once:
+
+> **12 folders look like a single person** — treat each as one person and skip
+> their full analysis.
+
+Those twelve are **already ticked**. One click on **👤 Group 12 folders & analyze
+the rest** confirms them and starts the pass you asked for; untick any you
+disagree with; **👥 Analyze everything anyway** is right there and states its own
+cost. It is still an offer, never a decision — a wrong grouping made silently is
+one you would have no reason to go looking for.
+
+Four things the dialog always tells you:
+
+- **what the check costs, against what it saves** — *Checking 12 folders (~15
+  images each — 180 in all, up to 720 where faces are hard to find), against the
+  7 316 this pass would embed.*
+- **what ticking the boxes spares** — *3 412 images are grouped instantly and
+  skipped by the pass.*
+- **why a folder is not offered** — *3 different faces in the sample — analyzed
+  in full*. A doubtful folder is never quietly ticked.
+- **what it did not reach.** The preflight covers up to 200 folders in one go.
+  Beyond that it says *N folders were not checked (biggest first) — they get the
+  full analysis*, because silence there would read as "the rest are not one
+  person".
+
+### When the sampled images have no face in them
+
+Scraped folders are full of crops, backs, distant shots and blur. A sample of
+fifteen can land entirely on those, and until recently that ended the folder's
+story: *only 0 of 15 sampled images had a usable face — analyzed in full*. On a
+3 546-image folder that meant fifteen embeddings spent for no answer at all, and
+then the whole pass anyway — exactly the cost the check exists to avoid.
+
+A draw that cannot be read is now **replaced**. The check keeps drawing new
+images — never one it has already tried, still spread across the whole folder —
+until it has about fifteen images with a usable face, or until it runs out of
+**budget**. That budget is the point, because "keep drawing" without one is the
+full pass by the back door. It is the smaller of two numbers, per folder:
+
+- **at most 60 images** — fifteen usable faces at a hit rate of one in four,
+  which is the worst rate still worth chasing;
+- **at most a quarter of the folder** — so a small folder is never nearly
+  analysed in full just to be described. Folders of 60 images or fewer keep the
+  single draw they have always had.
+
+That cap is also why the check can never quietly become expensive: a quarter of
+a folder is a quarter of what analysing it would cost, and the dialog prints the
+ceiling next to the typical cost before you start.
+
+Three ways it can end, and each says which one it is:
+
+- **enough usable faces** — the verdict you already know: *15/15 of 30 sampled
+  images look like the same person.*
+- **the budget ran out with a few** — *looks like one person, on thin evidence —
+  only 6 usable faces in 60 images tried.* It is still offered and still
+  pre-ticked, because the bar for an offer has always been two agreeing faces and
+  six is more evidence than two, not less — but the row says what it rests on so
+  you can weigh it.
+- **almost nothing readable** — *no readable face in 60 images tried across the
+  folder — crops, backs or blur.* This is not the check failing; it is what the
+  folder is. **The full pass will not do better on those images**: the preflight,
+  the folder check and the pass all drive the same detector at the same
+  thresholds, and the check writes its answers into the pass's own embedding
+  cache, so the pass reads them straight back rather than looking again. Grouping
+  by face simply has little to grip in that folder, and much of it will stay
+  ungrouped whatever you run.
+
+If there is nothing to ask — a bank with no subfolders, or one whose folders you
+have already declared — no dialog appears at all and the pass starts straight
+away. And whatever you accept here is an **ordinary assertion**: it survives
+re-scans, adopts images that land in the folder later, and **↩ Not one person
+after all** undoes it exactly as if you had clicked it by hand.
+
+While the check is running you can stop it with **👥 Analyze everything anyway**;
+it lets the sampling go and launches the full pass.
 
 ## Pick a balanced set
 
@@ -594,13 +973,136 @@ A bank you already scanned picks all of this up on its next **🔎 Scan** — th
 pass re-visits the images that predate these measurements on its own. You do not
 need a full rescan.
 
+## Sort a bank by medium and by head angle
+
+Two more ways to slice a big dump, both built on passes you have already paid
+for.
+
+### 🎨 Medium — what the picture is *made of*
+
+**🎨 Classify medium** sorts every scored image into **📷 Photo**, **🅰 Anime**,
+**🧊 3D render**, **🖌 Illustration** — or **❔ Unsure**. It reads the CLIP
+embedding the **✨ Score** pass already computed, so it looks at no image twice,
+downloads nothing, and never touches the GPU. On a 23 000-image bank it finishes
+in seconds. An image ✨ Score has not reached has no embedding and stays
+unclassified; the row says how many.
+
+**You no longer have to ask for it.** Because it costs nothing beyond what
+✨ Score already paid, it now runs **automatically at the end of every ✨ Score
+pass**, and the pass's own line reports it (`· 🎨 Medium: 812 classified`). If
+the CLIP text encoder is missing, the line says *skipped* and names the reason
+rather than staying quiet. The **🎨 Classify medium** button is still there: it
+is how you re-run the pass on its own, and how you re-classify images that
+already carry a verdict — something the automatic run never does, so a verdict
+you are looking at is never rewritten behind your back.
+
+This is **not** the same question as **🔎 Origin** above. Origin reads the
+*file's metadata* and answers "who made this file". Medium reads *the picture*
+and answers "what does it look like". A photorealistic AI portrait is 🤖 AI and
+📷 Photo at the same time; a scanned manga page is ❔ Unknown and 🅰 Anime.
+Neither is evidence for the other.
+
+**What it is worth, measured.** On a real 23 532-image bank, against 167 images
+labelled by hand:
+
+- photograph verdicts were right **90 out of 90** times;
+- both real anime drawings in the sample were found;
+- every 3D render and illustration in the sample came back **Unsure**.
+
+That last line is the honest shape of this feature. The bar for a non-photo
+verdict is deliberately six times higher than for a photograph, because the
+model reads a picture's *subject* as much as its medium: a photo of somebody
+**cosplaying** an anime character scores as anime. At a lower bar the "anime"
+pile filled with cosplay photographs and the "3D render" pile with advertising
+banners. So the pass answers **Unsure** rather than guessing, and the row prints
+how big that pile is instead of hiding it. Sort by **🎨 Medium confidence ↑** to
+put the images it nearly could not call in front of you.
+
+### ⤢ Angle — where the head is pointing
+
+The **🎭 Person groups** pass estimates a head pose while it works. The **⤢**
+chips turn that into **😐 Frontal** (turned less than 20°), **◑ Three-quarter**
+(20–60°), **👤 Profile** (more than 60°) and **🔙 From behind**.
+
+Two limits worth knowing before you trust a count:
+
+- **Profile is under-counted.** A head turned far enough that one eye disappears
+  often defeats the face detector outright, and an image with no detected face
+  has no angle at all. The profiles you see are the ones that were still
+  detectable.
+- **From behind needs two passes.** It is the crossing of "no face found" with
+  "the **📐 Framing** pass called it a back view" — because *no face* on its own
+  is also what a landscape with nobody in it looks like. Without the framing
+  pass this bucket stays empty rather than claiming a person is there.
+
+**If your bank was scanned before this shipped**, its faces have no angle: older
+builds measured the pose, used it once and threw it away, and the number is not
+recoverable from what was stored. The ⤢ row then offers to measure them, tells
+you how many there are and roughly how long it will take on your machine, and
+does nothing until you click. It re-runs the face detector on those images only,
+writes nothing but the angle, and leaves your person groups exactly as they are.
+
+## Set the bank filters from a sentence
+
+At the top of **Triage**, **🗣 Describe the set you want** takes a plain request —
+`an amateur photo set, least polished first` — and moves the bank's own controls:
+medium, quality flags, resolution tier, sort. The chip counters below then say,
+measured, how many images that lands on.
+
+The model never looks at your images and never chooses any. It reads the sentence
+and nothing else, so a wrong reading costs you one glance at chips you can edit,
+not a silent selection you would have to trust. Everything it proposes lands in the
+same filters a click would set, and clearing them is the same gesture as always.
+
+It answers over what your bank has actually measured. The real per-value counts go
+to the model with the request, so it cannot reach for a bucket that holds nothing.
+
+**It says when it cannot.** Asking for what is *in* the pictures — `women
+outdoors` — has nowhere to land while captions cover a small fraction of a bank
+and framing almost none of it. That part of the request comes back as *not
+expressible here* rather than as a filter that would return a few thousand
+convincing, unrelated images.
+
+**It will not turn an exclusion into a search.** The ranker returns *more* of a
+negated thing, not less (`a woman without a bikini` measured 60% bikinis against a
+10.1% baseline), so `without a watermark` is reported back to you instead of being
+quietly sent. To guarantee an absence, use the word-exclude box.
+
+## Choose CLIP or SigLIP 2 for Bank semantics
+
+Each Bank has its own **Semantic engine** choice in **① Analyze**:
+
+- **CLIP** is the compatible default. Its index is the embedding cache already
+  produced by **✨ Score**, so every existing Bank behaves exactly as before.
+- **SigLIP 2** is optional. Install the pinned model once in **Setup ▸ Quality
+  tools**, select it on the Bank, then explicitly build that Bank's semantic
+  index. Selecting it never starts a scan or downloads a model by itself.
+
+The selected engine powers **Find by text**, **Similar to selected**, **Pick
+diverse**, **Balanced pick**, visual spread/coverage and **Find crops &
+variants**. The calibrated aesthetic head, NSFW score, visual-style groups and
+**🎨 Medium** remain on CLIP regardless of this choice.
+
+CLIP and SigLIP 2 use separate, model-versioned caches and separate **same-shot
+group partitions**. Switching swaps the visible partition but keeps both, so
+returning to an engine restores its grouping instead of erasing completed work.
+Both partitions and their exact cache entries travel with the existing analysis
+snapshot on Bank → Dataset, Dataset → Bank and Bank → Bank copies; a changed
+image fails the fingerprint check and is re-indexed instead of receiving stale
+analysis.
+
+The SigLIP 2 index is resumable and stoppable like Score: completed entries are
+written atomically, and a later launch pays only for missing, failed or changed
+images. **Reindex SigLIP 2** rebuilds that cache only; it never touches Score.
+
 ## Find bank images by describing them
 
 Under **Curate**, **🔤 Find by text…** ranks images by how close they are to a
 phrase you type — `brunette outdoors, wide shot`, `red dress against a white
-wall`, `close-up, harsh flash`. It reuses the embeddings **✨ Score** already
-computed, so there is no extra model, no download and no GPU work; searching
-while a LoRA trains is fine.
+wall`, `close-up, harsh flash`. It reads the Bank's selected semantic index:
+the existing **✨ Score** cache for CLIP, or the separate index you explicitly
+built for SigLIP 2. A search itself performs no image inference; searching while
+a LoRA trains is fine.
 
 **It is a ranking, not a filter.** Every image scores *something* against every
 phrase, so a result list always comes back full. The panel therefore reports the
@@ -609,9 +1111,9 @@ are — *"all about equally close"*, *"the last ones are noticeably looser"*, or
 *"the tail is much weaker than the top"*. That spread is the useful signal: it
 says whether you can trust the bottom of the list.
 
-**Do not read those numbers as percentages.** They are much lower than intuition
-suggests. Measured on a real bank (48 images drawn from 8 unrelated datasets,
-using the exact model the app uses — ViT-L/14, `openai` weights):
+**Do not read those numbers as percentages, and do not compare engines by their
+raw values.** The following measurements are specifically for the default CLIP
+ViT-L/14 `openai` space, on a real bank (48 images from 8 unrelated datasets):
 
 | | Range |
 |---|---|
@@ -646,14 +1148,13 @@ just a filter plus a phrase; nothing needs a second search grammar. Results land
 as a normal selection you review with ✓ Keep / ✕ Reject / ⬆ Promote — nothing is
 kept or deleted for you. **Clear search** returns to the full grid.
 
-**Images that were never scored cannot be found by any phrase.** Rather than
-letting them vanish, the summary counts them: *"3 of 27 images in this filter
-have no ✨ Score embedding yet and could NOT be searched."* Run ✨ Score to
-include them.
+**Images missing from the selected index cannot be found by any phrase.** Rather
+than letting them vanish, the summary counts them. Run **✨ Score** for CLIP, or
+complete the explicit **SigLIP 2 index**, to include them.
 
 ### What it is good at, and what it is not
 
-CLIP reads a picture as a whole. It is reliable for **subjects, styles, framing,
+The default CLIP engine reads a picture as a whole. It is reliable for **subjects, styles, framing,
 setting, materials and colour**, and unreliable for three things in particular:
 
 | Ask for | What you actually get | Measured |
@@ -665,11 +1166,54 @@ setting, materials and colour**, and unreliable for three things in particular:
 The negation case is the one to remember, because it fails *silently and
 backwards*: CLIP does not penalise "without", it simply ignores the word. Someone
 searching `woman without glasses` gets women **wearing** glasses and has no way
-to tell the search misfired.
+to tell the search misfired. The same measurement on a 7,316-image bank: `a
+photo of a woman without a bikini` returned **60% bikinis**, against a 10%
+base rate — the query did not miss, it inverted. See **Push down** below.
 
-These are properties of the model, not bugs to report. The workaround is to
-describe what *is* in the frame rather than what is absent — "bare face" works,
-"without glasses" does not — and to check counting and left/right by eye.
+These are properties of the model, not bugs to report. Describe what *is* in the
+frame rather than what is absent, check counting and left/right by eye — and for
+the negation case, use the **Push down** field described next, because typing
+"without" will never work.
+
+### Push down what you do not want
+
+The panel has a second field, **Push down**, for the trait you are trying to get
+away from: `hat`, `sunglasses`, `blonde hair`. You can also write it inline in
+the query with a leading dash — `a woman in a car -hat` means the same thing.
+Typing a query that starts negating something ("a woman without a hat") offers
+you the field instead, rather than letting the search fail quietly.
+
+It does **not** filter. The excluded phrase is encoded exactly like the positive
+one and *subtracted* from each image's score, so images carrying that trait sink
+in the ranking. They are still in the pool and one can still surface if it is
+otherwise the best answer. If you need a guaranteed absence, that is a tag
+filter's job, not this one.
+
+**How hard** offers Gentle / Normal / Strong. The default, Normal, was measured
+over 7,316 real bank images that carry both a CLIP embedding and a written
+description, across 19 query/exclusion pairs, counting the top 60:
+
+| How hard | Top 60 still carrying the unwanted trait | Top 60 still on-topic |
+|---|---|---|
+| off | 23.0% | 89.7% |
+| Gentle | 11.9% | 89.5% |
+| **Normal** | **7.6%** | **87.7%** |
+| Strong | 3.8% | 79.8% |
+
+Pushing harder always removes more of the trait — what you pay for it is
+relevance, and that stays essentially flat up to Normal (2 points) then drops
+off a cliff (10 points at Strong, 25 past it). That is why Normal is the default
+and why Strong is described as a trade rather than as "better".
+
+**Some pairs cannot be separated at all,** and the app says so instead of
+pretending. Excluding `a bikini` from `a woman at the beach` barely moved: at
+every usable strength two thirds of the results still had a bikini, because in
+this model's eyes a beach photo largely *is* a bikini photo — and by the strength
+that finally bit, the beach was gone too. After each search the summary reports
+what actually happened on *your* bank: how many results the push-down brought in
+that would not have been there, and how strongly the returned set still matches
+the unwanted phrase compared with a typical image of the bank. When it changed
+nothing, it says that too.
 
 One last caveat, seen in the same measurement: a result can be right on the broad
 trait and wrong on the detail. A generic indoor query returned a genuinely indoor
@@ -678,15 +1222,114 @@ brings the likeliest images to the front; the final call stays yours.
 
 ### Why the first search takes a moment
 
-The text encoder is CLIP's other half, and loading it costs about **ten seconds**
-on the CPU. The app therefore keeps it warm after the first search — subsequent
-searches are effectively instant — and releases it once you close the panel or
-after ten idle minutes, because it holds roughly 2.4 GB of RAM while it lives.
-Every phrase you have already searched is also cached on disk, so re-typing one
-is free even after a restart.
+The text encoder is the other half of the selected image/text model. Loading the
+default CLIP encoder costs about **ten seconds** on the CPU; SigLIP 2 also has a
+one-time model load. The app keeps the chosen encoder warm after the first
+search, then releases it when you close the panel or after the idle window.
+Every phrase is cached under that engine's model key, so CLIP and SigLIP 2 text
+vectors can never be mixed and re-typing one is free even after a restart.
 
 On a memory-tight machine you can set `bank_scoring.text_search_idle_minutes` to
 `0`: nothing is ever kept warm, and each new phrase pays the ten seconds instead.
+
+## Choose who captions a bank, and which pile
+
+The 🏷️ **Caption** pass in ① Analyze has its own **Caption options** row, and
+every control on it applies to **that run only** — your Settings stay the
+default and are never rewritten from here.
+
+**Which pile gets captioned.** Three choices, and rejected images are in none of
+them:
+
+- **Kept + undecided** — the default, and exactly what the pass always did.
+- **✓ Kept only** — caption what you have already chosen, and nothing else. This
+  is the cheap one: on a 20 000-image dump where you kept 300, it is 300 vision
+  calls instead of 20 000.
+- **Undecided only** — the opposite errand. Captions feed the 🔍 search and the
+  🏷️ tag chips, so captioning the undecided pile is how you get *tools* to
+  triage it with.
+
+Each option carries its own count, and the button quotes the number it is really
+about to write. That number is **not** the size of the pile: images that already
+have a caption are skipped, so a bank of 4 000 kept images can honestly offer
+"Caption 12 kept". When everything in a pile already has a caption the button
+says so and goes inert.
+
+**A selection wins.** Select images first and the scope select greys out: the
+pass captions your selection, and the button switches to counting it. The server
+would otherwise *intersect* the two, and "Caption 12 selected" could quietly
+write 4.
+
+**Which engine, and which model.** Two more selects on the same row:
+
+- **Caption engine** — *Auto* is a chain, not a coin flip: JoyCaption drafts and
+  Ollama covers whatever it missed. Forcing *JoyCaption only* removes the Ollama
+  half rather than picking one of two.
+- **Caption vision model** — any Ollama model you have pulled. It is only used
+  when the engine can reach Ollama, and it is greyed out otherwise. A model
+  configured elsewhere stays selectable even if it is not in the live list.
+
+This last one matters more than it looks. A captioner that describes plainly
+visible things in evasive terms produces captions that are about something
+slightly *other* than your images — and a LoRA trained on those learns to look
+away too, with nothing in the output to reveal it. The captions read perfectly
+well. That is the problem. If you caption NSFW material, pair the **Explicit**
+register with an uncensored (abliterated) model; the app warns you when the
+model it is about to use does not look like one.
+
+You can change the model between runs on the same bank. 🏷️ **Caption** never
+rewrites anything: it only fills images that have no caption yet, so a second run
+with a different model captions the rest, not the ones already done. To redo the
+ones already done, see the next section.
+
+## Redo the captions of a bank with a different model
+
+🏷️ **Caption** skips images that already have a caption — which is what you want
+until the day it isn't. Once a bank is fully captioned that button reaches zero
+images and goes inert, and on a bank you captioned with a model you have since
+decided was a poor one, "nothing left to caption" is the wrong answer.
+
+🔄 **Re-caption**, at the end of the **Caption options** row, is that answer. It
+runs the same pass with the same engine, model, register and length you picked on
+that row, on the pile the scope select names — and it **overwrites** the captions
+that are already there.
+
+**It keeps the captions you wrote yourself.** Every caption now records who wrote
+it — JoyCaption, Ollama, or you. "You" means: typed or corrected in a dataset's
+caption box, changed by a find/replace across a dataset, or brought back as `.txt`
+sidecars from another tool. That record travels with the text through
+**Import to bank**, bank-to-bank copies, promotion back to a dataset, and backup
+restores, so a caption you wrote in a dataset three steps ago is still recognised
+as yours here. Re-caption skips those rows, exactly as the person pass skips a
+subfolder you declared to hold one person.
+
+**It tells you three numbers before you click, and never merges two of them.**
+The button quotes what it will rewrite (the pile, minus what it spares). The amber
+line under the row breaks the rest apart: how many captions it *keeps* because you
+wrote them, how many it overwrites **whose author was never recorded**, and how
+many a model wrote. The confirmation repeats them. None is an estimate; they all
+come from the same count the pass itself uses, so the figure on the button is the
+number of images that change.
+
+**"Origin never recorded" is the one to read carefully.** Captions written before
+the app started keeping track carry no author, and there is no way to work one out
+after the fact. Those are re-captioned — sparing them would make this button do
+nothing at all on any bank that already exists — so if you hand-wrote captions in
+an older version, they are in that count. It is stated separately from the
+machine-written ones for exactly that reason.
+
+**If you do want your own captions redone**, tick **"Also rewrite the N caption(s)
+I wrote"** next to the button. It only appears when there is something to protect,
+it is never pre-ticked, and the confirmation names it again.
+
+**There is still no undo.** The bank's ↩ Undo covers keep/reject decisions only;
+it has never covered captions, and this change does not add one.
+
+**It works by pile, never on a selection.** With images selected the button goes
+inert and says why: a selection can cover pages that were never loaded, so the
+app cannot count how many of them already have a caption — and it will not run a
+destructive pass on a number it cannot state. Clear the selection to re-caption a
+pile. 🏷️ **Caption** still honours selections as it always did.
 
 ## Review a bank one image at a time
 
@@ -795,6 +1438,93 @@ half-working one would be worse than none:
 
 The 🔄 rotate button needs no undo entry: turn the other way and the image is
 byte-for-byte the original again.
+## Find more images like this one — by attribute, not by look
+
+**Select an image** in a captioned bank and its tags are already there: beside
+the gallery on desktop, or in the filter bar on a phone. Tick `woman`, `red`,
+`dress` or `balcony` and the grid narrows to the images whose captions mention
+them. No extra click, no badge to find.
+
+**Select several and the row counts.** Each chip carries how many of your
+selected images cite it — `red dress 7 / 12` means 7 of the 12 captioned images
+you picked mention it. That is deliberately *not* an intersection: keeping only
+the tags every single image shares would print 12 next to each survivor (a number
+that says nothing) and usually leave you with one word. What you want to know is
+that a tag describes over half of what you selected.
+
+The row is honest about what it did **not** count, on its own lines:
+
+- images in your selection with **no caption yet** — named, not folded into the
+  denominator, so `7 / 12` always means 7 of 12 images that had something to say;
+- images whose caption held **no word worth filtering on** (`a photo of her`) —
+  a different problem with a different fix;
+- a selection **too large to read in one request**, which says how many images it
+  left out rather than quietly shrinking the total.
+
+Tick a chip and the row **holds still** while the filter runs, even though
+filtering clears the selection — it keeps showing the tags of the selection you
+filtered *from*.
+
+The 🏷️ **badge on a tile** is still there, in the bottom-right corner next to ▶
+and ⛶ where the tile's actions live. It reads one image's tags *without*
+selecting it. On an image with no caption — or a caption with no word worth
+filtering on — the badge stays visible and greyed, and its tooltip says which of
+the two it is: a feature that silently disappears is indistinguishable from one
+that was never built.
+
+This is the readable cousin of **🎯 Similar to selected**, and the difference is
+worth knowing because they fail differently:
+
+| | 🎯 Similar to selected | 🏷️ Tags of this image |
+|---|---|---|
+| Matches on | the whole look (the selected CLIP or SigLIP 2 index) | words *you* ticked |
+| Works without captions | yes | no |
+| Tells you *why* it matched | no | yes — the chips you ticked |
+
+Details that decide what you get:
+
+- **Several chips mean AND.** Ticking `red` and `dress` shows images mentioning
+  both, so every extra chip narrows further. The line under the chips says so
+  while the filter is active.
+- **Chips are matched as whole words**, in captions *and* file names. `car` will
+  not bring back `scarf`. (The 🚫 exclude box below is looser — it matches
+  anywhere — because a word you type by hand is often a fragment on purpose.)
+- **Booru captions keep their tags whole** (`red dress` stays one chip); prose
+  captions are cut into words, so `golden hour` becomes two chips and ticking
+  both means "captions with both words", not "captions about golden hour".
+- **It only sees what a captioner wrote.** An attribute nobody put in words is
+  invisible here, however plain it is in the picture. Caption more of the bank
+  (🏷️ Caption all) and the chips get better.
+- It composes with every other filter, and it travels with them — **Select all
+  in filter**, **▶ Review** and the curation picks all work on what you can see.
+
+## Hide images you have already handled
+
+The bank's 🔍 search box narrows the grid *to* a word. Next to it, the 🚫
+**Exclude words** box does the opposite: it hides every image whose **caption or
+file name** contains what you type. That turns a captioned bank into a checklist
+— *what have I not tagged yet?* — instead of a list you have to keep re-reading.
+
+- **Several words at once**, comma-separated: `logo, watermark, screenshot` hides
+  anything mentioning any of them.
+- **It composes with everything else** — the search box included. Searching
+  `dress` while excluding `red` gives you the dresses that are not red, and the
+  filter chips, subfolder, resolution tier and framing all still apply.
+- **It travels with the filter**: **Select all in filter**, **▶ Review one by
+  one** and the curation picks (🎨 diverse, ⚖️ balanced, similar) all work on the
+  visible set, so an image you hid is never handed back to you by a pick.
+
+Two limits worth knowing:
+
+- **It matches anywhere in the text**, like the search box — so `car` also hides
+  `scarf`. Type the longer word when that matters.
+- **Images with no caption are never hidden.** They have nothing to match, and
+  hiding them would remove exactly the images a checklist is looking for.
+
+Unlike the sort, the exclude box is **not remembered** between visits: an order
+you can see in a menu is a habit, but images missing from a grid for a reason you
+set last week reads as data loss.
+
 ## Sort a grid to review faster
 
 Filters answer *which images*; sorting answers *which one first*. Both grids
@@ -802,13 +1532,31 @@ have a **Sort** control, and it changes nothing but the order — the same image
 match, the counts stay put, and every bulk action keeps operating on exactly
 what the filters left.
 
-In a **bank** (View ▸ Sort, next to the tile size):
+In a **bank** (View ▸ Sort, next to the tile size) you can order by *anything the
+passes measured*, either way. The menu is grouped by the pass that produces the
+figure, so a greyed-out section also tells you which pass to run:
 
-- **Resolution ↓ / ↑** — megapixels, so a 900×900 outranks a wider 1200×300.
-- **Aesthetic ↓ / ↑** — the 1–10 rating from **✨ Score**. ↓ puts your keepers on
-  the first page; ↑ puts the duds there, which is usually the faster way to prune.
-- **Sharpness ↓ / ↑** — the Laplacian variance from **🔎 Scan quality**. ↑ brings
-  the blurry misses to you instead of making you hunt for them.
+- **📁 File** — **Resolution ↓ / ↑** (megapixels, so a 900×900 outranks a wider
+  1200×300) and **File size ↓ / ↑** (bytes on disk — the one figure no filter
+  chip exposes).
+- **✨ Score** — **Aesthetic ↓ / ↑** (the 1–10 rating; ↓ puts your keepers on the
+  first page, ↑ puts the duds there, which is usually the faster way to prune)
+  and **NSFW likelihood ↓ / ↑**.
+- **🔎 Scan quality** — **Sharpness** (↑ brings the blurry misses to you),
+  **Noise**, **Contrast** (↑ = the flattest, near-empty frames first), **Detail**
+  (↑ = the enlargements pretending to be big images), **Letterbox bars** and
+  **JPEG quality**.
+- **🎭 Faces** — **Face confidence ↓ / ↑**, the detection score: ↑ surfaces the
+  tiny, turned or half-hidden faces.
+
+A chip and a sort answer different questions. A chip only ranks the images that
+*cross* its threshold, so "the noisiest of the ones I am keeping" — all of them
+below the threshold — is a question only the sort can answer, and no chip ranks
+the other way round at all.
+
+**The bank remembers the order you chose, per bank.** Reopen it tomorrow and it
+opens the way you were reviewing it; other banks keep their own. Pick **Default**
+to forget the preference.
 
 In a **dataset** (above the grid, next to the decision chips): **Face similarity
 ↓ / ↑**, the ArcFace cosine against your reference photo computed by **🎭 Analyze
@@ -825,6 +1573,40 @@ Two things worth knowing:
 In a bank the ordering is done by the database over the *whole* filter, not just
 the page you can see — so **Select all in filter** and **▶ Review one by one**
 walk the same order you are looking at.
+
+## Move through a dataset without closing the image
+
+Open any dataset image full screen (the 🔍 on its tile) and you can walk the
+whole grid from there: **⟨** and **⟩** on the left and right edges of the picture,
+or the **←** and **→** keys. **Esc** closes, as before.
+
+The badge next to the image's name — **12 / 340** — is the part worth reading. It
+counts *the images the grid is showing you*, so:
+
+- **The arrows follow your filters and your sort.** Chip the grid down to "34
+  awaiting ✓/✕", sort by face similarity, and ⟩ walks those 34 in that order.
+  Change a filter and the badge changes with it. They never step onto an image
+  the grid is currently hiding — if they did, you would have no way to notice.
+- **They cross pages.** A dataset over 500 images is paged, and ⟩ turns the page
+  under the overlay: close the lightbox and you are on the page holding the
+  image you were just looking at, not where you started.
+- **They stop at the ends.** There is no wrap-around: on the first image ⟨ goes
+  grey and says *"You are on the first of the 340 images shown here"*, and the
+  same at the other end. On a wall of near-identical shots, a loop that silently
+  restarts makes "have I seen everything?" unanswerable.
+
+What does **not** travel with you: the 100 % zoom, an open **⧉ Compare with
+original** pane, and an improvement running on the image you left. Each image is
+inspected from a clean slate — a pane captioned *original* is always the parent
+of the picture in front of you, never of the previous one.
+
+Navigating is a *read*, so it keeps working while a generation, a captioning
+pass or a watermark scan holds the dataset — the same rule as opening an image
+and ticking a selection. Only the edits in the bar (crop, mirror, rotate,
+improve) wait for the pass.
+
+The rescue pairs in **Curation** are the one place with no arrows: there you are
+judging one pair, not walking a list.
 
 ## Compare an improved image with the original
 
@@ -862,6 +1644,36 @@ old rows), there is no button — a short amber note says why instead, so a
 missing control can't be mistaken for a bug. Everything else in the lightbox —
 ✂ Crop, ⇄ Mirror, ✨ Upscale & improve — is unchanged and still acts on the
 image you opened.
+
+## Compare an image with the dataset reference photo
+
+⧉ *Compare with original* only exists on the two kinds of candidate above. The
+question you actually ask of an ordinary generated variation is a different one
+— **is this still the same person?** — and its answer is the reference photo,
+which lives in another panel and is therefore never on screen beside the image
+you are judging.
+
+Open any image in the dataset full screen and it now carries
+**◐ Compare with reference**. Same split view, same named panes — *Reference*
+and *This image* — side by side on a wide screen, stacked on a phone. It works
+on **every** image, generated or imported, not only on improve candidates.
+
+**Each pane fits its own image**, and that is the honest thing to do here: the
+reference is a square head crop and the image beside it may be a full-body plan,
+so there is no shared scale to promise. The hint under the panes says
+*different framings* rather than *same scale* — that promise belongs to the
+comparison against the original, where both images really are two renderings of
+one shot.
+
+The two comparisons are **exclusive**: pressing one leaves the other, because
+two pairs of panes at once are four thumbnails and prove nothing. On an improved
+image both buttons are there and you can flip between the two questions; on a
+plain variation only ◐ *Compare with reference* is.
+
+A dataset with **no reference photo yet** shows no button and no warning — the
+reference panel already asks you for one, and a second nudge here would be noise
+on a screen that cannot act on it. Zoom is off inside this comparison too; leave
+it (⊟) for the usual click-for-100 % inspection.
 
 ## Tune the Bank filter thresholds
 
@@ -1045,6 +1857,44 @@ If a bank was scanned by an older version, its flagged images carry no recorded
 mark position; the panel says so and one more **🚩 Find watermarks** run makes
 them cleanable.
 
+### Who decided an image is watermarked
+
+**🚩 Find watermarks** can run two ways, and the panel says which one produced
+the verdicts you are looking at ("Judged 1 240 by the detector, 300 by the vision
+model") and which one a new run would use.
+
+- **The vision model** — the way that has always worked. It asks the local vision
+  model, in words, whether the picture carries a mark, once per image. About
+  1.7 seconds each, so about fifteen hours on a 30 000-image bank.
+- **The watermark detector** — an optional extra (Setup ▸ Quality tools). A small
+  classifier scores each image in about **0.14 second**, and a second model marks
+  where the logo sits so the two cleaning steps still have a box to work on. It
+  needs no Ollama at all.
+
+Install nothing and nothing changes. Install the extra and it takes over on its
+own; there is no switch to flip. What it costs is ~0.9 GB of weights, downloaded
+once into the same Python the **✨ Score** pass already uses.
+
+**How good is it, measured.** On 110 images pulled from a real bank and labelled
+by eye — half of them hard on purpose: faint corner logos, semi-transparent
+handles across the subject, an `OnlyFans.com/…` line barely a few pixels tall, and
+clean photos containing legitimate signage — the detector at its default setting
+flagged **none of the 55 clean images** and **54 of the 55 marked ones**. The
+vision model, on the exact same 110, flagged one clean image and missed one marked
+one. So the detector is not a downgrade in judgement; the gain you actually buy is
+the ten-fold speed-up. Neither is a verdict: both are a review flag, and both leave
+your source files untouched.
+
+The one image the detector missed was a `MET-ART.com` line in a bottom corner
+scoring 0.929, just under the 0.94 cut — and the highest-scoring clean image sat
+at 0.939. The two overlap by about a hundredth, which is why the cut is a
+**setting** (Settings ▸ Captioning & quality ▸ *Watermark detector sensitivity*)
+and not a constant.
+
+Images flagged **without** a position — the detector was sure there is a mark but
+could not place it — stay flagged and are counted separately in the pass's report.
+Draw a zone on them with **🚩 Edit mask** below, or leave them as a filter.
+
 
 ## Fix a watermark mask in a bank
 
@@ -1078,11 +1928,54 @@ a separate copy. A rotated image is shown unrotated here, because the whole
 watermark lane works on your original file, which the ↻ turn never changed.
 
 
+## Reject every flagged image at once
+
+In a dataset, **🧽 Find watermarks** flags the kept images that carry an overlaid
+mark. The recommended way through the pile is **🔍 Review flagged**, one image at
+a time — the detector is a review flag, not a verdict, and it *does* flag clean
+images sometimes. When you would rather drop the whole pile and move on,
+**✕ Reject all flagged (N)** does exactly that.
+
+Four things worth knowing before you click it:
+
+- **The number is the number.** `N` is what the button will really reject, not
+  how many are flagged. Small-image rescue pairs are excluded (the server refuses
+  a batch containing one, so including them would reject *nothing*) and failed
+  rows are excluded (the server skips them). If the two differ, the row says so
+  in plain text rather than showing you the bigger figure.
+- **Nothing is deleted.** Rejected images stay on disk and simply leave the
+  training set. To bring any of them back: **Show ▸ Rejected** in the grid,
+  select, then **✓ Keep**.
+- **It clears the watermark flags.** That is the one thing rejecting destroys:
+  after the click, 🔍 Review flagged is empty and nothing records which images
+  had been flagged. Re-run 🧽 Find watermarks to flag them again.
+- **Stop is available while a scan runs.** The ⏹ Stop button in the progress
+  banner ends the scan at the next image; everything already judged is kept, and
+  running 🧽 Find watermarks again finishes the rest.
+
+Which engine does the flagging is a setting — **Settings ▸ Captioning & quality ▸
+Watermark detection** — and it applies to datasets and banks alike. *Auto* uses
+the optional watermark detector when it is installed and the vision model
+otherwise, which is what the app has always done. Pin *Watermark detector*
+without the extra installed and the scan still runs, on the vision model, and
+says so with the link to install it. Only the detector can flag an image
+**without a position**; those are counted apart, 🧽 Clean leaves them alone, and
+you can draw the zone in 🔍 Review flagged. Images you dismissed as false
+positives are skipped by every later scan — **⟲ Rescan incl. dismissed** is the
+only way to have them judged again, which is what you want after changing engine.
+
+
 ## A bank and a dataset never share files
 
 A dataset and an image bank can hand images to each other in both directions,
 and both directions **copy**. That is not an implementation detail — it is the
 rule the whole flow rests on:
+
+The files generated for **ai-toolkit are not LDS's dataset registry**. At launch,
+LDS freezes a disposable training export (kept images, captions and a freshly
+generated job config) from its own Dataset rows. Bank/Dataset identity, analysis
+history and comparisons stay in LDS's database plus its SHA-bound snapshot/cache
+sidecars; they are not reconstructed from an old ai-toolkit config file.
 
 - **Bank → dataset** (**⬆ Promote…**) writes new files into the dataset.
 - **Dataset → bank** (**🗃 Import to bank**, on the dataset) copies the dataset's
@@ -1090,8 +1983,8 @@ rule the whole flow rests on:
   Dataset-owned captions, keep/reject curation, framing, watermark and
   provenance. Its dialog defaults to **Reuse compatible final-file analysis**;
   **Start fresh analysis** skips only reuse of prior analysis, not that metadata.
-  The AI **Face** and **Score** results are not reused after normalization or
-  another transformation because they are no longer proved.
+  The AI **Face**, **Score** and **SigLIP 2 semantic** results are not reused after
+  normalization or another transformation because they are no longer proved.
 
 Neither ever *points* at the other's files. The reason is that the two containers
 have opposite contracts. A dataset **owns** its images; a bank merely **points**
@@ -1215,6 +2108,366 @@ reversible at any time, and the note under the passes always says which
 interpreter is in use. If you never open this dialog, nothing changes: an install
 that works today keeps working, untouched.
 
+
+## Build the SigLIP 2 index on a GPU Python you already have
+
+The **SigLIP 2** semantic engine is the same story with a different dependency
+list. Its index is built by a worker that lives in the app's own environment —
+the CPU-only one — so on a machine with a card the index crawls for the same
+reason Score used to.
+
+SigLIP 2 is the lighter of the two: **92.9 M parameters against 303 M for the
+CLIP ViT-L/14 Score runs**, measured at about **105 ms per image on the CPU**
+rather than 336. Lighter is not free: a 30 000-image bank is still the better
+part of an hour.
+
+The **Semantic engine** panel now tells you which device the index will actually
+use, and when a card is sitting idle it offers the same button, **⚡ Use a GPU
+Python I already have**. It is the same detector, the same dialog and the same
+promise — with one difference that matters:
+
+**The dependency list is SigLIP 2's, not Score's.** The semantic worker never
+imports `open_clip` or `timm`. An interpreter Score refuses for a missing
+OpenCLIP — the most common shape of a ComfyUI venv — can be perfectly good here,
+and refusing it would be a lie about a worker that does not need it. What it
+*does* need is a **Transformers recent enough to carry `Siglip2Model`** (4.49 or
+newer). That one is checked by really looking for the class, not just for the
+package: an older `transformers` imports fine and then dies at model load, an
+hour into an index. Such an interpreter is refused, and the repair line the
+dialog hands you carries the version floor.
+
+**Borrowing an interpreter downloads nothing here.** The pinned SigLIP 2
+checkpoint lives in the app's own data folder, not inside the interpreter, so a
+borrowed Python needs no copy of it.
+
+**Where the index runs is not where anything is installed.** Setup ▸ Quality
+tools always installs SigLIP 2 into the environment the app built, whatever you
+picked in this dialog — including when you later hit Install/repair, which now
+*keeps* your choice instead of quietly putting the index back on the CPU.
+
+Score and the semantic index are chosen separately. Pointing one at an
+interpreter never moves the other, and **Back to the app default** undoes either
+on its own.
+
+## The video bank (turn a folder of rushes into shots)
+
+Videos are a different kind of material and they get their own bank. On the
+**🗃️ Bank** page the switch at the top right says which kind you are making —
+**🖼 Images** or **🎬 Video**. This matters more than it looks: an image bank
+skips every `.mp4` you drop into its folder **without a word**, so a folder of
+video used to look like an empty bank.
+
+A video bank triages **shots**, not files. One two-hour rush is not something you
+can judge; the three hundred shots inside it are.
+
+1. **Create it** — name it, point it at the folder. Every `.mp4`, `.mov`, `.mkv`,
+   `.webm` and `.avi` under it (subfolders included) is inventoried in place.
+   Nothing is copied and the folder is never modified.
+2. **▶ Run everything** chains the three passes in the only order that works:
+   **scan** reads what each file is (length, size, frame rate), **find shots**
+   cuts it at its shot boundaries, and **make thumbnails** grabs one frame from
+   the middle of each shot. Each pass is also available on its own, and the box
+   above the buttons always names the one step to take next — run them out of
+   order and each simply finds nothing to do and reports success.
+3. **Triage** — the grid is thumbnails, and only thumbnails. Click one to watch
+   exactly that shot, `←`/`→` to move, `K` to keep, `R` to reject. Filter by
+   status, or click a file in the **Files** list to see only its shots.
+4. **🎬 Build the dataset** encodes what you kept. This is the only step that
+   writes video.
+
+**Nothing is encoded while you triage.** A bank stores where each shot starts and
+ends — no clip file exists until you promote — which is why a bank of hundreds of
+shots costs no disk space, and why the player streams the original file rather
+than a preview.
+
+**A missing piece never disables the whole lane.** The video extra is three
+independent things: reading files, finding shots, and encoding clips. The app
+says which one is missing and what still works — with no ffmpeg, for example, you
+can scan, cut, watch and triage an entire bank, and only the final build waits.
+
+## Measure your shots, and choose your own cuts
+
+**📊 Measure quality** reads every frame of every shot in one pass and scores the
+four things that quietly ruin a video dataset: shots that barely move, shots that
+are all blur, black moments, and frozen stretches. The pass stores raw numbers,
+never verdicts — so changing a threshold later re-sorts the bank instantly, with
+no rescan. Stopping is safe; a re-run picks up where it left off.
+
+Flagged shots get an **amber ⚑ mark** in the grid. Amber, not red, because a flag
+is a reason to *look* — nothing is ever rejected for you. Hover the mark to see
+which cuts a shot tripped.
+
+**There are deliberately no default thresholds.** The same number that flags 2 %
+of one bank flags 12 % of another — a cut only means something against *your*
+bank's own distribution. Open **🎚 Quality cuts**, type a value (leave a field
+empty to disable that cut), and press **👁 Preview**: it answers with how many
+shots each rule would flag, per rule, before anything is applied. If a draft
+would flag most of the bank, the preview says so in as many words instead of
+letting you apply it by accident.
+
+**One cut needs no measuring at all: Minimum length.** Shot detection keeps very
+short cuts on purpose — a real flash cut is a real shot, and a detector that
+refuses to emit one also hides genuine boundaries. The cost is a grid peppered
+with half-second shots you scroll past a hundred times. Type a value in seconds
+and every shorter shot wears the flag, immediately after detection, with no
+measuring pass — this cut reads the shot's own bounds rather than its pixels.
+
+Do not confuse it with the *too short* refusal you may see at promotion. That one
+is your target profile's arithmetic — so many frames at so many fps — and no
+setting on this panel moves it: those shots were never going to land. **Minimum
+length** only decides what gets flagged for your eyes, so you can see and sort
+them *before* spending triage time on them.
+
+Two touches you get for free once shots are measured: thumbnails move from the
+middle-of-shot guess to the **sharpest measured frame**, and the freeze detector
+catches the failure the averages never can — a shot that plays fine and then
+hangs on a still image for a second. On a real 4.5-hour test bank that turned
+out to be the most common defect of all.
+
+**The sound is measured too, for the targets that keep it.** LTX and MiniMax H3
+mux the source's audio into every clip; Wan has no audio at all and forces the
+track off. So the pass also reports, per shot, **how much of it is silence** and
+**its overall level in dBFS** — because a dataset of silent clips teaches the
+model to be silent, and nothing about the file on disk reveals it: it is the
+right length, the right sample rate, and mute. Two cuts go with them, **Silent
+share** and **Loudness floor**, and they raise two different flags on purpose —
+a quiet clip can be normalised, a silent one cannot be rescued.
+
+Three states are kept apart here, and it matters:
+
+- **no sound track** — a property of the file. Never flagged; a Wan dataset is
+  supposed to look like this.
+- **silent** — a track that is there and carries nothing. That is the defect.
+- **not measured** — nobody has listened yet. Shots measured before this shipped
+  carry no sound reading at all, and an audio cut will never flag them. **Run
+  Measure again with re-measure** to fill them in; the pass otherwise skips
+  everything it has already done.
+
+## Retouch a cut: trim, split, or draw a shot by hand
+
+Shot detection is good and it is not right. It cuts a slow dissolve a second
+early, and it happily hands back a shot whose last second is a frozen frame.
+Before this panel existed the only gesture available on either was **✕ Reject** —
+throwing away eight good seconds to be rid of one bad one.
+
+Open any shot and unfold **✂ Trim & split this shot**, under the player:
+
+- **Nudge either bound** by 1 s or by one frame. One frame means one frame *of
+  your source file*, at its own rate — a 25 fps rush steps by 0.040 s, a 59.94 fps
+  one by 0.017 s. The frame counts your target model wants are a different thing
+  entirely, decided at build time.
+- **⇤ playhead** snaps a bound to wherever the video is paused. Scrub to the frame
+  you want, click, save.
+- **✂ Split here** cuts the shot in two at the playhead. The half you were looking
+  at keeps its triage decision, and so does the new one: split a *kept* shot and
+  both halves stay kept, so you never have to find them again among hundreds.
+- **＋ New shot from here** draws a shot the detector missed entirely. The player
+  is pointed at the whole rush, so you can scrub anywhere in the file — not only
+  inside the shot you opened — and mark a boundary that was never found.
+
+**For image-to-video targets, the first frame is the conditioning image.** The
+trainer conditions an i2v sample on the clip's *first* frame, so moving a start is
+not trimming: it is choosing the exact picture the model learns to animate from.
+If the first second of a shot is a dissolve, an i2v LoRA trained on it learns to
+animate dissolves. The panel repeats this line where the buttons are.
+
+**A re-cut shot loses its thumbnail and its quality scores, on purpose.** They
+were measurements *of the old bounds* — a thumbnail showing a frame the shot no
+longer contains is not stale, it is wrong. The tile goes blank and the bank's
+next-step line offers **🖼 Make thumbnails** again; run it once when you are done
+cutting rather than after every edit.
+
+**Limits worth knowing.** A shot must last at least 0.5 s, and both halves of a
+split must too — the buttons say so rather than silently clamping. Retouching is
+refused while a pass is running on the bank (a thumbnail pass mid-edit would
+produce a picture of the old span marked as current), so stop the pass first.
+Re-detecting a file deletes the shots the detector drew and **never** the ones you
+cut by hand; those stay, and may overlap the fresh ones. And editing a shot that
+is already in a built dataset is allowed: the dataset stored its own copy of the
+bounds when it was encoded, so nothing already on disk changes.
+
+## Find scenes in a video bank by typing a word
+
+A folder of rushes is a haystack whose needles have no names. The quality cuts
+tell you which shots are sharp and which move; they cannot tell you which one has
+the red car in it. **🔎 Find scenes** does: type *a woman walking on a beach* and
+the gallery is replaced by the shots that look most like it, best first.
+
+**Run the pass once, search as often as you like.** The 🔎 Find scenes button
+looks at a few frames of every shot and remembers what they look like. It is the
+slow part — it needs the same environment as the image bank's ✨ Score (Setup ▸
+Quality tools, or a Python you already have with torch and open_clip), and on a
+CPU it is minutes rather than seconds. Every search afterwards is instant and
+costs nothing.
+
+**Several frames per shot, not one.** A shot is a span of time, and a thumbnail is
+one instant of it. If a car only drives into view in the last second, a search
+that had looked at the opening frame would never find that shot — and would give
+you no hint that it had missed it. So each shot contributes a frame near its
+start, its sharpest frame, and one near its end, and a shot's score is the best of
+the three. Every result tells you **which second matched**, and opening it starts
+the player right there.
+
+**It is a ranking, not a filter.** Every shot scores something against every
+phrase, so the results always come back full, however wrong the query. The line
+above the gallery says how strong the top and bottom of the ranking are, and how
+many shots could not be searched at all — a shot the pass has not reached cannot
+be found by any phrase, and it would be easy to conclude the scene simply is not
+in the bank.
+
+**What it cannot do**, measured on the model this app uses:
+
+- **“Without” is ignored, not honoured.** Ask for *a street without cars* and you
+  get cars. Type `-cars` instead: that subtracts the unwanted thing from the score
+  and pushes those shots down the ranking. It cannot promise their absence, and
+  the panel says so rather than pretending otherwise.
+- **It cannot count.** *Two people* barely outranks a picture of one.
+- **It cannot hear, and it cannot see motion.** Only still frames are looked at,
+  so *a door slamming* or *panning left* describe nothing it can use.
+- **Left and right carry almost no meaning.**
+
+Searching respects the triage filter you are on, so *keep only* plus a phrase
+ranks what you already decided to keep. Changing the filter clears the search: a
+ranking computed over one bucket has nothing to say about another.
+
+## Describe your shots, and search what happens in them
+
+🔎 Find scenes ranks by what a moment **looks like**. It cannot find an action —
+"turns and walks away" is a fact about *time*, and no single frame carries it. The
+**🗣 Describe shots** pass closes that gap: it watches eight frames spread across
+each shot and writes one or two sentences about what happens in it.
+
+That line does two jobs, and the second is the one nobody sees coming:
+
+- **It is what the clip trains on.** At promotion each clip gets a `.txt` sidecar
+  next to it, and that file *is* the prompt. Before this pass existed every
+  promoted clip shipped with an **empty** one — which the trainer accepts in
+  silence, training the clip on no prompt at all. The build dialog now tells you
+  how many clips are about to go out uncaptioned, before it encodes anything.
+- **It makes the search read words as well as pixels.** Once captions exist,
+  typing a phrase ranks on both, and the panel says which halves are running so
+  that "nothing found" can be read correctly.
+
+**Captions are drafts.** Open any shot and edit the caption under the player; a
+bulk re-run will never overwrite one you wrote. Clearing it puts the shot back in
+the queue. Regenerating over your own words is possible, but you have to ask for
+it by name.
+
+**You can change how plainly they are written.** Next to the button there is a
+**Caption wording** choice: *Standard* (the shipped wording) or *Plain*, which
+gives the model explicit permission to name what is on screen instead of
+describing around it. On adult footage that difference is not cosmetic — a
+captioner asked the standard way produces captions that are *about something
+other than the shot*, and a LoRA trained on those learns the evasion. It was
+measured rather than assumed: the wording turned out to matter **more than the
+model**, and the stock model asked plainly beat an uncensored one asked the old
+way. Every caption records which wording produced it, and the choice is
+remembered as `video_caption.style` if you set it in your config.
+
+**You can change which model writes them.** The pass ships with one checkpoint
+and uses it unless you say otherwise (`video_caption.model` — see *Settings
+reference*). It is worth changing when the default **talks around** what your
+footage shows: a caption that names things evasively is not a style choice, it
+teaches the trained model to look away too, and the captions read perfectly well
+while being about something slightly other than the shot. Any checkpoint of the
+same architecture is a drop-in. If it is not on your machine, the first run
+downloads it — and the pass says so in its progress line before captioning
+anything, rather than sitting at 0 % while gigabytes arrive. Every caption
+records which model wrote it, so a bank captioned across a change stays readable.
+
+**It needs the same environment as ✨ Score** (torch + transformers) and it uses
+the GPU when there is one — a 4B vision model on a CPU is minutes per shot. It
+will not start while a training run owns the card, and stopping is safe: what is
+captioned stays captioned and the next run picks up where it left off.
+
+## Video training sets (and the two things to check before you cut one)
+
+Promoting a video bank builds a flat folder of clips with a `.txt` caption next
+to each one, and lists it in your library under **🎬 Video training sets**.
+
+**You can cap how many clips one source contributes.** A 50-clip set that is
+three videos over-represented looks exactly like a diverse one on disk, and that
+imbalance is the kind that quietly overfits a source. **Max clips per source**
+caps it; leave it empty for no cap. The cap trims dominance without punishing
+scarcity — a file with fewer clips than the cap keeps all of them — and it is
+**not a random sample**: each source keeps its earliest clips, so promoting the
+same bank twice gives you the same dataset. When a finished set leans on one file
+anyway, the result tells you the real share.
+
+**You can trim the edges of every clip.** A shot boundary is where a cut just
+happened, so the first and last frames of a shot are disproportionately
+dissolves, fades and leftovers of a transition — and a dataset whose clips all
+open on half a dissolve teaches the model to open on half a dissolve. **Trim each
+end** takes a number of seconds off *both* bounds; 0.25 is the common figure, and
+the default is 0 so an existing recipe exports exactly what it exported before.
+
+The trim never shortens a clip. Frame counts are a property of the target's VAE,
+so a clip that no longer supplies the count is **dropped, not exported short** —
+ffmpeg would write the short file and exit 0, and ai-toolkit would train it as
+repeated stills without a word. The dialog says how many clips the trim will cost
+*before* you press the button, and those are counted separately from clips that
+were never long enough: only the first kind is fixed by lowering the trim.
+
+**The clip length is chosen in FRAMES, from a menu.** That is not pedantry: the
+legal frame counts are a property of each model's VAE, not of video. 29 frames is
+legal for Wan and illegal for LTX; MiniMax H3 wants counts of the form 17n+5. No
+trainer refuses an illegal count — they round it down in latent space and say
+nothing. So the menu offers only counts the target can actually ingest, with the
+duration shown next to each at that model's own frame rate.
+
+Two labels sit next to every target, and both are there to save a wasted week:
+
+- **Not trainable yet** — the app knows the model's geometry perfectly and no
+  LoRA trainer for it is known to exist. Exactly one target of the four currently
+  clears that bar (Wan 2.1 / 2.2 14B). You can still cut a dataset for the
+  others; just know that today nothing is known to train on it.
+- **Licence limits** — MiniMax H3's Community Licence grants rights **only**
+  inside an "Applicable Territory" that excludes the EU, the UK, South Korea and
+  the USA. The restriction covers the **outputs**, not just the model, so keeping
+  your training private is not a way around it. Check your territory before you
+  build the set, not after.
+
+Deleting a video dataset deletes the encoded clips and nothing else: the bank
+keeps every shot and every decision, so you can re-cut at another length or for
+another target without triaging again.
+
+## Stopping Score, and what a relaunch costs
+
+**✨ Score** always covers the whole bank — but it only *computes* what it does
+not already have. Every image it scores is written to a cache next to the bank
+(the CLIP embedding plus the aesthetic and NSFW numbers), and a relaunch reads
+that cache and pays only for the rest. On a bank that is fully scored, the pass
+does not even load the model: it goes straight to the grouping.
+
+So **Stop is safe**, and it is now safe in the database too. When you stop a run,
+the scores it had already computed are written to your images before the pass
+ends — that work was paid for, and it used to reach the cache and never reach a
+single row. The line at the end of the pass says exactly what happened: how many
+images were scored, how many remain, and how many were reused instead of
+recomputed.
+
+One thing does *not* survive a stop: the **🎨 style groups**. Those ids are not a
+per-image measurement, they are a single numbering of the whole bank, computed
+from every embedding at once and renumbered on each pass. Half of one is not
+partial progress — it would put a new group 1 next to an old group 1 and mix two
+unrelated styles under the same chip. So a stopped pass leaves the previous
+grouping alone and says so. Relaunch and it finishes: the scoring part is already
+cached, and only the grouping is left. That grouping is the slow tail of the pass
+— about **8 seconds over 5 000 images and 3 minutes over 23 000** — so on a big
+bank it is worth letting it finish.
+
+**Rescore all** is the last line of ✨ Score's launch window, unticked. It is the
+opposite intent: throw the cache away and recompute everything, for a bank you
+scored with a different setup or whose results you no longer trust. It costs a
+full pass, which is why it is a deliberate tick and never a default — ✨ Score
+itself has always meant "cover the whole bank", and it still does.
+
+One more thing a relaunch fixes on its own: if the aesthetic head or the NSFW
+model could not be downloaded during an earlier run, the images scored in that
+window carry a hole. They are picked up again the next time you run Score, once
+the missing piece is available — an image is never left permanently half-scored
+because a download failed once.
+
 ## The LoRA Canvas (every run on one board)
 
 **Canvas** in the top bar opens a single board holding the training history of
@@ -1226,13 +2479,25 @@ thing you reconstruct.
 
 **Choosing what is on the board.** Everything is on it by default. The
 **Datasets** control above the board unticks what you do not want to see; the
-choice is remembered. On a phone it opens folded, with the current state written
-on the button ("3 of 7") so you always know what you are looking at.
+choice is remembered. It opens **folded**, at every screen width: its checkbox
+list is as tall as your library, and expanded on arrival it pushed the board —
+the thing you came to look at — below the fold on every load. Nothing is hidden
+by that, because the current state is written on the button ("3 of 7") so you
+always know what you are looking at. Unfold it and it stays unfolded next time.
 
 **Moving around.** Drag the background to pan, use the wheel (or two fingers) to
 zoom, and **Fit** puts the whole board back in view. The board only fits itself
 automatically until you first touch it — after that a dataset finishing its load
 never yanks your view away.
+
+**Moving something counts as touching it.** Zooming and panning are not the only
+way to take the view over: the first time you drag a picture or a run card to a
+new place, the board stops re-framing itself for good. Placing a render far from
+its lane makes the board bigger, and an automatic fit at that moment zoomed the
+whole plateau out the instant you let go — your framing thrown away by the very
+act of tidying. **✦ Fit** is still one click away whenever you *do* want the
+whole board back; it simply is not decided for you any more. A board you have
+never arranged still opens fitted, as it always did.
 
 **The reference face.** A character dataset's lane opens with its reference
 image, next to the dataset name — the person the renders on that lane are meant
@@ -1277,9 +2542,11 @@ re-flows the lane around it. Lanes you have never touched keep following the
 automatic tree, because there is no arrangement to protect there.
 
 **✦ Tidy up** is the way back: it forgets every card you have moved on the lanes
-currently shown and rebuilds the automatic tree. Positions are only ever a
-display preference — moving a card never changes which run continued which, and
-Tidy up never deletes a run, a checkpoint or a note.
+currently shown, rebuilds the automatic tree, and brings every pinned picture
+back beside the run that made it — including one you dragged clean off its lane.
+Positions are only ever a display preference — moving a card or a picture never
+changes which run continued which or which checkpoint made which image, and Tidy
+up never deletes a run, a checkpoint, a note or a picture.
 
 **Generating from the board.** Every checkpoint pill carries a small **✓** box.
 Tick one and the run settings open beside the board: the prompt, the seed, the
@@ -1302,6 +2569,46 @@ Two things it will tell you rather than fail at:
   and it says which two. This is not a restriction we chose: those families do
   not share a base model or a workflow, so there is no single run that can render
   both. Unpick one family and the button comes back.
+
+**⚖ Compare or 🧬 Blend.** From the second pick onwards the panel offers a
+choice, and it defaults to what it always did:
+
+- **⚖ Compare** — one pass per checkpoint, swept across the strengths. This is
+  how you find out which LoRA, or which step, is better.
+- **🧬 Blend** — *one* generation loads them **all**, each at its own weight, and
+  every dataset's trigger word is added to the front of your prompt. The panel
+  lists those words before you launch; nothing is injected silently. It is the
+  Test Studio's Blend mode, driven from the board — the same toggle, the same
+  engine. (The Test Studio called it **🧬 Combine** until August 2026; only the
+  name changed.)
+
+A blend is one configuration, not one per pick, so the strength sweep disappears
+(each LoRA carries its own weight instead) and the image counter drops to one
+picture per seed.
+
+**Trying several weights at once.** Each picked checkpoint has a row of weight
+boxes under its slider. Tick two on one and two on another, and the launch
+renders **all four combinations** in a single run instead of making you launch,
+look, move a slider and launch again. Every image is labelled with the pair that
+produced it. Tick nothing and the slider governs, exactly as before; the slider
+is also how you use a weight that is not on the grid.
+
+The panel counts the cost before you commit — "4 weight combinations → 4 images,
+about 1 min" — and turns amber past 24 images. It does not refuse: the queue is
+serial and the machine is yours. Two checkpoints at four weights each is 16
+images, which is exactly why the panel does the multiplication for you.
+
+What blending actually does is worth saying plainly: **two identity LoRAs give
+you a hybrid person** — someone who is neither of the two. That is a real use, on
+purpose, but it is not "both people in one shot". The combination that usually
+pays off is **identity + style**, or **identity + concept**. Weights are the dial:
+below 1 the LoRA contributes less, above 1 it dominates (0 to 2, 1 by default),
+and a weight you set survives un-ticking another pick or reloading the page.
+
+Blend needs **at least two checkpoints of one family**; with a mixed selection
+the toggle is greyed out with the reason, because the run underneath it could not
+exist either. Picks that are not deployed yet are deployed first, all of them,
+before anything is generated — a blend never loads a subset of what it announced.
 
 **▶ Continue training from a checkpoint.** Clicking a pill's body opens its
 actions — Download, Deploy, Details, Delete — and **▶ Continue from here**. It
@@ -1404,6 +2711,22 @@ picture and decide it belongs on the board.
 
 - **Move it** by dragging (on a phone: a long press picks it up, exactly like a
   run card). **Resize it** from the corner handle. **Close it** with **✕**.
+- **It goes wherever you want on the board — its lane is not a box.** Drag it
+  above its own lane, into the margin to the left of everything, or across to sit
+  beside another dataset's runs: nothing stops at the lane's corner any more, and
+  the arrow keys reach the same places. **✦ Fit** grows to include it, so a
+  picture parked well outside its lane is always one click from being back on
+  screen. Two things stay true wherever you put it: the line to the checkpoint
+  that made it follows it (that link is read off the image, never off its
+  position, so a picture can never end up claiming a run it did not come from),
+  and the picture still belongs to its own dataset — moving it over another
+  lane's runs changes nothing but where it is drawn.
+- The one thing to know before parking one far away: a lane's own position on the
+  board depends on which datasets are ticked and how tall the lanes above it are.
+  A picture is measured from **its own lane**, so it travels with the run it is
+  evidence about — put it next to *another* dataset's lane and it will keep that
+  spot relative to its own lane, not relative to its neighbour. **✦ Tidy up**
+  brings everything home if a board gets away from you.
 - Closing forgets nothing. Pin the same image again and it comes back **exactly
   where you left it, at exactly the size you left it** — that is the point of the
   feature, not a side effect. The geometry lives with your card positions, on
@@ -1417,9 +2740,13 @@ picture and decide it belongs on the board.
   its connecting line.
 - Unticking a dataset takes its lane off the board, pinned images included; they
   come back with the lane, untouched.
-- **✦ Tidy up** does not throw pinned images away — it re-flows them into the
-  same tidy band **📌 Pin all** uses, so a rebuild of the automatic tree can no
-  longer park a picture on top of a run card.
+- **✦ Tidy up** does not throw pinned images away — it brings them **home**. Every
+  picture on the visible board comes back beside the run that made it, into the
+  same tidy band **📌 Pin all** uses, wherever you had dragged it to. That is the
+  guaranteed way back from a picture parked far outside its lane, and it is why
+  free placement is safe to play with. Pictures you have **closed** are not
+  touched: their remembered spot is a promise, and Tidy up is not the place to
+  break it.
 - The **✕**, the **🔍** and the resize corner keep a finger-sized target **at
   every zoom level**: they are drawn at a constant size on screen rather than at
   the board's, so a board fitted to twenty runs is still one you can tap.
@@ -1457,15 +2784,27 @@ them. There is **no limit**: drop a third, a tenth, they all join the strip.
 - **Every picture in a strip is the same height**, each scaled to keep its own
   shape — that is what makes the band continuous instead of a row of letterboxed
   tiles. Resize the group from its corner and the whole strip scales.
+- **A strip gets ONE link back to each checkpoint it came from**, not one per
+  picture, and they all leave the band at the same point. A strip is one object
+  to the eye and to every gesture, so eight connectors fanning out of it was
+  eight times the ink for one fact — and now that a picture can be parked far
+  from its run, those links are long. A strip whose pictures all come from the
+  same checkpoint therefore draws a single line; one built from three epochs
+  draws three, because collapsing them would quietly credit one epoch with the
+  other two.
 - **A strip has no width limit, and that is the honest consequence of "no
   limit".** Ten pictures side by side is ten times as wide as one; the board
   zooms and pans, so **✦ Fit** is the answer. It deliberately does *not* wrap
   onto a second row — a strip that quietly stopped being a strip at some
   invisible threshold would be worse than a wide one. On a phone, expect to zoom.
-- **✦ Tidy up leaves groups alone.** It rebuilds the automatic tree and re-flows
-  the pictures you have *not* grouped; a strip is something you assembled on
-  purpose, and taking it apart is not tidying. The way out is the group's ✕, or
-  dragging its pictures back off it.
+- **✦ Tidy up moves a strip, and never takes one apart.** It brings the whole
+  band back beside the run that made its first picture, in one piece and in the
+  same order — a strip is something you assembled on purpose, so tidying it means
+  putting it away, not dismantling it. (It used to leave strips exactly where
+  they were, which was fine while a strip could not leave its lane; now that one
+  can be parked anywhere on the board, "leave it alone" would have meant leaving
+  it lost.) The way *out* of a group is still the group's ✕, or dragging its
+  pictures back off it.
 
 **📌 Pin all — the whole lot in one gesture.** When a generation launched from
 the board finishes, the green bar says how many images are ready and names the
@@ -1513,6 +2852,45 @@ sits above the board, and hovering a pill spells it out in words.
 The graph embedded in a dataset's *Checkpoints & LoRAs* panel is unchanged and
 still holds the per-checkpoint actions (download, deploy, continue from here,
 inline previews). The canvas is a second way in, not a replacement.
+
+## Upscale a picture straight from the board
+
+Click a pinned picture (🔍, or the picture itself) and the full-screen view now
+carries **✨ Upscale & improve** next to **⬇ Download** — the same pass, and the
+same choice of engine, as the one in the dataset lightbox.
+
+The same button is on the **checkpoint and run galleries** — open a picture from
+a pill's 🖼 gallery, or from a run card, and it is there too. That is where an
+improvement is delivered, so it is where the gesture costs the fewest clicks:
+you are already comparing a checkpoint's renders when you decide one of them
+deserves a bigger pass. Both surfaces are the same action on the same picture:
+
+- **✨ Improve via Klein** re-renders detail and texture. Sharper, but skin and
+  colour can shift. The note under the button quotes the exact instruction it is
+  about to send and links to where you can edit it or switch it off.
+- **🔍 Upscale via SeedVR2** resolves detail at a higher resolution and keeps the
+  original look. It appears once SeedVR2 is installed; until then Setup ▸ ComfyUI
+  can download it for you, and pressing ✨ before that answers with the same
+  offer to install it rather than a plain error.
+
+**Where the result goes.** The picture you started from is never touched. The
+improvement arrives as its **own image in that checkpoint's gallery**, right next
+to the original — open the gallery from the checkpoint pill (🖼) and you can
+compare the two, download either, or pin the improved one onto the board beside
+its source. Nothing moves on its own, which is why the confirmation says where to
+look. The pass takes minutes, and a gallery already open does not refresh by
+itself: close it and open it again to find the new picture waiting at the top.
+
+Two things it deliberately will not do. An **improvement cannot be improved
+again** — running two passes over the same pixels is how a face turns to
+plastic — and the **lane's reference face** has no ✨ at all, because it is a
+photo you supplied, not something the app generated. If a pass fails, press ✨
+again: that is the retry.
+
+**It stays out of the Test Studio.** These upscales are not sweep cells, so they
+never appear in the Test Studio grid, never count as a run in progress, and never
+enter the 👍/👎 ranking of a checkpoint — a rating you give an *upscale* would
+otherwise be read as a vote for the checkpoint that did not produce it.
 
 ## Tips that save runs
 

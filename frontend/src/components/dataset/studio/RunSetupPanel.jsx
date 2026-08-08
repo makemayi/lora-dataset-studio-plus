@@ -11,6 +11,8 @@ import LaunchBar from './LaunchBar';
 import StudioGenerationSettings from './StudioGenerationSettings';
 import StudioActionBar from './StudioActionBar';
 import StudioPreflightBanner from './StudioPreflightBanner';
+import { launchSettings, launchText as batchLaunchText, visibleBatch } from './promptBatch';
+import { heavyRunConfirm, heavyRunNotice, runCost } from './runCost';
 
 // Rail gauche « Setup du run » : pickers + seed/launch + bandeaux d'état.
 // Extraction behavior-preserving de LoraTestStudio.jsx :
@@ -33,9 +35,13 @@ import StudioPreflightBanner from './StudioPreflightBanner';
 //                           pas (familles mélangées). Jamais un bouton mort muet.
 // Tout le reste — modèle, format, cfg, steps, steps2, seed, ×N, LoRA always-on,
 // rebalance, négatif… — est le MÊME code, donc les deux écrans ne divergent pas.
+//   `showStrengths`/`cellTotal` : le mode 🧬 Blend du board charge tous les
+//                           checkpoints dans UNE image, chacun à son poids —
+//                           l'axe strengths n'a plus rien à balayer, et le
+//                           compteur ne doit plus le multiplier.
 export default function RunSetupPanel({ d, studio, form, datasetId,
   checkpointSlot = null, launchBlocked = false, launchLabel = null, launchHint = null, actionBar = true,
-  genStoragePrefix = null }) {
+  showStrengths = true, cellTotal = null, genStoragePrefix = null }) {
   const navigate = useNavigate();
   // Réglages de génération GLOBAUX (parité Generate, hors prompt builder) remontés par
   // StudioGenerationSettings : objet snake_case déjà prêt à fusionner dans le POST /run
@@ -49,8 +55,32 @@ export default function RunSetupPanel({ d, studio, form, datasetId,
   // contredit la famille du Studio (déploiement mal classé) → bandeau distinct.
   const [archMismatch, setArchMismatch] = useState(null);
 
-  const canLaunch = form.total > 0 && !d.pending && !d.gpu_busy && !studio.launching
+  // 📝 LOT DE PROMPTS — les prompts cochés dans l'historique. Le lancement les
+  // rejoue TOUS en un seul run (le backend en fait un axe : le GPU est sérialisé
+  // et un second POST serait refusé par le garde « a test run is already in
+  // progress »). Rien de coché = zéro changement : le prompt du champ, seul.
+  //
+  // Délibérément NON persisté (contrairement au mode 🧬 du board) : une sélection
+  // de lot est l'intention d'UN lancement. Retrouver trois cases cochées après un
+  // rechargement multiplierait par trois un run qu'on croyait simple.
+  const [batchPrompts, setBatchPrompts] = useState([]);
+  // La règle du lot vit dans promptBatch.js — pure, donc réellement testée, et
+  // partagée par les deux surfaces plutôt que réécrite dans chacune.
+  const pickedPrompts = visibleBatch(batchPrompts, d.recent_prompts);
+  const toggleBatchPrompt = (p) => setBatchPrompts((cur) => (
+    cur.includes(p) ? cur.filter((v) => v !== p) : [...cur, p]));
+
+  // Le nombre de cellules RÉELLEMENT lancées. `cellTotal` n'est fourni que par un
+  // mode qui change la formule (🧬 Blend : une pile = une configuration) — sinon
+  // c'est le total du formulaire, inchangé.
+  // 📝 Chaque prompt coché est une passe de plus sur la MÊME grille : le compteur
+  // et le bouton doivent le dire avant le clic, pas la file d'attente après.
+  const promptMult = Math.max(1, pickedPrompts.length);
+  const cells = cellTotal != null ? cellTotal : form.total;
+  const total = cells * promptMult;
+  const canLaunch = total > 0 && !d.pending && !d.gpu_busy && !studio.launching
     && !launchBlocked;
+  const launchText = batchLaunchText(launchLabel, pickedPrompts);
   // Axe ⚖ batch (Always-on LoRA cochés batch) : chaque config tourne SANS puis
   // AVEC chaque LoRA coché → le compteur d'images/temps doit en tenir compte
   // (le backend multiplie déjà les cellules par 1 + nb cochés).
@@ -59,11 +89,22 @@ export default function RunSetupPanel({ d, studio, form, datasetId,
   // setting — genSettings included — travels through this one call site on both
   // screens. Overriding the handler here instead would have quietly dropped the
   // global generation settings from a canvas run.
+  // ⏱ Ce que ce lancement va vraiment coûter : toutes les passes, au rythme
+  // MESURÉ de la machine. Rien n'est refusé — au-delà du seuil on chiffre, et on
+  // pose UNE question.
+  const cost = runCost(total * batchMult * form.genCount, d.seconds_per_image);
+
   const onLaunch = async () => {
+    if (cost.heavy && !window.confirm(heavyRunConfirm(cost))) return;
+    // 📝 `prompts` voyage dans le MÊME canal que les réglages globaux (les deux
+    // hooks étalent cet objet dans le corps du POST) — donc aucune signature à
+    // changer, et le lot arrive identiquement sur les deux routes. Absent quand
+    // rien n'est coché : le corps envoyé est alors octet pour octet celui d'avant.
+    const settings = launchSettings(genSettings, pickedPrompts);
     const res = await studio.launch(
       form.chosenCps, form.selSts, form.nextSeed(), form.effectivePrompt,
       form.effectiveModels, form.effectiveAspects, form.effectiveCfgs, form.effectiveSteps,
-      form.effectiveSteps2, form.genCount, genSettings,
+      form.effectiveSteps2, form.genCount, settings,
     );
     // Persist the itemized manques (toast is transient) — cleared on the next
     // launch that isn't blocked on missing assets.
@@ -147,7 +188,9 @@ export default function RunSetupPanel({ d, studio, form, datasetId,
             <CheckpointPicker checkpoints={d.checkpoints} chosen={form.chosenCps} onToggle={form.toggleCp} />
           )}
 
-          <StrengthPicker choices={STRENGTH_CHOICES} selected={form.selSts} onToggle={form.toggleSt} fmt={fmt} />
+          {showStrengths && (
+            <StrengthPicker choices={STRENGTH_CHOICES} selected={form.selSts} onToggle={form.toggleSt} fmt={fmt} />
+          )}
 
           <PromptField
             value={form.effectivePrompt}
@@ -158,6 +201,9 @@ export default function RunSetupPanel({ d, studio, form, datasetId,
             recentPrompts={d.recent_prompts}
             datasetId={datasetId}
             onDeletePrompt={studio.deletePrompt}
+            batchPrompts={pickedPrompts}
+            onToggleBatchPrompt={toggleBatchPrompt}
+            onClearBatchPrompts={() => setBatchPrompts([])}
           />
 
           <AxisPickers
@@ -180,6 +226,7 @@ export default function RunSetupPanel({ d, studio, form, datasetId,
             onToggleStep2={form.toggleStep2}
             defaultSteps2={d.default_steps2}
             mixedDefaults={form.mixedModelDefaults}
+            baseNote={d.base_note}
             fmt={fmt}
           />
 
@@ -206,12 +253,14 @@ export default function RunSetupPanel({ d, studio, form, datasetId,
               onToggleLock={() => form.setSeedLocked((v) => !v)}
               genCount={form.genCount}
               onGenCount={form.setGenCount}
-              total={form.total * batchMult}
+              total={total * batchMult}
               batchMult={batchMult}
+              promptMult={promptMult}
+              secondsPerImage={d.seconds_per_image}
               fmt={fmt}
             />
             <LaunchBar canLaunch={canLaunch} launching={studio.launching} onLaunch={onLaunch}
-              label={launchLabel} title={launchHint} />
+              label={launchText} title={launchHint} />
           </div>
           {/* A dead button that does not say why is what this replaces: the
               canvas passes the real reason (mixed families, nothing picked) and
@@ -220,6 +269,15 @@ export default function RunSetupPanel({ d, studio, form, datasetId,
             <p className={'m-0 text-[0.6875rem] ' + (launchBlocked ? 'text-amber-200' : 'text-content-muted')}
               role={launchBlocked ? 'status' : undefined}>
               {launchHint}
+            </p>
+          )}
+          {/* ⏱ Un long lancement est annoncé, pas interdit : le compte, la durée
+              au rythme mesuré, et le rappel qu'un Stop garde ce qui est fait. */}
+          {cost.heavy && (
+            <p data-testid="heavy-run-notice"
+              className="m-0 rounded-lg border border-amber-400/40 bg-amber-500/10 px-2.5 py-1.5 text-[0.6875rem] text-amber-200"
+              role="status">
+              <span aria-hidden>⏱</span> {heavyRunNotice(cost)}
             </p>
           )}
         </div>
@@ -247,7 +305,7 @@ export default function RunSetupPanel({ d, studio, form, datasetId,
         canRun={canLaunch}
         running={studio.launching}
         onRun={onLaunch}
-        runLabel={launchLabel ? `🚀 ${launchLabel}` : undefined}
+        runLabel={launchText ? `🚀 ${launchText}` : undefined}
       />
       )}
     </>

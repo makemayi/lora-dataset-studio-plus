@@ -10,6 +10,18 @@ test('isRunDeletable: only a gone run (checkpoint_ready === false) qualifies', (
   assert.equal(isRunDeletable(null), false);
 });
 
+test('isRunDeletable: a full model is never offered for removal, wherever it lives', () => {
+  // The incident: a dense run delivered to Hugging Face only has nothing in the
+  // checkpoint columns, so the old rule badged it "gone" and offered to remove
+  // it — discarding the only pointer to the repository holding the model.
+  assert.equal(isRunDeletable({ checkpoint_ready: null, dense_artifact: 'hub' }), false);
+  assert.equal(isRunDeletable({ checkpoint_ready: false, dense_artifact: 'hub' }), false);
+  assert.equal(isRunDeletable({ checkpoint_ready: false, dense_artifact: 'local' }), false);
+  // A dense run whose model is verifiably gone stays removable — the fix must
+  // not turn every full model into an undeletable ghost.
+  assert.equal(isRunDeletable({ checkpoint_ready: false, dense_artifact: 'none' }), true);
+});
+
 test('removeRunFromTree: drops the node and every edge touching it', () => {
   const tree = {
     root_id: 1, current_id: 2,

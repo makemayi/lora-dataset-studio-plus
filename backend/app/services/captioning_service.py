@@ -456,7 +456,8 @@ def _caption_concept(ds, force, backend, token=None, image_ids=None,
     return n
 
 
-def caption_images(user_id, dataset_id, force=False, mode=None, image_ids=None):
+def caption_images(user_id, dataset_id, force=False, mode=None, image_ids=None,
+                   report=None):
     """Caption les images gardees. Defaut: seulement celles SANS caption ; force=True
     re-capte TOUTES les gardees (ecrase) - pour rejouer apres un changement de prompt.
     Chaque caption passe par drop_identity_sentences (retire une eventuelle phrase
@@ -473,6 +474,7 @@ def caption_images(user_id, dataset_id, force=False, mode=None, image_ids=None):
       - 'ollama'     -> Ollama (Qwen3-VL) seul, JoyCaption jamais tenté.
       - 'auto'       -> comportement historique : JoyCaption en priorité,
                         fallback Ollama pour les images qu'il n'a pas captées."""
+    _guard_not_bank_export(dataset_id)
     ds = get_dataset(user_id, dataset_id)
     if not ds:
         return 0
@@ -608,6 +610,7 @@ def caption_images(user_id, dataset_id, force=False, mode=None, image_ids=None):
                     img.caption = _cap_caption(cleaned)
                     db.session.commit()
                     n += 1
+                    _writer(report, CAPTION_WRITER_JOYCAPTION)
                     dataset_activity.bump(token)   # this image is captioned (done)
                 else:
                     still.append((img, p))
@@ -646,6 +649,7 @@ def caption_images(user_id, dataset_id, force=False, mode=None, image_ids=None):
                         img.caption = _cap_caption(cleaned)
                         db.session.commit()
                         n += 1
+                        _writer(report, CAPTION_WRITER_OLLAMA)
                     dataset_activity.bump(token)   # image handled (captioned or not)
             except RuntimeError as e:
                 # 'auto' tried JoyCaption first and it was unavailable, then Ollama
@@ -830,14 +834,13 @@ def caption_paths(paths, *, prompt=None, backend=None, ollama_model=None,
 # compare raw model output side by side and pick the config, not to produce the final
 # stored caption (that still goes through the normal caption pass with its kind rules).
 
-def _compose_preview_instructions(vocabulary, instructions) -> str | None:
-    """Combine a vocabulary preset (the SAME appended register the dataset pass uses,
-    from _VOCABULARY_INSTRUCTION) with the user's free extra instructions into the single
-    ``extra_instructions`` string caption_paths appends to the prompt. None when neither
-    is set (byte-identical to a plain descriptive pass)."""
-    parts = []
-    if vocabulary:
-        parts.append(_VOCABULARY_INSTRUCTION[vocabulary])
+def _compose_preview_instructions(vocabulary, instructions, length=None) -> str | None:
+    """Combine the presets (the SAME appended register and length text the dataset pass
+    uses) with the user's free extra instructions into the single ``extra_instructions``
+    string caption_paths appends to the prompt. Same order as the dataset pass — presets
+    first, free text last. None when nothing is set (byte-identical to a plain descriptive
+    pass)."""
+    parts = _caption_preset_parts(vocabulary, length)
     extra = (instructions or '').strip()[:_CAPTION_INSTRUCTIONS_MAX]
     if extra:
         parts.append(extra)
@@ -853,8 +856,24 @@ def vocabulary_instruction(vocabulary) -> str | None:
     return _VOCABULARY_INSTRUCTION.get((vocabulary or '').strip().lower())
 
 
+
+# Public so the image bank's caption lane validates against — and appends — the
+# SAME backends and preset texts as the dataset pass, rather than duplicating
+# the tuples. Upstream keeps these next to CAPTION_VOCABULARIES; this fork's
+# split moved the pass here, so the public names follow the code.
+
+
+def caption_preset_instructions(vocabulary=None, length=None) -> str | None:
+    """The combined preset block (vocabulary register, then length) for a run that
+    has no per-dataset options to read — the image bank's per-run lane. None when
+    neither is set, so a call without presets appends nothing at all."""
+    parts = _caption_preset_parts(vocabulary, length)
+    return '\n\n'.join(parts) if parts else None
+
+
 def preview_caption(user_id, dataset_id, image_id, *, backend=None, ollama_model='',
-                    vocabulary=None, instructions=None, should_cancel=None) -> dict:
+                    vocabulary=None, length=None, instructions=None,
+                    should_cancel=None) -> dict:
     """Caption ONE dataset image with a candidate config and return the text WITHOUT
     persisting it — the Caption Lab's ephemeral A/B probe. Reuses caption_paths(), so the
     engine/model/GPU serialization contract is identical to the batch pass.
@@ -887,7 +906,10 @@ def preview_caption(user_id, dataset_id, image_id, *, backend=None, ollama_model
     vocab = (vocabulary or '').strip().lower() or None
     if vocab and vocab not in _CAPTION_VOCABULARIES:
         raise ValueError(f'invalid caption vocabulary: {vocab}')
-    extra = _compose_preview_instructions(vocab, instructions)
+    size = (length or '').strip().lower() or None
+    if size and size not in _CAPTION_LENGTHS:
+        raise ValueError(f'invalid caption length: {size}')
+    extra = _compose_preview_instructions(vocab, instructions, size)
     ollama_model = normalize_ollama_model_ref(
         ollama_model, allow_empty=True) or None
     started = time.perf_counter()
@@ -1028,10 +1050,20 @@ def derive_short_captions(user_id, dataset_id, image_ids=None, force=False, mode
 # imported first must find the other fully defined by the time the reach-back
 # import resolves.
 from .face_dataset_service import (
+    _guard_not_bank_export,
     get_dataset, caption_options, dual_captions_enabled, is_concept, is_style,
     is_body_fidelity, style_content_caption, _img_path, _cap_caption,
     _with_caption_instructions, _combined_caption_instructions,
     _CAPTION_BACKENDS, _CAPTION_VOCABULARIES, _VOCABULARY_INSTRUCTION,
+    _CAPTION_LENGTHS, _caption_preset_parts,
+    _writer, CAPTION_WRITER_JOYCAPTION, CAPTION_WRITER_OLLAMA,
     _CAPTION_INSTRUCTIONS_MAX, _VISION_BATCH_KEEPALIVE, CAPTION_VOCABULARIES,
     logger,
 )
+
+
+# Public alias, deliberately AFTER the borrow-back import: `_CAPTION_BACKENDS`
+# is owned by face_dataset_service and only reaches this module at the bottom of
+# the file, so a module-level alias any earlier would run before it is bound.
+# Same trap as _backup_extra_ref_names' call-time default.
+CAPTION_BACKENDS = _CAPTION_BACKENDS

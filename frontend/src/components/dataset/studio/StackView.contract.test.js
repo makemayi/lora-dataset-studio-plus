@@ -14,7 +14,7 @@ test('a stacked run swaps the per-LoRA ranking for its composition', () => {
   assert.match(studio, /showStackView \? \(\s*<StackCompositionPanel/);
   assert.match(studio, /<LoraRankingPanel ranking=\{data\?\.lora_ranking\}/,
     'a comparison run keeps its ranking');
-  // Decided by the RUN, never by the Compare/Combine toggle: an old stack must open
+  // Decided by the RUN, never by the Compare/Blend toggle: an old stack must open
   // as a stack even when the toggle sits on Compare.
   assert.doesNotMatch(studio, /showStackView = combine/);
 });

@@ -554,8 +554,20 @@ def queue_prompt_to_comfyui(prompt_workflow, client_id, worker_url=None):
         except Exception as e:                    # a broken probe must never block
             logger.warning(f"Model-file preflight skipped: {e}")
             unavailable = []
+        # A DETERMINISTIC kill may not rest on a cached observation. The list above
+        # can be up to _OBJECT_INFO_TTL old and the deploy path does not invalidate
+        # it, so a model deployed seconds ago used to die here for good. Re-ask once
+        # — bounded and gguf-exempt, see confirm_unavailable_model_files.
+        rechecked = False
         if unavailable:
-            message = format_unavailable_models_message(unavailable)
+            try:
+                unavailable, prompt_workflow, rechecked = (
+                    confirm_unavailable_model_files(prompt_workflow, unavailable))
+            except Exception as e:                # a broken probe must never block
+                logger.warning(f"Model-file re-check skipped: {e}")
+        if unavailable:
+            message = format_unavailable_models_message(unavailable,
+                                                        rechecked=rechecked)
             logger.error(f"Workflow refused before queuing — {message}")
             return None, f"WORKFLOW_INVALIDE (ComfyUI capability): {message}"
 
@@ -1073,7 +1085,7 @@ def _distill_model_files(data):
     return out
 
 
-def _fetch_object_info(timeout=None):
+def _fetch_object_info(timeout=None, force=False):
     """(classes, enums, model_files) from ONE `GET /object_info`, all three served
     by the same short TTL cache — the payload is the heaviest probe in the app, so
     the checks below must never cost a second request. (None, None, None) on any
@@ -1081,14 +1093,20 @@ def _fetch_object_info(timeout=None):
 
     `timeout` is the READ budget in seconds; None (the normal case) reads
     `object_info_timeout()`. The connect budget is separate and fixed — see
-    _OBJECT_INFO_CONNECT_TIMEOUT."""
+    _OBJECT_INFO_CONNECT_TIMEOUT.
+
+    `force` skips BOTH caches for this one call and refreshes them with what comes
+    back. It exists for exactly one caller — the model-file refusal in
+    `queue_prompt`, which must not kill a job on a snapshot that predates the model
+    (see `confirm_unavailable_model_files`). Nothing on a hot path may pass it."""
     addr = api_address()
     now = time.time()
-    if (_object_info_cache["data"] is not None and _object_info_cache["key"] == addr
+    if (not force and _object_info_cache["data"] is not None
+            and _object_info_cache["key"] == addr
             and now - _object_info_cache["timestamp"] < _OBJECT_INFO_TTL):
         return (_object_info_cache["data"], _object_info_cache["enums"],
                 _object_info_cache["files"])
-    if (_object_info_last["status"] not in ('ok', 'unknown')
+    if (not force and _object_info_last["status"] not in ('ok', 'unknown')
             and _object_info_last["key"] == addr
             and now - _object_info_last["timestamp"] < _OBJECT_INFO_FAIL_TTL):
         # Negative cache: one failure answers the burst behind it. See
@@ -1260,7 +1278,79 @@ def unavailable_model_files(workflow, files=None):
     return out
 
 
-def format_unavailable_models_message(items):
+# How old the /object_info snapshot behind a DETERMINISTIC refusal is allowed to be.
+# Below this, re-asking cannot change the answer, so we don't; above it, we re-ask
+# once. This single number is also what bounds the cost — see
+# `confirm_unavailable_model_files`.
+_OBJECT_INFO_RECHECK_MAX_AGE = 5
+
+
+def confirm_unavailable_model_files(workflow, items):
+    """`(items, workflow)` — `items` re-checked against a FRESH `/object_info`
+    before anyone is allowed to kill a job over them.
+
+    WHY THIS EXISTS (reported in #help, 2026-08-08): "there is a delay after
+    deploying a new checkpoint from Canvas before LDS can use it — even though I
+    can clearly select the deployed LoRA inside Comfy". Both halves were true.
+    `_fetch_object_info` serves a snapshot for `_OBJECT_INFO_TTL` (60 s) and the
+    deploy path does not invalidate it, so a model deployed at t+0 was judged
+    against the list as it stood at t-59. The refusal that followed is
+    DETERMINISTIC (`WORKFLOW_INVALIDE`, never retried — job_queue), so the job was
+    killed for good, and the message sent the user to check an API address that was
+    correct all along. A deterministic verdict may not rest on a stale observation:
+    that is the whole content of this function.
+
+    Re-asking WORKS, which is the fact that makes this the right fix rather than a
+    hopeful one. ComfyUI answers `/object_info` from `folder_paths.get_filename_list`,
+    whose cache is invalidated by the mtime of every scanned directory INCLUDING
+    subdirectories (`recursive_search` records one entry per subdir), so a file
+    dropped into `loras/<sub>/` invalidates it. Its second, mtime-blind cache
+    (`CacheHelper`) is activated only for the duration of one `/object_info` request
+    and cleared on exit — a within-request dedup, not a cross-request cache.
+
+    COST — one extra `/object_info` in the worst case, and it cannot run away:
+      * only reached when a graph is about to be REFUSED, never on a healthy queue;
+      * never for `gguf`, which is definitive whatever any list says;
+      * skipped when the snapshot is already younger than
+        `_OBJECT_INFO_RECHECK_MAX_AGE`, which is what bounds a batch: the forced
+        probe refreshes the cache, so a grid of N tiles against a genuinely missing
+        model pays one probe per 5 s, not one per tile — and since the probe itself
+        takes seconds on the installs where it is expensive, it throttles itself.
+
+    Fails OPEN when the fresh probe fails: with no current evidence the honest move
+    is to hand the graph to ComfyUI, whose own 400 is ground truth and is already
+    handled. `gguf` items survive that, because no probe was ever their basis.
+
+    Returns the workflow too: a name confirmed present is re-spelled against the
+    FRESH list (`canonical_model_widgets`), because the spelling the graph carries
+    was resolved against the stale one and ComfyUI validates by exact string.
+
+    The third value is `fresh`: True when the surviving verdict rests on an
+    observation no older than `_OBJECT_INFO_RECHECK_MAX_AGE` — either one we just
+    forced, or one already that young. It is what earns the message the right to
+    blame a second install; False keeps the message hedged. Nothing else may set
+    it, which is the point: the sentence and the evidence travel together."""
+    if not items:
+        return items, workflow, False
+    gguf = [i for i in items if i.get('reason') == 'gguf']
+    if len(gguf) == len(items):
+        # Extension, not availability: no list from anyone can make a core loader
+        # read a .gguf, so there is nothing to re-ask and nothing to hedge.
+        return items, workflow, True
+    now = time.time()
+    if (_object_info_cache["data"] is not None
+            and _object_info_cache["key"] == api_address()
+            and now - _object_info_cache["timestamp"] <= _OBJECT_INFO_RECHECK_MAX_AGE):
+        return items, workflow, True    # already young enough to be trusted
+    fresh = _fetch_object_info(force=True)[2]
+    if not fresh:
+        # No current evidence. Hand the graph to ComfyUI and let its own 400 judge.
+        return gguf, workflow, bool(gguf)
+    workflow, _ = comfy_names.canonical_model_widgets(workflow, fresh)
+    return unavailable_model_files(workflow, files=fresh), workflow, True
+
+
+def format_unavailable_models_message(items, rechecked=False):
     """One paste-safe English sentence for a model-file gap: which file, why this
     ComfyUI cannot use it, and the action that fixes it.
 
@@ -1270,7 +1360,18 @@ def format_unavailable_models_message(items):
 
     Deliberately never says "copy it into the model folder": that is the advice the
     reporter followed for an hour (into three folders) while neither cause could be
-    fixed that way."""
+    fixed that way.
+
+    `rechecked` says whether the caller established the gap against a FRESH
+    /object_info (`confirm_unavailable_model_files`) rather than a cached one. It
+    gates the "different install" sentence, which used to be asserted — "it is most
+    likely a different ComfyUI install" — on evidence that did not support it: with
+    a snapshot up to _OBJECT_INFO_TTL old, a model deployed a moment ago produced
+    that exact sentence, and it sent its reader to check an API address that was
+    right (#help, 2026-08-08). Unrechecked, the message now names the stale list as
+    the first thing to rule out; rechecked, the install hypothesis is earned and the
+    reader is told, in so many words, that a fresh deploy is NOT what they are
+    looking at."""
     seen, bits, has_gguf, has_missing = set(), [], False, False
     for i in items or []:
         key = (i.get('input'), i.get('value'))
@@ -1292,14 +1393,27 @@ def format_unavailable_models_message(items):
             f"pack ({url}), and this app's workflows use ComfyUI's standard model "
             "loader, which cannot read .gguf even once that pack is installed. Use a "
             ".safetensors build of the model instead.")
-    if has_missing:
+    if has_missing and rechecked:
         fixes.append(
             "This file is on disk where the app looked, but the ComfyUI answering on "
-            "the configured API address does not list it — it is most likely a "
-            "different ComfyUI install. Check that the ComfyUI API address and the "
-            "models folder in Settings point at the SAME install (ComfyUI Desktop "
-            "keeps a shared models folder AND one inside its install directory), "
-            "then restart ComfyUI.")
+            "the configured API address does not list it. That list was re-read "
+            "seconds ago, after any model you just deployed, and the file is still "
+            "not on it — so a fresh deploy is NOT what you are looking at, and "
+            "waiting or deploying it again will not change it. That leaves a second "
+            "ComfyUI: check that the ComfyUI API address and the models folder in "
+            "Settings point at the SAME install (ComfyUI Desktop keeps a shared "
+            "models folder AND one inside its install directory), then restart "
+            "ComfyUI.")
+    elif has_missing:
+        fixes.append(
+            "This file is on disk where the app looked, but the ComfyUI answering on "
+            "the configured API address does not list it. If you deployed this model "
+            "in the last minute, the list this check read may simply predate it — "
+            "try once more. Otherwise the two ends are looking at different ComfyUI "
+            "installs: check that the ComfyUI API address and the models folder in "
+            "Settings point at the SAME install (ComfyUI Desktop keeps a shared "
+            "models folder AND one inside its install directory), then restart "
+            "ComfyUI.")
     return ("Your ComfyUI does not offer a model file this workflow requires: "
             + '; '.join(bits) + '. ' + ' '.join(fixes))
 
@@ -1847,6 +1961,27 @@ def resolve_checkpoint_ckpt_name(name):
     return name
 
 
+def _model_scan_roots(out_dir):
+    """The diffusion-model folders the Studio listers walk: `<ComfyUI>/models/unet`
+    and `.../diffusion_models`, plus any diffusion_models root declared in
+    extra_model_paths.yaml (the `unet` key folds into the same canonical type).
+
+    Derived from the OUTPUT dir rather than from `comfy_model_paths.search_roots`
+    — deliberately, for now: they are two config routes to the same folders, and
+    swapping one for the other here would be a behaviour change on any install
+    where they disagree, not a refactor. Extracted so the two listers cannot drift
+    on the question of WHERE to look, which is half of how four scanners diverge.
+    Additive: no yaml -> nothing appended, list unchanged."""
+    models_root = os.path.normpath(os.path.join(out_dir, "..", "models"))
+    roots = [os.path.join(models_root, b) for b in ("unet", "diffusion_models")]
+    try:
+        from ..services import comfy_model_paths
+        roots += comfy_model_paths.extra_roots("diffusion_models")
+    except Exception:                       # noqa: BLE001 — an absent yaml is normal
+        pass
+    return roots
+
+
 _zimage_models_cache = {"data": None, "timestamp": 0}
 
 
@@ -1866,30 +2001,13 @@ def get_zimage_models():
     out_dir = _out_dir()
     if out_dir:
         try:
-            models_root = os.path.normpath(os.path.join(out_dir, "..", "models"))
-            base_dirs = [os.path.join(models_root, b) for b in ("unet", "diffusion_models")]
-            # Plus any diffusion_models root declared in extra_model_paths.yaml (the
-            # `unet` key folds into the same canonical type). Without this, a Z-Image
-            # merge kept outside <base>/models was absent from the training base
-            # picker — and therefore unconvertible, whatever zimage_convert resolves.
-            # Additive: no yaml -> nothing appended, list unchanged.
-            try:
-                from ..services import comfy_model_paths
-                base_dirs += comfy_model_paths.extra_roots("diffusion_models")
-            except Exception:
-                pass
-            for base_dir in base_dirs:
-                if not os.path.isdir(base_dir):
-                    continue
-                for root, _dirs, files in os.walk(base_dir):
-                    rel_dir = os.path.relpath(root, base_dir)
-                    low = rel_dir.lower()
-                    if "z image" not in low and "zimage" not in low:
-                        continue
-                    for f in files:
-                        if f.lower().endswith((".safetensors", ".gguf", ".sft")):
-                            out.append(f if rel_dir == "." else os.path.join(rel_dir, f))
-            out = sorted(set(out))
+            from ..services import comfy_model_paths
+            # No `root_file_accept`: this family has no root-filename rule. A
+            # `diffusion_models` root also holds Krea, FLUX and Klein weights, and
+            # nothing in a Z-Image filename separates them reliably — the folder
+            # IS the claim here. (Krea does have such a rule; see get_krea_models.)
+            out = comfy_model_paths.scan_family_tree(
+                _model_scan_roots(out_dir), ("z image", "zimage"))
         except Exception as e:
             logger.error(f"get_zimage_models error: {e}")
     _zimage_models_cache["data"] = out
@@ -1900,14 +2018,62 @@ def get_zimage_models():
 _krea_models_cache = {"data": None, "timestamp": 0}
 
 
+def _krea_root_candidate(name) -> bool:
+    """Is this ROOT-level file CLAIMED by the Krea family? A `diffusion_models`
+    root also holds Z-Image, FLUX and Klein weights, so at a root the filename is
+    the only claim there is.
+
+    Only the claim. Whether the file is a Krea base the pipeline can actually use
+    is `_krea_base_usable`, which applies at EVERY depth — that separation is the
+    fix for a checkpoint being refused here and accepted one folder down.
+
+    The wired workflow default used to be named explicitly on this line. It was
+    dead code (the name carries 'krea' and matches no exclusion) and it was the
+    last hardcoded filename in the lister, so it is gone.
+    """
+    return 'krea' in str(name or '').lower()
+
+
+def _krea_base_usable(name) -> bool:
+    """False for the checkpoints that carry 'krea' without being a Krea 2 base —
+    `KREA_INCOMPATIBLE_TOKENS`, borrowed from the Generate resolver rather than
+    re-declared so the two surfaces cannot drift."""
+    low = str(name or '').lower()
+    try:
+        from ..services.krea_edit_helper import KREA_INCOMPATIBLE_TOKENS
+    except Exception:                               # noqa: BLE001 — never fatal
+        KREA_INCOMPATIBLE_TOKENS = ('biglove',)
+    return not any(tok in low for tok in KREA_INCOMPATIBLE_TOKENS)
+
+
 def get_krea_models():
     """List Krea 2 UNET checkpoints: le défaut du workflow (krea2_turbo_fp8.safetensors
     à la racine de models/unet ou models/diffusion_models) + tout .safetensors/.gguf
-    sous un sous-dossier 'krea' (ex. 'Krea\\monKrea.safetensors'). Noms en forme
+    sous un sous-dossier 'krea' (ex. 'Krea\\monKrea.safetensors') + tout fichier de
+    RACINE dont le NOM porte 'krea'. Noms en forme
     UNETLoader (relatifs au dossier de base, séparateur de l'arbre parcouru =
     os.sep ; la file d'attente les réécrit selon la liste publiée par le ComfyUI
     ciblé). Cache TTL partagé. Vide si
-    ComfyUI n'est pas encore configuré."""
+    ComfyUI n'est pas encore configuré.
+
+    THE ROOT-FILENAME RULE, AND WHY IT WAS MISSING
+    ----------------------------------------------
+    The directory-only rule made the app's OWN full-model deliveries invisible
+    here. `fp8_local_delivery` writes the fp8 twin of a dense run to the ROOT of
+    `diffusion_models` — deliberately, because that is a folder ComfyUI reads —
+    so the one file the whole dense lane exists to produce could not be picked as
+    a Test Studio base. The only way to try a model you had paid hours of GPU for
+    was to open ComfyUI by hand.
+
+    That it was an oversight and not a rule is settled by the Generate surface:
+    `krea_edit_helper._krea_unet_folders` has always matched 'krea' in the folder
+    OR in the filename, root included. Aligning on it retro-fits every twin
+    already on disk without moving a byte, and it borrows the same exclusion
+    list — BigLove* carries 'krea' and renders pure noise under this pipeline.
+
+    Still NOT "every root file": a `diffusion_models` root also holds Z-Image,
+    FLUX and Klein weights, and listing those as Krea bases would trade one
+    silent wrong result for another."""
     current_time = time.time()
     if (_krea_models_cache["data"] is not None
             and current_time - _krea_models_cache["timestamp"] < _MODEL_CACHE_TTL):
@@ -1916,22 +2082,11 @@ def get_krea_models():
     out_dir = _out_dir()
     if out_dir:
         try:
-            models_root = os.path.normpath(os.path.join(out_dir, "..", "models"))
-            for base in ("unet", "diffusion_models"):
-                base_dir = os.path.join(models_root, base)
-                if not os.path.isdir(base_dir):
-                    continue
-                # Le défaut câblé dans krea2_turbo.json (racine) reste choisissable.
-                if os.path.isfile(os.path.join(base_dir, "krea2_turbo_fp8.safetensors")):
-                    out.append("krea2_turbo_fp8.safetensors")
-                for root, _dirs, files in os.walk(base_dir):
-                    rel_dir = os.path.relpath(root, base_dir)
-                    if rel_dir == "." or "krea" not in rel_dir.lower():
-                        continue
-                    for f in files:
-                        if f.lower().endswith((".safetensors", ".gguf", ".sft")):
-                            out.append(os.path.join(rel_dir, f))
-            out = sorted(set(out))
+            from ..services import comfy_model_paths
+            out = comfy_model_paths.scan_family_tree(
+                _model_scan_roots(out_dir), ("krea",),
+                root_file_accept=_krea_root_candidate,
+                accept=_krea_base_usable)
         except Exception as e:
             logger.error(f"get_krea_models error: {e}")
     _krea_models_cache["data"] = out

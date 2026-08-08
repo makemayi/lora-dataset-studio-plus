@@ -24,6 +24,16 @@ import subprocess
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _fresh_encoder_verdict():
+    """The ffmpeg verdict is process-cached; these tests stub it, so it must not
+    survive them."""
+    from app.services import ffmpeg_tools
+    ffmpeg_tools.clear_cache()
+    yield
+    ffmpeg_tools.clear_cache()
+
+
 # --- 1. the missing dependency ------------------------------------------------
 
 def test_masks_install_set_carries_onnxruntime():
@@ -45,7 +55,10 @@ def test_every_capability_install_set_covers_its_own_probe_imports():
     # import name differs from (or matches) the distribution name.
     provider = {'rembg': 'rembg', 'onnxruntime': 'onnxruntime',
                 'insightface': 'insightface', 'cv2': 'opencv-python-headless',
-                'numpy': 'numpy', 'simple_lama_inpainting': 'simple-lama-inpainting'}
+                'numpy': 'numpy', 'simple_lama_inpainting': 'simple-lama-inpainting',
+                # 🎬 video lane — the import names differ from the distributions,
+                # which is exactly the drift this guard exists to catch.
+                'av': 'av', 'transnetv2_pytorch': 'transnetv2-pytorch'}
     for action, pkgs in setup_installer._CAPABILITY_PACKAGES.items():
         expr = capabilities.CAPABILITY_IMPORTS.get(action)
         if not expr:
@@ -166,6 +179,125 @@ def test_the_verification_runs_the_exact_import_the_probe_runs():
     for action in setup_installer._CAPABILITY_ML_ACTIONS:
         assert capabilities.CAPABILITY_IMPORTS.get(action)
     assert capabilities.CAPABILITY_IMPORTS['masks'] == 'import rembg'
+
+
+# --- 2b. an action that installs a BINARY cannot be verified by an import ------
+#
+# The `video` action installs two halves — PyAV (reading) and imageio-ffmpeg
+# (encoding) — and its probe import, `import av`, can only speak for the first.
+# So the whole #24 lie came back through the other door: pip said "already
+# satisfied", `import av` passed, the action returned 0 and Setup printed
+# "✓ installed successfully" while its own "Video bank — clip encoding" row
+# stayed ✗ behind the same ↻ button. The user reinstalls the half that worked.
+
+def _stub_video_install(monkeypatch, setup_installer, *, encoder_rc=0,
+                        encoder_boom=None, import_rc=0):
+    """pip succeeds; `import av` answers import_rc; `ffmpeg -version` answers
+    encoder_rc. One router because both go through subprocess.run."""
+    _stub_pip(monkeypatch, setup_installer, rc=0)
+
+    def fake_run(cmd, **kw):
+        class _P:
+            stderr = ''
+            stdout = ''
+            returncode = 0
+        p = _P()
+        if str(cmd[0]).endswith('ffmpeg') or 'ffmpeg' in str(cmd[0]):
+            if encoder_boom is not None:
+                raise encoder_boom
+            p.returncode = encoder_rc
+            p.stderr = 'not an executable'
+            return p
+        p.returncode = import_rc
+        p.stderr = "ModuleNotFoundError: No module named 'av'" if import_rc else ''
+        return p
+
+    monkeypatch.setattr(setup_installer.subprocess, 'run', fake_run)
+    monkeypatch.setattr(setup_installer.os.path, 'isfile', lambda p: True)
+
+
+def test_video_install_that_cannot_encode_must_not_report_success(app, monkeypatch,
+                                                                  tmp_path):
+    """The half-success. Reading works, encoding does not — and the action used to
+    return 0 for it."""
+    from app import setup_installer
+    from app.services import ffmpeg_tools
+    lines = []
+    monkeypatch.setattr(setup_installer, '_append', lambda a, l: lines.append(l))
+    stub = tmp_path / 'ffmpeg'
+    stub.write_bytes(b'')
+    monkeypatch.setattr(ffmpeg_tools, 'ffmpeg_path', lambda: str(stub))
+    _stub_video_install(monkeypatch, setup_installer, encoder_rc=1)
+    with app.app_context():
+        setup_installer._runs['video'] = setup_installer._new_run()
+        rc = setup_installer._run_ml_capability('video')
+
+    assert rc == 1, 'an install that left half the capability off must not say it worked'
+    log = '\n'.join(lines).lower()
+    assert 'encod' in log, 'the message must name the half that is missing'
+    assert 'read' in log, 'and the half that works, so the user does not redo it'
+    assert 'path' in log or 'install ffmpeg' in log, 'and the gesture that repairs it'
+
+
+def test_video_install_reports_success_when_both_halves_work(app, monkeypatch, tmp_path):
+    from app import setup_installer
+    from app.services import ffmpeg_tools
+    lines = []
+    monkeypatch.setattr(setup_installer, '_append', lambda a, l: lines.append(l))
+    stub = tmp_path / 'ffmpeg'
+    stub.write_bytes(b'')
+    monkeypatch.setattr(ffmpeg_tools, 'ffmpeg_path', lambda: str(stub))
+    _stub_video_install(monkeypatch, setup_installer, encoder_rc=0)
+    with app.app_context():
+        setup_installer._runs['video'] = setup_installer._new_run()
+        rc = setup_installer._run_ml_capability('video')
+
+    assert rc == 0
+    assert any('clip encoding ready' in l for l in lines)
+
+
+def test_a_broken_encoder_does_not_fail_the_OTHER_capabilities(app, monkeypatch):
+    """The extra check is registered per action. Person masks does not ship an
+    encoder and must not start failing because this machine has no ffmpeg."""
+    from app import setup_installer, config
+    from app.services import ffmpeg_tools
+    monkeypatch.setattr(setup_installer, '_append', lambda a, l: None)
+    monkeypatch.setattr(ffmpeg_tools, 'ffmpeg_path', lambda: None)
+    _stub_pip(monkeypatch, setup_installer, rc=0)
+    _stub_import(monkeypatch, setup_installer, returncode=0)
+    with app.app_context():
+        config.save_config({'masks': {'python': '/masks/py'}})
+        setup_installer._runs['masks'] = setup_installer._new_run()
+        rc = setup_installer._run_ml_capability('masks')
+
+    assert rc == 0
+
+
+def test_every_installed_binary_is_covered_by_a_post_install_check():
+    """The family rule behind this fix: a package whose payload is a BINARY (not
+    an importable module) cannot be verified by re-running the probe import, so
+    whichever action installs one owes an explicit extra check — otherwise its
+    success message covers something it never looked at."""
+    from app import setup_installer
+    binary_packages = {setup_installer._canon('imageio-ffmpeg')}
+    for action, pkgs in setup_installer._CAPABILITY_PACKAGES.items():
+        if binary_packages & {setup_installer._canon(p) for p in pkgs}:
+            assert action in setup_installer._CAPABILITY_EXTRA_CHECKS, (
+                f'{action} installs a binary its probe import cannot see — it must '
+                f'register a post-install check or it can report success about a '
+                f'capability that is still half off')
+
+
+def test_shot_detection_verifies_everything_it_installs():
+    """The sister action, checked for the same gap: it installs
+    transnetv2-pytorch + av into the scoring env and its verification imports
+    torch, transnetv2_pytorch AND av — a superset, no binary, no gap. Weights
+    ride inside the wheel, so there is nothing else 'installed' to prove."""
+    from app import setup_installer, capabilities
+    expr = capabilities.CAPABILITY_IMPORTS['shot_detect']
+    for pkg in setup_installer._CAPABILITY_PACKAGES['shot_detect']:
+        module = pkg.replace('-', '_')
+        assert module in expr, f'shot_detect installs {pkg} but never verifies it'
 
 
 # --- 3. don't break the installs that already work -----------------------------

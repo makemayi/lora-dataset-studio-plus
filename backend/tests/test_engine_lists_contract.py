@@ -129,6 +129,40 @@ def test_the_local_engines_reference_support_matches_on_both_sides():
         assert engine in fsvc.LOCAL_EDIT_REF_SUPPORT, engine
 
 
+def test_each_local_engine_reads_only_its_own_pool():
+    """The two local engines want opposite photos, so the pools must not cross.
+
+    Klein chains the dataset's ANGLES (same face, identity locked across every
+    generation). Krea reads ONE image from the edit dialog, because its `_b` slot
+    was trained for a DIFFERENT subject — feeding it the dataset pool would hand
+    it another view of the same person every single time, which is the one photo
+    that slot mishandles. Two functions, one per pool, so a crossed wire is a
+    failing test rather than a quietly wrong render."""
+    dataset, modal = ['a.png', 'b.png', 'c.png'], ['upload1.png', 'upload2.png']
+
+    assert svc.local_edit_extra_refs('klein', dataset) == dataset
+    assert svc.local_edit_modal_refs('klein', modal) == []
+
+    assert svc.local_edit_extra_refs('krea', dataset) == []
+    assert svc.local_edit_modal_refs('krea', modal) == ['upload1.png']
+
+    assert svc.local_edit_extra_refs('krea', None) == []
+    assert svc.local_edit_modal_refs('krea', None) == []
+    # An engine nobody has decided about reads NEITHER pool rather than both —
+    # the safe default for a graph that may have no slot at all.
+    assert svc.local_edit_extra_refs('nanobanana', dataset) == []
+    assert svc.local_edit_modal_refs('nanobanana', modal) == []
+
+    # And the refusal path turns on this list, not on "is it local".
+    assert svc.local_engines_taking_modal_refs(['klein', 'krea']) == ['krea']
+    assert svc.local_engines_taking_modal_refs(['klein']) == []
+    # Its mirror gates DISK WRITES: a Krea-only edit must not copy the dataset's
+    # extras to temporary files for a consumer that no longer exists.
+    assert svc.local_engines_taking_dataset_refs(['klein', 'krea']) == ['klein']
+    assert svc.local_engines_taking_dataset_refs(['krea']) == []
+    assert svc.local_engines_taking_dataset_refs(['chatgpt']) == []
+
+
 def test_the_engine_labels_are_worded_identically_on_both_sides():
     """Both sides word a refusal from these labels ('pick Klein, Krea 2 Edit, Nano
     Banana Pro, ChatGPT or OpenRouter'), so the same engine must not be called two

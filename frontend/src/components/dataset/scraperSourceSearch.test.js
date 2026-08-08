@@ -2,11 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildPexelsSearchUrl,
+  buildWebSearchUrl,
   isPexelsUrl,
   loadPexelsAuthorization,
   normalizePexelsKeyword,
+  normalizeWebSearchKeyword,
   resolveScanTarget,
   savePexelsAuthorization,
+  scrapeItemToImportPayload,
 } from './scraperSourceSearch.js';
 
 function memoryStorage() {
@@ -55,6 +58,61 @@ test('Pexels dataset authorization is global and removable', () => {
   assert.equal(loadPexelsAuthorization(storage), true);
   savePexelsAuthorization(false, storage);
   assert.equal(loadPexelsAuthorization(storage), false);
+});
+
+test('web search URLs carry the keyword and the SafeSearch flag', () => {
+  assert.equal(buildWebSearchUrl('curly hair'),
+    'https://duckduckgo.com/?q=curly+hair&iax=images&ia=images&kp=-2');
+  assert.equal(buildWebSearchUrl('  curly   hair  ', true),
+    'https://duckduckgo.com/?q=curly+hair&iax=images&ia=images&kp=1');
+});
+
+test('a blank web search keyword builds no URL at all', () => {
+  assert.equal(buildWebSearchUrl(''), '');
+  assert.equal(buildWebSearchUrl('   '), '');
+  assert.equal(normalizeWebSearchKeyword(' portrait\tstudio\n'), 'portrait studio');
+});
+
+test('web search keywords survive URL encoding', () => {
+  assert.equal(buildWebSearchUrl('été & nuit'),
+    'https://duckduckgo.com/?q=%C3%A9t%C3%A9+%26+nuit&iax=images&ia=images&kp=-2');
+});
+
+test('a websearch scan item carries its platform and source_url into the import payload', () => {
+  // Shape websearch.scan() actually returns.
+  const scanItem = {
+    url: 'https://cdn.example.test/photo.jpg',
+    title: 'A photo',
+    thumbnail: 'https://cdn.example.test/photo.jpg',
+    type: 'image',
+    platform: 'websearch',
+    source_url: 'https://blog.example.test/post/42',
+  };
+  assert.deepEqual(scrapeItemToImportPayload(scanItem), {
+    url: 'https://cdn.example.test/photo.jpg',
+    title: 'A photo',
+    platform: 'websearch',
+    source_url: 'https://blog.example.test/post/42',
+  });
+});
+
+test('a Pexels scan item carries attribution fields the websearch shape does not have', () => {
+  const scanItem = {
+    url: 'https://images.pexels.test/photo.jpg', title: 'A photo',
+    platform: 'pexels', source_url: 'https://www.pexels.com/photo/12/',
+    photographer: 'Jane Doe', photographer_url: 'https://www.pexels.com/@jane/',
+  };
+  assert.deepEqual(scrapeItemToImportPayload(scanItem), {
+    url: 'https://images.pexels.test/photo.jpg', title: 'A photo',
+    platform: 'pexels', source_url: 'https://www.pexels.com/photo/12/',
+    photographer: 'Jane Doe', photographer_url: 'https://www.pexels.com/@jane/',
+  });
+});
+
+test('a scan item with an unrecognized platform carries no provenance at all', () => {
+  assert.deepEqual(
+    scrapeItemToImportPayload({ url: 'https://example.test/x.jpg', platform: 'reddit' }),
+    { url: 'https://example.test/x.jpg', title: '' });
 });
 
 test('Pexels URL detection accepts only official web hosts over HTTP or HTTPS', () => {

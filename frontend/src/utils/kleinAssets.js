@@ -12,6 +12,20 @@
 // The consistency LoRA is only RECOMMENDED, so it never gates readiness.
 export const KLEIN_REQUIRED_ASSETS = ['klein_model', 'klein_text_encoder', 'klein_vae'];
 
+// Installable, worth repairing, and NOT required: Klein generates without it (the
+// backend never counted it either — klein_engine_ready only looks at KLEIN_REQUIRED).
+// Kept right next to the required trio so the two lists cannot drift apart.
+export const KLEIN_OPTIONAL_ASSETS = ['klein_lora'];
+
+/** Does a broken/absent asset actually STOP its engine? Klein's required trio does;
+ *  Klein's recommended consistency LoRA does not. An asset this file has never heard
+ *  of answers TRUE on purpose: over-warning about a file we cannot classify is the
+ *  safe direction, silently downgrading one is not — that is the mistake this
+ *  function exists to stop repeating in the other direction. */
+export function kleinAssetBlocks(asset) {
+  return !KLEIN_OPTIONAL_ASSETS.includes(asset);
+}
+
 // setup_installer action name -> the short human word used in Setup/picker hints.
 export const KLEIN_ASSET_LABELS = {
   klein_model: 'model',

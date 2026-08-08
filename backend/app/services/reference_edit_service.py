@@ -143,6 +143,7 @@ def start_reference_edit(app, user_id, dataset_id, engine, prompt,
 
     Raises ValueError for a bad engine / empty prompt / missing reference (the
     route maps it to 400/404)."""
+    _guard_not_bank_export(dataset_id)
     engines = normalize_edit_engines(engine)
     prompt = (prompt or '').strip()
     if not prompt:
@@ -258,17 +259,62 @@ def start_reference_edit(app, user_id, dataset_id, engine, prompt,
 #: engine cannot be added without deciding what it does with the extra refs. The
 #: values are mirrored in frontend EDIT_REF_SUPPORT (contract-tested), because
 #: the UI has to say this at pick time, not discover it as a silent drop.
-LOCAL_EDIT_REF_SUPPORT = {'klein': 'dataset_only', 'krea': 'primary_only',
-                          # H3 is GENERATE-ONLY today (see GENERATE_ONLY_ENGINES),
-                          # so this entry never reaches the modal. It is here
-                          # because every local engine must declare what it would
-                          # consume rather than defaulting to 'all' — and one
-                          # reference IS what its graph sends.
-                          'minimax_h3': 'primary_only'}
+LOCAL_EDIT_REF_SUPPORT = {'klein': 'dataset_only', 'krea': 'modal_one',
+                          # H3 is GENERATE-ONLY (see GENERATE_ONLY_ENGINES), so
+                          # this never reaches the modal. Declared anyway,
+                          # because every local engine must say what it consumes
+                          # instead of falling through to a default — and 'none'
+                          # is in neither limit map below, so it takes nothing.
+                          'minimax_h3': 'none'}
+
+#: How many DATASET extras each support value forwards. None = no ceiling beyond
+#: the dataset's own MAX_EXTRA_REFS. A support value absent from this map takes
+#: none — which is what a newly added engine should do until someone decides.
+LOCAL_EDIT_REF_LIMITS = {'dataset_only': None}
+
+#: How many of the MODAL's own uploads each support value forwards. They reach a
+#: local engine as temporary FILES written from the request bytes — the same
+#: hand-off the primary reference already used, which is why "local engines
+#: cannot take the images added here" was always a routing decision rather than
+#: a limitation of the graphs.
+MODAL_EDIT_REF_LIMITS = {'modal_one': 1}
+
+
+def local_edit_extra_refs(engine, extra_ref_paths):
+    """The DATASET extras THIS engine consumes, in order (Klein's angles).
+
+    One place decides, so the enqueue below and what the modal claims can never
+    disagree — the failure this prevents is a UI promising angles to an engine
+    whose graph was never going to read them."""
+    limit = LOCAL_EDIT_REF_LIMITS.get(LOCAL_EDIT_REF_SUPPORT.get(engine), 0)
+    paths = list(extra_ref_paths or [])
+    return paths if limit is None else paths[:limit]
+
+
+def local_edit_modal_refs(engine, modal_ref_paths):
+    """The MODAL's uploads THIS engine consumes, in order (Krea's second subject)."""
+    limit = MODAL_EDIT_REF_LIMITS.get(LOCAL_EDIT_REF_SUPPORT.get(engine), 0)
+    return list(modal_ref_paths or [])[:limit]
+
+
+def local_engines_taking_dataset_refs(engines):
+    """The selected local engines that read the dataset's extra angles. Empty
+    means nothing will open them, which is what lets the caller skip writing
+    temporary copies no consumer exists for."""
+    return [e for e in (engines or [])
+            if LOCAL_EDIT_REF_LIMITS.get(LOCAL_EDIT_REF_SUPPORT.get(e), 0) != 0]
+
+
+def local_engines_taking_modal_refs(engines):
+    """Selected local engines that read the dialog's own uploads. An empty result
+    with uploads present is what turns them into a loud refusal instead of a
+    silent drop."""
+    return [e for e in (engines or [])
+            if MODAL_EDIT_REF_LIMITS.get(LOCAL_EDIT_REF_SUPPORT.get(e), 0)]
 
 
 def _enqueue_local_reference_edit(user_id, dataset_id, ds, engine, prompt, token,
-                                  ref_path, extra_ref_paths):
+                                  ref_path, extra_ref_paths, modal_ref_paths=()):
     """Reference edit on the user's OWN GPU: free, private, no key, no bill — and
     therefore the lane that makes "try five prompts until it's right" reasonable.
 
@@ -287,15 +333,18 @@ def _enqueue_local_reference_edit(user_id, dataset_id, ds, engine, prompt, token
             from . import krea_edit_helper as helper
             job_id = helper.enqueue_krea_edit(
                 user_id=str(user_id), source_filename=os.path.basename(ref_path),
-                source_path=ref_path, edit_prompt=prompt, extra_metadata=meta)
+                source_path=ref_path, edit_prompt=prompt, extra_metadata=meta,
+                # From the DIALOG, never from the dataset's angles: the `_b` slot
+                # wants a different subject, and the dataset pool holds only more
+                # views of the same one. One image — the slot has room for one.
+                extra_ref_paths=local_edit_modal_refs(engine, modal_ref_paths))
         else:
             from .klein_edit_helper import enqueue_klein_edit
             # The dataset's extra refs DO reach Klein (native ReferenceLatent
             # chaining) — the same anchors the API lane sends as bytes. Gated on
             # the table above rather than on the engine name, so the two can't
             # disagree.
-            extras = (list(extra_ref_paths)
-                      if LOCAL_EDIT_REF_SUPPORT.get(engine) == 'dataset_only' else [])
+            extras = local_edit_extra_refs(engine, extra_ref_paths)
             job_id = enqueue_klein_edit(
                 user_id=str(user_id), source_filename=os.path.basename(ref_path),
                 source_path=ref_path, edit_prompt=prompt, extra_ref_paths=extras,
@@ -664,11 +713,13 @@ def discard_reference_edit(dataset_id):
     """Drop a pending edit (running=abandon OR ready) and delete its candidate
     file. An API call already sent is still billed — honesty preserved, no
     'refund' implied; a local render is cancelled, because it can be."""
+    _guard_not_bank_export(dataset_id)
     _clear_reference_edit(dataset_id)
 
 
 def reference_mutation(dataset_id):
     """Context manager shared by every primary-reference mutation path."""
+    _guard_not_bank_export(dataset_id)
     return reference_edit_jobs.reference_mutation(dataset_id)
 
 
@@ -758,6 +809,7 @@ def _commit_edited_reference_locked(user_id, dataset_id, image_bytes):
 # the time the reach-back import resolves. A name owned by ANOTHER split module
 # is imported from that module directly, never through the parent's re-export.
 from .face_dataset_service import (
+    _guard_not_bank_export,
     get_dataset, dataset_klein_model, normalize_to_webp, write_image_atomic,
     link_completed_dataset_image, _ref_path, _crop_resize_file,
     _comfy_output_dir, _generation_steps, _generation_base_lora_strength,

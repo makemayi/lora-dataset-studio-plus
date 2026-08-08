@@ -94,8 +94,10 @@ def _ip_is_blocked(ip):
 def _resolve_public_ips(host, port):
     """Résout `host` et valide CHAQUE IP. Retourne (frozenset[str], error).
 
-    Sur la moindre IP non-publique → (None, message). Réutilisé à la validation
-    ET juste avant le lancement de yt-dlp (re-résolution anti-rebinding).
+    Sur la moindre IP non-publique → (None, message). N'est appelé QU'une fois,
+    à la validation (`_validate_public_http_url`) — pas de second appel juste
+    avant le spawn de gallery-dl/yt-dlp. Voir la docstring de
+    `_validate_public_http_url` pour la conséquence (fenêtre DNS-rebinding).
     """
     try:
         infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
@@ -132,11 +134,17 @@ def _validate_public_http_url(url):
     IP non-publique (loopback / privée / link-local / réservée / multicast /
     IPv4-mapped IPv6). Retourne (ok: bool, error: str|None).
 
-    NB : la résolution DNS faite ici et celle que yt-dlp refait au moment de
-    télécharger sont deux opérations distinctes (fenêtre TOCTOU / DNS-rebinding
-    + redirections HTTP non re-validées). On la réduit via une re-résolution
-    juste avant le spawn, mais la fermeture *complète* exige une allowlist de
-    domaines ou un proxy de sortie validant.
+    NB : cette fonction résout et classe le host UNE SEULE fois, ici. Les IP
+    obtenues ne sont pas conservées ni réutilisées : gallery-dl / yt-dlp
+    refont leur propre résolution DNS au moment de se connecter, en dehors de
+    ce module. Un host dont la réponse DNS change entre les deux (DNS
+    rebinding) — ou une redirection HTTP suivie par l'outil vers une IP
+    interne — n'est donc PAS intercepté par cette garde : il n'y a pas de
+    re-résolution juste avant le spawn. Fermer complètement cette fenêtre
+    demande un mécanisme hors de portée de ce module (un proxy de sortie qui
+    valide chaque connexion sortante, ou un pare-feu OS bloquant les plages
+    privées pour ce process) — ce n'est pas quelque chose que `netfetch.py`
+    peut garantir seul.
     """
     if not url or not isinstance(url, str):
         return False, "Missing URL."

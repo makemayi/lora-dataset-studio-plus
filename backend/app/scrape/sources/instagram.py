@@ -29,6 +29,9 @@ import time
 import logging
 from pathlib import Path
 
+from .base import ResultList
+from .gdl import GdlError
+
 try:
     import instaloader
     INSTALOADER_AVAILABLE = True
@@ -250,36 +253,108 @@ def _scan_profile(loader, username):
         return None, _AUTH_ERROR
 
     items = []
+    posts_seen = 0
+    posts_failed = 0
+    timed_out = False
+    capped = False
     started = time.time()
     try:
         for post in profile.get_posts():
             if len(items) >= SCAN_LIMIT:
+                # Plafond SCAN_LIMIT atteint : on ne regarde jamais le post
+                # suivant, donc on ne peut pas savoir si le profil s'arrêtait
+                # PILE là ou continuait — même limite de détection que
+                # picazor.py (cf. son commentaire). Côté honnête : PARTIEL même
+                # au risque d'un faux positif rare sur un profil qui aurait
+                # EXACTEMENT SCAN_LIMIT publications.
+                capped = True
                 break
             if time.time() - started > PROFILE_SCAN_TIMEOUT:
                 logger.warning("Timeout scan profil %s (%ds), %d items.",
                                username, PROFILE_SCAN_TIMEOUT, len(items))
+                timed_out = True
                 break
+            posts_seen += 1
             try:
-                for item in _items_from_post(post):
-                    items.append(item)
-                    if len(items) >= SCAN_LIMIT:
-                        break
+                converted = _items_from_post(post)
             except Exception as e:
                 # Un post cassé ne doit pas tuer le scan entier.
                 logger.debug("Post ignoré (%s) : %s", username, e)
+                posts_failed += 1
                 continue
+            if not converted:
+                # Post chargé sans lever mais aucun média extractible (chaque
+                # accès attribut de `_items_from_post` est déjà isolé dans son
+                # propre `except` — cf. sa docstring) : conversion ratée, compte
+                # comme un échec de post, pas comme « rien à ajouter ».
+                posts_failed += 1
+                continue
+            for item in converted:
+                items.append(item)
+                if len(items) >= SCAN_LIMIT:
+                    # Même plafond, atteint cette fois en cours de carrousel :
+                    # même limite de détection / même choix honnête que ci-dessus.
+                    capped = True
+                    break
     except Exception as e:
         # Erreur pendant l'itération paginée (souvent rate-limit en cours de route).
         if items:
-            # On a déjà des items utiles → on les retourne sans erreur.
+            # On a déjà des items utiles → on les retourne sans erreur, mais la
+            # récolte n'est PAS garantie complète (cas le plus courant : rate-limit
+            # en cours de route) — signal `partial`, même convention que
+            # `base.ResultList.partial` / le cas `timed_out`/`posts_failed`
+            # juste en dessous (réutilisée telle quelle), lue par `routes/scrape.py`
+            # sur l'objet retourné sans changement côté route. Avant cette
+            # correction ce chemin renvoyait `items[:SCAN_LIMIT], None` — une
+            # liste ordinaire sans signal de troncature, présentant une récolte
+            # coupée comme complète.
             logger.warning("Itération profil %s interrompue après %d items : %s",
                            username, len(items), e)
-            return items[:SCAN_LIMIT], None
+            result = ResultList(items[:SCAN_LIMIT])
+            result.partial = True
+            return result, None
         logger.warning("Itération profil %s échouée : %s", username, e)
         return None, _AUTH_ERROR
 
     if not items:
-        return None, f"No media found for profile {username}."
+        if timed_out:
+            # Le rate-controller d'instaloader DORT au lieu de lever (cf. docstring
+            # de module) : un profil throttled peut heurter `PROFILE_SCAN_TIMEOUT`
+            # sans jamais produire d'exception ni un seul item. Un vrai échec, pas
+            # « le profil n'a rien publié » — avant cette correction ce chemin
+            # retombait dans le kind='empty' juste en dessous.
+            return None, (f"Instagram profile scan timed out after "
+                          f"{PROFILE_SCAN_TIMEOUT}s ({posts_seen} post(s) checked, "
+                          f"no media collected): {username}.")
+        if posts_failed:
+            # Des posts ont été vus mais AUCUN n'a survécu à la conversion
+            # (typiquement un changement de mise en page côté Instagram) : échec
+            # systématique, pas un profil vide.
+            return None, (f"Instagram: {posts_failed} post(s) found for {username} "
+                          f"but none could be read (layout change?).")
+        # `profile.get_posts()` a itéré jusqu'au bout PROPREMENT — sans lever
+        # (le `except` ci-dessus l'aurait intercepté), sans timeout (`timed_out`
+        # resterait False) et sans produire un seul post traitable
+        # (`posts_failed` resterait 0 aussi) : compte public légitimement sans
+        # publication, pas un échec. Résultat vide légitime, même convention que
+        # gdl.GdlError kind='empty'.
+        return None, GdlError(f"No media found for profile {username}.", 'empty')
+
+    if timed_out or posts_failed or capped:
+        # Récolte non garantie complète : soit le plafond de temps a coupé
+        # l'itération avant la fin, soit certains posts ont échoué à la
+        # conversion pendant que d'autres réussissaient, soit le plafond
+        # SCAN_LIMIT a été atteint (`capped` — avant cette correction ce
+        # troisième cas retombait tout droit dans le `return items[:SCAN_LIMIT],
+        # None` final, une liste ordinaire sans signal de troncature : un
+        # profil de 5000 posts ressemblait à un profil de 50). Les items
+        # présents restent valides — signal `partial` plutôt que de les jeter,
+        # même convention que `base.ResultList.partial` (réutilisée telle
+        # quelle), lue par `routes/scrape.py` sur l'objet retourné sans
+        # changement côté route.
+        result = ResultList(items[:SCAN_LIMIT])
+        result.partial = True
+        return result, None
     return items[:SCAN_LIMIT], None
 
 
@@ -300,6 +375,13 @@ def _scan_single(loader, shortcode, original_url=None):
         return None, _AUTH_ERROR
 
     if not items:
+        # PAS un résultat vide légitime (kind='empty', finding #3) : un
+        # post/reel Instagram valide PORTE toujours au moins un média — s'il a
+        # chargé sans lever (le `except` ci-dessus l'aurait intercepté) et que
+        # `_items_from_post` renvoie quand même une liste vide, c'est que
+        # chaque accès attribut (shortcode/typename/is_video/url…) a échoué en
+        # silence (chacun est déjà encapsulé dans son propre `except` — cf.
+        # `_items_from_post`) : un vrai échec de conversion, pas « rien ici ».
         return None, f"No usable media for {shortcode}."
     return items[:SCAN_LIMIT], None
 

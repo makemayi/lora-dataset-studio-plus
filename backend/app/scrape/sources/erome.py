@@ -78,7 +78,10 @@ def scan(validation):
         items, err = gdl.enumerate(url, platform=PLATFORM,
                                    max_items=MAX_ITEMS, max_albums=MAX_ALBUMS)
         if err:
-            return None, f"Erome: {err}"
+            # GdlError (cf. gdl.py) : préfixer le message SANS perdre `.kind` — un
+            # f-string nu reconstruirait un str ordinaire, invisible au routage
+            # par kind (routes/scrape.py distingue désormais 'empty' du reste).
+            return None, gdl.GdlError(f"Erome: {err}", getattr(err, 'kind', None))
         return items, None
     except Exception as e:
         logger.exception("Erome scan: erreur inattendue")

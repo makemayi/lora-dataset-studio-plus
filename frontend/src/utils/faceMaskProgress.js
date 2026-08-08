@@ -27,7 +27,13 @@ const PHASE_LABELS = {
 export function previewStatusLabel(job) {
   if (!job) return '';
   if (job.error) return job.error;
+  if (job.stopped) return 'Stopped.';
   if (job.finished) return 'Done.';
+  // Between the click and the child actually winding up there is a real wait: it
+  // only looks at the stop request between two images, and during the model load
+  // it cannot look at all. Saying "Stopped" here would be the one lie the user
+  // can catch — the counter is still moving in front of them.
+  if (job.stopping) return 'Stopping — finishing the current image…';
   if (job.phase === 'detecting' && job.total > 0) {
     return `Analyzing image ${Math.min(job.done + 1, job.total)} of ${job.total}…`;
   }
@@ -52,6 +58,66 @@ export function previewPercent(job) {
 /** True while a pass is in flight — drives both the disabled button and the poll. */
 export function previewRunning(job) {
   return Boolean(job) && !job.finished && !job.error;
+}
+
+/** How many images this pass has already banked — the count a stop would keep. */
+function analyzed(job) {
+  if (!job || job.phase !== 'detecting') return 0;
+  return Math.max(0, Math.min(job.done || 0, job.total || 0));
+}
+
+/** What pressing Stop COSTS, said at the moment it is offered — never a generic
+ *  "are you sure?".
+ *
+ *  Two different answers, and which one applies changes while you watch:
+ *
+ *  - during the load (and the first-run download) nothing has been analyzed yet,
+ *    so the only thing given up is the load itself;
+ *  - once images are being analyzed, every face already found is kept and only
+ *    the load is re-paid on the way back.
+ *
+ *  The load is re-paid EITHER WAY, because the detector runs in a subprocess that
+ *  exits with the pass — there is no warm model left behind. That is stated, not
+ *  glossed: a Stop that quietly made the retry cost the whole run again would be
+ *  a button that looks like it saves time and spends it. */
+export function previewStopCost(job) {
+  if (!previewRunning(job)) return '';
+  const done = analyzed(job);
+  if (!done) {
+    return 'Nothing has been analyzed yet — stopping gives up the detector load only, '
+      + 'and starting again pays it over.';
+  }
+  return `The ${done} image${done > 1 ? 's' : ''} already analyzed ${done > 1 ? 'are' : 'is'} kept. `
+    + 'Starting again re-loads the detector, then carries on from where it stopped.';
+}
+
+/** The Stop button's own label. */
+export function previewStopLabel(job) {
+  return job && job.stopping ? 'Stopping…' : 'Stop';
+}
+
+/** The start button's label, so a resume ANNOUNCES its credit instead of looking
+ *  like a fresh pass over the same images. `resume` is the server's
+ *  {done, total} for the current kept set, or null when there is nothing banked. */
+export function previewStartLabel(resume, hasPreview) {
+  if (resume && resume.done > 0 && resume.total > resume.done) {
+    return `▶ Resume — ${resume.done} of ${resume.total} already analyzed`;
+  }
+  if (resume && resume.done > 0) return '▶ Resume — finishing up';
+  return hasPreview ? 'Refresh preview' : '👁 Preview the mask';
+}
+
+/** The line shown after a stop, or ''. It exists to make the bargain visible
+ *  AFTER the fact too: a user who stopped and sees nothing has no reason to
+ *  believe the work survived. */
+export function previewStoppedNotice(job, resume) {
+  if (!job || !job.stopped) return '';
+  if (resume && resume.done > 0 && resume.total > resume.done) {
+    return `Stopped. ${resume.done} of ${resume.total} images are kept — `
+      + 'starting again continues from there rather than beginning over.';
+  }
+  if (resume && resume.done > 0) return 'Stopped. Every image was analyzed — start again to draw the preview.';
+  return 'Stopped before any image was analyzed, so there was nothing to keep.';
 }
 
 /** What went wrong, or ''. A finished job with an error is the failure case that

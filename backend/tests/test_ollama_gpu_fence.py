@@ -4,6 +4,11 @@ import pytest
 
 from app.services import ollama_gpu_fence as fence
 
+# This file IS the fence's own test: it drives /api/ps through `requests`
+# itself, so it opts out of the autouse stub that keeps the rest of the
+# suite off this machine's Ollama (see conftest).
+pytestmark = pytest.mark.ollama_fence
+
 
 class _Response:
     def __init__(self, payload, status_code=200):
@@ -208,6 +213,89 @@ def test_an_unwritable_data_dir_degrades_to_the_old_in_process_behaviour(monkeyp
     monkeypatch.setattr(fence, '_claims_path', lambda: None)
     with patch.object(fence.requests, 'get', return_value=_ps()):
         assert fence.mark_before_generate(endpoint, 'lds-model', keep_alive='120s') == 'local'
+    assert fence._read_claims() == {}
+
+
+# --- A daemon that is not running is not an empty daemon ----------------------
+# Reported by socrasteeze (GitHub #20): the probe mapped a REFUSED connection to
+# 'empty', so with Ollama stopped the admission path took the claim branch and
+# wrote a keep-warm lease for a model that was never loaded. Its only caller
+# never returns the lease, so the phantom claim sat in the claim file for its
+# whole keep-alive — long enough for the user's OWN later `ollama run` of the
+# same model to be adopted as LDS's and unloaded from under them.
+
+def _refused():
+    """A connection-refused error shaped like the one requests actually raises."""
+    import errno as _errno
+    return fence.requests.exceptions.ConnectionError(
+        ConnectionRefusedError(_errno.ECONNREFUSED, 'connection refused'))
+
+
+def test_a_stopped_ollama_is_told_apart_from_an_empty_one():
+    endpoint = 'http://127.0.0.1:11434'
+    with patch.object(fence.requests, 'get', side_effect=_refused()):
+        assert fence._probe(endpoint)[0] == 'down'
+    with patch.object(fence.requests, 'get', return_value=_ps()):
+        assert fence._probe(endpoint)[0] == 'empty'
+    # Anything else the network can do stays 'unknown' - it proves nothing.
+    with patch.object(fence.requests, 'get',
+                      side_effect=fence.requests.exceptions.ReadTimeout('slow')):
+        assert fence._probe(endpoint)[0] == 'unknown'
+
+
+def test_no_keep_warm_lease_is_written_for_a_model_that_never_loaded(fence_data_dir):
+    endpoint = 'http://127.0.0.1:11434'
+    with patch.object(fence.requests, 'get', side_effect=_refused()), \
+            patch.object(fence.requests, 'post') as post:
+        # The call is still admitted: it will fail on its own connection error,
+        # or start the daemon and be admitted for real on the retry.
+        assert fence.mark_before_generate(endpoint, 'lds-model', keep_alive='120s') == 'local'
+    post.assert_not_called()
+    assert fence._read_claims() == {}
+    with fence._lock:
+        assert fence._owned_models == {}
+
+
+def test_a_model_the_user_loads_after_a_refused_probe_is_never_adopted(fence_data_dir):
+    """The teeth of the bug: LDS must not inherit a residency it never created."""
+    endpoint = 'http://127.0.0.1:11434'
+    with patch.object(fence.requests, 'get', side_effect=_refused()):
+        assert fence.mark_before_generate(endpoint, 'lds-model', keep_alive='120s') == 'local'
+
+    # The user starts Ollama and loads that very model themselves.
+    with patch.object(fence.requests, 'get',
+                      return_value=_ps_with_expiry('lds-model', _iso(90))), \
+            patch.object(fence.requests, 'post') as post:
+        assert fence.mark_before_generate(endpoint, 'lds-model', keep_alive='120s') == 'blocked'
+    post.assert_not_called()
+
+
+def test_a_stopped_ollama_never_stands_in_comfyuis_way(fence_data_dir):
+    """'down' still proves the GPU is free — the release paths must not regress."""
+    endpoint = 'http://127.0.0.1:11434'
+    with patch.object(fence, '_configured_local_endpoint', return_value=('local', endpoint)), \
+            patch.object(fence.requests, 'get', side_effect=_refused()), \
+            patch.object(fence.requests, 'post') as post:
+        assert fence.ensure_released_for_comfy() is True
+        assert fence.release_owned_models(ollama_url=endpoint) is True
+        status = fence.fence_status()
+        assert fence.unload_foreign_models()['reason'] == 'already-free'
+    post.assert_not_called()
+    # And the status says the daemon is not there rather than pretending it
+    # answered with an empty runner.
+    assert status == {'applies': True, 'blocked': False, 'scope': 'local',
+                      'reachable': False, 'models': []}
+
+
+def test_a_stopped_ollama_clears_a_claim_left_by_a_previous_run(fence_data_dir):
+    endpoint = 'http://127.0.0.1:11434'
+    with patch.object(fence.requests, 'get', return_value=_ps()):
+        assert fence.mark_before_generate(endpoint, 'lds-model', keep_alive='120s') == 'local'
+    assert fence._read_claims() != {}
+    fence.reset_for_tests()
+    with patch.object(fence, '_configured_local_endpoint', return_value=('local', endpoint)), \
+            patch.object(fence.requests, 'get', side_effect=_refused()):
+        assert fence.ensure_released_for_comfy() is True
     assert fence._read_claims() == {}
 
 

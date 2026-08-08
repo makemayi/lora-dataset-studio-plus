@@ -167,8 +167,15 @@ test('the hook submits and retries the exact selected engine list', () => {
     'Retry availability must follow the currently displayed opaque batch');
 });
 
-test('mixed API and local batches keep the picker but explain its scope', () => {
+test('mixed batches keep the picker but explain its scope', () => {
   assert.match(modal, /acceptsExtraEditRefsForBatch\(engines\)/);
-  assert.match(modal, /Images added here go only to the selected API engines/);
-  assert.match(modal, /selectedApiEngines\.length > 0 && selectedLocalEngines\.length > 0/);
+  // The split is no longer "API vs local" — Krea is local and reads these bytes.
+  // The banner has to turn on what actually differs: an engine in the selection
+  // that will NOT read them, whatever lane it sits in.
+  assert.match(modal, /selectedLocalEngines\.some\(\(e\) => !acceptsExtraEditRefs\(e\)\)/);
+  assert.match(modal, /Images added below go to the engines that read them/);
+  // And the cap follows the selection, or deselecting the generous engine would
+  // leave staged images the server is about to refuse.
+  assert.match(modal, /maxEditRefsForBatch\(engines\)/);
+  assert.match(modal, /editRefs\.length < maxRefs/);
 });

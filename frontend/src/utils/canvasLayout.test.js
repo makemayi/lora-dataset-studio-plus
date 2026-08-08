@@ -9,8 +9,8 @@ import {
 // ---- stackLanes ------------------------------------------------------------
 
 test('an empty board has no lanes and no size', () => {
-  assert.deepEqual(stackLanes([]), { lanes: [], width: 0, height: 0 });
-  assert.deepEqual(stackLanes(null), { lanes: [], width: 0, height: 0 });
+  assert.deepEqual(stackLanes([]), { lanes: [], x: 0, y: 0, width: 0, height: 0 });
+  assert.deepEqual(stackLanes(null), { lanes: [], x: 0, y: 0, width: 0, height: 0 });
 });
 
 test('one lane sits at the top, its graph below its header', () => {
@@ -57,6 +57,78 @@ test('nonsense sizes degrade to zero instead of NaN-ing the board', () => {
   assert.equal(lanes[0].height, 0);
   assert.equal(width, 0);
   assert.equal(height, LANE_HEADER_H);
+});
+
+/* ── The board's BOX ────────────────────────────────────────────────────────
+   A picture may be parked above or left of its own lane. The world therefore
+   has a corner that is not the origin, and everything that frames the board has
+   to measure from it — otherwise the one gesture free placement exists for
+   produces something ✦ Fit cannot bring back. */
+
+test('a board with nothing hanging out of a lane still has its corner at 0,0', () => {
+  const w = stackLanes([{ datasetId: 1, width: 500, height: 200 },
+    { datasetId: 2, width: 300, height: 100 }]);
+  assert.deepEqual([w.x, w.y], [0, 0]);
+  // …and the size is exactly what it was before overhang existed.
+  assert.equal(w.width, 500);
+  assert.equal(w.height, LANE_HEADER_H + 200 + LANE_GAP + LANE_HEADER_H + 100);
+});
+
+test('a picture above its lane pulls the board box up, without moving any lane', () => {
+  const plain = stackLanes([{ datasetId: 1, width: 500, height: 200 },
+    { datasetId: 2, width: 300, height: 100 }]);
+  const over = stackLanes([{ datasetId: 1, width: 500, height: 200 },
+    { datasetId: 2, width: 300, height: 100, minX: -120, minY: -400 }]);
+  // Lane 2's graph starts at 34 + 200 + 56 + 34 = 324; 400 above that is -76.
+  assert.equal(over.y, -76);
+  assert.equal(over.x, -120);
+  assert.equal(over.height, plain.height + 76);
+  assert.equal(over.width, plain.width + 120);
+  // THE non-negotiable: no lane moved. A board that re-stacked itself would
+  // slide sideways under the hand still dragging the picture.
+  assert.deepEqual(over.lanes.map((l) => [l.x, l.y, l.graphY]),
+    plain.lanes.map((l) => [l.x, l.y, l.graphY]));
+});
+
+test('overhang that stays inside the board changes nothing', () => {
+  // Lane 2's graph starts at 324, so reaching 100 up is still well below 0.
+  const w = stackLanes([{ datasetId: 1, width: 500, height: 200 },
+    { datasetId: 2, width: 300, height: 100, minY: -100 }]);
+  assert.deepEqual([w.x, w.y], [0, 0]);
+});
+
+test('a positive minX is not overhang and cannot shrink the board', () => {
+  const w = stackLanes([{ datasetId: 1, width: 500, height: 200, minX: 90, minY: 60 }]);
+  assert.deepEqual([w.x, w.y], [0, 0]);
+  assert.equal(w.width, 500);
+});
+
+test('Fit frames the board BOX, corner included', () => {
+  const world = { x: -500, y: -250, width: 2000, height: 1000 };
+  const v = fitView(world, { width: 800, height: 600 }, { padding: 0 });
+  // The box's top-left has to land inside the frame, not off it.
+  assert.equal(v.tx + world.x * v.scale, 0);
+  assert.equal(v.ty + world.y * v.scale, (600 - 1000 * v.scale) / 2);
+  // …and its bottom-right too.
+  assert.ok(v.tx + (world.x + world.width) * v.scale <= 800 + 0.001);
+});
+
+test('the board OPENS on the box top, so a picture above lane 1 is not off-screen', () => {
+  const world = { x: -300, y: -200, width: 900, height: 500 };
+  const v = initialView(world, { width: 800, height: 600 }, { padding: 16 });
+  assert.equal(v.ty + world.y * v.scale, 16, 'the box top is one padding down');
+  assert.ok(v.tx + world.x * v.scale >= 0);
+});
+
+test('the reachability clamp measures the box, not the quadrant below the origin', () => {
+  const world = { x: -1000, y: -1000, width: 2000, height: 2000 };
+  const viewport = { width: 800, height: 600 };
+  const centred = fitView(world, viewport);
+  assert.deepEqual(clampView(centred, world, viewport), centred,
+    'a fitted view is already inside the frame and must not be nudged');
+  const flung = clampView({ scale: 1, tx: 99999, ty: 99999 }, world, viewport);
+  assert.ok(flung.tx + world.x <= viewport.width - 80 + 0.001);
+  assert.ok(flung.ty + world.y <= viewport.height - 80 + 0.001);
 });
 
 // ---- scale -----------------------------------------------------------------

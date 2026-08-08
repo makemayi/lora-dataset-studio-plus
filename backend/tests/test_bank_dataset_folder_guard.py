@@ -194,9 +194,15 @@ def test_import_to_bank_copies_so_the_dataset_survives_a_bank_delete(app, ds):
     from unittest.mock import patch
     from app.services import image_bank_service as banks
 
-    def fake_start(_app, bank_id, kind, fn, total=0):
-        fn(object())
-        return None
+    def fake_start(_app, bank_id, kind, fn, total=0, reservation=None,
+                   reserve_ids=None):
+        """Inline runner that adopts the exact capability staged by the service."""
+        assert reserve_ids is None
+        banks.bank_jobs.require_reservation(reservation, bank_id)
+        assert reservation['kind'] == kind
+        reservation['_launched'] = True
+        fn(reservation)
+        return reservation
 
     with app.app_context():
         from app.models import ImageBank

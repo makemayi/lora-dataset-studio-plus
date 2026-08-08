@@ -44,37 +44,76 @@ export function clampScale(s) {
 /**
  * Stack per-dataset graphs into vertical lanes.
  *
- * `entries` — [{ datasetId, name, width, height, ... }] in the order they should
- * appear (the caller decides; the canvas keeps the filter's order). A lane with
- * no measurable graph still gets its header, so a dataset that is still loading
- * — or whose runs all vanished — keeps its place on the board instead of making
- * the lanes below it jump when it arrives.
+ * `entries` — [{ datasetId, name, width, height, minX, minY, ... }] in the order
+ * they should appear (the caller decides; the canvas keeps the filter's order).
+ * A lane with no measurable graph still gets its header, so a dataset that is
+ * still loading — or whose runs all vanished — keeps its place on the board
+ * instead of making the lanes below it jump when it arrives.
  *
- * Returns { lanes, width, height } in WORLD units, where each lane carries
- * `y` (its header's top) and `graphY` (its graph's top).
+ * `minX`/`minY` are that lane's OVERHANG: how far its content reaches above or
+ * left of its own origin, never positive (utils/canvasImageNodes.imageNodeExtent).
+ * A pinned picture may be parked above its lane, and the world has to contain it
+ * or ✦ Fit frames a board with something floating off the top of it.
+ *
+ * Returns { lanes, x, y, width, height } in WORLD units — the board's BOX, whose
+ * top-left `x`/`y` may be negative. Each lane carries `y` (its header's top) and
+ * `graphY` (its graph's top).
+ *
+ * ⚠️ The overhang does NOT push a lane down, and lanes are NOT shifted right to
+ * make room for a left overhang. Both were tried on paper and both are the same
+ * bug: a picture dragged one pixel past its lane's corner would move every lane
+ * on the board, so the whole thing would slide sideways under the hand still
+ * dragging it. Lanes keep the positions they always had; only the box that Fit
+ * measures grows to include what hangs out of them. With no overhang anywhere,
+ * this returns exactly the numbers it always returned, with x = y = 0.
  */
 export function stackLanes(entries) {
   const list = Array.isArray(entries) ? entries : [];
   const lanes = [];
   let y = 0;
-  let width = 0;
+  let left = 0;
+  let top = 0;
+  let right = 0;
+  let bottom = 0;
   for (const e of list) {
     const w = Math.max(0, Number(e?.width) || 0);
     const h = Math.max(0, Number(e?.height) || 0);
-    lanes.push({ ...e, x: 0, y, graphY: y + LANE_HEADER_H, width: w, height: h });
+    const overX = Math.min(0, Number(e?.minX) || 0);
+    const overY = Math.min(0, Number(e?.minY) || 0);
+    const lane = { ...e, x: 0, y, graphY: y + LANE_HEADER_H, width: w, height: h };
+    lanes.push(lane);
+    left = Math.min(left, lane.x + overX);
+    top = Math.min(top, lane.graphY + overY);
+    right = Math.max(right, lane.x + w);
+    // The lane's bottom, header included: `graphY` already carries the header,
+    // so a lane with no graph still contributes its title strip. This is also
+    // why there is no trailing gap — the board ends where the content ends,
+    // instead of carrying one lane-gap of dead space "fit" would waste.
+    bottom = Math.max(bottom, lane.graphY + h);
     y += LANE_HEADER_H + h + LANE_GAP;
-    width = Math.max(width, w);
   }
-  // The trailing gap is not content: without this the board always carried one
-  // lane-gap of dead space at the bottom, and "fit" wasted it on every zoom.
-  const height = lanes.length ? y - LANE_GAP : 0;
-  return { lanes, width, height };
+  if (!lanes.length) return { lanes, x: 0, y: 0, width: 0, height: 0 };
+  return { lanes, x: left, y: top, width: right - left, height: bottom - top };
 }
+
+/** The board's top-left corner in WORLD units. Zero for a board with nothing
+ *  hanging out of its lanes — which is every board that predates free placement
+ *  — so a caller that only passes {width,height} gets the maths it always got. */
+const worldOrigin = (world) => ({
+  x: Number(world?.x) || 0,
+  y: Number(world?.y) || 0,
+});
 
 /**
  * The view that shows the whole board inside `viewport`, centred.
- * `world` {width,height} and `viewport` {width,height} are both in their own
+ * `world` {x,y,width,height} and `viewport` {width,height} are both in their own
  * units; the result is { scale, tx, ty } with screen = world * scale + t.
+ *
+ * `world.x`/`world.y` may be NEGATIVE — a picture parked above or left of its
+ * lane puts the board's corner there — and the translate carries them, so what
+ * gets centred is the board's real box rather than the quadrant below its
+ * origin. Without that, the one gesture free placement exists for (drag a render
+ * up, above its lane) would produce a picture ✦ Fit could not bring back.
  *
  * Never magnifies past 1 — a two-run lineage blown up to fill a 27" screen
  * looks broken, not helpful. An empty board or an unmeasured frame answers the
@@ -89,10 +128,11 @@ export function fitView(world, viewport, { padding = 16 } = {}) {
   const availW = Math.max(1, vw - padding * 2);
   const availH = Math.max(1, vh - padding * 2);
   const scale = clampScale(Math.min(1, Math.min(availW / ww, availH / wh)));
+  const origin = worldOrigin(world);
   return {
     scale,
-    tx: (vw - ww * scale) / 2,
-    ty: (vh - wh * scale) / 2,
+    tx: (vw - ww * scale) / 2 - origin.x * scale,
+    ty: (vh - wh * scale) / 2 - origin.y * scale,
   };
 }
 
@@ -124,10 +164,13 @@ export function initialView(world, viewport, { padding = 16 } = {}) {
   if (!ww || !wh || !vw || !vh) return fit;
   const scale = clampScale(Math.min(1, Math.max(fit.scale, INITIAL_MIN_SCALE)));
   const w = ww * scale;
+  // Same origin correction as fitView: "top-aligned" means the top of the
+  // board's BOX, which is above the first lane when something hangs over it.
+  const origin = worldOrigin(world);
   return {
     scale,
-    tx: w <= vw ? (vw - w) / 2 : padding,
-    ty: padding,
+    tx: (w <= vw ? (vw - w) / 2 : padding) - origin.x * scale,
+    ty: padding - origin.y * scale,
   };
 }
 
@@ -178,10 +221,18 @@ export function clampView(view, world, viewport, { keep = 80 } = {}) {
     const margin = Math.min(keep, content);
     return Math.min(frame - margin, Math.max(margin - content, t));
   };
+  // The clamp is about where the CONTENT sits on screen, so it is applied to
+  // the board box's own left/top edge — which is `tx` shifted by the world
+  // origin — and undone afterwards. A board whose corner is at (0,0), which is
+  // every board with nothing hanging out of a lane, is clamped exactly as
+  // before.
+  const origin = worldOrigin(world);
+  const ox = origin.x * scale;
+  const oy = origin.y * scale;
   return {
     scale,
-    tx: clamp1(Number(view?.tx) || 0, ww, vw),
-    ty: clamp1(Number(view?.ty) || 0, wh, vh),
+    tx: clamp1((Number(view?.tx) || 0) + ox, ww, vw) - ox,
+    ty: clamp1((Number(view?.ty) || 0) + oy, wh, vh) - oy,
   };
 }
 

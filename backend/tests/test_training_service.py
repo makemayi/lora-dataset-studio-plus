@@ -399,6 +399,69 @@ def test_style_captioned_still_checks_prose_booru_mismatch(app):
         lt.assert_trainable(ds.id, train_type='sdxl', allow_caption_mismatch=True)
 
 
+def test_concept_sdxl_mismatch_does_not_name_an_unreachable_mode(app):
+    """A CONCEPT dataset on SDXL is a real dead end, and the refusal must say so.
+
+    Reproduced before it was touched: _caption_concept has no booru variant and
+    does not even accept a `mode`, and the prose/booru selector is hidden on
+    conceptual datasets — so concept captions are ALWAYS prose, and an SDXL
+    concept dataset trips MISMATCH_CAPTION on every launch. The generic advice
+    ("Re-caption in 'Booru tags' mode") therefore sends the user hunting for a
+    control that exists nowhere for them.
+
+    Until a booru concept captioner exists, the honest refusal names the two
+    paths that DO exist: a prose family, or forcing with the cost stated.
+    """
+    import pytest
+    from app.services import lora_training as lt
+    from app.services import face_dataset_service as svc
+    from app.models import FaceDatasetImage
+    from app.config import LOCAL_USER
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'C1', 'zcpt1', kind='concept',
+                                concept_desc='taking a selfie', train_type='sdxl')
+        # What _caption_concept really emits: scene-exhaustive prose describing
+        # everything EXCEPT the shared concept.
+        prose = ('a woman in a red dress stands on a balcony at dusk, city lights '
+                 'behind her, warm rim lighting, shot from the waist up')
+        for i in range(20):
+            svc.db.session.add(FaceDatasetImage(dataset_id=ds.id, status='keep',
+                                                filename='x.webp',
+                                                caption=f'{prose}, scene {i}'))
+        svc.db.session.commit()
+        with pytest.raises(ValueError, match='MISMATCH_CAPTION') as err:
+            lt.assert_trainable(ds.id, train_type='sdxl')
+        msg = str(err.value)
+        # It must NOT promise a mode a concept dataset cannot reach...
+        assert "Re-caption in 'Booru tags' mode" not in msg, msg
+        # ...and it must offer the two escapes that actually exist.
+        assert 'concept dataset' in msg, msg
+        assert 'Z-Image' in msg and 'force' in msg, msg
+        # Forcing still works — this is a confirmable refusal, not a wall.
+        lt.assert_trainable(ds.id, train_type='sdxl', allow_caption_mismatch=True)
+
+
+def test_character_sdxl_mismatch_keeps_the_actionable_recaption_advice(app):
+    """The concept wording must not leak onto CHARACTER datasets, where the
+    'Booru tags' selector is right there and re-captioning is the best answer."""
+    import pytest
+    from app.services import lora_training as lt
+    from app.services import face_dataset_service as svc
+    from app.models import FaceDatasetImage
+    from app.config import LOCAL_USER
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'C2', 'zcpt2', train_type='sdxl')
+        prose = 'A woman reading a book in a sunlit cafe, sitting by the window.'
+        for i in range(20):
+            svc.db.session.add(FaceDatasetImage(dataset_id=ds.id, status='keep',
+                                                filename='x.webp',
+                                                caption=f'{prose} Scene {i}.'))
+        svc.db.session.commit()
+        with pytest.raises(ValueError, match='MISMATCH_CAPTION') as err:
+            lt.assert_trainable(ds.id, train_type='sdxl')
+        assert "Re-caption in 'Booru tags' mode" in str(err.value)
+
+
 def test_style_default_trigger_salted_no_collision(app):
     """Audit fix: two styles created WITHOUT a trigger must not both land on the
     'zchar' default (the anti-collision guard would block the 2nd training run)."""
@@ -596,8 +659,13 @@ def test_step_cap_floor_500(app, tmp_path, monkeypatch):
     monkeypatch.setattr(lt, '_watch_training', lambda *a, **k: None)
 
     with app.app_context():
+        from PIL import Image
+
         ds = svc.create_dataset(LOCAL_USER, 'Floor', 'floortrig')
+        image_dir = svc._dataset_dir(ds.id)
         for i in range(12):
+            Image.new('RGB', (32, 32), (i, 20, 40)).save(
+                os.path.join(image_dir, f'x{i}.webp'), 'WEBP')
             svc.db.session.add(lt.FaceDatasetImage(dataset_id=ds.id, status='keep',
                                                    filename=f'x{i}.webp', caption='a caption here'))
         svc.db.session.commit()
@@ -618,6 +686,50 @@ def test_step_cap_floor_500(app, tmp_path, monkeypatch):
         assert train_cfg['steps'] == 500
         ds0 = config['config']['process'][0]['datasets'][0]
         assert 'mask_path' not in ds0
+
+
+def test_local_launch_refuses_when_run_provenance_cannot_be_persisted(
+        app, tmp_path, monkeypatch):
+    from PIL import Image
+    from app.config import LOCAL_USER
+    from app.services import checkpoint_registry
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as lt
+
+    _configure_aitoolkit(tmp_path, monkeypatch, app)
+    spawned = []
+    monkeypatch.setattr(
+        lt.subprocess, 'Popen',
+        lambda args, *_a, **_k: spawned.append(args))
+    monkeypatch.setattr(lt, '_watch_training', lambda *_a, **_k: None)
+
+    with app.app_context():
+        ds = svc.create_dataset(
+            LOCAL_USER, 'Registry required', 'registry_required')
+        filename = 'source.webp'
+        Image.new('RGB', (32, 32), (12, 34, 56)).save(
+            os.path.join(svc._dataset_dir(ds.id), filename), 'WEBP')
+        svc.db.session.add(lt.FaceDatasetImage(
+            dataset_id=ds.id, status='keep', filename=filename,
+            caption='a caption'))
+        svc.db.session.commit()
+        export = tmp_path / 'registry-export'
+        export.mkdir()
+        monkeypatch.setattr(
+            lt, 'export_dataset_to_aitoolkit',
+            lambda *_a, **_k: str(export))
+        monkeypatch.setattr(
+            checkpoint_registry, 'register_launch', lambda *_a, **_k: None)
+
+        with pytest.raises(RuntimeError, match='could not persist'):
+            lt.launch_training(
+                LOCAL_USER, ds.id, steps=500,
+                check_captions=False, masked=False)
+
+        assert not any(
+            isinstance(args, (list, tuple)) and len(args) > 1
+            and str(args[1]).lower() == 'run.py'
+            for args in spawned)
 
 
 def test_post_popen_identity_failure_stays_fail_closed_without_raising(
@@ -758,7 +870,10 @@ def test_two_launches_cannot_enter_dataset_export_concurrently(
         checkpoint_registry, 'prepare_launch',
         lambda *_a, **_k: {'manifest': [], 'snapshot': {}})
     monkeypatch.setattr(
-        checkpoint_registry, 'register_launch', lambda *_a, **_k: None)
+        checkpoint_registry, 'prepared_generation_identity',
+        lambda prepared: {} if prepared is not None else None)
+    monkeypatch.setattr(
+        checkpoint_registry, 'register_launch', lambda *_a, **_k: object())
     monkeypatch.setattr(lt.subprocess, 'Popen', lambda *_a, **_k: _FakeProc(9191))
     monkeypatch.setattr(
         lt, '_record_training_process_identity', lambda _pid: None)
@@ -825,6 +940,90 @@ def test_two_launches_cannot_enter_dataset_export_concurrently(
         for dataset_id, result in outcomes)
     with app.app_context():
         lt._clear_training_identity(ttl_seconds=1)
+
+
+def test_local_export_and_run_snapshot_share_one_dataset_generation(
+        app, tmp_path, monkeypatch):
+    from app.config import LOCAL_USER
+    from app.services import checkpoint_registry
+    from app.services import dataset_activity
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as lt
+
+    with app.app_context():
+        dataset = svc.create_dataset(
+            LOCAL_USER, 'Atomic training source', 'atomic_training_source')
+        seen = []
+
+        def fake_export(user_id, dataset_id, **_kwargs):
+            activity = dataset_activity.get(dataset_id)
+            seen.append(('export', activity and activity['kind']))
+            # Every normal Dataset mutation sees the same reservation while the
+            # derived ai-toolkit copy is being written.
+            with pytest.raises(RuntimeError, match='being frozen for training'):
+                svc.import_images(user_id, dataset_id, [b'not-an-image'])
+            return str(tmp_path / 'atomic-export')
+
+        prepared = {'manifest': [[1, 'caption', 'file']], 'snapshot': {}}
+
+        def fake_prepare(_user_id, dataset_id, **_kwargs):
+            activity = dataset_activity.get(dataset_id)
+            seen.append(('snapshot', activity and activity['kind']))
+            return prepared
+
+        monkeypatch.setattr(lt, 'export_dataset_to_aitoolkit', fake_export)
+        monkeypatch.setattr(
+            checkpoint_registry, 'prepare_launch', fake_prepare)
+        monkeypatch.setattr(
+            checkpoint_registry, 'prepared_generation_identity',
+            lambda value: {} if value is prepared else None)
+        monkeypatch.setattr(
+            lt.queue_manager, '_get_system_state',
+            lambda _key, default=None: default)
+
+        folder, frozen = lt._export_and_freeze_local_dataset(
+            LOCAL_USER, dataset.id, masked=False, base_model=None)
+
+        assert folder == str(tmp_path / 'atomic-export')
+        assert frozen is prepared
+        assert seen == [
+            ('export', 'training_export'),
+            ('snapshot', 'training_export'),
+        ]
+        assert dataset_activity.get(dataset.id) is None
+
+
+def test_local_training_refuses_when_the_atomic_snapshot_cannot_be_frozen(
+        app, tmp_path, monkeypatch):
+    from app.config import LOCAL_USER
+    from app.services import checkpoint_registry
+    from app.services import dataset_activity
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as lt
+
+    with app.app_context():
+        dataset = svc.create_dataset(
+            LOCAL_USER, 'Unfreezable source', 'unfreezable_source')
+        calls = []
+        monkeypatch.setattr(
+            lt, 'export_dataset_to_aitoolkit',
+            lambda *_a, **_k: str(tmp_path / 'failed-freeze-export'))
+
+        def fail_once(*_args, **_kwargs):
+            calls.append('prepare')
+            return None
+
+        monkeypatch.setattr(checkpoint_registry, 'prepare_launch', fail_once)
+        monkeypatch.setattr(
+            lt.queue_manager, '_get_system_state',
+            lambda _key, default=None: default)
+
+        with pytest.raises(RuntimeError, match='could not freeze'):
+            lt._export_and_freeze_local_dataset(
+                LOCAL_USER, dataset.id, masked=False, base_model=None)
+
+        assert calls == ['prepare']
+        assert dataset_activity.get(dataset.id) is None
 
 
 def test_direct_launch_refuses_unresolved_exact_resume_before_preflight(
@@ -1516,3 +1715,31 @@ def test_sample_prompts_string_cap_and_reset(app):
         eff3 = lt.update_train_settings(LOCAL_USER, ds.id, {'sample_prompts': ''})
         assert eff3['sample_prompts'] == []                             # cleared → defaults
         assert any('portrait' in p for p in lt._sample_prompts(ds, 'ztrig'))
+
+
+def test_find_run_collision_only_names_datasets_the_library_lists(app, monkeypatch):
+    """Two datasets sharing a trigger share an ai-toolkit run folder, and
+    ai-toolkit auto-resumes from that folder — so the second launch is refused,
+    naming the first.
+
+    The search runs over `face_dataset_service.list_datasets`, the same listing
+    the library page shows, not over a raw query: a refusal that names a row the
+    user cannot open is a training run blocked with no way out, days after
+    whatever created that row. Pinned here because a regression would surface
+    only as an error message about a dataset that is not in the library."""
+    from app.services import lora_training as lt
+    from app.services import face_dataset_service as svc
+    from app.config import LOCAL_USER
+    with app.app_context():
+        first = svc.create_dataset(LOCAL_USER, 'Alice', 'alice', train_type='zimage')
+        second = svc.create_dataset(LOCAL_USER, 'Alice again', 'alice', train_type='zimage')
+        assert lt._run_name(first) == lt._run_name(second)       # same run folder
+
+        clash = lt.find_run_collision(LOCAL_USER, second.id)
+        assert clash is not None and clash.id == first.id
+
+        # Hide `first` from the listing: the refusal must go with it (proving the
+        # enumeration goes through the choke-point), and `second` being in the
+        # list must not make it collide with itself.
+        monkeypatch.setattr(svc, 'list_datasets', lambda uid: [second])
+        assert lt.find_run_collision(LOCAL_USER, second.id) is None

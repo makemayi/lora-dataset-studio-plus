@@ -58,7 +58,19 @@ DEFAULTS = {
     # remote devices (access_token is then generated + persisted here so it
     # survives restarts and is copyable from Settings). Loopback never needs it.
     'server': {'host': '127.0.0.1', 'port': 5050, 'require_token': False, 'access_token': ''},
-    'paths': {'dataset_images_root': ''},                      # '' -> DATA_DIR/datasets
+    # Every path here means "'' = the default under DATA_DIR". Storing the
+    # resolved path instead would freeze today's disk into config.json and make
+    # a later DATA_DIR move silently wrong, so blank stays blank.
+    #   cloud_runs_dir     working area of a cloud run (dataset copy, samples,
+    #                      logs) — big, and safe to throw away once a run ended.
+    #   checkpoints_dir    the DURABLE checkpoint store. Deliberately NOT under
+    #                      cloud_runs_dir: the staging cleanup used to be the
+    #                      only copy of a never-deployed .safetensors, and
+    #                      emptying the trash after it destroyed weights.
+    'paths': {'dataset_images_root': '',                       # '' -> DATA_DIR/datasets
+              'cloud_runs_dir': '',                            # '' -> DATA_DIR/cloud_runs
+              'checkpoints_dir': '',                           # '' -> DATA_DIR/checkpoints
+              'video_datasets_dir': ''},                       # '' -> DATA_DIR/video_datasets
     'comfyui': {'api_url': 'http://127.0.0.1:8188', 'base_dir': '',
                 'output_dir': '', 'input_dir': '', 'models_dir': '', 'loras_dir': '',
                 # setup_skipped (default False): the user consciously chose "continue
@@ -168,6 +180,24 @@ DEFAULTS = {
     # merge, scrape-to-dataset). It does not touch generated images, the ≤2048
     # copies handed to a generation API, or an image the user already curated.
     'dataset_import': {'max_side': 1024, 'encoding': 'preserve'},
+    # 🛡️ The shared image INPUT budget — how big a source file any lane is
+    # allowed to decode. Not a dataset-import preference: dataset import, ZIP
+    # and scrape ingest, Bank scan and thumbnails, edits, ComfyUI staging and
+    # Ollama vision all read these two numbers, so an image that can be
+    # imported can also be looked at.
+    #
+    # It is a MEMORY guard, so it is reasoned in decoded bytes: 3 B per RGB
+    # pixel, 4 B per RGBA pixel, and an edit or analysis pass can hold a second
+    # copy at once. The shipped 64 Mi-pixels is ~192 MiB for one RGB decode
+    # (~256 MiB RGBA) and ~384-512 MiB with a working copy — room for every
+    # current phone/35 mm master (61 MP = 57 Mi-pixels) and for panoramas,
+    # which the previous hardcoded 16 Mi-pixels / 8192 px refused.
+    #
+    # 0 on either key = NO limit for that dimension. The app then also stops
+    # capping Pillow's own decompression-bomb threshold, so a malformed or
+    # hostile file can be decoded until it exhausts memory. That is a real
+    # trade, offered rather than imposed; the Settings card says so.
+    'image_input': {'max_side': 16384, 'max_pixels': 64 * 1024 * 1024},
     'training': {'default_family': 'zimage'},
     # Concept face masking (opt-in per dataset, Advanced training options). Both
     # knobs are exposed because NOBODY has measured the right value: no public A/B
@@ -198,7 +228,11 @@ DEFAULTS = {
         # to a raw-image launch using `image`/`onstart` below.
         'template_hash': '471ed5903d8cdb8e63b0d0e50f6cd519',
         'ui_port': 18675,              # container port the UI is reachable on (Caddy proxy)
-        'image': 'vastai/ostris-ai-toolkit:4625406-2026-07-12-cuda-12.9',  # raw-image fallback only
+        # Raw-image fallback only — BUT the tag also names the ai-toolkit commit
+        # the dense (full-transformer) recipe's supported/refused verdicts were
+        # read against. Bumping it means a different trainer: re-read the lever
+        # comments in services/lora_training.py first (a test enforces the pin).
+        'image': 'vastai/ostris-ai-toolkit:4625406-2026-07-12-cuda-12.9',
         'max_price_per_hour': 0.80,    # background safety cap on offer price, $/h
         'offer_scan_limit': 100,       # offers fetched when listing GPU speed tiers
         'pod_overhead_minutes': 35,    # boot+model download+quantize (measured ~40 min live), in cost estimates
@@ -264,6 +298,36 @@ DEFAULTS = {
             # recovery instead of declaring success or destroying the only copy.
             'verification_attempts': 3,
             'verification_retry_seconds': 5,
+            # Private Hugging Face storage the delivery needs, checked BEFORE a
+            # pod is rented (run #146 died at step 2750/3000 on a 403 "private
+            # repository storage limit reached"). 0 = infer the allowance from
+            # the plan documented by Hugging Face (100 GB free / 1 TB PRO) —
+            # an ESTIMATE: the Hub publishes no quota endpoint, and the observed
+            # refusal came well below the documented free figure. Set the real
+            # number here to make the pre-check exact. Never a hard lock: the
+            # refusal is confirmable ("Train anyway").
+            'private_storage_limit_gb': 0,
+            # Headroom on top of checkpoint × saves kept (model card, licence,
+            # a push that lands exactly on the ceiling still fails).
+            'storage_margin_gb': 20,
+            # 0 = size one dense checkpoint from what past runs really delivered
+            # (their persisted Hub integrity proof), else ~26 GB.
+            'checkpoint_size_gb': 0,
+            # Where a full model is delivered: 'both' (default) downloads it to
+            # this computer FIRST, proves it, and only then backs the master up
+            # to the private Hugging Face repository; 'local' skips the backup
+            # (and with it the ability to continue that run later); 'hub' is the
+            # historical Hugging-Face-only delivery. The order is the point: a
+            # full private quota can no longer end a training, because nothing
+            # is pushed while it trains.
+            'delivery': 'both',
+            # Free space to leave on the checkpoint volume on top of the
+            # delivery itself, checked before the pod is rented.
+            'local_disk_margin_gb': 15,
+            # Ceilings for the two pod-side Hugging Face transfers (backing the
+            # master up, and pulling it back when continuing a run).
+            'hub_push_budget_seconds': 3600,
+            'hub_fetch_budget_seconds': 3600,
         },
         'onstart': '',                 # raw-image fallback: optional startup command
     },
@@ -316,6 +380,41 @@ DEFAULTS = {
     #   "never stay warm": every distinct query pays the ~8 s load, which is the
     #   right trade on a memory-tight machine.
     'bank_scoring': {'python': '', 'text_search_idle_minutes': 10},
+    # 🗣 Which checkpoint writes the video captions. A SETTING rather than a
+    # constant because the choice is not a preference: a model that describes
+    # what it sees in evasive terms produces captions that are about something
+    # slightly other than the footage, and a LoRA trained on those learns to look
+    # away too — with nothing in the output to reveal it. Empty = the shipped
+    # default, so an install that sets nothing captions exactly as before.
+    # Any checkpoint of the same architecture works; see settings-reference.
+    # style: which PROMPT writes the captions — 'standard' (default, the shipped
+    #   wording) or 'plain', which grants explicit permission to name what is on
+    #   screen. Measured to matter MORE than the checkpoint: asked the standard
+    #   way, even an uncensored model describes around explicit footage, and the
+    #   base model asked plainly outperformed it. A caption that talks around its
+    #   subject teaches the trained model to look away. Empty = 'standard'.
+    'video_caption': {'model': '', 'style': ''},
+    # Optional second semantic space for Image Bank. Its interpreter is recorded
+    # separately so ✨ Score may borrow a user's CUDA Python without making the
+    # SigLIP2 installer mutate that environment. Existing configs without this
+    # key retain the historical bank_scoring.python fallback at runtime. The
+    # aesthetic MLP is CLIP-specific, while SigLIP2 powers only semantic
+    # search, selection, coverage and near-duplicate grouping. Weights are
+    # installed explicitly in Setup and inference is local-files-only, so
+    # selecting it can never trigger a surprise 1.5 GB download.
+    #
+    # The cosine distribution is not CLIP's. Keep its duplicate calibration in
+    # this separate section so SigLIP2 cannot retune historical CLIP Banks.
+    'bank_semantic': {
+        'python': '', 'models_root': '', 'device': 'auto',
+        'siglip2_semantic_dup_threshold': 0.97,
+    },
+    # fp8 quantization runs `fp8_export.py` in a SUBPROCESS, because it needs
+    # torch + safetensors and this app deliberately installs without them
+    # (gigabytes). Empty -> the same interpreter ✨ Score uses, then ai-toolkit's,
+    # then the app's own. Never imported in-process: doing so shipped a feature
+    # that could not run at all on a real install.
+    'quantize': {'python': ''},
     # Watermark inpainting (simple-lama-inpainting, extra ML). Dedicated key so a
     # user can override it, but defaults empty -> reuse the same ML interpreter as
     # rembg/insightface (masks.python) then sys.executable. Never imported in-process.
@@ -324,11 +423,118 @@ DEFAULTS = {
     # engine). A persisted user preference (Settings ▸ Watermark inpainting AND the
     # batch Clean bar both edit it); the review lightbox can still override it per image.
     'watermark': {'python': '', 'device': 'auto', 'allow_crop': True},  # auto|cuda|cpu
+    # 🚩 Dedicated watermark DETECTOR (optional extra: a SigLIP2 classifier that
+    # ranks + a Grounding DINO pass that locates). When installed, the Find pass
+    # uses it instead of asking the vision model image by image; when not, nothing
+    # changes and the vision model still does the work.
+    # python: its interpreter. Empty = reuse the bank-scoring environment (which
+    #   already has torch + transformers) and then the app's own — so a normal
+    #   install simply probes ✗ and keeps the vision-model path.
+    # models_root: where the ~0.9 GB of weights live. Empty = data/models/watermark_detect.
+    # threshold: the classifier score at or above which an image is FLAGGED.
+    #   0.94 is MEASURED, not a guess, and it is nowhere near the 0.5 a
+    #   probability normally implies: this model's scores are compressed hard
+    #   against 1, so on a 110-image hand-labelled sample of a real 29 759-image
+    #   bank, 0.5 flagged 52 of the 55 CLEAN images while 0.94 flagged none of
+    #   them and still caught 54 of the 55 marked ones. Raise it toward 0.96 to
+    #   miss more rather than crop anything by mistake; lower it toward 0.92 to
+    #   catch the faintest marks and hand-check a few clean images.
+    # device: auto|cuda|cpu, same meaning as the inpainting device.
+    # locate: run the second (localisation) model on flagged images. Off = images
+    #   are flagged with NO box, which the crop/inpaint levels cannot route on —
+    #   only worth it to save time on a bank you intend to filter, not clean.
+    # backend: WHICH route 🧽 Find watermarks takes, on BOTH surfaces (bank and
+    #   dataset). 'auto' = the detector when its extra is installed, the vision
+    #   model otherwise — which is exactly what the bank has always done, so
+    #   'auto' changes nothing anywhere. 'detector' / 'vision' pin one route; a
+    #   pinned 'detector' with no extra installed does NOT fail, it runs the
+    #   vision route and SAYS so (see watermark_detector.resolve_backend).
+    'watermark_detect': {'python': '', 'models_root': '', 'threshold': 0.94,
+                         'device': 'auto', 'locate': True, 'backend': 'auto'},
+    # 🎬 Shot-boundary detection for the video bank (TransNetV2). Declared here so
+    # a full-config Save round-trips these keys instead of failing "unknown config
+    # section" — the same reason bank_scoring is declared above.
+    # python: its interpreter. Empty = reuse the bank-scoring environment, which
+    #   already carries torch; a second copy would cost the user ~2.5 GB for
+    #   nothing. Then the app's own, which simply probes unavailable.
+    # threshold: the detector's cut probability at or above which a frame is a
+    #   boundary. 0.5 is the reference implementation's own default and is NOT a
+    #   measured value for this app's material — lower it to cut more finely on
+    #   soft transitions, raise it if dissolves are being split into fragments.
+    # min_shot_frames: shots shorter than this are DROPPED, not merged into a
+    #   neighbour — merging would silently move that neighbour's boundary, and a
+    #   boundary is the one thing the whole lane is built to get right. 5 rejects
+    #   a stray flash cut while leaving real rapid montages intact. Also not a
+    #   measured constant; no labelled sample of "too short" exists yet.
+    # device: auto|cuda|cpu. The network runs on 48x27 frames, so it is never the
+    #   bottleneck — decoding is. CPU is a perfectly reasonable choice here, and
+    #   it leaves the GPU free for captioning and training.
+    'shot_detect': {'python': '', 'threshold': 0.5, 'min_shot_frames': 5,
+                    'device': 'auto'},
+    # 🎬 Video bank quality cuts (wave 2). ALL None by default — a cut that has
+    # not been chosen filters NOTHING. That is a decision, not an omission: the
+    # published thresholds measurably do not transfer between corpora (the public
+    # motion floor lands at the 7th percentile of this machine's own test bank),
+    # so shipping one as a default would silently gut some users' banks. The
+    # dry-run endpoint exists precisely so a user picks cuts against their OWN
+    # distribution. Raw scores persist; flags are recomputed at read time, so
+    # changing any of these re-sorts every bank instantly, no rescan.
+    # Quality cuts of the 🎬 video bank — all None, because published thresholds
+    # measurably do not transfer between corpora. See video_metrics.THRESHOLD_KEYS
+    # for the canonical list; anything missing here still reads as None.
+    # watermark_max is the ONE cut here that ships with a number, and the reason
+    # is that it is not a corpus statistic. Motion and sharpness are properties
+    # of someone's footage (which is why the published defaults land at the 7th
+    # percentile of this machine's bank); a watermark score is a CLASSIFIER's
+    # probability, calibrated with the model itself — so the image lane's
+    # measurement transfers where a motion floor does not. 0.94 is that
+    # measurement (see watermark_detect.threshold above: 110 hand-labelled images
+    # of a 29 759-image bank; 0.94 flagged none of the 55 clean ones and still
+    # caught 54 of the 55 marked ones). Set it to null to flag nothing.
+    #
+    # duplicate_threshold is a COMPUTE-time setting, not a read-time cut, which is
+    # why it is not in video_metrics.THRESHOLD_KEYS: changing it means re-running
+    # the ✂ Duplicates pass (instant — it re-reads the vectors 🔎 Search cached,
+    # no GPU). 0.96 is inherited from the image lane's semantic near-duplicate cut
+    # over the SAME CLIP space (bank.semantic_dup_threshold); no video-pair
+    # calibration exists yet, and video_clip_dedup says so out loud.
+    'video_bank': {'min_duration_s': None,
+                   'motion_floor': None, 'motion_ceiling': None,
+                   'luma_floor': None, 'freeze_max': None,
+                   'sharpness_floor': None,
+                   'watermark_max': 0.94,
+                   'duplicate_threshold': 0.96},
     # consistency_strength: the dx8152 LoRA anchors STRUCTURE (composition/
     # background), not the face — its own guide says start at 0.5 and that
     # 0.8-1.0 "can prevent edits from applying". 0.9 made every variation a
     # near-copy of the reference. 0 disables the LoRA entirely.
     'klein': {'consistency_lora': 'klein/Flux2-Klein-9B-consistency-V2.safetensors',
+              # Optional user-pinned model files for the three required Klein
+              # slots. Each accepts a ComfyUI-relative loader name (e.g.
+              # 'klein/flux-2-klein-9b-fp8.safetensors' under models/unet or
+              # models/diffusion_models; a bare name for a file at a root) OR an
+              # ABSOLUTE path — a path under any registered model root (including
+              # extra_model_paths.yaml roots) is converted to the relative name a
+              # loader node needs. klein.consistency_lora and the
+              # generation_lora_presets rows take a path the same way.
+              # Empty = auto-detect (canonical download name, then the narrow
+              # token scan) — the historical behaviour, byte for byte.
+              #
+              # The scan is deliberately narrow (wrong model >> missing model),
+              # which means it DECLINES anything it cannot name: a UNET outside a
+              # 'klein'-named folder, an encoder whose filename carries no known
+              # token. Those files are on disk and get reported as MISSING, and
+              # no amount of re-downloading fixes that. A pin removes the
+              # resolver's discretion — the named file resolves, so the integrity
+              # verdict (klein_invalid_assets) finally gets to say "present but
+              # unreadable" when that is the truth.
+              #
+              # A pinned file that cannot be resolved falls back to auto-detection
+              # with a visible badge in Settings — it never blocks generation. A
+              # file genuinely outside every ComfyUI root cannot be loaded by
+              # ComfyUI at all: register its folder in extra_model_paths.yaml (the
+              # app parses it identically) — the badge says exactly that.
+              'unet': '', 'text_encoder': '', 'vae': '',
               'consistency_strength': 0.5,
               # Optional generation-LoRA PRESETS (Idea by @waltm — Discord
               # feature request): named combinations the user picks per run.
@@ -344,6 +550,20 @@ DEFAULTS = {
               # nsfw_lora keys are migrated in by _migrate_klein_loras() and
               # then dropped.
               'generation_lora_presets': [],
+              # Which of the presets above the run panel STARTS on. Empty = none,
+              # which is byte-for-byte the behaviour every install had before this
+              # key existed (the picker opened on "None" on every single visit —
+              # so a carefully configured preset applied only if you remembered to
+              # re-pick it, and the PNG metadata of a run that forgot showed no
+              # LoRA at all). It is a STARTING POINT, not a lock: the picker still
+              # offers None and every other preset for that run, and choosing
+              # differently there never rewrites this setting.
+              # Fail-closed like the rest of the preset chain: a name matching no
+              # configured preset falls back to "none", never to a blocked run.
+              # Per ENGINE on purpose — klein.generation_lora_presets and
+              # krea.generation_lora_presets are independent lists and the same
+              # name can mean two different chains.
+              'default_generation_lora_preset': '',
               # Optional instruction for small scraped-image rescue only.
               # Empty is intentional: never invent a restoration prompt for the user.
               'small_image_prompt': '',
@@ -413,6 +633,11 @@ DEFAULTS = {
         # is no migration and no save carve-out — _deep_merge preserves a list
         # the incoming partial doesn't mention.
         'generation_lora_presets': [],
+        # Krea's own starting preset for the run panel — the twin of
+        # klein.default_generation_lora_preset, and deliberately a SEPARATE key:
+        # the two preset lists are independent, so one name can name two
+        # different chains. Empty = none = the historical behaviour.
+        'default_generation_lora_preset': '',
         # THE consistency <-> prompt-adherence dial, in pixels: the resolution the
         # reference is shown to the vision text-encoder at. LOW = follows the
         # PROMPT (more variety, weaker likeness); HIGH = RESEMBLES the reference
@@ -541,6 +766,11 @@ DEFAULTS = {
         # first build in the SEEDVR2 folder. Set it to a filename to pin one (a
         # 7B build you dropped in yourself resolves exactly the same way).
         'model': '',
+        # Same contract for the VAE: blank = the canonical ema_vae_fp16, else the
+        # first file in the folder whose name says VAE. Set it to a filename when
+        # yours is named something the heuristic cannot recognise — a pin is
+        # honoured against the whole folder, which is the only reason it exists.
+        'vae': '',
         # Target for the SHORT edge in pixels; the long edge follows the source
         # aspect. 1080 is the node's own default and a sane dataset target — LoRA
         # training buckets rarely exceed it, so going higher mostly costs VRAM.
@@ -553,6 +783,25 @@ DEFAULTS = {
         # tone better on heavily degraded sources. Colour fidelity is the whole
         # reason this engine exists, so this is deliberately exposed.
         'color_correction': 'lab',
+        # How the high-resolution (tiled) lane is chosen, when the TTP node pack
+        # is installed. 'auto' (default) tiles when tiling helps — past the size
+        # the model is comfortable at, or when the frame would not fit. Tiling
+        # preserves high-frequency detail, not just VRAM (SurpassHR's
+        # side-by-side, GitHub #32); the old VRAM-only rule meant the bigger
+        # your card the less often you got the better picture, and it is gone.
+        # 'always' tiles whenever there is more than one tile to make; 'never'
+        # stays full-frame. Without the pack this has no effect.
+        'tiling': 'auto',
+        # Side of one tile, in pixels — THE VRAM lever of this engine. 1024 is
+        # the contributed value and a good one on a big card; on 8 GB, 768 or
+        # 512 is the difference between a 4K upscale and an out-of-memory, at
+        # the cost of more seams. It also sizes the VAE's tiled encode/decode,
+        # so it helps on the full-frame lane too, tiling pack or not.
+        'tile_px': 1024,
+        # Output short edge past which 'auto' tiles. 0 (default) = derive it from
+        # the tile size (1.5x = the shipped 1536 at a 1024 tile) so the crossover
+        # follows the tile. A positive value places it by hand.
+        'tile_threshold': 0,
         # Transformer blocks offloaded to system RAM during inference. 0 = none
         # (fastest). Raise it to fit a bigger build on a smaller card; it trades
         # speed for VRAM headroom, it does not change the result.
@@ -1119,6 +1368,30 @@ def dataset_images_root() -> Path:
     root.mkdir(parents=True, exist_ok=True)
     return root
 
+def cloud_runs_root(create=True) -> Path:
+    """Working area of cloud training runs (one ``run_<id>/`` per run: the
+    exported dataset copy, the sample images and the mirrored training log).
+    Relocatable — this is the directory that grows to tens of GB. It no longer
+    holds the only copy of anything: checkpoints live in checkpoints_root()."""
+    p = get('paths.cloud_runs_dir') or ''
+    root = Path(p) if p else _data_dir() / 'cloud_runs'
+    if create:
+        root.mkdir(parents=True, exist_ok=True)
+    return root
+
+def checkpoints_root(create=True) -> Path:
+    """The durable checkpoint store — one ``run_<id>/`` per cloud run holding the
+    ``.safetensors`` it produced. Separate from cloud_runs_root() on purpose: the
+    staging cleanup is allowed to throw its directory away, this one never is.
+
+    ``create=False`` for the READ path: listing a run's saves happens on every
+    hub poll, and an mkdir per run per poll buys nothing."""
+    p = get('paths.checkpoints_dir') or ''
+    root = Path(p) if p else _data_dir() / 'checkpoints'
+    if create:
+        root.mkdir(parents=True, exist_ok=True)
+    return root
+
 def backups_dir() -> Path:
     """Where 'Back up everything' writes its master archives (created on demand).
     Always under the app's data dir — never the (possibly relocated) datasets
@@ -1142,6 +1415,35 @@ def banks_root() -> Path:
     one subfolder per bank — never the source images, which stay in the user's
     folder untouched."""
     root = _data_dir() / 'banks'
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+def video_banks_root() -> Path:
+    """Working data of the 🎬 video banks — THUMBNAILS AND NOTHING ELSE.
+
+    The video bank stores bounds, not media: a clip is a pair of timestamps until
+    the moment it is promoted. So unlike banks_root(), which also holds embedding
+    caches, this tree only ever grows by one small .jpg per detected shot, and
+    deleting it costs a thumbnail pass rather than a triage.
+
+    Separate from banks_root() so the two lanes can be sized, moved and cleaned
+    independently in Settings › Storage — a user with four hundred hours of rushes
+    and a user with fifty thousand photos have very different problems."""
+    root = _data_dir() / 'video_banks'
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+def video_datasets_root() -> Path:
+    """Built video training sets: one flat ``<dataset id>/`` per set, holding the
+    encoded ``clip_0001.mp4`` files and their homonym ``.txt`` captions.
+
+    Relocatable, and it is the video lane's equivalent of dataset_images_root() —
+    this is the directory that grows to tens of GB, because unlike the bank it
+    holds real encoded media. NEVER the same tree as dataset_images_root(): the
+    image lane's storage layout is one folder per dataset id too, and sharing the
+    root would make two different tables claim the same folder name."""
+    p = get('paths.video_datasets_dir') or ''
+    root = Path(p) if p else _data_dir() / 'video_datasets'
     root.mkdir(parents=True, exist_ok=True)
     return root
 

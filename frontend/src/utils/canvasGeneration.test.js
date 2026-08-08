@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  anchorDataset, canvasFamily, canvasRunSelections, canvasSelectionSummary,
-  canvasUndeployed, describeCanvasLaunch, isCanvasCheckpointSelected,
+  anchorDataset, canvasBlendBlocker, canvasCheckpointKey, canvasFamily,
+  canvasRunSelections, canvasSelectionSummary, canvasStackKey, canvasStackTriggers,
+  canvasStackWeight, canvasStackWithoutTrigger, canvasUndeployed,
+  describeCanvasLaunch, isCanvasCheckpointSelected,
   pruneCanvasSelection, refreshCanvasSelection, toggleCanvasCheckpoint,
 } from './canvasGeneration.js';
 
@@ -129,4 +131,68 @@ test('canvasFamily is null the moment the picks disagree', () => {
   assert.equal(canvasFamily([pick(1, 1, 1)]), 'krea');
   assert.equal(canvasFamily([pick(1, 1, 1), pick(1, 2, 2, { family: 'sdxl' })]), null);
   assert.equal(canvasFamily([]), null);
+});
+
+/* --- 🧬 Blend ------------------------------------------------------------- */
+
+test('a blend weight is keyed on the PILL, so deploying does not reset the sliders', () => {
+  // THE reason the shim does not key on the checkpoint filename: that filename is
+  // null while the save is on disk only, and it APPEARS when "Deploy, then
+  // generate" runs. Keying on it would silently throw away every slider the user
+  // moved before launching.
+  const before = pick(3, 42, 1500, { deployed: false, filename: null });
+  const after = { ...before, deployed: true, filename: 'krea\\deployed.safetensors' };
+  assert.equal(canvasStackKey(before), canvasStackKey(after));
+  assert.equal(canvasStackKey(before), canvasCheckpointKey(3, 42, 1500));
+
+  const weights = { [canvasStackKey(before)]: 0.65 };
+  assert.equal(canvasStackWeight(weights, after), 0.65);
+});
+
+test('a blend weight uses the Test Studio clamp, not a second one', () => {
+  const e = pick(1, 10, 1000);
+  const k = canvasStackKey(e);
+  assert.equal(canvasStackWeight({}, e), 1);
+  assert.equal(canvasStackWeight({ [k]: 9 }, e), 2);
+  assert.equal(canvasStackWeight({ [k]: -4 }, e), 0);
+  assert.equal(canvasStackWeight({ [k]: 0.5555 }, e), 0.56);
+  assert.equal(canvasStackWeight({ [k]: 'nope' }, e), 1);
+});
+
+test('blending needs two picks of ONE family, and says which rule is in the way', () => {
+  assert.match(canvasBlendBlocker([pick(1, 10, 1000)]), /at least two/i);
+  assert.equal(canvasBlendBlocker([pick(1, 10, 1000), pick(2, 20, 2000)]), null);
+  const mixed = [pick(1, 10, 1000), pick(2, 20, 2000, { family: 'sdxl' })];
+  const why = canvasBlendBlocker(mixed);
+  assert.match(why, /krea/);
+  assert.match(why, /sdxl/);
+});
+
+test('a blend payload carries one weight per pick; Compare stays byte for byte what it was', () => {
+  const sel = [pick(1, 10, 1000), pick(2, 20, 2000)];
+  const weights = { [canvasStackKey(sel[0])]: 0.9, [canvasStackKey(sel[1])]: 0.55 };
+  // Depuis le balayage, chaque pastille porte sa LISTE de poids ; sans case
+  // cochee elle vaut un element (le curseur), et `weight` reste envoye pour un
+  // backend qui ignorerait encore le balayage.
+  assert.deepEqual(canvasRunSelections(sel, { blend: true, weights }), [
+    { dataset_id: 1, checkpoint: 'krea\\lora_x_1000.safetensors', record_id: 10, step: 1000, weight: 0.9, weights: [0.9] },
+    { dataset_id: 2, checkpoint: 'krea\\lora_x_2000.safetensors', record_id: 20, step: 2000, weight: 0.55, weights: [0.55] },
+  ]);
+  // No `blend` → not one extra key. The comparison runs must not change shape.
+  for (const entry of canvasRunSelections(sel)) {
+    assert.deepEqual(Object.keys(entry).sort(),
+      ['checkpoint', 'dataset_id', 'record_id', 'step']);
+  }
+});
+
+test('the triggers a blend will inject are listed in pick order, de-duplicated', () => {
+  const sel = [
+    pick(1, 10, 1000, { triggerWord: 'aaa' }),
+    pick(2, 20, 2000, { triggerWord: 'BBB' }),
+    pick(2, 21, 3000, { triggerWord: 'bbb' }),   // same token, collapsed like the backend does
+    pick(3, 30, 4000),                           // no trigger at all
+  ];
+  assert.deepEqual(canvasStackTriggers(sel), ['aaa', 'BBB']);
+  assert.deepEqual(canvasStackWithoutTrigger(sel).map((e) => e.recordId), [30]);
+  assert.deepEqual(canvasStackTriggers([]), []);
 });

@@ -31,7 +31,7 @@ test('the weight is announced for a new bank, and only once measured', () => {
   assert.match(weightNotice({ destination: 'bank', size: { count: 2 } }), /Measuring/)
 })
 
-test('a dataset promotion never quotes the source weight (it re-encodes to webp)', () => {
+test('a dataset promotion never quotes a weight that de-duplication can reduce', () => {
   assert.equal(weightNotice({ destination: 'dataset', size: { bytes: 65e6 } }), null)
 })
 
@@ -42,20 +42,22 @@ test('promoteCount prefers the selection, then the per-target count', () => {
   assert.equal(promoteCount({ useSelection: false }), null)
 })
 
-test('the new-bank summary says copied, un-triaged, and source kept', () => {
+test('the new-bank summary says analysis and triage decisions travel', () => {
   const s = promoteSummary({ destination: 'bank', useSelection: true, selectedCount: 200 })
   assert.match(s, /200 image\(s\)/)
   assert.match(s, /COPIED/)
-  assert.match(s, /un-triaged/)
+  assert.match(s, /analysis/)
+  assert.match(s, /keep\/pending\/reject decisions intact/)
   assert.match(s, /keeps every one of them, marked as promoted/)
 })
 
-test('the dataset summary is unchanged in substance', () => {
+test('the dataset summary promises byte preservation for Bank analysis', () => {
   const s = promoteSummary({
     destination: 'dataset', useSelection: false, promotable: 12, datasetChosen: true,
   })
   assert.match(s, /12 kept image\(s\) not yet in this dataset/)
-  assert.match(s, /normalized to webp/)
+  assert.match(s, /byte-for-byte/)
+  assert.match(s, /Bank analysis can travel/)
   assert.match(s, /source folder are left as they are/)
   const none = promoteSummary({ destination: 'dataset', useSelection: false, datasetChosen: false })
   assert.match(none, /chosen dataset/)

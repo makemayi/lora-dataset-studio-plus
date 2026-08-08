@@ -107,6 +107,31 @@ def test_apply_manual_when_not_git(monkeypatch):
     assert r['ok'] is False and r['manual'] is True and 'releases' in r['url']
 
 
+def test_pinokio_runtime_hands_the_update_back_to_the_launcher(monkeypatch):
+    """Pinokio starts and stops the server. Our restart helper is detached, so
+    an in-app update would leave the launcher showing "stopped" while an
+    untracked server kept the port — and Start would then boot a second one."""
+    monkeypatch.setenv('LDS_RUNTIME', 'pinokio')
+    assert updater.is_pinokio_runtime() is True
+    assert updater.pinokio_update_payload() == {
+        'install_mode': 'pinokio',
+        'can_apply': False,
+        'manual': True,
+        'instructions': [
+            'Stop the app in Pinokio',
+            'Click the Update tab',
+            'Click Start',
+        ],
+    }
+
+
+def test_pinokio_runtime_is_off_by_default_and_case_insensitive(monkeypatch):
+    monkeypatch.delenv('LDS_RUNTIME', raising=False)
+    assert updater.is_pinokio_runtime() is False
+    monkeypatch.setenv('LDS_RUNTIME', ' Pinokio ')
+    assert updater.is_pinokio_runtime() is True
+
+
 def test_apply_no_change(monkeypatch):
     def resp(a):
         if a[:2] == ('rev-parse', '--abbrev-ref'):

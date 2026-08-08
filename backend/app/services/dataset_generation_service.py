@@ -73,6 +73,7 @@ def generate_variations(user_id, dataset_id, variations, multiplier, klein_model
     an unknown name degrades to no extra LoRAs with a log). The preset's chain
     applies to EVERY variation of the run — picking the preset IS the intent,
     there is no automatic per-variation gating."""
+    _guard_not_bank_export(dataset_id)
     try:
         from .klein_edit_helper import enqueue_klein_edit
     except ImportError:
@@ -183,6 +184,7 @@ def generate_variations_krea(user_id, dataset_id, variations, multiplier,
     The row stores the ENGINE ID in `klein_model`, like the API rows do, so the
     grid badge can say "Krea 2 Edit"; the base model itself is re-resolved
     deterministically at enqueue and at regenerate."""
+    _guard_not_bank_export(dataset_id)
     from . import krea_edit_helper as keh
     ds = get_dataset(user_id, dataset_id)
     if not ds:
@@ -271,6 +273,7 @@ def generate_variations_minimax_h3(user_id, dataset_id, variations, multiplier):
     The row stores the ENGINE ID in `klein_model`, like the other lanes, so the
     grid badge can say "MiniMax H3"; the models themselves are re-resolved
     deterministically at enqueue and at regenerate."""
+    _guard_not_bank_export(dataset_id)
     from . import minimax_h3_helper as mh
     ds = get_dataset(user_id, dataset_id)
     if not ds:
@@ -442,6 +445,10 @@ def _enqueue_improve(engine, *, user_id, source, source_path, prompt, label):
 
 def improve_existing_image(user_id, image_id, engine=None):
     """Serialize one source's improve request, including the queue hand-off."""
+    image = _owned_image(user_id, image_id)
+    if image is None:
+        return None
+    _guard_not_bank_export(image.dataset_id)
     lock = _IMAGE_IMPROVE_LOCKS[hash((str(user_id), image_id))
                                 % len(_IMAGE_IMPROVE_LOCKS)]
     with lock:
@@ -571,6 +578,7 @@ def reimprove_image(user_id, image_id):
     img = _owned_image(user_id, image_id)
     if not img:
         return None
+    _guard_not_bank_export(img.dataset_id)
     if img.derivation_kind != KLEIN_IMAGE_IMPROVE:
         raise ValueError('only an upscale & improve result can be re-improved')
     # Take the same stripe as a first-pass improve OF THE PARENT: the two paths
@@ -775,6 +783,7 @@ def start_bulk_improve(app, user_id, dataset_id, image_ids, engine=None):
     an unknown dataset / an empty eligible set, RuntimeError (-> 409) when a batch
     is already running, and the engine's missing-assets exceptions (-> structured
     409) so a missing model surfaces ONCE instead of once per image."""
+    _guard_not_bank_export(dataset_id)
     ds = get_dataset(user_id, dataset_id)
     if not ds:
         raise ValueError('dataset not found')
@@ -896,6 +905,7 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
     img = _owned_image(user_id, image_id)
     if not img or img.source != 'generated':
         return None
+    _guard_not_bank_export(img.dataset_id)
     if img.derivation_kind == KLEIN_SMALL_IMAGE:
         raise ValueError('small-image rescue candidates cannot be regenerated; re-import the source')
     if img.derivation_kind == KLEIN_IMAGE_IMPROVE:
@@ -1571,6 +1581,7 @@ def generate_variations_nanobanana(app, user_id, dataset_id, variations, multipl
     rows (job_id stays None - that is the marker for API-generated rows), then
     fill them from a background thread. The existing polling/banner/cancel UI
     works unchanged (pending + no file = in flight). Returns the created ids."""
+    _guard_not_bank_export(dataset_id)
     if engine not in API_ENGINES:
         raise ValueError(f'unknown API engine: {engine}')
     # Fail-closed : les variations NSFW ne partent JAMAIS vers un moteur API
@@ -1625,6 +1636,7 @@ def generate_variations_nanobanana(app, user_id, dataset_id, variations, multipl
 # other, and whichever side loads first must find the other fully defined by
 # the time the reach-back import resolves.
 from .face_dataset_service import (
+    _guard_not_bank_export,
     get_dataset, dataset_klein_model, dataset_prompt_suffix, subject_type_of,
     normalize_to_webp, write_image_atomic, cancel_pending,
     link_completed_dataset_image, KleinNodesMissing,

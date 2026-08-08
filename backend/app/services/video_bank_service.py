@@ -1,0 +1,1845 @@
+"""🎬 Video bank — triage a folder of rushes into a video training set.
+
+The image lane rests on "one row = one file". This one cannot: a two-hour rush is
+one file and four hundred training clips. Everything below follows from that.
+
+WHAT A BANK STORES: BOUNDS, NOT MEDIA. A clip is a pair of PTS timestamps until
+the moment it is promoted, and the only bytes this module ever writes into the
+bank are thumbnails. Encoding at detection time is the obvious design and the
+wrong one — cutting 340 shots to keep 128 pays 212 encodes for files nobody asked
+for, and it would put media in a container whose contract says it holds decisions.
+So `ffmpeg` runs exactly once per KEPT clip, at promotion, and never before.
+
+THE SOURCE FOLDER IS READ-ONLY, LITERALLY. Nothing here opens a file in the user's
+rushes folder for writing, ever. Thumbnails go to ``video_banks_root()``, clips go
+to ``video_datasets_root()``.
+
+WHY FOUR SEAMS. Probing, shot detection, thumbnailing and encoding each need
+something the app cannot assume is installed (PyAV, torch, ffmpeg). They are the
+only four places this module touches media, each is one function, and each is
+monkeypatched by the tests — so the whole service is testable on an install with
+none of the video extras, which is also what CI is.
+
+WHY THE JOB KEY IS NAMESPACED. ``bank_jobs`` keys its registry by bank id, and the
+two lanes number their banks independently: image bank 1 and video bank 1 both
+exist and are different things. Sharing the raw key makes a video detection pass
+refuse a click on an unrelated image bank, with a message naming a pass the user
+cannot see. Hence ``job_key()`` — the registry itself is happily reused.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import subprocess
+from pathlib import Path
+
+from .. import config as cfg
+from ..extensions import db
+from ..models import (VideoBank, VideoClip, VideoDataset, VideoDatasetClip,
+                      VideoSource)
+from . import bank_jobs, video_metrics, ffmpeg_tools, path_guard, video_clip_export, video_targets
+
+logger = logging.getLogger(__name__)
+
+# Lowercase, and every comparison folds the filename's case before testing it.
+# `DSC_0001.MOV` is what a camera writes and what much of scraped material carries;
+# a case-sensitive match creates the bank, reports zero files and says nothing, so
+# the folder simply looks empty. That is a support ticket, not a naming detail.
+VIDEO_EXTS = ('.mp4', '.mov', '.mkv', '.webm', '.avi')
+
+# A ceiling on the WALK, not on the bank's history — a bank pointed at a whole
+# drive must be refused without being counted to the end. Far lower than the image
+# lane's: these are files that each become hundreds of rows.
+BANK_MAX_FILES = 5000
+
+# Canonical order. Detection needs the probe's fps and duration; thumbnails need
+# the bounds detection produced. Running them out of order is not a preference,
+# it is a pass that finds nothing to do.
+PIPELINE_STEPS = ('probe', 'detect', 'thumbs')
+
+TRIAGE_STATUSES = ('pending', 'keep', 'reject')
+
+# The shortest span a hand-cut shot may hold. Not a UI nicety: the shortest target
+# in the catalogue still asks for a fraction of a second of real footage, and a
+# 0.1 s shot promotes to a file that is one frame padded out to the profile's
+# length — which trains on a still. Half a second is deliberately generous: this
+# is a floor against a mis-click, not an opinion about how long a shot should be.
+MIN_CLIP_S = 0.5
+
+_INSERT_CHUNK = 2000
+
+
+# --- the job slot --------------------------------------------------------------
+
+def job_key(bank_id):
+    """The video lane's key into the shared ``bank_jobs`` registry.
+
+    A STRING, so it can never collide with the image lane's integer keys whatever
+    the ids happen to be. See the module docstring for the failure this avoids."""
+    return f'video:{int(bank_id)}'
+
+
+def cancel(bank_id) -> bool:
+    return bank_jobs.cancel(job_key(bank_id))
+
+
+def activity(bank_id):
+    return bank_jobs.get(job_key(bank_id))
+
+
+# --- storage -------------------------------------------------------------------
+
+def _bank_dir(bank_id) -> Path:
+    return cfg.video_banks_root() / str(int(bank_id))
+
+
+def _thumbs_dir(bank_id) -> Path:
+    return _bank_dir(bank_id) / 'thumbs'
+
+
+def thumb_path(bank_id, clip_id) -> Path:
+    """One .jpg per detected shot. The ONLY media a bank writes."""
+    return _thumbs_dir(bank_id) / f'clip_{int(clip_id)}.jpg'
+
+
+def dataset_dir(dataset_id) -> Path:
+    """A video dataset's folder. FLAT — see ``_promote_job`` for why a subfolder
+    here is a defect rather than a matter of taste."""
+    return cfg.video_datasets_root() / str(int(dataset_id))
+
+
+def _contained_path(base_dir: str, relpath: str) -> str | None:
+    """`base_dir/relpath` resolved, or None when it escapes `base_dir`.
+
+    Both sides are realpath'd (so a symlink cannot step out) and the prefix test
+    carries the SEPARATOR: without it `/srv/rushes-secret` passes the check for a
+    bank rooted at `/srv/rushes`."""
+    base = os.path.realpath(base_dir)
+    full = os.path.realpath(os.path.join(base, relpath))
+    if os.path.normcase(full).startswith(os.path.normcase(base + os.sep)):
+        return full
+    return None
+
+
+def _abs_source_path(bank: VideoBank, relpath: str) -> str | None:
+    """The containment-checked absolute path of one source file.
+
+    A relpath is data from a database that a user can edit; resolving it without
+    checking it still lands under the bank's folder is how `..` reads a file the
+    bank was never pointed at."""
+    return _contained_path(bank.source_path, relpath)
+
+
+def source_media_path(user_id, bank_id, source_id) -> str | None:
+    """The readable bytes of ONE source file, for the player. None on anything
+    that is not a file this bank legitimately holds.
+
+    One return value for four different refusals (unknown bank, unknown source,
+    a relpath that escapes the bank's folder, a file that has since vanished) on
+    purpose: the caller answers 404 to all of them. Distinguishing "escaped the
+    folder" from "not found" tells whoever tried which paths exist."""
+    bank = get_bank(user_id, bank_id)
+    if bank is None:
+        return None
+    row = VideoSource.query.filter_by(id=source_id, bank_id=bank_id).first()
+    if row is None:
+        return None
+    path = _abs_source_path(bank, row.relpath)
+    return path if path and os.path.isfile(path) else None
+
+
+def dataset_clip_media_path(user_id, dataset_id, clip_id) -> str | None:
+    """The bytes of one PROMOTED clip. Same contract as source_media_path.
+
+    The filename was written by the export job rather than typed by anyone, and
+    it is still checked for containment: it is a column in a database the user
+    can reach, and "we wrote it ourselves" is the assumption every path-traversal
+    write-up starts with."""
+    ds = get_video_dataset(user_id, dataset_id)
+    if ds is None or not ds.output_dir:
+        return None
+    row = VideoDatasetClip.query.filter_by(dataset_id=ds.id, id=clip_id).first()
+    if row is None:
+        return None
+    path = _contained_path(ds.output_dir, row.filename or '')
+    return path if path and os.path.isfile(path) else None
+
+
+# --- the four media seams ------------------------------------------------------
+# Each is the ONE place this module touches something the app cannot assume is
+# installed. Tests replace them; nothing else in this file imports av, torch or
+# subprocesses ffmpeg.
+
+def _probe_file(path):
+    """What this file is: duration, native rate, geometry, codec. Never raises —
+    see services/video_probe.probe."""
+    from . import video_probe
+    return video_probe.probe(path)
+
+
+def _detect_shots(path, fps_native=None):
+    """The shot boundaries of one file, as dicts carrying PTS seconds.
+
+    Imported lazily and by name so an install with no detection extra fails HERE,
+    per file, into detect_state='error' — rather than at import time, which would
+    take the whole app down for a capability it may never use."""
+    from . import shot_detect
+    return shot_detect.detect_shots(path, fps_native=fps_native)
+
+
+def _is_detector_unavailable(exc) -> bool:
+    """Is this "the extra is not installed" rather than "this file failed"?
+
+    services/shot_detect raises two RuntimeErrors: ShotDetectUnavailable (the
+    install lacks the detector) and ShotDetectFileError (this one file defeated
+    it). They must not be handled the same way — see _detect_job.
+
+    Matched by CLASS NAME, deliberately. The condition being identified is that
+    the module may not be importable at all, so importing it here to isinstance()
+    against an error raised by its absence is circular. The name is part of the
+    contract agreed with that module, and a rename would surface as this branch
+    going quiet rather than as a crash — which is why the behaviour is pinned by
+    a test rather than left to review."""
+    return type(exc).__name__ == 'ShotDetectUnavailable'
+
+
+def _write_thumbnail(src_path, timestamp_s, dst_path) -> bool:
+    """Grab one frame at `timestamp_s` and write it as a .jpg. True on success.
+
+    Lazy `av` import for the same reason as detection, and every failure is a
+    False rather than an exception: a bank whose thumbnails failed is still a
+    perfectly workable bank, it just shows placeholders."""
+    try:
+        import av
+        from PIL import Image
+    except ImportError:
+        return False
+    try:
+        os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+        with av.open(src_path) as container:
+            stream = container.streams.video[0]
+            # Seek in the stream's own time base, then decode forward to the first
+            # frame at or after the target: seeking lands on the preceding keyframe.
+            container.seek(int(timestamp_s / stream.time_base), stream=stream)
+            for frame in container.decode(stream):
+                img = frame.to_image()
+                img.thumbnail((480, 480), Image.LANCZOS)
+                img.convert('RGB').save(dst_path, 'JPEG', quality=82)
+                return True
+    except Exception:                       # noqa: BLE001 — any decode error
+        return False
+    return False
+
+
+def _run_ffmpeg(args):
+    """Execute ONE clip encode. Returns (returncode, stderr tail).
+
+    The single subprocess of this module. stderr is truncated because ffmpeg is
+    verbose and the tail is where the reason lives."""
+    proc = subprocess.run(args, capture_output=True, text=True,
+                          encoding='utf-8', errors='replace',
+                          creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    return proc.returncode, (proc.stderr or '')[-800:]
+
+
+def _ffmpeg_or_raise():
+    """The encoder, or a RuntimeError naming what is missing.
+
+    Checked BEFORE a dataset row is created, so a user with no ffmpeg gets a 503
+    instead of an empty dataset folder they then have to clean up."""
+    path = ffmpeg_tools.ffmpeg_path()
+    if not path:
+        raise RuntimeError(
+            'ffmpeg is required to cut clips and was not found — install the '
+            'video extra from Setup, or put ffmpeg on your PATH')
+    return path
+
+
+# --- banks ---------------------------------------------------------------------
+
+def get_bank(user_id, bank_id) -> VideoBank | None:
+    return VideoBank.query.filter_by(id=bank_id, user_id=user_id).first()
+
+
+def _scan_folder(folder) -> list:
+    """Every video file under `folder`, as relpaths. Recursive, case-insensitive."""
+    rels = []
+    for root, _dirs, files in os.walk(folder):
+        for f in files:
+            if f.lower().endswith(VIDEO_EXTS):
+                rels.append(os.path.relpath(os.path.join(root, f), folder))
+                if len(rels) > BANK_MAX_FILES:
+                    raise ValueError(
+                        f'this folder holds more than {BANK_MAX_FILES:,} videos '
+                        '— point the bank at a subfolder, or split it in two')
+    return rels
+
+
+def create_bank(user_id, name, folder):
+    """Register a folder of rushes as a bank: one row per video file.
+
+    Instant — no decode, no detection. Those are the separate passes, because a
+    two-hour file costs minutes and an HTTP request must not.
+    Returns (bank, added)."""
+    name = (name or '').strip()
+    # Windows «Copy as path» pastes quoted; unquote so a direct paste works first
+    # try, the same nicety the image bank and the dataset import already have.
+    folder = (folder or '').strip().strip('"\'')
+    if not name:
+        raise ValueError('name is required')
+    if not folder or not os.path.isdir(folder):
+        raise ValueError(f'folder not found or not readable: {folder or "(empty)"}')
+    # A bank and a dataset must never share bytes. Both roots are checked: the
+    # image lane's (a video bank over it would be harmless today but the rule is
+    # the rule) and the video lane's own, which is the real trap — promoting into
+    # a folder a bank points at would make the bank list its own output as source
+    # material, and re-promote it on the next pass.
+    for root in (None, cfg.video_datasets_root()):
+        conflict = path_guard.dataset_folder_conflict(folder, datasets_root=root)
+        if conflict:
+            raise ValueError(conflict['message'])
+    folder = os.path.realpath(folder)
+    rels = _scan_folder(folder)
+    bank = VideoBank(user_id=user_id, name=name, source_path=folder)
+    db.session.add(bank)
+    db.session.flush()                  # need bank.id for the child rows
+    _insert_sources(bank.id, folder, rels)
+    db.session.commit()
+    return bank, len(rels)
+
+
+def _insert_sources(bank_id, folder, rels) -> int:
+    rows = []
+    for rel in rels:
+        try:
+            size = os.path.getsize(os.path.join(folder, rel))
+        except OSError:
+            size = None
+        rows.append({'bank_id': bank_id, 'relpath': rel, 'file_size': size})
+    for i0 in range(0, len(rows), _INSERT_CHUNK):
+        db.session.execute(VideoSource.__table__.insert(), rows[i0:i0 + _INSERT_CHUNK])
+    return len(rows)
+
+
+def refresh_bank(user_id, bank_id, force=False) -> dict | None:
+    """Re-inventory the source folder.
+
+    STRICTLY ADDITIVE, exactly like the image lane: the only write is an INSERT of
+    relpaths we do not know yet. Files that VANISHED are counted, never removed —
+    an unplugged drive or a renamed folder would otherwise wipe a triage worked
+    over days in one silent pass, and the user would have no way to know why.
+
+    Returns {'added', 'missing', 'unavailable', 'error'}, or None when the bank is
+    unknown. ``force`` is accepted for symmetry with the image lane's cooldown."""
+    bank = get_bank(user_id, bank_id)
+    if bank is None:
+        return None
+    out = {'added': 0, 'missing': 0, 'unavailable': False, 'error': None}
+    if not os.path.isdir(bank.source_path):
+        out['unavailable'] = True
+        out['error'] = 'the source folder is not reachable right now'
+        return out
+    try:
+        rels = _scan_folder(bank.source_path)
+    except (OSError, ValueError) as e:
+        out['error'] = str(e)
+        return out
+    known = {s.relpath for s in
+             db.session.query(VideoSource.relpath).filter_by(bank_id=bank.id)}
+    on_disk = set(rels)
+    new = [r for r in rels if r not in known]
+    out['missing'] = len(known - on_disk)
+    if new:
+        _insert_sources(bank.id, bank.source_path, new)
+        db.session.commit()
+        out['added'] = len(new)
+    return out
+
+
+def delete_bank(user_id, bank_id) -> bool:
+    """Throw the bank away, with its sources, clips and thumbnails.
+
+    Children are deleted EXPLICITLY, deepest first, rather than trusted to the
+    ondelete=CASCADE in the schema: SQLite only enforces foreign keys when the
+    PRAGMA is on, and these models deliberately carry no ORM relationship() to
+    cascade through either. What survives is any dataset built out of this bank —
+    that is why VideoDatasetClip's provenance is a plain integer."""
+    bank = get_bank(user_id, bank_id)
+    if bank is None:
+        return False
+    VideoClip.query.filter_by(bank_id=bank.id).delete(synchronize_session=False)
+    VideoSource.query.filter_by(bank_id=bank.id).delete(synchronize_session=False)
+    db.session.flush()
+    db.session.delete(bank)
+    db.session.commit()
+    try:
+        from . import trash
+        if _bank_dir(bank_id).is_dir():
+            trash.dispose(str(_bank_dir(bank_id)), context='video bank thumbnails')
+    except Exception as e:                  # noqa: BLE001 — the rows are gone already
+        logger.warning('video bank %s: could not dispose thumbnails: %s', bank_id, e)
+    return True
+
+
+def _counts(bank_id) -> dict:
+    src = VideoSource.query.filter_by(bank_id=bank_id)
+    clips = VideoClip.query.filter_by(bank_id=bank_id)
+    return {
+        'sources': src.count(),
+        'probed': src.filter(VideoSource.probe_state.isnot(None)).count(),
+        'unreadable': src.filter_by(probe_state='unreadable').count(),
+        'detected': src.filter_by(detect_state='ok').count(),
+        'detect_errors': src.filter_by(detect_state='error').count(),
+        'clips': clips.count(),
+        'pending': clips.filter_by(status='pending').count(),
+        'keep': clips.filter_by(status='keep').count(),
+        'reject': clips.filter_by(status='reject').count(),
+        'promoted': clips.filter(VideoClip.promoted_dataset_id.isnot(None)).count(),
+        'thumbs': clips.filter_by(thumb_state='ok').count(),
+        # How many shots 🔎 Search can actually find. Counted here rather than
+        # derived in the UI because "0 results" and "0 searchable shots" are two
+        # different answers and only this number tells them apart.
+        'embedded': clips.filter_by(embed_state='ok').count(),
+        # Shots that carry a caption at all — generated or hand-written. What the
+        # search's readiness line and the promotion's pre-flight both read.
+        'captioned': clips.filter(VideoClip.caption.isnot(None),
+                                  VideoClip.caption != '').count(),
+    }
+
+
+def _load_pipeline_report(bank: VideoBank):
+    """The persisted pass summary, parsed. A corrupt blob is swallowed — a broken
+    report must never 500 the whole bank payload."""
+    raw = getattr(bank, 'pipeline_report', None)
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+
+
+def _bank_row(bank: VideoBank) -> dict:
+    return {
+        'id': bank.id, 'name': bank.name, 'source_path': bank.source_path,
+        'created_at': bank.created_at.isoformat() if bank.created_at else None,
+        'counts': _counts(bank.id),
+    }
+
+
+def list_banks(user_id) -> list:
+    banks = (VideoBank.query.filter_by(user_id=user_id)
+             .order_by(VideoBank.id.desc()).all())
+    return [_bank_row(b) for b in banks]
+
+
+def bank_payload(user_id, bank_id) -> dict | None:
+    """The workspace payload: the bank, its counters, its per-file state and the
+    live job. One request per poll, like the image lane."""
+    bank = get_bank(user_id, bank_id)
+    if bank is None:
+        return None
+    payload = _bank_row(bank)
+    payload['sources'] = sources_payload(user_id, bank_id)
+    payload['activity'] = activity(bank_id)
+    payload['pipeline_report'] = _load_pipeline_report(bank)
+    payload['capability'] = _capability()
+    # The saved cuts ride along so the thresholds panel opens on what is actually
+    # in force — a panel that opens blank while cuts are active would invite the
+    # user to "apply" an accidental clear.
+    payload['thresholds'] = metric_thresholds()
+    # Which checkpoint writes the captions, so nobody has to wonder what wrote
+    # theirs — and so a machine that does not have it yet learns that before
+    # pressing the button rather than twenty minutes into a download.
+    payload['caption_model'] = caption_model_info()
+    return payload
+
+
+def caption_model_info() -> dict:
+    """Which checkpoint will caption, and whether this machine already has it.
+
+    On the bank payload rather than behind its own route: the workspace already
+    polls this every two seconds, and a second request for one string would be a
+    request per bank per poll for an answer that changes when a config file is
+    edited by hand."""
+    from . import video_caption
+    model = video_caption.configured_model()
+    return {'model': model, 'cached': video_caption.model_is_cached(model),
+            'is_default': model == video_caption.DEFAULT_MODEL,
+            # The prompt style matters MORE than the checkpoint on real footage
+            # (see video_caption's measurement), so the picker rides here too.
+            'style': video_caption.configured_style(),
+            'styles': video_caption.style_choices()}
+
+
+def _capability() -> dict:
+    """Decode / detect / encode reported SEPARATELY — they fail independently and
+    are fixed differently, and a single "video unavailable" is how a user
+    reinstalls the wrong thing."""
+    try:
+        from .. import capabilities
+        return capabilities.probe_video()
+    except Exception as e:                  # noqa: BLE001 — never 500 the payload
+        logger.warning('video capability probe failed: %s', e)
+        return {'ok': False, 'detail': 'could not probe the video extra',
+                'decode': False, 'detect': False, 'encode': False}
+
+
+def sources_payload(user_id, bank_id) -> list:
+    rows = (VideoSource.query.filter_by(bank_id=bank_id)
+            .order_by(VideoSource.relpath.asc()).all())
+    clip_counts = dict(
+        db.session.query(VideoClip.source_id, db.func.count(VideoClip.id))
+        .filter(VideoClip.bank_id == bank_id).group_by(VideoClip.source_id).all())
+    return [{
+        'id': s.id, 'relpath': s.relpath, 'file_size': s.file_size,
+        'duration_s': s.duration_s, 'fps_native': s.fps_native,
+        'width': s.width, 'height': s.height, 'codec': s.codec,
+        'probe_state': s.probe_state, 'detect_state': s.detect_state,
+        'clips': clip_counts.get(s.id, 0),
+    } for s in rows]
+
+
+# --- clips ---------------------------------------------------------------------
+
+def metric_thresholds() -> dict:
+    """The cuts currently in force, read from config on every call so a Settings
+    save re-sorts the bank on the next poll. All default to None — a cut that has
+    not been chosen filters NOTHING, because the published defaults measurably do
+    not transfer between corpora (the public motion floor lands at the 7th
+    percentile of this machine's own test bank)."""
+    section = cfg.get('video_bank') or {}
+    # The key list is NOT repeated here — see video_metrics.THRESHOLD_KEYS for
+    # why a second copy of it is how a supported cut becomes unreachable.
+    return {k: section.get(k) for k in video_metrics.THRESHOLD_KEYS}
+
+
+def _clip_row(clip: VideoClip, relpaths: dict, thresholds=None) -> dict:
+    metrics = json.loads(clip.metrics_json) if clip.metrics_json else None
+    measured = metrics if metrics and metrics.get('metrics_state') == 'ok' else None
+    duration_s = round(clip.end_s - clip.start_s, 3)
+    # Flags are DERIVED here, at read time, from raw scores + the thresholds in
+    # force — never stored. Sorted so the payload is deterministic.
+    #
+    # The call happens even with nothing measured, which it did not use to: every
+    # cut needed the metrics pass, so skipping the unmeasured clips was free. The
+    # duration cut does not — its input is the bounds — and a bank straight out of
+    # detection is exactly where the flash-cut clutter is worst.
+    #
+    # The WHOLE blob goes to `verdicts`, not the 'ok'-only `measured` view. Two
+    # of the verdicts in it are written by other passes — the near-duplicate
+    # pass reads the search VECTORS and the watermark pass reads one frame, so
+    # both can legitimately have judged a clip the metrics pass never measured.
+    # Passing `measured` dropped every one of those flags with no error to see.
+    # Nothing else changes: an 'unreadable' summary carries every score as None,
+    # and a None score has never produced a flag.
+    flags = (sorted(video_metrics.verdicts(metrics, thresholds,
+                                           duration_s=duration_s))
+             if thresholds is not None else [])
+    return {
+        'id': clip.id, 'source_id': clip.source_id,
+        'relpath': relpaths.get(clip.source_id),
+        'start_s': clip.start_s, 'end_s': clip.end_s,
+        'duration_s': duration_s,
+        'start_frame': clip.start_frame, 'end_frame': clip.end_frame,
+        'detector': clip.detector, 'thumb_state': clip.thumb_state,
+        'status': clip.status, 'reject_reason': clip.reject_reason,
+        # The caption rides on every clip row: the lightbox edits it, the grid
+        # shows why a hybrid search moved a shot up, and the promotion dialog
+        # counts what has none. One field, three readers, no second request.
+        'caption': clip.caption, 'caption_state': clip.caption_state,
+        'promoted_dataset_id': clip.promoted_dataset_id,
+        'metrics': metrics if metrics and metrics.get('metrics_state') == 'ok' else None,
+        'flags': flags,
+    }
+
+
+def list_clips(user_id, bank_id, *, status=None, source_id=None, ids=None,
+               ids_only=False, offset=0, limit=200) -> dict | None:
+    """One page of the clip gallery. ``ids_only`` answers the WHOLE filter as a
+    list of ids in one request — what "select all in filter" needs, and it shares
+    this function so the two answers can never disagree about what the filter
+    holds."""
+    bank = get_bank(user_id, bank_id)
+    if bank is None:
+        return None
+    q = VideoClip.query.filter_by(bank_id=bank_id)
+    if status in TRIAGE_STATUSES:
+        q = q.filter_by(status=status)
+    if source_id:
+        q = q.filter_by(source_id=int(source_id))
+    if ids is not None:
+        q = q.filter(VideoClip.id.in_(ids)) if ids else q.filter(db.false())
+    q = q.order_by(VideoClip.source_id.asc(), VideoClip.start_s.asc())
+    total = q.count()
+    if ids_only:
+        return {'ids': [r.id for r in q.all()], 'total': total}
+    rows = q.offset(max(0, int(offset))).limit(max(1, int(limit))).all()
+    relpaths = dict(db.session.query(VideoSource.id, VideoSource.relpath)
+                    .filter_by(bank_id=bank_id).all())
+    thresholds = metric_thresholds()
+    return {'clips': [_clip_row(c, relpaths, thresholds) for c in rows],
+            'total': total, 'offset': int(offset), 'limit': int(limit)}
+
+
+def metrics_dry_run(user_id, bank_id, thresholds) -> dict:
+    """Per-rule counts over the bank's stored raw scores — the preview that keeps
+    a mis-set threshold from quietly gutting a bank. Pure read; flags nothing."""
+    bank = get_bank(user_id, bank_id)
+    if bank is None:
+        return {'total_flagged': 0}
+    # EVERY clip, not only the measured ones. The population used to be "clips
+    # carrying scores", which was right while every cut needed the metrics pass
+    # and is wrong for the duration cut: the short shots a user wants counted are
+    # the ones they have not bothered measuring. A clip with no usable scores
+    # still contributes its bounds, and contributes nothing to the other rules —
+    # `verdicts` never flags an absent reading.
+    rows = VideoClip.query.filter_by(bank_id=bank_id).all()
+    clips = []
+    for row in rows:
+        # The WHOLE blob, for the same reason `_clip_row` passes the whole blob:
+        # two of the cuts read verdicts written by other passes, which can have
+        # judged a clip the metrics decode never measured. Filtering on
+        # metrics_state here made the preview answer "0 would be flagged" over a
+        # bank the grid then flags — the two must describe the same bank.
+        # Nothing else moves: an 'unreadable' summary carries every score as
+        # None, and `verdicts` never flags an absent reading.
+        scores = json.loads(row.metrics_json) if row.metrics_json else None
+        clips.append((scores, round(row.end_s - row.start_s, 3)))
+    return video_metrics.dry_run(clips, thresholds)
+
+
+def set_clip_status(user_id, bank_id, ids, status, reason=None) -> dict:
+    """Triage. ``ids`` empty or None means EVERY clip of the bank — the same
+    "no selection = all of it" convention promotion uses, so the two cannot drift.
+
+    ``reject_reason`` is cleared on anything that is not a reject: a clip flipped
+    back to keep must not keep carrying why it was once refused."""
+    bank = get_bank(user_id, bank_id)
+    if bank is None:
+        raise ValueError('bank not found')
+    if status not in TRIAGE_STATUSES:
+        raise ValueError(f'status must be one of {", ".join(TRIAGE_STATUSES)}')
+    q = VideoClip.query.filter_by(bank_id=bank_id)
+    if ids:
+        q = q.filter(VideoClip.id.in_([int(i) for i in ids]))
+    rows = q.all()
+    for row in rows:
+        row.status = status
+        row.reject_reason = (str(reason)[:16] if (reason and status == 'reject')
+                             else None)
+    db.session.commit()
+    return {'updated': len(rows), 'counts': _counts(bank_id)}
+
+
+# --- retouching the cuts -------------------------------------------------------
+#
+# The detector is good and it is not right. It misses a boundary on a slow
+# dissolve, and it happily hands back a shot whose last second is a frozen frame.
+# Before these three functions the only gesture available on either was ✕ Reject,
+# which throws away the eight good seconds with the bad one. `detector='manual'`
+# was in the schema from the first day of this lane precisely to make room for
+# them.
+#
+# THE INVARIANT THEY ALL SHARE: a thumbnail and a set of metrics are measurements
+# OF A SPAN. Move the span and they stop describing anything — the thumbnail shows
+# a frame the shot no longer contains and the freeze ratio was integrated over
+# footage that is now in another clip. So they are FORGOTTEN, not clamped. The
+# thumbs pass already clamps a stale sharpest-frame timestamp back inside the
+# bounds, and that is a crash guard; it would happily produce a plausible,
+# perfectly wrong thumbnail. Forgetting also makes `counts.thumbs` fall, which is
+# what makes the workspace's next-step line offer the thumbnails pass again with
+# no extra plumbing.
+
+def _clip_of_bank(bank_id, clip_id) -> VideoClip | None:
+    """The clip AND the pairing check. The bank id in the URL is not decoration:
+    without this, a clip id from bank A would be editable through bank B's path."""
+    return VideoClip.query.filter_by(id=int(clip_id), bank_id=bank_id).first()
+
+
+def _validate_span(src: VideoSource, start_s, end_s) -> tuple:
+    """Bounds a cut can actually be made at, or ValueError naming the limit.
+
+    The upper bound is checked against the PROBED duration when there is one.
+    ``ffmpeg -ss`` past the end of a file does not fail — it writes a zero-length
+    or single-frame clip — so a start beyond the source surfaces at promotion,
+    hours after the mistake, as a dataset with silent holes in it."""
+    try:
+        start = float(start_s)
+        end = float(end_s)
+    except (TypeError, ValueError):
+        raise ValueError('start and end must be numbers') from None
+    if start != start or end != end:            # NaN, which every comparison passes
+        raise ValueError('start and end must be numbers')
+    if start < 0:
+        raise ValueError('a shot cannot start before the file does')
+    if end - start < MIN_CLIP_S:
+        raise ValueError(
+            f'a shot must last at least {MIN_CLIP_S}s — this one would last '
+            f'{max(0.0, end - start):.2f}s')
+    duration = getattr(src, 'duration_s', None)
+    if duration and end > duration + 1e-6:
+        raise ValueError(f'this file is {duration:.2f}s long — the end must sit '
+                         f'inside it')
+    return round(start, 3), round(end, 3)
+
+
+def _forget_measurements(bank_id, clip: VideoClip):
+    """Drop everything that described the OLD span, file included.
+
+    The JPEG has to go and not merely be un-stamped: the grid points an <img> at
+    the thumb URL, which serves whatever is on disk, so a leftover file would keep
+    showing the old frame until the pass ran again — the exact lie this feature
+    exists to remove."""
+    clip.thumb_state = None
+    clip.metrics_json = None
+    # The search vectors describe three INSTANTS of the old span. Kept, they would
+    # make this shot answer a phrase for something that now belongs to its
+    # neighbour, and hand the player a second outside the shot's own bounds — a
+    # wrong answer that looks exactly like a right one. Same reasoning as the
+    # thumbnail: a measurement of a span nobody has any more is not stale, it is
+    # false.
+    #
+    # The COLUMN is cleared and the vectors are left where they are, deliberately.
+    # `video_clip_search.search` requires embed_state == 'ok' before it will read
+    # a shot's vectors, so this one line is what makes the old ones unreachable —
+    # and rewriting the store here would rewrite the WHOLE bank's .npz (tens of MB
+    # on a real bank) inside a trim, which is an interactive gesture. The orphans
+    # are pruned by the next embedding pass, where a rewrite is happening anyway.
+    clip.embed_state = None
+    # The detector's frame indices described the old boundary and nothing cuts from
+    # them; keeping them would make a later disagreement unreadable.
+    clip.start_frame = None
+    clip.end_frame = None
+    clip.detector = 'manual'
+    try:
+        thumb_path(bank_id, clip.id).unlink(missing_ok=True)
+    except OSError:         # noqa: BLE001 — a locked thumbnail is not worth a 500
+        logger.info('video bank %s: could not remove the thumbnail of clip %s',
+                    bank_id, clip.id)
+
+
+def set_clip_bounds(user_id, bank_id, clip_id, start_s, end_s) -> dict | None:
+    """Move one shot's boundaries. None when the bank or the clip is unknown.
+
+    A PROMOTED clip stays editable on purpose. ``VideoDatasetClip`` copies the
+    relpath and the bounds at encode time — the dataset's provenance is a SNAPSHOT,
+    not a pointer — so re-cutting here cannot retro-edit what is already on disk.
+    Refusing the edit would protect nothing and would forbid the second, better cut
+    exactly when someone wants it: having just watched the built dataset.
+    ``promoted_dataset_id`` is left alone for the same reason it exists — it also
+    shields the clip from a re-detect, and a hand-corrected cut is the last thing
+    that should be destroyed by one."""
+    if get_bank(user_id, bank_id) is None:
+        return None
+    clip = _clip_of_bank(bank_id, clip_id)
+    if clip is None:
+        return None
+    src = db.session.get(VideoSource, clip.source_id)
+    start, end = _validate_span(src, start_s, end_s)
+    clip.start_s, clip.end_s = start, end
+    _forget_measurements(bank_id, clip)
+    db.session.commit()
+    return {'clip': _clip_row_for(bank_id, clip), 'counts': _counts(bank_id)}
+
+
+def split_clip(user_id, bank_id, clip_id, at_s) -> dict | None:
+    """Cut one shot in two at ``at_s``. None when the bank or the clip is unknown.
+
+    The NEW half inherits the parent's triage status. Falling back to 'pending' on
+    both sides would undo the decision being made: you split a kept shot because
+    its tail is bad, and the half you are keeping must not silently leave the keep
+    pile — you would have to find it again among hundreds.
+
+    The new half does NOT inherit ``promoted_dataset_id``: those bounds have never
+    been encoded anywhere, and claiming otherwise would put a "already in a
+    dataset" badge on a span no dataset contains."""
+    if get_bank(user_id, bank_id) is None:
+        return None
+    clip = _clip_of_bank(bank_id, clip_id)
+    if clip is None:
+        return None
+    try:
+        at = float(at_s)
+    except (TypeError, ValueError):
+        raise ValueError('the split point must be a number') from None
+    # Both halves are validated as spans in their own right, which is what makes a
+    # split flush against a bound (an empty shot) and a split 0.2 s in (a shot no
+    # target can ingest) the same refusal, with the same sentence.
+    src = db.session.get(VideoSource, clip.source_id)
+    _validate_span(src, clip.start_s, at)
+    _validate_span(src, at, clip.end_s)
+    at = round(at, 3)
+    tail = VideoClip(bank_id=bank_id, source_id=clip.source_id,
+                     start_s=at, end_s=clip.end_s, detector='manual',
+                     status=clip.status, reject_reason=clip.reject_reason)
+    db.session.add(tail)
+    clip.end_s = at
+    _forget_measurements(bank_id, clip)
+    db.session.flush()
+    _forget_measurements(bank_id, tail)
+    db.session.commit()
+    return {'clip': _clip_row_for(bank_id, clip),
+            'new_clip': _clip_row_for(bank_id, tail),
+            'counts': _counts(bank_id)}
+
+
+def create_clip(user_id, bank_id, source_id, start_s, end_s) -> dict | None:
+    """A shot the detector never drew. None when the bank or the source is unknown.
+
+    'pending', because it has never been judged — and it sorts into the gallery by
+    its start like any other, so it appears where the user cut it rather than at
+    the end of the list."""
+    if get_bank(user_id, bank_id) is None:
+        return None
+    src = VideoSource.query.filter_by(id=int(source_id), bank_id=bank_id).first()
+    if src is None:
+        return None
+    start, end = _validate_span(src, start_s, end_s)
+    clip = VideoClip(bank_id=bank_id, source_id=src.id, start_s=start, end_s=end,
+                     detector='manual', status='pending')
+    db.session.add(clip)
+    db.session.commit()
+    return {'clip': _clip_row_for(bank_id, clip), 'counts': _counts(bank_id)}
+
+
+def _clip_row_for(bank_id, clip: VideoClip) -> dict:
+    """One clip in the SAME shape the gallery already reads, so a retouched shot
+    can be swapped into the list in place instead of forcing a page reload."""
+    relpaths = dict(db.session.query(VideoSource.id, VideoSource.relpath)
+                    .filter_by(bank_id=bank_id).all())
+    return _clip_row(clip, relpaths, metric_thresholds())
+
+
+# --- passes --------------------------------------------------------------------
+
+def _require_free_bank(user_id, bank_id) -> VideoBank:
+    bank = get_bank(user_id, bank_id)
+    if bank is None:
+        raise ValueError('bank not found')
+    return bank
+
+
+def start_probe(app, user_id, bank_id, reprobe=False):
+    """Read what each source file IS. Cheap per file, but a bank holds hundreds."""
+    _require_free_bank(user_id, bank_id)
+    return bank_jobs.start(app, job_key(bank_id), 'probe',
+                           _probe_job(bank_id, bool(reprobe)))
+
+
+def _probe_job(bank_id, reprobe):
+    def run(job):
+        q = VideoSource.query.filter_by(bank_id=bank_id)
+        if not reprobe:
+            q = q.filter(VideoSource.probe_state.is_(None))
+        rows = q.order_by(VideoSource.id.asc()).all()
+        bank = db.session.get(VideoBank, bank_id)
+        bank_jobs.progress(job, done=0, total=len(rows), detail='probing')
+        ok = bad = 0
+        for src in rows:
+            if bank_jobs.cancelled(job):
+                break
+            path = _abs_source_path(bank, src.relpath) if bank else None
+            info = (_probe_file(path) if path
+                    else {'probe_state': 'unreadable'})
+            src.probe_state = info.get('probe_state') or 'unreadable'
+            if src.probe_state == 'ok':
+                src.duration_s = info.get('duration_s')
+                src.fps_native = info.get('fps_native')
+                src.width = info.get('width')
+                src.height = info.get('height')
+                codec = info.get('codec')
+                src.codec = str(codec)[:24] if codec else None
+                ok += 1
+            else:
+                bad += 1
+            if info.get('file_size') is not None:
+                src.file_size = info['file_size']
+            db.session.commit()
+            bank_jobs.bump(job)
+        detail = f'done — {ok} readable'
+        if bad:
+            detail += f', {bad} unreadable'
+        bank_jobs.progress(job, detail=detail)
+        return {'ok': ok, 'unreadable': bad}
+    return run
+
+
+def start_detect(app, user_id, bank_id, redetect=False):
+    """Find the shot boundaries. The expensive pass — minutes per hour of source."""
+    _require_free_bank(user_id, bank_id)
+    return bank_jobs.start(app, job_key(bank_id), 'detect',
+                           _detect_job(bank_id, bool(redetect)))
+
+
+def _detect_job(bank_id, redetect):
+    def run(job):
+        q = VideoSource.query.filter_by(bank_id=bank_id, probe_state='ok')
+        if not redetect:
+            q = q.filter(VideoSource.detect_state.is_(None))
+        rows = q.order_by(VideoSource.id.asc()).all()
+        bank = db.session.get(VideoBank, bank_id)
+        bank_jobs.progress(job, done=0, total=len(rows), detail='detecting shots')
+        made = failed = 0
+        for src in rows:
+            if bank_jobs.cancelled(job):
+                break
+            path = _abs_source_path(bank, src.relpath) if bank else None
+            try:
+                if path is None:
+                    raise OSError('source file is outside the bank folder')
+                shots = _detect_shots(path, src.fps_native)
+            except Exception as e:      # noqa: BLE001 — one bad file, not the pass
+                if _is_detector_unavailable(e):
+                    # A fact about the INSTALL, not about these files. Stamping
+                    # detect_state='error' on all of them would be wrong twice:
+                    # it blames the material, and because the pass skips anything
+                    # already marked, installing the extra afterwards would fix
+                    # nothing until the user found the re-detect checkbox.
+                    bank_jobs.fail(job, str(e))
+                    db.session.rollback()
+                    return {'clips': made, 'failed': failed, 'unavailable': True}
+                logger.info('video bank %s: detection failed on a source: %s',
+                            bank_id, type(e).__name__)
+                src.detect_state = 'error'
+                failed += 1
+                db.session.commit()
+                bank_jobs.bump(job)
+                continue
+            if redetect:
+                # Only clips nobody has promoted: a re-detect must not silently
+                # revoke the provenance of a dataset already built.
+                #
+                # And never a HAND-MADE cut. A manual bound is the one thing in this
+                # bank the detector cannot reproduce — re-running it would wipe an
+                # afternoon of retouching behind a checkbox labelled "re-detect",
+                # with no warning and nothing to undo. The manual clips then sit
+                # alongside the freshly detected ones and may overlap them; that is
+                # the honest outcome, and the grid shows both.
+                (VideoClip.query
+                 .filter_by(bank_id=bank_id, source_id=src.id)
+                 .filter(VideoClip.promoted_dataset_id.is_(None))
+                 .filter(db.or_(VideoClip.detector.is_(None),
+                                VideoClip.detector != 'manual'))
+                 .delete(synchronize_session=False))
+            made += _insert_clips(bank_id, src, shots)
+            src.detect_state = 'ok'
+            db.session.commit()
+            bank_jobs.bump(job)
+        detail = f'done — {made} clips found'
+        if failed:
+            detail += f', {failed} files failed detection'
+        bank_jobs.progress(job, detail=detail)
+        return {'clips': made, 'failed': failed}
+    return run
+
+
+def _insert_clips(bank_id, src: VideoSource, shots) -> int:
+    """Persist the detector's bounds AS GIVEN.
+
+    start_s/end_s are copied verbatim because they are canonical; the frame
+    indices are stored because they are what the detector actually said, and they
+    make a later disagreement debuggable. Nothing ever cuts from them."""
+    rows = []
+    for shot in shots or []:
+        try:
+            start_s = float(shot['start_s'])
+            end_s = float(shot['end_s'])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if end_s <= start_s:
+            continue
+        rows.append({
+            'bank_id': bank_id, 'source_id': src.id,
+            'start_s': start_s, 'end_s': end_s,
+            'start_frame': shot.get('start_frame'),
+            'end_frame': shot.get('end_frame'),
+            'detector': (shot.get('detector') or 'transnetv2')[:16],
+            'status': 'pending',
+        })
+    for i0 in range(0, len(rows), _INSERT_CHUNK):
+        db.session.execute(VideoClip.__table__.insert(), rows[i0:i0 + _INSERT_CHUNK])
+    return len(rows)
+
+
+def start_measure(app, user_id, bank_id, remeasure=False):
+    """Wave 2's pass: one decode per clip, every metric out of it. The heavy
+    per-clip work lives in video_metrics_scan; this wrapper only gives it the
+    same job envelope (busy refusal, progress, cancel) as every other pass."""
+    _require_free_bank(user_id, bank_id)
+    return bank_jobs.start(app, job_key(bank_id), 'measure',
+                           _measure_job(bank_id, bool(remeasure)))
+
+
+def _measure_job(bank_id, remeasure):
+    def run(job):
+        from . import video_metrics_scan
+        q = (VideoClip.query.filter_by(bank_id=bank_id)
+             .join(VideoSource, VideoSource.id == VideoClip.source_id)
+             .filter(VideoSource.probe_state == 'ok'))
+        if not remeasure:
+            q = q.filter(VideoClip.metrics_json.is_(None))
+        total = q.count()
+        bank_jobs.progress(job, done=0, total=total, detail='measuring clips')
+        # Delegate per-clip work but keep cancel/progress here: the scan commits
+        # per clip (its resume contract), so cancelling between clips loses
+        # nothing and the next run picks up exactly where this one stopped.
+        measured = unreadable = 0
+        bank = db.session.get(VideoBank, bank_id)
+        for clip in q.order_by(VideoClip.id.asc()).all():
+            if bank_jobs.cancelled(job):
+                break
+            r = video_metrics_scan.measure_one(bank, clip)
+            if r == 'ok':
+                measured += 1
+            else:
+                unreadable += 1
+            bank_jobs.bump(job)
+        detail = f'done — {measured} measured'
+        if unreadable:
+            detail += f', {unreadable} unreadable'
+        bank_jobs.progress(job, detail=detail)
+        return {'measured': measured, 'unreadable': unreadable}
+    return run
+
+
+def _embed_available():
+    """None when this install can embed frames, else the sentence saying why not.
+
+    A named seam rather than an inline import so the refusal can be exercised in
+    both directions without a torch install — and so the ONE place that decides
+    "can this machine do CLIP" stays visible to a reader of this file."""
+    from .clip_image_encoder import unavailable_reason
+    return unavailable_reason()
+
+
+def start_embed(app, user_id, bank_id, reembed=False):
+    """🔎 Wave 3's pass: CLIP vectors for a few frames of every shot, so a typed
+    word can find the scenes it describes.
+
+    Refused up front — with the Setup sentence, not a generic error — when no
+    interpreter here can run CLIP: a 202 followed by a job that dies on an import
+    is the same information delivered ten minutes later and harder to read.
+
+    Serialised against training and the vision passes ONLY when it will really
+    use the card, exactly like the image lane's ✨ Score. On CPU this is hours of
+    work that never wanted the GPU, and holding the exclusive window through it
+    would leave the card idle AND unusable."""
+    from ..capabilities import bank_scoring_gpu_available
+    _require_free_bank(user_id, bank_id)
+    reason = _embed_available()
+    if reason:
+        raise RuntimeError(reason)
+    use_gpu = bank_scoring_gpu_available()
+    if use_gpu:
+        busy = _gpu_busy_reason()
+        if busy:
+            raise RuntimeError(busy)
+    return bank_jobs.start(app, job_key(bank_id), 'embed',
+                           _embed_job(bank_id, bool(reembed), use_gpu))
+
+
+def _gpu_busy_reason():
+    """A human reason the card is unavailable right now, or None. The same system
+    flags training and the vision window raise, so an embedding pass never races
+    a training run — the guarantee the whole app is built on."""
+    from ..job_queue import queue_manager
+    if queue_manager._get_system_state('training_in_progress'):
+        return 'training is running on the GPU — try again once it finishes'
+    if queue_manager._get_system_state('vision_in_progress'):
+        return 'a vision/GPU pass is already running — try again in a moment'
+    return None
+
+
+def _embed_job(bank_id, reembed, use_gpu):
+    def run(job):
+        from contextlib import nullcontext
+
+        from ..gpu_window import gpu_exclusive_vision_window
+        from . import video_clip_search
+        total = video_clip_search.pending_clips(bank_id, reembed).count()
+        # Say WHICH device every time: on the CPU this is ~336 ms per frame and
+        # three frames per shot, so a progress bar crawling for an hour with no
+        # explanation reads as a hang rather than as the price of not having a
+        # card configured for ✨ Score.
+        bank_jobs.progress(job, done=0, total=total,
+                           detail=f'embedding shots ({"GPU" if use_gpu else "CPU"})')
+        window = (gpu_exclusive_vision_window(flag_ttl=1800) if use_gpu
+                  else nullcontext())
+        with window:
+            out = video_clip_search.run_embed(
+                bank_id, reembed, use_gpu=use_gpu,
+                on_clip=lambda: bank_jobs.bump(job),
+                should_stop=lambda: bank_jobs.cancelled(job))
+        detail = f'done — {out["embedded"]} shot(s) searchable'
+        if out['unreadable']:
+            detail += f', {out["unreadable"]} could not be read'
+        bank_jobs.progress(job, detail=detail)
+        return out
+    return run
+
+
+def start_dedup(app, user_id, bank_id, threshold=None):
+    """✂ Group near-identical shots. Refused up front — with the sentence that
+    says what to do — when the bank has no vectors: this pass reads what 🔎 Search
+    cached and produces nothing without it, and a 202 followed by "0 groups"
+    would read as "no duplicates in this bank".
+
+    No GPU window and no capability check: it re-reads an .npz and does dot
+    products. That is the whole point of building it on the embeddings that
+    already exist."""
+    from .video_clip_search import load_embeddings
+    _require_free_bank(user_id, bank_id)
+    if not load_embeddings(bank_id):
+        raise ValueError('run 🔎 Find scenes first — near-duplicates reuse the '
+                         'frame vectors it caches')
+    return bank_jobs.start(app, job_key(bank_id), 'dedup',
+                           _dedup_job(bank_id, threshold))
+
+
+def _dedup_job(bank_id, threshold):
+    def run(job):
+        from . import video_clip_dedup
+        bank_jobs.progress(job, done=0, total=0, detail='comparing shots')
+        out = video_clip_dedup.run_dedup(
+            bank_id, threshold, should_stop=lambda: bank_jobs.cancelled(job))
+        detail = f'done — {out["groups"]} near-duplicate group(s)'
+        if out['flagged']:
+            detail += f', {out["flagged"]} shot(s) flagged'
+        # Said out loud rather than folded into the total: "no duplicates" and
+        # "most of the bank was never embedded" are the same sentence otherwise.
+        if out['unevaluated']:
+            detail += f' — {out["unevaluated"]} shot(s) had no vectors to compare'
+        bank_jobs.progress(job, detail=detail)
+        return out
+    return run
+
+
+def _watermark_available():
+    """None when this install can look for watermarks, else the sentence saying
+    why not."""
+    from .video_watermark import unavailable_reason
+    return unavailable_reason()
+
+
+def start_watermark(app, user_id, bank_id, rescan=False):
+    """🔖 Look for a watermark on each shot's ambassador frame.
+
+    Refused up front when the detector is not installed, for the same reason the
+    embed pass refuses on a missing CLIP environment: a 202 followed by a job
+    that dies on an import is the same information delivered ten minutes later
+    and harder to read.
+
+    Serialised against training and the vision passes when it will really use the
+    card — this is a torch model, and the guarantee the whole app is built on is
+    that no pass races a training run."""
+    from ..capabilities import watermark_detect_gpu_available
+    _require_free_bank(user_id, bank_id)
+    reason = _watermark_available()
+    if reason:
+        raise RuntimeError(reason)
+    use_gpu = watermark_detect_gpu_available()
+    if use_gpu:
+        busy = _gpu_busy_reason()
+        if busy:
+            raise RuntimeError(busy)
+    return bank_jobs.start(app, job_key(bank_id), 'watermark',
+                           _watermark_job(bank_id, bool(rescan), use_gpu))
+
+
+def _watermark_job(bank_id, rescan, use_gpu):
+    def run(job):
+        from contextlib import nullcontext
+
+        from ..gpu_window import gpu_exclusive_vision_window
+        from . import video_watermark
+        total = len(video_watermark.pending_clips(bank_id, rescan))
+        bank_jobs.progress(job, done=0, total=total,
+                           detail=f'looking for watermarks ({"GPU" if use_gpu else "CPU"})')
+        window = (gpu_exclusive_vision_window(flag_ttl=1800) if use_gpu
+                  else nullcontext())
+        with window:
+            out = video_watermark.run_watermark(
+                bank_id, rescan,
+                on_clip=lambda: bank_jobs.bump(job),
+                should_stop=lambda: bank_jobs.cancelled(job))
+        detail = f'done — {out["detected"]} shot(s) carry a mark'
+        if out['unreadable']:
+            detail += f', {out["unreadable"]} could not be judged'
+        # The detector dying is a RESULT, and the sentence has to survive to the
+        # UI: everything it judged before that is kept, and "0 detected" on its
+        # own would read as a clean bank.
+        if out['error']:
+            detail = f'stopped — {out["error"]} ({out["scanned"]} shot(s) judged)'
+        bank_jobs.progress(job, detail=detail)
+        return out
+    return run
+
+
+def _caption_available():
+    """None when this install can caption, else the sentence saying why not."""
+    from .video_caption_worker import unavailable_reason
+    return unavailable_reason()
+
+
+def start_caption(app, user_id, bank_id, recaption=False, include_edited=False,
+                  style=None):
+    """🗣 Wave 5's pass: what HAPPENS in each shot, in prose.
+
+    The caption is the text the hybrid search matches AND the training prompt the
+    promotion writes into each `.txt`. Refused up front with the Setup sentence
+    when no interpreter here can run the model — a 202 followed by a job that
+    dies on an import is the same news, ten minutes later and harder to read.
+
+    Unlike the embedding pass this one is worth the GPU on any machine that has
+    one (a 4B VLM on a CPU is minutes per shot), so it takes the exclusive window
+    whenever the card is usable — and is refused outright while a training run
+    owns it, rather than competing with it."""
+    from ..capabilities import bank_scoring_gpu_available
+    _require_free_bank(user_id, bank_id)
+    reason = _caption_available()
+    if reason:
+        raise RuntimeError(reason)
+    use_gpu = bank_scoring_gpu_available()
+    if use_gpu:
+        busy = _gpu_busy_reason()
+        if busy:
+            raise RuntimeError(busy)
+    return bank_jobs.start(app, job_key(bank_id), 'caption',
+                           _caption_job(bank_id, bool(recaption),
+                                        bool(include_edited), use_gpu, style))
+
+
+def _caption_job(bank_id, recaption, include_edited, use_gpu, style=None):
+    def run(job):
+        from contextlib import nullcontext
+
+        from ..gpu_window import gpu_exclusive_vision_window
+        from . import video_caption
+        total = video_caption.pending_clips(bank_id, recaption,
+                                            include_edited).count()
+        model = video_caption.configured_model()
+        # A per-run choice with the config key as its default: captioning ONE
+        # bank plainly must not silently re-point every other bank.
+        chosen_style = (style if style in video_caption.CAPTION_STYLES
+                        else video_caption.configured_style())
+        # WHICH model, in the line the user is already watching: two checkpoints
+        # do not write comparable captions, so "captioning shots" alone leaves a
+        # bank nobody can reason about after the setting changes.
+        detail = (f'captioning shots with {model} / {chosen_style} prompt '
+                  f'({"GPU" if use_gpu else "CPU"})')
+        # And whether it is even here yet. The download is allowed — blocking it
+        # would ship a model setting that cannot point anywhere new — but never
+        # in silence: a pass sitting at 0/470 while gigabytes cross someone's
+        # connection is indistinguishable from a hang.
+        notice = video_caption.download_notice(model)
+        if notice:
+            detail = f'{detail} — {notice}'
+        bank_jobs.progress(job, done=0, total=total, detail=detail)
+        window = (gpu_exclusive_vision_window(flag_ttl=3600) if use_gpu
+                  else nullcontext())
+        with window:
+            out = video_caption.run_captions(
+                bank_id, recaption, include_edited=include_edited,
+                use_gpu=use_gpu, model=model, style=chosen_style,
+                on_clip=lambda: bank_jobs.bump(job),
+                should_stop=lambda: bank_jobs.cancelled(job))
+        detail = (f'done — {out["captioned"]} shot(s) captioned by '
+                  f'{out["model"]} ({out["style"]} prompt)')
+        if out['failed']:
+            detail += f', {out["failed"]} failed'
+        bank_jobs.progress(job, detail=detail)
+        return out
+    return run
+
+
+def start_thumbs(app, user_id, bank_id, rethumb=False):
+    """One frame per shot, taken from the shot's MIDDLE — a boundary is where a cut
+    just happened, so the opening frames are disproportionately dissolves and black."""
+    _require_free_bank(user_id, bank_id)
+    return bank_jobs.start(app, job_key(bank_id), 'thumbs',
+                           _thumbs_job(bank_id, bool(rethumb)))
+
+
+def _thumbs_job(bank_id, rethumb):
+    def run(job):
+        from . import video_probe
+        q = VideoClip.query.filter_by(bank_id=bank_id)
+        if not rethumb:
+            q = q.filter(VideoClip.thumb_state.is_(None))
+        rows = q.order_by(VideoClip.id.asc()).all()
+        bank = db.session.get(VideoBank, bank_id)
+        relpaths = dict(db.session.query(VideoSource.id, VideoSource.relpath)
+                        .filter_by(bank_id=bank_id).all())
+        bank_jobs.progress(job, done=0, total=len(rows), detail='making thumbnails')
+        ok = 0
+        for clip in rows:
+            if bank_jobs.cancelled(job):
+                break
+            path = _abs_source_path(bank, relpaths.get(clip.source_id) or '') \
+                if bank else None
+            done = False
+            if path:
+                # The middle of the shot is a GUESS made before any frame was
+                # measured; the metrics scan's sharpest frame is a MEASUREMENT,
+                # free once every frame had been read anyway — and it wins.
+                # Clips the scan has not reached keep the guess. Clamped inside
+                # the clip in case bounds were re-cut after measuring.
+                ts = video_probe.thumbnail_timestamp(clip.start_s, clip.end_s)
+                if clip.metrics_json:
+                    m = json.loads(clip.metrics_json)
+                    sharpest = m.get('sharpest_frame_s')
+                    if (m.get('metrics_state') == 'ok' and sharpest is not None
+                            and clip.start_s <= sharpest <= clip.end_s):
+                        ts = sharpest
+                done = _write_thumbnail(path, ts, str(thumb_path(bank_id, clip.id)))
+            clip.thumb_state = 'ok' if done else 'error'
+            ok += 1 if done else 0
+            bank_jobs.bump(job)
+        db.session.commit()
+        bank_jobs.progress(job, detail=f'done — {ok}/{len(rows)} thumbnails')
+        return {'thumbs': ok, 'total': len(rows)}
+    return run
+
+
+def _sanitize_steps(steps):
+    if not steps:
+        return list(PIPELINE_STEPS)
+    wanted = {s for s in steps if s in PIPELINE_STEPS}
+    return [s for s in PIPELINE_STEPS if s in wanted]      # canonical order
+
+
+def start_pipeline(app, user_id, bank_id, steps=None):
+    """Probe → detect → thumbnails, chained, with a report that survives the night.
+
+    The passes are also individually reachable, but chaining them is what a user
+    actually wants on a fresh bank: each one's input is the previous one's output,
+    and running them by hand in the wrong order finds nothing to do and says so in
+    a way that reads like a bug."""
+    _require_free_bank(user_id, bank_id)
+    wanted = _sanitize_steps(steps)
+    if not wanted:
+        raise ValueError('no pipeline steps selected')
+    return bank_jobs.start(app, job_key(bank_id), 'pipeline',
+                           _pipeline_job(user_id, bank_id, wanted))
+
+
+_STEP_RUNNERS = {
+    'probe': lambda bank_id: _probe_job(bank_id, False),
+    'detect': lambda bank_id: _detect_job(bank_id, False),
+    'thumbs': lambda bank_id: _thumbs_job(bank_id, False),
+}
+
+
+def _pipeline_job(user_id, bank_id, steps):
+    def run(job):
+        import time as _time
+        results = []
+        pipe = {'steps': list(steps), 'total_steps': len(steps), 'index': 0,
+                'current': steps[0], 'results': results}
+
+        def _sync(current=None, index=None):
+            if index is not None:
+                pipe['index'] = index
+            if current is not None:
+                pipe['current'] = current
+            pipe['results'] = list(results)
+            bank_jobs.set_pipeline(job, pipe)
+
+        _sync()
+        for i, step in enumerate(steps):
+            if bank_jobs.cancelled(job):
+                break
+            _sync(current=step, index=i)
+            entry = {'step': step, 'status': 'done', 'reason': None, 'counts': {}}
+            try:
+                out = _STEP_RUNNERS[step](bank_id)(job)
+                entry['counts'] = out or {}
+            except Exception as e:      # noqa: BLE001 — one bad pass never sinks the rest
+                entry['status'] = 'error'
+                entry['reason'] = f'{type(e).__name__}: {e}'
+                db.session.rollback()
+            results.append(entry)
+            _sync()
+
+        cancelled = bank_jobs.cancelled(job)
+        reached = {e['step'] for e in results}
+        for step in steps:
+            if step not in reached:
+                results.append({
+                    'step': step,
+                    'status': 'cancelled' if cancelled else 'skipped',
+                    'reason': 'cancelled before it ran' if cancelled
+                    else 'not reached', 'counts': {}})
+        _sync()
+
+        report = {'started_at': job.get('started_at'), 'finished_at': _time.time(),
+                  'cancelled': cancelled, 'requested_steps': list(steps),
+                  'steps': results, 'counts': _counts(bank_id)}
+        bank = db.session.get(VideoBank, bank_id)
+        if bank is not None:
+            bank.pipeline_report = json.dumps(report)
+            db.session.commit()
+        done_n = sum(1 for e in results if e['status'] == 'done')
+        tail = f'done — {done_n}/{len(steps)} steps ran'
+        if cancelled:
+            tail = f'cancelled — {done_n}/{len(steps)} steps ran'
+        bank_jobs.progress(job, detail=tail)
+    return run
+
+
+# --- promotion: the ONE place media is written --------------------------------
+
+def resolve_frames(profile_key, frames):
+    """The frame count this export will use, or a ValueError naming a legal one.
+
+    We REFUSE an illegal count rather than snapping to the nearest silently. The
+    catalogue can snap, and a UI offering `frame_choices` never produces an illegal
+    value, so a request that carries one came from somewhere that believed it —
+    and every trainer downstream would accept it and quietly floor it in latent
+    space. A refusal that names the nearest legal count is actionable; a silent
+    correction produces a dataset that is not the one that was asked for."""
+    profile = video_targets.get(profile_key)
+    if profile is None:
+        raise ValueError(f'unknown target profile: {profile_key}')
+    if frames in (None, ''):
+        frames = profile['frame_default']
+        if not frames:
+            raise ValueError(
+                f'{profile["label"]} declares no default clip length — pass an '
+                'explicit frame count')
+    try:
+        frames = int(frames)
+    except (TypeError, ValueError):
+        raise ValueError('frames must be a whole number of frames') from None
+    if not video_targets.is_legal_frames(profile_key, frames):
+        near = video_targets.snap_frames(profile_key, frames)
+        raise ValueError(
+            f'{profile["label"]} cannot ingest a {frames}-frame clip — the nearest '
+            f'length it accepts is {near}')
+    return frames
+
+
+def resolve_size(profile_key, size):
+    """(width, height) or None for "keep the source's size". ValueError off-grid.
+
+    A STEP, not a whitelist: the official size lists are inference-CLI asserts and
+    enforcing them would refuse perfectly trainable data. What is real is the
+    divisibility the VAE and the patch size impose together."""
+    if not size:
+        return None
+    try:
+        width, height = int(size[0]), int(size[1])
+    except (TypeError, ValueError, IndexError):
+        raise ValueError('size must be a width and a height') from None
+    if not video_targets.validate_resolution(profile_key, width, height):
+        profile = video_targets.get(profile_key) or {}
+        step = profile.get('size_multiple')
+        raise ValueError(
+            f'{width}x{height} is not a size {profile.get("label", profile_key)} '
+            f'can train at — both sides must be multiples of {step}')
+    return (width, height)
+
+
+# The largest edge trim a promotion will accept. Not a judgement about how much
+# of a shot is transition — 0.25 s is the researched figure and this is twenty
+# times it — but a guard against a typo (2.5 for 0.25) silently emptying a
+# dataset, since every clip it removes is removed for a reason the user set.
+MAX_EDGE_INSET_S = 5.0
+
+
+def _resolve_max_per_source(value):
+    """The per-source cap, validated. None means no cap.
+
+    Named refusals rather than an `int()` that escapes as a traceback: the route
+    turns any ValueError into the 400 the user reads, and "invalid literal for
+    int() with base 10: 'lots'" is not a sentence about clips per source.
+
+    2.5 is refused rather than rounded. "Two and a half clips per source" is not
+    a precision question, it is a request nobody can mean — and silently taking
+    2 would apply a cap the user never chose to a dataset they cannot re-derive.
+    """
+    if value is None or value == '':
+        return None
+    if isinstance(value, bool):              # True is 1 to int(), and means nothing here
+        raise ValueError('max clips per source must be a whole number of clips')
+    try:
+        cap = float(value)
+    except (TypeError, ValueError):
+        raise ValueError('max clips per source must be a whole number of clips')             from None
+    if cap != cap or cap != int(cap):        # NaN, or 2.5
+        raise ValueError('max clips per source must be a whole number of clips')
+    cap = int(cap)
+    if cap < 1:
+        raise ValueError('max clips per source must be at least 1 — leave it '
+                         'empty for no cap')
+    return cap
+
+
+def _resolve_edge_inset(value):
+    """The trim to apply at each bound, validated. Refuses rather than clamps:
+    a negative inset would EXTEND every clip past its own bounds into the
+    neighbouring shot — the exact frames the detector decided did not belong to
+    it — and silently honouring "-0.1" as 0 would hide the mistake."""
+    if value is None or value == '':
+        return 0.0
+    try:
+        inset = float(value)
+    except (TypeError, ValueError):
+        raise ValueError('edge inset must be a number of seconds') from None
+    if inset != inset or inset < 0:                  # NaN or negative
+        raise ValueError('edge inset cannot be negative — it would extend every '
+                         'clip into the shot next to it')
+    if inset > MAX_EDGE_INSET_S:
+        raise ValueError(f'edge inset is capped at {MAX_EDGE_INSET_S:g}s — '
+                         f'{inset:g}s would remove more than any transition is')
+    return inset
+
+
+def start_promote(app, user_id, bank_id, *, ids=None, name, target_profile,
+                  frames=None, size=None, max_per_source=None,
+                  edge_inset_s=None):
+    """Encode the KEPT clips into a new video dataset.
+
+    Everything that can be refused is refused HERE, synchronously, before a single
+    row or folder is created: an unknown profile, an illegal frame count, an
+    off-grid size, an empty selection, a missing ffmpeg. A background job that
+    fails on its first item leaves a dataset the user then has to clean up.
+
+    ``ids`` empty/None = every KEPT clip of the bank. Returns the dataset's
+    identity so the caller can navigate straight to it."""
+    bank = _require_free_bank(user_id, bank_id)
+    name = (name or '').strip()
+    if not name:
+        raise ValueError('name is required')
+    frames = resolve_frames(target_profile, frames)
+    size = resolve_size(target_profile, size)
+    inset = _resolve_edge_inset(edge_inset_s)
+    profile = video_targets.get(target_profile)
+
+    q = VideoClip.query.filter_by(bank_id=bank_id, status='keep')
+    if ids:
+        q = q.filter(VideoClip.id.in_([int(i) for i in ids]))
+    rows = q.order_by(VideoClip.source_id.asc(), VideoClip.start_s.asc()).all()
+    per_cap = _resolve_max_per_source(max_per_source)
+    if per_cap is not None:
+        # The cap trims DOMINANCE, it never punishes scarcity: each source keeps
+        # its EARLIEST clips (detector order — stable and explainable, unlike a
+        # random sample that changes on every promotion of the same bank).
+        taken = {}
+        kept = []
+        for clip in rows:
+            n = taken.get(clip.source_id, 0)
+            if n < per_cap:
+                taken[clip.source_id] = n + 1
+                kept.append(clip)
+        rows = kept
+    clip_ids = [c.id for c in rows]
+    # Composition, reported rather than judged: 60% of a dataset coming from one
+    # source is invisible on disk — the folder looks exactly like a diverse one —
+    # and it is the kind of imbalance that quietly overfits a source. Found by
+    # our own first end-to-end test, which picked "the first 50 that pass" and
+    # got three videos over-represented.
+    per_source = {}
+    for clip in rows:
+        per_source[clip.source_id] = per_source.get(clip.source_id, 0) + 1
+    # What the inset will COST, counted before a single file is written. The
+    # arithmetic is free (bounds we already hold, plus the profile's own rule)
+    # and it is the difference between choosing an inset and discovering it —
+    # every limit stays visible.
+    would_drop = 0
+    if inset and profile.get('fps'):
+        for clip in rows:
+            span = clip.end_s - clip.start_s
+            if (video_clip_export.fits_frames(span, frames, profile['fps'])
+                    and not video_clip_export.fits_frames(span - 2 * inset, frames,
+                                                          profile['fps'])):
+                would_drop += 1
+    # An empty sidecar trains as an EMPTY PROMPT and ai-toolkit says nothing about
+    # it, so how many clips are about to ship without one is a limit that has to
+    # be visible BEFORE the encode rather than discovered in a training run.
+    captioned = sum(1 for c in rows if (c.caption or '').strip())
+    composition = {
+        'sources': len(per_source),
+        'captioned': captioned,
+        'uncaptioned': len(rows) - captioned,
+        'top_source_share': (max(per_source.values()) / len(rows)) if rows else 0.0,
+        'edge_inset_s': inset,
+        # Clips the INSET removes — not clips that were never long enough. Those
+        # keep their own count, because only the first is fixed by lowering it.
+        'inset_would_drop': would_drop,
+    }
+    if not clip_ids:
+        raise ValueError('nothing to promote — keep some clips first')
+    # "Keep the source's size" quietly bypasses the explicit-size validation, and
+    # for a target that caps the canvas AREA that is exactly the gap: 1920x1088
+    # is a clean multiple of 32 and still out of spec for MiniMax H3. Only bites
+    # when the source size would SURVIVE — an explicit size rescales everything,
+    # so big sources stop mattering. Refused here, before any folder exists.
+    cap = profile.get('max_pixels')
+    if cap and not size:
+        oversized = (db.session.query(VideoSource)
+                     .join(VideoClip, VideoClip.source_id == VideoSource.id)
+                     .filter(VideoClip.id.in_(clip_ids),
+                             VideoSource.width.isnot(None),
+                             (VideoSource.width * VideoSource.height) > cap)
+                     .count())
+        if oversized:
+            raise ValueError(
+                f'{oversized} selected clip(s) come from sources larger than '
+                f'{profile["label"]}\'s canvas cap ({cap:,} px). Pick a size '
+                f'(e.g. {profile["recommended_sizes"][0][0]}x'
+                f'{profile["recommended_sizes"][0][1]}) so they are rescaled, '
+                f'or deselect those clips.')
+    _ffmpeg_or_raise()
+
+    dataset = VideoDataset(user_id=user_id, name=name,
+                           target_profile=target_profile, fps=profile['fps'],
+                           frames=frames,
+                           width=size[0] if size else None,
+                           height=size[1] if size else None,
+                           output_dir='')
+    db.session.add(dataset)
+    db.session.flush()                      # need the id to name its folder
+    out_dir = dataset_dir(dataset.id)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    dataset.output_dir = str(out_dir)
+    db.session.commit()
+
+    bank_jobs.start(app, job_key(bank_id), 'promote',
+                    _promote_job(bank.id, dataset.id, clip_ids, target_profile,
+                                 frames, size, inset),
+                    total=len(clip_ids))
+    return {'id': dataset.id, 'name': dataset.name,
+            'output_dir': dataset.output_dir, 'clips': len(clip_ids),
+            'composition': composition}
+
+
+def _promote_job(bank_id, dataset_id, clip_ids, profile_key, frames, size,
+                 edge_inset_s=0.0):
+    """One ffmpeg per kept clip, straight into a FLAT folder.
+
+    NOT ONE SUBFOLDER, EVER. ai-toolkit's dataset scan is os.walk — recursive —
+    and excludes only dotfiles and a directory literally named `_controls`. A
+    `preview/` or `rejects/` folder written here for our own convenience would be
+    picked up and trained on with no message anywhere. That makes a subfolder a
+    defect rather than a matter of taste, and it is why rejected clips are simply
+    never encoded instead of being encoded somewhere out of the way.
+
+    The .txt sidecar is written for EVERY clip that lands, even with no caption:
+    musubi-tuner raises FileNotFoundError out of a worker future with no handler
+    on the path, and diffusion-pipe drops the clip instead because its
+    skip_empty_caption defaults to true. Wave 1 has no captioning at all, so
+    without this every clip would take one of those two paths."""
+    def run(job):
+        ffmpeg = _ffmpeg_or_raise()
+        bank = db.session.get(VideoBank, bank_id)
+        dataset = db.session.get(VideoDataset, dataset_id)
+        if bank is None or dataset is None:
+            return {}
+        out_dir = Path(dataset.output_dir)
+        relpaths = dict(db.session.query(VideoSource.id, VideoSource.relpath)
+                        .filter_by(bank_id=bank_id).all())
+        rows = {c.id: c for c in VideoClip.query.filter(
+            VideoClip.id.in_(clip_ids)).all()}
+        bank_jobs.progress(job, done=0, total=len(clip_ids), detail='encoding clips')
+
+        # The profile's own fps, for telling "never long enough" apart from
+        # "too short once the inset was taken off". None only for a profile that
+        # declares no fps, which start_promote already refused.
+        profile_fps = (video_targets.get(profile_key) or {}).get('fps')
+
+        index = 0
+        encoded = too_short = failed = dropped_by_inset = 0
+        for clip_id in clip_ids:
+            if bank_jobs.cancelled(job):
+                break
+            clip = rows.get(clip_id)
+            if clip is None:
+                continue
+            relpath = relpaths.get(clip.source_id) or ''
+            src = _abs_source_path(bank, relpath)
+            if not src or not os.path.isfile(src):
+                failed += 1
+                bank_jobs.bump(job)
+                continue
+            # The filename index advances only on a clip that LANDED, so the folder
+            # is contiguous: trainers walk it in filename order and a gap reads as
+            # a dataset someone edited by hand.
+            candidate = index + 1
+            dst = out_dir / video_clip_export.clip_filename(candidate)
+            # Both bounds pulled inwards: a shot boundary is where a cut just
+            # happened, so the frames around BOTH ends are disproportionately
+            # dissolves and fades. Zero by default — see _resolve_edge_inset.
+            start_s = clip.start_s + edge_inset_s
+            end_s = clip.end_s - edge_inset_s
+            try:
+                args = video_clip_export.command_for_profile(
+                    ffmpeg=ffmpeg, src=src, dst=str(dst),
+                    start_s=start_s, end_s=end_s,
+                    profile_key=profile_key, frames=frames, size=size)
+            except video_clip_export.ClipTooShort:
+                # Loud, and it leaves NOTHING behind: a short clip encoded anyway
+                # is a file ai-toolkit trains as repeated stills without a word.
+                #
+                # WHICH refusal it is decides what the user should do about it. A
+                # clip that could never supply the frames is not fixable by
+                # lowering a knob; one the inset just cost them is. Reporting
+                # them as one number is how a setting quietly halves a dataset
+                # and looks like the material was at fault.
+                if (edge_inset_s and profile_fps
+                        and video_clip_export.fits_frames(
+                            clip.end_s - clip.start_s, frames, profile_fps)):
+                    dropped_by_inset += 1
+                else:
+                    too_short += 1
+                bank_jobs.bump(job)
+                continue
+            except ValueError as e:
+                failed += 1
+                logger.warning('video promote: %s', e)
+                bank_jobs.bump(job)
+                continue
+            code, err = _run_ffmpeg(args)
+            if code != 0 or not dst.exists():
+                failed += 1
+                logger.warning('video promote: ffmpeg exited %s: %s', code, err)
+                try:
+                    dst.unlink()            # never leave a half file in a dataset
+                except OSError:
+                    pass
+                bank_jobs.bump(job)
+                continue
+            # THE SIDECAR IS THE PROMPT. Written for every clip that lands, with
+            # the caption when there is one — and still written, empty, when
+            # there is not: musubi-tuner raises FileNotFoundError out of a worker
+            # future on a missing one, and diffusion-pipe drops the clip. An
+            # EMPTY sidecar is not neutral either, it trains as an empty prompt
+            # in silence, which is what the pre-flight count exists to surface.
+            video_clip_export.write_sidecar(str(dst), clip.caption)
+            index = candidate
+            encoded += 1
+            db.session.add(VideoDatasetClip(
+                dataset_id=dataset_id, filename=dst.name, caption=clip.caption,
+                source_bank_id=bank_id, source_clip_id=clip.id,
+                src_relpath=relpath, start_s=clip.start_s, end_s=clip.end_s))
+            clip.promoted_dataset_id = dataset_id
+            db.session.commit()
+            bank_jobs.bump(job)
+
+        detail = f'done — {encoded} clips encoded'
+        if too_short:
+            detail += f', {too_short} too short for {frames} frames'
+        if dropped_by_inset:
+            # Named separately in the sentence for the same reason it is counted
+            # separately: this one is the user's own setting, and it is the only
+            # one they can undo.
+            detail += (f', {dropped_by_inset} dropped by the '
+                       f'{edge_inset_s:g}s edge trim')
+        if failed:
+            detail += f', {failed} failed'
+        bank_jobs.progress(job, detail=detail)
+        return {'encoded': encoded, 'too_short': too_short,
+                'dropped_by_inset': dropped_by_inset, 'failed': failed}
+    return run
+
+
+# --- video datasets ------------------------------------------------------------
+
+def get_video_dataset(user_id, dataset_id) -> VideoDataset | None:
+    return VideoDataset.query.filter_by(id=dataset_id, user_id=user_id).first()
+
+
+def _dataset_row(ds: VideoDataset) -> dict:
+    profile = video_targets.get(ds.target_profile) or {}
+    seconds = video_targets.clip_seconds(ds.target_profile, ds.frames) \
+        if ds.frames else None
+    return {
+        'id': ds.id, 'name': ds.name, 'target_profile': ds.target_profile,
+        'target_label': profile.get('label', ds.target_profile),
+        'fps': ds.fps, 'frames': ds.frames,
+        'clip_seconds': round(seconds, 3) if seconds else None,
+        'width': ds.width, 'height': ds.height, 'output_dir': ds.output_dir,
+        'clips': VideoDatasetClip.query.filter_by(dataset_id=ds.id).count(),
+        'training_verified': profile.get('training_verified', False),
+        # Surfaced on the dataset, not only in the picker: a user who built a set
+        # for MiniMax H3 needs the territory restriction in front of them when
+        # they come back to it, not once at creation.
+        'licence_note': profile.get('licence_note'),
+        'created_at': ds.created_at.isoformat() if ds.created_at else None,
+    }
+
+
+def list_video_datasets(user_id) -> list:
+    rows = (VideoDataset.query.filter_by(user_id=user_id)
+            .order_by(VideoDataset.id.desc()).all())
+    return [_dataset_row(d) for d in rows]
+
+
+def video_dataset_payload(user_id, dataset_id) -> dict | None:
+    ds = get_video_dataset(user_id, dataset_id)
+    if ds is None:
+        return None
+    clips = (VideoDatasetClip.query.filter_by(dataset_id=ds.id)
+             .order_by(VideoDatasetClip.filename.asc()).all())
+    payload = _dataset_row(ds)
+    payload['items'] = [{
+        'id': c.id, 'filename': c.filename, 'caption': c.caption,
+        'source_bank_id': c.source_bank_id, 'source_clip_id': c.source_clip_id,
+        'src_relpath': c.src_relpath, 'start_s': c.start_s, 'end_s': c.end_s,
+    } for c in clips]
+    return payload
+
+
+def set_dataset_clip_caption(user_id, dataset_id, clip_id, caption) -> dict | None:
+    """Write a caption, and REWRITE THE SIDECAR IN THE SAME BREATH.
+
+    Storing the caption in the database alone is the quiet failure of this
+    feature: the trainer never reads our database, it reads the .txt next to the
+    .mp4. The two must move together or the dataset trains on what it had before,
+    with the UI showing what it has now."""
+    ds = get_video_dataset(user_id, dataset_id)
+    if ds is None:
+        return None
+    row = VideoDatasetClip.query.filter_by(dataset_id=ds.id, id=clip_id).first()
+    if row is None:
+        return None
+    row.caption = (caption or '').strip() or None
+    db.session.commit()
+    clip_path = os.path.join(ds.output_dir, row.filename)
+    written = True
+    try:
+        video_clip_export.write_sidecar(clip_path, row.caption)
+    except OSError as e:
+        written = False
+        logger.warning('video dataset %s: could not write sidecar: %s', ds.id, e)
+    return {'ok': True, 'caption': row.caption, 'sidecar_written': written}
+
+
+def delete_video_dataset(user_id, dataset_id) -> bool:
+    """Throw away a badly cut dataset — the ENCODE, never the triage.
+
+    The bank's clips stay exactly as they were; they only stop claiming to have
+    been promoted. That is the whole point of promoted_dataset_id being a real FK
+    with SET NULL, and it is applied here by hand because SQLite enforces neither
+    the cascade nor the SET NULL unless the PRAGMA is on."""
+    ds = get_video_dataset(user_id, dataset_id)
+    if ds is None:
+        return False
+    (VideoClip.query.filter_by(promoted_dataset_id=ds.id)
+     .update({'promoted_dataset_id': None}, synchronize_session=False))
+    VideoDatasetClip.query.filter_by(dataset_id=ds.id).delete(
+        synchronize_session=False)
+    db.session.flush()
+    out_dir = ds.output_dir
+    db.session.delete(ds)
+    db.session.commit()
+    try:
+        from . import trash
+        if out_dir and os.path.isdir(out_dir):
+            trash.dispose(out_dir, context='video dataset')
+    except Exception as e:                  # noqa: BLE001 — the rows are gone already
+        logger.warning('video dataset %s: could not dispose its folder: %s',
+                       dataset_id, e)
+    return True

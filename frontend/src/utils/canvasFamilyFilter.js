@@ -67,6 +67,33 @@ export function writeCanvasExtraFilters(store, value, key = CANVAS_EXTRA_FILTERS
   }
 }
 
+/* Le panneau « Datasets » est-il DÉPLIÉ ?
+   Replié par défaut, à toutes les largeurs : il s'ouvrait grand à chaque
+   chargement sur écran large, et sa liste de cases poussait le board — la chose
+   qu'on vient regarder — sous la ligne de flottaison. C'est un filtre, on ne le
+   consulte pas à chaque visite ; le bouton dit déjà ce qui est affiché (« 3 of
+   7 »), donc le replier ne cache aucune information.
+   Le choix de l'utilisateur, lui, SURVIT au rechargement (même contrat que les
+   autres préférences d'affichage du canvas, juste au-dessus). */
+export const CANVAS_FILTER_OPEN_KEY = 'lds.canvasFilterOpen';
+
+export function readCanvasFilterOpen(store, key = CANVAS_FILTER_OPEN_KEY) {
+  try {
+    return store?.getItem(key) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function writeCanvasFilterOpen(store, open, key = CANVAS_FILTER_OPEN_KEY) {
+  try {
+    store?.setItem(key, open ? '1' : '0');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function availableModelFamilies(datasets) {
   const found = asFamilies((datasets || []).flatMap((d) => d?.families || []));
   return found.sort((a, b) => {

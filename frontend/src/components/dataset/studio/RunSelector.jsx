@@ -56,7 +56,10 @@ export default function RunSelector({
             const pct = voted ? Math.round((r.likes / voted) * 100) : null;
             return (
               <option key={r.key} value={r.key}>
-                {i === 0 ? '● Current run' : `Run #${runs.length - i}`} — {r.modelLabel || '?'} · 👍{r.likes} 👎{r.dislikes}{pct !== null ? ` · ${pct}% 👍` : ''} · “{(r.prompt || '').slice(0, 22)}”
+                {/* `promptLabel` = le prompt du run, ou « N prompts » quand c'est
+                    un lot 📝 : nommer un seul des cinq laisserait croire que le
+                    run n'en porte qu'un. */}
+                {i === 0 ? '● Current run' : `Run #${runs.length - i}`} — {r.modelLabel || '?'} · 👍{r.likes} 👎{r.dislikes}{pct !== null ? ` · ${pct}% 👍` : ''} · “{(r.promptLabel || r.prompt || '').slice(0, 22)}”
               </option>
             );
           })}

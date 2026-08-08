@@ -1,10 +1,18 @@
 /* The two drawers the lineage graph opens must be readable on a 400-px phone.
-   Both are BOTTOM SHEETS below `sm` and side drawers from `sm` up. The detail
+   Both are BOTTOM SHEETS below `lg` and side drawers from `lg` up. The detail
    panel used to be `w-80` at every width, which on a 400-px screen covered 80%
    of the very board it annotates — you could read a run's settings but no
    longer see the run. Pinned here because it is invisible to every other test:
    a rewrite of the panel would silently drop the fix (a class is not behaviour,
-   nothing throws), and this is the panel opened most often on a phone. */
+   nothing throws), and this is the panel opened most often on a phone.
+
+   The switch used to happen at `sm` (640 px). Measured on the real board, that
+   was one breakpoint too early: these drawers are a FIXED width, so a 768-px
+   window — what a phone in landscape reports — got a 320/352-px drawer over a
+   ~400-px sliver of board, which is the same failure the sheet exists to avoid,
+   just less extreme. A side drawer only earns its keep once what remains is
+   still a readable board, i.e. from `lg` (1024 px). Nothing at or above 1024 px
+   changed. */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
@@ -12,21 +20,57 @@ import test from 'node:test';
 const detail = fs.readFileSync(new URL('./LineageDetailPanel.jsx', import.meta.url), 'utf8');
 const gallery = fs.readFileSync(
   new URL('../shared/CheckpointGalleryPanel.jsx', import.meta.url), 'utf8');
+const diff = fs.readFileSync(new URL('./LineageDiffPanel.jsx', import.meta.url), 'utf8');
+const canvasPanel = fs.readFileSync(
+  new URL('../canvas/CanvasGenerationPanel.jsx', import.meta.url), 'utf8');
 
 for (const [name, src] of [['LineageDetailPanel', detail],
   ['CheckpointGalleryPanel', gallery]]) {
-  test(`${name} is a bottom sheet on a phone and a side drawer from sm up`, () => {
-    // Phone: full width, anchored to the bottom, never taller than 70vh so the
-    // graph it describes stays on screen above it.
+  test(`${name} is a bottom sheet up to lg and a side drawer from lg up`, () => {
+    // Phone AND tablet: full width, anchored to the bottom, never taller than
+    // 70vh so the graph it describes stays on screen above it.
     assert.match(src, /fixed inset-x-0 bottom-0/);
     assert.match(src, /max-h-\[70vh\]/);
-    // From `sm`: back to the original side drawer, fixed width, full height.
-    assert.match(src, /sm:inset-x-auto/);
-    assert.match(src, /sm:h-full/);
-    assert.match(src, /sm:max-h-none/);
-    assert.match(src, /sm:w-(80|\[22rem\])/);
+    // From `lg`: back to the original side drawer, fixed width, full height.
+    assert.match(src, /lg:inset-x-auto/);
+    assert.match(src, /lg:h-full/);
+    assert.match(src, /lg:max-h-none/);
+    assert.match(src, /lg:w-(80|\[22rem\])/);
     // No unconditional width — that is exactly the bug.
     assert.doesNotMatch(src, /className="fixed[^"]*\sw-80/);
+    // …and no leftover `sm:` half, which would fire 384 px early and undo it.
+    assert.doesNotMatch(src, /sm:inset-x-auto/);
+  });
+}
+
+test('the canvas generation panel is a bottom sheet up to lg', () => {
+  // The 🎨 panel is a FIXED 26 rem side drawer. At 768 px that is 54 % of the
+  // window, over the board it is picking checkpoints from.
+  assert.match(canvasPanel, /fixed inset-x-0 bottom-0/);
+  assert.match(canvasPanel, /lg:inset-x-auto/);
+  assert.match(canvasPanel, /lg:w-\[26rem\]/);
+  assert.doesNotMatch(canvasPanel, /sm:inset-x-auto/);
+});
+
+test('the compare drawer stays full width up to lg', () => {
+  // Two columns of run settings inside 384 px next to a sliver of board is
+  // neither a comparison nor a board.
+  assert.match(diff, /fixed right-0 top-0[^"]*\sw-full[^"]*lg:w-96/);
+  assert.doesNotMatch(diff, /sm:w-96/);
+});
+
+/* ✕ The way back to the board. Every one of these surfaces covers the thing the
+   user came for, so its close button is the most-reached control on a phone —
+   and all four shipped it as a bare 14-px glyph. 44 px up to `lg`, the size the
+   desktop had is kept from `lg`. */
+for (const [name, src] of [['LineageDetailPanel', detail],
+  ['CheckpointGalleryPanel', gallery], ['LineageDiffPanel', diff],
+  ['CanvasGenerationPanel', canvasPanel]]) {
+  test(`${name} closes with a thumb-sized target on a phone`, () => {
+    const close = src.slice(src.indexOf('aria-label="Close"') - 700,
+      src.indexOf('aria-label="Close"') + 700);
+    assert.match(close, /h-11 w-11/);
+    assert.match(close, /lg:h-8 lg:w-8/);
   });
 }
 

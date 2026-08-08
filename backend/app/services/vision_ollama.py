@@ -17,7 +17,7 @@ import warnings
 import requests
 
 from .. import config as cfg
-from . import image_encoding
+from . import image_encoding, input_budget  # noqa: F401 - installs the shared budget
 
 logger = logging.getLogger(__name__)
 
@@ -104,15 +104,10 @@ def _ensure_ollama_decodable(image_bytes: bytes) -> bytes | None:
         with warnings.catch_warnings():
             warnings.simplefilter('error', Image.DecompressionBombWarning)
             with Image.open(io.BytesIO(image_bytes)) as source:
-                width, height = source.size
-                if (not isinstance(width, int) or not isinstance(height, int)
-                        or width <= 0 or height <= 0
-                        or width > image_encoding.INPUT_MAX_SIDE
-                        or height > image_encoding.INPUT_MAX_SIDE
-                        or width * height > image_encoding.INPUT_MAX_PIXELS):
-                    raise ValueError(
-                        f'image exceeds {image_encoding.INPUT_MAX_SIDE} px per side or '
-                        f'{image_encoding.INPUT_MAX_PIXELS} pixels')
+                # Same shared budget as Dataset import, resolved live: an image
+                # the user was allowed to import must also be describable.
+                image_encoding.validate_input_header_dimensions(
+                    source, label='vision captioning')
                 source.load()
                 im = ImageOps.exif_transpose(source)
         if im.mode in ('RGBA', 'LA', 'PA') or (im.mode == 'P' and 'transparency' in im.info):

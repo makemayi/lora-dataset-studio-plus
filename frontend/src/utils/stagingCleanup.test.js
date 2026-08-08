@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
+  CHECKPOINTS_KEPT,
   TRASH_REMINDER,
   formatStagingSize,
   purgeAllResultMessage,
@@ -42,6 +43,48 @@ test('the FRONT rule mirrors the BACKEND rule (one sparing law, two places)', ()
   // …which spares the same two categories this module spares.
   assert.match(svc, /run\.status in ACTIVE_STATES/);
   assert.match(svc, /run\.status == 'error_pod_kept'/);
+});
+
+test('the SERVER verdict wins over the local guess about a kept pod', () => {
+  // A kept pod is spared only while its recovery window is open, and only the
+  // server knows when that closed. Before this, the hub disabled the 🧹 forever
+  // on an error_pod_kept run whose pod had been gone for days.
+  const kept = { ...done, status: 'error_pod_kept' };
+  assert.match(stagingSpareReason(kept), /manual recovery/);          // no server field
+  assert.equal(stagingSpareReason({ ...kept, staging_spare_reason: null }), null);
+  assert.match(stagingSpareReason({ ...kept, staging_spare_reason: 'still active' }),
+    /still active/);
+  // an explicit null makes the button available again, weight and all
+  assert.equal(runStagingCleanup({ ...kept, staging_spare_reason: null },
+    { 93: 8.23e9 }).available, true);
+});
+
+test('every cleanup message promises the checkpoints survive', () => {
+  // The incident: "checkpoint duplicates already imported" was false for a
+  // checkpoint never deployed anywhere, and the trash emptying destroyed it.
+  assert.match(CHECKPOINTS_KEPT, /checkpoint store/);
+  const c = runStagingCleanup(done, { 93: 8.23e9 });
+  assert.match(c.confirmMessage, /NOT touched/);
+  assert.doesNotMatch(c.confirmMessage, /duplicate/i);
+  assert.match(c.title, /checkpoints are kept/);
+  assert.match(purgeRunResultMessage(done, { purged: true, freed_bytes: 1e6 }).text,
+    /checkpoints kept/);
+});
+
+test('the global toast NAMES the folders nothing points at instead of hiding them', () => {
+  // "already clean" while 25 GB of orphan run folders sat on disk is what made
+  // the button look broken.
+  const withOrphans = purgeAllResultMessage({
+    purged_runs: 0, already_clean: true,
+    orphans: [{ name: 'run_7' }, { name: 'run_9' }], orphan_bytes: 2.5e10,
+  });
+  assert.equal(withOrphans.kind, 'info');
+  assert.match(withOrphans.text, /2 run folders nothing points at \(25\.0 GB\)/);
+  assert.match(withOrphans.text, /Settings › Storage/);
+  // …and stays quiet when there are none
+  assert.doesNotMatch(
+    purgeAllResultMessage({ purged_runs: 0, already_clean: true, orphans: [] }).text,
+    /points at/);
 });
 
 test('runStagingCleanup offers a NAMED, weighed cleanup on a finished run', () => {

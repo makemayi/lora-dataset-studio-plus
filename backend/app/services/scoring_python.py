@@ -1,4 +1,4 @@
-"""Find a Python already on this machine that can run ✨ Score on the GPU.
+"""Find a Python already on this machine that can run a heavy pass on the GPU.
 
 The scoring extra deliberately installs CPU-only torch (Setup builds it a small
 private venv rather than pushing a ~2.5 GB CUDA download on people who have no
@@ -29,9 +29,26 @@ What makes this honest rather than hopeful:
 * **Fail safe.** Nothing proven -> nothing changes, and the pass keeps running
   where it runs today. ``select()`` refuses any interpreter it could not verify.
 
-The probe imports ONLY torch (CUDA needs the real module); the other modules are
-resolved with ``find_spec``, which is cheap and does not execute them — the whole
-check is one short subprocess per interpreter, cached.
+The probe really imports every dependency, in an isolated interpreter that
+ignores the process owner's user-site packages (``python -s``).  Merely finding
+a module spec is not enough: a package can be present yet fail while importing
+one of its native or transitive dependencies.  That exact false positive used
+to mark a borrowed ComfyUI Python as GPU-ready while Score itself stayed off.
+
+**Two features, one detector.** ✨ Score was the first caller; the SigLIP2
+semantic index is the second, and it needs a DIFFERENT dependency list (no
+open_clip, no timm) written to a DIFFERENT config key. Everything else — the
+candidates, the read-only rule, the fail-safe selection — is identical, so the
+module is parametrised by an :class:`InterpreterProfile` rather than copied.
+Telling someone "ComfyUI's Python cannot run the semantic index" because it
+lacks ``open_clip`` would be a lie: that worker never imports it.
+
+**Borrowing is about WHERE A PASS RUNS, never about where Setup installs.**
+Selecting an interpreter here writes one config key and nothing else. Setup's
+install actions resolve their target from the app-managed environment on their
+own and never read these keys — see ``setup_installer._bank_semantic_install_python``
+and ``test_setup_installer.py``. That separation is the whole reason it is safe
+to point the semantic engine at someone's ai-toolkit venv.
 """
 import json
 import os
@@ -40,6 +57,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import NamedTuple
 
 from .. import config as cfg
 
@@ -55,7 +73,62 @@ SCORING_DEPS = (
     {'module': 'numpy', 'pip': 'numpy', 'label': 'NumPy'},
     {'module': 'PIL', 'pip': 'Pillow', 'label': 'Pillow'},
 )
-_DEP_MODULES = tuple(d['module'] for d in SCORING_DEPS)
+
+# Everything backend/infer/bank_semantic_infer.py imports. A strict SUBSET of the
+# scoring list, plus one thing a module name cannot answer: ``Siglip2Model``
+# only exists from transformers 4.49. A 2024 ComfyUI venv imports `transformers`
+# perfectly and then dies on the model class — exactly the false positive this
+# probe exists to refuse, which is why a dep may also demand a SYMBOL.
+# `spec` is what the copy-pasteable repair line must say when a bare package
+# name would be a no-op on an environment that already holds an older copy.
+SEMANTIC_DEPS = (
+    {'module': 'torch', 'pip': 'torch', 'label': 'PyTorch'},
+    {'module': 'transformers', 'pip': 'transformers', 'spec': 'transformers>=4.49',
+     'attrs': ('Siglip2Model',), 'label': 'Transformers (SigLIP2-capable)'},
+    {'module': 'numpy', 'pip': 'numpy', 'label': 'NumPy'},
+    {'module': 'PIL', 'pip': 'Pillow', 'label': 'Pillow'},
+)
+
+
+class InterpreterProfile(NamedTuple):
+    """One feature's answer to "what must this Python be able to do, and where
+    is the choice stored". `feature` is user-facing copy: it lands verbatim in
+    the refusal a user reads, so it names the pass, not the module."""
+    key: str
+    config_key: str
+    feature: str
+    deps: tuple
+
+
+PROFILES = {
+    'scoring': InterpreterProfile(
+        'scoring', 'bank_scoring.python', '✨ Score', SCORING_DEPS),
+    'semantic': InterpreterProfile(
+        'semantic', 'bank_semantic.python', 'the SigLIP 2 semantic index',
+        SEMANTIC_DEPS),
+}
+DEFAULT_PROFILE = PROFILES['scoring']
+
+
+def get_profile(profile=None) -> InterpreterProfile:
+    """Accept a profile, its key, or nothing (Score — the original caller, kept
+    as the default so every existing call site keeps its exact meaning)."""
+    if isinstance(profile, InterpreterProfile):
+        return profile
+    key = str(profile or DEFAULT_PROFILE.key)
+    try:
+        return PROFILES[key]
+    except KeyError:
+        raise ValueError(f'unknown interpreter profile: {key!r}') from None
+
+
+# The probe answers for the UNION of every profile: one subprocess, one cache,
+# both features served. Order follows SCORING_DEPS so the payload a Score client
+# already parses is byte-identical.
+_ALL_DEPS = SCORING_DEPS + SEMANTIC_DEPS
+_DEP_MODULES = tuple(dict.fromkeys(d['module'] for d in _ALL_DEPS))
+_DEP_ATTRS = tuple(sorted({(d['module'], attr) for d in _ALL_DEPS
+                           for attr in d.get('attrs', ())}))
 
 # A cold `import torch` on a fresh machine (antivirus scanning ~300 MB of native
 # DLLs) runs tens of seconds. Generous, because a timeout here reads as "this
@@ -65,26 +138,37 @@ _PROBE_TTL = 600
 _probe_cache = {}     # normalised path -> (ts, info|None)
 
 _PROBE_CODE = (
-    'import importlib.util as _u, json, sys\n'
+    'import importlib as _i, json, sys\n'
     'mods = ' + repr(list(_DEP_MODULES)) + '\n'
     'found = {}\n'
+    'loaded = {}\n'
     'for m in mods:\n'
     '    try:\n'
-    '        found[m] = _u.find_spec(m) is not None\n'
+    '        loaded[m] = _i.import_module(m)\n'
+    '        found[m] = True\n'
     '    except Exception:\n'
     '        found[m] = False\n'
     'cuda, device, torch_version = False, None, None\n'
     'if found.get("torch"):\n'
     '    try:\n'
-    '        import torch\n'
+    '        torch = loaded["torch"]\n'
     '        torch_version = torch.__version__\n'
     '        cuda = bool(torch.cuda.is_available())\n'
     '        if cuda:\n'
     '            device = torch.cuda.get_device_name(0)\n'
     '    except Exception:\n'
     '        found["torch"] = False\n'
+    # A module that imports is not proof the SYMBOL a worker needs is in it.
+    'attrs = ' + repr([list(a) for a in _DEP_ATTRS]) + '\n'
+    'symbols = {}\n'
+    'for m, a in attrs:\n'
+    '    try:\n'
+    '        symbols[m + ":" + a] = getattr(loaded[m], a) is not None\n'
+    '    except Exception:\n'
+    '        symbols[m + ":" + a] = False\n'
     'print(json.dumps({"python": "%d.%d.%d" % sys.version_info[:3],\n'
-    '                  "modules": found, "cuda": cuda, "device_name": device,\n'
+    '                  "modules": found, "symbols": symbols, "cuda": cuda,\n'
+    '                  "device_name": device,\n'
     '                  "torch_version": torch_version}))\n'
 )
 
@@ -106,7 +190,7 @@ def _run_probe(python: str):
     UNKNOWN — never a claim that the interpreter is unusable."""
     try:
         proc = subprocess.run(
-            [python, '-c', _PROBE_CODE], capture_output=True, text=True,
+            [python, '-s', '-c', _PROBE_CODE], capture_output=True, text=True,
             encoding='utf-8', errors='replace', timeout=PROBE_TIMEOUT,
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     except Exception:      # noqa: BLE001 — OSError, TimeoutExpired, anything
@@ -214,30 +298,52 @@ def resolve_entered_path(raw: str) -> list:
     return [p]
 
 
-def describe(python: str, info) -> dict:
-    """Turn raw probe facts into the verdict the UI renders.
+def _dep_present(dep, mods, symbols) -> bool:
+    """A dependency counts as present only when its module imported AND every
+    symbol the worker needs is really in it. A probe payload with no `symbols`
+    map (an older cached answer, a hand-built fixture) cannot prove a symbol, so
+    a dep that demands one is reported MISSING — fail safe, like everything else
+    here: the cost of a wrong 'ready' is an import error an hour into a pass."""
+    if not mods.get(dep['module']):
+        return False
+    return all(bool((symbols or {}).get(f"{dep['module']}:{attr}"))
+               for attr in dep.get('attrs', ()))
+
+
+def _install_spec(dep) -> str:
+    """What to hand pip. A bare package name is a no-op on an environment that
+    already carries an older copy, so a dep with a version floor names it."""
+    spec = dep.get('spec') or dep['pip']
+    return f'"{spec}"' if spec != dep['pip'] else spec
+
+
+def describe(python: str, info, profile=None) -> dict:
+    """Turn raw probe facts into the verdict the UI renders, for one profile.
 
     status ∈
       'unreachable' — the interpreter did not answer (missing, broken, timeout).
-      'incomplete'  — it answered, but the scoring pass would crash on an import.
+      'incomplete'  — it answered, but the pass would crash on an import.
       'cpu_only'    — every dependency is there, torch just has no usable CUDA.
       'gpu_ready'   — every dependency is there AND torch sees the GPU.
 
     `missing` names the modules that aren't there and `install_command` is the
     exact line to fix it — we never run it ourselves.
     """
+    prof = get_profile(profile)
     out = {
         'path': str(python), 'status': 'unreachable', 'cuda': False,
         'device_name': None, 'python_version': None, 'torch_version': None,
-        'deps': [dict(d, present=False) for d in SCORING_DEPS],
-        'missing': [d['pip'] for d in SCORING_DEPS],
+        'profile': prof.key,
+        'deps': [dict(d, present=False) for d in prof.deps],
+        'missing': [d['pip'] for d in prof.deps],
         'install_command': '', 'usable': False, 'gpu': False,
         'detail': 'this interpreter did not answer — check the path',
     }
     if not info:
         return out
     mods = info.get('modules') or {}
-    deps = [dict(d, present=bool(mods.get(d['module']))) for d in SCORING_DEPS]
+    symbols = info.get('symbols') or {}
+    deps = [dict(d, present=_dep_present(d, mods, symbols)) for d in prof.deps]
     missing = [d for d in deps if not d['present']]
     out.update({
         'deps': deps,
@@ -251,7 +357,7 @@ def describe(python: str, info) -> dict:
         names = ', '.join(d['label'] for d in missing)
         out['status'] = 'incomplete'
         out['install_command'] = (f'{_quote(python)} -m pip install '
-                                  + ' '.join(d['pip'] for d in missing))
+                                  + ' '.join(_install_spec(d) for d in missing))
         out['detail'] = (
             f'has CUDA but is missing {names}' if out['cuda']
             else f'missing {names}')
@@ -261,10 +367,10 @@ def describe(python: str, info) -> dict:
         out['status'] = 'gpu_ready'
         out['gpu'] = True
         card = out['device_name'] or 'a CUDA GPU'
-        out['detail'] = f'ready — scores on {card}'
+        out['detail'] = f'ready — runs on {card}'
     else:
         out['status'] = 'cpu_only'
-        out['detail'] = 'ready, but torch here has no usable CUDA — scores on the CPU'
+        out['detail'] = 'ready, but torch here has no usable CUDA — runs on the CPU'
     return out
 
 
@@ -286,7 +392,7 @@ def _comfyui_pythons() -> list:
     return out
 
 
-def candidates() -> list:
+def candidates(profile=None) -> list:
     """Interpreters worth probing, best-known first: [{path, source, label}].
 
     Deliberately NOT a disk sweep — only Pythons the app already knows about
@@ -296,6 +402,7 @@ def candidates() -> list:
     information. The app's own interpreter is always last — it is what runs the
     pass today, so it belongs in the list as the way back."""
     from .. import setup_installer
+    prof = get_profile(profile)
     seen, out = set(), []
 
     def add(path, source, label):
@@ -334,20 +441,40 @@ def candidates() -> list:
     add((cfg.get('watermark.python') or '').strip(), 'watermark',
         "The app's inpainting environment")
     add(sys.executable, 'app', "The app's own Python")
-    add((cfg.get('bank_scoring.python') or '').strip(), 'configured',
-        'Currently used for ✨ Score')
+    # For any feature OTHER than Score, the interpreter Score already borrows is
+    # the single most likely right answer — it is the one the user already proved
+    # on this machine. It gets a row of its own so "use the same Python as ✨
+    # Score" is one click and not a path to copy by hand. Deduplication makes it
+    # a no-op when Score runs on something already listed above.
+    if prof.key != 'scoring':
+        add((cfg.get('bank_scoring.python') or '').strip(), 'scoring',
+            'The Python ✨ Score already uses')
+    add((cfg.get(prof.config_key) or '').strip(), 'configured',
+        f'Currently used for {prof.feature}')
     return out
 
 
-def detect(force=False, extra_path='') -> dict:
+def default_python(profile=None) -> str:
+    """What the pass runs in when nothing is selected — the exact fallback its
+    own resolver applies, not a guess. Kept next to the resolvers it mirrors so
+    a divergence is one grep away (``bank_semantic_models.semantic_python``)."""
+    prof = get_profile(profile)
+    if prof.key == 'semantic':
+        return (str(cfg.get('bank_scoring.python') or '').strip()
+                or sys.executable)
+    return sys.executable
+
+
+def detect(force=False, extra_path='', profile=None) -> dict:
     """The whole picture for the picker: every candidate with its per-dependency
     verdict, which one is selected, and whether the selected one reaches the GPU.
 
     `extra_path` is a path the user typed — probed like any other candidate and
     reported even when it does not exist (that IS the answer they need). Never
     raises: a candidate that explodes degrades to 'unreachable'."""
-    selected = (cfg.get('bank_scoring.python') or '').strip()
-    entries = list(candidates())
+    prof = get_profile(profile)
+    selected = (cfg.get(prof.config_key) or '').strip()
+    entries = list(candidates(prof))
     known = {_norm(e['path']) for e in entries}
     # A hand-typed path is a FIRST-CLASS route, not a fallback: most installs
     # out there have neither ai-toolkit nor ComfyUI where we look (or at all),
@@ -368,9 +495,9 @@ def detect(force=False, extra_path='') -> dict:
     # makes the wait the slowest one instead of the sum. Order is preserved.
     def probe_one(entry):
         try:
-            return describe(entry['path'], probe(entry['path'], force=force))
+            return describe(entry['path'], probe(entry['path'], force=force), prof)
         except Exception:      # noqa: BLE001 — a broken candidate is a row, not a 500
-            return describe(entry['path'], None)
+            return describe(entry['path'], None, prof)
 
     with ThreadPoolExecutor(max_workers=min(8, len(entries) or 1)) as pool:
         verdicts = list(pool.map(probe_one, entries))
@@ -386,9 +513,12 @@ def detect(force=False, extra_path='') -> dict:
         out.append(verdict)
     return {
         'selected': selected,
-        # No explicit selection = the pass runs in the app's own Python. Naming it
-        # keeps "what am I on right now" answerable in both states.
-        'default_python': sys.executable,
+        'profile': prof.key,
+        # No explicit selection = the pass runs wherever the resolver lands.
+        # Naming it keeps "what am I on right now" answerable in both states —
+        # and for the semantic engine that is NOT sys.executable: its resolver
+        # still falls back to Score's key for configs written before it had one.
+        'default_python': default_python(prof),
         # Is there an NVIDIA card here AT ALL (nvidia-smi, cached ~10 min)? Drives
         # the WORDING, never a refusal. A machine with no card — or an AMD/Intel
         # one — has nothing to fix, and a screen talking to it about CUDA is pure
@@ -425,29 +555,44 @@ class SelectionError(ValueError):
         self.verdict = verdict
 
 
-def select(path: str) -> dict:
-    """Point ✨ Score at `path` (or back at the app default when blank).
+def _save_selection(config_key: str, value: str) -> None:
+    """Write one dotted config key without touching its siblings. The key names
+    are stored in user configs (``bank_scoring.python``, ``bank_semantic.python``)
+    and are never renamed — they are split here, never rebuilt from a label."""
+    section, _, leaf = config_key.partition('.')
+    cfg.save_config({section: {leaf: value}})
+
+
+def select(path: str, profile=None) -> dict:
+    """Point one feature at `path` (or back at the app default when blank).
 
     Verifies FIRST and refuses anything it could not prove — an interpreter that
-    is missing open_clip would fail an hour into a pass. On success the
-    capability caches are dropped so ``bank_scoring_gpu_available()`` and the
-    Score button agree with the new choice immediately, with no restart."""
+    is missing open_clip would fail an hour into a Score pass, and one whose
+    transformers predates ``Siglip2Model`` would fail the same way on the
+    semantic index. On success the capability caches are dropped so
+    ``bank_scoring_gpu_available()`` / ``bank_siglip2_gpu_available()`` and the
+    buttons agree with the new choice immediately, with no restart.
+
+    This is an EXECUTION choice and nothing else. No Setup action reads the key
+    it writes to pick an install target."""
     from .. import capabilities
+    prof = get_profile(profile)
     target = (path or '').strip()
     if not target:
-        cfg.save_config({'bank_scoring': {'python': ''}})
+        _save_selection(prof.config_key, '')
         capabilities.clear_import_cache()
-        return {'selected': '', 'reverted': True}
-    verdict = describe(target, probe(target, force=True))
+        return {'selected': '', 'reverted': True, 'profile': prof.key}
+    verdict = describe(target, probe(target, force=True), prof)
     if not verdict['usable']:
         if verdict['status'] == 'unreachable':
             raise SelectionError(
                 'That path did not answer as a Python interpreter — '
                 'nothing was changed.', verdict)
         raise SelectionError(
-            f"That Python cannot run ✨ Score: {verdict['detail']}. "
+            f"That Python cannot run {prof.feature}: {verdict['detail']}. "
             'Nothing was changed — install the missing packages there first.',
             verdict)
-    cfg.save_config({'bank_scoring': {'python': target}})
+    _save_selection(prof.config_key, target)
     capabilities.clear_import_cache()
-    return {'selected': target, 'reverted': False, 'verdict': verdict}
+    return {'selected': target, 'reverted': False, 'verdict': verdict,
+            'profile': prof.key}

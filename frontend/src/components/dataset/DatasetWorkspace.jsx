@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import CompositionBar from './CompositionBar';
+import CoveragePanel from './CoveragePanel';
 import ClassifyFramingButton from './ClassifyFramingButton';
 import ReferencePanel from './ReferencePanel';
 import VariationCatalog from './VariationCatalog';
@@ -13,6 +14,7 @@ import DatasetFolderNote from './DatasetFolderNote';
 import { isDatasetImportBlocked, isStopGenerationBlocked } from './scraperState';
 import { faceAnalysisState, faceAnalysisLabel } from './faceScoringGate.js';
 import DatasetGrid from './DatasetGrid';
+import { datasetBusyReason } from './datasetBusyReason.js';
 import KleinModelSetting from '../shared/KleinModelSetting';
 import SmallImageRescueReview from './SmallImageRescueReview';
 import CaptionToolsBar from './CaptionToolsBar';
@@ -23,12 +25,18 @@ import CropModal from './CropModal';
 import ReferenceEditModal from './ReferenceEditModal';
 import { defaultEditEngine } from './referenceEdit';
 import { localEngineUnavailableReason, hasComfyui } from '../../utils/localEngineReason.js';
+import { captionEnginesSummary, CAPTION_ENGINE_WHY } from '../../utils/captionEngines.js';
+// …and the per-image half of the same question, for the captions listed in full here.
+import { captionOriginInfo } from '../../utils/captionOrigin.js';
 import { extraRefCropSource } from './extraRefs';
 import DatasetLightbox from './DatasetLightbox';
 import DatasetSettingsModal from './DatasetSettingsModal';
 import DatasetToBankDialog from './DatasetToBankDialog';
 import PublishHfModal from './PublishHfModal';
 import WatermarkReviewLightbox, { buildWatermarkRecap } from './WatermarkReviewLightbox';
+import {
+  summarizeFlagged, rejectableFlagged, rejectFlaggedConfirmText, flaggedSourceNote,
+} from './watermarkFlagged.js';
 import { useToast } from '../common/Toast';
 import { pickNativeFolder, FolderBrowserModal } from '../common/FolderPicker';
 import { useCapabilities } from '../../context/CapabilitiesContext';
@@ -242,6 +250,10 @@ export default function DatasetWorkspace({ ds, onBack }) {
   const [captionOptionsOpen, setCaptionOptionsOpen] = useState(false);
   // Frozen snapshot of the flagged queue when review mode opens (null = closed).
   const [reviewQueue, setReviewQueue] = useState(null);
+  // What the last "Reject all flagged" actually did, in the SERVER's number, and
+  // the way back. The undo exists (Show ▸ Rejected → ✓ Keep) but it only exists
+  // for the user if it is named at the moment it becomes useful.
+  const [rejectFlaggedNote, setRejectFlaggedNote] = useState('');
   const zipInput = useRef(null);   // hidden input for "Import dataset (ZIP)"
   const [refCrop, setRefCrop] = useState(false);
   const [refEdit, setRefEdit] = useState(false);
@@ -250,6 +262,11 @@ export default function DatasetWorkspace({ ds, onBack }) {
   // Pose key ('left'/'right'/'back'/...) of the pose slot photo being cropped.
   const [poseSlotCrop, setPoseSlotCrop] = useState(null);
   const [viewImg, setViewImg] = useState(null);
+  const [gridBulkBusy, setGridBulkBusy] = useState(false);
+  useEffect(() => {
+    if (gridBulkBusy) setViewImg(null);
+  }, [gridBulkBusy]);
+  useEffect(() => { setGridBulkBusy(false); }, [d?.id]);
   const [captionMode, setCaptionMode] = useState(null);   // null → défaut auto selon train_type
   const [showLeaks, setShowLeaks] = useState(false);       // liste dépliée des captions qui fuient
   const [captionToolsOpen, setCaptionToolsOpen] = useState(false);
@@ -323,6 +340,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
     ),
     hasLeakMetadata: Boolean(d?.caption_leak),
     watermarkDetected: navImages.filter((image) => image.watermark_state === 'detected').length,
+    watermarkRejectable: rejectableFlagged(navImages).length,
     smallImageRescue: buildSmallImageRescuePairs(navImages).filter((pair) => !pair.resolved).length,
     unused: navImages.filter((image) => (image.status === 'reject' || image.status === 'failed')
       && !isSmallImageRescueRow(image)).length,
@@ -571,7 +589,14 @@ export default function DatasetWorkspace({ ds, onBack }) {
   const leakingImages = images.filter((i) => i.leak);
   // Overlaid watermarks still awaiting removal → drives the "🧽 Clean (N)" button.
   const watermarkDetected = images.filter((i) => i.watermark_state === 'detected').length;
-  // Style de caption : défaut AUTO (SDXL booru-native → booru tags ; sinon prose), surchargé par le sélecteur.
+  // …and what that pile is really made of: what a bulk reject would move, what it
+  // would refuse to touch, which detector judged, and how many carry no position.
+  const flagged = summarizeFlagged(images);
+  const flaggedNote = flaggedSourceNote(flagged);
+  // Style de caption : défaut AUTO (SDXL booru-native → booru tags ; sinon prose),
+  // surchargé par le sélecteur. Anima est HYBRIDE (les deux formes sont natives) :
+  // le défaut prose n'est qu'un point de départ, basculer sur booru est légitime et
+  // ne déclenche aucun garde-fou au lancement.
   const effCaptionMode = captionMode || (d.train_type === 'sdxl' ? 'booru' : 'prose');
   // ── Grid tag-filter (session-only) ──────────────────────────────────────────
   // A tag is toggled in its list and mutually excluded from the other (a tag can't
@@ -770,7 +795,13 @@ export default function DatasetWorkspace({ ds, onBack }) {
             || act.kind === 'improve'
             // Editing the reference is an API call (ChatGPT / Nano Banana) — no GPU,
             // ComfyUI is never touched, so never claim it is paused.
-            || act.kind === 'edit_reference';
+            || act.kind === 'edit_reference'
+            // Dataset → Bank is a reserved filesystem copy. It blocks edits to
+            // keep one coherent source generation, but does not touch the GPU.
+            || act.kind === 'bank_export'
+            || act.kind === 'bank_import'
+            || act.kind === 'training_export'
+            || act.kind === 'backup';
           const label = {
             watermark_detect: `Scanning for watermarks…${prog}`,
             watermark_clean: `Cleaning watermarks…${prog}`,
@@ -781,9 +812,16 @@ export default function DatasetWorkspace({ ds, onBack }) {
             generate: `Generating variations…${prog}`,
             improve: `Queuing improvements…${prog}`,
             edit_reference: 'Editing reference…',
+            bank_export: `Copying into a Bank…${prog}`,
+            bank_import: `Copying images from a Bank…${prog}`,
+            training_export: 'Freezing the Dataset for training…',
+            backup: `Creating portable backup…${prog}`,
           }[act.kind];
           if (label) {
-            const detailed = act.detail || label;
+            // Copy/freeze details are stable phase names, while done/total lives
+            // beside them. Prefer the count-aware labels so progress stays visible.
+            const detailed = ['bank_export', 'bank_import', 'training_export']
+              .includes(act.kind) ? label : (act.detail || label);
             return `${detailed}${cpu ? '' : ' ComfyUI is paused during the pass.'}`;
           }
         }
@@ -792,6 +830,13 @@ export default function DatasetWorkspace({ ds, onBack }) {
 
   // ── Sidebar : pastilles par section — ambre quand une action attend l'utilisateur,
   //    indigo pulsé quand des générations tournent, neutre pour l'info « à faire ».
+  // The engine line for the caption pass that just ran — empty string (falsy) when
+  // no pass ran in this session, when the backend sent no counts, or when the run
+  // belongs to ANOTHER dataset: the id check is what stops this line from describing
+  // someone else's pass after a dataset switch.
+  const lastCaptionEngines = ds.lastCaptionRun && ds.lastCaptionRun.datasetId === d.id
+    ? captionEnginesSummary(ds.lastCaptionRun.engines) : '';
+
   const navBadges = {
     images: triage > 0
       ? { n: triage, tone: 'amber', srLabel: `${triage} image(s) awaiting keep/reject` } : null,
@@ -985,15 +1030,28 @@ export default function DatasetWorkspace({ ds, onBack }) {
           horizontal chip rail — same responsive pattern as the Settings page. */}
       <div className="lg:grid lg:grid-cols-[15rem_minmax(0,1fr)] lg:gap-4 lg:items-start">
         <aside>
-          {/* Mobile: horizontal chip rail */}
-          <nav aria-label="Dataset sections" className="-mx-4 overflow-x-auto px-4 pb-2 lg:hidden">
+          {/* Mobile: horizontal chip rail.
+
+              `relative` is NOT decoration — without it the whole page renders
+              at ~73% on a phone. `overflow-x-auto` clips a descendant only when
+              the scroller is also its containing block, and a static box never
+              is. The NavBadge counts carry an `.sr-only` label, which Tailwind
+              implements as `position: absolute` with no offsets: it therefore
+              resolves against the document, keeps its static position out at
+              the far end of a rail 1123 px wide, and escapes the clip. The
+              document then measures ~598 px against a 440 px viewport, mobile
+              Safari shrinks the page to fit, and every bar on screen — header
+              included — draws at 73% of the screen with dead space beside it.
+              Nothing overflows visibly, because the escapee is a 1 px box no
+              one can see. */}
+          <nav aria-label="Dataset sections" className="relative -mx-4 overflow-x-auto px-4 pb-2 lg:hidden">
             <ul className="m-0 flex list-none gap-2 p-0">
               {WORKSPACE_SECTIONS.map((s) => <li key={s.id}>{navItem(s, true)}</li>)}
             </ul>
           </nav>
           {activePanels.length > 0 && (
             <nav aria-label={`${sectionMeta[section].title} destinations`}
-              className="-mx-4 -mt-1 overflow-x-auto px-4 pb-3 lg:hidden">
+              className="relative -mx-4 -mt-1 overflow-x-auto px-4 pb-3 lg:hidden">
               <ul id={`dataset-mobile-panels-${section}`} className="m-0 flex list-none gap-2 p-0">
                 {activePanels.map((destination) => (
                   <li key={destination.id}>{panelNavItem(section, destination, true)}</li>
@@ -1046,6 +1104,16 @@ export default function DatasetWorkspace({ ds, onBack }) {
               {(act?.kind === 'caption' || act?.kind === 'recaption') && (
                 <button type="button" onClick={ds.cancelCaption} disabled={!!act?.cancelling}
                   title="Stops after the current image finishes — captions already written are kept; the rest stays uncaptioned."
+                  className="ml-auto shrink-0 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed">
+                  {act?.cancelling ? 'Stopping…' : '⏹ Stop'}
+                </button>
+              )}
+              {/* Same seam, same promise, for the watermark scan: it was the one
+                  long dataset pass with no way out but closing the tab. */}
+              {act?.kind === 'watermark_detect' && (
+                <button id="ds-watermark-scan-stop" type="button"
+                  onClick={ds.cancelWatermarkScan} disabled={!!act?.cancelling}
+                  title="Stops after the current image finishes — every watermark already found is kept; run 🧽 Find watermarks again to finish the rest."
                   className="ml-auto shrink-0 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed">
                   {act?.cancelling ? 'Stopping…' : '⏹ Stop'}
                 </button>
@@ -1187,9 +1255,14 @@ export default function DatasetWorkspace({ ds, onBack }) {
                     setViewImg(img);
                     if (img?.unseen) ds.markImageSeen(img.id);
                   }}
+                  /* ⟨ / ⟩ cross page boundaries, so the page underneath follows:
+                     closing the lightbox must not leave you on a page that no
+                     longer holds the image you were looking at. */
+                  viewingImageId={viewImg?.id ?? null}
                   onBatch={ds.batchImages} busy={ds.busy}
+                  onBulkBusyChange={setGridBulkBusy}
                   onImproveBatch={ds.improveBatch} activity={act}
-                  subjectType={d.subject_type || 'human'}
+                          subjectType={d.subject_type || 'human'}
                   eligibilityImages={images}
                   nonces={ds.nonces} faceThresholds={d.face_thresholds} datasetKind={d.kind || 'character'}
                   faceScoringBlocked={d.face_scoring_blocked}
@@ -1230,12 +1303,18 @@ export default function DatasetWorkspace({ ds, onBack }) {
                       onSetPoseSlot={ds.setPoseSlot} onMirrorPoseSlot={ds.mirrorPoseSlot}
                       onTogglePoseSlotEnabled={ds.togglePoseSlotEnabled}
                       onRemovePoseSlot={ds.removePoseSlot}
-                      onCropPoseSlot={(poseKey) => setPoseSlotCrop(poseKey)} />
+                      onCropPoseSlot={(poseKey) => setPoseSlotCrop(poseKey)}
+                      referenceEdit={d.reference_edit} />
                   </div>
                 </div>
 
                 <div id="gf-generate" className="scroll-mt-20 flex flex-col gap-2">
                   <CompositionBar composition={d.composition} upscaled={d.composition_upscaled} bodyFidelity={bodyFid} />
+                  {/* The bar above counts shot types against a target and can go
+                      fully green on a set that is the same pose, one outfit, one
+                      light — none of which it counts. This is that second
+                      question, read from the captions already written. */}
+                  <CoveragePanel datasetId={d.id} refreshKey={images.length} />
                   {/* Images imported WITHOUT head-crop have no shot type, so they count
                       for nothing in the bar above (the default on body-fidelity datasets:
                       a whole drag-and-drop import can leave it at 0). The vision pass that
@@ -1416,6 +1495,63 @@ export default function DatasetWorkspace({ ds, onBack }) {
                     🔍 Review flagged ({watermarkDetected})
                   </button>
                 )}
+                {/* The shortcut past that review, because it was asked for — and
+                    it says what it costs. The count is `flagged.rejectable`, NOT
+                    watermarkDetected: a small-image rescue row in the batch makes
+                    the SERVER refuse the whole request (400, zero rejected) and a
+                    'failed' row is skipped, so promising the bigger number would
+                    be the bank's "5 930 → 0" defect all over again. Red-tinted
+                    like 🧹 Purge, never the primary colour: this is the shortcut,
+                    the per-image review is still the recommended path. */}
+                {flagged.rejectable > 0 && (
+                  <button id="ds-curation-reject-flagged" type="button" data-workspace-focus
+                    disabled={ds.busy}
+                    onClick={async () => {
+                      if (!window.confirm(rejectFlaggedConfirmText(flagged))) return;
+                      const affected = await ds.batchImages(flagged.rejectableIds, 'reject');
+                      // The server's number, not ours — it is the one that counts
+                      // rows it actually wrote (see batch_image_action).
+                      setRejectFlaggedNote(affected
+                        ? `✓ rejected ${affected} — undo with Show ▸ Rejected in the grid, then ✓ Keep`
+                        : '');
+                    }}
+                    title="The detector is a review flag, not a verdict — it does flag clean images sometimes, which is what 🔍 Review flagged is for. This rejects them all at once instead; rejected images stay on disk and can be brought back."
+                    className="px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-sm disabled:opacity-40 scroll-mt-20">
+                    ✕ Reject all flagged ({flagged.rejectable})
+                  </button>
+                )}
+                {/* Two numbers that differ must never be shown as one. */}
+                {flagged.rejectable > 0 && flagged.heldBack > 0 && (
+                  <p className="m-0 basis-full text-content-subtle text-[0.6875rem]">
+                    {flagged.rejectable} of {flagged.flagged} flagged can be rejected in bulk —
+                    the rest are small-image rescue pairs or failed rows, settled in their own review.
+                  </p>
+                )}
+                {rejectFlaggedNote && (
+                  <p className="m-0 basis-full text-emerald-300/90 text-[0.6875rem]">
+                    {rejectFlaggedNote}
+                  </p>
+                )}
+                {/* Who judged, and how many carry no position. Silent on the
+                    ordinary run (one source, every flag located). */}
+                {flaggedNote && (
+                  <p className="m-0 basis-full text-content-subtle text-[0.6875rem]">
+                    ℹ {flaggedNote}
+                  </p>
+                )}
+                {/* The ONLY way to re-judge images ruled false positives. Without
+                    it, changing the detector leaves a residue of verdicts from the
+                    old one that nothing can ever touch again — a setting that
+                    visibly changes nothing. Shown only when there IS a residue, so
+                    the row does not grow on the ordinary dataset. */}
+                {flagged.dismissed > 0 && (
+                  <button type="button" disabled={ds.busy}
+                    onClick={() => ds.findWatermarks({ includeDismissed: true })}
+                    title="Re-examines the images you ruled false positives too. Use it after changing the watermark detector — a normal scan skips them forever."
+                    className="px-3 py-1.5 rounded-lg bg-surface border border-dashed border-border text-content-subtle text-sm disabled:opacity-40 hover:text-content">
+                    ⟲ Rescan incl. dismissed ({flagged.dismissed})
+                  </button>
+                )}
                 {/* Watermark inpainting (LaMa) needs one extra ML package (simple-lama-
                     inpainting). Show a scoped installer RIGHT HERE — where the lack is
                     met — instead of sending the user back to Setup's whole ML-extras
@@ -1487,11 +1623,25 @@ export default function DatasetWorkspace({ ds, onBack }) {
           <div className={sectionCls('captions')}>
             {heading('captions')}
             <div id="gf-captions" className="scroll-mt-20 flex flex-col gap-2">
+              {/* WHO wrote the captions of the pass that just ran. The default engine
+                  setting is "Auto", which silently chains JoyCaption and the Ollama
+                  vision model — two different writing styles — and the result used to
+                  be reported as a bare count. Shown HERE, under the buttons that
+                  produced it, not only in Settings. Wraps freely: it must stay
+                  readable at 400px. In-session only; it disappears on reload. */}
+              {lastCaptionEngines && (
+                <p title={CAPTION_ENGINE_WHY}
+                  className="break-words rounded-lg border border-border bg-surface px-3 py-1.5 text-[0.75rem] text-content-muted">
+                  ✍️ Last pass: {ds.lastCaptionRun.captioned} caption(s) — {lastCaptionEngines}
+                </p>
+              )}
               <div id="ds-captions-generate" tabIndex={-1}
                 className="flex items-center gap-2 flex-wrap rounded-lg border border-border bg-surface px-3 py-2 scroll-mt-20">
                 {!isConceptual && (
                   <select value={effCaptionMode} onChange={(e) => setCaptionMode(e.target.value)} disabled={ds.busy}
-                    title="Caption style — Prose (Z-Image) or Booru tags (SDXL booru-native, e.g. bigLove). Defaults to auto based on the dataset's type."
+                    title={d.train_type === 'anima'
+                      ? "Caption style — Anima reads BOTH: booru tags and natural language are first-class on this model. Prose is only the default; switching to Booru tags trains fine and is never flagged as a mismatch."
+                      : "Caption style — Prose (Z-Image) or Booru tags (SDXL booru-native, e.g. bigLove). Defaults to auto based on the dataset's type."}
                     className="px-2 py-1.5 rounded-lg bg-surface border border-border text-content text-[0.8125rem] disabled:opacity-40">
                     <option value="prose">📝 Prose</option>
                     <option value="booru">🏷️ Booru tags</option>
@@ -1710,6 +1860,18 @@ export default function DatasetWorkspace({ ds, onBack }) {
                                 }}
                                 aria-label={`Caption of image ${img.id}`}
                                 className="w-full bg-app/60 border border-amber-400/30 rounded px-2 py-1 text-[0.6875rem] text-content resize-y" />
+                              {/* WHO WROTE THE LEAKING SENTENCE. This list is read
+                                  caption by caption to decide what to redo, and the
+                                  'auto' backend chains two engines inside one run —
+                                  so "which engine keeps leaking" is answerable here
+                                  and was not. Silent when the author was never
+                                  recorded (that is not "a model wrote it"). */}
+                              {captionOriginInfo(img.caption_origin).known && (
+                                <span className="text-[0.625rem] text-content-subtle"
+                                  title={captionOriginInfo(img.caption_origin).title}>
+                                  {captionOriginInfo(img.caption_origin).short}
+                                </span>
+                              )}
                               <button type="button"
                                 disabled={recaptionLocked}
                                 onClick={() => ds.recaptionImages([img.id], effCaptionMode)}
@@ -1996,19 +2158,37 @@ export default function DatasetWorkspace({ ds, onBack }) {
           compare={viewImgComparison}
           parentNonce={(ds.nonces && viewImgComparison?.parent
             && ds.nonces[viewImgComparison.parent.id]) || 0}
+          // The SECOND comparison — against the dataset's reference photo — is
+          // decided inside the lightbox: unlike the derived parent it is not a
+          // row of the payload, just this dataset's own filename, and it is
+          // served by the very same /img/<name> endpoint. `refNonce` is the
+          // reference's own cache buster (a crop or a re-upload bumps it).
+          refFilename={d.ref_filename || ''}
+          refNonce={ds.refNonce || 0}
           onClose={() => setViewImg(null)}
           onMirror={viewImgLive._rescueReviewPreview ? undefined : ds.mirrorImage}
           onRotate={viewImgLive._rescueReviewPreview ? undefined : ds.rotateImage}
           mirrorBusy={Boolean(ds.mirroringIds?.has(viewImgLive.id))}
-          onImprove={canImproveViewImg ? ds.improveImage : undefined}
+          // The lightbox hands back WHICH engine was pressed; a single-✨
+          // surface passes none and the improve.engine setting decides.
+          onImprove={canImproveViewImg
+            ? ((imageId, engine) => ds.improveImage(imageId, { engine }))
+            : undefined}
+          /* ⟨ / ⟩ walk `gridImages` — the filtered, sorted list the grid shows,
+             the SAME array it is handed below. Not `images` (the raw payload):
+             ⟩ would then land on a picture the current filters hide, behind an
+             overlay that gives no way to notice. The rescue-review preview
+             opens on a Curation pair, not on a position in that list, so it
+             gets no arrows rather than arrows into someone else's sequence. */
+          images={viewImgLive._rescueReviewPreview ? null : gridImages}
+          onNavigate={viewImgLive._rescueReviewPreview ? null : setViewImg}
           improvePending={viewImgImproving}
           improveReady={viewImgImprovementReady}
-          busy={ds.busy}
-          // kleinAvailable gates the improve button, not dataset generation — the
-          // improve pass's 'klein' engine no longer runs the Flux.2 Klein 9B that
-          // caps.engines.klein checks (see krea_hq_helper); a real missing asset
-          // still surfaces as a 409 on click.
-          kleinAvailable
+          busy={ds.busy || gridBulkBusy}
+          // The refused writes in there name the pass that holds them, exactly
+          // like the tiles behind the lightbox.
+          busyReason={(ds.busy || gridBulkBusy) ? datasetBusyReason(ds.busy ? act : null) : null}
+          kleinAvailable={Boolean(caps.engines?.klein)}
           subjectType={d.subject_type || 'human'}
           onCrop={viewImgLive._rescueReviewPreview
             ? undefined

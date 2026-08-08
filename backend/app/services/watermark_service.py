@@ -98,6 +98,7 @@ def normalize_watermark_regions(value, *, allow_null=True) -> list[list[float]] 
 
 def set_watermark_regions(user_id, dataset_id, image_id, regions) -> dict | None:
     """Atomically replace a detected image's manual watermark-region override."""
+    _guard_not_bank_export(dataset_id)
     owned_query = (FaceDatasetImage.query
                    .join(FaceDataset, FaceDatasetImage.dataset_id == FaceDataset.id)
                    .filter(FaceDatasetImage.id == image_id,
@@ -308,32 +309,88 @@ def _apply_watermark_crop(path, box) -> bool:
     return True
 
 
-def detect_watermarks(user_id, dataset_id, *, include_dismissed=False):
-    """Scan the KEPT images for an overlaid watermark via Qwen3-VL and persist
-    watermark_state ('detected'|'none') + watermark_bbox (JSON normalized box).
-    CALLER holds the GPU-exclusive vision window (same as classify/caption). Returns
-    {'detected': n, 'none': n, 'checked': n}.
+def detect_watermarks(user_id, dataset_id, *, include_dismissed=False, backend=None,
+                      should_cancel=None, report=None):
+    """Scan the KEPT images for an overlaid watermark and persist watermark_state
+    ('detected'|'none') + watermark_bbox (JSON normalized box). Returns
+    {'detected': n, 'none': n, 'checked': n} — that dict is the route's response
+    shape and four tests pin it EXACTLY, so anything else the caller needs travels
+    through ``report`` (a dict this fills in) or the route's own keys.
+
+    TWO ROUTES, and which one runs is decided by ``watermark_detect.backend`` —
+    the same setting the bank reads, resolved by the same function, because two
+    screens obeying two rules is the defect this replaced:
+
+    * the dedicated DETECTOR extra (SigLIP2 ranks, Grounding DINO locates) — no
+      Ollama needed, ~0.14 s/image, and it writes a SCORE;
+    * the vision model (Qwen3-VL), exactly as before — one chat question per
+      image, ~1.7 s, no score. This is what 'auto' picks when the extra is not
+      installed, so an untouched install behaves identically to yesterday.
+
+    ``should_cancel`` is polled BETWEEN images: what was already judged is
+    committed and kept, the rest simply stays unscanned and a later run finishes
+    it (detect looks at every kept row on every pass).
 
     Images the user already judged NOT a watermark ('dismissed', a false positive
     ruled out in the review lightbox) are SKIPPED so a re-run never re-flags them --
     that's the anti-frustration point. Pass include_dismissed=True to re-examine them
-    (a deliberate "check everything again")."""
-    try:
-        from .vision_ollama import describe_image_ollama, unload_vision_model
-    except ImportError:
-        raise RuntimeError('vision (Ollama) service not configured/available yet')
+    (a deliberate "check everything again"). CALLER decides on the GPU-exclusive
+    vision window: the vision route always needs it, the detector only when it
+    actually runs on CUDA."""
+    _guard_not_bank_export(dataset_id)
+    from . import watermark_detector
+    resolution = (backend if isinstance(backend, dict)
+                  else watermark_detector.resolve_backend(backend))
+    if report is not None:
+        report.update(resolution)
     ds = get_dataset(user_id, dataset_id)
     if not ds:
         return {'detected': 0, 'none': 0, 'checked': 0}
     rows = (FaceDatasetImage.query.filter_by(dataset_id=dataset_id, status='keep')
             .filter(FaceDatasetImage.filename.isnot(None)).all())
+    # Ids, not ORM objects: see _live_image_row. Both loops commit per image, so
+    # every row they have not reached is expired, and deleting a tile from the
+    # grid mid-scan used to kill the scan.
+    row_ids = [img.id for img in rows]
+    if resolution['backend'] == 'detector':
+        return _detect_watermarks_detector(
+            dataset_id, row_ids, include_dismissed=include_dismissed,
+            should_cancel=should_cancel, report=report)
+    return _detect_watermarks_vision(
+        dataset_id, row_ids, include_dismissed=include_dismissed,
+        should_cancel=should_cancel, report=report)
+
+
+def _detect_watermarks_vision(dataset_id, row_ids, *, include_dismissed,
+                              should_cancel, report):
+    """The original Qwen3-VL pass, unchanged except for the cancel poll."""
+    try:
+        from .vision_ollama import describe_image_ollama, unload_vision_model
+    except ImportError:
+        raise RuntimeError('vision (Ollama) service not configured/available yet')
     counts = {'detected': 0, 'none': 0, 'checked': 0}
+    # Deliberately NOT a key in `counts`: that dict is this route's response
+    # shape and four tests pin it exactly. A counter that is zero on every
+    # ordinary run does not justify changing an API contract — and surfacing it
+    # usefully would mean a UI decision, not a silent extra field. Logged below.
+    vanished = 0
+    stopped = False
     # Persistent progress indicator (survives a page reload); try/finally clears it
     # even if the vision pass raises → no phantom "Scanning…" spinner.
-    token = dataset_activity.begin(dataset_id, 'watermark_detect', total=len(rows))
+    token = dataset_activity.begin(dataset_id, 'watermark_detect', total=len(row_ids))
     try:
-        for i, img in enumerate(rows):
+        for i, image_id in enumerate(row_ids):
+            # Between images, never inside one: the current inference finishes,
+            # everything already committed stays, and the pass unwinds through
+            # the SAME cleanup as a normal end (model unload, indicator end).
+            if should_cancel and should_cancel():
+                stopped = True
+                break
             dataset_activity.progress(token, done=i + 1)
+            img = _live_image_row(image_id)
+            if img is None:      # deleted while the pass ran
+                vanished += 1
+                continue
             # Dismissed = a confirmed false positive; don't waste a vision call re-asking
             # (and never silently re-flag it) unless the caller opts back in.
             if not include_dismissed and img.watermark_state == 'dismissed':
@@ -351,6 +408,10 @@ def detect_watermarks(user_id, dataset_id, *, include_dismissed=False):
                 # of falsely marking every image clean when Ollama is just down.
                 continue
             img.watermark_regions = None
+            # Stamp WHICH route ruled, on every row this pass touches — a dataset
+            # can hold verdicts from both (promotion carries a bank's across).
+            img.watermark_source = 'vision'
+            img.watermark_score = None          # this route has no score
             bbox = _parse_watermark_bbox(raw)
             if bbox:
                 img.watermark_state = 'detected'
@@ -365,6 +426,133 @@ def detect_watermarks(user_id, dataset_id, *, include_dismissed=False):
     finally:
         unload_vision_model()  # rend la VRAM a ComfyUI en fin de batch
         dataset_activity.end(token)
+    if vanished:
+        logger.info('watermark detect: %s image(s) were deleted while the pass ran, '
+                    'skipped', vanished)
+    if report is not None:
+        # located == detected here: the vision route never flags without a box
+        # (no box parsed IS the "clean" answer).
+        report.update({'stopped': stopped, 'located': counts['detected'],
+                       'unlocated': 0, 'errors': 0})
+    return counts
+
+
+def _detect_watermarks_detector(dataset_id, row_ids, *, include_dismissed,
+                                should_cancel, report):
+    """The same pass run by the dedicated detector extra. Deliberately the same
+    SHAPE as the vision pass — same skip rules, same per-image commit, same
+    survives-a-deletion discipline — because the two must be interchangeable.
+
+    Two structural differences the caller has to know about:
+
+    * a single child process holds both models (loading them costs ~10 s), so a
+      stop travels as a sentinel FILE the child polls between images rather than
+      a kill — killing a process mid-forward is how a stop becomes a half-write;
+    * this route can legitimately answer "detected, position unknown" when the
+      locator finds nothing. The vision route cannot. That row is flagged with a
+      NULL bbox, counted apart in ``report['unlocated']``, and the screen says so
+      — 🧽 Clean has no box to route on and would otherwise stamp it 'failed'.
+    """
+    from . import watermark_detector
+    counts = {'detected': 0, 'none': 0, 'checked': 0}
+    planned = []
+    for image_id in row_ids:
+        img = _live_image_row(image_id)
+        if img is None:
+            continue
+        if not include_dismissed and img.watermark_state == 'dismissed':
+            continue
+        path = _img_path(img)
+        if not path or not os.path.exists(path):
+            continue
+        planned.append((image_id, path))
+    located = unlocated = errors = vanished = 0
+    stopped = False
+    if not planned:
+        if report is not None:
+            report.update({'stopped': False, 'located': 0, 'unlocated': 0, 'errors': 0})
+        return counts
+    by_path = {}
+    for image_id, path in planned:
+        # A dataset can hold the same file twice; pop one waiting row per verdict
+        # so both do not land on the first row.
+        by_path.setdefault(path, []).append(image_id)
+
+    cancel_dir = tempfile.mkdtemp(prefix='lds-wmdet-ds-')
+    cancel_file = os.path.join(cancel_dir, 'cancel')
+
+    def _cancelled():
+        if not (should_cancel and should_cancel()):
+            return False
+        try:                                # the child polls for this file
+            open(cancel_file, 'wb').close()
+        except OSError:
+            pass
+        return True
+
+    token = dataset_activity.begin(dataset_id, 'watermark_detect', total=len(planned))
+    try:
+        for path, state, score, regions, _error in watermark_detector.scan(
+                [p for _i, p in planned], should_cancel=_cancelled,
+                cancel_file=cancel_file):
+            dataset_activity.bump(token)
+            waiting = by_path.get(path) or []
+            image_id = waiting.pop(0) if waiting else None
+            img = _live_image_row(image_id) if image_id is not None else None
+            if img is None:                 # deleted while it was being analysed
+                vanished += 1
+                continue
+            img.watermark_source = 'detector'
+            img.watermark_score = (round(float(score), 4) if score is not None else None)
+            if state == 'error':
+                # One unreadable file never sinks the pass, and it is NOT "clean":
+                # the row keeps whatever state it had so a retry can finish it.
+                errors += 1
+                db.session.commit()
+                continue
+            img.watermark_regions = None
+            if state == 'detected':
+                img.watermark_state = 'detected'
+                if regions:
+                    # ONE box, the child's first — it orders them
+                    # most-peripheral-first precisely because this line takes one
+                    # (see the bank's identical write for the full reasoning).
+                    img.watermark_bbox = json.dumps(
+                        [round(float(v), 4) for v in regions[0][:4]])
+                    located += 1
+                else:
+                    img.watermark_bbox = None
+                    unlocated += 1
+                counts['detected'] += 1
+            else:
+                img.watermark_state = 'none'
+                img.watermark_bbox = None
+                counts['none'] += 1
+            counts['checked'] += 1
+            db.session.commit()
+        stopped = bool(should_cancel and should_cancel())
+    except watermark_detector.DetectorUnavailable as e:
+        # The extra probed OK but could not actually run (weights half downloaded,
+        # a torch that no longer imports there). Everything already judged is
+        # committed; say what happened and name the way out instead of failing
+        # silently or, worse, marking unscanned rows clean.
+        db.session.commit()
+        logger.warning('dataset watermark detect: detector unavailable (%s)', e)
+        raise RuntimeError(
+            f'the watermark detector could not run ({e}). Nothing was mis-flagged — '
+            'the images it had not reached are still unscanned. Set Settings ▸ '
+            'Captioning & quality ▸ Watermark detection to "Vision model" to finish '
+            'the pass without it.') from e
+    finally:
+        db.session.commit()
+        dataset_activity.end(token)
+        shutil.rmtree(cancel_dir, ignore_errors=True)
+    if vanished:
+        logger.info('watermark detect: %s image(s) were deleted while the pass ran, '
+                    'skipped', vanished)
+    if report is not None:
+        report.update({'stopped': stopped, 'located': located,
+                       'unlocated': unlocated, 'errors': errors})
     return counts
 
 
@@ -376,6 +564,7 @@ def dismiss_watermarks(user_id, dataset_id, image_ids):
     don't belong / aren't detected are silently ignored, like batch_image_action).
     Returns the number of rows dismissed. The bbox is kept (harmless, and a later
     include_dismissed re-scan overwrites it)."""
+    _guard_not_bank_export(dataset_id)
     ds = get_dataset(user_id, dataset_id)
     if not ds:
         return 0
@@ -578,7 +767,16 @@ def clean_watermarks(user_id, dataset_id, image_ids=None, device='cpu', method='
                 lama_pending.append((img, path, staged, regions, True))
                 continue
             bbox = _safe_json(img.watermark_bbox)
-            if not os.path.exists(path) or not (isinstance(bbox, list) and len(bbox) == 4):
+            if not (isinstance(bbox, list) and len(bbox) == 4):
+                # Flagged, position unknown. The detector cascade produces this
+                # legitimately (its locator found nothing) and promotion carries
+                # it in from a bank; stamping 'failed' would DESTROY a correct
+                # flag over a missing coordinate. It goes to manual review, where
+                # a zone can be drawn — the same answer the bank gives.
+                out['needs_review'] += 1
+                db.session.commit()
+                continue
+            if not os.path.exists(path):
                 img.watermark_state = 'failed'
                 out['failed'] += 1
                 db.session.commit()
@@ -752,6 +950,7 @@ from .face_dataset_service import (
     get_dataset, batch_image_action, dataset_klein_model,
     write_image_atomic, _img_path, _dhash, _existing_dhashes, _safe_json,
     _valid_icc_profile, _VISION_BATCH_KEEPALIVE,
+    _guard_not_bank_export, _live_image_row,
     _watermark_regions_payload, _watermark_route_payload,
     logger,
 )

@@ -28,7 +28,8 @@ import LoraPicker from './LoraPicker';
 import LegacyDatasetStudio from './LegacyDatasetStudio';
 import ComparisonStudio from './ComparisonStudio';
 
-export default function StudioShell({ preselectDataset = null, preselectFamily = null, datasetId = null }) {
+export default function StudioShell({ preselectDataset = null, preselectFamily = null,
+  preselectBase = null, datasetId = null }) {
   // `datasetId` legacy est un alias de preselectDataset.
   const preselect = preselectDataset ?? datasetId;
 
@@ -41,13 +42,35 @@ export default function StudioShell({ preselectDataset = null, preselectFamily =
   // Liste des bases correspondant au train_type courant.
   // Fetch à chaque changement de runType via /api/studio/base-models?type=…
   const [baseModels, setBaseModels] = useState([]);
+  // Échelles CFG/steps de la famille, servies par le MÊME appel (clé `axes`).
+  // Sans elles, la branche comparaison/blend n'avait aucun axe de rendu à
+  // proposer — c'est ce qui la privait du réglage des steps (bug signalé).
+  const [axes, setAxes] = useState(null);
+  // CFG/steps PAR BASE, servis par le même appel. Sans eux la branche
+  // comparaison lançait une base non distillée (Z-Image Base, un modèle complet
+  // Krea 2 Raw) avec les chiffres de la Turbo — cfg 1 / 8 steps — qui rendent une
+  // esquisse floue lue comme « l'entraînement a raté ». Le studio mono-LoRA les
+  // recevait déjà par son propre payload ; c'est la même source.
+  const [modelDefaults, setModelDefaults] = useState(null);
+  // Ce que le défaut de base a d'anormal, quand il en a. Servi par le même appel,
+  // et présent MÊME quand `models` est vide — c'est l'install sans alternative qui
+  // en a le plus besoin.
+  const [baseNote, setBaseNote] = useState(null);
   useEffect(() => {
-    if (!runType) { setBaseModels([]); return; }
+    if (!runType) { setBaseModels([]); setAxes(null); setModelDefaults(null); setBaseNote(null); return; }
     let cancelled = false;
     fetch(`/api/studio/base-models?type=${encodeURIComponent(runType)}`, { credentials: 'include' })
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then((d) => { if (!cancelled) setBaseModels(d.models || []); })
-      .catch(() => { if (!cancelled) setBaseModels([]); });
+      .then((d) => {
+        if (cancelled) return;
+        setBaseModels(d.models || []);
+        setAxes(d.axes || null);
+        setModelDefaults(d.model_defaults || null);
+        setBaseNote(d.base_note || null);
+      })
+      .catch(() => {
+        if (!cancelled) { setBaseModels([]); setAxes(null); setModelDefaults(null); setBaseNote(null); }
+      });
     return () => { cancelled = true; };
   }, [runType]);
 
@@ -65,7 +88,7 @@ export default function StudioShell({ preselectDataset = null, preselectFamily =
         <h1 className="text-content font-bold flex items-center gap-2">🧪 Test Studio<HelpBadge topic="page-studio" /></h1>
         {comparison && (
           <span className="px-2 py-0.5 rounded-lg border border-amber-400/40 bg-amber-400/10 text-amber-200 text-[0.6875rem] font-semibold">
-            {/* Neutre : le mode réel (⚖ Compare / 🧬 Combine) est choisi et affiché
+            {/* Neutre : le mode réel (⚖ Compare / 🧬 Blend) est choisi et affiché
                 juste en dessous par LoraStackPanel — annoncer « Comparing » ici
                 mentirait dès que la pile est active. */}
             {selection.length} LoRAs checked
@@ -80,12 +103,14 @@ export default function StudioShell({ preselectDataset = null, preselectFamily =
       </div>
 
       {comparison ? (
-        <ComparisonStudio selection={selection} baseModels={baseModels} runType={runType} />
+        <ComparisonStudio selection={selection} baseModels={baseModels} axes={axes}
+          modelDefaults={modelDefaults} runType={runType} baseNote={baseNote} />
       ) : soloDatasetId ? (
         // `key` force un remontage propre quand on change de LoRA solo OU de famille
         // (reset des hooks/état du studio riche — sinon on garderait la grille du précédent).
         <LegacyDatasetStudio key={`${soloDatasetId}:${soloFamily ?? 'default'}`}
-          datasetId={String(soloDatasetId)} initialFamily={soloFamily} />
+          datasetId={String(soloDatasetId)} initialFamily={soloFamily}
+          initialBase={preselectBase} />
       ) : (
         <p className="text-content-subtle text-sm rounded-lg border border-border bg-surface px-3 py-6 text-center">
           Check a LoRA above to tune and test it. Check ≥2 to compare them side by side.

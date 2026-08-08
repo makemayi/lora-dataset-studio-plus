@@ -1,5 +1,7 @@
-// =====================================================================//  🎁 What's new — in-app changelog feed (source of truth)
-// =====================================================================//
+// =====================================================================
+//  🎁 What's new — in-app changelog feed (source of truth)
+// =====================================================================
+//
 //  WHY THIS FILE EXISTS
 //  --------------------
 //  The update banner only fires on TAGGED releases. Between releases, features
@@ -150,6 +152,1259 @@ export const WHATS_NEW = [
     blurb:
       'The two-stage sampler (Settings → Image engines → Krea 2 Edit) used to pin stage1/stage2 steps, the handoff point and both megapixel targets to one calibrated export — too slow for some setups. All five are now sliders under the toggle, same defaults until you touch one.',
     to: '/settings/engines',
+  },
+  {
+    id: '2026-08-08-a-just-deployed-model-generates-right-away',
+    date: '2026-08-08',
+    title: 'A model you just deployed works right away, not a minute later',
+    blurb:
+      'Deploy a checkpoint, hit Generate, and the job died: "Your ComfyUI does not offer a model file this workflow requires", followed by advice to go and check your ComfyUI address — which was right all along. The app reads the list of models ComfyUI offers once a minute and reuses it, so a model deployed seconds ago was judged against a list drawn up before it existed, and the refusal it produced is final: the job was never retried. Now, before a job is refused over a missing model, the app asks ComfyUI again — once, on the spot, ignoring what it had cached — and the model it finds is used immediately, spelled exactly the way that ComfyUI spells it. When the file really is absent the job still stops before queuing, but the explanation has stopped guessing: it now says the list was just re-read, so a fresh deploy is not what you are looking at, which leaves a second ComfyUI install as the thing to check.',
+  },
+  {
+    id: '2026-08-08-krea-tuning-same-four-dials-both-screens',
+    date: '2026-08-08',
+    title: 'Every Krea 2 Edit dial, on both screens that talk about it',
+    blurb:
+      'Krea\'s four calibration dials used to be split three ways: reference grounding was a slider in Settings but only a read-out in the workspace panel, sampler steps existed in Settings alone, and reference pull and identity LoRA strength existed in the panel alone. "Where do I change this?" had a different answer per dial. Now all four — reference grounding, sampler steps, reference pull, identity LoRA strength — are sliders in BOTH places, so you can retune from wherever you happen to be judging the result. There is still exactly one value per dial: every control writes the same global setting, so nothing can disagree with anything. Each slider says in words what its current number means, and offers Reset to default the moment you leave it. The two file-path fields stay in Settings alone — you fill those once at install, not while looking at an image.',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-07-compare-any-image-with-the-reference',
+    date: '2026-08-07',
+    title: 'Check any image against your reference photo, side by side',
+    blurb:
+      'The question you ask of a generated shot is "is this still the same person?" — and until now the only way to answer it was to remember the reference photo from another panel. Open any image in the dataset full screen and press ◐ Compare with reference: the reference and the image sit side by side, each named, each filling its own pane. It works on every image, generated or imported, not just on improve candidates — and on an improved one both buttons are there, so you can flip between "is it sharper?" and "is it still them?". The two never open at once, and neither follows you: press ⟩ and the next picture starts clean. Each pane fits its own image and says so — a square head crop next to a full-body plan has no shared scale to promise, unlike the comparison against the original.',
+    to: '/datasets?section=images',
+  },
+  {
+    id: '2026-08-07-dataset-lightbox-next-previous',
+    date: '2026-08-07',
+    title: 'Walk a dataset image by image, without closing the picture each time',
+    blurb:
+      'Reviewing image 41 of 340 full screen used to mean closing it, hunting tile 42 on the wall, and opening that — for every single image. The inspection view now has ⟨ and ⟩ on the edges of the picture, ← and → on the keyboard, and a 12 / 340 badge telling you where you are. It walks what the grid is SHOWING: chip it down to "awaiting ✓/✕", sort by face similarity, and the arrows follow that list in that order, crossing pages as they go — close the view and you are on the page holding the image you were looking at. The ends do not wrap: on the first image ⟨ goes grey and says so, because a loop that silently restarts makes "have I seen everything?" unanswerable. Zoom, an open comparison pane and a running improvement stay behind with the image they belong to, so the pane labelled "original" is always the parent of the picture in front of you. And since moving is only reading, the arrows keep working while a generation or a captioning pass holds the dataset.',
+    to: '/datasets?section=images',
+  },
+  {
+    id: '2026-08-07-lora-preset-applies-itself',
+    date: '2026-08-07',
+    title: 'Your LoRA preset can now apply itself, every run',
+    blurb:
+      'Building a generation-LoRA preset in Settings was only half the job: the tuning panel in the workspace opened on "None" every single time you came back to a dataset, so the preset applied only if you remembered to re-pick it — and a run that forgot showed no LoRA at all in the finished image\'s metadata, which looks exactly like the app ignoring your settings. Each local engine now has its own "Preset selected by default" in Settings → Image engines: pick one and every run starts there. It stays a starting point, not a lock — you can still choose another preset, or None, for a single run without touching the setting. Shipped as None, so nothing changes until you choose. Preset mechanism by @waltm (Discord).',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-07-lora-row-that-would-be-ignored-says-so',
+    date: '2026-08-07',
+    title: 'A LoRA line that would be ignored now tells you, in the editor',
+    blurb:
+      'Both local engines already load one LoRA outside your presets — Klein its consistency LoRA, Krea 2 Edit its identity edit LoRA — and a preset row naming that same file is deliberately dropped: chaining it twice adds both strengths together, well past what the file was trained for, and the result goes blocky. That drop happened in complete silence, one line in a server log nobody reads. Write such a row now and the preset editor says so on that exact line, explains why, and points at the strength setting to change instead. The check spells the path the same way the server does, so a slash the other way round or a different capitalisation cannot slip past it.',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-07-krea-base-model-is-named',
+    date: '2026-08-07',
+    title: 'Settings now names the Krea base model your runs actually load',
+    blurb:
+      'The "Base model file" field said "auto — finds a Krea 2 Turbo/Raw build" and stopped there. If your ComfyUI holds more than one candidate — the official Turbo build next to a community finetune whose filename also reads as turbo — the tie-break picked one and never told you which, so the only way to find out was to open a finished PNG and read its metadata. Every judgement about quality in between was about a model you had not chosen. The field now names the file the next run will load — and, when a filename you pinned yourself was not found under any krea folder, says so and names what is being loaded instead.',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-08-improve-instruction-editable-in-place',
+    date: '2026-08-08',
+    title: 'Fix the improve instruction where it goes wrong, not in Settings',
+    blurb:
+      'The note under ✨ Upscale & improve already told you what the pass was about to ask Klein for — "add detailed texture, add sharp details…" — and then sent you to Settings to change it. Now you can change it right there: ✎ Edit this instruction here opens the box under the button, in the lightbox and in the bulk toolbar, already filled with the exact text in force. Rewrite it for a drawing, or untick it and let the pass upscale with no instruction at all; both take effect on your next improve, with nothing to save. It edits the app-wide setting — the same value Settings shows, applying to every dataset — and the panel says so before you touch it. Reset to default appears only once you have actually overridden something, and puts you back on the shipped text rather than on a frozen copy of it, so later improvements to that text still reach you.',
+    to: '/datasets?section=images',
+  },
+  {
+    id: '2026-08-07-bank-stop-answers-the-click',
+    date: '2026-08-07',
+    title: 'Stop on a Bank pass answers you the moment you press it',
+    blurb:
+      'Press Stop while ✨ Score is writing thirty-six thousand rows and nothing appeared to happen for about three seconds — so everyone pressed it again, several times. The click was always registered instantly; it was the banner around it that took that long to refresh, and the button looked exactly the same before and after. It now changes to "Stopping…" the instant you press it and stops taking clicks, without waiting for anything from the server. It also says what it is waiting for, in the words of the step actually running — "finishing the current batch of 200 rows, then saving" is why the counter keeps moving for a moment after you press. And it tells you the price BEFORE you press: while scores are being written, everything already written stays and only the style grouping has to be redone in full, while during the style grouping itself Stop costs nothing because that step is written whole either way.',
+  },
+  {
+    id: '2026-08-07-passes-survive-a-locked-cache',
+    date: '2026-08-07',
+    title: 'A pass no longer dies because something else touched its cache file',
+    blurb:
+      'A ✨ Score over 37,000 images stopped at image 1849 with "Access denied" on its own cache — not a permissions problem, but an antivirus holding the freshly written file for a fraction of a second while the pass tried to swap it into place. On Windows that is enough to refuse the swap, and the work the pass had already computed and written was thrown away with it. Now the swap waits and retries for a few seconds, and if something really is holding the file the message says so instead of sending you into folder permissions. Better still, nothing is lost either way: work a previous run finished but could not file away is picked up automatically when the pass next starts, so a run interrupted by a lock, a crash or a power cut resumes from where it got to. Recovered work is checked before it is trusted — a half-written file is refused and removed rather than quietly becoming your cache. Applies to ✨ Score, faces, the semantic index and the video search vectors.',
+  },
+  {
+    id: '2026-08-07-image-size-budget-is-a-setting',
+    date: '2026-08-07',
+    title: 'Big panoramas and camera masters import now — and the size limit is yours to set',
+    blurb:
+      'A 10418×2100 panorama used to be refused with "reduce the image before import", which was the only advice possible while the limit was welded into the code. The limit is now a setting, and its default has moved from 16 Mi-pixels / 8192 px per side to 64 Mi-pixels / 16384 px — room for a 61 MP camera master or a stitched panorama without a second thought. Settings ▸ Captioning & quality ▸ Image size budget lets you raise it further, or switch it off entirely; the choices are labelled in the memory each one commits (a decoded pixel costs 3 bytes, and an edit can hold a second copy at once), and "No limit" says plainly what it disarms. One number governs the whole app — import, ZIP and scrape ingest, Bank scan and thumbnails, edits, ComfyUI staging and vision captioning — so an image you can import is an image you can look at. And when something is refused, the message now tells you where to change the budget instead of just telling you to shrink the file.',
+    to: '/settings/captioning',
+  },
+  {
+    id: '2026-08-07-dataset-stays-readable-while-it-works',
+    date: '2026-08-07',
+    title: 'A dataset you can still look through while it works',
+    blurb:
+      'Starting a generation, a captioning run or a watermark scan used to freeze the whole grid: you could not open an image full screen, zoom into a face, or even tick a box, on a pass that might run for an hour. Inspecting and selecting are reads — they change nothing — so they now stay available throughout. Editing does not: crop, mirror, rotate, keep/reject, captions and delete still wait for the pass to finish, because a second writer would race it. What changed there is that they stop being silently grey — each one now says which pass is holding it, where that pass has got to and how long it still needs ("⚡ Variation generation is running on this dataset — 12 / 64"), and a line above the grid states the rule once: edits wait, looking and ticking do not.',
+    to: '/datasets?section=images&panel=review',
+  },
+  {
+    id: '2026-08-07-pick-the-model-file-you-actually-have',
+    date: '2026-08-07',
+    title: 'Choose your Klein and Krea model files from a list instead of typing a filename',
+    blurb:
+      'The Klein model-file fields and the Krea 2 Edit base model and identity LoRA were blank boxes you had to fill from memory — one typo and the engine quietly used a different file. Each is now a searchable list of the model files actually found in your ComfyUI (extra_model_paths.yaml roots included), with a ↻ to rescan after you drop a new one in, and a plain sentence naming the folder when nothing is there. The Krea base list shows only what the app would really elect, so a checkpoint it refuses is never offered. Typing still works for a file that is not on disk yet, or an absolute path from anywhere.',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-07-a-pinned-model-that-is-missing-stops-the-run',
+    date: '2026-08-07',
+    title: 'A model file you chose that is no longer there now stops the engine instead of being swapped',
+    blurb:
+      'If you pinned a Klein or Krea model file and that file is gone or renamed, the app used to fall back to picking one for you and write a line in a log nobody reads — so the graph loaded a file other than the one on screen, and you only found out from the images. Now the pinned name stays in the field, marked "not found", the engine refuses to start and says which file it is looking for. Clearing the field is the explicit way back to automatic detection. The one exception is the shipped identity/consistency LoRA name, which nobody typed: at its default it still recovers a renamed download on its own.',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-07-krea-likeness-dials-reachable',
+    date: '2026-08-07',
+    title: 'When Krea 2 Edit does not look enough like your reference, you can now fix it',
+    blurb:
+      'Krea has two dials that decide how strongly it holds on to your reference photo — the reference pull and the identity LoRA\'s own strength — and neither had a control anywhere in the app: the only way to move them was to hand-edit config.json. They are now sliders in the "🧬 Krea 2 Edit tuning" panel of Generate variations, right where you judge the result. Reference pull is the one to reach for when the face is too loose (it used to ship paired with reference grounding, so raising grounding alone left you on an uncalibrated mix), and the identity LoRA strength has 50% of headroom above its shipped 1.0. Both write your global Krea settings — the panel says so, and each has a one-click way back to the shipped value.',
+    to: '/datasets?section=add&panel=generate',
+  },
+  {
+    id: '2026-08-07-passes-say-how-long-is-left',
+    date: '2026-08-07',
+    title: 'Every pass now tells you how much longer it needs',
+    blurb:
+      '"12939 / 37800" told you where a pass was, never whether that meant twenty minutes or four hours — so the only way to find out was to sit and watch. Scan, ✨ Score, faces, framing, medium, captioning, watermark, crops & variants, the semantic index and the video passes now add "about 2 hours left" beside their counter, and a refusal to start a second pass tells you how long the first one still needs. The number is measured over the last minute of real work, not averaged since the pass began: a ✨ Score resuming from cache swallows twenty thousand rows in two seconds and an average would have promised "a few seconds" for the next hour and a half. It stays quiet until it can hold still — you get "estimating time left…" rather than a figure that changes every poll — it says "in this step" once a pass has moved on to a different kind of work, and a step with nothing to count (grouping styles, comparing shots) gets no estimate at all rather than an invented one.',
+  },
+  {
+    id: '2026-08-07-reference-edit-survives-a-restart',
+    date: '2026-08-07',
+    title: 'An edited reference photo is no longer lost if the app restarts',
+    blurb:
+      'Editing your reference photo is a paid call that takes one to three minutes. If the app restarted before you pressed Keep, the finished image was still sitting in your dataset folder — but nothing could reach it any more: the modal came back empty, Keep refused, and the result you paid for was deleted half an hour later. It now comes back waiting for your Keep or Discard. If a second engine was still working when the app went down, it says so plainly instead of spinning forever on a result that is not coming.',
+    to: '/datasets',
+  },
+  {
+    id: '2026-08-07-video-install-checks-the-encoder',
+    date: '2026-08-07',
+    title: 'Installing the video extra no longer claims success when clips still cannot be cut',
+    blurb:
+      'The video extra delivers two things — reading your files, and encoding the clips you keep — and Setup only ever checked the first. So on a machine where the bundled ffmpeg never finished downloading (or an antivirus emptied it), the install said "✓ installed successfully" while the "Video bank — clip encoding" row stayed ✗ right underneath, behind the very same ↻ button: you reinstalled the half that already worked. That install now fails honestly and tells you which half is missing and what repairs it. The Setup row got stricter too: it runs ffmpeg instead of trusting that a file exists at the right path, so a truncated or quarantined binary is caught in Setup rather than in the middle of an export.',
+    to: '/setup',
+  },
+  {
+    id: '2026-08-07-face-mask-preview-survives-a-restart',
+    date: '2026-08-07',
+    title: 'The face-mask preview no longer disappears when you restart',
+    blurb:
+      'Looking for faces across a concept dataset is the slow part of the training panel — the detector alone takes seconds to load before the first image, then every kept photo on top. That whole pass used to live only in the app\'s memory, so restarting the server threw it away and the panel offered to run it all over again. It is now saved beside your images and comes back with them. Stopping a pass keeps its credit too: the faces already found survive the restart, so "Resume — 47 of 153 already analyzed" is still waiting for you. If you changed your kept images while the app was down, the preview comes back labelled out of date rather than pretending to be current.',
+    to: '/datasets',
+  },
+  {
+    id: '2026-08-03-phone-layout-full-width',
+    date: '2026-08-03',
+    title: 'The dataset page uses the whole screen again on a phone',
+    blurb:
+      'On a phone (and in the installed app), the dataset page drew everything at about three quarters of the screen width — the header bar, the section chips, every card — with a dead strip down the right-hand side. Nothing was cut off and nothing looked broken up close, which is what made it hard to place: the culprit was a one-pixel, invisible label that the horizontal section rail was failing to keep inside itself, which stretched the page wider than the screen and made the browser shrink the whole thing to fit. The rail now holds its contents, so the page measures the width of your screen and uses it. The Settings and Guide chip rails got the same treatment before they could catch it. Diagnosed and fixed by socrasteeze (GitHub).',
+    to: '/datasets',
+  },
+  {
+    id: '2026-08-07-captions-say-who-wrote-them',
+    date: '2026-08-07',
+    title: 'Every caption now says who wrote it',
+    blurb: 'The default captioning backend is a chain, not a choice: JoyCaption writes what it can, then the Ollama vision model covers the images it missed — and both halves used to land in the same box looking identical. Captions now carry their author everywhere you read one (bank tile, dataset tile, the expanded editor, the identity-leak list), your own hand-written captions stay marked as yours, and a bank caption run ends with "340 by JoyCaption, 87 by the Ollama vision model" instead of a bare total. On a bank that ✨ Score has found to be mostly NSFW, the caption window now also says what was measured on that kind of image before you start.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-07-unlocked-rows-lead-to-their-install',
+    date: '2026-08-07',
+    title: 'Every "What\'s unlocked" row now takes you to its install',
+    blurb: 'The Krea 2 Edit row told you it was missing and did nothing when clicked — it now opens the install screen where its one-click installer lives (or, when the files are already there, tells you to restart ComfyUI). Clip encoding joins the list too: a machine with no ffmpeg used to be certified complete while it could not export a single clip. And the scraper install warning finally names the packages YOUR machine is missing, instead of reciting three from memory.',
+    to: '/setup?step=install',
+  },
+  {
+    id: '2026-08-07-setup-summary-lists-every-installable-engine',
+    date: '2026-08-07',
+    title: 'Setup now lists every engine you can install',
+    blurb: "Bank scoring, the SigLIP2 semantic engine, the fast watermark detector and the scraping extras (gallery links & keyless web search) could already be installed with one click, but never showed up on the wizard's \"What's unlocked\" screen — so finishing Setup could look complete on a machine still missing four of them. All four now get their own row, their own install card, and their own ✓/✗.",
+    to: '/setup?step=quality',
+  },
+  {
+    id: '2026-08-07-web-image-search-install-check-fixed',
+    date: '2026-08-07',
+    title: 'Web image search now flags a missing install correctly',
+    blurb: 'If your scraper packages were installed before web image search (DuckDuckGo-style keyword search) shipped, the app used to say the scraper was ready and only fail once you actually searched. The Web images tab now correctly flags it as needing a reinstall, with a one-click "Install scraper extras" button to fix it.',
+  },
+  {
+    id: '2026-08-06-reddit-load-more-no-longer-drops-posts',
+    date: '2026-08-06',
+    title: 'Reddit "Load more" no longer skips posts',
+    blurb: 'On image-heavy subreddits, a batch of posts could hit the per-scan cap mid-way through — and the posts after that point were gone for good, on every page. "Load more" now picks up exactly where the cap cut off, so nothing is left unreachable.',
+  },
+  {
+    id: '2026-08-06-cap-hit-scans-say-so',
+    date: '2026-08-06',
+    title: 'A capped scan says there might be more',
+    blurb: 'Picazor, RedGifs and Instagram scans stop at a built-in limit to stay fast. Hitting that limit used to look exactly like a profile that genuinely had that few posts. Now the picker flags it, the same "some images may be missing" banner used for a scan cut short by a block or a timeout.',
+  },
+  {
+    id: '2026-08-06-scan-truncation-and-blocked-pages',
+    date: '2026-08-06',
+    title: 'A blocked page says so — even on a slow scan',
+    blurb: 'A gallery scan that hit both a login wall and the time budget used to report "nothing here" instead of the real reason. It now shows the actual block. And when a scan is cut short by the time limit, the picker tells you some images may be missing instead of quietly presenting a partial list as the whole thing.',
+  },
+  {
+    id: '2026-08-06-bank-scrape-keeps-provenance',
+    date: '2026-08-06',
+    title: 'Images scraped into a bank keep their source',
+    blurb: 'Scraping straight into a bank used to drop the Pexels credit or the page a web-search image was found on. It now survives the trip — and shows up again if you later promote that image into a dataset.',
+  },
+  {
+    id: '2026-08-06-web-search-image-origin-link',
+    date: '2026-08-06',
+    title: 'See where a web-search image came from',
+    blurb: 'Images you pull in from web search now carry a "Source ↗" link back to the page they were found on, right in the dataset — so you can credit or double-check the origin without hunting for it again.',
+  },
+  {
+    id: '2026-08-06-any-gallery-site',
+    date: '2026-08-06',
+    title: 'Paste a gallery from almost any site',
+    blurb: 'Sites without built-in support used to return a single image. They now list the whole page, using the same engine that already powers PornPics and Civitai. A site the engine does not know shows "No images found" instead.',
+  },
+  {
+    id: '2026-08-06-web-image-search',
+    date: '2026-08-06',
+    title: 'Search the web for images by keyword',
+    blurb: 'Type what you are looking for instead of hunting for a gallery URL first. No account, no API key. Results come from third-party sites, so check the licence before using one.',
+  },
+  {
+    id: '2026-08-06-pinned-runs-keep-one-grid-per-prompt',
+    date: '2026-08-06',
+    title: 'Pinning a run to the canvas gives each prompt its own grid',
+    blurb:
+      'Pinning everything a run produced onto the ◉ LoRA Canvas used to drop the pictures of several prompts into one another, so a board carrying two or three runs read as one scatter and you could not tell at a glance which image came from which prompt. Each prompt now keeps its own grid, and a fresh grid is moved aside rather than laid over anything already on the board — including the cards, the checkpoint pills and the pictures you placed by hand, which are never touched. The reason for putting a run on the board at all is to SEE which prompt gave what; that is now what you get.',
+    to: '/canvas',
+  },
+  {
+    id: '2026-08-06-duplicates-headline-counts-what-is-left',
+    date: '2026-08-06',
+    title: 'The duplicates figure counts what you still have to decide',
+    blurb:
+      'The ≈ Duplicates figure on the bank overview counted every group the last analysis found, including the ones you had already resolved — so it sat at the same number no matter how much of the queue you cleared, and there was no way to tell progress from a stuck pass. It now counts what is left to decide, and says so: “groups remaining to resolve”. A bank whose duplicates are all sorted reads zero, which is the whole point of a headline number.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-06-face-mask-preview-stops-and-resumes',
+    date: '2026-08-06',
+    title: 'The face-mask preview can be stopped — and picks up where it left off',
+    blurb:
+      '"Looking for faces… analyzing image 4 of 153" had no way out: the only choice was to wait for the whole pass or leave the page and lose it. There is a Stop button now, and it keeps what the pass already found — start it again and it resumes at image 5 instead of image 1. The button says what stopping costs at the moment you press it, and the cost changes as the pass runs: during the model load nothing has been analyzed yet, so only the load is given up; once images are being analyzed, every face already found is kept. Change your kept images and the saved work is dropped rather than reused, because boxes from photos that left the set would describe a run that no longer exists.',
+    to: '/datasets?section=training',
+  },
+  {
+    id: '2026-08-06-setup-counts-the-video-pieces',
+    date: '2026-08-06',
+    title: 'Setup now counts the video pieces — and its repair menu can reach them',
+    blurb:
+      'The setup wizard could certify "12 of 12 capabilities ready" on a machine whose Video bank could not open a single file: the two video pieces were not counted, not listed in the Install-or-repair menu, and the wizard skipped its own install screen because everything it DID count was green. The summary now counts 14 — reading video files and shot detection included, each ✗ row clickable to where it installs — and 🎬 Video decoding and 🎞️ Shot detection sit in the Install or repair individually menu like every other component.',
+    to: '/setup',
+  },
+  {
+    id: '2026-08-06-shot-detection-installs-its-decoder',
+    date: '2026-08-06',
+    title: 'Shot detection no longer fails every file right after a clean install',
+    blurb:
+      'The 🎞️ Shot detection install put the model in place but not the decoder it reads files with — so the install reported success, the readiness badge turned green, and then every single file answered "failed shot detection". The install now carries PyAV into the same environment, the badge only turns green when the worker can actually open a file, and a contract test holds the three ends (worker, installer, probe) to the same list. If you hit this: Setup → 🎞️ Shot detection → ↻ Reinstall, then run Find shots again — your files were never the problem.',
+    to: '/setup',
+  },
+  {
+    id: '2026-08-06-bank-page-opens-without-rescanning-everything',
+    date: '2026-08-06',
+    title: 'The Bank page opens in a blink instead of a second',
+    blurb:
+      'Every time you opened 🗃️ Bank, the app re-listed every image in every bank\'s source folder before drawing the page — on a real library of 86 000 images that was a full second of disk work, paid even when you were only passing through. It no longer does: the page opens on what it already knows. A folder is still re-checked automatically when you OPEN its bank, so images you dropped in it show up as before, and a new 🔄 Rescan folders button on the list checks them all at once. The page says how fresh its counts are, and a folder that went missing (unplugged drive, renamed folder) is still flagged straight from the list.',
+  },
+  {
+    id: '2026-08-06-semantic-index-borrows-a-gpu-python',
+    date: '2026-08-06',
+    title: 'Build the SigLIP 2 index on the GPU you already have',
+    blurb:
+      '✨ Score could already borrow a CUDA Python from ai-toolkit or ComfyUI instead of crawling on the CPU. The SigLIP 2 semantic index could not, so it kept indexing in the app’s own CPU-only environment even on a machine with a 4090 sitting idle. The Semantic engine panel now says which device the index will really use, and offers the same picker. It checks each interpreter dependency by dependency — and the list is the right one: SigLIP 2 never needs OpenCLIP or timm, so a ComfyUI venv Score refuses can be perfectly good here. Nothing is ever installed into an environment the app did not build: the pinned weights live in your data folder, and Setup ▸ Quality tools keeps installing into the app’s own Python even after you borrow one.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-06-video-extras-installable-from-setup',
+    date: '2026-08-06',
+    title: 'The video extras can now be installed where the app said they were',
+    blurb:
+      'The Video bank\'s banner told you "Install the video extra from Setup" — and Setup had no such button: both installs existed, but only for the API. Setup\'s optional-helpers step now carries the two missing cards: 🎬 Video decoding (PyAV + bundled ffmpeg into the app\'s own Python, no torch) and 🎞️ Shot detection (TransNetV2 into the scoring Python, CPU is fine). One click each, live progress, and the banner clears without a restart. A new test holds Setup to every install the video banners promise, so a pass can no longer point at a button that does not exist.',
+    to: '/setup',
+  },
+  {
+    id: '2026-08-06-video-watermark-flag',
+    date: '2026-08-06',
+    title: 'Spot the watermarked shots before they teach your LoRA a logo',
+    blurb:
+      'Rushes come off stock sites and other people\'s uploads, and a logo sitting in the same corner of every frame is the most consistent thing in your dataset — so it is the first thing a LoRA learns to draw. You cannot catch that by scrolling 90-pixel thumbnails. The new 🔖 Watermarks pass runs the same detector the image bank uses over each shot\'s sharpest frame and flags what it finds. Nothing is deleted: it is an amber flag you can filter on and act on. Needs the watermark detector from Setup; the cut sits in 🎚 Quality cuts at the measured 0.94, and a shot the pass has not judged is never called clean.',
+    to: '/video-bank',
+  },
+  {
+    id: '2026-08-06-video-duplicate-shots',
+    date: '2026-08-06',
+    title: 'Find the takes you already have, without watching them twice',
+    blurb:
+      'Ten near-identical takes of one gesture do not teach a model ten things — they teach it one thing ten times as loudly, and that is how a LoRA ends up unable to do anything else. The new ✂ Duplicates pass compares your shots to each other and groups the near-identical ones, keeping the sharpest of each pile unflagged so you know which one to keep. It costs no GPU and no waiting: it reuses the frame vectors 🔎 Find scenes already cached, so it is dot products over a file you already have. Flags only — nothing is rejected or deleted for you.',
+    to: '/video-bank',
+  },
+  {
+    id: '2026-08-06-video-flag-chips',
+    date: '2026-08-06',
+    title: 'Act on a quality flag instead of just reading it',
+    blurb:
+      'The amber flags in a video bank could be read one shot at a time and nothing more. There is now a row of chips above the gallery — "Barely moves (14)", "Same as another shot (31)" — and pressing one narrows the grid to exactly those shots, so you can select them and reject the lot in one gesture. The counts cover the shots currently loaded and the row says so when there are more to load.',
+    to: '/video-bank',
+  },
+  {
+    id: '2026-08-04-video-minimum-length',
+    date: '2026-08-04',
+    title: 'Half-second flash cuts stop cluttering your triage',
+    blurb:
+      'Shot detection deliberately keeps very short cuts — a real flash cut is a real shot, and a detector that hides them also hides genuine boundaries. The price was a grid full of half-second shots you scrolled past over and over, and that could never reach a dataset anyway. 🎚 Quality cuts now has a "Minimum length" field: type 1 second and every shorter shot wears an amber flag you can see and sort by. It is the one cut that works straight after detection — it reads the shot bounds, so you do not have to run the measuring pass first — and Preview tells you how many it would flag before you apply it. Nothing is deleted: it is a flag, like every other cut in that panel.',
+    to: '/video-bank',
+  },
+  {
+    id: '2026-08-04-video-train-local',
+    date: '2026-08-04',
+    title: 'Your video sets can now be trained here, without leaving the app',
+    blurb:
+      'A promoted video set now carries a ▶ Train this dataset button, and it hands the clips straight to the ai-toolkit already installed on your machine — no export, no copy, no config to write by hand. It shares the GPU with everything else honestly: a captioning pass or a ComfyUI render in flight refuses the launch instead of fighting over the card, and an image training already running blocks it exactly as another video run would. MiniMax H3 is wired in alongside Wan, with the quantisation, the noise schedule, the audio flags and the guidance its own trainer actually expects — a mismatch there does not crash, it just trains a slightly wrong model, which is why each value was read in the installed trainer rather than guessed. Two things it refuses to do quietly. H3 needs about 43 GB of weights: if they are not on your disk the button says so, names the repository and the size, and waits for a yes rather than turning into a silent overnight download. And a set re-promoted to a different target is refused rather than resumed, because the run folder still holds the previous model’s LoRA. Wan 2.2 is the one target a finished run has been through here; the card says plainly which of the others are wired but not yet proven.',
+    to: '/datasets',
+  },
+  {
+    id: '2026-08-04-video-cloud-training',
+    date: '2026-08-04',
+    title: 'A promoted video dataset can now be trained on a rented GPU without leaving the app',
+    blurb:
+      'Open a video training set in your library and it has a Cloud training panel: pick a step count, click Train in the cloud, and watch the run — the GPU it landed on and what it costs per hour are on screen as soon as the pod has them. When it finishes, the checkpoints are listed by step and downloadable from the same panel. Wan 2.2 saves TWO files per step, the high-noise and low-noise experts, and either one alone is a LoRA nothing can load — so a step is offered as a step, with both of its files, never as a loose file list. A run that failed has a Retry, a run that finished has Train further, and continuing a Wan run sends both experts back to the new pod rather than resuming half of it. Before the job starts, the pod is asked to decode one of the clips you just uploaded with the same decoder the trainer uses; a pod that cannot read them fails in the first minute instead of billing you for hours of training on nothing.',
+    to: '/datasets',
+  },
+  {
+    id: '2026-08-04-video-caption-wording',
+    date: '2026-08-04',
+    title: 'Captions can now speak plainly instead of describing around the subject',
+    blurb:
+      'Next to 🗣 Describe shots there is now a Caption wording choice. Standard is the wording that shipped and stays the default. Plain gives the model explicit permission to name what is actually on screen rather than reaching for vague stand-ins. This came out of a measurement, not a hunch: on real footage, four combinations were compared and the WORDING mattered more than the model did — the stock model asked plainly named things precisely and wrote the best action description of the four, while an uncensored model asked the old way still described around the subject. That matters because a caption that talks around its footage is a dataset defect you cannot see: the text reads perfectly well, the training set looks complete, and the LoRA learns the evasion. Every caption now records which wording produced it, so a bank captioned across a change is still one you can reason about. Pick it per run, or set it once in your config.',
+    to: '/video-bank',
+  },
+  {
+    id: '2026-08-04-video-caption-model-choice',
+    date: '2026-08-04',
+    title: 'Captions can now speak plainly — the model that writes them is yours to choose',
+    blurb:
+      'The 🗣 Describe shots pass had one model wired in. On a real corpus that turned out to be a dataset problem rather than a matter of taste: a captioner that describes what it sees in evasive terms produces captions that are about something slightly other than your footage — and a LoRA trained on those learns to look away too, with nothing in the output to reveal it. The captions read perfectly well; they are just not about the shot. So the checkpoint is now a setting, `video_caption.model`. Leave it empty and nothing changes: the same model as before, the same captions. Point it at any checkpoint of the same architecture and the pass uses that instead. Two things come with it. If the model is not on your machine yet, the pass SAYS so in its own progress line before it starts, because the first run downloads it and that should never be a silent twenty-minute wait. And every caption now records which model wrote it, so a bank captioned half before the change and half after is still a bank you can reason about.',
+    to: '/video-bank',
+  },
+  {
+    id: '2026-08-04-video-describe-shots',
+    date: '2026-08-04',
+    title: 'Your shots get described — so you can search for what HAPPENS, and so they train on words',
+    blurb:
+      'There is a new 🗣 Describe shots pass. It watches eight frames spread across each shot and writes what happens in it — “a woman turns and walks away”, not an inventory of objects — and that one line does two jobs. It becomes the clip’s .txt sidecar at promotion, which IS the prompt it trains on: until now every promoted clip shipped with an EMPTY prompt, and the trainer accepts that in silence. And it makes 🔎 Find scenes able to answer a question it structurally could not before. CLIP looks at frames, so it finds what a moment LOOKS like; an action is a fact about time and no single frame carries it. With captions the search reads both, and the panel says which halves are running so an empty result can be read correctly. Captions are drafts: open any shot and edit it, and a bulk re-run will not overwrite what you wrote. The promotion now also tells you how many clips are about to ship with no caption at all, before it encodes anything.',
+    to: '/video-bank',
+  },
+  {
+    id: '2026-08-04-video-source-cap-knob',
+    date: '2026-08-04',
+    title: 'The per-source cap you could already read about now has a knob',
+    blurb:
+      'The build dialog gains a “Max clips per source” field. The cap itself is not new — it has capped nothing so far because nothing could send it: the setting was implemented and reachable from neither the dialog nor the API. It matters because a 50-clip set that is three videos over-represented looks exactly like a diverse one on disk. Leave it empty for no cap. Each source keeps its EARLIEST clips, so promoting the same bank twice gives the same dataset, and a source with fewer clips than the cap keeps all of them — it trims dominance without punishing scarcity. And when a finished set turns out to lean on one file anyway, the result now says so with the real share instead of leaving you to notice.',
+    to: '/video-bank',
+  },
+  {
+    id: '2026-08-04-video-edge-trim',
+    date: '2026-08-04',
+    title: 'Trim the dissolve off both ends of every clip you export',
+    blurb:
+      'A shot boundary is where a cut just happened, so the first and last frames of a detected shot are disproportionately dissolves, fades and leftovers of a transition — and a dataset whose clips all open on half a dissolve teaches the model to open on half a dissolve. The build dialog now has a “Trim each end” field: a number of seconds taken off BOTH bounds of every clip. 0.25 is the common figure; the default is 0, so an existing recipe exports exactly what it exported before. What it will NOT do is hand you a short clip. Frame counts are a property of the target model’s VAE, and ffmpeg happily writes a 32-frame file and exits 0 when asked for 81 — so a clip that no longer supplies the count is dropped rather than exported short. The dialog tells you how many clips the trim will cost before you press the button, and counts them separately from clips that were never long enough: only the first kind is fixed by lowering the trim, and reporting them as one number is how a setting quietly halves a dataset while the material looks to blame.',
+    to: '/video-bank',
+  },
+  {
+    id: '2026-08-04-video-audio-metrics',
+    date: '2026-08-04',
+    title: 'Your shots are now listened to, not just looked at',
+    blurb:
+      'For LTX and MiniMax H3 the source’s audio is muxed into every clip you export — and until today nothing had ever listened to it. A shot whose track is a silent stretch, a dropout or a muted camera passed exactly like a shot with sound, because the file on disk is the right length, the right sample rate, and mute. A dataset of silent clips teaches the model to be silent. Measure now reports, per shot, how much of it is silence and its overall level in dBFS, with two new cuts to go with them — Silent share and Loudness floor — raising two different flags on purpose, since a quiet clip can be normalised and a silent one cannot be rescued. Three states are kept strictly apart, because collapsing any two of them makes the bank lie: a file with NO sound track is never flagged (Wan datasets are supposed to look like that), a track that is there and carries nothing is the actual defect, and shots measured before this shipped have no sound reading at all — an audio cut will never flag those, and Measure with re-measure is what fills them in.',
+    to: '/video-bank',
+  },
+  {
+    id: '2026-08-04-video-find-scenes',
+    date: '2026-08-04',
+    title: 'Type a word and find the scene, in a folder of rushes with no names',
+    blurb:
+      'A video bank is a haystack whose needles have no names: quality cuts tell you which shots are sharp and which move, and nothing tells you which one has the red car in it. There is now a 🔎 Find scenes box above the gallery. Run the pass once — it looks at a few frames of every shot — then type “a woman walking on a beach” and the gallery is replaced by the shots that look most like it, best first, instantly. Several frames per shot on purpose: a car that only drives into view in the last second would be invisible to a search that had looked at the opening frame, and you would get no hint it had been missed. So every shot contributes a frame near its start, its sharpest frame and one near its end — and every result tells you WHICH SECOND matched, with the player opening right there. Two things it says out loud rather than hiding. It is a ranking, not a filter: every shot scores something against every phrase, so the results always come back full and the line above the gallery tells you how strong the top and the tail really are, plus how many shots have not been looked at yet and could not be searched at all. And “without” does not work — ask for a street without cars and you get cars, because the model ignores the word rather than honouring it. Type “-cars” instead: that pushes them down the ranking, which is a promise the app can actually keep.',
+    to: '/video-bank',
+  },
+  {
+    id: '2026-08-04-video-clip-retouch',
+    date: '2026-08-04',
+    title: 'A badly cut shot is no longer a shot you have to throw away',
+    blurb:
+      'Until today, a shot the detector cut one second too early — or one holding a frozen tail — had exactly one available gesture: ✕ Reject, which threw away the eight good seconds to be rid of the bad one. Open any shot and there is now a ✂ Trim & split panel under the player. Nudge either bound by one second or by one frame (one frame OF YOUR FILE, at its own rate), snap a bound to wherever the playhead sits, split a shot in two at the playhead, or draw a shot the detector missed entirely — scrub anywhere in the rush and press ＋ New shot from here. Splitting keeps the decision you were making: split a kept shot and both halves stay kept, so you do not have to find them again among hundreds. One thing worth knowing before you trim: for image-to-video targets, the trainer conditions on the clip’s FIRST frame. Moving a start is therefore not trimming — it is choosing the exact image the model learns to animate from, and the panel says so where the buttons are. Re-cut shots lose their thumbnail and their quality scores on purpose: a thumbnail of a frame the shot no longer contains is not stale, it is wrong. Run Make thumbnails again when you are done cutting. And re-detecting a file no longer destroys the cuts you made by hand.',
+    to: '/video-bank',
+  },
+  {
+    id: '2026-08-04-video-quality-flags',
+    date: '2026-08-04',
+    title: 'Your video bank now measures every shot — and tells you which ones to look at',
+    blurb:
+      'One pass reads every frame of every shot and scores what quietly ruins a video dataset: shots that barely move, shots that are all blur, black moments, frozen stretches. Nothing is rejected for you — flagged shots get an amber mark in the grid, and the verdict stays yours. The cuts are yours too: there are deliberately NO default thresholds, because the same number that flags 2% of one bank flags 12% of another. Open 🎚 Quality cuts, set a value, and Preview shows exactly how many shots each cut would flag — per rule, before anything is applied. On a real 4.5-hour test bank the most valuable filter turned out to be the frozen-stretch one: 15% of shots carried a freeze the average could never see. Bonus: thumbnails now come from the SHARPEST measured frame instead of the middle guess.',
+    to: '/video-bank',
+  },
+  {
+    id: '2026-08-04-video-bank',
+    date: '2026-08-04',
+    title: 'Your folder of rushes is now a training set — and a .mp4 is no longer ignored in silence',
+    blurb:
+      'Drop a video into an image bank and until today it was skipped without a word: no row, no warning, nothing to click. Videos now get their own bank. Point it at a folder of rushes and it cuts every file at its shot boundaries, so you triage SHOTS instead of files — a two-hour rush becomes three hundred things you can judge in an afternoon. Click any shot to watch exactly that moment; the grid stays thumbnails, so a bank of hundreds of shots stays as light as a page of photos. Nothing is copied and nothing is re-encoded while you triage: a bank stores where each shot starts and ends, and only the ones you keep are ever encoded. When you build the set, the length menu offers only the frame counts your target model can actually ingest — 29 frames is legal for Wan and illegal for LTX, and no trainer tells you, they just quietly round it down. Two things are written next to the target you pick, because they are what costs a wasted week: whether a LoRA trainer for it is known to exist at all (exactly one of the four), and MiniMax H3’s licence, which grants no rights in the EU, the UK, South Korea or the USA — outputs included. And if a piece is missing, the app names which one: with no ffmpeg you can still scan, cut, watch and triage everything — only the final encode waits.',
+    to: '/video-bank',
+  },
+  {
+    id: '2026-08-06-aim-the-watermark-cleaning-levels',
+    date: '2026-08-06',
+    title: 'Choose which images get cropped or repainted — the two watermark levels no longer fire on one click',
+    blurb:
+      '🚩 Watermarks offered “✂ Auto-crop (16 052)” and “🧽 Inpaint (16 507)” as single buttons: press one and thousands of images were cleaned, with no way to say which. Both now open the same launch window the other passes use — run them on your kept images only, on the undecided ones, on the bin, on all three, or on exactly the images you ticked in the grid. Each line carries the real number for that pile, a run that would touch nothing is refused instead of reporting success, and the window states up front what is reversible: your own files are never written to, the cleaned pixels live in the bank’s own copy, and ↩ Undo cleaning throws them away and re-flags the images — what it cannot reach is an image you already promoted into a dataset, or one whose source file changed on disk since the clean. A run that only covered part of your bank now names what it left out, and flagged images sitting in the bin are reachable at last instead of leaving a dead button. Leave the window alone and both levels behave exactly as before.',
+  },
+  {
+    id: '2026-08-06-big-banks-open-instantly-and-stop-answers-again',
+    date: '2026-08-06',
+    title: 'Big Banks open in a second again — and Stop answers while a pass runs',
+    blurb:
+      'A Bank of 50 000 images took over 12 seconds to load its workspace, and more than 28 while a pass was running — long enough that the progress bar and its Stop button never arrived, so a running scan could not be stopped. The workspace was re-checking the location of every single image on disk, twice each, on every 2-second refresh; it now remembers what it already resolved. The progress bar has also moved to its own tiny request, so it keeps ticking and Stop keeps working no matter how large the Bank or how busy the pass. Measured on a 50 397-image Bank: 18.5 s to 1.5 s, and the progress bar answers in 1 ms.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-06-each-bank-can-choose-clip-or-siglip2-without-losing-work',
+    date: '2026-08-06',
+    title: 'Each Bank can choose CLIP or SigLIP 2 — switching keeps every result',
+    blurb:
+      'A Bank now chooses the semantic engine behind Find by text, Similar, diverse and balanced picks, coverage, and same-shot grouping. CLIP remains the zero-change default and still owns Score; SigLIP 2 is an explicit optional install with its own pinned, resumable index. The two caches and the two same-shot partitions are stored separately, restored when you switch back, and carried through Bank → Dataset, Dataset → Bank and Bank → Bank transfers. Live readiness counts now follow the images that are actually in the Bank, so deleting or rejecting the last group cannot leave an old “65 ready” graph behind.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-05-describe-the-set-you-want-and-the-filters-move',
+    date: '2026-08-05',
+    title: 'Say what you want in a sentence, and the bank sets its own filters',
+    blurb:
+      'Type "an amateur photo set, least polished first" above the triage chips and the bank moves ITS controls — medium, flags, resolution, sort — then the counters you already had say, measured, how many images that lands on. The model never looks at your pictures and never picks any: it only reads the sentence, so a wrong reading costs one glance at chips you can edit rather than a silent selection of a few thousand images you would have to trust. It answers over what your bank has actually measured, with the real per-value counts in front of it, so it cannot reach for a bucket that holds nothing. When part of a request has nowhere to land — asking for what is IN the pictures on a bank whose captions cover 1% of it — it says that part is not expressible here instead of inventing a filter that would return three thousand convincing, unrelated images. And it will not turn an exclusion into a search phrase: the ranker in this app returns MORE of a negated thing, not less, so "without a watermark" is reported rather than quietly sent.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-05-bank-passes-say-what-they-left-out',
+    date: '2026-08-05',
+    title: 'Bank passes now say what they were doing, what they grouped, and what they left out',
+    blurb:
+      '✨ Score used to go quiet for minutes once its counter reached the last image, bar full, Stop still offered — on a 21 000-image bank that silence read as a freeze. It was writing a 70 MB cache and then comparing every embedding against every other; both steps now name themselves while they run, and the ones where Stop costs something different say what it costs before you press it. The style grouping stopped hiding behind a number too: "1 style group of 2+" was printed both when almost nothing grouped and when a single group had swallowed 24 928 of 24 931 images. It now states the size of the biggest group against the total, and names the threshold when the grouping is too loose to separate anything or too tight to join anything. And every pass that skips part of your bank says so at the end: 🎨 Classify medium answering "0 classified" on a 50 000-image bank was exact — 25 464 rejected images had been dropped by the scope before the pass even began, and that figure appeared nowhere. It does now, on 🔎 Scan, 🏷️ Caption, 📐 Framing, 💧 Watermark and 🎨 Medium alike, and stays silent when a run really did reach everything. 🎨 Medium\'s launch window also counts, per scope, the images it cannot answer for because ✨ Score never reached them — and refuses to start a run where that is all of them.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-05-every-bank-pass-asks-where-to-run-before-it-runs',
+    date: '2026-08-05',
+    title: 'Every bank pass now asks where to run — kept, undecided, unkept, or your selection',
+    blurb:
+      'Pressing 🔎 Scan, 🏷️ Caption, 📐 Classify framing or any other pass used to fire immediately on whatever the app had decided was its pool. Each of them now opens a window first, and that window says three separate things. Where the run applies: kept only, undecided only, unkept (the bin), all three, or the images you have selected — each line quoting the number of images IT would actually touch, so a scope with nothing to do is refused before the click rather than reported as a success afterwards. What the pass reads: only the settings its calculation consumes, with where they live, so you stop guessing whether nudging a threshold costs you a rescan. And what is NOT decided there: the knobs that only re-sort and re-flag the grid, retunable any time with no pass at all. "Rescan all" and "Rescore all" were never separate actions and no longer pretend to be — they are a tick box in their pass\'s window, next to the pool they re-run and with their price written next to them. Three passes refuse a partial scope, and now say so instead of quietly not offering it: ✨ Score, 👥 Group by person and ✂ Find crops & variants each produce one numbering of the whole bank, and handed a slice they would land fresh group ids on top of unrelated groups already saved. Aiming a pass at the bin is offered everywhere it makes sense, always with what that run costs, and never as a default.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-05-the-launch-all-report-names-every-step',
+    date: '2026-08-05',
+    title: 'The Launch-all report calls every step by the name on its button',
+    blurb:
+      'Two of the eight steps in the "Last Launch-all run" summary printed their internal identifier instead of their name — you would read "semantic_dedup" and "framing" in your own report and have no way to tell which button that was. They are now "✂ Find crops & variants" and "📐 Classify framing", the exact words on the buttons you pressed. The fallback that made the omission invisible is now guarded by a test that reads the server\'s own step list, so a ninth step cannot ship nameless.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-05-select-images-and-see-their-tags-with-how-often-each-is-cited',
+    date: '2026-08-05',
+    title: 'Select images and their tags are right there, with how often each is cited',
+    blurb:
+      'Once a bank is captioned, selecting an image now shows its tags immediately — no extra click, no hunting for a badge. Select several and you get the tags across the whole selection, each with how many of them mention it: "red dress 7 / 12" tells you at a glance that over half of what you picked is that, which is the judgement you were making anyway. Ticking a chip filters the bank exactly as before, and the row holds still while it does. It is honest about its own reach: images with no caption yet are counted apart and named, so are captions whose every word was a grammar word, and a selection too large to read in one go says how many it left out instead of quietly shrinking the denominator. The 🏷️ button on a tile has also moved out of the badge cluster in the top-left corner — that corner is a state readout where nothing is clickable — down to the bottom-right next to ▶ and ⛶, where the tile\'s other actions live. When an image has no caption, or a caption with no word worth filtering on, the button stays visible and says which of the two it is, instead of disappearing and reading as a feature that does not exist.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-05-bank-chip-counts-follow-the-filters',
+    date: '2026-08-05',
+    title: 'The numbers on the bank filter chips now match what they open',
+    blurb:
+      'Every chip in the bank — 🌫 Blurry, 📺 Noisy, the resolution tiers, 🔎 Origin, 📐 Framing, 🎨 Medium, ⤢ Angle — used to print a total for the whole bank whatever else you had filtered. Pick ✕ Rejected, read "📺 Noisy 4 043", click it, get twelve images. The counts now describe the bank you are actually looking at: each one is measured with your other filters applied. The value you already picked is deliberately left out of its own count, so choosing 🌫 Blurry never zeroes 📺 Noisy next to it and you can always switch to a neighbour without clearing everything first. Chips stay on screen even when they hold nothing under the current filter, for the same reason. Two smaller things went with it: clicking a ✨ Score or ≈ Duplicates chip no longer silently drops the person or style group you were in, and the "showing N of M" line now notices 🔎 Origin, the 🚫 exclude box and the 🏷️ tag chips, which it used to ignore.',
+  },
+  {
+    id: '2026-08-05-a-scoring-pass-that-came-back-empty-now-says-why',
+    date: '2026-08-05',
+    title: 'A ✨ Score pass that could not load its models tells you why',
+    blurb:
+      'A scoring pass could finish, announce "done", and leave every image without a single number — with sorting by aesthetics, find crops and variants all greyed out because there was nothing to sort on. The closing line named the head that had gone quiet and stopped there: "(aesthetic + NSFW head unavailable)". Both models are fetched over the internet the first time they are used — the aesthetic predictor from GitHub, the NSFW classifier from Hugging Face — so on a machine that cannot reach them, typically a container without outbound network, both go down together and the whole pass comes back empty for one reason nobody was told. That reason was known all along, in the scoring log, and never made it to the screen. It does now: the sentence carries the actual error, so "no scores" reads as a network problem you can fix rather than a feature that looks broken. Reported by @_nofaceman on Discord.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-05-upscale-improve-finds-its-lora-on-a-docker-install',
+    date: '2026-08-05',
+    title: '✨ Upscale & improve stops re-downloading a LoRA you already have',
+    blurb:
+      'On a Docker or Linux install, raising the enhancement-LoRA strength made every ✨ Upscale & improve answer “Klein needs klein_enhancement_lora — I’ve started downloading it”, then download the file it already had, then say it again. The file was never missing: the improve workflow was exported from a Windows ComfyUI and names that LoRA klein\\realistic.safetensors, and on Linux a backslash is part of a filename rather than a folder separator — so the app looked for one file with a strange name instead of realistic.safetensors inside klein/. Setup, which spelled it correctly, kept showing it installed, which is why the two screens disagreed and only that one file looked broken while every other model loaded. The name is now respelled for whichever system opens it, on the way in and on the way out to ComfyUI. Nothing to reinstall — the LoRA already on your disk is picked up after an Update & restart. Reported by @_nofaceman on Discord.',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-05-stopping-score-no-longer-throws-away-what-it-computed',
+    date: '2026-08-05',
+    title: 'Stopping ✨ Score keeps the scores it had already computed',
+    blurb:
+      'Pressing Stop during a scoring pass used to leave your images exactly as they were: the work reached a cache on disk, but not a single image got its aesthetic or NSFW number. Now everything it computed is written to your images before the pass ends, and the closing line tells you how many were scored, how many are left, and how many were reused from the cache instead of recomputed — so a relaunch is visibly paying only for the rest. The 🎨 style groups are the one thing that still needs a full pass to land, because those ids are a single numbering of the whole bank and half of one would mix two unrelated styles under the same chip; a stopped pass now leaves the previous grouping untouched and says so, rather than writing a contradiction. Two more things that were quietly wrong: a run where the aesthetic or NSFW model could not be downloaded no longer wipes the scores your bank already had, and the images scored during such a window are picked up again once the missing piece is back, instead of staying half-scored forever. Finally, "Rescore all" is available for when you do want everything recomputed from scratch — it is the last line of ✨ Score\'s launch window, unticked, with its price next to it.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-05-reject-every-flagged-watermark-in-one-click',
+    date: '2026-08-05',
+    title: 'Drop every watermarked image at once — and get them back if you change your mind',
+    blurb:
+      'Reviewing flagged images one by one is still the careful way through a watermark scan, but it is no longer the only way: a dataset\'s curation row now offers ✕ Reject all flagged next to 🔍 Review flagged. The number on the button is what it will really reject, not how many are flagged — small-image rescue pairs and failed rows are left out, because including even one rescue row made the server refuse the whole batch and reject nothing at all. It asks before it acts, tells you exactly what it is about to do, and then tells you the way back: rejected images stay on disk, and Show ▸ Rejected in the grid followed by ✓ Keep brings any of them home. The one thing it does destroy is said out loud beforehand — rejecting clears the watermark flags, so 🔍 Review flagged will be empty afterwards and only a new scan can flag them again.',
+    to: '/datasets?section=curation&panel=reject-flagged',
+  },
+  {
+    id: '2026-08-05-choose-which-engine-finds-your-watermarks',
+    date: '2026-08-05',
+    title: 'Datasets and banks now find watermarks the same way — and you pick which way',
+    blurb:
+      'The two screens had quietly drifted apart: a bank used the fast watermark detector whenever its extra was installed, while a dataset always asked the vision model, one slow question per image, with no way to change it. Both now read one setting — Settings ▸ Captioning & quality ▸ Watermark detection — with three values: Auto, Watermark detector, or Vision model. Auto is the default and behaves exactly as before, so an untouched install changes nothing. Pin the detector without its extra installed and the scan still runs on the vision model rather than failing, and the app says so, with the link to install the extra. Where the two engines genuinely differ, the screen says that too: only the detector can flag an image without knowing where the mark is, and those are now counted apart and left for 🔍 Review instead of being marked failed. A ⟲ Rescan incl. dismissed button appears when you have ruled some flags false positives — the only way to have them judged again by a different engine.',
+    to: '/settings/captioning',
+  },
+  {
+    id: '2026-08-05-stop-a-watermark-scan-without-losing-it',
+    date: '2026-08-05',
+    title: 'A watermark scan can be stopped, and keeps everything it already found',
+    blurb:
+      'Starting 🧽 Find watermarks on a large dataset used to be a commitment: there was no Stop button anywhere, and the only way out was closing the tab and hoping. The progress banner now carries the same ⏹ Stop the captioning pass has. It stops after the image in flight — never mid-inference — and every watermark already found is kept, so running 🧽 Find watermarks again simply picks up where you left off. The live "Scanning… 12/340" counter now actually moves in the tab that started the scan, too; it only ever updated after a page reload before.',
+    to: '/datasets?section=curation&panel=watermarks',
+  },
+  {
+    id: '2026-08-04-the-quality-scan-no-longer-takes-the-app-away-with-it',
+    date: '2026-08-04',
+    title: 'The 🔎 quality scan leaves the rest of the bank usable',
+    blurb:
+      'On a big bank, pressing 🔎 Scan quality could take the whole app away for a couple of minutes: the bar reached 100 %, said “grouping duplicates”, and nothing else answered — sorting, renaming, promoting, all of it waited. Three things were behind that, and all three are fixed. The duplicate grouping no longer re-runs over your whole bank at the end of a scan that had nothing to scan — it runs when the hashes actually changed, and when you ask for it with “↻ Re-group duplicates”, which still applies a new duplicate distance without decoding a single file. When it does run it now shows its own progress and stops when you press Stop, instead of leaving you in front of a frozen-looking bar with no way out. And it no longer holds the database while it works, so the rest of the bank keeps answering: on a 50 000-image bank the grouping went from up to two minutes of dead application to a phase you can watch and interrupt, and the worst wait a click had to sit through fell from over five seconds to a few dozen milliseconds.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-04-full-model-training-on-turbo-and-your-own-krea-checkpoint',
+    date: '2026-08-04',
+    title: 'Full-model training now accepts Krea 2 Turbo — and a checkpoint of your own',
+    blurb:
+      'Full-model training used to accept exactly one thing: the official Krea 2 Raw base. Choosing Turbo did not just refuse — it silently switched the dataset back to LoRA, which is why the option looked like it did not exist. Both refusals are gone, and the reason they were there has been fixed rather than waived: the configuration sent to the rented GPU used to name Raw no matter what you had selected, so simply lifting the ban would have produced a run labelled Turbo that trained Raw for hours. The base is now resolved from your selection everywhere it appears — the job sent to the pod, the run’s provenance, the model card, the recipe summary — and the full-model panel finally has its own Raw/Turbo switch and base picker. You can also fine-tune a Krea 2 checkpoint from your own disk: it rides to the GPU through a private repository on your Hugging Face account, exactly as it already did for LoRA runs, and the launch checks the pod’s credential can really read it before renting anything. What has not changed: a ComfyUI scaled-fp8 export still cannot be trained at all — the loader refuses it — and the app says so when you pick it, while a plain fp8 cast stays allowed. Turbo comes with a plain warning shown before you spend anything: Krea recommends training a LoRA on Raw and applying it to Turbo, nobody has measured full-model training on a distilled base, and it may cost the model its few-step behaviour. It is a warning, not a wall.',
+    to: '/datasets?section=training',
+  },
+  {
+    id: '2026-08-05-re-caption-keeps-the-captions-you-wrote-yourself',
+    date: '2026-08-05',
+    title: 'Re-caption no longer destroys the captions you wrote yourself',
+    blurb:
+      '🔄 Re-caption used to warn you, honestly, that it could not tell a caption you had typed from one a model had written — one column, one string, no author. It can now: every caption records who wrote it, whether that is JoyCaption, Ollama, or you (typing one in a dataset, running a find/replace, or bringing .txt files back from another tool), and that record travels with the text through dataset → bank, bank → bank, promotion and backups. So a forced run keeps your own words and says so, the way the face pass already skips a person you declared yourself. The button now tells you three separate things instead of two: how many images it rewrites, how many captions it keeps because you wrote them, and how many it overwrites whose author was never recorded — captions written before this existed, which cannot be recovered and are re-captioned, so you learn that before the click and not after. If you actually want your own captions redone by a better model there is a tick box for it, offered only when you have something to lose.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-04-the-app-stops-claiming-a-full-model-it-has-not-checked',
+    date: '2026-08-04',
+    title: 'Your full models say where they really are, instead of where they were',
+    blurb:
+      'A delivered full model was announced as “available” on Hugging Face for ever after, because that status is written once, when the run ends, and was never asked again — so a repository you deleted last night still offered a link that answered 404, and one card managed to print “missing — the model is there” in the same sentence. The Checkpoints panel and the Runs page now ask Hugging Face when you open them, and say one of three things: it is still there, it is gone, or the check itself failed (no token, offline, an outage) — which is never reported as a loss. Until an answer arrives they date the delivery instead of claiming the present. When a repository really is gone they tell you what is left — the master on your disk, the fp8 twin, or nothing — and the buttons that could only have failed stop being offered: the dead links go, “Quantize to fp8” is disabled with its reason, and ▶ Continue is disabled only when the run left nothing on this computer to send to a pod instead.',
+    to: '/datasets?section=checkpoints',
+  },
+  {
+    id: '2026-08-04-choose-how-a-full-model-reaches-the-pod',
+    date: '2026-08-04',
+    title: 'Continue a full model from your own copy — and see what each way costs',
+    blurb:
+      '☁ Continuing a 12B full model used to be possible from exactly one place: its Hugging Face copy. If a run had been delivered to this computer only, or its Hub copy had been deleted, there was nothing to do — the app refused, and the reason was a limit inside one upload route, not a fact about the world. ▶ Continue now offers both roads and prices them before you click. Hugging Face is minutes, because the pod downloads over a datacenter link; sending the copy from this computer is autonomous and costs your upload speed. The figure that actually decides it has never been shown anywhere until now: the pod is rented and billed the entire time it waits for its file, so three hours of upload at $1.40/h is $4.20 of GPU computing nothing. You see that number, the file size, and how long it should take — measured on your own past transfers once you have made one, and openly labelled an estimate before that. A long upload is no longer all-or-nothing either: the file goes up in slices, and every slice that landed stays on the pod, so a dropped link, a closed app or a reboot resumes where it stopped instead of starting over. When a road is closed the dialog says which one and why, and what would reopen it. The Hugging Face road is checked rather than remembered, too: the app knew only that a delivery had once succeeded, so a repository you deleted last night still offered itself with a duration and a price — and picking it rented a pod that then found nothing to download. Opening the dialog now asks whether the repository still answers. A confirmed deletion closes that road; a check that could not be made (offline, no token, an outage) leaves it open, because losing your fast road to a dropped connection would be worse than the problem being avoided.',
+    to: '/cloud',
+  },
+  {
+    id: '2026-08-04-auto-reject-shows-the-number-it-will-actually-reject',
+    date: '2026-08-04',
+    title: 'Auto-reject stops promising more than it can do',
+    blurb:
+      '🧹 Auto-reject offered “5,930 flagged” for blurry shots, and rejecting them did nothing — because those 5,930 had already been rejected by an earlier run, and the pass deliberately never re-flips a decision. The count announced was not the count the button acted on, so the honest conclusion was that the feature was broken. It was not: the number was. Each checkbox now shows how many still-undecided images that exact click would reject, so a second run says “0 to reject” instead of advertising work it will not do — and running it really does reject that many. The filter chips keep counting every image carrying the flag, rejected ones included, which is what you want when you click one to look at them. Two things that used to hide behind an identical 0 now say which they are: a flag whose pass never ran tells you to run it first, and the panel names how many images have never been scanned at all — invisible to every quality flag until 🔎 Scan reaches them, which is very different from being clean. 🚀 Launch all shows the same numbers, and says plainly that the scan runs first so they will grow.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-04-the-merge-form-keeps-what-you-typed',
+    date: '2026-08-04',
+    title: 'The merge tool stops emptying itself when the window changes shape',
+    blurb:
+      'Turning a phone to landscape — or anything else that reshaped the page — folded “Merge a LoRA into a base checkpoint” shut and threw away the checkpoint path and the LoRA rows you had just typed, with nothing to undo. The panel it lives in is rebuilt when the layout moves, and it was taking the form down with it. What you type is now kept: the tool stays open where you left it and comes back filled in, after a resize, a rotation or a reload alike. It is cleared the moment a merge actually starts, so a form you already sent never comes back looking like unfinished work.',
+    to: '/datasets?section=checkpoints',
+  },
+  {
+    id: '2026-08-04-converting-a-custom-zimage-base-stops-hitting-the-paging-file',
+    date: '2026-08-04',
+    title: 'Converting a custom Z-Image base no longer dies on a “paging file” error',
+    blurb:
+      'If preparing your own Z-Image merge for training ended in “the paging file is too small to complete this operation”, nothing was wrong with your disk, your memory or your model — and buying more disk would not have helped. Opening the checkpoint reserved its whole size up front: on a 11.5 GB base that was 11.7 GB claimed in a tenth of a second, before a single number had been read, and about 15 GB by the time the conversion was under way. Big custom bases are exactly where this bit, because they are the ones people convert. The file is now read one tensor at a time and nothing is mapped: the same 11.5 GB conversion peaks at 0.19 GB and finishes in about a minute, so the size of your checkpoint no longer has anything to do with whether it can be opened. The check that runs before the conversion got faster too — it only ever compared shapes, which are in the file header, and it was loading all 11.5 GB to read them.',
+    to: '/datasets?section=training',
+  },
+  {
+    id: '2026-08-04-typed-base-path-is-checked-while-you-type',
+    date: '2026-08-04',
+    title: 'A base you type by hand is checked before you launch, not after',
+    blurb:
+      'Pick a base from the dropdown and the panel tells you immediately if it is a packed export the trainer cannot load, or an fp8 cast that trains from already-degraded weights. Type the path yourself under “Custom weights…” and, until now, you got that same verdict only when you saved or launched — which on the cloud lane meant after the dataset had been exported and a GPU had been rented. The typed path is now read the moment you stop typing: same check, same sentence, same red box, and the Train button stays disabled if the file cannot be loaded at all. A path that is not there, or that is not a .safetensors, says so instead of letting the run find out.',
+    to: '/datasets?section=training',
+  },
+  {
+    id: '2026-08-04-quantizing-no-longer-fails-on-the-paging-file',
+    date: '2026-08-04',
+    title: 'Quantizing a big model no longer dies on a “paging file” error',
+    blurb:
+      'If you tried to turn a full-precision model into its fp8 file and got “the paging file is too small to complete this operation”, nothing was wrong with your disk, your memory or your model — and adding disk space would not have helped. Opening the checkpoint reserved its entire size, 26 GB of it, before reading a single number. The app now reads big checkpoints one tensor at a time instead, so the size of the file no longer has anything to do with whether it opens: a 25.6 GB model that could not be opened at all now quantizes in about a minute, and the read-back check at the end works the same way, so it can no longer fail on the last step after twenty minutes of work.',
+    to: '/datasets?section=checkpoints',
+  },
+  {
+    id: '2026-08-04-studio-krea-base-is-chosen-not-hardcoded',
+    date: '2026-08-04',
+    title: 'The Test Studio picks its Krea base instead of hoping one file is there',
+    blurb:
+      'The Krea 2 base the Studio rendered on was a filename frozen into a workflow file — and not the one Setup installs. On a machine that simply followed Setup, that name matched nothing ComfyUI publishes, and the whole run was refused before a single step: it only ever worked if you happened to own that one community repack. The base is now chosen from what is actually on your disk, in an order you can check: the file Setup installs first, then a Turbo build (these graphs run at CFG 1 and a handful of steps, which only a distilled build can do), then whichever file the header says is in better shape — full precision ahead of a quantized cast, ahead of a packed export. Last of all comes anything carrying tensors the model family never declares: the repack that used to be the default hides about 75 MB of image inside itself, 432 tensors where Krea 2 has 430, announced in its own metadata. It stays usable — if it is the only Krea file you own it is still the default — but the Studio now tells you which file it picked and why, and the sampler numbers follow that file instead of assuming Turbo.',
+    to: '/studio',
+  },
+  {
+    id: '2026-08-04-merge-a-lora-into-a-base-checkpoint',
+    date: '2026-08-04',
+    title: 'Turn your LoRA into a full model you can publish',
+    blurb:
+      'Most of the checkpoints you download were not trained — they were merged: a LoRA folded into somebody’s base, quantized, uploaded. LDS could train the LoRA and could quantize the result, and could not do the step in between, so you could not reproduce what everyone else was doing. Now you can: pick a base, add one or more LoRAs with a weight each, and get a complete checkpoint. It also unlocks the speed problem — a full model trained here targets Raw, which is slow, and merging in the re-distillation LoRA Krea publishes for Turbo is the published route to getting few-step generation back (we have not tested that one ourselves, and the screen says so). Nothing starts on one click: the plan tells you how many tensors change, exactly how big the output is, which drive it lands on and how long it takes — about two minutes on a 26 GB base — and nothing is ever overwritten. And it calls the result what it is. A merged model is not a trained model, however often the model sites say “finetune” for it, so the file records the base, every LoRA and its weight, and the date, in its own metadata — which is what still identifies it in six months, after the name has changed.',
+    to: '/datasets?section=checkpoints',
+  },
+  {
+    id: '2026-08-04-turbo-dense-untested-not-impossible',
+    date: '2026-08-04',
+    title: 'Correction: full-model training on Turbo is untested, not impossible',
+    blurb:
+      'The Guide and the app both told you that training a full model on Krea 2 Turbo was mechanically impossible and would deliver a broken file. That was overstated, and we are correcting it. On the distilled models anyone has actually measured, full training leaves a perfectly valid checkpoint that simply stops being fast — and for Krea 2 nobody has published that measurement at all. Full-model runs still target Raw, and nothing about how they behave has changed; the refusal now says what it really is — a lane we have not tested — and the Guide explains what is known, including the published route people use to get the speed back afterwards.',
+  },
+  {
+    id: '2026-08-04-train-krea-on-a-checkpoint-you-already-have',
+    date: '2026-08-04',
+    title: 'Train Krea 2 on a model you already have — including the one your last run delivered',
+    blurb:
+      'The Krea 2 base selector offered exactly one thing: the official base. So a full model you had just trained, or any Krea 2 build sitting in your ComfyUI folders, could not be used as the starting point of the next run — while a Z-Image merge could. It now lists every Krea 2 checkpoint on your disk, the yaml-declared folders included, and hands the real file to the trainer (local runs load it directly; a cloud run offers to push it to your private repo first). Each entry also states its format before you pick it: an ordinary fp8 file trains — the trainer up-casts it as it loads — and now says with numbers how much precision the cast dropped, instead of being refused outright as it used to be. Only a packed ComfyUI export is still refused, because it carries decompression tables a trainer literally cannot load; the message says that, and points at the bf16 master your run kept next to it.',
+    to: '/datasets?section=training',
+  },
+  {
+    id: '2026-08-04-canvas-says-which-run-trained-a-full-model',
+    date: '2026-08-04',
+    title: 'On the board, a run that trained the whole model now says so',
+    blurb:
+      'A full-model run and a LoRA run of the same family printed exactly the same two words on their card — “Krea 2 · Raw” — while being completely different things: one produces a large checkpoint you load instead of the base, the other a small adapter you load on top of it. On a board holding both, nothing told you which was which. Those cards now carry a “full model” badge, in the graph and in the list alike.',
+    to: '/canvas',
+  },
+  {
+    id: '2026-08-04-full-model-is-selectable-as-a-studio-base',
+    date: '2026-08-04',
+    title: 'The fp8 file of a full model you trained is now offered as a base in the Test Studio — with its own sample settings already filled in',
+    blurb:
+      'One line decided it: the base picker only accepted a Krea checkpoint if it sat in a folder whose name carried “krea”. The fp8 twin of a full-model run is written to the root of ComfyUI’s diffusion_models folder — deliberately, because that is a folder ComfyUI reads — so the one file the whole full-model lane exists to produce was invisible to the one screen meant to try it, and the only way to test a model you had paid hours of GPU for was to open ComfyUI by hand. The picker now also accepts a file whose NAME carries “krea”, which is the rule the Generate side has always used, so every twin already on your disk appears without moving a byte. And because a full model trained here is undistilled, selecting it fills in CFG 4 / 25 steps rather than the family’s few-step Turbo defaults, which render a blurry sketch on it. Those per-base settings now also reach the comparison and blend screen, which never received them.',
+    to: '/studio',
+  },
+  {
+    id: '2026-08-04-full-models-appear-in-the-checkpoints-panel',
+    date: '2026-08-04',
+    title: 'A full model you trained now appears in 📦 Checkpoints & LoRAs, with the two files it leaves and what each one is for',
+    blurb:
+      'Until now a full-model run existed in the app as a banner and a Hugging Face link. It was in none of the places a trained thing lives, so testing one meant going into ComfyUI and finding the file yourself. There is now a 🧱 Full models block in the same panel, and it keeps apart the two files a run leaves — because they are not interchangeable. The full-precision master (~26 GB) is the only one you can train again or resume from, and it is never sent to ComfyUI: it would fill a model folder to do a job the smaller file does better. The fp8 twin (~13 GB) is the inference format, and → Send to ComfyUI puts it where ComfyUI looks — on the same drive that is a hard link, so it is instant and costs no extra disk space. Each card names the exact file it chose when a run left several 26 GB saves, the sampler settings the model wants, the machine it trained on, and where the Hugging Face backup is. ✨ Quantize works whether the master is on this computer or still only in the repository, and 🗑 Trash is the app trash, so a mis-click on hours of GPU is recoverable.',
+    to: '/datasets?section=checkpoints',
+  },
+  {
+    id: '2026-08-04-comfyui-unreachable-is-said-out-loud',
+    date: '2026-08-04',
+    title: 'When LDS cannot reach ComfyUI, the banner now says exactly that — instead of blaming a paused job',
+    blurb:
+      'On a brand-new install, the very first Generate could answer “A paused ComfyUI job is blocking new generations” — on a machine that had never generated anything, while ComfyUI logged no incoming connection at all. The pause was real, but it was the consequence, not the cause: LDS was knocking at an address nobody was behind, and nothing on screen said so. The banner now checks whether the two programs are in touch and leads with the answer: “LDS cannot reach ComfyUI at <your URL>”, followed by the three things that are actually wrong when that happens — the address of the ComfyUI window you really use, a ComfyUI started without --listen (it only answers on its own machine), and LDS in Docker needing host.docker.internal instead of 127.0.0.1. The paused job is still held, and still clears the same way; it just stops being the accusation. Reported by jerkyjunky (Discord).',
+    to: '/settings/local-tools',
+  },
+  {
+    id: '2026-08-04-prompt-batch-grid-shows-every-prompt',
+    date: '2026-08-04',
+    title: 'A batch of prompts now shows all of its images — one labelled grid per prompt, instead of a grid with a single picture',
+    blurb:
+      'Ticking several saved prompts generated every one of them, but the results view only ever showed one: it identified a run by its seed AND its prompt, so a single launch of five prompts arrived as five separate “runs” in the run picker, and you were looking at one of them. Nothing was lost — the images were all there, behind a dropdown that should never have had them. A run is now identified by the launch itself, so the batch stays whole, and each prompt gets its own grid under the prompt that produced it (shortened to fit, in full when you hover). Runs from before this change are grouped exactly as they were.',
+    to: '/studio',
+  },
+  {
+    id: '2026-08-04-full-model-run-no-longer-reads-as-gone',
+    date: '2026-08-04',
+    title: 'A full-model run whose model is on Hugging Face no longer shows up as “gone” — and the app no longer offers to delete it',
+    blurb:
+      'The canvas asked one question to decide whether a run still had anything: is there a checkpoint file on this disk? That question has no good answer for a full model delivered to a private Hugging Face repository — there is no local file, and there never was. So those runs were drawn dimmed, badged “gone”, and given a “Remove this run” button under the words “No checkpoints left on disk”, for a model that was perfectly fine and had cost hours of GPU. Removing one threw away the lineage, the notes and the only record of which repository the model was in. A full-model run is now asked about both of the addresses it can have: it shows “💾 full model here” when the weights are on this computer, “☁ on Hugging Face” when they are in its repository, and it is only offered for removal when the model is genuinely gone from both. If you try anyway, the app now says where the model still is instead of deleting the trail to it.',
+    to: '/canvas',
+  },
+  {
+    id: '2026-08-04-person-preflight-redraws-unreadable-samples',
+    date: '2026-08-04',
+    title: 'The folder check before 👤 Group by person no longer gives up when its sample lands on faceless images — it draws new ones',
+    blurb:
+      'On a real bank, four folders out of six came back with no verdict at all: “only 0 of 15 sampled images had a usable face — analyzed in full”. Scraped folders are full of crops, backs and blur, so a sample of fifteen can land entirely on images no face detector can read — and the biggest folder then spent fifteen embeddings for nothing before analysing all 3 546 of its images anyway, which is exactly the cost the check exists to avoid. A draw that cannot be read is now replaced: the check keeps drawing new images (never one it already tried, still spread across the whole folder) until it has about fifteen usable faces or hits a budget — at most 60 images per folder, or a quarter of it, whichever is smaller, and the dialog prints that ceiling next to the typical cost before you start. Three honest endings replace the old silence: a normal verdict; “looks like one person, on thin evidence — only 6 usable faces in 60 images tried”, still offered because a weak verdict that says how weak beats none; and, when almost nothing is readable, a fact about the folder rather than a promise the full pass would do better — it would not, it uses the same detector on the same images and re-reads the answers the check already cached.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-04-fp8-quantize-runs-where-torch-lives',
+    date: '2026-08-04',
+    title: 'Quantizing to fp8 now actually runs — it uses an environment that has torch, and says so before you click if none does',
+    blurb:
+      'On a real install the conversion could not run at all: it ended on “No module named ‘safetensors’”, because it tried to do the work inside the app’s own Python — which ships without torch on purpose, since torch is gigabytes and nothing else here needs it. It now runs the conversion in a separate interpreter that has the dependencies, exactly like ✨ Score and the masking passes already do: the one ✨ Score uses, ai-toolkit’s, or whichever you set as `quantize.python`. And because “can this machine do it at all” is something you should learn before committing, it is checked while the plan is drawn: an environment without torch disables the button and tells you which environments would work and what to install, instead of failing thirty seconds in — or, worse, after a 26 GB download.',
+    to: '/datasets?section=training',
+  },
+  {
+    id: '2026-08-04-fp8-disk-guard-says-yes-when-it-fits',
+    date: '2026-08-04',
+    title: 'The fp8 quantizer no longer refuses a conversion that fits — and a refusal now shows its arithmetic',
+    blurb:
+      'Two things were wrong with the disk check, and both showed up on a real 25.6 GB model. The panel said the conversion was fine, and the click that followed refused it: the threshold was only applied when starting, never when planning, so the button stayed enabled right up to the moment it was too late. And that threshold was a flat 30 GB, while the file being written was 12.8 GB and the drive had 17.6 GB free — an operation that fit twice over, refused by a number of our own. The budget is now derived from the job itself (what is left to download, the fp8 file’s own ceiling, and 2 GB of working headroom), every term is named in the refusal so you can check it, and whatever the plan accepts the start no longer rejects. Free space is also measured on the volume that really holds the folder, which matters because a ComfyUI models folder is very often a junction onto another drive. And when a drive genuinely is too full, the refusal offers to write the file to another folder instead of ending there.',
+    to: '/datasets?section=training',
+  },
+  {
+    id: '2026-08-04-quantize-to-fp8-in-one-click',
+    date: '2026-08-04',
+    title: 'One click turns your full model into the fp8 file ComfyUI loads — nothing to type, and it works on a model that is only on Hugging Face',
+    blurb:
+      'The fp8 quantizer asked for an absolute path to a file on this machine, and the model most people want to shrink has no such path: a full-model run delivers its 26 GB master into your private Hugging Face repository and never downloads it. So the one full model you own was the one thing the tool could not touch. Now “✨ Quantize to fp8” sits right there in the full-model recipe, already aimed at the model your run delivered, and does the whole chain: fetches the master, converts it, and leaves the fp8 file in ComfyUI’s own models folder, ready to load. Before it starts it tells you which checkpoint it takes (a repository often holds the final save AND several 26 GB step snapshots whose names differ by a number — one rule now decides, and it is the same one that names the file on the card), which folder the file lands in, and what it costs in disk. The download reports its gigabytes, can be stopped, and resumes where it left off. Afterwards the master is kept by default, because it is the only copy you can train from again; deleting it is one radio button away with its size on it. The path field is still there for a file nothing in the app points at — and it now pre-fills itself with your custom training base.',
+    to: '/datasets?section=training',
+  },
+  {
+    id: '2026-08-04-dense-quality-levers',
+    date: '2026-08-04',
+    title: 'Full-model training: choose how many images each step learns from, and how the learning rate moves',
+    blurb:
+      'A full-model Krea 2 run was training on ONE image per step — over a dataset of thousands, that is a very noisy idea of the right direction — at a flat learning rate from the first step to the last. Three settings in the recipe card change that. “Images per step” averages several images into each update, which steadies training on a big set; it needs no extra VRAM, only time, so the card tells you straight out that 4 images per step means a run about 4× longer and a rented GPU that costs about 4× as much. The learning-rate schedule can now warm up over the first steps instead of hitting a 12B model at full rate immediately, or fade to zero by the end to settle fine detail. The noise schedule picks which noise levels the run trains on. Leave all three alone and your run is byte-for-byte the recipe that shipped before — the defaults did not move. Two settings people ask for are deliberately absent, and the guide says why: on this model EMA would run the pod out of memory at its first checkpoint, and min-SNR weighting would crash the job an hour in, because a flow-matching model has none of the numbers it needs.',
+    to: '/datasets',
+  },
+  {
+    id: '2026-08-04-image-grid-pages-big-datasets',
+    date: '2026-08-04',
+    title: 'A dataset of thousands of images no longer bogs the Images screen down',
+    blurb:
+      'The Images grid used to draw every photo of the dataset at once. On a 6 211-image dataset that is about 148 000 elements on one page — 6 211 thumbnails, 6 211 caption boxes, 60 000 buttons — and it showed: scrolling ran at roughly 20 frames a second on a desktop and 12 on a phone, and a single keystroke in a caption took a tenth of a second to appear. The grid now shows 500 images at a time with a ← Prev / Next → pager above and below it, the same way the Bank has always handled 24 000-image folders. Measured on that same 6 211-image dataset: scrolling back at full speed, typing in a caption instant again, switching a filter about seven times faster. Nothing about curation changed — “select all” still takes every image the current filters show across all pages (its tooltip now says so), a selection you started on one page is still there on the next, the counters, sort, filters and auto-triage all still read the whole dataset, and captions are still edited right on the tile. The pager only appears when there is more than one page.',
+    to: '/datasets?section=images',
+  },
+  {
+    id: '2026-08-04-full-model-lands-on-your-computer',
+    date: '2026-08-04',
+    title: 'A finished full model now lands on YOUR computer — and a full Hugging Face quota can no longer end a training',
+    blurb:
+      '🖥 Until now a full-model (dense) run had exactly one address: a private Hugging Face repository the pod pushed to while it trained. That address has a ceiling nobody controls, and it collected: a run died 250 steps from the end on “403 private repository storage limit reached”, after eight hours of paid GPU, and only survived because 50 GB were deleted by hand. So the order is reversed. The finished model is downloaded to your checkpoint folder FIRST, the ~10 GB fp8 file for ComfyUI with it, and the pod is destroyed only once the file here is proven — the byte count has to match what the pod advertised, and the safetensors header has to re-read. Only then is the master uploaded to Hugging Face as a backup, and that upload is now allowed to fail: it costs the ability to continue that model later, nothing else. Nothing is pushed while the run trains, so the quota can no longer reach the training at all. The transfer is tens of minutes of 26 GB, so it shows its progress, survives an app restart, and can be stopped and resumed without losing what already landed — and if it fails, the machine is kept and the Runs page offers “Fetch to this computer”. A launch also checks this machine’s disk before renting anything, and refuses (confirmably, like every other estimate) when the drive plainly has no room. Choose the delivery in Settings ▸ Storage ▸ Full-model delivery; runs made before today keep their Hugging-Face-only behaviour exactly as it was.',
+    to: '/settings/storage',
+  },
+  {
+    id: '2026-08-04-continue-a-full-model',
+    date: '2026-08-04',
+    title: 'Continue a full model instead of paying for its first 3000 steps again',
+    blurb:
+      '▶ A full-model run that stopped at step 3000 can now be continued to 4000 — the same ▶ Continue as a LoRA, with the same guardrails, cost estimate and “from which step” choice. The fresh machine downloads the checkpoint from the run’s Hugging Face copy itself, over a datacenter link, and training picks up at the step written inside the file. Two honest limits, said in the app rather than discovered: the copy on your computer cannot be used for this (the only channel that puts a file on a pod builds its whole request in memory, which 26 GB cannot survive), so a run delivered to this computer ONLY is not resumable — the default delivery keeps a Hugging Face copy precisely to leave that door open.',
+    to: '/cloud',
+  },
+  {
+    id: '2026-08-04-cloud-quantize-rents-a-machine-that-fits',
+    date: '2026-08-04',
+    title: 'Cloud quantization picks a machine that can hold the model (server side — this lane has no button)',
+    blurb:
+      'A correction first: this lane has no interface, so there is no click to make. The fix below is real and lives in the server half; the reachable way to shrink a model is ✨ Quantize to fp8, locally, from a full-model card or Settings ▸ Storage. Cloud quantization used to give up one second after being asked with “create_instance failed: HTTP 400 {}” — no machine, no money spent, and no reason. Two things were wrong. It rented the cheapest offer on the market, and cheap is exactly where free disk runs out: a 26 GB model needs about 86 GB on the pod for the master, its fp8 twin and the download cache, while the top offer of a live search had 57 GB — an ask vast refuses outright. And a single refusal ended the job, even though the next machine would have taken it. Now the search only considers machines with the disk this job will claim, the offer is chosen by the same rule a training launch uses (bad hosts skipped, suspiciously cheap listings ignored), and a refusal moves to the next candidate instead of ending everything. When a rental really is impossible, the error quotes what vast said rather than an empty “{}”. The estimate stays an estimate — but if the market moved and the only machine left costs materially more than the price you agreed to, it tells you and rents nothing.',
+  },
+  {
+    id: '2026-08-04-quantize-to-fp8-from-settings-storage',
+    date: '2026-08-04',
+    title: 'Shrink a model to fp8 from Settings ▸ Storage — no dataset, no training run',
+    blurb:
+      'The fp8 quantizer that shipped yesterday had exactly one door: the full-model recipe card, which only exists inside a dense dataset. So the person it was written for — someone who downloaded a 26 GB full-precision model from Hugging Face and cannot load it — had no dataset, and never found it. It is now also in Settings ▸ Storage, beside the folder sizes and the trash, because “this file is too big” is a disk question. It is the same tool, not a second copy: point it at any full-precision .safetensors on this machine and it writes the ~10 GB version ComfyUI loads directly, next to the original. Same refusals before you click (a file that is already quantized, a LoRA/adapter), same promise that your source file is never modified and never overwritten, same read-back of the result before it reports success. It runs on the CPU, one at a time, so it never takes VRAM from ComfyUI or a training run. One correction landed on the same tab: the Hugging Face storage card counts the fp8 export in what a full-model run needs, but did not name it, so a ~60 GB forecast explained itself as 46 GB — the breakdown now lists every term it adds up.',
+    to: '/settings/storage',
+  },
+  {
+    id: '2026-08-04-gallery-lightbox-upscale-improve',
+    date: '2026-08-04',
+    title: 'Upscale & improve is now in the checkpoint gallery — the screen the result lands on',
+    blurb:
+      'Yesterday ✨ Upscale & improve arrived on the ◉ LoRA Canvas lightbox. It was missing from the one place an improvement actually appears: a checkpoint’s gallery. Open any picture from a pill’s 🖼 gallery or from a run card and the button is there, next to ⬇ Download — the same pass, the same choice between Klein (re-renders detail and texture) and SeedVR2 (resolves detail, keeps the look), and the same quote of the instruction Klein is about to send. It is the same action on the same picture as on the board, wired once rather than twice, so the two screens can never start behaving differently. The original is never touched: the improvement arrives as its own image in that very gallery, beside the picture it came from, ready to compare, download or pin onto the board. One honest limit — the pass takes minutes and a gallery left open does not refresh by itself, so close it and open it again to find the new picture waiting at the top.',
+    to: '/canvas',
+  },
+  {
+    id: '2026-08-04-canvas-drop-keeps-your-view',
+    date: '2026-08-04',
+    title: 'Arranging the canvas no longer throws your framing away',
+    blurb:
+      'Park a render up beside another dataset’s lane, let go — and the whole board zoomed out from under you, because it had just become bigger. Every time you tidied, the canvas re-framed the thing you were tidying, and the further you placed something the harder it kicked. From now on, moving anything — a pinned picture or a run card — means you have taken the view over: the board keeps the zoom and the position you chose and never re-frames itself again. ✦ Fit is still one click away for when you do want the whole board back, which is the difference between an offer and an interruption. A board you have never arranged still opens fitted to your screen, exactly as before.',
+    to: '/canvas',
+  },
+  {
+    id: '2026-08-03-krea-edit-takes-an-extra-angle',
+    date: '2026-08-03',
+    title: 'Krea 2 Edit takes a second image — add it in the edit dialog, and use it to compose',
+    blurb:
+      'Editing your reference with Krea 2 Edit used the main photo and nothing else. You can now add a second image, with the “+” inside the ✦ Edit reference dialog. What it is for matters more than the fact it exists: that slot was trained on two-input edits where the second image is a *different* subject — another person, or a scene to place yours in. So it composes (“put her in this room”, “next to him”). Another angle of the same face is off-label there and can come back duplicated, which is why it deliberately does NOT read the dataset’s extra reference photos: those are angles of one person by definition. Extra angles keep doing what they always did, on the engines built for them — Klein chains every one of them from the reference card and locks identity across every generation, and the API engines use them too. Two different jobs, two different places, and the dialog now says which is which before you press Generate.',
+  },
+  {
+    id: '2026-08-03-canvas-images-go-anywhere',
+    date: '2026-08-03',
+    title: 'Pinned images go anywhere on the canvas, not just below and right of their run',
+    blurb:
+      'A picture pinned onto the ◉ LoRA Canvas could be dragged down and right as far as you liked, but never up and never left: its own lane\'s corner was a wall, so you could not park a render above its run, in the free margin beside the board, or next to another dataset\'s lane to compare across datasets. That wall is gone — the mouse and the arrow keys both reach everywhere now, and ✦ Fit grows to include a picture wherever you put it, so it is always one click from being back on screen. Nothing about where an image came from changes: the line to the checkpoint that made it follows it, because that link is read off the image itself rather than off its position. Three things came with it. ✦ Tidy up is the way home — it brings every picture on the board back beside the run that made it, side-by-side strips included, moved in one piece and never taken apart — and it is no longer greyed out on a board where only pictures have been moved, which is exactly when you need it. The board no longer re-zooms under your finger while you drag something past its edge — nor when you let go of it (see the entry above). And a strip of grouped pictures now draws ONE line back to each checkpoint it came from instead of one per picture, so a long link stays readable.',
+    to: '/canvas',
+  },
+  {
+    id: '2026-08-03-canvas-group-drag-out-crash',
+    date: '2026-08-03',
+    title: 'Pulling a picture out of a group on the canvas no longer blanks the board',
+    blurb:
+      'Dragging one image off a strip of grouped images showed the error screen instead of the picture coming loose — the board went blank and the only way back was a reload. The hint that appears while you pull ("Drag it off the group to take it out") was reading a size that had moved to another file when the group\'s title bar was split out earlier today, so the very gesture it exists to explain was the one that crashed. It is back, at the same size as the bar\'s own label at every zoom. Nothing you had pinned was lost — the board reloads exactly as you left it.',
+  },
+  {
+    id: '2026-08-03-canvas-lightbox-upscale-improve',
+    date: '2026-08-03',
+    title: 'Upscale a picture without leaving the canvas',
+    blurb:
+      'Open a picture on the ◉ LoRA Canvas and it now carries ✨ Upscale & improve next to ⬇ Download — the same pass, and the same choice between Klein (re-renders detail and texture) and SeedVR2 (resolves detail and keeps the look) you already had in the dataset lightbox, with the same live quote of the instruction Klein is about to send. Until now the only way to improve a render you liked on the board was to go and find it somewhere else. The picture on the board is never touched: the result arrives as its own image in that checkpoint’s gallery, right next to the original, so you can compare the two and pin the better one. SeedVR2 offers to install itself if it is not there yet, an improvement cannot be improved again, and these upscales stay out of the Test Studio — they never count as a run in progress and never enter a checkpoint’s 👍/👎 ranking.',
+    to: '/canvas',
+  },
+  {
+    id: '2026-08-03-checkpoint-store-survives-cleanup',
+    date: '2026-08-03',
+    title: 'A cleanup can no longer delete a checkpoint you never deployed',
+    blurb:
+      '“Clean finished runs” said it was trashing “checkpoint duplicates already imported”. For a checkpoint you had never sent to ComfyUI there was no duplicate: the run’s staging folder was its only copy, and emptying the trash destroyed it. Trained files now land in their own checkpoint store the moment they are downloaded, and no cleanup path can reach them — cleaning a run moves its dataset copy, its sample images and its logs, and nothing else. Anything still sitting in an old staging folder is swept into the store at startup, and a button in Settings › Storage re-runs that sweep whenever you want. Two more honest answers while we were there: a run folder nothing points at is now listed with its size instead of being answered “already clean”, and a kept pod stops sparing tens of gigabytes once its recovery window has actually closed.',
+    to: '/settings/storage',
+  },
+  {
+    id: '2026-08-03-settings-storage-tab',
+    date: '2026-08-03',
+    title: 'One tab that says where everything lives — and moves it to another drive',
+    blurb:
+      'When C: fills up, the answer used to be a config.json edit and a manual copy. Settings › Storage now shows every folder the app writes to — datasets, banks, cloud run staging, the checkpoint store, the trash, the archive, the Hugging Face cache — with its real path, what it holds and the free space on its drive. Press 📏 Measure everything to see the sizes (never on open: walking a hundred gigabytes while you read is not a thing a page should do). Three of those roots can be pointed anywhere: type a path, the app proves it can really write there, then you choose out loud — move what is already there, with a progress bar and the old folder removed only once the last byte has landed, or start using the new folder empty and leave the old files exactly where they are. Nothing is ever moved silently. The trash, the run image archive and the Hugging Face allowance moved here too, so the disk questions are answered together instead of one card per screen.',
+    to: '/settings/storage',
+  },
+  {
+    id: '2026-08-03-prompt-batch-no-cap',
+    date: '2026-08-03',
+    title: 'The prompt batch no longer caps at 24 — and the time estimate is now yours',
+    blurb:
+      'Ticking more than 24 saved prompts was refused. That number was a guess, not a limit: nothing breaks past it, and it governed the wrong thing — 24 prompts across eight checkpoints went through, while 25 on a single one did not, even though the second run is far shorter. Tick as many as you like. What you get instead is the real cost, before the click: the panel counts every generation the run will queue and tells you how long that takes at the pace your own machine has actually been running at, measured from your recent tests rather than assumed. Past about an hour it asks once whether you meant it, and reminds you that the queue is serial — you can stop it whenever you like and keep what is already done. Every duration in the Studio and on the canvas now comes from that same measured pace, so a slower card stops being told it will take twenty minutes when it will take two hours.',
+    to: '/studio',
+  },
+  {
+    id: '2026-08-03-full-model-fp8-export-for-comfyui',
+    date: '2026-08-03',
+    title: 'A finished full model now also arrives as a ~10 GB file ComfyUI can just load',
+    blurb:
+      'Full-model training delivers a 26 GB bf16 checkpoint, and nobody generates with a file that size — everyone hunts for a community fp8 repack instead. Now the run makes one itself, on the pod, in the minutes before the machine is released: a scaled fp8 export (~10 GB) pushed next to the master in your private Hugging Face repo, loadable with the standard Load Diffusion Model node, no extra setup. The run card lists both files and says which to download for ComfyUI and which one is the master. “Keep the bf16 master” stays on by default on purpose: fp8 is a one-way export, and the master is the only file you can ever continue, merge or re-quantize from — turning it off halves your storage and closes that door. If the export fails the run is still a success: the master was delivered before it ever ran, and the card says exactly that instead of reporting a failure.',
+    to: '/cloud',
+  },
+  {
+    id: '2026-08-03-quantize-in-the-cloud-without-downloading',
+    date: '2026-08-03',
+    title: 'Cloud quantization: built on the server, never given a button — corrected',
+    blurb:
+      'This entry announced a “☁ Quantize to fp8 in the cloud” button, and that button was never wired: the service, its three endpoints and their tests are in the app, but nothing in the interface calls them, so there has never been anything to click. We are correcting the claim rather than quietly leaving it: an app that announces what it cannot do is worse than one that shipped less. What DOES work, and always did, is the local conversion — ✨ Quantize to fp8, from a full-model recipe card or from Settings ▸ Storage. It runs on your CPU in about a minute, so the arithmetic was never the expensive part. The cost the cloud lane was meant to save is bandwidth: a master that lives only in your Hugging Face repo has to come down (26 GB) and go back up (10 GB) for the local path to touch it. If that round trip is your problem, say so on the Discord — the server half is already written and only the door is missing.',
+    to: '/settings',
+  },
+  {
+    id: '2026-08-03-quantize-an-existing-model-to-fp8',
+    date: '2026-08-03',
+    title: 'Turn any full-precision model you already have into its ~10 GB ComfyUI version',
+    blurb:
+      'The same conversion the cloud runs at the end of a full-model training is now available by hand, on this machine: give it the path to any full-precision .safetensors — a 26 GB model downloaded from Hugging Face, a checkpoint from an earlier run — and it writes the fp8 version next to it. The source file is never modified and an existing output is never silently overwritten. It runs on the CPU, so nothing competes with ComfyUI or a training run, and when it finishes it re-opens the file it wrote to check the scales and dtypes are what ComfyUI expects. It refuses a file that is already quantized, and it refuses a LoRA — neither has anything to gain. Worth saying plainly, because it is constantly confused: this is NOT the “quantize” option in Advanced training, which only shrinks the model in memory while it trains and writes no file at all.',
+    to: '/datasets?section=training',
+  },
+  {
+    id: '2026-08-03-full-model-recipe-unlocked-four-settings',
+    date: '2026-08-03',
+    title: 'The full-model recipe finally lets you change the four things that matter',
+    blurb:
+      'Full-model training only exposed “steps”, so the mid-run preview sheet was four generic prompts that showed nothing about your actual dataset — the one thing you look at while the GPU is billing. Preview prompts are now editable, along with the learning rate (1e-7 to 5e-6), the resolution (768 or 1024) and the checkpoint cadence (every ≥100 steps, keep 1 to 3). Defaults are unchanged, so nothing moves unless you move it. Keeping 3 checkpoints means about 78 GB of private Hugging Face storage, and the panel now says the total before you launch instead of letting the last push fail. Everything still locked — batch size, Adafactor, bf16, gradient checkpointing — now says WHY: it is the geometry that makes a 12B model fit on one 80 GB card, and changing it turns a working run into an out-of-memory crash an hour in.',
+    to: '/datasets?section=training',
+  },
+  {
+    id: '2026-08-03-raw-full-model-test-settings',
+    date: '2026-08-03',
+    title: 'Testing a full model no longer looks like a failed training',
+    blurb:
+      'A full model trained on Krea 2 Raw is an undistilled checkpoint: it needs a real CFG and a real step count. The app was handing it Turbo’s defaults — CFG 1 and 8 steps — which render a blurry sketch and read as “the fine-tune did not work”, when nothing had gone wrong. The Test Studio now pre-fills CFG 4 and 25 steps when the selected base looks like a Raw / full / fp8 checkpoint (the exact settings the run’s own preview sheet used), and the training panel and run card say it in words: test at CFG ~4 and 20-30 steps.',
+    to: '/datasets?section=training',
+  },
+  {
+    id: '2026-08-03-quantized-base-refused-at-selection',
+    date: '2026-08-03',
+    title: 'Picking a quantized checkpoint as a training base is refused before it costs you a run',
+    blurb:
+      'The fp8/int8 exports everyone keeps on disk for generation cannot be trained on — the weights no longer carry the precision a gradient step needs. Until now the app took one happily and the run died deep inside ai-toolkit, after the dataset export and, in the cloud, after a GPU had been rented. Choosing one as Custom weights is now refused the moment you pick it, with a sentence that says what to do: “This is an inference-only quantized export — training needs the bf16/fp16 version of this model.” It reads a few kilobytes of file header, never the 10 GB body, and a header it cannot read is let through rather than guessed at.',
+    to: '/datasets?section=training',
+  },
+  {
+    id: '2026-08-03-person-pass-checks-folders-first',
+    date: '2026-08-03',
+    title: 'The person pass now checks your folders first — and asks once',
+    blurb:
+      'Scraped material arrives one folder per person, and 👥 Group by person used to pay a face embedding per image to rediscover that. The bank could already sample folders and offer the obvious ones, but only from a button in the Subfolder panel — and the first thing anyone does with a new bank is press 🚀 Launch all, so nobody ever saw it. Now the sampling runs by itself the moment you launch the person pass, standalone or inside Launch all: about fifteen images per folder, then one dialog saying “12 folders look like a single person — treat each as one person and skip their full analysis”, with those folders already ticked. One click accepts them all; untick what you disagree with; “👥 Analyze everything anyway” is right there and says what it costs. Folders where the sample showed several faces say so and go to the full analysis, and a ceiling that was not reached is named rather than assumed away. Nothing is ever grouped without your click — and whatever you accept is a normal folder assertion you can undo any time.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-03-hf-storage-precheck-and-cleanup',
+    date: '2026-08-03',
+    title: 'Full-model cloud runs now check your Hugging Face space before renting a GPU',
+    blurb:
+      'A full-model (dense) Krea run delivers each ~26 GB checkpoint straight into a private Hugging Face repo — and that push happens at the very end. A run died at step 2750 of 3000 on “private repository storage limit reached”, hours of paid GPU gone, because the account\'s private space was full of custom-base caches nothing in the app ever showed you. Now the launch measures your private storage first and refuses before a pod is rented, saying how much is missing and what is taking the room — with Train anyway always available, because Hugging Face publishes no quota endpoint and the ceiling is an estimate. Settings ▸ Training gained a Hugging Face storage card that lists every lds-base-* cache with its size, the local file it mirrors and the run that last used it, and deletes them one by one or all at once — warning you when a cache is the last copy left. And if a run hits the wall anyway, it now says so in plain words and keeps the pod so the checkpoint is recoverable.',
+    to: '/settings/training',
+  },
+  {
+    id: '2026-08-03-seedvr2-tile-and-vae-settings',
+    date: '2026-08-03',
+    title: 'SeedVR2 upscaling now fits smaller cards — tile size is a setting',
+    blurb:
+      'The fidelity upscaler used to hold one 1024 px tile at a time whatever your GPU, which is where a large upscale ran out of memory on an 8 GB card. Settings ▸ Image engines now has a Tile size: lower it to 768 or 512 and the same 4K upscale fits, at the cost of a few more seams. It also sizes the model\'s own tiled encode/decode, so it lowers memory use even without the optional tiling node pack. Two more dials came with it — where automatic tiling switches over, and which VAE file to load when yours is named something the automatic search cannot recognise. Defaults are unchanged, so nothing moves unless you touch it. Thanks to SurpassHR (GitHub) for asking for these knobs alongside the engine itself.',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-03-canvas-usable-on-a-phone',
+    date: '2026-08-03',
+    title: 'The LoRA Canvas is finally usable on a phone',
+    blurb:
+      'The board had never had a small-screen pass, and it showed. Opening 🎨 Generate on a tablet-width window turned it into a fixed side drawer that took more than half the screen and left a sliver of the very board you were picking checkpoints from — so that panel, the run details, the compare view and the image gallery now stay full-width sheets right up to a real desktop, and each one closes with a thumb-sized ✕ instead of a 14-pixel glyph. The zoom, Fit and Tidy up buttons are 40 px on touch, where a miss used to land on the board and pan it. The ✓ box that adds a checkpoint to a run no longer shrinks with the zoom — at the level the board opens on it had become a five-pixel square, on the one control the whole generate flow goes through. And the list of what the board can be told to do, which was simply hidden below laptop width, is now one tap away with the touch gestures spelled out.',
+    to: '/canvas',
+  },
+  {
+    id: '2026-08-03-multilora-steps-and-cfg',
+    date: '2026-08-03',
+    title: 'Set the steps and CFG with several LoRAs selected — compare or blend',
+    blurb:
+      'With two or more LoRAs checked, the Test Studio gave you no way to choose the number of steps or the CFG: the setting was not greyed out, it simply was not there, and every image ran on the family default no matter what you wanted. It is there now, in the same panel as the strengths, with the same ladders the single-LoRA studio and the canvas already used — including the SDXL second pass. It stays available in 🧬 Blend, where the strength sweep disappears but the render settings do not, and the cell counter includes them so you can see what a sweep will cost before you launch it.',
+    to: '/studio',
+  },
+  {
+    id: '2026-08-03-studio-prompt-batch',
+    date: '2026-08-03',
+    title: 'Run several saved prompts in one go, on both generation screens',
+    blurb:
+      'The list of saved prompts could only be replayed one at a time: pick a prompt, launch, wait, pick the next one. Every card now has a tick box. Tick three and the launch renders all three with the same checkpoints, the same settings and the same seed — which is what makes them comparable — in a single run the GPU works through by itself. The counter and the button say how many images that is before you click, and ticking nothing leaves the screen exactly as it was. It works the same way in the dataset Test Studio and in "Generate from the board" on the canvas, because both screens show the same list.',
+    to: '/studio',
+  },
+  {
+    id: '2026-08-03-restart-no-longer-kills-a-live-cloud-run',
+    date: '2026-08-03',
+    title: 'Restarting the app no longer kills a cloud run that is training fine',
+    blurb:
+      'When the app restarted, it picked the run back up and asked vast.ai whether the pod still existed. If that one answer came back without the pod in it — which happens, and means nothing — the run was declared dead about ten seconds later, and the "stop" that followed reached the pod that was still training and ended it. A run at step 825 of 3000 was lost that way, with the hour already paid. Now the pod itself is asked: a pod that answers is a pod that exists, whatever the marketplace says, and silence has to last minutes before the run is given up. If it truly cannot be reached, no stop is sent to a machine we could not talk to, and the pod is kept so the result stays recoverable.',
+    to: '/cloud',
+  },
+  {
+    id: '2026-08-03-canvas-opens-again-hotfix',
+    date: '2026-08-03',
+    title: 'The LoRA Canvas opens again — v2026.08.03 broke it for a few minutes',
+    blurb:
+      'If you updated to v2026.08.03 in the short window it was live, the Canvas page crashed on load (“An unexpected error occurred”). The provenance-edges feature read a value before it existed. Fixed — nothing else in that release was affected, and no data was touched.',
+    to: '/canvas',
+  },
+  {
+    id: '2026-08-03-canvas-blend-provenance',
+    date: '2026-08-03',
+    title: '🧬 A blended picture now shows every checkpoint it came from',
+    blurb:
+      'A picture pinned on the LoRA Canvas was linked back to one checkpoint — but a 🧬 Blend loads several, often from different datasets, so the board was showing one parent out of two or three. Violet lines now join a blended picture to every source it was made from, across lanes, next to the existing indigo training lineage. When a source is no longer on the board — its run deleted, its dataset unticked — no line is invented: the picture says “1 of 2 sources is not on the board” instead. Blends made before this update keep their images and simply have no lines to show.',
+    to: '/canvas',
+  },
+  {
+    id: '2026-08-03-seedvr2-tiling-is-a-choice',
+    date: '2026-08-03',
+    title: 'Tiled upscaling is now the default — it keeps more detail, not just less VRAM',
+    blurb:
+      'Yesterday tiling only kicked in when a frame would not fit on your card. SurpassHR (GitHub #32) re-tested it and sent the source renders: side by side, the full-frame result does not just soften fine texture, it rewrites it — short dense stubble comes back as long smeared strands. A tile is upscaled at the size the model works well at, while a whole 4K frame spreads its capacity over four times the surface. That made the old rule backwards: the bigger your GPU, the less often you got the better picture. So with the tiling node pack installed, large upscales are now tiled by default, and Settings ▸ Image engines lets you choose — tile when it helps (recommended), always tile large frames, or never. Nothing is tiled below roughly 1536 px on the short edge, where the model already works at a good size and a grid would only add seams.',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-03-bank-suggests-one-person-folders',
+    date: '2026-08-03',
+    title: '👤 The bank now spots your one-person folders — suggested automatically, you confirm',
+    blurb:
+      'Telling the bank a subfolder holds a single person saves the whole face pass on it, but you had to know which folders those were. It now samples them and asks: a folder that looks consistent gets a 👤? in the Subfolder picker and offers "Looks like one person (15/15 sampled) — assert?", and a folder holding several people says that too. Nothing is ever grouped on its own — the suggestion is an offer, confirming stays your click, because a wrong grouping made silently is one you would never think to look for. It runs free at the end of 👤 Group by person (the embeddings are already cached, so covering every folder costs no inference), or on demand with 🔎 Scan folders, which tells you what it will cost and what it did not reach. A suggestion expires by itself when the folder gains or loses images.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-03-medium-runs-itself-after-score',
+    date: '2026-08-03',
+    title: '🎨 Medium classifies itself at the end of ✨ Score',
+    blurb:
+      'Sorting a bank into photo / anime / 3D render / illustration reads the embeddings ✨ Score already computed — no GPU, seconds for 23 000 images. It was still a second button you had to know about, so banks sat there holding the data for the answer without the answer. Score now finishes the job and says so on its own line ("· 🎨 Medium: 812 classified"), or names the reason it could not. The 🎨 Classify medium button stays for re-running it alone, and the automatic pass never re-judges an image that already has a verdict.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-03-export-keeps-original-bytes',
+    date: '2026-08-03',
+    title: 'Big datasets stop bloating on their way to training',
+    blurb:
+      'Preparing a dataset for training used to re-encode every picture to a lossless PNG, even when nothing needed changing. On a 6 200-image style dataset that turned 3.6 GB of photos into 24 GB and took half an hour before training could even start — long enough to fill a disk and fail with a bare "no space left on device", and long enough that any restart in between killed the run. Pictures the trainer already reads as they are now go through untouched: same dataset, 3.6 GB, a couple of minutes. Anything that genuinely needs converting — a photo with a rotation tag to bake in, an unusual colour mode, a format the trainer does not read — still is. And if the disk really cannot hold the export, you are now told before it starts, with the size it needs and the space you have, instead of finding out halfway through.',
+  },
+  {
+    id: '2026-08-03-canvas-group-bar-reachable',
+    date: '2026-08-03',
+    title: 'Groups of pinned images can be moved and closed again',
+    blurb:
+      'A side-by-side group on the LoRA Canvas could end up impossible to move AND impossible to close, with no way to tell why. Its title bar — which holds the ⠿ grip, Export grid and ✕ — is drawn just above the strip, and any picture pinned over that space silently took the clicks meant for it. The bars are now drawn above every picture, so they always answer; and ✦ Tidy up and 📌 Pin all know that space is taken, so they stop dropping a picture there. It showed up most on a zoomed-out board, where the bar is twice as tall.',
+    to: '/canvas',
+  },
+  {
+    id: '2026-08-03-watermark-detector-extra',
+    date: '2026-08-03',
+    title: 'Finding watermarks in a big bank now takes minutes instead of hours',
+    blurb:
+      'Until now, 🚩 Find watermarks asked the vision model, in words, "is there a watermark here?" once per image — about 1.7 seconds each, which is fifteen hours on a 30 000-image bank for a question whose answer is usually no. There is now an optional extra (Setup ▸ Quality tools ▸ Watermark detector) that answers it with a small classifier instead, in about 0.14 seconds, and a second model marks where the logo sits so ✂ Crop and 🧽 Inpaint still have something to work on. It does not need Ollama at all, so a machine with no vision model can scan too. On a hand-labelled sample of 110 images from a real bank it flagged none of the 55 clean ones and 54 of the 55 marked ones — slightly better than the vision model on the same images, which also missed one. Install nothing and nothing changes: the vision model keeps doing exactly the same job, slower. The flag score is tunable in Settings ▸ Captioning & quality.',
+    to: '/setup',
+  },
+  {
+    id: '2026-08-03-canvas-image-controls-see-through',
+    date: '2026-08-03',
+    title: 'Pinned pictures are no longer hidden by their own buttons',
+    blurb:
+      'Hovering a picture pinned on the LoRA Canvas dropped an opaque black band across its top and a black block over its corner — the controls covered the very thing you were pointing at. 🔍, ✕ and ⬇ are now separate rounded pills over a blur, and the step label is a small tag instead of a full-width band, so the image shows through between them. The glyphs went white too: they were mid-grey, which reads on the app’s dark chrome but vanishes on a bright render.',
+    to: '/canvas',
+  },
+  {
+    id: '2026-08-03-canvas-filter-opens-folded',
+    date: '2026-08-03',
+    title: 'The LoRA Canvas opens on the board, not on its filter',
+    blurb:
+      'The Datasets filter opened expanded every time you loaded the canvas, and on a library of any size its checkbox list pushed the board itself below the fold — so the first thing you did on the page you came to look at was scroll past a filter. It now opens folded at every width, with the same summary on the button (“3 of 7 · 12 runs shown”), so nothing is hidden. If you unfold it, it stays unfolded next time.',
+    to: '/canvas',
+  },
+  {
+    id: '2026-08-03-blend-weight-sweep',
+    date: '2026-08-03',
+    title: '🧬 Tick several weights and blend every combination in one run',
+    blurb:
+      'Finding the right balance between two LoRAs meant launching, looking, moving a slider, launching again. Each LoRA in a 🧬 Blend now has weight boxes next to its slider: tick 0.6 and 0.8 on one, 0.4 and 1.0 on the other, and the launch renders all four combinations in a single run — each image labelled with the pair that made it, and lined up side by side in the stack view so you can just pick. The button says the cost before you commit (“4 weight combinations → 4 images, about 1 min”) and warns past 24, without ever refusing: it is your machine. Tick nothing and the slider governs, exactly as before. Works in the Test Studio and from the LoRA Canvas board.',
+    to: '/studio',
+  },
+  {
+    id: '2026-08-03-concept-sdxl-refusal-tells-the-truth',
+    date: '2026-08-03',
+    title: 'A Concept dataset on SDXL is told the truth instead of sent hunting',
+    blurb:
+      'Concept captions are only ever written as prose, and the prose/booru selector is hidden on concept datasets — so a Concept dataset trained on a booru-native SDXL checkpoint was always stopped, and then told to “re-caption in Booru tags mode”: a control that does not exist for it. You could look for it forever. The refusal now says what is actually true — no booru concept captioner exists yet — and names the two paths that work: train the concept on a prose family (Z-Image, Krea 2, FLUX.1, FLUX.2 Klein, Anima), or force the launch knowing what a booru-native base loses on prose. Character and Style datasets are untouched; both reach booru captions normally.',
+    to: '/datasets?section=training&panel=launch',
+  },
+  {
+    id: '2026-08-03-pinokio-update-hands-back',
+    date: '2026-08-03',
+    title: 'Installed from Pinokio? Updates now tell you the right three clicks',
+    blurb:
+      'Pinokio starts and stops the app itself, so pressing "Update & restart" in Settings would have relaunched the server in a window Pinokio no longer follows — it would show the app as stopped while the old one still held the port, and Start would have opened a second one on the same datasets. The Updates card and the update banner now show Stop, Update, Start instead of that button, while still telling you how many commits behind you are. Every other install shape is unchanged.',
+    to: '/settings/maintenance',
+  },
+  {
+    id: '2026-08-03-seedvr2-tiled-highres',
+    date: '2026-08-03',
+    title: 'Big SeedVR2 upscales no longer have to fit on your card in one piece',
+    blurb:
+      'Upscaling a whole frame at once needs the whole frame in VRAM, and past a certain size that simply fails — with a CUDA out-of-memory error in a log, which is a terrible way to find out. Two things change. The app now tells you, before it starts, roughly how many megapixels your GPU is good for in one pass. And if you install the Comfyui_TTP_Toolset node pack in ComfyUI, anything bigger is automatically cut into overlapping tiles, upscaled tile by tile and blended back together — so a 4K result works on a card that could not hold it whole. Without the pack nothing breaks: upscales still run, they are just capped. Tiled workflow and the measurement behind it contributed by SurpassHR (GitHub #32).',
+    to: '/setup',
+  },
+  {
+    id: '2026-08-03-dataset-passes-survive-a-deleted-image',
+    date: '2026-08-03',
+    title: 'A long pass no longer dies if you delete an image while it is running',
+    blurb:
+      'Captioning, watermark detection and cleaning, framing, short captions — these walk your whole dataset for minutes or hours, and the grid stays clickable the whole time. Delete a bad tile, press ⏹ Stop, or start an improve while one of them is working, and the pass could die on the spot with a cryptic database error, losing the work it had already done on every other image. It now skips whatever disappeared and carries on. ⏹ Stop also reports the number of generations it really cancelled rather than the number it attempted, so the count and the grid can no longer disagree.',
+    to: '/datasets',
+  },
+  {
+    id: '2026-08-03-bank-coverage-sees-more',
+    date: '2026-08-03',
+    title: 'The bank’s Coverage advice can now see that your images all look the same',
+    blurb:
+      'Coverage advice used to read only labels — framing, person and style clusters, resolution — and labels have a blind spot: they cannot tell two hundred near-identical shots from two hundred different ones, and they say nothing about outfits, lighting or camera angle. It now also reads two things you may already have on disk. Visual spread uses the embeddings ✨ Score cached to report how alike the pool actually looks ("91% average similarity — a set this repetitive teaches one look"); the bands come from measuring real banks, where an ordinary one sits near 65% and an image plus its nearest neighbours lands at 79-90%. Caption variety uses the captions 🏷️ wrote to say which camera views, lightings, settings, outfits and expressions your set never mentions — the same reading the dataset Coverage panel does. Both are honest about their limits on the panel itself: without ✨ Score the spread says "Not measured" rather than "varied", and the caption read looks at words rather than pixels, so a profile nobody described is invisible and "not smiling" still counts as a smile. Still advice only — nothing is kept or rejected.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-03-canvas-blend',
+    date: '2026-08-03',
+    title: '🧬 Blend two LoRAs into one image, straight from the board',
+    blurb:
+      'Ticking several checkpoints on the LoRA Canvas used to mean one pass each. A new ⚖ Compare / 🧬 Blend toggle lets you load them all into the SAME generation instead, each on its own weight slider, with every dataset\'s trigger word listed before you launch rather than injected behind your back. Identity + style and identity + concept are where it pays off — two identities blend into a hybrid person, which the panel now tells you up front. The mode is called Blend everywhere now: the Test Studio\'s 🧬 Combine toggle is the same thing and now says Blend too. Nothing you saved changes — only the word.',
+    to: '/canvas',
+  },
+  {
+    id: '2026-08-03-bank-single-person-folder',
+    date: '2026-08-03',
+    title: '👤 Tell the bank a folder is already one person — and skip the pass',
+    blurb:
+      'Scraped folders are usually one person each, and 👤 Group by person did not know it: one face embedding per image to rediscover what the folder name already said. Scope the grid to a subfolder and click "Single person here" — every image is grouped instantly, with no pass at all, and the next Group by person run skips them entirely. It survives re-scans, adopts images that land in the folder later, and one click undoes it. Not sure? "Check a sample" embeds about fifteen images spread across the folder and tells you whether they look like the same person, at the same threshold the clustering uses — fifteen inferences instead of thousands, and whatever it finds, your call stands.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-03-caption-mismatch-names-your-family',
+    date: '2026-08-03',
+    title: 'The caption-mismatch warning names YOUR model family, not Z-Image',
+    blurb:
+      'If your captions did not match the family you picked, the app refused the launch with a message that always said “this Z-Image dataset… but Z-Image expects prose” — even when you were training Krea 2, FLUX.1 or FLUX.2 Klein. The sentence was frozen into the code while the truth depends on the family. It now names the one you actually chose, so the advice matches what you are looking at.',
+    to: '/datasets?section=training&panel=launch',
+  },
+  {
+    id: '2026-08-03-anima-hybrid-captions',
+    date: '2026-08-03',
+    title: 'Anima takes booru tags too — the app stops calling them a mistake',
+    blurb:
+      'Anima is a hybrid-prompting model: booru tags and natural language are both first-class on it. The app only knew half of that and treated a booru-captioned Anima dataset as a caption mismatch, so a perfectly valid dataset had to be force-launched past a red warning. Both forms now train without a warning and without forcing, the caption-style selector says so on Anima, and prose stays the preselected default. Every other family keeps its guard exactly as it was — SDXL still refuses prose. Prompted by a correction from Witty_Mycologist_995 (Reddit).',
+    to: '/datasets?section=captions&panel=generate',
+  },
+  {
+    id: '2026-08-03-improve-note-cites-the-setting',
+    date: '2026-08-03',
+    title: 'The amber “drawn dataset” note now names the setting it came from',
+    blurb:
+      'Next to Improve, a caution used to announce “This dataset is drawn.” — a verdict the app never actually reached, because it only ever read the subject type you picked. On a photoreal dataset left marked Anime the sentence was simply wrong, with nothing to tell you where it came from. It now says the subject type is set to anime, so when the setting and your images disagree you can see which one to change. The advice itself is unchanged.',
+    to: '/datasets?section=images&panel=review',
+  },
+  {
+    id: '2026-08-03-folder-picker-paste-a-path',
+    date: '2026-08-03',
+    title: 'You can finally paste a path when choosing a folder',
+    blurb:
+      'Browse… opened the Windows folder tree from the XP era: no address bar, no Quick Access, and no way to paste — so a path someone sent you, or one you had just copied out of Explorer, had to be clicked down to one folder at a time. It now opens the modern Windows folder picker, with an address bar you can paste into and your usual shortcuts down the side. The in-app browser — the one you get over the LAN, on a tablet, or on Linux, where no Windows dialog exists — gained the same thing: a path box at the top, Enter to jump. If the modern dialog cannot be used on your machine, the old one still opens rather than nothing at all.',
+    to: '/datasets',
+  },
+  {
+    id: '2026-08-03-bank-tag-chips',
+    date: '2026-08-03',
+    title: 'Click an image’s 🏷️ tags to find the other images that share them',
+    blurb:
+      'Every captioned tile now has a clickable 🏷️ badge. It opens that image’s caption as chips — woman, red, dress, balcony — and ticking them narrows the grid to the images whose captions mention them. It is the readable cousin of 🎯 Similar to selected: that one matches the overall look and cannot say why, this one matches attributes you picked and shows you exactly which. Several chips mean AND, so each tick narrows further, and chips match as whole words — “car” will not drag back “scarf”.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-03-bank-medium-chips',
+    date: '2026-08-03',
+    title: '🎨 Split a mixed dump into photos, anime, 3D renders and illustrations',
+    blurb:
+      'A new chip row on the Bank sorts your images by what they are MADE of — a photograph, an anime drawing, a 3D render, a painting — and it costs nothing to run: it reads the embeddings ✨ Score already computed, so no image is looked at twice and the GPU stays free. It is not the same question as 🔎 Origin: a photorealistic AI portrait is 🤖 AI and 📷 Photo at once. Where it cannot tell, it says “Unsure” instead of guessing, and the row prints how big that pile is — measured on a real 23 500-image bank, its photograph verdicts were right 90 out of 90 times, and it refused to call every 3D render it saw rather than invent one. A photo of somebody cosplaying an anime character is the confusion that forced that caution.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-03-bank-angle-chips',
+    date: '2026-08-03',
+    title: '⤢ Filter a bank by head angle — frontal, three-quarter, profile, from behind',
+    blurb:
+      'The 🎭 Person groups pass has always estimated where a head is pointing, used the number once and thrown it away. It now keeps it, and a new chip row lets you pull out the frontal shots, the three-quarters, the profiles and the back views — the fastest way to see that a set is fifty selfies facing the camera. You can sort by it too. Two limits are printed rather than hidden: profiles are under-counted (a head turned that far often defeats the face detector), and “from behind” needs the 📐 Framing pass as well, because “no face” on its own is also what an empty landscape looks like. Banks scanned before this can measure their missing angles from the row itself — it tells you how many and roughly how long, and does nothing until you click.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-03-caption-length-preset',
+    date: '2026-08-03',
+    title: 'Ask for shorter — or longer — captions in one click',
+    blurb:
+      'Captions came out at whatever length the vision model felt like, and the only way to steer that was to hand-write it into Extra instructions on every dataset. ⚙️ Options on the Captions panel now has a Caption length dial: Concise aims for one short sentence, Detailed for several, Standard leaves the prompt exactly as it was. On 18 real photos with the shipped default vision model that came out at a median of 24 words for Concise, 88 for Standard and 126 for Detailed — a target the model follows loosely, not a word cap, and your own numbers will differ. Concise stays full prose, so a short-captioned dataset still trains on prose families without forcing past the caption-style check, and it is a different axis from the long + short dual captions — use both if you want. Saved per dataset, offered per run on the image bank\'s caption pass too, and your Extra instructions still get the last word. Suggested by djpraxis (Reddit).',
+    to: '/datasets?section=captions&panel=generate',
+  },
+  {
+    id: '2026-08-03-review-opens-instantly',
+    date: '2026-08-03',
+    title: '▶ Review opens instantly, even on a 20 000-image bank',
+    blurb:
+      'Pressing ▶ on a tile used to sit there for seconds on a big bank — longer still with a sort active. It was building its list of images the slow way: asking the server for the whole grid, 500 rows at a time, and keeping only the identifiers. On a 22 940-image bank that was 46 requests and 16 MB to end up with 23 000 numbers. It now asks once, for the numbers alone: 3.8 s down to 44 ms, on the same bank. "Select all in filter" took the same shortcut and got the same gain.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-02-klein-model-paths',
+    date: '2026-08-02',
+    title: 'Point the app at your models with a full path, from anywhere',
+    blurb:
+      'Every Klein model field — diffusion model, text encoder, VAE, and now the consistency LoRA, which was config-only until today — takes a full absolute path as well as a ComfyUI-relative name, and generation-LoRA preset rows do too. A path inside one of ComfyUI\'s model folders is converted to what the loader needs; a path from anywhere else (Downloads, a Hugging Face cache, another drive) is hardlinked into an lds-pinned/ folder for you, so a 10 GB weight stays where it is instead of being copied or moved. A native bf16 model also runs at full precision at last: both Klein graphs hardcoded an FP8 loader setting that quantized full-precision weights on load without telling anyone — the canonical download is FP8, so a stock install renders exactly as before. Contributed by socrasteeze (GitHub).',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-02-klein-model-file-pins',
+    date: '2026-08-02',
+    title: 'Tell the app exactly which Klein model files to load',
+    blurb:
+      'Settings → Image engines has three new optional fields — diffusion model (UNET), text encoder, VAE — that name the exact files the Klein graph loads. Empty keeps today\'s automatic detection. This is the way out of "the app says the model is missing and I am looking right at it": detection is deliberately narrow, so it declines any file it cannot confidently name — a UNET outside a "klein" folder, a weight renamed on download — and a declined file was reported missing. A pinned file resolves, and you get the real verdict on it, including "present but unreadable" for a corrupt download, with the delete-and-re-download action attached. A pin that is not on disk falls back to detection with a badge instead of blocking generation. Contributed by socrasteeze (GitHub).',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-02-bank-passes-survive-a-deleted-image',
+    date: '2026-08-02',
+    title: 'Deleting a bank image while a long pass is running no longer throws the whole pass away',
+    blurb:
+      'Score, watermark, framing, faces, captions and the quality scan all walk thousands of images for minutes or hours. If an image disappeared underneath one of them — most often because you deleted the bank, or its rejected images, while it was still working — the pass died on the spot with a cryptic error, and every image it had already analysed was lost with it. Now the vanished image is simply skipped and the pass finishes; the line at the end tells you how many were skipped, so a pass never quietly claims it analysed more than it did.',
+  },
+  {
+    id: '2026-08-02-dataset-coverage-panel',
+    date: '2026-08-02',
+    title: 'Your dataset can hit a green composition target and still be twenty-five copies of the same shot — a new panel says so',
+    blurb:
+      'The Composition bar counts face / bust / body / back against a target, so it goes green on a set that is entirely front-on, in one outfit, under one light. Those are not things it counts, and that set trains a LoRA that can only reproduce that one look. The new 🔍 Coverage panel, folded under that bar, is the second question: it reads the captions you already generated and reports what your set never shows — no profile views, only one outfit, eye level only, never outdoors — with a plain "generate or import more: profile, three-quarter" line under it. It is honest about being a keyword read of your captions rather than a look at the pixels: with no captions it says so instead of drawing empty bars, under five captions it refuses to judge, and it never keeps, rejects or changes anything. Style and concept datasets are judged on their own axes — "one outfit" is not a defect when the outfit is not what you are teaching.',
+    to: '/datasets?section=add',
+  },
+  {
+    id: '2026-08-02-pinokio-one-click-install',
+    date: '2026-08-02',
+    title: 'Install LDS in one click from Pinokio',
+    blurb:
+      'LDS now ships a Pinokio launcher. In Pinokio, paste the repository URL under "Download from URL", click Install, then Start — the Python environment, the requirements and the browser tab are handled for you, with no terminal, no Python install and nothing added to your PATH. Only the core app is set up that way: ComfyUI, Ollama, ai-toolkit and the ML helpers are still connected from Setup, so nothing heavy is downloaded behind your back. Update from Pinokio\'s own Update tab — it fast-forwards the same checkout the in-app updater uses.',
+  },
+  {
+    id: '2026-08-02-terminal-prints-the-address',
+    date: '2026-08-02',
+    title: 'The terminal finally tells you where the app is',
+    blurb:
+      'Starting the server by hand (python backend/run.py) printed no address at all — the usual "Running on http://..." line was being swallowed into data/app.log — so you had to guess the port, which is exactly the case where it may have moved because 5050 was taken. The console now prints "[LDS] Ready on http://…" once the app really answers, whichever way you launched it.',
+  },
+  {
+    id: '2026-08-02-ref-edit-keep-error',
+    date: '2026-08-02',
+    title: 'Fixing a failed reference edit no longer errors twice',
+    blurb:
+      'When keeping an edited reference failed, the app hit a second error while reporting the first, so you got a blank failure instead of the reassurance that your previous reference was left untouched. It now says exactly that — thanks to socrasteeze (GitHub) for spotting it.',
+  },
+  {
+    id: '2026-08-02-bank-text-search-push-down',
+    date: '2026-08-02',
+    title: 'Text search can finally get rid of what you do not want',
+    blurb:
+      'Typing "a woman without a hat" in 🔤 Find by text never worked — the search engine ignores the word "without", so you got hats, with nothing to tell you it had misfired (measured on a real bank: "without a bikini" returned 60% bikinis against a 10% base rate). There is now a Push down field for the trait you are trying to avoid, plus a -hat shorthand in the query itself, and typing "without" offers to move it there for you. It re-ranks rather than filters: matching images sink instead of disappearing, and after each search the panel tells you what it actually achieved on your bank — including "this changed nothing", which is the one outcome you could never have spotted.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-02-upscale-candidate-visible',
+    date: '2026-08-02',
+    title: 'You can finally see that an upscale is waiting for you',
+    blurb:
+      'An upscale never touches your original: it arrives as a separate tile you keep or reject. Which also meant that from the image you had just sent, nothing appeared to happen — so the pass got re-run on images that already had a result waiting, paying GPU time for a duplicate. The source tile now says it, both while the result is rendering and once it is ready to review. And the candidate names the engine that actually made it, instead of always crediting Klein.',
+    to: '/datasets',
+  },
+  {
+    id: '2026-08-02-seedvr2-in-the-lightbox',
+    date: '2026-08-02',
+    title: 'Pick your upscaler while you are looking at the image',
+    blurb:
+      'The full-screen inspector only ever offered the Klein pass. That is the one place where the choice matters most: on a drawn dataset the panel already warns you that Klein’s instruction pulls anime skin towards realism, and the pass that does not do that was two screens away in the selection toolbar. Both engines are now side by side in the inspector, each saying what it does to the original — and that warning stays under Klein alone, because SeedVR2 sends no instruction at all.',
+    to: '/datasets',
+  },
+  {
+    id: '2026-08-02-bank-exclude-words',
+    date: '2026-08-02',
+    title: 'Hide the bank images you have already handled, and work the rest as a checklist',
+    blurb:
+      'The bank search box narrows the grid TO a word. Next to it there is now a 🚫 Exclude box that does the opposite: it hides every image whose caption or file name carries one of the words you type (comma-separated, so "logo, watermark" is one gesture). It composes with the search and every chip — "dresses that are not red" is one line — and it travels with the filter, so Select all, ▶ Review and the curation picks never hand back an image you just hid. Images with no caption are never hidden: they are exactly what the checklist is looking for.',
+    to: '/bank',
+  },
+  {
+    id: '2026-08-02-bank-sort-every-measure',
+    date: '2026-08-02',
+    title: 'Sort a bank by anything its passes measured — and it remembers the order you chose',
+    blurb:
+      'The Sort menu covered resolution, aesthetics and sharpness. It now covers every figure the passes persist, both ways: file size, NSFW likelihood, noise, contrast, detail, letterbox bars, JPEG quality and face confidence — grouped by the pass that produces them, so a greyed-out section tells you which pass to run. A chip only ranks what crosses its threshold, so "the noisiest of the ones I am keeping" was a question nothing could answer. Each bank also remembers its own order now, so the dump you review by sharpness opens that way tomorrow.',
+    to: '/bank',
   },
   {
     id: '2026-08-02-writes-refuse-an-unreadable-body',
@@ -2786,6 +4041,76 @@ export const WHATS_NEW = [
       'Setup now repairs a mixed Pillow install on boot and keeps incompatible ML extras out of the Flask environment — fewer cryptic image errors the first time you run the app.',
     // No `to`: a reliability fix with nothing to click.
   },
+  {
+    id: '2026-08-04-text-encoder-tolerates-a-chatty-worker',
+    date: '2026-08-04',
+    title: '🎨 Medium and 🔎 text search stop failing over a line of chatter',
+    blurb:
+      'On some installs 🎨 Medium and 🔎 text search died with “the text encoder produced no result — check the ✨ Score interpreter”, on machines whose ✨ Score interpreter was fine — it had just produced the embeddings both features read. The cause was one line: the first thing the text encoder printed had to be its answer, so a first-run banner, a weights download or any greeting from the ML environment ahead of it was read as a failure. Both features now step over anything that is not an answer, the way the ✨ Score pass already did. And when the encoder really does fail, the message quotes what it actually printed — including the error output, which used to be discarded — with home-folder paths stripped, so it is safe to paste into a help thread and it no longer sends you to check a component it never looked at. Reported by shinybtw (Discord), with the failing traceback.',
+    to: '/bank',
+  },
+  // Appended rather than prepended ON PURPOSE: several waves are editing the
+  // head of this array at the same time and ordering is by date desc then id
+  // desc, so position here changes nothing and a tail entry is a conflict less.
+  {
+    id: '2026-08-04-seedvr2-settings-say-which-lane-your-target-takes',
+    date: '2026-08-04',
+    title: 'SeedVR2 settings tell you whether your target will be tiled',
+    blurb:
+      'Tiling starts strictly above the crossover, and the crossover is 1.5× your tile size — so it lands exactly on the round numbers people type. Ask for 1536 px with the default 1024 px tile (or 768 px with a 512 px tile) and the upscale ran whole, with nothing anywhere saying why: no tiles, no warning, no line in the panel. The SeedVR2 card now names the lane your configured target will actually take, and when it sits on the crossover it says so and gives you the three ways to change it.',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-04-fp8-delivery-names-the-running-job-before-the-disk',
+    date: '2026-08-04',
+    title: 'A busy fp8 conversion says so, instead of blaming your disk',
+    blurb:
+      'Starting a second fp8 conversion while one was already running could answer “not enough disk space” — true, but not the reason it refused, and it sent you deleting gigabytes for a job the disk was never blocking. The refusal now names what is actually in the way: something is already being prepared, wait for it or stop it. It also answers instantly, because it no longer reads the Hugging Face repository just to say no.',
+    to: '/datasets?section=checkpoints',
+  },
+  {
+    id: '2026-08-04-setup-tells-a-broken-optional-file-from-a-dead-engine',
+    date: '2026-08-04',
+    title: 'Setup stops calling a damaged optional file a broken engine',
+    blurb:
+      'A corrupted Klein consistency LoRA lit up Setup in red with “⚠ On disk, unreadable”, exactly like a dead model file — while generation carried on working perfectly, because that LoRA has never been required. The alarm said the engine was down when the engine was fine. It now says what is true: an unreadable file that nothing waits on is flagged in amber as optional, with a line telling you Klein still generates without it and a button to download it again; only a file the engine really needs keeps the red badge. The same file also stopped hiding on the other screen — the download buttons used to print “✓ Installed” over it, because it was not on the required list, so the one place offering to fix it was the one place claiming nothing was wrong.',
+    to: '/setup?step=install',
+  },
+  {
+    id: '2026-08-04-captions-say-which-engine-wrote-them',
+    date: '2026-08-04',
+    title: 'See which engine actually wrote your captions',
+    blurb:
+      'The captioning engine is set to Auto by default, and Auto is a chain, not a choice: JoyCaption writes what it can, the Ollama vision model writes the rest, and on a Concept dataset Ollama rewrites JoyCaption’s drafts. Those engines do not write alike — so captions could come back in two different voices, or in a different voice than last week, with nothing anywhere to explain it. Every pass now reports who wrote what, in the toast and on a line under the caption buttons: “Written by JoyCaption.”, “Drafted by JoyCaption, rewritten by the Ollama vision model.”, or “8 by JoyCaption · 4 by Ollama” when the batch was shared. If you want one consistent voice, ⚙️ Options lets you name a single engine — and now you can tell whether it obeyed.',
+    to: '/datasets?section=captions&panel=generate',
+  },
+  // Appended at the TAIL on purpose. Ordering is by date desc then id desc
+  // (sortedEntries), never by array position, so a new entry does not have to be
+  // prepended — and not prepending is what keeps two branches editing this file
+  // from merging into one mangled object.
+  {
+    id: '2026-08-04-bank-caption-engine-and-scope',
+    date: '2026-08-04',
+    title: 'Choose who writes your bank captions, and which pile gets them',
+    blurb:
+      'The 🏷️ Caption pass used to take whatever engine and vision model your Settings held, and always ran over everything you had not rejected. It now has its own row: pick the engine and the Ollama vision model for THIS run without touching your Settings, and aim the pass at the kept images only, the undecided only, or both. Which model writes a caption is not a matter of taste — one that describes things in evasive terms produces captions that are about something slightly other than your images, and a LoRA trained on them learns to look away too. The button also stops saying “Caption all” and starts saying how many images it is really about to write, because already-captioned ones are skipped and the count you could see was never the count it acted on. Rejected images stay out of reach, whatever you pick.',
+    // No `to`: the control lives inside a bank workspace, which has no deep link.
+  },
+  {
+    id: '2026-08-04-bank-recaption-button',
+    date: '2026-08-04',
+    title: 'Redo a bank’s captions with a better model — and see what that costs first',
+    blurb:
+      'Once every image in a bank had a caption, 🏷️ Caption reached zero and went grey — taking the engine and model selects beside it out of reach, on exactly the bank whose captions you wanted to redo. A 🔄 Re-caption button now sits at the end of the Caption options row and runs the same pass over the pile you chose, with the engine, model, register and length you picked. It overwrites, so it tells you the numbers before you click: the button quotes how many images it will rewrite, an amber line quotes how many of those already carry a caption, and the confirmation repeats both. It also says the part we cannot fix: this app stores one caption per image and records nothing about who wrote it, so a caption you corrected by hand looks exactly like a generated one and is overwritten too — and no undo covers captions. With images selected the button stays inert and says why, because a selection can span pages that were never loaded and the count would be a guess.',
+  },
+  {
+    id: '2026-08-07-framing-stops-locking-itself-out-of-the-model',
+    date: '2026-08-07',
+    title: '📐 Framing classifies your whole bank instead of a handful of images',
+    blurb:
+      'On a bank of any size, 📐 Framing could classify a few images and then quietly stop classifying anything at all — the bar kept moving, the log filled with “vision GPU window renewal failed / database is locked”, and stopping the pass reported four images done out of the twelve it had walked. The pass was starving itself: it saved its results in batches of 25 and held the database write lock between them, across model calls that take seconds each, while the check that lets the app talk to the vision model needs that same database every single call. Failing that check is fail-safe by design, so every remaining image was refused rather than mislabelled — correct, and completely invisible. It now saves each image as it goes (measured at 0.17 ms per save) and never holds the lock across a model call, so a pass classifies what you gave it. The 🔎 Watermark scan and the watermark repaint level got the same treatment before they could hit it. And when something does go wrong, every pass now ends the same way whether it finished or you stopped it: what it classified, what it could not read, what was deleted under it, what changed while it was being analysed, and what the model was never shown. Reported by _mr.arrow_ (Discord).',
+    // No `to`: the passes live inside a bank workspace, which has no deep link.
+  },
 ];
 
 // ── Ordering ────────────────────────────────────────────────────────────────
@@ -2872,7 +4197,8 @@ export function markAllSeen(storage, entries = WHATS_NEW) {
 
 // Param-less top-level routes (mirror App.jsx <Routes>).
 const TOP_LEVEL_ROUTES = new Set([
-  '/datasets', '/bank', '/studio', '/cloud', '/canvas', '/guide', '/help', '/setup',
+  '/datasets', '/bank', '/video-bank', '/studio', '/cloud', '/canvas', '/guide',
+  '/help', '/setup',
 ]);
 
 const SETTINGS_IDS = new Set(SETTINGS_SECTIONS.map((s) => s.id));

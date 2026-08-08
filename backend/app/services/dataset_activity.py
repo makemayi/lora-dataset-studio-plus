@@ -36,7 +36,8 @@ import time
 # ChatGPT / Klein) — it keeps the Generate button (and every concurrent action)
 # disabled for the WHOLE batch, not just the launch request.
 KINDS = ('watermark_detect', 'watermark_clean', 'caption', 'recaption',
-         'analyze_faces', 'classify', 'generate', 'improve', 'edit_reference')
+         'analyze_faces', 'classify', 'generate', 'improve', 'edit_reference',
+         'bank_export', 'bank_import', 'training_export', 'backup')
 
 # Kinds a user can gracefully STOP mid-batch (the ▶ Stop button). Only the
 # per-image captioning passes qualify: the worker checks the cancel flag at each
@@ -52,7 +53,16 @@ CANCELLABLE_KINDS = ('caption', 'recaption')
 # worker polls. Every kind here is disarmed by begin() so a leaked flag from a
 # previous run can never cancel a fresh one.
 IMPROVE_KINDS = ('improve',)
-STOPPABLE_KINDS = CANCELLABLE_KINDS + IMPROVE_KINDS
+
+# The 🧽 Find watermarks pass. Cooperatively stoppable exactly like captioning —
+# the worker polls between images and keeps every verdict already written — but
+# it gets its OWN arming scope rather than joining CANCELLABLE_KINDS, for the
+# same reason 'improve' does: CANCELLABLE_KINDS is the DEFAULT scope that the
+# caption worker polls and that the caption route clears, so widening it would
+# make one screen's Stop reach into another screen's pass.
+WATERMARK_KINDS = ('watermark_detect',)
+
+STOPPABLE_KINDS = CANCELLABLE_KINDS + IMPROVE_KINDS + WATERMARK_KINDS
 
 # Safety TTL: an entry not touched for this long is purged on read even if end()
 # never ran (process alive but the batch thread died without unwinding). 30 min is
@@ -71,14 +81,68 @@ _active: dict = {}
 # Lives with _active under _lock; in-memory only (dies with the process).
 _cancel: dict = {}
 _counter = itertools.count(1)
+_MAX_DATASET_ID = (1 << 63) - 1
+
+
+class DatasetActivityBusy(RuntimeError):
+    """An exclusive Dataset operation could not acquire its generation slot."""
+
+
+def normalize_dataset_id(dataset_id) -> int:
+    """Return one canonical SQLite Dataset id or raise ``ValueError``.
+
+    JSON callers may legitimately send ``"12"`` instead of ``12``.  Keeping
+    those as distinct dictionary keys breaks both exclusion and token cleanup:
+    tokens are decoded back to integers by :func:`end`.  Booleans and numeric
+    coercions such as ``1.0`` are deliberately rejected rather than silently
+    addressing Dataset 1.
+    """
+    if isinstance(dataset_id, bool):
+        raise ValueError('dataset_id must be a positive integer')
+    if isinstance(dataset_id, int):
+        value = dataset_id
+    elif isinstance(dataset_id, str) and dataset_id.isascii() \
+            and dataset_id.isdigit() and dataset_id == dataset_id.strip():
+        value = int(dataset_id)
+    else:
+        raise ValueError('dataset_id must be a positive integer')
+    if value <= 0 or value > _MAX_DATASET_ID:
+        raise ValueError('dataset_id must be a positive integer')
+    return value
+
+
+def _purge_stale_locked(dataset_id, now=None):
+    """Purge expired entries and return the remaining bucket (lock held)."""
+    bucket = _active.get(dataset_id)
+    if not bucket:
+        return None
+    now = time.time() if now is None else now
+    stale = [token for token, entry in bucket.items()
+             if now - entry['_touched'] > _TTL_SECONDS]
+    for token in stale:
+        bucket.pop(token, None)
+    if bucket:
+        return bucket
+    _active.pop(dataset_id, None)
+    # A stop request is meaningful only while its matching activity exists.
+    _cancel.pop(dataset_id, None)
+    return None
 
 
 def begin(dataset_id, kind, total=0, detail=None, engine=None):
     """Register a new in-progress batch on ``dataset_id`` and return an opaque token
     to pass to ``progress``/``bump``/``end``. ``total`` is the number of items the
     batch will process (0 when not enumerable up front)."""
+    dataset_id = normalize_dataset_id(dataset_id)
     now = time.time()
     with _lock:
+        bucket = _purge_stale_locked(dataset_id, now)
+        exclusive = next((entry for entry in (bucket or {}).values()
+                          if entry.get('_exclusive')), None)
+        if exclusive is not None:
+            raise DatasetActivityBusy(
+                f"This dataset has an exclusive {exclusive['kind']} operation "
+                'in progress. Wait for it to finish before starting more work.')
         # Fresh cancellable batch → disarm any stale/leaked stop request FOR THAT KIND
         # so it can never cancel this new run before it starts (a prior run that armed
         # the flag then crashed before it was consumed would otherwise poison this one).
@@ -94,6 +158,34 @@ def begin(dataset_id, kind, total=0, detail=None, engine=None):
         if engine:
             _active[dataset_id][token]['engine'] = str(engine).lower()
     return token
+
+
+def begin_exclusive(dataset_id, kind, total=0, detail=None, engine=None):
+    """Atomically reserve an otherwise idle Dataset, or return ``None``.
+
+    Dataset -> Bank export needs a lifetime wider than a request: selection,
+    source bytes and their metadata must remain one coherent generation until
+    the background copy either completes or discards its destination.  A
+    separate ``running`` then ``begin`` pair would leave a race between those
+    two lock acquisitions, hence this single critical section.
+    """
+    dataset_id = normalize_dataset_id(dataset_id)
+    now = time.time()
+    with _lock:
+        bucket = _purge_stale_locked(dataset_id, now)
+        if bucket:
+            return None
+        token = f'{dataset_id}:{kind}:{next(_counter)}'
+        entry = {
+            'kind': kind, 'done': 0, 'total': int(total or 0),
+            'started_at': now, '_touched': now, '_exclusive': True,
+        }
+        if detail:
+            entry['detail'] = str(detail)
+        if engine:
+            entry['engine'] = str(engine).lower()
+        _active[dataset_id] = {token: entry}
+        return token
 
 
 def progress(token, done=None, total=None, detail=None):
@@ -156,9 +248,14 @@ def sync_pending(dataset_id, kind, pending, engine=None):
     without corrupting it. Idempotent — safe to call on every enqueue and every
     completion. TTL purge (via ``get``) is the final safety net if a completion is
     lost and ``pending`` never reaches 0."""
+    dataset_id = normalize_dataset_id(dataset_id)
     now = time.time()
     with _lock:
-        bucket = _active.get(dataset_id) or {}
+        bucket = _purge_stale_locked(dataset_id, now) or {}
+        # A completion callback from older asynchronous work must not punch a
+        # second activity into an exclusive export generation.
+        if any(entry.get('_exclusive') for entry in bucket.values()):
+            return
         tok = next((t for t, e in bucket.items()
                     if e['kind'] == kind and e.get('_synced')), None)
         if pending <= 0:
@@ -192,16 +289,11 @@ def get(dataset_id):
     the batch that produced it. The ✨ improve batch owns a real handle AND drives
     in-flight generations, so both entries exist at once; the handle carries the
     honest done/total (250 images, not the 60 currently in flight)."""
+    dataset_id = normalize_dataset_id(dataset_id)
     now = time.time()
     with _lock:
-        bucket = _active.get(dataset_id)
+        bucket = _purge_stale_locked(dataset_id, now)
         if not bucket:
-            return None
-        stale = [t for t, e in bucket.items() if now - e['_touched'] > _TTL_SECONDS]
-        for t in stale:
-            bucket.pop(t, None)
-        if not bucket:
-            _active.pop(dataset_id, None)
             return None
         entry = max(bucket.values(),
                     key=lambda e: (0 if e.get('_synced') else 1, e['started_at']))
@@ -222,8 +314,41 @@ def get(dataset_id):
 def running(dataset_id, kinds):
     """True when a batch of one of ``kinds`` is live on ``dataset_id``. Used to refuse
     a second ✨ improve batch (-> 409) instead of racing two workers on one cap."""
+    dataset_id = normalize_dataset_id(dataset_id)
+    now = time.time()
     with _lock:
-        return any(e['kind'] in kinds for e in (_active.get(dataset_id) or {}).values())
+        bucket = _purge_stale_locked(dataset_id, now)
+        return any(e['kind'] in kinds for e in (bucket or {}).values())
+
+
+def exclusive_kind(dataset_id):
+    """Return the live exclusive activity kind, or ``None``.
+
+    Mutation guards use this capability bit instead of duplicating an allow-list
+    of today's export kinds.  A future exclusive Dataset operation is therefore
+    fail-closed automatically.
+    """
+    dataset_id = normalize_dataset_id(dataset_id)
+    now = time.time()
+    with _lock:
+        bucket = _purge_stale_locked(dataset_id, now)
+        entry = next((item for item in (bucket or {}).values()
+                      if item.get('_exclusive')), None)
+        return entry['kind'] if entry is not None else None
+
+
+def owns_exclusive(dataset_id, token, kind=None) -> bool:
+    """Whether ``token`` is the current exclusive capability for a Dataset."""
+    if not isinstance(token, str):
+        return False
+    dataset_id = normalize_dataset_id(dataset_id)
+    now = time.time()
+    with _lock:
+        bucket = _purge_stale_locked(dataset_id, now)
+        entry = (bucket or {}).get(token)
+        return bool(
+            entry and entry.get('_exclusive')
+            and (kind is None or entry.get('kind') == kind))
 
 
 def request_cancel(dataset_id, kinds=CANCELLABLE_KINDS):
@@ -235,8 +360,9 @@ def request_cancel(dataset_id, kinds=CANCELLABLE_KINDS):
     We never interrupt an in-flight inference — the worker finishes the current item,
     then sees the flag and unwinds through the SAME cleanup as a normal finish (model
     unload, indicator end). Returns True when a batch was live and is now flagged."""
+    dataset_id = normalize_dataset_id(dataset_id)
     with _lock:
-        bucket = _active.get(dataset_id) or {}
+        bucket = _purge_stale_locked(dataset_id) or {}
         live = {e['kind'] for e in bucket.values() if e['kind'] in kinds}
         if not live:
             return False
@@ -250,7 +376,9 @@ def cancel_requested(dataset_id, kinds=CANCELLABLE_KINDS):
     and by the improve worker with ``IMPROVE_KINDS``, plus by the routes to learn a
     pass ended because it was stopped. Cheap and lock-guarded — safe to poll in a
     tight per-item loop."""
+    dataset_id = normalize_dataset_id(dataset_id)
     with _lock:
+        _purge_stale_locked(dataset_id)
         return bool((_cancel.get(dataset_id) or set()) & set(kinds))
 
 
@@ -260,6 +388,7 @@ def clear_cancel(dataset_id, kinds=CANCELLABLE_KINDS):
     a later run — begin() also clears defensively, this just makes the intent explicit
     at the seam. Scoped by kind so unwinding a caption pass never disarms a concurrent
     improve batch that the user has just asked to stop."""
+    dataset_id = normalize_dataset_id(dataset_id)
     with _lock:
         _discard_cancel(dataset_id, kinds)
 
@@ -281,7 +410,7 @@ def _entry(token):
 
 def _dsid_of(token):
     try:
-        return int(str(token).split(':', 1)[0])
+        return normalize_dataset_id(str(token).split(':', 1)[0])
     except (ValueError, AttributeError):
         return None
 

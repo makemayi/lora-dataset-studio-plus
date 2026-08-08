@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { attemptModalSubmit } from '../../utils/submitOutcome.js'
+import { flagCandidateLabel, launchRejectNote } from './autoRejectReadiness.js'
+import {
+  defaultPipelineStepKeys, normalizeSemanticEngine, pipelineStepKeys,
+  semanticEngineLabel,
+} from './bankSemanticEngine.js'
 
 /** 🚀 Launch all — the overnight funnel. The user picks which passes run and how
  * auto-reject behaves, sees a plain "here's what will run" preview, and hits Go.
@@ -20,43 +25,60 @@ const QUALITY_FLAGS = [
   { key: 'small', label: '📐 Small' },
 ]
 
-export default function LaunchAllDialog({ caps, visionReady, onClose, onLaunch }) {
+export default function LaunchAllDialog({
+  caps, visionReady, counts, flagsActionable, semanticEngine = 'clip', onClose, onLaunch,
+}) {
+  const engine = normalizeSemanticEngine(semanticEngine)
+  const engineLabel = semanticEngineLabel(engine)
   // A heavy pass is "ready" when its tool is installed; scan/auto-reject always are.
   const ready = useMemo(() => ({
     scan: true,
     auto_reject: true,
     score: !!caps?.bank_scoring,
-    // Stage 2 reuses Score's embeddings — ready exactly when Score is (and it's
-    // skipped at run time if Score didn't actually produce any).
-    semantic_dedup: !!caps?.bank_scoring,
+    semantic_index: engine === 'siglip2' && !!caps?.bank_siglip2,
+    // Stage 2 reads whichever semantic engine this Bank selected. The preceding
+    // score/index stage supplies it; the backend still skips honestly if that
+    // stage did not produce a usable cache.
+    semantic_dedup: engine === 'siglip2' ? !!caps?.bank_siglip2 : !!caps?.bank_scoring,
     watermark: !!visionReady,
     faces: !!caps?.face_scoring,
     framing: !!visionReady,
     caption: !!visionReady,
-  }), [caps, visionReady])
+  }), [caps, visionReady, engine])
 
-  const STEPS = [
+  const STEP_DEFS = {
+    scan:
     { key: 'scan', label: '🔎 Scan quality',
       desc: 'Sharpness, noise, flatness, size + near-duplicate groups (CPU).' },
+    auto_reject:
     { key: 'auto_reject', label: '🧹 Auto-reject flagged',
       desc: 'Reject the images carrying the flags below — reversible, nothing deleted.' },
+    score:
     { key: 'score', label: '✨ Score', needs: 'Bank scoring extra',
-      desc: 'Aesthetic 1–10, NSFW, style groups (GPU).' },
-    { key: 'semantic_dedup', label: '✂ Find crops & variants', needs: 'Bank scoring extra',
-      desc: 'Group crops/variants of the same shot from Score’s embeddings — no extra GPU (needs Score first).' },
+      desc: 'CLIP aesthetic 1–10, NSFW, visual style and 🎨 Medium (GPU).' },
+    semantic_index:
+    { key: 'semantic_index', label: '🧠 Build SigLIP 2 semantic index', needs: 'SigLIP 2 Quality tool',
+      desc: 'Build or resume the whole-Bank SigLIP 2 cache for semantic features. Existing CLIP data is preserved.' },
+    semantic_dedup:
+    { key: 'semantic_dedup', label: '✂ Find crops & variants',
+      needs: engine === 'siglip2' ? 'SigLIP 2 Quality tool' : 'Bank scoring extra',
+      desc: `Group crops/variants of the same shot from the ${engineLabel} semantic index (needs that index first).` },
+    watermark:
     { key: 'watermark', label: '🚩 Find watermarks', needs: 'Vision model',
       desc: 'Detect overlaid watermarks/logos with the Qwen3-VL detector (GPU).' },
+    faces:
     { key: 'faces', label: '👥 Group by person', needs: 'Quality tools',
       desc: 'Face embeddings + person clusters, no reference photo (CPU/GPU).' },
+    framing:
     { key: 'framing', label: '📐 Classify framing', needs: 'Vision model',
       desc: 'Tag each shot face/bust/body/back — powers the framing filter & coverage advice (GPU).' },
+    caption:
     { key: 'caption', label: '🏷️ Caption', needs: 'Caption engine',
       desc: 'Describe every image so it becomes searchable and rides to the dataset (GPU).' },
-  ]
+  }
+  const STEPS = pipelineStepKeys(engine).map((key) => STEP_DEFS[key])
 
-  const [steps, setSteps] = useState(() => new Set(
-    ['scan', 'auto_reject', 'score', 'semantic_dedup', 'watermark', 'faces', 'framing']
-      .filter((k) => ready[k])))
+  const [steps, setSteps] = useState(() => new Set(defaultPipelineStepKeys(engine, ready)))
   const [rejectFlags, setRejectFlags] = useState(() => new Set(['blur', 'uniform']))
   const [resolveDups, setResolveDups] = useState(true)
 
@@ -72,6 +94,10 @@ export default function LaunchAllDialog({ caps, visionReady, onClose, onLaunch }
   })
 
   const autoRejectOn = steps.has('auto_reject')
+  // Honest about the ORDER: auto-reject runs after the scan here, so the counts
+  // shown next to the flags are a floor, and images nothing has ever measured
+  // are invisible to every flag until 🔎 Scan reaches them.
+  const rejectNote = launchRejectNote(counts, steps.has('scan'))
   // The honest preview: the steps that will actually RUN, in order, tagged when
   // one will be skipped because its tool isn't ready.
   const plan = STEPS.filter((s) => steps.has(s.key)).map((s) => ({
@@ -154,15 +180,28 @@ export default function LaunchAllDialog({ caps, visionReady, onClose, onLaunch }
                   <p className="text-xs text-content-muted">
                     Reject the still-undecided images with these flags (manual ✓/✕ are never touched):
                   </p>
+                  {/* The count is what the flag would catch RIGHT NOW — undecided
+                      images only, the same pile the pass touches. It is not the
+                      outcome: 🔎 Scan runs before auto-reject in this funnel, so
+                      the note below says which way the number will move rather
+                      than letting a stale figure pass for a promise. */}
                   <div className="flex flex-wrap gap-x-4 gap-y-1">
                     {QUALITY_FLAGS.map((f) => (
                       <label key={f.key} className="flex items-center gap-1.5 text-sm text-content">
                         <input type="checkbox" checked={rejectFlags.has(f.key)}
                           onChange={() => toggleFlag(f.key)} />
                         {f.label}
+                        <span className="text-xs text-content-subtle">
+                          ({flagCandidateLabel(f.key, flagsActionable)})
+                        </span>
                       </label>
                     ))}
                   </div>
+                  {rejectNote && (
+                    <p className="m-0 text-[0.6875rem] leading-snug text-amber-200">
+                      ⚠ {rejectNote}
+                    </p>
+                  )}
                   <label className="flex items-center gap-1.5 text-sm text-content">
                     <input type="checkbox" checked={resolveDups}
                       onChange={(e) => setResolveDups(e.target.checked)} />

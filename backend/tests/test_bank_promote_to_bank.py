@@ -81,8 +81,8 @@ def test_promoting_a_selection_makes_a_bank_with_files_of_its_own(app, source):
             # THE assertion: two files, not two names for one file.
             assert not os.path.samefile(src, dest)
             assert os.stat(src).st_ino != os.stat(dest).st_ino
-            # A fresh bank starts un-triaged, like any other.
-            assert r.status == 'pending'
+            # Curation is part of the complete Bank row transport.
+            assert r.status == 'keep'
 
         # The source keeps every row, and says where they went.
         kept = BankImage.query.filter_by(bank_id=bank_id).all()
@@ -162,6 +162,48 @@ def test_a_copy_that_cannot_be_written_leaves_no_phantom_bank(app, source):
         # ...and the source was not marked as promoted to a bank that is gone.
         assert all(r.promoted_bank_id is None
                    for r in BankImage.query.filter_by(bank_id=bank_id))
+
+
+def test_duplicate_destination_relpaths_discard_the_new_bank(app, source):
+    bank_id, folder, ids = source
+    with app.app_context():
+        from app.extensions import db
+        from app.models import BankImage, ImageBank
+        from app.services import bank_jobs, image_bank_service as banks
+
+        duplicate = BankImage(
+            bank_id=bank_id, relpath='a.png', status='keep',
+            file_size=os.path.getsize(os.path.join(folder, 'a.png')))
+        db.session.add(duplicate)
+        db.session.commit()
+        destination_id = banks.start_bank_promote(
+            app, 'local', bank_id, [ids[0], duplicate.id], 'Collision')
+
+        assert db.session.get(ImageBank, destination_id) is None
+        assert 'collide' in bank_jobs.get(bank_id)['error'].lower()
+        assert all(row.promoted_bank_id is None for row in
+                   BankImage.query.filter_by(bank_id=bank_id).all())
+
+
+def test_unexpected_copy_exception_also_discards_the_destination(
+        app, source, monkeypatch):
+    bank_id, _folder, ids = source
+    with app.app_context():
+        from app.extensions import db
+        from app.models import ImageBank
+        from app.services import bank_jobs, image_bank_service as banks
+
+        before = ImageBank.query.count()
+        monkeypatch.setattr(
+            banks.bank_transfer_metadata, 'load_runtime_cache_index',
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                RuntimeError('injected cache-index crash')))
+        destination_id = banks.start_bank_promote(
+            app, 'local', bank_id, ids[:1], 'Crash cleanup')
+
+        assert ImageBank.query.count() == before
+        assert db.session.get(ImageBank, destination_id) is None
+        assert 'partial Bank was discarded' in bank_jobs.get(bank_id)['error']
 
 
 def test_a_bank_born_from_another_is_not_reported_as_overlapping(app, source):
@@ -260,6 +302,20 @@ def test_the_route_returns_202_and_the_new_bank_id(client, app, source):
 
     bad = client.post(f'/api/bank/{bank_id}/promote-to-bank', json={'name': ''})
     assert bad.status_code == 400
+
+    for invalid_ids in ('', False, 0, {}):
+        bad = client.post(f'/api/bank/{bank_id}/promote-to-bank', json={
+            'name': 'Candidates', 'image_ids': invalid_ids,
+        })
+        assert bad.status_code == 400, (invalid_ids, bad.get_json())
+    assert client.post(
+        f'/api/bank/{bank_id}/promote-to-bank', json=[]).status_code == 400
+    assert client.post(
+        f'/api/bank/{bank_id}/promote-to-bank',
+        json={'name': 42, 'image_ids': ids[:1]}).status_code == 400
+    assert client.post(
+        f'/api/bank/{bank_id}/promote-to-bank',
+        json={'name': 'x' * 101, 'image_ids': ids[:1]}).status_code == 400
 
 
 def test_the_grid_payload_carries_the_new_destination(client, app, source):

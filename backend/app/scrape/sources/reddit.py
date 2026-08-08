@@ -33,7 +33,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 import requests
 
 from ..validators import Platform
-from .base import Source, Capabilities, Match
+from .base import Source, Capabilities, Match, ResultList
 from .gdl_source import resolve_cookies
 from . import registry
 
@@ -52,8 +52,24 @@ _GDL_CLIENT_ID = '6N9uN0krSDE-ig'
 
 _HTTP_TIMEOUT = 20
 _MAX_429_RETRY_WAIT = 4    # sur 429, on ne re-tente qu'UNE fois si le reset est proche
-_BATCH_POSTS = 30          # posts récupérés par « page » (chaque post ≈ 1-N images)
-_SCAN_MAX = 200            # plafond d'items remontés par un scan (payload borné)
+_BATCH_POSTS = 30          # posts récupérés par appel listing (chaque post ≈ 1-N images)
+_SCAN_MAX = 200            # plafond d'items remontés par UNE page de scan (payload borné)
+# Borne dure sur le nombre d'appels listing séquentiels qu'un seul _walk_items()
+# peut faire (skip + collecte confondus). Sans ça, une page profonde sur un
+# subreddit à faible densité d'images (posts texte) pourrait déclencher des
+# centaines d'appels API rien que pour sauter les items déjà livrés par les
+# pages précédentes. Du même ordre que le pire cas de l'ancien design (page
+# MAX_SCAN_PAGE+1 = 51 appels séquentiels) : ne régresse pas le cas courant,
+# protège seulement le cas pathologique. Si atteinte avant d'avoir rempli la
+# page ou épuisé le listing, le résultat est marqué `partial` (jamais renvoyé
+# comme silencieusement complet).
+# (l'ancien design rejouait lui aussi le listing depuis `after=None` à chaque
+# page — `_fetch_listing` bouclait `for i in range(page + 1)` puis ne convertissait
+# que la dernière fournée — donc ce n'est pas une dette nouvelle : mesuré, le coût
+# par item est un match nul à faible densité d'images et strictement meilleur sur
+# les subreddits à galeries, où l'ancienne marche livrait 30 items là où celle-ci
+# en livre 200)
+_MAX_LISTING_CALLS = 60
 _SORTS = frozenset({'hot', 'new', 'top', 'rising', 'controversial', 'best'})
 _IMG_EXT = ('.jpg', '.jpeg', '.png', '.webp', '.gif')
 
@@ -343,7 +359,10 @@ class RedditSource(Source):
     name = 'reddit'
     priority = 100
     capabilities = _REDDIT_CAPS
-    paginated = True          # « Charger plus » : avance le curseur `after` du listing
+    # « Charger plus » : voir _walk_items — la page N reprend au N*_SCAN_MAX-ième
+    # item du listing rejoué depuis le début, jamais un simple curseur `after` figé
+    # sur une fournée de posts (cf. _MAX_LISTING_CALLS pour le budget par requête).
+    paginated = True
     category = 'image'        # recherche d'images → ouvert aux non-admins
 
     def match(self, url):
@@ -352,15 +371,35 @@ class RedditSource(Source):
             return Match(url=url, validation=None)
         return None
 
-    def _fetch_listing(self, ep, token, page):
-        """Récupère la fournée de posts de la `page` demandée en avançant le curseur
-        `after` (recherche/listing sont paginés par curseur, pas par offset). page 0 =
-        1re fournée ; page N = N appels séquentiels. Retourne [] si on épuise le
-        listing AVANT d'atteindre la page (sinon « Charger plus » re-remonterait la
-        dernière fournée déjà vue → doublons)."""
+    def _walk_items(self, ep, token, skip, limit):
+        """Marche le listing depuis le DÉBUT (curseur `after`, recherche/listing sont
+        paginés par curseur, pas par offset), convertit chaque post en items au fil de
+        l'eau et déduplique par URL sur le flux entier — puis saute les `skip` premiers
+        items (déjà livrés par les pages précédentes) avant d'en collecter jusqu'à
+        `limit`.
+
+        POURQUOI un skip au niveau ITEM et pas au niveau post/batch : un post galerie
+        peut produire jusqu'à ~20 images, et une fournée de _BATCH_POSTS=30 posts peut
+        donc produire bien plus que `limit` items. Plafonner par POST (ancien design :
+        `page` = N-ième fournée de 30 posts, coupée en cours de route dès que `limit`
+        est atteint) perd irrémédiablement les posts restants de la fournée : la page
+        suivante avance le curseur `after` du LISTING, jamais ne revient dans la
+        fournée tronquée. Un skip par ITEM permet à la page suivante de reprendre
+        EXACTEMENT où le plafond a coupé — y compris au milieu d'une galerie — en
+        rejouant le même flux ordonné et en sautant ce qui a déjà été livré.
+
+        Retourne (items, exhausted, budget_hit) :
+          - exhausted=True  : le listing entier a été parcouru (plus de curseur après
+            le dernier batch) — inutile de proposer une page suivante.
+          - budget_hit=True : _MAX_LISTING_CALLS atteint avant d'avoir rempli `limit`
+            OU épuisé le listing — le résultat est valide mais potentiellement
+            incomplet pour CETTE page (jamais renvoyé comme silencieusement complet ;
+            cf. `ResultList.partial` posé par l'appelant)."""
         after = None
-        children = []
-        for i in range(page + 1):
+        seen = set()
+        skipped = 0
+        items = []
+        for _ in range(_MAX_LISTING_CALLS):
             params = dict(ep['params'])
             params['limit'] = _BATCH_POSTS
             if after:
@@ -368,9 +407,31 @@ class RedditSource(Source):
             listing = (_api_get(ep['api_path'], params, token) or {}).get('data', {})
             children = listing.get('children', []) or []
             after = listing.get('after')
-            if i < page and not after:
-                return []      # plus de pages avant d'atteindre la page voulue
-        return children
+            for ch in children:
+                data = ch.get('data') if isinstance(ch, dict) else None
+                if not isinstance(data, dict):
+                    continue
+                for it in _items_from_post(data):
+                    if it['url'] in seen:
+                        continue
+                    seen.add(it['url'])
+                    if skipped < skip:
+                        skipped += 1
+                        continue
+                    items.append(it)
+                    if len(items) >= limit:
+                        # Retour dès `limit` atteint, SANS regarder si `after` tient
+                        # encore un curseur : une page qui tombe pile sur `limit`
+                        # items se voit donc marquée exhausted=False et laisse
+                        # « Load more » actif pour un clic qui reviendra bredouille.
+                        # Délibéré : l'inverse (masquer le bouton alors qu'il restait
+                        # des items) serait le sens qui compte, et l'éviter coûterait
+                        # un appel listing d'anticipation par page réussie — un clic
+                        # mort occasionnel est moins cher que ça.
+                        return items, False, False
+            if not after:
+                return items, True, False   # listing épuisé : rien de plus à charger
+        return items, False, True           # budget d'appels épuisé, page potentiellement incomplète
 
     def _fetch_post(self, ep, token):
         """Récupère un post seul. L'endpoint /comments/<id> renvoie [postListing,
@@ -399,22 +460,41 @@ class RedditSource(Source):
 
             if ep['kind'] == 'post':
                 children = self._fetch_post(ep, token)
-            else:
-                page = max(0, getattr(match, 'page', 0) or 0)
-                children = self._fetch_listing(ep, token, page)
+                items, seen = [], set()
+                for ch in children:
+                    data = ch.get('data') if isinstance(ch, dict) else None
+                    if not isinstance(data, dict):
+                        continue
+                    for it in _items_from_post(data):
+                        if it['url'] not in seen:
+                            seen.add(it['url'])
+                            items.append(it)
+                            if len(items) >= _SCAN_MAX:
+                                # Un post seul reste borné par la limite de galerie de
+                                # Reddit (≤ 20 images) : très en-dessous de _SCAN_MAX,
+                                # donc en pratique jamais atteint ici. Le garde-fou
+                                # reste posé par cohérence de contrat (payload borné).
+                                break
+                return items, None
 
-            items, seen = [], set()
-            for ch in children:
-                data = ch.get('data') if isinstance(ch, dict) else None
-                if not isinstance(data, dict):
-                    continue
-                for it in _items_from_post(data):
-                    if it['url'] not in seen:
-                        seen.add(it['url'])
-                        items.append(it)
-                        if len(items) >= _SCAN_MAX:
-                            return items, None
-            return items, None
+            # Listing (recherche/subreddit/user) : « page » indexe des TRANCHES
+            # d'items de _SCAN_MAX, pas des fournées de posts — cf. _walk_items pour
+            # le pourquoi (reprise exacte, y compris en plein milieu d'une galerie).
+            page = max(0, getattr(match, 'page', 0) or 0)
+            items, exhausted, budget_hit = self._walk_items(ep, token, page * _SCAN_MAX, _SCAN_MAX)
+            if exhausted:
+                match.paginated = False   # rien de plus à charger : cache « Load more »
+            elif budget_hit and len(items) < _SCAN_MAX:
+                # Budget d'appels épuisé AVANT d'avoir rempli la page : une page
+                # plus profonde ferait un skip encore plus grand contre le MÊME
+                # budget, donc ne peut jamais réussir mieux — proposer « Load more »
+                # ici garantirait un clic mort (0 item, coût plein en appels API).
+                # `partial` reste posé : le bandeau reste honnête, seul le bouton
+                # se tait.
+                match.paginated = False
+            result = ResultList(items)
+            result.partial = budget_hit
+            return result, None
         except RedditRateLimited as e:
             wait = f' Try again in ~{e.reset_seconds}s.' if e.reset_seconds else ' Try again in a minute.'
             return None, ('Reddit is temporarily rate-limiting requests (shared quota '

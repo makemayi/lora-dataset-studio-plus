@@ -9,7 +9,11 @@ import EnhancePromptButton from './EnhancePromptButton';
 // `value` = effectivePrompt, `placeholder` = d.prompt, `isCustom` = prompt édité ≠ défaut.
 // Le rendu de <RecentPrompts> reste conditionné à la présence de d.recent_prompts :
 // on ne passe `recentPrompts` que si la liste est non vide.
-export default function PromptField({ value, placeholder, onChange, onReset, isCustom, recentPrompts, datasetId, onDeletePrompt }) {
+// 📝 `batchPrompts`/`onToggleBatchPrompt`/`onClearBatchPrompts` : le lot de prompts
+// à rejouer en un run (cases à cocher de l'historique). Purement traversant — l'état
+// vit dans RunSetupPanel, qui est le seul à savoir ce qu'un lancement envoie.
+export default function PromptField({ value, placeholder, onChange, onReset, isCustom, recentPrompts, datasetId, onDeletePrompt,
+  batchPrompts = null, onToggleBatchPrompt = null, onClearBatchPrompts = null }) {
   const [describeOpen, setDescribeOpen] = useState(false);
   // A described prompt replaces the field; if the user already typed one, confirm
   // before clobbering it (never silently discard their text).
@@ -54,7 +58,9 @@ export default function PromptField({ value, placeholder, onChange, onReset, isC
       )}
       {Array.isArray(recentPrompts) && recentPrompts.length > 0 && (
         <RecentPrompts items={recentPrompts} datasetId={datasetId} selectedPrompt={value}
-          onPick={onChange} onDelete={onDeletePrompt} />
+          onPick={onChange} onDelete={onDeletePrompt}
+          batch={batchPrompts} onToggleBatch={onToggleBatchPrompt}
+          onClearBatch={onClearBatchPrompts} />
       )}
       <DescribeImageModal open={describeOpen} onClose={() => setDescribeOpen(false)}
         onResult={applyDescription} />

@@ -37,6 +37,17 @@ export function LineageEdgeDefs() {
         <stop offset="0" stopColor="#f59e0b" stopOpacity="0.55" />
         <stop offset="1" stopColor="#fbbf24" stopOpacity="0.95" />
       </linearGradient>
+      {/* 🧬 GENERATION PROVENANCE — "this picture was blended from that
+          checkpoint". Its own violet, deliberately not the indigo trunk and not
+          the neutral grey: it is a third kind of descent (a blend loads several
+          LoRAs, so one image has several parents at once) and the board already
+          spends indigo on training lineage and amber on superseded branches.
+          Kept dimmer at the source and brighter at the picture, like the others,
+          so it still reads left→right as "came from". */}
+      <linearGradient id="lds-edge-blend" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stopColor="#a855f7" stopOpacity="0.45" />
+        <stop offset="1" stopColor="#e9d5ff" stopOpacity="0.95" />
+      </linearGradient>
       <filter id="lds-edge-glow" x="-20%" y="-40%" width="140%" height="180%">
         <feGaussianBlur stdDeviation="2.2" result="b" />
         <feMerge>
@@ -79,13 +90,17 @@ export function LineageEdges({ edges, isLit }) {
         {edges.map((e, i) => {
           const both = lit(e.parentId) && lit(e.childId);
           const spine = e.onSpine || both;
-          const grad = e.superseded ? 'lds-edge-super' : spine ? 'lds-edge-spine' : 'lds-edge-normal';
+          // 🧬 A provenance edge keeps its violet whatever the hover is doing:
+          // it is not part of the training spine, so lighting it like the trunk
+          // would claim a descent that did not happen.
+          const grad = e.blend ? 'lds-edge-blend'
+            : e.superseded ? 'lds-edge-super' : spine ? 'lds-edge-spine' : 'lds-edge-normal';
           return (
             <path key={`${e.parentId}-${e.childId}`}
               className="lds-ledge"
               d={e.d}
               stroke={`url(#${grad})`}
-              strokeWidth={spine ? 2.6 : e.superseded ? 2.2 : 1.5}
+              strokeWidth={e.blend ? 2 : spine ? 2.6 : e.superseded ? 2.2 : 1.5}
               /* ⚠️ `.lds-ledge` sets stroke-dasharray in CSS for the draw-in
                  animation, and a CSS declaration beats a presentation attribute:
                  this dash never actually renders. A superseded branch therefore

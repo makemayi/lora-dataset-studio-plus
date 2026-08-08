@@ -27,6 +27,7 @@ from . import fapello     # noqa: F401  (fapello.com + miroirs de langue — pag
 from . import reddit       # noqa: F401  (reddit.com — recherche mot-clé via API OAuth)
 from . import sexcom      # noqa: F401  (sex.com — recherche mot-clé via l'API du site)
 from . import pexels      # noqa: F401  (pexels.com — API officielle, clé requise)
+from . import websearch   # noqa: F401  (duckduckgo — recherche d'images par mot-clé)
 from . import universal  # noqa: F401
 
 # Invariant : exactement une source universelle, noms uniques. Lève au démarrage

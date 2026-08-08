@@ -1,16 +1,35 @@
-"""Enforce the repository policy that published releases never contain an EXE.
+"""Enforce what a published release may contain: no EXE, and no personal data.
 
 With no argument, this checks every workflow that can publish a GitHub release.
-Paths passed on the command line are inspected too; ZIP members are checked
+Paths passed on the command line are inspected too; ZIP members are read
 without extracting them. The release workflow and CI both invoke this script.
+
+WHY THE ARCHIVE AND NOT THE REPO. `backend/tests/test_no_personal_data.py`
+guards the sources, but it walks `git ls-files` and skips `frontend/dist/`, so
+it is blind to three things at once: untracked files, ignored files, and the
+compiled bundle everybody actually downloads. That blindness has already cost
+something — a published release carried `backend/.pytest_cache/`, because the
+packaging script excluded `tests` but not the cache directory beside it.
+
+Reading the final ZIP closes all three holes in one pass, because the ZIP is
+the artifact, not a proxy for it. The patterns are imported from
+`scripts/privacy_patterns.py`, never copied: two tables that drift apart are
+worse than one table.
 """
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 import zipfile
+from fnmatch import fnmatch
 from pathlib import Path
+
+if __package__:
+    from . import privacy_patterns as privacy
+else:                                     # `python scripts/check_release_artifacts.py`
+    import privacy_patterns as privacy
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +42,34 @@ PUBLISH_MARKERS = (
     "ncipollo/release-action",
 )
 DIST_GLOB = re.compile(r"(?i)(?:packaging[\\/])?dist[\\/][^\r\n\"'`]*\*")
+
+# A member bigger than this is not read. Nothing in a source bundle is a 32 MB
+# text file, so hitting the cap means something unreviewable is being shipped:
+# it is reported rather than skipped, because a scan that silently gives up is
+# indistinguishable from a scan that passed.
+MAX_SCANNED_MEMBER_BYTES = 32 * 1024 * 1024
+
+# THE EXCEPTION LIST — read this before adding to it.
+#
+# Each entry is (member glob, pattern label, exact matched text). All three
+# must match for a finding to be dropped, so an exception can never widen
+# beyond the one string it was written for.
+#
+# It is EMPTY, and that is a measured result, not an oversight: a real build of
+# the current bundle scans 189 of its 189 files — minified JS, CSS, LICENSE and
+# all — and produces zero findings. Two shapes people expect to see here do not
+# need an entry, and adding one would be wrong:
+#   * the UI placeholders `C:\path\to\...`, `C:\ComfyUI`, `C:\ai-toolkit` — the
+#     Windows-path pattern only fires on a `…:\Users\<account>` path, because a
+#     drive letter plus a generic folder identifies nobody;
+#   * help text starting with `Examples:` — it is prose, matching nothing.
+# Token-shaped strings that spell out that they are fake (`hf_…LEAKED…`, a
+# placeholder someone is meant to overwrite) are handled once, for every
+# scanner, by FAKE_SECRET_HINTS in privacy_patterns.py.
+#
+# If a release ever fails here, the first question is whether the string really
+# is harmless. Only then add an entry, with a comment saying why.
+ARCHIVE_EXCEPTIONS: tuple[tuple[str, str, str], ...] = ()
 
 
 def _release_workflows() -> list[Path]:
@@ -71,6 +118,64 @@ def check_artifact(path: Path) -> list[str]:
             for member in archive.namelist():
                 if Path(member).suffix.casefold() == ".exe":
                     errors.append(f"Forbidden executable in {path}: {member}")
+            errors.extend(scan_archive_privacy(archive, path))
+    return errors
+
+
+def _excused(member: str, label: str, found: str) -> bool:
+    return any(
+        fnmatch(member, glob) and label == excused_label and found == text
+        for glob, excused_label, text in ARCHIVE_EXCEPTIONS
+    )
+
+
+def name_list_path() -> str:
+    """Where the forbidden-identifier list lives — never inside the repo."""
+    return os.environ.get("LDS_PRIVACY_NAMES") or str(ROOT / ".privacy-names")
+
+
+def scan_archive_privacy(archive: zipfile.ZipFile, path: Path) -> list[str]:
+    """Read every textual member of an OPEN archive and report personal data.
+
+    This is the half that sees what `git ls-files` cannot: whatever ended up in
+    the ZIP, tracked or not, source or built.
+    """
+    errors: list[str] = []
+    names = privacy.name_pattern(privacy.read_name_list(name_list_path()))
+    if names is None:
+        # Never a silent skip: a scan that quietly ran half of itself is how a
+        # name reached fifteen releases in the first place.
+        print(
+            "NOTE: no forbidden-name list (LDS_PRIVACY_NAMES or .privacy-names); "
+            "scanning patterns only",
+            file=sys.stderr,
+        )
+
+    for info in archive.infolist():
+        member = info.filename
+        if info.is_dir() or not privacy.is_scannable(member):
+            continue
+        if info.file_size > MAX_SCANNED_MEMBER_BYTES:
+            errors.append(
+                f"{path.name}!{member}: text member too large to inspect "
+                f"({info.file_size} bytes) — it must not ship unreviewed"
+            )
+            continue
+        body = archive.read(member).decode("utf-8", "replace")
+
+        for line, label, found in privacy.scan_text(body):
+            if _excused(member, label, found):
+                continue
+            errors.append(
+                f"{path.name}!{member}:{line} — {label}: {found[:60]}"
+            )
+        if names is not None:
+            for match in names.finditer(body):
+                line = body[: match.start()].count("\n") + 1
+                errors.append(
+                    f"{path.name}!{member}:{line} — a forbidden identifier: "
+                    f"{match.group(0)}"
+                )
     return errors
 
 
@@ -88,9 +193,11 @@ def main(argv: list[str]) -> int:
         return 1
 
     checked = "release workflows"
+    verdict = "contain no publishable EXE"
     if argv:
         checked += " and " + ", ".join(argv)
-    print(f"OK: {checked} contain no publishable EXE")
+        verdict += ", no machine path, no personal address and no token"
+    print(f"OK: {checked} {verdict}")
     return 0
 
 

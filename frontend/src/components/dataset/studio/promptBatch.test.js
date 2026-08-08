@@ -1,0 +1,55 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { launchSettings, launchText, promptTexts, visibleBatch } from './promptBatch.js';
+
+test('the history is read in both shapes the API has ever returned', () => {
+  assert.deepEqual(
+    promptTexts(['a string one', { prompt: 'an object one', count: 3 }, { count: 1 }, null]),
+    ['a string one', 'an object one'],
+  );
+  assert.deepEqual(promptTexts(null), []);
+});
+
+test('a prompt deleted from the history leaves the batch by itself', () => {
+  // The 🗑 button removes a prompt AND its images. A batch still holding it
+  // would launch on a line the screen no longer shows.
+  const history = [{ prompt: 'kept' }, { prompt: 'also kept' }];
+  assert.deepEqual(visibleBatch(['kept', 'gone', 'also kept'], history),
+    ['kept', 'also kept']);
+  assert.deepEqual(visibleBatch([], history), []);
+  assert.deepEqual(visibleBatch(['kept'], null), []);
+});
+
+test('nothing ticked sends the body it has always sent — same object, no key', () => {
+  const gen = { negative: 'blurry', sampler: 'euler' };
+  assert.equal(launchSettings(gen, []), gen);          // identity, not a copy
+  assert.equal(launchSettings(gen, null), gen);
+  assert.ok(!('prompts' in launchSettings(gen, [])));
+});
+
+test('N ticked prompts travel as N entries alongside the global settings', () => {
+  const gen = { negative: 'blurry' };
+  const body = launchSettings(gen, ['on a rooftop', 'in the snow', 'at night']);
+  assert.deepEqual(body.prompts, ['on a rooftop', 'in the snow', 'at night']);
+  // The batch rides WITH the settings, it never replaces them: the run must
+  // still be the one the panel was showing.
+  assert.equal(body.negative, 'blurry');
+  // …and the caller's object is not mutated (it is component state).
+  assert.ok(!('prompts' in gen));
+});
+
+test('one ticked prompt is still a batch of one — that is what was ticked', () => {
+  assert.deepEqual(launchSettings({}, ['only this']).prompts, ['only this']);
+});
+
+test('the button keeps its surface’s verb and adds what the batch changes', () => {
+  assert.equal(launchText(null, []), null);            // Test Studio, untouched
+  assert.equal(launchText('Deploy 2 checkpoints, then generate', []),
+    'Deploy 2 checkpoints, then generate');            // canvas, untouched
+  assert.equal(launchText(null, ['a', 'b', 'c']), 'Run test · 3 prompts');
+  assert.equal(launchText('Deploy 2 checkpoints, then generate', ['a', 'b']),
+    'Deploy 2 checkpoints, then generate · 2 prompts');
+  // One prompt is not announced as a batch: the button would be shouting about
+  // a run that looks exactly like the ordinary one.
+  assert.equal(launchText(null, ['a']), null);
+});

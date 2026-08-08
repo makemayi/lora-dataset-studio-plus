@@ -42,6 +42,8 @@ def _seed(app, *, filename='asym.png', fmt='PNG', create_file=True,
             watermark_state='detected' if watermark else None,
             watermark_bbox='[0.1, 0.2, 0.3, 0.4]' if watermark else None,
             watermark_regions='[[0.1, 0.2, 0.3, 0.4]]' if watermark else None,
+            watermark_source='detector' if watermark else None,
+            watermark_score=0.93 if watermark else None,
         )
         svc.db.session.add(image)
         svc.db.session.commit()
@@ -150,6 +152,8 @@ def test_replace_failure_restores_watermark_and_cleans_temp(app, monkeypatch):
         assert row.watermark_state == 'detected'
         assert row.watermark_bbox == '[0.1, 0.2, 0.3, 0.4]'
         assert row.watermark_regions == '[[0.1, 0.2, 0.3, 0.4]]'
+        assert row.watermark_source == 'detector'
+        assert row.watermark_score == pytest.approx(0.93)
 
 
 def test_mirror_route_success_and_error_contracts(app, client):

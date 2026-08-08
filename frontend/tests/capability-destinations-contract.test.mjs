@@ -40,11 +40,18 @@ const RIGS = [
 test('every capability row carries a destination, in every rig', () => {
   for (const [name, caps] of RIGS) {
     const rows = deriveCapabilitySummary(caps)
-    // 12 since Krea 2 Edit joined the list. It was ABSENT before, which let the
-    // final screen certify "11 of 11 ready" on a machine with no Krea at all —
-    // an absent capability must be visible and counted, never dropped from the
-    // denominator.
-    assert.equal(rows.length, 12, `${name}: expected 12 capabilities`)
+    // 12 since Krea 2 Edit joined the list, 14 since the two video pieces did,
+    // 18 since bank scoring/SigLIP2/the watermark detector/scraping extras
+    // did, 19 since clip encoding did (probe_video reports decode/detect/encode
+    // apart because they fail apart — ffmpeg can be absent on a machine that
+    // decodes fine, and that machine cannot export a single clip)
+    // — each for the same reason. Krea was ABSENT before, which let the
+    // final screen certify "11 of 11 ready" on a machine with no Krea at all;
+    // the video lane repeated the defect ("12 of 12 ready" on a machine that
+    // could not cut one file); these four repeated it again ("14 of 14 ready"
+    // on a machine missing four installable engines). An absent capability
+    // must be visible and counted, never dropped from the denominator.
+    assert.equal(rows.length, 19, `${name}: expected 19 capabilities`)
     for (const row of rows) {
       const dest = capabilityDestination(row)
       assert.ok(dest, `${name}: "${row.label}" has no destination`)

@@ -100,7 +100,46 @@ def _face_python() -> str:
     return cfg.get('face_scoring.python') or sys.executable
 
 
-def _run_detail(images, out_dir, expand, timeout, on_progress=None) -> dict:
+def _asked(should_stop) -> bool:
+    """Whether the stop really was requested. A predicate that raises is read as
+    'no' — a broken callback must not turn a genuine crash into a silent 'you
+    stopped it', which would hide the failure the preview exists to surface."""
+    try:
+        return bool(should_stop())
+    except Exception:  # noqa: BLE001
+        logger.debug('face_mask: should_stop raised', exc_info=True)
+        return False
+
+
+def _stop_plumbing(should_stop):
+    """A (payload_field, on_stop, cleanup) triple for a stoppable pass, or
+    (None, None, cleanup) when the caller asked for no stop.
+
+    The sentinel lives in a private temp DIRECTORY, and the file is created only
+    when the stop is actually asked — an existing file IS the request, so
+    creating it up front would cancel the pass before it began. The directory is
+    removed on the way out, whether the stop happened or not: a leftover sentinel
+    would silently cancel the NEXT pass, which is a far nastier bug than the one
+    being fixed."""
+    import shutil
+    import tempfile
+    if not should_stop:
+        return None, None, (lambda: None)
+    tmp = tempfile.mkdtemp(prefix='lds-facemask-')
+    path = os.path.join(tmp, 'stop')
+
+    def _ask():
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write('stop')
+        except OSError:
+            logger.warning('face_mask: could not write the stop sentinel')
+
+    return path, _ask, (lambda: shutil.rmtree(tmp, ignore_errors=True))
+
+
+def _run_detail(images, out_dir, expand, timeout, on_progress=None,
+                should_stop=None) -> dict:
     """The pass, with its failure REASON kept. Always returns a dict carrying
     `ok`; on failure it also carries a human `error`.
 
@@ -115,8 +154,10 @@ def _run_detail(images, out_dir, expand, timeout, on_progress=None) -> dict:
     if not is_available():
         return {'ok': False, 'error': 'face detection unavailable',
                 'reason': 'face_scoring'}
+    cancel_file, on_stop, cleanup = _stop_plumbing(should_stop)
     payload = json.dumps({'images': images, 'out_dir': out_dir, 'expand': expand,
-                          'models_root': cfg.get('face_scoring.models_root') or None})
+                          'models_root': cfg.get('face_scoring.models_root') or None,
+                          'cancel_file': cancel_file})
 
     def _on_line(line):
         rec = parse_progress_line(line)
@@ -125,16 +166,25 @@ def _run_detail(images, out_dir, expand, timeout, on_progress=None) -> dict:
 
     try:
         stdout, stderr_lines, rc, timed_out = run_infer_script(
-            _face_python(), _SCRIPT, payload, timeout, _on_line)
+            _face_python(), _SCRIPT, payload, timeout, _on_line,
+            should_stop=should_stop, on_stop=on_stop)
     except OSError as e:
         logger.warning('face_mask: subprocess échec : %s', e)
         return {'ok': False, 'error': f'could not start face detection: {e}'}
+    finally:
+        cleanup()
     if timed_out:
         return {'ok': False,
                 'error': f'face detection timed out after {int(timeout)}s'}
     line = next((ln for ln in reversed((stdout or '').splitlines())
                  if ln.strip().startswith('{')), '')
     if not line:
+        # A stop that had to be enforced with a kill lands here. It is NOT a
+        # failure to report: the user asked for it, and the pass simply has
+        # nothing to hand back (it never reached a polling point, so it never
+        # reached image 1 either).
+        if should_stop and _asked(should_stop):
+            return {'ok': True, 'cancelled': True, 'results': {}}
         tail = stderr_tail(stderr_lines)
         logger.warning('face_mask: pas de JSON (rc=%s) stderr=%s', rc, tail)
         return {'ok': False,
@@ -168,7 +218,8 @@ def generate_face_masks(image_paths, out_dir, expand=None, timeout: int = 1800) 
     return _run(image_paths, out_dir, expand if expand is not None else expand_factor(), timeout)
 
 
-def detect_faces(image_paths, timeout: int = 900, on_progress=None) -> dict:
+def detect_faces(image_paths, timeout: int = 900, on_progress=None,
+                 should_stop=None) -> dict:
     """Detection ONLY — no file written. Feeds the preview, which grows the raw
     boxes itself so moving the expand slider costs nothing (the same arithmetic
     lives in infer/face_mask_infer.dilate_box and utils/faceMaskBox.js).
@@ -176,10 +227,18 @@ def detect_faces(image_paths, timeout: int = 900, on_progress=None) -> dict:
     `on_progress(record)` — optional — receives {'phase', 'done'?, 'total'?} from
     the stderr reader THREAD, so touch nothing but in-memory state in it.
 
+    `should_stop()` — optional — is polled while the pass runs. When it turns
+    true the child is asked to wind up and the reply carries `cancelled: True`
+    together with the faces found SO FAR. Those partial results are the point:
+    the caller can keep them and hand back only the remaining images next time,
+    so stopping costs the detector load rather than the whole pass. `ok` stays
+    true — a stop is not a failure.
+
     Unlike generate_face_masks this returns the failure reason (`ok`/`error`):
     the preview is the screen a user stares at, and "it failed" must be readable
     there rather than inferred from a spinner that never stops."""
-    return _run_detail(image_paths, None, expand_factor(), timeout, on_progress)
+    return _run_detail(image_paths, None, expand_factor(), timeout, on_progress,
+                       should_stop)
 
 
 def coverage_summary(results: dict) -> dict:

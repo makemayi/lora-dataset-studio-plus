@@ -29,19 +29,30 @@ def _launch_training_body() -> str:
     return SRC[start:end]
 
 
+def _atomic_export_body() -> str:
+    start = SRC.index('def _export_and_freeze_local_dataset(')
+    end = SRC.index('\ndef ', start + 1)
+    return SRC[start:end]
+
+
 def test_the_busy_flag_is_re_read_before_the_expensive_freeze():
-    body = _launch_training_body()
-    prepare = body.index('checkpoint_registry.prepare_launch(')
-    busy = [m.start() for m in re.finditer(
-        r"queue_manager\._get_system_state\('training_in_progress'", body)]
-    assert len(busy) >= 2, 'the busy flag must be read again after the export'
-    assert any(b < prepare for b in busy), \
-        'a launch that is going to be refused must not pay for the freeze'
+    launch = _launch_training_body()
+    atomic = _atomic_export_body()
+    export = atomic.index('export_dataset_to_aitoolkit(')
+    prepare = atomic.index('checkpoint_registry.prepare_launch(')
+    busy_during_freeze = atomic.index(
+        "queue_manager._get_system_state('training_in_progress'")
+    assert export < busy_during_freeze < prepare, \
+        'the busy flag must be re-read after export and before snapshot hashing'
+    assert launch.index('_export_and_freeze_local_dataset(') \
+        < launch.index('with _queue_lock, GPU_ARBITER_LOCK:')
     # …and the authoritative copy still lives under the queue/GPU lock pair,
     # after it. The order is part of the GPU admission contract.
-    lock = body.index('with _queue_lock, GPU_ARBITER_LOCK:')
+    lock = launch.index('with _queue_lock, GPU_ARBITER_LOCK:')
+    busy = [m.start() for m in re.finditer(
+        r"queue_manager\._get_system_state\('training_in_progress'", launch)]
     assert any(b > lock for b in busy), \
         'the check inside the queue/GPU lock pair is the authority and must stay'
-    assert prepare < lock, \
+    assert launch.index('_export_and_freeze_local_dataset(') < lock, \
         'the freeze must stay OUTSIDE the lock — holding it there is what caused ' \
         '"database is locked" on the cloud launch path'

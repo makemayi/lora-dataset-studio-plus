@@ -1,11 +1,12 @@
 import { CARD_H } from '../../utils/lineageGraph';
 import { resumeCaption } from '../../utils/lineageTree';
-import { famLabel, StatusDot, SavesChip } from './lineageChrome';
+import { famLabel, ModeChip, StatusDot, SavesChip } from './lineageChrome';
 import { trainingRunVariantLabel } from '../../utils/trainingRuns';
 import { runNumber, cloudNumber, runIdentityLabel } from '../../utils/runIdentity';
 import {
   DEPLOY_BAR_CLASS, deployState, deployTitleSuffix,
 } from '../../utils/checkpointDeployState';
+import { pillSelectScale } from '../../utils/canvasNodeChrome';
 
 /* ◉ The two things a lineage is DRAWN with: a run card and a checkpoint pill.
 
@@ -85,6 +86,7 @@ export function GraphCard({ node, lit, annotated, compareRole, onSelect }) {
         <span className="ml-auto shrink-0"><SavesChip node={node} /></span>
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-content-subtle text-[0.5625rem]">
+        <ModeChip node={node} />
         {node.version != null && (
           <span className="rounded bg-app/60 px-1 py-px font-medium text-content-muted">v{node.version}</span>
         )}
@@ -127,7 +129,13 @@ export function GraphCard({ node, lit, annotated, compareRole, onSelect }) {
  *  popover in SCREEN space (the canvas, whose board is zoomed and panned) needs
  *  the point that was clicked to place it. The host that draws it in its own
  *  <svg> ignores the second argument. */
-export function CheckpointPill({ pill, offX, offY, active, selected, preview, big, onOpen, onToggleSelect, onZoomPreview, onOpenGallery, selectable = null }) {
+export function CheckpointPill({ pill, offX, offY, active, selected, preview, big, onOpen, onToggleSelect, onZoomPreview, onOpenGallery, selectable = null, boardScale = null }) {
+  /* ✓ How big to draw the pick box. `boardScale` is the LoRA Canvas' zoom; the
+     in-card graph is not zoomable and passes nothing, which resolves to 1 and
+     leaves that graph — and any board at 100 % or more — exactly as it was. See
+     utils/canvasNodeChrome.pillSelectScale for the two bounds and for what this
+     deliberately does not fix. */
+  const selScale = boardScale ? pillSelectScale(boardScale, pill.w) : 1;
   const gone = pill.present === false;
   /* Can I generate from this checkpoint RIGHT NOW? The pill has always known
      (`testable`) and never said so: the answer only surfaced as the words
@@ -263,7 +271,14 @@ export function CheckpointPill({ pill, offX, offY, active, selected, preview, bi
           // to cover the first 10 px of its OWN pill, which on a 60-px pill hid
           // the leading digit of the step ("2500" read "500"). 12 px overhangs
           // the gap exactly, so it clips a 6×6 corner and nothing legible.
-          style={{ position: 'absolute', left: -6, top: -6 }}
+          // …and it GROWS UP-LEFT as the board zooms out (transform-origin at its
+          // bottom-right), never down-right onto the pill: the whole point of the
+          // -6/-6 offset is that the box lives in the gap, and a counter-scale
+          // anchored the other way would put it straight back over the digits.
+          style={{ position: 'absolute', left: -6, top: -6,
+            ...(selScale > 1
+              ? { transform: `scale(${selScale})`, transformOrigin: '100% 100%' }
+              : null) }}
           className={'lds-cksel flex items-center justify-center rounded-[3px] border leading-none shadow-sm '
             + (big ? 'h-5 w-5 text-[0.6875rem] ' : 'h-3 w-3 text-[0.5rem] ')
             + (selected ? 'border-indigo-400 bg-indigo-500 text-white ' : 'border-border-strong bg-surface-overlay text-transparent hover:border-indigo-400 ')}>

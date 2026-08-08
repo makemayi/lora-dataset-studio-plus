@@ -20,6 +20,7 @@ import json
 import pytest
 
 from app.config import LOCAL_USER
+from _dataset_files import write_kept_image_files
 
 
 def _mk(app, n_keep=0, caption='a nice varied caption with many words',
@@ -32,6 +33,10 @@ def _mk(app, n_keep=0, caption='a nice varied caption with many words',
             dataset_id=ds.id, filename=f'k{i}.webp', status='keep', framing='face',
             caption=(f'{caption} #{i}' if caption is not None else None)))
     svc.db.session.commit()
+    # The dataset stays REQUIRED in slider mode (denoising substrate), and a
+    # launch freezes its provenance from the image BYTES — so the substrate has
+    # to be on disk, not just in the table. See tests/_dataset_files.py.
+    write_kept_image_files(ds.id)
     return ds
 
 

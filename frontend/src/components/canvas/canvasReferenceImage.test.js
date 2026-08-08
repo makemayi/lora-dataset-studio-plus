@@ -42,7 +42,11 @@ test('the reference is enlargeable, and labelled for a screen reader', () => {
   // the column announced "SEED —" plus a Download named after a run and a step
   // this picture does not have.
   assert.match(canvas, /facts=\{false\} onClose=\{\(\) => setRefZoom\(null\)\}/);
-  assert.match(lightbox, /facts = true, onClose \}/);
+  // `facts` defaults to true and the component takes an onClose. Matched loosely
+  // on purpose: this pins the DEFAULT, not the arity — the signature has since
+  // grown the ✨ improve opt-in, and a test that breaks every time a prop is
+  // added teaches nothing about the reference image it is here to protect.
+  assert.match(lightbox, /facts = true, onClose[,}]/);
   assert.match(lightbox, /\{facts && \(\s*<aside/);
 });
 

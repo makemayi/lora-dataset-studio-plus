@@ -8,6 +8,7 @@
 // — and a bad query produces a confident, wrong-looking answer with no signal.
 // So three things are always said: that it is a ranking, how strong the top and
 // bottom of it are, and how many images could not be searched at all.
+import { normalizeSemanticEngine, semanticEngineLabel } from './bankSemanticEngine.js'
 
 // ── Why there is NO absolute quality scale here ──────────────────────────────
 // CLIP text/image cosines are not spread over 0..1 and their useful band is far
@@ -78,12 +79,13 @@ export function spreadLabel(range, poolMedian) {
  * Never claims a match: it says "closest", gives the range, and names what was
  * left out.
  */
-export function summarize(result) {
+export function summarize(result, engine = 'clip') {
   if (!result) return ''
+  const actualEngine = normalizeSemanticEngine(result.engine || engine)
   const shown = (result.image_ids || []).length
   if (!shown) {
-    return `No scored image to rank for “${result.query}”. `
-      + unsearchableNote(result)
+    return `No ${semanticEngineLabel(actualEngine)}-indexed image to rank for “${result.query}”. `
+      + unsearchableNote(result, actualEngine)
   }
   const r = result.score_range || {}
   const spread = spreadLabel(r, result.pool_median)
@@ -96,7 +98,7 @@ export function summarize(result) {
     'Search brings the likeliest images to the front; it does not select them. '
       + 'Every image scores something against every phrase.',
   ]
-  const note = unsearchableNote(result)
+  const note = unsearchableNote(result, actualEngine)
   if (note) parts.push(note)
   return parts.join(' ')
 }
@@ -107,15 +109,20 @@ function fmt(v) {
 }
 
 /**
- * The load-bearing warning. An image with no ✨ Score embedding cannot be found
+ * The load-bearing warning. An image with no selected-engine embedding cannot be found
  * by ANY phrase — staying silent about it lets the user conclude their picture
  * is missing from the bank.
  */
-export function unsearchableNote(result) {
-  const unscored = Number(result?.unscored) || 0
-  if (unscored <= 0) return ''
-  return `${unscored} of ${result.filtered} image(s) in this filter have no ✨ Score `
-    + 'embedding yet and could NOT be searched — run ✨ Score to include them.'
+export function unsearchableNote(result, engine = 'clip') {
+  const missing = Number(result?.unindexed ?? result?.unscored) || 0
+  if (missing <= 0) return ''
+  const actualEngine = normalizeSemanticEngine(result?.engine || engine)
+  const label = semanticEngineLabel(actualEngine)
+  const action = actualEngine === 'siglip2'
+    ? 'build or complete the SigLIP 2 semantic index'
+    : 'run ✨ Score'
+  return `${missing} of ${result.filtered} image(s) in this filter have no ${label} `
+    + `semantic embedding yet and could NOT be searched — ${action} to include them.`
 }
 
 /**
@@ -123,14 +130,15 @@ export function unsearchableNote(result) {
  * never an unexplained freeze. Mirrors the measured cost: ~8.5 s to load CLIP,
  * ~20 ms per phrase afterwards.
  */
-export function readinessHint(status) {
+export function readinessHint(status, engine = 'clip') {
   if (!status) return ''
+  const label = status.model_label || semanticEngineLabel(status.engine || engine)
   if (!status.available) {
     return status.reason || 'Text search is unavailable on this install.'
   }
   if (status.weights_warning) return status.weights_warning
-  if (status.warm) return 'Search model is loaded — results are instant.'
-  return 'First search loads the search model (about 10 seconds, on the CPU). '
+  if (status.warm) return `${label} search model is loaded — results are instant.`
+  return `First search loads the ${label} search model (about 10 seconds, on the CPU). `
     + 'After that, searches are instant.'
 }
 
@@ -158,14 +166,116 @@ export function pendingLabel(status) {
 //    describe what IS in the frame.
 export const CLIP_LIMITS = [
   'Counting — “two people” barely outranks one person; expect “one vs several” at best.',
-  'Negation — “without glasses” returns glasses. The word “without” is ignored, not applied.',
+  'Negation — “without glasses” returns glasses. Use the Push down field instead: '
+    + 'it subtracts the unwanted phrase from the score rather than speaking it.',
   'Spatial relations — “to the left of” carries almost no meaning.',
 ]
 
-export function limitsSentence() {
-  return 'Best at subjects, settings, styles and framing. It cannot count, '
-    + 'cannot handle “without”, and ignores left/right — so describe what IS in '
-    + 'the shot rather than what is missing.'
+export function limitsSentence(engine = 'clip') {
+  const label = semanticEngineLabel(engine)
+  return `${label} is best at subjects, settings, styles and framing. It cannot count and `
+    + 'ignores left/right — so describe what IS in the shot. To get rid of '
+    + `something, use Push down rather than the word “without”, which ${label} `
+    + 'ignores.'
+}
+
+// ── Pushing a trait DOWN, since “without” cannot ──────────────────────────────
+// Deliberately NOT called "exclude" anywhere the user can see: excluding is what
+// the tag filter does — a hard, guaranteed absence. This is a re-ranking. The
+// backend subtracts a weighted similarity to the unwanted phrase from the score,
+// so a matching image sinks and can still surface if it is otherwise the best
+// answer in the pool. Two different promises need two different words.
+//
+// The weights are measured, not picked: over 7,316 real captioned bank images
+// and 19 positive/excluded pairs, the share of the top 60 still carrying the
+// unwanted trait fell 23.0% → 11.9% → 7.6% → 3.8% at 0 / 0.3 / 0.6 / 1.0, while
+// the share still on-topic held at 89.7% → 89.5% → 87.7% → 79.8%. 0.6 is where
+// two thirds of the trait is gone for two points of relevance; 1.0 buys the last
+// third at ten. Hence Normal in the middle, and Strong labelled as a trade.
+export const PUSH_DOWN_STRENGTHS = [
+  { value: 0.3, label: 'Gentle', hint: 'nudges them back, keeps the ranking intact' },
+  { value: 0.6, label: 'Normal', hint: 'removes about two thirds of them from the top' },
+  { value: 1, label: 'Strong', hint: 'pushes hardest, and loosens how well the rest fits' },
+]
+
+export const PUSH_DOWN_DEFAULT_STRENGTH = 0.6
+
+/** The promise, in the panel, in the words the backend can actually keep. */
+export function pushDownCaveat() {
+  return 'Pushes down images that look like this — it cannot guarantee they are '
+    + 'absent. Nothing is filtered out; things only move.'
+}
+
+// “without a hat”, “no glasses”, “not blonde” — the phrasings a user reaches for
+// that CLIP silently inverts. Catching them is worth more than any wording in
+// the panel, because the failure is invisible: the results come back full and
+// confident, carrying exactly what was asked to be gone.
+// The leading comma and the "with" of "with no" are part of the clause: leaving
+// them behind would hand back "a woman with" as the cleaned-up positive query.
+// "with no" has to precede "no" in the alternation or it never matches.
+const NEGATION = /(?:,\s*)?\b(?:with\s+no|without|excluding|except|minus|not|no)\s+([^,.;]+)/i
+// Trailing filler that would make the suggestion read as a sentence fragment.
+const TAIL = /\s+(?:in|on|at|with|and|or)\b.*$/i
+
+/**
+ * The term a query is trying to negate, or '' when there is none. Purely a
+ * suggestion: the caller offers it, the user confirms. Never applied silently —
+ * guessing wrong and acting on it would be its own silent failure.
+ */
+export function suggestPushDown(query) {
+  const m = NEGATION.exec(String(query || ''))
+  if (!m) return ''
+  // The article rides along ("a hat", not "hat"): CLIP barely distinguishes them
+  // (cos = 0.986, measured) and keeping it makes the offered chip read like the
+  // words the user typed.
+  const term = String(m[1] || '').replace(TAIL, '').trim()
+  // One to three words: "a hat", "blonde hair", "a red baseball cap". Longer is
+  // a clause, not a trait, and a bad guess costs more than no guess.
+  if (!term || term.split(/\s+/).length > 3) return ''
+  return term.toLowerCase()
+}
+
+/** The query with the negating clause removed, for when the user accepts. */
+export function withoutNegation(query) {
+  const s = String(query || '')
+  if (!suggestPushDown(s)) return s.trim()
+  return s.replace(NEGATION, ' ').replace(/\s{2,}/g, ' ').trim()
+}
+
+/**
+ * What the push-down actually DID on this bank — measured here, never claimed.
+ * Returns '' when no exclusion was applied.
+ */
+export function pushDownNote(result) {
+  if (!result?.push_down) return ''
+  const moved = Number(result.push_down_moved)
+  const med = result.push_down_median || {}
+  const pool = Number(med.pool)
+  const got = Number(med.results)
+  if (Number.isFinite(moved) && moved === 0) {
+    return `Pushing “${result.push_down}” down changed nothing here — these were `
+      + 'already the closest images. Try a stronger push, or different words.'
+  }
+  const parts = []
+  if (Number.isFinite(moved)) {
+    // "places", not "images": when the count asked for covers the whole pool,
+    // the same pictures come back in a different order, and claiming images
+    // were "brought in" would be false exactly when the user can see the grid
+    // rearranged. Places changed is true in both regimes.
+    const total = (result.image_ids || []).length
+    parts.push(`Pushing “${result.push_down}” down changed ${moved} `
+      + `place${moved === 1 ? '' : 's'}${total ? ` of ${total}` : ''} in this ranking.`)
+  }
+  if (Number.isFinite(pool) && Number.isFinite(got)) {
+    const verdict = got < pool
+      ? 'below'
+      : 'level with'
+    parts.push(`These score ${got.toFixed(2)} against “${result.push_down}”, `
+      + `${verdict} the ${pool.toFixed(2)} a typical image here scores`
+      + (got < pool ? '.' : ' — the two ideas are too tangled here to separate.'))
+  }
+  parts.push('It is a re-ranking, not a filter: nothing was removed.')
+  return parts.join(' ')
 }
 
 /**

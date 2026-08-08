@@ -93,9 +93,11 @@ export function balanceNotes(result) {
 
 /** Whether the balanced pick can run at all, and why not when it cannot — read
  *  from the coverage payload, so the button is honest BEFORE the click. */
-export function balanceReadiness({ scored = 0, coverage = null } = {}) {
-  if (!scored) {
-    return { ready: false, reason: 'Run ✨ Score first — balanced selection reuses its embeddings.' }
+export function balanceReadiness({ semanticReady = false, coverage = null,
+  engineLabel = 'CLIP', prerequisite = '' } = {}) {
+  if (!semanticReady) {
+    return { ready: false, reason: prerequisite
+      || `Build the ${engineLabel} semantic index first — balanced selection reads it.` }
   }
   if (coverage && coverage.framing_available === false) {
     return { ready: false, reason: 'Run the 📐 Framing pass first — a balanced pick needs the shot type of each image.' }

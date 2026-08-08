@@ -87,7 +87,7 @@ test('the summary carries the "brings to the front, does not select" framing', (
 test('unscored images are reported, never silently dropped', () => {
   const note = unsearchableNote({ unscored: 3, filtered: 27 });
   assert.match(note, /3 of 27/);
-  assert.match(note, /no ✨ Score/);
+  assert.match(note, /no CLIP semantic embedding/);
   assert.match(note, /run ✨ Score/i);
   // …and it rides along in the announced summary.
   assert.match(summarize({
@@ -96,13 +96,23 @@ test('unscored images are reported, never silently dropped', () => {
   }), /3 of 27/);
 });
 
+test('SigLIP2 search accepts the new unindexed field and names its own fix', () => {
+  const note = unsearchableNote({
+    engine: 'siglip2', unindexed: 4, unscored: 0, filtered: 30,
+  });
+  assert.match(note, /4 of 30/);
+  assert.match(note, /no SigLIP 2 semantic embedding/);
+  assert.match(note, /build or complete the SigLIP 2 semantic index/i);
+  assert.doesNotMatch(note, /run ✨ Score/i);
+});
+
 test('a fully scored bank shows no scary note', () => {
   assert.equal(unsearchableNote({ unscored: 0, filtered: 27 }), '');
 });
 
 test('an empty result still explains itself instead of showing nothing', () => {
   const s = summarize({ query: 'x', pool: 0, filtered: 5, unscored: 5, image_ids: [] });
-  assert.match(s, /No scored image/);
+  assert.match(s, /No CLIP-indexed image/);
   assert.match(s, /5 of 5/);
 });
 
@@ -143,10 +153,12 @@ test('the negation warning states the INVERSION, not a vague imprecision', () =>
   const negation = CLIP_LIMITS.find((l) => /Negation/.test(l));
   assert.match(negation, /returns glasses|ignored/);
   const s = limitsSentence();
+  assert.match(s, /^CLIP is best/);
   assert.match(s, /cannot count/);
   assert.match(s, /without/);
   // …and it gives the usable workaround rather than only a disclaimer.
   assert.match(s, /describe what IS in the shot/);
+  assert.match(limitsSentence('siglip2'), /^SigLIP 2 is best/);
 });
 
 test('clampN matches the sibling selectors', () => {
@@ -175,7 +187,7 @@ test('the summary and limits are rendered from the tested helpers, not re-typed'
   assert.match(ws, /summarize\(/);
   assert.match(ws, /readinessHint\(/);
   assert.match(ws, /pendingLabel\(/);
-  assert.match(ws, /limitsSentence\(\)/);
+  assert.match(ws, /limitsSentence\(semanticState\.engine\)/);
 });
 
 test('closing the panel releases the encoder memory', () => {

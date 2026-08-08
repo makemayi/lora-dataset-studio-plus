@@ -10,3 +10,4 @@ brotli>=1.1              # Brotli decompression (curl_cffi / yt-dlp)
 beautifulsoup4>=4.12      # HTML parsing (picazor and friends)
 cloudscraper>=1.2.71      # Cloudflare-guarded listings (picazor)
 lxml>=5.0                 # fast HTML/XML parser backend for the above
+ddgs>=9.14                # keyless keyword image search over the open web (websearch source)

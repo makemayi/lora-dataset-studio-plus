@@ -9,8 +9,11 @@ import { bankListSyncToast } from '../components/bank/bankSync'
 import { overlapNotice } from '../components/bank/bankOverlap'
 import { datasetFolderNotice } from '../utils/pathRelation'
 import FolderSyncNote from '../components/bank/FolderSyncNote'
+import FolderCheckLine from '../components/bank/FolderCheckLine'
 import RelocateBankDialog from '../components/bank/RelocateBankDialog'
 import BankScrapePanel from '../components/bank/BankScrapePanel'
+import BankLaneTabs from '../components/videobank/BankLaneTabs'
+import { bankListOverview } from '../components/bank/bankOverview.js'
 
 const CURRENT_KEY = 'bankCurrentId'
 
@@ -46,6 +49,41 @@ function BankPreviewStrip({ bank, onOpen }) {
   )
 }
 
+const BANK_STATUS_TONE = {
+  keep: 'bg-emerald-400', pending: 'bg-amber-300', reject: 'bg-rose-400',
+}
+
+function BankListSummary({ bank }) {
+  const summary = bankListOverview(bank)
+  return (
+    <div className="space-y-1.5">
+      {summary.total > 0 ? (
+        <div className="flex h-2 overflow-hidden rounded-full bg-surface-raised" role="img"
+          aria-label={summary.status.map((row) => `${row.label}: ${row.value}, ${row.percent}%`).join('; ')}>
+          {summary.status.filter((row) => row.value > 0).map((row) => (
+            <span key={row.id} className={BANK_STATUS_TONE[row.id]}
+              style={{ width: `${row.widthPercent}%`, minWidth: '1px' }} />
+          ))}
+        </div>
+      ) : summary.total === 0
+        ? <p className="text-[11px] text-content-subtle">No images.</p>
+        : <p className="text-[11px] text-amber-300/90">Curation totals unavailable.</p>}
+      <ul className="flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-content-muted">
+        {summary.status.map((row) => (
+          <li key={row.id} className="tabular-nums">{row.label} <span className="text-content">{row.value ?? '—'}</span>
+            {row.percent != null && <span className="text-content-subtle"> · {row.percent}%</span>}</li>
+        ))}
+      </ul>
+      <div className="flex items-center gap-2 text-[11px]">
+        <span className="text-content-muted">Quality</span>
+        <span className={summary.scanPercent == null ? 'text-amber-300/90' : 'text-content-subtle'}>
+          {summary.scanText}
+        </span>
+      </div>
+    </div>
+  )
+}
+
 /** 🗃️ Image bank — triage a big unsorted folder BEFORE it becomes datasets.
  * List view (create/open/delete banks) + per-bank workspace. The bank
  * references the folder in place: nothing is copied until promotion, and the
@@ -65,19 +103,33 @@ export default function BankPage() {
   // spares the round-trip and the "why not?" (see utils/pathRelation.js).
   const [datasets, setDatasets] = useState([])
 
-  const refresh = useCallback(async () => {
+  // ⚠️ Plain loads do NOT re-walk the source folders any more: doing that cost a
+  // full disk inventory of the whole library on every navigation to this page
+  // (690-1 190 ms on a real 8-bank / 86 493-image library). `rescan` is the 🔄
+  // button, and it is the only caller that asks the server to walk.
+  const refresh = useCallback(async ({ rescan = false } = {}) => {
     try {
-      const d = await apiFetch('/api/banks')
+      const d = await apiFetch(`/api/banks${rescan ? '?rescan=1' : ''}`)
       setBanks(d.banks || [])
-      // The server re-walked every source folder before answering: say so when
-      // it found something, so the counters never move without an explanation.
+      if (!rescan) return
+      // A walk just happened: say what it found, so the counters never move
+      // without an explanation — and say so even when it found nothing, because
+      // silence after a click reads as a broken button.
       const note = bankListSyncToast(d.banks)
       if (note) toast[note.type](note.text)
+      else toast.success('Source folders checked — no new image found.')
     } catch (e) {
       toast.error(e?.message || 'Could not load the banks.')
-      setBanks([])
+      if (!rescan) setBanks([])
     }
   }, [toast])
+
+  const [rescanning, setRescanning] = useState(false)
+  const rescan = async () => {
+    if (rescanning) return
+    setRescanning(true)
+    try { await refresh({ rescan: true }) } finally { setRescanning(false) }
+  }
 
   useEffect(() => { if (currentId == null) refresh() }, [currentId, refresh])
 
@@ -142,9 +194,13 @@ export default function BankPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex items-center gap-2">
+      <header className="flex flex-wrap items-center gap-2">
         <h1 className="text-xl font-bold text-content">🗃️ Image bank</h1>
         <HelpBadge topic="page-bank" />
+        {/* The kind of bank you are making, said WHERE you make one. Until now a
+            .mp4 dropped in this folder was skipped in silence — this is the only
+            place someone with a folder of rushes would ever have looked. */}
+        <BankLaneTabs className="w-full sm:ml-auto sm:w-auto" />
       </header>
       <p className="text-sm text-content-muted max-w-3xl">
         Point the app at a big unsorted folder (a Telegram export, a scrape dump…) and triage it
@@ -183,7 +239,9 @@ export default function BankPage() {
 
       {/* Second way in: the scraper's own destination. A bank no longer needs a
           folder you prepared by hand — you can fill one straight from the web. */}
-      <BankScrapePanel banks={banks} onDone={refresh} />
+      <BankScrapePanel banks={banks} onDone={() => refresh()} />
+
+      <FolderCheckLine banks={banks} busy={rescanning} onRescan={rescan} />
 
       {banks == null ? (
         <p className="text-sm text-content-muted">Loading…</p>
@@ -196,7 +254,7 @@ export default function BankPage() {
         // column is sized on max-content, so the unbreakable source PATH inside
         // a card stretched it past the viewport and scrolled the whole page
         // sideways on a phone — with `truncate` never getting a chance to fire.
-        <ul className="grid gap-3 grid-cols-1 sm:grid-cols-2">
+        <ul className="grid gap-3 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
           {banks.map((b) => (
             <li key={b.id}
               className="flex min-w-0 flex-col gap-2 rounded-lg border border-border bg-surface p-4">
@@ -219,9 +277,7 @@ export default function BankPage() {
                 {b.source_path}
               </p>
               <BankPreviewStrip bank={b} onOpen={() => open(b.id)} />
-              <p className="text-xs text-content-muted">
-                {b.total} image(s) · {b.scanned} scanned · <span className="text-emerald-300">{b.keep} kept</span> · <span className="text-rose-300">{b.reject} rejected</span>
-              </p>
+              <BankListSummary bank={b} />
               <FolderSyncNote sync={b.folder_sync}
                 onRelocate={() => setRelocating(b)} />
               <button type="button" onClick={() => open(b.id)}
@@ -236,7 +292,7 @@ export default function BankPage() {
       {relocating && (
         <RelocateBankDialog bankId={relocating.id} bankName={relocating.name}
           sourcePath={relocating.source_path}
-          onClose={() => setRelocating(null)} onDone={refresh} />
+          onClose={() => setRelocating(null)} onDone={() => refresh()} />
       )}
     </div>
   )

@@ -27,7 +27,14 @@
  * Deploy-then-generate lives here too: when picks are not in ComfyUI yet the
  * caller's `onDeploy` runs first, and a failure ABORTS the launch with the real
  * reason — nothing is written to someone's disk by a button that did not say so,
- * and nothing generates on half a selection.
+ * and nothing generates on half a selection. That order is what makes 🧬 Blend
+ * safe as well: the deploy runs over the WHOLE selection before anything is
+ * posted, so a blend never loads a subset of the checkpoints it announced.
+ *
+ * `blend` / `weights` switch the launch from one pass per checkpoint to ONE
+ * generation loading them all, each at its own weight — the engine's `combine`
+ * mode (named « Blend » on both screens), the same one the Test Studio's
+ * 🧬 toggle drives.
  */
 import { useCallback, useState } from 'react';
 import { useToast } from '../components/common/Toast';
@@ -35,7 +42,8 @@ import { postJson } from './useDataset';
 import { useLoraTestStudio } from './useLoraTestStudio';
 import { canvasRunSelections, canvasUndeployed } from '../utils/canvasGeneration';
 
-export function useCanvasStudio(selection, family, { onDeploy, tracker } = {}) {
+export function useCanvasStudio(selection, family,
+  { onDeploy, tracker, blend = false, weights = null, sets = null } = {}) {
   const toast = useToast();
   const anchorId = selection?.[0]?.datasetId ?? null;
   // The settings payload comes from ONE dataset — the first pick. Everything it
@@ -72,14 +80,21 @@ export function useCanvasStudio(selection, family, { onDeploy, tracker } = {}) {
           return { ok: false, error: msg };
         }
       }
-      const selections = canvasRunSelections(picks);
+      // 🧬 Blend needs at least two LoRAs to be one; below that it IS a plain
+      //    single-LoRA run, and asking for it would only strip the strength
+      //    sweep off a run the user can still legitimately sweep.
+      const blending = blend && canvasRunSelections(picks).length > 1;
+      const selections = canvasRunSelections(picks, {
+        blend: blending, weights: weights || {}, sets: sets || {} });
       if (!selections.length) {
         return { ok: false, error: 'No deployed checkpoint in the selection' };
       }
       // 2. The SAME body the comparison grid posts, plus the exact origin of each
       //    pick — one shared prompt and seed across every dataset on the board.
+      //    In a blend every LoRA carries its own weight, so the strength axis is
+      //    not sent at all (the engine replaces it with the head LoRA's weight).
       const d = await postJson('/api/train/canvas/generate', {
-        selections, strengths, seed, prompt,
+        selections, ...(blending ? { combine: true } : { strengths }), seed, prompt,
         // Cross-dataset runs sweep ONE base model (the comparison engine's
         // contract); the canvas sends the first pick of the model axis.
         z_model: (zModels || [])[0] ?? null,
@@ -101,7 +116,7 @@ export function useCanvasStudio(selection, family, { onDeploy, tracker } = {}) {
     } finally {
       setLaunching(false);
     }
-  }, [selection, onDeploy, toast, tracker]);
+  }, [selection, onDeploy, toast, tracker, blend, weights, sets]);
 
   // The payload RunSetupPanel reads: the anchor's SETTINGS, the canvas run's LIVE
   // state, and the ticked pills standing in for the picker's checkpoint list.

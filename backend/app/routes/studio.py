@@ -47,23 +47,86 @@ def _read_uploaded_image():
     raise ValueError('no image provided')
 
 
+def _family_axes(kind):
+    """The CFG / steps ladders of a family, published WITHOUT a dataset.
+
+    They are the very constants `studio_payload` already sends per dataset — the
+    multi-LoRA comparison has no dataset to read them from, which is exactly why
+    its panel could not offer a steps axis while every other generation surface
+    could (user report: "I cannot set the number of steps when two LoRAs are
+    selected, in blend or in comparison"). Same source, so the screens cannot
+    drift into two ladders. `steps2` stays SDXL-only: the second pass is a
+    property of that workflow, not a setting the others hide."""
+    return {
+        'cfg_choices': lts.CFG_CHOICES, 'default_cfg': lts.DEFAULT_CFG,
+        'steps_choices': lts.STEPS_CHOICES, 'default_steps': lts.DEFAULT_STEPS,
+        'steps2_choices': lts.STEPS_CHOICES if kind == 'sdxl' else None,
+        'default_steps2': lts.DEFAULT_STEPS if kind == 'sdxl' else None,
+        # Rythme mesuré de la machine (médiane observée) — même clé et même
+        # source que le payload par dataset, pour que les deux branches du Studio
+        # n'annoncent jamais deux durées pour un seul lancement. null = pas assez
+        # d'historique, l'UI garde son « ~ » et son défaut.
+        'seconds_per_image': lts.measured_seconds_per_image(kind),
+    }
+
+
+def _base_defaults(kind, models):
+    """Per-BASE cfg/steps, keyed by the same `filename` this route publishes.
+
+    The per-dataset payload has carried these for a while; this route did not,
+    and it is the one feeding the comparison / blend screen. So an undistilled
+    base picked THERE silently kept the family's Turbo numbers (cfg 1 / 8 steps)
+    and rendered the same blurry sketch the solo screen had already been fixed
+    for. Same helper, so the two branches cannot answer differently.
+
+    The '' entry (the wired workflow UNET) is deliberately absent: it is not a
+    file, `studio_model_defaults` has no name to read, and `default_cfg` /
+    `default_steps` are already its answer."""
+    return lts.studio_model_defaults(
+        kind, [m['filename'] for m in models if m.get('filename')])
+
+
 @bp.get('/base-models')
 def studio_base_models():
+    """Bases of a family + (additive) its `axes` ladders and `model_defaults`.
+    `models` keeps its exact shape — an older frontend reads it unchanged and
+    simply ignores the two extras."""
     kind = (request.args.get('type') or 'zimage').lower()
+    axes = _family_axes(kind)
     if kind == 'sdxl':
-        return jsonify({'models': lts.list_sdxl_base_models()})
+        models = lts.list_sdxl_base_models()
+        return jsonify({'models': models, 'axes': axes,
+                        'model_defaults': _base_defaults(kind, models)})
     if kind == 'krea':
-        # Bases Krea locales ALTERNATIVES au UNET câblé de krea2_turbo.json (node 20).
-        # « Official » (filename vide → z_model absent → node intact) en tête = défaut.
-        # Aucune alternative sur disque → liste vide, le front masque le sélecteur.
+        # Bases Krea locales ALTERNATIVES au défaut ÉLU (cf. lts.krea_default_base).
+        # L'entrée de tête (filename vide → base_model absent → défaut élu) reste le
+        # défaut ; `base_note` dit quel fichier c'est quand ce n'est pas celui que
+        # Setup installe. La note est publiée MÊME sans alternative : c'est
+        # précisément l'install où l'utilisateur n'a rien d'autre qui doit le lire.
+        entry = lts.krea_default_base_entry()
+        # Les chiffres du défaut sont ceux du fichier RÉELLEMENT élu : sans ça une
+        # base non distillée élue par défaut repartait sur cfg 1 / 8 steps — la
+        # même esquisse floue que le correctif #18 avait déjà réglée ailleurs. La
+        # clé '' est publiée pour l'écran qui la lit sans sélecteur.
+        base_defaults = None
+        if entry['source']:
+            base_defaults = lts.krea_model_defaults(entry['source'])
+            axes = {**axes, 'default_cfg': base_defaults['cfg'],
+                    'default_steps': base_defaults['steps']}
         alts = lts.krea_alt_base_models()
         if not alts:
-            return jsonify({'models': []})
-        out = [{'filename': '', 'label': 'Official – Krea 2 Turbo'}]
+            return jsonify({'models': [], 'axes': axes, 'base_note': entry['note'],
+                            'model_defaults': {'': base_defaults} if base_defaults else {}})
+        out = [{'filename': '', 'label': entry['label']}]
         out += [{'filename': m, 'label': m.split('\\')[-1].rsplit('.', 1)[0]} for m in alts]
-        return jsonify({'models': out})
+        defaults = _base_defaults(kind, out)
+        if base_defaults:
+            defaults[''] = base_defaults
+        return jsonify({'models': out, 'axes': axes, 'base_note': entry['note'],
+                        'model_defaults': defaults})
     out = [{'filename': m, 'label': m.split('\\')[-1]} for m in get_zimage_models()]
-    return jsonify({'models': out})
+    return jsonify({'models': out, 'axes': axes,
+                    'model_defaults': _base_defaults(kind, out)})
 
 
 @bp.get('/checkpoints')

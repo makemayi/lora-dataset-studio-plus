@@ -13,6 +13,7 @@
    failure mode, in the order the user must fix them. */
 import { brokenAssetReason, blockingInvalid } from './modelIntegrityWords.js';
 import { comfyuiDownReason } from './comfyuiStatus.js';
+import { pinnedModelGapReason } from './modelFileOptions.js';
 
 /** Setup/capabilities asset keys -> the words a sentence uses. Mirrors
  *  krea_edit_helper.KREA_ASSETS; an unknown key falls back to itself rather
@@ -43,7 +44,7 @@ export const KREA_NODE_PACK_URL = 'https://github.com/lbouaraba/comfyui-krea2edi
 export function kreaUnavailableReason({
   enabledInSettings = true, comfyuiReachable = true,
   missingAssets = [], missingNodes = [], invalidAssets = [],
-  nodePackInstalled = false, comfyui = null,
+  nodePackInstalled = false, comfyui = null, pinGaps = [],
 } = {}) {
   if (!enabledInSettings) return '⚠ Krea 2 Edit is disabled in Settings (engines)';
   // `comfyui` is the raw capabilities block. Passing it is what lets this say
@@ -51,6 +52,12 @@ export function kreaUnavailableReason({
   // ComfyUI that IS configured and IS running — the reported bug. Omitting it
   // keeps the old single sentence; see utils/comfyuiStatus.js.
   if (!comfyuiReachable) return comfyuiDownReason(comfyui || { reachable: false });
+  // BEFORE the node pack and the weights: a pinned file that is absent makes
+  // every list below lie by omission. `krea_missing` reports nothing (the
+  // auto-detected files ARE there), so without this branch the engine would go
+  // dark with the catch-all sentence and no way to guess which field to fix.
+  const pinned = pinnedModelGapReason('Krea 2 Edit', pinGaps);
+  if (pinned) return pinned;
   if (Array.isArray(missingNodes) && missingNodes.length) {
     // The pack is ON DISK but ComfyUI hasn't loaded it: ComfyUI registers custom
     // nodes at STARTUP only. Now that the app installs the pack itself, this is

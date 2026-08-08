@@ -7,9 +7,49 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _clear_owned_process(monkeypatch):
+def _isolated_launcher_state(tmp_path, monkeypatch):
+    """Never let these tests write the CHECKOUT's own config.json.
+
+    Most tests in this file take only ``tmp_path`` and ``monkeypatch`` — they
+    exercise the launcher directly and have no reason to build a Flask app. That
+    is exactly how they escaped the isolation ``conftest.app`` sets up: without
+    it, ``LDS_CONFIG`` is unset, so ``_configure``'s ``save_config`` wrote the
+    REAL config.json of whatever checkout the suite ran in, stamping
+    ``comfyui.base_dir`` with a ``tmp_path`` that pytest deletes afterwards.
+
+    The bill was paid by somebody else, later: the next app started from that
+    checkout booted with "A part of your setup stopped working — ComfyUI folder
+    was working before and is not responding now", pointing at a directory that
+    no longer existed, and nothing connected that to having run the tests.
+
+    Autouse and file-wide on purpose, rather than a fix inside ``_configure``:
+    the leak is "a test in this file may call save_config", not "this one helper
+    does", and the next test added here must be safe without remembering why.
+    ``_cache`` is reset for the same reason conftest does it — config.py caches
+    the loaded dict in a module global that is not keyed on LDS_CONFIG, so a
+    stale one would survive the redirection.
+    """
+    from app import config as _cfg
     from app.services import comfyui_control
+    monkeypatch.setenv('LDS_CONFIG', str(tmp_path / 'launcher-config.json'))
+    monkeypatch.setattr(_cfg, '_cache', None)
     monkeypatch.setattr(comfyui_control, '_owned_process', None)
+
+
+def test_these_tests_never_write_the_checkouts_config(tmp_path):
+    """The guard that keeps the fix above from being undone by accident.
+
+    Cheap and stable: it asserts the ABSENCE of a side effect on a file the
+    suite has no business touching, so it cannot flake on timing or on whether
+    a real ComfyUI happens to be installed."""
+    from app import config
+    repo_config = config.REPO_ROOT / 'config.json'
+    before = repo_config.read_bytes() if repo_config.exists() else None
+    _configure(_portable_layout(tmp_path))
+    after = repo_config.read_bytes() if repo_config.exists() else None
+    assert after == before, (
+        'a launcher test wrote the checkout config.json — the next app started '
+        'from this folder will boot with a dead ComfyUI path')
 
 
 def _portable_layout(tmp_path):
@@ -189,7 +229,7 @@ def test_start_route_rejects_client_options_before_the_service(client, monkeypat
 
 @pytest.mark.parametrize('address', [
     '127.0.0.1', '::1', '::ffff:127.0.0.1',
-    '192.168.1.20', '100.102.48.85',
+    '192.0.2.20', '100.64.0.1',
 ])
 def test_start_route_accepts_clients_allowed_by_the_global_access_guard(
         client, monkeypatch, address):

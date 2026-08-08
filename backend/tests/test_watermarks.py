@@ -803,7 +803,7 @@ def test_detect_route_returns_counts(client, app, monkeypatch):
     from app.services import face_dataset_service as svc
     ds_id = _create(client, 'R', 'r').get_json()['id']
     monkeypatch.setattr(svc, 'detect_watermarks',
-                        lambda u, d, include_dismissed=False: {'detected': 1, 'none': 2, 'checked': 3})
+                        lambda u, d, **kw: {'detected': 1, 'none': 2, 'checked': 3})
     resp = client.post(f'/api/dataset/{ds_id}/watermarks/detect')
     assert resp.status_code == 200
     body = resp.get_json()
@@ -1279,8 +1279,9 @@ def test_detect_route_forwards_include_dismissed(client, app, monkeypatch):
     ds_id = _create(client, 'R', 'r').get_json()['id']
     seen = {}
     monkeypatch.setattr(svc, 'detect_watermarks',
-                        lambda u, d, include_dismissed=False: (seen.update(inc=include_dismissed)
-                                                               or {'detected': 0, 'none': 0, 'checked': 0}))
+                        lambda u, d, include_dismissed=False, **kw: (
+                            seen.update(inc=include_dismissed)
+                            or {'detected': 0, 'none': 0, 'checked': 0}))
     client.post(f'/api/dataset/{ds_id}/watermarks/detect', json={'include_dismissed': True})
     assert seen.get('inc') is True
 

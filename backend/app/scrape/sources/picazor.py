@@ -24,6 +24,9 @@ import re
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .base import ResultList
+from .gdl import GdlError
+
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
@@ -268,6 +271,14 @@ def scan(validation):
                 return None, err
             items = _parse_detail(html, creator)
             if not items:
+                # PAS un résultat vide légitime (kind='empty') : une page de
+                # détail Picazor DÉCRIT toujours un média précis — si la requête a
+                # réussi (pas de blocage Cloudflare, pas de HTTP >=400, cf. `err`
+                # ci-dessus) mais qu'aucune des deux regex (_DETAIL_VIDEO_RE /
+                # _DETAIL_PHOTO_RE) ne matche, c'est que le layout du site a
+                # changé et que le parsing a échoué à extraire un média qui EST
+                # là — un vrai échec outil, pas « rien ici » (cf. finding #3 :
+                # ne jamais convertir un échec réel en résultat vide).
                 return None, "Picazor: no media found on the detail page."
             return items[:MAX_ITEMS], None
 
@@ -278,7 +289,22 @@ def scan(validation):
                 return None, err
             items = _parse_listing(html, creator)
             if not items:
-                return None, "Picazor: no media found in this listing."
+                # Listing chargé sans incident mais aucune vignette 300px_ trouvée :
+                # une catégorie/un filtre légitimement vide (contenu récent, filtre
+                # de niche) est bien plus probable qu'un layout changé pour CE
+                # gabarit (contrairement à la page de détail ci-dessus, où la
+                # présence d'UN média précis est garantie). Résultat vide
+                # légitime, même convention que gdl.GdlError kind='empty'.
+                return None, GdlError("Picazor: no media found in this listing.", 'empty')
+            if len(items) > MAX_ITEMS:
+                # Cas limite mais sans ambiguïté (contrairement au profil paginé
+                # ci-dessous) : la page a livré PLUS d'items que MAX_ITEMS en un
+                # seul parse, on sait avec certitude qu'on en jette — pas une
+                # supposition sur « aurait-il pu y en avoir plus », la preuve est
+                # déjà dans la liste avant la troncature `[:MAX_ITEMS]`.
+                result = ResultList(items[:MAX_ITEMS])
+                result.partial = True
+                return result, None
             return items[:MAX_ITEMS], None
 
         # --- Profil paginé (cas par défaut : PROFILE) ---------------------- #
@@ -287,13 +313,24 @@ def scan(validation):
         seen = set()
         total_pages = None
         page = start_page
+        interrupted = False
+        capped = False
 
         for _ in range(MAX_PAGES):
             page_url = f"{BASE_URL}/fr/{creator}" + (f"/page/{page}" if page > 1 else "")
             html, err = _request_html(page_url)
             if err:
-                # Si on a déjà des items, on dégrade gracieusement sans planter.
+                # Si on a déjà des items, on dégrade gracieusement sans planter —
+                # mais le résultat n'est plus le profil ENTIER, juste ce qu'on a
+                # pu lire avant que Cloudflare/le réseau ne coupe une page
+                # suivante : PARTIEL (`interrupted`), pas complet. Même
+                # convention que redgifs.py/instagram.py (base.ResultList,
+                # cf. finding #3/#2 de la vague précédente) — avant cette
+                # correction ce chemin renvoyait `all_items[:MAX_ITEMS], None`,
+                # une liste ordinaire sans signal de troncature, présentant une
+                # récolte coupée par une panne mi-pagination comme complète.
                 if all_items:
+                    interrupted = True
                     break
                 return None, err
 
@@ -314,13 +351,36 @@ def scan(validation):
                     break
 
             if len(all_items) >= MAX_ITEMS:
+                # Plafond MAX_ITEMS atteint : on ne peut pas distinguer « le
+                # profil a EXACTEMENT MAX_ITEMS médias » de « il en restait plus
+                # après » (les pages suivantes ne sont jamais regardées). On
+                # choisit le côté honnête : marquer PARTIEL même si ça peut être
+                # un faux positif rare — un vrai plafond caché par erreur est pire
+                # qu'une bannière « peut-être plus » de trop.
+                capped = True
                 break
             page += 1
             if page > total_pages:
                 break
+        else:
+            # La boucle a épuisé ses MAX_PAGES itérations sans qu'aucun `break`
+            # n'ait déclaré ni la fin naturelle (page > total_pages) ni le
+            # plafond MAX_ITEMS : on sait alors que `page <= total_pages`
+            # (sinon on aurait `break`), donc des pages restent au-delà du
+            # garde-fou temps MAX_PAGES — troncature silencieuse avant cette
+            # correction (cf. commentaire MAX_PAGES en tête de module).
+            capped = True
 
         if not all_items:
-            return None, "Picazor: no media found for this profile."
+            # Toutes les pages parcourues (ou la 1re a échoué SANS items déjà
+            # collectés, cf. la sortie anticipée `return None, err` plus haut dans
+            # la boucle) sans un seul média : profil légitimement vide, même
+            # convention que gdl.GdlError kind='empty'.
+            return None, GdlError("Picazor: no media found for this profile.", 'empty')
+        if interrupted or capped:
+            result = ResultList(all_items[:MAX_ITEMS])
+            result.partial = True
+            return result, None
         return all_items[:MAX_ITEMS], None
 
     except Exception as e:  # garde-fou ultime — ne jamais lever

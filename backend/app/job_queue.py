@@ -16,6 +16,7 @@ import threading
 import time
 import uuid
 from datetime import datetime
+from typing import NamedTuple
 
 from .extensions import db
 from .models import FaceDatasetImage, ImageGenerationQueue, LoraTestImage, SystemState
@@ -163,26 +164,57 @@ def _dispatch_auto_resolved_cancellation(job_id) -> None:
             'job_queue: could not settle the linked card of auto-resolved job %s', job_id)
 
 
-def auto_resolve_comfyui_barrier() -> dict | None:
-    """Clear the recovery barrier when the remote prompt is PROVABLY gone.
+# What the SAME probe learned about the link to ComfyUI, instead of throwing it
+# away. `comfyui_prompt_is_absent` answers three things — True (a healthy /queue
+# proved the id gone), False (ComfyUI answered and still lists it), None (no
+# readable answer at all) — and only the first was ever acted on. The other two
+# were flattened into one "no proof, keep the barrier", which is how a fresh
+# install ended up being told a paused job was blocking it while its ComfyUI had
+# never logged a single incoming connection: LDS was not talking to that ComfyUI
+# at all (jerkyjunky, Discord). The barrier is right to stay; the sentence was
+# wrong. So the verdict now travels out with the resolution.
+COMFYUI_LINK_REACHABLE = 'reachable'
+COMFYUI_LINK_UNREACHABLE = 'unreachable'
 
-    Returns the resolved barrier owner, or None when nothing was resolved.
+
+class ComfyBarrierProbe(NamedTuple):
+    """(what the probe resolved, what it learned about the link).
+
+    `link` is None when nothing was asked — no barrier at all, or a barrier with
+    no prompt id to ask about. "Not asked" must never be read as "reachable".
+    """
+    resolved: dict | None = None
+    link: str | None = None
+
+
+def probe_comfyui_barrier() -> ComfyBarrierProbe:
+    """Clear the recovery barrier when the remote prompt is PROVABLY gone, and
+    report what ComfyUI answered while being asked.
+
     Never raises: a failed probe is simply an absence of proof.
     """
     owner = queue_manager.get_comfyui_stalled_barrier()
     if owner is None:
         # No barrier, or a corrupt one. A corrupt record is exactly the case
         # where a machine must not guess: it still blocks, and it needs eyes.
-        return None
+        return ComfyBarrierProbe()
     if owner.get('kind') != 'prompt' or not owner.get('prompt_id'):
-        return None
+        # An unconfirmed submission has no id to ask about, so this function
+        # learns nothing about the link either. Whoever needs that verdict has
+        # to get it elsewhere rather than infer it from this silence.
+        return ComfyBarrierProbe()
     prompt_id = owner['prompt_id']
+    link = None
     try:
         from .utils.comfyui import comfyui_prompt_is_absent
         # True *only* after a healthy /queue answer proved the id absent.
         # False = still pending/running; None = unreachable or unparseable.
-        if comfyui_prompt_is_absent(prompt_id) is not True:
-            return None
+        absent = comfyui_prompt_is_absent(prompt_id)
+        # False means ComfyUI answered — that IS the reachability proof, free of
+        # any extra request; None means LDS got nothing it could read.
+        link = COMFYUI_LINK_UNREACHABLE if absent is None else COMFYUI_LINK_REACHABLE
+        if absent is not True:
+            return ComfyBarrierProbe(None, link)
         # reconcile_stalled_comfy_job re-verifies queue absence on both sides of
         # a /history read and refuses an unhealthy history. This is its only
         # caller that runs without anyone asking, so it borrows those checks
@@ -194,7 +226,7 @@ def auto_resolve_comfyui_barrier() -> dict | None:
             # that nothing will ever clear. The prompt was just proven absent
             # from ComfyUI, so the second case is safe to drop.
             if not queue_manager.discard_orphan_comfyui_barrier():
-                return None
+                return ComfyBarrierProbe(None, link)
         else:
             # Unblocking the app is not the whole job: the dataset card that
             # owns this generation is still drawn as "in progress". Route the
@@ -203,13 +235,19 @@ def auto_resolve_comfyui_barrier() -> dict | None:
             _dispatch_auto_resolved_cancellation(owner['job_id'])
     except Exception:
         logger.exception('job_queue: automatic ComfyUI recovery probe failed')
-        return None
+        return ComfyBarrierProbe(None, link)
     logger.warning(
         'job_queue: automatically cleared the ComfyUI recovery barrier for job %s — '
         'prompt %s is absent from both /queue and /history (ComfyUI was restarted)',
         owner.get('job_id'), prompt_id)
     _record_auto_recovery_notice(owner)
-    return owner
+    return ComfyBarrierProbe(owner, link)
+
+
+def auto_resolve_comfyui_barrier() -> dict | None:
+    """The resolution half of `probe_comfyui_barrier`, for the callers that only
+    ever needed "was anything cleared?" — the route guards and the Stop paths."""
+    return probe_comfyui_barrier().resolved
 
 
 # A DB status check is the source of truth, but this in-process event also wakes

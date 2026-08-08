@@ -87,13 +87,22 @@ test('“unknown” framing is distinguished from “not classified”', () => {
   assert.ok(!/no label yet/.test(text));
 });
 
-test('readiness refuses before Score and before Framing, with the reason', () => {
-  assert.deepEqual(balanceReadiness({ scored: 0 }).ready, false);
-  assert.match(balanceReadiness({ scored: 0 }).reason, /✨ Score/);
-  const noFraming = balanceReadiness({ scored: 10, coverage: { framing_available: false } });
+test('readiness refuses before the selected semantic index and before Framing', () => {
+  assert.deepEqual(balanceReadiness({ semanticReady: false }).ready, false);
+  assert.match(balanceReadiness({ semanticReady: false, engineLabel: 'SigLIP 2' }).reason,
+    /SigLIP 2 semantic index/);
+  const noFraming = balanceReadiness({ semanticReady: true,
+    coverage: { framing_available: false } });
   assert.equal(noFraming.ready, false);
   assert.match(noFraming.reason, /📐 Framing/);
-  assert.equal(balanceReadiness({ scored: 10, coverage: { framing_available: true } }).ready, true);
+  assert.equal(balanceReadiness({ semanticReady: true,
+    coverage: { framing_available: true } }).ready, true);
+});
+
+test('a caller can preserve the exact engine-specific prerequisite', () => {
+  const r = balanceReadiness({ semanticReady: false,
+    prerequisite: 'Run ✨ Score first — it produces CLIP semantics.' });
+  assert.match(r.reason, /✨ Score/);
 });
 
 test('the person axis labels its bucket with the cluster id', () => {

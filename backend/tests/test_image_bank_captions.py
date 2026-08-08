@@ -172,6 +172,31 @@ def test_caption_stops_at_image_boundary(client, tmp_path, app, monkeypatch):
     assert len(non_null) == 1           # exactly one written, the rest left alone
 
 
+def test_caption_does_not_stamp_result_after_pixels_change_mid_inference(
+        client, tmp_path, app, monkeypatch):
+    """A caption computed from A is never attached to replacement pixels B."""
+    _use_ollama_backend(app)
+    bank_id, _source = _mkbank(
+        client, tmp_path, {'a.png': _flat(value=128)})
+    from app.services import face_dataset_service as datasets
+
+    def replace_then_answer(paths, **kwargs):
+        path = paths[0]
+        _save(path, _flat(value=60))
+        kwargs['on_caption'](path, 'caption describing the old image', 'ollama')
+        kwargs['progress'](1, 1)
+
+    monkeypatch.setattr(datasets, 'caption_paths', replace_then_answer)
+    response = client.post(f'/api/bank/{bank_id}/caption', json={})
+    assert response.status_code == 202
+    assert _by_name(client, bank_id)['a.png']['caption'] is None
+    activity = client.get(f'/api/bank/{bank_id}').get_json()['activity']
+    # The wording is now the one EVERY pass uses for this outcome (_skipped_note):
+    # four passes had four sentences for the same fact, and the cancelled endings
+    # had none at all.
+    assert 'the image changed while the pass ran' in activity['detail']
+
+
 def _striped(value, phase, size=256):
     """A distinct-dHash image (vertical bands, phase-shifted) carrying a top-left
     pixel `value` marker the mock keys off — two must NOT perceptual-dedupe on
@@ -283,3 +308,25 @@ def test_caption_refuses_when_gpu_busy(client, tmp_path, app, monkeypatch):
     r = client.post(f'/api/bank/{bank_id}/caption', json={})
     assert r.status_code == 503
     assert 'training' in r.get_json()['error']
+
+
+def test_caption_length_preset_rides_per_run(client, tmp_path, app, monkeypatch):
+    """The bank offers the same length dial per run as the dataset popover persists,
+    with the same text and the same order (register first, then length)."""
+    _use_ollama_backend(app)
+    bank_id, _ = _mkbank(client, tmp_path, {'a.png': _flat()})
+    seen = _capture_prompts(monkeypatch)
+    client.post(f'/api/bank/{bank_id}/caption',
+                json={'vocabulary': 'clinical', 'length': 'detailed'})
+    assert len(seen) == 1
+    i_vocab = seen[0].index('clinical, anatomical terms')
+    i_len = seen[0].index('Write a DETAILED caption')
+    assert i_vocab < i_len
+
+
+def test_caption_rejects_unknown_length(client, tmp_path, app):
+    _use_ollama_backend(app)
+    bank_id, _ = _mkbank(client, tmp_path, {'a.png': _flat()})
+    r = client.post(f'/api/bank/{bank_id}/caption', json={'length': 'epic'})
+    assert r.status_code == 400
+    assert 'length' in r.get_json()['error']

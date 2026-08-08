@@ -20,7 +20,9 @@ import { useQuickVote } from '../../../hooks/useQuickVote';
 import { fmt } from '../../../utils/studioFormat';
 import { flipOrder } from './flipOrder';
 import { DEFAULT_STRENGTHS, FAMILY_LABELS } from './constants';
-import { buildSelectionsPayload, combineBlocker } from './loraStack';
+import { blendConfigCount, buildSelectionsPayload, combineBlocker } from './loraStack';
+import { axisPayload, axisTotal, effectiveAxis, toggleAxisValue } from './studioAxes';
+import AxisPickers from './AxisPickers';
 import { isStackRun, stackMembers } from './stackResults';
 import StudioRunSetup from './StudioRunSetup';
 import LoraStackPanel from './LoraStackPanel';
@@ -37,7 +39,8 @@ import ResultLightbox from './ResultLightbox';
 
 const rollSeed = () => Math.floor(Math.random() * 2 ** 31);
 
-export default function ComparisonStudio({ selection, baseModels = [], runType = 'zimage' }) {
+export default function ComparisonStudio({ selection, baseModels = [], axes = null,
+  modelDefaults = null, runType = 'zimage', baseNote = null }) {
   const toast = useToast();
 
   // --- Réglages du run (persistés : recharger la page ne les perd plus) --------
@@ -63,9 +66,72 @@ export default function ComparisonStudio({ selection, baseModels = [], runType =
     try { return JSON.parse(localStorage.getItem('studioComp_weights') || '{}') || {}; }
     catch { return {}; }
   });
+  // Les poids COCHÉS par LoRA (balayage 🧬). Clé neuve : rien de ce qui est déjà
+  // stocké ne change de sens, et une install qui n'en a pas lit {} = aucune case
+  // cochée = les curseurs gouvernent, exactement comme avant.
+  const [stackSets, setStackSets] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('studioComp_weightSets') || '{}') || {}; }
+    catch { return {}; }
+  });
+  const toggleStackChip = (k, w) => setStackSets((cur) => {
+    const list = Array.isArray(cur[k]) ? cur[k] : [];
+    const next = list.includes(w) ? list.filter((v) => v !== w) : [...list, w];
+    return { ...cur, [k]: next };
+  });
   const [count, setCount] = useState(() => {
     try { return Math.max(1, parseInt(localStorage.getItem('studioComp_count'), 10) || 1); } catch { return 1; }
   });
+  // 🎛 Axes de rendu — CFG, steps, et la 2e passe SDXL. Ils MANQUAIENT ici : cette
+  // branche ne pouvait pas régler les steps alors que le studio mono-LoRA et le
+  // panneau du canvas le pouvaient. Clés localStorage NEUVES : rien de ce qui est
+  // déjà stocké ne change de sens, et une install qui n'en a pas lit null =
+  // « le défaut de la famille », c'est-à-dire ce qu'elle lançait hier.
+  const readAxis = (key) => {
+    try {
+      const v = JSON.parse(localStorage.getItem(key) || 'null');
+      return Array.isArray(v) && v.length ? v : null;
+    } catch { return null; }
+  };
+  // Modèle de base sélectionné : défaut = 1er de la liste fournie par le parent.
+  // Se réinitialise quand baseModels change (changement de runType).
+  // ⚠ DÉCLARÉ AVANT les axes : leurs défauts en dépendent (cf. `baseDefaults`
+  // plus bas), et une `const` lue avant sa déclaration est une ReferenceError au
+  // rendu — pas une valeur `undefined` qu'on rattraperait avec un `??`.
+  const [selectedBase, setSelectedBase] = useState('');
+  useEffect(() => {
+    setSelectedBase(baseModels.length > 0 ? baseModels[0].filename : '');
+  }, [baseModels]);
+  const [selCfgs, setSelCfgs] = useState(() => readAxis('studioComp_cfgs'));
+  const [selSteps, setSelSteps] = useState(() => readAxis('studioComp_steps'));
+  const [selSteps2, setSelSteps2] = useState(() => readAxis('studioComp_steps2'));
+  // Le défaut d'un axe dépend de la BASE, pas seulement de la famille : une base
+  // non distillée (Z-Image Base, un modèle complet Krea 2 Raw) rend une esquisse
+  // floue avec le cfg 1 / 8 steps de la Turbo. Le studio mono-LoRA lisait déjà
+  // `model_defaults` ; cette branche ne le recevait pas et héritait donc des
+  // mauvais chiffres pour exactement les modèles qui coûtent le plus cher à
+  // tester. Un axe que l'utilisateur a touché (selCfgs non nul) n'est jamais
+  // réécrit — ici comme là-bas.
+  // `selectedBase` vaut '' quand la famille n'offre aucune alternative — et la clé
+  // '' du payload EST celle du défaut élu. L'ignorer renvoyait une base non
+  // distillée sur les chiffres Turbo (cfg 1 / 8 steps), l'esquisse floue de #18.
+  const baseDefaults = (modelDefaults ? modelDefaults[selectedBase || ''] : null) || null;
+  const defaultCfg = baseDefaults?.cfg ?? axes?.default_cfg;
+  const defaultSteps = baseDefaults?.steps ?? axes?.default_steps;
+  const effectiveCfgs = effectiveAxis(selCfgs, defaultCfg);
+  const effectiveSteps = effectiveAxis(selSteps, defaultSteps);
+  // ⚠ La 2e passe appartient au workflow SDXL. Sans cette garde, une sélection
+  // laissée par un run SDXL suivrait l'utilisateur dans un run Z-Image (les
+  // réglages sont persistés, la famille change avec les cases cochées) et
+  // enverrait un axe que cette famille n'a pas. Famille sans 2e passe = axe vide.
+  const effectiveSteps2 = axes?.steps2_choices
+    ? effectiveAxis(selSteps2, axes.default_steps2) : [];
+  useEffect(() => {
+    try {
+      localStorage.setItem('studioComp_cfgs', JSON.stringify(selCfgs));
+      localStorage.setItem('studioComp_steps', JSON.stringify(selSteps));
+      localStorage.setItem('studioComp_steps2', JSON.stringify(selSteps2));
+    } catch { /* private mode */ }
+  }, [selCfgs, selSteps, selSteps2]);
   useEffect(() => {
     try {
       localStorage.setItem('studioComp_strengths', JSON.stringify(strengths));
@@ -73,8 +139,9 @@ export default function ComparisonStudio({ selection, baseModels = [], runType =
       localStorage.setItem('studioComp_count', String(count));
       localStorage.setItem('studioComp_mode', mode);
       localStorage.setItem('studioComp_weights', JSON.stringify(stackWeights));
+      localStorage.setItem('studioComp_weightSets', JSON.stringify(stackSets));
     } catch { /* private mode */ }
-  }, [strengths, prompt, count, mode, stackWeights]);
+  }, [strengths, prompt, count, mode, stackWeights, stackSets]);
   const [launching, setLaunching] = useState(false);
   // 409 `studio_missing` au lancement (P0-a) → bandeau des modèles/nodes manquants.
   const [preflight, setPreflight] = useState(null);
@@ -86,12 +153,6 @@ export default function ComparisonStudio({ selection, baseModels = [], runType =
   const toggleStrength = (s) =>
     setStrengths((cur) => (cur.includes(s) ? cur.filter((v) => v !== s) : [...cur, s].sort((a, b) => a - b)));
 
-  // Modèle de base sélectionné : défaut = 1er de la liste fournie par le parent.
-  // Se réinitialise quand baseModels change (changement de runType).
-  const [selectedBase, setSelectedBase] = useState('');
-  useEffect(() => {
-    setSelectedBase(baseModels.length > 0 ? baseModels[0].filename : '');
-  }, [baseModels]);
 
   // --- Run piloté --------------------------------------------------------------
   const [runId, setRunId] = useState(null);
@@ -143,7 +204,7 @@ export default function ComparisonStudio({ selection, baseModels = [], runType =
   const combineBlocked = combine ? combineBlocker(selection) : null;
 
   // --- Vue PILE ---------------------------------------------------------------
-  // Décidée par le RUN AFFICHÉ, pas par la bascule Compare/Combine : on peut ouvrir
+  // Décidée par le RUN AFFICHÉ, pas par la bascule Compare/Blend : on peut ouvrir
   // une pile lancée hier alors que la bascule est repassée sur Compare, et l'inverse.
   const shownStack = useMemo(() => stackMembers(data), [data]);
   const showStackView = isStackRun(data);
@@ -184,7 +245,7 @@ export default function ComparisonStudio({ selection, baseModels = [], runType =
     setLaunching(true);
     try {
       const body = {
-        selections: buildSelectionsPayload(selection, { combine, weights: stackWeights }),
+        selections: buildSelectionsPayload(selection, { combine, weights: stackWeights, sets: stackSets }),
         // En combine chaque LoRA porte son poids : l'axe strengths n'est plus envoyé
         // (le backend le remplace par le poids du LoRA de tête).
         ...(combine ? { combine: true } : { strengths }),
@@ -196,6 +257,11 @@ export default function ComparisonStudio({ selection, baseModels = [], runType =
         // Réglages globaux (resolution_tier, negative/sampler/detail/rebalance/…),
         // déjà gatés PAR FAMILLE côté backend — champs vides absents = défauts gardés.
         ...genSettings,
+        // 🎛 CFG / steps / 2e passe, EN DERNIER : ce que l'utilisateur vient de
+        // régler dans le panneau gagne sur tout réglage global homonyme. La route
+        // les acceptait déjà et l'engine les balayait déjà — ce qui manquait était
+        // ce corps, qui ne les portait pas, et le panneau, qui ne les offrait pas.
+        ...axisPayload({ cfgs: effectiveCfgs, steps: effectiveSteps, steps2: effectiveSteps2 }),
       };
       if (prompt.trim()) body.prompt = prompt.trim();
       const dResp = await postJson('/api/studio/run', body);
@@ -231,9 +297,17 @@ export default function ComparisonStudio({ selection, baseModels = [], runType =
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4 items-start">
       <aside className="flex flex-col gap-3 lg:sticky lg:top-16 lg:max-h-[calc(100vh-7rem)] lg:overflow-auto">
+        {/* Ce que le défaut de base a d'anormal — affiché même sans sélecteur :
+            l'install qui n'a qu'une base est celle qui doit le lire. */}
+        {baseNote && (
+          <p className="m-0 rounded-lg border border-amber-400/30 bg-amber-400/5 px-3 py-2
+                        text-[0.6875rem] leading-snug text-amber-300/80 break-words">
+            {baseNote}
+          </p>
+        )}
         {/* Picker de base — toutes familles. Krea : l'endpoint ne renvoie une liste
-            (Official + alternatives) que si des UNET Krea locaux existent ; sinon
-            vide → le sélecteur reste caché (défaut câblé du workflow). */}
+            (défaut élu + alternatives) que si des UNET Krea locaux existent ; sinon
+            vide → le sélecteur reste caché (défaut élu appliqué au node 20). */}
         {baseModels.length > 0 && (
           <div className="flex flex-col gap-1 rounded-lg border border-border bg-surface p-3">
             <span className="text-content-muted text-[0.625rem] uppercase">
@@ -253,6 +327,10 @@ export default function ComparisonStudio({ selection, baseModels = [], runType =
         )}
         <LoraStackPanel selection={selection} mode={mode} onMode={setMode}
           weights={stackWeights}
+          sets={stackSets}
+          onToggleChip={toggleStackChip}
+          count={count}
+          secondsPerImage={axes?.seconds_per_image ?? null}
           onWeight={(k, v) => setStackWeights((cur) => ({ ...cur, [k]: v }))} />
         <div id="st-setup" className="scroll-mt-16">
           <StudioRunSetup
@@ -271,6 +349,32 @@ export default function ComparisonStudio({ selection, baseModels = [], runType =
             batchMult={1 + ((genSettings.batch_loras || []).length)}
             combine={combine}
             combineBlocked={combineBlocked}
+            configCount={blendConfigCount(selection, { weights: stackWeights, sets: stackSets })}
+            axisTotal={axisTotal({ cfgs: effectiveCfgs, steps: effectiveSteps, steps2: effectiveSteps2 })}
+            secondsPerImage={axes?.seconds_per_image ?? null}
+            /* 🎛 Les axes de rendu, dans le panneau de réglage du run et pas dans
+               un bloc à part : c'est le même geste que choisir une strength. Le
+               MÊME composant que le studio mono-LoRA et le canvas — base et format
+               sont déjà réglés au-dessus ici, donc ces deux blocs restent muets. */
+            axisSlot={axes ? (
+              /* defaultCfg/defaultSteps = ceux de la BASE choisie (repli sur la
+                 famille) : la puce marquée « défaut » doit désigner la valeur
+                 réellement lancée, sinon elle désigne celle qui rend flou. */
+              <AxisPickers
+                zModels={null} effectiveModels={[]} onToggleModel={() => {}}
+                aspects={null} effectiveAspects={[]} onToggleAspect={() => {}}
+                cfgChoices={axes.cfg_choices} effectiveCfgs={effectiveCfgs}
+                onToggleCfg={(v) => setSelCfgs((cur) => toggleAxisValue(effectiveAxis(cur, defaultCfg), v))}
+                defaultCfg={defaultCfg}
+                stepsChoices={axes.steps_choices} effectiveSteps={effectiveSteps}
+                onToggleStep={(v) => setSelSteps((cur) => toggleAxisValue(effectiveAxis(cur, defaultSteps), v))}
+                defaultSteps={defaultSteps}
+                steps2Choices={axes.steps2_choices} effectiveSteps2={effectiveSteps2}
+                onToggleStep2={(v) => setSelSteps2((cur) => toggleAxisValue(effectiveAxis(cur, axes.default_steps2), v))}
+                defaultSteps2={axes.default_steps2}
+                fmt={fmt}
+              />
+            ) : null}
           />
         </div>
         {/* Réglages de génération globaux (parité Generate, hors prompt builder).

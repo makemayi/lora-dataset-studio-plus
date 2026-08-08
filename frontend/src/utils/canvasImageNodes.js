@@ -13,7 +13,21 @@
    instead of by dragging things in a browser.
 
    Coordinates are LANE-LOCAL world units, exactly like a card position, so both
-   kinds of node live in one coordinate system and one lane extent.
+   kinds of node live in one coordinate system.
+
+   ⚠️ LANE-LOCAL IS THE ANCHOR, NOT A CAGE. A picture may sit anywhere on the
+   board, including ABOVE and LEFT of its own lane's origin — that is what the
+   negative half of the reach below is for. What stays lane-local is the
+   REFERENCE the number is measured from, and that is deliberate: a lane's world
+   position is derived from the board's current filter (which datasets are
+   ticked) and from the height of every lane above it, so it moves by hundreds
+   of units the moment an unrelated dataset is unticked or gains a run —
+   measured on a three-dataset board, 580 units for one untick, 118 for one new
+   run. A picture stored in BOARD-absolute units would sit still while its lane
+   slid out from under it, and the day a dataset above is filtered off, every
+   picture below would be hovering over the wrong lane. Measured from its own
+   lane, it travels with the run it is evidence about, which is the only
+   relationship on this board that never goes stale.
 
    ⚠️ THE promise of this module: closing a pinned image must not forget it.
    `visible: false` is a state, not a deletion — the row keeps its x/y/w/h and
@@ -36,6 +50,21 @@ export const IMG_DEFAULT = 320;
 // Air between a card and the pins beside it, and between two stacked pins.
 const PIN_GAP = 48;
 
+/* How far from its lane's origin a picture may be parked, on either axis and in
+   either direction. A SAFETY RAIL, not a design limit: it exists so a corrupt
+   row (1e9, a hand-edited database, MAX_SAFE_INTEGER) cannot make ✦ Fit collapse
+   the whole board to a scale where nothing is readable — the exact failure the
+   size ceiling above already guards against, which until now had no equivalent
+   on the position axes at all.
+
+   100 000 units is roughly 380 card-widths, and about seven full-screen drags at
+   the minimum zoom: far beyond any placement made on purpose, and far beyond any
+   made by accident. And a picture that somehow ends up out there is not lost —
+   ✦ Tidy up brings every visible picture back beside the run that made it. */
+export const IMG_REACH = 100000;
+
+const reach = (v) => Math.min(IMG_REACH, Math.max(-IMG_REACH, v));
+
 const num = (v, fallback) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
@@ -47,13 +76,25 @@ const numOrNull = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
-/** Clamp one node's box into its lane and into a usable size. Unusable numbers
- *  degrade to the default rather than to 0/NaN: a node parked at NaN would be
- *  unreachable on every future load and there is no UI to fix that. */
+/**
+ * Clamp one node's box into a usable SIZE and a reachable POSITION. Unusable
+ * numbers degrade to the default rather than to 0/NaN: a node parked at NaN
+ * would be unreachable on every future load and there is no UI to fix that.
+ *
+ * The position is bounded on both sides of zero (±IMG_REACH), not floored at
+ * it. The floor was the wall: it made the lane's own origin the top-left corner
+ * a picture could never get past, so a render could be dragged down and right
+ * but never up or left — never above its lane, never beside the lane above it,
+ * never into the free margin left of the board. Nothing about a pinned picture
+ * needs that. It is not a step of the lineage, its link to the checkpoint that
+ * made it is READ off the image row rather than stored (see `imageNodeEdges`),
+ * so no coordinate can make it lie about where it came from, and the lane it
+ * belongs to is a fact about the image, not about the pixel it sits on.
+ */
 export function clampImageBox(box) {
   return {
-    x: Math.max(0, num(box?.x, 0)),
-    y: Math.max(0, num(box?.y, 0)),
+    x: reach(num(box?.x, 0)),
+    y: reach(num(box?.y, 0)),
     w: Math.min(IMG_MAX, Math.max(IMG_MIN, num(box?.w, IMG_DEFAULT))),
     h: Math.min(IMG_MAX, Math.max(IMG_MIN, num(box?.h, IMG_DEFAULT))),
   };
@@ -118,41 +159,86 @@ export function openGeometry(map, imageId, fallback) {
  * `taken` are the boxes already placed.
  */
 export function defaultImageSpot(graph, recordId, step, taken) {
+  const at = spotBesideCard(graph, recordId);
+  return clampImageBox(slideBelow({ ...at, w: IMG_DEFAULT, h: IMG_DEFAULT }, taken));
+}
+
+/**
+ * The top-left corner a pin anchored on `recordId` starts from: just right of
+ * that card, at the card's own top.
+ *
+ * Exported because ✦ Tidy up has to answer the same question for a whole
+ * side-by-side STRIP, and two placers would be two chances to disagree about
+ * where "beside its run" is.
+ *
+ * A pin whose card is not on the board still gets a spot — off the right of the
+ * lane — rather than being refused. Losing the picture would be a worse answer
+ * than losing the card it points at.
+ */
+export function spotBesideCard(graph, recordId) {
   const nodes = graph?.nodes || [];
   const card = nodes.find((n) => n.node?.record_id === recordId);
   let maxX = 0;
   for (const n of nodes) maxX = Math.max(maxX, n.x + CARD_W);
-  const box = {
-    // A pin whose card is not on the board still gets a spot — off the right of
-    // the lane — rather than being refused. Losing the picture would be a worse
-    // answer than losing the card it points at.
+  return {
     x: (card ? card.x + CARD_W : maxX) + PIN_GAP,
     y: card ? card.y : 0,
-    w: IMG_DEFAULT,
-    h: IMG_DEFAULT,
   };
+}
+
+const overlaps = (a, b) => (a.x < b.x + b.w && b.x < a.x + a.w
+  && a.y < b.y + b.h && b.y < a.y + a.h);
+
+/**
+ * The first spot at or BELOW `box` that overlaps nothing in `taken`.
+ *
+ * Down and not sideways, like every other placer on this board: the horizontal
+ * axis of a lineage carries meaning (one column = one generation) and vertical
+ * space is the free dimension. Bounded by construction — each step jumps below
+ * the lowest blocker, so it terminates after at most `taken.length` moves.
+ *
+ * Size is carried through untouched, so a caller placing something that is not
+ * a single picture (a strip, which is as wide as all its members put together)
+ * gets an answer measured on the real footprint.
+ */
+export function slideBelow(box, taken) {
   const list = Array.isArray(taken) ? taken : [];
-  const overlaps = (a, b) => (a.x < b.x + b.w && b.x < a.x + a.w
-    && a.y < b.y + b.h && b.y < a.y + a.h);
-  let y = box.y;
+  let y = num(box?.y, 0);
   for (let guard = 0; guard <= list.length; guard += 1) {
     const hits = list.filter((t) => overlaps({ ...box, y }, t));
     if (!hits.length) break;
     y = Math.max(...hits.map((t) => t.y + t.h)) + V_GAP;
   }
-  return clampImageBox({ ...box, y });
+  return { ...box, y };
 }
 
-/** How far right and down a lane's pins reach, so `stackLanes` sizes the lane to
- *  hold them and ✦ Fit cannot crop a picture off the board. */
+/**
+ * The box a lane's pins really occupy, relative to the LANE's origin.
+ *
+ * `width`/`height` are how far right and down they reach, as before, so
+ * `stackLanes` sizes the lane to hold them and ✦ Fit cannot crop a picture off
+ * the bottom of the board.
+ *
+ * `minX`/`minY` are the OVERHANG — how far a picture reaches above or left of
+ * its lane's origin — and are never positive, because the lane's own header and
+ * tree start at zero and the box has to contain them too. They exist because a
+ * picture may now be parked above its lane (see `clampImageBox`): a board that
+ * measured its size from the origin down would leave that picture outside the
+ * world it fits to, and ✦ Fit would frame a board with a picture floating off
+ * the top of it and no way to bring the view back to it.
+ */
 export function imageNodeExtent(nodes) {
+  let minX = 0;
+  let minY = 0;
   let width = 0;
   let height = 0;
   for (const n of (nodes || [])) {
-    width = Math.max(width, n.x + n.w);
-    height = Math.max(height, n.y + n.h);
+    minX = Math.min(minX, num(n?.x, 0));
+    minY = Math.min(minY, num(n?.y, 0));
+    width = Math.max(width, num(n?.x, 0) + num(n?.w, 0));
+    height = Math.max(height, num(n?.y, 0) + num(n?.h, 0));
   }
-  return { width, height };
+  return { minX, minY, width, height };
 }
 
 /**

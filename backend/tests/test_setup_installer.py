@@ -1538,34 +1538,50 @@ def test_run_ml_capability_pins_pillow_when_targeting_flask_venv(app, monkeypatc
 # never changed". The Install / ↻ Reinstall button used to take that same value
 # as its install TARGET — i.e. pip into the user's ai-toolkit or ComfyUI venv.
 
-def test_run_bank_scoring_refuses_a_borrowed_interpreter(app, monkeypatch, tmp_path):
-    """A bank_scoring.python the app did not build (the borrow case) is refused:
-    return 1, no pip at all, and the log hands over the command instead."""
+def test_run_bank_scoring_repairs_managed_while_preserving_borrowed_selection(
+        app, monkeypatch, tmp_path):
+    """Install is never an operation on the selected borrowed Python.  It repairs
+    LDS's managed venv successfully and leaves the GPU runtime selection intact."""
     from app import setup_installer, config
     borrowed = tmp_path / 'ai-toolkit' / 'venv' / 'Scripts' / 'python.exe'
     borrowed.parent.mkdir(parents=True)
     borrowed.touch()
-
-    def boom(*a, **k):
-        raise AssertionError('must not run pip against a borrowed environment')
-
-    monkeypatch.setattr(setup_installer.subprocess, 'Popen', boom)
+    seen = []
+    monkeypatch.setattr(setup_installer, '_find_base_python',
+                        lambda a: r'C:\pybase\python.exe')
+    monkeypatch.setattr(setup_installer.subprocess, 'Popen',
+                        _fake_venv_popen(seen))
     with app.app_context():
         config.save_config({'bank_scoring': {'python': str(borrowed)}})
+        managed = setup_installer._bank_scoring_env_python()
         setup_installer._runs['bank_scoring'] = setup_installer._new_run()
         rc = setup_installer._run_bank_scoring('bank_scoring')
-    assert rc == 1
+        selected = config.get('bank_scoring.python')
+    assert rc == 0
+    assert selected == str(borrowed)
+    pip_commands = [c for c in seen if c[1:4] == ['-m', 'pip', 'install']]
+    assert pip_commands
+    assert all(c[0] == managed for c in pip_commands)
+    assert all(c[0] != str(borrowed) for c in pip_commands)
     log = setup_installer._runs['bank_scoring']['log']
-    assert any('did not create' in l for l in log)
-    assert any('never changed' in l for l in log)
-    # the way out, both ways: the exact command, and how to go back to the default
-    assert any('-m pip install' in l and str(borrowed) in l for l in log)
-    assert any('bank_scoring.python' in l for l in log)
+    assert any('keeping the selected borrowed' in l for l in log)
+    assert any(managed in l for l in log)
+
+
+def test_bank_scoring_manual_command_never_points_at_borrowed_python(app):
+    from app import config, setup_installer
+    borrowed = r'C:\ComfyUI\python_embeded\python.exe'
+    with app.app_context():
+        config.save_config({'bank_scoring': {'python': borrowed}})
+        command = setup_installer.manual_command('bank_scoring')
+        managed = setup_installer._bank_scoring_env_python()
+    assert managed in command
+    assert borrowed not in command
 
 
 def test_run_bank_scoring_still_installs_into_the_managed_venv(app, monkeypatch):
-    """The refusal must not swallow the normal path: with nothing configured the
-    button still builds the app's own venv and installs into THAT."""
+    """With nothing configured the button builds LDS's venv, installs there and
+    selects it as the Score runtime."""
     from app import setup_installer, config
     seen = []
     monkeypatch.setattr(setup_installer, '_find_base_python', lambda a: r'C:\pybase\python.exe')
@@ -1582,3 +1598,297 @@ def test_run_bank_scoring_still_installs_into_the_managed_venv(app, monkeypatch)
     clip_cmd = next(c for c in seen if any('open_clip' in str(p) for p in c))
     assert clip_cmd[0] == managed
     assert saved == managed
+
+
+# --- The transformers floor the video-caption worker depends on ------------------
+# infer/video_caption_infer.py:103 imports Qwen3VLForConditionalGeneration, a class
+# transformers only grew in 4.57.0 (huggingface/transformers PR #40795, shipped in
+# the v4.57.0 release; the Qwen/Qwen3-VL-4B-Instruct card says `transformers==4.57.0`).
+# Installing the bank-scoring step with a BARE `pip install transformers` is a no-op
+# on a machine that already carries an older transformers ("already satisfied"), so
+# the caption worker dies on ImportError and re-clicking the step never repairs it.
+# Carrying the floor in the pip command is what turns that click into a repair.
+
+def test_requirements_ml_floors_transformers_for_qwen3vl():
+    """The floor lives in requirements-ml.txt (one place for every version), and it
+    is at least 4.57 — below that `Qwen3VLForConditionalGeneration` does not exist."""
+    from app import setup_installer
+    spec = setup_installer._requirement_spec('transformers')
+    assert spec != 'transformers', 'no floor in requirements-ml.txt — bare name fallback'
+    floor = spec.split('>=', 1)[1].split(',')[0].strip()
+    major, minor = (int(p) for p in floor.split('.')[:2])
+    assert (major, minor) >= (4, 57), f'floor {floor} predates Qwen3-VL support'
+
+
+def test_bank_scoring_manual_command_carries_the_transformers_floor(app):
+    """The copy-paste command shows the floor, QUOTED — an unquoted '>=' is shell
+    redirection and would write a file named '=4.57' instead of installing."""
+    from app import setup_installer
+    with app.app_context():
+        cmd = setup_installer.manual_command('bank_scoring')
+        spec = setup_installer._requirement_spec('transformers')
+    assert f'"{spec}"' in cmd
+    assert ' transformers ' not in cmd      # never the bare, no-op name
+
+
+def test_run_bank_scoring_installs_the_floored_transformers(app, monkeypatch):
+    """The REAL pip call carries the floor too, so re-clicking the step UPGRADES an
+    old transformers instead of reporting 'already satisfied' and changing nothing."""
+    from app import setup_installer, config
+    seen = []
+    monkeypatch.setattr(setup_installer, '_find_base_python', lambda a: r'C:\pybase\python.exe')
+    monkeypatch.setattr(setup_installer.subprocess, 'Popen', _fake_venv_popen(seen))
+    with app.app_context():
+        config.save_config({})
+        setup_installer._runs['bank_scoring'] = setup_installer._new_run()
+        rc = setup_installer._run_bank_scoring('bank_scoring')
+        spec = setup_installer._requirement_spec('transformers')
+    assert rc == 0
+    pkg_cmd = next(c for c in seen if any('open_clip' in str(p) for p in c))
+    assert spec in pkg_cmd
+    assert 'transformers' not in pkg_cmd     # the bare name must be GONE, not added to
+
+
+def test_bank_scoring_verification_ignores_user_site(app, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from app import setup_installer
+    python = tmp_path / 'managed-python.exe'
+    python.touch()
+    seen = []
+
+    def run(command, **kwargs):
+        seen.append(command)
+        return SimpleNamespace(returncode=0, stderr='')
+
+    monkeypatch.setattr(setup_installer.subprocess, 'run', run)
+    with app.app_context():
+        setup_installer._runs['bank_scoring'] = setup_installer._new_run()
+        assert setup_installer._verify_bank_scoring_import(
+            'bank_scoring', str(python)) is True
+    assert seen[0][:3] == [str(python), '-s', '-c']
+
+
+def test_bank_siglip2_is_explicit_scoped_action(app):
+    from app import config, setup_installer
+    borrowed = r'C:\borrowed score\python.exe'
+    assert 'bank_siglip2' in setup_installer.INSTALL_ACTIONS
+    assert 'bank_siglip2' in setup_installer._WORKERS
+    assert 'bank_siglip2' in setup_installer._PIP_ACTIONS
+    assert 'bank_siglip2' not in setup_installer._INSTALL_ALL_ORDER
+    with app.app_context():
+        config.save_config({
+            'bank_scoring': {'python': borrowed},
+            'bank_semantic': {'python': ''},
+        })
+        command = setup_installer.manual_command('bank_siglip2')
+        managed = setup_installer._bank_scoring_env_python()
+    assert managed in command
+    assert borrowed not in command
+    assert 'pip install torch' in command
+    assert setup_installer._TORCH_CPU_INDEX in command
+    assert 'transformers>=4.49' in command
+    assert 'Pillow' in command
+    assert 'hf_hub_download' in command
+
+
+def test_bank_siglip2_manual_command_never_targets_a_borrowed_interpreter(app):
+    """WHERE THE INDEX RUNS is not where we install.
+
+    ``bank_semantic.python`` is a picker now: it can hold someone's ai-toolkit or
+    ComfyUI venv, chosen so the index runs on their GPU. A repair line that read
+    it would hand the user a command that pip-installs into that environment —
+    the one thing this app never does. The managed venv is the only install
+    target, whatever either interpreter key says."""
+    from app import config, setup_installer
+    borrowed_score = r'D:\borrowed score\python.exe'
+    borrowed_semantic = r'D:\borrowed semantic\python.exe'
+    with app.app_context():
+        config.save_config({
+            'bank_scoring': {'python': borrowed_score},
+            'bank_semantic': {'python': borrowed_semantic},
+        })
+        command = setup_installer.manual_command('bank_siglip2')
+        managed = setup_installer._bank_scoring_env_python()
+    assert managed in command
+    assert borrowed_semantic not in command
+    assert borrowed_score not in command
+
+
+def test_bank_siglip2_install_ignores_borrowed_semantic_interpreter(
+        app, monkeypatch, tmp_path):
+    """The core guarantee of the semantic GPU picker, proved end to end.
+
+    A user points the SigLIP 2 index at their ai-toolkit venv (execution), then
+    hits Install/repair in Setup (installation). Every subprocess must run in the
+    app-managed venv, none of them may name the borrowed path, and the borrowed
+    choice must survive: overwriting it would silently drag the index back onto
+    the CPU right after a repair."""
+    from pathlib import Path
+    from app import config, setup_installer
+    from app.services import bank_semantic_models as assets
+    borrowed = tmp_path / 'ai-toolkit' / 'venv' / 'Scripts' / 'python.exe'
+    borrowed.parent.mkdir(parents=True)
+    borrowed.touch()
+    calls = []
+
+    monkeypatch.setattr(
+        setup_installer, '_run_pip',
+        lambda action, command: calls.append(tuple(command)) or 0)
+    monkeypatch.setattr(setup_installer, '_verify_capability_import',
+                        lambda action, python: True)
+    monkeypatch.setattr(assets, 'weights_present', lambda root=None: True)
+    with app.app_context():
+        config.save_config({'bank_semantic': {'python': str(borrowed)}})
+        managed = setup_installer._bank_scoring_env_python()
+        Path(managed).parent.mkdir(parents=True, exist_ok=True)
+        Path(managed).touch()
+        setup_installer._runs['bank_siglip2'] = setup_installer._new_run()
+        assert setup_installer._run_bank_siglip2('bank_siglip2') == 0
+        # Execution choice preserved — NOT repointed at the managed venv.
+        assert config.get('bank_semantic.python') == str(borrowed)
+    assert calls, 'the install must actually have run'
+    assert all(command[0] == managed for command in calls)
+    assert not any(str(borrowed) in str(part)
+                   for command in calls for part in command)
+    log = ' '.join(setup_installer._runs['bank_siglip2']['log'])
+    assert 'LDS-managed environment' in log
+
+
+def test_run_bank_siglip2_keeps_borrowed_score_and_installs_only_managed(
+        app, monkeypatch, tmp_path):
+    from pathlib import Path
+    from app import config, setup_installer
+    from app.services import bank_semantic_models as assets
+    borrowed = tmp_path / 'other-tool' / 'Scripts' / 'python.exe'
+    borrowed.parent.mkdir(parents=True)
+    borrowed.touch()
+    calls = []
+
+    monkeypatch.setattr(
+        setup_installer, '_run_pip',
+        lambda action, command: calls.append(tuple(command)) or 0)
+    monkeypatch.setattr(setup_installer, '_verify_capability_import',
+                        lambda action, python: True)
+    monkeypatch.setattr(assets, 'weights_present', lambda root=None: True)
+    with app.app_context():
+        config.save_config({
+            'bank_scoring': {'python': str(borrowed)},
+            'bank_semantic': {'python': ''},
+        })
+        managed = setup_installer._bank_scoring_env_python()
+        Path(managed).parent.mkdir(parents=True, exist_ok=True)
+        Path(managed).touch()
+        setup_installer._runs['bank_siglip2'] = setup_installer._new_run()
+        assert setup_installer._run_bank_siglip2('bank_siglip2') == 0
+        assert config.get('bank_scoring.python') == str(borrowed)
+        assert config.get('bank_semantic.python') == managed
+    assert len(calls) == 3
+    assert all(command[0] == managed for command in calls)
+    assert all(command[0] != str(borrowed) for command in calls)
+
+
+def test_run_bank_siglip2_downloads_only_pinned_files(app, monkeypatch):
+    from app import config, setup_installer
+    from app.services import bank_semantic_models as assets
+    calls = []
+    monkeypatch.setattr(
+        setup_installer, '_ensure_bank_scoring_env',
+        lambda action, *, save_score_python=True: (
+            setup_installer._bank_scoring_env_python()
+            if save_score_python is False else
+            (_ for _ in ()).throw(AssertionError('must not select Score'))))
+    monkeypatch.setattr(
+        setup_installer, '_run_pip',
+        lambda action, command: calls.append(command) or 0)
+    monkeypatch.setattr(setup_installer, '_verify_capability_import',
+                        lambda action, python: True)
+    monkeypatch.setattr(assets, 'weights_present', lambda root=None: True)
+    with app.app_context():
+        config.save_config({
+            'bank_scoring': {'python': ''},
+            'bank_semantic': {'python': ''},
+        })
+        setup_installer._runs['bank_siglip2'] = setup_installer._new_run()
+        assert setup_installer._run_bank_siglip2('bank_siglip2') == 0
+        assert config.get('bank_semantic.python') == (
+            setup_installer._bank_scoring_env_python())
+    packages = next(command for command in calls
+                    if 'transformers>=4.49' in command)
+    assert 'Pillow' in packages
+    download = next(command for command in calls if '-c' in command)
+    payload = download[-1]
+    for filename in assets.FILES:
+        assert filename in payload
+    assert assets.REVISION in payload
+
+
+def test_run_bank_siglip2_reports_failure_when_semantic_python_cannot_be_saved(
+        app, monkeypatch):
+    from app import config, setup_installer
+    from app.services import bank_semantic_models as assets
+    calls = []
+    managed = setup_installer._bank_scoring_env_python()
+    monkeypatch.setattr(
+        setup_installer, '_ensure_bank_scoring_env',
+        lambda action, *, save_score_python=True: managed)
+    monkeypatch.setattr(
+        setup_installer, '_run_pip',
+        lambda action, command: calls.append(tuple(command)) or 0)
+    monkeypatch.setattr(setup_installer, '_verify_capability_import',
+                        lambda action, python: True)
+    monkeypatch.setattr(assets, 'weights_present', lambda root=None: True)
+
+    def refuse_save(partial):
+        assert partial == {'bank_semantic': {'python': managed}}
+        raise OSError('config is read-only')
+
+    with app.app_context():
+        config.save_config({'bank_semantic': {'python': ''}})
+        monkeypatch.setattr(setup_installer.cfg, 'save_config', refuse_save)
+        setup_installer._runs['bank_siglip2'] = setup_installer._new_run()
+        assert setup_installer._run_bank_siglip2('bank_siglip2') == 1
+    assert len(calls) == 3, 'save is attempted only after packages and weights'
+    log = setup_installer._runs['bank_siglip2']['log']
+    assert any('could not be saved' in line for line in log)
+    assert not any(line.startswith('SigLIP2 ready') for line in log)
+
+
+# --- The decoder the shot-detect worker dies without ------------------------------
+# infer/shot_detect_infer.py decodes with PyAV in the SAME environment as the
+# model — `import av` runs before torch ever sees a frame. The install shipped
+# torch + transnetv2 without av, and the capability probe did not import av
+# either: install green, probe green, and then EVERY file of the first real
+# bank answered "failed shot detection" (ModuleNotFoundError: No module named
+# 'av', 246/246 files, found live the day the wave landed). These two tests
+# pin the whole chain: what the worker imports, the installer installs and the
+# probe checks.
+
+def test_shot_detect_install_carries_the_decoder_its_worker_dies_without(
+        app, monkeypatch, tmp_path):
+    from app import setup_installer
+    calls = []
+    monkeypatch.setattr(setup_installer, '_run_pip',
+                        lambda a, cmd: (calls.append(list(cmd)), 0)[1])
+    monkeypatch.setattr(setup_installer, '_verify_shot_detect_import',
+                        lambda a, p: True)
+    managed = str(tmp_path / 'envs' / 'bank_scoring' / 'Scripts' / 'python.exe')
+    monkeypatch.setattr(setup_installer, '_bank_scoring_env_python', lambda: managed)
+    monkeypatch.setattr(setup_installer, '_ensure_bank_scoring_env',
+                        lambda a, **k: managed)
+    saved = {}
+    monkeypatch.setattr(setup_installer.cfg, 'save_config',
+                        lambda p: saved.update(p))
+    with app.app_context():
+        setup_installer._runs['shot_detect'] = setup_installer._new_run()
+        rc = setup_installer._run_shot_detect('shot_detect')
+    assert rc == 0
+    flat = [arg for cmd in calls for arg in cmd]
+    assert any(a == 'av' or a.startswith('av>') or a.startswith('av=')
+               for a in flat), f'no av spec in the pip calls: {flat}'
+
+
+def test_shot_detect_capability_probe_imports_what_the_worker_imports():
+    """The probe and the worker must agree on the environment's contents; a
+    probe that skips av says "ready" about a worker that cannot open one file."""
+    from app import capabilities
+    assert 'av' in capabilities.CAPABILITY_IMPORTS['shot_detect']

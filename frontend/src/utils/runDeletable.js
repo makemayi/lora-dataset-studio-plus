@@ -6,9 +6,19 @@
    lineageChrome's SavesChip draws "gone" for). A run with checkpoints on disk
    (checkpoint_ready === true) is a recoverable run and is never offered for
    deletion; a run whose availability we couldn't determine (null/undefined — an
-   active run or a scan that failed) is left alone rather than guessed removable. */
+   active run or a scan that failed) is left alone rather than guessed removable.
+
+   A FULL MODEL is the case that made this rule worth stating twice. Its weights
+   are not addressed by the checkpoint columns at all: a run delivered to Hugging
+   Face only has nothing on this disk and never did, so the old rule badged it
+   "gone" and offered to remove it — for a model that exists, in a repository the
+   run record holds the only pointer to. The backend now answers `null` for it
+   (already refused above) AND names it in `dense_artifact`; this second clause
+   is what makes the refusal explicit rather than a lucky tri-state, and what
+   keeps it true if the flag ever comes back as a boolean. */
 export function isRunDeletable(node) {
-  return !!node && node.checkpoint_ready === false;
+  if (!node || node.checkpoint_ready !== false) return false;
+  return node.dense_artifact !== 'local' && node.dense_artifact !== 'hub';
 }
 
 /* Drop a run from a {nodes, edges} lineage tree WITHOUT a refetch: remove the

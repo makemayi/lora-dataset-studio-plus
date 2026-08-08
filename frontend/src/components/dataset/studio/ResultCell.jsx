@@ -8,9 +8,13 @@
  * Contrat souple (le calcul `list`/`score`/`isBest` est fait ICI, comme `renderCell`).
  */
 import ResultTile from './ResultTile';
+import { cellKeyFor } from './resultKeys';
 
 export default function ResultCell({ row, strength, variant, cellList, scoreMap, best, datasetId, onRate, onOpen, fmt }) {
-  const key = `${row.filename}|${strength}|${variant.zModel || ''}|${variant.aspect || ''}|${variant.cfg ?? ''}|${variant.steps ?? ''}|${variant.steps2 ?? ''}`;
+  // La MÊME fonction que celle qui a indexé `cellList` (cf. resultKeys) : la clé
+  // était écrite à la main des deux côtés, et un axe ajouté d'un seul côté ne
+  // produit pas d'erreur — juste des cases vides. Le contrat est testé.
+  const key = cellKeyFor(row.filename, strength, variant);
   const list = cellList.get(key);
   if (!list || !list.length) {
     return <td className="px-1 text-content-subtle text-[0.625rem] text-center">—</td>;

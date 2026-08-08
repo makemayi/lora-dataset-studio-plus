@@ -8,3 +8,22 @@ simple-lama-inpainting>=0.1.2
 # insightface 0.7.3 uses numpy's removed np.int and links numpy<2 ABI - numpy 2.x
 # import-crashes it. Cap below 2 (1.26.4 is the last with wheels for Py 3.10-3.12).
 numpy>=1.26,<2
+
+# Video lane. PyAV decodes in-process (probe, thumbnails, PTS); imageio-ffmpeg
+# ships a static ffmpeg binary so exporting works on a machine that has never
+# installed one. transnetv2-pytorch is the shot detector — MIT, weights bundled in
+# the wheel (~33 MB), so no download step and it works offline; it drags torch and
+# therefore installs into the bank-scoring environment, never the Flask venv.
+av>=13
+imageio-ffmpeg>=0.5
+transnetv2-pytorch>=1.0.5
+# Video captioning runs Qwen3-VL, and infer/video_caption_infer.py imports
+# `Qwen3VLForConditionalGeneration` — a class transformers only grew in 4.57.0
+# (huggingface/transformers PR #40795, shipped in the v4.57.0 release; the
+# Qwen/Qwen3-VL-4B-Instruct card asks for transformers==4.57.0). Without a floor
+# here the ✨ Score step installed a BARE `pip install transformers`, which is a
+# no-op on a machine that already carried an older one ("already satisfied") — so
+# the caption worker died on ImportError and re-clicking the step changed nothing.
+# With the floor, that same click is the repair. Installs into the bank-scoring
+# venv, not the Flask one (see _BANK_SCORING_PKGS in app/setup_installer.py).
+transformers>=4.57

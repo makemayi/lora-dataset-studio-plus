@@ -113,6 +113,38 @@ def test_run_pull_parses_progress_and_success(app, monkeypatch):
     assert cleared['n'] == 1
 
 
+def test_run_pull_bounds_the_read_so_a_dead_stream_cannot_hang_forever(app, monkeypatch):
+    """Reported by socrasteeze (GitHub #20): the pull used timeout=(10, None).
+
+    The read budget applies per chunk, and a pull streams progress lines the
+    whole way, so a bounded read never cuts a healthy download short — while an
+    unbounded one left the worker thread (and the pull state it owns) stuck
+    until the app restarted if the daemon went away mid-transfer.
+    """
+    from app.services import ollama_control
+
+    seen = {}
+
+    class _Resp:
+        status_code = 200
+        def iter_lines(self):
+            raise ollama_control.requests.exceptions.ReadTimeout('no data for 300s')
+
+    def _post(*a, **kwargs):
+        seen.update(kwargs)
+        return _Resp()
+
+    monkeypatch.setattr(ollama_control.requests, 'post', _post)
+    with app.app_context():
+        ollama_control._pull = {'state': 'running', 'model': 'm', 'progress': None,
+                                'log': [], 'error': None}
+        ollama_control._run_pull('m')
+    assert seen['timeout'] == (10, 300)
+    # And the stall lands as a reported error instead of a thread that never returns.
+    snap = ollama_control.pull_status()
+    assert snap['state'] == 'error' and 'no data for 300s' in snap['error']
+
+
 def test_run_pull_surfaces_ollama_error(app, monkeypatch):
     from app.services import ollama_control
     import json as _json

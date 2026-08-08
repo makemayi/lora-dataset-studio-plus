@@ -52,6 +52,33 @@ def test_register_allocates_versions_by_fingerprint(app, ds_with_images):
         assert rk.version == 1 and rk.source == 'cloud' and rk.cloud_run_id == 7
 
 
+def test_short_caption_only_edit_allocates_a_new_dataset_version(
+        app, ds_with_images):
+    """The caption variant exported to ai-toolkit is provenance, not decoration."""
+    from app.extensions import db
+    from app.models import FaceDatasetImage
+    from app.services import checkpoint_registry as reg
+
+    ds_id, ids = ds_with_images
+    with app.app_context():
+        image = db.session.get(FaceDatasetImage, ids[0])
+        image.caption_short = 'short version one'
+        db.session.commit()
+        first = reg.register_launch(
+            LOCAL_USER, ds_id, 'zimage', 'local', steps=1000)
+
+        image.caption_short = 'short version two'
+        db.session.commit()
+        second = reg.register_launch(
+            LOCAL_USER, ds_id, 'zimage', 'local', steps=1000)
+
+        assert first.version == 1
+        assert second.version == 2
+        assert reg.manifest_diff(
+            json.loads(first.manifest), json.loads(second.manifest)
+        )['captions_changed'] == 1
+
+
 def test_manifest_diff_counts_changes():
     from app.services import checkpoint_registry as reg
     old = [[1, 'aaaa', 'f1'], [2, 'bbbb', 'f2'], [3, 'cccc', 'f3']]

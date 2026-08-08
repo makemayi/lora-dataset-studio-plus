@@ -24,6 +24,10 @@
 // Explicit extension: this module is imported by `node --test` (which does not
 // resolve extensionless specifiers) as well as by Vite.
 import { famLabel } from './familyLabels.js';
+import {
+  blendCombinations, blendConfigCount, combineBlocker, stackKey, stackWeight,
+  stackWeightList, stackWeightSet,
+} from '../components/dataset/studio/loraStack.js';
 
 /** Stable identity of one pick. The canvas holds several datasets at once, so a
  *  (record, step) pair is not enough on its own to be unique across the board —
@@ -66,15 +70,100 @@ export function canvasFamily(selection) {
   return fams.length === 1 ? fams[0] : null;
 }
 
+/* 🧬 BLEND — the board's side of the Test Studio's Blend mode.
+   ---------------------------------------------------------------------------
+   Compare (the default, and everything above) runs one pass PER ticked
+   checkpoint. Blend loads them ALL into a single generation, each at its own
+   weight, with every dataset's trigger word injected into the prompt.
+
+   None of that logic is re-written here. The weights, their 0..2 clamp and the
+   "at least two LoRAs, all of one family" rule are the Test Studio's, imported
+   from studio/loraStack.js — one implementation, so the two screens cannot
+   disagree about what a blend is. What this section adds is the shim between
+   the board's camelCase picks and the shape that module reads.
+
+   The shim is built so that `stackKey` of a shimmed pick IS
+   `canvasCheckpointKey` of that pick: a weight is keyed on the PILL, never on
+   the deployed filename. That filename is null while a checkpoint is on disk
+   only, and it APPEARS when "Deploy, then generate" runs — keying on it would
+   have silently reset every slider the user moved before launching. */
+
+/** The picks, in the shape studio/loraStack.js reads. */
+export function canvasStackSelection(selection) {
+  return (selection || []).map((e) => ({
+    dataset_id: e.datasetId,
+    checkpoint: `${e.recordId}:${e.step}`,
+    family: e.family,
+    // Le nom que `blendComboLabel` mettra sur la cellule. Le Test Studio y met un
+    // nom de LoRA, le board y met sa lane et sa pastille — d'où le champ ici
+    // plutôt qu'un second fabricant d'étiquettes.
+    lora_label: `${e.datasetName || `Dataset ${e.datasetId}`} #${e.recordId}·${e.step}`,
+  }));
+}
+
+/** Les poids COCHÉS d'une pastille (balayage 🧬), et ceux qu'elle balayera
+ *  réellement — cases si elle en a, curseur sinon. La règle est celle du Test
+ *  Studio, importée, pas réécrite. */
+export const canvasStackWeightSet = (sets, entry) =>
+  stackWeightSet(sets, canvasStackSelection([entry])[0]);
+export const canvasStackWeightList = (weights, sets, entry) =>
+  stackWeightList(weights, sets, canvasStackSelection([entry])[0]);
+
+/** Combien de combinaisons ce board va lancer, et lesquelles. */
+export const canvasBlendConfigCount = (selection, opts = {}) =>
+  blendConfigCount(canvasStackSelection(selection), opts);
+export const canvasBlendCombinations = (selection, opts = {}) =>
+  blendCombinations(canvasStackSelection(selection), opts);
+
+/** Weight-map key of ONE pick — equal to `canvasCheckpointKey` by construction. */
+export const canvasStackKey = (entry) => stackKey(canvasStackSelection([entry])[0]);
+
+/** This pick's weight in the blend: the Studio's clamp, 1 by default. */
+export const canvasStackWeight = (weights, entry) =>
+  stackWeight(weights, canvasStackSelection([entry])[0]);
+
+/** Why this selection cannot be blended, or null. The Studio's own rule. */
+export const canvasBlendBlocker = (selection) =>
+  combineBlocker(canvasStackSelection(selection));
+
+/** The trigger words a blend will prepend to the prompt, in pick order and
+ *  de-duplicated case-insensitively — the same collapse the backend does, so
+ *  what the panel promises is what the prompt gets. */
+export function canvasStackTriggers(selection) {
+  const out = [];
+  for (const e of (selection || [])) {
+    const t = String(e.triggerWord || '').trim();
+    if (t && !out.some((v) => v.toLowerCase() === t.toLowerCase())) out.push(t);
+  }
+  return out;
+}
+
+/** Picks that will load with no trigger word of their own. Shown, not hidden:
+ *  a blend member whose dataset never got a trigger contributes its weights but
+ *  nothing the prompt can call on, and that is worth knowing before the GPU. */
+export const canvasStackWithoutTrigger = (selection) =>
+  (selection || []).filter((e) => !String(e.triggerWord || '').trim());
+
 /** The `selections` array POST /api/studio/run expects — plus the exact origin
  *  of each pick, which the canvas KNOWS (the user clicked that pill) and which
  *  the engine stamps on every image it produces. Only DEPLOYED picks make it in:
- *  a checkpoint with no LoRA in ComfyUI has nothing to load. */
-export function canvasRunSelections(selection) {
+ *  a checkpoint with no LoRA in ComfyUI has nothing to load.
+ *
+ *  In a 🧬 blend each entry also carries its `weight`; in Compare the body stays
+ *  byte for byte what it always was, so existing runs change in nothing. */
+export function canvasRunSelections(selection, { blend = false, weights = {}, sets = {} } = {}) {
   return (selection || [])
     .filter((e) => e.deployed && e.filename)
-    .map((e) => ({ dataset_id: e.datasetId, checkpoint: e.filename,
-      record_id: e.recordId, step: e.step }));
+    .map((e) => ({ dataset_id: e.datasetId,
+      checkpoint: e.filename,
+      record_id: e.recordId,
+      step: e.step,
+      ...(blend ? {
+        // Comme le Studio : `weight` scalaire EN PLUS de la liste, pour qu'un
+        // backend qui ignore encore le balayage rende une image sensée.
+        weight: canvasStackWeightList(weights, sets, e)[0],
+        weights: canvasStackWeightList(weights, sets, e),
+      } : {}) }));
 }
 
 /** The checkpoints that would have to be deployed into ComfyUI before this

@@ -335,7 +335,10 @@ def test_studio_base_models_krea_type_returns_empty_list(client):
     # front cache le sélecteur (le UNET câblé du workflow reste le seul choix).
     resp = client.get('/api/studio/base-models?type=krea')
     assert resp.status_code == 200
-    assert resp.get_json() == {'models': []}
+    # `models` is asserted on its own: the response also carries the family's
+    # `axes` ladders (CFG/steps), which the multi-LoRA comparison has no dataset
+    # to read them from — see test_studio_multilora_steps.py.
+    assert resp.get_json()['models'] == []
 
 
 def test_studio_base_models_krea_lists_official_then_alternatives(client, monkeypatch):
@@ -346,10 +349,10 @@ def test_studio_base_models_krea_lists_official_then_alternatives(client, monkey
                         lambda: ['krea\\my_custom_krea.safetensors'])
     resp = client.get('/api/studio/base-models?type=krea')
     assert resp.status_code == 200
-    assert resp.get_json() == {'models': [
+    assert resp.get_json()['models'] == [
         {'filename': '', 'label': 'Official – Krea 2 Turbo'},
         {'filename': 'krea\\my_custom_krea.safetensors', 'label': 'my_custom_krea'},
-    ]}
+    ]
 
 
 # --- per-dataset lora-test/status --------------------------------------------

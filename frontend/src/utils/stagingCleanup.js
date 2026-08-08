@@ -17,6 +17,13 @@ const CLOUD_ACTIVE_STATES = ['preparing', 'provisioning', 'uploading', 'training
 export const TRASH_REMINDER =
   'Nothing is deleted and no disk space is reclaimed yet — empty the trash in Settings to actually free it.';
 
+/* The sentence that was missing, and that cost checkpoints: the old cleanup
+   advertised "checkpoint duplicates already imported" and trashed the whole
+   folder — a checkpoint never deployed to ComfyUI had no duplicate. Cleaning now
+   leaves every .safetensors alone, in the checkpoint store, and says so. */
+export const CHECKPOINTS_KEPT =
+  'Trained checkpoints are NOT touched — they live in the checkpoint store (Settings › Storage).';
+
 /* Why this run's staging must NOT be cleaned, or null when it is fair game.
    Mirrors backend staging_spare_reason() and adds the front-only cases: a LOCAL
    run has no cloud staging at all, and a row with no cloud run id can't be
@@ -24,6 +31,11 @@ export const TRASH_REMINDER =
 export function stagingSpareReason(run) {
   if (!run) return 'unknown run';
   if (run.source !== 'cloud' || run.run_id == null) return 'not a cloud run — no staging folder';
+  // The server's own verdict wins whenever it sent one: a kept pod stops being
+  // spared once its recovery window has CLOSED, and only the server knows when
+  // that happened. `null` from the server is a real answer ("fair game"), so the
+  // key's presence is what is tested, not its truthiness.
+  if (run.staging_spare_reason !== undefined) return run.staging_spare_reason || null;
   if (CLOUD_ACTIVE_STATES.includes(run.status)) {
     return 'this run is still active — its staging is being written to';
   }
@@ -69,11 +81,12 @@ export function runStagingCleanup(run, sizes = {}) {
     reason: null,
     bytes,
     size,
-    title: `Move ${runLabel(run)}'s staging folder (${size}) to the trash — the dataset copy, samples and checkpoint duplicates this finished run left on disk`,
+    title: `Move ${runLabel(run)}'s dataset copy, samples and logs (${size}) to the trash — its checkpoints are kept`,
     confirmMessage: [
-      `Move ${runLabel(run)}'s staging folder (${size}) to the trash?`,
+      `Clean ${runLabel(run)}'s staging folder (${size})?`,
       '',
-      'It holds this finished run\'s dataset copy, its samples and its checkpoint files.',
+      'This moves the dataset copy, the sample images and the logs to the trash.',
+      CHECKPOINTS_KEPT,
       TRASH_REMINDER,
     ].join('\n'),
   };
@@ -86,7 +99,7 @@ export function purgeRunResultMessage(run, result) {
     return { kind: 'info', text: `${runLabel(run)} had no staging folder left — nothing to clean.` };
   }
   return { kind: 'success',
-    text: `${runLabel(run)}: staging folder${size ? ` (${size})` : ''} moved to the trash. ${TRASH_REMINDER}` };
+    text: `${runLabel(run)}: dataset copy, samples and logs${size ? ` (${size})` : ''} moved to the trash — checkpoints kept. ${TRASH_REMINDER}` };
 }
 
 /* The toast after the GLOBAL 🧹. Distinguishes the three outcomes the old
@@ -94,14 +107,23 @@ export function purgeRunResultMessage(run, result) {
    clean, a real cleanup, and "there WAS something but nothing could be moved". */
 export function purgeAllResultMessage(result) {
   const purged = Number(result?.purged_runs) || 0;
+  // Folders on disk that NO run points at. The cleanup used to ignore them and
+  // answer "already clean" while tens of GB sat right there, which is exactly
+  // what made the button look broken. They are named, never purged from here.
+  const orphans = Array.isArray(result?.orphans) ? result.orphans : [];
+  const orphanNote = orphans.length
+    ? ` ${orphans.length} run folder${orphans.length > 1 ? 's' : ''} nothing points at`
+      + `${formatStagingSize(result?.orphan_bytes) ? ` (${formatStagingSize(result.orphan_bytes)})` : ''}`
+      + ' — clean them from Settings › Storage.'
+    : '';
   if (purged > 0) {
     const size = formatStagingSize(result?.freed_bytes) || '0 KB';
     return { kind: 'success',
-      text: `Cleaned ${purged} run${purged > 1 ? 's' : ''} — ${size} moved to the trash. ${TRASH_REMINDER}` };
+      text: `Cleaned ${purged} run${purged > 1 ? 's' : ''} — ${size} moved to the trash, checkpoints kept. ${TRASH_REMINDER}${orphanNote}` };
   }
   if (result?.already_clean) {
     return { kind: 'info',
-      text: 'Nothing to clean — no finished run still has a staging folder on disk.' };
+      text: `Nothing to clean — no finished run has a dataset copy, samples or logs left on disk.${orphanNote}` };
   }
   return { kind: 'error',
     text: 'Could not clean any staging folder — files may be in use. Check the app log and retry.' };

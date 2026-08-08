@@ -110,6 +110,33 @@ def test_the_rented_pods_address_is_what_gets_banned(ct, app):
         assert entry['ip'] == SHARED_IP
 
 
+def test_a_run_records_which_trainer_it_actually_booted(ct, app):
+    """Nothing used to record which ai-toolkit produced a set of weights. The
+    default launch path is a vast.ai template published by a third party, so the
+    image named in local config is what we ASKED for, not necessarily what ran —
+    and for a dense run that difference decides whether a recipe setting was
+    honoured or silently ignored. The fact now travels with the run."""
+    with app.app_context():
+        run = ct.CloudTrainingRun(
+            dataset_id=1, status='training', job_name='j2', vast_label='lds-2',
+            train_params=json.dumps({'machine_id': BAD_MACHINE}))
+        ct.db.session.add(run)
+        ct.db.session.commit()
+
+        ct._stamp_pod_image(run, 'vastai/ostris-ai-toolkit:abc1234-cuda-12.9')
+        assert json.loads(run.train_params)['pod_image'] == \
+            'vastai/ostris-ai-toolkit:abc1234-cuda-12.9'
+        # Re-stamping the same value is a no-op, and it never clobbers the
+        # bookkeeping already on the row.
+        ct._stamp_pod_image(run, 'vastai/ostris-ai-toolkit:abc1234-cuda-12.9')
+        assert json.loads(run.train_params)['machine_id'] == BAD_MACHINE
+
+        # A pod that reports a DIFFERENT image than the one we asked for is
+        # exactly the case worth catching, so the newer value wins.
+        ct._stamp_pod_image(run, 'vastai/ostris-ai-toolkit:zzz9999-cuda-13.0')
+        assert json.loads(run.train_params)['pod_image'].endswith('zzz9999-cuda-13.0')
+
+
 def test_provision_stamps_every_identity_the_offer_carried(ct, app, seeded_dataset,
                                                            monkeypatch):
     from test_cloud_training_launch import _fake_export

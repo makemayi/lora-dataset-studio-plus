@@ -174,10 +174,10 @@ test('every threshold belongs to a declared group and every group has members', 
   for (const g of THRESHOLD_GROUPS) {
     assert.ok(thresholdsInGroup(g.id).length > 0, `${g.id} is not empty`);
   }
-  // The often-retuned groups stay open; the narrower ones fold. Two open groups
-  // is what keeps this readable on a 400 px screen.
-  assert.deepEqual(THRESHOLD_GROUPS.filter((g) => g.defaultOpen).map((g) => g.id),
-    ['quality', 'duplicates']);
+  // Opening the parent "Filter thresholds" panel reveals the group headings,
+  // never all their controls at once. Every inner group starts folded.
+  assert.equal(THRESHOLD_GROUPS.filter((g) => g.defaultOpen).length, 0,
+    'opening Filter thresholds must leave every inner group folded');
 });
 
 test('every threshold says when it takes effect, using a declared phrase', () => {
@@ -240,9 +240,20 @@ test('a non-instant threshold offers to run the pass that would apply it', () =>
   // The click goes through runPass(), which brackets onRunPass with the two
   // things a 202 cannot provide on its own: the "starting/running" state and
   // the figures the pass produced.
-  assert.match(panel, /onRun=\{\(\) => runPass\(rerun\.endpoint\)\}/);
-  assert.match(panel, /await onRunPass\?\.\(endpoint\)/);
-  assert.match(ws, /onRunPass=\{\(endpoint\)/);
+  assert.match(panel, /onRun=\{\(\) => runPass\(rerun\.endpoint, rerun\.body\)\}/);
+  assert.match(panel, /await onRunPass\?\.\(endpoint, body\)/);
+  assert.match(ws, /onRunPass=\{\(endpoint, body\)/);
+  // And the INTENT travels with it. "↻ Re-group duplicates" posts to the scan
+  // route, whose own pool is empty on an already-scanned bank — the quality scan
+  // only re-groups when the hashes it stored actually moved (re-grouping 50 000
+  // unchanged hashes at the tail of a scan that had 2 images to look at is what
+  // took the app away for two minutes). Drop this body and the button becomes a
+  // no-op that reports success.
+  assert.deepEqual(PASS_RERUN.scan.body, { regroup: true });
+  assert.match(
+    fs.readFileSync(new URL('../../../../backend/app/routes/bank.py', import.meta.url), 'utf8'),
+    /regroup=bool\(data\.get\('regroup'\)\)/,
+    'the scan route must read the regroup intent out of the body');
 });
 
 test('a re-run button cannot be pressed while a pass owns the bank', () => {

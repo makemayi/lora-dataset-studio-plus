@@ -389,6 +389,57 @@ def test_enqueue_actually_chains_the_resolved_rows_into_the_queued_workflow(
     assert 'gen_lora_3' not in wf   # the missing row never got a node
 
 
+def test_enqueue_stages_the_extra_angle_and_wires_it_into_the_queued_workflow(
+        app, tmp_path, monkeypatch):
+    """Lives in this file because it needs the only harness that runs the REAL
+    `enqueue_krea_edit` body. Same class of guard as the rows above: the graph
+    tests would stay green if the line threading the extra reference through the
+    enqueue were deleted, and the feature would become a silent no-op."""
+    from app.services import krea_edit_helper as keh
+    with app.app_context():
+        _comfy_with_loras(tmp_path)
+        _krea_ready_for_real_enqueue(monkeypatch, keh)
+        src, angle = tmp_path / 'src.png', tmp_path / 'angle.png'
+        Image.new('RGB', (64, 64), (10, 20, 30)).save(src, 'PNG')
+        Image.new('RGB', (64, 64), (40, 50, 60)).save(angle, 'PNG')
+        seen = {}
+        monkeypatch.setattr(keh.queue_manager, 'add_job',
+                            lambda **kw: (seen.update(kw), kw['job_id'])[1])
+        keh.enqueue_krea_edit(
+            user_id='local', source_filename='src.png', source_path=str(src),
+            edit_prompt='hi', extra_ref_paths=[str(angle), str(tmp_path / 'nope.png')])
+    wf = seen['workflow_data']
+    staged = seen['metadata']['staged_inputs']
+    extra_id = next(k for k, n in wf.items()
+                    if n['class_type'] == 'LoadImage' and n['inputs']['image'] != wf['5']['inputs']['image'])
+    assert wf['7']['inputs']['source_image_b'] == [extra_id, 0]
+    # BOTH staged files are declared, or the extra angle would outlive the job in
+    # ComfyUI's input folder.
+    assert len(staged) == 2 and wf[extra_id]['inputs']['image'] in staged
+
+
+def test_an_extra_angle_that_vanished_never_fails_the_edit(app, tmp_path, monkeypatch):
+    """An optional angle deleted between two clicks must degrade to the ordinary
+    single-reference render, not raise: the primary reference is what the user
+    asked to edit."""
+    from app.services import krea_edit_helper as keh
+    with app.app_context():
+        _comfy_with_loras(tmp_path)
+        _krea_ready_for_real_enqueue(monkeypatch, keh)
+        src = tmp_path / 'src.png'
+        Image.new('RGB', (64, 64), (10, 20, 30)).save(src, 'PNG')
+        seen = {}
+        monkeypatch.setattr(keh.queue_manager, 'add_job',
+                            lambda **kw: (seen.update(kw), kw['job_id'])[1])
+        keh.enqueue_krea_edit(
+            user_id='local', source_filename='src.png', source_path=str(src),
+            edit_prompt='hi', extra_ref_paths=[str(tmp_path / 'gone.png')])
+    wf = seen['workflow_data']
+    assert 'source_image_b' not in wf['7']['inputs']
+    assert sum(1 for n in wf.values() if n['class_type'] == 'LoadImage') == 1
+    assert seen['metadata']['staged_inputs'] == [wf['5']['inputs']['image']]
+
+
 def test_regenerate_applies_the_krea_preset_by_name_not_by_rows(app, tmp_path, monkeypatch):
     """Regenerate resolves the preset from its NAME through the real chain (name
     -> config rows -> existence-filtered rows -> graph). A caller that instead

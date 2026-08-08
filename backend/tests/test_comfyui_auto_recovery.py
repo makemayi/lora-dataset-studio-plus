@@ -404,6 +404,135 @@ def test_global_resolve_refuses_while_comfyui_is_unreachable(app, client):
         assert queue_manager.has_comfyui_stalled_barrier()
 
 
+# --- the connection the barrier was being blamed for -------------------------
+# jerkyjunky, Discord, on a fresh install: ComfyUI URL and folder auto-detected,
+# Klein files found, and the very first Generate answered "A paused comfyui job
+# is blocking new generation" — while his ComfyUI logged NO incoming connection
+# at all. He asked whether LDS needed a special flag, because the message left
+# him nothing else to suspect. The barrier was right to hold; the sentence was
+# the bug. Nothing below weakens the barrier: it only makes the app say which of
+# the three situations it is actually in.
+
+def test_the_probe_publishes_what_comfyui_answered_not_only_what_it_resolved(app):
+    """The tri-state was being flattened. False (ComfyUI answered and still has
+    the job) and None (no readable answer at all) both meant "no proof" — and
+    only one of them means the two programs are in touch."""
+    from app.job_queue import (COMFYUI_LINK_REACHABLE, COMFYUI_LINK_UNREACHABLE,
+                               probe_comfyui_barrier)
+    with app.app_context():
+        _stalled_prompt_barrier(app)
+        with patch('app.utils.comfyui.comfyui_prompt_is_absent', return_value=None):
+            probe = probe_comfyui_barrier()
+        assert probe.resolved is None and probe.link == COMFYUI_LINK_UNREACHABLE
+        with patch('app.utils.comfyui.comfyui_prompt_is_absent', return_value=False):
+            probe = probe_comfyui_barrier()
+        assert probe.resolved is None and probe.link == COMFYUI_LINK_REACHABLE
+        # And the provable clear still happens, with the same answer riding out.
+        with _comfyui_forgot_the_prompt():
+            probe = probe_comfyui_barrier()
+        assert probe.resolved is not None and probe.link == COMFYUI_LINK_REACHABLE
+
+
+def test_a_barrier_with_no_prompt_id_reports_no_link_verdict_rather_than_a_guess(app):
+    """Nothing was asked, so nothing is claimed. "Not asked" must never be
+    published as "reachable" — that is exactly how the wrong story gets told."""
+    from app.job_queue import probe_comfyui_barrier
+    with app.app_context():
+        _stalled_unknown_submit_barrier(app)
+        probe = probe_comfyui_barrier()
+        assert probe.resolved is None and probe.link is None
+
+
+def test_an_unreachable_comfyui_is_named_instead_of_blamed_on_a_paused_job(app, client):
+    """(c) The lived case: the state says the link is down, and at which address."""
+    with app.app_context():
+        _stalled_prompt_barrier(app)
+    with patch('app.utils.comfyui.comfyui_prompt_is_absent', return_value=None):
+        recovery = client.get('/api/system/comfyui-recovery').get_json()['recovery']
+    assert recovery['connection']['reachable'] is False
+    assert recovery['connection']['status'] == 'unreachable'
+    assert recovery['connection']['url']          # the address LDS knocks at
+    # The barrier itself is untouched: only what the app SAYS about it changed.
+    assert recovery['kind'] == 'prompt' and recovery['can_confirm_restart'] is True
+
+
+def test_a_reachable_comfyui_that_still_has_the_job_keeps_the_paused_job_story(app, client):
+    """(a) ComfyUI answered and still lists the prompt — the job is alive, and
+    that answer is the reachability proof; no second probe is made for it."""
+    with app.app_context():
+        _stalled_prompt_barrier(app)
+    with patch('app.utils.comfyui.comfyui_prompt_is_absent', return_value=False), \
+         patch('app.capabilities.probe_comfyui') as shared_probe:
+        recovery = client.get('/api/system/comfyui-recovery').get_json()['recovery']
+    assert not shared_probe.called
+    assert recovery['connection'] == {'reachable': True, 'status': 'ok',
+                                      'url': recovery['connection']['url'], 'hint': None}
+    assert recovery['kind'] == 'prompt' and recovery['can_confirm_restart'] is True
+
+
+def test_an_unconfirmed_submission_reads_the_link_from_the_shared_probe(app, client):
+    """jerkyjunky's exact shape: a `/prompt` whose outcome was never confirmed,
+    so there is no id to ask /queue about. The app's own ComfyUI reachability
+    read answers instead — the same one the engine cards and the enqueue 409
+    use, so two surfaces cannot tell the user two different stories."""
+    with app.app_context():
+        _stalled_unknown_submit_barrier(app)
+    with patch('app.capabilities.probe_comfyui',
+               return_value={'ok': False, 'status': 'unreachable',
+                             'hint': 'No answer from ComfyUI — nothing is listening '
+                                     'at that address.'}) as shared_probe:
+        recovery = client.get('/api/system/comfyui-recovery').get_json()['recovery']
+    assert shared_probe.called
+    assert recovery['kind'] == 'unknown_submit'
+    assert recovery['connection']['reachable'] is False
+    assert 'nothing is listening' in recovery['connection']['hint']
+
+
+def test_a_slow_comfyui_is_not_reported_as_a_broken_address(app, client):
+    """It accepted the connection; it is enumerating itself. Sending that user
+    to re-check a correct URL is the mistake `comfyui_down_message` exists for."""
+    with app.app_context():
+        _stalled_unknown_submit_barrier(app)
+    with patch('app.capabilities.probe_comfyui',
+               return_value={'ok': False, 'status': 'slow',
+                             'hint': 'ComfyUI took more than 3s to answer.'}):
+        recovery = client.get('/api/system/comfyui-recovery').get_json()['recovery']
+    assert recovery['connection']['reachable'] is True
+
+
+def test_a_healthy_app_never_probes_comfyui_for_this_banner(app, client):
+    """No barrier, no question. This route is polled forever by every open tab."""
+    with patch('app.capabilities.probe_comfyui') as shared_probe:
+        payload = client.get('/api/system/comfyui-recovery').get_json()
+    assert payload['recovery'] is None and not shared_probe.called
+
+
+def test_the_address_the_banner_shows_carries_no_secret(app, client):
+    """A blocked user screenshots this banner into a public help thread. A
+    ComfyUI behind a reverse proxy is legitimately `user:pass@host` / `?token=`."""
+    import app.config as app_config
+    from app.utils.redact import redact_url_secrets
+    assert redact_url_secrets(
+        'http://admin:hunter2@comfy.lan:8188/?token=abcdefgh12345678'
+    ) == 'http://comfy.lan:8188/'
+
+    real_get = app_config.get
+
+    def _secret_url(dotted, default=None):
+        if dotted == 'comfyui.api_url':
+            return 'http://admin:hunter2@comfy.lan:8188/?token=abcdefgh12345678'
+        return real_get(dotted, default)
+
+    with app.app_context():
+        _stalled_prompt_barrier(app)
+    with patch('app.config.get', side_effect=_secret_url), \
+         patch('app.utils.comfyui.comfyui_prompt_is_absent', return_value=None):
+        recovery = client.get('/api/system/comfyui-recovery').get_json()['recovery']
+    shown = recovery['connection']['url']
+    assert 'comfy.lan:8188' in shown
+    assert 'hunter2' not in shown and 'admin' not in shown and 'token' not in shown
+
+
 def test_global_resolve_refuses_a_prompt_comfyui_still_reports(app, client):
     """Confirmation cannot override evidence: the prompt is still queued."""
     from app.job_queue import queue_manager

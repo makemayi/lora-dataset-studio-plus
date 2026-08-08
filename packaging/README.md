@@ -24,6 +24,31 @@ The release workflow runs the same script after the backend/frontend test suites
 It then runs `scripts/check_release_artifacts.py` against the ZIP before uploading
 the explicitly named archive. GitHub also supplies its normal source-code archives.
 
+## What the archive check looks for
+
+`scripts/check_release_artifacts.py <zip>` reads every textual member of the ZIP
+and reports machine paths, personal e-mail addresses, API tokens and tailnet
+addresses, using the same pattern table as `backend/tests/test_no_personal_data.py`
+(`scripts/privacy_patterns.py` — one table, imported twice, never copied).
+
+It is aimed at the archive rather than the repo on purpose. The test walks
+`git ls-files` and skips `frontend/dist/`, so untracked files, ignored files and
+the compiled bundle are invisible to it — that is how `backend/.pytest_cache/`
+reached a published release. The ZIP has no such blind spot.
+
+**False positives.** A guard that fails a release over a placeholder gets turned
+off, so tolerated shapes are handled by name: UI placeholders such as
+`C:\path\to\...` (no `\Users\` segment, so nothing fires), `…\Users\<account>`
+and documented stand-in accounts, RFC 2606 documentation domains, and
+token-shaped strings that say they are fake. If a real release ever fails, judge
+the string first, then add an entry to `ARCHIVE_EXCEPTIONS` at the top of the
+script — member glob + label + exact text, with a comment saying why. It is
+empty today, and a full build of the current bundle scans all 189 files clean.
+
+The forbidden-*name* half needs a list kept out of the repo (`LDS_PRIVACY_NAMES`
+or a gitignored `.privacy-names`). Without one the script says so out loud
+rather than passing quietly.
+
 ## Release policy
 
 - Publish archives/source only; do not attach an executable launcher.

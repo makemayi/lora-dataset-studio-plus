@@ -52,8 +52,11 @@
    them. Nothing is ever stacked quietly. */
 
 import { CARD_W } from './lineageGraph.js';
-import { nextGroupId } from './canvasImageGroups.js';
-import { IMG_DEFAULT, IMG_MAX, IMG_MIN } from './canvasImageNodes.js';
+import { layoutImageNodes, nextGroupId, occupiedBox } from './canvasImageGroups.js';
+import { groupBarMaxHeight } from './canvasNodeChrome.js';
+import {
+  IMG_DEFAULT, IMG_MAX, IMG_MIN, slideBelow, spotBesideCard,
+} from './canvasImageNodes.js';
 
 /* How many pictures one click may put down. Not a technical limit — the band
    would happily hold ten times that — but an editorial one: past a few dozen
@@ -93,6 +96,62 @@ const rectsOverlap = (a, b) => (
 );
 
 /**
+ * Grouping turns several independently placed squares into a WIDE rendered
+ * strip whose title bar also occupies space above it. The source-column placer
+ * cannot see that future footprint: after its sixth row wraps, a new strip's
+ * anchor may sit exactly under the right half of an earlier strip.
+ *
+ * Keep every automatic group at its preferred x, then move only a conflicting
+ * anchor DOWN until its real `occupiedBox` is free. Down is deliberate: the
+ * batch band already sits below the lineage tree, so it preserves checkpoint
+ * order and cannot cross back into the cards. Existing nodes and fresh singles
+ * are reserved too. Only fresh rows are changed; no persisted/manual group is
+ * ever reflowed by a later Pin all gesture.
+ */
+function separateFreshGroupFootprints(nodes, rows, groupIds, graph = null) {
+  const targets = groupIds instanceof Set ? groupIds : new Set(groupIds || []);
+  if (!targets.size) return rows;
+  const freshIds = new Set((rows || []).map((row) => Number(row.imageId)));
+  const existing = (nodes || []).filter((node) => node?.visible !== false
+    && !freshIds.has(Number(node?.imageId)));
+  // Cards/pills are not image nodes and cannot be reconstructed here. The
+  // caller therefore passes the lane graph it actually placed against; this is
+  // load-bearing for remembered positions, which can each be free while the
+  // WIDE strip they are about to form reaches back across a card.
+  const reserved = [
+    ...boardObstacles(graph, []),
+    ...layoutImageNodes(existing).map(occupiedBox),
+  ];
+  const layout = layoutImageNodes(rows || []);
+
+  // Singles keep the exact spots the placer/remembered geometry chose. Groups
+  // move around them, never the other way round.
+  for (const row of layout) {
+    if (row.kind !== 'group' || !targets.has(row.groupId)) reserved.push(occupiedBox(row));
+  }
+
+  const groups = layout.filter((row) => row.kind === 'group' && targets.has(row.groupId))
+    .sort((a, b) => a.y - b.y || a.x - b.x
+      || (a.members[0]?.node.imageId ?? 0) - (b.members[0]?.node.imageId ?? 0));
+  const rowById = new Map((rows || []).map((row) => [Number(row.imageId), row]));
+  for (const group of groups) {
+    const anchor = rowById.get(Number(group.members[0]?.node.imageId));
+    if (!anchor) continue;
+    let footprint = occupiedBox(group);
+    while (true) {
+      const hits = reserved.filter((box) => rectsOverlap(footprint, box));
+      if (!hits.length) break;
+      const nextTop = Math.max(...hits.map((box) => box.y + box.h)) + TILE_GAP;
+      const dy = nextTop - footprint.y;
+      anchor.y += dy;
+      footprint = { ...footprint, y: footprint.y + dy };
+    }
+    reserved.push(footprint);
+  }
+  return rows;
+}
+
+/**
  * Everything already occupying the lane, as plain rectangles.
  *
  * A run card and its wrapped checkpoint pills are ONE rectangle: `cellH` is the
@@ -121,23 +180,36 @@ export function boardObstacles(graph, imageNodes) {
 const sourceKey = (img) => `${img?.record_id ?? '?'}:${img?.step ?? '?'}`;
 
 /**
- * WHICH GENERATION made a picture — the identity two lots must never share.
+ * WHICH GENERATION + PROMPT made a picture — the identity two grids must never
+ * share.
  *
  * `lora_test_image.run_id` already groups every cell of one launch (it is what
- * the Test Studio resumes a grid from); the checkpoint gallery now publishes
- * it. Without it, "same checkpoint" was the only thing a strip could be keyed
- * on, so a second run fired at the same checkpoint had its pictures appended to
- * the first run's strip — the two runs read as one lot, which is precisely what
- * a board built to COMPARE runs must never do.
+ * the Test Studio resumes a run from), while `prompt` identifies one grid
+ * INSIDE a multi-prompt launch. The checkpoint gallery publishes both. A key
+ * made from `run_id` alone turns all prompts selected for one launch into one
+ * strip; a key made from `prompt` alone joins separate launches. The pair is
+ * the boundary the Canvas actually needs.
  *
  * An image made before that column was backfilled carries no run id and falls
  * back to its checkpoint, so a board that predates this draws exactly what it
  * drew before rather than silently regrouping itself.
  */
-export function imageBatchKey(value) {
+const normalPrompt = (value) => String(value ?? '').trim().replace(/\s+/g, ' ');
+
+const runPromptKey = (value) => {
   const image = value?.image || value;
   const runId = image?.run_id;
-  if (runId != null && String(runId) !== '') return `run:${String(runId)}`;
+  if (runId == null || String(runId) === '') return null;
+  // JSON, not a delimiter: prompts are free text and may contain any separator
+  // we could choose. Normalising whitespace makes the key match what the UI
+  // shows as one prompt while preserving meaningful text and case.
+  return `run:${JSON.stringify([String(runId), normalPrompt(image?.prompt)])}`;
+};
+
+export function imageBatchKey(value) {
+  const image = value?.image || value;
+  const runKey = runPromptKey(image);
+  if (runKey) return runKey;
   if (image?.record_id == null || image?.step == null) return null;
   return `ckpt:${String(image.record_id)}:${String(image.step)}`;
 }
@@ -166,12 +238,12 @@ export function byTrainingOrder(a, b) {
 }
 
 /** Turn freshly pinned images into (or append them to) one strip per GENERATION
- * RUN (imageBatchKey) — not per checkpoint. Pinning a picture from a gallery
- * joins the strip of the lot it belongs to; a picture from a LATER run of the
- * same checkpoint starts its own. Manual mixed groups are never reused. The
- * undo snapshot covers both the new images and any existing member whose
- * membership is rewritten. */
-export function groupPinnedBatchBySource({ nodes = [], placed = [] } = {}) {
+ * RUN + PROMPT (imageBatchKey) — not per checkpoint. Pinning a picture from a
+ * gallery joins the grid of the prompt it belongs to; another prompt in the
+ * SAME run starts its own. A picture from a later run does too. Manual mixed
+ * groups are never reused. The undo snapshot covers both the new images and any
+ * existing member whose membership is rewritten. */
+export function groupPinnedBatchBySource({ nodes = [], placed = [], graph = null } = {}) {
   const before = new Map((nodes || []).filter((n) => n?.imageId != null)
     .map((n) => [Number(n.imageId), { ...n }]));
   const working = new Map([...before].map(([id, n]) => [id, { ...n }]));
@@ -190,6 +262,7 @@ export function groupPinnedBatchBySource({ nodes = [], placed = [] } = {}) {
 
   const affected = new Map();
   const undo = new Map();
+  const promptGroupIds = new Set();
   const remember = (node) => {
     const id = Number(node.imageId);
     if (!undo.has(id)) {
@@ -233,6 +306,11 @@ export function groupPinnedBatchBySource({ nodes = [], placed = [] } = {}) {
       if (members.length < 2) continue;
       groupId = nextGroupId([...working.values()], members[0].imageId);
     }
+    // A run+prompt key is an automatic Canvas grid. Legacy checkpoint keys are
+    // deliberately excluded, as are manual mixed groups (the homogeneous-group
+    // check above refuses to reuse those). The whole current membership is in
+    // `affected`, so moving its anchor remains one reversible/undoable write.
+    if (runPromptKey(additions[0]) === key) promptGroupIds.add(groupId);
     // ALWAYS training order, even when the picture that just arrived belongs
     // earlier than everything already in the strip: pinning epoch 500 after
     // epoch 2000 must not put 500 on the right-hand end. Nothing is lost by
@@ -248,42 +326,47 @@ export function groupPinnedBatchBySource({ nodes = [], placed = [] } = {}) {
 
   for (const p of fresh) remember(working.get(Number(p.imageId)));
   const byId = (a, b) => a.imageId - b.imageId;
-  return { rows: [...affected.values()].sort(byId), undoRows: [...undo.values()].sort(byId) };
+  const rows = [...affected.values()].sort(byId);
+  separateFreshGroupFootprints(nodes, rows, promptGroupIds, graph);
+  return { rows, undoRows: [...undo.values()].sort(byId) };
 }
 
-/** Turn one freshly generated/pinned lot into a strip PER GENERATION RUN,
- * ordered by training step.
+/** Turn one freshly generated/pinned lot into a strip PER GENERATION RUN AND
+ * PROMPT, ordered by training step.
  *
- * Different checkpoints belong together here — 📌 Pin all is one generation
- * action and the strip is that action's contact sheet. Two runs never can:
- * existing groups are never reused, and a lot that somehow carried images from
- * two runs is split by `run_id` rather than concatenated. Images with no run id
- * (made before the column was backfilled) keep the old whole-gesture strip,
- * which is safe — this function cannot merge into anything that was already on
- * the board. */
-export function groupPinnedBatchTogether({ nodes = [], placed = [] } = {}) {
+ * Different checkpoints of ONE prompt belong together here — that strip is the
+ * prompt's comparison grid. Another prompt selected in the SAME 📌 Pin all
+ * gesture must get another strip; two runs can never share one either. Existing
+ * groups are never reused. Images with no run id (made before the column was
+ * backfilled) keep the old whole-gesture strip, which is safe — this function
+ * cannot merge into anything that was already on the board. */
+export function groupPinnedBatchTogether({ nodes = [], placed = [], graph = null } = {}) {
   const before = new Map((nodes || []).filter((n) => n?.imageId != null)
     .map((n) => [Number(n.imageId), { ...n }]));
   const fresh = [...(placed || [])].filter((p) => p?.imageId != null)
     .sort(byTrainingOrder);
 
-  const runOf = (p) => {
-    const runId = (p?.image || p)?.run_id;
-    return runId != null && String(runId) !== '' ? `run:${String(runId)}` : 'gesture';
-  };
   const lots = new Map();
   for (const p of fresh) {
-    const key = runOf(p);
+    // Legacy rows deliberately stay one whole-gesture lot. The unit-pin path's
+    // no-run fallback remains per checkpoint in `imageBatchKey`; these are two
+    // historical behaviours and neither should be silently rewritten here.
+    const key = runPromptKey(p) ?? 'gesture';
     if (!lots.has(key)) lots.set(key, []);
     lots.get(key).push(p);
   }
   const groupOf = new Map();
   const posOf = new Map();
+  const promptGroupIds = new Set();
   const taken = [...(nodes || []), ...fresh];
-  for (const [, lot] of lots) {
+  for (const [lotKey, lot] of lots) {
     if (lot.length < 2) continue;
     const groupId = nextGroupId(taken, lot[0].imageId);
     taken.push({ groupId });
+    // Only modern run+prompt groups participate in the new footprint reflow.
+    // The `gesture` lot is the pre-run_id fallback and keeps its historical
+    // geometry as well as its historical membership semantics.
+    if (lotKey !== 'gesture') promptGroupIds.add(groupId);
     lot.forEach((p, pos) => {
       groupOf.set(Number(p.imageId), groupId);
       posOf.set(Number(p.imageId), pos);
@@ -300,6 +383,7 @@ export function groupPinnedBatchTogether({ nodes = [], placed = [] } = {}) {
       image: p.image || old?.image,
     };
   });
+  separateFreshGroupFootprints(nodes, rows, promptGroupIds, graph);
   const undoRows = rows.map((row) => {
     const old = before.get(row.imageId);
     return old ? { ...old } : {
@@ -421,10 +505,19 @@ export function placeImageBatch({ graph, existing, images, remembered, max } = {
     // what makes "no overlap" structural rather than searched for.
     let bandTop = 0;
     for (const o of occupied) bandTop = Math.max(bandTop, o.y + o.h);
-    bandTop += BAND_GAP;
+    // A current (run_id-bearing) batch will become one or more Canvas groups
+    // immediately after this placement. Reserve the TALLEST possible group bar
+    // now: it is drawn above the strip, and without this allowance the first
+    // prompt grid can cover the lineage card the band was placed below. Legacy
+    // no-run lots keep their exact historical geometry.
+    const futureGroupBar = band.some((image) => runPromptKey(image) != null)
+      ? groupBarMaxHeight(size) : 0;
+    bandTop += BAND_GAP + futureGroupBar;
 
     const colW = size + TILE_GAP;
-    const rowH = size + TILE_GAP;
+    // The same reservation between source rows prevents the bar of prompt N+1
+    // from climbing into prompt N before the final cross-column reflow above.
+    const rowH = size + TILE_GAP + futureGroupBar;
 
     // One group per source checkpoint, ordered by where that source sits on the
     // board (left to right, then top to bottom) so the band reads in the same
@@ -470,6 +563,81 @@ export function placeImageBatch({ graph, existing, images, remembered, max } = {
 
   placed.sort(byTrainingOrder);
   return { size, placed, skipped };
+}
+
+/**
+ * ✦ Tidy up, for the side-by-side STRIPS of one lane: bring each one back
+ * beside the run that made it, WITHOUT taking it apart.
+ *
+ * ── Why strips move at all now ───────────────────────────────────────────────
+ * They used to be left exactly where they were, and the argument was sound
+ * while a picture could not leave its lane: a strip is something the user
+ * assembled on purpose, and re-flowing its members one by one would not tidy it,
+ * it would dismantle it. Free placement changes the stakes, not the argument.
+ * A strip can now be parked thousands of units above or left of everything, and
+ * "the button that rebuilds the board" leaving it out there would mean a whole
+ * assembled comparison with no way back short of finding it by hand at 10 %
+ * zoom. So the strip comes back — as ONE object, which is the thing the old
+ * argument was actually protecting.
+ *
+ * ── How ──────────────────────────────────────────────────────────────────────
+ * Only the ANCHOR's row is written. The strip is DERIVED from the anchor's spot
+ * (utils/canvasImageGroups.layoutImageNodes), so moving the anchor moves the
+ * band, and every member keeps the geometry it gets back the day it is dragged
+ * out. The group fields are deliberately NOT in the returned rows either: a
+ * write that only mentions geometry can never dissolve a group, so a half-failed
+ * tidy leaves a strip moved, never broken.
+ *
+ * Placed through the SAME rule a hand-dropped pin uses — beside its own card,
+ * sliding down past whatever is already there (canvasImageNodes.spotBesideCard
+ * / slideBelow) — measured on `occupiedBox`, so the strip's drag BAR is
+ * reserved too and the contact-sheet band placed afterwards cannot land on it.
+ *
+ * `taken` are extra boxes already spoken for; the lane's own run cards are added
+ * here rather than asked for, so a caller cannot forget them and drop a strip on
+ * a card. Returns { rows, boxes }: the rows to persist, and the footprints the
+ * STRIPS now occupy — exactly the shape `placeImageBatch` wants as `existing`,
+ * so the contact-sheet band placed next cannot disagree about what is free.
+ * (The cards are not in `boxes`: `placeImageBatch` reads those off the graph
+ * itself, and publishing them twice would only make its tests lie.)
+ */
+export function tidyGroupRows({ graph, layout, taken } = {}) {
+  const strips = (layout || []).filter((r) => r?.kind === 'group' && r.members?.length);
+  const boxes = [];
+  if (!strips.length) return { rows: [], boxes };
+  const cards = graph?.nodes || [];
+  const busy = [...(taken || [])];
+  for (const n of cards) busy.push({ x: n.x, y: n.y, w: CARD_W, h: n.cellH });
+
+  // Deterministic order: where the source card sits on the tree, top to bottom
+  // then left to right, tie-broken by the anchor's image id. Two strips must
+  // never swap places just because the API listed their rows the other way
+  // round — the same reason applyPlacement sorts its arrivals.
+  const cardOf = (row) => cards.find(
+    (c) => c.node?.record_id === row.members[0].node.image?.record_id);
+  const ordered = [...strips].sort((a, b) => {
+    const ca = cardOf(a);
+    const cb = cardOf(b);
+    return ((ca?.y ?? Infinity) - (cb?.y ?? Infinity))
+      || ((ca?.x ?? Infinity) - (cb?.x ?? Infinity))
+      || (a.members[0].node.imageId - b.members[0].node.imageId);
+  });
+
+  const rows = [];
+  for (const strip of ordered) {
+    const anchor = strip.members[0].node;
+    const footprint = occupiedBox(strip);
+    // What occupiedBox reserved ABOVE the pictures for the group's drag bar.
+    const bar = footprint.h - strip.h;
+    const at = spotBesideCard(graph, anchor.image?.record_id);
+    const spot = slideBelow({ ...at, w: footprint.w, h: footprint.h }, busy);
+    const landed = { x: spot.x, y: spot.y, w: footprint.w, h: footprint.h };
+    busy.push(landed);
+    boxes.push(landed);
+    rows.push({ imageId: anchor.imageId, x: spot.x, y: spot.y + bar,
+      w: anchor.w, h: anchor.h });
+  }
+  return { rows, boxes };
 }
 
 /** The button's own words. It must say HOW MANY it is about to put down —

@@ -42,7 +42,7 @@ const anchorsFor = (chapterId) => {
 
 const SETTINGS_IDS = new Set(SETTINGS_SECTIONS.map((s) => s.id))
 const WORKSPACE_IDS = new Set(WORKSPACE_SECTIONS.map((s) => s.id))
-const STATIC_ROUTES = new Set(['/datasets', '/bank', '/setup', '/settings', '/studio', '/cloud', '/canvas', '/help'])
+const STATIC_ROUTES = new Set(['/datasets', '/bank', '/video-bank', '/setup', '/settings', '/studio', '/cloud', '/canvas', '/help'])
 
 // route ∈ {static} OR /settings/<settings-id> OR /setup?step=<setup-step-id>
 //         OR /datasets?section=<ws-id>[&panel=<panel>]
@@ -148,7 +148,7 @@ test('(5) each Settings section and Workspace section has its topic', () => {
 
 test('(6) tips have unique triggers and non-empty text', () => {
   const tips = helpTips()
-  assert.equal(tips.length, 11, 'expected exactly 11 one-time tips')
+  assert.equal(tips.length, 17, 'expected exactly 17 one-time tips')
   const triggers = new Set()
   for (const tip of tips) {
     assert.ok(tip.trigger, 'tip missing trigger')

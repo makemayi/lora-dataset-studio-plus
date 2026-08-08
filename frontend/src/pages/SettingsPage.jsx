@@ -17,6 +17,7 @@ import ScrapingSection from '../components/settings/ScrapingSection'
 import LocalToolsSection from '../components/settings/LocalToolsSection'
 import CaptioningSection from '../components/settings/CaptioningSection'
 import TrainingSection from '../components/settings/TrainingSection'
+import StorageSection from '../components/settings/StorageSection'
 import ServerSection from '../components/settings/ServerSection'
 import MaintenanceSection from '../components/settings/MaintenanceSection'
 
@@ -27,6 +28,7 @@ const SECTION_COMPONENTS = {
   'local-tools': LocalToolsSection,
   captioning: CaptioningSection,
   training: TrainingSection,
+  storage: StorageSection,
   server: ServerSection,
   maintenance: MaintenanceSection,
 }
@@ -171,6 +173,20 @@ export default function SettingsPage() {
     setConfig((prev) => ({ ...prev, [section]: data.config[section] }))
     setSavedConfig(data.config)
     setRuntime(data.runtime || { host: null, port: null })
+  }
+
+  // Persist a few keys of ONE section RIGHT NOW, bypassing the save bar.
+  // Settings › Storage needs it: it has just moved files on disk, and the app
+  // must point at the new folder in the same gesture — leaving that in the save
+  // bar would have it writing to the old folder while the tab claims the new one.
+  // The patch is passed explicitly on purpose: a setField() a moment earlier is
+  // a React state update, invisible to the callback that triggered it (which is
+  // exactly how the first version of this silently saved nothing).
+  const saveConfigPatch = async (section, patch) => {
+    const merged = { ...(config?.[section] || {}), ...patch }
+    const data = await putJson('/api/settings', { config: { [section]: merged } })
+    setConfig((prev) => ({ ...prev, [section]: data.config[section] }))
+    setSavedConfig(data.config)
   }
 
   const handleSave = async () => {
@@ -339,7 +355,8 @@ export default function SettingsPage() {
 
   const sectionProps = {
     config, setField, secretsPresence, secretInputs, setSecretInputs,
-    testResults, recordTestResult, saveSecretIfPending, saveConfigSection, handleDeleteSecret,
+    testResults, recordTestResult, saveSecretIfPending, saveConfigSection, saveConfigPatch,
+    handleDeleteSecret,
     toggleEngine, handleSave, saving, runtime, promptDefaults, promptDefaultsBySubject,
     configDefaults,
     setIdentityPrompts, caps, refreshCaps: refresh, toast,
@@ -422,8 +439,13 @@ export default function SettingsPage() {
     <div>
       <div className="lg:grid lg:grid-cols-[230px_minmax(0,1fr)] lg:items-start lg:gap-8">
         <aside>
-          {/* Mobile: horizontal chip rail */}
-          <nav aria-label="Settings sections" className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-3 lg:hidden">
+          {/* Mobile: horizontal chip rail. `relative` makes the scroller the
+              containing block for any absolutely positioned descendant — see
+              the long note on the same rail in DatasetWorkspace. This one is
+              1217 px wide and its chips carry no `.sr-only` label today, so
+              nothing escapes yet; adding the LED here (or any badge) without
+              `relative` would shrink the whole phone layout to ~73%. */}
+          <nav aria-label="Settings sections" className="relative -mx-4 flex gap-2 overflow-x-auto px-4 pb-3 lg:hidden">
             {visibleSections.map((s) => navItem(s, true))}
           </nav>
           {/* Desktop: sticky LED rail */}

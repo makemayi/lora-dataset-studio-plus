@@ -130,12 +130,90 @@ def test_scan_listing_extracts_and_dedups(monkeypatch):
     assert sorted(i['url'] for i in items) == ['https://i.redd.it/a.jpg', 'https://i.redd.it/same.jpg']
 
 
-def test_scan_pagination_walks_cursor_no_overlap(monkeypatch):
+def test_scan_small_listing_consumed_on_first_page_hides_load_more(monkeypatch):
+    """Un listing dont le total d'items ne dépasse jamais _SCAN_MAX est ENTIÈREMENT
+    consommé dès la page 0 (le walk continue de batch en batch tant que le curseur
+    `after` reste vivant et que la limite n'est pas atteinte) — et `match.paginated`
+    est baissé à False pour cacher un « Load more » qui ne ramènerait rien."""
     monkeypatch.setattr(reddit, '_get_token', lambda: 'tok')
     pages = {
-        None: _listing([_img_post('p0')], after='c1'),   # page 0
-        'c1': _listing([_img_post('p1')], after='c2'),   # page 1
+        None: _listing([_img_post('p0')], after='c1'),
+        'c1': _listing([_img_post('p1')], after=None),
     }
+    monkeypatch.setattr(reddit, '_api_get', lambda path, params, tok: pages[params.get('after')])
+
+    m0 = Match(url='https://www.reddit.com/r/x/top/'); m0.page = 0
+    items0, err0 = reddit.RedditSource().scan(m0)
+    assert err0 is None
+    assert sorted(i['url'] for i in items0) == ['https://i.redd.it/p0.jpg', 'https://i.redd.it/p1.jpg']
+    assert m0.paginated is False   # listing exhausted on page 0 → no more to load
+
+
+def test_scan_pagination_past_end_returns_empty(monkeypatch):
+    monkeypatch.setattr(reddit, '_get_token', lambda: 'tok')
+    # only one page exists (after=None) → requesting page 1 (skip past everything) yields nothing new
+    monkeypatch.setattr(reddit, '_api_get',
+                        lambda path, params, tok: _listing([_img_post('only')], after=None))
+    m = Match(url='https://www.reddit.com/r/x/'); m.page = 1
+    items, err = reddit.RedditSource().scan(m)
+    assert err is None and items == []
+    assert m.paginated is False
+
+
+def _gallery_post(pid, n):
+    """Post galerie synthétique à `n` images, au schéma média_metadata/gallery_data
+    réel de Reddit (cf. test_items_from_gallery_respects_order_and_thumb)."""
+    order = [f'{pid}_{i}' for i in range(n)]
+    return {
+        'title': pid, 'subreddit': 's', 'is_gallery': True,
+        'gallery_data': {'items': [{'media_id': mid} for mid in order]},
+        'media_metadata': {mid: {'e': 'Image', 's': {'u': f'https://i.redd.it/{mid}.jpg'}, 'p': []}
+                           for mid in order},
+    }
+
+
+def test_scan_batch_cap_split_post_recovered_via_pagination(monkeypatch):
+    """LE défaut corrigé : un subreddit riche en galeries trippe le plafond _SCAN_MAX
+    (200) EN PLEIN MILIEU d'un post (post #23/30, images 3-9 coupées) et laisse 7
+    posts entiers (24-30) hors de la fournée courante. Avec l'ancien design (curseur
+    `after` du LISTING = seule unité de pagination), la page suivante avance ce
+    curseur — qui pointe déjà APRÈS toute la fournée courante puisqu'elle tenait dans
+    UN seul appel API — donc ces posts ne sont JAMAIS remontrés, sur aucune page.
+    Avec le skip par ITEM (_walk_items), la page suivante rejoue le même flux ordonné
+    et reprend exactement où le plafond a coupé : rien n'est perdu."""
+    monkeypatch.setattr(reddit, '_get_token', lambda: 'tok')
+    posts = [_gallery_post(f'p{i}', 9) for i in range(30)]   # 30 posts * 9 imgs = 270
+    monkeypatch.setattr(reddit, '_api_get',
+                        lambda path, params, tok: _listing(posts, after=None))  # 1 seule fournée
+
+    src = reddit.RedditSource()
+    m0 = Match(url='https://www.reddit.com/r/x/'); m0.page = 0
+    items0, err0 = src.scan(m0)
+    assert err0 is None
+    assert len(items0) == reddit._SCAN_MAX            # capped at 200 (198 + 2 of post #23)
+    assert m0.paginated is not False                   # more remains → "Load more" stays visible
+
+    m1 = Match(url='https://www.reddit.com/r/x/'); m1.page = 1
+    items1, err1 = src.scan(m1)
+    assert err1 is None
+
+    urls0 = {i['url'] for i in items0}
+    urls1 = {i['url'] for i in items1}
+    assert urls0.isdisjoint(urls1)                      # no duplicate across pages
+    expected = {f'https://i.redd.it/p{i}_{j}.jpg' for i in range(30) for j in range(9)}
+    assert urls0 | urls1 == expected                    # every image reachable — nothing lost
+    assert len(urls1) == 270 - reddit._SCAN_MAX          # exactly the leftover: 70
+    assert m1.paginated is False                         # page 1 exhausts the listing
+
+
+def test_scan_pagination_replay_crosses_listing_batches(monkeypatch):
+    """Le skip par item doit rejouer le listing depuis le DÉBUT, en traversant
+    plusieurs appels API réels (curseur `after`) si besoin, pas seulement le dernier
+    batch — vérifié via le nombre et l'ordre des curseurs demandés."""
+    monkeypatch.setattr(reddit, '_get_token', lambda: 'tok')
+    batch1 = [_gallery_post(f'a{i}', 9) for i in range(25)]   # 225 imgs, after='c1'
+    batch2 = [_gallery_post(f'b{i}', 9) for i in range(5)]    # 45 imgs, after=None
+    pages = {None: _listing(batch1, after='c1'), 'c1': _listing(batch2, after=None)}
     calls = []
 
     def fake_get(path, params, tok):
@@ -143,24 +221,48 @@ def test_scan_pagination_walks_cursor_no_overlap(monkeypatch):
         return pages[params.get('after')]
     monkeypatch.setattr(reddit, '_api_get', fake_get)
 
-    src = reddit.RedditSource()
-    m0 = Match(url='https://www.reddit.com/r/x/top/'); m0.page = 0
-    m1 = Match(url='https://www.reddit.com/r/x/top/'); m1.page = 1
-    i0 = [i['url'] for i in src.scan(m0)[0]]
-    i1 = [i['url'] for i in src.scan(m1)[0]]
-    assert i0 == ['https://i.redd.it/p0.jpg']
-    assert i1 == ['https://i.redd.it/p1.jpg']       # page 1 = next batch, not page 0
-    assert set(i0).isdisjoint(i1)
+    m1 = Match(url='https://www.reddit.com/r/x/'); m1.page = 1
+    items1, err1 = reddit.RedditSource().scan(m1)
+    assert err1 is None
+    # page 1 = items 200..269 → the last 25 of batch1 + all 45 of batch2 → both
+    # cursors get re-requested from scratch (replay), in order.
+    assert calls == [None, 'c1']
+    urls1 = {i['url'] for i in items1}
+    assert any(u.startswith('https://i.redd.it/a24_') for u in urls1)   # tail of batch1
+    assert any(u.startswith('https://i.redd.it/b0_') for u in urls1)    # start of batch2
+    assert len(urls1) == 70
+    assert m1.paginated is False
 
 
-def test_scan_pagination_past_end_returns_empty(monkeypatch):
+def test_scan_listing_budget_exhausted_marks_partial(monkeypatch):
+    """Un listing pathologique (curseur qui ne se tarit jamais, très peu d'images par
+    post) ne doit jamais faire tourner _walk_items indéfiniment : passé
+    _MAX_LISTING_CALLS, le résultat est renvoyé tel quel mais marqué `partial` — la
+    règle gouvernante (rien de silencieux) appliquée au budget d'appels, pas
+    seulement au plafond d'items."""
     monkeypatch.setattr(reddit, '_get_token', lambda: 'tok')
-    # only one page exists (after=None) → requesting page 1 yields nothing new
-    monkeypatch.setattr(reddit, '_api_get',
-                        lambda path, params, tok: _listing([_img_post('only')], after=None))
-    m = Match(url='https://www.reddit.com/r/x/'); m.page = 1
+    calls = {'n': 0}
+
+    def fake_get(path, params, tok):
+        calls['n'] += 1
+        # 1 post texte (aucune image) par appel, curseur toujours vivant → jamais épuisé
+        return _listing([{'title': 't', 'subreddit': 's'}], after=f'c{calls["n"]}')
+    monkeypatch.setattr(reddit, '_api_get', fake_get)
+
+    m = Match(url='https://www.reddit.com/r/x/'); m.page = 0
     items, err = reddit.RedditSource().scan(m)
-    assert err is None and items == []
+    assert err is None
+    assert items == []
+    assert getattr(items, 'partial', False) is True
+    assert calls['n'] == reddit._MAX_LISTING_CALLS
+    # Budget épuisé AVANT d'avoir rempli la page : une page plus profonde ferait
+    # un skip encore plus grand contre le même budget, donc ne peut jamais
+    # réussir non plus — le bouton « Load more » doit se taire (le bandeau
+    # `partial` reste l'endroit honnête). Sans ce garde-fou, `match.paginated`
+    # resterait à sa valeur par défaut (non-False) et la route rapporterait
+    # `paginated: True` pour toujours sur cette page profonde : 60 appels API
+    # pour 0 item à chaque clic, indéfiniment.
+    assert m.paginated is False
 
 
 def test_scan_empty_keyword_is_error(monkeypatch):

@@ -21,6 +21,7 @@ and lora_strength drives the consistency LoRA (klein.consistency_strength), whic
 anchors composition — it is NOT an identity LoRA.
 """
 import json
+import os
 from unittest.mock import patch
 
 import pytest
@@ -133,6 +134,38 @@ def test_a_raised_strength_with_no_lora_file_is_an_ERROR_not_a_silent_skip(captu
     with pytest.raises(KleinModelsMissing) as err:
         captured(enhancement_lora_installed=False, improve_base_lora_strength=0.8)
     assert 'klein_enhancement_lora' in err.value.missing
+
+
+@pytest.mark.parametrize('sep,expected', [
+    ('/',  'klein/realistic.safetensors'),      # a Linux install (Docker)
+    ('\\', 'klein\\realistic.safetensors'),     # a Windows install
+])
+def test_a_workflow_name_is_respelled_for_the_host_that_opens_it(sep, expected):
+    """`improve skin.json` was exported from a Windows ComfyUI, so node 139 carries
+    ``klein\\realistic.safetensors``. On a Linux install a backslash is a legal
+    FILENAME character, not a separator: the probe asked for the single file
+    ``klein\\realistic.safetensors`` inside models/loras, missed the one really in
+    ``klein/``, and "Upscale & improve" answered "Klein needs klein_enhancement_lora,
+    I've started downloading it" — over a file already on disk, forever (reported by
+    @_nofaceman, Discord). Every OTHER model reference already went through this
+    normalisation (resolve_model_ref, _resolve_lora_abs_path); node 139 was the one
+    hole, which is exactly why that one file looked broken while all the others
+    loaded. `sep` is injectable so the Linux contract is pinned from a Windows host
+    and the reverse — the defect was invisible on the OS it was written on."""
+    from app.services.klein_edit_helper import normalize_rel_model_name
+    assert normalize_rel_model_name('klein\\realistic.safetensors', sep=sep) == expected
+    assert normalize_rel_model_name('klein/realistic.safetensors', sep=sep) == expected
+
+
+def test_the_installed_base_lora_survives_at_a_raised_strength(captured):
+    """The case no test covered: file present AND strength raised. Only the two
+    ABSENT-file cases were pinned, so a node 139 that silently stopped resolving
+    could not fail any test. Also asserts the name handed to ComfyUI is spelled with
+    the host separator — a LoraLoader validates against `folder_paths`, which lists
+    with os.sep, so a foreign spelling fails validation even once the file is found."""
+    w = captured(enhancement_lora_installed=True, improve_base_lora_strength=0.8)
+    assert w['139']['inputs']['strength_model'] == 0.8
+    assert w['139']['inputs']['lora_name'] == os.path.join('klein', 'realistic.safetensors')
 
 
 def test_strength_zero_with_no_lora_file_stays_a_quiet_skip(captured):

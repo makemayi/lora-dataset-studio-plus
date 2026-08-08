@@ -119,7 +119,10 @@ function RerunButton({ rerun, field, activity, offline, phase, outcome, onRun })
   const label = phase === 'starting' ? 'Starting…'
     : phase === 'running' ? 'Running…' : rerun.label
   // While OUR pass is the one running, the line is progress, not a refusal.
-  const why = phase === 'running' ? `${busyLine({ activity })}…`
+  // WITHOUT the phase detail: the progress bar at the top of the bank is on the
+  // same screen and already narrates the phase, so carrying it here printed
+  // "grouping styles over 21220 image(s) — the slow tail of this pass" twice.
+  const why = phase === 'running' ? `${busyLine({ activity, withDetail: false })}…`
     : phase === 'starting' ? null : state.reason
   const describedBy = [why && reasonId, outcome && outcomeId].filter(Boolean).join(' ')
   const tone = outcome?.tone === 'error' ? 'text-rose-300'
@@ -235,7 +238,11 @@ export default function BankThresholdsPanel({
     return null
   }, [dupSummary, semanticDupSummary])
 
-  const runPass = useCallback(async (endpoint) => {
+  // `body` carries the pass's INTENT (today: {regroup: true}, which is what tells
+  // a quality scan to re-group duplicates even though its own pool is empty).
+  // Without it this button would post the same thing the toolbar's 🔎 Scan posts
+  // and quietly do nothing on the bank it exists for.
+  const runPass = useCallback(async (endpoint, body) => {
     setOutcome(null)
     setStarting(endpoint)
     // The BEFORE half of "12 groups · 34 images (was 9 · 26)", captured while
@@ -243,7 +250,7 @@ export default function BankThresholdsPanel({
     const before = summaryFor(endpoint)
     let accepted = null
     try {
-      accepted = await onRunPass?.(endpoint)
+      accepted = await onRunPass?.(endpoint, body)
     } finally {
       setStarting(null)
     }
@@ -402,7 +409,7 @@ export default function BankThresholdsPanel({
                     phase={starting === rerun.endpoint ? 'starting'
                       : run?.endpoint === rerun.endpoint ? 'running' : 'idle'}
                     outcome={outcome?.endpoint === rerun.endpoint ? outcome : null}
-                    onRun={() => runPass(rerun.endpoint)} />
+                    onRun={() => runPass(rerun.endpoint, rerun.body)} />
                 )}
                 <ResetToDefault
                   label={t.label}

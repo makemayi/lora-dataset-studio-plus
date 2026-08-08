@@ -111,7 +111,13 @@ test('several guards in sequence each get their own confirm', async () => {
     const post = async (body) => {
       if (!body.allow_uncaptioned) throw refusal(UNCAPTIONED);
       if (!body.allow_caption_mismatch) {
-        throw refusal('MISMATCH_CAPTION: this Z-Image dataset has booru TAG captions.');
+        // Kept byte-representative of what the backend actually emits: the
+        // family name is interpolated (`this {label} dataset`), so a Klein user
+        // reads "FLUX.2 Klein", not a frozen "Z-Image". The parser under test
+        // keys on the `MISMATCH_CAPTION: ` PREFIX alone — see the assertion
+        // below, which is what makes this fixture's wording free to track the
+        // backend instead of pinning it.
+        throw refusal('MISMATCH_CAPTION: this FLUX.2 Klein dataset has booru TAG captions.');
       }
       return { ok: true };
     };
@@ -122,6 +128,26 @@ test('several guards in sequence each get their own confirm', async () => {
   });
 });
 
+test('a mismatch refusal is recognised by its PREFIX, whatever family it names', async () => {
+  // The backend interpolates the family label into this message. If the parser
+  // ever keyed on a family name instead of the marker, adding a family would
+  // silently turn a confirmable refusal into a hard error — so pin the
+  // independence rather than the sentence.
+  for (const family of ['Z-Image', 'FLUX.2 Klein', 'Krea 2', 'SDXL', '']) {
+    await withConfirm([true], async () => {
+      const post = async (body) => {
+        if (!body.allow_caption_mismatch) {
+          throw refusal(`MISMATCH_CAPTION: this ${family} dataset has booru TAG captions.`);
+        }
+        return { ok: true };
+      };
+      const out = await postWithConfirmations(post, {}, 'Retry anyway (force)',
+        RETRY_CONFIRMABLE_REFUSALS);
+      assert.deepEqual(out, { ok: true }, family);
+    });
+  }
+});
+
 // --- the guard family -------------------------------------------------------
 
 test('the retry lane can answer every pre-flight guard Start can answer', () => {
@@ -129,6 +155,13 @@ test('the retry lane can answer every pre-flight guard Start can answer', () => 
   assert.deepEqual(flags.slice().sort(), [
     'allow_caption_mismatch',
     'allow_caption_quality',
+    // Full-model cloud runs only: the private Hugging Face storage forecast.
+    // It rides the shared list because the ceiling it compares against is an
+    // ESTIMATE — every lane that can start a run must be able to say "anyway".
+    'allow_hf_storage',
+    // ... and its twin about this machine's disk, for the same reason: the
+    // delivery lands here first and its size is an estimate.
+    'allow_local_disk',
     'allow_not_ready',
     'allow_uncaptioned',
     'allow_unverified_weights',

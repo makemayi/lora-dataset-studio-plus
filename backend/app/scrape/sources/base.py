@@ -37,6 +37,40 @@ class Match:
     paginated: Optional[bool] = None
 
 
+class ResultList(list):
+    """Items renvoyés par une source de scraping, porteurs de métadonnées de
+    provenance (même patron que `gdl.GdlError` sous-classant `str`) : les
+    appelants qui traitent le retour comme une simple liste continuent de
+    fonctionner sans changement ; ceux qui veulent savoir consultent les
+    attributs.
+
+    Foyer public : ce type est un CONTRAT DE SOURCE (au même titre que
+    `Source`/`Match`/`Capabilities` ci-dessus), pas un détail d'implémentation
+    de gallery-dl — `gdl.py` l'utilise, mais `redgifs.py` et `instagram.py`
+    (ports autonomes, sans gallery-dl) le réutilisent aussi pour signaler
+    leurs propres troncatures. Vivait avant comme `gdl._ResultList` (nom
+    PRIVÉ) : deux modules sans rapport avec gallery-dl l'importaient quand
+    même, couplés à un module qu'ils n'utilisent pas ailleurs pour un type qui
+    n'a aucun invariant propre à gallery-dl.
+
+    - `from_albums` : True si TOUS les items proviennent de la récursion
+      d'albums de `gdl.enumerate` (type 6), pas des médias top-level de la
+      page. Ne borne cette récursion QU'au nombre d'albums (`max_albums`),
+      jamais par un offset de page — donc une source qui annoncerait la
+      pagination sur ces items enverrait « Charger plus » dans le vide (cf.
+      le repli `unsupported` qui, lui, coupe déjà `match.paginated` pour la
+      même raison). Non pertinent pour redgifs.py/instagram.py (toujours
+      False côté leurs producteurs).
+    - `partial` : True si le scan s'est arrêté avant d'avoir tout exploré
+      (budget de temps gdl.enumerate épuisé en cours de récursion d'albums,
+      page RedGifs refusée après une page réussie, itération Instagram
+      interrompue en cours de route) — les items présents restent valides,
+      il en manque potentiellement. Lu par `routes/scrape.py` via
+      `getattr(items, 'partial', False)`, sans connaître la source concrète."""
+    from_albums = False
+    partial = False
+
+
 class Source(ABC):
     """Une source de scraping. `match(url)` renvoie un Match si l'URL la concerne,
     sinon None. `scan(match)` énumère les médias. `download(url, dest_base)` n'est

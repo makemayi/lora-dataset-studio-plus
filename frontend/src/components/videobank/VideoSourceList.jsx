@@ -1,0 +1,77 @@
+import {
+  formatDuration, formatFileSize, sourceGeometry, sourceState,
+} from './videoBankStatus'
+import { firstShotBounds } from './videoClipEdit'
+
+const TONE = {
+  ok: 'bg-emerald-500/15 text-emerald-200',
+  info: 'bg-sky-500/15 text-sky-200',
+  idle: 'bg-surface-raised text-content-subtle',
+  error: 'bg-rose-500/15 text-rose-200',
+}
+
+/** 🎬 The per-FILE view: what each rush is, and how far it got.
+ *
+ * Cards rather than a table, and that is a 400 px decision: a table with five
+ * columns of which one is an unbreakable path either scrolls the whole page
+ * sideways or truncates the only column that identifies the row.
+ *
+ * Clicking a file filters the shot grid to it — the question this list actually
+ * gets asked is "what came out of THAT file", and answering it by scrolling a
+ * grid of three hundred shots is not answering it.
+ *
+ * ✂ CUT A SHOT BY HAND lives here and not only in the lightbox, and that is the
+ * whole point of it: every other retouch gesture needs an open shot, and a file
+ * that detection missed entirely — or a bank on an install with no detector, which
+ * the app explicitly says can still "scan, cut, watch and triage" — has none. It
+ * makes the first shot, which the lightbox then trims and splits.
+ */
+export default function VideoSourceList({ sources, activeSourceId, onFilter, onCut }) {
+  if (!sources?.length) {
+    return (
+      <p className="text-sm text-content-muted">
+        No video file found in this folder yet — press ↻ Rescan folder after adding some.
+      </p>
+    )
+  }
+  return (
+    <ul className="grid gap-2 grid-cols-1 sm:grid-cols-2">
+      {sources.map((s) => {
+        const state = sourceState(s)
+        const active = activeSourceId === s.id
+        return (
+          <li key={s.id}
+            className={`flex min-w-0 flex-col gap-1 rounded-lg border p-2.5 ${
+              active ? 'border-primary/60 bg-primary/10' : 'border-border bg-surface'}`}>
+            <div className="flex min-w-0 items-center gap-2">
+              {/* min-w-0 + truncate: the relpath is the one string here that has
+                  no break opportunity, and it is what stretched the grid past
+                  the viewport on a phone in the image lane. */}
+              <button type="button" onClick={() => onFilter(active ? null : s.id)}
+                aria-pressed={active}
+                title={active ? 'Show every shot again' : `Show only the shots from ${s.relpath}`}
+                className="min-w-0 flex-1 truncate text-left font-mono text-xs text-content hover:underline">
+                {s.relpath}
+              </button>
+              <span className={`shrink-0 rounded px-1.5 py-0.5 text-[0.625rem] font-semibold ${TONE[state.tone]}`}
+                title={state.title}>
+                {state.label}
+              </span>
+            </div>
+            <p className="text-[0.6875rem] text-content-subtle">
+              {formatDuration(s.duration_s)} · {formatFileSize(s.file_size)}
+              {sourceGeometry(s) ? ` · ${sourceGeometry(s)}` : ''}
+            </p>
+            {onCut && firstShotBounds(s) && (
+              <button type="button" onClick={() => onCut(s, firstShotBounds(s))}
+                title="Add a 5 s shot at the start of this file, then trim or split it in the player"
+                className="self-start rounded border border-border bg-surface-raised px-1.5 py-0.5 text-[0.625rem] font-semibold text-content-muted hover:bg-surface">
+                ✂ Cut a shot by hand
+              </button>
+            )}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}

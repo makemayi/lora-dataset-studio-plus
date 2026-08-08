@@ -15,7 +15,9 @@ not "is it faster" (a timing test is a flaky test) but **"does it still return
 exactly the same selection"** — same ids, same order, deterministic. That is what
 these tests pin.
 """
+import hashlib
 import os
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -49,7 +51,7 @@ def _write_score_cache(app, bank_id, embs_by_name):
         bank = banks.get_bank(_uid(), bank_id)
         rows = {os.path.basename(r.relpath): r
                 for r in BankImage.query.filter_by(bank_id=bank_id).all()}
-        paths, states, arr, sigs = [], [], [], []
+        paths, states, arr, sigs, hashes = [], [], [], [], []
         for nm, e in embs_by_name.items():
             r = rows[nm]
             p = banks.abs_image_path(bank, r)
@@ -58,6 +60,8 @@ def _write_score_cache(app, bank_id, embs_by_name):
             arr.append(np.asarray(e, dtype='float32'))
             st = os.stat(p)
             sigs.append(f'{st.st_size}:{st.st_mtime_ns}')
+            hashes.append(np.frombuffer(
+                hashlib.sha256(Path(p).read_bytes()).digest(), dtype='uint8'))
         cache_path = banks._score_cache_path(bank_id)
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(
@@ -65,7 +69,8 @@ def _write_score_cache(app, bank_id, embs_by_name):
             paths=np.array(paths), states=np.array(states),
             aes=np.array([float('nan')] * len(paths), dtype='float32'),
             nsfw=np.array([float('nan')] * len(paths), dtype='float32'),
-            embs=np.stack(arr).astype('float32'), sigs=np.array(sigs))
+            embs=np.stack(arr).astype('float32'), sigs=np.array(sigs),
+            hashes=np.stack(hashes).astype('uint8'))
 
 
 def _spread_bank(client, tmp_path, app, m=48, d=16, seed=7):

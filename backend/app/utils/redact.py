@@ -8,6 +8,7 @@ drive+Users+<segment> (or /home|Users/<segment>) prefix is swapped for `~`;
 the rest of the path is kept, it carries no identity.
 """
 import re
+from urllib.parse import urlsplit, urlunsplit
 
 # Windows home dir, single OR double backslash (some exception reprs escape
 # them): `C:\Users\<name>\...` / `C:\\Users\\<name>\\...`. Case-insensitive
@@ -50,6 +51,35 @@ def _mask(chunk):
     if chunk.lower().startswith('bearer'):
         return 'Bearer ***'
     return '***'
+
+
+def redact_url_secrets(url):
+    """A URL that is safe to SHOW: scheme, host, port and path stay; everything
+    that can carry a credential is dropped.
+
+    The ComfyUI recovery banner names the address LDS is talking to — pointing
+    at the wrong one is the very bug it exists for, so hiding the address would
+    defeat it. But a ComfyUI behind a reverse proxy is legitimately configured
+    as `https://user:pass@host/` or `https://host/?token=…`, and a banner is
+    exactly the kind of thing that gets screenshotted into a public help thread.
+    Userinfo, query and fragment go whole (a query string on a ComfyUI address
+    carries no routing meaning); anything unparseable falls back to the token
+    redactor rather than being shown raw. NULL/empty passes through.
+    """
+    if not url:
+        return url
+    try:
+        parts = urlsplit(str(url))
+        if not parts.scheme and not parts.netloc:
+            return redact_tokens(url)
+        host = parts.hostname or ''
+        if ':' in host:                       # IPv6 literal: keep its brackets
+            host = f'[{host}]'
+        port = parts.port                     # ValueError on a malformed port
+        return urlunsplit((parts.scheme, f'{host}:{port}' if port else host,
+                           parts.path, '', ''))
+    except ValueError:
+        return redact_tokens(url)
 
 
 def redact_user_paths(line):

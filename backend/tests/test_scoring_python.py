@@ -79,7 +79,11 @@ def test_a_complete_cuda_interpreter_is_accepted_and_lights_the_gpu_capability(s
 
         # The pass reads bank_scoring_gpu_available(), so the selection has to
         # reach THAT probe — including dropping its 10-minute cache.
-        with patch.object(capabilities, '_import_ok', lambda py, expr, timeout=60: py == str(good)):
+        def selected_python(py, expr, timeout=60):
+            executable = py[0] if isinstance(py, (tuple, list)) else py
+            return executable == str(good)
+
+        with patch.object(capabilities, '_import_ok', selected_python):
             assert capabilities.bank_scoring_gpu_available() is True
 
 
@@ -151,7 +155,7 @@ def test_an_empty_machine_is_not_flagged_as_a_failure(sp, app, client):
     """The other half of the same contract: a genuine 'nothing here' must NOT
     carry the failure flag, or the warning becomes noise everyone learns to
     ignore."""
-    with patch.object(sp, 'candidates', lambda: []):
+    with patch.object(sp, 'candidates', lambda profile=None: []):
         res = client.get('/api/scoring-python')
     body = res.get_json()
     assert body.get('detection_failed') in (None, False)
@@ -460,28 +464,52 @@ def test_the_probe_program_reports_every_scoring_dependency(sp):
     # open_clip is the one that matters and the one a CUDA-only check misses.
     assert 'open_clip' in sp._PROBE_CODE
     assert 'cuda.is_available' in sp._PROBE_CODE
+    assert 'find_spec' not in sp._PROBE_CODE, \
+        'a discoverable package is not necessarily importable'
 
 
 def test_the_probe_program_really_runs_and_emits_the_expected_shape(sp):
     """The generated program is EXECUTED here — a syntax error in it would
     otherwise read as 'every Python on your machine is unreachable' — but in
-    THIS process, with find_spec forced to miss, so it takes its no-torch branch.
+    THIS process, with every real dependency import forced to fail, so it takes
+    its no-torch branch.
 
     No subprocess and no `import torch` anywhere in the suite: importing torch
     for real would load the CUDA runtime (hundreds of MB per process, and this
     machine is somebody's desktop)."""
     import contextlib
+    import importlib
     import io as _io
 
     buf = _io.StringIO()
-    with patch('importlib.util.find_spec', lambda name: None), \
+    attempted = []
+
+    def missing(name):
+        attempted.append(name)
+        raise ImportError(name)
+
+    with patch.object(importlib, 'import_module', missing), \
          contextlib.redirect_stdout(buf):
         exec(compile(sp._PROBE_CODE, '<probe>', 'exec'), {'__name__': '__probe__'})
     info = json.loads(buf.getvalue().strip().splitlines()[-1])
     assert set(info['modules']) == {d['module'] for d in sp.SCORING_DEPS}
     assert info['modules'] == {d['module']: False for d in sp.SCORING_DEPS}
+    assert attempted == [d['module'] for d in sp.SCORING_DEPS]
     assert info['cuda'] is False and info['torch_version'] is None
     assert info['python'].count('.') == 2
+
+
+def test_probe_disables_user_site_for_a_borrowed_python(sp):
+    """The picker must test the same isolated environment Score will run in.
+    Otherwise a package in the Windows user-site can make find/import results
+    depend on who launched LDS instead of what ComfyUI actually contains."""
+    from types import SimpleNamespace
+    facts = _facts(cuda=True)
+    proc = SimpleNamespace(returncode=0, stdout=json.dumps(facts), stderr='')
+    with patch.object(sp.subprocess, 'run', return_value=proc) as run:
+        assert sp._run_probe(r'C:\ComfyUI\python_embeded\python.exe') == facts
+    command = run.call_args.args[0]
+    assert command[:3] == [r'C:\ComfyUI\python_embeded\python.exe', '-s', '-c']
 
 
 def test_the_probe_never_raises_when_the_interpreter_cannot_even_start(sp):

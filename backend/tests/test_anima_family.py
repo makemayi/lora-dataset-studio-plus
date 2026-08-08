@@ -190,25 +190,73 @@ def test_family_of_lora_classifies_anima_folder():
     assert FAMILY_LABELS['anima'] == 'Anima'
 
 
-# --- 6) prose captions (not booru) ---------------------------------------------
+# --- 6) HYBRID captions: booru tags AND natural language both first-class -------
 
-def test_anima_expects_prose_captions(app):
-    """Everything != sdxl expects prose: booru-tag captions on an anima dataset
-    trip the MISMATCH_CAPTION guard (forceable, like the others)."""
+BOORU_CAPTION = '1girl, solo, cafe, sitting, window, jeans, smile, looking_at_viewer'
+PROSE_CAPTION = ('a young woman sits alone at a cafe table by the window, wearing '
+                 'jeans, smiling as she looks towards the viewer in soft daylight')
+
+
+def _anima_dataset(svc, caption, slug):
+    """15 kept images all captioned the same way — above the anima image floor,
+    so only the caption-form guard can speak."""
+    from app.models import FaceDatasetImage
+    from app.config import LOCAL_USER
+    ds = svc.create_dataset(LOCAL_USER, slug.upper(), slug, train_type='anima')
+    for _ in range(15):
+        svc.db.session.add(FaceDatasetImage(dataset_id=ds.id, status='keep',
+                                            filename='x.webp', caption=caption))
+    svc.db.session.commit()
+    return ds
+
+
+@pytest.mark.parametrize('slug,caption', [('zchar_ap', PROSE_CAPTION),
+                                          ('zchar_ab', BOORU_CAPTION)])
+def test_anima_accepts_both_caption_forms(app, slug, caption):
+    """Anima is a HYBRID-prompting model: its model card documents booru tags AND
+    natural language as supported. Neither form may trip MISMATCH_CAPTION, and
+    crucially neither needs allow_caption_mismatch to get through — a user who
+    captioned in booru tags must not have to 'force' a perfectly valid dataset.
+
+    Prompted by a correction from a reader of the public thread: LDS classed
+    anima as prose-only, which is the mirror of the 'booru only' half someone
+    else believed. Both halves were wrong the same way."""
+    from app.services import lora_training as lt
+    from app.services import face_dataset_service as svc
+    with app.app_context():
+        ds = _anima_dataset(svc, caption, slug)
+        lt.assert_trainable(ds.id, train_type='anima')     # no force, no raise
+
+
+def test_anima_hybrid_does_not_loosen_the_mono_form_families(app):
+    """Surgical: only anima is hybrid. SDXL still refuses prose (booru-native),
+    and a prose-only family still refuses booru tags — the guard that protects
+    them is the whole reason it exists."""
     from app.services import lora_training as lt
     from app.services import face_dataset_service as svc
     from app.models import FaceDatasetImage
     from app.config import LOCAL_USER
     with app.app_context():
-        ds = svc.create_dataset(LOCAL_USER, 'AP', 'zchar_ap', train_type='anima')
-        booru = '1girl, solo, cafe, sitting, window, jeans, smile, looking_at_viewer'
-        for _ in range(15):
-            svc.db.session.add(FaceDatasetImage(dataset_id=ds.id, status='keep',
-                                                filename='x.webp', caption=booru))
-        svc.db.session.commit()
-        with pytest.raises(ValueError, match='MISMATCH_CAPTION'):
-            lt.assert_trainable(ds.id, train_type='anima')
-        lt.assert_trainable(ds.id, train_type='anima', allow_caption_mismatch=True)
+        # (family, captions it must refuse, the label its message must name)
+        cases = [('zchar_sx', 'sdxl', PROSE_CAPTION, 'SDXL'),
+                 ('zchar_zi', 'zimage', BOORU_CAPTION, 'Z-Image'),
+                 ('zchar_k2', 'krea', BOORU_CAPTION, 'Krea 2'),
+                 ('zchar_fk', 'flux2klein', BOORU_CAPTION, 'FLUX.2 Klein')]
+        for slug, train_type, caption, label in cases:
+            ds = svc.create_dataset(LOCAL_USER, slug.upper(), slug,
+                                    train_type=train_type)
+            for _ in range(30):        # above the SDXL floor too
+                svc.db.session.add(FaceDatasetImage(dataset_id=ds.id, status='keep',
+                                                    filename='x.webp', caption=caption))
+            svc.db.session.commit()
+            with pytest.raises(ValueError, match='MISMATCH_CAPTION') as err:
+                lt.assert_trainable(ds.id, train_type=train_type)
+            # The message names the family the user actually picked. It used to
+            # say "Z-Image" to everyone on the prose side — a Klein user was told
+            # about a dataset they do not have.
+            assert label in str(err.value), (train_type, str(err.value))
+            lt.assert_trainable(ds.id, train_type=train_type,
+                                allow_caption_mismatch=True)
 
 
 # --- 7) built-in presets --------------------------------------------------------

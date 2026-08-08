@@ -92,6 +92,21 @@ export default function ComfyRecoveryBanner() {
     window.location.reload()
   }
 
+  return (
+    <RecoveryBannerBody model={model} busy={busy}
+      onConfirm={clearIt} onOpenDataset={openOwningDataset} />
+  )
+}
+
+/**
+ * The pixels alone, with no polling and no fetching — so a test can mount it in
+ * every state it can be in. Splitting this out is not cosmetic: the polling
+ * component renders `null` until an effect has answered, and `node --test`
+ * never runs effects, so mounting the default export proves nothing about what
+ * a blocked user actually sees.
+ */
+export function RecoveryBannerBody({ model, busy = false, onConfirm, onOpenDataset }) {
+  if (!model) return null
   const warning = model.tone === 'warning'
   return (
     <div className="mx-auto max-w-5xl px-4 pt-3">
@@ -101,13 +116,26 @@ export default function ComfyRecoveryBanner() {
           : 'border-rose-400/40 bg-rose-500/10'}`}>
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <span aria-hidden>{warning ? '⏸️' : '⚠️'}</span>
-          <span className="font-medium text-content">{model.headline}</span>
+          {/* The headline can carry a URL, which has no spaces to wrap on: at
+              400 px it must break rather than push the card sideways. */}
+          <span className="min-w-0 break-words font-medium text-content">{model.headline}</span>
         </div>
         <p className="mt-1 text-xs text-content-subtle">{model.detail}</p>
+        {/* What to actually check, when the problem is the connection itself. */}
+        {model.checks?.length > 0 && (
+          <ul className="mt-1.5 list-disc space-y-1 pl-4 text-xs text-content-subtle">
+            {model.checks.map((check) => (
+              <li key={check} className="break-words">{check}</li>
+            ))}
+          </ul>
+        )}
+        {model.footnote && (
+          <p className="mt-1.5 text-xs italic text-content-subtle">{model.footnote}</p>
+        )}
         {/* Stacks on a 400 px screen, sits on one row from `sm` up. */}
         <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
           {model.canConfirm && (
-            <button type="button" onClick={clearIt} disabled={busy}
+            <button type="button" onClick={onConfirm} disabled={busy}
               className="rounded-md border border-amber-400/50 bg-amber-500/20 px-3 py-1.5
                          text-xs font-medium text-content hover:bg-amber-500/30
                          disabled:cursor-not-allowed disabled:opacity-60">
@@ -115,7 +143,7 @@ export default function ComfyRecoveryBanner() {
             </button>
           )}
           {model.datasetId != null && (
-            <button type="button" onClick={openOwningDataset}
+            <button type="button" onClick={onOpenDataset}
               className="text-left text-xs text-content-subtle underline hover:text-content">
               Open {model.datasetName ? `“${model.datasetName}”` : 'that dataset'}
             </button>

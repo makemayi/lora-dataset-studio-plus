@@ -10,15 +10,24 @@ const hook = readFileSync(new URL('../../hooks/useDataset.js', import.meta.url),
 const grid = readFileSync(new URL('./DatasetGrid.jsx', import.meta.url), 'utf8');
 const settings = readFileSync(new URL('../settings/ScrapingSection.jsx', import.meta.url), 'utf8');
 const attribution = readFileSync(new URL('./PexelsAttribution.jsx', import.meta.url), 'utf8');
+const sourceAttribution = readFileSync(new URL('./SourceAttribution.jsx', import.meta.url), 'utf8');
 
 test('lightbox exposes an accessible responsive image improvement action', () => {
-  assert.match(lightbox, /✨ Upscale & improve/);
-  assert.match(lightbox, /✨ Improving…/);
-  assert.match(lightbox, /Review improvement first/);
+  // ONE button per engine, from the shared pure module — the labels, the
+  // per-engine disabled reasons and the trade-off sentences are asserted in
+  // utils/improveEngines.test.js, so this file only pins the wiring.
+  assert.match(lightbox, /improveButtons\.map\(\(btn\) => \(/);
+  assert.match(lightbox, /lightboxImproveButtons\(\{/);
   assert.match(lightbox, /aria-busy=\{improvementActive\}/);
   assert.match(lightbox, /w-full sm:w-auto/);
-  assert.match(lightbox, /Creates a new upscaled version to validate and leaves the original intact/);
-  assert.match(lightbox, /busy \|\| improvementActive \|\| improveReady \|\| !kleinAvailable/);
+  // The engine pressed travels to the handler; a single-✨ surface passes none
+  // and the improve.engine setting decides instead.
+  assert.match(lightbox, /onImprove\(img\.id, engineId\)/);
+  // Klein's amber note follows KLEIN's button, never SeedVR2's: it is about
+  // Klein's instruction pulling drawn skin towards realism, and SeedVR2 sends
+  // no instruction at all.
+  assert.match(lightbox, /\{rail && btn\.showKleinNote &&/);
+  assert.match(lightbox, /\{!rail && improveButtons\.some\(\(b\) => b\.showKleinNote\)/);
 });
 
 // The comparison is what makes an improvement judgeable: before this, the
@@ -37,20 +46,59 @@ test('a derived image can be inspected next to the original it came from', () =>
   assert.match(lightbox, /className="h-full w-full select-none object-contain"/);
   assert.doesNotMatch(lightbox, /max-h-full max-w-full select-none object-contain/);
   // Real button, pressed state carried by aria (not colour alone).
-  assert.match(lightbox, /aria-pressed=\{comparing\}/);
+  assert.match(lightbox, /aria-pressed=\{compareMode === 'derived'\}/);
   assert.match(lightbox, /Compare with original/);
   assert.match(lightbox, /Exit comparison/);
   // Full-width control at phone width, like the other lightbox actions.
   assert.match(lightbox, /w-full sm:w-auto[^]{0,400}Compare with original/);
-  // Each pane names its side in TEXT.
-  assert.match(lightbox, /compare\.beforeLabel/);
-  assert.match(lightbox, /compare\.afterLabel/);
+  // Each pane names its side in TEXT — from whichever descriptor is on screen.
+  assert.match(lightbox, /activeCompare\.beforeLabel/);
+  assert.match(lightbox, /activeCompare\.afterLabel/);
   // Zoom is not silently broken: comparison says, in the same hint slot, that
   // 100 % lives outside the comparison.
   assert.match(lightbox, /exit comparison to zoom/i);
   // A vanished original explains itself instead of leaving a dead button.
   assert.match(lightbox, /compare && !compare\.available/);
   assert.match(lightbox, /\{compare\.reason\}/);
+});
+
+// The second comparison: "is this still the same person?" — the question a
+// plainly generated variation raises, which the derived comparison could never
+// answer because a generated row has no `derivation_kind` and therefore no
+// button at all. Decisions live in utils/referenceCompare.js (unit-tested);
+// this file pins the wiring, since node --test cannot render JSX.
+test('any dataset image can be inspected next to the reference photo', () => {
+  assert.match(lightbox, /describeReferenceComparison\(img, refFilename\)/);
+  // Its own button, next to the other one — not a mode picker that would hide
+  // one question behind the other on an improved image.
+  assert.match(lightbox, /Compare with reference/);
+  assert.match(lightbox, /aria-pressed=\{compareMode === 'reference'\}/);
+  assert.match(lightbox, /w-full sm:w-auto[^]{0,400}Compare with reference/);
+  // ONE state for both readings ⇒ entering either leaves the other; two
+  // booleans would have allowed two pairs of panes at once. And it lives in the
+  // id-STAMPED per-image slot, not in a useState of its own: that is what makes
+  // ⟩ leave the comparison behind with the image it belonged to, instead of
+  // carrying an "Original" pane onto a picture whose parent is someone else's.
+  assert.match(lightbox, /const \{ full, compareMode, improving \} = lightboxImageState\(/);
+  assert.doesNotMatch(lightbox, /useState\((true|false|'none')\)/);
+  assert.match(lightbox,
+    /patchImageState\(\{ full: false, compareMode: compareMode === mode \? 'none' : mode \}\)/);
+  // The reference is NOT a payload row: its own cache nonce, same /img endpoint.
+  assert.match(lightbox, /compareMode === 'reference' \? refNonce : parentNonce/);
+  // The rail/bar rule only needs to know a comparison is open, whichever it is.
+  assert.match(lightbox, /comparing: compareMode !== 'none'/);
+  // "same scale" is TRUE of the derived pair and FALSE here (a square head
+  // reference against a body plan): the hint is per mode, not shared.
+  assert.match(lightbox, /compareMode === 'derived' && inCompare/);
+  assert.match(lightbox, /different framings — each pane fits its own image/);
+  // A reference recorded without a usable file states why, like the other mode.
+  assert.match(lightbox, /refCompare && !refCompare\.available/);
+  assert.match(lightbox, /\{refCompare\.reason\}/);
+});
+
+test('workspace hands the lightbox the reference photo and its own nonce', () => {
+  assert.match(workspace, /refFilename=\{d\.ref_filename \|\| ''\}/);
+  assert.match(workspace, /refNonce=\{ds\.refNonce \|\| 0\}/);
 });
 
 test('workspace feeds the lightbox the resolved parent of a derived image', () => {
@@ -67,14 +115,18 @@ test('workspace guards rescue rows and detects a pending improvement child', () 
   assert.match(workspace, /image\.parent_image_id === viewImgLive\.id/);
   assert.match(workspace, /const viewImgImproving[\s\S]*image\.status === 'pending'[\s\S]*\)\) : false/);
   assert.match(workspace, /const viewImgImprovementReady[\s\S]*image\.status === 'pending'[\s\S]*!!image\.filename/);
-  // The improve pass no longer runs Flux.2 Klein 9B for its 'klein' engine (see
-  // krea_hq_helper), so it is no longer gated behind caps.engines.klein — a real
-  // missing asset still surfaces as a 409 on click.
-  assert.match(workspace, /\/\/ kleinAvailable gates the improve button/);
+  // Engine readiness is read from capabilities INSIDE the lightbox now, per
+  // engine — a `kleinAvailable` prop would be a second source of truth for
+  // one of the two engines and none for the other.
+  assert.match(workspace, /onImprove=\{canImproveViewImg/);
+  assert.match(workspace, /ds\.improveImage\(imageId, \{ engine \}\)/);
 });
 
 test('dataset hook starts improvement, reports the preserved original, then refreshes', () => {
-  assert.match(hook, /`\/api\/dataset\/image\/\$\{imageId\}\/improve`, \{\}/);
+  assert.match(hook, /`\/api\/dataset\/image\/\$\{imageId\}\/improve`,/);
+  // The engine rides along when the caller names one (the lightbox's two
+  // buttons); absent, the server falls back to the improve.engine setting.
+  assert.match(hook, /engine \? \{ engine \} : \{\}/);
   assert.match(hook, /original stays intact while a separate 2 MP candidate is generated for validation/);
   assert.match(hook, /Could not start image improvement/);
   assert.match(hook, /resolveSmallImageRescue, improveImage, reimproveImage, improveBatch, classify/);
@@ -124,10 +176,26 @@ test('manual improvement candidates cannot use the unrelated generic regenerate 
     derivation_kind: 'klein_image_improve', parent_image_id: 2 }), false);
 });
 
-test('curation grid and lightbox render the persisted safe Pexels attribution', () => {
+test('curation grid and lightbox render provenance through ONE dispatching component', () => {
+  // Two sources used to mean two stacked, independently-fail-closed components
+  // rendered at every site — twelve more recorded as debt would have meant
+  // twelve stacked components at each. Both render sites now feed the SAME
+  // `img.source_metadata` to a single dispatcher instead.
   const gridItem = readFileSync(new URL('./DatasetGridItem.jsx', import.meta.url), 'utf8');
-  assert.match(gridItem, /<PexelsAttribution metadata=\{img\.source_metadata\}/);
-  assert.match(lightbox, /<PexelsAttribution metadata=\{img\.source_metadata\}/);
+  assert.match(gridItem, /<SourceAttribution metadata=\{img\.source_metadata\}/);
+  assert.match(lightbox, /<SourceAttribution metadata=\{img\.source_metadata\}/);
+  assert.doesNotMatch(gridItem, /<PexelsAttribution\b|<WebImageSource\b/);
+  assert.doesNotMatch(lightbox, /<PexelsAttribution\b|<WebImageSource\b/);
+
+  // The dispatcher is a lookup table keyed by platform, fail-closed on both an
+  // unrecognized platform (no entry => no renderer => null) and, per-platform,
+  // whatever its own renderer's payload validation still refuses.
+  assert.match(sourceAttribution, /pexels:\s*PexelsAttribution/);
+  assert.match(sourceAttribution, /websearch:\s*WebImageSource/);
+  assert.match(sourceAttribution, /if \(!Renderer\) return null;/);
+
+  // The Pexels wording/links guarantee itself still lives in PexelsAttribution.jsx
+  // — moved under the dispatcher, not narrowed by it.
   assert.match(attribution, /Photo by\{' '\}/);
   assert.match(attribution, /rel="noopener noreferrer"/);
   assert.match(attribution, /attribution\.photographerUrl/);

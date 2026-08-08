@@ -46,15 +46,23 @@ def _mkbank(client, tmp_path, files, name='B'):
 
 
 def _set_scores(app, bank_id, **by_name):
-    """Write raw scores straight onto rows, keyed by file basename."""
+    """Write byte-bound raw scores straight onto rows, keyed by basename."""
     with app.app_context():
         from app.extensions import db
-        from app.models import BankImage
+        from app.models import BankImage, ImageBank
+        from app.services import bank_transfer_metadata as transfer
+        from app.services import image_bank_service as banks
+        bank = db.session.get(ImageBank, bank_id)
         rows = {os.path.basename(r.relpath): r
                 for r in BankImage.query.filter_by(bank_id=bank_id).all()}
         for name, vals in by_name.items():
+            row = rows[name]
             for k, v in vals.items():
-                setattr(rows[name], k, v)
+                setattr(row, k, v)
+            row.analysis_fingerprint = transfer.content_fingerprint_path(
+                banks.analysis_image_path(bank, row))
+            row.watermark_fingerprint = transfer.content_fingerprint_path(
+                banks.abs_image_path(bank, row))
         db.session.commit()
 
 

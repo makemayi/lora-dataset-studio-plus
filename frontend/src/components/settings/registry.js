@@ -28,12 +28,18 @@ export const SETTINGS_SECTIONS = [
     description: 'Default model family and cloud GPU guardrails.',
     keywords: ['family', 'zimage', 'sdxl', 'krea', 'cloud', 'vast', 'budget', 'price', 'stall', 'gpu',
       'verified host', 'secure cloud', 'community cloud', 'offer filter'] },
+  { id: 'storage', title: 'Storage', icon: '💾', eyebrow: 'disk',
+    description: 'Where everything lives on disk, and how much space it takes.',
+    keywords: ['storage', 'disk', 'space', 'full', 'drive', 'path', 'folder', 'location',
+      'move', 'relocate', 'another drive', 'data', 'dataset root', 'checkpoint store',
+      'cloud runs', 'staging', 'trash', 'archive', 'hugging face', 'hf', 'quota',
+      'free space', 'gb', 'cleanup', 'orphan'] },
   { id: 'server', title: 'Server & access', icon: '🌐', eyebrow: 'network',
     description: 'Port, LAN access and the access token.',
     keywords: ['port', 'host', 'lan', 'network', 'token', 'remote', 'phone', 'bind'] },
   { id: 'maintenance', title: 'Maintenance', icon: '🔧', eyebrow: 'housekeeping',
-    description: 'Updates, server log and data location.',
-    keywords: ['update', 'restart', 'log', 'diagnostic', 'data', 'storage', 'version', 'bug'] },
+    description: 'Updates, server log and bug reports.',
+    keywords: ['update', 'restart', 'log', 'diagnostic', 'version', 'bug'] },
 ]
 
 /* Sidebar LED per section — derived from live capabilities so the rail doubles

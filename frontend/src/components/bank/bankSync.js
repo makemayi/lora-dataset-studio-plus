@@ -66,6 +66,48 @@ export function bankListSyncToast(banks) {
   }
 }
 
+/** How long ago, in words. Deliberately coarse: the point is "recent enough" vs
+ * "old", not a stopwatch. */
+function agoText(seconds) {
+  const s = Math.max(0, Number(seconds) || 0)
+  if (s < 60) return 'just now'
+  const m = Math.round(s / 60)
+  if (m < 60) return `${m} min ago`
+  const h = Math.round(m / 60)
+  return h === 1 ? 'an hour ago' : `${h} hours ago`
+}
+
+/** The bank LIST's honesty line about how fresh its counts are.
+ *
+ * The list used to re-walk every bank's source folder before rendering — a full
+ * disk inventory of the whole library paid on every navigation (690-1 190 ms on
+ * a real 86 493-image library). It no longer does: a folder is walked when its
+ * bank is OPENED, or when the user clicks 🔄 Rescan folders.
+ *
+ * That trade is only acceptable if the page SAYS it — a silently stale list
+ * would be worse than a slow one. Returns {stale, text}, or null when there is
+ * no bank to be honest about. `folder_sync.walked` / `.age` come from the
+ * server (per bank, since this app run). */
+export function folderCheckNote(banks) {
+  const syncs = (Array.isArray(banks) ? banks : [])
+    .map((b) => b?.folder_sync).filter(Boolean)
+  if (!syncs.length) return null
+  const unchecked = syncs.filter((s) => !s.walked).length
+  if (unchecked > 0) {
+    return {
+      stale: true,
+      text: unchecked === syncs.length
+        ? 'Counts below are what the app knew last time — a folder is re-checked '
+          + 'when you open its bank. Rescan folders to update them all now.'
+        : `Counts below are what the app knew last time for ${unchecked} of these `
+          + 'banks — a folder is re-checked when you open its bank. Rescan folders '
+          + 'to update them all now.',
+    }
+  }
+  const oldest = Math.max(...syncs.map((s) => Number(s.age) || 0))
+  return { stale: false, text: `Source folders checked ${agoText(oldest)}.` }
+}
+
 /** The PERSISTENT note (a line in the workspace header, not a toast): the state
  * of the source folder as of the last walk. Files that disappeared are reported
  * and kept — the bank never deletes rows behind the user's back, so a folder

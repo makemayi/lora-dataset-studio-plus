@@ -19,34 +19,55 @@ export const IMPORT_ENCODING_LABEL = {
 export const IMPORT_FALLBACK_MAX_SIDE = 1024;
 export const IMPORT_FALLBACK_CEILING = 8192;
 export const IMPORT_FALLBACK_ENCODING = 'preserve';
-export const IMPORT_FALLBACK_INPUT_MAX_SIDE = 8192;
-export const IMPORT_FALLBACK_INPUT_MAX_PIXELS = 16 * 1024 * 1024;
+export const IMPORT_FALLBACK_INPUT_MAX_SIDE = 16384;
+export const IMPORT_FALLBACK_INPUT_MAX_PIXELS = 64 * 1024 * 1024;
 export const IMPORT_IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp,image/bmp';
 export const IMPORT_IMAGE_FORMATS = 'JPEG, PNG, WebP and BMP';
 
-function firstPositiveInteger(values, fallback) {
+/** The sentence a 0 earns: it removes a memory guard, so it says what it removes. */
+export const IMPORT_INPUT_UNLIMITED_NOTE = 'No limit means a corrupt or hostile file can be '
+  + 'decoded until it fills memory: a few hundred header bytes can claim billions of pixels, '
+  + 'and the app has no second guard behind this one.';
+
+/* 0 is a VALUE here ("no limit"), not a missing key — so the fallback may only
+   win for absent/unusable input. `firstPositiveInteger` used to treat 0 as
+   absent, which would have quoted the shipped default at a user who had just
+   switched the budget off. */
+function firstBudgetValue(values, fallback) {
   for (const value of values) {
+    if (value === undefined || value === null || value === '') continue;
     const parsed = Number(value);
-    if (Number.isSafeInteger(parsed) && parsed > 0) return parsed;
+    if (Number.isSafeInteger(parsed) && parsed >= 0) return parsed;
   }
   return fallback;
 }
 
 /** The admission limit is checked before preserve, crop, or WebP normalization. */
 export function importInputLimitLine(policy) {
-  const maxSide = firstPositiveInteger(
+  const maxSide = firstBudgetValue(
     [policy?.input_max_side, policy?.preserve_max_side],
     IMPORT_FALLBACK_INPUT_MAX_SIDE,
   );
-  const maxPixels = firstPositiveInteger(
+  const maxPixels = firstBudgetValue(
     [policy?.input_max_pixels, policy?.preserve_max_pixels],
     IMPORT_FALLBACK_INPUT_MAX_PIXELS,
   );
-  const mebiPixels = maxPixels / (1024 * 1024);
-  const displayPixels = Number.isInteger(mebiPixels)
-    ? String(mebiPixels)
-    : mebiPixels.toFixed(1).replace(/\.0$/, '');
-  return `${displayPixels} Mi-pixels and ${maxSide} px per side`;
+  const parts = [];
+  if (maxPixels > 0) {
+    const mebiPixels = maxPixels / (1024 * 1024);
+    const displayPixels = Number.isInteger(mebiPixels)
+      ? String(mebiPixels)
+      : mebiPixels.toFixed(1).replace(/\.0$/, '');
+    parts.push(`${displayPixels} Mi-pixels`);
+  }
+  if (maxSide > 0) parts.push(`${maxSide} px per side`);
+  return parts.length ? parts.join(' and ') : 'any size (no limit)';
+}
+
+/** Same fact, phrased to sit inside a parenthesis after the storage policy. */
+export function importInputLimitNote(policy) {
+  const line = importInputLimitLine(policy);
+  return line === 'any size (no limit)' ? 'no input size limit' : `input limit: ${line}`;
 }
 
 export function preservesOriginalFiles(policy) {
@@ -58,13 +79,13 @@ export function importPolicyLine(policy) {
   const p = policy || {};
   const encoding = preservesOriginalFiles(p) ? 'preserve' : p.encoding;
   const enc = IMPORT_ENCODING_LABEL[encoding];
-  const inputLimit = importInputLimitLine(p);
+  const inputLimit = importInputLimitNote(p);
   if (encoding === 'preserve') {
-    return `stored byte-for-byte in the original file and format (input limit: ${inputLimit})`;
+    return `stored byte-for-byte in the original file and format (${inputLimit})`;
   }
   if (p.max_side === 0) {
-    return `stored as ${enc} at original size (input limit: ${inputLimit})`;
+    return `stored as ${enc} at original size (${inputLimit})`;
   }
   const side = p.max_side || IMPORT_FALLBACK_MAX_SIDE;
-  return `stored as ${enc}, resized to ${side} px on the long side, ratio kept (input limit: ${inputLimit})`;
+  return `stored as ${enc}, resized to ${side} px on the long side, ratio kept (${inputLimit})`;
 }

@@ -75,6 +75,86 @@ test('a job with no dataset still produces a sentence, not "undefined"', () => {
   assert.doesNotMatch(model.detail, /undefined|null/);
 });
 
+/* The fresh install, from the report that is this feature's spec: URL and
+   ComfyUI folder auto-detected, model files found, first Generate answered "A
+   paused comfyui job is blocking new generation" — and his ComfyUI logged NO
+   incoming connection at all, so he went looking for a special flag he had to
+   pass. Nothing on that screen could have told him LDS was talking to the wrong
+   address (jerkyjunky, Discord). */
+const UNREACHABLE = {
+  recovery: {
+    kind: 'unknown_submit',
+    job_id: 'job-1',
+    can_confirm_restart: true,
+    connection: { reachable: false, url: 'http://127.0.0.1:8188',
+      status: 'unreachable', hint: null },
+  },
+};
+
+test('an unreachable ComfyUI is the headline, and it names the address', () => {
+  const model = recoveryBannerModel(UNREACHABLE, { now: NOW });
+  assert.match(model.headline, /cannot reach ComfyUI at http:\/\/127\.0\.0\.1:8188/);
+  assert.doesNotMatch(model.headline, /paused/i);
+});
+
+test('the unreachable banner lists what to check, including the two invisible ones', () => {
+  const { checks } = recoveryBannerModel(UNREACHABLE, { now: NOW });
+  assert.ok(checks.length >= 3);
+  assert.ok(checks.some((c) => /--listen/.test(c)));          // bound to 127.0.0.1
+  assert.ok(checks.some((c) => /host\.docker\.internal/.test(c)));
+  assert.ok(checks.some((c) => /Settings/.test(c)));
+});
+
+test('the paused job is demoted to a footnote, not the accusation', () => {
+  const model = recoveryBannerModel(UNREACHABLE, { now: NOW });
+  assert.match(model.footnote, /could not confirm ComfyUI ever accepted/);
+  assert.doesNotMatch(model.detail, /paused for/);
+  assert.equal(model.canConfirm, true);   // still the way out, once it answers
+});
+
+test('a known prompt behind a dead link says LDS finishes it once ComfyUI answers', () => {
+  const model = recoveryBannerModel({ recovery: { ...UNREACHABLE.recovery, kind: 'prompt' } });
+  assert.match(model.headline, /cannot reach ComfyUI/);
+  assert.match(model.footnote, /clears it by itself/);
+});
+
+test('no configured address says THAT, instead of "cannot reach at "', () => {
+  const model = recoveryBannerModel({ recovery: { ...UNREACHABLE.recovery,
+    connection: { reachable: false, url: '', status: 'unconfigured',
+      hint: 'Set the ComfyUI API URL in Settings ▸ Local tools.' } } });
+  assert.match(model.headline, /no ComfyUI address/);
+  assert.doesNotMatch(model.headline, /at\s*$/);
+  assert.match(model.detail, /Set the ComfyUI API URL/);
+});
+
+test('a reachable ComfyUI keeps the paused-job story word for word', () => {
+  const model = recoveryBannerModel({ recovery: { ...OTHER_DATASET.recovery,
+    connection: { reachable: true, url: 'http://127.0.0.1:8188', status: 'ok', hint: null } },
+  }, { now: NOW });
+  assert.equal(model.headline, 'A paused ComfyUI job is blocking new generations');
+  assert.deepEqual(model.checks, []);
+  assert.equal(model.footnote, null);
+});
+
+/* A server that predates this field, and the poll's own "nobody asked" value.
+   Neither may be read as "unreachable" — inventing a connection failure is as
+   wrong as hiding one. */
+test('no connection verdict at all leaves the banner exactly as it was', () => {
+  assert.equal(recoveryBannerModel(OTHER_DATASET, { now: NOW }).headline,
+    'A paused ComfyUI job is blocking new generations');
+  assert.equal(recoveryBannerModel({ recovery: { ...OTHER_DATASET.recovery,
+    connection: null } }, { now: NOW }).headline,
+  'A paused ComfyUI job is blocking new generations');
+});
+
+test('an unreadable record outranks the connection — it survives ComfyUI coming back', () => {
+  const model = recoveryBannerModel({ recovery: { kind: 'unreadable',
+    detail: 'LDS found an invalid ComfyUI recovery record.',
+    connection: { reachable: false, url: 'http://127.0.0.1:8188', status: 'unreachable' } } });
+  assert.match(model.headline, /unreadable/);
+  assert.equal(model.canConfirm, false);
+});
+
 test('stalledForText stays coarse', () => {
   assert.equal(stalledForText('2026-08-02T11:59:30Z', NOW), 'a moment');
   assert.equal(stalledForText('2026-08-02T11:30:00Z', NOW), '30 minutes');

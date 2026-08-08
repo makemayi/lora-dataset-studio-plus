@@ -41,6 +41,19 @@ pip install -r backend/requirements.txt
 python backend/run.py
 ```
 
+**Pinokio (one click, any OS):** in [Pinokio](https://pinokio.computer), use
+**Discover → Download from URL** with
+`https://github.com/perfectgf/lora-dataset-studio.git`, then **Install** and
+**Start**. Pinokio creates the environment (`env/`), installs the core
+requirements and opens Studio on the port it really bound. Two things to know:
+the optional tools are still connected from **Setup**, and updates go through
+Pinokio's **Update** tab — it runs the same `git pull --ff-only` as the in-app
+updater. You do not have to remember that last part: the app recognises a
+Pinokio launch and its Updates card shows *Stop → Update → Start* (with how many
+commits behind you are) instead of the **Update & restart** button, which would
+relaunch the server in a window Pinokio no longer tracks.
+
+
 The full install matrix (Windows release ZIP, GPU requirements, external tools)
 lives in the README on GitHub.
 

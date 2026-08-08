@@ -240,3 +240,45 @@ def _no_hugging_face_gate_call(request, monkeypatch):
     from app.services import cloud_training as _ct
     monkeypatch.setattr(_ct, '_assert_official_base_reachable',
                         lambda *a, **k: None, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _ollama_fence_never_reads_this_machine(request, monkeypatch):
+    """Keep the unit suite off THIS machine's Ollama.
+
+    The local-GPU fence probes `/api/ps` on the configured local endpoint before
+    every Ollama call, and with no config that endpoint is 127.0.0.1:11434 — the
+    developer's real Ollama. So the verdict of ~24 tests across test_captioning
+    and test_dataset_service was decided by whatever happened to be resident
+    there: empty runner, everything passes; anything loaded outside LDS (the
+    image generator, another agent, a model the developer pulled a minute ago)
+    and the fence correctly refuses, LocalOllamaFenceError propagates, and they
+    all fail at once. Measured 2026-08-02: 0 failures with an empty runner, 24
+    with `qwen3-vl:4b-instruct` loaded — same commit, same code, both times.
+
+    That is not a flake, it is an undeclared dependency, and it is the worst
+    kind: it makes CI red on a machine state nobody changed on purpose, and the
+    failure looks like the fence is broken when the fence is doing its job.
+
+    The claim file is stubbed for the same reason in the other direction: a test
+    that admits a model would otherwise leave a claim on disk, and the next test
+    to probe the same endpoint could re-adopt from it.
+
+    Tests that are ABOUT the fence opt back in with @pytest.mark.ollama_fence
+    and drive `requests` themselves, so the behaviour stays covered — only the
+    dependency on someone else's GPU goes.
+    """
+    from app.services import ollama_gpu_fence as _fence
+    if request.node.get_closest_marker('ollama_fence'):
+        # Still isolate the process-global registries: ownership must never leak
+        # from one test into the next, whoever drives the probe.
+        _fence.reset_for_tests()
+        yield
+        _fence.reset_for_tests()
+        return
+    monkeypatch.setattr(_fence, '_probe', lambda endpoint: ('empty', set(), {}))
+    monkeypatch.setattr(_fence, '_record_claim', lambda *a, **k: None)
+    monkeypatch.setattr(_fence, '_read_claims', dict)
+    _fence.reset_for_tests()
+    yield
+    _fence.reset_for_tests()

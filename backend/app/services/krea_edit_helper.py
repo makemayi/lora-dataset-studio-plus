@@ -24,6 +24,12 @@ THE GRAPH (validated against /object_info on a live install)
                                                               negative: Krea2EditGroundedEncode('',     image)
     CLIPLoader(qwen3-vl 4B, type='krea2') · VAELoader(qwen image vae) · EmptySD3LatentImage
 
+An OPTIONAL second reference joins the patch as `source_image_b` and both
+encodes as `image_b` — the pack's only `_b` slot, and it wants a DIFFERENT
+subject (a person or a scene), never another angle of the same face. See
+build_workflow for the two traps it carries (no second VAEEncode; ref_boost
+changes hands).
+
 BOTH custom nodes are mandatory:
   * `Krea2EditGroundedEncode` is what makes the text encoder actually SEE the
     reference. With a plain `CLIPTextEncode` the reference has no effect at all
@@ -164,6 +170,36 @@ class KreaModelsMissing(Exception):
                          + ', '.join(self.missing + self.missing_nodes))
 
 
+class KreaPinnedModelMissing(Exception):
+    """A Krea model file the user PINNED in Settings is not on disk.
+
+    Deliberately NOT the same error as KreaModelsMissing, and deliberately not a
+    silent fallback to automatic resolution.
+
+    WHY THE ENGINE REFUSES INSTEAD OF FALLING BACK
+    ----------------------------------------------
+    This resolver used to log a warning and elect a base model on its own when
+    `krea.base_model` named a file it could not find. On a shared ComfyUI that is
+    how an entire training ran on a third-party finetune nobody chose: the
+    Settings field showed one filename, the graph loaded another, and the only
+    symptom was images that were subtly not the model asked for — visible after
+    the expensive part, not before it.
+
+    A setting that quietly resolves to something OTHER than what it displays is
+    the worst failure mode available to us. So a pin that cannot be resolved is a
+    STOP, naming the file, and clearing the field is the explicit gesture that
+    goes back to auto-detection.
+
+    `.gaps` = [{'slot', 'key', 'configured'}]."""
+
+    def __init__(self, gaps):
+        self.gaps = list(gaps or [])
+        super().__init__(
+            'Krea 2 Edit: pinned model file not found — '
+            + '; '.join(f"{g['key']} = {g['configured']!r}" for g in self.gaps)
+            + '. Pick a file that exists, or clear the field to use auto-detection.')
+
+
 # --- Resolution -------------------------------------------------------------
 # Canonical-name-first with NARROW token fallbacks, scanning roots in ComfyUI's
 # own priority order — the same discipline as klein_edit_helper. A WRONG model is
@@ -208,31 +244,17 @@ def _krea_unet_folders():
     'Krea', 'krea2') or '' for a file dropped straight into the root of a search
     folder — flat / Stability-Matrix installs have no subfolder, and
     os.path.join('', name) == name is exactly what UNETLoader loads. Mirrors
-    klein_edit_helper._klein_unet_folders so anything listed is loadable."""
-    out = []
-    for base_dir in comfy_model_paths.search_roots('diffusion_models'):
-        try:
-            entries = os.listdir(base_dir)
-        except OSError:
-            continue
-        subs = sorted(d for d in entries
-                      if 'krea' in d.lower() and os.path.isdir(os.path.join(base_dir, d)))
-        for sub in subs:
-            try:
-                names = sorted(n for n in os.listdir(os.path.join(base_dir, sub))
-                               if n.lower().endswith(_MODEL_SUFFIXES))
-            except OSError:
-                continue
-            names = [n for n in names if _krea_base_compatible(n)]
-            if names:
-                out.append((sub, names))
-        root_names = sorted(n for n in entries
-                            if 'krea' in n.lower() and n.lower().endswith(_MODEL_SUFFIXES)
-                            and _krea_base_compatible(n)
-                            and os.path.isfile(os.path.join(base_dir, n)))
-        if root_names:
-            out.append(('', root_names))
-    return out
+    klein_edit_helper._klein_unet_folders so anything listed is loadable.
+
+    `accept=_krea_base_compatible` is applied EVERYWHERE here, root and subfolder
+    alike. The Studio's own lister applies the same exclusion only at a root (the
+    check lives inside `_krea_root_candidate`), so a BigLove inside `Krea/` is
+    offered there and refused here. That asymmetry is pinned by
+    `test_model_scanners_agree` rather than silently levelled: it is a behaviour
+    change, not a refactor."""
+    return comfy_model_paths.scan_family_folders(
+        comfy_model_paths.search_roots('diffusion_models'), ('krea',),
+        accept=_krea_base_compatible, suffixes=_MODEL_SUFFIXES)
 
 
 def _krea_base_compatible(name):
@@ -242,8 +264,8 @@ def _krea_base_compatible(name):
 
 def resolve_krea_unet(selected=None, require_raw=False, require_turbo=False):
     """ComfyUI-relative `unet_name` for the UNETLoader, WITH its subfolder prefix
-    (e.g. 'Krea\\krea2_turbo_fp8.safetensors'), or None when no compatible Krea 2
-    base is on disk.
+    (e.g. 'Krea\\krea2_turbo_fp8_scaled.safetensors'), or None when no compatible
+    Krea 2 base is on disk.
 
     Preference: the explicit pick (`selected`, or the `krea.base_model` setting —
     matched on its BASENAME across every krea folder, so a value copied from a
@@ -286,8 +308,12 @@ def resolve_krea_unet(selected=None, require_raw=False, require_turbo=False):
             logger.info('krea.base_model %r is not a %s build — this pipeline '
                         'resolves its own', pick, build)
         else:
-            logger.warning('krea.base_model %r not found under any krea folder — '
-                           'falling back to automatic resolution', pick)
+            # A pin the user TYPED that is not on disk is a hard None, not a
+            # fallback: silently rendering on a different model than the one
+            # they chose is worse than an engine that says the file is missing.
+            # `krea_pin_gaps` turns this into the sentence they read.
+            logger.warning('krea.base_model %r not found under any krea folder', pick)
+            return None
     # Automatic resolution must never PICK a file a loader cannot open: the
     # token match is on the NAME, and a .gguf named …turbo… would win here.
     folders = [(sub, [n for n in names if comfy_model_paths.is_loadable_model(n)])
@@ -295,13 +321,8 @@ def resolve_krea_unet(selected=None, require_raw=False, require_turbo=False):
     folders = [(sub, names) for sub, names in folders if names]
     if not folders:
         return None
-    for token in ('turbo', 'raw'):
-        for sub, names in folders:
-            for n in names:
-                if token in n.lower():
-                    return os.path.join(sub, n)
-    sub, names = folders[0]
-    return os.path.join(sub, names[0])
+    return elect_krea_base([os.path.join(sub, n) for sub, names in folders
+                            for n in names])
 
 
 def resolve_krea_text_encoder():
@@ -347,6 +368,16 @@ def resolve_krea_identity_lora():
         found = _lora_abs(configured)
         if found:
             return configured, found
+        # A pin the USER chose is a stop, not a licence to load a different
+        # LoRA: the identity LoRA IS the face transfer, and swapping it silently
+        # changes every output. But the SHIPPED default is not a choice — it is
+        # the canonical download name, and "not there under this name, so scan
+        # for the renamed file" is the whole reason that fallback exists. Only a
+        # value moved off the default refuses; the default keeps scanning.
+        if _is_user_pin('krea.identity_lora'):
+            logger.warning('krea.identity_lora %r is not on disk — refusing to '
+                           'scan for a different one', configured)
+            return None, None
         logger.info('krea.identity_lora %r not found — scanning for the LoRA by name',
                     configured)
     # list_models mirrors ComfyUI's own get_filename_list: every loras search
@@ -574,9 +605,52 @@ def missing_file_entries(missing):
     return out
 
 
+def _is_user_pin(key: str) -> bool:
+    """Is this config value something the USER chose, as opposed to the value the
+    app ships?
+
+    Not pedantry — the difference between a helpful refusal and a bricked
+    install. `krea.base_model` defaults to '', so any value is a choice.
+    `krea.identity_lora` defaults to the canonical DOWNLOAD name, so every
+    install on earth has it "set" while nobody typed it; treating that as a pin
+    would turn the renamed-download recovery into a hard stop for everyone."""
+    raw_value = str(cfg.get(key) or '').strip()
+    if not raw_value:
+        return False
+    section, _, field = key.partition('.')
+    shipped = str((cfg.DEFAULTS.get(section) or {}).get(field) or '').strip()
+    return raw_value != shipped
+
+
+def krea_pin_gaps():
+    """``[{'slot', 'key', 'configured'}]`` for every Krea model file pinned in
+    Settings that is NOT on disk. Empty on an install that pins nothing (the
+    normal case) and on one whose pins all resolve.
+
+    Read by capabilities (to keep the engine dark and let the UI say WHY) and by
+    preflight (to refuse a run). One function, so the badge in Settings, the
+    engine card and the refusal can never disagree about which file is missing."""
+    gaps = []
+    raw_base = (cfg.get('krea.base_model') or '').strip()
+    if raw_base and resolve_krea_unet() is None:
+        gaps.append({'slot': 'base_model', 'key': 'krea.base_model',
+                     'configured': raw_base})
+    raw_lora = (cfg.get('krea.identity_lora') or '').strip()
+    if _is_user_pin('krea.identity_lora') and resolve_krea_identity_lora()[0] is None:
+        gaps.append({'slot': 'identity_lora', 'key': 'krea.identity_lora',
+                     'configured': raw_lora})
+    return gaps
+
+
 def preflight(two_stage=False):
     """Raise KreaModelsMissing when the engine cannot run. No auto-download: see
     the module docstring — the honest answer is a named gap, not a fake installer."""
+    # A PINNED file that is absent is raised first and separately: "your base
+    # model is missing" and "the file you chose is not there" send the user to
+    # two different places, and only the second one is about something they typed.
+    gaps = krea_pin_gaps()
+    if gaps:
+        raise KreaPinnedModelMissing(gaps)
     missing = krea_missing_assets(two_stage=two_stage)
     nodes = krea_missing_nodes(two_stage=two_stage)
     if missing or nodes:
@@ -975,7 +1049,8 @@ def build_workflow(source_image, prompt, *, unet, clip, vae, lora_name,
                    width, height, seed, steps=None, grounding=None,
                    ref_boost=None, lora_strength=None, fit_mode='fit',
                    filename_prefix='krea_edit', character_loras=None,
-                   generation_loras=None, two_stage=False, aspect_ratio=None,
+                   generation_loras=None, extra_source_image=None,
+                   two_stage=False, aspect_ratio=None,
                    stage2_lora_name=None, two_stage_stage1_steps=None,
                    two_stage_stage2_steps=None, two_stage_handoff_percent=None,
                    two_stage_base_megapixels=None, two_stage_max_output_mp=None):
@@ -1005,7 +1080,11 @@ def build_workflow(source_image, prompt, *, unet, clip, vae, lora_name,
     always-on LoRA preset, chained AFTER `character_loras` and before the model
     patch (7). Rows arrive ALREADY existence-checked and clamped from
     enqueue_krea_edit — this function must stay pure, so it neither reads config
-    nor touches the disk. None/[] leaves the graph exactly as it was."""
+    nor touches the disk. None/[] leaves the graph exactly as it was.
+
+    `extra_source_image` (optional): the ComfyUI input filename of a SECOND
+    reference. The node pack exposes exactly one extra slot (`source_image_b` /
+    `image_b`) — there is no third, so this is a single name, not a list."""
     steps = 8 if steps is None else max(1, int(steps))
     grounding = 512 if grounding is None else int(grounding)
     ref_boost = 4.0 if ref_boost is None else float(ref_boost)
@@ -1135,6 +1214,41 @@ def build_workflow(source_image, prompt, *, unet, clip, vae, lora_name,
         '13': {'class_type': 'SaveImage',
                'inputs': {'filename_prefix': filename_prefix, 'images': ['12', 0]}},
     })
+    # --- Optional SECOND reference (the pack's `_b` slots) ---------------------
+    # Wired EXACTLY like the pack's own two-reference workflow: the extra image
+    # reaches the patch and BOTH grounded encodes — the negative included,
+    # because that is the trained unconditional.
+    #
+    # Two things here are counter-intuitive and were read off the node source,
+    # not guessed. Do not "complete" either of them:
+    #
+    #  1. NO second VAEEncode. The pack also exposes `source_latent_b`, and its
+    #     reference workflow connects it — but `Krea2EditModelPatch.patch`
+    #     rebuilds `src` from the PIXEL path whenever `vae` + `source_image` are
+    #     both connected, which this graph always does. `source_latent_b` is
+    #     therefore read only when the pixel path is off; adding it here would
+    #     encode an image on every render for a value the node never looks at.
+    #
+    #  2. `ref_boost_a` is raised to the SAME value as `ref_boost`. The node
+    #     applies `ref_boost` to the LAST reference and `ref_boost_a` to the
+    #     FIRST. With one reference the primary IS the last one, so it gets the
+    #     configured krea.ref_boost. Adding a second reference silently demotes
+    #     the primary to "first" — without this line the user's tuned value would
+    #     jump onto the second reference and the primary would fall back to the
+    #     hardcoded 1.0. Keeping both equal means adding an angle changes what
+    #     the model sees, never how hard it pulls on the reference already there.
+    #
+    # NAMED key, not '14': upstream numbers this node 14, which this fork's
+    # two-stage path already uses for its VAEDecode. A collision there would
+    # silently replace the decode with a LoadImage.
+    if extra_source_image:
+        g['ref_b'] = {'class_type': 'LoadImage',
+                      'inputs': {'image': extra_source_image},
+                      '_meta': {'title': 'Second reference (a different subject / scene)'}}
+        g['7']['inputs']['source_image_b'] = ['ref_b', 0]
+        g['7']['inputs']['ref_boost_a'] = ref_boost
+        g['8']['inputs']['image_b'] = ['ref_b', 0]
+        g['9']['inputs']['image_b'] = ['ref_b', 0]
     return g
 
 
@@ -1147,7 +1261,8 @@ def _comfy_input_dir() -> str:
 
 def enqueue_krea_edit(user_id, source_filename, edit_prompt, source_path=None,
                       extra_metadata=None, krea_model=None, framing=None,
-                      aspect_ratio=None, generation_loras=None):
+                      aspect_ratio=None, generation_loras=None,
+                      extra_ref_paths=None):
     """Copy the reference into ComfyUI's input folder, build the Krea 2 Edit
     graph against what is ACTUALLY installed, and enqueue it. Returns the app
     job_id.
@@ -1160,11 +1275,25 @@ def enqueue_krea_edit(user_id, source_filename, edit_prompt, source_path=None,
     THIS shot via grounding_px_for — None (the free-form reference-edit action,
     which has no catalog framing) falls back to the single global dial.
 
-    Deliberately NO extra-reference chaining: `Krea2EditModelPatch` takes a
-    SECOND source (`source_latent_b` / `source_image_b`) and no more, and we have
-    not measured what a second reference does to identity here. Shipping an
-    unmeasured multi-ref path would be guessing — the dataset's extra refs are
-    simply ignored by this engine, and the UI says so.
+    `extra_ref_paths`: the SECOND subject, in order — one is used, because
+    `Krea2EditModelPatch` and `Krea2EditGroundedEncode` each expose a single
+    extra slot (`_b`) and no more. Anything beyond it is dropped here rather than
+    silently at graph-build time. A path that no longer exists is skipped with a
+    log line, never fatal: an edit must not die over an optional reference.
+
+    WHAT belongs here, per the pack: a DIFFERENT subject — "scene first, subject
+    second", "two distinct people ... subject B on the `_b` inputs". Another
+    angle of the SAME person is off-label and comes back duplicated. That is why
+    the caller feeds this from the edit DIALOG and never from the dataset's extra
+    references, which are angles of one face by construction (see
+    face_dataset_service.LOCAL_EDIT_REF_SUPPORT). Wiring it to the dataset pool
+    was this feature's first shape, and it guaranteed the wrong photo.
+
+    This is NOT the fork's pose-slot path, which swaps the PRIMARY reference for
+    a matching angle of the same face before this function is called. The two
+    never touch: one changes which face photo is shown, the other adds a second
+    subject beside it.
+
 
     `generation_loras`: ordered [{file, strength}] rows of the run's always-on
     LoRA preset (already resolved from config by the caller — a request only ever
@@ -1197,6 +1326,22 @@ def enqueue_krea_edit(user_id, source_filename, edit_prompt, source_path=None,
         source_path, f'krea_source_{uid}_{source_stem}.png', comfy_input_dir)
     comfy_input = os.path.basename(staged_source)
 
+    # The single second subject, staged the same way. Only the basename is logged:
+    # a dataset path names a machine and the log is what users paste into a bug
+    # report.
+    extra_input = None
+    for candidate in (extra_ref_paths or []):
+        if not candidate or not os.path.exists(candidate):
+            # Says "skipped", not "running with the primary alone": a caller may
+            # hand over several candidates and a later one can still be usable.
+            logger.warning('krea: extra reference is not on disk — skipped: %s',
+                           os.path.basename(str(candidate or '')))
+            continue
+        staged_extra = comfy_fs.stage_input_image(
+            candidate, f'krea_ref_b_{uid}.png', comfy_input_dir)
+        extra_input = os.path.basename(staged_extra)
+        break
+
     # Measure the exact sanitized, EXIF-oriented PNG handed to the graph, never
     # the raw camera raster whose aspect can be transposed by orientation 5–8.
     # A dataset card may request a different output ratio; free-prompt reference
@@ -1222,6 +1367,7 @@ def enqueue_krea_edit(user_id, source_filename, edit_prompt, source_path=None,
         lora_strength=_identity_strength(),
         character_loras=_character_loras(),
         generation_loras=_existing_generation_lora_rows(generation_loras, identity_lora=lora_name),
+        extra_source_image=extra_input,
         two_stage=two_stage, aspect_ratio=two_stage_ratio,
         stage2_lora_name=stage2_lora_name,
         two_stage_stage1_steps=_krea_two_stage_stage1_steps(),
@@ -1239,7 +1385,9 @@ def enqueue_krea_edit(user_id, source_filename, edit_prompt, source_path=None,
     meta = {'model_name': 'krea_identity_edit_dataset'}
     if extra_metadata:
         meta.update(extra_metadata)
-    meta['staged_inputs'] = [comfy_input]   # dropped again when the job ends
+    # Dropped again when the job ends — the second reference is staged too, so it
+    # has to be listed or it would linger in ComfyUI's input folder for good.
+    meta['staged_inputs'] = [comfy_input] + ([extra_input] if extra_input else [])
     queue_manager.add_job(job_type='image', user_id=str(user_id),
                           workflow_data=workflow, prompt=edit_prompt,
                           job_id=job_id, metadata=meta)

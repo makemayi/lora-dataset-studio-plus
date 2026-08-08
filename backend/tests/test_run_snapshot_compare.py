@@ -339,6 +339,23 @@ def test_archive_stores_one_blob_per_distinct_content(app):
         assert again['added'] == 0 and again['skipped'] == 1
 
 
+def test_delayed_archive_never_publishes_new_pixels_under_an_old_signature(app):
+    with app.app_context():
+        from app import config as cfg
+
+        ds = _dataset()
+        img = _image(ds, 'caption', b'GENERATION-A')
+        src = str(cfg.dataset_images_root() / str(ds.id) / img.filename)
+        generation_a = run_snapshot._content_sig(src)
+        _rewrite(ds, img, b'GENERATION-B')
+
+        result = run_archive.store([(src, generation_a, img.filename)])
+
+        assert result['added'] == 0
+        assert result['skipped'] == 1
+        assert run_archive.path_for(generation_a) is None
+
+
 def test_archive_keeps_a_preserved_bmp_addressable(app, tmp_path):
     """A dataset BMP must not fall through the archive's old PNG fallback: the
     comparison route needs the real extension to serve it as image/bmp later."""

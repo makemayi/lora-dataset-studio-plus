@@ -8,11 +8,14 @@ import {
   TRAINING_MODE_LORA,
   canRecheckFullTransformerDelivery,
   cloudTierEstimateView,
+  denseContinueBlocker,
   fullTransformerArtifactView,
   fullTransformerRecheckOutcome,
   fullTransformerUnavailableReason,
   hfCloudTokenReadiness,
   isFullTransformerRun,
+  denseTurboWarning,
+  fullTransformerBaseLabel,
   isFullTransformerEligible,
   normalizeTrainingMode,
   trainingModeSettingsPayload,
@@ -34,15 +37,46 @@ test('training mode enum is exact and every legacy or invalid value falls back t
   assert.equal(trainingModeLabel('full_transformer'), 'Full model');
 });
 
-test('dense eligibility is limited to the official Krea 2 Raw recipe', () => {
+test('dense eligibility covers the whole Krea 2 family, and picking Turbo no longer expels the user', () => {
+  // The regression this replaces: choosing Turbo made Full model ineligible,
+  // and the panel's fallback effect then SAVED LoRA behind the user's back —
+  // which is why the owner could not find "where to put the turbo option".
   assert.equal(isFullTransformerEligible({ trainType: 'krea', variant: 'base', baseModel: '' }), true);
-  assert.equal(isFullTransformerEligible({ trainType: 'krea', variant: 'turbo', baseModel: '' }), false);
-  assert.equal(isFullTransformerEligible({ trainType: 'zimage', variant: 'base', baseModel: '' }), false);
-  assert.equal(isFullTransformerEligible({ trainType: 'krea', variant: 'base', baseModel: 'custom.safetensors' }), false);
+  assert.equal(isFullTransformerEligible({ trainType: 'krea', variant: 'turbo', baseModel: '' }), true);
   assert.equal(isFullTransformerEligible({
-    trainType: 'krea', variant: 'base', baseModel: '', customBase: true,
-  }), false);
-  assert.match(fullTransformerUnavailableReason({ trainType: 'krea', variant: 'turbo' }), /Raw/);
+    trainType: 'krea', variant: 'turbo', baseModel: 'C:/w/custom.safetensors', customBase: true,
+  }), true);
+  assert.equal(isFullTransformerEligible({ trainType: 'zimage', variant: 'base', baseModel: '' }), false);
+  assert.equal(fullTransformerUnavailableReason({ trainType: 'krea', variant: 'turbo' }), null);
+  assert.match(fullTransformerUnavailableReason({ trainType: 'zimage' }), /Krea 2 family/);
+});
+
+test('the dense summary names the base the run will actually train on', () => {
+  assert.equal(fullTransformerBaseLabel({ variant: 'base' }), 'official Krea 2 Raw');
+  assert.equal(fullTransformerBaseLabel({ variant: 'turbo' }), 'official Krea 2 Turbo');
+  assert.equal(fullTransformerBaseLabel({}), 'official Krea 2 Raw');
+  // An unset variant means Raw, exactly like the backend default.
+  assert.equal(fullTransformerBaseLabel({ variant: undefined }), 'official Krea 2 Raw');
+  // A picked checkpoint wins over the variant, and never leaks its full path.
+  assert.equal(
+    fullTransformerBaseLabel({ variant: 'turbo', baseModel: 'C:/models/my-krea.safetensors' }),
+    'custom: my-krea.safetensors');
+  assert.equal(
+    fullTransformerBaseLabel({ baseModel: 'C:/m/x.safetensors', baseLabel: 'Krea 2 Raw bf16' }),
+    'Krea 2 Raw bf16');
+});
+
+test('the dense Turbo warning states what is unknown, without promising or predicting', () => {
+  assert.equal(denseTurboWarning({ variant: 'base' }), null);
+  assert.equal(denseTurboWarning({ variant: 'turbo', baseModel: 'C:/m/x.safetensors' }), null);
+  const notice = denseTurboWarning({ variant: 'turbo' });
+  assert.match(notice.title, /untested here/);
+  assert.match(notice.body, /LoRA on Raw/);
+  assert.match(notice.body, /have not measured/);
+  assert.match(notice.body, /few-step/);
+  assert.match(notice.body, /Nothing is blocked/);
+  // No promise, no predicted failure.
+  assert.doesNotMatch(notice.body, /will (?:work|fail|break|ruin)|guaranteed|corrupt/i);
 });
 
 test('cloud launch and preflight carry the mode while LoRA stays the default regression path', () => {
@@ -139,8 +173,170 @@ test('a full artifact link exists only after verified availability', () => {
   });
   assert.equal(available.href, 'https://huggingface.co/me/private');
   assert.equal(available.available, true);
-  assert.equal(available.label, 'Full model available');
+  // Past tense: `artifact_status` is stamped at delivery and never revisited,
+  // so "available" is what WAS true. The label used to say "Full model
+  // available" above a link that answered 404 for a deleted repository.
+  assert.equal(available.label, 'Full model delivered');
   assert.equal(isFullTransformerRun({ training_mode: 'full_transformer' }), true);
+});
+
+test('a delivered model is dated and flagged unverified, not announced as present', () => {
+  const view = fullTransformerArtifactView({
+    artifact_status: 'available', hf_url: 'https://huggingface.co/me/private',
+    verified_at: '2026-07-11T09:12:33',
+    artifact_status_detail: 'Dense checkpoint and compliance metadata verified',
+  });
+  assert.equal(view.label, 'Full model delivered');
+  assert.match(view.detail, /Delivered and verified on 2026-07-11 — not re-checked since/);
+  assert.match(view.detail, /Open the repository to confirm it is still there/);
+  // The stored detail is a present-tense claim about a past verification. It is
+  // exactly what made this panel lie, so it does not get to speak here.
+  assert.doesNotMatch(view.detail, /metadata verified/);
+});
+
+test('only a live Hub answer promotes the panel to the present tense', () => {
+  const run = { artifact_status: 'available', hf_url: 'https://huggingface.co/me/private' };
+  const fresh = fullTransformerArtifactView(run, { state: 'present' });
+  assert.equal(fresh.label, 'Full model on Hugging Face');
+  assert.match(fresh.detail, /Checked just now/);
+  assert.equal(fresh.href, 'https://huggingface.co/me/private');
+  // "Could not check" is OUR failure. Demoting the view on it would tell
+  // someone offline that their eight hours of GPU are gone.
+  const offline = fullTransformerArtifactView(run, {
+    state: 'unknown', detail: 'Hugging Face could not be reached',
+  });
+  assert.equal(offline.label, 'Full model delivered');
+  assert.equal(offline.tone, 'success');
+  assert.equal(offline.href, 'https://huggingface.co/me/private');
+});
+
+test('a repository measured gone drops BOTH links — there is nothing behind them', () => {
+  const view = fullTransformerArtifactView({
+    artifact_status: 'available', hf_url: 'https://huggingface.co/me/private',
+    verified_at: '2026-07-11T09:12:33',
+  }, { state: 'gone' });
+  assert.equal(view.label, 'Full model no longer on Hugging Face');
+  assert.equal(view.tone, 'error');
+  assert.equal(view.available, false);
+  assert.equal(view.href, null);
+  // Not even as "Inspect the repository (delivery unverified)": that label
+  // would misname a 404, and the click is the dead end being fixed.
+  assert.equal(view.repositoryHref, null);
+  assert.match(view.detail, /no longer answers/);
+  assert.match(view.detail, /check the Checkpoints panel for a copy on this computer/i);
+});
+
+test('a run that delivered nothing loses its inspect link too once the repo is gone', () => {
+  const run = { artifact_status: 'missing', hf_url: 'https://huggingface.co/me/private' };
+  // Without a live answer the link stays: a repository that exists but holds no
+  // weights is worth opening, and that is what this branch was written for.
+  assert.equal(fullTransformerArtifactView(run).repositoryHref,
+    'https://huggingface.co/me/private');
+  const gone = fullTransformerArtifactView(run, { state: 'gone' });
+  assert.equal(gone.repositoryHref, null);
+  assert.match(gone.detail, /nothing left here to inspect/);
+  // And an unreachable Hub changes nothing: the link is still the right link.
+  assert.equal(fullTransformerArtifactView(run, { state: 'unknown' }).repositoryHref,
+    'https://huggingface.co/me/private');
+});
+
+test('Continue counts ROADS, and only a measured gone closes the Hub one', () => {
+  // `resume_checkpoints[].source` is rebuilt from the disk on every payload —
+  // that is why it, and not a delivery-time stamp, is what may take a button
+  // away. Gating on `local_artifact_status` would have been this wave's own bug
+  // mirrored: a button offered for a file deleted by hand.
+  const hubOnly = { resume_checkpoints: [{ step: 3000, source: 'hub' }] };
+  const localOnly = { resume_checkpoints: [{ step: 3000, source: 'local' }] };
+  const both = { resume_checkpoints: [
+    { step: 3000, source: 'local' }, { step: 3000, source: 'hub' }] };
+
+  for (const run of [hubOnly, localOnly, both]) {
+    assert.equal(denseContinueBlocker(run, null), null);
+    assert.equal(denseContinueBlocker(run, { state: 'present' }), null);
+    // A check we could not make never closes a road.
+    assert.equal(denseContinueBlocker(run, { state: 'unknown' }), null);
+  }
+  // Gone shuts the Hub road ONLY. The direct road is exactly the way out of a
+  // deleted repository, so greying the button there would hide it.
+  assert.equal(denseContinueBlocker(localOnly, { state: 'gone' }), null);
+  assert.equal(denseContinueBlocker(both, { state: 'gone' }), null);
+  assert.match(denseContinueBlocker(hubOnly, { state: 'gone' }),
+    /neither road is open/);
+  // A missing source defaults to the local road — an older payload must not
+  // lose its button.
+  assert.equal(denseContinueBlocker(
+    { resume_checkpoints: [{ step: 3000 }] }, { state: 'gone' }), null);
+});
+
+/* The value of a JSX attribute, brace-balanced — so an assertion about
+   `disabled=` cannot be satisfied by something written inside `title=` further
+   down. The obvious `/disabled=\{[\s\S]*?fn\(/` does exactly that: it spans
+   attributes, and it passed on a file with the call deleted from `disabled`
+   altogether. Measuring the reachable proxy instead of the property is the very
+   mistake this wave exists to correct; it is not allowed in its own tests. */
+function jsxAttr(source, name) {
+  const at = source.indexOf(`${name}={`);
+  if (at < 0) return '';
+  let i = at + name.length + 1;
+  let depth = 0;
+  for (; i < source.length; i += 1) {
+    if (source[i] === '{') depth += 1;
+    else if (source[i] === '}') { depth -= 1; if (!depth) break; }
+  }
+  return source.slice(at, i + 1);
+}
+
+test('THE trap: a trashed master with a stale "available" stamp still disables Continue', () => {
+  // The scenario, one click away from any user: they empty 26 GB with the card's
+  // own "🧹 Clean" button, and the Hub copy is gone too.
+  //
+  // `local_artifact_status` is written in exactly three places, all at delivery
+  // time (cloud_training.py :2384 pending, :4310 available, :4431 cancelled), and
+  // `dense_artifacts.delete_artifact` — the trash path — does not touch it. So the
+  // payload below is REAL: the stamp says the file is here, and it is not.
+  //
+  // Read the stamp and this run offers ▶ Continue, which then answers "this full
+  // model has nothing left to continue from" — the exact defect this wave fixes
+  // on the Hub side, rebuilt on the local side. `resume_checkpoints` cannot lie
+  // the same way: _dense_resume_candidates stats every file and drops what OSError
+  // says is gone.
+  const trashedButStamped = {
+    local_artifact_status: 'available',
+    local_weight_filename: 'Krea_dense_000003000.safetensors',
+    local_artifact_dir: 'anywhere',
+    resume_checkpoints: [{ step: 3000, source: 'hub' }],   // the disk road is GONE
+  };
+  assert.match(denseContinueBlocker(trashedButStamped, { state: 'gone' }),
+    /neither road is open/,
+    'a delivery-time stamp must never keep this button alive');
+  // The same payload with the Hub still there keeps the button: one road is enough.
+  assert.equal(denseContinueBlocker(trashedButStamped, { state: 'present' }), null);
+  assert.equal(denseContinueBlocker(trashedButStamped, { state: 'unknown' }), null);
+  // And the mirror: the disk road alive, the stamp saying nothing at all.
+  assert.equal(denseContinueBlocker(
+    { resume_checkpoints: [{ step: 3000, source: 'local' }] }, { state: 'gone' }), null);
+});
+
+test('the Runs page reads the blocker for BOTH the disabled state and the reason', () => {
+  // A greyed button with no explanation is the thing this replaces, and a
+  // reason nobody is disabled by is decoration.
+  const button = runsPage.slice(runsPage.indexOf('onClick={() => continueRun(run)}'));
+  const call = 'denseContinueBlocker(run, hubPresence[run.run_id])';
+  assert.ok(jsxAttr(button, 'disabled').includes(call),
+    'the blocker must be inside the disabled expression itself');
+  assert.ok(jsxAttr(button, 'title').includes(call),
+    'the blocker must be inside the title expression itself');
+});
+
+test('an in-flight delivery is never demoted by a 404 — the repo may not exist yet', () => {
+  // A pod that has not created the repository yet answers 404 by construction.
+  // Only a run whose record says the delivery FINISHED may be read that way.
+  for (const status of ['verification_pending', 'pending', 'uploading', 'creating_repository']) {
+    const view = fullTransformerArtifactView(
+      { artifact_status: status, status: 'training',
+        hf_url: 'https://huggingface.co/me/private' }, { state: 'gone' });
+    assert.notEqual(view.label, 'Full model no longer on Hugging Face');
+  }
 });
 
 test('dense token readiness fails closed only when the backend explicitly reports a problem', () => {
@@ -253,22 +449,47 @@ test('MVP copy and artifact actions distinguish a full model from a LoRA', () =>
     /Modèle complet|Fine-tuning complet|Recette dense verrouillée|Lancer le fine-tuning complet|Choisir un GPU 80 Go|Livraison Hugging Face bloquée|estimation dense indisponible/);
 });
 
-test('dense Advanced renders only the locked server recipe and its honored steps input', () => {
+test('dense Advanced exposes exactly the five unlocked values and states why the rest is locked', () => {
   const recipe = panel.slice(
     panel.indexOf('// FULL_TRANSFORMER_ADVANCED_RECIPE_START'),
     panel.indexOf('// FULL_TRANSFORMER_ADVANCED_RECIPE_END'),
   );
-  assert.match(panel, /Locked full-model recipe · steps/);
-  assert.match(recipe, /Official Krea 2 Raw · full transformer · unquantized/);
-  assert.match(recipe, /1024 px · batch 1 · bf16/);
-  assert.match(recipe, /Adafactor · learning rate 1e-6/);
-  assert.match(recipe, /Gradient checkpointing · cached latents \+ text embeddings/);
-  assert.match(recipe, /Checkpoint \+ preview every 250 steps · keep 1 checkpoint/);
+  assert.match(panel, /Full-model recipe · steps · prompts · LR · resolution · checkpoints/);
+  // Computed, not a literal: this line used to say "Official Krea 2 Raw" over
+  // a recipe that can now be Turbo or a local checkpoint.
+  assert.match(recipe, /\{baseSummary\}[\s\S]{0,80}full transformer · unquantized/);
   assert.match(recipe, /80 GB VRAM GPU · at least 200 GB disk/);
-  assert.match(recipe, /The only editable setting in this full-model recipe/);
-  assert.equal([...recipe.matchAll(/<input\b/g)].length, 1);
+
+  // The four values the 80 GB geometry depends on stay locked, and each says
+  // WHY — a greyed-out control with no reason reads as an arbitrary limit.
+  assert.match(recipe, /Locked · batch &amp; precision[\s\S]{0,200}Batch 1 · bf16/);
+  assert.match(recipe, /Locked · optimizer[\s\S]{0,200}Adafactor/);
+  assert.match(recipe, /Locked · memory[\s\S]{0,200}Gradient checkpointing/);
+  assert.match(recipe, /would not fit in memory|has no room for more/);
+
+  // The five unlocked ones, each wired to a real persistence call.
   assert.match(recipe, /setStepsOverride\(event\.target\.value\)/);
-  assert.doesNotMatch(recipe, /<select\b|<button\b|saveAdv\(|setBase\(|setVariant\(|setMasked\(/,
+  assert.match(recipe, /patch\(\{ dense_lr: value \}\)/);
+  assert.match(recipe, /patch\(\{ dense_resolution: Number\(event\.target\.value\) \}\)/);
+  assert.match(recipe, /patch\(\{ dense_save_every: value \}\)/);
+  assert.match(recipe, /patch\(\{ dense_max_step_saves: Number\(event\.target\.value\) \}\)/);
+  assert.match(recipe, /saveSamplePrompts\?\.\(\)/);
+  // Bounds come from the server payload, never from a second copy of the rules.
+  assert.match(recipe, /adv\?\.dense_lr_min/);
+  assert.match(recipe, /adv\?\.dense_save_every_max/);
+  assert.match(recipe, /adv\?\.dense_max_step_saves_max/);
+
+  // Keep x ~26 GB is stated BEFORE the launch, next to the control that sets it.
+  assert.match(recipe, /dense_storage_plan/);
+  assert.match(recipe, /fp8_typical_bytes/);
+  assert.match(recipe, /PRIVATE Hugging Face storage/);
+
+  // The dense artifact is a RAW checkpoint: how to test it must be visible here.
+  assert.match(recipe, /dense_inference_hint/);
+
+
+  // Still no LoRA CONTROL may leak in (naming them in prose is the point).
+  assert.doesNotMatch(recipe, /CUSTOM_BASE_SENTINEL|advNetworkType|advEffRank|applyPreset|setBase\(|setVariant\(|setMasked\(/,
     'the dense recipe card must not grow an ignored LoRA control');
 });
 
@@ -282,7 +503,14 @@ test('the full Advanced branch cannot render the unchanged LoRA controls', () =>
   const denseArm = branch.slice(0, split);
   const loraArm = branch.slice(split);
   assert.match(denseArm, /<FullTransformerAdvancedRecipe/);
-  assert.doesNotMatch(denseArm, /Presets|CUSTOM_BASE_SENTINEL|advNetworkType|Masked \(bg 10%\)|saveAdv\(/);
+  // LoRA-ONLY controls must not leak in. The base picker is deliberately NOT on
+  // this list any more: a dense run can now be pointed at Raw, Turbo or a local
+  // checkpoint, so the base/variant selectors are shared, not LoRA-only — and
+  // the dense arm renders its own copy (the LoRA arm's lives below the split
+  // and would otherwise be unreachable in full-model mode, which is exactly why
+  // the Turbo option looked missing).
+  assert.match(denseArm, /DENSE_BASE_PICKER_START/);
+  assert.doesNotMatch(denseArm, /Presets|advNetworkType|Masked \(bg 10%\)|saveAdv\(/);
   assert.match(loraArm, /Presets/);
   assert.match(loraArm, /CUSTOM_BASE_SENTINEL/);
   assert.match(loraArm, /advNetworkType/);

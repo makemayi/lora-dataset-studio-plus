@@ -11,6 +11,12 @@ Dataset Studio: SRC's module-level COMFYUI_API_ADDRESS constant becomes a live
 restart). SRC's COMFYUI_BASE_DIR/COMFYUI_BATCH_FILE imports are dropped — this
 app never launches or stops ComfyUI itself, so start_comfyui_process /
 stop_comfyui_process were already no-ops and stay that way.
+
+SRC's `queue_prompt` is gone too: nothing in this app ever called it, and it
+submitted with no timeout at all. The one live submission path is
+`app.utils.comfyui.queue_prompt_to_comfyui`, which is bounded and carries the
+error contract job_queue relies on — a second, unbounded door into /prompt was
+only ever a trap for the next caller.
 """
 
 import os
@@ -18,10 +24,9 @@ import time
 import socket
 import threading
 import logging
-import json
 import requests
 from urllib.parse import urljoin
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple
 
 from .. import config as cfg
 
@@ -102,17 +107,6 @@ class ComfyUIService:
         """Démarrage désactivé."""
         logger.warning("⚠️ start_comfyui_process ignoré.")
         return self.check_connection()
-
-    # ---------------- Prompt ----------------
-    def queue_prompt(self, prompt: Dict, client_id: str):
-        ok, msg = self.ensure_comfyui_running()
-        if not ok:
-            return None, msg
-        payload = json.dumps({"prompt": prompt, "client_id": client_id})
-        r = requests.post(urljoin(cfg.get('comfyui.api_url'), "/prompt"), data=payload)
-        if r.status_code == 200:
-            return r.json(), None
-        return None, r.text
 
 
 comfyui_service = ComfyUIService()

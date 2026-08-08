@@ -412,8 +412,9 @@ function NewDatasetForm({ onCreate, onClose }) {
           </label>
         )}
       </div>
-      {/* Modèle cible : fixe le format de caption (SDXL→tags booru, sinon prose) et la
-          section du menu. Modifiable ensuite dans le panneau d'entraînement. */}
+      {/* Modèle cible : fixe le format de caption PAR DÉFAUT (SDXL→tags booru,
+          anima→hybride: les deux acceptées, sinon prose) et la section du menu.
+          Modifiable ensuite dans le panneau d'entraînement. */}
       <label className="flex flex-col gap-1 text-[0.6875rem] text-content-muted">
         Target model <span className="text-content-subtle normal-case">— sets the caption style &amp; groups the menu (changeable later)</span>
         <select value={trainType} onChange={(e) => setTrainType(e.target.value)}
@@ -423,7 +424,7 @@ function NewDatasetForm({ onCreate, onClose }) {
           <option value="krea">Krea 2 (prose captions)</option>
           <option value="flux">FLUX.1 (prose captions)</option>
           <option value="flux2klein">FLUX.2 Klein (prose captions)</option>
-          <option value="anima">Anima (prose captions)</option>
+          <option value="anima">Anima (prose or booru tags)</option>
         </select>
       </label>
       {/* Fidélité (personnage) : visage seul (défaut) vs visage + corps. En mode corps,

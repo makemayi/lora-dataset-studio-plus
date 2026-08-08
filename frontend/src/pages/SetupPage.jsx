@@ -8,10 +8,12 @@ import { deriveSetupSteps, deriveCapabilitySummary, SETUP_STEP_IDS, kleinMissing
   aitoolkitVerdict, AITOOLKIT_INSTALL_STEPS } from '../hooks/useSetupSteps'
 import SettingsLink from '../components/common/SettingsLink'
 import GuidedSteps from '../components/setup/GuidedSteps'
+import { ML_INSTALL_CARDS, cardInstalled } from '../components/setup/mlInstallCards'
 import InstallRunner from '../components/setup/InstallRunner'
 import InstallEverything from '../components/setup/InstallEverything'
 import { HelpBadge } from '../help/HelpMode'
 import { comfyEnumUnavailableReason } from '../utils/comfyEnumSupport.js'
+import { kleinAssetBlocks } from '../utils/kleinAssets.js'
 
 const INPUT_CLASS =
   'mt-1 w-full rounded-md border border-border-strong bg-surface-raised px-3 py-2 text-sm text-content ' +
@@ -58,21 +60,39 @@ const STATUS_META = {
 // useSetupSteps.js) back to the wizard step that installs/configures it, so clicking a
 // row jumps straight to that step. Most entries match a step's own `unlocks` wording
 // 1:1 (Captioning, Face-similarity scoring, Person masks, LoRA training, Test Studio).
-// Two don't, and are set by where the control actually lives: "Klein (local)" is
+// Three don't, and are set by where the control actually lives: "Klein (local)" is
 // downloaded from the comfyui step's body (toolBody('comfyui') has the one-click
 // installers), not the image step — the image step only has the API-key fields and a
 // note pointing at ComfyUI. "Auto-framing & head-crop" is the ollama step's other two
 // unlocks (Auto-classify framing / Auto head-crop), just phrased differently here.
+// "Krea 2 Edit (local)" is the third, and it had NO entry at all: its row rendered a
+// ✗ and led nowhere, which teaches the user something is missing and gives them no
+// way to reach it. Its one-click installer is KreaInstallCard, and that card is
+// mounted ONLY inside InstallEverything — i.e. on the 'install' screen, not on any
+// tool step (the comfyui step has Klein's weights, never Krea's). Hence 'install',
+// which is a SCREEN and not a step id — see screenOf().
 const CAPABILITY_STEP_ID = {
   'Nano Banana (Gemini)': 'image',
   'ChatGPT (gpt-image-2)': 'image',
   'OpenRouter': 'image',
   'Klein (local)': 'comfyui',
+  'Krea 2 Edit (local)': 'install',
   'Captioning': 'ollama',
   'Auto-framing & head-crop': 'ollama',
   'Face-similarity scoring': 'quality',
   'Person masks': 'quality',
   'Watermark inpainting': 'quality',
+  'Video bank — reading files': 'quality',
+  'Video bank — shot detection': 'quality',
+  'Video bank — clip encoding': 'quality',
+  // Same step as the four rows above: each has its own one-click card in the
+  // quality step's install list (mlInstallCards.js) — bank scoring/SigLIP2/the
+  // watermark detector were already there; the scraping-extras card was added
+  // alongside this row (it previously only lived on the Concept Sources panel).
+  'Bank scoring (aesthetic · NSFW · style)': 'quality',
+  'SigLIP2 Bank semantics (optional)': 'quality',
+  'Watermark detector (optional)': 'quality',
+  'Scraping extras (optional)': 'quality',
   'LoRA training': 'training',
   'Test Studio': 'comfyui',
 }
@@ -422,15 +442,22 @@ export default function SetupPage() {
       // badge is what sent a user with a truncated 9.5 GB UNET to look for a file he
       // already had (zigzag4794, Discord). Three states, three actions — and the
       // word carries the state, not just the colour.
+      // EVERY unreadable Klein file, not just the required trio: the consistency
+      // LoRA is optional, so it was absent from step.kleinBroken — and a corrupted
+      // one therefore rendered "✓ Installed" right under a button offering to
+      // download it. Optional is a reason to say it QUIETLY, never a reason to hide
+      // it. Severity comes from the asset (kleinAssetBlocks), not from the list.
       const kleinBrokenBy = {}
-      ;(step.kleinBroken || []).forEach((i) => { kleinBrokenBy[i.asset] = i })
+      ;(step.kleinBrokenAll || step.kleinBroken || []).forEach((i) => { kleinBrokenBy[i.asset] = i })
       const installBtn = (action, label) => {
         const bad = kleinBrokenBy[action]
         if (bad) {
+          const gates = kleinAssetBlocks(action)
           return (
             <>
-              <p className="break-words text-xs text-rose-300">
-                ⚠ On disk, unreadable — {bad.filename}. Downloading again replaces it.
+              <p className={`break-words text-xs ${gates ? 'text-rose-300' : 'text-amber-400'}`}>
+                ⚠ On disk, unreadable — {bad.filename}.
+                {gates ? '' : ' Klein still generates without it.'} Downloading again replaces it.
               </p>
               <InstallRunner action={action} buttonLabel={`↻ Download ${label.replace(/^⬇ Download /, '')} again`}
                 onDone={() => refresh(true)} />
@@ -836,22 +863,17 @@ export default function SetupPage() {
       // who's missing just one (e.g. watermark inpainting on an older install) fixes
       // that one without redoing the whole monolithic step. The all-at-once install
       // stays available below for a first-time setup.
-      const ML_CAPS = [
-        { action: 'face_scoring', cap: 'face_scoring', icon: '🎭', title: 'Face-similarity scoring',
-          body: 'Powers the "Analyze faces" pass: scores how closely each generated image resembles your reference photo, so you keep the ones that truly look like the person. It only ranks — it never deletes anything.' },
-        { action: 'masks', cap: 'masks', icon: '🧍', title: 'Person masks',
-          body: 'Isolates the subject from the background for masked training: the surroundings are weighted down so the LoRA binds the identity to the person, not the room. A training without masks is still valid.' },
-        { action: 'watermark_inpaint', cap: 'watermark_inpaint', icon: '🧽', title: 'Watermark inpainting',
-          body: 'Repaints small off-center watermarks (LaMa) during 🧽 Clean instead of only cropping border marks. It can use CUDA or CPU from Settings. Without it, off-center marks are skipped.' },
-        { action: 'bank_scoring', cap: 'bank_scoring', icon: '✨', title: 'Bank scoring (aesthetic · NSFW · style)',
-          body: "Powers the 🗃️ Bank's ✨ Score pass: rates images for aesthetics (1–10), flags NSFW and groups them by visual style with one CLIP pass — and makes 'keep best' prefer the nicest-looking duplicate. Installs into its own Python (CLIP + a small NSFW model). Without it, the Score button is disabled with this hint." },
-      ]
+      // The list itself lives in mlInstallCards.js so the bare node --test suite
+      // can hold Setup to the promises the capability strips make (JSX never
+      // executes there — a list defined here is a list no test can see).
+      const ML_CAPS = ML_INSTALL_CARDS
       return (
         <div className="space-y-3">
           <p className="text-sm text-content-muted">
-            Optional helpers installed into this app's own Python environment. Face scoring and masks run on
+            Optional helpers installed into this app's managed ML environments. Face scoring and masks run on
             CPU; watermark inpainting can use CUDA or CPU. The app works fully without them; they just make
-            curation and training cleaner. Install each on its own below, or all at once at the bottom. Already installed?
+            curation and training cleaner. Install each on its own below. The legacy pip bundle at the bottom covers
+            the shared ML requirements only; isolated Bank engines and large model downloads stay explicit. Already installed?
             Use <span className="font-medium text-content">↻ Reinstall</span> to repair or update it.
           </p>
           {caps.python && !caps.python.ml_supported && (
@@ -871,7 +893,8 @@ export default function SetupPage() {
           )}
           <div className="space-y-3">
             {ML_CAPS.map((c) => {
-              const present = !!caps[c.cap]
+              // Every piece the action installs, not just the first — see cardInstalled.
+              const present = cardInstalled(c, caps)
               return (
                 <div key={c.action} className="rounded-md border border-border bg-surface-raised p-3 space-y-2">
                   <div className="flex items-center justify-between gap-2">
@@ -989,7 +1012,17 @@ export default function SetupPage() {
   const INSTALL = SCREENS.indexOf('install')   // the install/reinstall step, after config
   const isReady = (id) => stepById[id].status === 'ready' || stepById[id].disabled
   const toolIdx = (id) => SETUP_STEP_IDS.indexOf(id)
-  const screenOf = (id) => SETUP_STEP_IDS.indexOf(id) + 1   // welcome=0, tools=1..N
+  // welcome=0, tools=1..N — and, for the two screens that are not tool steps
+  // ('install', 'done'), their index in SCREENS. Without that second lookup a
+  // capability row pointing at the install/repair menu (Krea 2 Edit, whose only
+  // one-click installer lives there) silently resolved to -1+1 = 0 and dumped the
+  // user on the welcome screen. Unknown ids still fall back to welcome, as before.
+  const screenOf = (id) => {
+    const i = SETUP_STEP_IDS.indexOf(id)
+    if (i >= 0) return i + 1
+    const j = SCREENS.indexOf(id)
+    return j > 0 ? j : 0
+  }
   const allReady = SETUP_STEP_IDS.every(isReady)
   const nextUnfinished = (fromIdx) => {
     for (let i = fromIdx + 1; i < SETUP_STEP_IDS.length; i += 1)

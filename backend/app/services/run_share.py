@@ -177,8 +177,20 @@ def build_run_config_text(run_key):
                else ct._run_param(crun, 'version'))
     created = (rec.created_at if rec is not None else None) or \
         (crun.created_at if crun is not None else None)
-    dataset_name = ct._dataset_name(dataset_id)
-    dataset = FaceDataset.query.get(dataset_id)
+    # Resolve in the table this run actually trained on. `FaceDataset.query.get`
+    # on a video run returns the face dataset that merely shares its id, and the
+    # exported config would then describe someone else's data — a shareable file
+    # that is confidently wrong. A video run has no FaceDataset at all, so the
+    # image-specific sections below simply have nothing to render.
+    if crun is not None and rec is None:
+        from . import cloud_run_dataset as crd
+        dataset = crd.dataset_row(crun)
+        dataset_name = getattr(dataset, 'name', None)
+        if crd.is_video(crun):
+            dataset = None
+    else:
+        dataset_name = ct._dataset_name(dataset_id)
+        dataset = FaceDataset.query.get(dataset_id)
 
     settings = None
     if rec is not None and rec.settings:

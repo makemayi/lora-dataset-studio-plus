@@ -3,6 +3,7 @@ here so an API change touches one file. The API key is read from the secret
 store on every call — never cached, so a key pasted in Settings applies
 immediately."""
 import logging
+import re
 
 import requests
 
@@ -16,9 +17,72 @@ API_BASE = 'https://console.vast.ai/api/v0'
 API_BASE_V1 = 'https://console.vast.ai/api/v1'
 _TIMEOUT = 30
 
+# Hard limits vast enforces on the ask itself, quoted from its own refusal:
+# "error 400/3471: Invalid args: len(image) > 1024, or len(args) > 16384".
+# Learned the expensive way — the cloud quantization lane embeds its whole
+# program in `onstart`, exceeded this, and every launch was refused before a
+# machine existed. Checked HERE, before the request, so an ask that cannot be
+# accepted never becomes a round trip (and never a paid one).
+MAX_IMAGE_CHARS = 1024
+MAX_ONSTART_CHARS = 16384
+
+# How much of vast's own answer travels inside an exception. Long enough for a
+# sentence and a field name, short enough to stay a log line and to fit the
+# error column of the runs table.
+_ERROR_BODY_CHARS = 400
+
+# Anything below is redacted before a response body is quoted anywhere. A vast
+# error can echo the request it refused, and OUR requests carry secrets: the
+# pod's HF_TOKEN and the training UI's bearer token both travel in `env`.
+_REDACTED = '[redacted]'
+# a JSON pair whose NAME says the value is a secret: "HF_TOKEN": "hf_…",
+# "AI_TOOLKIT_AUTH": "…", "api_key": "…" — value replaced, name kept readable.
+_SECRET_PAIR_RE = re.compile(
+    r'("(?:[A-Za-z_]*(?:token|secret|key|auth|password)[A-Za-z_]*)"\s*:\s*")[^"]*(")',
+    re.I)
+# and the shapes worth killing wherever they appear, pair or not.
+_SECRET_VALUE_RES = (
+    re.compile(r'\bhf_[A-Za-z0-9_-]{8,}\b'),
+    re.compile(r'\bbearer\s+\S+', re.I),
+)
+
 
 class VastError(RuntimeError):
     pass
+
+
+def _scrub(text: str) -> str:
+    """Same text minus every secret shape we know how to send."""
+    out = str(text or '')
+    key = cfg.secret('VAST_API_KEY')
+    if key:
+        out = out.replace(key, _REDACTED)
+    out = _SECRET_PAIR_RE.sub(r'\1' + _REDACTED + r'\2', out)
+    for pattern in _SECRET_VALUE_RES:
+        out = pattern.sub(_REDACTED, out)
+    return out
+
+
+def _detail(r) -> str:
+    """What vast actually said, scrubbed and capped — never the empty ``{}``.
+
+    Every failure sentence in this file used to end at ``HTTP 400 {}`` because
+    the body was parsed only on 200: the first cloud quantization attempt died
+    that way and the reason had to be reconstructed by hand. The body is the
+    diagnosis, so it travels with the exception.
+    """
+    try:
+        text = ' '.join(str(r.text or '').split())
+    except Exception:          # a response object that cannot even be read
+        return ''
+    if not text:
+        return ''
+    text = _scrub(text)
+    return text[:_ERROR_BODY_CHARS] + '…' if len(text) > _ERROR_BODY_CHARS else text
+
+
+def _failed(r, what: str) -> VastError:
+    return VastError(f'{what} failed: HTTP {r.status_code} {_detail(r)}'.rstrip())
 
 
 def _request(method, path, *, base=API_BASE, **kwargs):
@@ -36,7 +100,7 @@ def _request(method, path, *, base=API_BASE, **kwargs):
 def search_offers(min_vram_gb: int, max_dph: float, limit: int = 20,
                   min_inet_down_mbps: int = 0, min_reliability: float = 0.95,
                   min_disk_bw_mbps: int = 0, verified_only: bool = True,
-                  secure_cloud_only: bool = False) -> list:
+                  secure_cloud_only: bool = False, min_disk_gb: int = 0) -> list:
     """Offers matching the configured trust tier and resource constraints.
 
     Vast calls its normal host trust flag ``verified`` and exposes Secure
@@ -46,7 +110,15 @@ def search_offers(min_vram_gb: int, max_dph: float, limit: int = 20,
     (Mbps) filters out hosts whose registry pull of the ~7 GB image would eat
     the whole boot budget (observed live: a retry-looping host on 2026-07-12);
     disk_bw (MB/s) filters out hosts too slow to EXTRACT it (a 5090 host froze
-    in 'loading' on 2026-07-13 with network fine — the disk was the bound)."""
+    in 'loading' on 2026-07-13 with network fine — the disk was the bound).
+
+    min_disk_gb is the one that decides whether the rental happens AT ALL: an
+    ask whose ``disk`` exceeds what the offer has free is refused outright, and
+    the cheapest offer on the market is exactly where free disk runs out — a
+    live search on 2026-08-04 returned a $0.081/h box with 57 GB against 19
+    others averaging 500+, and "cheapest" is what the quantization lane picked.
+    Callers MUST pass the same number they will send as ``disk``; filtering for
+    less than you ask for is the failure this parameter exists to remove."""
     body = {
         'gpu_ram': {'gte': int(min_vram_gb) * 1024},
         'reliability': {'gte': float(min_reliability)},
@@ -64,15 +136,29 @@ def search_offers(min_vram_gb: int, max_dph: float, limit: int = 20,
         body['inet_down'] = {'gte': int(min_inet_down_mbps)}
     if min_disk_bw_mbps:
         body['disk_bw'] = {'gte': int(min_disk_bw_mbps)}
+    if min_disk_gb:
+        body['disk_space'] = {'gte': int(min_disk_gb)}
     r = _request('POST', '/bundles/', json=body)
     if r.status_code != 200:
-        raise VastError(f'offer search failed: HTTP {r.status_code}')
+        raise _failed(r, 'offer search')
     offers = (r.json() or {}).get('offers') or []
+    if min_disk_gb:
+        # Belt and braces: the predicate above is honoured server-side (verified
+        # live), but a silently-ignored filter would hand back exactly the
+        # unrentable offers we are trying to avoid. An offer that does not
+        # publish its free disk is kept — unknown is not "too small".
+        offers = [o for o in offers
+                  if not o.get('disk_space') or float(o['disk_space']) >= int(min_disk_gb)]
     out = [{
         'offer_id': o.get('id'),
         'gpu_name': o.get('gpu_name'),
         'dph_total': o.get('dph_total'),
         'gpu_ram_gb': round((o.get('gpu_ram') or 0) / 1024.0, 1),
+        # Free disk (GB) and advertised downlink (Mbps): what the rental asks
+        # for and what the duration estimate is built on. Both are documented
+        # offer fields; both are treated as optional by every consumer.
+        'disk_space_gb': round(float(o.get('disk_space') or 0), 1),
+        'inet_down': o.get('inet_down'),
         # host identity + quality signals for the selection layer (blacklist
         # of hosts that failed to boot, reliability preference within a class).
         # machine_id alone was not enough: it lives in a file on the host
@@ -98,7 +184,28 @@ def create_instance(offer_id, disk_gb: int, label: str, template_hash: str | Non
     """Rent the offer. Preferred path: template_hash — the instance inherits the
     official template's env/ports/entrypoint (the raw-image path never published
     the UI port; smoke-tested 2026-07-12). image/env/onstart remain as a
-    config-escape-hatch fallback when no template hash is set."""
+    config-escape-hatch fallback when no template hash is set.
+
+    The two branches are not interchangeable: env and onstart are DROPPED on the
+    template branch (the template owns them, and vast refuses an env override
+    there with a 400). A caller that drives its pod entirely through onstart —
+    the cloud quantization lane, which needs no inbound port at all — therefore
+    has to take the raw-image branch, and a raw-image ask carrying env+onstart
+    was confirmed accepted (HTTP 200, contract created and immediately
+    destroyed) on 2026-08-04.
+
+    ``disk_gb`` must be backed by an offer that HAS that much free disk: vast
+    refuses the ask otherwise. See search_offers(min_disk_gb=…)."""
+    if image and len(str(image)) > MAX_IMAGE_CHARS:
+        raise VastError(f'image reference is {len(str(image))} characters; vast '
+                        f'refuses more than {MAX_IMAGE_CHARS} — nothing was sent')
+    if onstart and len(onstart) > MAX_ONSTART_CHARS:
+        # Caught before the request: vast answers this with a plain 400, which
+        # for months read as "the offer is gone" and cost two real launches.
+        raise VastError(
+            f'onstart script is {len(onstart)} characters; vast refuses more than '
+            f'{MAX_ONSTART_CHARS} ("Invalid args") — nothing was sent, so no '
+            'machine was rented. Shrink what the script embeds.')
     if template_hash:
         body = {'template_hash_id': template_hash, 'label': label, 'disk': int(disk_gb)}
         # The official template pins an OLD image tag (2026-05-20 — predates the
@@ -113,10 +220,58 @@ def create_instance(offer_id, disk_gb: int, label: str, template_hash: str | Non
         if onstart:
             body['onstart'] = onstart
     r = _request('PUT', f'/asks/{offer_id}/', json=body)
-    data = r.json() if r.status_code == 200 else {}
-    if r.status_code != 200 or not data.get('success'):
-        raise VastError(f'create_instance failed: HTTP {r.status_code} {data}')
+    if r.status_code != 200:
+        raise _failed(r, 'create_instance')
+    try:
+        data = r.json() or {}
+    except ValueError:
+        data = {}
+    if not data.get('success'):
+        raise _failed(r, 'create_instance')
     return str(data.get('new_contract'))
+
+
+def execute_command(instance_id, command: str) -> str:
+    """Run ONE shell command inside a running instance; return its result URL.
+
+    vast's ``PUT /instances/command/{id}/`` is asynchronous by design: it queues
+    the command on the host daemon and answers with a URL where the combined
+    output will appear once the command finishes. Nothing about the response
+    says the command succeeded — only ``fetch_command_result`` can.
+
+    This is a deliberately small, single-purpose surface: the ONLY caller is the
+    post-training fp8 export, whose whole failure mode is "no fp8 twin", never
+    "the run is lost". Do not grow it into a general remote shell.
+    """
+    if not str(command or '').strip():
+        raise VastError('execute_command needs a command')
+    r = _request('PUT', f'/instances/command/{instance_id}/',
+                 json={'command': command})
+    try:
+        data = (r.json() or {}) if r.status_code == 200 else {}
+    except ValueError:
+        data = {}
+    url = str(data.get('result_url') or '')
+    if r.status_code != 200 or not data.get('success') or not url:
+        raise _failed(r, 'execute_command')
+    return url
+
+
+def fetch_command_result(result_url: str):
+    """The command's output, or None while it has not landed yet.
+
+    The result object is written by the host when the command ends, so a 404 is
+    the normal "still running" answer and must not read as a failure.
+    """
+    try:
+        r = requests.get(result_url, timeout=_TIMEOUT)
+    except requests.RequestException as e:
+        raise VastError(f'vast.ai result fetch failed: {e}') from e
+    if r.status_code == 404:
+        return None
+    if r.status_code != 200:
+        raise _failed(r, 'result fetch')
+    return r.text
 
 
 def _normalize(i: dict) -> dict:
@@ -135,13 +290,19 @@ def _normalize(i: dict) -> dict:
         # per-instance auth token generated by vast — the template's Caddy
         # proxy accepts it as `Authorization: Bearer <jupyter_token>`
         'jupyter_token': i.get('jupyter_token'),
+        # The image the pod is REALLY running. Worth carrying even though we
+        # asked for one: the default launch path is a vast.ai TEMPLATE published
+        # by a third party, so what we asked for and what booted are two
+        # different facts, and only this one is the trainer that produced the
+        # weights. Optional — an absent field simply records nothing.
+        'image_uuid': i.get('image_uuid'),
     }
 
 
 def list_instances() -> list:
     r = _request('GET', '/instances/', base=API_BASE_V1)
     if r.status_code != 200:
-        raise VastError(f'list_instances failed: HTTP {r.status_code}')
+        raise _failed(r, 'list_instances')
     return [_normalize(i) for i in (r.json() or {}).get('instances') or []]
 
 
@@ -176,7 +337,8 @@ def destroy_instance(instance_id) -> bool:
         return False
     if r.status_code in (200, 404):
         return True
-    logger.warning('destroy_instance %s: HTTP %s', instance_id, r.status_code)
+    logger.warning('destroy_instance %s: HTTP %s %s', instance_id,
+                   r.status_code, _detail(r))
     return False
 
 

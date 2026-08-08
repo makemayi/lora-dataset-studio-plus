@@ -332,6 +332,7 @@ function CloudTrainingCard({ config, setField, configDefaults }) {
   )
 }
 
+
 /* Concept face masking (issue #15, reported by shivdbz2010 on GitHub). Both knobs
    are exposed because nobody has measured the right value — no public A/B of a
    concept LoRA trained with vs without face masking exists — so a frozen number

@@ -29,6 +29,10 @@ export async function pickNativeFolder(initial) {
  * silence is not a success. */
 export function FolderBrowserModal({ initial, onPick, onClose }) {
   const [path, setPath] = useState(initial || null)
+  // What the user is TYPING, kept apart from `data.path` (where the browser
+  // actually is): a half-typed path must not be mistaken for the current folder,
+  // and "Use this folder" must keep committing what is on screen, not the draft.
+  const [typed, setTyped] = useState(initial || '')
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -67,6 +71,9 @@ export function FolderBrowserModal({ initial, onPick, onClose }) {
       const d = await apiFetch(`/api/system/list-folders${q}`)
       setData(d)
       setPath(d.path)
+      // Follow the browser: after a click, an Up, or a successful jump, the box
+      // shows where you ARE, so the next paste replaces a real path.
+      setTyped(d.path || '')
     } catch (e) {
       // A bad starting path (e.g. a stale pasted value) shouldn't dead-end the
       // browser — surface it and drop back to the drive list.
@@ -94,17 +101,32 @@ export function FolderBrowserModal({ initial, onPick, onClose }) {
           you're only picking a location.
         </p>
 
-        <div className="mt-3 flex items-center gap-2">
+        {/* An address bar, for the same reason the native dialog needed one: the
+            path is very often already on the clipboard (someone sent it, or it
+            was copied out of Explorer), and clicking down to it folder by folder
+            is pure friction. This is also the ONLY way to paste a path on the
+            lanes that never get a native dialog at all — LAN, tablet, Linux —
+            where this browser is the whole picker. Enter jumps; a path that does
+            not exist reports itself in the amber box and leaves you put. */}
+        <form className="mt-3 flex items-center gap-2"
+          onSubmit={(e) => { e.preventDefault(); const v = typed.trim(); if (v) load(v) }}>
           <button type="button" onClick={() => load(atRoot ? null : (data?.parent ?? null))}
             disabled={loading || atRoot}
-            className="rounded-md border border-border px-2 py-1 text-xs text-content hover:bg-surface-raised disabled:opacity-40">
+            className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-content hover:bg-surface-raised disabled:opacity-40">
             ⬆ Up
           </button>
-          <span className="min-w-0 grow truncate font-mono text-xs text-content-subtle"
-            title={data?.path || 'This computer'}>
-            {data?.path || 'This computer'}
-          </span>
-        </div>
+          <input
+            aria-label="Folder path"
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            placeholder={data?.path || 'Paste or type a path'}
+            spellCheck={false}
+            className="min-w-0 grow rounded-md border border-border bg-surface-raised px-2 py-1 font-mono text-xs text-content placeholder:text-content-subtle" />
+          <button type="submit" disabled={loading || !typed.trim()}
+            className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-content hover:bg-surface-raised disabled:opacity-40">
+            Go
+          </button>
+        </form>
 
         {browseError && <p className="mt-2 text-xs text-amber-300">{browseError}</p>}
 

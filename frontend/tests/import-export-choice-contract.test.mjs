@@ -28,16 +28,16 @@ const datasetHook = readFileSync(join(here, '..', 'src', 'hooks', 'useDataset.js
 
 test('the import line states the resolution actually configured', () => {
   assert.equal(importPolicyLine({ max_side: 1024, encoding: 'standard' }),
-    'stored as WebP q92, resized to 1024 px on the long side, ratio kept (input limit: 16 Mi-pixels and 8192 px per side)');
+    'stored as WebP q92, resized to 1024 px on the long side, ratio kept (input limit: 64 Mi-pixels and 16384 px per side)');
   assert.equal(importPolicyLine({ max_side: 2048, encoding: 'lossless' }),
-    'stored as WebP lossless, resized to 2048 px on the long side, ratio kept (input limit: 16 Mi-pixels and 8192 px per side)');
+    'stored as WebP lossless, resized to 2048 px on the long side, ratio kept (input limit: 64 Mi-pixels and 16384 px per side)');
 });
 
 test('every policy names the input safety limit before a conversion can happen', () => {
   const line = importPolicyLine({ max_side: 0, encoding: 'high', ceiling: 8192 });
   assert.match(line, /original size/);
-  assert.match(line, /16 Mi-pixels/);
-  assert.match(line, /8192 px/);
+  assert.match(line, /64 Mi-pixels/);
+  assert.match(line, /16384 px/);
   assert.match(line, /WebP q100/);
   assert.equal(importInputLimitLine({ input_max_pixels: 16 * 1024 * 1024, input_max_side: 8192 }),
     '16 Mi-pixels and 8192 px per side');
@@ -45,7 +45,7 @@ test('every policy names the input safety limit before a conversion can happen',
 
 test('a missing policy degrades to preserving originals, never to a stale WebP claim', () => {
   assert.equal(importPolicyLine(undefined),
-    'stored byte-for-byte in the original file and format (input limit: 16 Mi-pixels and 8192 px per side)');
+    'stored byte-for-byte in the original file and format (input limit: 64 Mi-pixels and 16384 px per side)');
 });
 
 test('the dropzone reads the live policy, filters exactly the supported formats, and explains a rejection', () => {
@@ -59,8 +59,10 @@ test('the dropzone reads the live policy, filters exactly the supported formats,
     'the picker must use the exact static-image accept list');
   assert.ok(!dropzone.includes('accept="image/*"'),
     'the picker must not advertise unsupported image types');
-  assert.match(dropzone, /Files larger than \{inputLimit\} are rejected — convert or resize before importing\./,
-    'a size rejection must say how to remedy it');
+  assert.match(dropzone, /Files larger than \{inputLimit\} are rejected — resize before importing, or raise the budget\./,
+    'a size rejection must say how to remedy it — including the budget it can raise');
+  assert.ok(dropzone.includes('focus="image-input-max-pixels"'),
+    'the rejection hint must reach the budget that caused it');
   // and it points at the setting that changes it
   assert.ok(dropzone.includes('focus="dataset-import-encoding"'),
     'the hint must link to the setting it describes');
@@ -71,8 +73,12 @@ test('manual import makes server-side file refusals actionable instead of silent
     datasetHook.indexOf('// Concept only'));
   assert.match(importFiles, /if \(d\.failed\) toast\.warning\(/);
   assert.match(importFiles, /JPEG, PNG, WebP or BMP/);
-  assert.match(importFiles, /16 Mi-pixels and 8192 px per side/);
-  assert.match(importFiles, /convert or resize before importing/);
+  // No literal limit here any more: the budget is a setting, so the toast points
+  // at it instead of carrying a copy that goes stale the moment it is changed.
+  assert.ok(!/\d+ Mi-pixels/.test(importFiles),
+    'the toast must not hardcode a budget the user can change');
+  assert.match(importFiles, /Image size budget/);
+  assert.match(importFiles, /resize a larger file, or raise the budget/);
 });
 
 // --- the setting exists, is resettable, is documented -----------------------
@@ -92,7 +98,7 @@ test('the resolution choice warns that changing it mid-way is not retroactive', 
     'the setting must say it is not retroactive');
   assert.match(settings, /every source, including\s+WebP modes and Auto head-crop, must be no larger than/,
     'the same admission limit must be stated for preserve, crop, and WebP modes');
-  assert.match(settings, /convert or resize it before importing/,
+  assert.match(settings, /change the budget in <span className="font-medium">Image size budget<\/span> below,\s+or resize the file before importing/,
     'the settings explanation must make the refusal actionable');
 });
 

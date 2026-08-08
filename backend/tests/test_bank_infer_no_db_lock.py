@@ -1,8 +1,15 @@
 """🗃️ Image bank — an inference pass holds NO database transaction while it waits.
 
-Two shapes of wait live here: a child process (face, score) and a long series of
-Ollama calls (watermark). The invariant is the same for both, and so is the
+Three shapes of wait live here: a child process (face, score), a long series of
+Ollama calls (watermark, framing), and one batch that repaints a whole selection
+(the inpaint level). The invariant is the same for all of them, and so is the
 failure it prevents.
+
+The framing half is the one that was found the expensive way — see its own
+section below. It is also the reason this file is worth more than a latency
+test: a pass that locks the database does not merely make the app slow, it can
+starve the writer that authorises its OWN next model call, and then it stops
+producing anything while the progress bar keeps moving.
 
 The face and score passes read their rows, hand a path list to a child process,
 and only write results back when the child returns. That wait is not short: the
@@ -100,6 +107,7 @@ def _writer_verdict_during_inference(file_db, make_job):
         with patch.object(banks, '_drive_infer_subprocess', fake_drive), \
              patch.object(banks.bank_jobs, 'cancelled', lambda job: False), \
              patch.object(banks.bank_jobs, 'progress', lambda job, **kw: None), \
+             patch.object(banks.bank_jobs, 'set_stop_notice', lambda job, **kw: None), \
              patch('app.capabilities.bank_scoring_gpu_available', lambda: False), \
              patch.object(banks, '_resolve_face_device', lambda: ('cpu', False)):
             make_job(banks, bank_id)(object())
@@ -204,3 +212,189 @@ def test_the_watermark_pass_lets_other_writers_through_when_ollama_answers_nothi
     assert error is None, (
         'a single parsed answer followed by an unreachable Ollama left the write '
         f'lock held for the rest of the pass ({error})')
+
+
+# --- the framing pass: the same wait, and the writer it was starving ---------
+# This half is not hypothetical. A 211-image bank reported 4 images classified
+# out of the 12 the pass got through, with `vision GPU window renewal failed` /
+# `database is locked` on the `system_state` UPDATE repeating every few seconds.
+# The starved writer there is not a sort click: it is the renewal of the vision
+# GPU window itself, which runs before EVERY vision call and is fail-closed. So
+# the pass locked out the one writer that authorises it to work, and every image
+# after that was refused by its own fence. It is the only pass whose contention
+# eats its own output, which is why the probe below is worth its own file half.
+def _framing_writer_verdict(file_db, answer, probe_at, images=6):
+    """Run 📐 Framing over a file-backed bank and report what a concurrent writer
+    sees at the ``probe_at``-th Ollama call — i.e. while the pass is inside a
+    model call, holding whatever its previous images left behind."""
+    from app.extensions import db
+    from app.services import image_bank_service as banks
+    from app.services import vision_ollama, vision_pool
+
+    app, db_path, workdir = file_db
+    seen = {}
+    with app.app_context():
+        bank_id = _bank_with_images(workdir, n=images)
+        db.session.commit()
+        calls = {'n': 0}
+
+        def fake_describe(image_bytes, *a, **k):
+            i = calls['n']
+            calls['n'] += 1
+            if i == probe_at:
+                seen['error'] = _concurrent_write(db_path)
+            return answer(i)
+
+        job = {'done': 0, 'total': 0, '_touched': 0.0}
+        with patch.object(vision_pool, 'vision_concurrency', lambda *a, **k: 1), \
+             patch.object(vision_ollama, 'describe_image_ollama', fake_describe), \
+             patch.object(vision_ollama, 'unload_vision_model', lambda *a, **k: True), \
+             patch.object(banks.bank_jobs, 'cancelled', lambda j: False), \
+             patch.object(banks.bank_jobs, 'progress', lambda j, **kw: None):
+            banks._framing_job(bank_id, False)(job)
+    assert 'error' in seen, 'the pass never reached the probed image'
+    return seen['error']
+
+
+def test_the_framing_pass_lets_other_writers_through_between_classifications(file_db):
+    """Every image classifies, so every image WRITES. Those writes must not
+    accumulate into one lock spanning the model calls that follow them."""
+    error = _framing_writer_verdict(
+        file_db, lambda _i: '{"framing": "face"}', probe_at=3)
+    assert error is None, (
+        'the framing pass held the write lock across its Ollama calls — that is '
+        'the writer the vision GPU window needs to renew itself, so the pass '
+        f'fences its own remaining images out of the model ({error})')
+
+
+def test_the_framing_pass_lets_writers_through_when_ollama_goes_silent(file_db):
+    """One classification, then silence: a rhythm counted in CLASSIFIED images
+    never ticks again, so that single write outlives the whole pass."""
+    def one_answer_then_silence(i):
+        return '{"framing": "face"}' if i == 0 else ''
+
+    error = _framing_writer_verdict(file_db, one_answer_then_silence, probe_at=3)
+    assert error is None, (
+        'one classified image followed by a silent Ollama left the write lock '
+        f'held for the rest of the pass ({error})')
+
+
+def test_the_framing_probe_really_sees_a_held_lock(file_db):
+    """Green above means nothing unless the probe is shown catching a real
+    holder, from inside a model call, on this exact fixture.
+
+    So the flush is put back INSIDE the model call — where the pass used to be
+    sitting with an uncommitted classification behind it — and the probe fires
+    right after it. It cannot be staged before the pass instead: entering the
+    vision GPU window writes and commits `vision_in_progress` of its own, which
+    would release any holder set up beforehand. (The two tests above are the same
+    measurement with nothing flushed by hand — which is the point: the pass must
+    not manufacture that holder itself.)"""
+    from app.extensions import db
+    from app.models import ImageBank
+    from app.services import image_bank_service as banks
+    from app.services import vision_ollama, vision_pool
+
+    app, db_path, workdir = file_db
+    seen = {}
+    with app.app_context():
+        bank_id = _bank_with_images(workdir, n=4)
+        db.session.commit()
+
+        def fake_describe(image_bytes, *a, **k):
+            # vision_concurrency=1 runs the call inline on the pass's own thread
+            # and app context, so this is the pass's session.
+            if 'error' not in seen:
+                db.session.get(ImageBank, bank_id).name = 'renamed mid-call'
+                db.session.flush()      # what the autoflushed SELECT used to do
+                seen['error'] = _concurrent_write(db_path)
+            return '{"framing": "face"}'
+
+        with patch.object(vision_pool, 'vision_concurrency', lambda *a, **k: 1), \
+             patch.object(vision_ollama, 'describe_image_ollama', fake_describe), \
+             patch.object(vision_ollama, 'unload_vision_model', lambda *a, **k: True), \
+             patch.object(banks.bank_jobs, 'cancelled', lambda j: False), \
+             patch.object(banks.bank_jobs, 'progress', lambda j, **kw: None):
+            banks._framing_job(bank_id, False)({'done': 0, 'total': 0,
+                                                '_touched': 0.0})
+    assert seen.get('error') and 'locked' in seen['error'], (
+        'the probe saw nothing while a write was provably held — it is not '
+        f'measuring the write lock at all (got {seen.get("error")!r})')
+
+
+# --- the inpaint level: one batch, minutes long, staged row writes behind it --
+def test_the_inpaint_level_lets_other_writers_through_during_its_batch(file_db):
+    """LaMa repaints the whole selection in ONE call that runs for minutes.
+
+    The rows are staged before it, and a staging FAILURE writes to its row
+    (`_discard_clean_blob` clears the clean method) without committing. The next
+    row's re-read then flushed that write, took the single write lock, and the
+    batch ran with it held — the longest hold of any pass in this file."""
+    import json
+    from app.extensions import db
+    from app.models import BankImage, ImageBank
+    from app.services import bank_transfer_metadata as transfer
+    from app.services import image_bank_service as banks
+    from app.services import watermark_lama
+
+    app, db_path, workdir = file_db
+    seen = {}
+    with app.app_context():
+        bank_id = _bank_with_images(workdir, n=4)
+        bank = db.session.get(ImageBank, bank_id)
+        for row in BankImage.query.filter_by(bank_id=bank_id).all():
+            row.watermark_state = 'detected'
+            # A row that already carries a cleaned version — re-cleaning one is
+            # ordinary, and it is what makes the discard below a real write
+            # rather than a no-op assignment of None over None.
+            row.watermark_clean_method = 'crop'
+            row.watermark_bbox = json.dumps([0.0, 0.9, 1.0, 1.0])
+            row.watermark_regions = json.dumps([[0.0, 0.9, 1.0, 1.0]])
+            row.watermark_fingerprint = transfer.content_fingerprint_path(
+                banks.abs_image_path(bank, row))
+        db.session.commit()
+        real_stage = banks._stage_clean_copy
+        staged = {'n': 0}
+
+        def failing_first_stage(bank_id_, row, src):
+            staged['n'] += 1
+            if staged['n'] == 1:        # one bad file among four
+                raise OSError('cannot stage this one')
+            return real_stage(bank_id_, row, src)
+
+        def fake_batch(items, device='cpu'):
+            seen['error'] = _concurrent_write(db_path)
+            return {it['image_path']: (True, None) for it in items}
+
+        with patch.object(banks, '_stage_clean_copy', failing_first_stage), \
+             patch.object(watermark_lama, 'is_available', lambda: True), \
+             patch.object(watermark_lama, 'resolve_device', lambda: 'cpu'), \
+             patch.object(watermark_lama, 'inpaint_batch', fake_batch), \
+             patch.object(banks.bank_jobs, 'cancelled', lambda j: False), \
+             patch.object(banks.bank_jobs, 'progress', lambda j, **kw: None), \
+             patch.object(banks.bank_jobs, 'bump', lambda j, n=1: None):
+            banks._watermark_inpaint_job(bank_id, 'auto')({'done': 0, 'total': 0,
+                                                           '_touched': 0.0})
+    assert 'error' in seen, 'the pass never reached the inpaint batch'
+    assert seen['error'] is None, (
+        'the inpaint level held the write lock across its LaMa batch — on a real '
+        'selection that is minutes of `database is locked` for every other '
+        f'writer in the app ({seen["error"]})')
+
+
+def test_the_framing_pass_lets_writers_through_when_every_image_changed(file_db):
+    """The refused-write branch mutates too.
+
+    When `_prepare_analysis_write` declines (the bytes moved between the call and
+    the write-back) it invalidates the lanes it refused — a write — and then the
+    loop skips to the next image. That write must not travel into the next model
+    call any more than a classification does."""
+    from app.services import image_bank_service as banks
+
+    with patch.object(banks, '_prepare_analysis_write',
+                      lambda row, path, fingerprint: False):
+        error = _framing_writer_verdict(
+            file_db, lambda _i: '{"framing": "face"}', probe_at=3)
+    assert error is None, (
+        'the branch that refuses a stale write kept its own invalidation pending '
+        f'across the calls that followed it ({error})')

@@ -201,6 +201,7 @@ def test_cloud_staging_generates_masks_from_the_stored_setting(app, tmp_path, mo
     and it reads the run params that `launch_cloud_training` stamped from the
     dataset setting."""
     from app.services import cloud_training as ct
+    from app.services import checkpoint_registry
     from app.services import lora_training as lt
     from app.models import CloudTrainingRun
     with app.app_context():
@@ -220,12 +221,62 @@ def test_cloud_staging_generates_masks_from_the_stored_setting(app, tmp_path, mo
 
         monkeypatch.setattr(ct.lt, 'export_dataset_to_aitoolkit', fake_export)
         monkeypatch.setattr(ct, '_staging_root', lambda: tmp_path / 'staging')
+        prepared = checkpoint_registry.prepare_launch(LOCAL_USER, ds.id)
+        record = checkpoint_registry.register_launch(
+            LOCAL_USER, ds.id, 'zimage', 'cloud', prepared=prepared)
         run = CloudTrainingRun(dataset_id=ds.id, status='preparing', run_name='msk',
-                               train_params=json.dumps({'masked': stamped}))
+                               train_params=json.dumps({
+                                   'masked': stamped,
+                                   'base_model': '',
+                                   'record_id': record.id,
+                                   ct._TRAIN_SETTINGS_SNAPSHOT: ds.train_settings,
+                                   ct._TRAIN_SLIDER_SNAPSHOT: ds.train_slider,
+                               }))
         db.session.add(run)
         db.session.commit()
         ct._prepare_staging(run)
         assert seen['masked'] is False
+
+
+def test_cloud_staging_refuses_when_dataset_changed_after_launch(
+        app, tmp_path, monkeypatch):
+    from app.models import CloudTrainingRun
+    from app.services import checkpoint_registry
+    from app.services import cloud_training as ct
+    from app.services import dataset_activity
+
+    with app.app_context():
+        ds = _dataset(tmp_path, trigger='cloud_generation_fence')
+        prepared = checkpoint_registry.prepare_launch(LOCAL_USER, ds.id)
+        record = checkpoint_registry.register_launch(
+            LOCAL_USER, ds.id, 'zimage', 'cloud', prepared=prepared)
+        row = FaceDatasetImage.query.filter_by(dataset_id=ds.id).first()
+        row.caption = 'caption changed after the launch click'
+        db.session.commit()
+
+        run = CloudTrainingRun(
+            dataset_id=ds.id, status='preparing', run_name='generation-fence',
+            train_params=json.dumps({
+                'masked': False,
+                'base_model': '',
+                'record_id': record.id,
+                ct._TRAIN_SETTINGS_SNAPSHOT: ds.train_settings,
+                ct._TRAIN_SLIDER_SNAPSHOT: ds.train_slider,
+            }))
+        db.session.add(run)
+        db.session.commit()
+        monkeypatch.setattr(ct, '_staging_root', lambda: tmp_path / 'staging')
+        exports = []
+        monkeypatch.setattr(
+            ct.lt, 'export_dataset_to_aitoolkit',
+            lambda *_a, **_k: exports.append('exported'))
+
+        with pytest.raises(RuntimeError, match='Dataset changed'):
+            ct._prepare_staging(run)
+
+        assert exports == []
+        assert run.staging_dir is None
+        assert dataset_activity.get(ds.id) is None
 
 
 def test_cloud_route_forwards_absent_masked_as_none(client, monkeypatch):

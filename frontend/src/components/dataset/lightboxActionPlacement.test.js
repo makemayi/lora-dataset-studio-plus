@@ -199,7 +199,10 @@ test('tab order follows the eye: one DOM order, no CSS reordering', () => {
     '⇆ Mirror horizontally',
     'Rotate left',
     'Rotate right',
-    '✨ Upscale & improve',
+    // The improve actions are now rendered from a list (one button per engine),
+    // so the DOM-order anchor is the map that emits them rather than one label.
+    'improveButtons.map',
+    '<KleinImproveNote',
   ].map(at);
   for (let i = 1; i < order.length; i += 1) {
     assert.ok(order[i] > order[i - 1], 'the action DOM order must not change');
@@ -213,9 +216,12 @@ test('tab order follows the eye: one DOM order, no CSS reordering', () => {
 
 test('the rail keeps words — these actions rotate, recrop and spend GPU time', () => {
   for (const label of ['✂ Crop', '⇆ Mirror horizontally', 'Rotate left',
-    'Rotate right', '✨ Upscale & improve']) {
+    'Rotate right']) {
     assert.ok(lightbox.includes(label), `${label} must stay spelled out`);
   }
+  // The improve labels are built in improveEngines.js ('✨ Improve via Klein',
+  // '🔍 Upscale via SeedVR2'); that they stay spelled out is asserted there.
+  assert.ok(lightbox.includes('{btn.label}'), 'the improve buttons must render their label');
   // No placement branch may swap a label for a bare glyph.
   assert.ok(!/rail \? '[↺↻✂⇆✨]'/.test(lightbox));
 });
@@ -223,7 +229,11 @@ test('the rail keeps words — these actions rotate, recrop and spend GPU time',
 test('the decision is fed the lock and the comparison, not just the geometry', () => {
   assert.match(lightbox, /const actionsLocked = busy \|\| mirrorBusy \|\| improving \|\| improvePending/);
   assert.match(lightbox, /locked: actionsLocked/);
-  assert.match(lightbox, /comparing,/);
+  // The lightbox now has TWO comparisons (against the original, against the
+  // reference photo) held in one `compareMode`. This rule only cares that two
+  // panes want the width, so it is fed the collapsed boolean — a mode name
+  // leaking in here would make the placement rule grow a second reason to change.
+  assert.match(lightbox, /comparing: compareMode !== 'none',/);
   // Resize is coalesced to one decision per frame.
   assert.match(lightbox, /requestAnimationFrame\(\(\) => \{ frame = 0; apply\(\); \}\)/);
   assert.match(lightbox, /removeEventListener\('resize', onResize\)/);
@@ -239,4 +249,56 @@ test('the intrinsic size is measured wherever the image already loads', () => {
   // …and that remembered ratio decides the FIRST painted frame, rather than an
   // effect correcting a bar the user already saw somewhere else.
   assert.match(lightbox, /useState\(\(\) => decideActionPlacement\(\{/);
+});
+
+/* --- The opening decision, and the row that must stay a row ---------------
+   A user reported, with screenshots: whatever the window size, opening the
+   lightbox drew the actions as a bottom row with the SECOND improve button
+   stranded alone and centred at the very bottom; resizing the window produced
+   the correct right-hand rail. Two distinct defects behind one picture. */
+
+test('opening carries no hysteresis — there is nothing to stabilise yet', () => {
+  // The dead band exists so a bar cannot change side under the pointer while a
+  // window edge is dragged. Applied to the FIRST answer it is not stability, it
+  // is a bias towards the default ('bottom'). A geometry that qualifies for the
+  // rail must therefore open in the rail.
+  const geometry = { viewportWidth: 1200, viewportHeight: 1000,
+    imageWidth: 900, imageHeight: 1000 };            // aspect 0.90
+  const leftover = (1200 - 272) / 1000;              // 0.928
+  assert.ok(0.9 <= leftover, 'the bare inequality must hold for this case');
+  assert.ok(0.9 > leftover * (1 - PLACEMENT_HYSTERESIS),
+    'and it must FAIL the entering dead band — otherwise this proves nothing');
+  assert.equal(decideActionPlacement(geometry), 'rail',
+    'the opening decision must read the geometry, not the default');
+  // Once a placement is in force the dead band comes back, unchanged.
+  assert.equal(decideActionPlacement({ ...geometry, current: 'bottom' }), 'bottom');
+  assert.equal(decideActionPlacement({ ...geometry, current: 'rail' }), 'rail');
+});
+
+test('the viewport floor keeps its dead band only once a rail exists', () => {
+  const g = { viewportWidth: 1000, viewportHeight: 1000, imageWidth: 600, imageHeight: 1000 };
+  // 1000 px is below the entry floor: opening there is a bottom bar...
+  assert.equal(decideActionPlacement(g), 'bottom');
+  // ...but an EXISTING rail survives down to RAIL_EXIT_VIEWPORT_PX.
+  assert.equal(decideActionPlacement({ ...g, current: 'rail' }), 'rail');
+});
+
+test('a small window still opens at the bottom, and 400 px always does', () => {
+  const portrait = { imageWidth: 832, imageHeight: 1216 };
+  assert.equal(decideActionPlacement({
+    viewportWidth: 900, viewportHeight: 900, ...portrait }), 'bottom');
+  assert.equal(decideActionPlacement({
+    viewportWidth: 400, viewportHeight: 900, ...portrait }), 'bottom');
+});
+
+test('the bottom bar keeps the improve buttons on ONE row', () => {
+  // THE reported break: the Klein note is full-width, and dropped between the
+  // two buttons it pushes the second one onto its own line — "stranded alone,
+  // centred, at the very bottom". It may sit between them in the rail (a
+  // column, where that is what attaches it to Klein) and nowhere else.
+  assert.match(lightbox, /\{rail && btn\.showKleinNote && !improvementActive && \(/);
+  assert.match(lightbox, /\{!rail && improveButtons\.some\(\(b\) => b\.showKleinNote\)/);
+  // Exactly two renders of the note, one per placement — never both at once.
+  const notes = lightbox.match(/<KleinImproveNote\b/g) || [];
+  assert.equal(notes.length, 2, 'one note per placement branch, no more');
 });

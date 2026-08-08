@@ -122,7 +122,7 @@ test('jobProgress: total when there is one, bare count when there is not', () =>
 
 test('every job kind bank_jobs can report has a human label', () => {
   // Mirrors the `kind` strings passed to bank_jobs.start() in image_bank_service.
-  for (const kind of ['scan', 'faces', 'score', 'semantic_dedup', 'watermark',
+  for (const kind of ['scan', 'faces', 'score', 'semantic_index', 'semantic_dedup', 'watermark',
     'framing', 'caption', 'promote', 'bank_promote', 'pipeline']) {
     assert.ok(JOB_LABELS[kind], `no label for job kind ${kind}`);
     assert.ok(!jobLabel(kind).includes('_'), `label for ${kind} leaks an internal id`);
@@ -196,6 +196,7 @@ test('a stopped pass is not reported as a result', () => {
 
 test('the endpoint→kind table matches the routes the buttons POST to', () => {
   assert.equal(ENDPOINT_JOB_KIND['semantic-dedup'], 'semantic_dedup');
+  assert.equal(ENDPOINT_JOB_KIND['semantic-index'], 'semantic_index');
   assert.equal(ENDPOINT_JOB_KIND.scan, 'scan');
 });
 

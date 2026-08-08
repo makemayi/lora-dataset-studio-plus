@@ -27,6 +27,10 @@ import {
   preferredCheckpointForStep,
 } from '../../utils/trainingResumeState.js';
 import { initialResumeStep, resolveInitialLane, submitBlockedReason } from './lineageContinue.js';
+import {
+  TRANSPORTS, TRANSPORT_LABELS, closedRoads, initialTransport, rateNote,
+  transportBlockedReason, transportOption, transportSummary,
+} from './podTransportChoice.js';
 
 const SAVE_CHOICES = [250, 500, 1000];
 const SAMPLE_EVERY_CHOICES = [100, 250, 500, 1000];
@@ -55,6 +59,13 @@ export default function ContinueDialog({
   // before. Present (the dataset panel) → the user chooses where the continuation
   // RUNS, independently of where the source run trained; `where` seeds the default.
   lanes = null,
+  // OPT-IN transport picker, for a FULL MODEL only: the backend's resume plan
+  // ({ default_transport, options: [{transport, available, reason, bytes,
+  // seconds, gpu_cost, rate_* }] }). Absent → no picker and the dialog behaves
+  // exactly as before. A ~26 GB checkpoint can reach the pod two ways, and the
+  // difference between them is hours of a GPU that is rented and idle the whole
+  // time — a choice nobody should make without seeing the price.
+  transportPlan = null,
   settings = {},           // inherited effective settings shown as the starting point
   defaultExtra = 1000,
   busy = false,
@@ -82,8 +93,15 @@ export default function ContinueDialog({
   const [lane, setLane] = useState(() => resolveInitialLane(where, lanes));
   const laneState = (id) => (lanes ? (lanes[id] || {}) : {});
   const laneBlocked = !!lanes && laneState(lane).available === false;
+  // HOW the checkpoint gets to the pod. Seeded from the backend's default, but
+  // never onto a road it would immediately have to disable.
+  const [transport, setTransport] = useState(() => initialTransport(transportPlan));
+  useEffect(() => { setTransport(initialTransport(transportPlan)); }, [transportPlan]);
+  const transportReason = transportPlan
+    ? transportBlockedReason(transportPlan, transport) : null;
   const blockedReason = submitBlockedReason({
-    latest, laneBlocked, laneReason: laneState(lane).reason, lane });
+    latest, laneBlocked, laneReason: laneState(lane).reason, lane })
+    || transportReason;
   const selectedCheckpoint = useMemo(
     () => preferredCheckpointForStep(checkpoints, fromStep),
     [checkpoints, fromStep]);
@@ -175,6 +193,9 @@ export default function ContinueDialog({
       // Where it runs. Always sent; a caller that offers no picker gets `where`
       // back and can ignore it.
       lane,
+      // Which road the 26 GB takes back to the pod. Undefined when no picker was
+      // offered, so the backend keeps its own default (the Hugging Face copy).
+      transport: transportPlan ? transport : undefined,
       // Never infer this server-side: legacy checkpoints and current cloud pods
       // are weights-only, while a verified exact bundle opts into the bridge.
       resumeMode,
@@ -242,6 +263,73 @@ export default function ContinueDialog({
                 {laneState(lane).reason}
               </span>
             )}
+          </div>
+        )}
+
+        {/* HOW the checkpoint reaches the pod — full models only.
+            A ~26 GB file has two roads and they are not interchangeable: the
+            pod can pull it from Hugging Face over a datacenter link in minutes,
+            or this computer can push it up over the user's own uplink in hours.
+            The pod is RENTED AND BILLED either way, so the slow road costs real
+            money for a GPU that computes nothing — which is why the price sits
+            under the buttons and not in a tooltip. */}
+        {transportPlan && (
+          <div className="flex flex-col gap-1">
+            <div className="flex items-start gap-2 flex-wrap">
+              <span className="text-content text-[0.75rem] w-28 shrink-0 pt-1">Send it via</span>
+              <div role="radiogroup" aria-label="How the checkpoint reaches the pod"
+                className="flex items-center gap-1 rounded-lg border border-border bg-surface p-0.5 flex-wrap">
+                {TRANSPORTS.map((id) => {
+                  const option = transportOption(transportPlan.options, id);
+                  const off = option.available === false;
+                  return (
+                    <button key={id} type="button" role="radio" aria-checked={transport === id}
+                      disabled={off} onClick={() => setTransport(id)}
+                      title={off ? option.reason || undefined : undefined}
+                      className={'px-2.5 py-1 rounded-md text-[0.75rem] font-semibold '
+                        + (transport === id
+                          ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50 '
+                          : 'text-content-muted hover:text-content border border-transparent ')
+                        + (off ? 'opacity-40 cursor-not-allowed ' : '')}>
+                      {TRANSPORT_LABELS[id]}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            {/* Every road that is CLOSED says so on screen, whether or not it is
+                the one selected. Putting that in the button's `title` would be
+                greyed out with no reason for anyone who is not hovering a mouse
+                — which is the exact complaint this picker answers. */}
+            {closedRoads(transportPlan).map(({ transport: id, label, reason }) => (
+              <span key={id}
+                className="text-amber-300/90 text-[0.6875rem] leading-relaxed break-words">
+                {label} is unavailable: {reason}
+              </span>
+            ))}
+            {/* The numbers for the SELECTED road — shown only when it is a road
+                that can actually be taken. */}
+            {!transportReason && (
+                <div className="flex flex-col gap-0.5 sm:pl-[7.5rem]">
+                  <span className="text-content text-[0.6875rem] leading-relaxed break-words">
+                    {transportSummary(transportOption(transportPlan.options, transport))}
+                  </span>
+                  <span className="text-content-subtle text-[0.6875rem] leading-relaxed break-words">
+                    {rateNote(transportOption(transportPlan.options, transport))}
+                  </span>
+                  {transport === 'direct' && (
+                    <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
+                      Sent in pieces: if it stops, continuing this run again picks
+                      up where it left off instead of starting over.
+                    </span>
+                  )}
+                  {transport === 'hub' && (
+                    <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
+                      Fast, and the weights pass through Hugging Face on the way.
+                    </span>
+                  )}
+                </div>
+              )}
           </div>
         )}
 

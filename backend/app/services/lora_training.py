@@ -39,7 +39,8 @@ from PIL import Image, ImageOps
 from .. import config as cfg
 from ..models import FaceDataset, FaceDatasetImage
 from ..job_queue import GPU_ARBITER_LOCK, queue_manager
-from . import face_dataset_service as fds, face_mask, trash
+from . import cloud_run_dataset as _crd
+from . import dataset_activity, face_dataset_service as fds, face_mask, trash
 from .person_mask import generate_person_masks
 
 logger = logging.getLogger(__name__)
@@ -57,8 +58,342 @@ KREA_TRAIN_RESOLUTION = 1024
 # predictable cadence bounds disk use while preserving restartability.
 FULL_TRANSFORMER_SAVE_EVERY = 250
 FULL_TRANSFORMER_SAMPLE_EVERY = 250
+# How many dense saves live side by side. Named (rather than the literal it used
+# to be) because the Hugging Face storage pre-check multiplies by it: the
+# forecast and the job config must never disagree about how many ~26 GB objects
+# a run produces.
+FULL_TRANSFORMER_MAX_STEP_SAVES = 1
+# The two OFFICIAL Krea 2 repositories, used by the LoRA lane and the dense lane
+# alike. FULL_TRANSFORMER_BASE keeps its name because it is also the dense
+# DEFAULT (an unset `train_variant` means Raw, cf. _krea_is_raw) — but it is no
+# longer the only base a dense run can carry: see _krea_name_or_path.
 FULL_TRANSFORMER_BASE = 'krea/Krea-2-Raw'
+KREA_TURBO_BASE = 'krea/Krea-2-Turbo'
 FULL_TRANSFORMER_VAE = 'Qwen/Qwen-Image-2512'
+
+# --- the dense knobs that are NOT locked --------------------------------------
+# The dense recipe stays server-owned because its geometry is what makes a 12B
+# transformer fit in 80 GB: optimizer (adafactor), batch 1, bf16 and gradient
+# checkpointing are load-bearing, and changing any one of them turns a working
+# run into an out-of-memory crash an hour in. The ones below are different —
+# they change what the run PRODUCES, not whether it fits:
+#
+#   * preview prompts  — the four generic defaults show nothing about the actual
+#     dataset, which makes the mid-run sample sheet useless for deciding whether
+#     to stop. Reuses the LoRA `sample_prompts` key on purpose: same dataset,
+#     same subject, one place to edit (and no new stored id to alias later).
+#   * learning rate    — bounded around the validated 1e-6.
+#   * resolution       — 1024 (default) or 768; 768 is the measured fallback
+#     when a run has to be cheaper, not a quality choice.
+#   * checkpoint every / keep — the storage lever, and the one the Hugging Face
+#     pre-check multiplies by. Nothing here may drift from what the job config
+#     emits; both read the resolvers below.
+FULL_TRANSFORMER_LR = 1e-6
+FULL_TRANSFORMER_LR_MIN = 1e-7
+FULL_TRANSFORMER_LR_MAX = 5e-6
+FULL_TRANSFORMER_RESOLUTION_CHOICES = (768, 1024)
+FULL_TRANSFORMER_SAVE_EVERY_MIN = 100
+FULL_TRANSFORMER_SAVE_EVERY_MAX = 5000
+FULL_TRANSFORMER_MAX_STEP_SAVES_MAX = 3
+
+# --- WHICH ai-toolkit these verdicts describe ---------------------------------
+# Dense training and LoRA training do NOT run the same ai-toolkit, and reading
+# the wrong one is the easiest way to ship a setting that lies.
+#
+#   * LoRA (local lane) runs the ai-toolkit checkout on the USER'S machine. That
+#     one moves: it is whatever they last pulled. Nothing here describes it.
+#   * DENSE (this recipe) is cloud-only and runs the ai-toolkit baked into the
+#     vast.ai pod. The machine the user's dataset is actually trained on is a
+#     remote one nobody here can `git log`.
+#
+# So the line references below are against the ai-toolkit commit the dense pod
+# image carries, NOT against any local checkout:
+FULL_TRANSFORMER_AITOOLKIT_COMMIT = '4625406'      # ai-toolkit, dated 2026-07-12
+# `config.py` pins that same commit in `cloud.image`; the test suite fails if the
+# two ever drift, because a new image is a new trainer and every verdict below
+# has to be re-checked against it. Two honest caveats that a pin cannot fix:
+#   - the DEFAULT launch path is `cloud.template_hash` (vast.ai's own "Ostris AI
+#     Toolkit" template), and its contents are published by a third party — it
+#     can move without this repo changing. `cloud.image` is only the raw-image
+#     fallback. Nothing in a run record stamps which trainer actually ran, which
+#     is a real gap, flagged rather than silently patched here.
+#   - to bound that risk, every verdict below was ALSO re-checked against a
+#     three-weeks-newer ai-toolkit (2026-08-03). All six came out identical, so
+#     none of them hinges on one snapshot — but "identical at both ends of a
+#     three-week window" is evidence, not a guarantee.
+#
+# --- the three quality levers, and why the other two are NOT here -------------
+# Every value below was traced through the code path a `krea2` run actually
+# takes — `extensions_built_in/sd_trainer/SDTrainer.py` and
+# `jobs/process/BaseSDTrainProcess.py` — not merely found in ai-toolkit's
+# `toolkit/config_modules.py`. That distinction is the whole point: a key can
+# exist in the config dataclass, be parsed without complaint, and never be read
+# on this architecture. A setting that quietly does nothing is worse than no
+# setting, because it makes a run look tuned when it is not.
+#
+#   * gradient accumulation — READ. BaseSDTrainProcess pulls
+#     `train.gradient_accumulation` batches into one list per step (L2380) and
+#     SDTrainer runs a backward per batch before a single optimiser step
+#     (L2122-2155). With batch_size pinned at 1, this is the ONLY way to make
+#     the effective batch bigger than one image, and it costs no VRAM: the
+#     forwards are sequential, the gradient buffer already exists (batches wait
+#     on the CPU, a few hundred MB of host RAM at 8). It costs TIME — N
+#     accumulations means an N× longer run and an N× bigger pod bill, which is
+#     why `dense_time_multiplier` travels with the setting.
+#     NB the optimiser is adafactor, whose update is RMS-normalised
+#     (toolkit/optimizers/adafactor.py L343-345), so accumulating summed rather
+#     than averaged gradients does not inflate the step size the way it would
+#     under plain SGD. The LR bounds above stay valid.
+#   * LR schedule / warmup — READ. `train.lr_scheduler` (+ `lr_scheduler_params`)
+#     builds a torch scheduler (BaseSDTrainProcess L2054-2065) stepped every
+#     iteration (SDTrainer L2169). It reaches adafactor because ai-toolkit forces
+#     `relative_step=False` / `scale_parameter=False` (toolkit/optimizer.py
+#     L88-96), so adafactor reads `param_group['lr']` straight back
+#     (adafactor.py L193-203) — the value the scheduler rewrites.
+#     Warmup is wired for `constant_with_warmup` ONLY: the torch schedulers
+#     behind `cosine`/`constant` do not accept `num_warmup_steps` and would
+#     raise (toolkit/scheduler.py L6-40). Same rule as the LoRA lane.
+#   * timestep type — READ. flowmatch training re-draws the timestep schedule
+#     from `train.timestep_type` (BaseSDTrainProcess L1178-1207 →
+#     toolkit/samplers/custom_flowmatch_sampler.py L107-219), and `weighted`
+#     additionally re-weights the loss (SDTrainer L836-853). Krea 2 is a
+#     flow-matching model (krea2.py L181) so all of that applies.
+#     `shift`/`flux_shift` are deliberately NOT offered even though they parse:
+#     the trainer derives the shift from an image-token count that assumes
+#     `unet.config.patch_size` (BaseSDTrainProcess L1195-1200), and Krea 2's
+#     denoiser config names that field `patch` (krea2/src/mmdit.py L92-106), so
+#     patch_size silently falls back to 1 and the token count comes out 4× the
+#     value Krea 2's own scheduler was calibrated against (krea2.py L86-89).
+#     A mis-shifted noise schedule is exactly the "looks tuned, is not" trap.
+#
+# Refused, with the reason, so nobody re-litigates it from the key list alone:
+#   * EMA — supported, and fatal here. ExponentialMovingAverage clones every
+#     trained parameter on the training device (toolkit/ema.py L60-63), and each
+#     save/sample clones them a SECOND time (store() before copy_to(), ema.py
+#     L171-176, BaseSDTrainProcess L491-497). In dense mode the parameter set is
+#     the whole 12B transformer (no `network`, so the optimiser holds the
+#     transformer itself — BaseSDTrainProcess L777-789 reads exactly those param
+#     groups), so that is roughly +26 GB resident and +26 GB more at every
+#     checkpoint, on top of an unquantised bf16 model and its gradients. It would
+#     not survive its first save. (The LoRA lane offers EMA because there it
+#     averages a few hundred MB of adapter.)
+#   * min_snr_gamma — supported for epsilon models, crashes on this one, and
+#     crashes LATE. SDTrainer L920-922 calls `apply_snr_weight`, which needs
+#     `all_snr` or `alphas_cumprod` off the noise scheduler
+#     (toolkit/train_tools.py L642-654). Krea 2 trains on
+#     CustomFlowMatchEulerDiscreteScheduler (krea2.py L223-224, L450), which
+#     inherits diffusers' FlowMatchEulerDiscreteScheduler and defines neither.
+#     ai-toolkit does TRY to attach the table up front (SDTrainer L276 →
+#     train_tools L623-639) but that helper swallows its own exception, so the
+#     failure does not surface at startup: it surfaces as an uncaught
+#     AttributeError on the first loss, an hour into a paid pod.
+FULL_TRANSFORMER_GRAD_ACCUM = 1
+# 8 is the ceiling because the ceiling is a bill, not a memory limit: at 8 a
+# 3000-step dense run takes eight times as long on a rented 80 GB GPU. Somebody
+# who needs more smoothing than that should be training on fewer, better images.
+FULL_TRANSFORMER_GRAD_ACCUM_CHOICES = (1, 2, 4, 8)
+FULL_TRANSFORMER_TIMESTEP_TYPE = 'linear'
+FULL_TRANSFORMER_TIMESTEP_TYPE_CHOICES = ('linear', 'sigmoid', 'weighted')
+FULL_TRANSFORMER_LR_SCHEDULE = 'constant'
+FULL_TRANSFORMER_LR_SCHEDULE_CHOICES = ('constant', 'constant_with_warmup', 'cosine')
+FULL_TRANSFORMER_WARMUP = 100
+FULL_TRANSFORMER_WARMUP_MIN = 10
+FULL_TRANSFORMER_WARMUP_MAX = 1000
+# train_settings keys. NEW names (never reused from the LoRA lane), so a dataset
+# that switches modes cannot inherit a value that meant something else.
+DENSE_SETTING_KEYS = ('dense_lr', 'dense_resolution', 'dense_save_every',
+                      'dense_max_step_saves', 'dense_fp8_export',
+                      'dense_keep_bf16', 'dense_grad_accum',
+                      'dense_lr_schedule', 'dense_warmup',
+                      'dense_timestep_type')
+
+
+def _dense_bool(ds, key, default=True) -> bool:
+    v = _train_settings(ds).get(key)
+    return v if isinstance(v, bool) else default
+
+
+def dense_fp8_export_enabled(ds) -> bool:
+    """Produce the ~10 GB ComfyUI-loadable fp8 twin at the end of a dense run.
+
+    ON by default: nobody generates with a 26 GB bf16 transformer, and doing the
+    conversion on the pod (where the file already is) costs minutes, while doing
+    it at home costs a 26 GB download first."""
+    return _dense_bool(ds, 'dense_fp8_export', True)
+
+
+def dense_keep_bf16_master(ds) -> bool:
+    """Keep the bf16 master NEXT TO the fp8 export instead of replacing it.
+
+    ON by default, and that default is not a preference: fp8 is a lossy,
+    one-way export. A dense run that only delivered fp8 can never be continued,
+    re-trained, merged or re-quantized differently — the master is the only
+    thing that makes those possible."""
+    return _dense_bool(ds, 'dense_keep_bf16', True)
+
+
+def _dense_lr(ds) -> float:
+    v = _train_settings(ds).get('dense_lr')
+    if isinstance(v, (int, float)) and not isinstance(v, bool) \
+            and FULL_TRANSFORMER_LR_MIN <= float(v) <= FULL_TRANSFORMER_LR_MAX:
+        return float(v)
+    return FULL_TRANSFORMER_LR
+
+
+def _dense_resolution(ds) -> int:
+    v = _train_settings(ds).get('dense_resolution')
+    return v if v in FULL_TRANSFORMER_RESOLUTION_CHOICES else KREA_TRAIN_RESOLUTION
+
+
+def _dense_save_every(ds) -> int:
+    v = _train_settings(ds).get('dense_save_every')
+    if isinstance(v, int) and not isinstance(v, bool) \
+            and FULL_TRANSFORMER_SAVE_EVERY_MIN <= v <= FULL_TRANSFORMER_SAVE_EVERY_MAX:
+        return v
+    return FULL_TRANSFORMER_SAVE_EVERY
+
+
+def _dense_max_step_saves(ds) -> int:
+    v = _train_settings(ds).get('dense_max_step_saves')
+    if isinstance(v, int) and not isinstance(v, bool) \
+            and 1 <= v <= FULL_TRANSFORMER_MAX_STEP_SAVES_MAX:
+        return v
+    return FULL_TRANSFORMER_MAX_STEP_SAVES
+
+
+def _dense_grad_accum(ds) -> int:
+    v = _train_settings(ds).get('dense_grad_accum')
+    if isinstance(v, int) and not isinstance(v, bool) \
+            and v in FULL_TRANSFORMER_GRAD_ACCUM_CHOICES:
+        return v
+    return FULL_TRANSFORMER_GRAD_ACCUM
+
+
+def _dense_timestep_type(ds) -> str:
+    v = _train_settings(ds).get('dense_timestep_type')
+    return v if v in FULL_TRANSFORMER_TIMESTEP_TYPE_CHOICES \
+        else FULL_TRANSFORMER_TIMESTEP_TYPE
+
+
+def _dense_lr_schedule(ds) -> str:
+    v = _train_settings(ds).get('dense_lr_schedule')
+    return v if v in FULL_TRANSFORMER_LR_SCHEDULE_CHOICES \
+        else FULL_TRANSFORMER_LR_SCHEDULE
+
+
+def _dense_warmup(ds) -> int:
+    v = _train_settings(ds).get('dense_warmup')
+    if isinstance(v, int) and not isinstance(v, bool) \
+            and FULL_TRANSFORMER_WARMUP_MIN <= v <= FULL_TRANSFORMER_WARMUP_MAX:
+        return v
+    return FULL_TRANSFORMER_WARMUP
+
+
+def _dense_lr_schedule_fields(ds) -> dict:
+    """`{}` for the shipped `constant` schedule — and that emptiness is load-
+    bearing. ai-toolkit's TrainConfig already defaults `lr_scheduler` to
+    'constant' (config_modules.py L371), so omitting the key entirely keeps the
+    emitted job config byte-for-byte what it was before this lever existed.
+    `num_warmup_steps` travels ONLY with `constant_with_warmup`: the torch
+    schedulers behind the other choices reject it (toolkit/scheduler.py)."""
+    schedule = _dense_lr_schedule(ds)
+    if schedule == FULL_TRANSFORMER_LR_SCHEDULE:
+        return {}
+    out = {'lr_scheduler': schedule}
+    if schedule == 'constant_with_warmup':
+        out['lr_scheduler_params'] = {'num_warmup_steps': _dense_warmup(ds)}
+    return out
+
+
+def dense_time_multiplier(ds) -> int:
+    """How many times longer accumulation alone makes this run — which is also
+    how many times bigger the pod bill gets, since the pod is billed by the hour.
+
+    Accumulation-only on purpose: it is the one lever whose cost is exactly a
+    multiplication (N sequential forward/backward passes per optimiser step,
+    same steps, same checkpoints). Resolution also moves the clock, but not by a
+    factor anyone can state without measuring, so it is not folded in here — a
+    made-up second factor would poison the one number that IS exact.
+
+    Exported (not private) because it has to be sayable BEFORE a machine is
+    rented; the recipe card is the honest place to learn it, not the invoice."""
+    return _dense_grad_accum(ds)
+
+
+def dense_images_per_step(ds) -> int:
+    """The effective batch: `batch_size` (pinned at 1) × gradient accumulation.
+    This is what the lever is FOR — on a 6 000-image dataset, a gradient
+    computed from one image is a very noisy estimate of the right direction."""
+    return _dense_grad_accum(ds)
+
+
+# --- how to TEST what a dense run delivers -------------------------------------
+# The dense artifact is Krea 2 RAW: undistilled, and it needs a real CFG and a
+# real step count. The family's inference defaults are Turbo defaults (a handful
+# of steps at CFG 1) — applied to a Raw checkpoint they produce a blurry sketch
+# and read as "the training failed". These are the values the run's OWN preview
+# sheet was rendered with (sample.guidance_scale / sample.sample_steps in the
+# emitted job config), which is why they are defined once, here, and referenced
+# by the recipe, the panel, the run card and the test lane rather than retyped.
+FULL_TRANSFORMER_SAMPLE_GUIDANCE = 4
+FULL_TRANSFORMER_SAMPLE_STEPS = 25
+FULL_TRANSFORMER_SAMPLE_GUIDANCE_RANGE = (3.5, 5.0)
+FULL_TRANSFORMER_SAMPLE_STEPS_RANGE = (20, 30)
+
+
+def dense_inference_hint(ds=None) -> dict:
+    """The settings to generate with from a dense artifact, in one shape.
+
+    Consumed by the training panel, the run card and the test/generation lane so
+    a single change of the recipe moves every surface at once.
+
+    The NUMBERS never change with the base — undistilled guidance and 20-30
+    steps are what a dense Krea 2 artifact wants either way, and that is also
+    the published replacement recipe for a distilled model that has been fully
+    fine-tuned. The SENTENCE does: calling a Turbo-based run "a RAW
+    (undistilled) model" would state as fact the very thing nobody has
+    measured. ``ds`` is optional because two callers hold a delivered artifact
+    rather than a dataset; without one the wording stays the Raw default, which
+    is the default recipe."""
+    lo_cfg, hi_cfg = FULL_TRANSFORMER_SAMPLE_GUIDANCE_RANGE
+    lo_steps, hi_steps = FULL_TRANSFORMER_SAMPLE_STEPS_RANGE
+    settings = (f'CFG ~{FULL_TRANSFORMER_SAMPLE_GUIDANCE} '
+                f'({lo_cfg:g}-{hi_cfg:g}) and {lo_steps}-{hi_steps} steps')
+    base = 'krea2_raw'
+    note = (f'This is a RAW (undistilled) Krea 2 model. Test it at {settings} '
+            '— Turbo-style few-step settings will look blurry.')
+    if ds is not None and _train_type(ds) == 'krea':
+        if _is_custom_weights(getattr(ds, 'train_base_model', None)):
+            base = 'custom'
+            note = (f'Test this full model at {settings}. If the checkpoint you '
+                    'fine-tuned was a few-step build, check for yourself whether '
+                    'it still works at low step counts — training moves the '
+                    'weights that behaviour lives in.')
+        elif not _krea_is_raw(ds):
+            base = 'krea2_turbo'
+            note = (f'Trained from Krea 2 Turbo. Test it at {settings}, the way '
+                    'an undistilled model is tested: full fine-tuning moves the '
+                    'weights the few-step behaviour lives in. How much of that '
+                    'behaviour is left is exactly what has not been measured — '
+                    'try your usual Turbo settings too and compare.')
+    return {
+        'base': base,
+        'guidance_scale': FULL_TRANSFORMER_SAMPLE_GUIDANCE,
+        'steps': FULL_TRANSFORMER_SAMPLE_STEPS,
+        'guidance_scale_range': [lo_cfg, hi_cfg],
+        'steps_range': [lo_steps, hi_steps],
+        'note': note,
+    }
+
+
+def dense_max_step_saves_for(ds) -> int:
+    """THE number the Hugging Face storage forecast multiplies a ~26 GB
+    checkpoint by. Exported because two callers outside this module (the cloud
+    launch pre-check and the Settings storage card) must never re-derive it —
+    a forecast that disagrees with the emitted job config is the exact failure
+    that cost run #146 its last 250 steps. ``None`` = no dataset in hand, i.e.
+    the shipped default."""
+    return FULL_TRANSFORMER_MAX_STEP_SAVES if ds is None else _dense_max_step_saves(ds)
 
 # Persisted/API contract. Keep this deliberately tiny: accepting aliases here
 # would make provenance ambiguous and could silently turn a requested dense run
@@ -622,6 +957,42 @@ def _is_custom_weights(value) -> bool:
     return bool(value) and os.path.isabs(str(value))
 
 
+def assert_trainable_base_file(path) -> dict:
+    """Refuse a base the trainer CANNOT LOAD — and only that one — at selection.
+
+    The community publishes fp8/int8 repacks of every popular base (~10 GB
+    instead of ~26 GB) and they are the files most people already have on disk.
+    What makes one unusable is its FORMAT, not its bit width, and the two forms
+    behave differently (measured — see model_integrity's block comment):
+
+    * a STRUCTURED export (ComfyUI scaled fp8 / comfy_quant, int8 repacks, this
+      app's own fp8 twin) ships extra dequantization tensors, and ai-toolkit
+      loads a base with ``load_state_dict(..., strict=True)`` — the load itself
+      raises, immediately. Refused here, so the failure lands when the file is
+      PICKED rather than after the dataset export and (in the cloud lane) after
+      a GPU has been rented, for a few kilobytes of header.
+    * a BARE cast adds no key of its own; the loader up-casts it to the training
+      dtype and nothing in the PACKING stands in the way. Allowed —
+      `model_integrity.base_precision_warning` states what it costs instead. It
+      can still be refused at load for an unrelated reason (a tensor the
+      architecture does not declare); this guard reads the packing only, and its
+      wording is careful not to promise otherwise.
+
+    An earlier version of this docstring claimed the trainer "dies deep in the
+    first optimizer step". It does not, for either form, and that sentence was
+    used to justify scoping decisions elsewhere — hence the detail here.
+
+    Returns the report (``checked=False`` = unreadable header → deliberately
+    permissive: the integrity validator owns "this file is broken", and refusing
+    a base nobody could inspect would be worse than the failure it prevents).
+    """
+    from . import model_integrity
+    report = model_integrity.quantization_report(path)
+    if not report.get('trainable_as_base', True):
+        raise ValueError(model_integrity.QUANT_REFUSAL)
+    return report
+
+
 _SAFETENSORS_MAX_HEADER = 64 * 1024 * 1024   # 64 MB — a real header is < ~10 MB
 
 
@@ -832,6 +1203,18 @@ _ARCH_LABEL = {'sdxl': 'an SDXL', 'sd15': 'a Stable Diffusion 1.5',
 # behaviour of the surviving definition), and the lower one deleted.
 _FAMILY_LABEL = {'zimage': 'Z-Image', 'sdxl': 'SDXL', 'krea': 'Krea 2',
                  'flux': 'FLUX.1', 'flux2klein': 'FLUX.2 Klein', 'anima': 'Anima'}
+# Caption FORM each family is prompted with — the only input of the
+# MISMATCH_CAPTION guard (assert_trainable). Three values:
+#   'booru'  the model is tag-native (SDXL booru checkpoints, e.g. bigLove);
+#   'prose'  natural language only (the default for every family not listed);
+#   None     HYBRID — both forms are first-class, so no mismatch can exist.
+# Anima is the hybrid case: its model card documents booru tags AND natural
+# language as supported prompting styles (Cosmos-Predict2 2B backbone, Qwen LLM
+# text encoder — an LLM text encoder is what makes both readable). LDS used to
+# lump it with 'prose' by omission and refused booru-captioned anima datasets;
+# that was half a truth, and the mirror image of the "booru only" half someone
+# else had. Anything absent from this table keeps the historical prose default.
+_EXPECTED_CAPTION_FORM = {'sdxl': 'booru', 'anima': None}
 # Confirmable-refusal marker (mirrors UNCAPTIONED:/MISMATCH_CAPTION:): the UI
 # strips it, asks window.confirm, and retries with allow_unverified_weights.
 _UNVERIFIED_MARKER = 'CUSTOM_WEIGHTS_UNVERIFIED: '
@@ -860,6 +1243,11 @@ def preflight_custom_paths(family, weights=None, vae_path=None, te_path=None,
     if _is_custom_weights(weights):
         if not os.path.isfile(weights):
             raise ValueError(f'custom weights file not found: {weights}')
+        # Second seam for the same refusal the SELECTOR already makes: a base
+        # persisted before that guard shipped, or restored from a preset/share,
+        # must not reach a rented GPU either. Hard, never confirmable — an
+        # inference-only export cannot be trained on at any confidence level.
+        assert_trainable_base_file(weights)
         keys = _safetensors_tensor_keys(weights)   # raises on unreadable header
         detected = _detect_safetensors_arch(keys)
         expected = _FAMILY_EXPECTED_ARCH.get(family)
@@ -1153,6 +1541,25 @@ def _krea_is_raw(ds, variant=_PERSISTED) -> bool:
     return str(selected or 'base').lower() in ('base', 'raw')
 
 
+def _krea_name_or_path(ds, variant=_PERSISTED) -> str:
+    """The base ai-toolkit LOADS for a Krea 2 run — the single resolver for both
+    the LoRA lane and the dense lane.
+
+    It exists because those two lanes used to answer this question differently:
+    the LoRA branch read the selection, the dense branch pinned the constant. A
+    dense run could therefore be launched, named and stamped "Turbo" while
+    training Raw. One function, one answer, and a test asserts the emitted
+    ``model.name_or_path`` per recipe rather than the absence of an exception.
+
+    Custom weights (an ABSOLUTE local path) win over the variant: the file IS
+    the base. The TE/VAE stay official — Krea bundles them, and ai-toolkit's
+    krea2 arch takes no override for either."""
+    base = getattr(ds, 'train_base_model', None)
+    if _is_custom_weights(base):
+        return str(base)
+    return FULL_TRANSFORMER_BASE if _krea_is_raw(ds, variant) else KREA_TURBO_BASE
+
+
 def _flux2klein_is_9b(ds, variant=_PERSISTED) -> bool:
     """FLUX.2 Klein model size. `train_variant` '9b' → the 9B base (32-48 GB VRAM,
     the cloud-first lane); anything else → the 4B base (16-24 GB, the local lane).
@@ -1213,6 +1620,15 @@ _SAVE_CHOICES = (250, 500, 1000)
 _DROPOUT_CHOICES = (0.05, 0.1, 0.15, 0.2, 0.3)          # LoRA network dropout ; absent = off
 _ALPHA_CHOICES = (1, 2, 4, 8, 16, 24, 32, 48, 64)       # alpha découplé du rank ; absent = dérivé
 _TIMESTEP_TYPE_CHOICES = ('sigmoid', 'linear', 'weighted', 'shift')  # pondération flowmatch ; SDXL le désactive
+# ⚠️ `shift` sur Krea : l'entraîneur calcule le décalage depuis un nombre de
+# tokens qui suppose `unet.config.patch_size`, alors que le denoiser de Krea 2
+# nomme ce champ `patch` → patch_size retombe à 1 et le compte sort 4× trop
+# grand. Constaté dans l'ai-toolkit LOCAL (c'est bien lui qui exécute la voie
+# LoRA) ET dans l'image figée du pod : ça ne dépend pas de la version. Laissé
+# tel quel ici — le retirer changerait un réglage déjà stocké chez des gens —
+# mais la voie DENSE ne le propose pas (cf. FULL_TRANSFORMER_TIMESTEP_TYPE_CHOICES).
+# Les deux voies ne tournent PAS sur le même ai-toolkit : local (mouvant) pour
+# les LoRA, image du pod (épinglée) pour le dense.
 _DEFAULT_TIMESTEP = {'zimage': 'sigmoid', 'krea': 'linear', 'flux': 'sigmoid',
                      'flux2klein': 'weighted', 'anima': 'weighted'}   # ce que « Auto » résout (sdxl : aucun) ; flux subject → sigmoid (reco ai-toolkit) ; flux2klein → weighted (défaut canonique options.ts, PAS sigmoid) ; anima → weighted (défaut options.ts PR #860)
 # Batch 2 — optimiseur / planning du LR / batch effectif (valeurs VÉRIFIÉES dans
@@ -2230,32 +2646,49 @@ def launch_settings_snapshot(ds, family=None, masked=None) -> dict:
             'training_mode': 'full_transformer',
             'artifact_kind': 'full_transformer',
             'model_arch': 'krea2',
-            'effective_base': FULL_TRANSFORMER_BASE,
+            # Read from the SAME resolver as the emitted config. It used to be
+            # the Raw constant, which was harmless only for as long as a dense
+            # run could not be anything else — the Runs page would otherwise
+            # claim "Krea 2 Raw" over a Turbo or custom-base run.
+            'effective_base': _krea_name_or_path(dense_ds),
             'vae_path': FULL_TRANSFORMER_VAE,
-            'resolution': [KREA_TRAIN_RESOLUTION],
+            **({'base_weights': str(getattr(dense_ds, 'train_base_model', None))}
+               if _is_custom_weights(getattr(dense_ds, 'train_base_model', None))
+               else {}),
+            'resolution': [_dense_resolution(dense_ds)],
             'caption_dropout_rate': 0.05,
             'cache_latents_to_disk': True,
             'cache_text_embeddings': True,
-            'save_every': FULL_TRANSFORMER_SAVE_EVERY,
-            'max_step_saves': 1,
+            'save_every': _dense_save_every(dense_ds),
+            'max_step_saves': _dense_max_step_saves(dense_ds),
             'save_dtype': 'bf16',
             'batch_size': 1,
-            'grad_accum': 1,
+            'grad_accum': _dense_grad_accum(dense_ds),
             'train_unet': True,
             'train_text_encoder': False,
             'unload_text_encoder': True,
             'gradient_checkpointing': True,
             'noise_scheduler': 'flowmatch',
-            'timestep_type': 'linear',
+            'timestep_type': _dense_timestep_type(dense_ds),
             'optimizer': 'adafactor',
-            'lr': 1e-6,
+            'lr': _dense_lr(dense_ds),
+            # Stamped EFFECTIVE, like every other value in this block: 'constant'
+            # is what the run uses even though the emitted config leaves the key
+            # out. Provenance answers "what did this run train with?", not "what
+            # bytes were in the file".
+            'lr_scheduler': _dense_lr_schedule(dense_ds),
+            **({'warmup': _dense_warmup(dense_ds)}
+               if _dense_lr_schedule(dense_ds) == 'constant_with_warmup' else {}),
             'dtype': 'bf16',
             'quantize': False,
             'quantize_te': False,
             'low_vram': False,
-            'sample_every': FULL_TRANSFORMER_SAMPLE_EVERY,
-            'guidance_scale': 4,
-            'sample_steps': 25,
+            'sample_every': _dense_save_every(dense_ds),
+            'guidance_scale': FULL_TRANSFORMER_SAMPLE_GUIDANCE,
+            'sample_steps': FULL_TRANSFORMER_SAMPLE_STEPS,
+            'sample_prompts': _sample_prompts(dense_ds, _safe_trigger(dense_ds)),
+            'fp8_export': dense_fp8_export_enabled(dense_ds),
+            'keep_bf16_master': dense_keep_bf16_master(dense_ds),
             'trigger': _safe_trigger(dense_ds),
             'masked': (bool(masked) if isinstance(masked, bool)
                        else person_masking_enabled(dense_ds)),
@@ -2545,7 +2978,95 @@ def effective_train_settings(ds, family=None) -> dict:
             # défaut résolu (kind + trigger courant) : placeholder/aperçu quand vide.
             'sample_prompts_default': _resolved_default_sample_prompts(ds, trig),
             'sample_every_choices': list(_SAMPLE_EVERY_CHOICES),
-            'max_sample_prompts': _MAX_SAMPLE_PROMPTS}
+            'max_sample_prompts': _MAX_SAMPLE_PROMPTS,
+            # --- full-model (dense) recipe: every unlocked value, the two
+            # delivery switches, and what the choice costs. Always present so
+            # the panel can render the locked card and its editable half from
+            # ONE payload; `*_stored` is the raw choice (None = "default", so
+            # the control re-checks Auto), the bare key is what the run will
+            # actually use.
+            **_dense_settings_payload(ds)}
+
+
+def _dense_settings_payload(ds) -> dict:
+    s = _train_settings(ds)
+    return {
+        'dense_lr': _dense_lr(ds),
+        'dense_lr_stored': s.get('dense_lr') if isinstance(s.get('dense_lr'), (int, float))
+        and not isinstance(s.get('dense_lr'), bool) else None,
+        'dense_lr_default': FULL_TRANSFORMER_LR,
+        'dense_lr_min': FULL_TRANSFORMER_LR_MIN,
+        'dense_lr_max': FULL_TRANSFORMER_LR_MAX,
+        'dense_resolution': _dense_resolution(ds),
+        'dense_resolution_default': KREA_TRAIN_RESOLUTION,
+        'dense_resolution_choices': list(FULL_TRANSFORMER_RESOLUTION_CHOICES),
+        'dense_save_every': _dense_save_every(ds),
+        'dense_save_every_default': FULL_TRANSFORMER_SAVE_EVERY,
+        'dense_save_every_min': FULL_TRANSFORMER_SAVE_EVERY_MIN,
+        'dense_save_every_max': FULL_TRANSFORMER_SAVE_EVERY_MAX,
+        'dense_max_step_saves': _dense_max_step_saves(ds),
+        'dense_max_step_saves_default': FULL_TRANSFORMER_MAX_STEP_SAVES,
+        'dense_max_step_saves_max': FULL_TRANSFORMER_MAX_STEP_SAVES_MAX,
+        'dense_grad_accum': _dense_grad_accum(ds),
+        'dense_grad_accum_default': FULL_TRANSFORMER_GRAD_ACCUM,
+        'dense_grad_accum_choices': list(FULL_TRANSFORMER_GRAD_ACCUM_CHOICES),
+        # The price tag, next to the control that sets it. Accumulation is the
+        # only dense lever that spends money instead of memory, and the panel
+        # must be able to say "≈3× longer, ≈3× the pod bill" at the moment of
+        # choosing — not leave it to be discovered on the invoice.
+        'dense_time_multiplier': dense_time_multiplier(ds),
+        'dense_images_per_step': dense_images_per_step(ds),
+        'dense_lr_schedule': _dense_lr_schedule(ds),
+        'dense_lr_schedule_default': FULL_TRANSFORMER_LR_SCHEDULE,
+        'dense_lr_schedule_choices': list(FULL_TRANSFORMER_LR_SCHEDULE_CHOICES),
+        'dense_warmup': _dense_warmup(ds),
+        'dense_warmup_default': FULL_TRANSFORMER_WARMUP,
+        'dense_warmup_min': FULL_TRANSFORMER_WARMUP_MIN,
+        'dense_warmup_max': FULL_TRANSFORMER_WARMUP_MAX,
+        # Warmup steps only reach ai-toolkit on this one schedule; the panel
+        # gates its control on the same fact rather than re-deriving it.
+        'dense_warmup_applies': _dense_lr_schedule(ds) == 'constant_with_warmup',
+        'dense_timestep_type': _dense_timestep_type(ds),
+        'dense_timestep_type_default': FULL_TRANSFORMER_TIMESTEP_TYPE,
+        'dense_timestep_type_choices': list(FULL_TRANSFORMER_TIMESTEP_TYPE_CHOICES),
+        'dense_fp8_export': dense_fp8_export_enabled(ds),
+        'dense_keep_bf16': dense_keep_bf16_master(ds),
+        # What the delivery will weigh, so the panel can say it BEFORE the pod is
+        # rented rather than after the 403. One source of arithmetic with the
+        # Hugging Face pre-check (hf_storage.dense_storage_forecast).
+        'dense_storage_plan': dense_storage_plan(ds),
+        # What to generate with once the model lands — the SAME numbers the run
+        # previews with, so the panel never hard-codes a second version of them.
+        'dense_inference_hint': dense_inference_hint(ds),
+    }
+
+
+def dense_storage_plan(ds) -> dict:
+    """How many objects of what size ONE dense run will put on Hugging Face.
+
+    Deliberately expressed as the PEAK, not the steady state: even when the bf16
+    master is dropped, ai-toolkit pushes it first and the fp8 twin is uploaded
+    before it is deleted. A forecast that quoted the post-cleanup total would be
+    accurate about the wrong moment — the moment that refuses a push is the peak.
+    """
+    from . import hf_storage
+    from . import fp8_export
+    keeps = _dense_max_step_saves(ds)
+    checkpoint, source = hf_storage.dense_checkpoint_bytes()
+    fp8 = (fp8_export.estimate_fp8_bytes(checkpoint)
+           if dense_fp8_export_enabled(ds) else 0)
+    return {'keeps': keeps, 'checkpoint_bytes': checkpoint,
+            'checkpoint_source': source,
+            # `fp8_bytes` is the forecast CEILING (it has to round up or it stops
+            # protecting anything); `fp8_typical_bytes` is what to SHOW someone
+            # asking how big their download will be. Same file, two questions.
+            'fp8_bytes': fp8,
+            'fp8_typical_bytes': (fp8_export.typical_fp8_bytes(checkpoint)
+                                  if dense_fp8_export_enabled(ds) else 0),
+            'keep_bf16': dense_keep_bf16_master(ds),
+            'peak_bytes': checkpoint * keeps + fp8,
+            'resident_bytes': (checkpoint * keeps if dense_keep_bf16_master(ds)
+                               else 0) + fp8}
 
 
 def _training_selection_candidate(ds, patch: dict, requested_mode) -> dict:
@@ -2589,6 +3110,10 @@ def _training_selection_candidate(ds, patch: dict, requested_mode) -> dict:
         if raw_base is not None and not isinstance(raw_base, str):
             raise ValueError('base_model must be a string or empty')
         base_model = (raw_base or '').strip()
+        # Custom weights only: a ComfyUI-relative name addresses a catalog entry
+        # this app installed, an absolute path is a file the user picked.
+        if _is_custom_weights(base_model):
+            assert_trainable_base_file(base_model)
     if 'variant' in patch:
         raw_variant = patch.get('variant')
         if not isinstance(raw_variant, str) or not raw_variant.strip():
@@ -2702,6 +3227,111 @@ def update_train_settings(user_id, dataset_id, patch: dict, *, _settings=None) -
                 cur.pop('sample_prompts', None)
         else:
             raise ValueError('sample_prompts must be a list of strings (or empty to reset)')
+    # --- the unlocked half of the dense recipe --------------------------------
+    # Bounded, never free-form: the bounds are what keep "editable" from meaning
+    # "able to burn 80 GB of rented GPU on a value that cannot converge".
+    if 'dense_lr' in patch:
+        v = patch['dense_lr']
+        if v in (None, '', 'auto'):
+            cur.pop('dense_lr', None)
+        elif (isinstance(v, (int, float)) and not isinstance(v, bool)
+                and FULL_TRANSFORMER_LR_MIN <= float(v) <= FULL_TRANSFORMER_LR_MAX):
+            cur['dense_lr'] = float(v)
+        else:
+            raise ValueError(
+                f'dense_lr must be between {FULL_TRANSFORMER_LR_MIN:g} and '
+                f'{FULL_TRANSFORMER_LR_MAX:g} (or auto)')
+    if 'dense_resolution' in patch:
+        v = patch['dense_resolution']
+        if v in (None, '', 'auto'):
+            cur.pop('dense_resolution', None)
+        elif v in FULL_TRANSFORMER_RESOLUTION_CHOICES:
+            cur['dense_resolution'] = v
+        else:
+            raise ValueError('dense_resolution must be one of '
+                             f'{list(FULL_TRANSFORMER_RESOLUTION_CHOICES)} (or auto)')
+    if 'dense_save_every' in patch:
+        v = patch['dense_save_every']
+        if v in (None, '', 'auto'):
+            cur.pop('dense_save_every', None)
+        elif (isinstance(v, int) and not isinstance(v, bool)
+                and FULL_TRANSFORMER_SAVE_EVERY_MIN <= v <= FULL_TRANSFORMER_SAVE_EVERY_MAX):
+            cur['dense_save_every'] = v
+        else:
+            raise ValueError(
+                f'dense_save_every must be between {FULL_TRANSFORMER_SAVE_EVERY_MIN} '
+                f'and {FULL_TRANSFORMER_SAVE_EVERY_MAX} steps (or auto)')
+    if 'dense_max_step_saves' in patch:
+        v = patch['dense_max_step_saves']
+        if v in (None, '', 'auto'):
+            cur.pop('dense_max_step_saves', None)
+        elif (isinstance(v, int) and not isinstance(v, bool)
+                and 1 <= v <= FULL_TRANSFORMER_MAX_STEP_SAVES_MAX):
+            cur['dense_max_step_saves'] = v
+        else:
+            raise ValueError('dense_max_step_saves must be between 1 and '
+                             f'{FULL_TRANSFORMER_MAX_STEP_SAVES_MAX} (or auto)')
+    if 'dense_grad_accum' in patch:
+        v = patch['dense_grad_accum']
+        if v in (None, '', 'auto'):
+            cur.pop('dense_grad_accum', None)
+        elif (isinstance(v, int) and not isinstance(v, bool)
+                and v in FULL_TRANSFORMER_GRAD_ACCUM_CHOICES):
+            cur['dense_grad_accum'] = v
+        else:
+            # The message says what the refusal protects: this is the one dense
+            # value whose upper bound is a budget, not a memory limit.
+            raise ValueError(
+                'dense_grad_accum must be one of '
+                f'{list(FULL_TRANSFORMER_GRAD_ACCUM_CHOICES)} (or auto) — each '
+                'step becomes that many images, so the run (and the rented GPU '
+                'it is billed on) takes that many times longer')
+    if 'dense_lr_schedule' in patch:
+        v = patch['dense_lr_schedule']
+        if v in (None, '', 'auto'):
+            cur.pop('dense_lr_schedule', None)
+        elif v in FULL_TRANSFORMER_LR_SCHEDULE_CHOICES:
+            cur['dense_lr_schedule'] = v
+        else:
+            raise ValueError(
+                'dense_lr_schedule must be one of '
+                f'{list(FULL_TRANSFORMER_LR_SCHEDULE_CHOICES)} (or auto)')
+    if 'dense_warmup' in patch:
+        v = patch['dense_warmup']
+        if v in (None, '', 'auto'):
+            cur.pop('dense_warmup', None)
+        elif (isinstance(v, int) and not isinstance(v, bool)
+                and FULL_TRANSFORMER_WARMUP_MIN <= v <= FULL_TRANSFORMER_WARMUP_MAX):
+            cur['dense_warmup'] = v
+        else:
+            raise ValueError(
+                f'dense_warmup must be between {FULL_TRANSFORMER_WARMUP_MIN} and '
+                f'{FULL_TRANSFORMER_WARMUP_MAX} steps (or auto), and it only '
+                "applies to the 'constant_with_warmup' schedule")
+    if 'dense_timestep_type' in patch:
+        v = patch['dense_timestep_type']
+        if v in (None, '', 'auto'):
+            cur.pop('dense_timestep_type', None)
+        elif v in FULL_TRANSFORMER_TIMESTEP_TYPE_CHOICES:
+            cur['dense_timestep_type'] = v
+        else:
+            # 'shift' is the value people ask for and the one that lands here:
+            # say why it is missing instead of letting it read as an oversight.
+            raise ValueError(
+                'dense_timestep_type must be one of '
+                f'{list(FULL_TRANSFORMER_TIMESTEP_TYPE_CHOICES)} (or auto); '
+                "shift-based schedules are not offered for Krea 2 because the "
+                'trainer would compute their shift from a four-times-too-large '
+                'token count')
+    for _flag in ('dense_fp8_export', 'dense_keep_bf16'):
+        if _flag in patch:
+            v = patch[_flag]
+            if v in (None, '', 'auto'):
+                cur.pop(_flag, None)
+            elif isinstance(v, bool):
+                cur[_flag] = v
+            else:
+                raise ValueError(f'{_flag} must be true or false')
     if 'dropout' in patch:
         v = patch['dropout']
         if v in (None, 0, 0.0, 'off', ''):
@@ -3011,6 +3641,10 @@ TRAIN_SETTING_KEYS = ('rank', 'resolution', 'save_every', 'max_step_saves',
                       'cache_text_embeddings', 'save_dtype',
                       'preset_steps_per_image', 'preset_steps_min',
                       'preset_steps_max', 'preset_steps_fixed',
+                      # The unlocked half of the dense recipe. Present here so a
+                      # shared/exported preset can carry it too — the values are
+                      # bounded, and a LoRA run simply never reads them.
+                      *DENSE_SETTING_KEYS,
                       *_MEMORY_SETTING_KEYS)
 
 # The ONLY settings a resume/continue may change. ai-toolkit rebuilds the job
@@ -3216,7 +3850,11 @@ BUILTIN_TRAIN_PRESETS = [
     # The linked Pastebin configuration was later deleted. The post specifies
     # LoKr factor 16 but not linear rank/alpha, so LDS retains its verified Krea
     # Character 32/32 baseline instead of inventing missing values. `base` is
-    # Krea-2-Raw in LDS; Turbo is deliberately excluded from this Raw recipe.
+    # Krea-2-Raw in LDS; Turbo is excluded from THIS preset's variant list
+    # because the community report was never validated on it, not because
+    # Turbo LoRA training is broken. Full-model/dense training likewise refuses
+    # Turbo because dense-on-Turbo is untested, unlike Turbo LoRA training
+    # which works fine — see _assert_full_transformer_recipe.
     {
         'id': 'builtin-krea-raw-lokr-likeness',
         'name': 'Krea 2 Raw · LoKr likeness',
@@ -3909,12 +4547,15 @@ def find_run_collision(user_id, dataset_id, base_model=_PERSISTED,
         return None
     target = _run_name(ds, variant=variant) if base_model is _PERSISTED \
         else _run_name(ds, base_model, variant=variant)
-    others = (FaceDataset.query
-              .filter(FaceDataset.user_id == str(ds.user_id),
-                      FaceDataset.id != int(ds.id))
-              .all())
-    for o in others:
-        if _run_name(o) == target:
+    # Enumerated through `fds.list_datasets` — the library's own definition of
+    # "the datasets that exist" — rather than a raw FaceDataset query. A refusal
+    # is only actionable if the user can OPEN the dataset it names: colliding
+    # with a row that is not in the library blocks a training run with an error
+    # nobody can act on. Today the two sets are identical; keeping the single
+    # source means a future listing rule (hidden/archived rows) is honoured here
+    # for free instead of being a second place someone must remember.
+    for o in fds.list_datasets(ds.user_id):
+        if int(o.id) != int(ds.id) and _run_name(o) == target:
             return o
     return None
 
@@ -3989,10 +4630,93 @@ def _dual_caption_json_path(dataset_folder) -> str:
     return (str(dataset_folder).rstrip('/\\') + '/' + _DUAL_CAPTION_FILENAME)
 
 
+# --- Export encoding (2026-08-03) ---------------------------------------------
+# The exporter used to re-encode EVERY master to lossless PNG. On a 6 211-image
+# style dataset that turned 3.6 GB of masters into 23.7 GB of staging and burned
+# 24 min of CPU before a single byte reached the network — measured, not guessed
+# — which is what filled the disk ([Errno 28] with no pod created), what left a
+# half-hour window in which any app restart killed the run, and what made the
+# upload "12 422 files and 24 GB" that RemoteAiToolkit.upload_dataset already
+# documents. The re-encode exists for exactly two reasons: bake EXIF orientation
+# into the pixels (an upright JPEG must never train sideways) and hand the
+# trainer a format it reads. A master that has NO EXIF block at all needs
+# neither the baking nor the metadata stripping, so its own bytes go straight
+# through.
+#
+# Extensions verified at the source, not assumed: ai-toolkit scans
+# `img_ext_list = ['.jpg', '.jpeg', '.png', '.webp']` (toolkit/dataloader_mixins.py)
+# and pairs a mask by STEM + any of those, so a copied .jpg still finds its .png
+# mask; the pod uploader's own whitelist (_DATA_EXTS) already carries the same four.
+_TRAINER_IMAGE_EXTS = ('.jpg', '.jpeg', '.png', '.webp')
+
+# Free space demanded on top of the estimate: captions, masks, the samples dir a
+# cloud run puts beside the dataset, and the plain fact that an export that ends
+# on a disk with nothing left is a broken export.
+_EXPORT_DISK_MARGIN_BYTES = 2 * 1024 ** 3
+
+
+def _export_copy_is_safe(im, ext) -> bool:
+    """Can this master's own bytes be handed to the trainer untouched?
+
+    Four conditions, all necessary: an extension ai-toolkit reads; NO EXIF block
+    at all (nothing to bake into pixels, and nothing — GPS, camera, timestamps —
+    to ship to a rented pod); already RGB (palette/CMYK/alpha must be converted);
+    a single frame. Anything else keeps the historical PNG re-encode."""
+    try:
+        exif = im.getexif()
+    except Exception:                       # a corrupt EXIF block: re-encode
+        return False
+    return (ext in _TRAINER_IMAGE_EXTS and not len(exif)
+            and im.mode == 'RGB' and int(getattr(im, 'n_frames', 1) or 1) == 1)
+
+
+def _export_image_bytes(src) -> int:
+    """Bytes `src` will occupy in the export, without writing anything.
+
+    A copied master costs exactly its file size; a re-encoded one is bounded by
+    its raw RGB size (PNG of a photo lands well under that). Unreadable headers
+    fall back to the file size rather than failing the estimate — the export
+    itself skips those files anyway."""
+    try:
+        with Image.open(src) as im:
+            if _export_copy_is_safe(im, os.path.splitext(src)[1].lower()):
+                return os.path.getsize(src)
+            w, h = im.size
+            return int(w) * int(h) * 3
+    except OSError:
+        try:
+            return os.path.getsize(src)
+        except OSError:
+            return 0
+
+
+def _assert_export_fits(out, srcs) -> None:
+    """Refuse an export that cannot fit BEFORE writing its first file.
+
+    Half a written export is worse than none: it fails with a bare
+    "[Errno 28] No space left on device" (twice, live, on runs that had already
+    spent 20 minutes), it leaves the partial copy behind, and it names neither
+    the size it wanted nor the space there was."""
+    need = int(sum(_export_image_bytes(s) for s in srcs) * 1.05) + _EXPORT_DISK_MARGIN_BYTES
+    try:
+        free = shutil.disk_usage(out).free
+    except OSError:
+        return                              # cannot measure -> do not invent a refusal
+    if free >= need:
+        return
+    raise ValueError(
+        f'not enough free disk space to export this dataset: about '
+        f'{need / 1e9:.1f} GB needed, {free / 1e9:.1f} GB free where the export '
+        f'goes ({out}). Free some space — finished cloud runs keep their staging '
+        f'copy until you clean it up (🧹 in the cloud run list) — then relaunch.')
+
+
 def export_dataset_to_aitoolkit(user_id, dataset_id, masked: bool = True, dest_dir=None,
                                 masked_faces: bool = True) -> str:
-    """Écrit les images `keep` en paires .png/.txt dans
-    DATASETS_DIR/<trigger>. Character/concept = trigger + caption éditée ; Style
+    """Écrit les images `keep` en paires image/.txt dans
+    DATASETS_DIR/<trigger>. L'image garde ses octets d'origine (.jpg/.webp/.png)
+    quand le trainer les lit tels quels et qu'aucun EXIF n'est à appliquer, sinon
+    elle est ré-encodée en .png — cf `_export_copy_is_safe`. Character/concept = trigger + caption éditée ; Style
     always-on = caption de contenu seule (le trigger interne n'est jamais exporté).
     Retourne le dossier.
 
@@ -4065,6 +4789,9 @@ def export_dataset_to_aitoolkit(user_id, dataset_id, masked: bool = True, dest_d
             .filter(FaceDatasetImage.filename.isnot(None)).all())
     if not kept:
         raise ValueError('no kept images to export')
+    _assert_export_fits(out, [p for p in
+                             (os.path.join(fds._dataset_dir(img.dataset_id), img.filename)
+                              for img in kept) if os.path.isfile(p)])
     n = 0
     exported = []
     dual = fds.dual_captions_enabled(ds)
@@ -4074,12 +4801,19 @@ def export_dataset_to_aitoolkit(user_id, dataset_id, masked: bool = True, dest_d
         if not os.path.isfile(src):
             continue
         stem = f'{trigger}_{n:03d}'
-        dst = os.path.join(out, f'{stem}.png')
-        # Dataset masters can retain their native JPEG/PNG/WebP/BMP bytes. The
-        # trainer receives this disposable PNG instead: bake EXIF orientation into
-        # pixels before dropping metadata so an upright JPEG never trains sideways.
+        ext = os.path.splitext(src)[1].lower()
+        # Dataset masters can retain their native JPEG/PNG/WebP/BMP bytes. A
+        # master the trainer already reads, carrying no EXIF at all, is copied
+        # byte for byte; anything else gets the historical disposable PNG, which
+        # bakes EXIF orientation into pixels and drops metadata so an upright
+        # JPEG never trains sideways. See _export_copy_is_safe.
         with Image.open(src) as source:
-            ImageOps.exif_transpose(source).convert('RGB').save(dst, 'PNG')
+            verbatim = _export_copy_is_safe(source, ext)
+            dst = os.path.join(out, f'{stem}{ext if verbatim else ".png"}')
+            if not verbatim:
+                ImageOps.exif_transpose(source).convert('RGB').save(dst, 'PNG')
+        if verbatim:
+            shutil.copyfile(src, dst)
         exported.append(dst)
         cap = fds.style_content_caption(ds, img.caption)
         body = cap if fds.is_style(ds) else (f'{trigger}, {cap}' if cap else trigger)
@@ -4152,6 +4886,59 @@ def export_dataset_to_aitoolkit(user_id, dataset_id, masked: bool = True, dest_d
                                     ttl_seconds=_TRAIN_STATE_TTL)
     logger.info(f'export dataset {dataset_id} -> {out} ({n} paires)')
     return out
+
+
+def _export_and_freeze_local_dataset(user_id, dataset_id, *, masked, base_model):
+    """Create one coherent local-training export and provenance snapshot.
+
+    Dataset mutations use the same ingest lock and consult the exclusive
+    activity below.  Keeping both the ai-toolkit export and
+    ``prepare_launch`` inside that reservation prevents a run from training on
+    generation A while its LDS record describes generation B.
+    """
+    lock = fds._dataset_ingest_lock(user_id, dataset_id)
+    with lock:
+        token = dataset_activity.begin_exclusive(
+            dataset_id, 'training_export',
+            detail='freezing the Dataset for training')
+        if token is None:
+            raise dataset_activity.DatasetActivityBusy(
+                'This dataset already has work in progress. Wait for it to '
+                'finish before launching training.')
+        heartbeat_stop = threading.Event()
+
+        def keep_reservation_alive():
+            while not heartbeat_stop.wait(30.0):
+                dataset_activity.progress(token)
+
+        heartbeat = threading.Thread(
+            target=keep_reservation_alive, daemon=True,
+            name=f'dataset-{dataset_id}-training-export-heartbeat')
+        heartbeat.start()
+        try:
+            dataset_folder = export_dataset_to_aitoolkit(
+                user_id, dataset_id, masked=masked)
+            # A cloud/other-lane launch can win while a large local export is
+            # being written.  Refuse before the expensive snapshot if so; the
+            # final queue/GPU lock remains authoritative for spawning.
+            if (queue_manager._get_system_state('training_in_progress', False)
+                    and not _training_process_is_definitely_dead(
+                        queue_manager._get_system_state('training_pid', None))):
+                raise ValueError(
+                    'a training is already in progress - wait for it to finish '
+                    'or queue this dataset')
+            from . import checkpoint_registry
+            prepared = checkpoint_registry.prepare_launch(
+                user_id, dataset_id, base_model=base_model)
+            if checkpoint_registry.prepared_generation_identity(prepared) is None:
+                raise RuntimeError(
+                    'could not freeze the Dataset provenance for training; no '
+                    'run was started — retry after checking the backend log')
+            return dataset_folder, prepared
+        finally:
+            heartbeat_stop.set()
+            heartbeat.join(timeout=1.0)
+            dataset_activity.end(token)
 
 
 # --- Overrides STYLE (communs aux familles) ------------------------------------
@@ -4323,17 +5110,69 @@ def _apply_slider_overrides(ds, process: dict, family: str | None = None) -> dic
 
 
 def _assert_full_transformer_recipe(ds) -> None:
-    """Validate the intentionally narrow Krea 2 dense-training MVP."""
+    """What a Krea 2 dense run may and may not be built from.
+
+    Two refusals used to live here and no longer do — Turbo, and a custom base.
+    Both were SCOPE decisions, and this docstring already said so; what kept
+    them was not the risk of a broken checkpoint but the risk of a MISLABELLED
+    run, because the dense config pinned its base to a constant. That is the
+    part that was fixed first: `_krea_name_or_path` now resolves the base from
+    the selection for the dense lane exactly as for the LoRA lane, and the
+    provenance stamp reads the same resolver. A dense run can no longer
+    announce Turbo and train Raw, so the refusal it justified has nothing left
+    to protect.
+
+    What travels with the lifted Turbo refusal, as a WARNING rather than a
+    wall (the product decision: warn and let through):
+
+    - The dense lane still loads NO `assistant_lora_path`, on Turbo included.
+      That is deliberate. ai-toolkit can subtract an adapter
+      (`merge_out(w) == merge_in(-w)`) but nothing wires that into the dense
+      save path, and a LoRA-shaped subtraction would not cover the
+      normalisation/modulation tensors a dense run moves anyway. Adding the
+      de-distillation adapter here would introduce the exact defect the old
+      guard feared; leaving it out cannot.
+    - Where dense-on-distilled HAS been measured publicly (Z-Image-Turbo,
+      FLUX.2 Klein) the cost is speed, not validity: the checkpoint stays
+      structurally sound and progressively stops being a few-step model,
+      drifting back toward real guidance and ~25-30 steps. Erosion, not a
+      cliff. Nothing equivalent has been measured for Krea 2, by us or by
+      anyone — which is what the UI says, without predicting either outcome.
+
+    What survives, and why each one is a different kind of statement:
+
+    * family — Krea 2 only. The dense recipe (no `network` block, adafactor,
+      the 80 GB geometry) is written against `arch='krea2'`.
+    * Slider — a slider LoRA IS an adapter with a direction; there is no dense
+      equivalent of a network multiplier.
+    * a base that is not an absolute local path — a ComfyUI-relative name
+      addresses another family's catalog and is silently ignored by the krea2
+      loader. The LoRA lane drops it; the dense lane refuses it instead,
+      because "ignored" here means training something other than what the
+      panel shows.
+    * a STRUCTURED fp8/int8 export as the base — the only MECHANICAL limit in
+      this list, and the reason it is enforced by `assert_trainable_base_file`
+      rather than restated: ai-toolkit loads a base with
+      ``load_state_dict(..., strict=True)`` and a scaled_fp8 export carries
+      `.scale_weight` tensors the architecture never declares, so the load
+      raises. A BARE cast (same tensor names, reduced dtype) is up-cast by the
+      trainer and stays allowed. Refusing the two alike would repeat, in the
+      other direction, the mistake this function is being corrected for.
+    """
     if not _is_full_transformer(ds):
         return
     if _train_type(ds) != 'krea':
         raise ValueError('full_transformer training is supported only for Krea 2')
-    if not _krea_is_raw(ds):
-        raise ValueError('full_transformer training requires Krea-2-Raw (Turbo is not supported)')
-    if str(getattr(ds, 'train_base_model', None) or '').strip():
-        raise ValueError('full_transformer training does not support a custom base model')
     if slider_mode_enabled(ds):
         raise ValueError('full_transformer training is incompatible with Slider LoRA mode')
+    base = str(getattr(ds, 'train_base_model', None) or '').strip()
+    if base:
+        if not _is_custom_weights(base):
+            raise ValueError(
+                'full_transformer training needs either the official Krea 2 base '
+                'or the full path to a local .safetensors checkpoint')
+        # Mechanical, not scope: a structured fp8/int8 export cannot be loaded.
+        assert_trainable_base_file(base)
 
 
 def build_job_config(ds, dataset_folder: str, steps: int = 3000, training_folder=None) -> dict:
@@ -4505,8 +5344,8 @@ def _build_job_config_krea(ds, dataset_folder: str, steps: int, training_folder=
                     # absence as optimisation of the actual transformer weights.
                     'save': {
                         'dtype': 'bf16',
-                        'save_every': FULL_TRANSFORMER_SAVE_EVERY,
-                        'max_step_saves_to_keep': 1,
+                        'save_every': _dense_save_every(ds),
+                        'max_step_saves_to_keep': _dense_max_step_saves(ds),
                     },
                     'datasets': [{
                         'folder_path': dataset_folder,
@@ -4514,26 +5353,38 @@ def _build_job_config_krea(ds, dataset_folder: str, steps: int, training_folder=
                         'caption_dropout_rate': 0.05,
                         'cache_latents_to_disk': True,
                         'cache_text_embeddings': True,
-                        'resolution': [KREA_TRAIN_RESOLUTION],
+                        'resolution': [_dense_resolution(ds)],
                         **_mask_fields(dataset_folder),
                     }],
                     'train': {
                         'batch_size': 1,
                         'steps': steps,
-                        'gradient_accumulation': 1,
+                        # `steps` counts OPTIMISER steps, so accumulation does
+                        # not change how many checkpoints a run produces — it
+                        # changes how many images each step learned from, and
+                        # how long the run takes. Neither the save cadence nor
+                        # the storage forecast moves.
+                        'gradient_accumulation': _dense_grad_accum(ds),
                         'train_unet': True,
                         'train_text_encoder': False,
                         'unload_text_encoder': True,
                         'gradient_checkpointing': True,
                         'noise_scheduler': 'flowmatch',
-                        'timestep_type': 'linear',
+                        'timestep_type': _dense_timestep_type(ds),
                         'optimizer': 'adafactor',
-                        'lr': 1e-6,
+                        'lr': _dense_lr(ds),
+                        **_dense_lr_schedule_fields(ds),
                         'dtype': 'bf16',
                     },
                     'model': {
                         'arch': 'krea2',
-                        'name_or_path': FULL_TRANSFORMER_BASE,
+                        # The SELECTION, not a constant: Raw, Turbo, or the
+                        # absolute path to a local checkpoint. Same resolver as
+                        # the LoRA branch and as the provenance stamp, so a run
+                        # cannot be named/stamped one base and trained on
+                        # another. NO assistant_lora_path on Turbo here — see
+                        # _assert_full_transformer_recipe.
+                        'name_or_path': _krea_name_or_path(ds),
                         'quantize': False,
                         'low_vram': False,
                         'quantize_te': False,
@@ -4542,9 +5393,12 @@ def _build_job_config_krea(ds, dataset_folder: str, steps: int, training_folder=
                     'sample': {
                         'sampler': 'flowmatch',
                         'neg': '',
-                        'sample_every': FULL_TRANSFORMER_SAMPLE_EVERY,
-                        'guidance_scale': 4,
-                        'sample_steps': 25,
+                        # Previews follow the checkpoint cadence: a probe sheet
+                        # that does not line up with a save cannot be used to
+                        # pick which save to keep.
+                        'sample_every': _dense_save_every(ds),
+                        'guidance_scale': FULL_TRANSFORMER_SAMPLE_GUIDANCE,
+                        'sample_steps': FULL_TRANSFORMER_SAMPLE_STEPS,
                         'prompts': _sample_prompts(ds, trigger),
                     },
                 }],
@@ -4554,11 +5408,9 @@ def _build_job_config_krea(ds, dataset_folder: str, steps: int, training_folder=
     _krank = _lora_rank(ds, 'krea')   # défaut 32/32 (recherche) ; éditable via train_settings
     # Custom weights (local-only, same krea2 arch) override name_or_path; the TE/VAE
     # stay official (Krea bundles them). The variant still drives the adapter/CFG.
-    _kbase = getattr(ds, 'train_base_model', None)
     model = {
         'arch': 'krea2',
-        'name_or_path': (_kbase if _is_custom_weights(_kbase)
-                         else ('krea/Krea-2-Raw' if is_raw else 'krea/Krea-2-Turbo')),
+        'name_or_path': _krea_name_or_path(ds),
         **_model_memory_block(ds, 'krea'),
     }
     # Adapter de dé-distillation : Turbo UNIQUEMENT (le Raw est déjà non distillé →
@@ -6318,20 +7170,43 @@ def training_preflight(user_id, dataset_id, train_type=None, variant=None,
             dense_issues.append('full_transformer training is cloud-only')
         if ttype != 'krea':
             dense_issues.append('it is supported only for Krea 2')
-        elif not _krea_is_raw(ds):
-            dense_issues.append('Krea-2-Raw is required (Turbo is not supported)')
-        if str(getattr(ds, 'train_base_model', None) or '').strip():
-            dense_issues.append('custom base models are not supported')
         if slider:
             dense_issues.append('Slider LoRA mode must be disabled')
+        _dense_base = str(getattr(ds, 'train_base_model', None) or '').strip()
+        if _dense_base:
+            if not _is_custom_weights(_dense_base):
+                dense_issues.append('a custom base must be the full path to a '
+                                    'local .safetensors checkpoint')
+            else:
+                try:
+                    assert_trainable_base_file(_dense_base)
+                except ValueError as exc:
+                    dense_issues.append(str(exc))
         if dense_issues:
             message = '; '.join(dense_issues)
             blockers.append(message)
             _check('training_mode', 'Dense training compatibility', 'fail',
                    message, 'gf-training', bypassable=False)
         else:
+            # Names the base this run will REALLY train — by file name for a
+            # custom checkpoint, never its full path: preflight details are
+            # pasted into Discord and GitHub issues.
+            _dense_target = (os.path.basename(_dense_base)
+                             if _is_custom_weights(_dense_base)
+                             else _krea_name_or_path(ds))
             _check('training_mode', 'Dense training compatibility', 'ok',
-                   'Krea-2-Raw full transformer training will run in the cloud')
+                   f'{_dense_target} full transformer training will run '
+                   'in the cloud')
+        # Turbo is allowed and UNMEASURED. Said here, in the preflight the user
+        # reads before renting, not after — and phrased as what is unknown: no
+        # promise of a result, no prediction of failure.
+        if ttype == 'krea' and not _krea_is_raw(ds) and not _is_custom_weights(_dense_base):
+            _check('dense_turbo', 'Full-model training on Krea 2 Turbo', 'warn',
+                   'Krea officially recommends training a LoRA on Raw and applying '
+                   'it to Turbo. Dense training on a distilled base has not been '
+                   'measured here; on other distilled models it has been seen to '
+                   'erode few-step behaviour, so the result may need real guidance '
+                   'and more steps.', scope='cloud')
 
         # Reuse the launch's definitive credential validator.  This may contact
         # Hugging Face, but it never reserves a pod/GPU; a paid run must not be
@@ -6339,7 +7214,8 @@ def training_preflight(user_id, dataset_id, train_type=None, variant=None,
         # Krea licence is discovered.
         try:
             from . import cloud_training as cloud
-            hf_cloud_token_status = cloud.full_transformer_token_preflight()
+            hf_cloud_token_status = cloud.full_transformer_token_preflight(
+                required_base_repo=official_base_repo(ds, ttype))
             if not isinstance(hf_cloud_token_status, dict):
                 raise RuntimeError('invalid token preflight response')
         except Exception:
@@ -7314,7 +8190,8 @@ def launch_training(user_id, dataset_id, steps: int | None = None, check_caption
                 exc, exc_info=True)
             _bridge_candidate = False
             _bridge_model_pins = None
-    dataset_folder = export_dataset_to_aitoolkit(user_id, dataset_id, masked=masked)
+    dataset_folder, _prepared = _export_and_freeze_local_dataset(
+        user_id, dataset_id, masked=masked, base_model=base_model)
     _job_config = build_job_config(ds, dataset_folder, steps=steps)
     if _bridge_candidate:
         _configure_exact_state_dataloaders(_job_config)
@@ -7353,27 +8230,9 @@ def launch_training(user_id, dataset_id, steps: int | None = None, check_caption
         log_path = _run_log_path(
             ds, base_model=base_model, family=launch_fam, variant=variant)
     run_token = secrets.token_hex(16)
-    # Freeze the dataset (manifest + caption text + image content hashes +
-    # environment) BEFORE taking the lock. All of the reading — file hashes,
-    # nvidia-smi, the ai-toolkit revision — happens here so the registration
-    # under `_queue_lock` stays a single short write; the launch path has
-    # already lost cloud runs to `database is locked` once.
+    # The Dataset manifest/snapshot was frozen atomically with the export above;
+    # only the short registry write remains for the spawn transaction below.
     from . import checkpoint_registry
-    # Re-ask the cheap question BEFORE the freeze. The same check already runs at
-    # the top of this function, but the dataset export in between takes minutes on
-    # a real dataset — long enough for another launch to have won the process slot.
-    # Without this, that loser still paid for a full freeze (hashing every image,
-    # probing nvidia-smi and the ai-toolkit revision) before the authoritative
-    # check under `_queue_lock` refused it. Two reads of an in-memory flag; the
-    # copy inside the lock stays the authority, this one only saves the work.
-    if (queue_manager._get_system_state('training_in_progress', False)
-            and not _training_process_is_definitely_dead(
-                queue_manager._get_system_state('training_pid', None))):
-        raise ValueError(
-            'a training is already in progress - wait for it to finish or '
-            'queue this dataset')
-    _prepared = checkpoint_registry.prepare_launch(
-        user_id, dataset_id, base_model=base_model)
     _bridge_identity_path = None
     _bridge_status_path = None
     with _queue_lock:
@@ -7470,11 +8329,15 @@ def launch_training(user_id, dataset_id, steps: int | None = None, check_caption
         _launch_settings = launch_settings_snapshot(ds, masked=masked)
         if allow_not_ready and isinstance(_launch_settings, dict):
             _launch_settings = {**_launch_settings, 'acknowledged_not_ready': True}
-        checkpoint_registry.register_launch(
+        _run_record = checkpoint_registry.register_launch(
             user_id, dataset_id, family=launch_fam, source='local',
             base_model=base_model or '', variant=variant, masked=bool(masked),
             steps=int(steps), settings=_launch_settings, prepared=_prepared,
             parent_record_id=parent_record_id, resumed_from=resumed_from)
+        if _run_record is None:
+            raise RuntimeError(
+                'could not persist the Dataset provenance for local training; '
+                'no training process was started')
         queue_manager._set_system_state('training_error', None, ttl_seconds=1)
         identity = {
             'training_in_progress': True,
@@ -8295,19 +9158,29 @@ def continue_training(user_id, dataset_id, extra_steps: int = 1000,
     return res
 
 
-def stop_training(expected_dataset_id=None, expected_run_token=None) -> bool:
+def stop_training(expected_dataset_id=None, expected_run_token=None,
+                  expected_dataset_table=None) -> bool:
     """Kill the local training process, then release its GPU ownership fence.
 
     The final state transition is deliberately fail-closed: a non-zero
     taskkill result, a missing PID, or an unavailable PID probe leaves the
     training fence in place. Releasing it without proof would let Vision or
     ComfyUI allocate the GPU while ai-toolkit may still be running.
+
+    `expected_dataset_table` completes `expected_dataset_id`, which is an integer
+    two tables now share. Omitted, it means `face_dataset` — so the image lane's
+    Stop button keeps refusing, rather than killing, a video run of the same id.
+    An unconditional stop (no expected id at all) is unchanged and still stops
+    whatever is running: it is the "get off my GPU" button, and it is not asked
+    to know what it is stopping.
     """
     # Keep the launch lock order: training ownership first, then shared GPU
     # admission. This makes the final clear atomic with Vision/ComfyUI admission.
     with _queue_lock, GPU_ARBITER_LOCK:
         current_id = queue_manager._get_system_state('training_dataset_id', None)
         current_token = queue_manager._get_system_state('training_run_token', None)
+        current_table = (queue_manager._get_system_state(
+            'training_dataset_table', None) or _crd.FACE)
         in_progress = bool(queue_manager._get_system_state(
             'training_in_progress', False))
         if expected_dataset_id is not None:
@@ -8315,6 +9188,8 @@ def stop_training(expected_dataset_id=None, expected_run_token=None) -> bool:
                 same_run = int(current_id) == int(expected_dataset_id)
             except (TypeError, ValueError):
                 same_run = False
+            if same_run:
+                same_run = current_table == (expected_dataset_table or _crd.FACE)
             if not in_progress or not same_run:
                 return False
         if expected_run_token is not None:
@@ -8394,7 +9269,9 @@ def assert_trainable(dataset_id, train_type=None, allow_caption_mismatch=False,
                      variant=None, allow_not_ready=False) -> None:
     """Lève ValueError si le dataset n'est pas prêt : trop peu d'images gardées,
     captions manquantes, ou STYLE de caption incohérent avec le type de modèle
-    (SDXL booru-native attend des tags booru ; Z-Image attend de la prose). Le
+    (SDXL booru-native attend des tags booru ; Z-Image attend de la prose ; anima
+    est HYBRIDE — les deux formes sont natives, donc aucun mismatch n'existe pour
+    elle, cf. _EXPECTED_CAPTION_FORM). Le
     `train_type` effectif est passé par l'appelant car il n'est persisté qu'APRÈS
     cet appel. `allow_caption_mismatch=True` = override explicite (bouton « forcer »).
     `allow_uncaptioned=True` = confirm explicite « train anyway » : les captions
@@ -8474,7 +9351,11 @@ def assert_trainable(dataset_id, train_type=None, allow_caption_mismatch=False,
     # Garde-fou style ↔ type : un LoRA SDXL entraîné sur des captions PROSE = mismatch
     # booru-native → « images disjointes » (recherche 2026-06-14) ; et l'inverse pour Z-Image.
     # `ttype` a déjà été résolu en tête (plancher d'images) — on le réutilise.
-    expected = 'booru' if ttype == 'sdxl' else 'prose'
+    # `None` = famille HYBRIDE : les deux formes sont first-class, aucun mismatch
+    # n'existe, le garde se tait (voir _EXPECTED_CAPTION_FORM).
+    expected = _EXPECTED_CAPTION_FORM.get(ttype, 'prose')
+    if expected is None:
+        return
     from .face_variations import caption_style
     caps = (FaceDatasetImage.query
             .filter_by(dataset_id=dataset_id, status='keep')
@@ -8485,12 +9366,34 @@ def assert_trainable(dataset_id, train_type=None, allow_caption_mismatch=False,
         actual = 'booru' if booru_n * 2 >= len(sample) else 'prose'   # vote majoritaire
         if actual != expected:
             if expected == 'booru':
+                # A CONCEPT dataset cannot follow the usual advice. Its captions
+                # come from _caption_concept, which has no booru variant and does
+                # not even take a `mode`, and the prose/booru selector is hidden
+                # on conceptual datasets — so "re-caption in 'Booru tags' mode"
+                # names a mode the user cannot reach from anywhere. Sending
+                # someone hunting for it is worse than the refusal itself.
+                # (Style datasets are fine: caption_prompt_for_style IS
+                # mode-aware, and an SDXL style dataset already defaults to
+                # booru, so it never lands here.)
+                if fds.is_concept(ds_):
+                    raise ValueError(
+                        "MISMATCH_CAPTION: this SDXL dataset has PROSE captions, but a booru "
+                        "model (bigLove type) is prompted with tags. Concept captions are only "
+                        "produced as prose today — there is no 'Booru tags' mode to switch to "
+                        "on a concept dataset. Either train this concept on a prose family "
+                        "(Z-Image, Krea 2, FLUX.1, FLUX.2 Klein, Anima), or force the training "
+                        "and expect the quality loss a booru-native base takes from prose.")
                 raise ValueError(
                     "MISMATCH_CAPTION: this SDXL dataset has PROSE captions, but a booru "
                     "model (bigLove type) is prompted with tags. Re-caption in 'Booru tags' mode "
                     "before training, or force the training.")
+            # `label`, not a hard-coded "Z-Image": this branch fires for EVERY
+            # prose family (Krea 2, FLUX.1, FLUX.2 Klein…), and telling a Klein
+            # user they have a Z-Image dataset is the same disease as the anima
+            # bug above — a claim frozen into a string where the truth is
+            # per-family. `label` was already resolved for the image floor.
             raise ValueError(
-                "MISMATCH_CAPTION: this Z-Image dataset has booru TAG captions, but Z-Image "
+                f"MISMATCH_CAPTION: this {label} dataset has booru TAG captions, but {label} "
                 "expects prose. Re-caption in 'Prose' mode, or force the training.")
 
 
@@ -8547,8 +9450,34 @@ def is_local_run_active(dataset_id) -> bool:
 def training_status(user_id=None) -> dict:
     cur_id = queue_manager._get_system_state('training_dataset_id', None)
     in_progress = bool(queue_manager._get_system_state('training_in_progress', False))
+    cur_table = (queue_manager._get_system_state('training_dataset_table', None)
+                 or _crd.FACE)
     current = None
-    if in_progress and cur_id is not None:
+    if in_progress and cur_id is not None and cur_table == _crd.VIDEO:
+        # A video run. Resolved here rather than below because every line of the
+        # face branch — the family, the variant, the base model, the Z-Image
+        # recipe diagnostic — is a question about a `face_dataset` row that this
+        # id does not name. Answering them from the colliding face row is how the
+        # run ends up on the wrong page under the wrong name.
+        from ..models import VideoDataset
+        vds = VideoDataset.query.get(int(cur_id))
+        current = {
+            'dataset_id': cur_id,
+            'dataset_table': cur_table,
+            'name': vds.name if vds else f'video dataset {cur_id}',
+            'run_token': queue_manager._get_system_state('training_run_token', None),
+            'train_type': 'video',
+            'target_profile': vds.target_profile if vds else None,
+            'slider_mode': False,
+            'variant': None,
+            'base_model': None,
+            'effective_base': None,
+            'training_adapter': None,
+            'recipe_version': None,
+            'recipe_status': None,
+            'recipe_warning': None,
+        }
+    elif in_progress and cur_id is not None:
         ds = FaceDataset.query.get(int(cur_id))
         fam = (queue_manager._get_system_state('training_train_type', None)
                or (_train_type(ds) if ds else None))
@@ -8566,6 +9495,7 @@ def training_status(user_id=None) -> dict:
             fam, variant, effective_base, adapter, recipe_version)
         current = {
             'dataset_id': cur_id,
+            'dataset_table': cur_table,
             'name': ds.name if ds else _dataset_name(cur_id),
             'run_token': queue_manager._get_system_state(
                 'training_run_token', None),
@@ -8982,6 +9912,12 @@ _queue_lock = threading.RLock()
 
 _TRAIN_IDENTITY_KEYS = (
     'training_pid', 'training_pid_create_time', 'training_dataset_id',
+    # WHICH TABLE `training_dataset_id` POINTS INTO. Absent means `face_dataset`,
+    # the only meaning it could have had before the video lane existed. Without
+    # it the fence is one integer shared by two tables: face dataset #3 and video
+    # dataset #3 both exist, so a video run would show up under a face dataset's
+    # name and be killed by that dataset's Stop button.
+    'training_dataset_table',
     'training_target_step',
     'training_run_token', 'training_train_type', 'training_variant',
     'training_base_model', 'training_effective_base', 'training_slider_mode',

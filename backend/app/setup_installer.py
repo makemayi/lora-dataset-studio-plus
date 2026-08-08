@@ -48,6 +48,7 @@ one venv fail 6/6 with WinError 2 / Errno 13). Each pip run also retries once on
 transient file-lock error (an antivirus holding a fresh file). Model downloads and the
 ollama pull don't touch a venv, so they stay parallel.
 """
+import importlib
 import json
 import logging
 import os
@@ -62,6 +63,7 @@ import requests
 
 from . import capabilities
 from . import config as cfg
+from .utils.redact import redact_user_paths
 
 logger = logging.getLogger(__name__)
 
@@ -241,7 +243,9 @@ _NODE_PACKS = {
 
 INSTALL_ACTIONS = ('ml_extras', 'scrape_extras', 'ollama_model',
                    'face_scoring', 'masks', 'watermark_inpaint',
-                   'bank_scoring') + tuple(_MODEL_DOWNLOADS) + tuple(_NODE_PACKS)
+                   'bank_scoring', 'bank_siglip2',
+                   'watermark_detect',
+                   'video', 'shot_detect') + tuple(_MODEL_DOWNLOADS) + tuple(_NODE_PACKS)
 
 _ML_REQUIREMENTS = cfg.BACKEND_DIR / 'requirements-ml.txt'
 _SCRAPE_REQUIREMENTS = cfg.BACKEND_DIR / 'requirements-scrape.txt'
@@ -259,6 +263,9 @@ _WATERMARK_PKG = 'simple-lama-inpainting'
 # These are NOT in requirements-ml.txt (which the monolithic ml_extras installs
 # into the Flask venv); they live here and install only through the bank_scoring
 # action, same isolation as the watermark torch install.
+# These are NOT all in requirements-ml.txt, so most install unpinned; the ones that
+# ARE (transformers, for Qwen3-VL) get their floor from there via _requirement_spec
+# — see _bank_scoring_specs().
 _BANK_SCORING_PKGS = ('open_clip_torch', 'transformers', 'timm', 'safetensors',
                       'huggingface_hub')
 
@@ -310,17 +317,43 @@ _CAPABILITY_PACKAGES = {
     'face_scoring': ('insightface', 'onnxruntime', 'numpy', 'opencv-python-headless'),
     'masks': ('rembg', 'onnxruntime', 'numpy', 'opencv-python-headless'),
     'watermark_inpaint': (_WATERMARK_PKG,),
+    # 🎬 The video lane, split across two environments on purpose.
+    #   video       decoding (PyAV, imported IN-PROCESS by Flask, so it must land
+    #               in the app's own interpreter) plus a bundled static ffmpeg
+    #               binary, which is what lets a user who has never installed
+    #               ffmpeg export a dataset. Small; the generic ML worker handles it.
+    #   shot_detect TransNetV2, which drags torch — so it rides the environment
+    #               bank scoring already manages instead of costing a second
+    #               ~2.5 GB copy. Its own worker, like watermark_detect; listed
+    #               here so the anti-orphan test sees its package covered.
+    #               It carries `av` OF ITS OWN even though `video` installs the
+    #               same package: the two land in DIFFERENT interpreters. `video`
+    #               puts PyAV in the app's own Python because Flask imports it
+    #               in-process; shot detection runs in the bank-scoring
+    #               environment, where `shot_detect_infer._open()` is the single
+    #               decode seam. Without this line the install reported success
+    #               and the capability stayed off — the probe imports av, so it
+    #               kept failing in an environment nothing had put av into.
+    'video': ('imageio-ffmpeg', 'av'),
+    'shot_detect': ('transnetv2-pytorch', 'av'),
+    #   bank_scoring  has its own worker and its own package tuple
+    #                 (_BANK_SCORING_PKGS); only the ONE package whose version
+    #                 floor matters is declared in requirements-ml.txt, so it is
+    #                 named here too — otherwise the anti-orphan test below sees
+    #                 an unowned line. Same bookkeeping-only role as shot_detect.
+    'bank_scoring': ('transformers',),
 }
 # The capabilities served by the GENERIC per-capability pip worker
 # (_run_ml_capability). watermark_inpaint keeps its own worker, so it's excluded.
-_CAPABILITY_ML_ACTIONS = ('face_scoring', 'masks')
+_CAPABILITY_ML_ACTIONS = ('face_scoring', 'masks', 'video')
 
 # Actions whose success makes a NEW importable package appear -> the probe
 # import-cache must be dropped so the capability flips without waiting out the
 # 600 s TTL (ml_extras/scrape_extras via -r, the scoped per-capability installs).
 _IMPORT_CACHE_ACTIONS = (frozenset(_PIP_REQUIREMENTS)
                          | set(_CAPABILITY_ML_ACTIONS)
-                         | {'watermark_inpaint', 'bank_scoring'})
+                         | {'watermark_inpaint', 'bank_scoring', 'bank_siglip2',
+                            'watermark_detect', 'shot_detect'})
 
 # Actions that invoke pip and therefore MUST NOT run concurrently: two pip processes
 # writing the same environment race on a shared package's files/dist-info and corrupt
@@ -332,7 +365,12 @@ _IMPORT_CACHE_ACTIONS = (frozenset(_PIP_REQUIREMENTS)
 # running in parallel.
 _PIP_ACTIONS = (frozenset(_PIP_REQUIREMENTS)
                 | set(_CAPABILITY_ML_ACTIONS)
-                | {'watermark_inpaint', 'bank_scoring'})
+                # watermark_detect installs into the SAME venv bank_scoring owns
+                # (that sharing is the whole point — it saves a second 2.5 GB
+                # torch), so it must share the pip queue too or the two race on
+                # one environment's dist-info.
+                | {'watermark_inpaint', 'bank_scoring', 'bank_siglip2',
+                   'watermark_detect', 'shot_detect'})
 
 # Transient file-lock errors an install can hit even without concurrency: an antivirus
 # or the search indexer briefly holding a just-written file at the moment pip renames
@@ -477,6 +515,17 @@ def _ml_requirement_specs(*, exclude=frozenset(), requirements=_ML_REQUIREMENTS)
     return out
 
 
+def _bank_scoring_specs() -> list:
+    """_BANK_SCORING_PKGS with every version floor requirements-ml.txt knows about
+    applied (bare name for the rest). The floor is what makes re-clicking ✨ Score a
+    REPAIR: `pip install transformers` is a no-op against an already-installed older
+    transformers, while `pip install "transformers>=4.57"` upgrades it — and 4.57 is
+    where `Qwen3VLForConditionalGeneration` (infer/video_caption_infer.py:103, the
+    video-caption worker) first exists. Callers building a SHELL string must quote
+    each spec; '>=' unquoted is redirection."""
+    return [_requirement_spec(p) for p in _BANK_SCORING_PKGS]
+
+
 def _app_pillow_spec() -> str:
     """The Pillow pin from requirements.txt (e.g. 'Pillow==12.2.0') — the version the
     Flask venv MUST keep. Appended as an explicit requirement to any install that
@@ -568,10 +617,58 @@ def manual_command(action) -> str:
         return f'{_quote(python)} -m pip install "{spec}"'
     if action == 'bank_scoring':
         # The dedicated managed venv (auto-built) + CPU torch + the CLIP/NSFW stack.
-        python = cfg.get('bank_scoring.python') or _bank_scoring_env_python()
-        pkgs = ' '.join(_BANK_SCORING_PKGS)
+        # This command documents what the Install button itself does.  A borrowed
+        # Score interpreter is a runtime selection, never an install target.
+        # The specs keep their version floors: a bare package name is a no-op on
+        # an environment that already carries an older copy (see
+        # test_requirements_ml_floors_transformers_for_qwen3vl).
+        python = _bank_scoring_env_python()
+        pkgs = ' '.join(f'"{s}"' for s in _bank_scoring_specs())
         return (f'{_quote(python)} -m pip install torch --index-url {_TORCH_CPU_INDEX}  '
                 f'&&  {_quote(python)} -m pip install {pkgs}')
+    if action == 'shot_detect':
+        # One line, and no weights step: transnetv2-pytorch carries its own inside
+        # the wheel. Targets the scoring environment because of torch.
+        python = (cfg.get('shot_detect.python') or cfg.get('bank_scoring.python')
+                  or _bank_scoring_env_python())
+        return (f'{_quote(python)} -m pip install torch --index-url {_TORCH_CPU_INDEX}  '
+                f'&&  {_quote(python)} -m pip install '
+                f'"{_requirement_spec("transnetv2-pytorch")}" "{_requirement_spec("av")}"')
+    if action == 'bank_siglip2':
+        # ALWAYS the LDS-managed environment — exactly what the Install button
+        # does, and deliberately blind to ``bank_semantic.python``. That key is
+        # now a picker ("run the index in the Python that already has CUDA"), so
+        # reading it here would turn a repair into a pip install inside someone
+        # else's ai-toolkit or ComfyUI venv. Where it RUNS and where we INSTALL
+        # are two different questions; this line only ever answers the second.
+        python = _bank_semantic_install_python()
+        from .services import bank_semantic_models as assets
+        root = assets.models_root()
+        pulls = '; '.join(
+            f"d(repo_id='{assets.MODEL_ID}', filename='{name}', "
+            f"revision='{assets.REVISION}', cache_dir=r'{root}')"
+            for name in assets.FILES)
+        return (f'{_quote(python)} -m pip install torch --index-url {_TORCH_CPU_INDEX}  '
+                f'&&  {_quote(python)} -m pip install "transformers>=4.49" '
+                f'huggingface_hub safetensors sentencepiece Pillow  &&  '
+                f'{_quote(python)} -c "from huggingface_hub import hf_hub_download as d; '
+                f'{pulls}"')
+    if action == 'watermark_detect':
+        # Packages then weights. The weights line names the FILES on purpose —
+        # a bare `snapshot_download` of the SigLIP2 repo pulls its training
+        # checkpoints and costs 2.4 GB instead of 371 MB (measured).
+        python = _watermark_detect_python()
+        from .services import watermark_detector
+        root = watermark_detector.models_root() or '<data>/models/watermark_detect'
+        pulls = '  &&  '.join(
+            f'{_quote(python)} -c "from huggingface_hub import hf_hub_download as d; '
+            + '; '.join(f"d(repo_id='{repo}', filename='{name}', cache_dir=r'{root}')"
+                        for name in meta['files'])
+            + '"'
+            for repo, meta in watermark_detector.MODEL_FILES.items())
+        return (f'{_quote(python)} -m pip install torch --index-url {_TORCH_CPU_INDEX}  '
+                f'&&  {_quote(python)} -m pip install transformers huggingface_hub '
+                f'safetensors  &&  {pulls}')
     if action == 'ollama_model':
         # The Studio container need not have an Ollama CLI; this action is HTTP-only.
         return ''
@@ -1379,10 +1476,14 @@ def _bank_scoring_env_python() -> str:
     return _venv_python(_bank_scoring_env_dir())
 
 
-def _ensure_bank_scoring_env(action) -> str:
-    """Build (or reuse) the app-managed bank-scoring venv and record it as
-    bank_scoring.python. Returns the venv python on success, '' on failure (an
-    actionable one-liner is logged). Idempotent — mirrors _ensure_watermark_env."""
+def _ensure_bank_scoring_env(action, *, save_score_python=True) -> str:
+    """Build or reuse the app-managed Bank ML venv.
+
+    Score owns the historical environment directory, but other extras may reuse
+    it without changing the user's Score selection. ``save_score_python=False``
+    is therefore required by SigLIP2: a borrowed CUDA Score interpreter remains
+    selected while SigLIP2 is installed into LDS's managed environment.
+    """
     env_dir = _bank_scoring_env_dir()
     env_python = _venv_python(env_dir)
     if not os.path.isfile(env_python):
@@ -1411,63 +1512,38 @@ def _ensure_bank_scoring_env(action) -> str:
         _append(action, 'environment ready')
     else:
         _append(action, f'reusing the bank-scoring environment at {env_dir}')
-    try:
-        cfg.save_config({'bank_scoring': {'python': env_python}})
-    except Exception as e:
-        _append(action, f'warning: could not save bank_scoring.python ({e}); '
-                        'the environment still works for this run')
+    if save_score_python:
+        try:
+            cfg.save_config({'bank_scoring': {'python': env_python}})
+        except Exception as e:
+            _append(action, f'warning: could not save bank_scoring.python ({e}); '
+                            'the environment still works for this run')
     return env_python
 
 
 def _run_bank_scoring(action) -> int:
     """Install the bank-scoring stack (CPU torch + open_clip + transformers + timm)
     into the app's OWN bank-scoring venv — never the Flask venv, and never an
-    environment the app did not build. Auto-provisions the managed venv when nothing
-    is configured; a bank_scoring.python pointing anywhere else is a BORROWED
-    interpreter (that is what the ⚡ picker writes) and is refused with the command
-    to run by hand. Verifies the import at the end so a pip-success-but-import-fail
-    never reports a ready capability over a silent ✗ (same honesty gate as the
-    watermark install)."""
+    environment the app did not build. A borrowed ``bank_scoring.python`` is only
+    a runtime selection (written by the GPU picker): installing or repairing the
+    managed environment keeps that selection intact and never invokes pip in it.
+    Verifies the managed import at the end so a pip-success-but-import-fail never
+    reports success (same honesty gate as the watermark install)."""
     managed_python = _bank_scoring_env_python()
     configured = (cfg.get('bank_scoring.python') or '').strip()
-    rebuild_managed = (bool(configured) and _same_path(configured, managed_python)
-                       and not os.path.isfile(managed_python))
-    if not configured or rebuild_managed:
-        python = _ensure_bank_scoring_env(action)
-        if not python:
-            return 1
-    else:
-        python = configured
-        if _is_flask_venv(python):
-            for line in (
-                "bank_scoring.python points at the app's own Python, but the CLIP/NSFW",
-                "stack is heavy and installs into its own Python. Nothing was installed.",
-                "Clear bank_scoring.python and click Install again — the app builds a",
-                "dedicated Python for you.",
-                f"(refused target — the app's own interpreter: {sys.executable})",
-            ):
-                _append(action, line)
-            return 1
-    managed = _same_path(python, managed_python)
-    if not managed:
-        # bank_scoring.python is ALSO what the "use a GPU Python you already
-        # have" picker writes, and that picker promises, twice, that borrowed
-        # environments "are checked, never changed". Installing here would put
-        # torch + open_clip + transformers + timm into the user's ai-toolkit or
-        # ComfyUI venv — the environment that runs their training or their
-        # generation — which is precisely the promise we made not to break.
-        # Same refusal as the Flask venv: name the target, hand over the
-        # command, install nothing.
-        for line in (
-            'bank_scoring.python points at an environment this app did not create,',
-            'so nothing was installed into it — borrowed environments are checked,',
-            'never changed. To add the scoring packages there yourself, run:',
-            f'  "{python}" -m pip install {" ".join(_BANK_SCORING_PKGS)}',
-            'Or clear bank_scoring.python (⚡ picker ▸ "Back to the app default")',
-            'and click Install again — the app then builds its own environment.',
-        ):
-            _append(action, line)
+    borrowed = bool(configured) and not _same_path(configured, managed_python)
+    python = _ensure_bank_scoring_env(
+        action, save_score_python=not borrowed)
+    if not python:
         return 1
+    if not _same_path(python, managed_python):
+        _append(action, 'internal error: Bank scoring did not resolve to the '
+                        'LDS-managed environment; nothing was installed')
+        return 1
+    if borrowed:
+        _append(action, f'keeping the selected borrowed Score interpreter unchanged: '
+                        f'{configured}')
+        _append(action, 'Install/repair targets only the LDS-managed environment below.')
     # Past this point the target is always the app-managed venv.
     _append(action, f'target interpreter: {python}')
     _append(action, 'installing CPU torch (download.pytorch.org/whl/cpu)')
@@ -1476,8 +1552,9 @@ def _run_bank_scoring(action) -> int:
     if rc != 0:
         _append(action, f'torch install failed (rc={rc}) — see the log above')
         return rc
-    _append(action, f"installing {', '.join(_BANK_SCORING_PKGS)}")
-    rc = _run_pip(action, [python, '-m', 'pip', 'install', *_BANK_SCORING_PKGS])
+    specs = _bank_scoring_specs()
+    _append(action, f"installing {', '.join(specs)}")
+    rc = _run_pip(action, [python, '-m', 'pip', 'install', *specs])
     if rc == 0 and not _verify_bank_scoring_import(action, python):
         return 1
     return rc
@@ -1493,7 +1570,8 @@ def _verify_bank_scoring_import(action, python) -> bool:
     _append(action, 'verifying the install (first import — this also warms it, so the '
                     'capability turns green without a restart)…')
     try:
-        proc = subprocess.run([python, '-c', 'import torch, open_clip, transformers'],
+        proc = subprocess.run([python, '-s', '-c',
+                               'import torch, open_clip, transformers'],
                               capture_output=True, text=True, encoding='utf-8',
                               errors='replace', timeout=_WARM_IMPORT_TIMEOUT,
                               creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
@@ -1512,6 +1590,239 @@ def _verify_bank_scoring_import(action, python) -> bool:
     for line in (proc.stderr or '').strip().splitlines()[-4:]:
         _append(action, f'  {line}')
     return False
+
+
+def _bank_semantic_install_python() -> str:
+    """Where SigLIP2 is INSTALLED. Always the app-managed Bank ML venv.
+
+    Deliberately takes no argument and reads no interpreter key: ``bank_scoring.python``
+    and ``bank_semantic.python`` say where a pass RUNS, and both can point at an
+    environment the user built (ai-toolkit's, ComfyUI's). Installing into one of
+    those is the one thing this app never does, so the install target is derived
+    from the data folder and nothing else. Enforced by
+    ``test_bank_siglip2_install_ignores_borrowed_semantic_interpreter``."""
+    return _bank_scoring_env_python()
+
+
+def _run_bank_siglip2(action) -> int:
+    """Install the optional SigLIP2 semantic engine and its pinned checkpoint.
+
+    It always targets LDS's managed Bank ML venv. Score — and now the semantic
+    index itself — may keep using a borrowed CUDA interpreter: this action
+    neither installs into it nor repoints it. ``bank_semantic.python`` is only
+    written when nothing was borrowed, and only after packages and every pinned
+    weight are ready; a user who chose a GPU Python for the index keeps it.
+    """
+    from .services import bank_semantic_models as assets
+
+    managed_python = _bank_semantic_install_python()
+    configured = (cfg.get('bank_semantic.python') or '').strip()
+    borrowed = bool(configured) and not _same_path(configured, managed_python)
+
+    python = _ensure_bank_scoring_env(action, save_score_python=False)
+    if not python:
+        return 1
+    if not _same_path(python, managed_python):
+        _append(action, 'internal error: SigLIP2 did not resolve to the LDS-managed '
+                        'Bank environment; nothing was installed')
+        return 1
+    if borrowed:
+        _append(action, f'keeping the selected borrowed semantic interpreter '
+                        f'unchanged: {configured}')
+        _append(action, 'Install/repair targets only the LDS-managed environment below.')
+
+    _append(action, f'target interpreter: {python}')
+    _append(action, 'installing CPU torch if needed (the GPU-Python picker remains available)')
+    rc = _run_pip(action, [python, '-m', 'pip', 'install', 'torch',
+                           '--index-url', _TORCH_CPU_INDEX])
+    if rc != 0:
+        return rc
+    rc = _run_pip(action, [python, '-m', 'pip', 'install',
+                           'transformers>=4.49', 'huggingface_hub', 'safetensors',
+                           'sentencepiece', 'Pillow'])
+    if rc != 0:
+        return rc
+    if not _verify_capability_import(action, python):
+        return 1
+
+    root = assets.models_root()
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        _append(action, f'could not create {root}: {e}')
+        return 1
+    _append(action, f'downloading {assets.MODEL_ID} (~{assets.DOWNLOAD_MB} MB, '
+                    f'Apache-2.0) to {root}')
+    _append(action, f'pinned revision: {assets.REVISION}')
+    code = (
+        'import json, sys\n'
+        'from huggingface_hub import hf_hub_download\n'
+        'repo, revision, root, files = json.loads(sys.argv[1])\n'
+        'for name in files:\n'
+        '    hf_hub_download(repo_id=repo, filename=name, revision=revision, cache_dir=root)\n'
+        'print("ok")\n'
+    )
+    payload = json.dumps([
+        assets.MODEL_ID, assets.REVISION, str(root), list(assets.FILES)])
+    rc = _run_pip(action, [python, '-c', code, payload])
+    if rc != 0:
+        _append(action, 'SigLIP2 download did not finish — click Install again to resume')
+        return rc
+    if not assets.weights_present(root):
+        _append(action, 'download returned success but at least one pinned model file is missing')
+        return 1
+    if borrowed:
+        # The user's pick already answered "where does the index run", and it was
+        # verified before it was stored. Overwriting it here would silently drag
+        # the pass back onto the CPU right after a repair.
+        _append(action, f'the index keeps running in the interpreter you chose '
+                        f'({configured}) — change it from the Bank\'s Semantic '
+                        'engine panel')
+    else:
+        try:
+            cfg.save_config({'bank_semantic': {'python': managed_python}})
+        except Exception as e:
+            _append(action, f'SigLIP2 packages and weights are ready, but '
+                            f'bank_semantic.python could not be saved ({e}); the install '
+                            'is reported as failed so Setup never claims a runtime it '
+                            'cannot select after restart')
+            return 1
+    _append(action, 'SigLIP2 ready — each Bank can now choose it without deleting CLIP')
+    return 0
+
+
+def _watermark_detect_python() -> str:
+    """The interpreter the detector extra installs into.
+
+    Deliberately the bank-scoring venv unless the user pointed elsewhere: it
+    already holds torch and transformers, which is the ENTIRE dependency list of
+    this extra, and building a second environment would ask for another ~2.5 GB
+    to hold a byte-identical copy. When bank scoring was never installed, that
+    same managed venv is built here — which is why this returns the path either
+    way and _run_watermark_detect provisions it."""
+    return (cfg.get('watermark_detect.python') or '').strip() or _bank_scoring_env_python()
+
+
+def _run_watermark_detect(action) -> int:
+    """Install the dedicated watermark DETECTOR: the packages (torch +
+    transformers, into the app's own bank-scoring venv) and then the weights.
+
+    Both halves matter and they fail differently. Packages missing = "the extra
+    is not installed". Weights missing = "it is installed but the first scan will
+    die on a network error an hour in" — which is why the capability probe checks
+    the model cache too, and why this worker downloads them here rather than
+    lazily on first use."""
+    managed_python = _bank_scoring_env_python()
+    configured = (cfg.get('watermark_detect.python') or '').strip()
+    if configured and not _same_path(configured, managed_python):
+        # A BORROWED environment (the ⚡ picker's promise: checked, never changed).
+        for line in (
+            'watermark_detect.python points at an environment this app did not create,',
+            'so nothing was installed into it — borrowed environments are checked,',
+            'never changed. To add the detector packages there yourself, run:',
+            f'  "{configured}" -m pip install torch transformers',
+            'Or clear watermark_detect.python and click Install again — the app then',
+            'uses its own scoring environment, which already has both packages.',
+        ):
+            _append(action, line)
+        return 1
+    python = configured or _ensure_bank_scoring_env(action)
+    if not python:
+        return 1
+    if _is_flask_venv(python):
+        for line in (
+            "The detector needs torch, which never installs into the app's own Python.",
+            'Nothing was installed. Clear watermark_detect.python and click Install',
+            'again — the app builds a dedicated Python for you.',
+        ):
+            _append(action, line)
+        return 1
+    _append(action, f'target interpreter: {python}')
+    _append(action, 'installing CPU torch (download.pytorch.org/whl/cpu) if needed')
+    rc = _run_pip(action, [python, '-m', 'pip', 'install', 'torch',
+                           '--index-url', _TORCH_CPU_INDEX])
+    if rc != 0:
+        _append(action, f'torch install failed (rc={rc}) — see the log above')
+        return rc
+    rc = _run_pip(action, [python, '-m', 'pip', 'install', 'transformers',
+                           'huggingface_hub', 'safetensors'])
+    if rc != 0:
+        return rc
+    if not _verify_watermark_detect_import(action, python):
+        return 1
+    try:
+        cfg.save_config({'watermark_detect': {'python': python}})
+    except Exception as e:      # noqa: BLE001
+        _append(action, f'warning: could not save watermark_detect.python ({e}); '
+                        'the environment still works for this run')
+    return _download_watermark_detect_models(action, python)
+
+
+def _verify_watermark_detect_import(action, python) -> bool:
+    """Same honesty-and-warming gate as the other heavy extras: import in the
+    TARGET environment once pip says done. A timeout is 'still warming'."""
+    if not os.path.isfile(python):
+        return True
+    _append(action, 'verifying the install (first import — this also warms it)…')
+    try:
+        proc = subprocess.run([python, '-c', 'import torch, transformers'],
+                              capture_output=True, text=True, encoding='utf-8',
+                              errors='replace', timeout=_WARM_IMPORT_TIMEOUT,
+                              creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    except subprocess.TimeoutExpired:
+        _append(action, 'still warming up — the capability turns green on its own '
+                        'shortly; no restart needed')
+        return True
+    except OSError as e:
+        _append(action, f'could not run the verification import ({e}) — skipping the check')
+        return True
+    if proc.returncode == 0:
+        return True
+    _append(action, 'installed, but torch/transformers do not import in this '
+                    'environment yet — the install is not usable:')
+    for line in (proc.stderr or '').strip().splitlines()[-4:]:
+        _append(action, f'  {line}')
+    return False
+
+
+def _download_watermark_detect_models(action, python) -> int:
+    """Fetch the two model repos, NAMING every file.
+
+    Never a bare snapshot_download. Measured on 2026-08-03: the SigLIP2 repo also
+    publishes its training checkpoints (checkpoint-712/, checkpoint-1424/,
+    optimizer.pt) next to a model that weighs 371 MB, so a whole-repo pull costs
+    2.4 GB, and the Grounding DINO repo would add a duplicate pytorch_model.bin.
+    Listing the files brings the download to ~0.9 GB — for identical behaviour."""
+    from .services import watermark_detector
+    root = watermark_detector.models_root()
+    if not root:
+        _append(action, 'could not resolve where to store the detector weights')
+        return 1
+    try:
+        os.makedirs(root, exist_ok=True)
+    except OSError as e:
+        _append(action, f'could not create {root}: {e}')
+        return 1
+    _append(action, f'downloading the detector weights (~{watermark_detector.DOWNLOAD_MB} MB) '
+                    f'to {root}')
+    for repo, meta in watermark_detector.MODEL_FILES.items():
+        _append(action, f'  {repo} — {meta["license"]}, {meta["role"]}')
+        code = (
+            'import sys, json\n'
+            'from huggingface_hub import hf_hub_download\n'
+            'repo, root, files = json.loads(sys.argv[1])\n'
+            'for name in files:\n'
+            '    hf_hub_download(repo_id=repo, filename=name, cache_dir=root)\n'
+            'print("ok")\n'
+        )
+        payload = json.dumps([repo, root, list(meta['files'])])
+        rc = _run_pip(action, [python, '-c', code, payload])
+        if rc != 0:
+            _append(action, f'could not download {repo} (rc={rc}) — the detector stays '
+                            'unavailable and the vision model keeps doing the work')
+            return rc
+    _append(action, 'weights ready — 🚩 Find watermarks now uses the detector')
+    return 0
 
 
 def _run_ml_capability(action) -> int:
@@ -1614,6 +1925,13 @@ def _verify_capability_import(action, python) -> bool:
     capabilities.CAPABILITY_IMPORTS, i.e. literally the one the probe runs, so the
     two can never drift apart again.
 
+    An import cannot speak for everything an action installs, though. When the
+    action delivers something else too — `video` ships a BINARY next to its
+    package — it registers an extra check in _CAPABILITY_EXTRA_CHECKS and this
+    gate runs it after the import. Per action, never globally: every other
+    capability IS fully described by its import and must not be made stricter as
+    a side effect.
+
     It also WARMS the import, like the watermark/bank verifications: the capability
     probe fires seconds later and its first cold import can be slow enough to time
     out and read ✗ on a perfectly good install.
@@ -1639,8 +1957,17 @@ def _verify_capability_import(action, python) -> bool:
         _append(action, f'could not run the verification import ({e}) — skipping the check')
         return True   # couldn't check -> don't punish a pip install that succeeded
     if proc.returncode == 0:
-        _append(action, f'import OK — {_CAPABILITY_LABEL.get(action, action)} is ready')
-        return True
+        extra = _CAPABILITY_EXTRA_CHECKS.get(action)
+        if extra is None:
+            _append(action, f'import OK — {_CAPABILITY_LABEL.get(action, action)} is ready')
+            return True
+        # This action delivers something an import cannot answer for. Saying
+        # "ready" here and then failing two lines down is the confusion this
+        # gate exists to remove, so the import result is announced as the HALF it
+        # actually proves, and the check that owns the other half speaks next.
+        _append(action, f'import OK — {_CAPABILITY_LABEL.get(action, action)} loads; '
+                        f'now checking the rest of what this install promises…')
+        return extra(action, python)
     stderr = proc.stderr or ''
     _append(action, f'pip finished, but {_CAPABILITY_LABEL.get(action, action)} still does '
                     f'not load in this environment — the capability stays OFF:')
@@ -1658,8 +1985,59 @@ def _verify_capability_import(action, python) -> bool:
 
 _MISSING_MODULE_RE = re.compile(r"No module named ['\"]([\w.]+)['\"]")
 _CAPABILITY_LABEL = {'face_scoring': 'face scoring', 'masks': 'person masks',
-                     'bank_scoring': 'bank scoring',
-                     'watermark_inpaint': 'watermark inpainting'}
+                      'bank_scoring': 'bank scoring',
+                      'bank_siglip2': 'SigLIP2 Bank semantics',
+                      'watermark_inpaint': 'watermark inpainting',
+                      # `video` is TWO halves and the import proves only the
+                      # first, so its label names that half and never the extra.
+                      'video': 'video decoding (PyAV)'}
+
+
+def _verify_video_encoder(action, python) -> bool:
+    """The OTHER half of the `video` extra: an ffmpeg binary that runs.
+
+    `video` installs two things — PyAV for reading and imageio-ffmpeg for writing
+    — and an import can only speak for the first. So the action could install a
+    package whose bundled binary never arrived, watch `import av` succeed, and
+    announce "✓ installed successfully" while Setup's "Video bank — clip
+    encoding" row stayed ✗ behind the very same ↻ button. The user then reruns
+    the install that already worked, which is exactly the wrong-half reinstall
+    probe_video() splits its three rows to prevent.
+
+    Judged by capabilities' own definition (ffmpeg_tools.ffmpeg_ready), in the
+    process that will do the judging later — resolution happens IN FLASK, not in
+    `python`, because PyAV is what lives in the capability's interpreter while
+    ffmpeg is resolved in-process by whoever encodes.
+    """
+    # pip just wrote a package into this interpreter's site-packages; without
+    # this the still-running process can keep a cached "no such module" view of
+    # that directory and report a missing encoder that is in fact installed.
+    importlib.invalidate_caches()
+    from .services import ffmpeg_tools
+    status = ffmpeg_tools.ffmpeg_ready(force=True)
+    if status['ok']:
+        _append(action, f"clip encoding ready — ffmpeg at "
+                        f"{redact_user_paths(status['path'] or '')}")
+        return True
+    _append(action, 'HALF INSTALLED: your videos can be read, but clips cannot be '
+                    'ENCODED yet, so a bank still cannot be exported to a dataset.')
+    _append(action, f"  {status['reason']}")
+    if not _same_path(python, sys.executable):
+        # A dedicated video.python cannot fix encoding: Flask resolves ffmpeg in
+        # its OWN process. Worth saying, because the install genuinely succeeded.
+        _append(action, '  note: imageio-ffmpeg went into the interpreter above, but the '
+                        "app resolves ffmpeg inside its own Python — clear video.python, "
+                        'or put ffmpeg on PATH, so the encoder is visible to the app.')
+    _append(action, '  fix: run this install again with network access (imageio-ffmpeg '
+                    'fetches its binary), or install ffmpeg yourself and put it on '
+                    'PATH — then click ↻ once more. Decoding stays available either way.')
+    return False
+
+
+# Post-install checks that go BEYOND the probe import, per action. A dict and not
+# a branch inside the gate: every other capability is fully described by its
+# import, and must not become stricter because this one is not.
+_CAPABILITY_EXTRA_CHECKS = {'video': _verify_video_encoder}
 
 
 def _is_blocking_invalid(path, spec) -> bool:
@@ -2288,11 +2666,104 @@ def _run_ollama_model(action) -> int:
             run['response'] = None
 
 
+def _run_shot_detect(action) -> int:
+    """Install TransNetV2 — the shot-boundary detector the video bank cuts with.
+
+    It goes into the environment bank scoring already manages, not the app's own
+    Python, for one reason: it needs torch. A second torch is ~2.5 GB the user
+    gains nothing from, and the watermark detector already settled this question
+    the same way. The capability probe resolves the interpreter through the same
+    chain, so the install target and the later import cannot drift.
+
+    Unlike the watermark detector there is no weights step: transnetv2-pytorch
+    ships its ~33 MB weights inside the wheel, so "installed" really does mean
+    "usable offline". That is most of why it was chosen over the alternatives.
+    """
+    managed_python = _bank_scoring_env_python()
+    configured = (cfg.get('shot_detect.python') or '').strip()
+    if configured and not _same_path(configured, managed_python):
+        # A BORROWED environment — checked, never changed (the ⚡ picker's promise).
+        for line in (
+            'shot_detect.python points at an environment this app did not create,',
+            'so nothing was installed into it — borrowed environments are checked,',
+            'never changed. To add the detector there yourself, run:',
+            f'  "{configured}" -m pip install torch transnetv2-pytorch av',
+            'Or clear shot_detect.python and click Install again — the app then uses',
+            'its own scoring environment, which already has torch.',
+        ):
+            _append(action, line)
+        return 1
+    python = configured or _ensure_bank_scoring_env(action)
+    if not python:
+        return 1
+    if _is_flask_venv(python):
+        for line in (
+            "Shot detection needs torch, which never installs into the app's own Python.",
+            'Nothing was installed. Clear shot_detect.python and click Install again —',
+            'the app builds a dedicated Python for you.',
+        ):
+            _append(action, line)
+        return 1
+    _append(action, f'target interpreter: {python}')
+    _append(action, 'installing CPU torch (download.pytorch.org/whl/cpu) if needed')
+    rc = _run_pip(action, [python, '-m', 'pip', 'install', 'torch',
+                           '--index-url', _TORCH_CPU_INDEX])
+    if rc != 0:
+        _append(action, f'torch install failed (rc={rc}) — see the log above')
+        return rc
+    # av rides along because the WORKER decodes with PyAV in this same
+    # environment (infer/shot_detect_infer.py imports av before torch sees a
+    # frame). Without it the model loads, the probe used to say ready, and
+    # every file failed with ModuleNotFoundError: av — 246/246 on the first
+    # real bank this install met.
+    rc = _run_pip(action, [python, '-m', 'pip', 'install',
+                           _requirement_spec('transnetv2-pytorch'),
+                           _requirement_spec('av')])
+    if rc != 0:
+        return rc
+    if not _verify_shot_detect_import(action, python):
+        return 1
+    try:
+        cfg.save_config({'shot_detect': {'python': python}})
+    except Exception as e:      # noqa: BLE001
+        _append(action, f'warning: could not save shot_detect.python ({e}); '
+                        'the environment still works for this run')
+    return 0
+
+
+def _verify_shot_detect_import(action, python) -> bool:
+    """Run the SAME import the probe will, in the target environment, once pip
+    says it is done — otherwise an install reports success while the capability
+    stays off with no reason shown anywhere. A timeout is 'still warming', never
+    a failure."""
+    if not os.path.isfile(python):
+        return True
+    _append(action, 'verifying the install (first import — this also warms it)…')
+    try:
+        proc = subprocess.run([python, '-c', 'import torch, transnetv2_pytorch, av'],
+                              capture_output=True, text=True, encoding='utf-8',
+                              errors='replace', timeout=_WARM_IMPORT_TIMEOUT,
+                              creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    except subprocess.TimeoutExpired:
+        _append(action, 'still warming up — the capability turns green on its own '
+                        'shortly; no restart needed')
+        return True
+    if proc.returncode == 0:
+        return True
+    _append(action, 'the packages installed but the import still fails:')
+    for line in (proc.stderr or '').strip().splitlines()[-8:]:
+        _append(action, f'  {line}')
+    return False
+
+
 _WORKERS = {**{a: _run_ml_extras for a in _PIP_REQUIREMENTS},   # ml_extras + scrape_extras
             'ollama_model': _run_ollama_model,
-            **{a: _run_ml_capability for a in _CAPABILITY_ML_ACTIONS},  # face_scoring + masks
+            **{a: _run_ml_capability for a in _CAPABILITY_ML_ACTIONS},  # face_scoring + masks + video
             'watermark_inpaint': _run_watermark_inpaint,
             'bank_scoring': _run_bank_scoring,
+            'bank_siglip2': _run_bank_siglip2,
+            'watermark_detect': _run_watermark_detect,
+            'shot_detect': _run_shot_detect,
             **{a: _run_model_download for a in _MODEL_DOWNLOADS},
             **{a: _run_node_pack for a in _NODE_PACKS}}
 # Structural invariant: every whitelisted action MUST have a worker — a missing

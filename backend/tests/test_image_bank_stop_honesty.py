@@ -278,7 +278,13 @@ def test_faces_job_success_still_persists(client, tmp_path, app, monkeypatch):
 
     def fake_driver(job, python, script, payload, cache_path, rx, window):
         imgs = _paths_of(payload)
-        results = {p: {'state': 'scorable', 'det': 0.9} for p in imgs}
+        results = {
+            p: {
+                'state': 'scorable', 'det': 0.9,
+                'fingerprint': (
+                    banks.bank_transfer_metadata.content_fingerprint_path(p)),
+            }
+            for p in imgs}
         clusters = {p: 1 for p in imgs}
         return ({'ok': True, 'results': results, 'clusters': clusters},
                 deque(), 0)

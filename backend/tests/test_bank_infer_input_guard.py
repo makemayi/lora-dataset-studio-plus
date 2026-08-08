@@ -1,6 +1,7 @@
 """Regression coverage for the live-Bank input guard used by infer children."""
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import io
 import json
@@ -140,6 +141,160 @@ def test_face_embed_marks_rejected_snapshot_error_without_cv2_decode(
     assert cv2.calls == 0
 
 
+def test_face_embed_does_not_commit_result_when_file_changes_during_model_call(
+        tmp_path, monkeypatch, capsys):
+    np = pytest.importorskip('numpy')
+    live = tmp_path / 'live.jpg'
+    _small_image(live, 'JPEG')
+    cache_path = tmp_path / 'face-cache.npz'
+
+    cv2 = types.ModuleType('cv2')
+    cv2.IMREAD_COLOR = 1
+    cv2.imdecode = lambda *_args, **_kwargs: np.zeros((12, 16, 3), dtype='uint8')
+    onnxruntime = types.ModuleType('onnxruntime')
+    onnxruntime.get_available_providers = lambda: []
+    insightface = types.ModuleType('insightface')
+    insightface.__path__ = []
+    insightface_app = types.ModuleType('insightface.app')
+
+    face = types.SimpleNamespace(
+        bbox=np.array([1, 1, 12, 10]), det_score=0.95,
+        pose=np.array([0.0, 3.0, 0.0]),
+        normed_embedding=np.zeros(512, dtype='float32'))
+
+    class FaceAnalysis:
+        def __init__(self, **_kwargs):
+            pass
+
+        def prepare(self, **_kwargs):
+            pass
+
+        def get(self, _image):
+            # Same path, different identity while the model is working.
+            live.write_bytes(live.read_bytes() + b'replacement')
+            return [face]
+
+    insightface_app.FaceAnalysis = FaceAnalysis
+    monkeypatch.setitem(sys.modules, 'cv2', cv2)
+    monkeypatch.setitem(sys.modules, 'onnxruntime', onnxruntime)
+    monkeypatch.setitem(sys.modules, 'insightface', insightface)
+    monkeypatch.setitem(sys.modules, 'insightface.app', insightface_app)
+
+    module = _load_infer('face_embed_infer')
+    monkeypatch.setattr(module, '_repair_nested_antelopev2', lambda _root: None)
+    monkeypatch.setattr(sys, 'stdin', io.StringIO(json.dumps({
+        'images': [str(live)], 'models_root': str(tmp_path / 'models'),
+        'device': 'cpu', 'cache': str(cache_path),
+    })))
+    assert module.main() == 0
+    out = _last_json(capsys)
+    assert out['results'][str(live)]['state'] == 'error'
+    assert not cache_path.exists()
+    assert module._load_cache(str(cache_path)) == {}
+
+
+def test_bank_score_does_not_commit_embedding_when_file_changes_during_clip(
+        tmp_path, monkeypatch, capsys):
+    np = pytest.importorskip('numpy')
+    live = tmp_path / 'live-score.jpg'
+    _small_image(live, 'JPEG')
+    cache_path = tmp_path / 'score-cache.npz'
+
+    torch = types.ModuleType('torch')
+    torch.cuda = types.SimpleNamespace(is_available=lambda: False)
+
+    class NoGrad:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    torch.no_grad = NoGrad
+    open_clip = types.ModuleType('open_clip')
+
+    class Input:
+        def unsqueeze(self, _axis):
+            return self
+
+        def to(self, _device):
+            return self
+
+    class Embedding:
+        def __init__(self):
+            self.value = np.ones((1, 768), dtype='float32')
+
+        def norm(self, **_kwargs):
+            return 1.0
+
+        def __truediv__(self, _other):
+            return self
+
+        def cpu(self):
+            return self
+
+        def numpy(self):
+            return self.value
+
+    class Clip:
+        def to(self, _device):
+            return self
+
+        def eval(self):
+            return self
+
+        def encode_image(self, _input):
+            live.write_bytes(live.read_bytes() + b'replacement')
+            return Embedding()
+
+    open_clip.create_model_and_transforms = (
+        lambda *_args, **_kwargs: (Clip(), None, lambda _image: Input()))
+    monkeypatch.setitem(sys.modules, 'torch', torch)
+    monkeypatch.setitem(sys.modules, 'open_clip', open_clip)
+
+    module = _load_infer('bank_score_infer')
+    monkeypatch.setattr(module, '_load_aesthetic_head',
+                        lambda *_args: (None, False, 'offline'))
+    monkeypatch.setattr(module, '_load_nsfw',
+                        lambda *_args: (None, False, 'offline'))
+    monkeypatch.setattr(sys, 'stdin', io.StringIO(json.dumps({
+        'images': [str(live)], 'models_root': str(tmp_path / 'models'),
+        'cache': str(cache_path),
+    })))
+    assert module.main() == 0
+    out = _last_json(capsys)
+    assert out['results'][str(live)]['state'] == 'error'
+    assert not cache_path.exists()
+    assert module._load_cache(str(cache_path)) == {}
+
+
+def test_infer_caches_store_sha256_as_compact_uint8_rows(tmp_path):
+    np = pytest.importorskip('numpy')
+    digest = hashlib.sha256(b'exact image payload').digest()
+
+    score = _load_infer('bank_score_infer')
+    score_path = tmp_path / 'score.npz'
+    score._save_cache(str(score_path), {
+        'one.jpg': ('ok', 7.0, 0.1, np.zeros(768, dtype='float32'),
+                    '123:456', digest),
+    })
+    with np.load(score_path, allow_pickle=False) as archive:
+        assert archive['hashes'].dtype == np.dtype('uint8')
+        assert archive['hashes'].shape == (1, 32)
+    assert score._load_cache(str(score_path))['one.jpg'][5] == digest
+
+    face = _load_infer('face_embed_infer')
+    face_path = tmp_path / 'face.npz'
+    face._save_cache(str(face_path), {
+        'one.jpg': ('scorable', 0.9, 0.2,
+                    np.zeros(512, dtype='float32'), 3.0, '123:456', digest),
+    })
+    with np.load(face_path, allow_pickle=False) as archive:
+        assert archive['hashes'].dtype == np.dtype('uint8')
+        assert archive['hashes'].shape == (1, 32)
+    assert face._load_cache(str(face_path))['one.jpg'][6] == digest
+
+
 def test_bank_score_marks_rejected_snapshot_error_without_second_pillow_open(
         tmp_path, monkeypatch, capsys):
     pytest.importorskip('numpy')
@@ -179,13 +334,19 @@ def test_bank_score_marks_rejected_snapshot_error_without_second_pillow_open(
 
     monkeypatch.setattr(Image, 'open', tracking_open)
     module = _load_infer('bank_score_infer')
-    monkeypatch.setattr(module, '_load_aesthetic_head', lambda *_args: (None, False))
-    monkeypatch.setattr(module, '_load_nsfw', lambda *_args: (None, False))
+    monkeypatch.setattr(module, '_load_aesthetic_head',
+                        lambda *_args: (None, False, 'URLError: unreachable'))
+    monkeypatch.setattr(module, '_load_nsfw',
+                        lambda *_args: (None, False, 'OSError: unreachable'))
     monkeypatch.setattr(sys, 'stdin', io.StringIO(json.dumps({
         'images': [str(bad)], 'models_root': str(tmp_path / 'models')})))
     assert module.main() == 0
     out = _last_json(capsys)
-    assert out['results'][str(bad)] == {'state': 'error'}
+    # Every result carries the exact-byte authority field. A source rejected
+    # before hashing has no authority, explicitly, rather than an absent key
+    # that an older parent could mistake for a legacy result.
+    assert out['results'][str(bad)] == {
+        'state': 'error', 'fingerprint': None}
     assert len(opens) == 1 and isinstance(opens[0], io.BytesIO)
 
 

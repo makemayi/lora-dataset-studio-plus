@@ -9,6 +9,7 @@ import {
   improveEngine,
   improveEngineBlockedReason,
   IMPROVE_ENGINES,
+  lightboxImproveButtons,
 } from './improveEngines.js'
 
 test('every engine states what it does to the ORIGINAL, not just that it improves', () => {
@@ -82,4 +83,77 @@ test('the progress label reads the running batch engine', () => {
     '✨ Klein…')
   assert.equal(improveBatchLabel({ kind: 'improve', engine: 'seedvr2', cancelling: true }),
     '🔍 Stopping…')
+})
+
+// --- The lightbox's per-image buttons ---------------------------------------
+// A user's case, from a screenshot: a DRAWN dataset where the amber note already
+// warns that Klein's instruction pulls anime skin towards realism — and SeedVR2,
+// the pass that does not do that, was offered in the selection toolbar but not
+// in the lightbox, which is where you are when you are looking at that one image.
+
+const READY = { comfyui: { seedvr2_ready: true } }
+
+test('the lightbox offers BOTH engines once SeedVR2 is installed', () => {
+  const ids = lightboxImproveButtons({ caps: READY, engines: { klein: true } })
+    .map((b) => b.id)
+  assert.deepEqual(ids, ['klein', 'seedvr2'])
+})
+
+test('SeedVR2 absent from the lightbox until it is installed', () => {
+  const ids = lightboxImproveButtons({ caps: { comfyui: {} }, engines: { klein: true } })
+    .map((b) => b.id)
+  assert.deepEqual(ids, ['klein'])
+})
+
+test('the amber anime warning belongs to Klein ALONE', () => {
+  // It is about Klein's instruction ("detailed texture, sharp details"). SeedVR2
+  // sends no instruction, so repeating it there would be false — and would warn
+  // people off the exact pass that solves their problem.
+  const byId = Object.fromEntries(
+    lightboxImproveButtons({ caps: READY, engines: { klein: true } })
+      .map((b) => [b.id, b]))
+  assert.equal(byId.klein.showKleinNote, true)
+  assert.equal(byId.seedvr2.showKleinNote, false)
+})
+
+test('each button carries its own trade-off sentence, never the other one', () => {
+  const byId = Object.fromEntries(
+    lightboxImproveButtons({ caps: READY, engines: { klein: true } })
+      .map((b) => [b.id, b]))
+  assert.match(byId.klein.title, /shift/i)
+  assert.match(byId.seedvr2.title, /keeps the original/i)
+  assert.doesNotMatch(byId.seedvr2.title, /shift/i)
+})
+
+test('an engine that cannot run is disabled and SAYS why, per engine', () => {
+  const byId = Object.fromEntries(
+    lightboxImproveButtons({ caps: { comfyui: { seedvr2_ready: true } },
+      engines: { klein: false } }).map((b) => [b.id, b]))
+  assert.equal(byId.klein.disabled, true)
+  assert.match(byId.klein.title, /not available/i)
+  // ...while the OTHER engine stays clickable. A shared disabled flag would have
+  // greyed out the working pass because the broken one is broken.
+  assert.equal(byId.seedvr2.disabled, false)
+})
+
+test('image-level state blocks every engine, and says so before the engine name', () => {
+  for (const state of [{ improvePending: true }, { improving: true },
+    { improveReady: true }, { busy: true }]) {
+    const buttons = lightboxImproveButtons({
+      caps: READY, engines: { klein: true }, ...state })
+    assert.ok(buttons.every((b) => b.disabled),
+      `${JSON.stringify(state)} must block both engines`)
+  }
+  const [klein] = lightboxImproveButtons({
+    caps: READY, engines: { klein: true }, improveReady: true })
+  assert.equal(klein.label, '✓ Review improvement first')
+  const [running] = lightboxImproveButtons({
+    caps: READY, engines: { klein: true }, improving: true })
+  assert.match(running.label, /Improving…/)
+})
+
+test('the idle labels name the engine, matching the selection toolbar', () => {
+  const labels = lightboxImproveButtons({ caps: READY, engines: { klein: true } })
+    .map((b) => b.label)
+  assert.deepEqual(labels, ['✨ Improve via Klein', '🔍 Upscale via SeedVR2'])
 })

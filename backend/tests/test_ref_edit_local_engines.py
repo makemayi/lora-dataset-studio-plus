@@ -177,23 +177,90 @@ def test_klein_edit_forwards_the_datasets_extra_references(client, monkeypatch):
     assert os.path.basename(calls[0]['extra_ref_paths'][0]).endswith('.webp')
 
 
-def test_a_local_engine_refuses_the_modals_transient_references(client, monkeypatch):
-    """Both local graphs take file PATHS; the modal's uploads are request-scoped
-    bytes. Refused with the engine named — a silent drop would return an edit that
-    ignored half of what the user handed it."""
+def test_an_engine_with_no_slot_for_them_refuses_the_modals_uploads(client, monkeypatch):
+    """Klein's second reference is the dataset's angles — it has nowhere to put an
+    image added in the dialog. Refused with the engine named, because a silent
+    drop would return an edit that ignored half of what the user handed it.
+
+    The refusal is now about THIS engine's slot, not about being local: Krea sits
+    on the same GPU and does take one (the test below)."""
+    did = _create_with_ref(client, monkeypatch, 'Mo', 'zchar_mo')
+    calls = []
+    _stub_klein(monkeypatch, calls)
+
+    resp = client.post(f'/api/dataset/{did}/ref/edit',
+                       data={'prompt': 'add glasses', 'engine': 'klein',
+                             'ref': (io.BytesIO(_png()), 'anchor.png')},
+                       content_type='multipart/form-data')
+
+    assert resp.status_code == 400
+    assert 'Klein' in resp.get_json()['error']
+    assert not calls                                   # nothing queued
+    assert client.get(f'/api/dataset/{did}').get_json()['reference_edit'] is None
+
+
+def test_krea_takes_the_modals_upload_as_its_second_subject(client, monkeypatch):
+    """The whole point of the split: Krea's `_b` slot was trained for a DIFFERENT
+    subject, so it reads the image added in this dialog and NOT the dataset's
+    extra angles — which are, by construction, more views of the same face.
+
+    The bytes reach it as a temporary FILE, the same hand-off the primary
+    reference already used; "a local engine cannot take request-scoped bytes" was
+    a routing decision, never a limitation."""
     did = _create_with_ref(client, monkeypatch, 'Mo', 'zchar_mo')
     calls = []
     _stub_krea(monkeypatch, calls)
 
     resp = client.post(f'/api/dataset/{did}/ref/edit',
-                       data={'prompt': 'add glasses', 'engine': 'krea',
-                             'ref': (io.BytesIO(_png()), 'anchor.png')},
+                       data={'prompt': 'put her in this room', 'engine': 'krea',
+                             'ref': (io.BytesIO(_png()), 'room.png')},
                        content_type='multipart/form-data')
 
-    assert resp.status_code == 400
-    assert 'Krea 2 Edit' in resp.get_json()['error']
-    assert not calls                                   # nothing queued
-    assert client.get(f'/api/dataset/{did}').get_json()['reference_edit'] is None
+    assert resp.status_code == 202
+    assert len(calls) == 1
+    paths = calls[0]['extra_ref_paths']
+    assert len(paths) == 1, 'one slot in the graph, one image forwarded'
+    assert os.path.basename(paths[0]).endswith('.webp')   # sanitized, not raw bytes
+    assert 'modalref' in os.path.basename(paths[0])       # from the dialog, not the card
+
+
+def test_a_rejected_upload_leaves_the_batch_already_on_screen_alone(client, monkeypatch):
+    """Input validation must happen BEFORE start_batch, because start_batch is
+    destructive: it supersedes what is on screen, unlinking the previous
+    candidate and cancelling a render still in flight.
+
+    Wiring Krea onto the dialog's uploads briefly moved that validation after the
+    supersede — the API lane always sanitized first, and a local batch carrying
+    uploads used to be refused outright, so no such ordering had ever existed.
+    The consequence was silent and expensive: dropping a HEIC or an animated GIF
+    by mistake (both pass the browser's image/* filter and the byte cap) killed a
+    candidate the user had not kept yet, and answered 400 as if nothing had
+    happened."""
+    did = _create_with_ref(client, monkeypatch, 'Nel', 'zchar_nel')
+    calls = []
+    _stub_krea(monkeypatch, calls)
+
+    first = client.post(f'/api/dataset/{did}/ref/edit',
+                        data={'prompt': 'warmer lighting', 'engine': 'krea'},
+                        content_type='multipart/form-data')
+    assert first.status_code == 202
+    running = client.get(f'/api/dataset/{did}').get_json()['reference_edit']
+    assert running['status'] == 'running'
+
+    # Undecodable bytes behind an image content type — the exact shape a phone
+    # photo in an unsupported container arrives in.
+    bad = client.post(f'/api/dataset/{did}/ref/edit',
+                      data={'prompt': 'put her in this room', 'engine': 'krea',
+                            'ref': (io.BytesIO(b'GIF89a this is not a decodable image'),
+                                    'holiday.gif')},
+                      content_type='multipart/form-data')
+
+    assert bad.status_code == 400
+    assert len(calls) == 1, 'the rejected request queued nothing'
+    survivor = client.get(f'/api/dataset/{did}').get_json()['reference_edit']
+    assert survivor is not None, 'the running edit was destroyed by a request that failed'
+    assert survivor['status'] == 'running'
+    assert survivor.get('batch_id') == running.get('batch_id')
 
 
 def test_an_unavailable_local_engine_is_explained_and_leaves_no_phantom_job(
@@ -376,7 +443,12 @@ def test_mixed_api_local_batch_shares_snapshot_and_activity_until_local_lands(
 
     assert response.status_code == 202
     assert len(krea_calls) == 1
-    assert 'extra_ref_paths' not in krea_calls[0]
+    # The modal's upload now has TWO legitimate destinations in this batch: the
+    # API sibling (as bytes, below) and Krea's second slot (as a staged file).
+    # Both must get it from the same launch snapshot, and Krea must get exactly
+    # one — its graph has one slot.
+    assert len(krea_calls[0]['extra_ref_paths']) == 1
+    assert 'modalref' in os.path.basename(krea_calls[0]['extra_ref_paths'][0])
     assert api_calls[0][0] == 'chatgpt'
     assert len(api_calls[0][1]) == 2       # primary + modal upload, API only
     assert api_calls[0][1][0] == local_primary[0]

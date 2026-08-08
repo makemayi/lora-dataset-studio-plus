@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CLUSTER_UNITS, chromeScale, chromeScreenSize, clusterBox, groupBarHeight,
-  isNodeControlTarget, nodePointerIntent,
+  isNodeControlTarget, nodePointerIntent, pillSelectScale, pillSelectScreenSize,
 } from './canvasNodeChrome.js';
 
 /* The ✕ that "did not work" on a phone.
@@ -164,4 +164,35 @@ test('a control in the world opts out of the board gesture by marker alone', () 
   assert.equal(nodePointerIntent(LANE_CONTROL, 'mouse'), 'control');
   assert.equal(nodePointerIntent(LANE_CONTROL, 'touch'), 'control',
     'and it never arms the long press either');
+});
+
+/* ✓ The pick box on a checkpoint pill — the same disease, on the control the
+   board's whole generate flow runs through. Measured headless at 400 px: the
+   board opens on Fit, Fit landed at 45 %, and the box reported 5 × 5 CSS px
+   while the toolbar told the user to tick it. */
+
+test('the ✓ pick box stops shrinking with the board', () => {
+  // The bug, in one number.
+  assert.ok(12 * 0.45 < 6, 'raw, the box is a five-pixel square at Fit zoom');
+  // Counter-scaled it holds its nominal size on screen instead.
+  assert.ok(pillSelectScreenSize(0.45, 60) > 10,
+    'more than twice the size it had, at the zoom a phone opens on');
+  assert.ok(Math.abs(pillSelectScreenSize(0.45, 200) - 12) < 1e-9,
+    'on a wide pill nothing caps it: exactly its nominal 12 px');
+});
+
+test('the ✓ box never grows over the pill it sits on', () => {
+  // A 60-unit pill shows a four-digit step. The box may take 55 % of it and no
+  // more — larger and the leading digit goes, which is a fix already paid for.
+  assert.ok(12 * pillSelectScale(0.1, 60) <= 60 * 0.55 + 1e-9);
+  assert.ok(12 * pillSelectScale(0.01, 40) <= 40 * 0.55 + 1e-9);
+});
+
+test('the ✓ box is untouched at 100 % and above — and without a board at all', () => {
+  // The in-card lineage graph passes no scale; a desktop board reads at 100 %+.
+  assert.equal(pillSelectScale(1, 60), 1);
+  assert.equal(pillSelectScale(2.5, 60), 1);
+  assert.equal(pillSelectScale(0, 60), 1);
+  assert.equal(pillSelectScale(NaN, 60), 1);
+  assert.ok(Number.isFinite(pillSelectScale(0.4, NaN)));
 });

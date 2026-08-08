@@ -23,7 +23,10 @@ import CanvasImageNode from './CanvasImageNode';
 
      • the title bar moves the whole strip. It is the only thing that does, it
        is visible at rest, it says how many pictures are here, and it carries
-       the group's ✕;
+       the group's ✕. It is drawn by CanvasGroupBar, in a LAYER above every
+       picture — living inside this component, it was a plain sibling with no
+       z-index and any picture placed over that strip took its clicks, which
+       left the group neither movable nor closable;
      • dragging a picture INSIDE the strip means "take this one out", and it
        only takes effect once the pointer is off the strip — which is exactly
        the way it was asked for ("je la drague en dehors du node"), and the only
@@ -33,7 +36,9 @@ import CanvasImageNode from './CanvasImageNode';
    The bar's height is counter-scaled by the board zoom (canvasNodeChrome.
    groupBarHeight): a grip four pixels tall at 24 % would not make the gesture
    awkward, it would make the group immovable — the same bug the ✕ already had
-   once on a phone.
+   once on a phone. That counter-scale is also why the bar can be TWICE as tall
+   at 40 % as at 100 %, and why the placers reserve its worst case rather than
+   its current one (utils/canvasImageGroups.occupiedBox).
 
    ⚠️ Width grows without limit, on purpose. Ten pictures side by side is ten
    times as wide, and this is a board that zooms and pans, so ✦ Fit is the
@@ -42,10 +47,16 @@ import CanvasImageNode from './CanvasImageNode';
    wide one. */
 
 export default function CanvasImageGroup({ group, datasetId, laneName, boardScale = 1,
-  onClose, onOpen, onCloseGroup, onExportGrid, dropHint = null }) {
-  const barH = groupBarHeight(boardScale, group.h);
+  onClose, onOpen, dropHint = null, blendNotes = null }) {
   const count = group.members.length;
   const anchorId = group.members[0]?.node.imageId;
+  // The drag-out hint below is CHROME, not content: it must stay readable at
+  // 24 % exactly as at 100 %, which is the one thing groupBarHeight computes.
+  // Recomputed here rather than passed down, so the hint and the bar's own
+  // label keep ONE source of truth for that counter-scale — the bar moved out
+  // of this file and took the binding with it, which is how the hint came to
+  // reference a `barH` nothing declared any more.
+  const barH = groupBarHeight(boardScale, group.h);
 
   return (
     <div
@@ -62,51 +73,13 @@ export default function CanvasImageGroup({ group, datasetId, laneName, boardScal
         width: group.w, height: group.h }}
       className="lds-canvas-group rounded-md border border-indigo-400/40 bg-surface-overlay shadow-lg">
 
-      {/* The grip. Above the pictures, never over them: the strip itself stays
-          nothing but photographs, which is the whole point of "no border". */}
-      <div data-canvas-group-bar=""
-        style={{ position: 'absolute', left: 0, top: -barH, width: group.w, height: barH }}
-        title="Drag this bar to move the whole group"
-        className="flex cursor-grab touch-none items-center gap-1 overflow-hidden rounded-t-md border border-b-0 border-indigo-400/40 bg-app/85 pl-1.5 backdrop-blur-sm">
-        <span style={{ fontSize: Math.max(9, barH * 0.42) }}
-          className="min-w-0 flex-1 truncate font-semibold text-content-muted tabular-nums">
-          <span aria-hidden>⠿</span> {count} images
-        </span>
-        <button type="button"
-          onClick={(e) => { e.stopPropagation(); onExportGrid?.(group); }}
-          onPointerDown={(e) => e.stopPropagation()}
-          data-testid="canvas-group-export-grid"
-          style={{ height: barH, fontSize: Math.max(9, barH * 0.36) }}
-          title={`Export these ${count} images as a grid`}
-          aria-label={`Export grid from these ${count} images`}
-          className="flex shrink-0 items-center gap-1 rounded px-1.5 font-semibold text-indigo-200 hover:bg-indigo-500/25 hover:text-white">
-          <span aria-hidden>▦</span> Export grid
-        </button>
-        {/* ✕ on a GROUP closes N pictures at once, so it says N and says what
-            happens to them. A destructive action has to be readable before it
-            is pressed, not after. */}
-        <button type="button"
-          onClick={(e) => { e.stopPropagation(); onCloseGroup?.(group); }}
-          data-testid="canvas-group-close"
-          // The FULL bar height, not a fraction of it: at ✦ Fit on a 400-px
-          // screen the bar is 26 px and four fifths of that is 21 — under the
-          // floor a finger needs, which is the exact shape of the bug the
-          // pinned-image ✕ already had once.
-          style={{ width: barH, height: barH, fontSize: Math.max(9, barH * 0.42) }}
-          title={`Close all ${count} images — the group is undone and each one goes back `
-            + 'to its own size. Re-opening one from its gallery brings just that one back.'}
-          aria-label={`Close this group of ${count} images`}
-          className="flex shrink-0 items-center justify-center rounded leading-none text-content-subtle hover:bg-red-500/25 hover:text-content">
-          ✕{count}
-        </button>
-      </div>
-
       {/* The pictures. Edge to edge, gap zero — the strip is one band. */}
       {group.members.map((m) => (
         <CanvasImageNode key={m.node.imageId} node={m.node} datasetId={datasetId}
           laneName={laneName} variant="member"
           box={{ x: m.x - group.x, y: m.y - group.y, w: m.w, h: m.h }}
-          onClose={onClose} onOpen={onOpen} boardScale={boardScale} />
+          onClose={onClose} onOpen={onOpen} boardScale={boardScale}
+          blendNote={blendNotes?.get(m.node.imageId) || null} />
       ))}
 
       {/* Resizing the strip resizes it as a WHOLE, keeping its shape: a member
@@ -124,7 +97,8 @@ export default function CanvasImageGroup({ group, datasetId, laneName, boardScal
           strip, where the finger is. Without it, letting go one pixel too early
           just looks like the drag failed. */}
       {dropHint === 'leaving' && (
-        <div style={{ position: 'absolute', left: 0, top: 0, width: group.w, height: group.h }}
+        <div data-testid="canvas-group-drop-hint"
+          style={{ position: 'absolute', left: 0, top: 0, width: group.w, height: group.h }}
           className="pointer-events-none flex items-end justify-center rounded-md bg-indigo-500/10 ring-2 ring-inset ring-indigo-300/50">
           <span style={{ fontSize: Math.max(9, barH * 0.42), marginBottom: barH * 0.3 }}
             className="rounded bg-app/90 px-1.5 py-0.5 font-semibold text-indigo-100">

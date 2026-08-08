@@ -16,6 +16,7 @@ import json
 import pytest
 
 from app.config import LOCAL_USER
+from _dataset_files import write_kept_image_files
 
 
 def _configure_aitoolkit(tmp_path, monkeypatch, app):
@@ -48,6 +49,10 @@ def _mk_ds(app, n_keep=6, trigger='rt_trig', name='Retry', slider=False):
             dataset_id=ds.id, filename=f'k{i}.webp', status='keep',
             framing='face', caption=f'a nice varied caption number {i}'))
     svc.db.session.commit()
+    # A retry is a real LAUNCH: it freezes the dataset's provenance, which reads
+    # every kept image's bytes. Rows without files are a dataset that cannot be
+    # launched — see tests/_dataset_files.py.
+    write_kept_image_files(ds.id)
     if slider:
         lt.update_slider_settings(LOCAL_USER, ds.id, {
             'enabled': True, 'positive': 'very muscular body',

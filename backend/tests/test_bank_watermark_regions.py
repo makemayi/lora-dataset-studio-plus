@@ -43,13 +43,18 @@ def _mkbank(client, tmp_path, files, name='WM'):
 
 def _flag(app, bank_id, bbox, *, index=0, state='detected'):
     from app.extensions import db
-    from app.models import BankImage
+    from app.models import BankImage, ImageBank
+    from app.services import bank_transfer_metadata as transfer
+    from app.services import image_bank_service as banks
     with app.app_context():
+        bank = db.session.get(ImageBank, bank_id)
         rows = (BankImage.query.filter_by(bank_id=bank_id)
                 .order_by(BankImage.id.asc()).all())
         row = rows[index]
         row.watermark_state = state
         row.watermark_bbox = json.dumps(bbox) if bbox is not None else None
+        row.watermark_fingerprint = transfer.content_fingerprint_path(
+            banks.abs_image_path(bank, row))
         db.session.commit()
         return row.id
 

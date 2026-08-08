@@ -94,8 +94,49 @@ def _dataset_name(dataset_id):
     return getattr(ds, 'name', None) if ds else None
 
 
+def _comfyui_connection(link):
+    """Can LDS talk to ComfyUI at all, and at which address — for the banner.
+
+    A barrier says a job is paused. It says nothing about whether LDS and
+    ComfyUI are even in touch, and that silence is what made a fresh install
+    unreadable: the URL was auto-detected, the files were found, the first
+    Generate answered "a paused ComfyUI job is blocking new generations", and
+    ComfyUI logged no incoming connection at all (jerkyjunky, Discord). The
+    person went looking for a flag they had to pass; the truth was that LDS was
+    knocking on a door nobody was behind.
+
+    `link` is the verdict the recovery probe ALREADY produced this poll (it had
+    to read /queue to decide whether to auto-clear), so the common case costs
+    nothing extra. Only a barrier it could not ask about — an unconfirmed
+    submission, which has no prompt id — falls back to the app's shared ComfyUI
+    reachability read, the same one the engine cards and the enqueue 409 use, so
+    the two surfaces cannot contradict each other.
+    """
+    from .. import capabilities, config as cfg
+    from ..job_queue import COMFYUI_LINK_REACHABLE, COMFYUI_LINK_UNREACHABLE
+    from ..utils.redact import redact_url_secrets
+    url = redact_url_secrets((cfg.get('comfyui.api_url') or '').rstrip('/')) or ''
+    if link == COMFYUI_LINK_REACHABLE:
+        return {'reachable': True, 'url': url, 'status': 'ok', 'hint': None}
+    if link == COMFYUI_LINK_UNREACHABLE:
+        return {'reachable': False, 'url': url, 'status': 'unreachable', 'hint': None}
+    comfy = capabilities.probe_comfyui()
+    status = comfy.get('status')
+    # 'slow' is NOT a broken link: the server accepted the connection and is
+    # merely slow to answer. Sending that user to re-check a correct URL is the
+    # exact mistake `comfyui_down_message` exists to prevent.
+    reachable = status in ('ok', 'slow')
+    return {'reachable': reachable, 'url': url, 'status': status,
+            'hint': None if reachable else (comfy.get('hint') or None)}
+
+
 def _recovery_snapshot():
-    """What is blocking generation right now, or None when nothing is."""
+    """What is blocking generation right now, or None when nothing is.
+
+    `connection` is left None here and filled by the polling GET alone: the POST
+    below needs only the barrier's identity and must not pay for a probe to get
+    it. None therefore means "nobody asked", never "unreachable".
+    """
     from ..job_queue import (COMFYUI_RECOVERY_REQUIRED_MESSAGE, queue_manager)
     owner = queue_manager.get_comfyui_stalled_barrier()
     if owner is None:
@@ -106,6 +147,7 @@ def _recovery_snapshot():
         # thinking the app is simply broken.
         return {'kind': 'unreadable', 'job_id': None, 'can_confirm_restart': False,
                 'message': COMFYUI_RECOVERY_REQUIRED_MESSAGE,
+                'connection': None,
                 'detail': ('LDS found an invalid ComfyUI recovery record. Restart LDS '
                            'and check the server log before starting new generations.')}
     stalled_since, metadata = _stalled_job_facts(owner.get('job_id'))
@@ -125,6 +167,7 @@ def _recovery_snapshot():
         'stalled_since': stalled_since,
         'message': COMFYUI_RECOVERY_REQUIRED_MESSAGE,
         'detail': owner.get('reason'),
+        'connection': None,
         # Every readable barrier can be resolved from here once the user
         # confirms the restart; the backend still refuses anything it cannot
         # prove or identify, with its own message.
@@ -139,12 +182,22 @@ def comfyui_recovery_state():
     Reading this also attempts the provable automatic clear, so an install left
     blocked overnight heals as soon as any page is open and ComfyUI is back —
     without the user having to click the thing that was refused.
+
+    That same attempt is where the reachability verdict comes from: the banner
+    must be able to say "LDS cannot reach ComfyUI at <url>" instead of blaming a
+    paused job for a connection that never existed.
     """
-    from ..job_queue import auto_resolve_comfyui_barrier, peek_auto_recovery_notice
-    if auto_resolve_comfyui_barrier() is not None:
+    from ..job_queue import peek_auto_recovery_notice, probe_comfyui_barrier
+    probe = probe_comfyui_barrier()
+    if probe.resolved is not None:
         logger.info('system: ComfyUI recovery barrier cleared automatically on poll')
+    recovery = _recovery_snapshot()
+    if recovery is not None:
+        # Only ever paid for while something is actually blocking: a healthy app
+        # polls this route forever and must not probe ComfyUI for nothing.
+        recovery['connection'] = _comfyui_connection(probe.link)
     return jsonify({'ok': True,
-                    'recovery': _recovery_snapshot(),
+                    'recovery': recovery,
                     'auto_cleared': peek_auto_recovery_notice()})
 
 

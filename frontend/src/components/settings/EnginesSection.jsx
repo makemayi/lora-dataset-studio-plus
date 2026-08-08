@@ -2,11 +2,25 @@ import { useEffect, useState } from 'react'
 import { apiFetch, postJson } from '../../api/fetchClient'
 import { INPUT_CLASS, Card, StatusBadge, SecretField } from './primitives'
 import KleinLoraCombobox, { useKleinGenerationLoras } from './KleinLoraCombobox'
+import ModelFilePicker, { useModelFiles } from './ModelFilePicker'
 import PromptOverrideField from '../common/PromptOverrideField'
 import PromptPreview from './PromptPreview'
 import ResetToDefault from './ResetToDefault'
 import { defaultValueAt } from './settingDefaults.js'
 import { kreaStrengthRange, KREA_LORA_STRENGTH_DEFAULT } from '../../utils/kreaGenerationLoras'
+import { isFixedLoraDuplicate, fixedLoraDuplicateWarning } from '../../utils/loraDuplicateGuard'
+import { kreaBaseNote, KREA_BASE_NOTE_CLASS } from '../../utils/kreaBaseNote'
+// The bounds mirror krea_edit_helper's clamps. They live in utils/kreaDials.js
+// because the workspace panel offers the SAME four dials — two copies of "512"
+// would be two chances to drift away from the server.
+import {
+  KREA_GROUNDING_MIN, KREA_GROUNDING_MAX, KREA_GROUNDING_STEP,
+  KREA_STEPS_MIN, KREA_STEPS_MAX,
+  KREA_REF_BOOST_MIN, KREA_REF_BOOST_MAX, KREA_REF_BOOST_STEP,
+  KREA_IDENTITY_STRENGTH_MIN, KREA_IDENTITY_STRENGTH_MAX, KREA_IDENTITY_STRENGTH_STEP,
+  clampRefBoost, clampIdentityStrength,
+  refBoostDescription, identityStrengthDescription, stepsDescription,
+} from '../../utils/kreaDials.js'
 import { refImageSizeDescription, packetLengthDescription } from '../../utils/minimaxH3Engine.js'
 import {
   identityPromptFields, PROMPT_SUBJECT_TYPES,
@@ -14,6 +28,7 @@ import {
   GLOBAL_PROMPT_PART_FIELDS, SUBJECT_PROMPT_PART_FIELDS, FRAMING_PROMPT_PART_FIELDS,
 } from '../common/promptOverride.js'
 import { SUBJECT_TYPE_LABELS } from '../dataset/subjectTypes.js'
+import { laneForTarget } from '../setup/seedvr2Tiling.js'
 
 const ENGINE_SECRETS = [
   { key: 'GEMINI_API_KEY', label: 'Gemini API key', testTarget: 'gemini', help: 'Powers the Nano Banana engine.' },
@@ -44,7 +59,8 @@ const ENGINE_OPTIONS = [
    files, any purpose — texture, anatomy, style…). Inside a preset the rows
    chain after the consistency/identity-edit LoRA in LIST ORDER (file +
    strength, reorderable, capped at 8). Per run each engine's own tuning panel
-   just PICKS a preset ("None" by default) — the choice carries the intent,
+   just PICKS a preset, starting on the engine's own default preset setting
+   ("None" until one is chosen) — the choice carries the intent,
    there is no automatic gating. The app never ships or hardcodes a LoRA name. */
 const MAX_GENERATION_LORAS = 8        // mirrors the klein_edit_helper AND
 const MAX_GENERATION_LORA_PRESETS = 12 // krea_edit_helper caps — both the same
@@ -69,7 +85,8 @@ function freeName(presets, base) {
    range, its default and the engine the badge judges for differ. */
 function LoraPresetCard({ preset, index, presets, save, loraScan,
                           engineLabel = 'Klein', strengthRange, defaultStrength,
-                          placeholder = 'klein/my-lora.safetensors' }) {
+                          placeholder = 'klein/my-lora.safetensors',
+                          engineId = 'klein', fixedLora = '' }) {
   const rows = Array.isArray(preset?.loras) ? preset.loras : []
   const patchPreset = (p) => save(presets.map((x, j) => (j === index ? { ...x, ...p } : x)))
   const patchRow = (i, p) => patchPreset({ loras: rows.map((r, j) => (j === i ? { ...r, ...p } : r)) })
@@ -109,6 +126,13 @@ function LoraPresetCard({ preset, index, presets, save, loraScan,
       {rows.map((row, i) => {
         const strength = Number.isFinite(Number(row?.strength)) ? Number(row.strength) : defaultStrength
         const range = strengthRange(row?.file || '')
+        // The row the server will DROP: it names the LoRA this engine already
+        // loads outside the presets. Said HERE, where the row is written —
+        // until now the only trace was one line in the server log, so a preset
+        // whose single row was that file produced a run with no LoRA at all and
+        // nothing on screen to explain it. Comparison is normcase+normpath, the
+        // server's own, so a '/' or a case difference cannot dodge it.
+        const duplicate = isFixedLoraDuplicate(row?.file, fixedLora)
         return (
           <div key={i} className="flex items-center gap-2 flex-wrap">
             <span className="text-xs text-content-muted w-4 shrink-0" aria-hidden="true">{i + 1}.</span>
@@ -136,6 +160,13 @@ function LoraPresetCard({ preset, index, presets, save, loraScan,
             <button type="button" onClick={() => patchPreset({ loras: rows.filter((_, j) => j !== i) })}
               aria-label={`Remove LoRA ${i + 1} from preset ${index + 1}`} title="Remove this LoRA"
               className={`${SMALL_BTN} hover:bg-red-500/15 hover:text-red-300`}>✕</button>
+            {/* w-full inside the WRAPPING flex row = its own line under the
+                controls, without re-nesting (and re-indenting) the whole row. */}
+            {duplicate && (
+              <p role="alert" className="w-full pl-6 text-[0.6875rem] text-amber-400">
+                {fixedLoraDuplicateWarning(engineId)}
+              </p>
+            )}
           </div>
         )
       })}
@@ -153,6 +184,54 @@ function LoraPresetCard({ preset, index, presets, save, loraScan,
   )
 }
 
+/* Which preset the run panel OPENS on, per engine.
+   The panel used to start on "None" on every single visit, so a preset someone
+   had carefully built applied only when they remembered to re-pick it — and a
+   run that forgot carried no LoRA anywhere in its PNG metadata, which reads as
+   the app ignoring its own settings. This is the missing half of the feature,
+   not a new one.
+   Deliberately per ENGINE: klein.generation_lora_presets and
+   krea.generation_lora_presets are independent lists where the same NAME can
+   designate two different chains, so one shared default would be a lie half the
+   time. And deliberately a STARTING POINT, which the note under the field says
+   out loud: the run panel still offers None and every other preset for that run,
+   and choosing there never writes back here. */
+function DefaultPresetField({ id, engineLabel, presets, value, onChange }) {
+  const names = presets.map((p) => (p?.name || '').trim()).filter(Boolean)
+  const current = typeof value === 'string' ? value.trim() : ''
+  // Fail-closed, mirroring resolveDefaultPresetName: a name matching nothing
+  // (renamed preset, hand-edited config.json) behaves as "None" everywhere, so
+  // the field must not silently show "None" as if the setting were empty.
+  const stale = !!current && !names.includes(current)
+  return (
+    <div className="border-t border-border pt-3">
+      <label htmlFor={id} className="block text-xs font-medium text-content">
+        Preset selected by default
+      </label>
+      <select
+        id={id}
+        value={stale ? '' : current}
+        onChange={(e) => onChange(e.target.value)}
+        className={`${INPUT_CLASS} sm:max-w-xs`}
+      >
+        <option value="">None</option>
+        {names.map((n) => <option key={n} value={n}>{n}</option>)}
+      </select>
+      <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        Which preset the {engineLabel} tuning panel starts on when you open a dataset.
+        “None” is the shipped default and keeps today’s behaviour exactly. You can still
+        pick another preset — or None — for a single run without changing this setting.
+      </p>
+      {stale && (
+        <p role="alert" className="mt-1 text-[0.6875rem] text-amber-400">
+          “{current}” is no longer one of your presets, so runs start on None. Pick a
+          preset above to set a new default.
+        </p>
+      )}
+    </div>
+  )
+}
+
 function KleinLorasCard({ config, setField }) {
   const presets = Array.isArray(config.klein?.generation_lora_presets)
     ? config.klein.generation_lora_presets : []
@@ -164,7 +243,7 @@ function KleinLorasCard({ config, setField }) {
     <Card
       id="klein-generation-lora-presets"
       title="Klein generation LoRA presets (optional)"
-      help={`Named combinations of your own LoRA files, chained after the consistency LoRA on the local Klein engine — inside a preset the order is the chain order (max ${MAX_GENERATION_LORAS} LoRAs each, ${MAX_GENERATION_LORA_PRESETS} presets). Pick each row from the LoRAs found under ComfyUI's models/loras (Klein-compatible ones are listed first; you can still type a path for a file not on disk yet) — any LoRA, any purpose. Per run, pick a preset in the workspace's 🖥️ Klein tuning panel ("None" by default). Presets and LoRA autocomplete by @waltm (Discord).`}
+      help={`Named combinations of your own LoRA files, chained after the consistency LoRA on the local Klein engine — inside a preset the order is the chain order (max ${MAX_GENERATION_LORAS} LoRAs each, ${MAX_GENERATION_LORA_PRESETS} presets). Pick each row from the LoRAs found under ComfyUI's models/loras (Klein-compatible ones are listed first; you can still type a path for a file not on disk yet) — any LoRA, any purpose. Per run, pick a preset in the workspace's 🖥️ Klein tuning panel — it opens on the default preset chosen below ("None" until you choose one), and picking something else there applies to that run only. Presets and LoRA autocomplete by @waltm (Discord).`}
     >
       {presets.length === 0 && (
         <p className="text-sm text-content-muted">No presets yet — create your first combination below.</p>
@@ -173,7 +252,8 @@ function KleinLorasCard({ config, setField }) {
         <LoraPresetCard key={i} preset={preset} index={i} presets={presets} save={save}
           loraScan={loraScan} engineLabel="Klein"
           strengthRange={() => ({ min: 0, max: 1.5 })}
-          defaultStrength={0.6} />
+          defaultStrength={0.6}
+          engineId="klein" fixedLora={config.klein?.consistency_lora || ''} />
       ))}
       <div className="flex items-center gap-3">
         <button
@@ -185,6 +265,92 @@ function KleinLorasCard({ config, setField }) {
         </button>
         <span className="text-xs text-content-muted">{presets.length}/{MAX_GENERATION_LORA_PRESETS}</span>
       </div>
+      <DefaultPresetField
+        id="klein-default-lora-preset" engineLabel="🖥️ Klein" presets={presets}
+        value={config.klein?.default_generation_lora_preset || ''}
+        onChange={(v) => setField('klein', 'default_generation_lora_preset', v)} />
+    </Card>
+  )
+}
+
+/* The pinnable Klein model slots. `key` is the DOM id the help registry focuses
+   (the contract test scans these literals); `cfg` is the klein.* config key;
+   `slot` matches caps.comfyui.klein_overrides.
+   Ported from socrasteeze's branch (GitHub #20). */
+const KLEIN_MODEL_SLOTS = [
+  { key: 'klein-model-unet', cfg: 'unet', slot: 'unet', pick: 'klein_unet', label: 'Diffusion model (UNET)',
+    hint: 'Full path from anywhere, or relative to a diffusion-model folder — e.g. klein/flux-2-klein-9b-fp8.safetensors under models/unet (a bare filename for a file sitting at a folder root). A filename without "fp8" loads at full precision instead of being quantized.' },
+  { key: 'klein-model-text_encoder', cfg: 'text_encoder', slot: 'text_encoder', pick: 'klein_text_encoder', label: 'Text encoder',
+    hint: 'Full path, or relative to models/text_encoders — e.g. qwen_3_8b_fp8mixed.safetensors.' },
+  { key: 'klein-model-vae', cfg: 'vae', slot: 'vae', pick: 'klein_vae', label: 'VAE',
+    hint: 'Full path, or relative to models/vae — e.g. flux2-vae.safetensors.' },
+  { key: 'klein-model-consistency_lora', cfg: 'consistency_lora', slot: 'consistency_lora', pick: 'klein_consistency_lora',
+    label: 'Consistency LoRA',
+    placeholder: 'Empty = no consistency LoRA',
+    missText: 'Not found — at the shipped name the LoRA is simply skipped (Setup can download it); a name you chose yourself stops the engine instead',
+    hint: 'Full path, or relative to models/loras — the structure-anchoring LoRA chained onto the Klein edit graph. Unlike the three above, this one has a shipped default and clearing it disables the LoRA rather than turning on auto-detection.' },
+]
+
+/* One badge per resolve status from caps.comfyui.klein_overrides. Two wordings
+   are deliberate rather than cosmetic:
+   - 'outside_roots' is NOT "not found" — the file IS there, ComfyUI simply
+     cannot reach it, and a different action fixes that;
+   - what happens after a miss is not the same for every slot, so the badge does
+     not claim it: the three model slots fall back to auto-detection, while the
+     consistency LoRA has no detection to fall back to (it is just skipped, and
+     reported as a missing asset Setup can download). Saying "auto-detection is
+     used" on that row would name a mechanism that does not exist for it. */
+function overrideBadge(st, missText) {
+  if (!st) return null
+  if (st.found) return { cls: 'text-emerald-400', text: 'Found' }
+  if (st.status === 'outside_roots') {
+    return { cls: 'text-amber-400',
+             text: "Could not be linked into ComfyUI's model folders — check permissions, or move the file" }
+  }
+  return { cls: 'text-amber-400', text: missText || 'Not found — the engine will refuse to run until you fix or clear this' }
+}
+
+/* ONE pinnable slot. Its own component because each row needs its OWN scan of a
+   DIFFERENT ComfyUI folder, and a hook cannot be called inside a .map. Each scan
+   is cached server-side on that folder's mtime, so four rows are four cheap
+   requests, not four directory walks. */
+function KleinModelSlotRow({ spec, config, setField, override }) {
+  const { key, cfg, label, hint, placeholder, missText, pick } = spec
+  const scan = useModelFiles(pick)
+  const badge = overrideBadge(override, missText)
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-x-2">
+        <label htmlFor={key} className="block text-sm font-medium text-content">{label}</label>
+        {badge && (
+          <span className={`text-xs sm:text-right ${badge.cls}`}>{badge.text}</span>
+        )}
+      </div>
+      <ModelFilePicker
+        id={key}
+        ariaLabel={`Klein ${label}`}
+        value={config.klein?.[cfg] || ''}
+        onChange={(v) => setField('klein', cfg, v)}
+        placeholder={placeholder || 'Empty = auto-detect'}
+        {...scan}
+      />
+      <p className="mt-1 text-[0.6875rem] text-content-subtle">{hint}</p>
+    </div>
+  )
+}
+
+function KleinModelFilesCard({ config, setField, caps }) {
+  const overrides = caps?.comfyui?.klein_overrides || {}
+  return (
+    <Card
+      id="klein-model-files"
+      title="Klein model files (optional)"
+      help="Pin the exact files the Klein graph loads instead of relying on auto-detection (the canonical download names, then a narrow token scan). Each field takes a full absolute path OR a ComfyUI-relative loader name. A path under one of ComfyUI's model folders (extra_model_paths.yaml roots included) is converted automatically to what the loader needs; a path from anywhere else is hardlinked into an lds-pinned/ folder so ComfyUI can load it without you moving a multi-GB file. Each field lists the files actually found in that ComfyUI folder — you can still type a name or a full path for a file that is not there yet. Leave a field empty to keep auto-detection for that slot. A pinned file that cannot be resolved STOPS the engine and says which one: it used to fall back to auto-detection, which meant the graph loaded a different file from the one shown here and nobody found out until the images came back wrong. Clearing the field is how you go back to auto-detection. Contributed by socrasteeze (GitHub)."
+    >
+      {KLEIN_MODEL_SLOTS.map((s) => (
+        <KleinModelSlotRow key={s.key} spec={s} config={config} setField={setField}
+          override={overrides[s.slot]} />
+      ))}
     </Card>
   )
 }
@@ -273,15 +439,17 @@ function KleinGenerationCard({ config, setField, configDefaults }) {
 /* Krea 2 Identity Edit — the second LOCAL engine. Its headline knob is
    `grounding_px`, THE consistency <-> prompt-adherence dial, so it is first and
    explained in plain words: a number nobody can interpret is not a setting.
-   The two path fields are BLANK-MEANS-AUTO on purpose: the resolver finds the
-   files by canonical name then by a narrow token across every ComfyUI model
-   root, so an install that looks nothing like the developer's works untouched —
-   they exist for the person whose files are named something else. */
-const KREA_GROUNDING_MIN = 512      // mirrors krea_edit_helper.GROUNDING_PX_MIN
-const KREA_GROUNDING_MAX = 1536     // mirrors krea_edit_helper.GROUNDING_PX_MAX
-const KREA_REF_BOOST_MIN = 0        // mirrors krea_edit_helper.REF_BOOST_MIN
-const KREA_REF_BOOST_MAX = 10       // mirrors krea_edit_helper.REF_BOOST_MAX
-const KREA_STEPS_MAX = 50
+   The FOUR calibration dials of this card (grounding, steps, reference pull,
+   identity LoRA strength) are the same four the workspace's "🧬 Krea 2 Edit
+   tuning" panel offers, on purpose: they are judged on the images that panel
+   produces and configured here, and since every control writes the SAME global
+   key through the same endpoint there is only ever one value to read.
+   The two path fields are NOT duplicated there — they are filled once at
+   install, not adjusted while looking at a result. They are BLANK-MEANS-AUTO on
+   purpose: the resolver finds the files by canonical name then by a narrow
+   token across every ComfyUI model root, so an install that looks nothing like
+   the developer's works untouched — they exist for the person whose files are
+   named something else. */
 
 // Mirror seedvr2_helper's clamps. The SERVER stays the authority (it re-clamps
 // every value), these only stop the input offering a number that would be
@@ -290,6 +458,11 @@ const SEEDVR2_RESOLUTION_MIN = 256
 const SEEDVR2_RESOLUTION_MAX = 4096
 const SEEDVR2_MAX_RESOLUTION_MAX = 8192
 const SEEDVR2_BLOCKS_MAX = 36
+// seedvr2_helper.TILE_PX_MIN / TILE_PX_MAX, and the factor the 'auto' crossover
+// is derived from (TILE_ABOVE_FACTOR) — shown, never enforced here.
+const SEEDVR2_TILE_MIN = 512
+const SEEDVR2_TILE_MAX = 2048
+const SEEDVR2_TILE_ABOVE_FACTOR = 1.5
 // seedvr2_helper.COLOR_CORRECTIONS — the node's own enum, in its own order.
 const SEEDVR2_COLOR_MODES = ['lab', 'wavelet', 'wavelet_adaptive', 'hsv', 'adain', 'none']
 
@@ -478,12 +651,27 @@ function MinimaxH3Card({ config, setField, configDefaults, caps }) {
   )
 }
 
-function KreaCard({ config, setField, configDefaults }) {
+function KreaCard({ config, setField, configDefaults, caps }) {
   const krea = config.krea || {}
   const reset = { config, configDefaults, setField }
   const dflt = (key) => defaultValueAt(configDefaults, 'krea', key)
+  // One scan per slot, fired when the card mounts. Both degrade to an empty list
+  // (=> plain free-text field) rather than blocking the panel — an absolute path
+  // from outside every ComfyUI root is a legitimate value no scan can enumerate.
+  const baseScan = useModelFiles('krea_base_model')
+  const identityScan = useModelFiles('krea_identity_lora')
   const grounding = Number(krea.grounding_px ?? dflt('grounding_px'))
-  const boost = Number(krea.ref_boost ?? dflt('ref_boost'))
+  const steps = krea.steps ?? dflt('steps')
+  // Clamped for DISPLAY only: a config.json hand-edited past the server's clamp
+  // would otherwise park the slider thumb at an end while the label showed a
+  // number the graph will never receive. The server re-clamps on its side.
+  const refBoost = clampRefBoost(krea.ref_boost, dflt('ref_boost'))
+  const identityStrength = clampIdentityStrength(krea.identity_lora_strength,
+    dflt('identity_lora_strength'))
+  // WHICH Krea base this install loads, named. Resolved SERVER-side
+  // (caps.comfyui.krea_base_resolved = the resolve_krea_unet() the generation
+  // path calls) — the browser ranks nothing. See utils/kreaBaseNote.js.
+  const baseNote = kreaBaseNote(krea.base_model, caps?.comfyui?.krea_base_resolved)
   return (
     <Card
       id="krea-engine"
@@ -499,7 +687,7 @@ function KreaCard({ config, setField, configDefaults }) {
           type="range"
           min={KREA_GROUNDING_MIN}
           max={KREA_GROUNDING_MAX}
-          step={64}
+          step={KREA_GROUNDING_STEP}
           value={grounding}
           onChange={(e) => setField('krea', 'grounding_px', Number(e.target.value))}
           className="mt-1 w-full accent-violet-500"
@@ -511,7 +699,8 @@ function KreaCard({ config, setField, configDefaults }) {
           the reference more, but can copy the pose and outfit you asked it to change.
           512 px is the dataset-restaging balance: it keeps the prompt and selected shot card
           in charge while preserving identity. Raise it deliberately when reference likeness
-          matters more.
+          matters more. Also adjustable, with this exact value, from the workspace&rsquo;s
+          🧬 Krea 2 Edit tuning panel.
         </p>
         <ResetToDefault label="Reference grounding" section="krea" field="grounding_px" {...reset} />
       </div>
@@ -564,19 +753,74 @@ function KreaCard({ config, setField, configDefaults }) {
         <input
           id="krea-steps"
           type="number"
-          min={1}
+          min={KREA_STEPS_MIN}
           max={KREA_STEPS_MAX}
           step={1}
-          value={krea.steps ?? dflt('steps')}
+          value={steps}
           onChange={(e) => setField('krea', 'steps',
             e.target.value === '' ? dflt('steps') : Number(e.target.value))}
           className={INPUT_CLASS}
         />
         <p className="mt-1 text-[0.6875rem] text-content-subtle">
-          {dflt('steps')} is the value the model&rsquo;s own reference workflow uses. More is
-          slower and rarely better on this pipeline.
+          {stepsDescription(steps)}. {dflt('steps')} is the value the model&rsquo;s own
+          reference workflow uses. More is slower and rarely better on this pipeline.
         </p>
         <ResetToDefault label="Sampler steps" section="krea" field="steps" {...reset} />
+      </div>
+
+      {/* The two calibration dials that used to have NO input on this page: they
+          were reachable only from the workspace panel, so "where do I change
+          this?" had a different answer per dial. Same key, same endpoint, same
+          value — a slider here and a slider there cannot disagree. */}
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="krea-ref-boost" className="block text-xs font-medium text-content">
+          Reference pull ({refBoost})
+        </label>
+        <input
+          id="krea-ref-boost"
+          type="range"
+          min={KREA_REF_BOOST_MIN}
+          max={KREA_REF_BOOST_MAX}
+          step={KREA_REF_BOOST_STEP}
+          value={refBoost}
+          onChange={(e) => setField('krea', 'ref_boost',
+            clampRefBoost(e.target.value, dflt('ref_boost')))}
+          className="mt-1 w-full accent-violet-500"
+        />
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          {refBoostDescription(refBoost)}. How hard the source latent is pushed back into the
+          model at every denoising step — the lever for &ldquo;the subject does not look enough
+          like my reference&rdquo;. High values also recopy the composition, pose and outfit the
+          shot card asked it to change. Also on the workspace&rsquo;s 🧬 Krea 2 Edit tuning panel,
+          where you judge the result.
+        </p>
+        <ResetToDefault label="Reference pull" section="krea" field="ref_boost"
+          value={refBoost} {...reset} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="krea-identity-lora-strength" className="block text-xs font-medium text-content">
+          Identity LoRA strength ({identityStrength})
+        </label>
+        <input
+          id="krea-identity-lora-strength"
+          type="range"
+          min={KREA_IDENTITY_STRENGTH_MIN}
+          max={KREA_IDENTITY_STRENGTH_MAX}
+          step={KREA_IDENTITY_STRENGTH_STEP}
+          value={identityStrength}
+          onChange={(e) => setField('krea', 'identity_lora_strength',
+            clampIdentityStrength(e.target.value, dflt('identity_lora_strength')))}
+          className="mt-1 w-full accent-violet-500"
+        />
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          {identityStrengthDescription(identityStrength)}. The weight of the Krea 2
+          identity-edit LoRA itself — the piece that carries the face across. Below 1 loosens
+          the likeness, 0 disables the face transfer, above 1 is past what the file was
+          trained for and can posterize. Also on the workspace&rsquo;s 🧬 Krea 2 Edit tuning panel.
+        </p>
+        <ResetToDefault label="Identity LoRA strength" section="krea"
+          field="identity_lora_strength" value={identityStrength} {...reset} />
       </div>
 
       <div className="mt-3 sm:max-w-md">
@@ -646,18 +890,23 @@ function KreaCard({ config, setField, configDefaults }) {
         <label htmlFor="krea-base-model" className="block text-xs font-medium text-content">
           Base model file (optional)
         </label>
-        <input
+        <ModelFilePicker
           id="krea-base-model"
-          type="text"
+          ariaLabel="Krea base model file"
           value={krea.base_model ?? ''}
+          onChange={(v) => setField('krea', 'base_model', v)}
           placeholder="auto — finds a Krea 2 Turbo/Raw build"
-          onChange={(e) => setField('krea', 'base_model', e.target.value)}
-          className={INPUT_CLASS}
+          {...baseScan}
         />
+        <p className={`mt-1 font-mono text-[0.6875rem] ${KREA_BASE_NOTE_CLASS[baseNote.tone]}`}>
+          {baseNote.text}
+        </p>
         <p className="mt-1 text-[0.6875rem] text-content-subtle">
           Leave blank unless you own several Krea builds. Blank = the app picks a Krea 2
-          Turbo then Raw model from your ComfyUI. Non-Krea-2 checkpoints that merely carry
-          &ldquo;krea&rdquo; in their name are skipped: the identity LoRA renders pure noise on them.
+          Turbo then Raw model from your ComfyUI. The list is what the app would actually
+          elect from: non-Krea-2 checkpoints that merely carry &ldquo;krea&rdquo; in their name are
+          skipped there too, because the identity LoRA renders pure noise on them. Pick a
+          file that is not on disk and Krea refuses to run rather than loading another one.
         </p>
         {/* The default here is the EMPTY string, and resetting writes exactly
             that: blank means "resolve it yourself", and a reset must give that
@@ -670,18 +919,18 @@ function KreaCard({ config, setField, configDefaults }) {
         <label htmlFor="krea-identity-lora" className="block text-xs font-medium text-content">
           Identity edit LoRA (optional)
         </label>
-        <input
+        <ModelFilePicker
           id="krea-identity-lora"
-          type="text"
+          ariaLabel="Krea identity edit LoRA"
           value={krea.identity_lora ?? ''}
-          placeholder="krea/krea2_identity_edit_v1_2.safetensors"
-          onChange={(e) => setField('krea', 'identity_lora', e.target.value)}
-          className={INPUT_CLASS}
+          onChange={(v) => setField('krea', 'identity_lora', v)}
+          placeholder="blank = find krea2_identity_edit automatically"
+          {...identityScan}
         />
         <p className="mt-1 text-[0.6875rem] text-content-subtle">
-          Path relative to ComfyUI&rsquo;s models/loras. If the file isn&rsquo;t there under this
-          name, the app searches your LoRA folders for a krea2_identity_edit file, so a
-          renamed download still works.
+          Blank = the app searches your LoRA folders for a krea2_identity_edit file, so a
+          renamed download still works. Name one here and that is the LoRA it loads — if it
+          is not on disk, Krea refuses to run instead of substituting another face transfer.
         </p>
         <ResetToDefault label="Identity edit LoRA" section="krea" field="identity_lora" {...reset} />
       </div>
@@ -903,6 +1152,25 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
   }, [ready])
   const installed = (models && models.installed) || []
   const catalog = (models && models.catalog) || []
+  // Every file in the SEEDVR2 folder, split on whether its NAME looks like a
+  // VAE. The unlikely ones are still offered, in their own group and labelled:
+  // the pin exists for the install whose VAE is named something the automatic
+  // path cannot recognise, and hiding those files would leave that install with
+  // a picker it cannot use.
+  const vaeChoices = (models && models.vae_choices) || []
+  const vaeLikely = vaeChoices.filter((v) => v.likely_vae)
+  const vaeOther = vaeChoices.filter((v) => !v.likely_vae)
+  const tilePx = Number(svr.tile_px ?? dflt('tile_px')) || SEEDVR2_TILE_MIN
+  // What 'auto' will actually use as its crossover: the explicit threshold, or
+  // the tile side x1.5 — the same arithmetic the server does.
+  const tileAbove = Number(svr.tile_threshold ?? dflt('tile_threshold')) > 0
+    ? Number(svr.tile_threshold ?? dflt('tile_threshold'))
+    : Math.round(tilePx * SEEDVR2_TILE_ABOVE_FACTOR)
+  // ...and what that means for the target actually configured. The crossover is
+  // strict AND derived (1.5x the tile), so it lands exactly on round numbers
+  // people type — a target sitting on it ran whole with nothing said anywhere.
+  const laneLine = laneForTarget(svr.tiling ?? dflt('tiling'),
+    Number(svr.resolution ?? dflt('resolution')), tileAbove)
   return (
     <Card
       id="seedvr2-engine"
@@ -913,6 +1181,18 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
         {ready
           ? 'Ready — SeedVR2 appears in the workspace bulk actions.'
           : 'Not ready yet. Setup ▸ ComfyUI lists what is missing and can download the weights; the node pack itself is installed from ComfyUI (search “SeedVR2” in ComfyUI-Manager), then restart ComfyUI.'}
+      </p>
+
+      <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <a href="https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler" target="_blank"
+          rel="noreferrer" className="text-sky-300 underline hover:text-sky-200">Node pack →</a>
+        {' · '}
+        <a href="https://huggingface.co/numz/SeedVR2_comfyUI" target="_blank"
+          rel="noreferrer" className="text-sky-300 underline hover:text-sky-200">Model weights →</a>
+        {' · '}
+        <a href="https://github.com/ByteDance-Seed/SeedVR" target="_blank"
+          rel="noreferrer" className="text-sky-300 underline hover:text-sky-200">SeedVR2 by ByteDance-Seed →</a>
+        {' — all Apache-2.0.'}
       </p>
 
       <div className="mt-3 sm:max-w-md">
@@ -967,6 +1247,116 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
           </ul>
         )}
         <ResetToDefault label="Model build" section="seedvr2" field="model" {...reset} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="seedvr2-vae" className="block text-xs font-medium text-content">
+          VAE build (optional)
+        </label>
+        <select
+          id="seedvr2-vae"
+          value={svr.vae ?? ''}
+          onChange={(e) => setField('seedvr2', 'vae', e.target.value)}
+          className={INPUT_CLASS}
+        >
+          <option value="">auto — ema_vae_fp16, or the first VAE in the folder</option>
+          {vaeLikely.map((v) => <option key={v.file} value={v.file}>{v.file}</option>)}
+          {vaeOther.length > 0 && (
+            <optgroup label="Other files in models/SEEDVR2 (not named like a VAE)">
+              {vaeOther.map((v) => <option key={v.file} value={v.file}>{v.file}</option>)}
+            </optgroup>
+          )}
+        </select>
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          Leave it on auto unless your VAE file is named something with no
+          &ldquo;vae&rdquo; in it — that is the only case the automatic search misses, and
+          the reason the second group above is offered at all. Picking a DiT build here
+          fails inside the loader node, so choose from that group only if you know the
+          file is a VAE.
+        </p>
+        <ResetToDefault label="VAE build" section="seedvr2" field="vae" {...reset} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="seedvr2-tiling" className="block text-xs font-medium text-content">
+          High-resolution tiling
+        </label>
+        <select
+          id="seedvr2-tiling"
+          value={svr.tiling ?? dflt('tiling')}
+          onChange={(e) => setField('seedvr2', 'tiling', e.target.value)}
+          className={INPUT_CLASS}
+        >
+          <option value="auto">Tile when it helps (recommended)</option>
+          <option value="always">Always tile large frames</option>
+          <option value="never">Never tile</option>
+        </select>
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          Needs the <code>Comfyui_TTP_Toolset</code> node pack; without it this has no
+          effect. Tiling is not only about memory: a tile is upscaled at the size the
+          model works well at, so a large frame keeps far more fine detail than one
+          processed whole — contributed and measured by SurpassHR (GitHub&nbsp;#32).
+          On <b>Tile when it helps</b> nothing is tiled at or below {tileAbove} px on the
+          short edge: the model is already in its comfortable range there and a grid would
+          only add seams. <b>Always</b> tiles any frame bigger than one tile; pick{' '}
+          <b>never</b> if you ever see a seam.
+        </p>
+        {laneLine && (
+          <p className="mt-1 text-[0.6875rem] text-sky-300">{laneLine}</p>
+        )}
+        <ResetToDefault label="High-resolution tiling" section="seedvr2" field="tiling" {...reset} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="seedvr2-tile-px" className="block text-xs font-medium text-content">
+          Tile size (px)
+        </label>
+        <input
+          id="seedvr2-tile-px"
+          type="number"
+          min={SEEDVR2_TILE_MIN}
+          max={SEEDVR2_TILE_MAX}
+          step={64}
+          value={svr.tile_px ?? dflt('tile_px')}
+          onChange={(e) => setField('seedvr2', 'tile_px',
+            e.target.value === '' ? dflt('tile_px') : Number(e.target.value))}
+          className={INPUT_CLASS}
+        />
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          The memory dial of this engine: a run holds one tile at a time, so
+          <b> lower it if upscales run out of VRAM</b> (768 or 512 on an 8 GB card) and
+          raise it on a big card for fewer seams and more context per tile.
+          {' '}{dflt('tile_px')} px is the contributed default. It also sizes the model&rsquo;s
+          own tiled encode/decode, so it helps even <i>without</i> the tiling node
+          pack — this is the one setting worth touching before giving up on a large upscale.
+        </p>
+        <ResetToDefault label="Tile size" section="seedvr2" field="tile_px" {...reset} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="seedvr2-tile-threshold" className="block text-xs font-medium text-content">
+          Start tiling above (px on the short edge, 0 = automatic)
+        </label>
+        <input
+          id="seedvr2-tile-threshold"
+          type="number"
+          min={0}
+          max={SEEDVR2_MAX_RESOLUTION_MAX}
+          step={64}
+          value={svr.tile_threshold ?? dflt('tile_threshold')}
+          onChange={(e) => setField('seedvr2', 'tile_threshold',
+            e.target.value === '' ? dflt('tile_threshold') : Number(e.target.value))}
+          className={INPUT_CLASS}
+        />
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          Where <b>Tile when it helps</b> switches over. <b>0</b> (default) follows the tile
+          size — {SEEDVR2_TILE_ABOVE_FACTOR}&times; it, so {tilePx} px tiles start tiling
+          above {Math.round(tilePx * SEEDVR2_TILE_ABOVE_FACTOR)} px. Set a number to place
+          the crossover yourself: lower it to tile sooner (safer on a small card), raise it
+          to keep more targets in one fast pass. It has no effect on <b>always</b> or
+          <b> never</b>.
+        </p>
+        <ResetToDefault label="Start tiling above" section="seedvr2" field="tile_threshold" {...reset} />
       </div>
 
       <div className="mt-3 sm:max-w-md">
@@ -1083,7 +1473,7 @@ function KreaLorasCard({ config, setField }) {
     <Card
       id="krea-generation-lora-presets"
       title="Krea 2 Edit generation LoRA presets (optional)"
-      help={`Named combinations of your own LoRA files, chained after the identity-edit LoRA when Krea 2 Edit generates dataset images — inside a preset the order is the chain order (max ${MAX_GENERATION_LORAS} LoRAs each, ${MAX_GENERATION_LORA_PRESETS} presets). Pick each row from the LoRAs found under ComfyUI's models/loras; Krea-compatible ones are listed first, and a LoRA of another architecture is badged because ComfyUI would load it as a silent no-op here. Strength goes to 6, or to 20 for utility LoRAs whose filename says filter-bypass — those have no effect below ~10. Per run, pick a preset in the workspace's 🧬 Krea 2 Edit tuning panel ("None" by default). Only the model side is patched, so a LoRA's text-encoder weights are ignored. Preset mechanism by @waltm (Discord).`}
+      help={`Named combinations of your own LoRA files, chained after the identity-edit LoRA when Krea 2 Edit generates dataset images — inside a preset the order is the chain order (max ${MAX_GENERATION_LORAS} LoRAs each, ${MAX_GENERATION_LORA_PRESETS} presets). Pick each row from the LoRAs found under ComfyUI's models/loras; Krea-compatible ones are listed first, and a LoRA of another architecture is badged because ComfyUI would load it as a silent no-op here. Strength goes to 6, or to 20 for utility LoRAs whose filename says filter-bypass — those have no effect below ~10. Per run, pick a preset in the workspace's 🧬 Krea 2 Edit tuning panel — it opens on the default preset chosen below ("None" until you choose one), and picking something else there applies to that run only. Only the model side is patched, so a LoRA's text-encoder weights are ignored. Preset mechanism by @waltm (Discord).`}
     >
       {presets.length === 0 && (
         <p className="text-sm text-content-muted">No presets yet — create your first combination below.</p>
@@ -1092,7 +1482,8 @@ function KreaLorasCard({ config, setField }) {
         <LoraPresetCard key={i} preset={preset} index={i} presets={presets} save={save}
           loraScan={loraScan} engineLabel="Krea 2"
           strengthRange={kreaStrengthRange} defaultStrength={KREA_LORA_STRENGTH_DEFAULT}
-          placeholder="krea/my-lora.safetensors" />
+          placeholder="krea/my-lora.safetensors"
+          engineId="krea" fixedLora={config.krea?.identity_lora || ''} />
       ))}
       <div className="flex items-center gap-3">
         <button
@@ -1104,6 +1495,10 @@ function KreaLorasCard({ config, setField }) {
         </button>
         <span className="text-xs text-content-muted">{presets.length}/{MAX_GENERATION_LORA_PRESETS}</span>
       </div>
+      <DefaultPresetField
+        id="krea-default-lora-preset" engineLabel="🧬 Krea 2 Edit" presets={presets}
+        value={config.krea?.default_generation_lora_preset || ''}
+        onChange={(v) => setField('krea', 'default_generation_lora_preset', v)} />
     </Card>
   )
 }
@@ -1715,11 +2110,13 @@ export default function EnginesSection(props) {
         </fieldset>
       </Card>
 
+      <KleinModelFilesCard config={config} setField={setField} caps={caps} />
+
       <KleinGenerationCard config={config} setField={setField} configDefaults={configDefaults} />
 
       <KleinLorasCard config={config} setField={setField} />
 
-      <KreaCard config={config} setField={setField} configDefaults={configDefaults} />
+      <KreaCard config={config} setField={setField} configDefaults={configDefaults} caps={caps} />
 
       <KreaLorasCard config={config} setField={setField} />
 

@@ -13,17 +13,26 @@
  * subject). Each level shows its own remaining/handled counts, because the whole
  * point is to see how far down the funnel the bank already is.
  *
+ * LEVELS 2 AND 3 OPEN A LAUNCH WINDOW, like every other pass. They were the last
+ * two actions on this page that fired straight from the click, and they are the
+ * only two that produce new image files: a real bank offered "✂ Auto-crop
+ * (16 052)" and "🧽 Inpaint (16 507)" with no way to say which images. The window
+ * carries the kept / undecided / unkept / all scope, the selection, the measured
+ * count per line — and, because these two write files, what ↩ Undo really takes
+ * back and what it does not.
+ *
  * All of the "which button is live, and why not" logic lives in the JSX-free
  * `bankWatermark.js` so `node --test` covers it; this file is the shell.
  */
 import { useCallback, useEffect, useState } from 'react'
 import { apiFetch, postJson } from '../../api/fetchClient'
+import PassDialog from './PassDialog.jsx'
 import KleinModelSetting from '../shared/KleinModelSetting'
 import { useCapabilities } from '../../context/CapabilitiesContext'
 import { useToast } from '../common/Toast'
 import {
   cropLevelState, findLevelState, hasCleanedImages, inpaintLevelState,
-  levelCounts, maskNote, progressSummary, rescanNote,
+  levelCounts, maskNote, progressSummary, rescanNote, sourceNote,
 } from './bankWatermark.js'
 import { localEngineUnavailableReason } from '../../utils/localEngineReason'
 
@@ -47,19 +56,27 @@ function LevelCard({ index, title, blurb, state, onRun }) {
       </button>
       <p className="text-[0.6875rem] text-content-subtle">
         {state.done > 0 ? `${state.done} already handled here. ` : ''}
-        {state.reason || `${state.remaining} image(s) waiting.`}
+        {state.reason || state.note || `${state.remaining} image(s) waiting.`}
       </p>
     </div>
   )
 }
 
-export default function BankWatermarkPanel({ bankId, live, onChanged }) {
+export default function BankWatermarkPanel({
+  bankId, live, onFind, onChanged, payload = null, selectedIds = [],
+}) {
   const { caps } = useCapabilities()
   const toast = useToast()
   const [levels, setLevels] = useState(null)
   const [method, setMethod] = useState('auto')
   const [comparing, setComparing] = useState(false)
   const [showOriginal, setShowOriginal] = useState(false)
+  /* Which cleaning level's launch window is open ('watermark_crop' /
+     'watermark_inpaint'), and the scope each one is aimed at. The scope lives
+     HERE rather than inside the dialog so closing a window does not silently
+     undo a choice — the rule the other pass windows already follow. */
+  const [cleanOpen, setCleanOpen] = useState(null)
+  const [cleanScope, setCleanScope] = useState({})
 
   const load = useCallback(async () => {
     try {
@@ -84,18 +101,56 @@ export default function BankWatermarkPanel({ bankId, live, onChanged }) {
     }
   }
 
+  /* A launch coming from a window. It answers {ok,error} instead of toasting:
+     the window owns its own refusal surface and stays open with the choices
+     intact, so "nothing to repaint in this scope" lands next to the scope that
+     produced it (utils/submitOutcome.js).
+
+     Every key is spread-if-set, so a run that changes nothing posts the SAME
+     body the button posted before this window existed — the contract the other
+     pass dialogs already follow. */
+  const runLevel = async (endpoint, { statuses, imageIds }, extra = {}) => {
+    const body = {
+      ...extra,
+      ...(statuses ? { statuses } : {}),
+      ...(imageIds === 'selection' && selectedIds.length
+        ? { image_ids: [...selectedIds] } : {}),
+    }
+    try {
+      await postJson(`/api/bank/${bankId}/${endpoint}`, body)
+    } catch (e) {
+      return { ok: false, error: e?.message || 'Could not start the run.' }
+    }
+    await load()
+    await onChanged?.()
+    return { ok: true }
+  }
+
   // The ONE shared sentence for "why not Klein", the same one the generation
   // picker and the ✦ Edit modal show — instead of a per-screen catch-all that
   // blames ComfyUI and the weights whatever the real gap is.
   const kleinReason = localEngineUnavailableReason('klein', caps)
-  const find = findLevelState(levels, { live, visionReady: !!caps.ollama?.vision_model_ready })
-  const crop = cropLevelState(levels, { live })
+  const find = findLevelState(levels, {
+    live,
+    visionReady: !!caps.ollama?.vision_model_ready,
+    detectorReady: !!caps.watermark_detect,
+  })
+  const source = sourceNote(levels)
+  /* The bin is invisible to /watermark/levels (its pool has always excluded
+     rejected images), so the two levels read their bin figure from the bank
+     payload's per-pass table — the one the server computes from the SAME clause
+     the run filters on. Without it, a bank whose flagged images all sit in the
+     bin would show two dead buttons and no way to reach the scope that works. */
+  const cropBin = payload?.pass_scopes?.watermark_crop?.todo?.reject || 0
+  const inpaintBin = payload?.pass_scopes?.watermark_inpaint?.todo?.reject || 0
+  const crop = cropLevelState(levels, { live, binWaiting: cropBin })
   const inpaint = inpaintLevelState(levels, {
     live,
     method,
     lamaReady: !!caps.watermark_inpaint,
     kleinReady: !!caps.watermark_klein,
     kleinReason,
+    binWaiting: inpaintBin,
   })
   const note = rescanNote(levels)
   // What the hand-edited masks change for the two levels below (and, loudest, an
@@ -135,22 +190,23 @@ export default function BankWatermarkPanel({ bankId, live, onChanged }) {
         find them, then clear them in two manual steps — your original files are never modified
       </p>
       <p className="text-xs text-content-subtle">{progressSummary(levels)}</p>
+      {/* WHO ruled, and who will rule next. Wraps onto its own line at 400 px
+          rather than being truncated — the source is the actionable half of a
+          flag the user disagrees with. */}
+      {source && <p className="text-[0.6875rem] text-content-subtle">🔎 {source}</p>}
       {note && <p className="text-xs text-amber-300/90">⚠️ {note}</p>}
       {masks && <p className="text-xs text-content-subtle">🚩 {masks}</p>}
 
       <div className="flex flex-wrap gap-2">
         <LevelCard index={1} title="Find them" state={find}
-          blurb="Scans every non-rejected image for an overlaid logo/URL and records WHERE it sits — the two steps below route on that box."
-          onRun={() => run(`/api/bank/${bankId}/watermark`, {},
-            '🚩 Watermark scan started — Stop any time.')} />
+          blurb="Scans the images you choose for an overlaid logo/URL and records WHERE it sits — the two steps below route on that box."
+          onRun={onFind} />
         <LevelCard index={2} title="Crop it off" state={crop}
           blurb="Cuts the border strip holding the mark. No model, no GPU, and no invented pixel — try this one first."
-          onRun={() => run(`/api/bank/${bankId}/watermark/crop`, {},
-            '✂ Auto-crop started — Stop any time.')} />
+          onRun={() => setCleanOpen('watermark_crop')} />
         <LevelCard index={3} title="Repaint what's left" state={inpaint}
           blurb="Repaints the marks a crop can't remove. LaMa is fast; Klein is slower but also clears marks on the subject."
-          onRun={() => run(`/api/bank/${bankId}/watermark/inpaint`, { method },
-            '🧽 Inpainting started — Stop any time.')} />
+          onRun={() => setCleanOpen('watermark_inpaint')} />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -218,6 +274,39 @@ export default function BankWatermarkPanel({ bankId, live, onChanged }) {
         </div>
       )}
       </div>
+      )}
+
+      {/* The two file-writing levels' launch windows. Same component, same three
+          blocks, same measured scope lines as the passes above — the point being
+          that these two are not a different kind of action just because they live
+          inside the funnel. */}
+      {cleanOpen && (
+        <PassDialog passId={cleanOpen} payload={payload} live={live}
+          selectionSize={selectedIds.length}
+          scope={cleanScope[cleanOpen] || ''}
+          onScope={(v) => setCleanScope((s) => ({ ...s, [cleanOpen]: v }))}
+          onClose={() => setCleanOpen(null)}
+          onLaunch={(r) => runLevel(
+            cleanOpen === 'watermark_crop' ? 'watermark/crop' : 'watermark/inpaint',
+            r,
+            cleanOpen === 'watermark_inpaint' ? { method } : {},
+          )}>
+          {cleanOpen === 'watermark_inpaint' && (
+            /* WHICH engine this run will use. The toggle stays on the panel —
+               it also decides whether the button is live at all, and two
+               authorities for one value is how they drift — but a window that
+               named no engine would hide the single biggest difference between
+               two runs of this level. */
+            <p className="m-0 rounded-md border border-border bg-surface-raised px-2 py-1.5 text-[11px] leading-snug text-content-muted">
+              Engine: <span className="font-semibold text-content">
+                {method === 'klein' ? 'Klein' : 'LaMa'}
+              </span>{method === 'klein'
+                ? ' — slower, and the only one that clears a mark ON the subject.'
+                : ' — fast; a mark on the subject stays flagged instead of being smeared.'}
+              {' '}Change it on the 🚩 Watermarks panel, next to this level.
+            </p>
+          )}
+        </PassDialog>
       )}
     </div>
   )

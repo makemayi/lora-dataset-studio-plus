@@ -9,6 +9,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { fmt } from '../../../utils/studioFormat';
 import { flipOrder } from './flipOrder';
+import { runKey, variantKey, variantOf, cellKey, distinctPrompts } from './resultKeys';
 import RunSelector from './RunSelector';
 import ResultsGrid from './ResultsGrid';
 import ExportGridModal from './ExportGridModal';
@@ -27,25 +28,29 @@ export default function ResultsArea({ datasetId, d, studio, vote, onOpen }) {
   const runs = useMemo(() => {
     const groups = new Map();
     for (const c of d?.cells || []) {
-      // Un lancement = un run_seed (regroupe les N seeds d'un batch). Fallback sur
-      // `seed` pour les anciens runs (avant la colonne run_seed).
-      const runSeed = c.run_seed ?? c.seed;
-      // Un lancement = un run_seed (N seeds d'un batch + TOUS les modèles de base
-      // balayés). Le modèle est un axe de VARIANTE, pas un run distinct.
-      const key = `${runSeed}|${c.prompt || ''}`;
+      // Un lancement = son `run_id` (cf. resultKeys.runKey) : les N seeds d'un
+      // batch, TOUS les modèles de base balayés ET tous les prompts du lot 📝.
+      // Le modèle comme le prompt sont des axes de VARIANTE, pas des runs
+      // distincts — les mettre dans cette clé coupait un lot de N prompts en N
+      // pseudo-runs, dont la vue n'en montrait qu'un.
+      const key = runKey(c);
       let g = groups.get(key);
       if (!g) {
-        g = { key, seed: runSeed, prompt: c.prompt || '', models: new Set(),
-              cells: [], latestId: 0, likes: 0, dislikes: 0 };
+        g = { key, seed: c.run_seed ?? c.seed, prompt: c.prompt || '', models: new Set(),
+              prompts: new Set(), cells: [], latestId: 0, likes: 0, dislikes: 0 };
         groups.set(key, g);
       }
       g.cells.push(c);
       if (c.z_model_label) g.models.add(c.z_model_label);
+      g.prompts.add(c.prompt || '');
       if (c.id > g.latestId) g.latestId = c.id;
       if (c.rating === 1) g.likes += 1; else if (c.rating === -1) g.dislikes += 1;
     }
     return [...groups.values()].map((g) => ({
       ...g, modelLabel: g.models.size > 1 ? `${g.models.size} models` : ([...g.models][0] || ''),
+      // Même règle que les modèles : un lot annonce son COMPTE, pas le premier de
+      // ses prompts — le sélecteur mentirait en nommant un seul des cinq.
+      promptLabel: g.prompts.size > 1 ? `${g.prompts.size} prompts` : g.prompt,
     })).sort((a, b) => b.latestId - a.latestId);
   }, [d]);
   const activeRunKey = (runs.find((r) => r.key === selRun) ? selRun : runs[0]?.key) || null;
@@ -54,15 +59,14 @@ export default function ResultsArea({ datasetId, d, studio, vote, onOpen }) {
     return r ? r.cells : [];
   }, [runs, activeRunKey]);
 
-  // Dernière cellule par config dans le run affiché.
-  // Clé d'une cellule = checkpoint|strength|format|cfg|steps|steps2 (steps2 = pass 2
-  // SDXL ; vide pour Z-Image → clé inchangée).
-  const ckey = (c) => `${c.checkpoint}|${c.strength}|${c.z_model || ''}|${c.aspect || ''}|${c.cfg ?? ''}|${c.steps ?? ''}|${c.steps2 ?? ''}`;
+  // Cellules par config dans le run affiché (clé : resultKeys.cellKey — checkpoint
+  // × strength × la variante, PROMPT COMPRIS ; c'est la même fonction que celle
+  // dont `ResultCell` se sert pour retrouver sa case).
   // Batch : TOUTES les cellules par config (les N seeds), triées par seed → bande.
   const cellList = useMemo(() => {
     const m = new Map();
     for (const c of displayedCells) {
-      const k = ckey(c);
+      const k = cellKey(c);
       if (!m.has(k)) m.set(k, []);
       m.get(k).push(c);
     }
@@ -73,11 +77,15 @@ export default function ResultsArea({ datasetId, d, studio, vote, onOpen }) {
   // --- Ordre de FEUILLETAGE de la lightbox --------------------------------------
   // Le set navigable = les cellules AFFICHÉES (run courant), triées pour que les
   // variantes de strength d'un même rendu soient adjacentes : variante (z_model /
-  // aspect / cfg / steps) → checkpoint → seed → STRENGTH en dernier. Voir flipOrder.
+  // aspect / cfg / steps / prompt) → checkpoint → seed → STRENGTH en dernier.
+  // Le prompt se range AVEC les autres axes de variante, pour que feuilleter suive
+  // les grilles affichées au lieu de sauter d'un prompt à l'autre. Sur un run
+  // mono-prompt il est constant : l'ordre y est exactement celui d'avant.
   const navImages = useMemo(
     () => flipOrder(displayedCells, (c) => [
       c.z_model_label || c.z_model || '', c.aspect || '', c.cfg ?? 0,
-      c.steps ?? 0, c.steps2 ?? 0, c.label || '', c.seed ?? 0, c.strength ?? 0,
+      c.steps ?? 0, c.steps2 ?? 0, c.prompt || '', c.label || '',
+      c.seed ?? 0, c.strength ?? 0,
     ]),
     [displayedCells],
   );
@@ -94,19 +102,28 @@ export default function ResultsArea({ datasetId, d, studio, vote, onOpen }) {
     return m;
   }, [d]);
 
-  // Variantes présentes dans le run affiché (format × cfg × steps) → une grille par variante.
+  // Variantes présentes dans le run affiché (format × cfg × steps × PROMPT) → une
+  // grille par variante. Le prompt est un axe comme les autres : un lot de N
+  // prompts rend N tables, exactement comme un balayage de N CFG.
   const variantsInData = useMemo(() => {
     const m = new Map();
     for (const c of displayedCells) {
-      const k = `${c.z_model || ''}|${c.aspect || ''}|${c.cfg ?? ''}|${c.steps ?? ''}|${c.steps2 ?? ''}`;
-      if (!m.has(k)) m.set(k, { key: k, zModel: c.z_model || '', zModelLabel: c.z_model_label || '',
-                                aspect: c.aspect || '', cfg: c.cfg, steps: c.steps, steps2: c.steps2 });
+      const k = variantKey(c);
+      if (!m.has(k)) m.set(k, variantOf(c));
     }
+    // Aucun critère sur le prompt : les variantes d'un lot ne diffèrent QUE par
+    // lui, elles se comparent donc toutes à égalité et le tri (stable) leur laisse
+    // l'ordre d'insertion — c'est-à-dire l'ordre dans lequel l'utilisateur a coché
+    // ses prompts, le seul qui lui parle. Un tri alphabétique le lui reprendrait.
     return [...m.values()].sort((a, b) =>
       (a.zModelLabel || '').localeCompare(b.zModelLabel || '')
       || a.aspect.localeCompare(b.aspect) || ((a.cfg ?? 0) - (b.cfg ?? 0))
       || ((a.steps ?? 0) - (b.steps ?? 0)) || ((a.steps2 ?? 0) - (b.steps2 ?? 0)));
   }, [displayedCells]);
+
+  // Un run mono-prompt n'a rien à étiqueter — sa légende répéterait le même texte
+  // sur chacune de ses tables. Le lot 📝, lui, ne se lit pas sans le prompt.
+  const showPromptLabels = useMemo(() => distinctPrompts(displayedCells) > 1, [displayedCells]);
 
   const gridRows = useMemo(() => {
     const seen = new Map();
@@ -156,6 +173,7 @@ export default function ResultsArea({ datasetId, d, studio, vote, onOpen }) {
           gridRows={gridRows}
           gridCols={gridCols}
           variantsInData={variantsInData}
+          showPromptLabels={showPromptLabels}
           cellList={cellList}
           scoreMap={scoreMap}
           best={d.best_cell}

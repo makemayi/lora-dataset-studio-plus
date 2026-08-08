@@ -8,8 +8,13 @@ explicit confirmation.
 """
 from unittest.mock import patch
 
+import pytest
+
 from app.services import ollama_gpu_fence as fence
 from app.services.vision_ollama import LocalOllamaFenceError
+
+# Drives the fence directly (see conftest's autouse stub).
+pytestmark = pytest.mark.ollama_fence
 
 
 def test_enhance_refusal_carries_the_fence_code_so_the_ui_can_offer_the_way_out(

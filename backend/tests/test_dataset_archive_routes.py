@@ -203,6 +203,70 @@ def test_archive_services_accept_streams_without_closing_callers(app):
         assert not training_stream.closed
 
 
+def _make_max_content_length_read_only(monkeypatch):
+    """Reproduce a Flask whose per-request upload ceiling cannot be assigned.
+
+    ``Request.max_content_length`` only became settable per request in Flask
+    3.1; before that it was a plain read-only property, and any environment
+    that resolves an older Flask (a stale user site-packages, a distro build)
+    turned every archive upload into a 500. Stripping the setter off the
+    property reproduces exactly that class on the pinned Flask.
+    """
+    import flask
+
+    getter = flask.Request.__dict__['max_content_length'].fget
+    monkeypatch.setattr(flask.Request, 'max_content_length', property(getter))
+
+
+def test_archive_ceiling_holds_when_the_request_property_is_read_only(
+        app, client, monkeypatch):
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as service
+
+    with app.app_context():
+        dataset = service.create_dataset(LOCAL_USER, 'Read only', 'read_only')
+        backup = service.build_backup_zip(LOCAL_USER, dataset.id)
+
+    assert len(backup) > 128
+    app.config.update(
+        MAX_CONTENT_LENGTH=128,
+        DATASET_ARCHIVE_MAX_UPLOAD_BYTES=64 * 1024,
+        DATASET_ARCHIVE_MULTIPART_OVERHEAD_BYTES=16 * 1024,
+    )
+    _make_max_content_length_read_only(monkeypatch)
+
+    response = client.post(
+        '/api/dataset/backup/import',
+        data={'file': (io.BytesIO(backup), 'backup.zip')},
+        content_type='multipart/form-data',
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()['ok'] is True
+
+
+def test_ordinary_endpoints_keep_the_plain_ceiling(app, client, monkeypatch):
+    """The raised ceiling stays the archive endpoints' privilege, not a global."""
+    from flask import request
+
+    @app.post('/api/ordinary-upload')
+    def ordinary_upload():
+        request.get_data()
+        return {'ok': True}
+
+    app.config.update(
+        MAX_CONTENT_LENGTH=128,
+        DATASET_ARCHIVE_MAX_UPLOAD_BYTES=64 * 1024,
+        DATASET_ARCHIVE_MULTIPART_OVERHEAD_BYTES=16 * 1024,
+    )
+    _make_max_content_length_read_only(monkeypatch)
+
+    response = client.post('/api/ordinary-upload', data=b'x' * 1024)
+
+    assert response.status_code == 413
+    assert response.get_json()['error'] == 'upload too large'
+
+
 def test_backup_metadata_cap_is_checked_before_inflation(app, monkeypatch):
     from app.config import LOCAL_USER
     from app.services import face_dataset_service as service
@@ -238,6 +302,149 @@ def test_backup_uncompressed_cap_counts_unknown_entries(app, monkeypatch):
 
     with app.app_context(), pytest.raises(ValueError, match='backup too large'):
         service.import_backup_zip(LOCAL_USER, io.BytesIO(output.getvalue()))
+
+
+@pytest.mark.parametrize(
+    ('entries', 'central_size', 'message'),
+    [
+        ('too-many', 0, 'too many files in backup'),
+        (0, 'too-large', 'backup central directory is too large'),
+    ],
+    ids=('entry-count', 'central-directory-bytes'),
+)
+def test_backup_eocd_caps_run_before_zipfile_parses_the_directory(
+        app, monkeypatch, entries, central_size, message):
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as service
+
+    end_record = [0] * 10
+    end_record[getattr(zipfile, '_ECD_ENTRIES_TOTAL', 4)] = (
+        service._BACKUP_MAX_FILES + 3 if entries == 'too-many' else entries)
+    end_record[getattr(zipfile, '_ECD_SIZE', 5)] = (
+        service._BACKUP_MAX_CENTRAL_DIRECTORY_BYTES + 1
+        if central_size == 'too-large' else central_size)
+    stream = io.BytesIO(b'EOCD preflight owns this rejection')
+    monkeypatch.setattr(service.zipfile, '_EndRecData', lambda source: end_record)
+
+    def forbidden_zipfile(*_args, **_kwargs):
+        raise AssertionError('ZipFile must not parse an over-budget central directory')
+
+    monkeypatch.setattr(service.zipfile, 'ZipFile', forbidden_zipfile)
+    with app.app_context(), pytest.raises(ValueError, match=message):
+        service.import_backup_zip(LOCAL_USER, stream)
+    assert stream.tell() == 0
+
+
+def test_training_zip_eocd_cap_runs_before_zipfile_parses_the_directory(
+        app, monkeypatch):
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as service
+
+    with app.app_context():
+        dataset = service.create_dataset(
+            LOCAL_USER, 'Training EOCD cap', 'training_eocd_cap')
+        end_record = [0] * 10
+        end_record[getattr(zipfile, '_ECD_ENTRIES_TOTAL', 4)] = \
+            service.DATASET_ZIP_MAX_FILES + 1
+        end_record[getattr(zipfile, '_ECD_SIZE', 5)] = 0
+        stream = io.BytesIO(b'EOCD preflight owns this rejection')
+        monkeypatch.setattr(
+            service.zipfile, '_EndRecData', lambda _source: end_record)
+
+        def forbidden_zipfile(*_args, **_kwargs):
+            raise AssertionError(
+                'ZipFile must not parse an over-budget central directory')
+
+        monkeypatch.setattr(service.zipfile, 'ZipFile', forbidden_zipfile)
+        with pytest.raises(ValueError, match='too many files in zip'):
+            service.import_dataset_zip(LOCAL_USER, dataset.id, stream)
+        assert stream.tell() == 0
+
+
+def test_backup_eocd_preflight_rewinds_before_zipfile(app, monkeypatch):
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as service
+
+    data = _empty_backup(service)
+    stream = io.BytesIO(data)
+    native_end_reader = zipfile._EndRecData
+    native_zipfile = zipfile.ZipFile
+    constructor_offsets = []
+
+    def end_reader(source):
+        result = native_end_reader(source)
+        assert source.tell() != 0
+        return result
+
+    class RewoundZipFile(native_zipfile):
+        def __init__(self, source, *args, **kwargs):
+            constructor_offsets.append(source.tell())
+            super().__init__(source, *args, **kwargs)
+
+    sentinel = object()
+    monkeypatch.setattr(service.zipfile, '_EndRecData', end_reader)
+    monkeypatch.setattr(service.zipfile, 'ZipFile', RewoundZipFile)
+    monkeypatch.setattr(service, '_import_backup_zipfile', lambda *_args: sentinel)
+
+    with app.app_context():
+        assert service.import_backup_zip(LOCAL_USER, stream) is sentinel
+    assert constructor_offsets == [0]
+
+
+def test_backup_eocd_preflight_has_a_compatibility_fallback(app, monkeypatch):
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as service
+
+    stream = io.BytesIO(_empty_backup(service))
+    stream.seek(7)
+    constructor_offsets = []
+    native_zipfile = zipfile.ZipFile
+
+    def recording_zipfile(source, *args, **kwargs):
+        constructor_offsets.append(source.tell())
+        return native_zipfile(source, *args, **kwargs)
+
+    # Model a runtime whose public ZipFile API exists but CPython's private EOCD
+    # helper does not.  The fallback must preserve compatibility and rewind.
+    compat_zipfile = SimpleNamespace(
+        BadZipFile=zipfile.BadZipFile,
+        ZipFile=recording_zipfile,
+    )
+    sentinel = object()
+    monkeypatch.setattr(service, 'zipfile', compat_zipfile)
+    monkeypatch.setattr(service, '_import_backup_zipfile', lambda *_args: sentinel)
+
+    with app.app_context():
+        assert service.import_backup_zip(LOCAL_USER, stream) is sentinel
+    assert constructor_offsets == [0]
+
+
+def test_corrupt_deflate_backup_member_is_a_clean_400(app, client):
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as service
+
+    data = bytearray(_empty_backup(
+        service, manifest_extra={'padding': 'compress-me-' * 200}))
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        info = archive.getinfo('manifest.json')
+        assert info.compress_type == zipfile.ZIP_DEFLATED
+        header = info.header_offset
+        name_size = int.from_bytes(data[header + 26:header + 28], 'little')
+        extra_size = int.from_bytes(data[header + 28:header + 30], 'little')
+        payload_start = header + 30 + name_size + extra_size
+        payload_end = payload_start + info.compress_size
+    data[payload_start:payload_end] = b'\xff' * info.compress_size
+    corrupted = bytes(data)
+
+    with app.app_context(), pytest.raises(ValueError, match='not a dataset backup'):
+        service.import_backup_zip(LOCAL_USER, io.BytesIO(corrupted))
+    response = client.post(
+        '/api/dataset/backup/import',
+        data={'file': (io.BytesIO(corrupted), 'corrupt.zip')},
+        content_type='multipart/form-data',
+    )
+    assert response.status_code == 400
+    assert 'not a dataset backup' in response.get_json()['error']
 
 
 def test_training_zip_rejects_oversized_image_before_read(app, monkeypatch):
@@ -299,8 +506,16 @@ def test_backup_rejects_exact_and_casefold_duplicates_before_extraction(
         ({'version': '1'}, None, 'invalid backup version'),
         ({'name': ['not', 'text']}, None, 'invalid backup name'),
         ({'trigger_word': {'not': 'text'}}, None, 'invalid backup trigger_word'),
+        ({'kind': {'not': 'text'}}, None, 'invalid backup kind'),
+        ({'train_settings': '{"rank": NaN}'}, None,
+         'invalid backup train_settings'),
         (None, [{'filename': ['not', 'text'], 'status': 'keep'}],
          'invalid backup image filename'),
+        (None, [{'filename': 'bad.webp', 'status': {'not': 'text'}}],
+         'invalid backup image status'),
+        (None, [{'filename': 'bad.webp', 'status': 'keep',
+                 'face_score': float('nan')}],
+         'invalid backup image face_score'),
     ],
 )
 def test_malformed_backup_types_are_value_errors_and_route_400(
@@ -321,3 +536,56 @@ def test_malformed_backup_types_are_value_errors_and_route_400(
     )
     assert response.status_code == 400
     assert response.get_json()['error'] == message
+
+
+@pytest.mark.parametrize(
+    ('entry', 'images_meta', 'manifest_extra', 'message'),
+    [
+        ('images/orphan.webp', [], {}, 'unreferenced image in backup'),
+        ('ref/orphan.webp', [], {}, 'unreferenced reference image in backup'),
+        ('images/NUL.jpg', [{'filename': 'NUL.jpg', 'status': 'keep'}], {},
+         'invalid backup image filename'),
+    ],
+)
+def test_backup_v2_rejects_unowned_or_windows_device_payloads_before_extraction(
+        app, entry, images_meta, manifest_extra, message):
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as service
+
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
+        manifest = {
+            'format': service.BACKUP_FORMAT,
+            'version': service.BACKUP_VERSION,
+            'name': 'Owned payloads',
+            'trigger_word': 'owned_payloads',
+            **manifest_extra,
+        }
+        archive.writestr('manifest.json', json.dumps(manifest))
+        archive.writestr('images.json', json.dumps(images_meta))
+        archive.writestr(entry, b'not decoded because ownership fails first')
+
+    with app.app_context(), pytest.raises(ValueError, match=message):
+        service.import_backup_zip(LOCAL_USER, output.getvalue())
+    assert list(service.cfg.dataset_images_root().iterdir()) == []
+
+
+def test_backup_v2_rejects_unowned_analysis_cache(app):
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as service
+
+    cache_ref = 'a' * 64
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('manifest.json', json.dumps({
+            'format': service.BACKUP_FORMAT,
+            'version': service.BACKUP_VERSION,
+            'name': 'No cache owner',
+            'trigger_word': 'no_cache_owner',
+        }))
+        archive.writestr('images.json', '[]')
+        archive.writestr(f'analysis-cache/{cache_ref}.npz', b'unowned')
+
+    with app.app_context(), pytest.raises(
+            ValueError, match='unreferenced analysis cache'):
+        service.import_backup_zip(LOCAL_USER, output.getvalue())

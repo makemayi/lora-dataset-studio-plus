@@ -1,8 +1,13 @@
-"""Generate packaging/icon.ico for the launcher exe + window.
+"""Generate packaging/icon.ico for the launcher exe + window, and icon.png at the
+repo root for the Pinokio launcher tile.
 
 A rounded indigo->violet tile with a little DNA double-helix (dots on two offset sine
-strands) — matches the app's 🧬 theme. Committed alongside the .ico it produces so the
+strands) — matches the app's 🧬 theme. Committed alongside the files it produces so the
 build is reproducible; re-run `python packaging/make_icon.py` to regenerate.
+
+Both outputs come from the SAME render() so the app never ships two different
+faces: Windows reads the .ico, Pinokio's app grid reads the .png (it renders the
+icon in an <img>, where .ico support is a browser detail we don't want to bet on).
 """
 import math
 from pathlib import Path
@@ -11,6 +16,7 @@ from PIL import Image, ImageDraw
 
 SIZE = 256
 OUT = Path(__file__).resolve().parent / "icon.ico"
+PNG_OUT = Path(__file__).resolve().parents[1] / "icon.png"
 
 
 def _lerp(a, b, t):
@@ -51,6 +57,8 @@ def main() -> None:
     sizes = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
     icon.save(OUT, format="ICO", sizes=sizes)
     print(f"wrote {OUT} ({', '.join(f'{w}x{h}' for w, h in sizes)})")
+    icon.save(PNG_OUT, format="PNG")
+    print(f"wrote {PNG_OUT} ({SIZE}x{SIZE})")
 
 
 if __name__ == "__main__":

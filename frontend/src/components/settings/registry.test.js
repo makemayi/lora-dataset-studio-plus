@@ -21,6 +21,8 @@ test('Pexels key and attribution markup stay wired without nested controls', () 
   const settingsSource = readFileSync(new URL('./ScrapingSection.jsx', import.meta.url), 'utf8');
   const panelSource = readFileSync(
     new URL('../dataset/ConceptSourcesPanel.jsx', import.meta.url), 'utf8');
+  const scraperSourceSearchSource = readFileSync(
+    new URL('../dataset/scraperSourceSearch.js', import.meta.url), 'utf8');
   const attributionSource = readFileSync(
     new URL('../dataset/PexelsAttribution.jsx', import.meta.url), 'utf8');
   const readmeSource = readFileSync(new URL('../../../../README.md', import.meta.url), 'utf8');
@@ -50,8 +52,15 @@ test('Pexels key and attribution markup stay wired without nested controls', () 
     /https:\/\/help\.pexels\.com\/hc\/en-us\/articles\/900005880463-What-are-the-Terms-and-Conditions/);
   assert.match(panelSource, /Photos provided by Pexels/);
   assert.match(panelSource, /<PexelsAttribution metadata=\{it\}/);
+  // The url→payload mapping lives in scraperSourceSearch.js (scrapeItemToImportPayload),
+  // not inlined in the panel — see scraperSourceSearch.test.js for its behavioural coverage.
+  // Pinned on the CALL SITE, not just the import: a dangling import with nothing
+  // calling it would still match a bare name-presence check, and the wiring this
+  // test exists to guarantee (selected items are actually mapped before import)
+  // would then be unpinned.
+  assert.match(panelSource, /\.map\(scrapeItemToImportPayload\)/);
   for (const field of ['platform', 'source_url', 'photographer', 'photographer_url']) {
-    assert.match(panelSource, new RegExp(`${field}:`), `selected items forward ${field}`);
+    assert.match(scraperSourceSearchSource, new RegExp(`${field}:`), `selected items forward ${field}`);
   }
   assert.match(attributionSource, /Photo by\{' '\}[\s\S]*\{' · '\}[\s\S]*Pexels/);
   assert.match(attributionSource, /rel="noopener noreferrer"/);

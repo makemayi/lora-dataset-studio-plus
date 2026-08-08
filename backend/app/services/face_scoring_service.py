@@ -79,6 +79,7 @@ def analyze_faces(user_id, dataset_id) -> dict:
     Persiste face_score (cosinus brut, None si non note) + face_state. AUCUNE
     suppression, aucune decision : la passe ecrit un chiffre, c'est 🎯 Auto-triage
     qui agit dessus. Tourne sur CPU -> pas de fenetre GPU. Retourne {state: count}."""
+    _guard_not_bank_export(dataset_id)
     ds = get_dataset(user_id, dataset_id)
     if not ds:
         raise ValueError('dataset not found')
@@ -328,6 +329,7 @@ def analyze_image_face(user_id, image_id):
 # modules: whichever side loads first must find the other fully defined by the
 # time the reach-back import resolves.
 from .face_dataset_service import (
+    _guard_not_bank_export,
     get_dataset, dataset_payload, face_scoring_block_reason, _owned_image,
     _img_path, _ref_path, _nullable_equals, _face_scoring_lock,
     _face_scoring_busy_error, logger,

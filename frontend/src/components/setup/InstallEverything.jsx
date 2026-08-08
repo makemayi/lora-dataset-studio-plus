@@ -38,13 +38,19 @@ function InstallItem({ item, onDone }) {
   //   'restart' — on disk but not yet live (the Krea node pack, which ComfyUI only
   //               registers at startup);
   //   'broken'  — on disk, right name, right size, and NOT loadable (a truncated or
-  //               corrupted download, a licence page saved as .safetensors).
-  // Both are cases where "✓ Installed" would certify something that does not work
+  //               corrupted download, a licence page saved as .safetensors), AND
+  //               required: the engine is down until it is replaced;
+  //   'broken_optional' — same unreadable file, but a component nothing waits on
+  //               (Klein's recommended consistency LoRA). Still shown, still
+  //               re-installable, deliberately NOT dressed in the red of a dead
+  //               engine — an alarm that overstates the damage teaches people to
+  //               ignore the one that doesn't.
+  // All are cases where "✓ Installed" would certify something that does not work
   // and "✗ Not installed" would describe a file the user can see. Each badge is a
   // WORD, not just a colour — the glyph and the text carry the state, so it reads
   // the same to anyone who doesn't perceive the hue.
   const badgeCls = state === 'broken' ? 'text-rose-300'
-    : state === 'restart' ? 'text-amber-400'
+    : state === 'restart' || state === 'broken_optional' ? 'text-amber-400'
       : present ? 'text-emerald-400' : 'text-content-subtle'
   return (
     <div className="rounded-md border border-border bg-surface-raised p-3 space-y-2">
@@ -57,11 +63,13 @@ function InstallItem({ item, onDone }) {
       {/* The fault and the fix, in the user's own file name. Wraps freely: it must
           stay readable at 400px. */}
       {brokenReason && (
-        <p className="break-words text-xs text-rose-300">{brokenReason}</p>
+        <p className={`break-words text-xs ${state === 'broken' ? 'text-rose-300' : 'text-amber-400'}`}>
+          {brokenReason}
+        </p>
       )}
       {available ? (
         <InstallRunner action={action}
-          buttonLabel={state === 'broken' ? '↻ Download again'
+          buttonLabel={(state === 'broken' || state === 'broken_optional') ? '↻ Download again'
             : (present || state === 'restart') ? '↻ Reinstall' : 'Install'}
           onDone={onDone} />
       ) : (

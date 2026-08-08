@@ -143,8 +143,73 @@ def test_a_giant_or_nonsense_size_is_clamped_not_stored(client, app):
     lane = {n['image_id']: n for n in _lane(client, ds_id)}
     assert (lane[big]['w'], lane[big]['h']) == (CANVAS_IMAGE_MAX, CANVAS_IMAGE_MAX)
     assert (lane[tiny]['w'], lane[tiny]['h']) == (CANVAS_IMAGE_MIN, CANVAS_IMAGE_MIN)
-    assert (lane[tiny]['x'], lane[tiny]['y']) == (0.0, 0.0)
     assert bad not in lane
+
+
+# ---- free placement: the lane anchors a picture, it does not cage it -------
+
+def test_a_picture_parked_above_and_left_of_its_lane_survives_the_round_trip(client, app):
+    """THE assertion of free placement. Coordinates used to be floored at zero,
+    so a render could be dragged down and right but never up or left: its own
+    lane's corner was a wall. A picture is not a step of the lineage — the link
+    to the checkpoint that made it is read off the image row, never off its
+    position — so no coordinate can make it lie about where it came from."""
+    with app.app_context():
+        ds_id = _dataset().id
+        img_id = _image(ds_id)
+    client.put(f'/api/dataset/{ds_id}/canvas/images', json={'nodes': [
+        {'image_id': img_id, 'x': -1840.5, 'y': -920.25, 'w': 320, 'h': 320}]})
+    node = _lane(client, ds_id)[0]
+    assert (node['x'], node['y']) == (-1840.5, -920.25)
+    # …and it is still joined to the checkpoint that produced it.
+    assert (node['image']['record_id'], node['image']['step']) == (7, 2500)
+
+
+def test_the_reach_is_a_rail_on_both_sides_so_one_row_cannot_collapse_fit(client, app):
+    """The position axes had no ceiling at all before: only the SIZE was
+    bounded, so one corrupt row could blow a lane's extent up and collapse
+    ✦ Fit to a scale where nothing on the board is readable."""
+    from app.services.cloud_training import CANVAS_IMAGE_REACH
+    with app.app_context():
+        ds_id = _dataset().id
+        far = _image(ds_id, filename='far.png')
+        back = _image(ds_id, filename='back.png')
+    client.put(f'/api/dataset/{ds_id}/canvas/images', json={'nodes': [
+        {'image_id': far, 'x': 1e9, 'y': 5e12, 'w': 320, 'h': 320},
+        {'image_id': back, 'x': -1e9, 'y': -5e12, 'w': 320, 'h': 320}]})
+    lane = {n['image_id']: n for n in _lane(client, ds_id)}
+    assert (lane[far]['x'], lane[far]['y']) == (CANVAS_IMAGE_REACH, CANVAS_IMAGE_REACH)
+    assert (lane[back]['x'], lane[back]['y']) == (-CANVAS_IMAGE_REACH, -CANVAS_IMAGE_REACH)
+
+
+def test_a_board_written_before_free_placement_reads_back_byte_for_byte(client, app):
+    """NO MIGRATION — and this is what says so.
+
+    Lane-local is the ANCHOR, not the cage, so relaxing the floor changed what a
+    picture may DO, never what its stored numbers MEAN. Every row ever written
+    is still a lane-local offset and still inside the rail, so a database that
+    predates this change draws exactly the board it always drew. (Board-absolute
+    coordinates would have needed the opposite: a migration adding each lane's
+    world origin — a number the server cannot even compute, because lane heights
+    are laid out in the browser and depend on which datasets are ticked.)"""
+    from app.extensions import db
+    from app.models import CanvasImageNode
+    with app.app_context():
+        ds_id = _dataset().id
+        img_id = _image(ds_id)
+        # A row exactly as an older build would have left it: no group columns,
+        # geometry in the old non-negative half.
+        db.session.add(CanvasImageNode(dataset_id=ds_id, image_id=img_id,
+                                       x=312.0, y=40.0, w=320.0, h=320.0,
+                                       visible=True))
+        db.session.commit()
+    before = _lane(client, ds_id)[0]
+    assert (before['x'], before['y'], before['w'], before['h']) == (312.0, 40.0, 320.0, 320.0)
+    assert (before['group_id'], before['group_pos']) == (None, None)
+    # Re-reading is idempotent: nothing is rewritten, nudged or defaulted on the
+    # way through the new clamp.
+    after = _lane(client, ds_id)[0]
+    assert after == before
 
 
 def test_an_unknown_dataset_is_404_on_both_write_paths(client, app):

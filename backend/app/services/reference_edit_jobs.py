@@ -10,9 +10,34 @@ payload — which survives a tab sleep AND a reload.
 This registry holds one pending BATCH per dataset. Its ordered engine list owns
 one candidate state per engine, while one activity token covers the whole batch.
 
-It is IN-MEMORY only (like dataset_activity) — a job dies with the process, which
-is correct for a transient candidate awaiting Keep. The candidate FILE on disk is
-reclaimed by a TTL sweep so a crashed process never leaks it.
+The registry is in memory (like dataset_activity) — a RUNNING job dies with the
+process, which is correct: its provider call died with the thread. The candidate
+FILE on disk is reclaimed by a TTL sweep so a crashed process never leaks it.
+
+Surviving a restart
+-------------------
+A candidate that already LANDED is a different thing from a running job, and
+treating the two alike was a real bug: the edit is a PAID call, and the entry
+that knew its image existed was the only way to reach it. A restart left the
+image on disk, unreachable — the modal came back empty, Keep answered 409, and
+the sweep deleted the paid result half an hour later.
+
+So `set_ready` writes a sidecar next to the candidate (`<name>.refedit.json`)
+carrying what it takes to re-offer it: batch id, engine, the batch's engine
+order, prompt, start time. With no live entry for the dataset, `get(dataset_id,
+dsdir)` rebuilds a batch from those sidecars.
+
+Recovery is driven by sidecars and NEVER by filename, because CANDIDATE_MARKER
+is in the name of two different kinds of file: the paid result, and the staged
+INPUT snapshots a local engine reads (`snapshot_…`, `modalref_…`). Matching on
+the marker would hand the user back their own source photo as an edit result.
+Only a real result ever gets a sidecar.
+
+What does not come back: a running engine (it returns failed, saying why — a
+resurrected spinner would be driven by nothing), the activity token (that
+registry is empty in a new process; a stale token would light a badge nothing
+could turn off), and anything past the TTL, measured on the image's own mtime so
+recovery, the lazy purge and the disk sweep can never disagree.
 
 TWO LANES, ONE REGISTRY. An API edit is a blocking call made from a service
 thread, which fills its candidate state. A LOCAL edit (Klein / Krea 2 Edit) is a
@@ -37,6 +62,7 @@ the service worker, delete lives here), so the lifecycle stays in one place.
 """
 from contextlib import contextmanager
 import itertools
+import json
 import logging
 import os
 import secrets
@@ -51,9 +77,21 @@ logger = logging.getLogger(__name__)
 CANDIDATE_MARKER = '_datasetrefeditcand_'
 _TTL_SECONDS = 30 * 60
 
+# Sidecar written beside a candidate the moment it turns READY, so a restart can
+# find it again — see "Surviving a restart" in the module docstring. The suffix
+# is what separates a paid RESULT from the staged INPUT snapshots that share
+# CANDIDATE_MARKER: only a real result ever gets one.
+_META_SUFFIX = '.refedit.json'
+
 _lock = threading.Lock()
 _jobs: dict = {}                 # dataset_id -> entry dict
 _revisions: dict = {}            # dataset_id -> reference mutation epoch
+# Datasets whose disk has already been searched for a candidate left by a
+# previous process. Recovery is a once-per-process question — after it, every
+# candidate that appears is registered live, and one that is cleared takes its
+# sidecar with it. Without this the dataset payload would re-list a folder of
+# thousands of images on EVERY poll to keep answering "still nothing".
+_recovered: set = set()
 _counter = itertools.count(1)
 _mutation_locks_guard = threading.Lock()
 _mutation_locks: dict = {}        # dataset_id -> re-entrant primary-reference lock
@@ -81,6 +119,70 @@ def _unlink(path):
         os.remove(path)
     except OSError:
         pass
+
+
+def _candidate_meta_path(directory, filename):
+    """The sidecar that makes one ready candidate findable after a restart."""
+    return os.path.join(directory, f'{filename}{_META_SUFFIX}')
+
+
+def _write_candidate_meta(entry, candidate, filename):
+    """Record what it takes to re-offer this candidate in a new process.
+
+    Only the BARE filename is stored, never a path: the sidecar travels inside
+    the dataset folder, which the Storage settings can move to another drive.
+    Never raises — a full or read-only disk must cost the recoverability, not the
+    result that just landed and is about to be shown."""
+    directory = entry.get('_dir')
+    if not directory:
+        return
+    payload = {
+        'batch_id': entry['batch_id'],
+        'engine': candidate['engine'],
+        'engines': list(entry['engines']),
+        'prompt': entry.get('prompt'),
+        'candidate_filename': filename,
+        'started_at': entry['started_at'],
+    }
+    path = _candidate_meta_path(directory, filename)
+    tmp = f'{path}.tmp'
+    try:
+        with open(tmp, 'w', encoding='utf-8') as fh:
+            json.dump(payload, fh)
+        os.replace(tmp, path)
+    except (OSError, TypeError, ValueError):
+        logger.warning('reference edit: could not record the candidate sidecar',
+                       exc_info=True)
+        _unlink(tmp)
+
+
+def _read_candidate_meta(directory, name):
+    """One sidecar as a dict, or None when it is unusable.
+
+    A sidecar POINTS AT a result; it is not one. So a pointer whose image is gone
+    (kept, discarded, swept, deleted by hand) is not a candidate, and neither is
+    a truncated or hand-edited file. Both are dropped quietly: every dataset poll
+    comes through here, and a bad file must cost one candidate, not the page."""
+    try:
+        with open(os.path.join(directory, name), encoding='utf-8') as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    filename = data.get('candidate_filename')
+    engine = data.get('engine')
+    batch_id = data.get('batch_id')
+    if not (isinstance(filename, str) and isinstance(engine, str)
+            and isinstance(batch_id, str)):
+        return None
+    # The name must be the one this sidecar belongs to. A sidecar renamed to sit
+    # beside a different image would otherwise point at bytes it never described.
+    if f'{filename}{_META_SUFFIX}' != name:
+        return None
+    if not os.path.isfile(os.path.join(directory, filename)):
+        return None
+    return data
 
 
 def _candidate_public(candidate):
@@ -156,7 +258,12 @@ def _cleanup_entry(entry, dsdir=None):
     directory = dsdir or entry.get('_dir')
     for candidate in entry.get('candidates', {}).values():
         if directory and candidate.get('candidate_filename'):
-            _unlink(os.path.join(directory, candidate['candidate_filename']))
+            filename = candidate['candidate_filename']
+            _unlink(os.path.join(directory, filename))
+            # The sidecar dies with the image it points at, so keep, discard,
+            # supersede and the TTL all stop the recovery in one place instead of
+            # each having to remember it.
+            _unlink(_candidate_meta_path(directory, filename))
         if candidate.get('status') == 'running':
             _cancel_queue_job(candidate.get('_job_id'))
     if entry.get('_act_token') is not None and not entry.get('_activity_closed'):
@@ -336,6 +443,10 @@ def set_ready(dataset_id, token, candidate_filename):
         candidate['candidate_filename'] = candidate_filename
         candidate['error'] = None
         entry['_touched'] = time.time()
+        # Written HERE, at the one moment a paid result exists on disk and is
+        # accounted for in the registry. Anywhere later and a restart in between
+        # would lose exactly the thing this protects.
+        _write_candidate_meta(entry, candidate, candidate_filename)
         return True
 
 
@@ -381,13 +492,109 @@ def activity_update(dataset_id, token):
         }
 
 
-def get(dataset_id):
-    """Public batch, lazily purging all resources after the TTL."""
+def _recover(dataset_id, directory):
+    """Rebuild a batch from the sidecars left in `directory`, or None.
+
+    Caller holds `_lock`, and only ever calls this when the registry has NO entry
+    for the dataset — a live batch always wins over anything on disk.
+
+    Recovered candidates are the ones that LANDED. An engine that was still
+    running when the process died wrote nothing, so it comes back failed and
+    says so: "running" would be a spinner nothing drives, and omitting it would
+    hide that the user was billed for it.
+
+    Freshness is the same rule the in-process purge and the disk sweep use, read
+    off the image's own mtime so the three can never disagree. A restart must not
+    buy an abandoned edit more life than staying up would have."""
+    if dataset_id in _recovered:
+        return None
+    _recovered.add(dataset_id)
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return None
+    now = time.time()
+    found = {}
+    for name in names:
+        if not name.endswith(_META_SUFFIX):
+            continue
+        meta = _read_candidate_meta(directory, name)
+        if not meta:
+            continue
+        try:
+            age = now - os.path.getmtime(
+                os.path.join(directory, meta['candidate_filename']))
+        except OSError:
+            continue
+        if age > _TTL_SECONDS:
+            continue
+        found.setdefault(meta['batch_id'], []).append(meta)
+    if not found:
+        return None
+    # One batch supersedes the previous one, so more than one batch on disk means
+    # a crash between the two. The newest is the one the user was looking at.
+    metas = max(found.values(),
+                key=lambda group: max(m.get('started_at') or 0 for m in group))
+    landed = {m['engine']: m for m in metas}
+    engines = tuple(dict.fromkeys(
+        [str(e) for e in (metas[0].get('engines') or []) if isinstance(e, str)]
+        or list(landed)))
+    started_at = min(m.get('started_at') or now for m in metas)
+    entry = {
+        'batch_id': metas[0]['batch_id'],
+        'prompt': metas[0].get('prompt'),
+        'engines': engines,
+        'candidates': {
+            engine: {
+                'engine': engine,
+                'status': 'ready' if engine in landed else 'failed',
+                'candidate_filename': (landed[engine]['candidate_filename']
+                                       if engine in landed else None),
+                'error': None if engine in landed else (
+                    f'{engine}: this edit was still running when the app '
+                    'restarted, so its result was lost'),
+                'token': next(_counter),
+                'started_at': started_at,
+                '_job_id': None,
+                '_user_id': None,
+                # The dispatch already happened in the dead process. Claiming it
+                # here keeps a recovered entry from ever authorising a second
+                # paid call for work that was already billed.
+                '_api_dispatch_claimed': True,
+            }
+            for engine in engines
+        },
+        'batch_token': next(_counter),
+        'started_at': started_at,
+        '_touched': now,
+        '_dir': directory,
+        # No activity token: that registry is empty in a new process, and a token
+        # from the dead one would light a badge nothing could ever turn off.
+        '_act_token': None,
+        '_activity_closed': True,
+        '_keep_claim': None,
+        '_reference_revision': _revisions.get(dataset_id, 0),
+    }
+    _jobs[dataset_id] = entry
+    logger.info('reference edit: recovered %d candidate(s) for dataset %s '
+                'after a restart', len(landed), dataset_id)
+    return entry
+
+
+def get(dataset_id, dsdir=None):
+    """Public batch, lazily purging all resources after the TTL.
+
+    ``dsdir`` enables recovery of a paid candidate left behind by a previous
+    process (see ``_recover``). It is optional so callers that only want to read
+    live state — and every existing test — stay unchanged; the dataset payload
+    passes it, which is the one surface where the user is waiting for the answer.
+    """
     now = time.time()
     with _lock:
         entry = _jobs.get(dataset_id)
         if not entry:
-            return None
+            recovered = _recover(dataset_id, dsdir) if dsdir else None
+            return _public(recovered) if recovered else None
         if now - entry['_touched'] <= _TTL_SECONDS:
             return _public(entry)
         _jobs.pop(dataset_id, None)
@@ -563,17 +770,29 @@ def sweep(dsdir):
     except OSError:
         return
     for n in names:
+        # A sidecar is reclaimed with its image, and also when it has outlived it
+        # — a pointer to a file that is already gone can only mislead.
+        if n.endswith(_META_SUFFIX):
+            filename = n[:-len(_META_SUFFIX)]
+            if not os.path.isfile(os.path.join(dsdir, filename)):
+                _unlink(os.path.join(dsdir, n))
+            continue
         if CANDIDATE_MARKER in n:
             p = os.path.join(dsdir, n)
             try:
                 if now - os.path.getmtime(p) > _TTL_SECONDS:
                     os.remove(p)
+                    _unlink(_candidate_meta_path(dsdir, n))
             except OSError:
                 pass
 
 
 def reset():
-    """Test helper: clear the whole registry (does NOT touch files)."""
+    """Test helper: clear the whole registry (does NOT touch files).
+
+    Clears the recovery marker too, so this stays a faithful restart: a new
+    process has both an empty registry AND its disk still to search."""
     with _lock:
         _jobs.clear()
         _revisions.clear()
+        _recovered.clear()

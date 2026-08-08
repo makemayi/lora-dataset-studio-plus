@@ -54,7 +54,7 @@ def _promote(app, bank_id, dataset_id, ids=None):
     """Run the promote job inline so the assertions see a finished promotion."""
     from app.services import image_bank_service as banks
     with patch.object(banks.bank_jobs, 'start',
-                      lambda _a, _b, _k, fn, total=0: fn(object())), \
+                      lambda _a, _b, _k, fn, total=0, **_kw: fn(object())), \
          patch.object(banks.bank_jobs, 'cancelled', lambda job: False), \
          patch.object(banks.bank_jobs, 'bump', lambda job, n=1: None), \
          patch.object(banks.bank_jobs, 'progress', lambda job, **kw: None):
@@ -125,9 +125,9 @@ def test_promoting_to_another_dataset_is_unaffected(app, ds, tmp_path):
         assert banks.promotable_count('local', bank_id, other.id) == 2   # per-target
 
 
-def test_a_promotion_deduped_away_still_counts_as_landed(app, ds, tmp_path):
-    """The dataset already holds an equivalent image: the blob is dropped, but the
-    dataset DOES hold it — the bank must not keep offering it forever."""
+def test_an_identical_image_from_another_bank_lands_independently(
+        app, ds, tmp_path):
+    """Transfer metadata is per source row, so byte twins never get merged."""
     from app.models import BankImage, FaceDatasetImage
     from app.services import image_bank_service as banks
 
@@ -147,9 +147,12 @@ def test_a_promotion_deduped_away_still_counts_as_landed(app, ds, tmp_path):
         assert banks.promotable_count('local', bank2.id, ds.id) == 1
 
         _promote(app, bank2.id, ds.id)
-        # Nothing new landed (perceptual duplicate)…
-        assert FaceDatasetImage.query.filter_by(dataset_id=ds.id).count() == 1
-        # …yet the bank knows the dataset holds it, so it stops offering it.
+        assert FaceDatasetImage.query.filter_by(dataset_id=ds.id).count() == 2
+        assert {row.bank_image_id for row in FaceDatasetImage.query.filter_by(
+            dataset_id=ds.id).all()} == {
+                BankImage.query.filter_by(bank_id=bank_id).one().id,
+                rows[0].id,
+            }
         assert banks.promotable_count('local', bank2.id, ds.id) == 0
 
 

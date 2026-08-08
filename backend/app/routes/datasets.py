@@ -5,6 +5,7 @@ No login — single local user (`cfg.LOCAL_USER`). Vision-dependent routes borro
 the GPU-exclusive window (`gpu_exclusive_vision_window`) so a vision pass never
 fights ComfyUI for the single GPU.
 """
+import contextlib
 import logging
 import os
 import tempfile
@@ -37,6 +38,8 @@ from ..services.face_variations import (NSFW_VARIATION_CATALOG, VARIATION_CATALO
 from ..utils.comfyui import KREA_ALLOWED_SAMPLERS, KREA_ALLOWED_SCHEDULERS, get_krea_loras
 from ._common import (_map_error, _require_comfyui, _require_no_stalled_comfyui,
                       _studio_arch_mismatch_response, _studio_missing_response)
+
+logger = logging.getLogger(__name__)
 
 bp = Blueprint('datasets', __name__, url_prefix='/api')
 
@@ -342,6 +345,17 @@ def dataset_list():
 @bp.get('/dataset/<int:dataset_id>')
 def dataset_get(dataset_id):
     payload = svc.dataset_payload(LOCAL_USER, dataset_id)
+    return (jsonify(payload), 200) if payload else (jsonify({'error': 'not found'}), 404)
+
+
+@bp.get('/dataset/<int:dataset_id>/coverage')
+def dataset_coverage_get(dataset_id):
+    """Read-only variety report: what the captions never mention (camera view,
+    lighting, setting, outfit, expression) and how many images the composition
+    bar had to ignore. Composes the framing column and the existing captions —
+    no model runs. 404 when the dataset is gone."""
+    from ..services import dataset_coverage as cov
+    payload = cov.coverage(LOCAL_USER, dataset_id)
     return (jsonify(payload), 200) if payload else (jsonify({'error': 'not found'}), 404)
 
 
@@ -1288,10 +1302,15 @@ def dataset_caption(dataset_id):
         return jsonify({'error': "'image_ids' must be a list"}), 400
     force = bool(data.get('force')) or image_ids is not None
     mode = data.get('mode')  # 'prose' | 'booru' | None (None → auto selon train_type)
+    # Who WROTE these captions. The default backend ('auto') chains JoyCaption and the
+    # Ollama vision model — two engines with visibly different styles — and the app
+    # never said which one produced what. Counted where each caption is stored, so it
+    # describes the run that actually happened rather than the setting that was read.
+    engines = {}
     try:
         with gpu_exclusive_vision_window(flag_ttl=1800):
             n = svc.caption_images(LOCAL_USER, dataset_id, force=force, mode=mode,
-                                   image_ids=image_ids)
+                                   image_ids=image_ids, report=engines)
             # Did the long pass end because the user hit Stop? If so, skip the short
             # pass entirely — the point of stopping is to run NO more inference.
             stopped = dataset_activity.cancel_requested(dataset_id)
@@ -1314,7 +1333,7 @@ def dataset_caption(dataset_id):
         # Consume the flag once the whole operation has unwound so a stop can never
         # bleed into a later run (begin() also disarms defensively).
         dataset_activity.clear_cancel(dataset_id)
-    return jsonify({'ok': True, 'captioned': n, 'stopped': stopped})
+    return jsonify({'ok': True, 'captioned': n, 'stopped': stopped, 'engines': engines})
 
 
 @bp.post('/dataset/<int:dataset_id>/caption/cancel')
@@ -1333,8 +1352,9 @@ def dataset_caption_cancel(dataset_id):
 
 @bp.get('/dataset/<int:dataset_id>/caption/options')
 def dataset_caption_options_get(dataset_id):
-    """Per-dataset caption method overrides {backend, ollama_model, instructions} for the
-    ⚙️ Options popover. Empty values mean "follow the global default"."""
+    """Per-dataset caption method overrides {backend, ollama_model, vocabulary, length,
+    instructions} for the ⚙️ Options popover. Empty values mean "follow the global
+    default" (for length, the standard prompt with nothing appended)."""
     ds = svc.get_dataset(LOCAL_USER, dataset_id)
     if not ds:
         return jsonify({'error': 'not found'}), 404
@@ -1382,7 +1402,8 @@ def dataset_image_caption_preview(dataset_id, image_id):
             result = svc.preview_caption(
                 LOCAL_USER, dataset_id, image_id,
                 backend=data.get('backend'), ollama_model=data.get('ollama_model', ''),
-                vocabulary=data.get('vocabulary'), instructions=data.get('instructions'),
+                vocabulary=data.get('vocabulary'), length=data.get('length'),
+                instructions=data.get('instructions'),
                 should_cancel=lambda: dataset_activity.cancel_requested(dataset_id))
     except Exception as e:
         return _map_error(e)
@@ -1421,20 +1442,70 @@ def dataset_image_analyze_face(image_id):
 
 @bp.post('/dataset/<int:dataset_id>/watermarks/detect')
 def dataset_watermarks_detect(dataset_id):
-    """Scan kept images for overlaid watermarks (Qwen3-VL) — GPU-exclusive vision
-    window like classify/caption. Persists watermark_state/bbox; deletes nothing.
-    Skips images already dismissed as false positives unless {include_dismissed:true}."""
+    """Scan kept images for overlaid watermarks. WHICH detector runs follows
+    Settings ▸ Captioning & quality ▸ Watermark detection (auto | detector |
+    vision); the answer travels back as `backend` / `backend_note` so a fallback
+    is never silent. Persists watermark_state/bbox/source/score; deletes nothing.
+    Skips images already dismissed as false positives unless {include_dismissed:true}.
+
+    Stoppable: ⏹ Stop posts to .../detect/cancel and this returns `stopped: true`
+    with everything judged so far already committed.
+
+    The GPU-exclusive vision window is taken only when the pass would actually
+    USE the card — always on the vision route, and on the detector route only
+    when its interpreter can run torch on CUDA. The stock detector install is a
+    CPU torch, and a pass that never touches the GPU must not unload ComfyUI or
+    block a training start (the rule the bank's scan already follows)."""
     if not svc.get_dataset(LOCAL_USER, dataset_id):
         return jsonify({'error': 'not found'}), 404
     data = request.get_json(silent=True) or {}
     include_dismissed = bool(data.get('include_dismissed'))
+    from ..capabilities import watermark_detect_gpu_available
+    from ..services import watermark_detector
+    resolution = watermark_detector.resolve_backend()
+    on_gpu = (resolution['backend'] == 'vision' or watermark_detect_gpu_available())
+    window = (gpu_exclusive_vision_window(flag_ttl=1800) if on_gpu
+              else contextlib.nullcontext())
+    report = {}
     try:
-        with gpu_exclusive_vision_window(flag_ttl=1800):
-            counts = svc.detect_watermarks(LOCAL_USER, dataset_id,
-                                           include_dismissed=include_dismissed)
+        with window:
+            counts = svc.detect_watermarks(
+                LOCAL_USER, dataset_id, include_dismissed=include_dismissed,
+                backend=resolution, report=report,
+                should_cancel=lambda: dataset_activity.cancel_requested(
+                    dataset_id, dataset_activity.WATERMARK_KINDS))
     except Exception as e:
         return _map_error(e)
-    return jsonify({'ok': True, **counts})
+    finally:
+        # Consume the flag once the whole pass has unwound so a stop can never
+        # bleed into a later run (begin() also disarms defensively).
+        dataset_activity.clear_cancel(dataset_id, dataset_activity.WATERMARK_KINDS)
+    # `counts` keeps its exact three-key shape (four tests pin it); everything
+    # this route learned rides alongside it, like the caption route's `stopped`.
+    return jsonify({'ok': True, **counts,
+                    'backend': resolution['backend'],
+                    'backend_requested': resolution['requested'],
+                    'backend_note': resolution['detail'],
+                    'stopped': bool(report.get('stopped')),
+                    'located': report.get('located', counts['detected']),
+                    'unlocated': report.get('unlocated', 0),
+                    'errors': report.get('errors', 0)})
+
+
+@bp.post('/dataset/<int:dataset_id>/watermarks/detect/cancel')
+def dataset_watermarks_detect_cancel(dataset_id):
+    """Ask an in-progress watermark scan to stop gracefully at the next image
+    boundary. What was already judged is KEPT (the pass commits per image) and a
+    later 🧽 Find finishes the rest — detect looks at every kept row on every
+    pass. Never interrupts an in-flight inference and never kills a process; the
+    detector route hands the child a sentinel file instead. Idempotent. 404 when
+    the dataset is unknown, 409 when no scan is currently running."""
+    if not svc.get_dataset(LOCAL_USER, dataset_id):
+        return jsonify({'error': 'not found'}), 404
+    if not dataset_activity.request_cancel(dataset_id,
+                                           dataset_activity.WATERMARK_KINDS):
+        return jsonify({'error': 'no watermark scan in progress'}), 409
+    return jsonify({'ok': True, 'stopping': True})
 
 
 def _klein_clean_preflight():
@@ -1733,6 +1804,37 @@ def dataset_image_reimprove(image_id):
     return jsonify({'ok': True, **result})
 
 
+@bp.post('/canvas/image/<int:image_id>/improve')
+def canvas_image_improve(image_id):
+    """✨ Upscale & improve ONE image of the ◉ Canvas board / a checkpoint gallery.
+
+    Deliberately its own route rather than a reuse of
+    `/dataset/image/<id>/improve`: `image_id` here is a `lora_test_image.id`
+    (that is what `canvas_image_node.image_id` stores) while the dataset route
+    resolves a `FaceDatasetImage`. The two tables have INDEPENDENT id spaces, so
+    sending a board id to the other route would not 404 — it would find a real,
+    unrelated dataset image and improve THAT one, silently.
+
+    Same body and same answers as its dataset sibling: `engine` ('klein' |
+    'seedvr2', absent = the improve.engine setting), and the same 409 that offers
+    to install a missing engine, because both go through the one preflight."""
+    gate = _require_no_stalled_comfyui()
+    if gate:
+        return gate
+    data = request.get_json(silent=True) or {}
+    engine = (data.get('engine') or '').strip() or None
+    try:
+        result = lts.improve_canvas_image(LOCAL_USER, image_id, engine=engine)
+    except Exception as e:
+        engine_error = _improve_engine_error(e)
+        if engine_error:
+            return engine_error
+        return _map_error(e)
+    if result is None:
+        return jsonify({'error': 'not found'}), 404
+    return jsonify({'ok': True, **result})
+
+
 @bp.post('/dataset/<int:dataset_id>/improve/batch')
 def dataset_improve_batch(dataset_id):
     """Start the SERVER-side ✨ Upscale & improve batch over a selection.
@@ -1918,13 +2020,17 @@ def dataset_captions_write_files(dataset_id):
 def dataset_images_batch(dataset_id):
     """Multi-select curation: apply one action to many images in one request.
     Body: {ids: [int, ...], action: keep|reject|pending|delete|clear_caption}."""
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON body must be an object'}), 400
     action = data.get('action')
     ids = data.get('ids')
     if action not in svc.BATCH_ACTIONS:
         return jsonify({'error': 'invalid action'}), 400
-    if not isinstance(ids, list) or not ids:
-        return jsonify({'error': "'ids' must be a non-empty list"}), 400
+    try:
+        ids = svc.normalize_batch_image_ids(ids)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
     if not svc.get_dataset(LOCAL_USER, dataset_id):
         return jsonify({'error': 'not found'}), 404
     try:
@@ -2124,6 +2230,9 @@ def lora_test_run(dataset_id):
         res = lts.create_run(LOCAL_USER, dataset_id,
                              d.get('checkpoints') or [], d.get('strengths') or [],
                              seed=d.get('seed'), prompt=d.get('prompt'),
+                             # 📝 Lot : une passe par prompt coché dans
+                             # l'historique. Absent → le prompt du champ, seul.
+                             prompts=d.get('prompts'),
                              z_model=d.get('z_model'), z_models=d.get('z_models'),
                              aspects=d.get('aspects'),
                              cfgs=d.get('cfgs'), steps_list=d.get('steps'),

@@ -59,7 +59,7 @@ class _FakeHfApi:
         self.list_calls.append(kwargs)
         if self.failure:
             raise self.failure
-        if kwargs.get('repo_id') == 'krea/Krea-2-Raw':
+        if str(kwargs.get('repo_id') or '').startswith('krea/Krea-2-'):
             return ['LICENSE.pdf', 'README.md']
         return self.files
 
@@ -93,7 +93,7 @@ class _FakeHfApi:
     def hf_hub_download(self, **kwargs):
         repo_id = kwargs['repo_id']
         filename = kwargs['filename']
-        if repo_id == 'krea/Krea-2-Raw' and filename == 'LICENSE.pdf':
+        if repo_id.startswith('krea/Krea-2-') and filename == 'LICENSE.pdf':
             payload = b'%PDF-1.7 official Krea 2 licence fixture'
         else:
             payload = self.uploaded[(repo_id, filename)]
@@ -110,6 +110,15 @@ def ct(app, monkeypatch):
     monkeypatch.setenv('VAST_API_KEY', 'vast-test')
     monkeypatch.setenv('HF_TOKEN', 'hf-general-must-not-reach-dense')
     monkeypatch.setenv('HF_CLOUD_TOKEN', 'hf-cloud-secret-x')
+    # A dense launch now also measures THIS machine's disk (the delivery lands
+    # here first). The measurement is the only part faked: the forecast, the
+    # refusal and its override all stay live in every test below — a suite whose
+    # verdict depends on how full the developer's C: drive is would be worse
+    # than no test at all.
+    from app.services import storage_locations
+    monkeypatch.setattr(storage_locations, 'free_space',
+                        lambda path: {'free_bytes': 4 * 1000 ** 4,
+                                      'total_bytes': 8 * 1000 ** 4})
     from app.services import cloud_training
     monkeypatch.setattr(cloud_training, '_start_monitor', lambda *a, **k: None)
     monkeypatch.setattr(cloud_training, '_reconcile_before_launch', lambda *a, **k: None)
@@ -181,12 +190,17 @@ def test_full_launch_creates_private_per_run_repo_and_freezes_mode(
 @pytest.mark.parametrize('kwargs,message', [
     ({'training_mode': 'FULL_TRANSFORMER', 'train_type': 'krea'}, 'training_mode'),
     ({'training_mode': 'full_transformer', 'train_type': 'zimage'}, 'only for Krea'),
-    ({'training_mode': 'full_transformer', 'train_type': 'krea', 'variant': 'turbo'},
-     'Krea-2-Raw'),
+    # Turbo is ALLOWED now (the config carries krea/Krea-2-Turbo); what is still
+    # refused before any reservation is a base that is not an absolute path,
+    # because the krea2 loader would ignore it and train the official base under
+    # a name that says otherwise.
     ({'training_mode': 'full_transformer', 'train_type': 'krea',
-      'base_model': 'custom.safetensors'}, 'official Krea-2-Raw'),
+      'base_model': 'custom.safetensors'}, 'full path'),
+    # A local seed is no longer refused for BEING one — it is sent to the pod in
+    # resumable slices now. What is still refused, and still before any
+    # reservation, is a seed that is not on this computer at all.
     ({'training_mode': 'full_transformer', 'train_type': 'krea',
-      'resume_ckpt_path': 'seed.safetensors'}, 'resume/continue'),
+      'resume_ckpt_path': 'seed.safetensors'}, 'no longer on this computer'),
 ])
 def test_full_launch_validation_happens_before_reservation(
         ct, app, dataset_id, kwargs, message):
@@ -217,7 +231,151 @@ def test_full_launch_rejects_slider_and_missing_hf_token(
         assert ct.CloudTrainingRun.query.count() == 0
 
 
-def test_full_continue_and_seeded_retry_are_refused(ct, app, dataset_id):
+class _FullAccountHfApi(_FakeHfApi):
+    """The same dense token, on an account whose PRIVATE storage is already
+    full — the state that killed run #146 at step 2750/3000."""
+
+    def list_models(self, author=None, expand=None):
+        repo = SimpleNamespace(id=f'{author}/lds-base-h1111', private=True,
+                               last_modified=None)
+        repo.usedStorage = 95 * 1000 ** 3
+        return [repo]
+
+    def list_datasets(self, author=None, expand=None):
+        return []
+
+
+def _hub_only(monkeypatch):
+    """Force the historical Hugging-Face-only delivery for one test."""
+    from app import config as cfg
+    cloud = dict(cfg.get('cloud') or {})
+    dense = dict(cloud.get('full_transformer') or {})
+    dense['delivery'] = 'hub'
+    cloud['full_transformer'] = dense
+    monkeypatch.setattr(
+        cfg, 'get',
+        lambda key, default=None, _real=cfg.get: (
+            cloud if key == 'cloud' else _real(key, default)))
+
+
+def test_full_launch_refuses_before_renting_when_hf_storage_is_full(
+        ct, app, dataset_id, monkeypatch, tmp_path):
+    """The pre-check has to fire BEFORE the reservation row exists: the point is
+    to lose nothing, and every later refusal has already cost something.
+
+    Scoped to the hub-ONLY delivery, which is the case the refusal is still
+    about: there the repository is the artifact's only address, so a forecast
+    that does not fit means the run has nowhere to land. A delivery that also
+    brings the model home no longer refuses — see the warning test below."""
+    _hub_only(monkeypatch)
+    api = _FullAccountHfApi(tmp_path)
+    monkeypatch.setattr(ct, '_make_hf_api', lambda token: api)
+    with app.app_context():
+        with pytest.raises(ValueError) as excinfo:
+            ct.launch_cloud_training(
+                'local', dataset_id, train_type='krea', variant='base',
+                training_mode='full_transformer')
+        message = str(excinfo.value)
+        assert message.startswith('HF_STORAGE_FULL: ')
+        assert 'lds-base-h1111' in message
+        assert ct.CloudTrainingRun.query.count() == 0
+        assert api.created == []
+
+
+def test_full_launch_warns_instead_of_refusing_when_the_model_comes_home(
+        ct, app, dataset_id, monkeypatch, tmp_path):
+    """A full private quota can no longer end a dense run — only its backup.
+
+    The default delivery downloads the model to this computer FIRST and pushes
+    the master afterwards, so a Hub that will not fit costs resumability, not
+    the run. It is still said BEFORE the GPU is rented: learning that a model
+    cannot be continued is worth eight hours of notice."""
+    api = _FullAccountHfApi(tmp_path)
+    monkeypatch.setattr(ct, '_make_hf_api', lambda token: api)
+    with app.app_context():
+        result = ct.launch_cloud_training(
+            'local', dataset_id, train_type='krea', variant='base',
+            training_mode='full_transformer')
+        run = ct.db.session.get(ct.CloudTrainingRun, result['run_id'])
+        params = json.loads(run.train_params)
+        assert params['dense_delivery'] == 'both'
+        assert 'not be able to continue' in result['warning'] \
+            or 'cannot be continued' in result['warning']
+        assert params['hub_backup_warning'] == result['warning']
+        # The run exists, the repository was created, nothing was refused.
+        assert api.created and params['artifact_status'] == 'pending'
+
+
+def test_full_launch_honours_the_storage_override_and_stamps_it(
+        ct, app, dataset_id, monkeypatch, tmp_path):
+    """The ceiling is an estimate, so 'Train anyway' must exist — and be
+    replayed by an automatic retry rather than re-litigated."""
+    _hub_only(monkeypatch)
+    api = _FullAccountHfApi(tmp_path)
+    monkeypatch.setattr(ct, '_make_hf_api', lambda token: api)
+    with app.app_context():
+        result = ct.launch_cloud_training(
+            'local', dataset_id, train_type='krea', variant='base',
+            training_mode='full_transformer', allow_hf_storage=True)
+        run = ct.db.session.get(ct.CloudTrainingRun, result['run_id'])
+        params = json.loads(run.train_params)
+        assert params['allow_hf_storage'] is True
+        assert ct._confirmation_flags(params)['allow_hf_storage'] is True
+
+
+def test_the_storage_precheck_never_reaches_for_the_general_token(
+        ct, app, dataset_id, monkeypatch, tmp_path):
+    """The pre-check measures with HF_CLOUD_TOKEN and stays blind otherwise.
+
+    Reading the general HF_TOKEN would give a better forecast on a dense token
+    too narrow to list its namespace — and it is deliberately NOT done: dense
+    runs are cut off from that credential, and widening a least-privilege
+    boundary to sharpen an estimate is the wrong trade. Pinned here so the
+    blind spot stays a decision rather than becoming a regression."""
+    dense = _FakeHfApi(tmp_path)                     # no list_models at all
+    general = _FullAccountHfApi(tmp_path)            # would have said "full"
+    monkeypatch.setattr(
+        ct, '_make_hf_api',
+        lambda token: general if token == 'hf-general-must-not-reach-dense' else dense)
+    with app.app_context():
+        result = ct.launch_cloud_training(
+            'local', dataset_id, train_type='krea', variant='base',
+            training_mode='full_transformer')
+        assert result['run_id']
+
+
+def test_full_launch_is_not_blocked_by_an_unmeasurable_account(
+        ct, app, dataset_id, monkeypatch, tmp_path):
+    """_FakeHfApi has no list_models at all — the Hub could not be measured, and
+    an unmeasurable number must never lock a user out of their own GPU."""
+    api = _FakeHfApi(tmp_path)
+    monkeypatch.setattr(ct, '_make_hf_api', lambda token: api)
+    with app.app_context():
+        result = ct.launch_cloud_training(
+            'local', dataset_id, train_type='krea', variant='base',
+            training_mode='full_transformer')
+        assert result['run_id']
+
+
+def test_dense_continue_refuses_only_what_is_genuinely_impossible(
+        ct, app, dataset_id):
+    """Three refusals that SURVIVED the arrival of the direct road, each for its
+    own reason — and none of them for the old one.
+
+    This test used to be called "needs a hub copy and never a local seed", and
+    its docstring explained all three by the same dead fact: that the only seam
+    putting a file on a pod built its whole request in memory. That is no longer
+    true (pod_checkpoint_push), so a test that still asserted it would have been
+    guarding the absence of a feature that now exists. What is left is narrower
+    and still worth holding:
+
+    * a run with NO source at all — nothing on disk, no verified Hub copy —
+      cannot be continued, and says so instead of pretending the option exists;
+    * a retry replays its seed verbatim, so a seed that has since been deleted
+      is a refusal rather than a silent train-from-scratch;
+    * a full model still cannot be continued from the LOCAL lane, for a reason
+      that predates all of this: full-model training is cloud-only, so there is
+      no local full-model run to continue in the first place."""
     with app.app_context():
         done = ct.CloudTrainingRun(
             dataset_id=dataset_id, status='done', run_name='dense',
@@ -230,11 +388,11 @@ def test_full_continue_and_seeded_retry_are_refused(ct, app, dataset_id):
                 'variant': 'base', 'resume_ckpt_path': 'seed.safetensors'}))
         ct.db.session.add_all([done, retry])
         ct.db.session.commit()
-        with pytest.raises(ValueError, match='cannot be continued or resumed'):
+        with pytest.raises(ValueError, match='nothing left to continue from'):
             ct.continue_cloud_run('local', done.id)
-        with pytest.raises(ValueError, match='resume/continue'):
+        with pytest.raises(ValueError, match='no longer on this computer'):
             ct.retry_cloud_run('local', retry.id)
-        with pytest.raises(ValueError, match='cannot be continued or resumed'):
+        with pytest.raises(ValueError, match='only trained in the cloud'):
             ct.continue_local_run_in_cloud(
                 'local', dataset_id, training_mode='full_transformer')
 
@@ -899,7 +1057,7 @@ def test_candidate_token_status_uses_the_candidate_and_scrubs_it(
     saved = 'hf_saved_NEVER_ECHO_THIS_VALUE'
     seen = []
 
-    def reject(token, _api=None):
+    def reject(token, _api=None, required_base_repo=None):
         seen.append(token)
         raise ValueError(f'rejected credential {token}')
 
@@ -1166,3 +1324,172 @@ def test_dense_profile_defaults_are_explicit(app):
     assert cfg.get('cloud.full_transformer.min_vram_gb') == 80
     assert cfg.get('cloud.full_transformer.disk_gb') == 200
     assert cfg.get('cloud.full_transformer.verification_attempts') == 3
+
+
+# --- the base that reaches the POD ---------------------------------------------
+#
+# The recipe tests assert what build_job_config emits. These assert the rest of
+# the chain — the stamped run params, the rebuild the monitor does minutes later
+# at pod boot, and the cloud rewrite — because that is where a lifted refusal
+# could still have produced a run named Turbo and trained on Raw.
+
+_TURBO_SCOPES = [
+    {'entity': {'type': 'model', 'name': 'krea/Krea-2-Turbo'},
+     'permissions': ['repo.content.read']},
+    {'entity': {'type': 'user', 'name': 'tester'},
+     'permissions': ['repo.content.read', 'repo.write']},
+]
+
+
+def _pod_job(ct, run, ds, staging='/pod/ds'):
+    """The exact chain the monitor runs at pod boot."""
+    params = json.loads(run.train_params)
+    job = ct.lt.build_job_config(
+        ct._run_config_dataset(ds, params), staging,
+        steps=params.get('steps') or 800, training_folder='__POD__')
+    job = ct._cloudify_job_config(
+        job, run.job_name, staging,
+        {'DATASETS_FOLDER': '/datasets', 'TRAINING_FOLDER': '/output'},
+        run_params=params)
+    return job['config']['process'][0], params
+
+
+def test_dense_turbo_launch_sends_turbo_to_the_pod(
+        ct, app, dataset_id, monkeypatch, tmp_path):
+    api = _FakeHfApi(tmp_path, scopes=_TURBO_SCOPES)
+    monkeypatch.setattr(ct, '_make_hf_api', lambda token: api)
+    from app.services import face_dataset_service as fds
+
+    with app.app_context():
+        result = ct.launch_cloud_training(
+            'local', dataset_id, train_type='krea', variant='turbo',
+            training_mode='full_transformer')
+        run = ct.db.session.get(ct.CloudTrainingRun, result['run_id'])
+        proc, params = _pod_job(ct, run, fds.get_dataset('local', dataset_id))
+
+    # The variant is no longer overwritten with 'base' at launch...
+    assert params['variant'] == 'turbo'
+    # ...and the config the pod receives names Turbo.
+    assert proc['model']['name_or_path'] == 'krea/Krea-2-Turbo'
+    assert 'network' not in proc                      # still a dense run
+    assert 'assistant_lora_path' not in proc['model']
+    # The token was asked for the repository this run needs, not for Raw.
+    assert any(call.get('repo_id') == 'krea/Krea-2-Turbo'
+               for call in api.list_calls)
+
+
+def test_a_raw_only_token_cannot_launch_a_turbo_dense_run(
+        ct, app, dataset_id, monkeypatch, tmp_path):
+    """The gate that keeps a 403 from landing on a rented GPU."""
+    api = _FakeHfApi(tmp_path)          # default scopes: Krea-2-Raw only
+    monkeypatch.setattr(ct, '_make_hf_api', lambda token: api)
+    with app.app_context():
+        with pytest.raises(ValueError, match='krea/Krea-2-Turbo'):
+            ct.launch_cloud_training(
+                'local', dataset_id, train_type='krea', variant='turbo',
+                training_mode='full_transformer')
+        assert ct.CloudTrainingRun.query.count() == 0
+
+
+def test_dense_custom_base_rides_the_private_repo_to_the_pod(
+        ct, app, dataset_id, monkeypatch, tmp_path):
+    """The custom-base transport was already wired and mode-agnostic; what the
+    dense lane could never obtain was the base_repo_id stamp. It can now."""
+    from app.services import face_dataset_service as fds
+    from app.services import hf_base_push as hbp
+
+    api = _FakeHfApi(tmp_path)
+    monkeypatch.setattr(ct, '_make_hf_api', lambda token: api)
+    monkeypatch.setattr(hbp, 'require_base_repo', lambda *a, **k: {
+        'repo_id': 'tester/lds-base-hdeadbeef', 'size_bytes': 20_000_000_000})
+    readable = []
+    monkeypatch.setattr(ct, '_assert_dense_custom_base_readable',
+                        lambda repo, token, **k: readable.append((repo, token)))
+    weights = tmp_path / 'my-krea.safetensors'
+    weights.write_bytes(bytes(16))
+    monkeypatch.setattr(ct.lt, 'preflight_custom_paths', lambda *a, **k: None)
+    monkeypatch.setattr(ct.lt, 'assert_trainable_base_file', lambda p: {})
+
+    with app.app_context():
+        result = ct.launch_cloud_training(
+            'local', dataset_id, train_type='krea', variant='base',
+            base_model=str(weights), training_mode='full_transformer')
+        run = ct.db.session.get(ct.CloudTrainingRun, result['run_id'])
+        proc, params = _pod_job(ct, run, fds.get_dataset('local', dataset_id))
+
+    assert params['base_repo_id'] == 'tester/lds-base-hdeadbeef'
+    assert params['base_size_bytes'] == 20_000_000_000
+    # The pod pulls the private repo, by the exact filename it will find there…
+    assert proc['model']['name_or_path'] == 'tester/lds-base-hdeadbeef'
+    assert proc['model']['model_kwargs']['checkpoint_filename'] == (
+        'hdeadbeef.safetensors')
+    # …and the dense VAE survives the rewrite.
+    assert proc['model']['model_kwargs']['vae_path'] == 'Qwen/Qwen-Image-2512'
+    # The pod's own credential was proven able to read that repository.
+    assert readable == [('tester/lds-base-hdeadbeef', 'hf-cloud-secret-x')]
+
+
+def test_the_pod_credential_must_be_able_to_read_the_custom_base(ct, monkeypatch):
+    """A 401/403 refuses the launch with its reason; anything else fails OPEN —
+    an HF outage must never block a launch that would have worked."""
+    import urllib.error
+    import urllib.request
+
+    codes = []
+
+    def fake_urlopen(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, codes.pop(0), 'no', {}, None)
+
+    monkeypatch.setattr(urllib.request, 'urlopen', fake_urlopen)
+    codes.append(403)
+    with pytest.raises(ValueError, match='HF_CLOUD_TOKEN cannot read'):
+        ct._assert_dense_custom_base_readable('tester/lds-base-h1', 'tok')
+    codes.append(404)
+    ct._assert_dense_custom_base_readable('tester/lds-base-h1', 'tok')
+    # No repository to check at all is never an error.
+    ct._assert_dense_custom_base_readable(None, 'tok')
+
+
+def test_the_model_card_names_the_base_the_run_actually_used(ct):
+    assert 'base_model: krea/Krea-2-Turbo' in ct._full_transformer_readme(
+        'tester/Krea-2-full-7-x', 'krea/Krea-2-Turbo')
+    assert 'krea/Krea-2-Turbo`' in ct._full_transformer_readme(
+        'tester/Krea-2-full-7-x', 'krea/Krea-2-Turbo')
+    # …resolved from the run's own stamped params, never from a constant.
+    assert ct._dense_base_repo_for({'variant': 'turbo'}) == 'krea/Krea-2-Turbo'
+    assert ct._dense_base_repo_for({'variant': 'base'}) == 'krea/Krea-2-Raw'
+    assert ct._dense_base_repo_for({}) == 'krea/Krea-2-Raw'
+    assert ct._dense_base_repo_for(
+        {'variant': 'turbo', 'base_repo_id': 'tester/lds-base-h9'}
+    ) == 'tester/lds-base-h9'
+    # The licence PDF only ever comes from an OFFICIAL Krea repository.
+    assert ct._krea_license_source('tester/lds-base-h9') == 'krea/Krea-2-Raw'
+    assert ct._krea_license_source('krea/Krea-2-Turbo') == 'krea/Krea-2-Turbo'
+
+
+def test_the_licence_is_fetched_from_whichever_krea_repo_the_token_can_read(ct):
+    """A custom-base run needs no official read scope at all, so the token may
+    legitimately be scoped to Turbo, to Raw, or to neither. The licence still
+    has to travel with the derivative — so try both, and fail before renting
+    only if neither answers."""
+    class _OneRepoOnly:
+        def __init__(self, readable):
+            self.readable = readable
+            self.asked = []
+
+        def hf_hub_download(self, **kwargs):
+            self.asked.append(kwargs['repo_id'])
+            if kwargs['repo_id'] != self.readable:
+                raise RuntimeError('403')
+            return __import__('tempfile').mkstemp()[1]
+
+    turbo_only = _OneRepoOnly('krea/Krea-2-Turbo')
+    ct._krea_license_bytes(turbo_only, 'tester/lds-base-h9')
+    assert turbo_only.asked == ['krea/Krea-2-Raw', 'krea/Krea-2-Turbo']
+
+    raw_only = _OneRepoOnly('krea/Krea-2-Raw')
+    ct._krea_license_bytes(raw_only, 'krea/Krea-2-Turbo')
+    assert raw_only.asked == ['krea/Krea-2-Turbo', 'krea/Krea-2-Raw']
+
+    with pytest.raises(Exception):
+        ct._krea_license_bytes(_OneRepoOnly('nobody/nothing'), 'krea/Krea-2-Raw')

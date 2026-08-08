@@ -56,7 +56,13 @@ def kept_images(dataset_id) -> list:
 
 
 def dataset_manifest(dataset_id, rows=None) -> list:
-    """[[image_id, caption_hash, file_hash], ...] of the KEPT images, id-sorted.
+    """Training manifest of the KEPT images, id-sorted.
+
+    Entries retain the historical ``[id, long_hash, file_hash]`` shape when no
+    short caption exists.  A fourth short-caption hash is appended when present,
+    so editing only the caption variant that ai-toolkit can sample is no longer
+    invisible to run comparison.  Existing single-caption fingerprints remain
+    byte-for-byte stable.
 
     `file_hash` stays the cheap `size:mtime` proxy on purpose: this list feeds
     `fingerprint_of()`, and every dataset version already stored in every
@@ -64,8 +70,15 @@ def dataset_manifest(dataset_id, rows=None) -> list:
     snapshot (`run_snapshot`), where it can improve the diff without renumbering
     everybody's versions."""
     rows = kept_images(dataset_id) if rows is None else rows
-    return [[r.id, _caption_hash(r.caption), _file_hash(dataset_id, r.filename)]
-            for r in rows]
+    manifest = []
+    for row in rows:
+        entry = [row.id, _caption_hash(row.caption),
+                 _file_hash(dataset_id, row.filename)]
+        short = (getattr(row, 'caption_short', None) or '').strip()
+        if short:
+            entry.append(_caption_hash(short))
+        manifest.append(entry)
+    return manifest
 
 
 def fingerprint_of(manifest, trigger='', kind='') -> str:
@@ -81,8 +94,11 @@ def manifest_diff(old, new) -> dict:
     new_by_id = {e[0]: e for e in (new or [])}
     added = sorted(set(new_by_id) - set(old_by_id))
     removed = sorted(set(old_by_id) - set(new_by_id))
-    captions = sum(1 for i in set(old_by_id) & set(new_by_id)
-                   if old_by_id[i][1] != new_by_id[i][1])
+    captions = sum(
+        1 for i in set(old_by_id) & set(new_by_id)
+        if (old_by_id[i][1] != new_by_id[i][1]
+            or (old_by_id[i][3] if len(old_by_id[i]) > 3 else None)
+            != (new_by_id[i][3] if len(new_by_id[i]) > 3 else None)))
     edited = sum(1 for i in set(old_by_id) & set(new_by_id)
                  if len(old_by_id[i]) > 2 and len(new_by_id[i]) > 2
                  and old_by_id[i][2] != new_by_id[i][2])
@@ -131,6 +147,66 @@ def prepare_launch(user_id, dataset_id, base_model=None):
     except Exception:
         logger.exception('launch snapshot preparation failed (launch continues)')
         return None
+
+
+def prepared_generation_identity(prepared):
+    """Serializable exact Dataset identity captured by ``prepare_launch``.
+
+    Environment probes are deliberately excluded: they describe where a run is
+    launched, not the image/caption generation exported to ai-toolkit.  Every
+    kept row must carry a content signature; otherwise callers cannot prove two
+    generations equal and must fail closed.
+    """
+    if not isinstance(prepared, dict):
+        return None
+    ds = prepared.get('ds')
+    manifest = prepared.get('manifest')
+    snapshot = prepared.get('snapshot')
+    if ds is None or not isinstance(manifest, list) or not isinstance(snapshot, dict):
+        return None
+    images = snapshot.get('images') or {}
+    if not isinstance(images, dict):
+        return None
+    for entry in manifest:
+        if (not isinstance(entry, list) or not entry
+                or not isinstance(images.get(str(entry[0])), dict)
+                or not images[str(entry[0])].get('c')):
+            return None
+    stable_snapshot = {
+        key: value for key, value in snapshot.items() if key != 'env'}
+    return {
+        'fingerprint': fingerprint_of(
+            manifest, ds.trigger_word, getattr(ds, 'kind', '')),
+        'manifest': manifest,
+        'snapshot': stable_snapshot,
+    }
+
+
+def record_generation_identity(record):
+    """The persisted counterpart of :func:`prepared_generation_identity`."""
+    if record is None:
+        return None
+    try:
+        manifest = json.loads(record.manifest or 'null')
+        snapshot = json.loads(record.snapshot or 'null')
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(manifest, list) or not isinstance(snapshot, dict):
+        return None
+    images = snapshot.get('images') or {}
+    if not isinstance(images, dict):
+        return None
+    for entry in manifest:
+        if (not isinstance(entry, list) or not entry
+                or not isinstance(images.get(str(entry[0])), dict)
+                or not images[str(entry[0])].get('c')):
+            return None
+    return {
+        'fingerprint': record.fingerprint,
+        'manifest': manifest,
+        'snapshot': {
+            key: value for key, value in snapshot.items() if key != 'env'},
+    }
 
 
 def register_launch(user_id, dataset_id, family, source, base_model='',

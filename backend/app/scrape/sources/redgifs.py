@@ -14,8 +14,19 @@ import threading
 import requests
 
 from ..validators import URLType
+from .base import ResultList
 
 logger = logging.getLogger(__name__)
+
+
+class RedGifsAbort(Exception):
+    """Levée par `_iter_paged` quand l'itération s'arrête sur une ERREUR (HTTP
+    429/403/5xx, timeout réseau, 401 après épuisement des retries de token)
+    plutôt que sur un épuisement propre des pages. Sans ce signal, `scan()` ne
+    pouvait pas distinguer « le profil/la niche est vide » d'« une page a été
+    refusée » — RedGifs rate-limite couramment (cf. la logique de refresh de
+    token juste au-dessus, déjà prévue pour ça) et un `return` silencieux dans
+    `_iter_paged` transformait un 429/403/500 en résultat vide légitime."""
 
 REDGIFS_API_BASE = "https://api.redgifs.com/v2"
 REDGIFS_AUTH_URL = f"{REDGIFS_API_BASE}/auth/temporary"
@@ -97,8 +108,21 @@ class RedGifsClient:
             return None
         return (data or {}).get('gif')
 
-    def _iter_paged(self, url_for_page):
-        """Itère les pages via une fonction page→url, avec refresh de token sur 401."""
+    def _iter_paged(self, url_for_page, state=None):
+        """Itère les pages via une fonction page→url, avec refresh de token sur 401.
+
+        Épuisement propre (plus de gifs sur la page, ou dernière page atteinte) →
+        `return` normal, générateur terminé sans lever. Toute page refusée (HTTP
+        429/403/5xx, timeout, 401 non récupéré) → lève `RedGifsAbort` au lieu de
+        `return` : l'appelant doit pouvoir distinguer « fini » d'« interrompu »
+        (cf. `RedGifsAbort`).
+
+        `state` (dict optionnel, posé par l'appelant) : si la boucle épuise ses
+        MAX_PAGES itérations SANS avoir atteint `page >= total_pages` (i.e. il
+        restait des pages réelles au-delà du garde-fou temps MAX_PAGES),
+        `state['capped'] = True` est posé juste avant que le générateur se
+        termine — sans ça, ce plafond tronquait silencieusement (même défaut
+        que MAX_ITEMS côté `_consume_paged`, cf. son docstring)."""
         page = 1
         token_retries = 0
         while page <= MAX_PAGES:
@@ -106,15 +130,16 @@ class RedGifsClient:
             try:
                 data = self._get(url)
             except requests.HTTPError as e:
-                if getattr(e.response, 'status_code', None) == 401 and token_retries < 2:
+                status = getattr(e.response, 'status_code', None)
+                if status == 401 and token_retries < 2:
                     token_retries += 1
                     self._reset_token()
                     if self.get_token():
                         continue  # réessaye la même page
-                    return
-                return
-            except Exception:
-                return
+                    raise RedGifsAbort("RedGifs: token refresh failed after 401.") from e
+                raise RedGifsAbort(f"RedGifs: HTTP {status}.") from e
+            except Exception as e:
+                raise RedGifsAbort(f"RedGifs: {e}") from e
 
             gifs = (data or {}).get('gifs') or []
             if not gifs:
@@ -126,14 +151,20 @@ class RedGifsClient:
             if page >= total_pages:
                 return
             page += 1
+        # `while` sorti par épuisement de MAX_PAGES (pas par un `return` ci-dessus
+        # donc `page` n'a jamais atteint `total_pages`) : des pages restent.
+        if state is not None:
+            state['capped'] = True
 
-    def iter_user(self, username):
+    def iter_user(self, username, state=None):
         return self._iter_paged(
-            lambda p: f"{REDGIFS_API_BASE}/users/{username}/search?order=new&page={p}")
+            lambda p: f"{REDGIFS_API_BASE}/users/{username}/search?order=new&page={p}",
+            state=state)
 
-    def iter_niche(self, niche):
+    def iter_niche(self, niche, state=None):
         return self._iter_paged(
-            lambda p: f"{REDGIFS_API_BASE}/niches/{niche}/gifs?page={p}")
+            lambda p: f"{REDGIFS_API_BASE}/niches/{niche}/gifs?page={p}",
+            state=state)
 
 
 # Instance globale (feature admin-only mono-utilisateur).
@@ -153,6 +184,29 @@ def _item_from_gif(gif):
     }
 
 
+def _consume_paged(gen, items, state=None):
+    """Draine un générateur `_iter_paged` dans `items` (borné à MAX_ITEMS).
+
+    Retourne True si la récolte est TRONQUÉE pour une raison quelconque :
+      - `RedGifsAbort` levée en cours de route (page refusée / réseau) ;
+      - plafond MAX_ITEMS atteint AVANT que le générateur ne s'épuise
+        proprement — même limite de détection que picazor.py : on ne peut
+        pas savoir si le profil s'arrêtait pile là, on choisit le côté
+        honnête (cf. son commentaire) ;
+      - `state['capped']` posé par `_iter_paged` (plafond MAX_PAGES atteint
+        alors que des pages réelles restaient, cf. son docstring).
+    Retourne False si l'itération s'est épuisée proprement, sans aucun de ces
+    signaux — profil/niche réellement à court de contenu."""
+    try:
+        for gif in gen:
+            items.append(_item_from_gif(gif))
+            if len(items) >= MAX_ITEMS:
+                return True
+    except RedGifsAbort:
+        return True
+    return bool(state.get('capped')) if state is not None else False
+
+
 def scan(validation):
     """Énumère les médias d'une URL RedGifs. Retourne (items, error).
 
@@ -166,27 +220,54 @@ def scan(validation):
         ut = validation.url_type
         value = validation.value
         items = []
+        state = {}
 
         if ut == URLType.PROFILE:
-            for gif in client.iter_user(value):
-                items.append(_item_from_gif(gif))
-                if len(items) >= MAX_ITEMS:
-                    break
+            truncated = _consume_paged(client.iter_user(value, state=state), items, state)
         elif ut == URLType.NICHE:
-            for gif in client.iter_niche(value):
-                items.append(_item_from_gif(gif))
-                if len(items) >= MAX_ITEMS:
-                    break
+            truncated = _consume_paged(client.iter_niche(value, state=state), items, state)
         elif ut == URLType.VIDEO:
             gif = client.get_single_video(value)
             if not gif:
                 return None, "RedGifs video not found (or token expired)."
             items.append(_item_from_gif(gif))
+            return items, None
         else:
             return None, "Unsupported RedGifs URL type."
 
-        if not items:
-            return None, "No media found for this RedGifs URL."
+        if truncated:
+            if items:
+                # Des items ont déjà été récoltés avant que la récolte ne soit
+                # coupée — page refusée (429/403/5xx/401), plafond MAX_ITEMS, ou
+                # plafond MAX_PAGES atteint avec des pages restantes (cf.
+                # `_consume_paged`) : résultat PARTIEL, pas un échec — même
+                # convention que `base.ResultList.partial` (réutilisée telle
+                # quelle, cf. import), lue par `routes/scrape.py` sur l'objet
+                # retourné (`getattr(items, 'partial', False)`), sans changement
+                # côté route. Corrige au passage un bug préexistant vérifié par le
+                # relecteur : un 429 en page 2 après une page 1 réussie renvoyait
+                # 1 item avec err=None et aucun signal de troncature — et, plus
+                # récemment, un plafond MAX_ITEMS/MAX_PAGES atteint sans incident
+                # réseau faisait de même.
+                result = ResultList(items[:MAX_ITEMS])
+                result.partial = True
+                return result, None
+            # Zéro item ET troncature signalée : ne peut venir ici que d'un
+            # `RedGifsAbort` (le plafond MAX_ITEMS exige au moins 1 item déjà
+            # ajouté, et `state['capped']` n'est posé qu'après avoir consommé au
+            # moins une page avec des gifs, cf. `_iter_paged`) — une vraie panne
+            # (rate-limit/blocage), pas « rien ici » — avant cette correction ce
+            # cas se confondait avec le profil/la niche légitimement vide juste
+            # en dessous et répondait ([], None), 200, « No images found ».
+            return None, "RedGifs: rate-limited or blocked while listing (try again shortly)."
+
+        # PROFILE/NICHE vide (pas VIDEO, cf. branche dédiée ci-dessus qui reste une
+        # vraie erreur) après une itération qui s'est épuisée PROPREMENT (aucun
+        # `RedGifsAbort`, cf. juste au-dessus) : l'API a répondu sans incident, le
+        # compte/la niche n'a juste aucune vidéo publique. Résultat vide LÉGITIME
+        # (même convention que gdl.GdlError kind='empty', app/scrape/sources/gdl.py)
+        # — pas un échec outil : avant cette vague la route répondait 502 sur un
+        # profil vide.
         return items, None
     except Exception as e:  # garde-fou : ne jamais propager
         logger.warning(f"[redgifs] erreur de scan: {e}")

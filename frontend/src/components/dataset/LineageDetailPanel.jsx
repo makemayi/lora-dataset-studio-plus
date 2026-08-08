@@ -104,14 +104,20 @@ export default function LineageDetailPanel({ node, onClose, onNodeChanged, onNod
   };
 
   return (
-    /* Bottom sheet on a phone, side drawer from `sm` up — the same treatment as
-       CheckpointGalleryPanel. It used to be a hard `w-80` side drawer at every
-       width, which on a 400-px screen covered 80% of the board it is supposed to
-       annotate: you could read the run's settings, but not see the run. Capped at
-       70vh so the graph stays visible above the sheet. Desktop is unchanged. */
+    /* Bottom sheet on a phone AND on a tablet, side drawer from `lg` up — the
+       same treatment as CheckpointGalleryPanel. It used to be a hard `w-80` side
+       drawer at every width, which on a 400-px screen covered 80% of the board it
+       is supposed to annotate: you could read the run's settings, but not see the
+       run. Capped at 70vh so the graph stays visible above the sheet.
+
+       The switch used to happen at `sm` (640 px), and that was too early: a 320-px
+       drawer against a 768-px window leaves 448 px of board — the very sliver the
+       sheet exists to avoid, just less extreme. A side drawer only earns its keep
+       when what remains is still a board you can read, so it starts at `lg`
+       (1024 px). Desktop is byte-for-byte unchanged. */
     <div data-testid="lineage-detail-panel" aria-label="Run details"
       className="fixed inset-x-0 bottom-0 z-50 flex max-h-[70vh] flex-col overflow-y-auto border-t border-border bg-surface-overlay p-4 shadow-xl
-                 sm:inset-x-auto sm:right-0 sm:top-0 sm:h-full sm:max-h-none sm:w-80 sm:border-l sm:border-t-0">
+                 lg:inset-x-auto lg:right-0 lg:top-0 lg:h-full lg:max-h-none lg:w-80 lg:border-l lg:border-t-0">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-content">
           {/* Same number as the card that opened this panel (see runIdentity). */}
@@ -119,8 +125,11 @@ export default function LineageDetailPanel({ node, onClose, onNodeChanged, onNod
           {node.train_type ? ` · ${node.train_type}` : ''}
           {node.steps ? ` · ${node.steps.toLocaleString()} steps` : ''}
         </h3>
+        {/* 44 px of thumb below `lg`: this ✕ is the way back to the board, and a
+            14-px glyph is the one target on this panel that must never be missed. */}
         <button type="button" onClick={onClose}
-          className="text-content-subtle hover:text-content" aria-label="Close">✕</button>
+          className="-mr-2 -mt-2 flex h-11 w-11 shrink-0 items-center justify-center text-content-subtle hover:text-content lg:-mr-1 lg:-mt-1 lg:h-8 lg:w-8"
+          aria-label="Close">✕</button>
       </div>
 
       <section className="mt-3">

@@ -188,6 +188,22 @@ export function putJson(url, body) {
   });
 }
 
+/* PATCH, for a route that edits SOME fields of a thing that already exists and is
+   idempotent — a video clip's bounds being the first. PUT would claim the body is
+   the whole resource, which for a clip carrying a status, a thumbnail state and a
+   promotion link it very much is not. */
+export function patchJson(url, body, opts = {}) {
+  return apiFetch(url, {
+    ...opts,
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': getCsrfToken(),
+    },
+    body: JSON.stringify(body),
+  });
+}
+
 export function del(url) {
   return apiFetch(url, {
     method: 'DELETE',

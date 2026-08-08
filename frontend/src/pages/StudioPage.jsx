@@ -20,6 +20,13 @@ export default function StudioPage() {
   // /dataset/studio/:id (legacy), or /studio?dataset=… (launcher), or nothing (standalone).
   const preselectDataset = id || sp.get('dataset') || null;
   const preselectFamily = sp.get('family') || null;
+  // `?base=` — the base model to open on, as ComfyUI's loader names it. Sent by
+  // the full-model card in Checkpoints & LoRAs: arriving there means "test THIS
+  // model", and a full model that is not preselected is a model you have to go
+  // and find in a dropdown among every checkpoint on the machine. It also
+  // re-seeds CFG/steps, which is the point for an undistilled base — the
+  // family's few-step defaults render mush on one.
+  const preselectBase = sp.get('base') || null;
 
   if (!caps.studio_visible) {
     return (
@@ -36,7 +43,8 @@ export default function StudioPage() {
   // leaves room so it never covers the last row of results.
   return (
     <div className="pb-24">
-      <StudioShell preselectDataset={preselectDataset} preselectFamily={preselectFamily} />
+      <StudioShell preselectDataset={preselectDataset} preselectFamily={preselectFamily}
+        preselectBase={preselectBase} />
     </div>
   );
 }

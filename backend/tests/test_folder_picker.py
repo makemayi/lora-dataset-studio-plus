@@ -4,6 +4,7 @@ The native dialog spawns PowerShell on a real desktop, which we never want in a
 test run, so open_native_folder_dialog is monkeypatched at the route boundary.
 The listing endpoint is exercised for real against tmp_path directories."""
 import os
+import re
 
 import pytest
 
@@ -107,6 +108,91 @@ def test_native_dialog_nonzero_exit_is_unavailable(monkeypatch):
 
 
 # --- GET /api/system/list-folders --------------------------------------------
+# --- Which dialog the user actually gets -----------------------------------
+def test_pwsh_is_preferred_over_windows_powershell(monkeypatch):
+    """The host decides the DIALOG, not just the interpreter: pwsh runs on .NET
+    Core, whose FolderBrowserDialog is the modern Common Item Dialog (address bar,
+    pasteable path); powershell.exe 5.1 runs on .NET Framework and draws the
+    XP-era tree. Preferring powershell.exe handed the dated dialog to every
+    machine that had both."""
+    seen = []
+
+    def fake_which(name):
+        seen.append(name)
+        return f'C:\\{name}.exe'
+
+    monkeypatch.setattr(folder_picker.shutil, 'which', fake_which)
+    assert folder_picker._powershell_exe() == 'C:\\pwsh.exe'
+    assert seen[0] == 'pwsh', 'pwsh must be probed FIRST'
+
+
+def test_falls_back_to_windows_powershell_when_pwsh_absent(monkeypatch):
+    monkeypatch.setattr(folder_picker.shutil, 'which',
+                        lambda name: None if name == 'pwsh' else 'C:\\powershell.exe')
+    assert folder_picker._powershell_exe() == 'C:\\powershell.exe'
+
+
+def test_script_asks_for_the_folder_picker_and_can_always_fall_back():
+    """Contract on the shipped PowerShell, which no unit test can execute here.
+
+    Three things must stay true or the picker silently regresses to the old
+    dialog (or to none at all):
+      * FOS_PICKFOLDERS is what turns the file dialog into a folder dialog;
+      * the COM path is wrapped so ANY interop failure still shows a dialog;
+      * a user CANCEL is not treated as a failure — re-showing a second dialog
+        after a deliberate cancel would be worse than the bug we fixed.
+    """
+    src = folder_picker._PS_SCRIPT
+    # Values, not spelling: the constants are what the shell actually reads.
+    assert re.search(r'FOS_PICKFOLDERS\s*=\s*0x0*20\b', src)
+    assert re.search(r'FOS_FORCEFILESYSTEM\s*=\s*0x0*40\b', src)
+    assert re.search(r'SIGDN_FILESYSPATH\s*=\s*0x80058000\b', src)
+    assert 'DC1C5A9C-E88A-4dde-A5A1-60F82A20AEF7' in src   # CLSID_FileOpenDialog
+    assert '42f85136-db7e-439c-85f1-e4075d135fc8' in src   # IID_IFileDialog
+    # The fallback: a catch around the COM path that still shows a dialog.
+    com_call = src.index('$path = Show-ComDialog')
+    catch = src.index('} catch {', com_call)
+    assert '$path = Show-WinFormsDialog' in src[catch:catch + 600]
+    # Cancel is a normal outcome, returned as null BEFORE any throw.
+    assert 'ERROR_CANCELLED_HR' in src and 'if (hr == ERROR_CANCELLED_HR) return null;' in src
+
+
+def test_script_vtable_order_matches_the_reference_source():
+    """A COM vtable is POSITIONAL: one misplaced entry calls a different function
+    with the wrong arguments, and the failure mode is a crash or a wrong path
+    rather than a compile error. This pins the order against .NET's own
+    FileDialog_Vista_Interop.cs declaration, truncated at the last slot we call."""
+    src = folder_picker._PS_SCRIPT
+    start = src.index('interface IFileDialog {')
+    body = src[start:src.index('}', src.index('void GetResult', start))]
+    order = [ln.split('(')[0].split()[-1] for ln in body.splitlines()
+             if ln.strip().startswith(('void ', '[PreserveSig] int '))]
+    assert order == [
+        'Show', 'SetFileTypes', 'SetFileTypeIndex', 'GetFileTypeIndex',
+        'Advise', 'Unadvise', 'SetOptions', 'GetOptions',
+        'SetDefaultFolder', 'SetFolder', 'GetFolder', 'GetCurrentSelection',
+        'SetFileName', 'GetFileName', 'SetTitle', 'SetOkButtonLabel',
+        'SetFileNameLabel', 'GetResult',
+    ]
+
+
+def test_picker_mode_env_reaches_the_script(monkeypatch):
+    """LDS_PICKER_MODE=legacy is the escape hatch for a user whose modern dialog
+    misbehaves; it has to actually reach PowerShell."""
+    monkeypatch.setattr(os, 'name', 'nt')
+    monkeypatch.setattr(folder_picker, '_powershell_exe', lambda: 'pwsh')
+    monkeypatch.setenv('LDS_PICKER_MODE', 'legacy')
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen['env'] = kw.get('env') or {}
+        return _FakeProc(stdout=b'D:\\x')
+
+    monkeypatch.setattr(folder_picker.subprocess, 'run', fake_run)
+    folder_picker.open_native_folder_dialog()
+    assert seen['env'].get('LDS_PICKER_MODE') == 'legacy'
+
+
 def test_list_roots_when_no_path(client):
     r = client.get('/api/system/list-folders')
     assert r.status_code == 200

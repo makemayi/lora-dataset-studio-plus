@@ -147,6 +147,21 @@ class FaceDatasetImage(db.Model):
     # concept/aesthetic omitted) and stored WITHOUT the trigger; the trigger is prepended at
     # export like the long. Additive column (migration in create_app). NULL = no short yet.
     caption_short = db.Column(Text, nullable=True)
+    # WHO wrote each of the two captions above. NULL = never recorded (what every
+    # row that predates these columns carries, and what a caption-free row keeps) |
+    # 'asserted' = a human typed, corrected or imported the text | 'joycaption' /
+    # 'ollama' = the engine that produced it. Same two vocabularies, same reasons,
+    # as face_cluster_origin and watermark_source on BankImage — and the same
+    # consequence for the first: a FORCED caption pass SKIPS 'asserted' rows so it
+    # never silently overwrites the user's own words. NULL is re-captionable on
+    # purpose: sparing it would make Re-caption inert on every existing dataset,
+    # and the screen counts it separately instead of calling it machine-written.
+    # The short caption has its OWN column because it has its own writers on both
+    # sides (the expanded editor types it; the dual-caption pass derives it), and
+    # the two cross constantly — one column for two texts would mislabel one of
+    # them. See services/caption_origin.py. Additive columns (see _SCHEMA_ADDITIONS).
+    caption_origin = db.Column(String(16), nullable=True)
+    caption_short_origin = db.Column(String(16), nullable=True)
     job_id = db.Column(String(36), nullable=True, index=True)
     variation_prompt = db.Column(String(500), nullable=True)    # RAW catalog prompt (regenerate)
     klein_model = db.Column(String(255), nullable=True)         # UNET used (regenerate)
@@ -210,6 +225,17 @@ class FaceDatasetImage(db.Model):
     # Correction manuelle : JSON list de bbox normalisées. NULL conserve le bbox
     # automatique comme source effective ; [] est un override explicite vide.
     watermark_regions = db.Column(Text, nullable=True)
+    # WHICH detector ruled on this row: 'detector' (the SigLIP2 cascade extra) |
+    # 'vision' (the Ollama vision model) | NULL = unknown, never guessed. Same
+    # vocabulary and same reason as bank_image.watermark_source, which came
+    # first: a dataset can already hold verdicts from BOTH routes today —
+    # promotion copies a bank's watermark_state across — and the two disagree at
+    # the margins, so "why is this one flagged?" has to stay answerable per image
+    # rather than per dataset. watermark_score is the cascade's 0..1 score
+    # (NULL on the vision route, which has none). Additive columns (create_app
+    # migration); rows written before them stay NULL and read as 'unknown'.
+    watermark_source = db.Column(String(16), nullable=True)
+    watermark_score = db.Column(Float, nullable=True)
     # Métadonnées de provenance génériques, sérialisées en JSON. La première
     # intégration prise en charge est Pexels : plateforme, page photo et crédit
     # photographe. Toute écriture passe par la validation stricte du service.
@@ -241,6 +267,11 @@ class FaceDatasetImage(db.Model):
     # on a locked image; it just refuses single delete, batch delete and purge.
     # Additive column (migration in create_app); see _SCHEMA_ADDITIONS.
     is_locked = db.Column(db.Boolean, nullable=True, default=False)
+    # Bidirectional, bounded metadata envelope for fields that only one side of
+    # Bank <-> Dataset exposes (short caption, generation provenance, Bank reject
+    # reason, etc.). It is inert history unless the transfer validator explicitly
+    # restores a compatible destination field.
+    transfer_metadata = db.Column(Text, nullable=True)
     created_at = db.Column(DateTime, default=db.func.current_timestamp())
 
     def __repr__(self):
@@ -268,6 +299,12 @@ class ImageBank(db.Model):
     # pipeline has ever run. Additive column — the image_bank table shipped in
     # the Beta, so it needs the additive path (see _SCHEMA_ADDITIONS).
     pipeline_report = db.Column(Text, nullable=True)
+    # Which image/text embedding space powers Bank search, similarity, diversity,
+    # coverage and semantic duplicate grouping. CLIP remains the durable default
+    # for every existing Bank; SigLIP2 uses its own cache and never replaces the
+    # CLIP vectors needed by aesthetic, NSFW, style and medium analysis.
+    semantic_engine = db.Column(String(16), nullable=False, default='clip',
+                                server_default='clip')
 
     def __repr__(self):
         return f'<ImageBank {self.id} {self.name}>'
@@ -301,12 +338,16 @@ class BankImage(db.Model):
     # same 64-bit dHash family (Hamming <= dup_distance).
     dup_group = db.Column(Integer, nullable=True, index=True)
     # Semantic near-duplicate group id (stage 2 — "same shot, different crop"):
-    # cosine of the CLIP embeddings the ✨ Score pass cached >= semantic_dup_threshold.
-    # Catches crops / re-compressed variants a dHash misses. Assigned by the
-    # semantic-dedup pass over the scored images; NULL = no semantic near-dup /
-    # the pass hasn't run. Distinct column from dup_group so the two stages
-    # co-exist (an image can belong to both).
+    # cosine in the Bank's selected CLIP or SigLIP2 space, with an engine-specific
+    # threshold. Catches crops / re-compressed variants a dHash misses. Assigned
+    # by the semantic-dedup pass; NULL = no semantic near-dup / the pass has not
+    # run for the active engine. Distinct from dup_group so both stages co-exist.
     semantic_dup_group = db.Column(Integer, nullable=True, index=True)
+    # Durable per-engine semantic partitions. ``semantic_dup_group`` above is the
+    # active projection consumed by every existing filter/payload; switching the
+    # Bank swaps that projection without throwing either engine's work away.
+    clip_semantic_dup_group = db.Column(Integer, nullable=True)
+    siglip2_semantic_dup_group = db.Column(Integer, nullable=True)
     # Subject pass (InsightFace subprocess). face_state mirrors the dataset
     # vocabulary (scorable|no_face|low_det|too_small|extreme_pose|unreadable|error);
     # face_cluster is a bank-local person-cluster id (1 = biggest cluster),
@@ -314,6 +355,16 @@ class BankImage(db.Model):
     face_state = db.Column(String(16), nullable=True)
     face_det = db.Column(Float, nullable=True)
     face_cluster = db.Column(Integer, nullable=True, index=True)
+    # WHERE the face_cluster id came from. NULL = the embeddings pass computed it
+    # (the default, and what every row that predates this column carries).
+    # 'asserted' = the user declared the image's SUBFOLDER to hold a single person
+    # (services/folder_person.py), so the id was written with no inference at all.
+    # The two live in the SAME id space on purpose: every reader (filters, coverage,
+    # the person chips) keeps working unchanged, and a later cross-folder merge can
+    # still join an asserted group to a computed one. The column exists so the
+    # embeddings pass can tell them apart — it SKIPS asserted rows (that skip is the
+    # compute the assertion saves) and never silently overwrites the user's word.
+    face_cluster_origin = db.Column(String(10), nullable=True)
     # Scoring pass (V2, the "bank scoring" ML extra: CLIP ViT-L/14 + a tiny
     # aesthetic head + an NSFW classifier, one subprocess like the face pass).
     # RAW scores persist, VERDICTS are recomputed at read time against the 'bank'
@@ -354,12 +405,38 @@ class BankImage(db.Model):
     # Non-NULL is what makes the readers (promote, thumbnails, the file route)
     # prefer the cleaned blob over the untouched source.
     watermark_clean_method = db.Column(String(16), nullable=True)
+    # WHICH detector produced watermark_state: NULL (a row scanned before this
+    # column existed, or never scanned) | 'vision' (the Ollama vision model, the
+    # route that has always existed and still runs when the extra is absent) |
+    # 'detector' (the dedicated SigLIP2 + Grounding DINO extra). Persisted rather
+    # than derived because a bank is scanned over weeks and can hold BOTH — and
+    # the two disagree at the margins, so "why is this flagged?" has to be
+    # answerable per image, not per bank. Additive column (see _SCHEMA_ADDITIONS).
+    watermark_source = db.Column(String(16), nullable=True)
+    # The detector's raw score in 0..1 for this image (NULL for a vision-model row:
+    # that route produces a sentence, not a number). Kept because the flag itself
+    # is a THRESHOLD applied to it — storing only the verdict would mean a rescan
+    # of the whole bank to answer "what would 0.92 have flagged?", and the
+    # threshold is the one knob this feature offers.
+    watermark_score = db.Column(Float, nullable=True)
     # Caption pass — a plain DESCRIPTIVE caption (no trigger, no identity omission:
     # a bank has no trigger word and nothing to protect). It doubles as the bank's
     # search text (the search bar matches caption + relpath) AND rides along to the
     # dataset on promotion, so a promoted selection starts already captioned. NULL =
     # not captioned yet. Additive column — created by db.create_all(), no migration.
     caption = db.Column(Text, nullable=True)
+    # WHO wrote that caption. NULL = never recorded (every row that predates this
+    # column, and every uncaptioned row) | 'asserted' = a human wrote or corrected
+    # it — usually in a Dataset, the only place this app offers a caption editor,
+    # and carried here by the Dataset -> Bank import | 'joycaption' / 'ollama' =
+    # the engine that produced it. Exactly the two vocabularies already on this
+    # table (face_cluster_origin's 'asserted', watermark_source's engine name),
+    # and 'asserted' keeps its meaning: 🔄 Re-caption SKIPS those rows rather than
+    # overwriting a human's words with a model's. NULL rows ARE re-captioned (their
+    # origin was never recorded and cannot be recovered), and the button counts
+    # them apart from the machine-written ones instead of pretending they are the
+    # same thing. See services/caption_origin.py. Additive column (_SCHEMA_ADDITIONS).
+    caption_origin = db.Column(String(16), nullable=True)
     # Portable source provenance shared with Dataset images. The only currently
     # accepted shape is normalized Pexels attribution; services validate/canonicalize
     # it before writing. Keeping it on the Bank makes Bank -> Dataset -> Bank
@@ -397,6 +474,48 @@ class BankImage(db.Model):
     jpeg_quality = db.Column(Float, nullable=True)
     origin = db.Column(String(8), nullable=True, index=True)
     origin_evidence = db.Column(String(24), nullable=True)
+    # Medium pass — WHAT THE PICTURE IS MADE OF, as opposed to `origin`, which
+    # reads the file's metadata. The two answer different questions and must
+    # never be conflated: an AI-generated photorealistic portrait is origin='ai'
+    # AND medium='photo'; a scanned manga page is origin='unknown' AND
+    # medium='anime'. Computed with zero-shot CLIP over the embedding the ✨ Score
+    # pass ALREADY cached, so it costs no new image inference.
+    #   medium         : 'photo' | 'anime' | 'render3d' | 'illustration'
+    #                    | 'unsure' | NULL (never classified — the ✨ Score pass
+    #                    has not reached this image, so there is no embedding to
+    #                    read and the honest answer is "not scored yet").
+    #                    'unsure' is a REAL, measured verdict, not a placeholder:
+    #                    see MEDIUM_MARGIN_* in image_bank_service for the numbers
+    #                    that make it the majority answer on ambiguous rows.
+    #   medium_margin  : the cosine gap between the winning prototype and the
+    #                    runner-up. Persisted because it is the only number that
+    #                    says HOW MUCH the verdict was worth, it is what the
+    #                    'unsure' cut is applied to, and it makes the pass
+    #                    re-tunable with no recompute (same read-time-verdict
+    #                    philosophy as the quality thresholds).
+    # Synergy note: this column is what a future "is this dataset anime or
+    # photographic?" check (the Anima lane) should read — it is the only
+    # per-image medium signal the app persists.
+    medium = db.Column(String(16), nullable=True, index=True)
+    medium_margin = db.Column(Float, nullable=True)
+    # Face pass — the head's YAW in degrees, signed, as InsightFace reports it
+    # (negative = turned one way, positive = the other; the app only ever reads
+    # |yaw|, because "turned left" and "turned right" are the same shot type for
+    # a training set). It was ALREADY computed by every face pass — used once to
+    # gate 'extreme_pose' and then thrown away — so persisting it costs one float
+    # and no extra inference. NULL = the pass never ran on this row, ran before
+    # this column existed, or found no face; the ⤢ Angle chips call all three
+    # "not measured", never "frontal".
+    face_yaw = db.Column(Float, nullable=True)
+    # Full SHA-256 of the exact EFFECTIVE bytes (cleaned/rotated when selected)
+    # described by Quality, Score, Face and Framing.  Watermark geometry is the
+    # deliberate exception: it is measured and applied in raw-source coordinates
+    # and therefore has its own authority below.
+    analysis_fingerprint = db.Column(String(64), nullable=True)
+    # SHA-256 of the raw, pre-rotation source used for watermark detection,
+    # regions and cleaning. Historical watermark metadata may survive a baked
+    # transfer, but it is actionable only while this still matches the raw file.
+    watermark_fingerprint = db.Column(String(64), nullable=True)
     # Manual turn, in degrees CLOCKWISE: NULL/0 = untouched | 90 | 180 | 270.
     # (Idea by 1Tomber, GitHub #17.) A bank is a READ-ONLY view over the user's
     # own folder, so a rotation cannot rewrite their file — it is stored here and
@@ -424,10 +543,98 @@ class BankImage(db.Model):
     # read as "a dataset id" everywhere, so it is never re-pointed at a bank.
     # An image can have gone to both; the two answers stay independent.
     promoted_bank_id = db.Column(Integer, nullable=True)
+    # Same portable envelope as FaceDatasetImage.transfer_metadata. A Bank does
+    # not interpret Dataset-only values, but must carry them byte-for-metadata
+    # through Bank -> Bank and back to a Dataset.
+    transfer_metadata = db.Column(Text, nullable=True)
     created_at = db.Column(DateTime, default=db.func.current_timestamp())
 
     def __repr__(self):
         return f'<BankImage {self.id} bank={self.bank_id} {self.status}>'
+
+
+class BankFolderPerson(db.Model):
+    """"This subfolder is one person" — the user's assertion about a bank folder.
+
+    Scraped sources are very often one folder per person, and making the face pass
+    re-discover by inference what the folder name already said is the single most
+    expensive way to learn nothing. One row here says it instead: every image of
+    that subfolder gets a person id immediately, at zero GPU cost, and the
+    embeddings pass then SKIPS those images entirely.
+
+    Keyed on (bank_id, subfolder) — the TOP-LEVEL subfolder, exactly the string the
+    Subfolder filter uses ('' = the bank root), so the assertion and the scoping
+    facet always talk about the same set of files. It is a rule, not a stamp: it
+    survives re-scans, and an image that lands in the folder later joins the group
+    on insert. Revoking deletes the row and clears the ids it wrote, putting those
+    images back in the way of normal clustering.
+
+    NO relationship() to ImageBank on purpose (see the delete-500 lesson): the
+    services delete these rows explicitly, children first."""
+    __tablename__ = 'bank_folder_person'
+    __table_args__ = (db.UniqueConstraint('bank_id', 'subfolder',
+                                          name='uq_bank_folder_person'),)
+    id = db.Column(Integer, primary_key=True)
+    bank_id = db.Column(
+        Integer, db.ForeignKey('image_bank.id', ondelete='CASCADE'),
+        nullable=False, index=True)
+    # Top-level subfolder name, '' for the bank root. Stored verbatim — it is a
+    # user path fragment and is never shown outside this install.
+    subfolder = db.Column(Text, nullable=False, default='')
+    # The bank-local person id this folder owns. Allocated once, above every id in
+    # use at that moment, and NEVER reallocated while the assertion stands — the
+    # embeddings pass offsets its own ids past it so the two never collide.
+    cluster_id = db.Column(Integer, nullable=False)
+    # Last sample check, JSON: {checked_at, sample, scorable, largest, faces,
+    # verdict, note}. NULL = never verified (the assertion is still in force —
+    # verification informs, it never gates).
+    sample_report = db.Column(Text, nullable=True)
+    created_at = db.Column(DateTime, default=db.func.current_timestamp())
+
+    def __repr__(self):
+        return (f'<BankFolderPerson bank={self.bank_id} '
+                f'{self.subfolder!r} #{self.cluster_id}>')
+
+
+class BankFolderProbe(db.Model):
+    """"This subfolder LOOKS like one person" — a MEASUREMENT about a folder.
+
+    Deliberately a different table from BankFolderPerson, because it is a
+    different kind of thing with a different lifetime. A probe is something the
+    app found out by sampling ~15 images; an assertion is something the user
+    declared. Conflating them is exactly the mistake this feature exists to
+    avoid: a suggestion must never be able to become a grouping on its own.
+
+    So this table only ever feeds a SUGGESTION. It groups nothing, it writes no
+    face_cluster, and confirming it is a click the user makes.
+
+    ``content_sig`` is what makes a probe expire honestly: a cheap DB-only digest
+    of the sampled pool's row ids, effective-analysis identities, transform
+    markers, and face threshold. Images added, removed, transformed or rebound
+    since → the verdict describes a folder that no longer exists, and the UI
+    marks it stale rather than suggest from stale evidence."""
+    __tablename__ = 'bank_folder_probe'
+    __table_args__ = (db.UniqueConstraint('bank_id', 'subfolder',
+                                          name='uq_bank_folder_probe'),)
+    id = db.Column(Integer, primary_key=True)
+    bank_id = db.Column(
+        Integer, db.ForeignKey('image_bank.id', ondelete='CASCADE'),
+        nullable=False, index=True)
+    subfolder = db.Column(Text, nullable=False, default='')
+    # 'consistent' | 'mixed' | 'inconclusive' — the same three the single-folder
+    # check produces, from the same function. One vocabulary, one meaning.
+    verdict = db.Column(String(14), nullable=False)
+    sample = db.Column(Integer, nullable=True)      # images actually embedded
+    scorable = db.Column(Integer, nullable=True)    # of those, with a usable face
+    largest = db.Column(Integer, nullable=True)     # biggest same-person group
+    faces = db.Column(Integer, nullable=True)       # distinct people in the sample
+    note = db.Column(Text, nullable=True)           # the sentence shown to the user
+    content_sig = db.Column(String(40), nullable=True)
+    checked_at = db.Column(DateTime, default=db.func.current_timestamp())
+
+    def __repr__(self):
+        return (f'<BankFolderProbe bank={self.bank_id} '
+                f'{self.subfolder!r} {self.verdict}>')
 
 
 class LoraTestImage(db.Model):
@@ -505,6 +712,33 @@ class LoraTestImage(db.Model):
     record_id = db.Column(Integer, nullable=True, index=True)
     step = db.Column(Integer, nullable=True)
     created_at = db.Column(DateTime, default=db.func.current_timestamp())
+    # ✨ A row that is NOT a Test Studio cell: the ✨ Upscale & improve pass run on
+    # one of these images from the ◉ Canvas lightbox. The result has to live in
+    # THIS table — `canvas_image_node.image_id` is a `lora_test_image.id`, so
+    # anything the board must be able to pin has to be one — but it was never
+    # generated by a checkpoint×strength sweep and must not be read as one.
+    #
+    # `derivation_kind` is therefore the EXCLUSION MARKER, not decoration. Every
+    # query in lora_test_studio.py that means "the cells of this dataset" goes
+    # through `_cells()`, which filters these rows out; an audit of the 21 read
+    # sites found TEN that otherwise break — a pending improve counted as an
+    # active test run and blocked new launches, a failed one was resumed as a
+    # Z-Image cell, and the row entered cell_scores/face_ranking as a vote for
+    # the checkpoint that did not make it. A test forbids bare `LoraTestImage.query`
+    # in that module so the invariant is enforced rather than remembered.
+    #
+    # `run_id` stays NULL on these rows as well — that is what keeps them out of
+    # checkpoint_timeline (which filters `run_id IS NOT NULL`), where a 2 MP
+    # upscale spliced into an epoch-by-epoch morph would be a lie. `record_id`
+    # and `step` ARE copied, on purpose: that is what puts the improvement in the
+    # same checkpoint gallery as its source, next to it, and on the board.
+    #
+    # `parent_image_id` is the source row, deliberately not a ForeignKey (same
+    # reason as `record_id`): a deleted source must leave a picture you can still
+    # look at, never a database error. Additive columns → existing databases keep
+    # their rows and read NULL everywhere (see _SCHEMA_ADDITIONS).
+    parent_image_id = db.Column(Integer, nullable=True, index=True)
+    derivation_kind = db.Column(String(32), nullable=True)
 
     def __repr__(self):
         return f'<LoraTestImage {self.id} ds={self.dataset_id} {self.checkpoint}@{self.strength} {self.status}>'
@@ -647,6 +881,13 @@ class CloudTrainingRun(db.Model):
     __tablename__ = 'cloud_training_run'
     id = db.Column(db.Integer, primary_key=True)
     dataset_id = db.Column(db.Integer, nullable=False)
+    # WHICH TABLE `dataset_id` points into: 'face_dataset' or 'video_dataset'.
+    # The two share one integer space, so without this a video run and a face
+    # dataset of the same id are indistinguishable and every consumer resolves
+    # the wrong row in silence. NULL on every row that predates the column, and
+    # read as 'face_dataset' — see services/cloud_run_dataset.table_of, which is
+    # the only place allowed to answer this question.
+    dataset_table = db.Column(db.String(32))
     run_name = db.Column(db.String(255))          # local run identity (lt._run_name)
     job_name = db.Column(db.String(255))          # unique remote job/dataset name
     status = db.Column(db.String(32), default='preparing')
@@ -890,8 +1131,22 @@ class CanvasImageNode(db.Model):
 
     Same table shape and the same reasoning as ``CanvasNodePosition``, one row
     per (dataset, image): coordinates are LANE-LOCAL, the same world units the
-    card positions use, so both live in one coordinate system and one lane
-    extent.
+    card positions use, so both live in one coordinate system.
+
+    ⚠️ Lane-local is the ANCHOR, not a cage — and unlike a card's, these
+    coordinates may be NEGATIVE. A picture goes wherever it is dropped, above or
+    left of its own lane included; only the point it is measured FROM is the
+    lane's origin. That reference is what makes the number survive: a lane's
+    position on the board is derived from which datasets are ticked in the
+    canvas filter and from the height of every lane above it, so it moves by
+    hundreds of world units whenever an unrelated dataset is unticked or gains a
+    run. Board-absolute coordinates would leave every picture hovering over the
+    wrong lane after one filter click, and would need a migration nobody could
+    compute server-side (lane heights are laid out in the browser). Measured
+    from its own lane, a picture travels with the run it is evidence about, and
+    every row ever written keeps meaning exactly what it meant — no migration,
+    on any database. ``cloud_training.CANVAS_IMAGE_REACH`` bounds the distance
+    so one corrupt row cannot collapse ✦ Fit; ✦ Tidy up is the way back.
 
     ⚠️ ``visible`` is the whole feature, not a flag. Closing a pinned image must
     NOT forget where it was: re-opening it has to put it back exactly where and
@@ -943,3 +1198,232 @@ class CanvasImageNode(db.Model):
     dataset = db.relationship('FaceDataset')
     __table_args__ = (db.UniqueConstraint('dataset_id', 'image_id',
                                           name='uq_canvas_image_node'),)
+
+
+# ---------------------------------------------------------------------------
+# 🎬 Video lane — a SEPARATE set of tables, on purpose.
+#
+# The image lane rests on one invariant: one row = one file. `BankImage.relpath`
+# is relative to the bank's source_path, every reader resolves it to a path, the
+# dedup hashes a file, the promotion copies a file. The video lane cannot hold
+# that invariant — a two-hour rush is ONE file and four hundred training clips.
+#
+# Bolting temporal bounds onto BankImage would have meant a migration over tables
+# that already carry tens of thousands of rows in user databases, plus every
+# existing pass learning to say "not applicable" for video rows. These tables are
+# NEW, so db.create_all() creates them and no migration is needed at all, and not
+# one line of the image lane changes.
+# ---------------------------------------------------------------------------
+
+
+class VideoBank(db.Model):
+    """A triage bank over a folder of SOURCE VIDEOS, referenced in place.
+
+    Same promise as the image bank: the source folder is never written to. The
+    video bank keeps that promise more literally than one might expect — it
+    stores no media at all beyond thumbnails, because cutting a clip means
+    re-encoding it, and we only pay that at promotion, for the clips actually
+    kept. What lives here is bounds and decisions."""
+    __tablename__ = 'video_bank'
+    id = db.Column(Integer, primary_key=True)
+    user_id = db.Column(String(36), nullable=False, index=True, default='local')
+    name = db.Column(String(100), nullable=False)
+    source_path = db.Column(Text, nullable=False)      # absolute folder, read-only
+    # Persisted summary of the last pipeline run (JSON), same role as
+    # ImageBank.pipeline_report: the outcome is still there tomorrow morning.
+    pipeline_report = db.Column(Text, nullable=True)
+    created_at = db.Column(DateTime, default=db.func.current_timestamp())
+    updated_at = db.Column(DateTime, default=db.func.current_timestamp(),
+                           onupdate=db.func.current_timestamp())
+
+    def __repr__(self):
+        return f'<VideoBank {self.id} {self.name}>'
+
+
+class VideoSource(db.Model):
+    """One source FILE of a video bank — the level the image lane does not have.
+
+    It exists because the facts a file carries (duration, native fps, resolution,
+    codec) are not facts a clip carries, and because a probe that fails must fail
+    once per file rather than once per clip. `fps_native` is the SOURCE's rate and
+    is never what a clip is encoded at: the target profile decides that. Reading
+    this column at encode time is precisely how a 16 fps target ends up with
+    accelerated motion."""
+    __tablename__ = 'video_source'
+    id = db.Column(Integer, primary_key=True)
+    bank_id = db.Column(
+        Integer, db.ForeignKey('video_bank.id', ondelete='CASCADE'),
+        nullable=False, index=True)
+    relpath = db.Column(Text, nullable=False)          # relative to bank.source_path
+    file_size = db.Column(Integer, nullable=True)
+    duration_s = db.Column(Float, nullable=True)
+    fps_native = db.Column(Float, nullable=True)       # the SOURCE's rate, never the target's
+    width = db.Column(Integer, nullable=True)
+    height = db.Column(Integer, nullable=True)
+    codec = db.Column(String(24), nullable=True)
+    # NULL = not probed yet | 'ok' | 'unreadable'. Mirrors BankImage.quality_state's
+    # vocabulary so "the file is broken" reads the same in both lanes.
+    probe_state = db.Column(String(12), nullable=True)
+    # NULL = shot detection has not run on this file | 'ok' | 'error'. Separate from
+    # probe_state because a file can be perfectly readable and still fail detection.
+    detect_state = db.Column(String(12), nullable=True)
+    created_at = db.Column(DateTime, default=db.func.current_timestamp())
+
+    def __repr__(self):
+        return f'<VideoSource {self.id} bank={self.bank_id} {self.relpath}>'
+
+
+class VideoClip(db.Model):
+    """One detected shot — the unit of work of the whole video lane.
+
+    BOUNDS ARE PTS SECONDS, AND THAT IS THE CANONICAL FORM. The detector reasons
+    in frame indices on a decoded stream, which is frame-exact and tempting, but
+    scraped material is routinely variable-frame-rate: index n corresponds to no
+    stable instant there, while a presentation timestamp does. `ffmpeg -ss` takes
+    seconds too. The frame indices are kept because they are what the detector
+    actually said, and they make a disagreement debuggable — but nothing cuts
+    from them.
+
+    Sub-second precision is not a nicety: rounding a bound to the nearest second
+    on a 2-second clip moves a quarter of the sample."""
+    __tablename__ = 'video_clip'
+    id = db.Column(Integer, primary_key=True)
+    bank_id = db.Column(
+        Integer, db.ForeignKey('video_bank.id', ondelete='CASCADE'),
+        nullable=False, index=True)
+    source_id = db.Column(
+        Integer, db.ForeignKey('video_source.id', ondelete='CASCADE'),
+        nullable=False, index=True)
+    start_s = db.Column(Float, nullable=False)
+    end_s = db.Column(Float, nullable=False)
+    start_frame = db.Column(Integer, nullable=True)    # informative; never cut from
+    end_frame = db.Column(Integer, nullable=True)
+    # Which detector drew this boundary: 'transnetv2' | 'manual'. Persisted rather
+    # than derived because a bank is worked on over days and can hold both, and
+    # "why is this cut here?" has to be answerable per clip.
+    detector = db.Column(String(16), nullable=True)
+    # NULL = no thumbnail yet | 'ok' | 'error'. The thumbnail is the ONLY media the
+    # bank writes, and the gallery shows nothing else — there is deliberately no
+    # per-clip preview file to hover, because that would mean encoding every clip
+    # including the ones about to be rejected.
+    thumb_state = db.Column(String(12), nullable=True)
+    # Quality metrics (wave 2): the RAW per-clip summary the metrics scan wrote,
+    # as JSON — motion_mean/motion_p95, luma_min/luma_mean, sharpness_p90,
+    # freeze_ratio, sharpest_frame_s, metrics_state. RAW scores only, never
+    # verdicts: flags are recomputed at read time against the bank's thresholds
+    # (services/video_metrics.verdicts), so retuning a cut re-sorts the bank with
+    # no rescan — the same philosophy as the image lane's quality columns, and it
+    # matters more here because decoding is ~85 % of this lane's cost. One JSON
+    # column rather than eight scalar ones: the summary is written and read as a
+    # unit, and adding a metric to the scan must not need a migration.
+    # NULL = the scan has not reached this clip. Additive — see _SCHEMA_ADDITIONS.
+    metrics_json = db.Column(Text, nullable=True)
+    # 🔎 Search pass: NULL = never embedded | 'ok' | 'unreadable'. Only the STATE
+    # lives here; the vectors themselves are a .npz next to the bank's thumbnails
+    # (services/video_clip_search), for the same reason the image lane keeps its
+    # ✨ Score embeddings out of SQLite — three 768-float rows per clip over a bank
+    # of thousands is a blob store, not a column, and every reader of it wants the
+    # whole matrix at once rather than one row. The state is here because it is
+    # what the resume contract and the counters read, and both must be answerable
+    # without touching numpy. Additive — see _SCHEMA_ADDITIONS.
+    embed_state = db.Column(String(12), nullable=True)
+    # 🗣 Caption: what HAPPENS in this shot, in prose. Two things at once, and the
+    # second is why it is a column rather than a search index: it is the text the
+    # 🔎 hybrid search matches literally, AND it is what the promotion writes into
+    # the clip's `.txt` sidecar — which IS the training prompt. An empty sidecar
+    # is not a neutral default: ai-toolkit trains it as an empty prompt and says
+    # nothing (see video_clip_export.write_sidecar).
+    caption = db.Column(Text, nullable=True)
+    # NULL = never captioned | 'ok' (generated) | 'edited' (a human corrected it,
+    # and a bulk re-run must not overwrite that) | 'error'. The 'edited' state is
+    # the whole reason this is not derivable from `caption is not None`: a
+    # generated caption is a draft, and losing a correction to the next pass is
+    # the one thing that would stop anyone from ever editing one.
+    caption_state = db.Column(String(12), nullable=True)
+    # WHICH checkpoint wrote this caption. NULL for a caption a human typed and
+    # for a clip that has none — nothing wrote those, so nothing is claimed.
+    #
+    # A column rather than a key inside a JSON blob because the question it
+    # answers is per-ROW and asked at read time: two checkpoints do not produce
+    # comparable captions, and changing the setting mid-corpus is exactly what
+    # making it configurable invites. A bank captioned half by one and half by
+    # another has to stay readable, which means every row saying which — and a
+    # JSON field would make "show me what the old model wrote" a full-table
+    # parse instead of a filter.
+    caption_model = db.Column(String(120), nullable=True)
+    # And WHICH prompt style produced it. Same reasoning as the model, and the
+    # measurement says it matters more: the prompt turned out to dominate how
+    # plainly a caption describes its footage, so two styles do not write
+    # comparable captions any more than two checkpoints do. NULL for a human's
+    # caption and for a failed one.
+    caption_style = db.Column(String(16), nullable=True)
+    # Triage decision — the same three words as the image lane.
+    status = db.Column(String(10), nullable=False, default='pending', index=True)
+    reject_reason = db.Column(String(16), nullable=True)
+    # Set once the clip has been encoded into a video dataset. A REAL foreign key
+    # with SET NULL, unlike the image lane's plain integer: throwing away a badly
+    # cut dataset must cost the encode, not the triage. The clips stay, they just
+    # stop claiming to have been promoted.
+    promoted_dataset_id = db.Column(
+        Integer, db.ForeignKey('video_dataset.id', ondelete='SET NULL'),
+        nullable=True, index=True)
+    created_at = db.Column(DateTime, default=db.func.current_timestamp())
+
+    def __repr__(self):
+        return f'<VideoClip {self.id} src={self.source_id} {self.start_s}-{self.end_s}>'
+
+
+class VideoDataset(db.Model):
+    """A built video training set: a flat folder of .mp4 files with homonym .txt
+    captions, plus the memory of HOW it was built.
+
+    `target_profile` is not decoration. It is the key into the target catalogue
+    (services/video_targets.py) that says at which fps and at which length these
+    clips were encoded, and it is stored here rather than recomputed because the
+    files on disk are already committed to it. `fps` and `frames` are DENORMALISED
+    copies of what the profile said at build time — deliberately, so a dataset
+    built last month still reports what it actually contains even if the profile's
+    defaults move."""
+    __tablename__ = 'video_dataset'
+    id = db.Column(Integer, primary_key=True)
+    user_id = db.Column(String(36), nullable=False, index=True, default='local')
+    name = db.Column(String(100), nullable=False)
+    target_profile = db.Column(String(24), nullable=False)
+    fps = db.Column(Integer, nullable=True)            # as encoded, not as configured now
+    frames = db.Column(Integer, nullable=True)         # clip length actually used
+    width = db.Column(Integer, nullable=True)
+    height = db.Column(Integer, nullable=True)
+    output_dir = db.Column(Text, nullable=False)
+    created_at = db.Column(DateTime, default=db.func.current_timestamp())
+    updated_at = db.Column(DateTime, default=db.func.current_timestamp(),
+                           onupdate=db.func.current_timestamp())
+
+    def __repr__(self):
+        return f'<VideoDataset {self.id} {self.name} {self.target_profile}>'
+
+
+class VideoDatasetClip(db.Model):
+    """One encoded .mp4 of a video dataset, and the memory of where it came from.
+
+    The provenance columns are what make this more than a directory listing. The
+    dataset holds finished clips, but each one still names its source file and the
+    bounds it was cut at — so a later re-export to a different target is a re-encode
+    from the original, not a re-scan from scratch. `source_clip_id` is intentionally
+    NOT a foreign key: the bank it points into is a scratch container the user is
+    free to delete, and the provenance must outlive it."""
+    __tablename__ = 'video_dataset_clip'
+    id = db.Column(Integer, primary_key=True)
+    dataset_id = db.Column(
+        Integer, db.ForeignKey('video_dataset.id', ondelete='CASCADE'),
+        nullable=False, index=True)
+    filename = db.Column(String(255), nullable=False)   # clip_0001.mp4
+    caption = db.Column(Text, nullable=True)            # written to the homonym .txt
+    source_bank_id = db.Column(Integer, nullable=True)
+    source_clip_id = db.Column(Integer, nullable=True)
+    src_relpath = db.Column(Text, nullable=True)
+    start_s = db.Column(Float, nullable=True)
+    end_s = db.Column(Float, nullable=True)
+    created_at = db.Column(DateTime, default=db.func.current_timestamp())
+
+    def __repr__(self):
+        return f'<VideoDatasetClip {self.id} ds={self.dataset_id} {self.filename}>'

@@ -5,6 +5,7 @@ import { useToast } from '../common/Toast';
 /* ⚙️ Caption method options (per-dataset). Lets the user override, for THIS dataset:
    - the caption engine (or leave it on the global default);
    - which pulled Ollama vision model runs — and pull a new one by name, with progress;
+   - the vocabulary register and the caption LENGTH preset, two independent axes;
    - extra instructions APPENDED to the caption prompt (the kind omission rules and the
      output cleaners stay in force server-side, so this can't reintroduce a banned term).
    Saved to caption_options and picked up by the next caption / re-caption run (targeted
@@ -36,6 +37,17 @@ export const VOCABULARY_OPTIONS = [
   { id: 'safe', label: 'Safe — non-explicit, no crude terms' },
 ];
 
+// Caption LENGTH preset — how MUCH the captioner writes. Orthogonal to the vocabulary
+// register above (which decides the wording, not the size) and to the dual long+short
+// captions (whose short half is derived from the long one, in its own field).
+// '' = Standard: nothing appended, byte-identical to the prompt before this option existed.
+// Idea by djpraxis (Reddit).
+export const CAPTION_LENGTH_OPTIONS = [
+  { id: '', label: 'Standard — the prompt as it is' },
+  { id: 'concise', label: 'Concise — aims for one short sentence' },
+  { id: 'detailed', label: 'Detailed — several sentences' },
+];
+
 export default function CaptionOptionsPopover({ datasetId, trainType, onClose, onSaved }) {
   const toast = useToast();
   const [loading, setLoading] = useState(true);
@@ -43,6 +55,7 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
   const [backend, setBackend] = useState('');
   const [ollamaModel, setOllamaModel] = useState('');
   const [vocabulary, setVocabulary] = useState('');
+  const [length, setLength] = useState('');
   const [instructions, setInstructions] = useState('');
   const [models, setModels] = useState([]);
   const [modelsReachable, setModelsReachable] = useState(true);
@@ -67,6 +80,7 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
         setBackend(o.backend || '');
         setOllamaModel(o.ollama_model || '');
         setVocabulary(o.vocabulary || '');
+        setLength(o.length || '');
         setInstructions(o.instructions || '');
         setModels(mdl.models || []);
         setModelsReachable(mdl.reachable !== false);
@@ -160,7 +174,7 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
     setSaving(true);
     try {
       const r = await postJson(`/api/dataset/${datasetId}/caption/options`,
-        { backend, ollama_model: ollamaModel, vocabulary, instructions });
+        { backend, ollama_model: ollamaModel, vocabulary, length, instructions });
       toast.success('Caption options saved');
       onSaved?.(r.options);
       onClose();
@@ -301,6 +315,29 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
               </p>
             </div>
 
+            {/* Caption length preset */}
+            <div className="flex flex-col gap-1">
+              <label htmlFor="cap-opt-length" className="text-sm font-medium text-content">Caption length</label>
+              <select id="cap-opt-length" value={length} onChange={(e) => setLength(e.target.value)}
+                className={inputCls}>
+                {CAPTION_LENGTH_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+              </select>
+              <p className="text-xs text-content-subtle">
+                How much the captioner writes. “Standard” leaves the prompt untouched.
+                “Concise” aims for one short sentence, “Detailed” for several — a target the
+                model follows loosely, not a hard cap. Measured on 18 photos with the default
+                vision model: median 24 / 88 / 126 words for Concise / Standard / Detailed;
+                another engine or model will land elsewhere. Both stay full prose, so a Concise
+                dataset still trains on prose-native families without forcing past the
+                caption-style check.
+              </p>
+              <p className="text-xs text-content-subtle">
+                Different axis from the long + short dual captions: the short one is derived
+                from the long caption and stored separately, while this changes the long
+                caption itself. You can use both.
+              </p>
+            </div>
+
             {/* Extra instructions */}
             <div className="flex flex-col gap-1">
               <label htmlFor="cap-opt-instructions" className="text-sm font-medium text-content">Extra instructions</label>
@@ -309,8 +346,10 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
                 placeholder="e.g. Always name the visible clothing colors and the time of day."
                 className="w-full px-2 py-1.5 rounded-lg bg-app/60 border border-border text-content text-sm resize-y" />
               <p className="text-xs text-content-subtle">
-                Added to the end of the caption prompt (both engines). The identity / concept / style
-                omission rules and the leak cleaners still apply, so this can’t reintroduce a banned term.
+                Added to the end of the caption prompt (both engines), <em>after</em> the vocabulary
+                and length presets — so when yours contradicts one of them, yours is what the model
+                reads last. The identity / concept / style omission rules and the leak cleaners still
+                apply, so this can’t reintroduce a banned term.
               </p>
             </div>
 

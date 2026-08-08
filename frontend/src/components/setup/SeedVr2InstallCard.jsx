@@ -5,6 +5,7 @@ import {
   INSTALL_ALL_ACTION_LABELS, seedvr2InstallPlan, seedvr2NeedsComfyuiRestart,
 } from '../../hooks/useSetupSteps'
 import { HelpBadge } from '../../help/HelpMode'
+import { ceilingLine, tilingStatus, TTP_PACK, TTP_URL } from './seedvr2Tiling.js'
 
 const POLL_MS = 1200
 
@@ -22,7 +23,21 @@ function fmtSize(b) {
   return `${Math.max(0, Math.round(b / 1e3))} KB`
 }
 
+/* The three places this feature actually comes from. Verified 2026-08-02 (HTTP
+   200 on each), and worth linking rather than naming: the pack URL is what
+   someone who prefers cloning by hand needs, the weights repo is what the
+   button below downloads (3.9 GB — say where from), and the original project is
+   the credit. Apache-2.0 throughout. */
+const TILING_TONE = {
+  ready: 'border-emerald-500/30 bg-emerald-500/10',
+  restart: 'border-amber-500/40 bg-amber-500/10',
+  absent: 'border-border bg-surface-raised',
+  unknown: 'border-border bg-surface-raised',
+}
+
 const PACK_URL = 'https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler'
+const WEIGHTS_URL = 'https://huggingface.co/numz/SeedVR2_comfyUI'
+const PROJECT_URL = 'https://github.com/ByteDance-Seed/SeedVR'
 
 // SeedVR2 — the FIDELITY upscaler (issue #32, requested by SurpassHR).
 //
@@ -51,6 +66,10 @@ export default function SeedVr2InstallCard({ caps, onDone }) {
   const dirValid = !!cu.dir_valid
   const ready = cu.seedvr2_ready === true
   const needsRestart = seedvr2NeedsComfyuiRestart(caps)
+  // The optional high-resolution lane. Its own detection, its own wording:
+  // it is a SECOND pack, from a different author, and it is not required.
+  const tiling = tilingStatus(caps)
+  const ceiling = ceilingLine(caps)
   // On disk but not loaded is a RESTART; absent from disk is an install the user
   // has to run in ComfyUI. Two different sentences, so they are two states.
   const packMissing = !cu.seedvr2_nodes_installed
@@ -135,6 +154,14 @@ export default function SeedVr2InstallCard({ caps, onDone }) {
         (<span className="whitespace-nowrap">~3.9 GB</span>), so it is installed on request,
         not by &ldquo;Install everything&rdquo;.
       </p>
+      <p className="mt-1 text-xs text-content-subtle">
+        <a href={PACK_URL} target="_blank" rel="noreferrer" className="text-sky-300 underline hover:text-sky-200">Node pack →</a>
+        {' · '}
+        <a href={WEIGHTS_URL} target="_blank" rel="noreferrer" className="text-sky-300 underline hover:text-sky-200">Model weights →</a>
+        {' · '}
+        <a href={PROJECT_URL} target="_blank" rel="noreferrer" className="text-sky-300 underline hover:text-sky-200">SeedVR2 by ByteDance-Seed →</a>
+        {' — all Apache-2.0.'}
+      </p>
 
       {!dirValid ? (
         <p className="mt-3 text-xs text-content-subtle">
@@ -192,6 +219,25 @@ export default function SeedVr2InstallCard({ caps, onDone }) {
         </>
       )}
 
+      {/* THE OPTIONAL HIGH-RESOLUTION LANE — a different pack, a different
+          author, and genuinely optional: without it the upscaler still works,
+          it is only limited to what the card holds in one pass. Contributed by
+          SurpassHR (GitHub #32), who hit that limit as a CUDA out-of-memory and
+          shipped the tiled workflow this lane is ported from. */}
+      <div className={`mt-3 rounded-md border px-3 py-2 text-sm text-content ${
+        TILING_TONE[tiling.state] || TILING_TONE.absent}`}>
+        <div className="font-semibold">
+          {tiling.state === 'ready' ? '✓' : '○'} High-resolution upscales (tiling)
+        </div>
+        {ceiling && <p className="mt-1 text-content-muted">{ceiling}</p>}
+        <p className="mt-1 text-content-muted">{tiling.text}</p>
+        <p className="mt-1 text-xs text-content-subtle">
+          <a href={TTP_URL} target="_blank" rel="noreferrer"
+            className="text-sky-300 underline hover:text-sky-200">{TTP_PACK} →</a>
+          {' — MIT. Tiling workflow contributed by SurpassHR (GitHub #32).'}
+        </p>
+      </div>
+
       {/* The half this app deliberately does NOT install. Spelled out rather than
           hidden behind a button that could not work: the pack's Python
           dependencies have to land in ComfyUI's interpreter, which is exactly
@@ -210,8 +256,9 @@ export default function SeedVr2InstallCard({ caps, onDone }) {
           <span className="text-content-muted"> Install it from ComfyUI itself — search
             &ldquo;SeedVR2&rdquo; in ComfyUI-Manager — then restart ComfyUI. The app does not
             install this one for you: it pulls thirteen Python packages that have to go into
-            ComfyUI&rsquo;s own environment, and a plain copy of the folder would not work.
-            Source: <span className="break-all">{PACK_URL}</span> (Apache-2.0).</span>
+            ComfyUI&rsquo;s own environment, and a plain copy of the folder would not work.{' '}
+            <a href={PACK_URL} target="_blank" rel="noreferrer" className="text-sky-300 underline hover:text-sky-200">
+              Open the node pack on GitHub →</a></span>
         </p>
       )}
     </section>

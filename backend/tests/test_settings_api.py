@@ -269,6 +269,55 @@ def test_put_settings_accepts_and_protects_bank_scoring_section(client):
             == '/data/envs/bank_scoring/py.exe')
 
 
+def test_put_settings_protects_the_shot_detection_interpreter(client):
+    """shot_detect.python is written by its installer and has no Settings input, so
+    the frontend echoes it back as "" on every full Save. Without the guard, saving
+    any unrelated setting silently un-installs shot detection: the probe falls back
+    to the app's own Python, which has no torch, and the capability reads "missing"
+    forever despite a perfect install — the exact defect the other auto-provisioned
+    interpreters already carry a guard for."""
+    from app import config
+    config.save_config({'shot_detect': {'python': '/envs/scoring/py.exe'}})
+    r = client.put('/api/settings', json={'config': {
+        'shot_detect': {'python': '', 'device': 'cuda'},
+    }})
+    assert r.status_code == 200, r.get_json()
+    saved = r.get_json()['config']['shot_detect']
+    assert saved['python'] == '/envs/scoring/py.exe'
+    assert saved['device'] == 'cuda'      # the rest of the section still saves
+
+
+def test_stale_full_config_save_keeps_installed_bank_semantic_python(client):
+    """A Settings form opened before SigLIP2 finishes must not undo the install.
+
+    The stale form still carries ``bank_semantic.python: ''``. Setup records the
+    managed runtime out-of-band while that tab is open; saving another semantic
+    setting afterwards must preserve the new runtime instead of falling back to
+    Score's borrowed interpreter.
+    """
+    from app import config
+
+    borrowed = '/borrowed/gpu/python'
+    managed = '/data/envs/bank_scoring/python'
+    config.save_config({
+        'bank_scoring': {'python': borrowed},
+        'bank_semantic': {'python': ''},
+    })
+    stale = client.get('/api/settings').get_json()['config']
+    assert stale['bank_semantic']['python'] == ''
+
+    # SigLIP2 Install completes after the Settings tab loaded.
+    config.save_config({'bank_semantic': {'python': managed}})
+    stale['bank_semantic']['device'] = 'cpu'
+    r = client.put('/api/settings', json={'config': stale})
+
+    assert r.status_code == 200, r.get_json()
+    saved = r.get_json()['config']
+    assert saved['bank_semantic']['python'] == managed
+    assert saved['bank_semantic']['device'] == 'cpu'
+    assert saved['bank_scoring']['python'] == borrowed
+
+
 def test_capabilities_endpoint(client):
     caps = client.get('/api/capabilities').get_json()
     assert 'engines' in caps and 'studio_visible' in caps
@@ -576,6 +625,102 @@ def test_update_check_detects_newer_release(client, monkeypatch, _reset_update_c
     assert d['url'].endswith('v9999.12.31')
 
 
+def test_update_check_docker_reports_manual_rebuild_even_with_zip(
+        client, monkeypatch, _reset_update_cache):
+    import requests
+    from app.services import updater
+    monkeypatch.setenv('LDS_RUNTIME', 'docker-gpu')
+    monkeypatch.setattr(updater, 'is_git_checkout', lambda root=None: True)
+    monkeypatch.setattr(
+        updater, 'git_update_status',
+        lambda root=None: (_ for _ in ()).throw(
+            AssertionError('Docker checks must not fetch through the git updater')),
+    )
+    monkeypatch.setattr(requests, 'get', lambda *a, **k: _FakeResp(200, {
+        'tag_name': 'v9999.12.31',
+        'assets': [{'name': 'LoRA-Dataset-Studio-windows.zip',
+                    'browser_download_url': 'https://x/win'}],
+    }))
+
+    d = client.get('/api/update/check?force=1').get_json()
+
+    assert d['update_available'] is True
+    assert d['install_mode'] == 'docker' and d['can_apply'] is False
+    assert d['manual'] is True
+    assert d['instructions'] == [
+        'git pull',
+        'docker compose -f docker-compose.gpu.yml up -d --build',
+    ]
+
+
+def test_update_check_pinokio_keeps_the_git_answer_but_drops_the_button(
+        client, monkeypatch, _reset_update_cache):
+    """Unlike Docker, a Pinokio install IS a git checkout worth measuring: its
+    Update tab pulls exactly those commits, so "3 commits behind" stays true and
+    useful. Only the in-app apply goes away."""
+    from app.services import updater
+    monkeypatch.setenv('LDS_RUNTIME', 'pinokio')
+    monkeypatch.setattr(updater, 'is_git_checkout', lambda root=None: True)
+    monkeypatch.setattr(updater, 'git_update_status', lambda root=None: {
+        'ok': True, 'is_git': True, 'update_available': True, 'behind': 3,
+        'current_sha': 'aaaaaaa', 'remote_sha': 'bbbbbbb',
+    })
+
+    d = client.get('/api/update/check?force=1').get_json()
+
+    assert d['behind'] == 3 and d['is_git'] is True
+    assert d['install_mode'] == 'pinokio' and d['can_apply'] is False
+    assert d['manual'] is True
+    assert d['instructions'] == [
+        'Stop the app in Pinokio',
+        'Click the Update tab',
+        'Click Start',
+    ]
+
+
+def test_update_check_pinokio_never_advertises_a_zip_apply(
+        client, monkeypatch, _reset_update_cache):
+    """The passive (non-git-aware) path must not hand back can_apply just
+    because the latest release ships a ZIP asset."""
+    import requests
+    from app.services import updater
+    monkeypatch.setenv('LDS_RUNTIME', 'pinokio')
+    monkeypatch.setattr(updater, 'is_git_checkout', lambda root=None: False)
+    monkeypatch.setattr(requests, 'get', lambda *a, **k: _FakeResp(200, {
+        'tag_name': 'v9999.12.31',
+        'assets': [{'name': 'LoRA-Dataset-Studio-windows.zip',
+                    'browser_download_url': 'https://x/win'}],
+    }))
+
+    d = client.get('/api/update/check').get_json()
+
+    assert d['update_available'] is True
+    assert d['install_mode'] == 'pinokio' and d['can_apply'] is False
+
+
+def test_update_apply_pinokio_refuses_before_touching_git(client, monkeypatch):
+    from app.services import updater
+    monkeypatch.setenv('LDS_RUNTIME', 'pinokio')
+    forbidden = lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError('Pinokio apply must refuse before an updater is selected'))
+    monkeypatch.setattr(updater, 'is_git_checkout', forbidden)
+    monkeypatch.setattr(updater, 'apply_update', forbidden)
+    monkeypatch.setattr(updater, 'start_zip_update', forbidden)
+    monkeypatch.setattr(updater, 'schedule_restart', forbidden)
+
+    response = client.post('/api/update/apply')
+    body = response.get_json()
+
+    assert response.status_code == 200
+    assert body['ok'] is False and body['manual'] is True
+    assert body['install_mode'] == 'pinokio' and body['can_apply'] is False
+    assert body['instructions'] == [
+        'Stop the app in Pinokio',
+        'Click the Update tab',
+        'Click Start',
+    ]
+
+
 def test_update_check_same_version_and_cache(client, monkeypatch, _reset_update_cache):
     import requests
     from app.version import APP_VERSION
@@ -805,12 +950,12 @@ def test_is_cgnat_classifies_tailscale_range():
     """Only 100.64.0.0/10 (Tailscale's CGNAT block) counts — a real LAN IP or a
     100.x address outside the block must not be mistaken for a tailnet address."""
     from app.routes import settings as sroutes
-    assert sroutes._is_cgnat('100.87.119.32') is True     # in-block (real tailnet IP)
+    assert sroutes._is_cgnat('100.100.100.100') is True   # in-block (Tailscale's own)
     assert sroutes._is_cgnat('100.64.0.1') is True        # lower edge
     assert sroutes._is_cgnat('100.127.255.254') is True   # upper edge
     assert sroutes._is_cgnat('100.63.255.255') is False   # just below the block
     assert sroutes._is_cgnat('100.128.0.1') is False      # just above the block
-    assert sroutes._is_cgnat('192.168.1.162') is False    # a real LAN IP
+    assert sroutes._is_cgnat('192.0.2.10') is False       # outside the block
     assert sroutes._is_cgnat('') is False
     assert sroutes._is_cgnat(None) is False
 

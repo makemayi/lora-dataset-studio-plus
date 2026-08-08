@@ -105,6 +105,124 @@ def is_loadable_model(name: str) -> bool:
     """
     return str(name or '').lower().endswith(LOADABLE_MODEL_EXTENSIONS)
 
+
+# What a LISTER shows, as opposed to what a resolver may CHOOSE: `.gguf` is on
+# disk, ComfyUI's GGUF pack loads it, and hiding it would make the user's own
+# folder look wrong. `is_loadable_model` is the narrower predicate the choosers
+# use — the two are deliberately different sets, and the comment above says why.
+MODEL_FILE_SUFFIXES = ('.safetensors', '.gguf', '.sft')
+
+
+# --- family scans -------------------------------------------------------------
+# Four functions used to walk these same folders looking for one family's
+# weights: the two Studio listers (`comfyui.get_krea_models`,
+# `comfyui.get_zimage_models`) and the two Generate resolvers'
+# (`krea_edit_helper._krea_unet_folders`, `klein_edit_helper._klein_unet_folders`).
+# Four hand-written walks over one folder layout, and their drift has already
+# shipped a bug: two of them answered differently about the SAME folder, so a
+# file one screen offered was a file the other refused.
+#
+# They are folded onto the two below. Not onto ONE, because the two SHAPES are
+# genuinely different and pretending otherwise would cost more than it saves:
+#
+#   * a lister walks the tree to any DEPTH and returns flat relative names,
+#     because the picker's value is a path a loader accepts;
+#   * a resolver reads ONE level and returns (subfolder, [names]) groups, because
+#     it walks roots in ComfyUI's own priority order and has to say WHICH folder
+#     a candidate came from.
+#
+# What they must not do is disagree about the rules — which extensions count,
+# what makes a folder this family's, whether a file sitting at a root counts.
+# Those are the arguments below, so a difference between two families is now
+# something you can read in one call rather than diff across four loops.
+
+def scan_family_tree(roots, dir_tokens, *, root_file_accept=None, accept=None,
+                     suffixes=MODEL_FILE_SUFFIXES):
+    """Model files under `roots` whose RELATIVE DIRECTORY carries one of
+    `dir_tokens` (case-insensitive, at any depth), as names relative to their
+    root — sorted, de-duplicated, joined with the separator of the tree actually
+    walked (``os.sep``; the queue respells them for the target ComfyUI).
+
+    `root_file_accept(filename) -> bool` decides files sitting at the ROOT of a
+    search folder, where there is no directory to carry the claim. ``None`` means
+    a root file is never listed: that is a real difference between families (a
+    `diffusion_models` root also holds Z-Image, FLUX and Klein weights), not an
+    oversight, so it is an argument rather than a hardcoded rule.
+
+    `accept(filename) -> bool` is the family's exclusion list, and it applies
+    EVERYWHERE — root and subfolder alike. It is separate from
+    `root_file_accept` on purpose: one answers "does this file at a root belong
+    to the family at all", the other "is this file, wherever it sits, one the
+    family knows is unusable". Folding the second into the first is what made
+    the same checkpoint refused at a root and accepted one folder down.
+    """
+    out = []
+    for base_dir in roots or []:
+        if not os.path.isdir(base_dir):
+            continue
+        for root, _dirs, files in os.walk(base_dir):
+            rel_dir = os.path.relpath(root, base_dir)
+            at_root = rel_dir == '.'
+            if at_root:
+                if root_file_accept is None:
+                    continue
+            elif not any(t in rel_dir.lower() for t in dir_tokens):
+                continue
+            for f in files:
+                if not f.lower().endswith(suffixes):
+                    continue
+                if at_root and not root_file_accept(f):
+                    continue
+                if accept is not None and not accept(f):
+                    continue
+                out.append(f if at_root else os.path.join(rel_dir, f))
+    return sorted(set(out))
+
+
+def scan_family_folders(roots, dir_tokens, *, accept=None,
+                        suffixes=MODEL_FILE_SUFFIXES):
+    """``[(prefix, [filenames])]`` ONE level under each root, in the order the
+    roots were given (ComfyUI's own priority order).
+
+    `prefix` is a subfolder whose NAME carries one of `dir_tokens`, or ``''`` for
+    a file dropped straight into the root of a search folder — flat /
+    Stability-Matrix installs have no subfolder, and ``os.path.join('', name) ==
+    name`` is exactly what a UNETLoader loads. Per root: subfolders first
+    (sorted), then the root entry.
+
+    `accept(filename) -> bool` is the family's own exclusion list — the
+    checkpoints that carry its token without being one of its bases. ``None`` =
+    keep everything found, which is a family that has no such list, not a family
+    that forgot one.
+    """
+    keep = accept or (lambda _name: True)
+    out = []
+    for base_dir in roots or []:
+        try:
+            entries = os.listdir(base_dir)
+        except OSError:
+            continue
+        subs = sorted(d for d in entries
+                      if any(t in d.lower() for t in dir_tokens)
+                      and os.path.isdir(os.path.join(base_dir, d)))
+        for sub in subs:
+            try:
+                names = sorted(n for n in os.listdir(os.path.join(base_dir, sub))
+                               if n.lower().endswith(suffixes))
+            except OSError:
+                continue
+            names = [n for n in names if keep(n)]
+            if names:
+                out.append((sub, names))
+        root_names = sorted(n for n in entries
+                            if any(t in n.lower() for t in dir_tokens)
+                            and n.lower().endswith(suffixes) and keep(n)
+                            and os.path.isfile(os.path.join(base_dir, n)))
+        if root_names:
+            out.append(('', root_names))
+    return out
+
+
 # folder_paths.map_legacy — the canonical alias source (unet↔diffusion_models,
 # clip↔text_encoders). Query and yaml keys are both normalised through it.
 _LEGACY = {'unet': 'diffusion_models', 'clip': 'text_encoders'}

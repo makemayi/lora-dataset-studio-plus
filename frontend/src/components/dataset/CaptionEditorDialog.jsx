@@ -3,10 +3,33 @@ import { createPortal } from 'react-dom';
 import { captionCharacterLabel, isCaptionSaveShortcut, isLikelyTruncatedCaption } from '../../utils/captionEditor';
 import { attemptModalSubmit } from '../../utils/submitOutcome.js';
 import CaptionLab from './CaptionLab';
+// WHO wrote the sentence in the box — this is the surface where a caption is read
+// in full, so it is the one that says it in words rather than as a chip.
+import { captionOriginInfo } from '../../utils/captionOrigin.js';
+
+/** The authorship line for a text box, or null.
+ *
+ *  IT DESCRIBES THE SAVED TEXT, NOT THE DRAFT. The stamp on the row is about the
+ *  sentence the server holds; the moment the user types, the two are different
+ *  things and claiming the old author for the new words would be exactly the kind
+ *  of confident wrong label this whole feature exists to remove. So an edited draft
+ *  says what it really is — unsaved, and yours once saved.
+ */
+function authorshipNote(draft, saved, origin) {
+  const text = (draft || '');
+  if (!text.trim()) return null;
+  if (text !== (saved || '')) {
+    return { text: 'Unsaved edit — saving records this caption as written by you.',
+             title: 'A caption you save is stamped as yours, and a forced 🔄 Re-caption '
+               + 'then skips it.' };
+  }
+  const info = captionOriginInfo(origin);
+  return { text: info.short, title: info.title };
+}
 
 export default function CaptionEditorDialog({
   initialCaption, initialShortCaption, showShort = false, imageUrl, imageLabel, onClose, onSave,
-  datasetId, imageId,
+  datasetId, imageId, captionOrigin = null, shortCaptionOrigin = null,
 }) {
   const [draft, setDraft] = useState(initialCaption || '');
   const [shortDraft, setShortDraft] = useState(initialShortCaption || '');
@@ -123,6 +146,12 @@ export default function CaptionEditorDialog({
                 {captionCharacterLabel(draft)}
               </span>
             </div>
+            {authorshipNote(draft, initialCaption, captionOrigin) && (
+              <p className="m-0 text-[0.6875rem] leading-relaxed text-content-subtle"
+                title={authorshipNote(draft, initialCaption, captionOrigin).title}>
+                {authorshipNote(draft, initialCaption, captionOrigin).text}
+              </p>
+            )}
             {isLikelyTruncatedCaption(initialCaption) && (
               <p className="m-0 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-[0.6875rem] leading-relaxed text-amber-200">
                 This caption is exactly 800 characters and ends mid-sentence — an earlier
@@ -160,6 +189,17 @@ export default function CaptionEditorDialog({
                       (no trigger, keep the identity/concept/aesthetic out). Leave empty to reuse
                       the long caption; (re-)captioning regenerates it automatically.
                     </p>
+                    {/* Its OWN author: the short caption has its own writers on both
+                        sides (this box types it, the dual-caption pass derives it),
+                        so the long caption's stamp cannot answer for it. */}
+                    {authorshipNote(shortDraft, initialShortCaption, shortCaptionOrigin) && (
+                      <p className="m-0 text-[0.6875rem] leading-relaxed text-content-subtle"
+                        title={authorshipNote(shortDraft, initialShortCaption,
+                                              shortCaptionOrigin).title}>
+                        {authorshipNote(shortDraft, initialShortCaption,
+                                        shortCaptionOrigin).text}
+                      </p>
+                    )}
                     <textarea value={shortDraft}
                       onChange={(event) => setShortDraft(event.target.value)}
                       onKeyDown={(event) => {

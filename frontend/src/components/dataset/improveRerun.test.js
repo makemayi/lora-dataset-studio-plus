@@ -74,7 +74,10 @@ test('the tile renders a real button with an aria-label and calls onReimprove', 
   // a rewrite of the component would silently drop.
   assert.match(tile, /improveRerunAffordance/);
   assert.match(tile, /onReimprove\?\.\(img\.id\)/);
-  assert.match(tile, /aria-label=\{rerunImprove\.title\}/);
+  // The accessible name falls back to `rerunImprove.title` and is REPLACED, while
+  // a dataset pass holds the tile, by the sentence naming that pass — a refused
+  // write must never be mute (tests/dataset-tile-reads-stay-live.test.mjs).
+  assert.match(tile, /aria-label=\{refused \|\| rerunImprove\.title\}/);
   assert.match(tile, /disabled=\{busy \|\| !rerunImprove\.enabled\}/);
   // The tile must never hand an improvement to the generic route.
   assert.match(tile, /canRegenerateGeneric\(img, \{ isRescueDerived \}\)/);

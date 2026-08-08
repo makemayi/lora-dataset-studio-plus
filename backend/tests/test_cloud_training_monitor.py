@@ -449,6 +449,33 @@ def test_provision_retries_transient_create_refusal(ct, app, client, monkeypatch
         assert destroyed == ['777']
 
 
+def test_provision_only_looks_at_machines_with_the_disk_it_will_claim(
+        ct, app, client, monkeypatch):
+    """vast refuses an ask whose `disk` exceeds the offer's free space, and the
+    refusal is a bare HTTP 400 — the failure that cost the cloud quantization
+    lane its first run. Filtering for LESS than what will be asked for is the
+    bug; the two numbers are pinned equal here."""
+    destroyed = []
+    remote = FakeRemote(polls_to_complete=3)
+    ds_id, run_id = _launch(ct, app, client, monkeypatch, remote, destroyed)
+    seen, created = {}, {}
+
+    def search(**kw):
+        seen.update(kw)
+        return list(_TWO_OFFERS)
+
+    def create(offer_id, **kw):
+        created.update(kw)
+        return '777'
+
+    monkeypatch.setattr(ct.vast_client, 'search_offers', search)
+    monkeypatch.setattr(ct.vast_client, 'create_instance', create)
+    with app.app_context():
+        ct._monitor(app, run_id)
+    assert created['disk_gb'] > 0
+    assert seen['min_disk_gb'] == created['disk_gb']
+
+
 def test_provision_does_not_retry_non_transient_create_error(ct, app, client, monkeypatch):
     """An auth-class refusal (HTTP 403) is not worth retrying — fail fast, once."""
     destroyed = []
@@ -723,11 +750,15 @@ def test_midrun_checkpoint_sync_harvests_every_save(ct, app, client, monkeypatch
                              'j_000000300.safetensors']
         # checkpoint_local_path tracks the NEWEST; every epoch stays on disk
         assert run.checkpoint_local_path.endswith('j_000000300.safetensors')
-        files = os.listdir(run.staging_dir)
+        # Saves land in the DURABLE store, not in the disposable staging dir:
+        # the cleanup used to be the only copy of a never-deployed checkpoint.
+        files = os.listdir(ct.checkpoint_store_dir(run))
         assert sorted(f for f in files if f.endswith('.safetensors')) == \
             ['j_000000100.safetensors', 'j_000000200.safetensors',
              'j_000000300.safetensors']
         assert not any(f.endswith('.part') for f in files)
+        assert not any(f.endswith('.safetensors')
+                       for f in os.listdir(run.staging_dir))
         # ...and the panel lists all of them
         assert [c['step'] for c in ct.cloud_checkpoints(ds_id)] == [100, 200, 300]
 
@@ -751,7 +782,7 @@ def test_completion_retrieves_intermediates_still_on_pod(ct, app, client, monkey
         ct._monitor(app, run_id)
         run = ct.CloudTrainingRun.query.get(run_id)
         assert run.status == 'done'
-        staged = sorted(f for f in os.listdir(run.staging_dir)
+        staged = sorted(f for f in os.listdir(ct.checkpoint_store_dir(run))
                         if f.endswith('.safetensors'))
         assert staged == ['j_000000050.safetensors', 'j_000000100.safetensors']
         # every epoch mirrored into the local run dir under local naming

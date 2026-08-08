@@ -4,10 +4,12 @@
  * list of {file, strength} rows (list order = chain order after the
  * consistency LoRA on the local Klein edit graph; files are loras-relative
  * names the user points, never hardcoded). Per run the workspace just PICKS a
- * preset ("None" by default each visit) — no per-LoRA toggles, no automatic
- * gating: the chosen preset carries the intent. The request only ever sends
- * the preset NAME; the backend resolves files/strengths/order from config
- * (fail-closed, unknown names degrade to no extra LoRAs).
+ * preset — it opens on klein.default_generation_lora_preset ("None" until one
+ * is set), and picking something else there applies to that run only, without
+ * rewriting the setting. No per-LoRA toggles, no automatic gating: the chosen
+ * preset carries the intent. The request only ever sends the preset NAME; the
+ * backend resolves files/strengths/order from config (fail-closed, unknown
+ * names degrade to no extra LoRAs).
  */
 
 export const LORA_STRENGTH_MAX = 1.5;
@@ -53,6 +55,24 @@ export function sanitizeGenerationLoraPresets(list) {
     if (out.length >= MAX_GENERATION_LORA_PRESETS) break;
   }
   return out;
+}
+
+/** Which preset the run panel STARTS on, from `klein.default_generation_lora_preset`.
+ *
+ *  The panel used to open on "None" on every visit, so a configured preset only
+ *  ever applied when the user remembered to re-pick it — and a run that forgot
+ *  showed no LoRA anywhere in its PNG metadata, which reads as the app ignoring
+ *  its own settings. This is a STARTING POINT, never a lock: the picker still
+ *  offers None and every other preset for that run, and the choice made there is
+ *  not written back to the setting.
+ *
+ *  Fail-closed, like every other step of the preset chain: a name matching no
+ *  configured preset (renamed, deleted, typed by hand into config.json) resolves
+ *  to '' — "no preset" — rather than blocking or guessing a neighbour. */
+export function resolveDefaultPresetName(defaultName, presets = []) {
+  const name = typeof defaultName === 'string' ? defaultName.trim() : '';
+  if (!name) return '';
+  return sanitizeGenerationLoraPresets(presets).some((p) => p.name === name) ? name : '';
 }
 
 /** Body fragment for /generate (and /regenerate): the picked preset's NAME as

@@ -44,9 +44,69 @@ function jobDescription(recovery) {
   return 'A generation';
 }
 
+/** The concrete places a ComfyUI address goes wrong. Ordered by how often they
+ *  are the answer, and each one names what to look at rather than what to feel:
+ *  a fresh install with an auto-detected URL has no way to know which of these
+ *  it is until someone lists them. */
+const CONNECTION_CHECKS = [
+  'Open the ComfyUI window you actually use and copy the address from its browser'
+  + ' bar — LDS must point at that exact host and port.',
+  'ComfyUI started without --listen only answers on its own machine. If it runs on'
+  + ' another PC, start it with --listen and put that machine’s address here.',
+  'LDS in Docker with ComfyUI on the host: use http://host.docker.internal:8188 —'
+  + ' inside a container, 127.0.0.1 is the container itself.',
+  'The address lives in Settings ▸ Local tools ▸ ComfyUI API URL.',
+];
+
+/** The banner when LDS cannot talk to ComfyUI at all, or null.
+ *
+ * This is the half that was missing. A barrier says a job is paused; it says
+ * nothing about whether the two programs are in touch. A fresh install was told
+ * "a paused ComfyUI job is blocking new generations" on its very first Generate,
+ * while its ComfyUI logged no incoming connection at all — so the user went
+ * hunting for a flag he had to pass, which is the one thing that could not have
+ * helped (jerkyjunky, Discord). When the server reports the link as down, the
+ * connection is the headline and the paused job is a footnote.
+ */
+function connectionFirstModel(recovery) {
+  const connection = recovery.connection;
+  if (!connection || connection.reachable !== false) return null;
+  const url = connection.url || '';
+  const unconfigured = connection.status === 'unconfigured' || !url;
+  // An unconfirmed submission is the fresh-install shape: LDS asked ComfyUI to
+  // start a job and never heard back, so it holds that job rather than risk
+  // running it twice. Saying "a paused job is blocking you" first, to someone
+  // who has never generated anything, is what made this unreadable.
+  const footnote = recovery.kind === 'unknown_submit'
+    ? 'A generation LDS could not confirm ComfyUI ever accepted is on hold behind'
+      + ' this — that silence is the same problem, not a second one. Clear it with'
+      + ' the button below once ComfyUI answers.'
+    : 'A paused generation is waiting behind this. LDS clears it by itself as soon'
+      + ' as ComfyUI answers again and no longer knows the job.';
+  return {
+    tone: 'error',
+    headline: unconfigured
+      ? 'LDS has no ComfyUI address to reach'
+      : `LDS cannot reach ComfyUI at ${url}`,
+    detail: connection.hint
+      || (unconfigured
+        ? 'Set the ComfyUI API URL before generating anything — nothing local can run'
+          + ' until LDS knows where ComfyUI is.'
+        : 'Fix the connection first: nothing local can generate until LDS can talk to'
+          + ' ComfyUI, and LDS got no answer from that address.'),
+    checks: CONNECTION_CHECKS,
+    footnote,
+    actionLabel: 'I restarted ComfyUI — clear it',
+    canConfirm: recovery.can_confirm_restart !== false,
+    datasetId: recovery.dataset_id ?? null,
+    datasetName: recovery.dataset_name ?? null,
+  };
+}
+
 /**
  * @returns null when nothing is blocking, else the banner's content:
- *   {tone, headline, detail, actionLabel, canConfirm, datasetId, datasetName}
+ *   {tone, headline, detail, checks, footnote, actionLabel, canConfirm,
+ *    datasetId, datasetName}
  */
 export function recoveryBannerModel(state, { now = Date.now() } = {}) {
   const recovery = state?.recovery;
@@ -61,12 +121,21 @@ export function recoveryBannerModel(state, { now = Date.now() } = {}) {
       detail: recovery.detail
         || 'LDS found an invalid ComfyUI recovery record. Restart LDS and check the '
            + 'server log before starting new generations.',
+      checks: [],
+      footnote: null,
       actionLabel: null,
       canConfirm: false,
       datasetId: null,
       datasetName: null,
     };
   }
+
+  // Then, before naming the paused job: is LDS even talking to ComfyUI? If it
+  // is not, every other sentence here is a red herring. (An unreadable record
+  // above stays first — it survives ComfyUI coming back, so it must not be
+  // hidden behind a connection the user is about to fix.)
+  const unreachable = connectionFirstModel(recovery);
+  if (unreachable) return unreachable;
 
   const since = stalledForText(recovery.stalled_since, now);
   const sinceText = since ? ` It has been paused for ${since}.` : '';
@@ -83,6 +152,8 @@ export function recoveryBannerModel(state, { now = Date.now() } = {}) {
     tone: 'warning',
     headline: 'A paused ComfyUI job is blocking new generations',
     detail: `${jobDescription(recovery)} stopped without a known outcome.${sinceText}${next}`,
+    checks: [],
+    footnote: null,
     actionLabel: 'I restarted ComfyUI — clear it',
     canConfirm: recovery.can_confirm_restart !== false,
     datasetId: recovery.dataset_id ?? null,

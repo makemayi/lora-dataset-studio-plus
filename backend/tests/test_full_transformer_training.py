@@ -126,14 +126,16 @@ def test_settings_atomically_validates_and_persists_dense_selection(
         before = (ds.training_mode, ds.train_type, ds.train_base_model,
                   ds.train_variant, ds.train_settings, ds.train_slider)
 
-    # The complete candidate is rejected before any column changes.  In
-    # particular, Krea Turbo cannot become a dense run halfway through a save.
+    # The complete candidate is rejected before any column changes. Turbo is no
+    # longer one of those candidates (see the Turbo/custom-base tests below);
+    # a base that is not an absolute path still is, because the krea2 loader
+    # would ignore it and train something other than what the panel shows.
     response = client.post(
         f'/api/dataset/{dataset_id}/train/settings',
         json={'training_mode': 'full_transformer', 'train_type': 'krea',
-              'base_model': '', 'variant': 'turbo'})
+              'base_model': 'relative-name.safetensors', 'variant': 'base'})
     assert response.status_code == 400
-    assert 'Krea-2-Raw' in response.get_json()['error']
+    assert 'full path' in response.get_json()['error']
     with app.app_context():
         ds = db.session.get(FaceDataset, dataset_id)
         assert (ds.training_mode, ds.train_type, ds.train_base_model,
@@ -158,11 +160,11 @@ def test_dense_slider_disable_validation_failure_changes_nothing(
 
     response = client.post(
         f'/api/dataset/{dataset_id}/train/settings',
-        json={'training_mode': 'full_transformer', 'train_type': 'krea',
+        json={'training_mode': 'full_transformer', 'train_type': 'zimage',
               'base_model': '', 'variant': 'turbo',
               'disable_slider_for_full_transformer': True})
     assert response.status_code == 400
-    assert 'Krea-2-Raw' in response.get_json()['error']
+    assert 'only for Krea 2' in response.get_json()['error']
     with app.app_context():
         ds = db.session.get(FaceDataset, dataset_id)
         assert (ds.training_mode, ds.train_type, ds.train_base_model,
@@ -335,7 +337,12 @@ def test_full_transformer_snapshot_matches_emitted_dense_recipe(app):
         assert lora_only not in snapshot
 
 
-def test_full_transformer_rejects_non_krea_turbo_custom_and_slider(app, tmp_path):
+def test_full_transformer_rejects_non_krea_and_slider(app, tmp_path):
+    """The two refusals that SURVIVED. Turbo and a custom base were scope
+    decisions and are gone — what they were protecting (a run trained on a base
+    it does not name) is now prevented by resolving the base from the selection;
+    see test_dense_recipe_and_quantized_base.py, which asserts the emitted
+    `model.name_or_path` per recipe rather than the absence of an exception."""
     from app.models import FaceDataset
     from app.services import lora_training as lt
 
@@ -349,15 +356,11 @@ def test_full_transformer_rejects_non_krea_turbo_custom_and_slider(app, tmp_path
 
         ds.train_type = 'krea'
         ds.train_variant = 'turbo'
-        with pytest.raises(ValueError, match='Krea-2-Raw'):
-            lt.build_job_config(ds, '/dataset', training_folder='/cloud')
+        assert lt.build_job_config(
+            ds, '/dataset', training_folder='/cloud',
+        )['config']['process'][0]['model']['name_or_path'] == 'krea/Krea-2-Turbo'
 
         ds.train_variant = 'base'
-        ds.train_base_model = str(tmp_path / 'custom.safetensors')
-        with pytest.raises(ValueError, match='custom base'):
-            lt.build_job_config(ds, '/dataset', training_folder='/cloud')
-
-        ds.train_base_model = None
         ds.train_slider = json.dumps({'enabled': True})
         with pytest.raises(ValueError, match='Slider LoRA'):
             lt.build_job_config(ds, '/dataset', training_folder='/cloud')
@@ -419,7 +422,7 @@ def test_preflight_uses_exact_selected_base_and_variant(app, monkeypatch):
     dataset_id = _dataset(app)
     monkeypatch.setattr(
         'app.services.cloud_training.full_transformer_token_preflight',
-        lambda: {'ok': True, 'configured': True, 'namespace': 'tester'})
+        lambda **_kw: {'ok': True, 'configured': True, 'namespace': 'tester'})
     with app.app_context():
         ds = db.session.get(FaceDataset, dataset_id)
         ds.training_mode = 'full_transformer'
@@ -456,7 +459,7 @@ def test_dense_preflight_route_reports_dedicated_cloud_token(
     dataset_id = _dataset(app)
     monkeypatch.setattr(
         'app.services.cloud_training.full_transformer_token_preflight',
-        lambda: dict(token_status))
+        lambda **_kw: dict(token_status))
 
     response = client.get(
         f'/api/dataset/{dataset_id}/train/preflight'

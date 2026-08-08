@@ -23,6 +23,7 @@ import { comfyEnumUnavailableReason } from './comfyEnumSupport.js';
 // right reason (optional + auto-fetched, so naming it sends the user nowhere).
 import { kleinMissingLabels, KLEIN_ASSET_LABELS, KLEIN_REQUIRED_ASSETS } from './kleinAssets.js';
 import { brokenAssetReason, blockingInvalid } from './modelIntegrityWords.js';
+import { pinnedModelGapReason } from './modelFileOptions.js';
 import { comfyuiDownReason } from './comfyuiStatus.js';
 
 /** Why Klein can't be picked, or null when it can. Ordered by what has to be
@@ -44,12 +45,18 @@ import { comfyuiDownReason } from './comfyuiStatus.js';
 export function kleinUnavailableReason({
   enabledInSettings = true, comfyuiReachable = true,
   missingAssets = [], unsupportedEnums = [], invalidAssets = [], comfyui = null,
+  pinGaps = [],
 } = {}) {
   if (!enabledInSettings) return '⚠ Klein is disabled in Settings (engines)';
   // Same two-causes split as Krea's: a ComfyUI that is up and slow to enumerate
   // itself must not be reported as one to go and configure. See
   // utils/comfyuiStatus.js.
   if (!comfyuiReachable) return comfyuiDownReason(comfyui || { reachable: false });
+  // Before the enum gap and the weights, for the same reason as Krea's: the
+  // asset scan answers "everything is here" when a pin is broken, because
+  // auto-detection DID find files — just not the ones that were asked for.
+  const pinned = pinnedModelGapReason('Klein', pinGaps);
+  if (pinned) return pinned;
   const enumHint = comfyEnumUnavailableReason(unsupportedEnums);
   if (enumHint) return enumHint;
   const words = kleinMissingLabels(missingAssets);
@@ -90,6 +97,7 @@ export function localEngineUnavailableReason(engine, caps, enabledEngines = null
       missingAssets: comfy.klein_missing,
       unsupportedEnums: comfy.klein_unsupported_enums,
       invalidAssets: comfy.klein_invalid,
+      pinGaps: comfy.klein_pin_gaps,
     });
   }
   if (engine === 'krea') {
@@ -102,6 +110,7 @@ export function localEngineUnavailableReason(engine, caps, enabledEngines = null
       missingNodes: comfy.krea_nodes_missing,
       invalidAssets: comfy.krea_invalid,
       nodePackInstalled: comfy.krea_nodes_installed,
+      pinGaps: comfy.krea_pin_gaps,
     });
   }
   if (engine === 'minimax_h3') {

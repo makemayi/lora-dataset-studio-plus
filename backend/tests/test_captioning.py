@@ -598,9 +598,14 @@ def test_caption_route_scopes_and_implies_force(client, app, monkeypatch):
     from app.services import face_dataset_service as svc
     seen = {}
 
-    def _fake(user, dataset_id, force=False, mode=None, image_ids=None):
+    # `report` is the per-engine writer out-dict the route now passes; a targeted pass
+    # fills it like any other, so the stand-in has to accept (and answer) it.
+    def _fake(user, dataset_id, force=False, mode=None, image_ids=None, report=None):
         seen.update(force=force, mode=mode, image_ids=image_ids)
-        return len(image_ids or [])
+        n = len(image_ids or [])
+        if report is not None:
+            report['ollama'] = n
+        return n
 
     ds_id = client.post('/api/dataset/create',
                         json={'name': 'R', 'trigger_word': 'r'}).get_json()['id']
@@ -608,6 +613,9 @@ def test_caption_route_scopes_and_implies_force(client, app, monkeypatch):
     resp = client.post(f'/api/dataset/{ds_id}/caption', json={'image_ids': [4, 7]})
     assert resp.status_code == 200 and resp.get_json()['captioned'] == 2
     assert seen == {'force': True, 'mode': None, 'image_ids': [4, 7]}
+    # A targeted re-caption reports its writer too — that pass produces captions the
+    # user is looking straight at, so it is the last place that may stay anonymous.
+    assert resp.get_json()['engines'] == {'ollama': 2}
 
 
 def test_caption_route_rejects_non_list_image_ids(client, app):

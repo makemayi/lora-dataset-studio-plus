@@ -3,7 +3,7 @@ import IdentityPromptModal from './IdentityPromptModal';
 import PoseSlotPanel from './PoseSlotPanel';
 // Engine names come from the derived edit list — spelling them out here is how
 // this tooltip ended up naming two engines while a third could already edit.
-import { editEngineNames } from './referenceEdit';
+import { editEngineNames, pendingEditNote } from './referenceEdit';
 import { imageFromClipboard } from './clipboardImage';
 
 // Cap identique à MAX_EXTRA_REFS côté backend (face_dataset_service).
@@ -15,7 +15,7 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
                                          onCropExtraRef, subjectType = 'human',
                                          poseSlots = {}, onSetPoseSlot, onCropPoseSlot,
                                          onMirrorPoseSlot, onTogglePoseSlotEnabled,
-                                         onRemovePoseSlot }) {
+                                         onRemovePoseSlot, referenceEdit = null }) {
   const inp = useRef(null);
   const inpExtra = useRef(null);
   // Auto head-crop = OPT-IN (vision pass, pauses ComfyUI). Default OFF: upload is
@@ -51,6 +51,10 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
     return () => document.removeEventListener('paste', onPaste);
   }, [onSetRef, onAddExtraRef, autoCrop, visionBusy, importBusy, extraRefs.length]);
 
+  // An edit that already landed and is waiting for Keep or Discard. It matters
+  // most after a restart: the modal only opens on a click, so without this the
+  // paid result would sit unannounced until the TTL deleted it.
+  const waiting = onEditRef ? pendingEditNote(referenceEdit) : null;
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-3">
       <div className="flex items-center gap-3">
@@ -62,7 +66,19 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
             : <span className="text-content-subtle text-xs">none</span>}
         </div>
         <div className="flex flex-col gap-1">
-          <span className="text-content text-sm font-medium">Reference photo</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-content text-sm font-medium">Reference photo</span>
+            {waiting && (
+              // A button, not a label: the whole point is to lead somewhere, and
+              // the modal it opens is where Keep and Discard live.
+              <button type="button" onClick={onEditRef} disabled={busy}
+                title="Open the edit to compare it with the current reference, then Keep or Discard"
+                className="px-2 py-0.5 rounded-full border border-amber-500/40 bg-amber-500/10
+                           text-amber-300 text-[0.625rem] font-medium disabled:opacity-40">
+                ✦ {waiting} →
+              </button>
+            )}
+          </div>
           <span className="text-content-subtle text-[0.6875rem]">source of Klein variations — crop with ✂ after upload</span>
           <div className="flex gap-1.5 items-center flex-wrap">
             <button type="button" onClick={() => inp.current?.click()} disabled={importBusy}
@@ -96,16 +112,20 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
           onCropPoseSlot={onCropPoseSlot} onMirrorPoseSlot={onMirrorPoseSlot}
           onTogglePoseSlotEnabled={onTogglePoseSlotEnabled} onRemovePoseSlot={onRemovePoseSlot} />
       )}
-      {/* Références additionnelles — identité multi-angles, consommées par TOUS
-          les moteurs : Nano Banana & ChatGPT (jointes à l'appel API) et Klein
-          (chaînées en ReferenceLatent natifs). Recadrables une par une (✂ sur la
-          vignette) ; le scoring reste sur la principale. */}
+      {/* Références additionnelles — identité multi-angles : Nano Banana &
+          ChatGPT (jointes à l'appel API) et Klein (chaînées en ReferenceLatent
+          natifs). PAS Krea 2 Edit : son unique slot secondaire a été entraîné
+          pour un sujet DIFFÉRENT, donc il lit une image ajoutée dans la modale
+          ✦ Edit reference, jamais ce vivier-ci (cf. LOCAL_EDIT_REF_SUPPORT).
+          Ne pas réécrire « tous les moteurs » ici sans vérifier cette table.
+          Recadrables une par une (✂ sur la vignette) ; le scoring reste sur la
+          principale. */}
       {refFilename && (
         <div className="flex items-center gap-2 flex-wrap border-t border-border pt-2"
           onMouseEnter={() => { extraHover.current = true; }} onMouseLeave={() => { extraHover.current = false; }}
           title="Hover and press Ctrl+V to paste a new extra reference">
           <span className="text-content-subtle text-[0.6875rem]">
-            Extra refs <span className="opacity-70">(all engines — stronger identity lock)</span>
+            Extra refs <span className="opacity-70">(more angles of this face — identity lock)</span>
           </span>
           {extraRefs.map((fn) => (
             <div key={fn} className="relative w-12 h-12 rounded-lg overflow-hidden bg-black shrink-0">
@@ -129,7 +149,7 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
           {extraRefs.length < MAX_EXTRA_REFS && (
             <button type="button" onClick={() => inpExtra.current?.click()} disabled={importBusy}
               aria-label="Add an extra reference photo (other angles of the same face)"
-              title="Add an extra reference photo — every engine (Nano Banana, ChatGPT, Klein) uses them together to lock the identity"
+              title="Add an extra reference photo — Klein and the API engines use these together to lock the identity, on every generation. Krea 2 Edit does not read them: its second image is added inside the ✦ Edit reference dialog, and is meant to be a different subject."
               className="w-12 h-12 rounded-lg border border-dashed border-border-strong text-content-muted text-lg leading-none disabled:opacity-40">
               +
             </button>

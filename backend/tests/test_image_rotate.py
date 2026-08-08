@@ -323,6 +323,50 @@ def test_bank_rotation_regenerates_the_thumbnail_and_reports_new_dimensions(app,
         assert (payload['width'], payload['height']) == (row.height, row.width)
 
 
+def test_bank_rescan_reports_effective_rotated_dimensions_once(
+        app, client, tmp_path, monkeypatch):
+    from app.config import LOCAL_USER
+    from app.models import BankImage
+    from app.services import image_bank_service as banks
+
+    bank_id, image_id, _src = _seed_bank(app, client, tmp_path)
+    with app.app_context():
+        banks.rotate_images(LOCAL_USER, bank_id, [image_id], 90)
+        monkeypatch.setattr(banks, 'rebuild_dup_groups', lambda *_a, **_k: 0)
+        job = banks.start_scan(
+            app, LOCAL_USER, bank_id, rescan=True, ids=[image_id])
+        assert job['error'] is None, job
+        row = banks.db.session.get(BankImage, image_id, populate_existing=True)
+        assert (row.width, row.height) == (40, 96)
+        assert row.analysis_fingerprint
+        payload = banks._image_dict(row, banks.thresholds())
+        assert (payload['width'], payload['height']) == (40, 96)
+
+
+def test_bank_rotated_cache_rebuilds_after_live_source_replacement(
+        app, client, tmp_path, monkeypatch):
+    from app.config import LOCAL_USER
+    from app.models import BankImage
+    from app.services import image_bank_service as banks
+
+    bank_id, image_id, source = _seed_bank(app, client, tmp_path)
+    with app.app_context():
+        bank = banks.get_bank(LOCAL_USER, bank_id)
+        banks.rotate_images(LOCAL_USER, bank_id, [image_id], 90)
+        monkeypatch.setattr(banks, 'rebuild_dup_groups', lambda *_a, **_k: 0)
+        banks.start_scan(app, LOCAL_USER, bank_id, rescan=True, ids=[image_id])
+        row = banks.db.session.get(BankImage, image_id, populate_existing=True)
+        first = Path(banks.analysis_image_path(bank, row, refresh_rotation=True))
+        first_payload = first.read_bytes()
+
+        _corner_marked(source, 'JPEG', size=(71, 123))
+        second = Path(banks.analysis_image_path(bank, row, refresh_rotation=True))
+        assert second != first
+        assert second.read_bytes() != first_payload
+        with Image.open(second) as image:
+            assert image.size == (123, 71)
+
+
 def test_bank_rotate_route_contract(app, client, tmp_path):
     bank_id, image_id, _src = _seed_bank(app, client, tmp_path)
     ok = client.post(f'/api/bank/{bank_id}/rotate',

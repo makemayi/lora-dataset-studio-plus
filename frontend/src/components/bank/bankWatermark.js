@@ -44,13 +44,24 @@ export function levelCounts(levels) {
 /** Step 1 — FIND. Detection is the first rung of the same ladder, not a pass
  * that lives elsewhere: the two cleaning levels are dead without it (they route
  * on the box it stores), and splitting them across the page is what made the
- * feature read as two unrelated things. Needs the vision model. */
-export function findLevelState(levels, { live = false, visionReady = false } = {}) {
+ * feature read as two unrelated things.
+ *
+ * TWO routes can drive it. The dedicated detector extra, when installed, does not
+ * need Ollama at all — so the "pull the vision model" refusal must NOT fire on a
+ * machine that has the detector, or the fast route would be locked behind a
+ * dependency it removed. */
+export function findLevelState(levels, {
+  live = false, visionReady = false, detectorReady = false,
+} = {}) {
   const c = levelCounts(levels);
   const reason = live
     ? 'A pass is already running on this bank — wait for it to finish.'
-    : !visionReady
-      ? 'Pull the vision model (Settings ▸ Captioning & quality) to scan for watermarks.'
+    : !visionReady && !detectorReady
+      // Settings ▸ Local tools, NOT ▸ Captioning & quality: that section holds the
+      // ENGINE selector, while the Ollama vision model field lives in Local tools.
+      // Sending someone to the wrong tab to fix a blocked pass is worse than silence.
+      ? 'Pull the vision model (Settings ▸ Local tools), or install the '
+        + 'watermark detector (Setup ▸ Quality tools), to scan for watermarks.'
       : null;
   return {
     done: c.scanned,
@@ -68,12 +79,20 @@ export function findLevelState(levels, { live = false, visionReady = false } = {
 }
 
 /** Level 2 — auto-crop. Always available (CPU/PIL), so the only reasons it can
- * be off are "a pass is already running" and "nothing to crop". */
-export function cropLevelState(levels, { live = false } = {}) {
+ * be off are "a pass is already running" and "nothing to crop".
+ *
+ * `binWaiting` is how many flagged images sit in the BIN — a pile this payload
+ * cannot see (its pool has always been `status != 'reject'`). It exists because
+ * the level now opens a window where the bin CAN be chosen: a button disabled on
+ * "nothing to crop" would lock that choice away from exactly the user who needs
+ * it, and a capability nobody can reach reads as one that was never shipped. */
+export function cropLevelState(levels, { live = false, binWaiting = 0 } = {}) {
   const c = levelCounts(levels);
   const reason = live
     ? 'A pass is already running on this bank — wait for it to finish.'
-    : c.croppable === 0
+    : (c.croppable === 0 && binWaiting > 0)
+      ? null
+      : c.croppable === 0
       ? (c.flagged > 0
         ? (c.handMasked >= c.flagged
           // A hand-drawn mask can hold several zones and zones on the subject —
@@ -90,8 +109,24 @@ export function cropLevelState(levels, { live = false } = {}) {
     remaining: c.croppable,
     disabled: reason !== null,
     reason,
-    label: `✂ Auto-crop (${c.croppable})`,
+    // The bin is NAMED rather than folded into the total: "✂ Auto-crop (0)" on a
+    // live button is a contradiction, and adding binWaiting to croppable would
+    // add an unrouted figure to a routed one.
+    label: c.croppable === 0 && binWaiting > 0
+      ? `✂ Auto-crop (${binWaiting} in the bin)`
+      : `✂ Auto-crop (${c.croppable})`,
+    // …and the line under the button follows the label. Leaving the default
+    // "0 image(s) waiting" under a button offering 2 is the card contradicting
+    // itself, which is exactly what the counts on this page exist to end.
+    note: binWaiting > 0 && c.croppable === 0 ? binNote(binWaiting) : '',
   };
+}
+
+
+/** The line under a level whose only remaining work sits in the bin. */
+function binNote(n) {
+  return `${n} image(s) waiting, all of them unkept — pick “✕ Unkept only” in `
+    + 'the window.';
 }
 
 /** Level 3 — inpaint. `method` is the engine toggle: 'lama' (or 'auto') repaints
@@ -99,7 +134,8 @@ export function cropLevelState(levels, { live = false } = {}) {
  * repaints those. An engine that isn't installed disables the button with the
  * install path spelled out — never a silent failure mid-pass. */
 export function inpaintLevelState(levels, {
-  live = false, method = 'auto', lamaReady = false, kleinReady = false, kleinReason = null,
+  live = false, method = 'auto', lamaReady = false, kleinReady = false,
+  kleinReason = null, binWaiting = 0,
 } = {}) {
   const c = levelCounts(levels);
   const wantsKlein = method === 'klein';
@@ -117,17 +153,22 @@ export function inpaintLevelState(levels, {
         ? (kleinReason
           || 'Klein inpainting needs ComfyUI running and the Klein models (Setup ▸ ComfyUI).')
         : 'LaMa inpainting is not installed yet (Setup ▸ Quality tools).')
-      : c.flagged === 0
-        ? (c.cropped > 0
-          ? 'Nothing left — every flagged image has been handled.'
-          : 'Nothing flagged — run 🚩 Find watermarks first.')
-        : null;
+      : (c.flagged === 0 && binWaiting > 0)
+        ? null                      // see cropLevelState: the bin is reachable now
+        : c.flagged === 0
+          ? (c.cropped > 0
+            ? 'Nothing left — every flagged image has been handled.'
+            : 'Nothing flagged — run 🚩 Find watermarks first.')
+          : null;
   return {
     done: c.inpainted,
     remaining: c.flagged,
     disabled: reason !== null,
     reason,
-    label: `🧽 Inpaint (${c.flagged})`,
+    label: c.flagged === 0 && binWaiting > 0
+      ? `🧽 Inpaint (${binWaiting} in the bin)`
+      : `🧽 Inpaint (${c.flagged})`,
+    note: binWaiting > 0 && c.flagged === 0 && engineReady ? binNote(binWaiting) : '',
   };
 }
 
@@ -169,6 +210,35 @@ export function maskNote(levels) {
   if (!c.emptyMasks) return drawn;
   return `${drawn} ${c.emptyMasks} of them has an EMPTY mask and will be cleaned by `
     + 'neither level — draw a zone in ▶ Review, or dismiss the image.';
+}
+
+/** WHO decided these verdicts, and who will decide the next ones — one sentence,
+ * or null when there is nothing scanned and nothing to say.
+ *
+ * This is not trivia. The two routes are different instruments: the detector
+ * returns a SCORE compared against a threshold the user can move, the vision
+ * model returns a sentence it wrote. A user looking at a flag and asking "why?"
+ * gets a different answer, and a different remedy, depending on which one ruled
+ * — so a panel that hides the source hides the only actionable half. */
+export function sourceNote(levels) {
+  const l = levels || {};
+  const s = l.sources || {};
+  const detector = num(s.detector);
+  const vision = num(s.vision);
+  const unknown = num(s.unknown);
+  const next = l.next_source === 'detector' ? 'detector' : 'vision';
+  const thr = Number.isFinite(l.threshold) ? l.threshold : null;
+  const nextLabel = next === 'detector'
+    ? `the watermark detector${thr === null ? '' : ` (flags at a score of ${thr})`}`
+    : 'the vision model';
+  if (detector + vision + unknown === 0) return `Nothing scanned yet — ${nextLabel} will do it.`;
+  const done = [];
+  if (detector) done.push(`${detector} by the detector`);
+  if (vision) done.push(`${vision} by the vision model`);
+  // Never attributed to either route: these rows were scanned before the app
+  // recorded which one ruled. Saying "by the vision model" would be a guess.
+  if (unknown) done.push(`${unknown} before the source was recorded`);
+  return `Judged ${done.join(', ')}. A new run uses ${nextLabel}.`;
 }
 
 /** Rows a previous build flagged without keeping the box: they are invisible to

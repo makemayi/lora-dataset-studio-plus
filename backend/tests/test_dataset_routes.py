@@ -141,11 +141,22 @@ def test_images_batch_route_validates_and_applies(client, app):
                        json={'ids': [img_id], 'action': 'nope'}).status_code == 400
     assert client.post(f'/api/dataset/{ds_id}/images/batch',
                        json={'ids': [], 'action': 'keep'}).status_code == 400
+    assert client.post(f'/api/dataset/{ds_id}/images/batch',
+                       json=[]).status_code == 400
+    for bad_ids in ([True], ['1'], [1.0], [0], [-1], [1 << 63]):
+        assert client.post(
+            f'/api/dataset/{ds_id}/images/batch',
+            json={'ids': bad_ids, 'action': 'keep'}).status_code == 400
     assert client.post('/api/dataset/999999/images/batch',
                        json={'ids': [img_id], 'action': 'keep'}).status_code == 404
     ok = client.post(f'/api/dataset/{ds_id}/images/batch',
                      json={'ids': [img_id], 'action': 'keep'})
     assert ok.status_code == 200 and ok.get_json() == {'ok': True, 'affected': 1}
+    deduped = client.post(
+        f'/api/dataset/{ds_id}/images/batch',
+        json={'ids': [img_id, img_id], 'action': 'keep'})
+    assert deduped.status_code == 200
+    assert deduped.get_json() == {'ok': True, 'affected': 1}
     payload = client.get(f'/api/dataset/{ds_id}').get_json()
     assert payload['images'][0]['status'] == 'keep'
 

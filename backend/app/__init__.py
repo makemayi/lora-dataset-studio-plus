@@ -4,7 +4,8 @@ import mimetypes
 import sqlite3
 import json
 from pathlib import Path
-from flask import Flask, send_from_directory, jsonify, request
+from flask import (
+    Flask, Request, current_app, jsonify, request, send_from_directory)
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from .extensions import db, csrf
@@ -87,6 +88,67 @@ _DATASET_ARCHIVE_UPLOAD_ENDPOINTS = frozenset({
 })
 
 
+class ArchiveAwareRequest(Request):
+    """Give the archive-upload endpoints — and only them — a raised ceiling.
+
+    The limit has to be in place before anything reads the body, and
+    Flask-WTF reads ``request.form`` in its own ``before_request`` hook, so a
+    hook of ours would have to win a registration race to be of any use.
+    Assigning ``request.max_content_length`` from that hook also depends on the
+    property being settable, which it only became in Flask 3.1: on any older
+    Flask the assignment raises ``AttributeError`` and every archive upload
+    answers 500.
+
+    Declaring the ceiling on the request class instead removes both problems.
+    It is read lazily, whenever the body is first touched and however early
+    that is, and it never writes to a framework property. The geometry is
+    unchanged: the ordinary ``MAX_CONTENT_LENGTH`` still governs every other
+    endpoint.
+    """
+
+    #: Honours an explicit per-request assignment first, so this class stays a
+    #: drop-in for the Flask >= 3.1 behaviour it replaces.
+    _forced_max_content_length = None
+
+    @property
+    def max_content_length(self):
+        if self._forced_max_content_length is not None:
+            return self._forced_max_content_length
+        if self.endpoint in _DATASET_ARCHIVE_UPLOAD_ENDPOINTS and current_app:
+            archive_max = int(
+                current_app.config['DATASET_ARCHIVE_MAX_UPLOAD_BYTES'])
+            overhead = max(0, int(
+                current_app.config['DATASET_ARCHIVE_MULTIPART_OVERHEAD_BYTES']))
+            return archive_max + overhead
+        return super().max_content_length
+
+    @max_content_length.setter
+    def max_content_length(self, value):
+        self._forced_max_content_length = value
+
+    def _raise_if_declared_body_is_too_large(self):
+        """Apply the selected ceiling on Flask/Werkzeug versions before 2.3.
+
+        Older Werkzeug guarded multipart parsing but its raw ``get_data``
+        stream did not consult Flask's ``MAX_CONTENT_LENGTH`` at all.  Keep the
+        same endpoint-aware limit for both entry paths so an ordinary upload
+        cannot bypass its 64 MiB ceiling merely by using a non-form body.
+        """
+        limit = self.max_content_length
+        if (limit is not None and self.content_length is not None
+                and self.content_length > limit):
+            from werkzeug.exceptions import RequestEntityTooLarge
+            raise RequestEntityTooLarge()
+
+    def _load_form_data(self):
+        self._raise_if_declared_body_is_too_large()
+        return super()._load_form_data()
+
+    def get_data(self, *args, **kwargs):
+        self._raise_if_declared_body_is_too_large()
+        return super().get_data(*args, **kwargs)
+
+
 def _positive_env_int(name, default):
     """Read a positive integer without making a bad optional env var fatal."""
     try:
@@ -148,6 +210,12 @@ _SCHEMA_ADDITIONS = (
     ('face_dataset', 'prompt_suffixes', 'TEXT'),
     ('face_dataset', 'caption_options', 'TEXT'),
     ('face_dataset', 'klein_model', 'VARCHAR(255)'),
+    # NOTE — `face_dataset.internal` was added here for a feature that was
+    # removed before it ever shipped in a release. Databases created while it
+    # existed still carry the column; it is nullable, nothing reads or writes it,
+    # and it is deliberately NOT dropped: SQLite's DROP COLUMN is unavailable on
+    # older engines and would rewrite the table for no gain. Do not reuse the
+    # name for anything else — an old database would hand you stale values.
     ('face_dataset_image', 'caption_short', 'TEXT'),
     ('face_dataset_image', 'fail_reason', 'TEXT'),
     # Nature de l'échec ('refused' | 'empty' | 'error') pour compter les refus
@@ -160,6 +228,11 @@ _SCHEMA_ADDITIONS = (
     ('face_dataset_image', 'watermark_state', 'VARCHAR(16)'),
     ('face_dataset_image', 'watermark_bbox', 'TEXT'),
     ('face_dataset_image', 'watermark_regions', 'TEXT'),
+    # Who ruled ('detector' | 'vision') and with what score. Existing rows stay
+    # NULL — read as "before the source was recorded", never attributed to a
+    # route at random (same rule the bank's identical pair already follows).
+    ('face_dataset_image', 'watermark_source', 'VARCHAR(16)'),
+    ('face_dataset_image', 'watermark_score', 'REAL'),
     ('face_dataset_image', 'source_metadata', 'TEXT'),
     # Back-link to the bank_image a promotion copied here. Existing rows keep
     # NULL: a bank that was promoted before this column existed still relies on
@@ -177,6 +250,7 @@ _SCHEMA_ADDITIONS = (
     # simply carries NULL, read as 'ai_toolkit' by the code that consumes it
     # (see checkpoint_registry / lora_training call sites).
     ('training_run_record', 'trainer', 'VARCHAR(16)'),
+    ('face_dataset_image', 'transfer_metadata', 'TEXT'),
     ('training_run_record', 'settings', 'TEXT'),
     # Full launch freeze: caption text, per-image content hashes, environment.
     # NULL on every run recorded before it existed — the compare panel says so.
@@ -187,6 +261,11 @@ _SCHEMA_ADDITIONS = (
     ('training_run_record', 'note', 'TEXT'),
     ('training_preset', 'dataset_kind', 'VARCHAR(16)'),
     ('training_preset', 'variants', 'TEXT'),
+    # Which table `cloud_training_run.dataset_id` points into. Deliberately
+    # NULLABLE with no server default: every historical run predates the column
+    # and must be READ as 'face_dataset' rather than rewritten by a migration —
+    # see services/cloud_run_dataset.table_of, the only reader of this value.
+    ('cloud_training_run', 'dataset_table', 'VARCHAR(32)'),
     ('lora_test_image', 'error', 'TEXT'),
     ('lora_test_image', 'resolution_multiplier', 'REAL'),
     # WHICH checkpoint produced this image, written at generation time instead of
@@ -194,6 +273,14 @@ _SCHEMA_ADDITIONS = (
     # services.checkpoint_link_backfill attributes the ones it can prove.
     ('lora_test_image', 'record_id', 'INTEGER'),
     ('lora_test_image', 'step', 'INTEGER'),
+    # ✨ Upscale & improve run from the ◉ Canvas lightbox: the result is a row of
+    # this table (so the board can pin it) that is NOT a Test Studio cell.
+    # `derivation_kind` is what every studio query excludes on — see
+    # models.LoraTestImage and lora_test_studio._cells(). Existing rows read NULL,
+    # which means "an ordinary cell", so a database that predates this keeps
+    # behaving exactly as it did.
+    ('lora_test_image', 'parent_image_id', 'INTEGER'),
+    ('lora_test_image', 'derivation_kind', 'VARCHAR(32)'),
     # Bank V2 scoring pass — the image_bank/bank_image tables shipped in the Beta,
     # so these columns need the additive path (db.create_all never ALTERs an
     # existing table).
@@ -206,6 +293,10 @@ _SCHEMA_ADDITIONS = (
     # rows remain NULL, just like they were before source attribution was added.
     ('bank_image', 'source_metadata', 'TEXT'),
     ('bank_image', 'semantic_dup_group', 'INTEGER'),
+    # The visible semantic_dup_group is a projection of the selected engine.
+    # These nullable lanes retain both partitions across engine switches.
+    ('bank_image', 'clip_semantic_dup_group', 'INTEGER'),
+    ('bank_image', 'siglip2_semantic_dup_group', 'INTEGER'),
     ('bank_image', 'framing', 'VARCHAR(8)'),
     # Bank watermark CLEANING (two manual levels) — the detected bbox is now kept
     # (the scan used to parse it and throw it away) and the cleaned blob's method
@@ -216,6 +307,12 @@ _SCHEMA_ADDITIONS = (
     # of the dataset's watermark_regions. Additive: a database that never gains it
     # simply has no hand-edited mask and both levels keep routing on the bbox.
     ('bank_image', 'watermark_regions', 'TEXT'),
+    # Which detector produced the watermark verdict, and its raw score. Both stay
+    # NULL on every row scanned before the dedicated detector existed — those rows
+    # are vision-model verdicts we cannot retro-label, and the panel says
+    # "unknown" for them rather than inventing a source.
+    ('bank_image', 'watermark_source', 'VARCHAR(16)'),
+    ('bank_image', 'watermark_score', 'REAL'),
     # Bank provenance pass — effective resolution, letterbox, JPEG quality and the
     # ai/camera/unknown origin. Same additive path: existing banks keep every row
     # and simply carry NULLs until the next quality scan fills them in.
@@ -224,14 +321,46 @@ _SCHEMA_ADDITIONS = (
     ('bank_image', 'jpeg_quality', 'REAL'),
     ('bank_image', 'origin', 'VARCHAR(8)'),
     ('bank_image', 'origin_evidence', 'VARCHAR(24)'),
+    # 🎨 Medium (what the picture is MADE of) and the confidence gap behind it,
+    # plus the face pass's yaw. Additive: a database that never gains them keeps
+    # every row and simply reports "not classified" / "not measured".
+    ('bank_image', 'medium', 'VARCHAR(16)'),
+    ('bank_image', 'medium_margin', 'REAL'),
+    ('bank_image', 'face_yaw', 'REAL'),
+    # Exact-byte authority shared by every Bank analysis lane.  Existing rows
+    # stay NULL and enter the explicit legacy compatibility path until a pass
+    # re-attests them; inventing a backfill hash would falsely bless stale data.
+    ('bank_image', 'analysis_fingerprint', 'VARCHAR(64)'),
+    ('bank_image', 'watermark_fingerprint', 'VARCHAR(64)'),
     # ⬆ Promote's second destination: the bank a selection was copied into.
     # Additive and independent of promoted_dataset_id — a database that never
     # gains it simply never shows the "promoted to a bank" badge.
     ('bank_image', 'promoted_bank_id', 'INTEGER'),
+    ('bank_image', 'transfer_metadata', 'TEXT'),
     # Manual quarter-turn of a bank image (degrees clockwise, NULL = untouched).
     # Additive: a database that never gains it simply has no rotated images.
     ('bank_image', 'rotation', 'INTEGER'),
+    # Where a face_cluster id came from: NULL = the embeddings pass computed it
+    # (what every existing row means), 'asserted' = a "this subfolder is one
+    # person" declaration wrote it with no inference. Additive: a database that
+    # never gains it simply has no assertions and clusters exactly as before.
+    ('bank_image', 'face_cluster_origin', 'VARCHAR(10)'),
+    # WHO wrote a caption: NULL = never recorded | 'asserted' (a human) |
+    # 'joycaption'/'ollama' (the engine). Deliberately NO server default: NULL is
+    # the value that carries meaning here, and back-filling every existing row
+    # with 'joycaption' or with 'asserted' would BOTH be a claim nobody measured
+    # — the first would make Re-caption destroy hand-written work it just
+    # promised to spare, the second would freeze every bank that exists today.
+    # A row that predates the column keeps NULL, is re-captioned as it always
+    # was, and is counted on screen as "origin never recorded". See
+    # services/caption_origin.py.
+    ('bank_image', 'caption_origin', 'VARCHAR(16)'),
+    ('face_dataset_image', 'caption_origin', 'VARCHAR(16)'),
+    ('face_dataset_image', 'caption_short_origin', 'VARCHAR(16)'),
     ('image_bank', 'pipeline_report', 'TEXT'),
+    # Per-Bank semantic engine. The non-null default makes every historical row
+    # byte-for-byte compatible with the CLIP behaviour it already had.
+    ('image_bank', 'semantic_engine', "VARCHAR(16) NOT NULL DEFAULT 'clip'"),
     # Cloud stop that cannot lie: the moment the user asked for a stop, kept in
     # the database so the supervisor can terminate a pod whose monitor thread
     # never honoured it. Additive — existing runs simply carry NULL.
@@ -248,6 +377,22 @@ _SCHEMA_ADDITIONS = (
     ('face_dataset_image', 'unseen', 'BOOLEAN DEFAULT 0'),
     # Per-image delete guard (feature request) — see FaceDatasetImage.is_locked.
     ('face_dataset_image', 'is_locked', 'BOOLEAN DEFAULT 0'),
+    # 🎬 Video wave 2: the metrics scan's raw per-clip summary. Additive so a
+    # video bank cut by wave 1 keeps every clip and simply reads "not measured".
+    ('video_clip', 'metrics_json', 'TEXT'),
+    # 🎬 Video wave 3: whether this shot's frames were embedded for 🔎 Search.
+    # Additive so a bank cut and measured by the earlier waves keeps every clip
+    # and simply reads "not searchable yet" until the pass runs.
+    ('video_clip', 'embed_state', 'VARCHAR(12)'),
+    # 🎬 Video wave 5: the shot's caption and whether a human has touched it.
+    # Additive, so every bank cut by the earlier waves keeps its clips and simply
+    # reads "not captioned yet".
+    ('video_clip', 'caption', 'TEXT'),
+    ('video_clip', 'caption_state', 'VARCHAR(12)'),
+    # Which checkpoint wrote the caption. Additive: rows captioned before the
+    # model became configurable read NULL, which is honest — nobody recorded it.
+    ('video_clip', 'caption_model', 'VARCHAR(120)'),
+    ('video_clip', 'caption_style', 'VARCHAR(16)'),
 )
 
 # Indexes that only a FRESH database ever got. `index=True` on a model column is
@@ -263,7 +408,9 @@ _INDEX_ADDITIONS = (
     ('bank_image', 'style_cluster'),
     ('bank_image', 'framing'),
     ('bank_image', 'origin'),
+    ('bank_image', 'medium'),
     ('lora_test_image', 'record_id'),
+    ('lora_test_image', 'parent_image_id'),
 )
 
 
@@ -277,6 +424,37 @@ def _apply_additive_migrations():
                 db.session.commit()
         except Exception:
             db.session.rollback()  # a failed ALTER must never block boot
+    # Before the engine selector there was only ``semantic_dup_group`` and its
+    # space was necessarily CLIP.  Copy that visible partition into the durable
+    # lane (or into SigLIP2 for Banks already switched by an intermediate build)
+    # so the first switch after this migration cannot erase existing work.  The
+    # NULL guard makes this safe and idempotent on every boot.
+    try:
+        db.session.execute(text("""
+            UPDATE bank_image
+               SET clip_semantic_dup_group = semantic_dup_group
+             WHERE clip_semantic_dup_group IS NULL
+               AND semantic_dup_group IS NOT NULL
+               AND bank_id IN (
+                   SELECT id FROM image_bank
+                    WHERE LOWER(TRIM(COALESCE(semantic_engine, 'clip')))
+                          != 'siglip2'
+               )
+        """))
+        db.session.execute(text("""
+            UPDATE bank_image
+               SET siglip2_semantic_dup_group = semantic_dup_group
+             WHERE siglip2_semantic_dup_group IS NULL
+               AND semantic_dup_group IS NOT NULL
+               AND bank_id IN (
+                   SELECT id FROM image_bank
+                    WHERE LOWER(TRIM(COALESCE(semantic_engine, 'clip')))
+                          = 'siglip2'
+               )
+        """))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()  # legacy backfill is best-effort, boot stays open
     # Same loop, same discipline: idempotent (IF NOT EXISTS), additive only, and
     # fail-open — a database that cannot take an index still boots, just slower.
     for table, col in _INDEX_ADDITIONS:
@@ -347,6 +525,7 @@ def create_app(config_object=None):
     # `mimetypes.init()` run by any library imported since this module loaded.
     pin_static_mime_types()
     app = Flask(__name__, static_folder=None)
+    app.request_class = ArchiveAwareRequest
     data_dir = Path(os.environ.get('LDS_DATA_DIR', str(cfg.REPO_ROOT / 'data')))
     data_dir.mkdir(parents=True, exist_ok=True)
     app.config.update(
@@ -386,18 +565,6 @@ def create_app(config_object=None):
             root.addHandler(fh)
             if root.level > logging.INFO or root.level == logging.NOTSET:
                 root.setLevel(logging.INFO)
-
-    # Flask-WTF looks in request.form before it checks the CSRF header.  For a
-    # multipart upload that parses the body in its before_request hook, before the
-    # view itself can raise the limit.  Register this override first so ONLY the
-    # two archive endpoints may exceed the ordinary 64 MiB request ceiling.
-    @app.before_request
-    def _set_dataset_archive_request_limit():
-        if request.endpoint in _DATASET_ARCHIVE_UPLOAD_ENDPOINTS:
-            archive_max = int(app.config['DATASET_ARCHIVE_MAX_UPLOAD_BYTES'])
-            overhead = max(0, int(
-                app.config['DATASET_ARCHIVE_MULTIPART_OVERHEAD_BYTES']))
-            request.max_content_length = archive_max + overhead
 
     db.init_app(app)
     csrf.init_app(app)
@@ -450,6 +617,16 @@ def create_app(config_object=None):
         # leaving the restarted app stuck on "GPU busy" until the TTL expires.
         from .gpu_window import recover_stale_vision_window
         recover_stale_vision_window()
+        # Move cloud checkpoints out of the disposable staging dirs and into the
+        # durable store. Until this has run, an install trained before the store
+        # existed still keeps its ONLY copy of a never-deployed .safetensors in a
+        # directory the cleanup is allowed to trash (see services.cloud_training).
+        # Once, guarded by a persisted flag, and swallows its own failures.
+        try:
+            from .services.cloud_training import migrate_checkpoints_into_store
+            migrate_checkpoints_into_store()
+        except Exception:
+            app.logger.exception('checkpoint store retrofit skipped')
 
     from .routes import register_blueprints
     register_blueprints(app, csrf)

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  extractFromGroup, groupMembers, layoutImageNodes, mergeIntoGroup,
+  edgeAnchors, extractFromGroup, groupMembers, layoutImageNodes, mergeIntoGroup,
   mergeTargetAt, nextGroupId, shouldExtract,
 } from './canvasImageGroups.js';
 
@@ -317,6 +317,45 @@ test('members with the same groupPos still get a stable, repeatable order', () =
 
 test('extracting an image that is in no group changes nothing', () => {
   assert.deepEqual(extractFromGroup([node(1, SQUARE)], 1, { x: 5, y: 5 }), []);
+});
+
+// ---- the links back to the source checkpoints -----------------------------
+/* One thing on screen gets one thread. A strip is one object to the eye and to
+   every gesture, so a line per member fanned eight connectors out of eight
+   points along one band — and free placement makes those lines long, which is
+   exactly when the ink starts to matter. */
+
+const source = (id, recordId, step) => ({
+  imageId: id, x: 0, y: 0, w: 200, h: 200, visible: true,
+  groupId: 'g', groupPos: id, image: { id, url: `/i/${id}.png`, record_id: recordId, step },
+});
+
+test('a strip whose pictures share a checkpoint draws ONE link, from the strip', () => {
+  const strip = [source(1, 10, 500), source(2, 10, 500), source(3, 10, 500)];
+  const layout = layoutImageNodes(strip);
+  const anchors = edgeAnchors(layout);
+  assert.equal(anchors.length, 1, 'one object, one thread');
+  const band = layout.find((r) => r.kind === 'group');
+  assert.deepEqual([anchors[0].x, anchors[0].y, anchors[0].w, anchors[0].h],
+    [band.x, band.y, band.w, band.h], 'it leaves the STRIP, not a tile inside it');
+});
+
+test('…and a strip built from SEVERAL checkpoints owns up to every one of them', () => {
+  // 📌 Pin all groups a whole generation run — routinely three epochs of the
+  // same card. One line to one pill would attribute the other two to it.
+  const strip = [source(1, 10, 500), source(2, 10, 1000), source(3, 10, 1000),
+    source(4, 10, 1500)];
+  const anchors = edgeAnchors(layoutImageNodes(strip));
+  assert.deepEqual(anchors.map((n) => n.image.step), [500, 1000, 1500]);
+  // Every one of them still leaves from the same point — a strip with threads,
+  // never a comb.
+  assert.equal(new Set(anchors.map((n) => `${n.x}:${n.y}`)).size, 1);
+});
+
+test('a lone picture still answers for itself, at the box it is drawn in', () => {
+  const anchors = edgeAnchors(layoutImageNodes([node(1, SQUARE)]));
+  assert.equal(anchors.length, 1);
+  assert.deepEqual([anchors[0].x, anchors[0].y], [SQUARE.x, SQUARE.y]);
 });
 
 /** Apply the rows a merge/extract produced back onto the node list, the way the

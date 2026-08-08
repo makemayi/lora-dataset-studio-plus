@@ -41,7 +41,14 @@ def _write_safetensors(path, keys):
     return str(path)
 
 
-_KREA_KEYS = ['first.weight', 'blocks.0.attn.qkv.weight', 'txtfusion.0.attn.qkv.weight',
+# Read off a REAL Krea 2 checkpoint header (krea2_raw_bf16.safetensors, 430
+# tensors), not invented: the family keeps q/k/v as SEPARATE matrices and nests
+# txtfusion under refiner_blocks / layerwise_blocks. There is no `qkv` tensor
+# anywhere in it — a previous spelling here said there was, and anyone reading
+# these fixtures to learn the layout would have designed a qkv-slicing merge that
+# cannot work.
+_KREA_KEYS = ['first.weight', 'blocks.0.attn.wq.weight',
+              'txtfusion.refiner_blocks.0.attn.wk.weight',
               'tmlp.0.weight', 'last.linear.weight']
 _FLUX_KEYS = ['double_blocks.0.img_attn.qkv.weight', 'single_blocks.0.linear1.weight',
               'img_in.weight', 'txt_in.weight', 'final_layer.linear.weight']

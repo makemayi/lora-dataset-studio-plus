@@ -13,6 +13,47 @@
  * not prove — a wrong pick would surface as an import error an hour into a pass.
  */
 
+/** The two features that can borrow an interpreter, and the ONLY thing that
+ *  differs between them: which endpoint answers, what the sentences call the
+ *  pass, and what it needs. Same dialog, same rules — a second copy of this
+ *  screen would be a second place to fix the next wording bug.
+ *
+ *  `key` is a route/profile id shared with the backend (`scoring_python.PROFILES`)
+ *  and is NOT a display string: never rename it. */
+export const PICKER_PROFILES = {
+  scoring: {
+    key: 'scoring',
+    endpoint: '/api/scoring-python',
+    feature: '✨ Score',
+    needs: 'PyTorch, OpenCLIP and a couple of others',
+    ariaLabel: 'Choose the Python that runs Score',
+    inputId: 'scoring-python-path',
+    extraNote: '',
+  },
+  semantic: {
+    key: 'semantic',
+    endpoint: '/api/semantic-python',
+    feature: 'the SigLIP 2 index',
+    needs: 'PyTorch, a SigLIP2-capable Transformers, NumPy and Pillow',
+    ariaLabel: 'Choose the Python that runs the SigLIP 2 index',
+    inputId: 'semantic-python-path',
+    // The reason borrowing is cheap here and nowhere else: the checkpoint is not
+    // in the interpreter. Someone who just paid 1.5 GB for it needs to be told
+    // they will not pay it twice.
+    extraNote: 'The pinned SigLIP 2 weights live in the app’s data folder, not '
+      + 'in the interpreter — borrowing one downloads nothing and installs nothing. '
+      + 'Setup ▸ Quality tools keeps installing into the app’s own environment.',
+  },
+}
+
+export const DEFAULT_PICKER = PICKER_PROFILES.scoring
+
+/** Accept a profile object, its key, or nothing (Score — the original caller). */
+export function pickerProfile(profile) {
+  if (profile && typeof profile === 'object') return profile
+  return PICKER_PROFILES[profile] || DEFAULT_PICKER
+}
+
 /** Best first: a ready GPU interpreter, then a working CPU one, then the ones
  *  that need something, then the ones that did not answer. Ties keep the
  *  backend's order (the interpreter in use first, the app's own last). */
@@ -64,7 +105,8 @@ export function missingLabels(row) {
  *
  *  `nvidiaPresent` defaults to true so a caller that hasn't loaded it yet gets
  *  the old wording rather than wrongly telling someone they have no card. */
-export function detectionSummary(rows, nvidiaPresent = true) {
+export function detectionSummary(rows, nvidiaPresent = true, profile = DEFAULT_PICKER) {
+  const { feature } = pickerProfile(profile)
   const list = rows || []
   const usable = list.filter((r) => r.usable)
   if (!nvidiaPresent) {
@@ -75,19 +117,19 @@ export function detectionSummary(rows, nvidiaPresent = true) {
       ? ` ${usable.length} interpreter${usable.length === 1 ? '' : 's'} here already `
         + `${usable.length === 1 ? 'has' : 'have'} the packages, if you would rather not install them again.`
       : ''
-    return `No NVIDIA card detected on this machine — ✨ Score runs on the CPU either way.${offer}`
+    return `No NVIDIA card detected on this machine — ${feature} runs on the CPU either way.${offer}`
   }
   if (!list.length) return 'No Python interpreters found to check yet.'
   const ready = list.filter((r) => r.status === 'gpu_ready')
   if (ready.length) {
-    return `${ready.length} of ${list.length} can run ✨ Score on your GPU.`
+    return `${ready.length} of ${list.length} can run ${feature} on your GPU.`
   }
   const close = list.filter((r) => r.status === 'incomplete' && r.cuda)
   if (close.length) {
     const names = close.map((r) => `${r.label} (${missingLabels(r).join(', ')})`)
     return `None is ready yet. Reaches the GPU but needs packages: ${names.join('; ')}.`
   }
-  return 'None of these can reach the GPU — ✨ Score stays on the CPU. '
+  return `None of these can reach the GPU — ${feature} stays on the CPU. `
     + 'If you have another Python with a CUDA PyTorch, enter its path below.'
 }
 
@@ -111,20 +153,21 @@ export function detectionFailure(result) {
 
 /** Title + intro for the dialog, adapted to the machine. Same rule as above: a
  *  machine with no NVIDIA card is never shown a CUDA pitch. */
-export function dialogCopy(nvidiaPresent = true) {
+export function dialogCopy(nvidiaPresent = true, profile = DEFAULT_PICKER) {
+  const { feature, needs } = pickerProfile(profile)
   if (!nvidiaPresent) {
     return {
-      title: '⚡ Run ✨ Score in a Python you already have',
-      intro: 'Score needs PyTorch, OpenCLIP and a couple of others. If another '
+      title: `⚡ Run ${feature} in a Python you already have`,
+      intro: `${feature} needs ${needs}. If another `
         + 'Python on this machine already carries them, it can run the pass — no '
         + 'second install. Nothing is ever installed into those environments: '
         + 'they are checked, never changed.',
     }
   }
   return {
-    title: '⚡ Run ✨ Score on a GPU Python you already have',
+    title: `⚡ Run ${feature} on a GPU Python you already have`,
     intro: 'If this machine already has a working CUDA PyTorch — the one that '
-      + 'trains your LoRAs, or the one ComfyUI runs on — Score can borrow it '
+      + `trains your LoRAs, or the one ComfyUI runs on — ${feature} can borrow it `
       + 'instead of downloading another. Nothing is ever installed into those '
       + 'environments: they are checked, never changed.',
   }
@@ -164,9 +207,9 @@ export function enteredNote(result) {
 /** What the Score panel says about the current interpreter, once one has been
  *  chosen explicitly. null when the app default is in use (the CPU note already
  *  covers that case, and saying it twice is noise). */
-export function selectionNote(result) {
+export function selectionNote(result, profile = DEFAULT_PICKER) {
   const rows = result?.interpreters || []
   const current = rows.find((r) => r.selected)
   if (!current) return null
-  return `✨ Score runs in ${current.label} — ${current.detail}`
+  return `${pickerProfile(profile).feature} runs in ${current.label} — ${current.detail}`
 }

@@ -119,9 +119,43 @@ test('the dialog can offer the LANE (local vs cloud), opt-in and reasoned', () =
   assert.match(dialog, /☁ Cloud/);
   assert.match(dialog, /disabled=\{off\}/);
   assert.match(dialog, /laneState\(lane\)\.reason/);
-  // the chosen lane rides the payload, and a blocked lane can't be submitted
-  assert.match(dialog, /lane,\s*\/\/ Never infer this server-side:/);
+  // The chosen lane rides the payload, and a blocked lane can't be submitted.
+  // Asserted as "the field is in the object" rather than "the field is followed
+  // by that exact comment": the adjacency version broke the day a second field
+  // was added next to it, which said nothing about the lane at all.
+  assert.match(dialog, /onResolve\(\{[\s\S]*?\blane,\r?\n/);
   assert.match(dialog, /disabled=\{busy \|\| latest === 0 \|\| laneBlocked/);
+});
+
+test('a full model can choose HOW its 26 GB reaches the pod, priced', () => {
+  // Opt-in like the lane picker: absent → no picker, and the backend keeps its
+  // own default (the Hugging Face copy), which is what shipped before.
+  assert.match(dialog, /transportPlan = null/);
+  assert.match(dialog, /\{transportPlan && \(/);
+  assert.match(dialog, /initialTransport\(transportPlan\)/);
+  assert.match(dialog, /aria-label="How the checkpoint reaches the pod"/);
+  // Both roads always rendered; a closed one disabled WITH its reason.
+  assert.match(dialog, /TRANSPORTS\.map/);
+  assert.match(dialog, /disabled=\{off\}/);
+  // A closed road explains itself ON SCREEN, not in a `title` tooltip that no
+  // screenshot, touch screen or screen reader ever surfaces.
+  assert.match(dialog, /closedRoads\(transportPlan\)\.map/);
+  assert.match(dialog, /is unavailable: \{reason\}/);
+  // The numbers, and where they came from — the reason this picker exists.
+  assert.match(dialog, /transportSummary\(transportOption\(transportPlan\.options, transport\)\)/);
+  assert.match(dialog, /rateNote\(transportOption\(transportPlan\.options, transport\)\)/);
+  // The choice rides the payload, and a closed road cannot be submitted.
+  assert.match(dialog, /transport: transportPlan \? transport : undefined/);
+  assert.match(dialog, /\|\| transportReason/);
+});
+
+test('the Runs hub fetches that plan and sends the chosen road', () => {
+  assert.match(cloud, /transportPlan=\{transportPlan\}/);
+  assert.match(cloud, /\/api\/dataset\/train\/cloud\/resume-plan/);
+  assert.match(cloud, /payload\.transport \? \{ transport: payload\.transport \}/);
+  // A missing forecast must never block the resume: the roads still exist and
+  // the backend still refuses the impossible one with its reason.
+  assert.match(cloud, /catch \{[\s\S]*?setTransportPlan\(null\)/);
 });
 
 test('the Runs hub offers the picker too, with its own lane rule', () => {

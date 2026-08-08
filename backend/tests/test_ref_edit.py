@@ -300,6 +300,25 @@ def test_route_keep_without_ready_409(client, monkeypatch):
     assert client.post(f'/api/dataset/{did}/ref/edit/keep').status_code == 409
 
 
+def test_route_keep_reports_a_failed_commit_instead_of_erroring_twice(client, monkeypatch):
+    """A Keep that fails must answer WHY, not raise a second exception.
+
+    Reported by socrasteeze (GitHub #20): the 500 handler logged through a
+    module-level `logger` this module never defined, so the only thing the user
+    ever got out of a failed commit was a bare, message-less 500 — the branch
+    that exists to reassure them their reference is untouched never ran.
+    """
+    did = _create_with_ref(client, monkeypatch, 'Boom', 'zchar_boom')
+
+    def _explode(*a, **k):
+        raise OSError('disk went away mid-commit')
+
+    monkeypatch.setattr(svc, 'keep_reference_edit', _explode)
+    resp = client.post(f'/api/dataset/{did}/ref/edit/keep', json={})
+    assert resp.status_code == 500
+    assert 'previous reference is unchanged' in resp.get_json()['error']
+
+
 def test_route_discard_clears(client, monkeypatch):
     did = _create_with_ref(client, monkeypatch, 'Di', 'zchar_di')
     monkeypatch.setattr(reference_edit_service, '_edit_engine_call', lambda e, refs, p: _webp((0, 0, 255)))

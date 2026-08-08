@@ -18,6 +18,7 @@ What these tests pin:
 
 No real model is ever loaded: the encoder is monkeypatched everywhere.
 """
+import hashlib
 import json
 import os
 
@@ -62,7 +63,7 @@ def _write_score_cache(app, bank_id, embs_by_name, state='ok'):
         bank = banks.get_bank(_uid(), bank_id)
         rows = {os.path.basename(r.relpath): r
                 for r in BankImage.query.filter_by(bank_id=bank_id).all()}
-        paths, states, arr, sigs = [], [], [], []
+        paths, states, arr, sigs, hashes = [], [], [], [], []
         for nm, e in embs_by_name.items():
             r = rows[nm]
             p = banks.abs_image_path(bank, r)
@@ -71,6 +72,10 @@ def _write_score_cache(app, bank_id, embs_by_name, state='ok'):
             arr.append(np.asarray(e, dtype='float32'))
             st = os.stat(p)
             sigs.append(f'{st.st_size}:{st.st_mtime_ns}')
+            with open(p, 'rb') as fh:
+                digest = hashlib.sha256(fh.read()).digest()
+            hashes.append(np.frombuffer(digest, dtype='uint8'))
+            r.analysis_fingerprint = digest.hex()
         cache_path = banks._score_cache_path(bank_id)
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(
@@ -78,7 +83,10 @@ def _write_score_cache(app, bank_id, embs_by_name, state='ok'):
             paths=np.array(paths), states=np.array(states),
             aes=np.array([float('nan')] * len(paths), dtype='float32'),
             nsfw=np.array([float('nan')] * len(paths), dtype='float32'),
-            embs=np.stack(arr).astype('float32'), sigs=np.array(sigs))
+            embs=np.stack(arr).astype('float32'), sigs=np.array(sigs),
+            hashes=np.stack(hashes).astype('uint8'))
+        banks.db.session.commit()
+        banks.reset_score_memo()
 
 
 def _names_of(app, bank_id, ids):
@@ -257,6 +265,47 @@ def test_text_search_rejects_an_empty_query(client, tmp_path, app, monkeypatch):
     r = client.post(f'/api/bank/{bank_id}/search-text', json={'query': '   '})
     assert r.status_code == 400
     assert 'query' in r.get_json()['error'].lower()
+
+
+@pytest.mark.parametrize(('field', 'label'), [
+    ('query', 'query'), ('push_down', 'push_down'),
+])
+def test_text_search_rejects_oversized_text_before_loading_an_encoder(
+        client, tmp_path, monkeypatch, field, label):
+    from app.services import clip_text_encoder
+    bank_id, _ = _mkbank(client, tmp_path, ['a.jpg'])
+    monkeypatch.setattr(
+        clip_text_encoder, 'encode_query',
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError('oversized input must fail before encoder startup')))
+    body = {'query': 'valid phrase', field: 'x' * (clip_text_encoder.MAX_QUERY_CHARS + 1)}
+    response = client.post(f'/api/bank/{bank_id}/search-text', json=body)
+    assert response.status_code == 400
+    assert label in response.get_json()['error']
+    assert 'maximum' in response.get_json()['error']
+
+
+def test_text_search_requires_an_object_body(client, tmp_path):
+    bank_id, _ = _mkbank(client, tmp_path, ['a.jpg'])
+    response = client.post(f'/api/bank/{bank_id}/search-text', json=[])
+    assert response.status_code == 400
+    assert 'object' in response.get_json()['error']
+
+
+def test_text_search_rejects_combined_inline_and_field_exclusion_as_input_error(
+        client, tmp_path, monkeypatch):
+    from app.services import clip_text_encoder
+    bank_id, _ = _mkbank(client, tmp_path, ['a.jpg'])
+    monkeypatch.setattr(
+        clip_text_encoder, 'encode_query',
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError('combined oversized input must fail before encoding')))
+    response = client.post(f'/api/bank/{bank_id}/search-text', json={
+        'query': 'valid -' + ('x' * 500),
+        'push_down': 'y' * 500,
+    })
+    assert response.status_code == 400
+    assert 'combined push_down' in response.get_json()['error']
 
 
 # --- degradation: no ML interpreter ------------------------------------------
@@ -440,6 +489,28 @@ def test_release_endpoint_reaps_the_worker(client, tmp_path, app, monkeypatch):
     assert client.post('/api/bank/text-search/release').get_json()['released'] is False
 
 
+def test_release_endpoint_targets_only_the_requested_engine(client, monkeypatch):
+    from app.services import clip_text_encoder
+    seen = []
+    monkeypatch.setattr(
+        clip_text_encoder, 'release',
+        lambda engine='clip': seen.append(engine) or engine == 'siglip2')
+
+    body = client.post('/api/bank/text-search/release',
+                       json={'engine': 'siglip2'}).get_json()
+    assert body == {'ok': True, 'released': True}
+    assert seen == ['siglip2']
+
+
+def test_release_endpoint_keeps_legacy_default_and_rejects_bad_input(client):
+    assert client.post('/api/bank/text-search/release').status_code == 200
+    assert client.post('/api/bank/text-search/release', json=[]).status_code == 400
+    bad = client.post('/api/bank/text-search/release',
+                      json={'engine': 'dino'})
+    assert bad.status_code == 400
+    assert 'clip or siglip2' in bad.get_json()['error']
+
+
 def test_a_cache_hit_never_wakes_the_worker(client, tmp_path, app, monkeypatch):
     """The cheapest layer really is cheapest: a phrase already on disk must not
     start a 2.4 GB process to answer."""
@@ -466,6 +537,28 @@ def test_status_reports_unavailability_without_raising(client, app, monkeypatch)
     assert body['available'] is False
     assert 'torch' in body['reason']
     assert body['warm'] is False
+
+
+def test_status_endpoint_forwards_the_requested_engine(client, monkeypatch):
+    from app.services import clip_text_encoder
+    seen = []
+
+    def fake_status(engine='clip'):
+        seen.append(engine)
+        return {'available': True, 'engine': engine, 'warm': False}
+
+    monkeypatch.setattr(clip_text_encoder, 'status', fake_status)
+    body = client.get('/api/bank/text-search/status?engine=siglip2').get_json()
+    assert body == {
+        'ok': True, 'available': True, 'engine': 'siglip2', 'warm': False,
+    }
+    assert seen == ['siglip2']
+
+
+def test_status_endpoint_rejects_an_unknown_semantic_space(client):
+    response = client.get('/api/bank/text-search/status?engine=dino')
+    assert response.status_code == 400
+    assert 'clip or siglip2' in response.get_json()['error']
 
 
 def test_idle_minutes_is_clamped_and_never_a_trap(app, monkeypatch):

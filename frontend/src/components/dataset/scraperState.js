@@ -2,10 +2,11 @@ import { normalizePexelsLocale, normalizePexelsOrientation } from './scraperSour
 
 const STORAGE_PREFIX = 'lds:scraper-scan:v1:';
 
-const SOURCE_MODES = new Set(['reddit', 'pexels', 'url']);
+const SOURCE_MODES = new Set(['reddit', 'pexels', 'websearch', 'url']);
 
 const emptyState = () => ({ sourceMode: 'reddit', url: '', kw: '', sub: '',
   pexelsKeyword: '', pexelsLocale: 'fr-FR', pexelsOrientation: '',
+  websearchKeyword: '', websearchSafe: false,
   activeScanUrl: '', activePlatform: '', items: [], page: 0,
   paginated: false, fullAlbums: false, rescueSmall: false, selected: new Set() });
 const storageFor = (storage) => {
@@ -67,6 +68,8 @@ export function loadScraperScanState(datasetId, storage) {
       pexelsKeyword: typeof raw.pexelsKeyword === 'string' ? raw.pexelsKeyword : '',
       pexelsLocale: normalizePexelsLocale(raw.pexelsLocale),
       pexelsOrientation: normalizePexelsOrientation(raw.pexelsOrientation),
+      websearchKeyword: typeof raw.websearchKeyword === 'string' ? raw.websearchKeyword : '',
+      websearchSafe: !!raw.websearchSafe,
       activeScanUrl, activePlatform,
       items, page: Number.isInteger(raw.page) && raw.page >= 0 ? raw.page : 0,
       paginated: !!raw.paginated, fullAlbums: !!raw.fullAlbums,
@@ -85,6 +88,8 @@ export function saveScraperScanState(datasetId, state, storage) {
       pexelsKeyword: state?.pexelsKeyword || '',
       pexelsLocale: normalizePexelsLocale(state?.pexelsLocale),
       pexelsOrientation: normalizePexelsOrientation(state?.pexelsOrientation),
+      websearchKeyword: state?.websearchKeyword || '',
+      websearchSafe: !!state?.websearchSafe,
       activeScanUrl: state?.activeScanUrl || '', activePlatform: state?.activePlatform || '',
       items,
       page: Number.isInteger(state?.page) ? state.page : 0,
@@ -95,6 +100,7 @@ export function saveScraperScanState(datasetId, state, storage) {
     const hasMeaningfulState = items.length || saved.sourceMode !== 'reddit' || saved.url
       || saved.kw || saved.sub || saved.pexelsKeyword || saved.activeScanUrl
       || saved.pexelsLocale !== 'fr-FR' || saved.pexelsOrientation
+      || saved.websearchKeyword || saved.websearchSafe
       || saved.fullAlbums || saved.rescueSmall;
     if (!hasMeaningfulState) { target.removeItem(keyFor(datasetId)); return; }
     target.setItem(keyFor(datasetId), JSON.stringify(saved));

@@ -273,38 +273,119 @@ def test_refresh_skips_a_bank_with_a_live_job(client, app, tmp_path, monkeypatch
     bank_id, src = _mkbank(client, tmp_path, {'a.jpg': _photo(seed=1)})
     _write(src, 'b.jpg', _photo(seed=2))
     from app.services import bank_jobs
-    monkeypatch.setattr(bank_jobs, 'running', lambda _bid: True)
-    payload = client.get(f'/api/bank/{bank_id}?refresh=1').get_json()
+    reservation = bank_jobs.reserve(bank_id, 'scan')
+    try:
+        payload = client.get(f'/api/bank/{bank_id}?refresh=1').get_json()
+    finally:
+        bank_jobs.abort(reservation)
     assert payload['folder_sync']['added'] == 0
     assert payload['counts']['total'] == 1
 
 
 # --- the list route ---------------------------------------------------------
-def test_bank_list_refreshes_every_bank(client, app, tmp_path):
+# ⚠️ THE LIST NO LONGER WALKS. It used to re-inventory every bank's folder on
+# every load, which on a real library of 8 banks / 86 493 images cost 690-1 190 ms
+# per navigation (1 341-1 777 ms on the reporter's instance) for a page the user
+# is often only passing through. The walk moved to where it is worth its price:
+# opening a bank (automatic), and the list's 🔄 button (?rescan=1).
+#
+# The promise "a bank reflects its folder" is therefore held by THREE things,
+# each pinned below: the rescan finds everything a plain load did; opening a
+# bank still walks; and the list SAYS its counts may lag (folder_sync.walked /
+# age) instead of showing stale numbers silently.
+def test_bank_list_does_not_walk_a_single_folder(client, app, tmp_path,
+                                                 monkeypatch):
+    """THE regression, pinned on the syscall — a stopwatch would be flaky."""
+    _mkbank(client, tmp_path / 'one', {'a.jpg': _photo(seed=1)}, name='One')
+    _mkbank(client, tmp_path / 'two', {'x.jpg': _photo(seed=2)}, name='Two')
+    walked = []
+    real = os.walk
+    monkeypatch.setattr(os, 'walk',
+                        lambda top, *a, **k: (walked.append(str(top)),
+                                              real(top, *a, **k))[1])
+    assert client.get('/api/banks').status_code == 200
+    assert walked == [], f'the bank list walked {len(walked)} folder(s): {walked}'
+
+
+def test_bank_list_still_reports_a_folder_that_went_away(client, app, tmp_path):
+    """The one warning worth a syscall per BANK: an unplugged drive or a folder
+    renamed under the app. Reported WITHOUT a walk — and now even on a cold
+    process, where the walk-based version had nothing cached to say."""
+    id1, _ = _mkbank(client, tmp_path / 'one', {'a.jpg': _photo(seed=1)}, name='One')
+    id2, _ = _mkbank(client, tmp_path / 'two', {'x.jpg': _photo(seed=2)}, name='Two')
+    with app.app_context():
+        from app.extensions import db
+        from app.models import ImageBank
+        db.session.get(ImageBank, id1).source_path = str(tmp_path / 'nope')
+        db.session.commit()
+
+    r = client.get('/api/banks')
+    assert r.status_code == 200
+    rows = {b['id']: b for b in r.get_json()['banks']}
+    assert rows[id1]['folder_sync']['unavailable'] is True
+    assert rows[id1]['total'] == 1              # nothing is dropped, ever
+    assert rows[id2]['folder_sync']['unavailable'] is False
+
+
+def test_bank_list_says_whether_its_counts_come_from_a_walk(client, app, tmp_path):
+    """A silently stale list would be worse than a slow one. The page can only
+    say "counts may lag" if the payload tells it so."""
+    bank_id, _ = _mkbank(client, tmp_path, {'a.jpg': _photo(seed=1)})
+    cold = {b['id']: b for b in client.get('/api/banks').get_json()['banks']}
+    assert cold[bank_id]['folder_sync']['walked'] is False
+    assert cold[bank_id]['folder_sync']['age'] is None
+
+    # The RESCAN's OWN answer must carry it too, not just the next plain load.
+    # It did not, and a screenshot caught what a green test had not: the page
+    # said "counts are what the app knew last time" under a toast saying the
+    # folders had just been checked. Asserting the next request was measuring a
+    # proxy for the thing that renders.
+    rescanned = client.get('/api/banks?rescan=1').get_json()
+    assert rescanned['rescanned'] is True
+    hot = {b['id']: b for b in rescanned['banks']}
+    assert hot[bank_id]['folder_sync']['walked'] is True
+    assert hot[bank_id]['folder_sync']['age'] >= 0
+
+    warm = {b['id']: b for b in client.get('/api/banks').get_json()['banks']}
+    assert warm[bank_id]['folder_sync']['walked'] is True
+    assert warm[bank_id]['folder_sync']['age'] >= 0
+
+
+def test_the_rescan_button_finds_what_the_plain_list_no_longer_does(
+        client, app, tmp_path):
+    """What the old automatic walk did, one click away — every bank, in one
+    request. This is half of the product promise; the other half is the walk on
+    open, pinned by the ?refresh=1 tests above."""
     id1, src1 = _mkbank(client, tmp_path / 'one', {'a.jpg': _photo(seed=1)}, name='One')
     id2, src2 = _mkbank(client, tmp_path / 'two', {'x.jpg': _photo(seed=2)}, name='Two')
     _write(src1, 'b.jpg', _photo(seed=3))
     _write(src2, 'y.jpg', _photo(seed=4))
     _write(src2, 'z.jpg', _photo(seed=5))
 
-    rows = {b['id']: b for b in client.get('/api/banks').get_json()['banks']}
+    plain = {b['id']: b for b in client.get('/api/banks').get_json()['banks']}
+    assert plain[id1]['total'] == 1 and plain[id2]['total'] == 1
+    assert plain[id1]['folder_sync']['added'] == 0
+
+    rows = {b['id']: b for b in
+            client.get('/api/banks?rescan=1').get_json()['banks']}
     assert rows[id1]['folder_sync']['added'] == 1 and rows[id1]['total'] == 2
     assert rows[id2]['folder_sync']['added'] == 2 and rows[id2]['total'] == 3
 
 
-def test_bank_list_ignores_the_cooldown(client, app, tmp_path):
-    """Navigating to the bank list IS the user asking to see their banks — files
-    dropped in a folder seconds ago must show up, cooldown or not (unlike the
-    workspace's 2 s job poll, which the cooldown exists for)."""
+def test_the_rescan_ignores_the_cooldown(client, app, tmp_path):
+    """Clicking 🔄 IS the user saying "look now" — files dropped in the folder a
+    second ago must show up, cooldown or not (unlike the workspace's 2 s job
+    poll, which the cooldown exists for)."""
     bank_id, src = _mkbank(client, tmp_path, {'a.jpg': _photo(seed=1)})
-    client.get('/api/banks')                       # primes the cooldown
+    client.get('/api/banks?rescan=1')              # primes the cooldown
     _write(src, 'b.jpg', _photo(seed=2))
-    rows = {b['id']: b for b in client.get('/api/banks').get_json()['banks']}
+    rows = {b['id']: b for b in
+            client.get('/api/banks?rescan=1').get_json()['banks']}
     assert rows[bank_id]['folder_sync']['added'] == 1
     assert rows[bank_id]['total'] == 2
 
 
-def test_bank_list_survives_an_unavailable_folder(client, app, tmp_path):
+def test_the_rescan_survives_an_unavailable_folder(client, app, tmp_path):
     """One bank on a disconnected drive must not break the whole page."""
     id1, _ = _mkbank(client, tmp_path / 'one', {'a.jpg': _photo(seed=1)}, name='One')
     id2, src2 = _mkbank(client, tmp_path / 'two', {'x.jpg': _photo(seed=2)}, name='Two')
@@ -315,9 +396,62 @@ def test_bank_list_survives_an_unavailable_folder(client, app, tmp_path):
         db.session.commit()
     _write(src2, 'y.jpg', _photo(seed=4))
 
-    r = client.get('/api/banks')
+    r = client.get('/api/banks?rescan=1')
     assert r.status_code == 200
     rows = {b['id']: b for b in r.get_json()['banks']}
     assert rows[id1]['folder_sync']['unavailable'] is True
     assert rows[id1]['total'] == 1
     assert rows[id2]['folder_sync']['added'] == 1
+
+
+# --- the walk itself --------------------------------------------------------
+def test_the_walk_yields_exactly_what_relpath_did(client, app, tmp_path):
+    """The walk stopped calling ``os.path.relpath`` (85 821 calls, ~10 normcase
+    each, on a real library). Same strings out, whatever the folder is SPELLED
+    like in the database — a legacy source_path with a trailing separator or
+    forward slashes must not suddenly key rows differently and re-insert the
+    whole bank."""
+    src = tmp_path / 'tree'
+    _write(src, 'a.jpg', _photo(seed=1))
+    _write(src, os.path.join('sub', 'b.jpg'), _photo(seed=2))
+    _write(src, os.path.join('sub', 'deep', 'c.jpg'), _photo(seed=3))
+    (src / 'notes.txt').write_text('not an image')  # must be skipped
+
+    from app.services import image_bank_service as banks
+    spellings = [str(src), str(src) + os.sep, str(src).replace('\\', '/'),
+                 str(src).replace('\\', '/') + '/']
+    expected = None
+    for folder in spellings:
+        by_relpath = sorted(
+            os.path.relpath(os.path.join(root, f), folder)
+            for root, _d, files in os.walk(folder) for f in files
+            if f.lower().endswith(banks.IMG_EXTS))
+        got = sorted(banks._walk_image_relpaths(folder))
+        assert got == by_relpath, f'{folder!r}: {got} != {by_relpath}'
+        expected = expected or by_relpath
+        assert got == expected, f'{folder!r} keys rows differently'
+    assert len(expected) == 3
+
+
+def test_a_rescan_after_a_rescan_adds_nothing(client, app, tmp_path):
+    """The keys the walk produces must match the keys already in the database —
+    the failure mode of a hand-rolled relpath is a silent DOUBLE inventory.
+
+    The bank is re-pointed at the SAME folder spelled the way a legacy row can
+    hold it (forward slashes, trailing separator) before the rescan: that is the
+    case a slice-based walk gets wrong and relpath got right for free."""
+    bank_id, src = _mkbank(client, tmp_path, {'a.jpg': _photo(seed=1),
+                                              os.path.join('sub', 'b.jpg'):
+                                              _photo(seed=2)})
+    with app.app_context():
+        from app.extensions import db
+        from app.models import ImageBank
+        db.session.get(ImageBank, bank_id).source_path = (
+            str(src).replace('\\', '/') + '/')
+        db.session.commit()
+    client.get('/api/banks?rescan=1')
+    rows = {b['id']: b for b in
+            client.get('/api/banks?rescan=1').get_json()['banks']}
+    assert rows[bank_id]['folder_sync']['added'] == 0
+    assert rows[bank_id]['folder_sync']['missing'] == 0
+    assert rows[bank_id]['total'] == 2

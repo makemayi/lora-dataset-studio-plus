@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router';
 import { postJson } from '../api/fetchClient';
 import { useToast } from '../components/common/Toast';
 import { useCapabilities } from '../context/CapabilitiesContext';
+import useHubPresence from '../hooks/useHubPresence';
 import TrainingProgress from '../components/dataset/TrainingProgress';
 import LaunchProgress from '../components/dataset/LaunchProgress';
 import ContinueDialog from '../components/dataset/ContinueDialog';
@@ -31,12 +32,19 @@ import { podBootFailureView, stopButtonLabel, uploadStallFailureView } from '../
 import { runSilenceWarning, stopOutcomeMessage } from '../utils/runSilence';
 import { runsHubContinueLanes } from '../utils/runsHubContinueLanes';
 import {
+  canFetchDenseLocally,
   canRecheckFullTransformerDelivery,
+  denseContinueBlocker,
+  denseHubBackupView,
+  denseLocalArtifactView,
+  fullTransformerArtifactFiles,
   fullTransformerArtifactView,
+  fullTransformerFp8Note,
   fullTransformerRecheckOutcome,
   isFullTransformerRun,
 } from '../utils/trainingMode.js';
 import {
+  CHECKPOINTS_KEPT,
   TRASH_REMINDER,
   purgeAllResultMessage,
   purgeRunResultMessage,
@@ -161,36 +169,103 @@ const FULL_ARTIFACT_TONE = {
   info: 'border-sky-400/40 bg-sky-500/10 text-sky-100',
 };
 
-function FullArtifactStatus({ run, onRecheck, rechecking = false }) {
-  const view = fullTransformerArtifactView(run);
-  const canRecheck = canRecheckFullTransformerDelivery(run) && !!onRecheck;
+/* The copy on THIS computer — the first-class delivery since the Hugging Face
+   quota stopped being the only address a full model has. Rendered above the Hub
+   block on purpose: it is the one that decides whether the run is safe. */
+function DenseLocalStatus({ run, onFetch, fetching = false }) {
+  const view = denseLocalArtifactView(run);
+  if (!view) return null;
+  const canFetch = canFetchDenseLocally(run) && !!onFetch;
   return (
-    <div role={view.tone === 'error' || view.tone === 'warning' ? 'alert' : 'status'}
+    <div role={view.tone === 'warning' ? 'alert' : 'status'}
       className={`w-full rounded-md border px-2.5 py-2 text-[0.6875rem] leading-relaxed ${FULL_ARTIFACT_TONE[view.tone]}`}>
       <span className="font-semibold">{view.label}</span>
       <span className="block opacity-90">{view.detail}</span>
-      {view.href && (
-        <a href={view.href} target="_blank" rel="noreferrer"
-          className="mt-1 inline-block font-semibold text-sky-200 underline hover:text-sky-100">
-          Open private model on Hugging Face ↗
-        </a>
+      {view.dir && (
+        <span className="block break-all opacity-80" title="Folder on this computer">
+          📁 <span className="font-mono">{view.dir}</span>
+        </span>
       )}
-      {!view.href && view.repositoryHref && (
-        <a href={view.repositoryHref} target="_blank" rel="noreferrer"
-          title="This link only opens the repository; the model weights have not been verified yet"
-          className="mt-1 inline-block font-semibold text-amber-100 underline hover:text-white">
-          Inspect Hugging Face repository (delivery not verified) ↗
-        </a>
+      {/* Which of the two files to take. They are not interchangeable: the fp8
+          one is what ComfyUI loads, the master is the only one that can be
+          trained again. */}
+      {view.available && fullTransformerArtifactFiles(run).map((file) => (
+        <span key={file.kind} className="block opacity-90">
+          {file.primary ? '★ ' : '· '}
+          <span className="font-mono break-all">{file.name}</span> — {file.note}
+        </span>
+      ))}
+      {view.available && run.inference_hint?.note && (
+        <span className="block opacity-90">⚠ {run.inference_hint.note}</span>
       )}
-      {canRecheck && (
-        <button type="button" onClick={() => onRecheck(run)} disabled={rechecking}
-          className="mt-1.5 block rounded-md border border-amber-300/50 bg-amber-400/10 px-2.5 py-1 text-amber-50 font-semibold hover:bg-amber-400/20 disabled:opacity-40">
-          {rechecking
-            ? (view.cleanupPending ? 'Cleaning up pod…' : 'Verifying Hugging Face delivery…')
-            : (view.cleanupPending ? 'Retry pod cleanup' : 'Verify Hugging Face delivery')}
+      {(canFetch || fetching) && (
+        <button type="button" onClick={() => onFetch(run, fetching)}
+          className="mt-1.5 block rounded-md border border-sky-300/50 bg-sky-400/10 px-2.5 py-1 font-semibold text-sky-50 hover:bg-sky-400/20">
+          {fetching ? 'Stop fetching (what landed is kept)' : 'Fetch to this computer'}
         </button>
       )}
     </div>
+  );
+}
+
+/* Exported for tests/dense-local-delivery-contract.test.mjs: this block now has
+   three shapes (a local copy, a Hub backup, the historical Hub-only delivery)
+   and the only way to prove a shape renders is to render it. */
+export function FullArtifactStatus({ run, onRecheck, rechecking = false,
+  onFetch, fetching = false, presence = null }) {
+  const local = denseLocalArtifactView(run);
+  const backup = denseHubBackupView(run, presence);
+  // A run delivered here keeps its Hugging Face block only as a BACKUP note:
+  // "Full model not found" would be a lie about a model sitting on the disk.
+  const view = backup || (local ? null : fullTransformerArtifactView(run, presence));
+  const canRecheck = canRecheckFullTransformerDelivery(run) && !!onRecheck;
+  if (!view) {
+    return <DenseLocalStatus run={run} onFetch={onFetch} fetching={fetching} />;
+  }
+  return (
+    <>
+      <DenseLocalStatus run={run} onFetch={onFetch} fetching={fetching} />
+      <div role={view.tone === 'error' || view.tone === 'warning' ? 'alert' : 'status'}
+        className={`w-full rounded-md border px-2.5 py-2 text-[0.6875rem] leading-relaxed ${FULL_ARTIFACT_TONE[view.tone]}`}>
+        <span className="font-semibold">{view.label}</span>
+        <span className="block opacity-90">{view.detail}</span>
+        {/* Which of the delivered files to take. Without this the repository shows
+            two objects with nearly the same name, one of which is 26 GB. */}
+        {!local && fullTransformerArtifactFiles(run).map((file) => (
+          <span key={file.kind} className="block opacity-90">
+            {file.primary ? '★ ' : '· '}
+            <span className="font-mono break-all">{file.name}</span> — {file.note}
+          </span>
+        ))}
+        {fullTransformerFp8Note(run) && (
+          <span className="block opacity-80">ℹ {fullTransformerFp8Note(run)}</span>
+        )}
+        {!local && view.available && run.inference_hint?.note && (
+          <span className="block opacity-90">⚠ {run.inference_hint.note}</span>
+        )}
+        {view.href && (
+          <a href={view.href} target="_blank" rel="noreferrer"
+            className="mt-1 inline-block font-semibold text-sky-200 underline hover:text-sky-100">
+            Open private model on Hugging Face ↗
+          </a>
+        )}
+        {!view.href && view.repositoryHref && (
+          <a href={view.repositoryHref} target="_blank" rel="noreferrer"
+            title="This link only opens the repository; the model weights have not been verified yet"
+            className="mt-1 inline-block font-semibold text-amber-100 underline hover:text-white">
+            Inspect Hugging Face repository (delivery not verified) ↗
+          </a>
+        )}
+        {canRecheck && (
+          <button type="button" onClick={() => onRecheck(run)} disabled={rechecking}
+            className="mt-1.5 block rounded-md border border-amber-300/50 bg-amber-400/10 px-2.5 py-1 text-amber-50 font-semibold hover:bg-amber-400/20 disabled:opacity-40">
+            {rechecking
+              ? (view.cleanupPending ? 'Cleaning up pod…' : 'Verifying Hugging Face delivery…')
+              : (view.cleanupPending ? 'Retry pod cleanup' : 'Verify Hugging Face delivery')}
+          </button>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -407,6 +482,17 @@ export default function CloudRunsPage() {
     return () => { alive = false; clearTimeout(t); };
   }, [poll]);
 
+  // Is each delivered full model STILL on Hugging Face? `artifact_status` is
+  // stamped at delivery and never revisited, so this page happily offered "Open
+  // private model on Hugging Face ↗" on a repository its owner had deleted.
+  // Asked once, after the page has painted, for the dense runs that recorded a
+  // repository — every card renders from the record (dated, past tense) until
+  // and unless this answers.
+  const hubPresence = useHubPresence(
+    [...(data?.actives || []), ...(data?.recent || [])]
+      .filter((r) => isFullTransformerRun(r) && r.hf_repo_id)
+      .map((r) => r.run_id));
+
   // Nudge, once, that a finished run can be continued — resuming from an earlier,
   // less-cooked epoch is the flagship of the Continue dialog and easy to miss.
   useEffect(() => {
@@ -520,6 +606,26 @@ export default function CloudRunsPage() {
     }
   };
 
+  // Bring a kept pod's full model home — or stop a transfer in flight. The
+  // request returns immediately: 26 GB is tens of minutes, so the progress the
+  // user watches is the run's own phase line, which this page already polls.
+  const fetchFullModel = async (run, running) => {
+    try {
+      await postJson('/api/dataset/train/cloud/fetch-local', {
+        run_id: run.run_id, ...(running ? { cancel: true } : {}),
+      });
+      toast.info(running
+        ? 'Stopping the transfer — everything already downloaded is kept, and fetching again continues from there.'
+        : 'Downloading the full model to this computer. The pod is kept until the file here is verified.',
+      12000);
+      await poll();
+    } catch (error) {
+      toast.error(error?.message
+        ? `Could not fetch the full model: ${error.message}`
+        : 'Could not fetch the full model. The pod is kept — try again.');
+    }
+  };
+
   const stopLocal = async () => {
     const local = data?.local_active;
     if (!canStopLocalRun(local) || stoppingLocalRef.current) return;
@@ -608,6 +714,28 @@ export default function CloudRunsPage() {
   // Only a success closes it, so a refused attempt no longer costs the user the
   // lane, the checkpoint, the step count and the five folded settings.
   const [continueError, setContinueError] = useState(null);
+  // The priced choice of HOW a full model's ~26 GB gets back to a pod. Fetched
+  // when the dialog opens rather than with the run list: it costs a round-trip
+  // and a Hugging Face size lookup, and it is meaningless for a LoRA (which is
+  // small enough that the question never arises). null while it is in flight or
+  // does not apply → the dialog renders no picker and the backend keeps its own
+  // default, which is exactly the behaviour that shipped before.
+  const [transportPlan, setTransportPlan] = useState(null);
+  const loadTransportPlan = async (run) => {
+    setTransportPlan(null);
+    if (!run || !isFullTransformerRun(run) || run.run_id == null) return;
+    try {
+      const plan = await postJson('/api/dataset/train/cloud/resume-plan',
+        { run_id: run.run_id });
+      // Guard against a slow answer landing after the dialog moved on.
+      setTransportPlan((prev) => (plan?.run_id === run.run_id ? plan : prev));
+    } catch {
+      // A missing forecast must not block the resume — the roads still exist
+      // and the backend still refuses the impossible one with its reason. The
+      // dialog simply falls back to its historical no-picker shape.
+      setTransportPlan(null);
+    }
+  };
   const continueRun = (run) => {
     if (isTrainingRecipeReplayBlocked(run)) {
       toast.error('This checkpoint uses an incompatible legacy Z-Image recipe and cannot be continued safely.');
@@ -616,6 +744,7 @@ export default function CloudRunsPage() {
     setContinueInitialStep(null);
     setContinueError(null);
     setContinueRunTarget(run);
+    loadTransportPlan(run);
   };
   // The LOCAL lane of the same gesture: the checkpoint the cloud run left behind
   // was mirrored into this dataset's ai-toolkit run dir, so resuming it here is
@@ -649,7 +778,8 @@ export default function CloudRunsPage() {
     // container that sat UNDER every modal (fixed: Toast.jsx is z-[10000]); its
     // own cost was that a refusal discarded the whole form. Only a success closes
     // it now — a refusal lands inside it, next to the inputs that caused it.
-    if (!run || !payload) { setContinueRunTarget(null); setContinueInitialStep(null); return; }
+    if (!run || !payload) { setContinueRunTarget(null); setContinueInitialStep(null);
+      setTransportPlan(null); return; }
     const local = payload.lane === 'local';
     setContinuing((m) => ({ ...m, [run.run_id]: true }));
     setContinueError(null);
@@ -666,6 +796,7 @@ export default function CloudRunsPage() {
           { run_id: run.run_id, extra_steps: payload.extraSteps,
             from_step: payload.fromStep, overrides: payload.overrides,
             resume_mode: payload.resumeMode || 'weights_only',
+            ...(payload.transport ? { transport: payload.transport } : {}),
             ...(payload.stateBundleId
               ? { state_bundle_id: payload.stateBundleId } : {}) });
       outcome = continueAttemptOutcome(
@@ -682,6 +813,7 @@ export default function CloudRunsPage() {
     setContinueRunTarget(null);
     setContinueInitialStep(null);
     setContinueError(null);
+    setTransportPlan(null);
     toast.success(local
       ? `Continuing from step ${d.resumed_from} → ${d.target_steps} on this machine — ComfyUI paused.`
       : `Continuing from step ${d.resumed_from} → ${d.target_steps} on a fresh pod…`);
@@ -722,11 +854,21 @@ export default function CloudRunsPage() {
   // ai-toolkit + the machine-wide single-flight training, cloud by the key, this
   // DATASET's own active run and the concurrency limit.
   const continueLanes = useMemo(
-    () => runsHubContinueLanes(continueRunTarget, {
-      aitoolkitValid: caps?.aitoolkit?.valid,
-      localActive: data?.local_active,
-      actives, configured, limit, familyLabel: famLabel,
-    }),
+    () => {
+      const lanes = runsHubContinueLanes(continueRunTarget, {
+        aitoolkitValid: caps?.aitoolkit?.valid,
+        localActive: data?.local_active,
+        actives, configured, limit, familyLabel: famLabel,
+      });
+      // Full-model training is cloud-only — 12B weights do not fit on a desktop
+      // card — so its local lane says that instead of offering a run that would
+      // be refused by the server a click later.
+      if (lanes && isFullTransformerRun(continueRunTarget || {})) {
+        lanes.local = { available: false,
+          reason: 'A full model can only be trained on a rented 80 GB card — continue it in the cloud.' };
+      }
+      return lanes;
+    },
     [continueRunTarget, caps, data, actives, configured, limit]);
 
   // ▶ Continue from a ◉ Graph checkpoint pill: open the Continue dialog on THAT
@@ -752,6 +894,7 @@ export default function CloudRunsPage() {
     setContinueInitialStep(pill?.step ?? null);
     setContinueError(null);
     setContinueRunTarget(target);
+    loadTransportPlan(target);
   };
 
   /* One HISTORY card. Visual hierarchy: rank 1 = thumbnail + identity chip +
@@ -831,7 +974,7 @@ export default function CloudRunsPage() {
                 and no 🧹 either). */}
             {cleanup.size && (
               <span className="tabular-nums text-content-subtle"
-                title="Disk this run's staging folder still holds (dataset copy, samples, checkpoints)">
+                title="Disk this run's staging folder still holds (dataset copy, samples, logs)">
                 🗄 {cleanup.size} on disk
               </span>
             )}
@@ -871,7 +1014,9 @@ export default function CloudRunsPage() {
           })()}
           {fullModel && (
             <FullArtifactStatus run={run} onRecheck={recheckFullDelivery}
-              rechecking={!!recheckingDelivery[run.run_id]} />
+              rechecking={!!recheckingDelivery[run.run_id]}
+              presence={hubPresence[run.run_id] || null}
+              onFetch={fetchFullModel} fetching={!!run.dense_fetch_active} />
           )}
           {line && (
             <p className="m-0 truncate text-content-subtle text-[0.625rem]"
@@ -894,12 +1039,23 @@ export default function CloudRunsPage() {
                 {retrying[runRetryKey(run)] ? '↻ Retrying…' : '↻ Retry'}
               </button>
             )}
-            {!fullModel && run.source === 'cloud' && run.status === 'done' && run.checkpoint_ready && (
+            {/* A LoRA is continued from a checkpoint on this disk; a full model
+                is continued from EITHER its Hugging Face copy or the copy on
+                this computer, which is what `resume_steps` carries for a dense
+                run. The dialog prices both roads before the click, because a
+                26 GB upload bills a rented GPU for every minute it takes. */}
+            {run.source === 'cloud' && (fullModel
+              ? (run.resume_steps || []).length > 0
+              : (run.status === 'done' && run.checkpoint_ready)) && (
               <button type="button" onClick={() => continueRun(run)}
-                disabled={isTrainingRecipeReplayBlocked(run) || !!continuing[run.run_id]}
+                disabled={isTrainingRecipeReplayBlocked(run) || !!continuing[run.run_id]
+                  || !!(fullModel && denseContinueBlocker(run, hubPresence[run.run_id]))}
                 title={isTrainingRecipeReplayBlocked(run)
                   ? 'Disabled: this legacy/incompatible Z-Image checkpoint cannot be continued safely; start a fresh run'
-                  : "Resume from any of this run's checkpoints for more steps, on a fresh pod"}
+                  : fullModel
+                    ? (denseContinueBlocker(run, hubPresence[run.run_id])
+                      || "Resume this full model on a fresh pod — pick how its 26 GB gets there")
+                    : "Resume from any of this run's checkpoints for more steps, on a fresh pod"}
                 className="px-3 py-1.5 rounded-lg bg-sky-600/80 hover:bg-sky-600 text-white text-xs font-semibold disabled:opacity-40">
                 {continuing[run.run_id] ? '▶ Continuing…' : '▶ Continue…'}
               </button>
@@ -1140,7 +1296,9 @@ export default function CloudRunsPage() {
                 variant={run.variant} cloud showLaunch={false} />
               {isFullTransformerRun(run) && (
                 <FullArtifactStatus run={run} onRecheck={recheckFullDelivery}
-                  rechecking={!!recheckingDelivery[run.run_id]} />
+                  rechecking={!!recheckingDelivery[run.run_id]}
+                  presence={hubPresence[run.run_id] || null}
+                  onFetch={fetchFullModel} fetching={!!run.dense_fetch_active} />
               )}
 
               <div className="flex flex-wrap items-center gap-2">
@@ -1221,7 +1379,7 @@ export default function CloudRunsPage() {
             {!recentCollapsed && (
               <button type="button"
                 onClick={async () => {
-                  if (!window.confirm(`Move the staging folders of all FINISHED runs to the trash?\n\nDataset copies, samples and checkpoint duplicates already imported. Active runs and pods kept for recovery are spared.\n${TRASH_REMINDER}`)) return;
+                  if (!window.confirm(`Clean the staging folders of all FINISHED runs?\n\nThis moves their dataset copies, sample images and logs to the trash. Active runs, and pods still inside their recovery window, are spared.\n${CHECKPOINTS_KEPT}\n${TRASH_REMINDER}`)) return;
                   // No catch here meant a refused purge threw past the refresh
                   // below AND said nothing (GitHub #23's defect class again).
                   try {
@@ -1316,6 +1474,7 @@ export default function CloudRunsPage() {
               : [continueRunTarget.steps]).filter(Boolean)).map((step) => ({ step }))}
           initialFromStep={continueInitialStep}
           lanes={continueLanes}
+          transportPlan={transportPlan}
           settings={{ optimizer: continueRunTarget.settings?.optimizer,
             learning_rate: continueRunTarget.settings?.lr }}
           busy={!!continuing[continueRunTarget.run_id]}

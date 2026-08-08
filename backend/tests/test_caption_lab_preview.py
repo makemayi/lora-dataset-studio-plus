@@ -192,3 +192,18 @@ def test_preview_cancel_returns_empty_flagged(client, app, monkeypatch):
                                      should_cancel=lambda: True)
     assert result['caption'] == ''
     assert result['cancelled'] is True
+
+
+def test_preview_appends_length_preset(client, app, monkeypatch):
+    """The Lab compares length presets too - the preview appends the same text the
+    dataset pass would, and refuses an unknown value with a 400."""
+    _use_ollama_backend(app)
+    ds_id, img_id = _dataset_with_image(client, app)
+    capture = {}
+    _mock_vision(monkeypatch, capture=capture)
+
+    r = _preview(client, ds_id, img_id, length='concise')
+    assert r.status_code == 200, r.get_json()
+    assert 'Keep the caption SHORT' in capture['prompt']
+
+    assert _preview(client, ds_id, img_id, length='epic').status_code == 400

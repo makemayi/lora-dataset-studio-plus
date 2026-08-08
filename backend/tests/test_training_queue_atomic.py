@@ -363,7 +363,7 @@ def test_stop_waits_until_launch_publishes_the_new_pid(
     monkeypatch.setattr(
         lt, 'write_job_config', lambda *_a, **_kw: str(tmp_path / 'job.json'))
     monkeypatch.setattr(
-        checkpoint_registry, 'register_launch', lambda *_a, **_kw: None)
+        checkpoint_registry, 'register_launch', lambda *_a, **_kw: object())
     monkeypatch.setattr(lt.subprocess, 'Popen', blocked_popen)
     if lt.os.name == 'nt':
         monkeypatch.setattr(
@@ -450,7 +450,7 @@ def test_training_refuses_when_ollama_fence_cannot_release_before_spawn(
     monkeypatch.setattr(
         lt, 'write_job_config', lambda *_a, **_kw: str(tmp_path / 'job.json'))
     monkeypatch.setattr(
-        checkpoint_registry, 'register_launch', lambda *_a, **_kw: None)
+        checkpoint_registry, 'register_launch', lambda *_a, **_kw: object())
     monkeypatch.setattr(ollama_gpu_fence, 'ensure_released_for_comfy', lambda: False)
     monkeypatch.setattr(
         lt.subprocess, 'Popen',

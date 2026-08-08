@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { apiFetch, postJson } from '../../api/fetchClient'
 import DiagnosticReport from '../common/DiagnosticReport'
-import { Card, TextField } from './primitives'
-import ResetToDefault from './ResetToDefault'
+import PinokioUpdateInstructions from '../common/PinokioUpdateInstructions'
 import { installMode, zipUpdateHeadline, progressLabel, progressPercent } from './updateStatus'
+import { Card } from './primitives'
 import { versionLabel } from '../../utils/versionLabel'
 
 /* In-app updater: "Check for updates" hits the git-aware check (commits-behind for a
@@ -77,6 +77,10 @@ function UpdatesCard() {
   }
 
   const apply = async () => {
+    // Defense in depth for Pinokio: the pull would succeed and the restart
+    // would detach the server from the launcher that owns it. The button is not
+    // rendered in this mode, and a stale callback must not POST an apply anyway.
+    if (mode === 'pinokio') return
     setApplying(true); setPhase('pulling'); setProgress(null)
     try {
       const res = await postJson('/api/update/apply', {})
@@ -99,10 +103,12 @@ function UpdatesCard() {
   const s = status
   // In-app update is possible for a git clone (pull) or a packaged install whose
   // latest release ships a ZIP asset (download + swap). Otherwise: link out.
+  const pinokioMode = mode === 'pinokio'
   const canPull = s && s.update_available && (mode === 'git' || mode === 'zip')
   return (
-    <Card title="Updates"
-      help="Pull the latest version from GitHub and restart — without leaving the app.">
+    <Card title="Updates" help={pinokioMode
+      ? 'Pinokio starts and stops this app, so it also owns the update: Stop, Update, Start.'
+      : 'Pull the latest version from GitHub and restart — without leaving the app.'}>
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" onClick={check} disabled={checking || applying}
           className="rounded-md border border-border-strong px-3 py-1.5 text-sm font-medium text-content hover:bg-surface-raised disabled:opacity-50">
@@ -159,7 +165,17 @@ function UpdatesCard() {
 
       {!applying && s && (
         <div className="text-sm">
-          {canPull ? (
+          {pinokioMode && s.update_available ? (
+            <div className="space-y-2">
+              <p className="text-content">
+                <span aria-hidden>⬆</span>{' '}
+                {typeof s.behind === 'number' && s.behind > 0
+                  ? `${s.behind} commit${s.behind === 1 ? '' : 's'} behind${s.current_sha && s.remote_sha ? ` (${s.current_sha} → ${s.remote_sha})` : ''}.`
+                  : `Update available${s.latest ? ` — v${s.latest}` : ''}.`}
+              </p>
+              <PinokioUpdateInstructions />
+            </div>
+          ) : canPull ? (
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-content">
                 <span aria-hidden>⬆</span>{' '}
@@ -247,139 +263,14 @@ function LogViewer() {
   )
 }
 
-/* App-wide trash: everything the app "deletes" (checkpoints, cloud staging,
-   deployed LoRAs) is MOVED here — this card is the only place bytes actually
-   die. Size fetched once on mount (no poll). */
-function TrashCard() {
-  const [size, setSize] = useState(null)
-  const [busy, setBusy] = useState(false)
-  const [opening, setOpening] = useState(false)
-  useEffect(() => {
-    let alive = true
-    apiFetch('/api/trash')
-      .then((d) => { if (alive) setSize(d?.size_bytes ?? null) })
-      .catch(() => { /* best-effort */ })
-    return () => { alive = false }
-  }, [])
-  const fmt = (b) => (b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB`
-    : b >= 1e6 ? `${Math.round(b / 1e6)} MB`
-    : b > 0 ? `${Math.max(1, Math.round(b / 1e3))} KB` : 'empty')
-  const openFolder = async () => {
-    setOpening(true)
-    try {
-      const d = await postJson('/api/trash/open', {})
-      if (!d?.ok) window.alert(d?.error || 'Could not open the trash folder.')
-    } catch {
-      window.alert('Could not open the trash folder.')
-    } finally {
-      setOpening(false)
-    }
-  }
-  const empty = async () => {
-    if (!window.confirm('Permanently delete everything in the trash?\n\nThis is the ONLY destructive action — deleted checkpoints cannot be recovered afterwards.')) return
-    setBusy(true)
-    try {
-      const d = await postJson('/api/trash/empty', {})
-      if (d?.ok) setSize(0)
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <Card title="Trash" help="Everything the app deletes (checkpoints, cloud staging, deployed LoRAs) is moved here first — emptying it is the only action that actually destroys files.">
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="text-sm text-content">
-          <span aria-hidden>🗑</span> Trash size:{' '}
-          <span className="font-semibold tabular-nums">{size == null ? '…' : fmt(size)}</span>
-        </span>
-        <button type="button" onClick={openFolder} disabled={opening}
-          title="Open the trash folder in the file explorer"
-          className="rounded-md border border-border bg-surface-raised px-3 py-1.5 text-sm font-medium text-content disabled:opacity-40">
-          {opening ? 'Opening…' : '📂 Open folder'}
-        </button>
-        <button type="button" onClick={empty} disabled={busy || !size}
-          className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-sm font-medium text-red-300 disabled:opacity-40">
-          {busy ? 'Emptying…' : 'Empty trash'}
-        </button>
-      </div>
-    </Card>
-  )
-}
-
-/* The run image archive: a deduplicated copy of every image a training run was
-   launched on, so a comparison can still SHOW an image that has since been
-   deleted from its dataset. Content-addressed, so an unchanged dataset costs
-   nothing on its second launch — but it is still bytes, so its size is visible
-   and clearable here rather than growing invisibly. */
-function RunArchiveCard() {
-  const [info, setInfo] = useState(null)
-  const [busy, setBusy] = useState(false)
-  useEffect(() => {
-    let alive = true
-    apiFetch('/api/run-archive')
-      .then((d) => { if (alive) setInfo(d || null) })
-      .catch(() => { /* best-effort */ })
-    return () => { alive = false }
-  }, [])
-  const fmt = (b) => (b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB`
-    : b >= 1e6 ? `${Math.round(b / 1e6)} MB`
-    : b > 0 ? `${Math.max(1, Math.round(b / 1e3))} KB` : 'empty')
-  const clear = async () => {
-    if (!window.confirm('Delete every archived training image?\n\nYour runs, their settings and their captions are kept — you just lose the ability to look at images that have since been deleted from their dataset.')) return
-    setBusy(true)
-    try {
-      const d = await postJson('/api/run-archive/clear', {})
-      if (d?.ok) setInfo((v) => ({ ...(v || {}), size_bytes: 0 }))
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <Card title="Run image archive" help="When a training run is launched, a deduplicated copy of the images it trains on is kept so that comparing two runs can still show an image you have since deleted. Only new or edited images are copied, and the archive stops growing at its ceiling.">
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="text-sm text-content">
-          <span aria-hidden>🗂</span> Archive size:{' '}
-          <span className="font-semibold tabular-nums">
-            {info == null ? '…' : fmt(info.size_bytes || 0)}
-          </span>
-          {info?.max_bytes ? (
-            <span className="text-content-subtle">
-              {' '}/ {fmt(info.max_bytes)} ceiling
-            </span>
-          ) : null}
-        </span>
-        {info && !info.enabled && (
-          <span className="text-xs text-content-subtle">Archiving is turned off.</span>
-        )}
-        <button type="button" onClick={clear} disabled={busy || !info?.size_bytes}
-          className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-sm font-medium text-red-300 disabled:opacity-40">
-          {busy ? 'Clearing…' : 'Clear archive'}
-        </button>
-      </div>
-    </Card>
-  )
-}
-
-export default function MaintenanceSection({ config, setField, configDefaults }) {
+/* Maintenance keeps what is about the APP itself — updating it, reporting a bug,
+   reading its log. Everything about the disk (trash, archive, dataset root, where
+   the big folders live) moved to Settings › Storage, where those questions are
+   answered together instead of one card per screen. */
+export default function MaintenanceSection() {
   return (
     <div className="space-y-6">
       <UpdatesCard />
-      <TrashCard />
-      <RunArchiveCard />
-      <Card title="Data" help="Where dataset images live on disk.">
-        <TextField
-          id="dataset-images-root"
-          label="Dataset images root"
-          value={config.paths.dataset_images_root}
-          onChange={(v) => setField('paths', 'dataset_images_root', v)}
-          placeholder="Defaults to data/datasets"
-        >
-          {/* Default is the EMPTY string ("use data/datasets"), so reset gives
-              the implicit state back instead of writing today's path in. */}
-          <ResetToDefault label="Dataset images root" section="paths" field="dataset_images_root"
-            config={config} configDefaults={configDefaults} setField={setField} />
-        </TextField>
-      </Card>
       <DiagnosticReport />
       <LogViewer />
     </div>

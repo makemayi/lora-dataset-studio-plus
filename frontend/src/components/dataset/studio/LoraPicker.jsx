@@ -153,7 +153,7 @@ export default function LoraPicker({ preselectDataset, preselectFamily = null, o
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-content-muted text-[0.6875rem] uppercase">LoRA to test</span>
         {/* Ce badge annonçait « ⚖ Comparaison » dès 2 LoRA cochés — faux depuis que
-            la pile (🧬 Combine) est un mode à part entière, et le mode réel est
+            la pile (🧬 Blend) est un mode à part entière, et le mode réel est
             choisi juste en dessous (LoraStackPanel). On n'annonce plus que le FAIT
             d'avoir plusieurs LoRA, pas ce qu'on va en faire. */}
         {count >= 2 && (

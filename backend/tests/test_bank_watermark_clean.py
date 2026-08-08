@@ -43,13 +43,18 @@ def _mkbank(client, tmp_path, files, name='WM'):
 def _flag(app, bank_id, bbox, *, index=0, state='detected'):
     """Put a row in the state the detection pass leaves behind. Returns its id."""
     from app.extensions import db
-    from app.models import BankImage
+    from app.models import BankImage, ImageBank
+    from app.services import bank_transfer_metadata as transfer
+    from app.services import image_bank_service as banks
     with app.app_context():
+        bank = db.session.get(ImageBank, bank_id)
         rows = (BankImage.query.filter_by(bank_id=bank_id)
                 .order_by(BankImage.id.asc()).all())
         row = rows[index]
         row.watermark_state = state
         row.watermark_bbox = json.dumps(bbox) if bbox is not None else None
+        row.watermark_fingerprint = transfer.content_fingerprint_path(
+            banks.abs_image_path(bank, row))
         db.session.commit()
         return row.id
 
@@ -69,6 +74,62 @@ def db_get(model, pk):
 def _fingerprint(path):
     """Bytes + mtime — what "the source was not touched" actually means."""
     return open(path, 'rb').read(), os.stat(path).st_mtime_ns
+
+
+def _seed_effective_lanes(app, bank_id, image_id):
+    """Give a row representatives from every effective-byte lane."""
+    from app.extensions import db
+    from app.models import BankImage, ImageBank
+    from app.services import bank_transfer_metadata as transfer
+    from app.services import image_bank_service as banks
+
+    with app.app_context():
+        bank = db.session.get(ImageBank, bank_id)
+        row = db.session.get(BankImage, image_id)
+        row.analysis_fingerprint = transfer.content_fingerprint_path(
+            banks.analysis_image_path(bank, row))
+        row.quality_state = 'ok'
+        row.blur_score = 123.0
+        row.aesthetic_score = 7.5
+        row.nsfw_score = 0.1
+        row.face_state = 'scorable'
+        row.face_det = 0.9
+        row.face_yaw = 3.0
+        row.framing = 'bust'
+        row.medium = 'photo'
+        row.dup_group = 9
+        row.semantic_dup_group = 10
+        row.style_cluster = 11
+        # User-owned person assertions are identity metadata, not a computed
+        # result, and must survive every pixel-generation invalidation.
+        row.face_cluster = 12
+        row.face_cluster_origin = 'asserted'
+        db.session.commit()
+
+
+def _assert_raw_generation_invalidated(app, bank_id, image_id, source):
+    from app.extensions import db
+    from app.models import BankImage
+    from app.services import bank_transfer_metadata as transfer
+    from app.services import image_bank_service as banks
+
+    with app.app_context():
+        row = db.session.get(BankImage, image_id)
+        assert row.watermark_fingerprint == transfer.content_fingerprint_path(source)
+        assert row.watermark_state is None
+        assert row.watermark_bbox is None
+        assert row.watermark_regions is None
+        assert row.watermark_clean_method is None
+        assert row.analysis_fingerprint is None
+        assert row.width is None and row.height is None
+        assert row.face_cluster == 12
+        assert row.face_cluster_origin == 'asserted'
+        for field in ('quality_state', 'blur_score', 'aesthetic_score',
+                      'nsfw_score', 'face_state', 'face_det', 'face_yaw',
+                      'framing', 'medium', 'dup_group', 'semantic_dup_group',
+                      'style_cluster'):
+            assert getattr(row, field) is None, field
+        assert not banks.clean_image_path(bank_id, image_id).exists()
 
 
 # A mark inside the top band of a 1000×1000 image: croppable (the crop keeps
@@ -100,6 +161,29 @@ def test_crop_level_cleans_without_touching_the_source(client, tmp_path, app):
     with Image.open(blob) as im:
         # The band up to the mark's inner edge is gone: 1000 → 950 px tall.
         assert im.height == 950 and im.width == 1000
+
+
+def test_crop_discards_result_when_raw_source_changes_during_engine_work(
+        client, tmp_path, app, monkeypatch):
+    """A crop result belongs to the raw bytes measured before the crop began."""
+    from app.services import face_dataset_service as faces
+
+    bank_id, src = _mkbank(client, tmp_path, {'a.jpg': _photo()})
+    image_id = _flag(app, bank_id, TOP_MARK)
+    _seed_effective_lanes(app, bank_id, image_id)
+    source = src / 'a.jpg'
+    real_crop = faces._apply_watermark_crop
+
+    def crop_then_replace(path, box):
+        ok = real_crop(path, box)
+        _photo(value=210).save(source, 'JPEG', quality=92)
+        return ok
+
+    monkeypatch.setattr(faces, '_apply_watermark_crop', crop_then_replace)
+
+    response = client.post(f'/api/bank/{bank_id}/watermark/crop')
+    assert response.status_code == 202, response.get_json()
+    _assert_raw_generation_invalidated(app, bank_id, image_id, source)
 
 
 def test_bank_crop_uses_exif_visual_coordinates_and_keeps_camera_master(client, tmp_path, app):
@@ -237,7 +321,8 @@ def test_display_and_copy_readers_are_pinned_to_the_resolver():
     """CONTRACT — the cleaned blob only reaches the user if the readers ask for
     it. Each piece of this feature can be green while the JOIN is broken, so the
     three known readers are pinned here: promotion and the thumbnail must go
-    through resolved_image_path and must NOT call abs_image_path directly, and
+    through the strict analysis_image_path and must NOT call abs_image_path
+    directly, and
     the file route must offer the resolver (its ?original=1 lane is the one
     place abs_image_path stays legitimate). Rebinding any of them back to the
     raw source path fails THIS test."""
@@ -257,7 +342,7 @@ def test_display_and_copy_readers_are_pinned_to_the_resolver():
                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
 
     promote = calls(banks, '_promote_job', inner='run')
-    assert 'resolved_image_path' in promote
+    assert 'analysis_image_path' in promote
     assert 'abs_image_path' not in promote
 
     thumb = calls(banks, 'ensure_thumb')
@@ -308,6 +393,45 @@ def test_inpaint_level_repaints_what_the_crop_left(client, tmp_path, app,
     # The engine was handed OUR working copy, not the user's file.
     assert len(painted) == 1
     assert str(src) not in painted[0]
+
+
+@pytest.mark.parametrize('method', ['lama', 'klein'])
+def test_inpaint_discards_result_when_raw_source_changes_during_engine_work(
+        client, tmp_path, app, monkeypatch, method):
+    """Both slow engines must revalidate the pristine source after returning."""
+    from app.services import watermark_klein, watermark_lama
+
+    bank_id, src = _mkbank(client, tmp_path, {'a.jpg': _photo()})
+    image_id = _flag(app, bank_id, OFFCENTER_MARK)
+    _seed_effective_lanes(app, bank_id, image_id)
+    source = src / 'a.jpg'
+
+    def replace_source():
+        _photo(value=220).save(source, 'JPEG', quality=92)
+
+    if method == 'lama':
+        monkeypatch.setattr(watermark_lama, 'is_available', lambda: True)
+        monkeypatch.setattr(watermark_lama, 'resolve_device', lambda: 'cpu')
+
+        def batch(jobs, *, device, timeout=900):
+            replace_source()
+            return {job['image_path']: (True, None) for job in jobs}
+
+        monkeypatch.setattr(watermark_lama, 'inpaint_batch', batch)
+    else:
+        monkeypatch.setattr(watermark_klein, 'is_available', lambda: True)
+
+        def klein(_user_id, _path, _boxes, **_kwargs):
+            replace_source()
+            return True, None
+
+        monkeypatch.setattr(
+            watermark_klein, 'inpaint_watermark_klein', klein)
+
+    response = client.post(
+        f'/api/bank/{bank_id}/watermark/inpaint', json={'method': method})
+    assert response.status_code == 202, response.get_json()
+    _assert_raw_generation_invalidated(app, bank_id, image_id, source)
 
 
 @pytest.mark.parametrize('method, clean_method', [('lama', 'lama'), ('klein', 'klein')])
@@ -446,6 +570,49 @@ def test_dismissed_images_leave_both_levels(client, tmp_path, app):
     assert client.post(f'/api/bank/{bank_id}/watermark/crop').status_code == 400
     levels = client.get(f'/api/bank/{bank_id}/watermark/levels').get_json()
     assert levels['dismissed'] == 1 and levels['flagged'] == 0
+
+
+@pytest.mark.parametrize('action', ['mask', 'dismiss'])
+def test_manual_watermark_actions_refuse_a_replaced_raw_generation(
+        client, tmp_path, app, action):
+    bank_id, src = _mkbank(client, tmp_path, {'a.jpg': _photo()})
+    image_id = _flag(app, bank_id, OFFCENTER_MARK)
+    _seed_effective_lanes(app, bank_id, image_id)
+    source = src / 'a.jpg'
+    _photo(value=230).save(source, 'JPEG', quality=92)
+
+    if action == 'mask':
+        response = client.put(
+            f'/api/bank/{bank_id}/image/{image_id}/watermark-regions',
+            json={'regions': [[0.2, 0.2, 0.3, 0.3]]})
+        assert response.status_code == 409, response.get_json()
+        assert 'source image changed' in response.get_json()['error']
+    else:
+        response = client.post(
+            f'/api/bank/{bank_id}/watermark/dismiss',
+            json={'image_ids': [image_id]})
+        assert response.status_code == 200, response.get_json()
+        assert response.get_json()['dismissed'] == 0
+
+    _assert_raw_generation_invalidated(app, bank_id, image_id, source)
+
+
+def test_undo_refuses_a_replaced_raw_generation_and_drops_stale_clean_blob(
+        client, tmp_path, app):
+    bank_id, src = _mkbank(client, tmp_path, {'a.jpg': _photo()})
+    image_id = _flag(app, bank_id, TOP_MARK)
+    assert client.post(
+        f'/api/bank/{bank_id}/watermark/crop').status_code == 202
+    _seed_effective_lanes(app, bank_id, image_id)
+    source = src / 'a.jpg'
+    _photo(value=240).save(source, 'JPEG', quality=92)
+
+    response = client.post(
+        f'/api/bank/{bank_id}/watermark/undo',
+        json={'image_ids': [image_id]})
+    assert response.status_code == 200, response.get_json()
+    assert response.get_json()['restored'] == 0
+    _assert_raw_generation_invalidated(app, bank_id, image_id, source)
 
 
 # --- retrofit: rows flagged before the bbox was persisted --------------------

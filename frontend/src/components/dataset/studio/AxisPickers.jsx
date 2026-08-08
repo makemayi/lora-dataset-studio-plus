@@ -14,6 +14,11 @@ export default function AxisPickers({
   // Z-Image Base dans le même balayage) : une seule paire CFG/steps ne peut pas
   // convenir aux deux, on le DIT au lieu de faire semblant. (bobba84, GitHub #18)
   mixedDefaults = false,
+  // Ce que le DÉFAUT de base a d'anormal (Krea : le fichier que Setup installe
+  // n'est pas là, celui élu porte autre chose que des poids). Rendu HORS de la
+  // garde `zModels.length > 1` : l'install qui n'a qu'une seule base est
+  // précisément celle qui n'a pas de sélecteur et qui doit quand même le lire.
+  baseNote = null,
   // SDXL uniquement : 2e passe (detail daemon). Absent (null) pour Z-Image.
   steps2Choices, effectiveSteps2, onToggleStep2, defaultSteps2,
   fmt,
@@ -22,6 +27,12 @@ export default function AxisPickers({
   const hasPass2 = Array.isArray(steps2Choices);
   return (
     <>
+      {baseNote && (
+        <p className="m-0 text-[0.6875rem] leading-snug text-amber-300/80 break-words">
+          {baseNote}
+        </p>
+      )}
+
       {Array.isArray(zModels) && zModels.length > 1 && (
         <div className="flex flex-col gap-1">
           {/* Libellé générique : la liste vient du payload PAR FAMILLE (Z-Image,

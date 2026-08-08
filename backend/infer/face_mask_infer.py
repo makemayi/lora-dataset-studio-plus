@@ -12,9 +12,24 @@ erase pixels and does NOT paint anything into the image — it tells the trainer
 not correct me here". That is why this is a loss mask and not a blur: a blurred face
 would BE the regression target and the LoRA would learn to produce blur.
 
-stdin  : {"images": [paths...], "out_dir": path|null, "expand": float}
-stdout : last line = JSON {"ok", "written", "results": {path: {...}}}
+stdin  : {"images": [paths...], "out_dir": path|null, "expand": float,
+          "cancel_file": path|null}
+stdout : last line = JSON {"ok", "written", "cancelled", "results": {path: {...}}}
 Logs -> stderr.
+
+STOPPING (`cancel_file`)
+  The parent asks for a stop by CREATING that file; this script notices it
+  between two images and exits by PRINTING WHAT IT ALREADY FOUND, with
+  `cancelled: true`. Being SIGKILLed would have been simpler and would have
+  thrown that away: the results only exist in this process until the final JSON
+  line, so a killed child means every face found so far is lost and a relaunch
+  re-detects them. The boxes are the expensive part, so they are what survives.
+
+  The check is between images ONLY. Nothing can interrupt `FaceAnalysis.prepare`
+  from the outside, so a stop asked during the load lands at the top of the loop
+  instead — the first thing the loop does, before image 1. That is why the
+  parent states the cost of stopping DURING the load separately: there, nothing
+  has been analysed yet and the load itself is what is lost.
 
 PROGRESS PROTOCOL (stderr, read by app/services/face_mask.py):
   `[facemask] phase=<name>` then `[facemask] i/N ...` per image, same idiom as
@@ -72,6 +87,13 @@ def _models_present(models_root=None) -> bool:
                 or glob.glob(os.path.join(outer, 'antelopev2', '*.onnx')))
 
 
+def cancel_requested(cancel_file) -> bool:
+    """True once the parent has created the sentinel. A FILE rather than a signal
+    because this is a plain stdin/stdout child on Windows too, where there is no
+    usable POSIX signal for "wind up cleanly"."""
+    return bool(cancel_file) and os.path.exists(cancel_file)
+
+
 def dilate_box(box, expand, shift_up=_SHIFT_UP):
     """Grow a face box into a head box. PURE — mirrored verbatim by the frontend
     preview (frontend/src/utils/faceMaskBox.js) so what the user sees drawn is what
@@ -91,6 +113,7 @@ def main() -> int:
         out_dir = payload.get('out_dir') or None
         expand = float(payload.get('expand') or 2.0)
         models_root = payload.get('models_root') or None
+        cancel_file = payload.get('cancel_file') or None
     except Exception as e:  # noqa: BLE001 — must exit as clean JSON, never a mute traceback
         print(json.dumps({"ok": False, "error": f"payload: {e}"}))
         return 1
@@ -147,9 +170,15 @@ def main() -> int:
         padded = cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=(0, 0, 0))
         return (app.get(padded) or []), 1.0, pad
 
-    results, written = {}, 0
+    results, written, cancelled = {}, 0, False
     _phase('detecting')
     for i, p in enumerate(images, 1):
+        # BEFORE the work, not after: this is also where a stop asked during the
+        # model load is honoured, and there it must cost zero images.
+        if cancel_requested(cancel_file):
+            cancelled = True
+            _log(f'[facemask] stopped at {i - 1}/{len(images)}')
+            break
         try:
             img = cv2.imread(p)
             if img is None:
@@ -206,7 +235,12 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001 — one bad image must not kill the pass
             results[p] = {"state": "error", "error": str(e), "boxes": []}
             _log(f'[facemask] {i}/{len(images)} ERROR {e}')
-    print(json.dumps({"ok": True, "written": written, "results": results}))
+    # `ok` stays TRUE on a stop: the pass did not fail, it was asked to end early
+    # and it is handing back everything it managed to compute. Reporting it as an
+    # error would push the parent down the failure path and discard exactly the
+    # work this whole mechanism exists to keep.
+    print(json.dumps({"ok": True, "written": written, "cancelled": cancelled,
+                      "results": results}))
     return 0
 
 

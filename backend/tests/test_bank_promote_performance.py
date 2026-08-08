@@ -1,9 +1,7 @@
-"""Regression coverage for the Bank -> Dataset promotion dedupe cache."""
+"""Regression coverage for independent Bank -> Dataset copies."""
 import io
 import os
 import random
-import threading
-from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 from PIL import Image
@@ -29,9 +27,9 @@ def _run_promote_inline(banks, bank_id, image_ids, dataset_id):
     return progress
 
 
-def test_promote_loads_dataset_dhashes_once_and_dedupes_across_chunks(
+def test_promote_never_dedupes_or_merges_metadata_across_chunks(
         app, tmp_path, monkeypatch):
-    """The second chunk must reuse the first chunk's updated cache."""
+    """Every selected Bank row gets its own destination row, like other hops."""
     with app.app_context():
         from app.extensions import db
         from app.models import BankImage, FaceDatasetImage
@@ -70,19 +68,20 @@ def test_promote_loads_dataset_dhashes_once_and_dedupes_across_chunks(
         progress = _run_promote_inline(
             banks, bank.id, [row.id for row in rows], dataset.id)
 
-        assert existing_calls == [dataset.id]
+        assert existing_calls == []
         detail = progress[-1]['detail']
-        assert detail.startswith('done — 2 imported, 1 already in the dataset')
+        assert detail.startswith('done — 3 imported')
         assert 'failed' not in detail
         promoted = (FaceDatasetImage.query.filter_by(dataset_id=dataset.id)
                     .order_by(FaceDatasetImage.id.asc()).all())
-        assert len(promoted) == 2
-        assert {row.bank_image_id for row in promoted} == {rows[0].id, rows[1].id}
+        assert len(promoted) == 3
+        assert {row.bank_image_id for row in promoted} == {
+            source_row.id for source_row in rows}
 
 
-def test_two_banks_promoting_same_image_to_one_dataset_create_one_row(
-        app, tmp_path, monkeypatch):
-    """Both jobs may start together, but only one may snapshot/import at a time."""
+def test_two_banks_promoting_same_image_create_two_independent_rows(
+        app, tmp_path):
+    """Identical bytes from different Banks must not collapse their metadata."""
     with app.app_context():
         from app.extensions import db
         from app.models import BankImage, FaceDatasetImage
@@ -105,55 +104,13 @@ def test_two_banks_promoting_same_image_to_one_dataset_create_one_row(
         dataset = datasets.create_dataset(
             'local', 'Concurrent target', 'concurrenttarget')
 
-        real_existing = banks._existing_dhash_rows
-        first_snapshot = threading.Event()
-        second_started = threading.Event()
-        second_snapshot = threading.Event()
-        calls_lock = threading.Lock()
-        calls = 0
-
-        def coordinated_existing(dataset_id):
-            nonlocal calls
-            snapshot = real_existing(dataset_id)
-            with calls_lock:
-                calls += 1
-                call_number = calls
-            if call_number == 1:
-                first_snapshot.set()
-                assert second_started.wait(2)
-                # Without the job-long lock, the second job reaches this loader
-                # and captures the same empty snapshot before either import.
-                second_snapshot.wait(0.25)
-            else:
-                second_snapshot.set()
-            return snapshot
-
-        monkeypatch.setattr(banks, '_existing_dhash_rows',
-                            coordinated_existing)
-
-        def promote(bank_id, image_id, *, second=False):
-            if second:
-                second_started.set()
-            with app.app_context():
-                banks._promote_job(
-                    'local', bank_id, [image_id], dataset.id)(object())
-
-        with patch.object(banks.bank_jobs, 'cancelled', lambda _job: False), \
-             patch.object(banks.bank_jobs, 'bump', lambda _job, _n=1: None), \
-             patch.object(banks.bank_jobs, 'progress', lambda _job, **_kw: None), \
-             ThreadPoolExecutor(max_workers=2) as pool:
-            first = pool.submit(
-                promote, bank_rows[0][0], bank_rows[0][1])
-            assert first_snapshot.wait(2)
-            second = pool.submit(
-                promote, bank_rows[1][0], bank_rows[1][1], second=True)
-            first.result(timeout=5)
-            second.result(timeout=5)
+        for bank_id, image_id in bank_rows:
+            _run_promote_inline(
+                banks, bank_id, [image_id], dataset.id)
 
         db.session.expire_all()
-        assert calls == 2
         assert FaceDatasetImage.query.filter_by(
-            dataset_id=dataset.id).count() == 1
+            dataset_id=dataset.id).count() == 2
 
 
 def test_stale_cached_dhash_after_dataset_file_replacement_is_revalidated(app):

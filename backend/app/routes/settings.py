@@ -238,7 +238,8 @@ def put_settings():
         # later cleared). Only when the client didn't already send an explicit value.
         if 'setup_skipped' not in config_partial['comfyui']:
             config_partial['comfyui']['setup_skipped'] = False
-    # The scoped-ML interpreters (watermark/masks/face_scoring `.python`) have NO input
+    # The scoped-ML interpreters (watermark/masks/face_scoring/bank_semantic
+    # `.python`) have NO input
     # in Settings — they're written out-of-band by the installers (the watermark
     # "Install inpainting" button auto-provisions a dedicated venv and records its
     # python here). The frontend only ever echoes back what it loaded, blank on a fresh
@@ -247,7 +248,8 @@ def put_settings():
     # which probe_watermark_inpaint falls back to the app's own Pillow-12 venv and the
     # feature reads "NOT installed" forever despite a perfect install. Drop the blank so
     # a stale Save can't undo an install. (aitoolkit.python IS user-editable — not here.)
-    for _managed in ('watermark', 'masks', 'face_scoring', 'bank_scoring'):
+    for _managed in ('watermark', 'masks', 'face_scoring', 'bank_scoring',
+                     'bank_semantic', 'watermark_detect', 'shot_detect'):
         node = config_partial.get(_managed)
         if isinstance(node, dict) and 'python' in node and not str(node.get('python') or '').strip():
             node.pop('python')
@@ -321,13 +323,42 @@ def loras_list():
     return jsonify({'loras': loras})
 
 
+@bp.get('/comfy/model-files')
+def comfy_model_files():
+    """The model files on disk for ONE picker slot — what backs the Klein model-file
+    fields and Krea 2 Edit's base model / identity LoRA, which used to be free text.
+
+    ``?slot=`` is one of ``comfy_model_picker.SLOTS``; ``?force=1`` bypasses the
+    mtime cache (the ↻ rescan button). Answers
+    ``{files: [relative loader name], folder: "where to put one"}``.
+
+    Each name is exactly the string the field already stored, so switching those
+    fields to a picker needs no alias and an install that typed a name by hand
+    finds it selected. ``folder`` is what the empty state SAYS to do — a mute
+    empty dropdown is the one outcome this endpoint must never produce.
+
+    An unknown slot and any scan failure both answer 200 with an empty list: the
+    picker degrades to a free-text field rather than blocking the panel."""
+    from ..services import comfy_model_picker
+    slot = (request.args.get('slot') or '').strip()
+    force = bool(request.args.get('force'))
+    files, folder = comfy_model_picker.list_slot_files(slot, force=force)
+    return jsonify({'files': files, 'folder': folder})
+
+
 @bp.get('/seedvr2/models')
 def seedvr2_models_list():
     """The SeedVR2 DiT builds actually PRESENT in this install's SEEDVR2 folder(s),
     plus the catalog of builds the app can talk about.
 
     ``{installed: [name], catalog: [{file, label, size_gb, vram_gb, recommended,
-    installed}], resolved: name|null, vae: name|null}``.
+    installed}], resolved: name|null, vae: name|null,
+    vae_choices: [{file, likely_vae}]}``.
+
+    ``vae_choices`` covers the WHOLE folder, each entry flagged with whether its
+    name looks like a VAE: the automatic path already handles every install
+    where it does, so the pin exists for the one where it does not, and a picker
+    that hid those files could not express that install.
 
     Only installed builds are offered as a pin: the pack's loader nodes download
     an unknown name on first use, so a picker listing everything would turn a
@@ -341,17 +372,18 @@ def seedvr2_models_list():
         installed = svr.installed_dit_models()
         resolved = svr.resolve_seedvr2_dit()
         vae = svr.resolve_seedvr2_vae()
+        vae_choices = svr.vae_choices()
     except Exception:
         current_app.logger.exception('seedvr2 model scan failed')
-        installed, resolved, vae = [], None, None
+        installed, resolved, vae, vae_choices = [], None, None, []
     catalog = [{**v, 'installed': v['file'] in installed} for v in svr.DIT_VARIANTS]
     return jsonify({'installed': installed, 'catalog': catalog,
-                    'resolved': resolved, 'vae': vae})
+                    'resolved': resolved, 'vae': vae,
+                    'vae_choices': vae_choices})
 
 
-@bp.get('/scoring-python')
-def scoring_python_list():
-    """Pythons on this machine that could run the ✨ Score pass, each with a
+def _interpreter_list(profile):
+    """Pythons on this machine that could run one heavy pass, each with a
     per-dependency verdict — the picker behind "use a GPU Python you already
     have". ``?force=1`` re-probes (after the user pip-installed something);
     ``?path=`` adds a hand-typed interpreter to the list. Read-only: nothing is
@@ -364,6 +396,7 @@ def scoring_python_list():
     retrying might well fix. `detection_failed` separates the two, and
     `default_python` stays filled in: it is the one thing we know regardless."""
     from ..services import scoring_python
+    prof = scoring_python.get_profile(profile)
     force = bool(request.args.get('force'))
     if force:
         # "↻ Check again" is what a user clicks right after installing a package
@@ -373,15 +406,17 @@ def scoring_python_list():
         capabilities.clear_import_cache()
     try:
         return jsonify(scoring_python.detect(
-            force=force, extra_path=request.args.get('path') or ''))
+            force=force, extra_path=request.args.get('path') or '',
+            profile=prof))
     except Exception as e:
-        current_app.logger.exception('scoring interpreter detection failed')
+        current_app.logger.exception('%s interpreter detection failed', prof.key)
         try:
-            selected = (cfg.get('bank_scoring.python') or '').strip()
+            selected = (cfg.get(prof.config_key) or '').strip()
         except Exception:      # noqa: BLE001 — a config read that also fails
             selected = ''
         return jsonify({
             'selected': selected,
+            'profile': prof.key,
             'default_python': sys.executable,
             'interpreters': [],
             'detection_failed': True,
@@ -389,22 +424,52 @@ def scoring_python_list():
         })
 
 
-@bp.post('/scoring-python')
-def scoring_python_select():
-    """Point ✨ Score at an interpreter (``{python: "<path>"}``), or back at the
-    app's own (``{python: ""}``). Refuses — 400, with the verdict attached — any
-    interpreter that could not be proven able to run the pass, so a bad pick can
-    never turn an hour of scoring into an import error."""
+def _interpreter_select(profile):
+    """Point one feature at an interpreter (``{python: "<path>"}``), or back at
+    the app's own (``{python: ""}``). Refuses — 400, with the verdict attached —
+    any interpreter that could not be proven able to run the pass, so a bad pick
+    can never turn an hour of work into an import error."""
     from ..services import scoring_python
     body = request.get_json(silent=True) or {}
     try:
-        result = scoring_python.select(body.get('python') or '')
+        result = scoring_python.select(body.get('python') or '', profile=profile)
     except scoring_python.SelectionError as e:
         return jsonify({'error': str(e), 'verdict': e.verdict}), 400
     except Exception as e:
-        current_app.logger.exception('scoring interpreter selection failed')
+        current_app.logger.exception('interpreter selection failed')
         return jsonify({'error': f'could not save the interpreter: {e}'}), 500
     return jsonify(result)
+
+
+@bp.get('/scoring-python')
+def scoring_python_list():
+    """The picker for ✨ Score (``bank_scoring.python``)."""
+    return _interpreter_list('scoring')
+
+
+@bp.post('/scoring-python')
+def scoring_python_select():
+    """Select the interpreter ✨ Score runs in."""
+    return _interpreter_select('scoring')
+
+
+@bp.get('/semantic-python')
+def semantic_python_list():
+    """The same picker for the SigLIP 2 semantic engine (``bank_semantic.python``).
+
+    Same detector, a SHORTER dependency list: the semantic worker never imports
+    open_clip or timm, so an interpreter Score would refuse can be perfectly
+    good here. The pinned SigLIP2 weights live in the app's data folder, not in
+    the interpreter, so a borrowed Python needs no download at all."""
+    return _interpreter_list('semantic')
+
+
+@bp.post('/semantic-python')
+def semantic_python_select():
+    """Select the interpreter the SigLIP 2 index runs in. Execution only — Setup
+    ▸ Quality tools still installs into the app-managed environment and never
+    into a borrowed one."""
+    return _interpreter_select('semantic')
 
 
 @bp.post('/settings/test/<target>')
@@ -451,6 +516,10 @@ def update_check():
             return jsonify(_git_check_cache['data'])
         gs = updater.git_update_status()
         if gs is not None:
+            # Pinokio: the commits-behind answer stays true and useful (its
+            # Update tab pulls exactly those), only the in-app apply must go.
+            if updater.is_pinokio_runtime():
+                gs.update(updater.pinokio_update_payload())
             _git_check_cache.update(ts=now, data=gs)
             return jsonify(gs)
     now = time.time()
@@ -460,6 +529,10 @@ def update_check():
     repo = cfg.get('updates.repo') or 'makemayi/lora-dataset-studio-plus'
     out = {'ok': True, 'current': APP_VERSION, 'latest': None,
            'update_available': False, 'url': f'https://github.com/{repo}/releases'}
+    # Upstream also merges a docker_update_payload here; this fork removed the
+    # Docker deployments, so Pinokio is the only install that updates elsewhere.
+    if updater.is_pinokio_runtime():
+        out.update(updater.pinokio_update_payload())
     sha = updater.current_sha()
     if sha:
         out['current_sha'] = sha
@@ -483,10 +556,15 @@ def update_check():
                     zip_size = int(a.get('size') or 0)
                     if 'windows' in name:
                         break
-            out['can_apply'] = bool(zip_size) or any(
-                (a.get('name') or '').lower().endswith('.zip') and a.get('browser_download_url')
-                for a in (j.get('assets') or []))
-            out['zip_size'] = zip_size      # bytes, for the "download ~XX MB" hint
+            # A Pinokio install may not advertise an in-app apply just because
+            # the release carries a ZIP: it updates from outside this process.
+            # (Upstream also excludes its Docker runtime here — removed in this
+            # fork, so Pinokio is the only case left.)
+            if not updater.is_pinokio_runtime():
+                out['can_apply'] = bool(zip_size) or any(
+                    (a.get('name') or '').lower().endswith('.zip') and a.get('browser_download_url')
+                    for a in (j.get('assets') or []))
+                out['zip_size'] = zip_size      # bytes, for the "download ~XX MB" hint
         else:
             out['reason'] = (f'release feed answered {r.status_code} '
                              '(no public release yet?)')
@@ -507,6 +585,16 @@ def update_apply():
     trivial ZIP outcomes (up to date / no ZIP asset / offline) come back inline
     just like the git path. Both defer changed requirements to the restart helper."""
     from ..services import updater
+    # Pinokio owns the process: pulling here would work, but the restart that
+    # follows would detach the server from the launcher that is supposed to
+    # stop and start it. Refuse before touching git.
+    if updater.is_pinokio_runtime():
+        return jsonify({
+            'ok': False,
+            'reason': 'Pinokio installs are updated from the launcher: '
+                      'Stop, then Update, then Start.',
+            **updater.pinokio_update_payload(),
+        })
     if updater.is_git_checkout():
         res = updater.apply_update()
         res['restarting'] = bool(res.get('ok') and res.get('changed'))
@@ -586,6 +674,71 @@ def run_archive_clear():
     database and survive; only the ability to LOOK at a since-deleted image goes."""
     from ..services import run_archive
     return jsonify({'ok': True, **run_archive.clear()})
+
+
+@bp.get('/storage/locations')
+def storage_locations():
+    """The “what lives where” map: every category, its effective path and
+    whether it can be relocated. Deliberately size-free — measuring means
+    walking tens of thousands of files, which belongs to an explicit click
+    (see /storage/sizes), never to a tab mount."""
+    from ..services import storage_locations as sl
+    payload = {'locations': sl.locations()}
+    for entry in payload['locations']:
+        if entry['path']:
+            entry['volume'] = sl.free_space(entry['path'])
+    return jsonify(payload)
+
+
+@bp.get('/storage/sizes')
+def storage_sizes():
+    """Bytes held by each requested category (?keys=a,b — all of them when
+    absent). This is the walk the map's “Measure” button pays for."""
+    from ..services import storage_locations as sl
+    raw = (request.args.get('keys') or '').strip()
+    keys = [k for k in raw.split(',') if k.strip()] if raw else None
+    sizes = sl.sizes(keys)
+    return jsonify({'ok': True, 'sizes': sizes,
+                    'total_bytes': sum(sizes.values())})
+
+
+@bp.post('/storage/validate')
+def storage_validate():
+    """Is this folder usable for that category? Proves writability by writing a
+    probe file — permission bits lie on Windows. Writes no config."""
+    from ..services import storage_locations as sl
+    body = request.get_json(silent=True) or {}
+    key = str(body.get('key') or '')
+    return jsonify(sl.validate_target(key, body.get('path')))
+
+
+@bp.post('/storage/move')
+def storage_move():
+    """Start moving a category's current content into its new folder. The
+    location change itself is a normal settings save; this only carries the
+    bytes, and never runs unless the user asked for it (the alternative,
+    “adopt the empty folder”, saves without calling this)."""
+    from ..services import storage_locations as sl
+    body = request.get_json(silent=True) or {}
+    try:
+        res = sl.start_move(str(body.get('key') or ''), body.get('path'))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, **res})
+
+
+@bp.get('/storage/move/progress')
+def storage_move_progress():
+    from ..services import storage_locations as sl
+    return jsonify({'ok': True, 'job': sl.move_progress(request.args.get('job_id'))})
+
+
+@bp.post('/storage/adopt-checkpoints')
+def storage_adopt_checkpoints():
+    """Re-run the staging → checkpoint-store retrofit on demand. Idempotent: on
+    an already-migrated install it moves nothing and says so."""
+    from ..services import cloud_training as ct
+    return jsonify({'ok': True, **ct.migrate_checkpoints_into_store(force=True)})
 
 
 @bp.post('/trash/open')

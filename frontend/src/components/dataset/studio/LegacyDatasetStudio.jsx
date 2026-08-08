@@ -27,7 +27,8 @@ import ResultsArea from './ResultsArea';
 import QuickVoteModal from './QuickVoteModal';
 import ResultLightbox from './ResultLightbox';
 
-export default function LegacyDatasetStudio({ datasetId, initialFamily = null }) {
+export default function LegacyDatasetStudio({ datasetId, initialFamily = null,
+  initialBase = null }) {
   // Famille (pipeline) sélectionnée : null = défaut résolu côté serveur. `initialFamily`
   // = la famille de la LIGNE cochée dans le picker (ex. « Lola [KREA] » → ouvre sur krea).
   // Changer de famille REMONTE le corps du studio (key) → hook + formulaire repartent
@@ -36,14 +37,16 @@ export default function LegacyDatasetStudio({ datasetId, initialFamily = null })
   useEffect(() => { setFamily(initialFamily); }, [datasetId, initialFamily]);  // reset au changement de ligne
   return (
     <StudioBody key={`${datasetId}:${family ?? 'default'}`}
-      datasetId={datasetId} family={family} onFamilyChange={setFamily} />
+      datasetId={datasetId} family={family} onFamilyChange={setFamily}
+      initialBase={initialBase} />
   );
 }
 
-function StudioBody({ datasetId, family, onFamilyChange }) {
+function StudioBody({ datasetId, family, onFamilyChange, initialBase = null }) {
   const studio = useLoraTestStudio(datasetId, family);
   const d = studio.data;
-  const form = useStudioForm(d, datasetId, d?.family || family);
+  const form = useStudioForm(d, datasetId, d?.family || family,
+    { preselectBase: initialBase });
   const vote = useQuickVote(studio.rate);
   const [lbImg, setLbImg] = useState(null);
   // Set navigable ORDONNÉ figé à l'ouverture (fourni par ResultsArea, cf. flipOrder).

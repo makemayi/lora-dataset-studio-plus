@@ -139,6 +139,138 @@ def test_the_vae_is_never_offered_as_a_dit_build(app, tmp_path):
         assert svr.resolve_seedvr2_vae() == svr.CANONICAL_VAE
 
 
+def _enqueue_and_capture(app, tmp_path, monkeypatch, settings, source_px=(800, 1200)):
+    """Run the REAL enqueue path with `settings` saved, and return the workflow
+    it submitted. The point of going through enqueue rather than calling
+    build_workflow directly: a setting that is read but never passed on looks
+    perfectly fine in a unit test of either half."""
+    from PIL import Image
+    from app import config
+    from app.services import seedvr2_helper as svr, comfy_model_paths
+    base = _make_comfyui(tmp_path)
+    (base / 'input').mkdir(exist_ok=True)
+    (base / 'output').mkdir(exist_ok=True)
+    _install_weights(base, svr.CANONICAL_DIT, svr.CANONICAL_VAE)
+    src = tmp_path / 'source.png'
+    Image.new('RGB', source_px, (32, 64, 96)).save(src)
+
+    captured = {}
+    monkeypatch.setattr(svr.queue_manager, 'add_job',
+                        lambda **kw: captured.update(kw) or 'job')
+    monkeypatch.setattr(svr, 'seedvr2_missing_nodes', lambda: [])
+    monkeypatch.setattr(svr, 'tiling_available', lambda *a, **k: True)
+    monkeypatch.setattr(svr, 'full_frame_ceiling_mp', lambda *a, **k: 13.2)
+    with app.app_context():
+        # Start from the shipped defaults every time: save_config MERGES, so a
+        # previous call's tile size would otherwise still be in the file and the
+        # "default" half of these tests would silently assert nothing.
+        config.save_config({'comfyui': {'base_dir': str(base)},
+                            'seedvr2': dict(config.DEFAULTS['seedvr2'])})
+        config.save_config(settings)
+        comfy_model_paths.clear_cache()
+        svr.enqueue_seedvr2_upscale('u1', 'source.png', source_path=str(src))
+    return captured['workflow_data']
+
+
+def test_the_tile_size_setting_reaches_the_submitted_workflow(app, tmp_path, monkeypatch):
+    """THE propagation proof for issue #32's settings half. A non-default tile
+    side must appear in the graph ComfyUI is actually handed — in the TTP tiler
+    (what a pass holds) AND in the VAE's tiled encode/decode (the same memory
+    decision, one node down)."""
+    from app.services import seedvr2_helper as svr
+    g = _enqueue_and_capture(app, tmp_path, monkeypatch,
+                             {'seedvr2': {'resolution': 2160, 'tile_px': 768}})
+    tiler = next(n for n in g.values() if n['class_type'] == 'TTP_Image_Tile_Batch')
+    assert tiler['inputs']['tile_width'] == 768
+    assert tiler['inputs']['tile_height'] == 768
+    vae = next(n for n in g.values() if n['class_type'] == 'SeedVR2LoadVAEModel')
+    assert vae['inputs']['encode_tile_size'] == 768
+    assert vae['inputs']['decode_tile_size'] == 768
+    assert vae['inputs']['decode_tile_overlap'] == 96
+    up = next(n for n in g.values() if n['class_type'] == 'SeedVR2VideoUpscaler')
+    # A tile is upscaled at the TILE's size, never the frame's.
+    assert up['inputs']['resolution'] == 768
+    # …and the default still submits the contributed 1024.
+    d = _enqueue_and_capture(app, tmp_path, monkeypatch, {'seedvr2': {'resolution': 2160}})
+    assert next(n for n in d.values()
+                if n['class_type'] == 'TTP_Image_Tile_Batch')['inputs']['tile_width'] == svr.TILE_PX
+
+
+def test_the_tile_size_also_reaches_the_FULL_frame_lane(app, tmp_path, monkeypatch):
+    """The full-frame lane runs a tiled VAE too, so this setting saves memory
+    even for someone who never installed the tiling node pack — the person most
+    likely to need it. ('never' stands in for that install: same lane, and it is
+    also the setting someone picks after seeing a seam.)"""
+    g = _enqueue_and_capture(app, tmp_path, monkeypatch,
+                             {'seedvr2': {'resolution': 1080, 'tile_px': 512,
+                                          'tiling': 'never'}})
+    assert not any(n['class_type'].startswith('TTP_') for n in g.values())  # full lane
+    vae = next(n for n in g.values() if n['class_type'] == 'SeedVR2LoadVAEModel')
+    assert vae['inputs']['encode_tile_size'] == 512
+    assert vae['inputs']['encode_tile_overlap'] == 64
+
+
+def test_the_tiling_threshold_setting_decides_the_lane(app, tmp_path, monkeypatch):
+    """A 1080 target is left whole by default; lowering the crossover makes the
+    SAME request tile. That is the lane choice moving because of a setting, not
+    because of the geometry."""
+    full = _enqueue_and_capture(app, tmp_path, monkeypatch,
+                                {'seedvr2': {'resolution': 1080}})
+    assert not any(n['class_type'].startswith('TTP_') for n in full.values())
+    tiled = _enqueue_and_capture(app, tmp_path, monkeypatch,
+                                 {'seedvr2': {'resolution': 1080,
+                                              'tile_threshold': 640}})
+    assert any(n['class_type'] == 'TTP_Image_Tile_Batch' for n in tiled.values())
+
+
+def test_the_pinned_vae_reaches_the_loader_node(app, tmp_path, monkeypatch):
+    from app.services import seedvr2_helper as svr
+    g = _enqueue_and_capture(app, tmp_path, monkeypatch, {'seedvr2': {}})
+    vae = next(n for n in g.values() if n['class_type'] == 'SeedVR2LoadVAEModel')
+    assert vae['inputs']['model'] == svr.CANONICAL_VAE
+
+
+def test_a_vae_named_nothing_like_one_can_be_pinned(app, tmp_path):
+    """The whole reason `seedvr2.vae` exists. The automatic path finds a file
+    whose NAME says vae; someone whose file is called something else had no way
+    to say so, and 'seedvr2_vae' missing meant the engine simply refused to run.
+    A pin is therefore matched against the whole folder, not re-filtered through
+    the heuristic that failed."""
+    from app import config
+    from app.services import seedvr2_helper as svr, comfy_model_paths
+    base = _make_comfyui(tmp_path)
+    _install_weights(base, svr.CANONICAL_DIT, 'seedvr2_ema_decoder.safetensors')
+    with app.app_context():
+        config.save_config({'comfyui': {'base_dir': str(base)}})
+        comfy_model_paths.clear_cache()
+        assert svr.resolve_seedvr2_vae() is None          # nothing looks like a VAE
+        assert svr.seedvr2_missing_assets() == ['seedvr2_vae']
+        config.save_config({'seedvr2': {'vae': 'seedvr2_ema_decoder.safetensors'}})
+        assert svr.resolve_seedvr2_vae() == 'seedvr2_ema_decoder.safetensors'
+        assert svr.seedvr2_missing_assets() == []
+        # …and the picker still offers it, flagged for what it is, so the setting
+        # is reachable from the UI and not only from config.json.
+        choices = {c['file']: c['likely_vae'] for c in svr.vae_choices()}
+        assert choices == {svr.CANONICAL_DIT: False,
+                           'seedvr2_ema_decoder.safetensors': False}
+
+
+def test_a_pinned_vae_that_is_absent_falls_back_instead_of_being_submitted(app, tmp_path):
+    """Same rule as the DiT pin: the loader DOWNLOADS an unknown name, so a stale
+    pin must degrade to what is on disk, never be passed through."""
+    from app import config
+    from app.services import seedvr2_helper as svr, comfy_model_paths
+    base = _make_comfyui(tmp_path)
+    _install_weights(base, svr.CANONICAL_DIT, svr.CANONICAL_VAE)
+    with app.app_context():
+        config.save_config({'comfyui': {'base_dir': str(base)},
+                            'seedvr2': {'vae': 'a_vae_from_another_install.safetensors'}})
+        comfy_model_paths.clear_cache()
+        assert svr.resolve_seedvr2_vae() == svr.CANONICAL_VAE
+        # An explicit argument still wins over the setting, like the DiT resolver.
+        assert svr.resolve_seedvr2_vae(svr.CANONICAL_VAE) == svr.CANONICAL_VAE
+
+
 def test_only_an_installed_build_is_ever_submitted(app, tmp_path):
     """The loader nodes DOWNLOAD an unknown name on first use. A pin pointing at a
     build that is not on disk must therefore fall back to one that is, never be

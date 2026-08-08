@@ -13,7 +13,7 @@ import {
 import { toOverrideMap } from '../utils/canvasPlacement';
 import { toImageNodeMap, visibleImageNodes } from '../utils/canvasImageNodes';
 import { layoutImageNodes } from '../utils/canvasImageGroups';
-import { placeImageBatch } from '../utils/canvasPinBatch';
+import { placeImageBatch, tidyGroupRows } from '../utils/canvasPinBatch';
 import CanvasDatasetFilter from '../components/canvas/CanvasDatasetFilter';
 import LineageCanvas from '../components/canvas/LineageCanvas';
 import { HelpBadge } from '../help/HelpMode';
@@ -226,31 +226,47 @@ export default function CanvasPage() {
         if (!map) continue;
         const tree = trees[id]?.tree;
         const graph = tree ? buildLineageGraph(tree) : null;
-        /* 🖼🖼 A picture that is part of a side-by-side GROUP is left exactly
-           where it is. Same argument as the closed pins just below: a strip is
-           a deliberate arrangement the user built by hand, and re-flowing its
-           members one by one would not tidy it — it would take it apart.
-           ✦ Tidy up rebuilds the automatic tree; it has never been the button
-           that undoes what you assembled on purpose. (The way out of a group is
-           the group's own ✕, or dragging its pictures back off it.) */
-        const nodes = visibleImageNodes(map).filter((n) => !n.groupId);
-        if (!nodes.length) continue;
-        const res = placeImageBatch({
-          graph,
-          // …and nothing may land ON one of those strips either.
-          existing: layoutImageNodes(visibleImageNodes(map))
-            .filter((r) => r.kind === 'group')
-            .map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h })),
-          images: nodes.map((n) => ({ id: n.imageId, dataset_id: id,
-            record_id: n.image?.record_id, step: n.image?.step })),
-          max: nodes.length,
-        });
         const lane = { ...map };
         const rows = [];
-        for (const p of res.placed) {
-          lane[p.imageId] = { ...lane[p.imageId], x: p.x, y: p.y, w: p.w, h: p.h };
-          rows.push({ image_id: p.imageId, x: p.x, y: p.y, w: p.w, h: p.h, visible: true });
+
+        /* 🖼🖼 STRIPS FIRST, and each as ONE object.
+           A picture can now be parked anywhere on the board, its own lane's
+           corner included — so "leave the groups alone", which was right while a
+           strip could only ever be inside its lane, would now mean ✦ Tidy up
+           walking past a whole assembled comparison stranded thousands of units
+           off the board, with no way back short of hunting for it at 10 % zoom.
+           A strip therefore comes home too. What the old rule was really
+           protecting is untouched: only the ANCHOR's row is written, the strip
+           is derived from it, and no membership is sent — so a tidy can move a
+           group but can never take one apart. */
+        const strips = tidyGroupRows({
+          graph, layout: layoutImageNodes(visibleImageNodes(map)),
+        });
+        for (const r of strips.rows) {
+          lane[r.imageId] = { ...lane[r.imageId], x: r.x, y: r.y, w: r.w, h: r.h };
+          rows.push({ image_id: r.imageId, x: r.x, y: r.y, w: r.w, h: r.h, visible: true });
         }
+
+        const nodes = visibleImageNodes(map).filter((n) => !n.groupId);
+        if (nodes.length) {
+          const res = placeImageBatch({
+            graph,
+            // …and nothing may land ON one of those strips either — nor on the
+            // BAR above one, which is the group's only grip and carries its ✕.
+            // These are the footprints the strips ended up on, handed straight
+            // back by tidyGroupRows, so the two passes cannot disagree about
+            // what is free.
+            existing: strips.boxes,
+            images: nodes.map((n) => ({ id: n.imageId, dataset_id: id,
+              record_id: n.image?.record_id, step: n.image?.step })),
+            max: nodes.length,
+          });
+          for (const p of res.placed) {
+            lane[p.imageId] = { ...lane[p.imageId], x: p.x, y: p.y, w: p.w, h: p.h };
+            rows.push({ image_id: p.imageId, x: p.x, y: p.y, w: p.w, h: p.h, visible: true });
+          }
+        }
+
         next[id] = lane;
         // One write for the lane, not one per picture: a board carrying twenty
         // pins used to fire twenty requests at the server that is probably also
@@ -350,6 +366,9 @@ export default function CanvasPage() {
       // is one to show at all — a concept or a style dataset has no reference.
       refFilename: row?.ref_filename || null,
       kind: row?.kind || 'character',
+      // 🧬 The dataset's trigger word, carried on the lane so a pick taken from
+      // it knows what a blend will prepend to the prompt.
+      triggerWord: row?.trigger_word || null,
       status: state?.status || 'loading',
       error: state?.error || null,
       // The RAW tree, not a laid-out graph: the canvas has to be able to lay it
@@ -363,13 +382,19 @@ export default function CanvasPage() {
 
   return (
     <div>
-      <header className="mb-3">
+      {/* 📱 The blurb is the first thing a phone can afford to lose. It explains
+          the page once; after that it is 72 px of the 800 this screen has, spent
+          above the board, on every single load — and it was those 72 px that
+          pushed the frame's bottom edge past the fold at 400 px. It stays in full
+          from `sm` up, and the ? badge next to the title carries the same
+          explanation at every width, so nothing is actually hidden. */}
+      <header className="mb-2 sm:mb-3">
         <h1 className="flex items-center gap-2 text-lg font-semibold text-content">
           <span aria-hidden>◉</span> LoRA Canvas
           <span className="px-1.5 py-0.5 rounded border border-amber-400/50 bg-amber-500/10 text-amber-300 text-[0.625rem] font-semibold uppercase tracking-wide">Beta</span>
           <HelpBadge topic="page-canvas" />
         </h1>
-        <p className="mt-1 text-content-muted text-[0.75rem]">
+        <p className="mt-1 hidden text-content-muted text-[0.75rem] sm:block">
           Every training run you have made, on one board: each dataset gets a lane, each run a card,
           and a continuation is joined to the exact checkpoint it resumed from.
         </p>

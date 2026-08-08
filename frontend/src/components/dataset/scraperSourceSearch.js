@@ -52,6 +52,44 @@ export function resolveScanTarget({ nextPage, explicitUrl, draftUrl, activeScanU
   return typeof candidate === 'string' ? candidate.trim() : '';
 }
 
+// DuckDuckGo's own SafeSearch flag. The scan API accepts a URL and nothing else,
+// so the setting travels inside the URL and the backend source reads it back —
+// no request field is added and the contract is unchanged.
+const WEB_SEARCH_SAFE_OFF = '-2';
+const WEB_SEARCH_SAFE_STRICT = '1';
+
+export function normalizeWebSearchKeyword(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+export function buildWebSearchUrl(keyword, safe = false) {
+  const query = normalizeWebSearchKeyword(keyword);
+  if (!query) return '';
+  const params = new URLSearchParams({
+    q: query, iax: 'images', ia: 'images',
+    kp: safe ? WEB_SEARCH_SAFE_STRICT : WEB_SEARCH_SAFE_OFF,
+  });
+  return `https://duckduckgo.com/?${params.toString()}`;
+}
+
+/**
+ * Scan item → the payload posted to scrape-import. Pexels items carry
+ * attribution fields websearch items don't have (photographer, photographer_url);
+ * websearch items carry the page they were found on (source_url) instead. Both
+ * need `platform` forwarded or the backend has nothing to key provenance on.
+ */
+export function scrapeItemToImportPayload(it) {
+  const base = { url: it.url, title: it.title || '' };
+  if (it.platform === 'pexels') {
+    return { ...base, platform: 'pexels', source_url: it.source_url,
+      photographer: it.photographer, photographer_url: it.photographer_url };
+  }
+  if (it.platform === 'websearch') {
+    return { ...base, platform: 'websearch', source_url: it.source_url };
+  }
+  return base;
+}
+
 export function loadPexelsAuthorization(storage) {
   const target = storageFor(storage);
   if (!target) return false;

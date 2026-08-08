@@ -37,6 +37,10 @@
  *    1024 px is not a flip-flop point either.
  *  - `locked`: while a pixel edit is in flight the current placement is
  *    returned verbatim, whatever the geometry says.
+ * Both dead bands apply ONLY once a placement is in force. The opening decision
+ * passes no `current` and is therefore made on the bare inequality: there is
+ * nothing to stabilise before the first frame, and biasing it would just pin the
+ * default.
  * And the intrinsic size is REMEMBERED per image id (below), so the decision is
  * already made the next time that image opens instead of being re-derived from
  * an `onLoad` the user can watch happen.
@@ -62,7 +66,8 @@ const positive = (n) => typeof n === 'number' && Number.isFinite(n) && n > 0;
  * @param {number} input.viewportHeight
  * @param {number} [input.imageWidth]   intrinsic px — unknown until the image loads
  * @param {number} [input.imageHeight]
- * @param {'rail'|'bottom'} [input.current]  placement in force right now
+ * @param {'rail'|'bottom'|null} [input.current]  placement in force right now;
+ *   omit it for the FIRST decision (mount), where there is nothing to stabilise
  * @param {boolean} [input.comparing]  side-by-side mode: both panes want the width
  * @param {boolean} [input.locked]     an action is running — do not move anything
  * @returns {'rail'|'bottom'}
@@ -72,11 +77,16 @@ export function decideActionPlacement({
   viewportHeight,
   imageWidth,
   imageHeight,
-  current = 'bottom',
+  current = null,
   comparing = false,
   locked = false,
 } = {}) {
   const held = current === 'rail' ? 'rail' : 'bottom';
+  // No placement in force yet = this is the opening decision. Hysteresis exists
+  // to stop a bar changing side under a pointer while a window edge is dragged;
+  // applied to the FIRST answer it is not stability, it is a thumb on the scale
+  // towards whatever the default happens to be — and the default is 'bottom'.
+  const settling = current === 'rail' || current === 'bottom';
   // Comparison first, and it outranks the lock: entering it is a full relayout
   // the user asked for, and its two panes split the width the rail would take.
   if (comparing) return 'bottom';
@@ -86,12 +96,14 @@ export function decideActionPlacement({
   // guess: guessing is what makes the bar jump when the image finally paints.
   if (!positive(imageWidth) || !positive(imageHeight)) return 'bottom';
 
-  const floor = held === 'rail' ? RAIL_EXIT_VIEWPORT_PX : MIN_RAIL_VIEWPORT_PX;
+  const floor = (settling && held === 'rail') ? RAIL_EXIT_VIEWPORT_PX : MIN_RAIL_VIEWPORT_PX;
   if (viewportWidth < floor) return 'bottom';
 
   const aspect = imageWidth / imageHeight;
   const leftover = (viewportWidth - RAIL_WIDTH_PX) / viewportHeight;
-  const margin = held === 'rail' ? 1 + PLACEMENT_HYSTERESIS : 1 - PLACEMENT_HYSTERESIS;
+  const margin = !settling
+    ? 1
+    : (held === 'rail' ? 1 + PLACEMENT_HYSTERESIS : 1 - PLACEMENT_HYSTERESIS);
   return aspect <= leftover * margin ? 'rail' : 'bottom';
 }
 

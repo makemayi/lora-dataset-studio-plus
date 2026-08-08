@@ -1,20 +1,30 @@
 /** One curation tile: image + keep/reject + source/framing badges + caption + crop. */
+import { improvementBadge } from './improveCandidates.js';
 import { useEffect, useRef, useState } from 'react';
 import { displayLabel } from '../../utils/labels';
+// WHO wrote this tile's caption — the per-image half of the provenance the pass
+// already reports in aggregate (utils/captionEngines.js).
+import { captionIsAsserted, captionOriginInfo } from '../../utils/captionOrigin.js';
 import { isSmallImageRescueRow } from '../../utils/smallImageRescue';
 import CaptionEditorDialog from './CaptionEditorDialog';
 import PromptEditPopover from './PromptEditPopover';
-import PexelsAttribution from './PexelsAttribution';
+import SourceAttribution from './SourceAttribution';
 import { ENGINE_ACCENTS, ENGINE_LABELS } from './engineSelection.js';
 import { canRegenerateGeneric, improveRerunAffordance, isImageImproveRow } from './improveRerun.js';
 import { rememberImageRatio } from './lightboxActionPlacement.js';
 import { FACE_BADGE_CLASS, PROVENANCE_BADGE_CLASS, TILE_BADGE_STACK_CLASS,
   WATERMARK_BADGE_CLASS } from './tileBadgeLayout.js';
 
+/* Provenance wording per STORED derivation kind. `klein_image_improve` is a
+   legacy key: it predates the second engine and is written in user databases,
+   so a SeedVR2 result carries it too and the badge must NOT claim Klein made
+   it. The engine is named by the candidate's own label ('Klein upscale &
+   improve' / 'SeedVR2 upscale'), which is where a per-row truth belongs; this
+   badge says only what KIND of row it is, which is true for both. */
 const DERIVATION_LABEL = {
   klein_small_image: 'Klein rescue',
   small_image_source: 'rescue original',
-  klein_image_improve: 'Klein improve',
+  klein_image_improve: 'upscale candidate',
 };
 
 const STATUS_CLS = {
@@ -69,12 +79,24 @@ const WATERMARK_BADGE = {
   failed: { icon: '⚠', cls: 'text-red-300', text: 'watermark', label: 'Watermark removal failed' },
 };
 
+/* READS ARE NOT WRITES.
+ * `busy` means "a pass is running on this dataset, so nothing here may CHANGE
+ * it". It used to switch off the whole tile — including the button that opens
+ * the image and the tick that selects it, neither of which writes anything —
+ * which is how "during a generation everything around the dataset is blocked"
+ * became the app's most-reported frustration. Inspecting and ticking now ignore
+ * `busy` entirely; every button below that touches pixels, status, captions or
+ * files still refuses, and `busyReason` is the sentence it shows instead of
+ * going quietly grey.
+ */
 export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, onCrop, onDelete,
-                                          onLockToggle, onMirror, mirrorBusy = false, busy = false,
+                                         onLockToggle, onMirror, mirrorBusy = false, busy = false,
+                                         busyReason = null,
                                           onScoreFace, scoreFaceBusy = false, faceScoringBusy = false, faceScoringBlocked = null,
                                           onRegenerate, onReimprove, onFaceSwap, hasRef = false, onView, nonce = 0, faceThresholds,
                                           selected = false, onToggleSelect, tileSize = 'M',
-                                          datasetKind = 'character', dualCaptions = false }) {
+                                          datasetKind = 'character', dualCaptions = false,
+                                          improvementState = undefined }) {
   const [cap, setCap] = useState(img.caption || '');
   const [captionEditorOpen, setCaptionEditorOpen] = useState(false);
   // ✏️ edit-prompt bubble open state (regenerate this tile with an edited prompt).
@@ -106,8 +128,10 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
       : faceScoringBusy
         ? 'Face scoring is already running for another image…'
         : busy
-          ? 'Wait for the current dataset action to finish before scoring.'
+          ? (busyReason || 'Wait for the current dataset action to finish before scoring.')
           : 'Score facial resemblance to the reference');
+  // Every refused write says WHICH pass holds it; idle, each keeps its own words.
+  const refused = busy ? busyReason : null;
 
   const fb = faceBadge(img, faceThresholds);
   const wb = WATERMARK_BADGE[img.watermark_state];
@@ -131,6 +155,9 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
   // can go into title/aria-label — the badge is clamped to two lines at the
   // bottom of a narrow tile, and a truncated engine name must stay readable
   // on hover and to a screen reader.
+  // 'ready' | 'generating' | undefined, decided once for the whole grid
+  // (DatasetGrid) so each tile is a lookup, not a scan of every sibling.
+  const improvementBadgeInfo = improvementBadge(improvementState);
   const originText = DERIVATION_LABEL[img.derivation_kind]
     || (img.source === 'import' ? 'real' : 'generated');
   const engineLabel = ENGINE_ACCENTS[img.engine] ? ENGINE_LABELS[img.engine] : null;
@@ -170,17 +197,25 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             className="dataset-grid-item__actions absolute bottom-1 left-1 z-10 flex items-center justify-center w-6 h-6 rounded bg-black/60 cursor-pointer"
             title="Select for bulk actions"
             onClick={(e) => e.stopPropagation()}>
-            <input type="checkbox" checked={selected} disabled={busy}
+            {/* NOT gated on `busy`: ticking changes nothing on the server, and
+                a running pass was handed its id list at launch time — a
+                selection made afterwards cannot shift what it is processing.
+                What DOES gate this tick is a bulk action currently CONSUMING
+                the selection, and that one is decided by the grid, which
+                withholds `onToggleSelect` entirely. */}
+            <input type="checkbox" checked={selected}
               onChange={() => onToggleSelect(img.id)}
               aria-label={`Select ${displayLabel(img.variation_label) || 'this image'} for bulk actions`}
               className="w-4 h-4 accent-indigo-500 cursor-pointer" />
           </label>
         )}
         {url ? (
+          // A pure read: it opens the same bytes the tile is already showing.
+          // No `disabled={busy}` — that is the whole point of this change.
           <button type="button" onClick={() => onView?.(img)}
             title="Inspect (zoom)"
             aria-label={`Inspect ${displayLabel(img.variation_label) || 'the image'} full screen`}
-            className="block w-full h-full cursor-zoom-in">
+            className="block w-full h-full cursor-zoom-in disabled:cursor-not-allowed">
             {/* The tile and the lightbox request the SAME url, so the tile is
                 where the intrinsic size is known FIRST. Recording it here is
                 what lets the lightbox open with its actions already in the
@@ -215,6 +250,19 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             provenance badge back to the top-left as soon as the TILE — not the
             window — is wide enough to hold it next to the action buttons. */}
         <div className={TILE_BADGE_STACK_CLASS}>
+          {/* An upscale of THIS image is waiting (or still rendering). The
+              candidate is a separate row that lands on its own tile elsewhere
+              in the grid, so from here nothing looked like it had happened —
+              and the pass got re-run on images that already had a result,
+              paying GPU time for a duplicate. */}
+          {improvementBadgeInfo && (
+            <span className={`${WATERMARK_BADGE_CLASS} bg-black/70 ${
+              improvementBadgeInfo.tone === 'ready'
+                ? 'text-indigo-200' : 'text-white/70'}`}
+              title={improvementBadgeInfo.title} aria-label={improvementBadgeInfo.title}>
+              {improvementBadgeInfo.text}
+            </span>
+          )}
           {wb && (
             <span className={`${WATERMARK_BADGE_CLASS} bg-black/70 ${wb.cls}`}
               title={(img.watermark_state === 'detected' && WATERMARK_ROUTE_HINT[img.watermark_route]) || wb.label}>
@@ -256,16 +304,18 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
           {canRegenerate && (
             <button type="button"
               onClick={(e) => { e.stopPropagation(); onRegenerate?.(img.id); }}
-              title="Regenerate this variation (new seed)"
-              aria-label="Regenerate this variation (new seed)"
-              className="px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px]">🔄</button>
+              disabled={busy}
+              title={refused || 'Regenerate this variation (new seed)'}
+              aria-label={refused || 'Regenerate this variation (new seed)'}
+              className="px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">🔄</button>
           )}
           {canRegenerate && (
             <button type="button"
               onClick={(e) => { e.stopPropagation(); setEditingPrompt(true); }}
-              title="Edit the prompt, then regenerate this variation"
-              aria-label="Edit the prompt, then regenerate this variation"
-              className="px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px]">✏️</button>
+              disabled={busy}
+              title={refused || 'Edit the prompt, then regenerate this variation'}
+              aria-label={refused || 'Edit the prompt, then regenerate this variation'}
+              className="px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">✏️</button>
           )}
           {canFaceSwap && onFaceSwap && (
             <button type="button"
@@ -278,7 +328,8 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             <button type="button"
               onClick={(e) => { e.stopPropagation(); onReimprove?.(img.id); }}
               disabled={busy || !rerunImprove.enabled}
-              title={rerunImprove.title} aria-label={rerunImprove.title}
+              title={refused || rerunImprove.title}
+              aria-label={refused || rerunImprove.title}
               className="grid min-h-7 min-w-7 place-items-center rounded bg-black/60 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-45">
               <span aria-hidden="true">🔄✨</span>
             </button>
@@ -288,18 +339,20 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               onClick={(e) => { e.stopPropagation(); onMirror(img.id); }}
               disabled={busy || mirrorBusy}
               aria-busy={mirrorBusy}
-              aria-label={mirrorBusy
+              aria-label={refused || (mirrorBusy
                 ? `Mirroring ${displayLabel(img.variation_label) || 'this image'} horizontally`
-                : `Mirror ${displayLabel(img.variation_label) || 'this image'} horizontally`}
-              title={mirrorBusy ? 'Mirroring horizontally…' : 'Mirror horizontally (flip left and right)'}
+                : `Mirror ${displayLabel(img.variation_label) || 'this image'} horizontally`)}
+              title={refused
+                || (mirrorBusy ? 'Mirroring horizontally…' : 'Mirror horizontally (flip left and right)')}
               className="grid min-h-7 min-w-7 place-items-center rounded bg-black/60 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-45">
               <span aria-hidden="true">{mirrorBusy ? '…' : '⇆'}</span>
             </button>
           )}
           {url && (
             <button type="button" onClick={(e) => { e.stopPropagation(); onCrop(img); }}
-              title="Crop" aria-label="Crop"
-              className="px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px]">✂</button>
+              disabled={busy}
+              title={refused || 'Crop'} aria-label={refused || 'Crop'}
+              className="px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">✂</button>
           )}
           {onLockToggle && (
             <button type="button"
@@ -315,13 +368,13 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             <button type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                if (img.is_locked) return;
+                if (img.is_locked || busy) return;
                 if (window.confirm('Permanently delete this image?')) onDelete(img.id);
               }}
-              disabled={img.is_locked}
-              title={img.is_locked ? 'Locked — unlock to delete' : 'Delete permanently'}
-              aria-label={img.is_locked ? 'Locked — unlock to delete' : 'Delete permanently'}
-              className="px-1.5 py-0.5 rounded bg-red-700/80 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-40">🗑</button>
+              disabled={busy || img.is_locked}
+              title={img.is_locked ? 'Locked — unlock to delete' : (refused || 'Delete permanently')}
+              aria-label={img.is_locked ? 'Locked — unlock to delete' : (refused || 'Delete permanently')}
+              className="px-1.5 py-0.5 rounded bg-red-700/80 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">🗑</button>
           )}
         </div>
         {editingPrompt && (
@@ -331,7 +384,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             onClose={() => setEditingPrompt(false)} />
         )}
       </div>
-      <PexelsAttribution metadata={img.source_metadata}
+      <SourceAttribution metadata={img.source_metadata}
         className="mx-1.5 mt-1 block text-[0.625rem] leading-tight text-content-subtle" />
       {isRescueDerived ? (
         <p className="m-1.5 rounded border border-indigo-400/30 bg-indigo-500/10 px-2 py-1 text-center text-[0.625rem] text-indigo-200"
@@ -341,8 +394,10 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
       ) : (
         <div className="dataset-grid-item__actions flex gap-1 p-1.5">
           <button type="button" onClick={() => onStatus(img.id, img.status === 'keep' ? 'pending' : 'keep')}
-            title="Keep" aria-label="Keep" aria-pressed={img.status === 'keep'}
-            className={`flex-1 py-1 rounded text-[11px] ${img.status === 'keep' ? 'bg-green-600 text-white' : 'bg-surface text-content-muted'}`}>✓</button>
+            disabled={busy}
+            title={refused || 'Keep'} aria-label={refused || 'Keep'}
+            aria-pressed={img.status === 'keep'}
+            className={`flex-1 py-1 rounded text-[11px] disabled:cursor-not-allowed disabled:opacity-45 ${img.status === 'keep' ? 'bg-green-600 text-white' : 'bg-surface text-content-muted'}`}>✓</button>
           <button type="button"
             onClick={() => {
               // Rejecting a GENERATED image offers an immediate retry of the same
@@ -355,34 +410,58 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               }
               onStatus(img.id, img.status === 'reject' ? 'pending' : 'reject');
             }}
-            title="Reject (offers a regeneration)" aria-label="Reject" aria-pressed={img.status === 'reject'}
-            className={`flex-1 py-1 rounded text-[11px] ${img.status === 'reject' ? 'bg-red-600 text-white' : 'bg-surface text-content-muted'}`}>✕</button>
+            disabled={busy}
+            title={refused || 'Reject (offers a regeneration)'} aria-label={refused || 'Reject'}
+            aria-pressed={img.status === 'reject'}
+            className={`flex-1 py-1 rounded text-[11px] disabled:cursor-not-allowed disabled:opacity-45 ${img.status === 'reject' ? 'bg-red-600 text-white' : 'bg-surface text-content-muted'}`}>✕</button>
         </div>
       )}
       {img.status === 'keep' && (
         <div className="m-1.5 mt-0 flex flex-col gap-1">
           <div className="dataset-grid-item__actions flex items-center justify-end gap-1">
             <button type="button" onClick={() => setCaptionEditorOpen(true)}
-              title="Open a larger caption editor"
-              aria-label="Expand caption editor"
-              className="rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] text-content-muted hover:text-content">
+              disabled={busy}
+              title={refused || 'Open a larger caption editor'}
+              aria-label={refused || 'Expand caption editor'}
+              className="rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] text-content-muted hover:text-content disabled:cursor-not-allowed disabled:opacity-45">
               ⛶ Expand
             </button>
             {cap && (
               <button type="button"
                 onClick={() => { editingRef.current = false; setCap(''); onCaption(img.id, ''); }}
-                title="Delete this image's caption (then “Caption” regenerates it via JoyCaption)"
-                aria-label="Delete this image's caption"
-                className="rounded border border-red-500/40 bg-red-500/15 px-1.5 py-0.5 text-[10px] text-red-300 hover:bg-red-500/25">
+                disabled={busy}
+                title={refused || 'Delete this image’s caption (then “Caption” regenerates it via JoyCaption)'}
+                aria-label={refused || 'Delete this image’s caption'}
+                className="rounded border border-red-500/40 bg-red-500/15 px-1.5 py-0.5 text-[10px] text-red-300 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-45">
                 🗑 Caption
               </button>
             )}
           </div>
+          {/* WHO WROTE THE TEXT IN THE BOX BELOW.
+              ITS OWN LINE, not a badge slipped into the action row: at the M tile
+              density that row already holds ⛶ Expand and 🗑 Caption, and a third
+              item there is clipped at the tile's left edge — measured headless at
+              that density, where the chip read "yCaption".
+              ALWAYS VISIBLE, unlike that row: this is a readout, not an action, and
+              a provenance you have to hover to discover is one nobody discovers.
+              Only when there IS a caption and its author was recorded — stamping
+              "author not recorded" on every legacy tile would be a grid of identical
+              chips, which is noise; the expanded editor has room to say it and does. */}
+          {(cap || '').trim() && captionOriginInfo(img.caption_origin).known && (
+            <span title={captionOriginInfo(img.caption_origin).title}
+              aria-label={captionOriginInfo(img.caption_origin).short}
+              className={`block truncate text-[10px] leading-none ${
+                captionIsAsserted(img.caption_origin)
+                  ? 'text-emerald-300' : 'text-content-subtle'}`}>
+              {captionOriginInfo(img.caption_origin).chip}
+            </span>
+          )}
           <textarea value={cap} onChange={(e) => setCap(e.target.value)}
+            disabled={busy} title={refused || undefined}
             onFocus={() => { editingRef.current = true; }}
             onBlur={() => {
               editingRef.current = false;
-              if (cap !== (img.caption || '')) onCaption(img.id, cap);
+              if (!busy && cap !== (img.caption || '')) onCaption(img.id, cap);
             }}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.currentTarget.blur(); } }}
             rows={2} placeholder={datasetKind === 'style'
@@ -397,6 +476,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
         <CaptionEditorDialog initialCaption={cap} imageUrl={url}
           datasetId={datasetId} imageId={img.id}
           initialShortCaption={img.caption_short || ''} showShort={dualCaptions}
+          captionOrigin={img.caption_origin} shortCaptionOrigin={img.caption_short_origin}
           imageLabel={displayLabel(img.variation_label)}
           onClose={() => setCaptionEditorOpen(false)}
           /* Awaited, and its answer is handed BACK: an unawaited handler cannot
@@ -406,6 +486,10 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
              copy is only advanced on a success — otherwise a failed save would
              show the new text on a tile the server never accepted. */
           onSave={async (nextCaption, nextShort) => {
+            if (busy) {
+              return { ok: false,
+                error: refused || 'Wait for the running dataset pass to finish before saving.' };
+            }
             // Persist when either field changed; `nextShort` is undefined unless dual is on.
             const changed = nextCaption !== (img.caption || '')
               || (nextShort !== undefined && nextShort !== (img.caption_short || ''));

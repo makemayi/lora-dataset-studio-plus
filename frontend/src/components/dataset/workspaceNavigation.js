@@ -15,6 +15,10 @@ const AVAILABILITY = {
   character: (c) => boolStatus(c.kind === 'character'),
   smallImageRescue: (c) => boolStatus(c.smallImageRescue > 0),
   watermarkDetected: (c) => boolStatus(c.watermarkDetected > 0),
+  // Its own predicate rather than watermarkDetected: the bulk-reject button is
+  // rendered on what can REALLY be rejected, and a nav entry that scrolls to a
+  // button which is not on screen is worse than no entry.
+  watermarkRejectable: (c) => boolStatus(c.watermarkRejectable > 0),
   unused: (c) => boolStatus(c.unused > 0),
   leakReview: (c) => boolStatus(c.kind !== 'style' && c.hasKeptImages && c.hasLeakMetadata),
   hasCaptionedKept: (c) => boolStatus(c.hasCaptionedKept),

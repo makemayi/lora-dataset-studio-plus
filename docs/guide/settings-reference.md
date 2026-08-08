@@ -159,7 +159,7 @@ It is not installed by the app. It needs, inside your own ComfyUI:
 
 The engine card in the workspace names whichever of these is still missing, one actionable line at a time, and the app never guesses a download URL for weights it cannot verify. Every path above is found by *searching* your ComfyUI model roots — including any `extra_model_paths.yaml` roots — so a non-standard layout works untouched.
 
-Settings:
+Settings. The **four calibration dials** below (reference grounding, sampler steps, reference pull, identity LoRA strength) are editable **both here and in the 🧬 Krea 2 Edit tuning panel** of the workspace's *Generate variations* screen — same key, same endpoint, one value: whichever slider you move, the other screen shows the new number and every future Krea run uses it. The two **file-path** fields are on this page only, because they are filled once at install rather than adjusted while judging an image.
 
 - **Reference grounding** → `krea.grounding_px`. Range `512`–`1536`, default **`512`**. **The** dial of this engine: the resolution your reference is shown to the model's vision encoder at. At the low end it follows the shot description (more variety in pose, outfit and scene, looser likeness); **higher** values favor reference likeness and can copy the very pose and outfit you asked it to change. **512 is the dataset-restaging balance**: it keeps the prompt and selected catalog card in charge while preserving identity. Raise it deliberately when keeping the reference more closely matters than changing its pose. This is Krea-only: it does not change ChatGPT, Gemini/Nano Banana, OpenRouter, or Klein.
 - **Reference grounding, per framing** → `krea.grounding_px_by_framing.{face,bust,body,back}`. Blank (default) for a framing = use the dial above for it — nothing changes until you touch this. The same pixel budget is not equally strong on every framing: on a face close-up the reference IS almost entirely face, so identity is already solid and a LOWER value there buys more expression/angle/background variety without losing it; on a full-body shot the face is a small fraction of the same reference, so a HIGHER value can help identity hold up where it is most likely to drift.
@@ -174,12 +174,17 @@ Settings:
   - **Handoff (%)** → `krea.two_stage_handoff_percent` (default `16.67`, 0–100). Where stage 1 hands off to stage 2 in the denoising schedule — `0` uses only stage 2, `100` uses only stage 1.
   - **Stage 1 megapixels** → `krea.two_stage_base_megapixels` (default `1.0`, 0.1–16.0). The low-resolution first pass's target size.
   - **Final megapixels** → `krea.max_output_mp` (default `2.0`, 0.1–16.0). The two-stage path's final upscaled size — **and** the single-stage sampler's output-size cap above, since both share the same sizing call. Lowering it speeds up either path.
+- **Sampler steps** → `krea.steps`. Range `1`–`50`, default **`8`**, the value the model's own reference workflow uses. This base is guidance-distilled, so more steps mostly buy waiting: raise it only if detail looks unfinished. *(This line said "default 10" for a while — the shipped default has been 8.)*
+- **Base model file** → `krea.base_model`. **This is the GENERATION setting only** — the checkpoint ComfyUI loads for Krea 2 Identity Edit. It has **nothing to do with LoRA training**, which never reads it: training pulls its base from Hugging Face and picks it from the **Krea 2 training base** dropdown in the training panel (**Raw**, the default and the official recommendation — you train on Raw and apply the LoRA on Turbo at inference). Nobody can accidentally train on Turbo by leaving this field alone. *(The naming confusion was raised by strouder, GitHub #19.)* Blank (default) = the app picks a Krea 2 **Turbo** then **Raw** build from your ComfyUI. Set it only if you own several. Checkpoints that merely carry "krea" in their name but are not Krea 2 bases are **skipped on purpose** — the identity LoRA renders pure noise on them, which looks like a broken app rather than a wrong file. The field is a **searchable list of the Krea bases actually on disk** — the same candidates the app itself would elect, so a checkpoint it refuses is never offered; you can still type a name for a file you have not downloaded yet. **A name that is not on disk stops the engine** rather than falling back to automatic election: this exact fallback once had a whole training run on a third-party finetune nobody chose, because the field showed one file and the graph loaded another. **When the field is blank, the line under it names the build your runs actually load** — with two Krea checkpoints whose filenames both read as "turbo", the tie-break used to pick one silently, and the only way to find out was reading a finished PNG's metadata, long after the quality judgements had been made on a model nobody chose. The name is resolved server-side by the same code the generation path calls, never re-ranked in the browser. Clear the field to go back to automatic detection.
+- **Identity edit LoRA** → `krea.identity_lora`. A searchable list of the LoRAs on disk (typing a path still works). At its **shipped default** — the canonical download name, which nobody typed — nothing is there under that name means the app searches your LoRA folders for a `krea2_identity_edit` file, so a renamed download still works. **A name you chose yourself and that is not on disk stops the engine instead**, naming the file: the identity LoRA *is* the face transfer, and quietly substituting another one changes every image you generate. Clear the field to return to the automatic search.
 - **Krea 2 Edit generation LoRA presets** → `krea.generation_lora_presets`. Named,
   ordered combinations of **your own** LoRA files, chained after the identity-edit
   LoRA when Krea 2 Edit generates dataset images. Max 8 LoRAs per preset, 12
   presets; inside a preset the row order **is** the chain order. Per run you pick
-  one preset (or None, the default on every visit) in the workspace's 🧬 Krea 2
-  Edit tuning panel — the run sends only the preset's NAME and the app resolves
+  one preset in the workspace's 🧬 Krea 2 Edit tuning panel — which opens on
+  **Preset selected by default** → `krea.default_generation_lora_preset` (default:
+  empty = *None*), a starting point you can override for a single run without
+  rewriting the setting — the run sends only the preset's NAME and the app resolves
   the files from this list, so renaming a preset can never make a run load
   something you didn't configure. Strength runs to 6, and to **20** for utility
   LoRAs whose filename says `filter-bypass`: those have no measurable effect below
@@ -191,15 +196,25 @@ Settings:
   pointing at the **same file as Identity edit LoRA** is skipped too — it would
   chain the identity LoRA a second time on top of itself, summing both strengths
   into one delta well past what the file was trained for (visible as blocky,
-  posterized output, not a subtler quality loss). Empty by default. *(Preset
+  posterized output, not a subtler quality loss) — **the preset editor flags that
+  row as you write it** rather than leaving the only trace in the server log, and
+  it compares paths the way the server does, so a different separator or
+  capitalisation cannot dodge the warning. Empty by default. *(Preset
   mechanism by @waltm, Discord.)*
 
-The pipeline's reference boost is an internal Krea calibration, not a second user-facing likeness slider; use **Reference grounding** for that trade-off.
+Two more Krea calibration dials, on this page **and** in the **🧬 Krea 2 Edit tuning** panel of the workspace's *Generate variations* screen — that panel is where you judge what they do, so it is where you should be able to turn them. They were reachable only from there for a while, and reference grounding only from here, which meant "where do I change this?" had a different answer per dial. They are settings either way: moving a slider on either screen saves the value globally and it applies to **every** Krea run from now on. The panel says so above the sliders.
+
+- **Reference pull** → `krea.ref_boost`. Range `0`–`10`, default **`0.25`**. How hard the source latent is pushed back into the model at every denoising step. This is the lever for *"the subject doesn't look enough like my reference"* — raise it and likeness sharpens; raise it far and the model also recopies the composition, pose and outfit the shot card asked it to change. Historically it shipped **paired** with `grounding_px` (v1 = 1024 / 4.0, v2 = 512 / 1.0), so if you have raised grounding on its own you are on a combination no shipped profile ever calibrated — this is the dial that brings the pair back into balance.
+- **Identity LoRA strength** → `krea.identity_lora_strength`. Range `0`–`1.5`, default **`1.0`**. The weight applied to the Krea 2 identity-edit LoRA itself — the piece that carries the face across. Below 1 softens the likeness and leaves more room for the prompt; `0` disables the face transfer entirely; above 1 is past the weight the file was trained for and can look waxy or posterized rather than simply more similar.
+
+Both are re-clamped by the server on every run, so a hand-edited `config.json` out of range is corrected rather than obeyed.
 
 Two behaviours worth knowing before you build a dataset with it:
 
 - **The selected card's framing is honored.** Krea Fit v1.2 uses the selected catalog card's framing and aspect ratio (including its 1:1 / 3:4 shape) instead of copying the source photo's shape.
 - **Extra reference images (the "+" row, up to 3) are still ignored** — those exist for Nano Banana/Klein identity locking, not Krea. **Angle reference photos are different**: see below.
+- **The dataset's extra reference images are never used by Krea** — not when generating variations, and not when editing. Identity comes from the primary reference alone. Klein and the API engines are the ones that read those extra angles to strengthen identity.
+  **Krea's one spare slot lives in the ✦ Edit reference dialog instead.** Add an image there with **+** and it becomes the second input of that single edit. The edit model was trained on two-input edits where the second image is a *different* subject — another person, or a scene to place yours in ("scene first, subject second"). So use it to compose: *"put her in this room"*, *"next to this person"*. Another angle of the same face is off-label there and can come back duplicated, which is exactly why that slot is not wired to the dataset's angles.
 
 Outfits and expressions are steered differently here than on the other engines: this model preserves anything it is not *positively* told to change, so the catalog's "a different outfit (not the one in the reference)" phrasing is rewritten at generation time into a concrete garment ("wearing a red knit sweater"), picked from the shot's own name — so outfits genuinely differ across the dataset while regenerating one shot reproduces its own.
 
@@ -302,14 +317,59 @@ Settings:
 
 - **Default engine for ✨ Upscale & improve** → `improve.engine`. One of `klein`, `seedvr2`. Default **`klein`** — what every improve did before this setting existed. It governs the ✨ button on a single tile and ↻ Re-improve. **Bulk runs are never decided by it**: the selection toolbar shows one button per available engine and each states its trade-off, so a batch always says which pass it is about to run.
 - **Model build** → `seedvr2.model`. Blank (default) = the app resolves it: the 3B FP8 build when present, else whatever is in the folder. Only builds **already on disk** are offered in the dropdown — the pack's loader node downloads an unknown name on first use, and a dropdown must never start a multi-gigabyte download. To use a 7B or a GGUF build, drop the file in `models/SEEDVR2` and it appears in the list. Guidance from the pack: 3B FP8 ≈ 8–12 GB VRAM, 3B FP16 ≈ 12–16, 7B FP8 ≈ 16–20, 7B FP16 ≈ 24+.
-- **Target resolution (short edge)** → `seedvr2.resolution`. Range `256`–`4096`, default **`1080`**. The **short** edge is scaled to this and the aspect ratio is kept, so 1080 on a 3:2 photo gives 1620×1080. LoRA training buckets rarely exceed 1024–1280, so higher mostly costs VRAM and time.
+- **VAE build** → `seedvr2.vae`. Blank (default) = `ema_vae_fp16.safetensors` when it is there, else the first file in the folder whose **name** says VAE. The dropdown lists the whole `models/SEEDVR2` folder, VAE-looking files first and the rest in a second group: a pin is honoured against every file, because the automatic search already covers every install where the name is recognisable and the setting exists for the one where it is not. Picking a DiT build here fails inside the loader node.
+- **Target resolution (short edge)** → `seedvr2.resolution`. Range `256`–`4096`, default **`1080`**. The **short** edge is scaled to this and the aspect ratio is kept, so 1080 on a 3:2 photo gives 1620×1080. LoRA training buckets rarely exceed 1024–1280, so higher mostly costs VRAM and time. Past what your GPU can hold in one pass the app either tiles the frame (if the tiling pack is installed) or warns you before starting — see below.
 - **Maximum long edge** → `seedvr2.max_resolution`. `0` (default) = no limit. The VRAM safety valve on a wide crop: at a 1080 short edge a 4:1 panorama becomes 4320 px across.
 - **Colour correction** → `seedvr2.color_correction`. One of `lab`, `wavelet`, `wavelet_adaptive`, `hsv`, `adain`, `none`. Default **`lab`** — the model's own default and the most conservative. `wavelet` holds broad tone better on heavily degraded sources; `none` shows the raw output. Colour fidelity is the reason this engine exists, so it is worth trying two modes on one image before a long batch.
 - **Blocks offloaded to system RAM** → `seedvr2.blocks_to_swap`. Range `0`–`36`, default **`0`** (none, and fastest). Raise it to fit a bigger build on a smaller card: it trades speed for VRAM headroom and does not change the result.
 
+#### Large upscales: the ceiling, and the optional tiling pack
+
+*Contributed by [SurpassHR](https://github.com/perfectgf/lora-dataset-studio/issues/32), who hit this as a real CUDA out-of-memory on an 11.6 GB card and shipped the tiled workflow this is ported from.*
+
+Upscaling a whole frame at once needs the whole frame in VRAM, so past a certain size it simply fails. Two things follow from that:
+
+- **You are told the limit before a run, not after.** Setup ▸ ComfyUI shows roughly how many megapixels this GPU is good for in a single pass. It is a guide, not a gate — real headroom moves with the build, block swapping and whatever else holds VRAM, so LDS still runs what you ask for and says when it looks over budget. On a GPU it cannot see (no `nvidia-smi`, a remote ComfyUI) it says **nothing**, rather than inventing a number.
+- **With the [Comfyui_TTP_Toolset](https://github.com/TTPlanetPig/Comfyui_TTP_Toolset) node pack installed (MIT), large frames are tiled**: the frame is cut into overlapping tiles (1024 px by default), each is upscaled, and the seams are blended back. Nothing *has* to be configured — the lane switches on the geometry — but the tile size and the crossover are settings when you need them (below). Install the pack in ComfyUI-Manager and restart ComfyUI; LDS detects the two node classes it needs.
+
+Without the pack nothing breaks: upscales still run, they are just capped by the card.
+
+- **High-resolution tiling** → `seedvr2.tiling`. One of `auto` (default), `always`, `never`. Tiling is **not only a memory trick**: SeedVR2's target resolution is the size the model actually works at, so a whole 4K frame spreads its capacity over four times the surface while a tile is upscaled in the range it is good at. SurpassHR's side-by-side on his own card showed the full-frame result losing detail and gaining artifacts where the tiled one did not — which also means the old rule (tile only when the frame would not fit) had it backwards: the bigger your GPU, the less often you got the better picture.
+  - `auto` — tile once the target short edge is past ~1536 px, or when the frame would not fit anyway. This is the recommended setting and the reason the pack is worth installing.
+  - `always` — tile any frame bigger than a single tile, including below that crossover.
+  - `never` — always full-frame. Pick this if you ever see a seam; the VRAM warning still applies.
+  On `auto` nothing is tiled **at or below** the crossover: the model is already at a comfortable size and a grid would only add seams. The crossover has to be *passed*, not just reached — a 1536 px target at the default 1024 px tile runs full-frame, and so does a 768 px one if you dropped the tile to 512. The panel says which lane your configured target will take, so that decision is never silent. The pre-#32 rule (tile *only* when the frame would not fit) is deliberately not offered — it is the default the side-by-side refuted.
+- **Tile size** → `seedvr2.tile_px`. Range `512`–`2048` (snapped to a multiple of 64), default **`1024`** — the contributed value. **This is the memory dial of the engine**: a pass holds one tile at a time, so lowering it to 768 or 512 is what makes a large upscale finish on an 8 GB card, at the cost of more seams and more passes; raising it on a 24 GB card gives fewer seams and more context per tile. It also sizes the model's own **tiled VAE encode/decode**, which runs on the full-frame lane as well — so it lowers VRAM use even with no tiling pack installed. Try this before concluding a big upscale is impossible on your card.
+- **Start tiling above** → `seedvr2.tile_threshold`. Short edge past which `auto` tiles, in pixels — strictly *above*, so a target equal to this value still runs full-frame. **`0`** (default) = derive it from the tile size (1.5×, i.e. the shipped 1536 px at a 1024 px tile) so the crossover follows the tile you chose. A positive value places it by hand: lower to tile sooner (safer on a small card), higher to keep more targets in a single fast pass. No effect on `always` or `never`.
+
+ LDS ports only the tiling itself — the original workflow also chained two further node packs to do arithmetic (counting tiles, normalising a pixel count), one of them GPL-3.0, and that arithmetic is done in Python here instead.
+
 **There is no batch-size setting, on purpose.** SeedVR2's `batch_size` is a *video* window whose frames share temporal attention to stay coherent — feeding it unrelated dataset photos would let them bleed into each other. Images are upscaled one per job; throughput comes from the normal generation queue and its fan-out cap.
 
 **What the `klein` engine needs**, separately from the standalone SeedVR2 pack above: a Krea 2 Turbo base model, its Qwen3-VL text encoder and Qwen Image VAE (auto-resolved the same way the Krea 2 Edit engine's do), a Krea 2 "high quality" LoRA, and its OWN SeedVR2 build (a specific 7B-sharp int8 model loaded through a plain UNETLoader, not the SeedVR2LoadDiTModel node above — different node pack, and a **different folder**: a plain UNETLoader/VAELoader only sees `models/diffusion_models` and `models/vae`, so this build goes in `models/diffusion_models/seedvr2_7b_sharp_int8_convrot.safetensors` and needs `ema_vae_fp16.safetensors` in `models/vae` — a copy in `models/SEEDVR2`, where the standalone engine above keeps its own, is invisible to this graph). None of this is auto-downloaded — a missing file surfaces as a named error on the next ✨ click, telling you exactly where to place it. There is no Settings UI for any of it; every loader value is resolved automatically.
+### Klein model files (optional)
+
+*Contributed by socrasteeze (GitHub).* Pin the exact files the Klein graph loads instead of relying on auto-detection. Every field accepts **a full absolute path or a ComfyUI-relative loader name**; empty fields keep the default behaviour (the canonical download filename first, then a narrow token scan of the ComfyUI model folders). Each field now **lists the files actually found in that ComfyUI folder** (`extra_model_paths.yaml` roots included), with a ↻ to rescan after you drop a new file in; free text stays available because an absolute path from outside every ComfyUI root is a legitimate value no scan can enumerate.
+
+- **Diffusion model (UNET)** → `klein.unet`. A full path, or a name relative to a diffusion-model folder — e.g. `klein/flux-2-klein-9b-fp8.safetensors` under `models/unet`, or a bare filename for a file sitting at a folder root. This is also what lets you use a UNET that does **not** live in a `klein`-named subfolder, which the automatic scan would never find. Default **empty** (auto-detect).
+- **Text encoder** → `klein.text_encoder`. Full path, or relative to `models/text_encoders` — e.g. `qwen_3_8b_fp8mixed.safetensors`. Default **empty**.
+- **VAE** → `klein.vae`. Full path, or relative to `models/vae` — e.g. `flux2-vae.safetensors`. Default **empty**.
+- **Consistency LoRA** → `klein.consistency_lora`. Full path, or relative to `models/loras`. The structure-anchoring LoRA chained onto the Klein edit graph — this is the same key that was previously config-only. Unlike the three above it has a shipped default, so **clearing it disables the LoRA** rather than turning on auto-detection. Default `klein/Flux2-Klein-9B-consistency-V2.safetensors` (the Setup download location).
+
+How references resolve:
+
+- A **full path under any of ComfyUI's model folders** — including folders registered in `extra_model_paths.yaml` (the app parses it exactly like ComfyUI does) — is converted automatically to the relative loader name ComfyUI's nodes need, and the field shows **Found**. Nothing is copied or moved.
+- A **full path anywhere else** — Downloads, a Hugging Face cache, another drive — is **hardlinked (or symlinked) into `<ComfyUI models>/<type>/lds-pinned/`** so stock loader nodes can open it, and shows the same **Found**. Your config keeps the original absolute path; the link is created when the reference resolves, costs no extra disk, and is reused on later runs. Staged files are deliberately *not* put in a `klein`-named folder, so they never show up as a second copy in the Klein model picker.
+- A reference that **cannot be resolved** — no such file, or the link could not be created (a read-only models folder, or another volume on an account without symlink rights) — **stops the Klein engine**, with a badge here and a sentence on the engine card naming the file. It used to fall back to auto-detection and only show the badge: the run then went ahead on a *different* file from the one displayed, and the only symptom arrived with the images. **Clearing the field is the explicit way back to auto-detection.** The one exception is **Consistency LoRA left at its shipped default**, which nobody chose: at that value a missing file is still simply skipped, exactly as before.
+- Native / **bf16 UNETs** (a filename without `fp8`) now load with `weight_dtype: default`; FP8 builds keep `fp8_e4m3fn`. Both shipped Klein graphs hardcoded `fp8_e4m3fn`, which quantized a full-precision pin on load without saying so. The canonical download carries `fp8` in its name, so a stock install renders exactly as before.
+- Generation-LoRA **preset rows** accept full paths the same way.
+- **Not cleaned up automatically.** Changing or clearing a pin leaves its link behind in `lds-pinned/`; the folder is safe to delete by hand when nothing points there any more.
+
+Traps and good-to-knows:
+
+- The dataset's own **Klein model (per dataset)** choice still wins over `klein.unet` for that dataset's runs — the pin is what auto-detection falls back to, not an override of an explicit per-run pick.
+- **This is the fix for a model the app insists is "missing" while you are looking at it.** Auto-detection is deliberately narrow (a wrong model fails at sampling time with a cryptic shape error, which is worse than a missing one), so it *declines* any file it cannot confidently name — and a declined file is reported as missing. Pinning it by name removes that discretion: the file resolves, and the integrity check then tells you the truth about it, including **"present but unreadable"** for a corrupt or half-downloaded weight, with the delete-and-re-download action attached.
+- Pinning the wrong *kind* of file (e.g. another family's text encoder) is **not** validated — that generate will fail at sampling time with a shape error. The narrow auto-detection exists precisely to avoid that; only pin files you know are Klein-compatible.
 
 ### Klein generation LoRA presets (optional)
 
@@ -324,11 +384,11 @@ Use **＋ New preset**, **Duplicate**, **Delete** and rename to manage them, and
 
 How presets are used matters:
 
-- A preset is **chosen per run** in the **🖥️ Klein tuning** panel of the workspace, and it **defaults to *None* every visit** — presets never apply on their own.
+- A preset is **chosen per run** in the **🖥️ Klein tuning** panel of the workspace. The panel opens on **Preset selected by default** → `klein.default_generation_lora_preset` (default: empty = *None*, the behaviour every install had before this key existed). That is a **starting point, not a lock**: the run panel still offers *None* and every other preset for that run, and choosing there **never rewrites the setting**. Fail-closed like the rest of the chain — a default naming a preset you have since renamed or deleted falls back to *None*, and the Settings field says so instead of pretending it is empty. Each engine has its **own** default key (`klein.default_generation_lora_preset` / `krea.default_generation_lora_preset`), because `klein.generation_lora_presets` and `krea.generation_lora_presets` are independent lists where the same name can designate two different chains.
 - Resolution happens **by name** on the server, and it's **fail-closed**: if a run references a preset name that no longer exists, it runs **with no extra LoRAs** rather than erroring.
 - **Trap:** *renaming* a preset does **not** follow a run that referenced it by the old name — that run silently falls back to no extra LoRAs. Rename before you queue, or re-pick the preset on the run.
 - There is deliberately **no automatic NSFW gating** on individual LoRAs — the preset you pick carries the intent. If you want an "NSFW full" stack, make it a preset.
-- **Trap:** a row pointing at the **same file as the consistency LoRA** (`klein.consistency_lora`) is skipped — it would chain that LoRA a second time on top of itself, summing both strengths into one delta well past what the file was trained for (visible as blocky, posterized output).
+- **Trap:** a row pointing at the **same file as the consistency LoRA** (`klein.consistency_lora`) is skipped — it would chain that LoRA a second time on top of itself, summing both strengths into one delta well past what the file was trained for (visible as blocky, posterized output). **The preset editor now flags that row as you write it**, on the row itself, instead of leaving the only trace in the server log — which is how a preset holding exactly one such row produced a run with no extra LoRA and nothing on screen to explain it. The check compares paths the way the server does (separators unified, case ignored), so `klein/x.safetensors` and `klein\X.safetensors` are both caught. It does **not** claim to catch an absolute path aliasing the same file — the server still drops that row, quietly.
 
 ### Klein generation quality
 
@@ -372,6 +432,8 @@ Storage follows that split, and nothing was renamed or migrated: the **Human** o
 
 **Reproducibility guarantee:** with nothing overridden, generation is **byte-identical** to before this setting existed — you only change behaviour if you deliberately edit the text away from the default.
 
+**Edit the improve instruction from the ✨ button itself.** `identity_prompts.klein_improve` is the one prompt on this card you never have to come here for: the note under **✨ Upscale & improve** (dataset lightbox, bulk toolbar, generated-image lightbox) carries **✎ Edit this instruction here**, which opens the same box and the same on/off tick under the button. It edits **this setting** — there is no per-image and no per-run copy, so what you write there is what this card shows and what every later improve sends, in every dataset. The panel says that in as many words before you type, because a control sitting inside one dataset's screen otherwise reads as belonging to that dataset. The rest of the contract is identical to the box here: the field is pre-filled with the text actually in force, text matching the built-in default is stored as blank, **Reset to default** shows up only once you really have an override, and edits save as you type (the last keystroke is saved even if you close the lightbox on it). What is *not* duplicated there, on purpose: the per-subject identity locks, the other prompt parts and the four strength knobs — the note links here for those.
+
 **Shortcut from the workspace.** The multi-reference instructions are also reachable from **Add images ▸ Extra refs ▸ ✎**, without opening Settings. That modal shows **both** of them — `face_multi` (Nano Banana / ChatGPT) and `klein_identity` (Klein) — because the engines do not share one text, and badges **every** prompt your ticked engines actually use (a Klein + ChatGPT run really uses both). It edits the prompts of the **open dataset's subject type**, and says which one in its title and intro; edits made there are the same settings as here, for that subject.
 
 - **API engine — identity lock (single reference)** → `identity_prompts.face_single`. Prepended to Nano Banana / ChatGPT variations built from **one** reference photo.
@@ -379,6 +441,14 @@ Storage follows that split, and nothing was renamed or migrated: the **Human** o
 - **Klein — restage & face-identity block** → `identity_prompts.klein_identity`. The instruction block the local **Klein** engine uses to restage the shot (pose, framing, outfit, expression) while keeping the face identical.
 - **Upscale & improve prompt** → `identity_prompts.klein_improve`, with an on/off toggle `identity_prompts.klein_improve_enabled` (default **on**). The instruction the ✨ **Upscale & improve** `klein` engine's Krea 2 edit stage sends. The shipped text is `remove blur, remove noise, add sharp fine detail, add crisp in-focus clarity, correct soft or out-of-focus areas, high-definition`. **Turning the toggle off does not fully silence it**: the Krea 2 edit node this pipeline uses was never tested with a blank prompt, so an empty/disabled instruction falls back to a neutral `photorealistic` rather than running with nothing — unlike the old Flux.2 Klein pass, this one has no true "prompt-free" mode. Editable per subject type is **not** offered here — like the identity locks below, `klein_improve` stays global.
 - ~~**Upscale & improve — strength** → `klein.improve_megapixels`, `klein.improve_base_lora_strength`, `klein.improve_consistency_strength`, `klein.improve_steps`.~~ **Currently has no effect.** These four still save in Settings, but nothing reads them any more: they configured the OLD Flux.2 Klein 9B improve pass, and the Krea 2 edit + SeedVR2 pipeline that replaced it (see *SeedVR2 upscaling* above) has no equivalent knobs — output size, LoRA strength and step count are fixed inside the shipped workflow instead. Left in place rather than ripped out mid-iteration; if you are reading this and they are still here, they may simply not have been cleaned up yet.
+- **Klein upscale & improve prompt** → `identity_prompts.klein_improve`, with an on/off toggle `identity_prompts.klein_improve_enabled` (default **on**). The fixed instruction the manual **Klein upscale & improve** action sends to add texture and detail. The shipped text is `add detailed texture, add sharp details, add candid shot, add soft focus effect` — read it before you blame the model: those four clauses describe a **photograph**, and they are applied to every dataset, drawn ones included. **Turn the toggle off** to run that action with **no prompt at all** — a pure upscale with no added styling. Both the text in force and these two levers are now quoted **and editable** from the ✨ **Upscale & improve** button itself (lightbox and bulk toolbar) — see *Edit the improve instruction from the ✨ button itself* above — so you no longer have to know this setting exists to find it, nor leave your images to fix it.
+- **Upscale & improve — strength** → `klein.improve_megapixels`, `klein.improve_base_lora_strength`, `klein.improve_consistency_strength`, `klein.improve_steps`. The output resolution, and how much that pass is allowed to change the image. Until these were exposed the whole profile was hardcoded — **both LoRA strengths pinned to 0**, so the *enhancement* LoRA baked into the workflow never applied at all, and the size was fixed at 2 MP whatever the source was worth. Defaults are those same historical values (**2 MP / 0 / 0 / 4 steps**), so leaving them alone keeps today's result exactly. These are read at each run, so to try a new value on an image you already improved, use the **🔄✨** button on that tile: it re-runs the pass on the same source image with the settings as they are now, and replaces the result in place. (The ordinary 🔄 stays hidden there — it would restart from the dataset's reference photo and make an unrelated image.)
+  - **Output size (MP)** (0.5–8, default **2**) — the source is rescaled to this pixel budget before sampling, so it *is* the result's resolution. This is the knob that makes "Upscale" actually upscale.
+  - **Enhancement LoRA** (0–2, default **0**) — the workflow's own detail LoRA. At 0 it does nothing; try **0.5–0.8**. It needs its weights file (`klein/realistic.safetensors`): when that file is missing the node is skipped entirely and this value changes nothing. **Setup ▸ Install everything downloads it** with the other Klein assets (from [dx8152/Flux2-Klein-9B-Enhanced-Details](https://huggingface.co/dx8152/Flux2-Klein-9B-Enhanced-Details), Apache-2.0) — run it first if the slider seems inert.
+  - **Consistency LoRA** (0–1.5, default **1**) — anchors the **composition and background**, not identity. Deliberately high here: an improve pass should add detail *without* redrawing the shot, so the resistance to editing that makes 0.8–1.0 a poor choice for restaging is exactly what you want. (Shipped briefly as `improve_character_lora_strength`, a misnomer; a value saved under that name is still honoured.)
+  - **Steps** (1–50, default **4**) — more steps is slower and usually cleaner.
+  - Out-of-range or malformed values are **clamped**, never rejected: a bad config weakens the pass instead of failing your click.
+  - **A strength you raised is never silently dropped.** If a LoRA's weights file is missing while its strength is above 0, the pass reports the missing asset (which is what triggers its download) instead of running without it and leaving you to wonder why nothing changed. At strength 0 it stays a quiet skip — nothing is lost by not loading a LoRA you did not ask for.
 
 Each field is a plain textarea; there's no Test button — you see the effect on your next generation. If an override ever makes results worse, hit **Restore default**.
 
@@ -520,15 +590,49 @@ working copies. This follows **Qeeyana (Reddit)** asking: *"Images added to
   untouched.
 
 **Import safety limit — every mode:** Before preserve, WebP normalization, or
-auto head-crop can decode the source, it must be no larger than **16 Mi-pixels**
-and **8192 px per side**. A larger file is rejected; convert or resize it before
-importing. WebP normalization does not bypass this admission limit.
+auto head-crop can decode the source, it must fit the **Image size budget**
+below (shipped default **64 Mi-pixels** and **16384 px per side**). A larger
+file is rejected, and the message names the setting. WebP normalization does
+not bypass this admission limit.
 - **Stored resolution** → `dataset_import.max_side`. Used only by the three WebP
 normalization modes. Choose `1024`, `1536`, `2048`, `4096`, or `0` = original
 size. The aspect ratio is always preserved (no square padding) and an image is
 never enlarged. This output setting takes effect only after the source passes
 the import safety limit above; normalized output also clamps the longest side to
-**8192 px**.
+**8192 px** — that ceiling bounds what is *written* by a WebP mode and is
+deliberately independent of the input budget.
+
+### Image size budget
+
+How large a source image **any** part of the app may decode. Not an import-only
+rule: dataset import, ZIP and scrape ingest, Bank scan and thumbnails, edits,
+ComfyUI staging and Ollama vision captioning all read these two keys, so an
+image you can import is an image you can look at.
+
+- **Maximum total pixels** → `image_input.max_pixels`. Default
+  **`67108864`** (64 Mi-pixels). `0` = no limit.
+- **Maximum side** → `image_input.max_side`. Default **`16384`** px. `0` = no
+  limit.
+
+This is a **memory** budget, not an encoder limit: a decoded RGB pixel costs 3
+bytes (RGBA 4), and an edit or analysis pass can hold a second copy at the same
+time. So 64 Mi-pixels is about **192 MiB** for one decoded RGB buffer and
+roughly **384 MiB** while a working copy exists. It admits every current phone
+and 35 mm camera master (a 61 MP 9504×6336 frame is 57 Mi-pixels) and ordinary
+stitched panoramas — the previous fixed 16 Mi-pixels / 8192 px refused both.
+
+**What `0` disarms.** No limit means a corrupt or hostile file can be decoded
+until it fills memory: a few hundred header bytes can claim billions of pixels,
+and the app has no second guard behind this one — an unlimited budget also lifts
+Pillow's own decompression-bomb threshold, so the choice is real in both
+directions. It is offered because "let it through" is a legitimate answer for a
+panorama you produced yourself.
+
+**One consumer cannot follow it.** Image Bank *inference workers* (face,
+aesthetic and NSFW scoring, watermark inpainting) run in a separate Python
+interpreter that does not import the app or its config, and keep their own fixed
+16 Mi-pixel / 8192 px guard (`backend/infer/bank_image_guard.py`). An image above
+that imports, displays and trains normally; those workers skip it.
 
 **Auto head-crop is deliberately different.** It changes the picture into a
 square head shot, so it creates a derived WebP even when `preserve` is selected.
@@ -554,6 +658,15 @@ fixed sizes on purpose.
 | `joycaption` | JoyCaption only. |
 | `ollama` | Ollama vision model only. |
 | `none` | No auto-captioning — you write them yourself. |
+
+`auto` is a **chain**, not a coin toss: JoyCaption captions the images it can in one
+batch, the Ollama vision model covers whatever is left, and on a **Concept** dataset
+Ollama rewrites JoyCaption's drafts. The two engines write in different styles, so one
+batch can come back in two voices. Every caption pass now reports which engine wrote
+what — in the toast, and on a line under the caption buttons (Captions ▸ Generate
+captions), e.g. *“8 by JoyCaption · 4 by Ollama”*. That line describes the last pass
+of the current session only; nothing is stored per image. Pick a single value above
+(or per dataset, in Captions ▸ ⚙️ Options) if you want one voice across a set.
 
 ### Watermark inpainting
 
@@ -606,8 +719,8 @@ with **no rescan**. (The two exceptions are noted below.)
 - **Same-person similarity** → `bank.face_threshold`. Cosine similarity at or above which two faces cluster as the same person in **👥 Group by person**. Default **`0.45`**. Raise it if different people get merged into one cluster; lower it if the same person splits into several. *Applies at the next face pass* (embeddings are cached, so re-clustering is fast).
 - **Aesthetic minimum** → `bank.aesthetic_min`. LAION aesthetic score (~1–10) under which an image is flagged **💔 low aesthetic** — the "keep the nice ones" cut. Default **`5`**. Only images the **✨ Score** pass reached carry a score; an unscored image is never flagged. The score also drives "keep best" on duplicate groups (the nicest-looking copy wins).
 - **NSFW maximum** → `bank.nsfw_max`. NSFW probability (0–1) over which an image is flagged **🔞 NSFW**, to split a mixed SFW/NSFW dump. Default **`0.5`**. Set by the **✨ Score** pass; a review flag, not a verdict.
-- **Same-style similarity** → `bank.style_threshold`. Cosine similarity on the CLIP image embeddings at or above which two images share a visual **🎨 style** (screenshots/memes cluster apart from photoreal) in the **✨ Score** pass. Default **`0.6`**. *Applies at the next scoring pass* (embeddings are cached, so re-clustering at another threshold is fast).
-- **Semantic duplicate similarity** → `bank.semantic_dup_threshold`. Cosine similarity on the *same* CLIP embeddings at or above which two scored images are grouped as a **✂ semantic near-duplicate** — a crop or re-compressed variant of the *same shot* that the perceptual-hash **≈ Duplicates** (stage 1) misses. Default **`0.96`** (much higher than the style threshold: a crop is far closer than merely "same style"). Needs the **✨ Score** pass first (it reuses those embeddings — no extra GPU work). *Re-running at another threshold re-sorts instantly* from the cached embeddings, no re-scan.
+- **Same-style similarity** → `bank.style_threshold`. Cosine similarity on the CLIP image embeddings at or above which two images share a visual **🎨 style** (screenshots/memes cluster apart from photoreal) in the **✨ Score** pass. Default **`0.6`**. *Applies at the next scoring pass* — the embeddings are cached, so re-clustering at another threshold costs **no inference at all**: the pass does not even load the model. It is not instant, though, and the cost is the grouping itself, which compares every image with every other: **~8 s over 5 000 images, ~3 min over 23 000** (measured). Stopping the pass during that phase leaves the previous grouping in place rather than writing half of a new one — the ids are one numbering of the whole bank, so half of them would collide with the other half. **A measured limit, on a big single-subject bank:** the grouping is *transitive* (A groups with B and B with C puts A with C, even if A and C look nothing alike), so on a bank whose images are all of one person a chain of near-neighbours can merge everything into one group. Measured on a 25 058-image bank at the default `0.6`: **one group holding 25 056 of them** — and raising the threshold does not open a middle ground so much as move the cliff (0.8 → one group of 24 735; 0.9 → one of 15 066; 0.95 → the grouping shatters into 19 716 groups, 17 137 of them single images). The end-of-pass line now states the size of the biggest group against the total, so this is visible without opening the database. If your bank is varied, the default behaves; if it is one subject shot over and over, expect the 🎨 style chip to be close to useless whatever the threshold, and use ✂ **Find crops & variants** (a much tighter, per-pair comparison) for the grouping you probably wanted.
+- **Semantic duplicate similarity** → `bank.semantic_dup_threshold`. CLIP cosine similarity at or above which two images are grouped as a **✂ semantic near-duplicate** — a crop or re-compressed variant of the *same shot* that the perceptual-hash **≈ Duplicates** (stage 1) misses. Default **`0.96`**. With CLIP selected it needs **✨ Score** first. SigLIP 2 uses the separate conservative starting value `bank_semantic.siglip2_semantic_dup_threshold`; it deliberately does not inherit the CLIP cutoff, and should be reviewed/calibrated on your Banks. Re-running the grouping reuses the selected cache; no image inference.
 
 - **Which Python runs ✨ Score** → `bank_scoring.python`. **Auto-managed:** leave it empty and Setup ▸ Quality tools builds a dedicated environment and fills it in. It carries **CPU-only PyTorch** on purpose (a first install stays small instead of pulling ~2.5 GB of CUDA wheels on machines with no card), which costs roughly **336 ms per image** instead of ~15 ms on a GPU. On a machine that already has a working CUDA PyTorch — ai-toolkit's venv, ComfyUI's, a conda env — you can point Score at it instead: open a bank and click **⚡ Use a GPU Python I already have** under the CPU warning. The picker checks each candidate *package by package* (`torch`, `open_clip`, `transformers`, `timm`, `numpy`, `Pillow`) and **refuses** any interpreter that can't run the whole pass — CUDA alone is not enough, and a missing `open_clip` would only surface an hour into a run. Nothing is ever installed into an environment the app did not build: a missing package is named with the exact command, for you to run. Reversible at any time (**Back to the app default**), and leaving it alone changes nothing — detection is an offer, never a prerequisite. The picker also accepts a path you type: an interpreter **or** the environment folder holding it (venv, conda/miniconda, uv, a portable bundle, the system Python, another disk), spaces and accents included. No torch or CUDA *version* is required — only that the modules import and `torch.cuda.is_available()` is true. On a machine with no NVIDIA card the picker says so and stops suggesting CUDA; it still lets you borrow an interpreter that already has the packages, to avoid installing them twice. The **Install / ↻ Reinstall** button in Setup ▸ Quality tools honours the same rule: while Score is pointed at a borrowed interpreter it installs nothing and prints the `pip install` command instead — clear the setting (**Back to the app default**) if you want the app to build and fill its own environment again. See *Using the app ▸ Make Score use a GPU Python you already have*.
 
@@ -624,7 +737,15 @@ pure-coverage behaviour this button had before the slider existed** — the chan
 of default does change what a given bank returns. See *Using the app ▸ Curate down
 to the right subset*.
 
-The **✨ Score** pass (aesthetic · NSFW · style) needs the **Bank scoring** extra (Setup ▸ Quality tools); **🚩 Find watermarks** reuses the vision model from **Captioning**. Both are GPU passes, serialized against training and captioning, and detection-only — the bank never edits your source files.
+- **Watermark detection** → `watermark_detect.backend`. Which engine **🧽 Find watermarks** uses, on datasets *and* banks. `auto` (default) takes the optional watermark-detector extra when it is installed — ~0.14 s per image and it returns a score — and the Ollama vision model otherwise; that is the behaviour that shipped, so leaving this alone changes nothing. `detector` and `vision` pin one engine. A pinned `detector` with the extra **not** installed does not fail the scan: the vision model runs it and the app says so, naming *Setup ▸ Quality tools ▸ Watermark detector*. The two engines disagree at the margins, and only the detector can flag an image *without* a position — those are counted apart and 🧽 Clean leaves them for 🔍 Review instead of marking them failed. *Applies at the next scan; images already dismissed as false positives are only re-judged by **⟲ Rescan incl. dismissed**.*
+- **Watermark detector sensitivity** → `watermark_detect.threshold`. The score (0–1) at or above which **🚩 Find watermarks** flags an image, *when the optional watermark-detector extra is installed* (Setup ▸ Quality tools). Default **`0.94`**. *Applies at the next scan.*
+  This number is **measured, not chosen**, and it is deliberately nowhere near the 0.5 a probability normally implies: the classifier's scores sit hard against 1. On a 110-image sample drawn from a real 29 759-image bank and labelled by eye (2026-08-03, CPU), a threshold of 0.5 would have flagged **52 of the 55 clean images**; 0.94 flagged **none** of them and still caught **54 of the 55** marked ones. The clean images topped out at 0.939 and the marked ones bottomed out at 0.929, so the two populations overlap by about 0.01 — there is no setting that is perfect, only a knee. Lower it towards 0.92 to catch the faintest marks and hand-check a few clean images; raise it towards 0.96 to miss a mark rather than crop anything by mistake.
+- **Watermark detector interpreter** → `watermark_detect.python`. Written by the installer, not edited here. Empty means "use the **Bank scoring** environment", which already carries the two packages this extra needs.
+- **Watermark detector weights** → `watermark_detect.models_root`. Empty means `data/models/watermark_detect` (~0.9 GB, downloaded once at install).
+- **Watermark detector device** → `watermark_detect.device` (`auto` | `cuda` | `cpu`). The extra installs CPU-only torch, so this is CPU unless you point `watermark_detect.python` at an environment with a CUDA torch. The pass only takes the exclusive-GPU window (which unloads ComfyUI and blocks a training start) when it will actually use the card.
+- **Locate the mark** → `watermark_detect.locate` (default on). Runs the second model on the images the first one flagged, to record **where** the mark sits. Off means images are flagged with no position, and neither **✂ Auto-crop** nor **🧽 Inpaint** can route on them — only worth turning off on a bank you intend to filter rather than clean.
+
+The **✨ Score** pass (aesthetic · NSFW · style) needs the **Bank scoring** extra (Setup ▸ Quality tools). **🚩 Find watermarks** runs one of two ways: the **watermark detector** extra when it is installed (~0.14 s per image, and it does not need Ollama at all), otherwise the vision model from **Captioning** (~1.7 s per image). Installing the extra only ever adds the faster route — with nothing installed the pass behaves exactly as it always has. Both are detection-only: the bank never edits your source files.
 
 ## Training
 
@@ -632,7 +753,7 @@ Defaults for new runs, plus everything about the optional cloud training lane.
 
 ### Defaults
 
-- **Default training family** → `training.default_family`. The model family preselected when you start a new run. One of `zimage`, `sdxl`, `krea`, `flux`, `flux2klein`, `anima`. Default **`zimage`**. Purely a starting point — you can switch family per run. `anima` trains the open [Anima](https://huggingface.co/circlestone-labs/Anima-Base-v1.0-Diffusers) anime model on its public base (no gated download); it is **local-only** for now (needs an up-to-date ai-toolkit + diffusers — cloud training arrives once the GPU pod image is verified).
+- **Default training family** → `training.default_family`. The model family preselected when you start a new run. One of `zimage`, `sdxl`, `krea`, `flux`, `flux2klein`, `anima`. Default **`zimage`**. Purely a starting point — you can switch family per run. `anima` trains the open [Anima](https://huggingface.co/circlestone-labs/Anima-Base-v1.0-Diffusers) anime model on its public base (no gated download); it is **local-only** for now (needs an up-to-date ai-toolkit + diffusers — cloud training arrives once the GPU pod image is verified). **Anima is the one family with hybrid prompting:** booru tags *and* natural language are both first-class on it, so the caption-style guard says nothing there — prose is merely the preselected default, and a booru-captioned Anima dataset trains without being flagged or forced. Every other family keeps its single expected form (SDXL = booru tags, the rest = prose).
 
 ### Training base & variant are per FAMILY
 
@@ -653,6 +774,39 @@ dialog both went on advertising it.
 A base that provably belongs to another family (found on datasets created before
 this change) is reported as such in the panel, is not used, and is not offered for
 upload to Hugging Face by the cloud dialog.
+
+### Krea 2: the checkpoints on your disk are listed as bases
+
+The **Base** dropdown under *LoRA type = Krea 2* offers the official base **and**
+every Krea 2 checkpoint found in your ComfyUI `unet` / `diffusion_models` folders,
+including the roots declared in `extra_model_paths.yaml` — the same scan the Test
+Studio uses. That is how a full model one of your own runs delivered, or a
+community Krea 2 build, becomes something you can keep training on.
+
+The value stored is the **absolute path** of the file, not the ComfyUI folder name
+the Studio uses, because the trainer identifies a custom base by its being an
+absolute path and a cloud pod has to receive the actual file. A checkpoint the app
+can list but cannot resolve to a file on disk is left out of the dropdown rather
+than offered as a name a run would ignore.
+
+Each entry says what its format costs before you pick it:
+
+- **no tag** — full precision, nothing to report;
+- **`· fp8 cast`** — the weights are stored in fp8 under the tensor names a
+  full-precision file already had, with nothing extra. The trainer up-casts it as
+  it loads, and selecting it shows how many of the file's tensors are quantized
+  and how many significand bits that leaves. The lost precision does not come
+  back. The tag reads the *packing*, not the architecture: a file can be tagged
+  this way and still be refused at load for carrying a tensor the model family
+  does not declare;
+- **`· packed export`** — a ComfyUI scaled-fp8 / `comfy_quant` / int8 repack. It
+  carries decompression tables as extra tensors that a trainer's strict load
+  rejects, so the load fails outright. Selecting it is refused, and training is
+  blocked until another base is picked. Use the bf16/fp16 master instead — a
+  full-model run keeps it next to its fp8 twin and the Checkpoints panel lists it.
+
+With no ComfyUI folder configured the list falls back to the official base alone,
+and says so.
 
 ### Concept face masking
 
@@ -701,7 +855,7 @@ separate 3.10–3.12 interpreter.
 
 Guard-rails on cost and host quality for rented pods. The card also shows a live **Spent this month** line. Everything here has a sane default — you can leave it all alone and just add the key.
 
-Full-model Krea 2 runs also need `HF_CLOUD_TOKEN`. A separate fine-grained token is strongly recommended: grant **`repo.content.read` exactly on `krea/Krea-2-Raw`**, then **`repo.content.read` + `repo.write` on one dedicated HF user or organization namespace containing only LDS deliveries**. [Create a fine-grained token](https://huggingface.co/settings/tokens/new?tokenType=fineGrained). A classic/global token with `role=write` is also accepted, but LDS shows a broad-access warning because it can modify every repository the account can write to; [create a global write token](https://huggingface.co/settings/tokens/new?tokenType=write). Read-only tokens are rejected, and Settings validates the token as soon as it is saved.
+Full-model Krea 2 runs also need `HF_CLOUD_TOKEN`. A separate fine-grained token is strongly recommended: grant **`repo.content.read` exactly on the Krea 2 repository the run trains from** (`krea/Krea-2-Raw`, or `krea/Krea-2-Turbo` for a Turbo run — a scope on either is accepted, and the one this run needs is required), then **`repo.content.read` + `repo.write` on one dedicated HF user or organization namespace containing only LDS deliveries**. [Create a fine-grained token](https://huggingface.co/settings/tokens/new?tokenType=fineGrained). A classic/global token with `role=write` is also accepted, but LDS shows a broad-access warning because it can modify every repository the account can write to; [create a global write token](https://huggingface.co/settings/tokens/new?tokenType=write). Read-only tokens are rejected, and Settings validates the token as soon as it is saved.
 
 | Setting | Key | Default | Range | What it does |
 |---|---|---|---|---|
@@ -714,12 +868,144 @@ Full-model Krea 2 runs also need `HF_CLOUD_TOKEN`. A separate fine-grained token
 | **Max runtime (minutes)** | `cloud.max_runtime_minutes` | `480` | 30–1440 | Hard stop on the whole run, whatever it is doing: the newest checkpoint is rescued, then the pod is terminated. Enforced by the out-of-run supervisor too, so it holds even if the run's own supervision dies. |
 | **Freeze watchdog (minutes, 0 = warn only)** | `cloud.freeze_watchdog_minutes` | `45` | 0 or 15–480 | Last-resort net for a run whose own supervision stopped answering (an app restart, a wedged connection to the pod): if a **training** run reports no progress at all for this long, the pod is terminated from outside — the stall timeout above can only act while the run is still being watched. Checkpoints already downloaded are kept. Set to `0` to only see the warning on the run card and never cut automatically. **"No progress" means the pod, not the app.** The clock is kept in the database and advances only when something actually moves on the host (the training step, the download's byte counter, a checkpoint landing), so restarting the app no longer sets it back to zero, and a run whose supervision keeps repeating the same sentence is no longer counted as alive. Phases that are silent by design (booting, downloading the result) are never judged on this value; they get a fixed 2 h floor and the runtime cap as backstop. The **dataset upload** used to be one of them and is not any more — it reports the bytes it pushes, so it has its own, much shorter setting below. |
 | **Dataset upload stall (minutes, 0 = never cut)** | `cloud.upload_stall_minutes` | `25` | 0 or 5–480 | **Not a time limit on the upload.** A large dataset is allowed to take as long as it needs — the run card shows the files and gigabytes going across — and this value is how long the rented machine may sit with **no data at all** arriving before the run is given up and the pod released. It exists because that phase used to report nothing: a 24 GB dataset that never reached the pod billed for two hours before anyone could tell a slow upload from a dead one. Set `0` to never cut; turning the freeze watchdog off turns this off too. |
-| **Unreachable grace (minutes)** | `cloud.unreachable_grace_minutes` | `6` | 1–60 | How long a running pod may stay unreachable (a vast.ai network blackout) before the run is given up and auto-retried on a fresh host. Raise it if healthy runs die with *pod unreachable*. |
+| **Unreachable grace (minutes)** | `cloud.unreachable_grace_minutes` | `6` | 1–60 | How long a running pod may stay unreachable (a vast.ai network blackout) before the run is given up and auto-retried on a fresh host. Raise it if healthy runs die with *pod unreachable*. It also bounds the **reconnection after an app restart**: a run whose job was already training is given this long to answer again — asked directly, not through the vast.ai listing — before it is given up, and the pod is never told to stop on a verdict reached without reaching it. |
 | **Min host reliability** | `cloud.min_reliability` | `0.98` | 0.9–0.999 | vast.ai reliability floor. Lowering toward 0.95 surfaces cheaper hosts at a higher boot-failure risk. |
 | **Verified hosts only** | `cloud.verified_only` | **on** | toggle | Restrict to vast.ai's verified hosts (the historical, safer behaviour). |
 | **Secure Cloud only** | `cloud.secure_cloud_only` | **off** | toggle | Restrict to vast.ai's *datacenter* (Secure Cloud) tier — usually narrows the market and raises the price, so it's opt-in. |
 
 ### Advanced options (per run)
+
+#### Full-model (dense) recipe
+
+Full-model training keeps a **locked** recipe — batch 1, bf16, Adafactor and
+gradient checkpointing are what make a 12B model fit on one 80 GB card, and the
+panel now names each lock and its reason instead of just greying it out. The
+values below are editable because they change the *result*, not whether the run
+fits.
+
+**Raw, Turbo, or a checkpoint of your own — with one warning and one real
+refusal.** The full-model panel has its own base picker: the Raw/Turbo switch,
+the Krea 2 checkpoints installed on this machine, and **Custom weights…** for a
+local `.safetensors`. A custom base travels to the rented GPU through a private
+repository on your Hugging Face account, exactly as it already did for LoRA
+runs, and the launch verifies the pod's own credential can read it before
+anything is rented.
+
+*Turbo is allowed and unmeasured.* Turbo is speed-distilled, and a dense run
+rewrites the weights that distillation lives in. On the distilled models where
+this *has* been measured, the result stays a valid checkpoint and simply stops
+being fast (back toward real CFG and 25-30 steps); for Krea 2 specifically
+nobody has published the measurement. The panel says exactly that before you
+spend anything — Krea's own recommendation is still to train a LoRA on Raw and
+apply it to Turbo — and then lets you through. See the dataset guide, §10, for
+what is known and for the published trick to get the speed back afterwards.
+
+*A structured fp8/int8 export is refused, and that one is mechanical.* A
+ComfyUI scaled-fp8 build (or any `comfy_quant`/int8 repack, including this app's
+own fp8 twin) carries dequantization tensors the architecture never declares,
+and ai-toolkit loads a base with `strict=True` — the load itself raises. Pick
+the bf16/fp16 build of the same model. A **bare** fp8 cast, which adds no key of
+its own, stays allowed and says what it costs.
+
+| Setting | Key | Default | Notes |
+|---|---|---|---|
+| **Steps** | (per launch) | adaptive | ≥ 500 when set explicitly. |
+| **Preview prompts** | `sample_prompts` | generic per dataset kind | Up to 8 lines, `{trigger}` marks the subject. Shared with the LoRA lane on purpose — same dataset, same subject. The defaults describe nobody, and these images are the only way to judge a run while it is still costing money. |
+| **Learning rate** | `dense_lr` | `1e-6` | 1e-7 – 5e-6. |
+| **Resolution** | `dense_resolution` | `1024` | `768` or `1024`. 768 trains faster and cheaper, at lower fidelity. |
+| **Checkpoint every / keep** | `dense_save_every` / `dense_max_step_saves` | `250` / `1` | ≥ 100 steps; keep 1–3. Each kept checkpoint is ~26 GB of **private** Hugging Face storage — the panel states the total before launch and the pre-check uses the same number, never the shipped default. |
+| **Keep the bf16 master** | `dense_keep_bf16` | on | Keeps the ~26 GB master next to the fp8 export. fp8 is a lossy, one-way export: without the master the model can never be continued, merged or re-quantized. |
+| **fp8 export** | `dense_fp8_export` | on | Quantize the finished checkpoint on the pod and upload the ~10 GB ComfyUI file. A failed export never fails the run. |
+| **Images per step** | `dense_grad_accum` | `1` | 1, 2, 4 or 8. Gradient accumulation: how many images are averaged into each optimizer step. Batch size stays 1, so this costs **no extra VRAM** — it costs time. 4 images per step ≈ a run 4× longer on a GPU billed by the hour. Checkpoint count, cadence and storage are unchanged. |
+| **Learning-rate schedule** | `dense_lr_schedule` | `constant` | `constant`, `constant_with_warmup` or `cosine`. Warmup eases the first steps instead of hitting a 12B model at full rate from step 1; cosine fades the rate to zero by the last step. |
+| **Warm up over** | `dense_warmup` | `100` | 10 – 1000 steps. Only applies to `constant_with_warmup` — the schedulers behind the other choices reject the value outright, so it is not sent with them. |
+| **Noise schedule** | `dense_timestep_type` | `linear` | `linear`, `sigmoid` or `weighted`. Which noise levels the run trains on; `weighted` keeps the linear draw but weights the loss on a bell curve. |
+
+**Two knobs are deliberately missing, and that is not an oversight.** Both exist
+in AI Toolkit and both are *harmful on this specific model*, so the full-model
+card does not offer them:
+
+- **EMA** (weight averaging) keeps a second copy of every trained parameter on
+  the GPU, and a third one whenever it saves. For a LoRA that is a few hundred
+  MB; for a 12B full model it is roughly +26 GB, then +26 GB again at the first
+  checkpoint, on top of an unquantized model and its gradients. The run would
+  die at its first save. EMA remains available for **LoRA** training, where it
+  is cheap.
+- **min-SNR weighting** needs a signal-to-noise table that only diffusion models
+  of the older kind carry. Krea 2 is flow-matching and has none, and the
+  trainer's attempt to build one fails silently at startup — so the run does not
+  refuse at launch, it crashes in the middle of the loss computation an hour
+  into a paid pod. Refusing it up front is the cheaper failure.
+
+`shift`-style noise schedules are absent for the same class of reason: AI Toolkit
+computes their shift from an image-token count that assumes a field Krea 2's
+denoiser names differently, so the value silently comes out four times too large.
+It is offered for LoRA training (where the same flaw applies to Krea and is
+documented in the code) but never for full-model runs.
+
+**Which AI Toolkit these statements describe.** LoRA training runs the AI Toolkit
+installed on *your* machine, which moves whenever you update it. Full-model
+training is cloud-only and runs the AI Toolkit baked into the rented pod's image,
+which is pinned (`cloud.image`). The two are different codebases at different
+dates; everything above was verified against the pinned one, and a test fails if
+that pin moves without the verdicts being re-checked. Each run now also records
+the image the pod actually booted, so a run can say for itself which trainer
+produced its weights.
+
+**Getting the fp8 file in one click.** When a run has delivered its model, the
+recipe card's *Quantize a model to fp8* block is already aimed at it: **✨
+Quantize to fp8** does the whole chain with nothing to type — it fetches the
+master out of your private Hugging Face repo, converts it, and leaves the fp8
+file in ComfyUI's own models folder
+(`models/diffusion_models` for a dense transformer, `models/checkpoints` for an
+SDXL-style full checkpoint; with ComfyUI unconfigured it falls back to the app's
+`data/models/…` and **says so**). Before it starts it states:
+
+- **which checkpoint it takes.** A dense repo usually holds the final save *and*
+  several ~26 GB step snapshots with nearly the same name. One rule decides —
+  the final save wins, otherwise the highest step — and it is the same rule that
+  stamped the file the card lists, so the two can never disagree;
+- **where the file lands**, spelled out, before and after;
+- **what it costs in disk.** What is still to download, the fp8 file's own
+  ceiling and 2 GB of working headroom, compared with the free space of the
+  volume that *really* holds that folder — `realpath` first, because a ComfyUI
+  models folder is very often a junction onto another drive. Too little is a
+  refusal that writes out every term and offers another folder, not a failure at
+  90 %. **What this forecast accepts, the conversion does not then refuse**: the
+  threshold used to be applied only when starting, so the button stayed enabled
+  and the refusal arrived after the click.
+
+The download is the long part (~26 GB) and it is a real job: progress in bytes,
+a **Stop** button, and resumption from where it stopped — stopping never throws
+away what already came down. Afterwards the master is **kept** by default (it is
+the only file you can train from again, merge or re-quantize); deleting it is one
+radio button away, with its size on it.
+
+**The path field, for everything else.** The same block still takes a full path
+to any full-precision `.safetensors` — a file nothing in the app points at — and
+it pre-fills with your **custom training base** when there is one. The same tool
+is in **Settings ▸ Storage** for a model that has nothing to do with a dataset,
+where it is documented in full. It writes `<name>_fp8.safetensors` into the same
+ComfyUI folder as the one-click path; the source is never modified, an existing
+output is never silently overwritten, and the result is re-opened and verified
+before it reports success. It runs on the **CPU** (one elementwise cast per
+tensor — disk-bound, not GPU-bound), one at a time app-wide. It refuses a file
+that is already quantized and refuses a LoRA/adapter. Note this is **not** the
+`quantize` training option, which only shrinks the model in memory while it
+trains and writes no file.
+
+**Testing what it delivers.** The artifact is a **Raw (undistilled)** Krea 2
+checkpoint. Turbo-style few-step settings render a blurry sketch on it; use
+**CFG ~4 (3.5–5) and 20–30 steps** — the same settings the run previewed with.
+The Test Studio pre-fills them when the selected base looks Raw / full / fp8.
+
+**Quantized bases are refused.** Choosing a community fp8/int8 export as *Custom
+weights* is rejected at selection with *"This is an inference-only quantized
+export — training needs the bf16/fp16 version of this model."* The check reads a
+few kilobytes of file header (quantization markers and tensor dtypes), so it
+costs nothing; a header it cannot read is let through rather than guessed at.
+
+
 
 These live under **⚙️ Advanced options** in a dataset's training panel — rank, resolution, save/sample cadence, optimizer, scheduler, EMA, LoKr and more. Each carries its own inline **Why/How** note, so they aren't repeated here. Two are worth calling out because of a caveat.
 
@@ -763,6 +1049,220 @@ to compare in Test Studio, not as proof that a specific step will be best.
 
 - **Dual captions (long + short)** — off by default. When on, the run uses ai-toolkit's native `short_and_long_captions`: every image trains with **both** its full caption and a short one (text-side augmentation, so the LoRA leans less on any single wording). The short variant is **derived from the long caption** the next time you (re-)caption — text-only, via the local vision model, honouring the same kind rules (no trigger; the identity/concept/aesthetic stays omitted) — and you can edit it per image in the **⛶** caption editor. **Local training only for now:** the cloud pod's dataset upload doesn't carry the JSON caption file the short is read from, so cloud runs train on the long caption alone. **Not available on Krea 2 or Anima:** those families pre-cache their text embeddings and unload the text encoder, so no second caption can be encoded — the toggle is reported as ignored on the training panel and in the pre-launch check, and the run trains on the long caption alone (issue #22, reported by 1Tomber).
 
+## Storage
+
+Everything about the disk in one place: which folder holds what, how big it is,
+and how to put any of it on another drive. Before this tab those answers were
+scattered across three screens, and the two directories that actually fill a
+drive — the cloud run staging and the trained checkpoints — were hard-coded and
+invisible.
+
+**Sizes are measured only when you ask.** Walking a hundred gigabytes of datasets
+takes seconds, so **📏 Measure everything** is a button, never something the tab
+does while you read it. Until you press it a folder reads *not measured*, which
+is deliberately not the same as *empty*.
+
+- **What lives where** — one row per category: dataset images, image banks, bank
+  source images, cloud run staging, the checkpoint store, the trash, the run image
+  archive, backups, the ai-toolkit install, the Hugging Face cache and the app's
+  own build. Each row shows the **effective path**, what it holds, the free space
+  on that drive, and a **movable** tag when it can be relocated from here.
+
+### Moving a folder to another drive
+
+Four roots can be pointed anywhere: **Dataset images root**
+(`paths.dataset_images_root`), **Cloud run staging** (`paths.cloud_runs_dir`),
+the **Checkpoint store** (`paths.checkpoints_dir`) and **Video datasets**
+(`paths.video_datasets_dir`). All four default to **empty →
+a folder inside the app's data directory**; the field's *Reset to default* gives
+that implicit state back rather than writing today's path in.
+
+Type a path, press **Check folder**, and the app proves it can write there — by
+actually writing a probe file, because permission bits lie on Windows. A relative
+path, an uncreatable folder, or a target *inside* the folder it would replace is
+refused with the reason. Then **you choose**, and nothing happens until you do:
+
+- **Move what is already there** — every file is copied to the new folder first,
+  and the old one is only removed once the last byte has landed. A progress bar
+  shows files and percentage. If the destination drive has less free space than
+  the folder needs, the button is disabled and says both numbers.
+- **Start using it empty** — the new folder is used from now on. **Nothing is
+  copied and nothing is deleted**: the old folder keeps its files and the app
+  simply stops looking at them. On a full C: this is often the only choice that
+  fits.
+
+The setting is saved **after** the files have moved, so an interrupted move never
+leaves the app pointing at a half-filled folder.
+
+- **Dataset images root** → `paths.dataset_images_root`. Where dataset images are stored. Default **empty → `<data dir>/datasets`**. This folder (and every dataset folder under it) is refused as an **image bank** source: a bank points at a live folder and can delete from it, so the two must never share files — see *Using the app → A bank and a dataset never share files*. Moving this root onto a folder an existing bank already uses is not blocked here, but that bank will say so the next time you open it, and its 🗑 Delete rejected will be refused.
+- **Cloud run staging** → `paths.cloud_runs_dir`. The working area of cloud training runs: the exported dataset copy, the sample images and the mirrored log, one `run_<id>` folder per run. Default **empty → `<data dir>/cloud_runs`**. This is the folder that grows to tens of gigabytes, and the one a cleanup empties.
+- **Checkpoint store** → `paths.checkpoints_dir`. Where the `.safetensors` your cloud runs produce are kept, one `run_<id>` folder per run. Default **empty → `<data dir>/checkpoints`**. **No cleanup in the app ever removes a file from here** — only you can, from the Checkpoints panel or by emptying the trash.
+- **Video datasets** → `paths.video_datasets_dir`. The flat folders of `.mp4` clips (plus their homonym `.txt` captions) that a video bank produces when you promote a selection. Default **empty → `<data dir>/video_datasets`**. **This is where the video lane actually uses disk.** A video bank itself stores almost nothing — only timestamps and one small thumbnail per detected shot — because cutting a clip means re-encoding it, and that is paid once, at promotion, for the clips you kept.
+- **Video banks (working data)** → no path setting; it follows the data directory. Holds the shot thumbnails only: never your source videos, which a bank references in place and never writes to, and never the clips, which do not exist until you promote them.
+
+### Why checkpoints have their own folder
+
+They did not, and it cost weights. "Clean finished runs" trashed the whole staging
+directory while advertising *checkpoint duplicates already imported* — but a
+checkpoint that had never been deployed to ComfyUI had no duplicate: staging was
+its **only** copy. Emptying the trash afterwards destroyed it.
+
+Trained files now land in the checkpoint store from the moment they are
+downloaded, and no cleanup path can reach them. An install that trained before
+this change is swept once at startup; **Move stray checkpoints into the store**
+re-runs that sweep on demand and is safe to press at any time.
+
+### Cloud run housekeeping
+
+- **What a cleanup actually does.** Cleaning a finished run — from this tab or with
+  the 🧹 button on the Runs hub — moves its **dataset copy, its sample images and
+  its logs** to the trash. It never moves a `.safetensors`. Files go to the trash
+  **on the same disk**, so the space only comes back when you **empty the trash**.
+- **Which runs are spared.** A run that is still active, and a run whose pod was
+  kept for manual recovery **while that recovery window is still open**
+  (`cloud.max_runtime_minutes` after the run ended). Once the window has closed the
+  pod is gone, so its staging is cleanable like any other — it used to stay frozen
+  forever, holding tens of gigabytes for a pod that no longer existed.
+- **Find unclaimed run folders** — `run_<id>` folders on disk that **no run in the
+  database points at**, left behind by a restored backup, a deleted database or an
+  interrupted cleanup. The cleanup used to answer *already clean* while 25 GB sat
+  right there. They are now listed with their size, and any checkpoint still inside
+  one is **rescued into the store** before the folder goes to the trash.
+
+### Trash and archives
+
+- **Trash** — **Open folder** and **Empty trash**. Everything the app deletes goes here first; emptying is the one destructive action, and it asks for confirmation. It lives on the same disk as your data, so a cleanup gives space back only once you empty it.
+- **Run image archive** — its size, its ceiling, and **Clear archive**. When a training run is launched, a **deduplicated** copy of the images it trains on is kept so that comparing two runs can still *show* an image you have since deleted from its dataset. Copies are **content-addressed**: relaunching an unchanged dataset stores nothing the second time, and only images that were added or re-edited cost anything. Clearing it keeps your runs, their settings and their caption text — you only lose the ability to look at images that are no longer in their dataset. The ceiling is `provenance.archive_max_gb` (see *Config-file-only settings*); past it, nothing more is stored and the compare panel says the picture is unavailable instead of showing a wrong one.
+- **Back up everything** — not on this page but on the **Datasets library**: one button archives every dataset, its **training history** and your settings into a single file (⬇ download or 📂 open folder), and the library's **Import backup** restores it — datasets come back under **Trained**, not "Not trained yet". Tick **Include trained LoRAs** to bundle the (large) trained `.safetensors` too. **API keys and tokens are never included** — re-enter them on the new install. See *Using the app → Back up everything*.
+
+### Quantize an existing model to fp8
+
+A full-precision `.safetensors` is roughly **2.5× the size ComfyUI needs** to
+generate with it. **Quantize a model to fp8** takes any full-precision model — a
+~26 GB one downloaded from Hugging Face, a checkpoint an earlier full-model run
+delivered, a large finetune someone shared — and writes `<name>_fp8.safetensors`
+into ComfyUI's own models folder, loadable with the standard *Load Diffusion
+Model* node without moving anything by hand.
+
+This is the **same tool** as the one on the full-model recipe card (*Training →
+Full-model (dense) recipe*), reachable here **without a dataset**: it was only in
+that card at first, which nobody who simply downloaded a model ever opens.
+
+- **The source is never modified**, and an existing output is never silently
+  overwritten. The result is re-opened and its scaled tensors counted before it
+  reports success — a file that cannot be read back is reported as a failure, not
+  as a smaller model.
+- **It refuses before you click, not after.** The plan states the source size,
+  the name and folder it will write, the expected size and how many matrices are
+  quantized. A file that is **already quantized**, a **LoRA/adapter**, an output
+  that already exists and a drive without room are refused *there*, with the
+  reason, and the button stays dead. Reading the plan costs a few kilobytes of
+  file header. Every condition that would stop the conversion is evaluated here:
+  a refusal that only existed at start time left the button enabled and landed
+  after the user had committed.
+- **The disk budget is derived, not a flat number.** What is still to download +
+  the fp8 file's own ceiling + 2 GB of working headroom, against the free space
+  of the volume that really holds the destination (`realpath` first — model
+  folders are often junctions onto another drive). A flat 30 GB floor used to
+  refuse a 12.8 GB conversion on a drive with 17.6 GB free. When a drive really
+  is too full, the refusal offers to write the file to another folder.
+- **It runs on the CPU**, one conversion at a time app-wide, so it never competes
+  with ComfyUI or a training run for VRAM. It is disk-bound (measured ~1.2 GB/s).
+- **It runs in a separate Python**, the one that has `torch` — this app installs
+  without it on purpose. See `quantize.python` in *Config-file-only settings*. An
+  environment that cannot do the work is a refusal in the plan, naming what to
+  install.
+- **Nothing is memory-mapped.** The checkpoint is read one tensor at a time, so
+  the size of the file has no bearing on whether it can be opened. Mapping a
+  26 GB file used to reserve 26 GB before reading a single number, which failed
+  outright — with a "paging file is too small" error — on any machine whose
+  pagefile was not unusually large.
+- **fp8 is a one-way, inference-only export.** A quantized file is refused as a
+  training base, so keep the full-precision one if you may ever want to continue,
+  merge or re-quantize that model. And this is **not** the `quantize` training
+  option, which only shrinks a model in memory while it trains and writes no file.
+
+The result lands in ComfyUI's own folder (`models/diffusion_models`, or
+`models/checkpoints` for an SDXL-style bundle), so there is nothing to move.
+With ComfyUI not configured it falls back to the app's `data/models/…` and
+**says so** rather than pretending. **A model a full-model run delivered needs no
+path at all**: inside a dataset, the same block is already aimed at it — see
+*Training → Full-model (dense) recipe*.
+
+### Hugging Face storage
+
+Full-model (dense) cloud training now delivers its ~26 GB result **to this
+computer first** — the checkpoint folder set above — and only then backs the
+master up to a **private** Hugging Face repo. Custom training bases are still
+cached there (one `lds-base-<hash>` repo per distinct base), so the **private
+storage allowance** still matters; what changed is that nothing is pushed *while
+the run trains*. A full allowance used to arrive as
+`403 … private repository storage limit reached` at the end of a paid run and
+end it (this happened at step 2750 of 3000). It can now cost only the backup —
+and with it the ability to continue that model later.
+
+The **Hugging Face storage** card is the answer to that. Nothing here runs on
+page load; **Check storage** is an explicit click.
+
+- **What it measures.** Hugging Face publishes **no quota endpoint**. The card
+  therefore sums the `usedStorage` the Hub reports for each of your private
+  repos (models and datasets) — the same number you can read on
+  huggingface.co — and compares it with what one dense run needs: one checkpoint
+  (sized from what your **past runs actually delivered**, else ~26 GB) × the
+  saves kept, plus the **fp8 twin** the run also uploads, plus a margin. The card
+  spells that sum out term by term, in the same words as the launch refusal, so
+  the total and its breakdown can never tell two different stories.
+- **What it cannot know.** The **ceiling**. The published plan table says 100 GB
+  of private storage for a free account and 1 TB for PRO, but a real refusal has
+  been observed well below the free figure. Everything the card says about
+  "allowance" and "room left" is therefore an **estimate**, clearly labelled as
+  one, and the launch refusal it produces is always confirmable — *Train anyway*
+  exists on purpose. Storage is also billed over git history: a superseded
+  revision keeps counting until a repo's history is squashed, which this
+  estimate does not model.
+- **One blind spot, on purpose.** The *launch* pre-check measures with the
+  dedicated `HF_CLOUD_TOKEN` only — dense runs are deliberately cut off from the
+  general `HF_TOKEN`, and reading it here to sharpen an estimate would widen
+  that boundary. So a fine-grained cloud token too narrow to *list* its delivery
+  namespace makes the forecast **unknown**, and unknown never blocks a launch.
+  The card below uses `HF_TOKEN` and stays fully sighted, so **Check storage**
+  shows the whole picture even when the launch forecast could not.
+- **Custom-base caches.** Every `lds-base-*` repo is listed with its size, the
+  local file it mirrors, and the last cloud run that used it. Each is a **cache**:
+  the local file is the source of truth, so deleting one costs a single
+  re-upload the next time you launch on that base — *unless* the local file is
+  gone, in which case the card says **Only copy** and the confirmation says so
+  too. **Delete all** sweeps them in one go and reports partial failures.
+
+| Setting | Key | Default | Notes |
+|---|---|---|---|
+| **Full-model delivery** | `cloud.full_transformer.delivery` | `both` | Where a finished full model goes. `both` = download it here, verify it (byte count **and** a re-read of the safetensors header), release the pod, then upload the master to the private repo as a backup. `local` = skip the backup and save the quota — the run can then **not** be continued later, because a 26 GB checkpoint can only reach a fresh pod from the Hub. `hub` = the historical Hugging-Face-only delivery, with its mid-training pushes. Runs launched before this setting existed keep the `hub` behaviour for ever. |
+| **Private storage allowance (GB)** | `cloud.full_transformer.private_storage_limit_gb` | `0` | What the pre-check compares against. `0` = infer from the plan documented by Hugging Face (100 GB free / 1 TB PRO) — a guess, as above. Put your account's real ceiling here to make the check exact. |
+
+**Which forecast blocks, and which one only warns.** With `delivery = hub` the
+repository is the artifact's only address, so a forecast that does not fit is a
+**refusal** (confirmable — the ceiling is an estimate). With a delivery that also
+brings the model home, the same forecast is a **warning shown at launch**: the
+run is unaffected, but you are told before the GPU is rented that this model will
+probably not be resumable. A second, separate check looks at **this machine's**
+disk (`LOCAL_DISK_FULL:`) and refuses — also confirmably — a launch whose
+delivery plainly will not fit in the checkpoint folder.
+
+**When a transfer fails.** The pod is destroyed **only** after the local file is
+proven. Anything that goes wrong before that (a truncated stream, a full drive, a
+cancelled transfer, the runtime cap) closes the run as **error_pod_kept** with the
+machine still alive, and the Runs page grows a **Fetch to this computer** button
+that resumes the download from where it stopped — an interrupted transfer keeps
+every byte it had already written. Cancelling is a second click on the same
+button.
+
+**When a run hits the Hugging Face wall anyway.** A `hub`-only dense run whose
+checkpoint push is refused for storage says so: the run card reads *HF private
+storage full — free space then resume from the kept pod*, and the run closes as
+**error_pod_kept** — the paid pod is **kept**, not destroyed, for the recovery
+window (`cloud.max_runtime_minutes` after the failure). Free space here, then use
+**Verify HF delivery** on the Runs page once the push lands.
+
 ## Server & access
 
 How the app binds and who can reach it. **These are the settings that need a restart** — the card shows a **Running vs Saved** banner and a **Save & restart to apply** button that does it in one click.
@@ -777,13 +1277,10 @@ How the app binds and who can reach it. **These are the settings that need a res
 
 ## Maintenance
 
-Housekeeping and diagnostics. Only one true setting lives here; the rest are actions.
+Keeping the **app itself** healthy: updating it, and getting a bug report out of it. No setting lives here, only actions. Everything about the **disk** — the trash, the run image archive, the dataset root and the folders that fill a drive — moved to *Storage* above, where those questions are answered together.
 
 - **Updates** — **Check for updates** and **Update & restart**, plus a *see what's in this update* compare link. **The button adapts to how you installed.** A **git checkout** fast-forwards to the latest commits. A **packaged (ZIP) install** announces the release and its size (*Update to vX — download ~XX MB*) and shows a **live progress bar** while it downloads and installs (a release ZIP is far larger than a git pull), then backs up the current files and swaps in the new ones — keeping `data/`, `config.json`, `.env` and your `.venv` untouched — and restarts. A mid-way failure rolls back automatically, so a broken download never leaves you with a half-updated install. If the app can't identify a downloadable release (no ZIP asset, or offline), the button steps aside and links to the releases page instead of promising an update it can't perform.
-- **Trash** — **Open folder** and **Empty trash**. Everything the app deletes goes here first; emptying is the one destructive action, and it asks for confirmation.
-- **Run image archive** — its size, its ceiling, and **Clear archive**. When a training run is launched, a **deduplicated** copy of the images it trains on is kept so that comparing two runs can still *show* an image you have since deleted from its dataset. Copies are **content-addressed**: relaunching an unchanged dataset stores nothing the second time, and only images that were added or re-edited cost anything. Clearing it keeps your runs, their settings and their caption text — you only lose the ability to look at images that are no longer in their dataset. The ceiling is `provenance.archive_max_gb` (see *Config-file-only settings*); past it, nothing more is stored and the compare panel says the picture is unavailable instead of showing a wrong one.
 - **Back up everything** — not on this page but on the **Datasets library**: one button archives every dataset, its **training history** and your settings into a single file (⬇ download or 📂 open folder), and the library's **Import backup** restores it — datasets come back under **Trained**, not "Not trained yet". Tick **Include trained LoRAs** to bundle the (large) trained `.safetensors` too. **API keys and tokens are never included** — re-enter them on the new install. See *Using the app → Back up everything*.
-- **Dataset images root** → `paths.dataset_images_root`. Where dataset images are stored. Default **empty → `<data dir>/datasets`**. Point it at a bigger or faster drive if your default data directory is tight on space. This folder (and every dataset folder under it) is refused as an **image bank** source: a bank points at a live folder and can delete from it, so the two must never share files — see *Using the app → A bank and a dataset never share files*. Moving this root onto a folder an existing bank already uses is not blocked here, but that bank will say so the next time you open it, and its 🗑 Delete rejected will be refused.
 - **Diagnostic report** — a one-click, **paste-safe** report for bug reports: it carries the version, capability status and a log tail, with **no secrets** and file paths reduced to booleans (present/absent). Safe to drop into Discord or a GitHub issue.
 - **Server log** — a live tail of the server log, with **Copy all**, for when you need to see what just happened.
 
@@ -826,6 +1323,40 @@ These have no UI control — they're for advanced users editing `config.json` by
 |---|---|---|
 | `engines.chatgpt_subscription_model` | `gpt-5.4-mini` | The Codex **router** model used by the subscription lane — not the image model. The subscription lane renders on whatever image model your plan serves; the API-key lane's image model is `engines.chatgpt_image_model`. |
 
+**Shot detection (video bank):** the boundary detector that cuts a long source into
+individual shots. No UI control yet — the defaults are the reference
+implementation's, and neither of the two numbers below has been measured against
+this app's material, so they are stated as adjustable rather than tuned.
+
+| Key | Default | Role |
+|---|---|---|
+| `shot_detect.python` | `''` | Interpreter that runs the detector. Empty means **reuse the Bank scoring environment**, which already carries torch — a second copy would cost you ~2.5 GB for nothing. Written by the installer; you rarely set it by hand. |
+| `shot_detect.threshold` | `0.5` | Cut probability at or above which a frame is treated as a shot boundary. Lower it to cut more finely on soft transitions; raise it if dissolves are being split into fragments. |
+| `shot_detect.min_shot_frames` | `5` | Shots shorter than this are **dropped, not merged** into a neighbour. Merging would silently move that neighbour's boundary, and a boundary is the one thing this whole lane exists to get right. 5 rejects a stray flash cut while leaving real rapid montages intact. |
+| `shot_detect.device` | `auto` | `auto` \| `cuda` \| `cpu`. The network runs on 48×27 frames and is never the bottleneck — decoding is. CPU is a perfectly reasonable choice, and it leaves the GPU free for captioning and training. |
+
+**Video bank quality cuts:** the thresholds behind the video bank's amber flags.
+The cuts that describe your *footage* default to **empty = no cut** — that is a
+decision, not an omission: published thresholds measurably do not transfer between
+collections, so the app never ships one. `watermark_max` is the exception and the
+reason is worth knowing: it does not measure your footage, it reads a *classifier's*
+probability, which is calibrated with the model rather than with your material — so
+the image lane's measurement transfers where a motion floor does not. Set them from
+**Video bank → 🎚 Quality cuts**, where **Preview** shows how many shots each value
+would flag before you apply it. Raw scores stay stored, so changing any of these
+re-sorts every bank instantly, without rescanning.
+
+| Key | Default | Role |
+|---|---|---|
+| `video_bank.min_duration_s` | *(empty)* | Flags shots shorter than this, in seconds (`brief`). The only cut here that needs no measuring pass — it reads the shot bounds, so it works straight after detection. Not the same thing as the promotion's `too short` refusal, which is your target profile's own arithmetic and no setting moves it; this one only decides what gets flagged for your eyes. |
+| `video_bank.motion_floor` | *(empty)* | Flags shots whose average motion falls below this (`still`). |
+| `video_bank.motion_ceiling` | *(empty)* | Flags shots whose busiest moments exceed this (`agitated`). |
+| `video_bank.luma_floor` | *(empty)* | Flags shots whose darkest frame falls below this brightness (`black`). |
+| `video_bank.freeze_max` | *(empty)* | Flags shots where more than this share of frames do not move (`freeze`). |
+| `video_bank.sharpness_floor` | *(empty)* | Flags shots whose sharpest stretch stays below this (`soft`). |
+| `video_bank.watermark_max` | `0.94` | Flags shots whose watermark score exceeds this (`watermark`), after the **🔖 Watermarks** pass has scored them. This model's scores are compressed hard against 1, so 0.94 is the measured cut and not the 0.5 a probability normally implies — on a 110-image hand-labelled sample it flagged none of the 55 clean images and still caught 54 of the 55 marked ones. Lower it toward 0.92 to catch the faintest marks and hand-check a few clean shots. A shot the pass has not judged carries no score and is **never** flagged — that is "not evaluated", not "clean". Set it to empty to flag nothing. |
+| `video_bank.duplicate_threshold` | `0.96` | Cosine similarity at or above which two shots are grouped as near-duplicates by the **✂ Duplicates** pass, comparing them at their closest pair of embedded frames. Not a read-time cut like the rows above: changing it means re-running that pass — which is instant and costs no GPU, since it re-reads the frame vectors **🔎 Find scenes** already cached. **Where the number comes from:** it is inherited from the image bank's `bank.semantic_dup_threshold`, measured over the *same* CLIP space, and no video-pair calibration exists yet. Comparing shots at their closest frame pair also reaches any given value more easily than a single-image comparison does, so **raise** it if your bank over-groups. |
+
 **Imported shot catalogs** — written by the workspace, not meant to be hand-edited (see *Using the app → Your own shot catalog*), but this is where they live so you know what to back up:
 
 | Key | Default | Role |
@@ -850,6 +1381,8 @@ These have no UI control — they're for advanced users editing `config.json` by
 | `cloud.disk_gb` | `60` | Instance disk (base model + dataset + checkpoints). |
 | `cloud.min_vram_gb` | `{zimage:24, sdxl:16, krea:24, flux2klein:32}` | Minimum VRAM **per family**. flux2klein uses 32 (the 9B is the cloud-first lane; a 32 GB pod also trains the 4B). |
 | `cloud.onstart` | `''` | Optional startup command for the raw-image fallback. |
+| `cloud.full_transformer.storage_margin_gb` | `20` | Headroom added on top of *checkpoint × saves kept* in the Hugging Face storage pre-check. |
+| `cloud.full_transformer.checkpoint_size_gb` | `0` | Size of one dense checkpoint used by that pre-check. `0` = measure it from what past dense runs really delivered, else ~26 GB. |
 
 **Quality-tool interpreters and models:**
 
@@ -859,7 +1392,11 @@ These have no UI control — they're for advanced users editing `config.json` by
 | `face_scoring.models_root` | `''` | Where InsightFace weights are stored/downloaded. |
 | `face_scoring.device` | `'auto'` | Device for the Image-bank face pass. `auto` uses the GPU when the face interpreter exposes CUDA (needs `onnxruntime-gpu` installed in it) and falls back to CPU otherwise; `cpu` forces CPU (never touches the GPU); `cuda` requests the GPU but still falls back to CPU when unavailable. A GPU run is serialized through the GPU-exclusive window so it never competes with a training/scoring pass. |
 | `masks.python` | `''` | Interpreter for the rembg (person-mask) subprocess. |
-| `bank_scoring.text_search_idle_minutes` | How long the 🔤 **Find by text** encoder stays warm after its last query (default `10`, capped at `120`). Loading CLIP costs ~10 s on the CPU; encoding a phrase afterwards costs ~20 ms, so the worker is kept alive to make a refine-and-retry session instant. It holds roughly **2.4 GB of RAM** while it lives, and is released when you close the search panel or when the window elapses. Set to `0` to never keep it warm — every new phrase then pays the ~10 s load, which is the right trade on a memory-tight machine. Already-searched phrases are cached on disk and cost nothing either way. |
+| `bank_scoring.text_search_idle_minutes` | `10` | How long the selected 🔤 **Find by text** encoder stays warm after its last query (capped at `120`). Set `0` to unload after every query. Text caches are separated by engine/model key. |
+| `bank_semantic.python` | `''` | Interpreter for SigLIP 2 image/text workers and capability probes. Setup installs SigLIP 2 into `data/envs/bank_scoring` and records that managed Python here without changing `bank_scoring.python` (so a borrowed GPU Score runtime stays selected and untouched). You can also point it at a CUDA interpreter you already have, from the Bank's **Semantic engine** panel (**GPU Python I already have**) - an EXECUTION choice only: Setup's Install/repair keeps targeting the managed environment and now preserves your pick instead of overwriting it. The check uses SigLIP 2's own dependency list (`torch`, a `transformers` carrying `Siglip2Model`, `numpy`, `Pillow`) - no `open_clip`, no `timm`. Empty keeps backward compatibility: use `bank_scoring.python`, then the app Python. |
+| `bank_semantic.models_root` | `''` | SigLIP 2 model cache (empty = `data/models/bank_semantic`). Setup downloads only the pinned files after an explicit click; inference is local-files-only. |
+| `bank_semantic.device` | `'auto'` | Device for the SigLIP 2 image index (`auto`, `cuda`, `cpu`). Resolved against `bank_semantic.python`: `auto` only reaches the GPU if THAT interpreter's torch sees a card, which is what the Semantic engine panel's device line reports. A GPU run uses the same exclusive window as other Bank ML work. |
+| `bank_semantic.siglip2_semantic_dup_threshold` | `0.97` | SigLIP 2 cosine threshold for **✂ Find crops & variants**. Separate from CLIP because the two spaces are not numerically interchangeable. |
 | `watermark.python` | `''` | Interpreter for the LaMa watermark subprocess. **Auto-managed:** leave it empty and the **Install inpainting** button builds a dedicated Python 3.10-3.12 environment for you (`simple-lama-inpainting` needs Pillow&lt;10, so it can't share the app's own Python) and fills this in automatically. Set it yourself only to point at an environment you already have — a manual value is always respected and never overwritten. |
 
 **Klein consistency LoRA:**
@@ -902,8 +1439,13 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `server.port` | Port the server listens on (default `5050`). |
 | `server.require_token` | On a non-loopback bind, require remote clients to present an access token (default `false` — a trusted LAN needs none). Toggle and token also live in Settings → Server & access. |
 | `paths.dataset_images_root` | Where dataset images are stored. Empty string defaults to `<data dir>/datasets`. |
-| `dataset_import.max_side` | Longest side for opt-in WebP normalization (default `1024`; `0` = original size). It is ignored by the default `preserve` mode; ratio is always preserved, never enlarged, and normalized paths clamp at 8192 px. Every source must still be at most 16 Mi-pixels and 8192 px per side; a larger one is rejected and must be converted or resized before import. Not retroactive. Editable in Settings → Captioning & quality. |
-| `dataset_import.encoding` | How an un-cropped imported image is written: `preserve` (default; original JPG/JPEG, PNG, WebP or BMP bytes with the matching extension), or the opt-in WebP modes `standard` (q92), `high` (q100), and `lossless`. Auto head-crop is always a derived WebP. The 16 Mi-pixel / 8192 px-per-side input limit applies to every mode. Editable in Settings → Captioning & quality. |
+| `paths.cloud_runs_dir` | Working area of cloud training runs (dataset copy, samples, logs). Empty string defaults to `<data dir>/cloud_runs`. |
+| `paths.checkpoints_dir` | Durable store for the checkpoints cloud runs produce. Empty string defaults to `<data dir>/checkpoints`. No cleanup ever removes a file from it. |
+| `paths.video_datasets_dir` | Where promoted video datasets are written — a flat folder of `.mp4` clips with homonym `.txt` captions per dataset. Empty string defaults to `<data dir>/video_datasets`. |
+| `dataset_import.max_side` | Longest side for opt-in WebP normalization (default `1024`; `0` = original size). It is ignored by the default `preserve` mode; ratio is always preserved, never enlarged, and normalized paths clamp at 8192 px. Every source must still fit `image_input.*` below; a larger one is rejected and must be resized before import (or the budget raised). Not retroactive. Editable in Settings → Captioning & quality. |
+| `dataset_import.encoding` | How an un-cropped imported image is written: `preserve` (default; original JPG/JPEG, PNG, WebP or BMP bytes with the matching extension), or the opt-in WebP modes `standard` (q92), `high` (q100), and `lossless`. Auto head-crop is always a derived WebP. The `image_input.*` budget applies to every mode. Editable in Settings → Captioning & quality. |
+| `image_input.max_pixels` | Largest source image any lane may decode, in pixels (default `67108864` = 64 Mi-pixels; `0` = no limit). A memory budget: ~3 bytes per decoded RGB pixel, and an edit or analysis pass can hold a second copy. Read by dataset import, ZIP/scrape ingest, Bank scan and thumbnails, edits, ComfyUI staging and Ollama vision. Bank *inference workers* keep their own fixed 16 Mi-pixel guard. Editable in Settings → Captioning & quality. |
+| `image_input.max_side` | Largest side of a source image, in px (default `16384`; `0` = no limit). Separate from `max_pixels` because a wide panorama can sit inside the pixel budget and still exceed a side limit. Editable in Settings → Captioning & quality. |
 | `comfyui.api_url` | Base URL of your ComfyUI instance (default `http://127.0.0.1:8188`). |
 | `comfyui.base_dir` | ComfyUI install directory, used to derive `output`/`input`/`models`/`loras` dirs if those aren't set explicitly. |
 | `comfyui.output_dir` | Explicit override for ComfyUI's output folder. Set it when ComfyUI runs with `--output-directory`. Editable in Settings → Local tools. |
@@ -934,24 +1476,44 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `engines.chatgpt_subscription_model` | Codex **router** model for the subscription lane (default `gpt-5.4-mini`) — not an image model. |
 | `captioning.backend` | Caption backend: `auto` (prefer JoyCaption, fall back to Ollama), `joycaption`, `ollama`, or `none`. |
 | `training.default_family` | Default model family preselected for new training runs (`zimage`, `sdxl`, `krea`, `flux`, `flux2klein`, or `anima`). |
-| `cloud.max_concurrent_runs` | Simultaneous cloud pods allowed (default `1`, 1–10). Also in Settings → Training. |
+| `cloud.max_concurrent_runs` | Simultaneous cloud pods allowed (default `1`, 1–10). Also in Settings → Storage. |
 | `cloud.max_price_per_hour` | Safety cap on the hourly offer price in $ (default `0.80`); pricier hosts are skipped before launch. |
 | `cloud.monthly_budget_usd` | Hard monthly spend ceiling in $ (default `0` = unlimited); launches are blocked past it. |
 | `cloud.stall_timeout_minutes` | Kill + rescue a cloud run after this many minutes without step progress (default `30`, 5–240). |
-| `cloud.first_step_timeout_minutes` | Kill a run that reaches no training step **and** reports no new downloaded bytes for this long (default `45`, 5–240). Also in Settings → Training. |
-| `cloud.first_step_download_budget_minutes` | Absolute ceiling on the pre-training base-model download, even while it is progressing (default `180`; `0` = no ceiling). Also in Settings → Training. |
-| `cloud.max_runtime_minutes` | Hard stop on the whole run (default `480`, 30–1440); the newest checkpoint is rescued first. Enforced by the out-of-run supervisor too. Also in Settings → Training. |
+| `cloud.first_step_timeout_minutes` | Kill a run that reaches no training step **and** reports no new downloaded bytes for this long (default `45`, 5–240). Also in Settings → Storage. |
+| `cloud.first_step_download_budget_minutes` | Absolute ceiling on the pre-training base-model download, even while it is progressing (default `180`; `0` = no ceiling). Also in Settings → Storage. |
+| `cloud.max_runtime_minutes` | Hard stop on the whole run (default `480`, 30–1440); the newest checkpoint is rescued first. Enforced by the out-of-run supervisor too. Also in Settings → Storage. |
 | `cloud.freeze_watchdog_minutes` | Terminate a training run whose **pod** shows no progress for this long (step, download bytes or a new checkpoint), from outside the run's own supervision; the clock is durable and survives an app restart (default `45`; `0` = warn on the card only). |
-| `cloud.upload_stall_minutes` | Give up a run whose dataset upload has had **no byte at all** reach the pod for this long, and release the machine (default `25`; `0` = never cut). Not a ceiling on the transfer's duration — a slow upload that keeps moving is never cut. Also in Settings → Training. |
+| `cloud.upload_stall_minutes` | Give up a run whose dataset upload has had **no byte at all** reach the pod for this long, and release the machine (default `25`; `0` = never cut). Not a ceiling on the transfer's duration — a slow upload that keeps moving is never cut. Also in Settings → Storage. |
 | `cloud.min_reliability` | vast.ai host-reliability floor (default `0.98`, 0.9–0.999); lower surfaces cheaper, riskier hosts. |
 | `cloud.verified_only` | Restrict to vast.ai verified hosts (default `true`). |
 | `cloud.secure_cloud_only` | Restrict to vast.ai's Secure Cloud (datacenter) tier (default `false`; narrows the market, raises price). |
+| `cloud.full_transformer.delivery` | Where a finished full model is delivered: `both` (default — this computer first, Hugging Face backup after), `local`, or `hub`. Also in Settings → Storage. |
+| `cloud.full_transformer.local_disk_margin_gb` | Free space left on the checkpoint volume on top of the delivery itself, checked before a pod is rented (default `15`). |
+| `cloud.full_transformer.hub_push_budget_seconds` | Ceiling on the pod-side upload of the master to Hugging Face (default `3600`). |
+| `cloud.full_transformer.hub_fetch_budget_seconds` | Ceiling on the pod-side download of a checkpoint when continuing a full model (default `3600`). |
+| `cloud.full_transformer.push_slice_bytes` | Size of one slice when a full model is pushed to a pod **from this computer** (default `2147483648`, i.e. 2 GiB). It is not a memory setting — the request is streamed, so a slice of any size costs a megabyte of RAM. It is what an interruption COSTS: a broken transfer resumes at the last whole slice, so a smaller value loses less on a flaky link and a larger one makes fewer round-trips. |
+| `cloud.uplink_mbps` | Your upload speed in Mbit/s, used to forecast how long sending a checkpoint to a pod would take and what that costs in rented GPU time (default `0` = work it out). The app **measures** the real speed of every checkpoint it pushes and prefers what it measured over what you typed, so this only fills the gap until you have sent one. Dataset uploads do not count towards that measurement: thousands of small files measure per-request latency, not the throughput one continuous 26 GB file would see, and averaging the two would describe neither. |
+| `cloud.full_transformer.private_storage_limit_gb` | Private Hugging Face allowance the dense pre-check compares against (default `0` = infer from the documented plan, an estimate). Also in Settings → Storage. |
+| `cloud.full_transformer.storage_margin_gb` | Headroom added to that forecast (default `20`). |
+| `cloud.full_transformer.checkpoint_size_gb` | Dense checkpoint size used by that forecast (default `0` = measured from past runs, else ~26 GB). |
+| `cloud.full_transformer.fp8_export` | Produce the ~10 GB ComfyUI-loadable fp8 twin at the end of a successful dense run (default `true`). `false` disables it for every dataset — an install that would rather not spend the extra pod minutes. |
+| `cloud.quantize.max_minutes` | Hard ceiling on a cloud quantization rental (default `60`, floor 5). The machine is destroyed when it is reached, whatever it reported. |
+| `cloud.quantize.max_price_per_hour` | Price cap for that rental (default: the general `cloud.max_price_per_hour`). |
+| `cloud.quantize.min_inet_down_mbps` | Downlink floor for the host (default `200`). The job is network-bound — this is the setting that decides the bill. |
+| *(not a setting)* free-disk floor | Derived, never configurable: the pod must hold the master, its fp8 twin and the download cache (~86 GB for a 26 GB model). Offers with less free disk are excluded from the search, because vast refuses an ask larger than the machine's disk — and the cheapest listing is exactly where free disk runs out. |
+| `cloud.quantize.export_budget_seconds` | Time budget for the conversion inside the pod (default `1800`). |
+| `cloud.full_transformer.fp8_export_budget_seconds` | Time budget for that conversion on the pod (default `1800`). Exceeding it abandons the export; the bf16 master is already delivered, so the run stays a success. |
 | `face_scoring.python` | Python interpreter used to run the InsightFace subprocess (empty = current interpreter). |
 | `face_scoring.models_root` | Directory where InsightFace model weights are stored/downloaded. |
 | `face_scoring.green` | Similarity score threshold (0–1) above which an image is flagged "green" (strong match). |
 | `face_scoring.orange` | Similarity score threshold (0–1) above which an image is flagged "orange" (borderline match). |
 | `masks.python` | Python interpreter used to run the rembg subprocess (empty = current interpreter). |
+| `video_caption.style` | Which PROMPT writes the captions: `standard` (default, the shipped wording) or `plain`. Measured to matter **more than the checkpoint**: asked the standard way, even an uncensored model describes *around* explicit footage, while the base model asked plainly named things precisely and wrote the best action description of the four combinations tried. `plain` adds explicit permission to state what is visible and what occurs, and forbids the two evasive words the test caught models hiding behind. It matters because a caption that talks around its subject teaches the trained model to look away, and the captions read perfectly well either way. Anything unknown falls back to `standard` — never to `plain`. Also pickable per run, next to the **🗣 Describe shots** button; every caption records the style that produced it. |
+| `video_caption.model` | Which model writes the 🗣 **Describe shots** captions (empty = the shipped default, `Qwen/Qwen3-VL-4B-Instruct`). Any checkpoint of the **same architecture** is a drop-in; a different architecture fails loudly at load rather than silently misbehaving. Worth changing when the default **talks around** what your footage shows — a caption that names things evasively teaches the trained model to do the same, and nothing in the output reveals it. Pointing this at a model the machine does not have is allowed and downloads it on the first run, but never in silence: the pass says so in its own progress line before captioning anything. Every caption records which model wrote it, so a bank captioned across a change stays readable. |
+| `quantize.python` | Python interpreter that runs the **fp8 conversion** and the **LoRA→base merge** (empty = the one ✨ Score uses, then ai-toolkit's, then the app's own). Both need `torch`, which this app deliberately does **not** install — it is gigabytes and nothing else here needs it — so they run in a subprocess, like the scoring and masking passes. One setting governs both on purpose: "the Python on this machine that has torch" is one fact, and saying it twice is how the two drift apart. The chosen interpreter is probed while the *plan* is drawn: one that lacks the packages disables the button with the reason and the `pip install` line, instead of failing after the click (or after a 26 GB download). `torch` is the only module either of them needs: both read and write the safetensors format themselves rather than memory-mapping it, so an environment with torch alone is enough. |
 | `bank_scoring.python` | Python interpreter that runs the ✨ Score pass (empty = the app's own). Auto-filled by Setup with a CPU-only environment; repointable at any CUDA interpreter already on the machine via the bank's **⚡ Use a GPU Python I already have** picker, which verifies every dependency first and never installs into an environment it did not create. |
+| `bank_semantic.python` | Python interpreter that runs SigLIP 2. New installs record the LDS-managed Bank environment here independently of Score; repointable at any CUDA interpreter already on the machine from the Bank's **Semantic engine** panel, verified against SigLIP 2's own (shorter) dependency list and never installed into. Empty falls back to `bank_scoring.python` for older configs, then the app's own interpreter. |
 | `watermark.python` | Python interpreter used to run the LaMa watermark-inpainting subprocess (empty = reuse `masks.python`, then the current interpreter). |
 | `watermark.device` | LaMa processing device: `auto` (CUDA when available, otherwise CPU), `cuda`, or `cpu`. |
 | `watermark.allow_crop` | When `true` (default), a border watermark is cropped off; when `false`, it is repainted instead. Also editable in the Clean bar. |
@@ -962,6 +1524,8 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `klein.generation_steps` | Sampler steps for Klein **generation** (variations, regenerate, small-image rescue). Default `5` = the value hardcoded in the shipped workflow; 1–50. Not the improve pass (`klein.improve_steps`). |
 | `klein.edit_base_lora_strength` | Strength of the enhancement LoRA (`klein/realistic.safetensors`, node 139) on Klein **edits** — reference edit, variations, regenerate, small-image rescue. Default `0` = off, the render before that LoRA became a Setup download; 0–2. Not the improve pass (`klein.improve_base_lora_strength`). |
 | `klein.generation_lora_presets` | Named generation-LoRA stacks (default empty) picked per run in Klein tuning; each has a name and up to 8 `{file, strength}` rows. Managed in Settings → Image engines. |
+| `klein.default_generation_lora_preset` | Which of `klein.generation_lora_presets` the 🖥️ Klein tuning panel STARTS on. Default `''` = *None*, the behaviour before this key existed. A starting point only — the run panel still offers None and every other preset for that run, and picking there does not rewrite this. Fail-closed: a name matching no preset behaves as *None*. |
+| `krea.default_generation_lora_preset` | The same, for `krea.generation_lora_presets` and the 🧬 Krea 2 Edit tuning panel. A SEPARATE key on purpose: the two preset lists are independent and one name can designate two different chains. Default `''`. |
 | `identity_prompts.markings_lock` | Krea's “hold the skin” order — forbids inventing or redrawing marks. Blank = shipped default. Naming a body feature here summons it. |
 | `identity_prompts.outfit_vary` | The outfit directive injected into every human shot with no named garment. Blank = shipped default. |
 | `identity_prompts.expression_neutral` | The neutral-expression directive injected into every human shot with no named expression. Blank = shipped default. |

@@ -475,6 +475,9 @@ def _run_klein_job(user_id, crop_img, *, seed, steps=KLEIN_STEPS,
         return None, {'kind': 'unavailable', 'detail': str(exc)}
 
     workflow['114']['inputs']['unet_name'] = unet
+    # Same rule as the edit lane: the graph hardcodes fp8_e4m3fn, which is only
+    # right for an fp8 build (keh._unet_weight_dtype).
+    workflow['114']['inputs']['weight_dtype'] = keh._unet_weight_dtype(unet)
     workflow['10']['inputs']['vae_name'] = vae
     workflow['90']['inputs']['clip_name'] = te
     workflow['52']['inputs']['image'] = crop_name

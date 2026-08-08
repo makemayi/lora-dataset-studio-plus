@@ -15,6 +15,7 @@ const BASE = Object.freeze({
   hasCaptionedKept: true,
   hasLeakMetadata: true,
   watermarkDetected: 0,
+  watermarkRejectable: 0,
   smallImageRescue: 0,
   unused: 0,
   hfPublish: false,
@@ -67,6 +68,10 @@ test('data and capability predicates expose only destinations that currently exi
   assert.deepEqual(ids('images', { hasSelectableImages: false }), ['review']);
   assert.deepEqual(ids('curation', { watermarkDetected: 2, unused: 3 }),
     ['face-analysis', 'watermarks', 'review-flagged', 'rejected-cleanup']);
+  // Flagged but nothing bulk-rejectable (rescue pairs / failed rows): the
+  // shortcut is NOT offered, because the button itself is not rendered.
+  assert.deepEqual(ids('curation', { watermarkDetected: 2, watermarkRejectable: 2 }),
+    ['face-analysis', 'watermarks', 'review-flagged', 'reject-flagged']);
   assert.deepEqual(ids('curation', { smallImageRescue: 2 }),
     ['small-image-rescue', 'face-analysis', 'watermarks']);
   assert.deepEqual(ids('captions', { hasKeptImages: false, hasCaptionedKept: false }), ['generate']);

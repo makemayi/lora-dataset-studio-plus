@@ -163,6 +163,7 @@ Captions are the text the trainer actually reads. The target family selects the 
 |---|---|
 | **JoyCaption / Ollama vision** | Generate captions with the engine selected for this dataset |
 | **Vocabulary and wording options** | Choose Explicit, Clinical or Safe vocabulary and add project-specific instructions |
+| **Caption length** | Aim the captioner at Concise (about one short sentence), Standard or Detailed — a target it follows loosely, not a word cap |
 | **Identity/concept leak checks** | Catch text that accidentally describes the invariant meant to bind to the trigger |
 | **Caption Lab** | Inspect frequencies, find/replace, isolate tags, edit in a larger panel and target only problematic images |
 | **Long + short captions** | Train supported local families on two editable wordings through ai-toolkit's native text-side augmentation |
@@ -180,6 +181,8 @@ See [Caption your images in another tool](using-the-app.md#caption-your-images-i
 <p align="center">
   <img src="../screenshots/caption/caption-options.png" alt="Caption engine, vision model and vocabulary controls" width="460">
 </p>
+
+Vocabulary, length and free instructions are three independent dials on the same prompt, applied in that order — the free instructions come last, so they override a preset they contradict. The length preset is a target, not a cap: Concise asks for a single short sentence in prose (never a tag list, so the dataset still reads as prose at training launch), Detailed for several sentences. It is also unrelated to the long + short dual captions, whose short half is derived from the long one and stored separately; both can be on at once. The image bank's caption pass offers the same two dials per run.
 
 A running batch reports its position, can be stopped at any point, and shows the identity-leak scan result as captions land.
 

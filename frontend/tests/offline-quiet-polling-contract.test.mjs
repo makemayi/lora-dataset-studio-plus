@@ -87,7 +87,13 @@ test('the bank progress zone knows about the offline state', () => {
 
 test('the polls that fire on a timer are marked background', () => {
   const marked = [
-    ['components/bank/BankWorkspace.jsx', /refreshPayload\(\{ background: true \}\), 2000\)/],
+    // The bank's 2 s tick now asks /activity for the job instead of re-fetching
+    // the whole workspace payload (which took 12.5 s on a 50 000-image bank and
+    // took the Stop button down with it). BOTH calls it can make on a timer are
+    // pinned here — the property has not moved, only the URL it fires at.
+    ['components/bank/BankWorkspace.jsx',
+      /apiFetch\(`\/api\/bank\/\$\{bankId\}\/activity`, \{ background: true \}\)/],
+    ['components/bank/BankWorkspace.jsx', /refreshPayload\(\{ background: true \}\)/],
     ['hooks/useTrainingActivity.js', /'\/api\/train\/activity', \{ background: true \}/],
     ['components/settings/MaintenanceSection.jsx', /background: true/],
     ['components/settings/EnginesSection.jsx', /background: true/],
@@ -95,4 +101,18 @@ test('the polls that fire on a timer are marked background', () => {
     ['App.jsx', /update\/check\?auto=1', \{ background: true \}/],
   ];
   for (const [file, re] of marked) assert.match(read(file), re, `${file} poll not marked background`);
+});
+
+test('the bank dashboard refresh is on a wall clock, not a per-tick counter', () => {
+  // The poll effect lists the job's `detail` in its dependencies, and a running
+  // pass rewrites `detail` every couple of seconds — so the effect re-subscribes
+  // constantly. A counter declared inside it would reset before ever reaching N
+  // and the bank-wide counts would then NEVER refresh while a job ran. Caught in
+  // review of this very change; pinned so it cannot come back as a "simpler" N.
+  const s = read('components/bank/BankWorkspace.jsx');
+  assert.match(s, /const fullPayloadAt = useRef\(0\)/,
+    'the full-refresh deadline must outlive the effect');
+  assert.match(s, /Date\.now\(\) - fullPayloadAt\.current >= FULL_PAYLOAD_MS/);
+  assert.doesNotMatch(s, /ticks % FULL_PAYLOAD/,
+    'a tick counter inside the effect is reset by every detail change');
 });

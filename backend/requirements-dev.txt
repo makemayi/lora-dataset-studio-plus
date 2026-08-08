@@ -50,9 +50,40 @@ setuptools==83.0.0
 # Test-only ML extras. These are never in requirements.txt on purpose: the app
 # installs them into dedicated environments on demand (see requirements-ml.txt).
 # A handful of suites — test_watermarks.py above all — exercise real numpy/OpenCV
-# pixel maths and the Telea fallback that runs when LaMa is absent, so these two
-# (and ONLY these two in the lightweight base: Torch has its own overlay, while
+# pixel maths and the Telea fallback that runs when LaMa is absent, so these
+# (and ONLY these in the lightweight base: Torch has its own overlay, while
 # LaMa stays absent) make those tests run for real while keeping "LaMa absent"
 # true.
 numpy>=1.26,<2
 opencv-python-headless>=4.9
+
+# safetensors belongs HERE and not in the Torch overlay: that overlay carries
+# `--index-url .../whl/cpu`, so anything added to it resolves from PyTorch's
+# index instead of PyPI — the exact substitution the pinned setuptools above
+# exists to prevent. Its own contract test pins it to the Torch wheel alone.
+#
+# test_zimage_convert_streaming.py guards on Torch (`importorskip`) but reads
+# and writes real .safetensors containers, so on a machine that HAS Torch the
+# guard passes and the import still fails. That machine is CI: the dev box
+# carries safetensors transitively and stayed green, so the divergence only
+# surfaced on the release tag — the second time this file's own header describes
+# that exact failure, now on a different package. Declared, so the streaming
+# converter is actually exercised in release validation rather than skipped.
+safetensors>=0.4
+
+# instaloader belongs here for the SAME reason safetensors does, and this is the
+# THIRD time this file's header describes the same shape. test_instagram_scan.py
+# imports it at module level — everything in that file is mocked, no network is
+# ever touched, but the module is needed for the `instaloader.Profile`/`Post`
+# namespace the fakes stand in for. It ships in requirements-scrape.txt, an
+# OPTIONAL extra the app installs on demand, so a contributor who ran the scraper
+# once has it transitively and stays green while CI, which installs this file and
+# nothing else, cannot even collect the module. That is a collection ERROR, not a
+# skip: it failed the release tag, not a test.
+#
+# Declared rather than guarded with `importorskip` on purpose. A skip would turn
+# the suite green by removing the only place the Instagram verdicts are pinned —
+# and those verdicts are the point: an empty profile is an empty RESULT, while a
+# post that refuses to parse stays a real failure. Pure Python, no wheels to
+# build, so running it for real costs nothing.
+instaloader>=4.12

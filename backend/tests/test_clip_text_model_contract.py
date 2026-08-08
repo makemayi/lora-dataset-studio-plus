@@ -1,4 +1,9 @@
-"""The image half and the text half of CLIP must load the SAME model.
+"""Every CLIP tower in this project must load the SAME model.
+
+There are three of them now, and they all meet in one dot product:
+``bank_score_infer.py`` embeds bank images, ``clip_image_embed_infer.py`` embeds
+video frames, and ``clip_text_infer.py`` encodes the query both are ranked
+against. A drift in any one of them breaks a feature that shows no error.
 
 🔤 Text search ranks a query vector (from ``clip_text_infer.py``) against the
 image vectors ``bank_score_infer.py`` cached. Cosine similarity between vectors
@@ -29,6 +34,7 @@ from pathlib import Path
 INFER = Path(__file__).resolve().parents[1] / 'infer'
 SCORE = INFER / 'bank_score_infer.py'
 TEXT = INFER / 'clip_text_infer.py'
+FRAMES = INFER / 'clip_image_embed_infer.py'
 
 
 def _score_spec():
@@ -40,13 +46,17 @@ def _score_spec():
     return m.group(1), m.group(2)
 
 
-def _text_spec():
-    """(MODEL_NAME, PRETRAINED) as clip_text_infer.py declares them."""
-    src = TEXT.read_text(encoding='utf-8')
+def _declared_spec(path):
+    """(MODEL_NAME, PRETRAINED) as a warm-worker script declares them."""
+    src = path.read_text(encoding='utf-8')
     name = re.search(r"^MODEL_NAME\s*=\s*'([^']+)'", src, re.M)
     pre = re.search(r"^PRETRAINED\s*=\s*'([^']+)'", src, re.M)
-    assert name and pre, 'could not find the CLIP model spec in clip_text_infer.py'
+    assert name and pre, f'could not find the CLIP model spec in {path.name}'
     return name.group(1), pre.group(1)
+
+
+def _text_spec():
+    return _declared_spec(TEXT)
 
 
 def test_text_and_image_towers_load_the_same_checkpoint():
@@ -55,6 +65,38 @@ def test_text_and_image_towers_load_the_same_checkpoint():
         'clip_text_infer.py and bank_score_infer.py must load the SAME CLIP '
         'model/pretrained pair — otherwise text search ranks by a cosine '
         'between incomparable vectors and silently returns nonsense.')
+
+
+def test_video_frames_are_embedded_by_the_same_checkpoint():
+    """🎬 Video search ranks frame vectors from ``clip_image_embed_infer.py``
+    against a query encoded by the text tower. A different checkpoint there and
+    every video search silently returns a ranking with no meaning — the same
+    invisible failure as above, on a lane where the user has no captions to
+    cross-check the answer against."""
+    assert _declared_spec(FRAMES) == _score_spec(), (
+        'clip_image_embed_infer.py must load the SAME CLIP model/pretrained pair '
+        'as bank_score_infer.py and clip_text_infer.py — otherwise a video search '
+        'ranks a cosine between incomparable vectors.')
+
+
+def test_the_frame_worker_uses_the_declared_constants_and_normalises():
+    src = FRAMES.read_text(encoding='utf-8')
+    assert re.search(r'create_model_and_transforms\(\s*\n?\s*MODEL_NAME\s*,\s*'
+                     r'pretrained=PRETRAINED', src), \
+        'clip_image_embed_infer.py must build its model from MODEL_NAME/PRETRAINED'
+    assert re.search(r'emb\s*/\s*emb\.norm\(dim=-1,\s*keepdim=True\)', src), \
+        'clip_image_embed_infer.py must L2-normalise its embeddings'
+
+
+def test_the_frame_worker_can_be_kept_off_the_gpu_before_torch_loads():
+    """Unlike the text tower this one MAY use the card — embedding thousands of
+    frames is real compute. But when the parent did not take the GPU-exclusive
+    window, CUDA has to be hidden before torch is imported, or an hour-long pass
+    quietly competes with a training run."""
+    src = FRAMES.read_text(encoding='utf-8')
+    hide = src.index("os.environ['CUDA_VISIBLE_DEVICES'] = ''")
+    assert hide < src.index('import torch', hide), \
+        'CUDA must be hidden before torch is imported'
 
 
 def test_the_text_side_uses_the_declared_constants():

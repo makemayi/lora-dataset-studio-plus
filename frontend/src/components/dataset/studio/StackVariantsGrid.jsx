@@ -20,7 +20,7 @@
 import { fmt } from '../../../utils/studioFormat';
 import { HelpBadge } from '../../../help/HelpMode';
 import ResultTile from './ResultTile';
-import { alignWeights, variantSummary, weightVectorText, weightsIntoStackMap } from './stackResults';
+import { alignWeights, comboLabelText, variantKey, variantSummary, weightVectorText, weightsIntoStackMap } from './stackResults';
 
 export default function StackVariantsGrid({
   members, variants, onRate, onOpen, onSelectRun, onUseWeights,
@@ -55,7 +55,8 @@ export default function StackVariantsGrid({
                 LoRA \ run
               </th>
               {list.map((v) => (
-                <th key={v.run_id} scope="col"
+                <th key={variantKey(v)} scope="col"
+                  title={comboLabelText(v.weights)}
                   className={`px-1.5 py-1 text-[0.6875rem] font-semibold rounded ${v.active
                     ? 'bg-sky-500/15 text-sky-200 border border-sky-400/50'
                     : 'text-content border border-transparent'}`}>
@@ -76,7 +77,7 @@ export default function StackVariantsGrid({
                 {list.map((v) => {
                   const row = alignWeights(members, v.weights, v.active ? null : activeWeights)[i];
                   return (
-                    <td key={v.run_id}
+                    <td key={variantKey(v)}
                       className={`px-1.5 py-0.5 text-center text-[0.6875rem] tabular-nums rounded ${row.changed
                         ? 'bg-amber-400/15 text-amber-200 font-semibold'
                         : 'text-content-muted'}`}
@@ -99,7 +100,7 @@ export default function StackVariantsGrid({
                 images
               </th>
               {list.map((v) => (
-                <td key={v.run_id} className="align-top p-1">
+                <td key={variantKey(v)} className="align-top p-1">
                   {v.cells?.length ? (
                     <div className="flex flex-wrap items-start gap-1">
                       {v.cells.map((c) => (
@@ -122,7 +123,7 @@ export default function StackVariantsGrid({
               {list.map((v) => {
                 const s = variantSummary(v);
                 return (
-                  <td key={v.run_id} className="px-1.5 py-0.5 text-center text-[0.6875rem] tabular-nums">
+                  <td key={variantKey(v)} className="px-1.5 py-0.5 text-center text-[0.6875rem] tabular-nums">
                     <span className="text-green-300">👍 {s.likes}</span>{' '}
                     <span className="text-red-300">👎 {s.dislikes}</span>
                     <span className="ml-1 text-content-subtle"
@@ -136,7 +137,7 @@ export default function StackVariantsGrid({
             <tr>
               <th scope="row" className="px-1" />
               {list.map((v) => (
-                <td key={v.run_id} className="px-1 py-1">
+                <td key={variantKey(v)} className="px-1 py-1">
                   <div className="flex flex-col gap-1">
                     <button type="button" disabled={v.active} onClick={() => onSelectRun?.(v.run_id)}
                       className="rounded border border-border bg-surface px-1.5 py-0.5 text-[0.625rem] text-content disabled:opacity-40">

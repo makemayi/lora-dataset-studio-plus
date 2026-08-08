@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { buildLineageRows, resumeCaption } from '../../utils/lineageTree';
-import { famLabel, StatusDot, SavesChip } from './lineageChrome';
+import { famLabel, ModeChip, StatusDot, SavesChip } from './lineageChrome';
 import { runNumber, cloudNumber, runIdentityLabel } from '../../utils/runIdentity';
 import RunLineageGraph from './RunLineageGraph';
 
@@ -90,6 +90,7 @@ function LineageNode({ row, onSelect, index }) {
           <span className="ml-auto shrink-0"><SavesChip node={node} /></span>
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-content-subtle text-[0.5625rem]">
+          <ModeChip node={node} />
           {node.version != null && (
             <span className="rounded bg-app/60 px-1 py-px font-medium text-content-muted">v{node.version}</span>
           )}

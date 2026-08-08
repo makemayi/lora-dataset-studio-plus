@@ -38,8 +38,31 @@ test('the improve button still exists on both improve surfaces', () => {
   // pass's 'klein' engine stopped running Klein at all — Krea2 Ostris Edit +
   // SeedVR2 now, see krea_hq_helper. The action itself is unaffected.
   const lightbox = read('../dataset/DatasetLightbox.jsx');
-  assert.match(lightbox, /Upscale & improve/);
-  assert.match(lightbox, /\{onImprove && \(/);
+  assert.match(lightbox, /lightboxImproveButtons\(/);
+  assert.match(lightbox, /<KleinImproveNote\b/);
+  // ...but under KLEIN's button only: the note is about Klein's INSTRUCTION
+  // pulling drawn skin towards realism, and SeedVR2 sends no instruction — a
+  // drawn dataset is exactly where SeedVR2 is the right click, so warning
+  // under it would argue against the pass that fixes the complaint.
+  // hidden while it runs — a settings trip mid-job is not the offer being made
+  // Two branches now, one per placement: between the buttons in the rail
+  // (a column, where that is what attaches it to Klein) and under the whole
+  // group in the bottom bar (a row, where a full-width paragraph dropped
+  // mid-row stranded the second button on its own line).
+  assert.match(lightbox, /\{rail && btn\.showKleinNote && !improvementActive && \(/);
+  assert.match(lightbox, /\{!rail && improveButtons\.some\(\(b\) => b\.showKleinNote\)/);
+  // The BULK improve is the same action at scale, and it went targetless for a
+  // long time: the instruction that spoils one tile spoils the whole selection.
+  assert.match(read('../dataset/DatasetGrid.jsx'), /<KleinImproveNote\b/);
+});
+
+test('the note offers BOTH improve levers — the words and the amount', () => {
+  // "Adjust improve strength" was the only pointer for a long time, and it aims
+  // at the knobs. The reported complaint (anime turned realistic, Qeeyana on
+  // Reddit) is caused by the INSTRUCTION, which had no pointer at all.
+  const note = read('../dataset/KleinImproveNote.jsx');
+  assert.match(note, /focus="identity-prompt-klein-improve"/);
+  assert.match(note, /focus="klein-improve-strength"/);
 });
 
 test('the cloud banner lands on the section holding the key, not the landing page', () => {

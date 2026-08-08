@@ -10,8 +10,10 @@ import { WhatsNewButton, WhatsNewModal } from './components/common/WhatsNew'
 import ConnectionBanner from './components/common/ConnectionBanner'
 import SetupHealthNotice from './components/setup/SetupHealthNotice'
 import ComfyRecoveryBanner from './components/common/ComfyRecoveryBanner'
+import PinokioUpdateInstructions from './components/common/PinokioUpdateInstructions'
 import DatasetPage from './pages/DatasetPage'
 import BankPage from './pages/BankPage'
+import VideoBankPage from './pages/VideoBankPage'
 import StudioPage from './pages/StudioPage'
 import SettingsPage from './pages/SettingsPage'
 import SetupPage from './pages/SetupPage'
@@ -238,9 +240,21 @@ function NavBar() {
         </NavLink>
         {/* Desktop: workspaces on the left, utilities grouped into icon menus
             on the right (Guide/Help under ?, Setup/Settings under ⚙). */}
-        <nav className="hidden md:flex flex-1 items-center gap-1" aria-label="Main navigation">
-          {workspaceLinks}
-          <div className="ml-auto flex items-center gap-1">
+        {/* The workspace row is its own flex-wrap box, not a run of direct nav
+            children. Measured at 768 px, the row is saturated to the PIXEL with
+            the five workspaces it has today: as direct children they cannot
+            wrap, so the smallest growth — one more link, one longer label —
+            widened the header past the viewport and the whole PAGE scrolled
+            sideways, which is the one thing a layout must never do. Wrapping
+            keeps any overflow inside this box (a taller header) instead of
+            widening the document, and unlike `overflow-x-auto` here it cannot
+            clip the ? / ⚙ popovers, which live in the sibling below. Above lg
+            everything fits on one line, so a normal desktop is unchanged. */}
+        <nav className="hidden md:flex flex-1 min-w-0 items-center gap-1" aria-label="Main navigation">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+            {workspaceLinks}
+          </div>
+          <div className="ml-auto flex shrink-0 items-center gap-1">
             <HeaderMenu triggerLabel={<span aria-hidden>?</span>}
               triggerTitle="Help & guide" active={helpMenuActive}>
               {(close) => (
@@ -327,6 +341,10 @@ function UpdateBanner() {
   // One-click pull + restart, same backend action as the Settings card. A packaged
   // build (no git) comes back {manual:true} → fall back to the download page.
   const apply = async () => {
+    // Pinokio owns the process: the pull would work and the restart would
+    // detach the server from the launcher. The action is hidden below, but keep
+    // a hard guard so an already-bound/stale callback cannot call the endpoint.
+    if (installMode(info) === 'pinokio') return
     setApplying(true); setPhase('pulling'); setError(null)
     try {
       const res = await postJson('/api/update/apply', {})
@@ -347,6 +365,7 @@ function UpdateBanner() {
   }
 
   if (!info) return null
+  const pinokioMode = installMode(info) === 'pinokio'
   return (
     <div className="mx-auto max-w-5xl px-4 pt-3">
       <div role="status"
@@ -369,17 +388,23 @@ function UpdateBanner() {
                     : 'a new version'}
               </span> (you run v{info.current}).
             </span>
-            <button type="button" onClick={apply}
-              className="rounded-md bg-gradient-primary px-3 py-1 text-xs font-semibold text-white transition-transform hover:-translate-y-px">
-              Update &amp; restart
-            </button>
-            {/* Download link only for packaged builds (a git checkout updates in
-                place via the button — a release ZIP would be the wrong artifact). */}
-            {!info.is_git && (
-              <a href={info.url} target="_blank" rel="noreferrer"
-                className="text-emerald-300 underline">
-                Download
-              </a>
+            {pinokioMode ? (
+              <PinokioUpdateInstructions />
+            ) : (
+              <>
+                <button type="button" onClick={apply}
+                  className="rounded-md bg-gradient-primary px-3 py-1 text-xs font-semibold text-white transition-transform hover:-translate-y-px">
+                  Update &amp; restart
+                </button>
+                {/* Download link only for packaged builds (a git checkout updates in
+                    place via the button — a release ZIP would be the wrong artifact). */}
+                {!info.is_git && (
+                  <a href={info.url} target="_blank" rel="noreferrer"
+                    className="text-emerald-300 underline">
+                    Download
+                  </a>
+                )}
+              </>
             )}
             {error && <span className="text-rose-300">{error}</span>}
             <button type="button"
@@ -402,7 +427,7 @@ function UpdateBanner() {
 
 function Shell() {
   const { pathname } = useLocation();
-  const canvasRoute = pathname === '/canvas';
+  const wideWorkspaceRoute = pathname === '/canvas' || pathname === '/bank';
   return (
     <>
       <NavBar />
@@ -419,7 +444,7 @@ function Shell() {
       <ComfyRecoveryBanner />
       <UpdateBanner />
       <main id="main-content" tabIndex={-1}
-        className={canvasRoute
+        className={wideWorkspaceRoute
           ? 'mx-auto w-full max-w-[1800px] px-3 py-4 sm:px-4 sm:py-6'
           : 'mx-auto max-w-5xl px-4 py-6'}>
         <Outlet />
@@ -452,6 +477,11 @@ function AppInner() {
             <Route path="/" element={<Navigate to="/datasets" replace />} />
             <Route path="/datasets" element={<DatasetPage />} />
             <Route path="/bank" element={<BankPage />} />
+            {/* Its OWN route rather than a sixth nav item: the desktop bar
+                already overflows at 768 px with five workspaces, and these are
+                two kinds of material for one job — the lane switch lives on both
+                bank pages (components/videobank/BankLaneTabs). */}
+            <Route path="/video-bank" element={<VideoBankPage />} />
             <Route path="/guide" element={<GuidePage />} />
             <Route path="/guide/getting-help" element={<Navigate to="/help" replace />} />
             <Route path="/guide/:section" element={<GuidePage />} />

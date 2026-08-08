@@ -967,12 +967,15 @@ def test_build_cell_workflow_krea_honors_local_base(app, monkeypatch):
         lora_nodes = [n for n in wf.values()
                       if isinstance(n, dict) and n.get('class_type') == 'LoraLoaderModelOnly']
         assert any(n['inputs']['lora_name'] == lora for n in lora_nodes)
-        # z_model=None (entrée « Official ») → UNET câblé intact.
+        # z_model=None (entrée par défaut du picker) → base ÉLUE, pas le nom figé
+        # dans krea2_turbo.json : ce littéral n'est pas le fichier que Setup
+        # installe, donc sur une install qui a suivi Setup il désignait un fichier
+        # absent et ComfyUI refusait le prompt (cf. test_krea_default_base_election).
         wf2 = lts._build_cell_workflow(
             user_id='local', checkpoint=lora, strength=0.9, prompt='a prompt',
             seed=42, z_model=None, allowed_loras={lora}, dataset_id=1,
             train_type='krea', trigger_word='kt')
-        assert wf2['20']['inputs']['unet_name'] == 'Krea\\krea2_turbo_fp8.safetensors'
+        assert wf2['20']['inputs']['unet_name'] == base
 
 
 def _build_krea_cell(lts, monkeypatch, *, available_classes):

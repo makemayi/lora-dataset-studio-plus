@@ -75,6 +75,19 @@ export function sanitizeKreaGenerationLoraPresets(list) {
   return out;
 }
 
+/** Which preset the Krea run panel STARTS on, from
+ *  `krea.default_generation_lora_preset`. Its own key and its own resolution,
+ *  because the two preset lists are independent: the same NAME can designate two
+ *  different chains, so Klein's default must never select a Krea preset.
+ *  Fail-closed — an unknown name resolves to '' ("no preset"), never to a guess.
+ *  A starting point only: the picker still offers None and every other preset for
+ *  that run, and picking there does not rewrite the setting. */
+export function resolveKreaDefaultPresetName(defaultName, presets = []) {
+  const name = typeof defaultName === 'string' ? defaultName.trim() : '';
+  if (!name) return '';
+  return sanitizeKreaGenerationLoraPresets(presets).some((p) => p.name === name) ? name : '';
+}
+
 /** Body fragment for /generate: the picked preset's NAME under Krea's OWN key —
  *  one run can dispatch to Klein and Krea at once, so the two keys must not
  *  collide. Empty fragment ({}) when Krea isn't in the run, nothing is picked, or

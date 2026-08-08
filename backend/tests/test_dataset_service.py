@@ -462,6 +462,130 @@ def test_backup_roundtrip_restores_everything(app):
         assert os.path.isfile(os.path.join(svc._dataset_dir(restored.id), 'a.webp'))
 
 
+def test_backup_aborts_if_dataset_generation_changes_while_streaming(
+        app, monkeypatch):
+    import os
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'Moving backup', 'moving_backup')
+        folder = svc._dataset_dir(ds.id)
+        os.makedirs(folder, exist_ok=True)
+        open(os.path.join(folder, 'a.webp'), 'wb').write(_webp())
+        row = FaceDatasetImage(
+            dataset_id=ds.id, filename='a.webp', source='import',
+            status='keep', caption='generation A')
+        svc.db.session.add(row)
+        svc.db.session.commit()
+
+        native_write = svc._write_backup_file_member
+        changed = False
+
+        def mutate_after_member(*args, **kwargs):
+            nonlocal changed
+            result = native_write(*args, **kwargs)
+            if not changed:
+                changed = True
+                row.caption = 'generation B'
+                svc.db.session.commit()
+            return result
+
+        monkeypatch.setattr(svc, '_write_backup_file_member', mutate_after_member)
+        with pytest.raises(ValueError, match='dataset changed while the backup'):
+            svc.write_backup_zip(LOCAL_USER, ds.id, io.BytesIO())
+        assert svc.dataset_activity.get(ds.id) is None
+
+
+@pytest.mark.parametrize(
+    ('cap_name', 'cap_value', 'message'),
+    [
+        ('_BACKUP_MAX_FILES', 0, 'too many files in backup'),
+        ('_BACKUP_MAX_BYTES', 1, 'backup too large'),
+        ('_BACKUP_MAX_IMAGE_BYTES', 1, 'backup image a.webp is too large'),
+    ],
+    ids=('member-count', 'aggregate-bytes', 'image-bytes'),
+)
+def test_backup_writer_refuses_reader_budgets_before_opening_destination(
+        app, monkeypatch, cap_name, cap_value, message):
+    import os
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'Bounded backup', 'bounded_backup')
+        folder = svc._dataset_dir(ds.id)
+        os.makedirs(folder, exist_ok=True)
+        open(os.path.join(folder, 'a.webp'), 'wb').write(_webp())
+        svc.db.session.add(FaceDatasetImage(
+            dataset_id=ds.id, filename='a.webp', source='import', status='keep'))
+        svc.db.session.commit()
+        monkeypatch.setattr(svc, cap_name, cap_value)
+
+        output = io.BytesIO()
+        with pytest.raises(ValueError, match=message):
+            svc.write_backup_zip(LOCAL_USER, ds.id, output)
+        assert output.getvalue() == b''
+
+
+def test_backup_writer_refuses_601_rows_before_opening_destination(app):
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'Too many rows', 'too_many_rows')
+        svc.db.session.add_all([
+            FaceDatasetImage(
+                dataset_id=ds.id, derivation_kind=svc.KLEIN_SMALL_IMAGE,
+                source='generated', status='pending')
+            for _ in range(svc._BACKUP_MAX_ROWS + 1)
+        ])
+        svc.db.session.commit()
+
+        output = io.BytesIO()
+        with pytest.raises(ValueError, match='too many image rows in backup'):
+            svc.write_backup_zip(LOCAL_USER, ds.id, output)
+        assert output.getvalue() == b''
+
+
+@pytest.mark.parametrize(
+    'filename',
+    ('COM¹.jpg', 'com².PNG', 'Com³.webp',
+     'LPT¹.bmp', 'lpt².JPEG', 'Lpt³.jpg'),
+)
+def test_backup_basename_rejects_superscript_windows_devices(filename):
+    from app.services import face_dataset_service as svc
+
+    assert svc._backup_basename(filename) is None
+
+
+@pytest.mark.parametrize(
+    ('payload', 'declared_size'),
+    ((b'short', 6), (b'grown!', 5)),
+    ids=('premature-eof', 'one-byte-growth'),
+)
+def test_backup_member_copy_requires_the_exact_preflight_size(
+        tmp_path, monkeypatch, payload, declared_size):
+    from app.services import face_dataset_service as svc
+
+    path = tmp_path / 'source.webp'
+    path.write_bytes(payload)
+    generation = svc._backup_file_generation(path)
+    expected = (generation[0], generation[1], declared_size, generation[3])
+    # Isolate the byte-count fence: the real fstat fence is covered by the
+    # generation-change integration test above.
+    monkeypatch.setattr(svc, '_backup_handle_generation', lambda _stream: expected)
+
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
+        with pytest.raises(ValueError, match='dataset changed while the backup'):
+            svc._write_backup_file_member(
+                archive, path, 'images/source.webp', expected)
+
+
 def test_backup_roundtrip_keeps_a_preserved_bmp(app):
     """BMP is a supported source master, so a portable backup must neither
     silently omit it nor change its extension on restore."""
@@ -1724,6 +1848,34 @@ def test_import_dataset_zip_dedupes_and_rejects_bad_zip(app):
             assert False, 'expected ValueError'
         except ValueError as e:
             assert 'zip' in str(e)
+
+
+def test_import_dataset_zip_counts_a_corrupt_deflate_member_as_failed(
+        app, monkeypatch):
+    import zlib
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'Zip codec', 'zip_codec')
+        payload = _training_zip([
+            ('good.png', _patterned_png(11)),
+            ('corrupt.png', _patterned_png(12)),
+        ])
+        original_read = svc.zipfile.ZipFile.read
+
+        def codec_failure(archive, name, *args, **kwargs):
+            filename = name.filename if hasattr(name, 'filename') else str(name)
+            if filename == 'corrupt.png':
+                raise zlib.error('corrupt deflate stream')
+            return original_read(archive, name, *args, **kwargs)
+
+        monkeypatch.setattr(svc.zipfile.ZipFile, 'read', codec_failure)
+        imported, failed = svc.import_dataset_zip(
+            LOCAL_USER, ds.id, payload)
+
+        assert len(imported) == 1
+        assert failed == 1
 
 
 def test_import_zip_route(client, app):

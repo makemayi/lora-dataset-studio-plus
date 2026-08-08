@@ -8,6 +8,7 @@ overrides applied by the orchestrator)."""
 import logging
 import os
 import posixpath
+import uuid
 from urllib.parse import quote
 
 import requests
@@ -17,11 +18,112 @@ logger = logging.getLogger(__name__)
 _TIMEOUT = 30
 _UPLOAD_TIMEOUT = 300
 _UPLOAD_BATCH = 8
-_DATA_EXTS = ('.png', '.jpg', '.jpeg', '.webp', '.txt')
+# What upload_dataset ships to the pod. `.mp4` is here because a video dataset is
+# a flat folder of clips with homonym .txt captions, and without it the upload
+# succeeded while carrying ONLY the captions — the pod would then train on a
+# folder with zero samples, after the GPU had been rented. An image dataset folder
+# is written by the exporter and holds no video, so nothing else changes.
+_DATA_EXTS = ('.png', '.jpg', '.jpeg', '.webp', '.txt', '.mp4')
+_STREAM_BLOCK = 1024 * 1024
+
+
+class _StreamedPart:
+    """One multipart/form-data body, produced as it is sent instead of built.
+
+    THE SAME DEFECT AS c09dba7b AND d062606c, ON THE SENDING SIDE. `requests`
+    with ``files=`` hands the payload to urllib3's ``encode_multipart_formdata``,
+    which calls ``read()`` on every file object and concatenates the result: the
+    whole body exists in memory before the first byte leaves. That is fine for
+    an 85 MB LoRA and is an OOM for a 26 GB checkpoint — and it is why a full
+    model could not be sent to a pod at all. The remedy has the same shape it
+    had the other two times: seek to an offset and read one block at a time.
+
+    ``__len__`` is not decoration, it is the whole reason this works. requests'
+    ``prepare_body`` treats any non-mapping iterable as a stream and then asks
+    ``super_len`` for its size; a size means a real ``Content-Length`` header,
+    no size means ``Transfer-Encoding: chunked``. We want the former: the
+    receiving route is ai-toolkit's Next.js ``request.formData()``, and a body
+    whose length is declared up front is the shape it is known to accept.
+
+    Iterating twice would send a truncated body (the file handle has moved), so
+    a redirect or a retry that replays the body is a silent corruption waiting
+    to happen. ``__iter__`` therefore refuses a second pass rather than
+    producing a short one, and the caller retries by building a new instance.
+    """
+
+    def __init__(self, field_name, filename, path, fields=None,
+                 offset=0, length=None, boundary=None, on_block=None,
+                 should_cancel=None):
+        self.path = path
+        self.offset = int(offset or 0)
+        size = os.path.getsize(path)
+        remaining = max(0, size - self.offset)
+        self.length = remaining if length is None else min(int(length), remaining)
+        self.boundary = boundary or uuid.uuid4().hex
+        self.on_block = on_block
+        self.should_cancel = should_cancel
+        self._spent = False
+        crlf = b'\r\n'
+        dash = b'--' + self.boundary.encode('ascii')
+        head = []
+        for key, value in (fields or {}).items():
+            head += [dash, crlf,
+                     b'Content-Disposition: form-data; name="'
+                     + str(key).encode('utf-8') + b'"', crlf, crlf,
+                     str(value).encode('utf-8'), crlf]
+        head += [dash, crlf,
+                 b'Content-Disposition: form-data; name="'
+                 + str(field_name).encode('utf-8') + b'"; filename="'
+                 + str(filename).encode('utf-8') + b'"', crlf,
+                 b'Content-Type: application/octet-stream', crlf, crlf]
+        self._head = b''.join(head)
+        self._tail = crlf + dash + b'--' + crlf
+
+    @property
+    def content_type(self) -> str:
+        return f'multipart/form-data; boundary={self.boundary}'
+
+    def __len__(self) -> int:
+        return len(self._head) + self.length + len(self._tail)
+
+    def __iter__(self):
+        if self._spent:
+            raise RemoteError('a streamed upload body cannot be sent twice — '
+                              'build a new one for the retry')
+        self._spent = True
+        yield self._head
+        left = self.length
+        with open(self.path, 'rb') as fh:
+            fh.seek(self.offset)
+            while left > 0:
+                if self.should_cancel is not None and self.should_cancel():
+                    raise TransferCancelled('upload cancelled mid-body')
+                block = fh.read(min(_STREAM_BLOCK, left))
+                if not block:
+                    # The file shrank under us. Padding to Content-Length would
+                    # land a file that is the right SIZE and the wrong BYTES,
+                    # which auto-resume would then happily train from.
+                    raise RemoteError(
+                        f'{os.path.basename(self.path)} shrank while it was '
+                        f'being sent ({left} bytes short)')
+                left -= len(block)
+                yield block
+                if self.on_block:
+                    self.on_block(len(block))
+        yield self._tail
 
 
 class RemoteError(RuntimeError):
     pass
+
+
+class TransferCancelled(RemoteError):
+    """The caller asked for the transfer to stop (a user stop, a closing run).
+
+    Its own type because the partial file is deliberately KEPT: a cancelled
+    26 GB download that threw away 20 GB of progress would make "cancel" the
+    most expensive button in the app.
+    """
 
 
 class RemoteAiToolkit:
@@ -121,25 +223,69 @@ class RemoteAiToolkit:
             notify(total, sent_bytes)
         return total
 
+    def upload_file_slice(self, datasets_folder: str, dest_dir: str,
+                          remote_name: str, local_path: str, *, offset=0,
+                          length=None, timeout=None, on_progress=None,
+                          should_cancel=None) -> int:
+        """Send BYTES [offset, offset+length) of a local file to the pod as
+        ``dest_dir/remote_name``, without ever holding them in memory.
+
+        The addressing trick is ``seed_checkpoint``'s and is unchanged: the
+        /api/datasets/upload route joins its ``datasetName`` onto
+        DATASETS_FOLDER with Node's ``path.join`` (which normalises ``..``), so
+        a relative path lands the file EXACTLY in dest_dir, and the route
+        sanitises the FILENAME to [A-Za-z0-9._-]. What changed is only the body:
+        see ``_StreamedPart``.
+
+        The slice arguments are what make a 26 GB transfer RESUMABLE. A single
+        request that dies at 80% has nothing to offer the next attempt; a
+        request that carries one numbered slice leaves every earlier slice
+        sitting on the pod, where the next attempt can see it and skip it.
+
+        on_progress(bytes_sent_so_far_in_this_slice) is called as the blocks go
+        out — same contract as the download side, and for the same reason: a
+        transfer measured in hours has to be able to prove it is alive. A
+        raising callback is disabled, never fatal.
+
+        Returns the number of payload bytes sent."""
+        rel = posixpath.relpath(dest_dir, datasets_folder.rstrip('/'))
+        sent = [0]
+        cb = [on_progress]
+
+        def on_block(n):
+            sent[0] += n
+            if cb[0]:
+                try:
+                    cb[0](sent[0])
+                except Exception:
+                    cb[0] = None
+                    logger.debug('upload progress callback disabled', exc_info=True)
+
+        body = _StreamedPart('files', remote_name, local_path,
+                             fields={'datasetName': rel}, offset=offset,
+                             length=length, on_block=on_block,
+                             should_cancel=should_cancel)
+        r = self._request('POST', '/api/datasets/upload', data=body,
+                          headers={'Content-Type': body.content_type},
+                          timeout=timeout or _UPLOAD_TIMEOUT)
+        if r.status_code != 200:
+            raise RemoteError(f'upload {remote_name} -> HTTP {r.status_code}: '
+                              f'{r.text[:200]}')
+        return sent[0]
+
     def seed_checkpoint(self, datasets_folder: str, dest_dir: str,
                         remote_name: str, local_path: str) -> None:
-        """Pre-place a checkpoint into an ARBITRARY pod directory (dest_dir —
+        """Pre-place a WHOLE file into an ARBITRARY pod directory (dest_dir —
         e.g. a job's save_root <TRAINING_FOLDER>/<job_name>) so ai-toolkit's
-        auto-resume picks it up on the next job start. Repurposes
-        /api/datasets/upload: that route joins its `datasetName` onto
-        DATASETS_FOLDER with Node's path.join (which normalises `..`), so a
-        relative path from DATASETS_FOLDER to dest_dir lands the file EXACTLY in
-        dest_dir. The route sanitises the FILENAME to [A-Za-z0-9._-], which
-        leaves an ai-toolkit '<job>_<step>.safetensors' name intact. Raises
-        RemoteError on a non-200 so a 'continue' that cannot seed fails loudly
-        rather than silently training from scratch."""
-        rel = posixpath.relpath(dest_dir, datasets_folder.rstrip('/'))
-        with open(local_path, 'rb') as fh:
-            r = self._request('POST', '/api/datasets/upload',
-                              files=[('files', (remote_name, fh))],
-                              data={'datasetName': rel}, timeout=_UPLOAD_TIMEOUT)
-        if r.status_code != 200:
-            raise RemoteError(f'seed checkpoint -> HTTP {r.status_code}: {r.text[:200]}')
+        auto-resume picks it up on the next job start. Raises RemoteError on a
+        non-200 so a 'continue' that cannot seed fails loudly rather than
+        silently training from scratch.
+
+        Kept as its own name because three callers mean "the whole file, in one
+        request" by it (a LoRA save, the Hub token, the fp8 helper). It goes
+        through the streamed body like everything else: nothing about a small
+        file needs the payload in memory either."""
+        self.upload_file_slice(datasets_folder, dest_dir, remote_name, local_path)
 
     # -- jobs ----------------------------------------------------------------
     def create_job(self, name: str, job_config: dict, gpu_ids: str = '0') -> str:
@@ -187,7 +333,7 @@ class RemoteAiToolkit:
     # -- downloads (public, path-restricted routes) ---------------------------
     def _download(self, route: str, remote_path: str, dest_path: str,
                   timeout=None, expected_size=None, attempts=3,
-                  on_progress=None) -> None:
+                  on_progress=None, resume=False, should_cancel=None) -> None:
         """Stream to dest_path.part, then rename. RESUME-CAPABLE: some vast
         hosts' proxies cut the stream every ~0.5-2 MB (observed live
         2026-07-13 on 2 of 3 pods — an 85 MB checkpoint needed ~100 resumed
@@ -199,18 +345,41 @@ class RemoteAiToolkit:
         on_progress(bytes_so_far, expected_size) is called as the bytes land,
         so a caller can prove to its own watchdogs that a long transfer is
         alive; it is throttled by the caller, and never allowed to break the
-        download (a raising callback is logged and disabled)."""
+        download (a raising callback is logged and disabled).
+
+        resume=True ADOPTS a ``.part`` left by an earlier call instead of
+        deleting it, and only makes sense with expected_size (the size is what
+        turns a leftover into a valid offset). A LoRA save is small enough that
+        restarting it costs nothing, which is why the default stays False; a
+        dense checkpoint is 26 GB, and losing that to an app restart is the
+        difference between a resumable transfer and a lost evening.
+
+        should_cancel() is polled as the bytes land: a true answer raises
+        TransferCancelled and KEEPS the partial file, so the next attempt
+        continues where this one stopped."""
         url_path = f'{route}{quote(remote_path, safe="")}'
         tmp = dest_path + '.part'
-        try:
-            os.remove(tmp)                    # stale leftover from a past run
-        except OSError:
-            pass
-        got = 0
+        if resume and expected_size:
+            try:
+                # Never adopt something bigger than the target: that is not a
+                # prefix of the file, it is garbage from a different save.
+                if os.path.getsize(tmp) > int(expected_size):
+                    os.remove(tmp)
+            except OSError:
+                pass
+        else:
+            try:
+                os.remove(tmp)                # stale leftover from a past run
+            except OSError:
+                pass
+        got = os.path.getsize(tmp) if (resume and os.path.exists(tmp)) else 0
         want = int(expected_size or 0)
         for _ in range(max(1, int(attempts))):
             before = got
             clean = False
+            if should_cancel is not None and should_cancel():
+                raise TransferCancelled(
+                    f'download of {remote_path} cancelled ({got} bytes kept)')
             try:
                 headers = {'Range': f'bytes={got}-'} if got else {}
                 with self._request('GET', url_path, stream=True, headers=headers,
@@ -226,6 +395,11 @@ class RemoteAiToolkit:
                         written = got
                         with open(tmp, 'ab' if got else 'wb') as fh:
                             for chunk in r.iter_content(chunk_size=1024 * 256):
+                                if should_cancel is not None and should_cancel():
+                                    fh.flush()
+                                    raise TransferCancelled(
+                                        f'download of {remote_path} cancelled '
+                                        f'({written} bytes kept)')
                                 if chunk:
                                     fh.write(chunk)
                                     written += len(chunk)
@@ -264,14 +438,18 @@ class RemoteAiToolkit:
 
     def download_public_file(self, remote_path: str, dest_path: str,
                              timeout=None, expected_size=None, attempts=3,
-                             on_progress=None) -> None:
+                             on_progress=None, resume=False,
+                             should_cancel=None) -> None:
         # timeout/attempts overrides: the OPPORTUNISTIC mid-run checkpoint sync
         # fails fast (few attempts, short timeout — the monitor loop must not
         # hang); the FINAL end-of-run download passes a large attempts budget
         # so a sick-proxy host still delivers via many resumed connections.
+        # resume/should_cancel are the dense harvest's: a 26 GB transfer has to
+        # survive an app restart and has to be interruptible.
         self._download('/api/files/', remote_path, dest_path, timeout=timeout,
                        expected_size=expected_size, attempts=attempts,
-                       on_progress=on_progress)
+                       on_progress=on_progress, resume=resume,
+                       should_cancel=should_cancel)
 
     def download_sample(self, remote_path: str, dest_path: str) -> None:
         self._download('/api/img/', remote_path, dest_path)

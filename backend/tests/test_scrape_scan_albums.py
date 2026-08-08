@@ -10,6 +10,8 @@ gallery-dl. Si le parse covers échoue (layout changé), repli gallery-dl borné
 1 image/album. L'URL directe d'une galerie (/galleries/...) n'est pas concernée.
 
 Tout est mocké — aucun appel réseau ni process gallery-dl."""
+import time
+
 import pytest
 
 from app.scrape.sources import gdl, image_sites
@@ -49,6 +51,124 @@ def test_enumerate_without_per_album_dives_full_albums(monkeypatch):
     items, err = gdl.enumerate('https://x/category/')
     assert err is None
     assert len(items) == 10          # 2 albums × 5 images : comportement historique
+
+
+# --- Provenance des items (from_albums) — debt "Load more" muet -------------- #
+
+def test_enumerate_flags_album_sourced_items_so_callers_can_disable_pagination(monkeypatch):
+    """Ces items viennent EXCLUSIVEMENT de la récursion d'albums (type 6), bornée
+    en NOMBRE d'albums (max_albums) — jamais par un offset de page. Un appelant
+    qui annoncerait la pagination dessus (UniversalSource) enverrait « Charger
+    plus » vers une fenêtre --range que cette récursion ignore complètement :
+    silence total. `enumerate()` doit donc porter ce signal sur son retour."""
+    _mock_gdl_runs(monkeypatch)
+    items, err = gdl.enumerate('https://x/category/')
+    assert err is None
+    assert getattr(items, 'from_albums', False) is True
+
+
+def test_enumerate_does_not_flag_top_level_media_as_album_sourced(monkeypatch):
+    """Des médias TOP-LEVEL (type 3, pas de récursion) restent normalement
+    paginables via image_range — pas de signal from_albums dessus."""
+    def fake(url, max_items, cookies, extra_opts, image_range=None):
+        return [[3, f'{url}img1.jpg', {'extension': 'jpg'}]], None
+    monkeypatch.setattr(gdl, '_run_simulate', fake)
+
+    items, err = gdl.enumerate('https://x/direct-media/')
+
+    assert err is None
+    assert getattr(items, 'from_albums', False) is False
+
+
+# --- Budget de temps global (deadline) — debt requête Flask ~9 min ----------- #
+
+def test_enumerate_stops_the_album_recursion_once_the_deadline_has_passed(monkeypatch):
+    """Un deadline déjà expiré (posé directement, sans horloge réelle à faire
+    avancer) doit couper la récursion d'albums AVANT le 1er sous-process
+    gallery-dl d'album et rendre un résultat vide LÉGITIME (kind='empty',
+    même convention que « aucun média trouvé ») — jamais une erreur pour un
+    budget épuisé, cf. gdl.enumerate docstring."""
+    calls = _mock_gdl_runs(monkeypatch)
+
+    items, err = gdl.enumerate('https://x/category/', per_album=1,
+                               deadline=time.monotonic() - 1)   # déjà expiré
+
+    assert items is None
+    assert getattr(err, 'kind', None) == 'empty'
+    # Le scan top-level (1 appel, trouve les 2 albums) part toujours ; la
+    # récursion, elle, s'arrête avant le 1er album — deadline déjà dépassé.
+    assert len(calls) == 1
+
+
+def test_enumerate_applies_a_default_deadline_when_the_caller_passes_none(monkeypatch):
+    """Finding #4 : `gdl.enumerate()` doit borner le temps même quand l'appelant
+    (image_sites.py, civitai.py, fapello.py, erome.py, sexcom.py — toutes les
+    sources gdl-backed SAUF universal.py avant cette vague) ne passe pas
+    `deadline` explicitement. Sans ce défaut, ces sources pouvaient lancer
+    1 + max_albums sous-process gallery-dl à GDL_TIMEOUT chacun DANS une requête
+    Flask synchrone (~9 min pire cas) — la protection n'existait que pour
+    l'appelant qui avait pensé à la demander."""
+    calls = _mock_gdl_runs(monkeypatch)
+    base = 1_000_000.0
+    clock = iter([base,                                            # calcul du deadline par défaut
+                  base + gdl.DEFAULT_SCAN_BUDGET_SECONDS + 1])      # boucle : avant album1
+    monkeypatch.setattr(gdl.time, 'monotonic', lambda: next(clock))
+
+    items, err = gdl.enumerate('https://x/category/', per_album=1)   # PAS de deadline
+
+    assert items is None
+    assert getattr(err, 'kind', None) == 'empty'
+    assert len(calls) == 1     # top-level seulement ; la récursion n'a jamais démarré
+
+
+def test_enumerate_deadline_checked_between_albums_lets_the_first_one_through(monkeypatch):
+    """Le budget est vérifié en DÉBUT de boucle, jamais pendant un sous-process
+    déjà lancé (cf. docstring `enumerate`) : une horloge fictive qui ne dépasse
+    le deadline qu'APRÈS le 1er album laisse ce 1er album aboutir et coupe
+    seulement le 2e — résultat partiel, pas vide."""
+    calls = _mock_gdl_runs(monkeypatch)
+    clock = iter([0.0,    # boucle : avant album1 (deadline pas atteint)
+                  2.0])   # boucle : avant album2 (deadline dépassé)
+    monkeypatch.setattr(gdl.time, 'monotonic', lambda: next(clock))
+
+    items, err = gdl.enumerate('https://x/category/', per_album=1, deadline=1.0)
+
+    assert err is None
+    assert [it['url'] for it in items] == ['https://x/album1/img1.jpg']
+    assert getattr(items, 'partial', False) is True
+    assert len(calls) == 2      # scan top-level (trouve les albums) + album1 seul
+
+
+def test_enumerate_reports_a_blocked_album_scan_even_when_the_budget_also_expired(monkeypatch):
+    """RÉGRESSION (finding #1) : le 1er album renvoie une erreur auth (page
+    BLOQUÉE), et le budget de temps expire avant que le 2e album ne soit tenté.
+    Avant cette vague, la vérif `timed_out` passait AVANT `album_errors` : le
+    kind='empty' du budget épuisé écrasait l'erreur auth déjà collectée, et un
+    scan activement bloqué se faisait passer pour une page vide (200/count=0)
+    au lieu de remonter le message de l'extracteur en 502. L'erreur auth DOIT
+    gagner, que le budget ait aussi expiré ou non."""
+    calls = []
+
+    def fake(url, max_items, cookies, extra_opts, image_range=None):
+        calls.append(url)
+        if 'category' in url:
+            return [[6, 'https://x/album1/', {}], [6, 'https://x/album2/', {}]], None
+        return None, gdl.GdlError('gallery-dl: auth (429).', 'auth')
+    monkeypatch.setattr(gdl, '_run_simulate', fake)
+
+    clock = iter([0.0,    # boucle : avant album1 (deadline pas atteint)
+                  2.0])   # boucle : avant album2 (deadline dépassé)
+    monkeypatch.setattr(gdl.time, 'monotonic', lambda: next(clock))
+
+    items, err = gdl.enumerate('https://x/category/', per_album=1, deadline=1.0)
+
+    assert items is None
+    assert getattr(err, 'kind', None) == 'auth'
+    assert '429' in err
+    # top-level (trouve les 2 albums) + album1 (erreur) ; album2 jamais tenté
+    # (coupé par le deadline) — la vérif porte donc bien sur les DEUX conditions
+    # combinées, pas seulement sur album_errors seul.
+    assert len(calls) == 2
 
 
 # --- Mode covers : parse des vignettes du listing -----------------------------

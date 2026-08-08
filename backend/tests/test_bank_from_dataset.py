@@ -47,7 +47,7 @@ def _run_import(app, dataset_id, name):
     from app.services import image_bank_service as banks
     captured = {}
 
-    def fake_start(_app, bank_id, kind, fn, total=0):
+    def fake_start(_app, bank_id, kind, fn, total=0, **_kwargs):
         captured['bank_id'] = bank_id
         captured['kind'] = kind
         fn(object())          # the job body ignores the handle except via bank_jobs
@@ -107,15 +107,17 @@ def test_import_refuses_without_a_name_or_kept_images(app, ds):
             banks.start_dataset_import(app, 'local', 99999, 'Whatever')
 
 
-def test_import_survives_a_row_whose_file_is_gone(app, ds):
-    """A dataset row can outlive its file; that must cost one image, not the import."""
+def test_import_refuses_atomically_when_a_selected_file_is_gone(app, ds):
+    """The destination may never silently omit part of the reserved selection."""
     with app.app_context():
-        from app.models import BankImage
+        from app.models import ImageBank
+        from app.services import image_bank_service as banks
         src = _seed(ds.id, ['a.png', 'b.png'])
         os.remove(os.path.join(src, 'a.png'))
-        bank_id, _ = _run_import(app, ds.id, 'Partial')
-        rows = BankImage.query.filter_by(bank_id=bank_id).all()
-        assert [r.relpath for r in rows] == ['b.png']
+        before = ImageBank.query.count()
+        with pytest.raises(RuntimeError, match='unavailable'):
+            banks.start_dataset_import(app, 'local', ds.id, 'Partial')
+        assert ImageBank.query.count() == before
 
 
 def test_import_route_returns_the_new_bank_id(client, app, ds):

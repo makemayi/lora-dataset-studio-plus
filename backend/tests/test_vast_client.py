@@ -3,10 +3,10 @@ import pytest
 
 
 class FakeResp:
-    def __init__(self, status_code=200, payload=None):
+    def __init__(self, status_code=200, payload=None, text=None):
         self.status_code = status_code
         self._payload = payload if payload is not None else {}
-        self.text = str(self._payload)
+        self.text = str(self._payload) if text is None else text
 
     def json(self):
         return self._payload
@@ -149,6 +149,22 @@ def test_get_instance_exposes_jupyter_token(vc, monkeypatch):
     assert vc.derive_base_url(inst, 18675) == 'http://5.6.7.8:29739'
 
 
+def test_get_instance_reports_the_image_the_pod_really_booted(vc, monkeypatch):
+    """We ask for a machine by TEMPLATE, and a template is published by somebody
+    else: what booted is a different fact from what we requested, and it is the
+    only one that identifies the trainer that produced the weights. An instance
+    that does not report it simply records nothing."""
+    payload = {'instances': {'id': 778, 'actual_status': 'running',
+                             'image_uuid': 'vastai/ostris-ai-toolkit:abc1234-cuda-12.9'}}
+    monkeypatch.setattr(vc.requests, 'request', lambda m, u, **kw: FakeResp(200, payload))
+    assert vc.get_instance('778')['image_uuid'] == \
+        'vastai/ostris-ai-toolkit:abc1234-cuda-12.9'
+
+    silent = {'instances': {'id': 779, 'actual_status': 'running'}}
+    monkeypatch.setattr(vc.requests, 'request', lambda m, u, **kw: FakeResp(200, silent))
+    assert vc.get_instance('779')['image_uuid'] is None
+
+
 def test_get_instance_gone_returns_none(vc, monkeypatch):
     """vast answers 200 + {'instances': null} for a destroyed instance
     (observed live on 2026-07-12)."""
@@ -162,6 +178,120 @@ def test_create_instance_failure_raises(vc, monkeypatch):
                         lambda m, u, **kw: FakeResp(200, {'success': False, 'error': 'no capacity'}))
     with pytest.raises(vc.VastError):
         vc.create_instance(99, image='i', env={}, disk_gb=10, label='lds-x')
+
+
+# --- what a refusal is allowed to say, and what it must never say ---------------
+
+def test_a_refusal_carries_vast_s_own_words(vc, monkeypatch):
+    """THE diagnostic fix: a non-200 used to be reported as 'HTTP 400 {}' because
+    the body was parsed only on 200. The body IS the diagnosis."""
+    monkeypatch.setattr(vc.requests, 'request', lambda m, u, **kw: FakeResp(
+        400, text='{"success": false, "msg": "disk_space 86 exceeds the 57 GB free"}'))
+    with pytest.raises(vc.VastError) as excinfo:
+        vc.create_instance(99, image='i', env={}, disk_gb=86, label='lds-x')
+    assert 'HTTP 400' in str(excinfo.value)
+    assert 'exceeds the 57 GB free' in str(excinfo.value)
+
+
+def test_every_call_reports_the_body_not_just_the_code(vc, monkeypatch):
+    monkeypatch.setattr(vc.requests, 'request',
+                        lambda m, u, **kw: FakeResp(500, text='upstream is on fire'))
+    for call in (lambda: vc.search_offers(min_vram_gb=24, max_dph=0.8),
+                 lambda: vc.list_instances(),
+                 lambda: vc.execute_command('7', 'echo hi')):
+        with pytest.raises(vc.VastError, match='upstream is on fire'):
+            call()
+
+
+def test_a_refusal_that_echoes_our_request_never_leaks_a_secret(vc, monkeypatch):
+    """vast can quote back the ask it refused — and our asks carry the pod's
+    Hugging Face token, the training UI bearer, and the API key itself."""
+    echoed = ('{"error": "bad request", "request": {"env": {"HF_TOKEN": '
+              '"hf_LEAKEDsecretVALUE123", "AI_TOOLKIT_AUTH": "bearer-me-not"}, '
+              '"headers": {"Authorization": "Bearer k-test"}}}')
+    monkeypatch.setattr(vc.requests, 'request',
+                        lambda m, u, **kw: FakeResp(400, text=echoed))
+    with pytest.raises(vc.VastError) as excinfo:
+        vc.create_instance(99, image='i', env={'HF_TOKEN': 'hf_LEAKEDsecretVALUE123'},
+                           disk_gb=10, label='lds-x')
+    message = str(excinfo.value)
+    assert 'hf_LEAKEDsecretVALUE123' not in message
+    assert 'bearer-me-not' not in message
+    assert 'k-test' not in message
+    assert 'bad request' in message, 'the useful half must survive the scrubbing'
+
+
+def test_a_refusal_body_is_capped_not_pasted_whole(vc, monkeypatch):
+    monkeypatch.setattr(vc.requests, 'request',
+                        lambda m, u, **kw: FakeResp(400, text='x' * 5000))
+    with pytest.raises(vc.VastError) as excinfo:
+        vc.create_instance(99, image='i', env={}, disk_gb=10, label='lds-x')
+    assert len(str(excinfo.value)) < 600
+
+
+def test_an_oversized_onstart_is_refused_without_a_request(vc, monkeypatch):
+    """vast caps the ask at 16384 characters and answers a plain 400 — which is
+    how two cloud quantization launches died. Refusing here costs no round trip,
+    and the sentence names the real problem instead of the status code."""
+    calls = []
+    monkeypatch.setattr(vc.requests, 'request',
+                        lambda m, u, **kw: calls.append(u) or FakeResp(200, {
+                            'success': True, 'new_contract': 1}))
+    with pytest.raises(vc.VastError, match='onstart script is'):
+        vc.create_instance(99, image='i', env={}, disk_gb=10, label='lds-x',
+                           onstart='x' * (vc.MAX_ONSTART_CHARS + 1))
+    assert calls == [], 'nothing may be sent — a rental could be created'
+    # One character under the limit is a normal launch.
+    assert vc.create_instance(99, image='i', env={}, disk_gb=10, label='lds-x',
+                              onstart='x' * vc.MAX_ONSTART_CHARS) == '1'
+
+
+def test_an_absurd_image_reference_is_refused_the_same_way(vc, monkeypatch):
+    calls = []
+    monkeypatch.setattr(vc.requests, 'request',
+                        lambda m, u, **kw: calls.append(u) or FakeResp(200, {}))
+    with pytest.raises(vc.VastError, match='image reference'):
+        vc.create_instance(99, image='i' * (vc.MAX_IMAGE_CHARS + 1), env={},
+                           disk_gb=10, label='lds-x')
+    assert calls == []
+
+
+# --- the disk floor: the difference between an offer and a rental ---------------
+
+def test_search_asks_for_the_disk_the_rental_will_claim(vc, monkeypatch):
+    """An ask whose `disk` exceeds the offer's free space is refused by vast, and
+    the CHEAPEST offer is where free space runs out (live 2026-08-04: $0.081/h
+    with 57 GB, against 19 others averaging 500+)."""
+    seen = {}
+
+    def fake_request(method, url, **kw):
+        seen['json'] = kw.get('json')
+        return FakeResp(200, {'offers': [
+            {'id': 1, 'gpu_name': 'RTX 3090', 'dph_total': 0.30, 'gpu_ram': 24576,
+             'disk_space': 512.34, 'inet_down': 900.5},
+        ]})
+
+    monkeypatch.setattr(vc.requests, 'request', fake_request)
+    offers = vc.search_offers(min_vram_gb=8, max_dph=0.8, min_disk_gb=86)
+    assert seen['json']['disk_space'] == {'gte': 86}
+    assert offers[0]["disk_space_gb"] == 512.3
+    assert offers[0]['inet_down'] == 900.5
+
+
+def test_an_offer_too_small_for_the_job_is_dropped_even_if_vast_returns_it(vc, monkeypatch):
+    """Belt and braces: a silently-ignored predicate would hand back exactly the
+    unrentable offers. An offer that does not publish its disk is kept."""
+    monkeypatch.setattr(vc.requests, 'request', lambda m, u, **kw: FakeResp(200, {'offers': [
+        {'id': 1, 'gpu_name': 'RTX 3080 Ti', 'dph_total': 0.08, 'gpu_ram': 12288,
+         'disk_space': 57.4},
+        {'id': 2, 'gpu_name': 'RTX 5070', 'dph_total': 0.11, 'gpu_ram': 12288,
+         'disk_space': 717.6},
+        {'id': 3, 'gpu_name': 'RTX 4090', 'dph_total': 0.34, 'gpu_ram': 24576},
+    ]}))
+    assert [o['offer_id'] for o in vc.search_offers(
+        min_vram_gb=8, max_dph=0.8, min_disk_gb=86)] == [2, 3]
+    # No floor asked -> no filtering, and no disk predicate in the body.
+    assert len(vc.search_offers(min_vram_gb=8, max_dph=0.8)) == 3
 
 
 def test_list_and_get_instance(vc, monkeypatch):

@@ -34,7 +34,7 @@ import warnings
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from .redact import redact_user_paths
-from ..services import image_encoding
+from ..services import image_encoding, input_budget  # noqa: F401 - installs the shared budget
 
 logger = logging.getLogger(__name__)
 
@@ -198,16 +198,10 @@ def stage_input_image(src_path, dest_name, input_dir) -> str:
         with warnings.catch_warnings():
             warnings.simplefilter('error', Image.DecompressionBombWarning)
             with Image.open(src_path) as source:
-                width, height = source.size
-                valid = (isinstance(width, int) and isinstance(height, int)
-                         and width > 0 and height > 0
-                         and width <= image_encoding.INPUT_MAX_SIDE
-                         and height <= image_encoding.INPUT_MAX_SIDE
-                         and width * height <= image_encoding.INPUT_MAX_PIXELS)
-                if not valid:
-                    raise ValueError(
-                        f'image exceeds {image_encoding.INPUT_MAX_SIDE} px per side or '
-                        f'{image_encoding.INPUT_MAX_PIXELS} pixels; reduce it before use')
+                # Same shared budget as Dataset import, resolved live so a
+                # raised setting reaches this staging lane too.
+                image_encoding.validate_input_header_dimensions(
+                    source, label='ComfyUI image staging')
                 source.load()
                 oriented = ImageOps.exif_transpose(source)
                 has_alpha = ('A' in oriented.getbands()

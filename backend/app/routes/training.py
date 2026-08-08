@@ -23,7 +23,7 @@ from ..services import face_mask_preview as fmp
 from ..models import FaceDatasetImage
 from ..services import lora_training as lt
 from ..services import zimage_convert as zc
-from ..utils.comfyui import get_zimage_models, get_checkpoint_models
+from ..utils.comfyui import get_zimage_models, get_checkpoint_models, get_krea_models
 from ._common import _map_error
 
 bp = Blueprint('training', __name__, url_prefix='/api')
@@ -85,15 +85,29 @@ def _require_onetrainer():
 def _full_transformer_artifact_response(run):
     """409 redirect metadata for routes that otherwise treat a file as a LoRA.
 
-    Dense checkpoints are delivered as a private Hugging Face repository.  A
-    stray/staging ``.safetensors`` file is never sufficient proof that one can
-    be deployed to ComfyUI as an adapter.
+    A dense checkpoint is a FULL model, wherever it lives — on this disk since
+    the local delivery landed, in a private Hugging Face repository before that.
+    Neither makes it an adapter, and a stray/staging ``.safetensors`` file is
+    never sufficient proof that one can be deployed to ComfyUI as one.
     """
     if not run or not ct._is_full_transformer_run(run):
         return None
+    local_name = ct._run_param(run, 'local_weight_filename')
+    local_dir = ct._run_param(run, 'local_artifact_dir')
+    if local_name and local_dir:
+        # It IS on this machine now — but re-serving 26 GB through the browser
+        # would only write a second copy of a file the user already has. Say
+        # where it is instead.
+        error = (f'this full model is already on this computer: {local_name} in '
+                 f'{local_dir}. It is a full checkpoint, not a LoRA adapter, so '
+                 'it cannot be imported as one.')
+    else:
+        error = ('full_transformer artifacts are delivered through Hugging Face '
+                 'and cannot be imported or downloaded as a LoRA checkpoint')
     return jsonify({
-        'error': ('full_transformer artifacts are delivered through Hugging Face '
-                  'and cannot be imported or downloaded as a LoRA checkpoint'),
+        'error': error,
+        'local_weight_filename': local_name,
+        'local_artifact_dir': local_dir,
         'training_mode': 'full_transformer',
         'artifact_kind': (ct._run_param(run, 'artifact_kind')
                           or 'full_transformer'),
@@ -444,7 +458,7 @@ def dataset_train_checkpoints(dataset_id):
     if variant:
         kw['variant'] = variant
     from ..models import CloudTrainingRun
-    from ..services import checkpoint_registry
+    from ..services import checkpoint_registry, dense_artifacts
     ds = svc.get_dataset(LOCAL_USER, dataset_id)
     fam_resolved = lt._train_type(ds, fam)
     # Retrofit for datasets trained BEFORE the provenance registry existed:
@@ -486,6 +500,14 @@ def dataset_train_checkpoints(dataset_id):
                         dataset_id, train_type=fam_resolved, variant=variant),
                     'recommended_steps_info': lt.recommended_steps_info(
                         dataset_id, train_type=fam_resolved, variant=variant),
+                    # FULL MODELS — a second lane in the same panel, deliberately
+                    # not folded into the two above. Those deploy LoRA adapters
+                    # into loras/<family>; a 26 GB transformer is not an adapter
+                    # and must not inherit the adapter's verbs (see
+                    # cloud_checkpoint_groups' guard, which stays). Additive: an
+                    # older frontend simply ignores the key.
+                    'dense_models': dense_artifacts.list_dense_models(
+                        dataset_id, fam_resolved),
                     'imported': lt.list_imported_checkpoints(LOCAL_USER, dataset_id, family=fam),
                     'disk_usage': lt.dataset_disk_usage(LOCAL_USER, dataset_id, **kw),
                     # provenance: latest registered dataset version vs the
@@ -697,26 +719,98 @@ def dataset_face_mask_preview(dataset_id):
         # Nothing kept is a valid answer, not a job. Publish it so a return to the
         # page shows the same thing rather than an inviting button.
         fmp.set_result(dataset_id, _face_preview_payload({}, {}, limit), fp)
-        return jsonify({'ok': True, 'started': False, **fmp.snapshot(dataset_id, fp)})
+        fmp.clear_partial(dataset_id)
+        return jsonify({'ok': True, 'started': False,
+                        **fmp.snapshot(dataset_id, fp, total=0)})
 
     paths = list(by_path)
     app = current_app._get_current_object()
+    # What a previous, STOPPED pass already found on this exact kept set. Guarded
+    # by the same fingerprint as the stored result, so a set that moved yields {}
+    # and this is a full pass again.
+    banked = fmp.partial(dataset_id, fp)
+    todo = [p for p in paths if p not in banked]
+    done_already = len(paths) - len(todo)
 
     def _work(job):
+        if done_already:
+            # The bar opens where the previous pass left off. Seeded HERE and not
+            # after start() returns: under TESTING the job runs inline, so a seed
+            # placed outside would land after the pass instead of before it —
+            # and in production it would race the first real progress line.
+            fmp.progress(job, {'done': done_already, 'total': len(paths)})
+        if not todo:
+            # Everything was already detected before the stop — there is nothing
+            # left to run, only a result to publish. Paying an InsightFace load
+            # to re-derive it would be the exact waste this path exists to avoid.
+            fmp.set_result(dataset_id, _face_preview_payload(banked, by_path, limit), fp)
+            fmp.clear_partial(dataset_id)
+            return
+
+        def _on_progress(rec):
+            # The child counts ITS OWN images, which on a resume are only the
+            # remaining ones. The panel must keep counting the whole kept set, or
+            # a resumed pass would restart its bar at "image 1 of 106" and read
+            # as though the stop had thrown everything away.
+            rec = dict(rec)
+            if rec.get('done') is not None:
+                rec['done'] = rec['done'] + done_already
+            if rec.get('total') is not None:
+                rec['total'] = len(paths)
+            fmp.progress(job, rec)
+
         data = face_mask.detect_faces(
-            paths, on_progress=lambda rec: fmp.progress(job, rec))
+            todo, on_progress=_on_progress,
+            should_stop=lambda: fmp.stop_requested(job))
         if not data.get('ok'):
             # An operation that failed must LOOK failed. The reason travels all the
             # way to the panel instead of dying in a log line.
             fmp.fail(job, data.get('error') or 'face detection failed')
             return
+        merged = {**banked, **(data.get('results') or {})}
+        if data.get('cancelled'):
+            # Stopped. The boxes computed before the stop are the whole point of
+            # asking the child to wind up rather than killing it, so they are
+            # banked for the next start. The stored RESULT is deliberately left
+            # alone: `coverage` is a safety figure over the WHOLE kept set, and
+            # publishing "masked on 12 of 47" for a 153-image set would be a
+            # wrong number rather than a partial one.
+            fmp.remember_partial(dataset_id, merged, fp)
+            fmp.mark_stopped(job)
+            return
         # Zero faces is a RESULT, not a failure: a concept dataset may legitimately
         # hold no people. It publishes like any other pass.
-        fmp.set_result(dataset_id, _face_preview_payload(
-            data.get('results') or {}, by_path, limit), fp)
+        fmp.set_result(dataset_id, _face_preview_payload(merged, by_path, limit), fp)
+        fmp.clear_partial(dataset_id)
 
     job, started = fmp.start(app, dataset_id, _work, total=len(paths), fp=fp)
-    return jsonify({'ok': True, 'started': started, **fmp.snapshot(dataset_id, fp)}), 202
+    return jsonify({'ok': True, 'started': started,
+                    **fmp.snapshot(dataset_id, fp, total=len(paths))}), 202
+
+
+@bp.post('/dataset/<int:dataset_id>/train/face-mask-preview/stop')
+def dataset_face_mask_preview_stop(dataset_id):
+    """Ask the running detection to wind up, KEEPING what it already found.
+
+    Not a kill. The child holds every box it detected in memory until it prints
+    its final JSON line, so killing it would discard the pass — and since the
+    detector load is a fixed price paid before image 1, a discarding Stop would
+    make the retry cost the whole run again. It is asked instead, notices between
+    two images, and hands back what it has; those detections are banked under the
+    kept set's fingerprint and the next start resumes from them.
+
+    The delay is honest and bounded by one image, EXCEPT during the model load
+    (and the first-run download), which nothing can interrupt from outside: a
+    stop asked there lands at the top of the loop, before image 1 — where there
+    is nothing detected to lose anyway. The panel says which of the two costs
+    applies at the moment it offers the button."""
+    gate = _face_preview_guard(dataset_id, require_tool=False)
+    if gate:
+        return gate
+    stopped = fmp.request_stop(dataset_id)
+    by_path, fp = _face_preview_kept(dataset_id)
+    return jsonify({'ok': True, 'stopping': stopped,
+                    **fmp.snapshot(dataset_id, fp, total=len(by_path))})
 
 
 @bp.get('/dataset/<int:dataset_id>/train/face-mask-preview')
@@ -731,9 +825,98 @@ def dataset_face_mask_preview_status(dataset_id):
     gate = _face_preview_guard(dataset_id, require_tool=False)
     if gate:
         return gate
-    _, fp = _face_preview_kept(dataset_id)
+    by_path, fp = _face_preview_kept(dataset_id)
     return jsonify({'ok': True, 'available': face_mask.is_available(),
-                    **fmp.snapshot(dataset_id, fp)})
+                    **fmp.snapshot(dataset_id, fp, total=len(by_path))})
+
+
+def _krea_installed_bases():
+    """Every Krea 2 checkpoint on this machine, as TRAINING base entries.
+
+    The Studio and the trainer address a model with two different — and both
+    legitimate — vocabularies, so this is a translation, not a shortcut:
+
+    * the Studio picker speaks ComfyUI-relative loader names (``Krea\\x.safetensors``)
+      because it hands them to a ComfyUI running on this machine;
+    * the trainer reads a base value through ``lt._is_custom_weights`` — an
+      ABSOLUTE path means "custom weights, load this file", a RELATIVE name means
+      "a catalog entry the app installed" (Z-Image merges, the SDXL whitelist,
+      both of which have their own resolver), and ``''`` means the official base.
+      Krea has no relative-name resolver: ``foreign_base_reason`` classifies a
+      relative value on Krea as another family's base and the run silently falls
+      back to the official weights. The trainer can also run on a REMOTE pod that
+      must RECEIVE the file, which is why an absolute local path is the right
+      currency there and a ComfyUI folder name is not.
+
+    So: scan with the Studio's scanner (`get_krea_models` — no fifth scanner),
+    then resolve each name to the concrete file through the same search roots
+    ComfyUI itself uses. A name that resolves to nothing is DROPPED rather than
+    emitted relative: offering a value the trainer would quietly ignore is worse
+    than a shorter list.
+
+    Each entry also carries what the picker must say about the file before it is
+    chosen (`model_integrity.training_base_advisory`): a packed inference export
+    is not trainable and says why, a bare fp8 cast is trainable and says what it
+    costs. Header-only and cached per (path, mtime, size).
+    """
+    from ..services import comfy_model_paths
+    from ..services import model_integrity
+    out = []
+    for rel in (get_krea_models() or []):
+        path = comfy_model_paths.resolve_model_file('diffusion_models', rel)
+        if not path:
+            continue
+        advisory = model_integrity.training_base_advisory(path)
+        out.append({
+            'value': path,
+            'label': os.path.basename(str(rel).replace('\\', '/')).rsplit('.', 1)[0],
+            'trainable': advisory['trainable'],
+            'quantization': advisory['form'],
+            'note': advisory['note'],
+        })
+    return out
+
+
+@bp.get('/train/base-file-advisory')
+def train_base_file_advisory():
+    """The verdict a LISTED base already carries, for a path the user TYPED.
+
+    « Custom weights… » is a free text field, and until now the only thing that
+    ever read the file was the save and the launch. So the one base nobody can
+    pick from a list — a checkpoint downloaded five minutes ago, the exact case
+    the field exists for — was also the only one whose "this is a packed export,
+    the trainer cannot load it" arrived after the dataset had been exported and,
+    on the cloud lane, after a GPU had been rented. Same answer, same wording,
+    same `model_integrity.training_base_advisory` — just at typing time.
+
+    Read-only and header-only, and it never echoes the path back: the reply
+    carries the BASENAME, because these payloads end up in pasted diagnostics.
+    `status` is `ok` / `missing` / `not_a_model`; a file it cannot inspect is
+    reported as such and never as a refusal — refusing a base nobody could read
+    would be worse than the failure it prevents.
+    """
+    from ..services import model_integrity
+    raw = (request.args.get('path') or '').strip().strip('"')
+    if not raw:
+        return jsonify({'status': 'missing', 'trainable': True, 'note': None}), 200
+    name = os.path.basename(raw.replace('\\', '/'))
+    if not name.lower().endswith(('.safetensors', '.sft')):
+        # .gguf is loadable by ComfyUI and NOT by a trainer; anything else is not
+        # a single-file checkpoint at all. Both are "not a base", said the same way.
+        return jsonify({'status': 'not_a_model', 'filename': name,
+                        'trainable': False, 'level': 'error', 'quantization': '',
+                        'note': f'{name} is not a .safetensors checkpoint — training '
+                                f'needs a single-file model in that format.'}), 200
+    if not os.path.isfile(raw):
+        return jsonify({'status': 'missing', 'filename': name, 'trainable': False,
+                        'level': 'error', 'quantization': '',
+                        'note': f'{name} is not at that path.'}), 200
+    advisory = model_integrity.training_base_advisory(raw)
+    return jsonify({'status': 'ok', 'filename': name,
+                    'trainable': advisory['trainable'],
+                    'level': advisory['level'],
+                    'quantization': advisory['form'],
+                    'note': advisory['note']}), 200
 
 
 @bp.get('/dataset/<int:dataset_id>/train/base-info')
@@ -759,9 +942,12 @@ def dataset_train_base_info(dataset_id):
         name = c['name'] if isinstance(c, dict) else c
         sdxl_bases.append({'value': name,
                            'label': name.replace('\\', '/').split('/')[-1].rsplit('.', 1)[0]})
-    # Krea 2 : base officielle fixe (pas de checkpoint custom, pas de conversion) ; le
-    # choix Raw/Turbo se fait via le sélecteur `variant`, pas ici → label neutre.
-    krea_bases = [{'value': '', 'label': 'Official - Krea 2'}]
+    # Krea 2 : la base officielle (le choix Raw/Turbo se fait via le sélecteur
+    # `variant`, pas ici → label neutre) PUIS tout checkpoint Krea 2 installé sur
+    # cette machine — un modèle que l'utilisateur vient d'entraîner, un build
+    # communautaire. Même scanner que le Studio (get_krea_models), pas un
+    # cinquième : leur divergence a déjà produit un bug.
+    krea_bases = [{'value': '', 'label': 'Official - Krea 2'}] + _krea_installed_bases()
     # Flux : base officielle fixe (FLUX.1-dev, gated HF) — pas de checkpoint custom ni
     # de conversion. Entrée explicite pour que l'UI n'aille PAS retomber sur les bases
     # Z-Image (fallback `bases_by_type[type] || bases`) quand la famille est Flux.
@@ -1491,9 +1677,36 @@ def dataset_train_checkpoints_cleanup(dataset_id):
 
 @bp.post('/dataset/train/cloud/purge')
 def dataset_train_cloud_purge():
-    """Trash the staging dirs of finished cloud runs (dataset copies, samples,
-    checkpoint duplicates already imported)."""
+    """Trash the working files of finished cloud runs — the exported dataset
+    copy, the sample images and the logs. Checkpoints are moved into the durable
+    store instead and never trashed. Also reports orphan run folders found on
+    disk, which the caller can then purge explicitly."""
     return jsonify({'ok': True, **ct.purge_finished_runs()})
+
+
+@bp.get('/dataset/train/cloud/orphans')
+def dataset_train_cloud_orphans():
+    """Run folders on disk that no run row claims — the tens of GB the cleanup
+    used to answer 'already clean' about. Walks the disk, so it is its own
+    endpoint and never rides the hub's poll."""
+    orphans = ct.orphan_staging_dirs()
+    return jsonify({'ok': True, 'orphans': orphans,
+                    'total_bytes': sum(o['size_bytes'] for o in orphans)})
+
+
+@bp.post('/dataset/train/cloud/purge-orphans')
+def dataset_train_cloud_purge_orphans():
+    """Trash the named orphan run folders (all of them when `names` is absent).
+    Loose checkpoints inside them are rescued into the store first."""
+    body = request.get_json(silent=True) or {}
+    names = body.get('names')
+    if names is not None and not isinstance(names, list):
+        return jsonify({'error': 'names must be a list'}), 400
+    try:
+        res = ct.purge_orphan_staging_dirs(names)
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, **res})
 
 
 @bp.get('/dataset/train/cloud/staging-sizes')
@@ -1553,15 +1766,24 @@ def dataset_train_import(dataset_id):
     # to this dataset; its dataset version rides along into the deployed name.
     if body.get('cloud_run_id'):
         from ..models import CloudTrainingRun
+        from ..services import cloud_run_dataset as crd
         crun = CloudTrainingRun.query.get(int(body['cloud_run_id']))
-        if not crun or crun.dataset_id != dataset_id:
+        # (id, table), not id alone: this route is reached from a FACE dataset,
+        # and a video run of the same id would otherwise pass the check and get
+        # deployed into this dataset's ComfyUI folder.
+        if not crun or not crd.owns(crun, dataset_id):
             return jsonify({'error': 'unknown cloud run'}), 404
         dense_response = _full_transformer_artifact_response(crun)
         if dense_response:
             return dense_response
-        if not crun.staging_dir:
+        # Where THIS save actually sits: the durable checkpoint store, or the
+        # legacy staging dir on an install that has not been retrofitted yet.
+        saves = ct.run_checkpoint_files(crun)
+        src = saves.get(os.path.basename(fn or '')) or (
+            sorted(saves.values())[0] if saves else None)
+        if not src:
             return jsonify({'error': 'unknown cloud run'}), 404
-        kw['src_dir'] = crun.staging_dir
+        kw['src_dir'] = os.path.dirname(src)
         kw['version'] = ct._run_param(crun, 'version')
         # Tag the deployed name with THIS cloud run's id (☁ #N) so importing the
         # same step from two different runs never overwrites one with the other.
@@ -1617,6 +1839,13 @@ def dataset_train_cloud(dataset_id):
             allow_caption_quality=bool(d.get('allow_caption_quality')),
             allow_unverified_weights=bool(d.get('allow_unverified_weights')),
             allow_not_ready=bool(d.get('allow_not_ready')),
+            # « Train anyway » on the HF private-storage pre-check: the ceiling
+            # it compares against is an estimate, so the user always keeps the
+            # last word (see hf_storage).
+            allow_hf_storage=bool(d.get('allow_hf_storage')),
+            # ... and the same last word about THIS machine's disk, for a full
+            # model that is delivered here.
+            allow_local_disk=bool(d.get('allow_local_disk')),
             gpu_name=d.get('gpu_name'))
     except Exception as e:
         return _map_error(e)
@@ -1681,6 +1910,298 @@ def dataset_train_cloud_custom_base_push(dataset_id):
     return jsonify({'ok': True, **out})
 
 
+# --- Hugging Face private storage (Settings ▸ Training) -----------------------
+# Every route below talks to the Hub, so none of them runs on page load: the
+# Settings card fetches on an explicit click. The namespace is resolved from the
+# token, never taken from the client.
+
+def _hf_storage_namespace():
+    """(namespace, token) for the account whose private storage matters, or a
+    (None, reason) pair. HF_TOKEN owns the lds-base-* caches; HF_CLOUD_TOKEN is
+    scoped to the dense DELIVERY namespace and may not even be able to list
+    them, so the general token is preferred and the dense one is the fallback."""
+    from ..services.hf_publish import HfPublishError, _make_api
+    for key in ('HF_TOKEN', 'HF_CLOUD_TOKEN'):
+        token = cfg.secret(key)
+        if not token:
+            continue
+        try:
+            who = _make_api(token).whoami() or {}
+        except HfPublishError:
+            continue
+        except Exception:
+            continue
+        name = str((who or {}).get('name') or '').strip()
+        if name:
+            return name, token, who
+    return None, None, {}
+
+
+# --- Local fp8 quantization ---------------------------------------------------
+# Same conversion as the post-training pod export, started by hand on a model
+# already on this machine. No ai-toolkit and no cloud gate: it is a pure
+# file-in / file-out operation on the CPU (see fp8_quantize's module note).
+
+@bp.post('/tools/fp8-quantize/plan')
+def tools_fp8_quantize_plan():
+    """What quantizing this file would produce, or WHY it is refused.
+
+    Always 200: the panel disables its button with the reason instead of showing
+    an error toast after a click.
+    """
+    from ..services import fp8_quantize
+    d = request.get_json(silent=True) or {}
+    return jsonify(fp8_quantize.describe(d.get('path')))
+
+
+@bp.post('/tools/fp8-quantize')
+def tools_fp8_quantize_start():
+    from ..services import fp8_quantize
+    d = request.get_json(silent=True) or {}
+    try:
+        info = fp8_quantize.start_async(current_app._get_current_object(),
+                                        d.get('path'),
+                                        overwrite=bool(d.get('overwrite')))
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, **info, 'status': fp8_quantize.status()})
+
+
+@bp.get('/tools/fp8-quantize/status')
+def tools_fp8_quantize_status():
+    from ..services import fp8_quantize
+    return jsonify({'ok': True, **(fp8_quantize.status() or {})})
+
+
+# --- One-click fp8 delivery ------------------------------------------------------
+# The normal path: no path to paste, no machine to rent. It resolves the master
+# (a Hugging Face repository, or a full-precision file the app already knows
+# about), downloads it if it is not here, quantizes it and leaves the fp8 in the
+# ComfyUI folder that loads it. NOT behind _require_cloud: nothing is rented, and
+# the person who most needs this has no vast key at all.
+
+@bp.post('/tools/fp8-deliver/plan')
+def tools_fp8_deliver_plan():
+    """Where the file will land, what it will weigh, and whether the disk can
+    take it — answered BEFORE the click. Always 200: a refusal is a disabled
+    button carrying its reason, not a toast after the user committed."""
+    from ..services import fp8_local_delivery
+    d = request.get_json(silent=True) or {}
+    return jsonify(fp8_local_delivery.describe(
+        repo_id=d.get('repo_id'), filename=d.get('filename'), path=d.get('path'),
+        family=d.get('family'), keep_master=d.get('keep_master', True),
+        destination_dir=d.get('destination_dir')))
+
+
+@bp.post('/tools/fp8-deliver')
+def tools_fp8_deliver_start():
+    from ..services import fp8_local_delivery
+    d = request.get_json(silent=True) or {}
+    try:
+        info = fp8_local_delivery.start(
+            current_app._get_current_object(),
+            repo_id=d.get('repo_id'), filename=d.get('filename'),
+            path=d.get('path'), family=d.get('family'),
+            keep_master=d.get('keep_master', True),
+            destination_dir=d.get('destination_dir'))
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, **info, 'status': fp8_local_delivery.status()})
+
+
+@bp.get('/tools/fp8-deliver/status')
+def tools_fp8_deliver_status():
+    from ..services import fp8_local_delivery
+    return jsonify({'ok': True, **(fp8_local_delivery.status() or {})})
+
+
+@bp.post('/tools/fp8-deliver/cancel')
+def tools_fp8_deliver_cancel():
+    """Stop the job. The bytes already downloaded stay on disk, so starting
+    again resumes rather than restarts."""
+    from ..services import fp8_local_delivery
+    return jsonify({'ok': True, 'cancelled': fp8_local_delivery.cancel(),
+                    **(fp8_local_delivery.status() or {})})
+
+
+# --- full models: the fp8 twin's last mile, and the trash -------------------------
+# The master is NEVER sent to ComfyUI. It is 26 GB of a model folder to do a job
+# the ~13 GB twin does better, and it is the only file that can be trained again.
+# That asymmetry is the whole point of this lane, so it lives in the routes too:
+# there is no endpoint here that could deploy a master, not even by mistake.
+
+@bp.post('/dataset/<int:dataset_id>/train/dense/send-plan')
+def dataset_dense_send_plan(dataset_id):
+    """What "Send to ComfyUI" would do — link or copy, where, at what cost.
+    Always 200: a refusal is a disabled button carrying its reason."""
+    from ..services import dense_artifacts
+    if not svc.get_dataset(LOCAL_USER, dataset_id):
+        return jsonify({'error': 'not found'}), 404
+    d = request.get_json(silent=True) or {}
+    return jsonify(dense_artifacts.send_plan(dataset_id, d.get('run_id')))
+
+
+@bp.post('/dataset/<int:dataset_id>/train/dense/send')
+def dataset_dense_send(dataset_id):
+    from ..services import dense_artifacts
+    if not svc.get_dataset(LOCAL_USER, dataset_id):
+        return jsonify({'error': 'not found'}), 404
+    d = request.get_json(silent=True) or {}
+    try:
+        info = dense_artifacts.send_to_comfyui(
+            current_app._get_current_object(), dataset_id, d.get('run_id'))
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, **info, 'job': dense_artifacts.status()})
+
+
+@bp.get('/tools/dense-send/status')
+def tools_dense_send_status():
+    """Global, like the fp8 job's: one send at a time, and it outlives the tab."""
+    from ..services import dense_artifacts
+    return jsonify({'ok': True, **(dense_artifacts.status() or {})})
+
+
+@bp.post('/dataset/<int:dataset_id>/train/dense/delete')
+def dataset_dense_delete(dataset_id):
+    """Move ONE of a full model's files to the app trash — recoverable on
+    purpose: these cost hours of GPU, and a mis-click must not be final."""
+    from ..services import dense_artifacts
+    if not svc.get_dataset(LOCAL_USER, dataset_id):
+        return jsonify({'error': 'not found'}), 404
+    d = request.get_json(silent=True) or {}
+    try:
+        out = dense_artifacts.delete_artifact(
+            dataset_id, d.get('run_id'), d.get('filename'))
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, **out})
+
+
+@bp.post('/cloud/quantize/plan')
+def cloud_quantize_plan():
+    """Cost, duration cap and storage impact of quantizing a delivered artifact
+    in the cloud — always answered BEFORE anything is rented."""
+    gate = _require_cloud()
+    if gate:
+        return gate
+    from ..services import cloud_quantize
+    d = request.get_json(silent=True) or {}
+    try:
+        return jsonify({'ok': True, **cloud_quantize.plan(
+            d.get('repo_id'), filename=d.get('filename'),
+            keep_bf16=d.get('keep_bf16', True))})
+    except Exception as e:
+        return _map_error(e)
+
+
+@bp.post('/cloud/quantize')
+def cloud_quantize_start():
+    gate = _require_cloud()
+    if gate:
+        return gate
+    from ..services import cloud_quantize
+    d = request.get_json(silent=True) or {}
+    try:
+        planned = cloud_quantize.start(
+            current_app._get_current_object(), d.get('repo_id'),
+            filename=d.get('filename'), keep_bf16=d.get('keep_bf16', True),
+            # The price the user read on screen: the rental re-searches offers,
+            # and must not silently land on a dearer machine than the one quoted.
+            quoted_price=d.get('quoted_price_per_hour'))
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, **planned, 'status': cloud_quantize.status()})
+
+
+@bp.get('/cloud/quantize/status')
+def cloud_quantize_status():
+    """State of the cloud quantization, and a sweep for orphaned pods.
+
+    The sweep runs HERE on purpose: this endpoint is what the UI polls, so a
+    machine left behind by an app restart is reaped by the act of looking at it.
+    """
+    gate = _require_cloud()
+    if gate:
+        return gate
+    from ..services import cloud_quantize
+    reaped = cloud_quantize.reconcile_orphans()
+    return jsonify({'ok': True, 'reaped': reaped, **(cloud_quantize.status() or {})})
+
+
+@bp.get('/cloud/hf-storage')
+def cloud_hf_storage():
+    """Measured private storage + the lds-base-* cache inventory.
+
+    Answers 200 with ok=false rather than an error status when the Hub cannot be
+    measured: this card must be able to SAY it does not know."""
+    gate = _require_cloud()
+    if gate:
+        return gate
+    from ..services import hf_storage
+    namespace, token, who = _hf_storage_namespace()
+    if not namespace:
+        return jsonify({'ok': False, 'reason': 'no_token',
+                        'error': 'no Hugging Face token configured — add HF_TOKEN '
+                                 'in Settings ▸ Local tools'})
+    usage = hf_storage.private_storage_usage(namespace, token)
+    inventory = hf_storage.base_cache_inventory(namespace, token, LOCAL_USER,
+                                                _usage=usage)
+    # No dataset in hand here — this card describes the account, not one run.
+    # It therefore quotes the SHIPPED defaults (1 checkpoint + the fp8 export);
+    # the per-run figure, which follows that dataset's own "keep" choice, is
+    # shown in the training panel and enforced at launch.
+    forecast = hf_storage.dense_storage_forecast(
+        namespace, token, keeps=lt.dense_max_step_saves_for(None), who=who,
+        _usage=usage, fp8_export=True)
+    forecast.pop('usage', None)
+    inventory.pop('usage', None)
+    return jsonify({'ok': usage['ok'], 'namespace': namespace,
+                    'reason': usage.get('reason'),
+                    'partial': usage.get('partial', False),
+                    'used_bytes': usage.get('used_bytes'),
+                    'private_repo_count': usage.get('private_repo_count'),
+                    'unsized_repo_count': usage.get('unsized_repo_count'),
+                    'forecast': forecast, **inventory})
+
+
+@bp.delete('/cloud/hf-storage/base/<repo_name>')
+def cloud_hf_storage_delete_base(repo_name):
+    """Delete ONE lds-base-* cache repo (the service validates the name)."""
+    gate = _require_cloud()
+    if gate:
+        return gate
+    from ..services import hf_storage
+    from ..services.hf_publish import HfPublishError
+    namespace, token, _who = _hf_storage_namespace()
+    if not namespace:
+        return jsonify({'error': 'no Hugging Face token configured'}), 400
+    try:
+        out = hf_storage.delete_base_cache(namespace, repo_name, token)
+    except HfPublishError as e:
+        return jsonify({'error': e.message, 'error_code': e.code}), 400
+    except Exception as e:
+        return _map_error(e)
+    return jsonify(out)
+
+
+@bp.post('/cloud/hf-storage/base/delete-all')
+def cloud_hf_storage_delete_all_bases():
+    """Delete every lds-base-* cache of the account. Partial failures reported."""
+    gate = _require_cloud()
+    if gate:
+        return gate
+    from ..services import hf_storage
+    namespace, token, _who = _hf_storage_namespace()
+    if not namespace:
+        return jsonify({'error': 'no Hugging Face token configured'}), 400
+    try:
+        out = hf_storage.delete_all_base_caches(namespace, token, LOCAL_USER)
+    except Exception as e:
+        return _map_error(e)
+    return jsonify(out)
+
+
 @bp.post('/dataset/train/retry')
 def dataset_train_retry():
     """↻ Retry a FAILED LOCAL run (Runs page): relaunch training with the exact
@@ -1740,10 +2261,30 @@ def dataset_train_cloud_continue():
                                     from_step=d.get('from_step'),
                                     overrides=d.get('overrides'),
                                     resume_mode=d.get('resume_mode', 'weights_only'),
-                                    state_bundle_id=d.get('state_bundle_id'))
+                                    state_bundle_id=d.get('state_bundle_id'),
+                                    transport=d.get('transport'))
     except Exception as e:
         return _map_error(e)
     return jsonify({'ok': True, **res})
+
+
+@bp.post('/dataset/train/cloud/resume-plan')
+def dataset_train_cloud_resume_plan():
+    """The two roads a full model can take back to a pod, with their duration
+    and their GPU cost — answered BEFORE anything is rented, like every other
+    plan endpoint here. Always 200: a road that cannot be taken comes back
+    unavailable with the reason, because a disabled button that explains itself
+    is the whole point of this panel."""
+    gate = _require_cloud()
+    if gate:
+        return gate
+    d = request.get_json(silent=True) or {}
+    try:
+        return jsonify({'ok': True, **ct.dense_resume_plan(
+            LOCAL_USER, int(d.get('run_id') or 0),
+            from_step=d.get('from_step'))})
+    except Exception as e:
+        return _map_error(e)
 
 
 @bp.post('/dataset/train/cloud/recheck-delivery')
@@ -1754,6 +2295,67 @@ def dataset_train_cloud_recheck_delivery():
         return jsonify({'error': 'run_id is required'}), 400
     try:
         result = ct.recheck_full_transformer_delivery(body['run_id'])
+    except Exception as exc:
+        return _map_error(exc)
+    return jsonify(result)
+
+
+@bp.post('/dataset/train/cloud/hub-presence')
+def dataset_train_cloud_hub_presence():
+    """Are these runs' Hugging Face repositories still there — asked NOW.
+
+    Deliberately its own endpoint, and deliberately not a field of the
+    checkpoints listing: the panel must paint before anything touches the
+    network, and a Hub outage must never delay a page that is mostly about
+    local files. The panel calls this after it has rendered, and only ever
+    replaces "not re-checked since delivery" with something it measured.
+
+    Cheap by construction — one metadata request per repository, cached with a
+    short TTL in ``hub_presence`` — and never destructive: it reads, and does
+    not rewrite ``artifact_status`` (that record is the delivery's minute, and
+    ``recheck-delivery`` above is the one operation allowed to restate it).
+    """
+    from ..models import CloudTrainingRun
+    from ..services import hub_presence
+
+    body = request.get_json(silent=True) or {}
+    wanted = body.get('run_ids')
+    if not isinstance(wanted, list) or not wanted:
+        return jsonify({'error': 'run_ids is required'}), 400
+    ids = []
+    for value in wanted:
+        try:
+            ids.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    repo_of = {}
+    for run in CloudTrainingRun.query.filter(CloudTrainingRun.id.in_(ids)).all():
+        if not ct._is_full_transformer_run(run):
+            continue
+        repo = str(ct._run_param(run, 'hf_repo_id') or '').strip()
+        if repo:
+            repo_of[run.id] = repo
+    checked = hub_presence.check_many(repo_of.values(),
+                                      force=body.get('force') is True)
+    return jsonify({'ok': True, 'results': {
+        str(run_id): {**checked[repo], 'run_id': run_id}
+        for run_id, repo in repo_of.items() if repo in checked}})
+
+
+@bp.post('/dataset/train/cloud/fetch-local')
+def dataset_train_cloud_fetch_local():
+    """Bring ONE kept dense run's files home (or stop doing it).
+
+    Answers immediately: the transfer is tens of minutes of ~26 GB and runs in
+    the background, reporting through the run's own phase line. ``cancel: true``
+    stops it and keeps every byte already downloaded.
+    """
+    body = request.get_json(silent=True) or {}
+    if body.get('run_id') in (None, ''):
+        return jsonify({'error': 'run_id is required'}), 400
+    try:
+        result = ct.fetch_dense_locally(body['run_id'],
+                                        cancel=body.get('cancel') is True)
     except Exception as exc:
         return _map_error(exc)
     return jsonify(result)
@@ -1944,6 +2546,12 @@ def dataset_train_run_delete(record_id):
     if status == 'has_saves':
         return jsonify({'error': 'This run still has checkpoints on disk. Delete '
                                  'its checkpoints first, then remove the run.'}), 409
+    if status == 'has_model':
+        return jsonify({'error': 'This run trained a full model that is still in '
+                                 'its private Hugging Face repository. Removing '
+                                 'the run would discard the only record of where '
+                                 'that model is. Delete the repository first if '
+                                 'you really want it gone.'}), 409
     if status == 'conflict':
         return jsonify({'error': 'This run is still referenced and could not be '
                                  'removed. Refresh and try again.'}), 409
@@ -2092,8 +2700,12 @@ def dataset_train_cloud_checkpoint(dataset_id):
     rid = request.args.get('run_id', type=int)
     if rid is not None:
         from ..models import CloudTrainingRun
+        from ..services import cloud_run_dataset as crd
         run = CloudTrainingRun.query.get(rid)
-        if run and run.dataset_id != dataset_id:
+        # Same (id, table) ownership test: this endpoint SERVES the run's
+        # checkpoint file, so an id-only match would hand a face dataset's caller
+        # the weights of a video run that shares its id.
+        if run and not crd.owns(run, dataset_id):
             run = None
     else:
         run = ct.latest_run_for(dataset_id, request.args.get('train_type'))
@@ -2102,18 +2714,16 @@ def dataset_train_cloud_checkpoint(dataset_id):
     dense_response = _full_transformer_artifact_response(run)
     if dense_response:
         return dense_response
-    # ?filename targets ONE harvested epoch in this run's staging (the ◉ Graph's
-    # per-checkpoint ⬇). Path-guarded: basename only, and it must really be a
-    # .safetensors sitting in THIS run's staging_dir. Absent → the run's final
-    # LoRA, the historical behaviour.
+    # ?filename targets ONE harvested epoch of this run (the ◉ Graph's
+    # per-checkpoint ⬇). Absent → the run's final LoRA, the historical
+    # behaviour.
     fn = request.args.get('filename')
     if fn:
-        safe = os.path.basename(fn)
-        if (safe != fn or not safe.lower().endswith('.safetensors')
-                or not run.staging_dir):
-            abort(404)
-        path = os.path.join(run.staging_dir, safe)
-        if not os.path.isfile(path):
+        # Resolved through the run's own save list (durable store first, legacy
+        # staging second) — basename-only by construction, so the client can
+        # never point this at a path of its choosing.
+        path = ct.run_checkpoint_path(run, fn)
+        if not path or not os.path.isfile(path):
             abort(404)
         return send_file(path, as_attachment=True)
     if not run.checkpoint_local_path or not os.path.isfile(run.checkpoint_local_path):
@@ -2172,7 +2782,13 @@ def train_canvas_generate():
     canvas); they may NOT span several families — the engine refuses, and the
     reason travels back so the button can say it. Same gates as the other launch
     routes: ComfyUI not set up → 409/503, missing models/nodes → the actionable
-    409 the Studio already returns."""
+    409 the Studio already returns.
+
+    🧬 `combine: true` (the board's Blend toggle) switches from one pass per
+    ticked checkpoint to ONE generation loading them all, each at the `weight`
+    its selection carries, with every dataset's trigger word injected. It is the
+    Test Studio's own Blend mode — the same engine argument, so the two screens
+    cannot drift into two answers for one word."""
     from ._common import (_require_comfyui, _studio_arch_mismatch_response,
                           _studio_missing_response)
     gate = _require_comfyui()
@@ -2183,7 +2799,9 @@ def train_canvas_generate():
         res = ct.canvas_generate(
             LOCAL_USER, d.get('selections') or [],
             strengths=d.get('strengths') or [1.0],
-            seed=d.get('seed'), prompt=d.get('prompt'), z_model=d.get('z_model'),
+            seed=d.get('seed'), prompt=d.get('prompt'),
+            # 📝 Lot : une passe par prompt coché dans l'historique du panneau.
+            prompts=d.get('prompts'), z_model=d.get('z_model'),
             aspects=d.get('aspects'), cfgs=d.get('cfgs'), steps_list=d.get('steps'),
             steps2_list=d.get('steps2'), count=d.get('count'),
             permanent_loras=d.get('permanent_loras'), batch_loras=d.get('batch_loras'),
@@ -2195,7 +2813,8 @@ def train_canvas_generate():
             detail_amount=d.get('detail_amount'),
             resolution_tier=d.get('resolution_tier'),
             resolution_multiplier=d.get('resolution_multiplier'),
-            init_image=d.get('init_image'), denoise=d.get('denoise'))
+            init_image=d.get('init_image'), denoise=d.get('denoise'),
+            combine=d.get('combine'))
     except Exception as e:
         from ..services.lora_test_studio import StudioArchMismatch, StudioAssetsMissing
         if isinstance(e, StudioArchMismatch):

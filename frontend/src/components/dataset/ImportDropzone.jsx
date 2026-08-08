@@ -60,8 +60,9 @@ export default function ImportDropzone({ onImport, busy, visionBusy = false, cro
         ) : (
           <span>WebP normalization resizes and re-encodes eligible imports.</span>
         )}
-        <span>Files larger than {inputLimit} are rejected — convert or resize before importing.</span>
+        <span>Files larger than {inputLimit} are rejected — resize before importing, or raise the budget.</span>
         <SettingsLink section="captioning" focus="dataset-import-encoding">Change storage mode</SettingsLink>
+        <SettingsLink section="captioning" focus="image-input-max-pixels">Change size budget</SettingsLink>
       </span>
       {cropOption && (
         <label onClick={(e) => e.stopPropagation()}

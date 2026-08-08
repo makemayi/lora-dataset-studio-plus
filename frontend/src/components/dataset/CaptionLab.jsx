@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch, postJson } from '../../api/fetchClient';
 import { useToast } from '../common/Toast';
-import { ENGINE_OPTIONS, OLLAMA_RELEVANT, VOCABULARY_OPTIONS } from './CaptionOptionsPopover';
+import {
+  CAPTION_LENGTH_OPTIONS, ENGINE_OPTIONS, OLLAMA_RELEVANT, VOCABULARY_OPTIONS,
+} from './CaptionOptionsPopover';
 
 /* 🧪 Caption Lab — try several caption configs on THIS image and compare them side by
    side, WITHOUT touching the stored caption. A candidate is engine × Ollama model ×
-   vocabulary register; each runs through the /caption/preview endpoint, which reuses the
+   vocabulary register × length preset; each runs through the /caption/preview endpoint, which reuses the
    real caption bricks (descriptive by-path pass) and never writes. Candidates run
    SEQUENTIALLY — the GPU is single and serialized server-side, so firing them in parallel
    would just 409/503. Results live only while the modal is open (ephemeral bench).
@@ -20,10 +22,11 @@ const MAX_CANDIDATES = 4;
 // Short labels for a candidate card header (the long option labels are for the picker).
 const ENGINE_SHORT = { '': 'Default engine', auto: 'Auto', joycaption: 'JoyCaption', ollama: 'Ollama' };
 const VOCAB_SHORT = { '': '', explicit: 'Explicit', clinical: 'Clinical', safe: 'Safe' };
+const LENGTH_SHORT = { '': '', concise: 'Concise', detailed: 'Detailed' };
 
 let candidateSeq = 0;
 const newCandidate = (over = {}) => ({
-  id: ++candidateSeq, backend: '', ollamaModel: '', vocabulary: '',
+  id: ++candidateSeq, backend: '', ollamaModel: '', vocabulary: '', length: '',
   status: 'idle', caption: '', chars: 0, durationMs: 0, error: '', cancelled: false, ...over,
 });
 
@@ -31,6 +34,7 @@ function configLabel(c) {
   const parts = [ENGINE_SHORT[c.backend] ?? c.backend];
   if (OLLAMA_RELEVANT.has(c.backend) && c.ollamaModel) parts.push(c.ollamaModel);
   if (c.vocabulary) parts.push(VOCAB_SHORT[c.vocabulary]);
+  if (c.length) parts.push(LENGTH_SHORT[c.length]);
   return parts.join(' · ');
 }
 
@@ -65,14 +69,15 @@ export default function CaptionLab({ datasetId, imageId, currentCaption, onKeep 
     // Reset prior results so a re-run reads cleanly.
     setCandidates((cs) => cs.map((c) => ({ ...c, status: 'idle', caption: '', error: '', cancelled: false })));
     // Snapshot the ids/config now — state updates during the loop won't reorder the run.
-    const snapshot = candidates.map((c) => ({ id: c.id, backend: c.backend, ollamaModel: c.ollamaModel, vocabulary: c.vocabulary }));
+    const snapshot = candidates.map((c) => ({ id: c.id, backend: c.backend, ollamaModel: c.ollamaModel, vocabulary: c.vocabulary, length: c.length }));
     for (const c of snapshot) {
       if (abortRef.current) { patch(c.id, { status: 'idle' }); continue; }
       patch(c.id, { status: 'running', caption: '', error: '', cancelled: false });
       try {
         const started = performance.now();
         const r = await postJson(`/api/dataset/${datasetId}/image/${imageId}/caption/preview`,
-          { backend: c.backend, ollama_model: c.ollamaModel, vocabulary: c.vocabulary });
+          { backend: c.backend, ollama_model: c.ollamaModel, vocabulary: c.vocabulary,
+            length: c.length });
         const elapsed = Math.round(performance.now() - started);
         if (r.cancelled) {
           patch(c.id, { status: 'cancelled', cancelled: true, durationMs: r.duration_ms ?? elapsed });
@@ -101,7 +106,8 @@ export default function CaptionLab({ datasetId, imageId, currentCaption, onKeep 
   const makeDefault = async (c) => {
     try {
       await postJson(`/api/dataset/${datasetId}/caption/options`,
-        { backend: c.backend, ollama_model: c.ollamaModel, vocabulary: c.vocabulary });
+        { backend: c.backend, ollama_model: c.ollamaModel, vocabulary: c.vocabulary,
+          length: c.length });
       toast.success('Saved as this dataset’s default caption method');
     } catch (e) {
       toast.error(e.message || 'Could not save the default');
@@ -169,6 +175,10 @@ export default function CaptionLab({ datasetId, imageId, currentCaption, onKeep 
                   {VOCABULARY_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
                 </select>
               </div>
+              <select aria-label="Caption length" value={c.length} disabled={running}
+                onChange={(e) => patch(c.id, { length: e.target.value })} className={selectCls}>
+                {CAPTION_LENGTH_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+              </select>
               <select aria-label="Ollama vision model" value={c.ollamaModel} disabled={running || !OLLAMA_RELEVANT.has(c.backend)}
                 onChange={(e) => patch(c.id, { ollamaModel: e.target.value })}
                 className={`${selectCls} ${OLLAMA_RELEVANT.has(c.backend) ? '' : 'opacity-40'}`}>

@@ -21,7 +21,7 @@ This module builds the companion blob (`TrainingRunRecord.snapshot`, JSON):
 Design constraints, all of them load-bearing:
 
 * **The launch must not slow down.** Content hashes are CACHED on the image row
-  (`content_sig` + the `size:mtime` they were computed for): the first launch
+  (`content_sig` + the `size:mtime_ns` they were computed for): the first launch
   after the upgrade pays the read, every later launch pays one `stat` per image.
   `build()` does all of its file I/O OUTSIDE any transaction and returns the
   cache updates for the caller to flush in the SINGLE short commit that also
@@ -49,18 +49,10 @@ logger = logging.getLogger(__name__)
 
 SNAPSHOT_VERSION = 1
 
-# Images are square 1024 px exports — a few hundred KB. Reading one whole is
-# cheaper than being clever, and a full hash cannot produce a false "unchanged".
-# Above the cap (an unusually large import) we sample head+tail like a model
-# file: still proof of a difference, just not proof of identity.
-_FULL_HASH_MAX = 8 << 20        # 8 MiB
-_SAMPLE_BYTES = 1 << 20
-
-
 def _content_sig(path):
     """sha1 of an image's BYTES (short hex), or None when it can't be read.
 
-    This is the fact `size:mtime` only approximated: restoring a backup changes
+    This is the fact `size:mtime_ns` only approximated: restoring a backup changes
     the mtime without touching a pixel, and a re-crop that happens to land on the
     same byte count within the same second changes the pixels without touching
     either. Only the content answers "is this the same image?"."""
@@ -68,16 +60,11 @@ def _content_sig(path):
         size = os.path.getsize(path)
         h = hashlib.sha1(str(size).encode())
         with open(path, 'rb') as fh:
-            if size <= _FULL_HASH_MAX:
-                while True:
-                    chunk = fh.read(1 << 20)
-                    if not chunk:
-                        break
-                    h.update(chunk)
-            else:
-                h.update(fh.read(_SAMPLE_BYTES))
-                fh.seek(-_SAMPLE_BYTES, os.SEEK_END)
-                h.update(fh.read(_SAMPLE_BYTES))
+            while True:
+                chunk = fh.read(1 << 20)
+                if not chunk:
+                    break
+                h.update(chunk)
         return h.hexdigest()[:16]
     except OSError:
         return None
@@ -86,7 +73,7 @@ def _content_sig(path):
 def _stat_key(path):
     try:
         st = os.stat(path)
-        return f'{st.st_size}:{int(st.st_mtime)}'
+        return f'{st.st_size}:{st.st_mtime_ns}'
     except OSError:
         return None
 
@@ -94,7 +81,7 @@ def _stat_key(path):
 def content_sig_for(row, path, updates):
     """Cached content signature of one image row.
 
-    Reuses `row.content_sig` when the file's size+mtime still match the ones it
+    Reuses `row.content_sig` when the file's size+mtime_ns still match the ones it
     was computed for; otherwise re-hashes and appends `(row, sig, stat)` to
     `updates` so the caller can persist it inside its own single commit. Never
     writes here — this runs before the transaction, on purpose."""

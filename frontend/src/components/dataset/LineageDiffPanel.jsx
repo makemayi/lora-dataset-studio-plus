@@ -85,11 +85,15 @@ export default function LineageDiffPanel({ a, b, onClose }) {
           : images?.content_withheld) || 0);
 
   return (
-    <div className="fixed right-0 top-0 z-50 flex h-full w-full flex-col overflow-y-auto border-l border-border bg-surface-overlay p-4 shadow-xl sm:w-96">
+    /* Full screen up to `lg`, a 24-rem side drawer from there. It narrowed at
+       `sm` before, which on a 768-px tablet left a 372-px sliver of board beside
+       a two-column table — neither side usable. Desktop is unchanged. */
+    <div className="fixed right-0 top-0 z-50 flex h-full w-full flex-col overflow-y-auto border-l border-border bg-surface-overlay p-4 shadow-xl lg:w-96">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-content">Compare runs</h3>
         <button type="button" onClick={onClose}
-          className="text-content-subtle hover:text-content" aria-label="Close">✕</button>
+          className="-mr-2 -mt-2 flex h-11 w-11 shrink-0 items-center justify-center text-content-subtle hover:text-content lg:-mr-1 lg:-mt-1 lg:h-8 lg:w-8"
+          aria-label="Close">✕</button>
       </div>
 
       <div className="mt-2 grid grid-cols-2 gap-2 text-xs">

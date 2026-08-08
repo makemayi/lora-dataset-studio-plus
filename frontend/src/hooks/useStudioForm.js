@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { DEFAULT_STRENGTHS } from '../components/dataset/studio/constants';
 import { defaultCfgFor, defaultStepsFor, mixedModelDefaults } from '../utils/studioModelDefaults';
 
@@ -22,7 +22,8 @@ const rollSeed = () => Math.floor(Math.random() * 2 ** 31);
    datasets. Tout le reste (modèle, format, cfg, steps, seed, ×N, réglages
    globaux) passe par exactement ce hook et exactement ce composant, donc les
    deux écrans ne peuvent pas diverger. */
-export function useStudioForm(d, datasetId, family = null, { pinnedCheckpoints = null } = {}) {
+export function useStudioForm(d, datasetId, family = null,
+  { pinnedCheckpoints = null, preselectBase = null } = {}) {
   // Persistance namespacée par dataset ET par famille : chaque pipeline (ZIT/SDXL/Krea)
   // garde ses propres axes (checkpoints/strengths/modèle…). Le composant studio est
   // remonté quand la famille change → ce hook re-lit la bonne clé au montage.
@@ -44,6 +45,33 @@ export function useStudioForm(d, datasetId, family = null, { pinnedCheckpoints =
   const [selCfgs, setSelCfgs] = useState(initial.selCfgs ?? null);
   const [selSteps, setSelSteps] = useState(initial.selSteps ?? null);
   const [selSteps2, setSelSteps2] = useState(initial.selSteps2 ?? null);  // SDXL : pass 2 (detail daemon)
+
+  /* `preselectBase` — a base named in the URL (`/studio?base=…`), used by the
+     full-model card to open ON the model you asked to test.
+
+     Three deliberate choices:
+       • it wins over the persisted selection, ONCE. Same rule as the LoRA
+         picker's URL preselection: an explicit navigation is a fresher intent
+         than what localStorage remembers, but only for the arrival, so the very
+         next click of the user is never fought over;
+       • it clears the persisted CFG/steps, and that is the whole point for an
+         undistilled base. A session spent on a Turbo checkpoint leaves cfg 1 /
+         8 steps behind; inherited by a Raw full model they render a blurry
+         sketch that reads as "the training failed". Cleared, the axes re-seed
+         from `model_defaults` — the run's OWN sample settings;
+       • it waits for the base to actually be in `z_models`. Selecting a value
+         the payload does not know would be silently dropped by the backend
+         whitelist and fall back to the first base, i.e. generate on the WRONG
+         model while the UI claims otherwise. */
+  const preselectedBaseRef = useRef(false);
+  useEffect(() => {
+    if (preselectedBaseRef.current || !preselectBase) return;
+    if (!(d?.z_models || []).some((m) => m.value === preselectBase)) return;
+    preselectedBaseRef.current = true;
+    setSelModels([preselectBase]);
+    setSelCfgs(null);
+    setSelSteps(null);
+  }, [preselectBase, d?.z_models]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Persiste les sélections à chaque changement (refresh-safe, par dataset).
   useEffect(() => {
@@ -77,9 +105,14 @@ export function useStudioForm(d, datasetId, family = null, { pinnedCheckpoints =
   // Pass 2 (detail daemon) : SDXL uniquement. Z-Image → default_steps2 null → axe vide
   // (×1 dans le compteur, pas envoyé au backend).
   const effectiveSteps2 = selSteps2 ?? (d?.default_steps2 != null ? [d.default_steps2] : []);
-  const total = chosenCps.length * selSts.length * effectiveAspects.length
-    * effectiveCfgs.length * effectiveSteps.length * Math.max(1, effectiveSteps2.length)
-    * Math.max(1, effectiveModels.length);
+  // Everything the axes multiply EXCEPT the checkpoints and the strength sweep.
+  // 🧬 Blend collapses those two into one configuration (each LoRA carries its own
+  // weight, they all load in the same image), so its cell count is exactly this —
+  // exposed rather than divided back out of `total`, which would be a lie the
+  // moment one of the two factors is zero.
+  const axisTotal = effectiveAspects.length * effectiveCfgs.length * effectiveSteps.length
+    * Math.max(1, effectiveSteps2.length) * Math.max(1, effectiveModels.length);
+  const total = chosenCps.length * selSts.length * axisTotal;
 
   const toggleCp = (fn) =>
     setSelCps((cur) => {
@@ -121,7 +154,7 @@ export function useStudioForm(d, datasetId, family = null, { pinnedCheckpoints =
 
   return {
     selSts, seed, seedLocked, genCount, promptText, selModels,
-    chosenCps, effectivePrompt, effectiveModels, effectiveAspects, effectiveCfgs, effectiveSteps, effectiveSteps2, total,
+    chosenCps, effectivePrompt, effectiveModels, effectiveAspects, effectiveCfgs, effectiveSteps, effectiveSteps2, total, axisTotal,
     // Défauts DU MODÈLE sélectionné (pour l'étiquette « default … » des pickers).
     modelDefaultCfg, modelDefaultSteps,
     mixedModelDefaults: mixedModelDefaults(d, effectiveModels),

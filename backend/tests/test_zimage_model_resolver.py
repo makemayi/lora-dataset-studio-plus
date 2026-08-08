@@ -327,7 +327,12 @@ def test_every_published_default_is_reachable_from_the_pickers(app):
         assert d['steps'] in lts.STEPS_CHOICES
 
 
-def test_studio_model_defaults_is_zimage_only_and_keyed_by_picker_value(app):
+def test_studio_model_defaults_covers_the_two_split_families_and_is_keyed_by_picker_value(app):
+    """Z-Image and Krea 2 both ship a distilled and an undistilled build that need
+    OPPOSITE sampler settings; SDXL does not, and keeps the family-wide
+    default_cfg/default_steps. Krea joined this list when full-model training
+    started delivering Raw checkpoints, on which Turbo's cfg 1 / 8 steps render a
+    blurry sketch that reads as a failed fine-tune."""
     from app.services import lora_test_studio as lts
     models = [{'value': 'z image\\z_image_turbo.safetensors', 'label': 'turbo'},
               {'value': 'z image\\z_image_base.safetensors', 'label': 'base'}]
@@ -335,4 +340,12 @@ def test_studio_model_defaults_is_zimage_only_and_keyed_by_picker_value(app):
     assert set(out) == {m['value'] for m in models}
     assert out['z image\\z_image_base.safetensors']['cfg'] > 1.0
     assert lts.studio_model_defaults('sdxl', models) == {}
-    assert lts.studio_model_defaults('krea', models) == {}
+
+    krea = lts.studio_model_defaults('krea', [
+        {'value': '', 'label': 'Official - Krea 2 Turbo'},
+        {'value': 'Krea_full_subject1_000002500_fp8.safetensors', 'label': 'full'}])
+    # The official Turbo entry has an empty picker value and is deliberately not
+    # listed: the frontend falls back to default_cfg/default_steps for it, which
+    # ARE Turbo's numbers. Only the Raw/full/fp8 build gets its own row.
+    assert '' not in krea
+    assert krea['Krea_full_subject1_000002500_fp8.safetensors'] == {'cfg': 4.0, 'steps': 25}

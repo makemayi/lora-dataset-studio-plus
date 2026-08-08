@@ -63,17 +63,32 @@ except ImportError:
 app = create_app()
 
 
-def _open_browser_when_ready(url, timeout=30):
-    """Open only after the selected port is serving, avoiding a startup error page."""
+def _announce_when_ready(url, open_browser=False, timeout=180):
+    """Print the address the app is actually serving on — and open the browser
+    when asked — once that address answers.
+
+    The URL has to be printed HERE because Werkzeug's own " * Running on ..."
+    banner never reaches the terminal: ``create_app`` attaches a rotating file
+    handler to the ROOT logger, so werkzeug's INFO-level banner lands in
+    ``data/app.log`` instead of stdout. A plain ``python backend/run.py`` used to
+    print no address at all, and any launcher that reads the terminal for one
+    (the Pinokio launcher does, to light up its "Open Web UI" tab) would wait
+    forever. Waiting for /api/health first means the line — and the browser tab —
+    appear when the app can actually answer, not on a startup error page.
+
+    On timeout the address is printed anyway: a slow first boot must not leave a
+    launcher hanging on a line that never comes."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
             with urllib.request.urlopen(url + 'api/health', timeout=1) as response:
                 if response.status == 200:
-                    webbrowser.open(url)
-                    return
+                    break
         except Exception:
             time.sleep(0.25)
+    print(f"[LDS] Ready on {url}", flush=True)
+    if open_browser:
+        webbrowser.open(url)
 
 if __name__ == '__main__':
     host = os.environ.get('LDS_HOST') or cfg_get('server.host')
@@ -113,13 +128,13 @@ if __name__ == '__main__':
     # reading cfg_get again there would lie about what's currently serving requests.
     app.config['LDS_BOUND_HOST'] = host
     app.config['LDS_BOUND_PORT'] = port
-    if os.environ.get('LDS_OPEN_BROWSER') == '1':
-        browser_host = {'0.0.0.0': '127.0.0.1', '::': '::1'}.get(host, host)
-        if ':' in browser_host and not browser_host.startswith('['):
-            browser_host = f'[{browser_host}]'
-        url = f"http://{browser_host}:{port}/"
-        threading.Thread(target=_open_browser_when_ready, args=(url,),
-                         daemon=True).start()
+    local_host = {'0.0.0.0': '127.0.0.1', '::': '::1'}.get(host, host)
+    if ':' in local_host and not local_host.startswith('['):
+        local_host = f'[{local_host}]'
+    url = f"http://{local_host}:{port}/"
+    threading.Thread(target=_announce_when_ready, args=(url,),
+                     kwargs={'open_browser': os.environ.get('LDS_OPEN_BROWSER') == '1'},
+                     daemon=True).start()
     app.run(debug=os.environ.get('FLASK_DEBUG', '0') == '1',
             host=host,
             port=port, threaded=True, use_reloader=False)

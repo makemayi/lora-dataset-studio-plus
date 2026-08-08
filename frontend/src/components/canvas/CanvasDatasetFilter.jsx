@@ -1,16 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { selectionSummary } from '../../utils/canvasSelection';
-import { familyLabel } from '../../utils/canvasFamilyFilter';
+import {
+  familyLabel, readCanvasFilterOpen, writeCanvasFilterOpen,
+} from '../../utils/canvasFamilyFilter';
 
 /* Which datasets sit on the board.
 
    The canvas' whole promise is "all your datasets at once", so this is a
    SUBTRACTIVE control: everything is on the board until you take something off.
 
-   It folds. On a phone a permanent checkbox list would eat the screen the board
-   needs, so below `sm` it opens collapsed behind a button that says what is
-   currently shown ("3 of 7") — the state is never hidden behind a mystery icon.
-   On a wide screen it opens expanded, because there it costs one row. */
+   It folds, and it opens FOLDED — at every width. It used to open expanded on a
+   wide screen, "because there it costs one row"; it costs a row plus a wrapping
+   checkbox list per dataset, and on a library of any size that pushed the board
+   — the thing you came to look at — under the fold on every single load. A
+   filter is not something you consult on arrival.
+   Nothing is hidden by that: the button says what is currently shown ("3 of 7"),
+   so the state is readable folded, never behind a mystery icon. And unfolding is
+   REMEMBERED, so someone who works with the filter open keeps it open. */
 
 export default function CanvasDatasetFilter({
   datasets, selected, onToggle, onAll, onNone,
@@ -18,20 +24,16 @@ export default function CanvasDatasetFilter({
   query, onQueryChange, statuses, selectedStatuses, onToggleStatus,
   showPinned, onTogglePinned, onResetFilters, visibleRuns,
 }) {
-  const wide = typeof window !== 'undefined' && window.matchMedia
-    ? window.matchMedia('(min-width: 640px)').matches
-    : true;
-  const [open, setOpen] = useState(wide);
-  // A phone rotated to landscape (or a resized window) should not be stuck with
-  // the phone's fold — follow the breakpoint until the user decides for himself.
-  const [userSet, setUserSet] = useState(false);
-  useEffect(() => {
-    if (userSet || typeof window === 'undefined' || !window.matchMedia) return undefined;
-    const mq = window.matchMedia('(min-width: 640px)');
-    const apply = () => setOpen(mq.matches);
-    mq.addEventListener?.('change', apply);
-    return () => mq.removeEventListener?.('change', apply);
-  }, [userSet]);
+  // Replié tant que l'utilisateur n'a pas dit le contraire — et son choix survit
+  // au rechargement. Plus de largeur d'écran ici : l'ancienne version rouvrait
+  // le panneau sur tout redimensionnement vers `sm`, ce qui aurait annulé un pli
+  // délibéré à chaque fois que la fenêtre grandit.
+  const [open, setOpen] = useState(
+    () => readCanvasFilterOpen(typeof localStorage !== 'undefined' ? localStorage : null));
+  const toggleOpen = () => setOpen((v) => {
+    writeCanvasFilterOpen(typeof localStorage !== 'undefined' ? localStorage : null, !v);
+    return !v;
+  });
 
   const sel = new Set(selected || []);
   const familySel = new Set(selectedFamilies || []);
@@ -41,7 +43,7 @@ export default function CanvasDatasetFilter({
     <section className="mb-3 rounded-xl border border-border bg-surface-raised p-2.5">
       <div className="flex flex-wrap items-center gap-2">
         <button type="button"
-          onClick={() => { setUserSet(true); setOpen((v) => !v); }}
+          onClick={toggleOpen}
           aria-expanded={open}
           className="flex h-9 items-center gap-1.5 rounded-md border border-border bg-app/60 px-2.5 text-content text-[0.75rem] font-semibold hover:border-indigo-400/50">
           <span aria-hidden>{open ? '▾' : '▸'}</span> Datasets

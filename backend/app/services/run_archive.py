@@ -29,8 +29,10 @@ gigabyte, and an incremental launch copies only what actually changed.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
+import re
 import shutil
 import threading
 
@@ -43,6 +45,20 @@ _ALLOWED_EXT = ('.png', '.jpg', '.jpeg', '.webp', '.bmp')
 
 _lock = threading.Lock()
 _size_cache = {'bytes': None}
+_CONTENT_SIG_RE = re.compile(r'^[0-9a-f]{16}$')
+
+
+def _content_signature(path):
+    """Match run_snapshot's full-file signature for publish verification."""
+    size = os.path.getsize(path)
+    digest = hashlib.sha1(str(size).encode())
+    with open(path, 'rb') as stream:
+        while True:
+            chunk = stream.read(1 << 20)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()[:16]
 
 
 def archive_root():
@@ -245,8 +261,22 @@ def store(plan) -> dict:
                 # leave a TRUNCATED blob sitting at the address of a valid hash.
                 tmp = dst.with_suffix(dst.suffix + '.part')
                 shutil.copyfile(src, tmp)
+                # The plan was captured before this daemon thread started.  A
+                # later Dataset edit must never be published under generation
+                # A's content address; keep the run honest and leave that image
+                # unavailable instead.
+                if (_CONTENT_SIG_RE.fullmatch(str(sig))
+                        and _content_signature(tmp) != str(sig)):
+                    tmp.unlink(missing_ok=True)
+                    skipped += 1
+                    continue
+                actual_size = os.path.getsize(tmp)
+                if current + actual_size > ceiling:
+                    tmp.unlink(missing_ok=True)
+                    full = True
+                    break
                 os.replace(tmp, dst)
-                current += size
+                current += actual_size
                 added += 1
             except OSError:
                 logger.debug('could not archive %s', sig, exc_info=True)

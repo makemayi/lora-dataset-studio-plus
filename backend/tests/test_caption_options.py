@@ -40,7 +40,8 @@ def test_caption_options_defaults_and_normalization(app):
         ds = svc.create_dataset(LOCAL_USER, 'Emma', 'zchar_emma')
         # Never set → all-empty (follow the global defaults).
         assert svc.caption_options(ds) == {
-            'backend': '', 'ollama_model': '', 'instructions': '', 'vocabulary': ''}
+            'backend': '', 'ollama_model': '', 'instructions': '', 'vocabulary': '',
+            'length': ''}
 
         # A corrupt blob degrades to defaults, never raises.
         ds.caption_options = '{not json'
@@ -92,7 +93,8 @@ def test_set_caption_options_roundtrip_and_validation(app):
                                       {'backend': 'ollama', 'ollama_model': 'q:8b',
                                        'instructions': 'name the season', 'vocabulary': 'explicit'})
         assert eff == {'backend': 'ollama', 'ollama_model': 'q:8b',
-                       'instructions': 'name the season', 'vocabulary': 'explicit'}
+                       'instructions': 'name the season', 'vocabulary': 'explicit',
+                       'length': ''}
         stored = json.loads(db.session.get(FaceDataset, ds.id).caption_options)
         assert stored == {'backend': 'ollama', 'ollama_model': 'q:8b',
                           'instructions': 'name the season', 'vocabulary': 'explicit'}
@@ -101,12 +103,12 @@ def test_set_caption_options_roundtrip_and_validation(app):
         svc.set_caption_options(LOCAL_USER, ds.id, {'instructions': 'name the outfit'})
         assert svc.caption_options(db.session.get(FaceDataset, ds.id)) == {
             'backend': 'ollama', 'ollama_model': 'q:8b', 'instructions': 'name the outfit',
-            'vocabulary': 'explicit'}
+            'vocabulary': 'explicit', 'length': ''}
 
         # Clearing every field stores NULL (identical to never-touched).
         svc.set_caption_options(LOCAL_USER, ds.id,
                                 {'backend': '', 'ollama_model': '', 'instructions': '',
-                                 'vocabulary': ''})
+                                 'vocabulary': '', 'length': ''})
         assert db.session.get(FaceDataset, ds.id).caption_options is None
 
         # Invalid engine → ValueError (mapped 400 by the route).
@@ -256,7 +258,8 @@ def test_caption_options_routes(app, client):
     r = client.get(f'/api/dataset/{ds_id}/caption/options')
     assert r.status_code == 200
     assert r.get_json()['options'] == {
-        'backend': '', 'ollama_model': '', 'instructions': '', 'vocabulary': ''}
+        'backend': '', 'ollama_model': '', 'instructions': '', 'vocabulary': '',
+        'length': ''}
 
     r = client.post(f'/api/dataset/{ds_id}/caption/options',
                     json={'backend': 'joycaption', 'instructions': 'be terse'})
@@ -295,3 +298,117 @@ def test_caption_options_route_rejects_invalid_ollama_models(app, client):
         json={'ollama_model': ''})
     assert r.status_code == 200
     assert r.get_json()['options']['ollama_model'] == ''
+
+
+# --- caption LENGTH preset (idea by djpraxis, Reddit) -------------------------
+def test_caption_length_normalization_and_validation(app):
+    """Same contract as the vocabulary register: unknown values are dropped on read,
+    refused on write, and '' means "standard" (nothing appended)."""
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'Len', 'zchar_len')
+        ds.caption_options = json.dumps({'length': 'tiny'})
+        db.session.commit()
+        assert svc.caption_options(ds)['length'] == ''
+
+        ds.caption_options = json.dumps({'length': '  Concise '})
+        db.session.commit()
+        assert svc.caption_options(ds)['length'] == 'concise'
+
+        assert svc.set_caption_options(
+            LOCAL_USER, ds.id, {'length': 'detailed'})['length'] == 'detailed'
+        # Only the named key changed - the round-trip stays additive.
+        assert svc.caption_options(db.session.get(FaceDataset, ds.id))['vocabulary'] == ''
+        with pytest.raises(ValueError, match='invalid caption length'):
+            svc.set_caption_options(LOCAL_USER, ds.id, {'length': 'epic'})
+
+        # Cleared back to standard -> the key is not stored at all.
+        svc.set_caption_options(LOCAL_USER, ds.id, {'length': ''})
+        assert db.session.get(FaceDataset, ds.id).caption_options is None
+
+
+def test_caption_length_route_rejects_unknown_value(app, client):
+    with app.app_context():
+        ds_id = svc.create_dataset(LOCAL_USER, 'LenRoute', 'zchar_len_route').id
+    r = client.post(f'/api/dataset/{ds_id}/caption/options', json={'length': 'epic'})
+    assert r.status_code == 400 and 'length' in r.get_json()['error']
+    r = client.post(f'/api/dataset/{ds_id}/caption/options', json={'length': 'concise'})
+    assert r.status_code == 200 and r.get_json()['options']['length'] == 'concise'
+
+
+def test_length_preset_rides_after_vocabulary_and_before_free_instructions(
+        app, client, monkeypatch):
+    """The documented composition order - base prompt, then vocabulary register, then
+    length preset, then the user's free text LAST so it can override a preset."""
+    from app.services import vision_ollama
+    with app.app_context():
+        save_config({'captioning': {'backend': 'auto'}})
+        ds = svc.create_dataset(LOCAL_USER, 'Order', 'zchar_order')
+        svc.set_caption_options(LOCAL_USER, ds.id,
+                                {'backend': 'ollama', 'vocabulary': 'clinical',
+                                 'length': 'concise',
+                                 'instructions': 'MY OWN STEER'})
+        _kept_image(ds, 'k0.png')
+        ds_id = ds.id
+
+    captured = {}
+
+    def fake_describe(image_bytes, prompt, **kwargs):
+        captured['prompt'] = prompt
+        return 'a woman standing in a park wearing a red coat'
+
+    monkeypatch.setattr(vision_ollama, 'describe_image_ollama', fake_describe)
+    monkeypatch.setattr(vision_ollama, 'unload_vision_model', lambda *a, **k: True)
+
+    r = client.post(f'/api/dataset/{ds_id}/caption', json={'force': True})
+    assert r.status_code == 200 and r.get_json()['captioned'] == 1
+
+    prompt = captured['prompt']
+    i_vocab = prompt.index('clinical, anatomical terms')
+    i_len = prompt.index('Keep the caption SHORT')
+    i_free = prompt.index('MY OWN STEER')
+    assert prompt.index('Additional instructions from the user:') < i_vocab < i_len < i_free
+    assert prompt.rstrip().endswith('MY OWN STEER')
+
+
+def test_standard_length_leaves_the_prompt_byte_identical(app, client, monkeypatch):
+    """Retro-compat: length='' appends nothing at all - a dataset that never touched
+    the dial builds exactly the prompt it built before this option existed."""
+    from app.services import vision_ollama
+    with app.app_context():
+        save_config({'captioning': {'backend': 'auto'}})
+        ds = svc.create_dataset(LOCAL_USER, 'Std', 'zchar_std')
+        svc.set_caption_options(LOCAL_USER, ds.id, {'backend': 'ollama'})
+        _kept_image(ds, 'k0.png')
+        ds_id = ds.id
+
+    captured = {}
+
+    def fake_describe(image_bytes, prompt, **kwargs):
+        captured['prompt'] = prompt
+        return 'a woman standing in a park wearing a red coat'
+
+    monkeypatch.setattr(vision_ollama, 'describe_image_ollama', fake_describe)
+    monkeypatch.setattr(vision_ollama, 'unload_vision_model', lambda *a, **k: True)
+    client.post(f'/api/dataset/{ds_id}/caption', json={'force': True})
+    assert 'Additional instructions from the user:' not in captured['prompt']
+
+
+def test_concise_preset_keeps_captions_on_the_prose_side_of_the_mismatch_guard():
+    """A Concise caption must stay PROSE. caption_style() votes 'booru' on three-plus
+    short comma segments with no sentence punctuation, and assert_trainable refuses a
+    prose family on booru captions (MISMATCH_CAPTION) - so a length preset phrased as
+    "a few key comma-separated phrases" would have made every Concise dataset need a
+    forced launch. The shipped instruction asks for one COMPLETE SENTENCE and forbids
+    a tag list; this pins both halves."""
+    from app.services.face_variations import caption_style
+    text = svc._LENGTH_INSTRUCTION['concise']
+    assert 'complete sentence' in text
+    assert 'never a comma-separated list of tags' in text
+    # A caption written to that instruction reads as prose, even with commas in it.
+    concise = ('A woman in a red coat stands on a rainy street at night, '
+               'looking away from the camera.')
+    assert caption_style(concise) == 'prose'
+    # The Detailed preset is prose by construction (several sentences).
+    assert caption_style(
+        'A woman sits at a cafe table. She wears a denim jacket. '
+        'Warm afternoon light comes from the left. The shot is a waist-up view.') == 'prose'

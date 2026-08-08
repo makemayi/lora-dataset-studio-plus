@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiFetch, postJson } from '../../api/fetchClient'
 import {
-  canSelect, detectionFailure, detectionSummary, dialogCopy, enteredNote,
-  missingLabels, sortInterpreters, statusBadge,
+  canSelect, DEFAULT_PICKER, detectionFailure, detectionSummary, dialogCopy,
+  enteredNote, missingLabels, pickerProfile, sortInterpreters, statusBadge,
 } from './scoringPython.js'
 
 /** ⚡ Use a GPU Python you already have — the picker behind the "✨ Score runs on
- * the CPU" warning.
+ * the CPU" warning, and behind the same warning for the SigLIP 2 semantic index.
+ *
+ * ONE dialog for both, driven by `profile`: the detector, the read-only rule and
+ * the refusal are identical, only the dependency list and the config key differ
+ * and both live on the server. A twin screen would be a second place to fix
+ * every future wording bug — and the two would drift the first time one of them
+ * was touched.
  *
  * This app never installs into an environment it did not build. ai-toolkit's venv
  * runs the user's training; ComfyUI's runs their generation. We read them, we
@@ -48,7 +54,9 @@ function DepChips({ deps }) {
   )
 }
 
-export default function ScoringPythonDialog({ onClose, onChanged }) {
+export default function ScoringPythonDialog({ onClose, onChanged,
+  profile = DEFAULT_PICKER }) {
+  const picker = pickerProfile(profile)
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
@@ -63,13 +71,13 @@ export default function ScoringPythonDialog({ onClose, onChanged }) {
       if (opts.force) qs.set('force', '1')
       if (opts.path) qs.set('path', opts.path)
       const q = qs.toString()
-      setResult(await apiFetch(`/api/scoring-python${q ? `?${q}` : ''}`))
+      setResult(await apiFetch(`${picker.endpoint}${q ? `?${q}` : ''}`))
     } catch (e) {
       setError(e.message || 'Could not look for interpreters.')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [picker.endpoint])
 
   useEffect(() => { load() }, [load])
 
@@ -77,7 +85,7 @@ export default function ScoringPythonDialog({ onClose, onChanged }) {
     setBusy(path || 'default')
     setError('')
     try {
-      await postJson('/api/scoring-python', { python: path })
+      await postJson(picker.endpoint, { python: path })
       await load({ force: true })
       onChanged?.()
     } catch (e) {
@@ -92,20 +100,25 @@ export default function ScoringPythonDialog({ onClose, onChanged }) {
   // Until the probe answers, assume a card: claiming "no NVIDIA card" on a
   // machine that has one is the one wrong thing to flash.
   const nvidia = result ? result.nvidia_present !== false : true
-  const copy = dialogCopy(nvidia)
+  const copy = dialogCopy(nvidia, picker)
   const entered = loading ? null : enteredNote(result)
   // "the search broke" and "there is nothing here" are NOT the same screen.
   const failure = loading ? null : detectionFailure(result)
 
   return (
-    <div role="dialog" aria-modal="true" aria-label="Choose the Python that runs Score"
+    <div role="dialog" aria-modal="true" aria-label={picker.ariaLabel}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-2 sm:p-4">
       <div className="w-full max-w-2xl max-h-[92vh] overflow-y-auto rounded-xl border border-border bg-surface-overlay p-4 shadow-2xl space-y-4 sm:p-5">
         <div>
           <h2 className="text-base font-bold text-content">{copy.title}</h2>
           <p className="mt-1 text-sm text-content-muted">{copy.intro}</p>
+          {picker.extraNote && (
+            <p className="mt-2 text-xs text-content-subtle">{picker.extraNote}</p>
+          )}
           {!loading && !failure && (
-            <p className="mt-2 text-xs text-content-subtle">{detectionSummary(rows, nvidia)}</p>
+            <p className="mt-2 text-xs text-content-subtle">
+              {detectionSummary(rows, nvidia, picker)}
+            </p>
           )}
         </div>
 
@@ -171,7 +184,7 @@ export default function ScoringPythonDialog({ onClose, onChanged }) {
                   <div className="flex flex-wrap gap-2">
                     <button type="button" disabled={!canSelect(r) || !!busy}
                       onClick={() => choose(r.path)}
-                      title={canSelect(r) ? 'Point ✨ Score at this interpreter'
+                      title={canSelect(r) ? `Point ${picker.feature} at this interpreter`
                         : r.selected ? 'Already in use' : 'This one cannot run the pass yet'}
                       className="rounded-md border border-border px-2.5 py-1 text-xs text-content hover:bg-surface-raised disabled:opacity-40 disabled:hover:bg-transparent">
                       {busy === r.path ? 'Checking…' : 'Use this one'}
@@ -184,11 +197,11 @@ export default function ScoringPythonDialog({ onClose, onChanged }) {
         )}
 
         <div className="space-y-2 border-t border-border pt-3">
-          <label htmlFor="scoring-python-path" className="block text-xs font-medium text-content">
+          <label htmlFor={picker.inputId} className="block text-xs font-medium text-content">
             Not listed? Enter the path to a Python interpreter or its folder
           </label>
           <div className="flex flex-col gap-2 sm:flex-row">
-            <input id="scoring-python-path" type="text" value={typed} spellCheck={false}
+            <input id={picker.inputId} type="text" value={typed} spellCheck={false}
               onChange={(e) => setTyped(e.target.value)}
               placeholder="…/envs/myenv  or  …/envs/myenv/Scripts/python.exe"
               className="min-w-0 flex-1 rounded-md border border-border bg-surface px-2 py-1 font-mono text-xs text-content" />
@@ -221,7 +234,7 @@ export default function ScoringPythonDialog({ onClose, onChanged }) {
           <div className="flex flex-wrap gap-2">
             {hasOverride && (
               <button type="button" onClick={() => choose('')} disabled={!!busy}
-                title="Go back to the environment the app set up for scoring"
+                title="Go back to the environment the app set up for this pass"
                 className="rounded-md border border-border px-2.5 py-1 text-xs text-content-muted hover:text-content hover:bg-surface-raised disabled:opacity-40">
                 Back to the app default
               </button>

@@ -23,6 +23,27 @@ test('the picker is reachable from BOTH dead ends: a CPU pass, and no extra at a
   assert.match(ws, /const \{ caps, loading: capsLoading, refresh: refreshCaps \}/);
   assert.match(ws, /openerLabel\(scoreGpuPresent\)/);
   assert.match(ws, /<ScoringPythonDialog/);
+  assert.match(ws, /setPythonPickerFor\('scoring'\)/);
+});
+
+test('ONE dialog serves both features — the semantic index gets the same picker', () => {
+  // The detector, the read-only rule and the refusal are identical; only the
+  // dependency list and the config key differ, and both live on the server. A
+  // twin dialog would be a second place to fix every future wording bug.
+  const semantic = fs.readFileSync(
+    new URL('./BankSemanticEngine.jsx', import.meta.url), 'utf8');
+  assert.match(ws, /profile=\{PICKER_PROFILES\[pythonPickerFor\]\}/);
+  assert.match(ws, /onPickPython=\{\(\) => setPythonPickerFor\('semantic'\)\}/);
+  assert.match(semantic, /offersSemanticGpuPython\(state, gpuPresent\)/);
+  assert.match(semantic, /openerLabel\(gpuPresent\)/);
+  // The dialog reads its endpoint from the profile — never a hardcoded route,
+  // which is how the semantic picker would silently write Score's config key.
+  assert.match(dialog, /apiFetch\(`\$\{picker\.endpoint\}/);
+  assert.match(dialog, /postJson\(picker\.endpoint/);
+  assert.doesNotMatch(dialog, /'\/api\/scoring-python'/);
+  // Borrowing an interpreter for the index must never read as "and Setup will
+  // install into it".
+  assert.match(logic, /Setup ▸ Quality tools keeps installing into the app’s own environment/);
 });
 
 test('a machine with no NVIDIA card is never sold a CUDA fix', () => {
@@ -34,7 +55,7 @@ test('a machine with no NVIDIA card is never sold a CUDA fix', () => {
   // the button label and the dialog copy drop every mention of a GPU.
   assert.match(ws, /const scoreGpuPresent = /);
   assert.match(ws, /openerLabel\(scoreGpuPresent\)/);
-  assert.match(dialog, /dialogCopy\(nvidia\)/);
+  assert.match(dialog, /dialogCopy\(nvidia, picker\)/);
   assert.match(dialog, /result\.nvidia_present !== false/);
 });
 

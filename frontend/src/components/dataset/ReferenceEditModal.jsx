@@ -23,13 +23,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import KleinModelSetting from '../shared/KleinModelSetting';
 import {
-  EDIT_ENGINES, API_ENGINES, LOCAL_ENGINES, batchLiveNote, editPhase,
+  EDIT_ENGINES, LOCAL_ENGINES, batchLiveNote, editPhase,
   editEngineOptions, editCostNote, editKeepNote, editRefNote,
-  acceptsExtraEditRefsForBatch, editBatchBlockedReason, referenceEditCandidates,
-  ENGINE_LABELS,
+  acceptsExtraEditRefs, acceptsExtraEditRefsForBatch, editBatchBlockedReason,
+  referenceEditCandidates,
+  ENGINE_LABELS, maxEditRefsForBatch,
 } from './referenceEdit';
-
-const MAX_EDIT_REFS = 3;
 
 export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
                                              defaultEngine = 'chatgpt', liveActivity = null,
@@ -102,20 +101,23 @@ export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
   const selectedBlocked = options.filter(
     (option) => engines.includes(option.engine) && option.blocked);
   const liveNote = batchLiveNote(liveActivity);
-  const selectedApiEngines = engines.filter((engine) => API_ENGINES.includes(engine));
   const selectedLocalEngines = engines.filter((engine) => LOCAL_ENGINES.includes(engine));
   const localRefNotes = selectedLocalEngines
     .map((engine) => editRefNote(engine, { datasetExtraCount }))
     .filter(Boolean);
   const canAddRefs = acceptsExtraEditRefsForBatch(engines);
-  // An all-local batch cannot take modal uploads: drop anything already staged,
-  // matching the historic single-local behaviour. A mixed batch keeps the bytes
-  // for its API candidates only.
-  useEffect(() => { if (!canAddRefs) setEditRefs([]); }, [canAddRefs]);
+  // The cap follows the SELECTION, because engines read a different number of
+  // these: Krea has room for one, the API engines for three. Deselecting the
+  // generous one has to drop what no longer fits, or the request would carry
+  // images the server is about to refuse.
+  const maxRefs = maxEditRefsForBatch(engines);
+  useEffect(() => {
+    setEditRefs((cur) => (cur.length <= maxRefs ? cur : cur.slice(0, maxRefs)));
+  }, [maxRefs]);
 
   const addRefs = (files) => {
     const list = Array.from(files || []).filter((f) => f && f.type.startsWith('image/'));
-    setEditRefs((cur) => [...cur, ...list].slice(0, MAX_EDIT_REFS));
+    setEditRefs((cur) => [...cur, ...list].slice(0, maxRefs));
   };
 
   const runEdit = async () => {
@@ -338,16 +340,22 @@ export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
             {localRefNotes.map((note) => (
               <p key={note} className="text-[0.6875rem] text-content-muted">{note}</p>
             ))}
-            {selectedApiEngines.length > 0 && selectedLocalEngines.length > 0 && (
+            {/* Only worth saying when the selection actually splits: one engine
+                reads these bytes and another does not. Krea reads them now, so
+                the old blanket "API engines only" would have been false. */}
+            {canAddRefs && selectedLocalEngines.some((e) => !acceptsExtraEditRefs(e)) && (
               <p className="text-[0.6875rem] text-sky-300 bg-sky-500/10 border border-sky-500/30 rounded-lg px-2.5 py-1.5">
-                Images added here go only to the selected API engines. Local engines use the
+                Images added below go to the engines that read them. The rest use the
                 reference support described above.
               </p>
             )}
 
             {/* Optional extra reference images — transient inputs to THIS edit only,
-                never saved as the dataset's extra refs. Hidden for an all-local
-                batch; in a mixed batch they go only to selected API engines. */}
+                never saved as the dataset's extra refs. Shown whenever a SELECTED
+                engine reads them: every API engine, and Krea for its one `_b`
+                slot (a different subject to compose with). Klein does not — it
+                reads the dataset's angles from the reference card instead. The
+                count is capped by the most generous consumer in the selection. */}
             {canAddRefs && (
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-content-subtle text-xs">Add reference images (optional)</span>
@@ -360,7 +368,7 @@ export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
                     className="absolute top-0 right-0 w-4 h-4 flex items-center justify-center rounded-bl bg-black/70 text-white text-[0.625rem] leading-none disabled:opacity-40">✕</button>
                 </div>
               ))}
-              {editRefs.length < MAX_EDIT_REFS && (
+              {editRefs.length < maxRefs && (
                 <button type="button" onClick={() => inpRef.current?.click()} disabled={busy}
                   aria-label="Add a reference image for the edit"
                   className="w-12 h-12 rounded-lg border border-dashed border-border-strong text-content-muted text-lg leading-none disabled:opacity-40">+</button>

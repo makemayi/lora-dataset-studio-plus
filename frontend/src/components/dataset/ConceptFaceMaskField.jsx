@@ -20,7 +20,8 @@ import { HelpBadge } from '../../help/HelpMode';
 import FaceDetectionInstallPrompt from '../setup/FaceDetectionInstallPrompt';
 import { boxStyle, coverageFraction, MAX_COVERAGE } from '../../utils/faceMaskBox';
 import {
-  previewError, previewPercent, previewProgressValue, previewRunning, previewStatusLabel,
+  previewError, previewPercent, previewProgressValue, previewRunning, previewStartLabel,
+  previewStatusLabel, previewStopCost, previewStoppedNotice, previewStopLabel,
 } from '../../utils/faceMaskProgress';
 
 const previewUrl = (datasetId) => `/api/dataset/${datasetId}/train/face-mask-preview`;
@@ -106,6 +107,11 @@ export default function ConceptFaceMaskField({
 }) {
   const [preview, setPreview] = useState(null);
   const [job, setJob] = useState(null);
+  // What a resume would be worth, as the SERVER sees it: the detections banked
+  // by a stopped pass, already checked against the current kept set's
+  // fingerprint. Null once that set moves — a resume onto changed images would
+  // mix in boxes from photos that are no longer in the run.
+  const [resume, setResume] = useState(null);
   const [expand, setExpand] = useState(expandDefault ?? 2);
   const [err, setErr] = useState(null);
   const expandTouched = useRef(false);
@@ -117,6 +123,7 @@ export default function ConceptFaceMaskField({
   const adopt = useCallback((d) => {
     if (!d || !d.ok) return;
     setJob(d.job || null);
+    setResume(d.resume || null);
     if (d.result) {
       setPreview(d.result);
       // The slider is the user's; only seed it from the server before they touch it.
@@ -202,6 +209,15 @@ export default function ConceptFaceMaskField({
     }
   };
 
+  /* Ask the pass to wind up. Deliberately NOT optimistic about the outcome: the
+     server answers "stopping", and the pass stays running until the child hands
+     back what it found. Flipping the UI straight to "stopped" would claim the
+     work was banked before it actually was. */
+  const stopPreview = async () => {
+    const d = await postJson(`${previewUrl(datasetId)}/stop`, {});
+    if (d && d.ok) adopt(d);
+  };
+
   const cov = preview?.coverage;
   const samples = preview?.samples || [];
   // A partially masked set is worse than a consistently unmasked one, so this is a
@@ -262,10 +278,34 @@ export default function ConceptFaceMaskField({
 
       {enabled && faceCapability !== false && (
         <div className="mt-1">
-          <button type="button" onClick={runPreview} disabled={running}
-            className="min-h-8 rounded-lg border border-border bg-surface px-2.5 text-[0.6875rem] font-semibold text-content hover:bg-surface-raised disabled:opacity-50">
-            {running ? 'Looking for faces…' : preview ? 'Refresh preview' : '👁 Preview the mask'}
-          </button>
+          {/* 400px-first: the two buttons wrap instead of overflowing, and the
+              cost sentence sits on its own line under them rather than being
+              squeezed next to Stop. */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button type="button" onClick={runPreview} disabled={running}
+              className="min-h-8 rounded-lg border border-border bg-surface px-2.5 text-[0.6875rem] font-semibold text-content hover:bg-surface-raised disabled:opacity-50">
+              {running ? 'Looking for faces…' : previewStartLabel(resume, Boolean(preview))}
+            </button>
+            {running && (
+              <button type="button" onClick={stopPreview} disabled={Boolean(job && job.stopping)}
+                className="min-h-8 rounded-lg border border-border bg-surface px-2.5 text-[0.6875rem] font-semibold text-amber-200 hover:bg-surface-raised disabled:opacity-50">
+                {previewStopLabel(job)}
+              </button>
+            )}
+          </div>
+          {/* The price of stopping, stated where the button is — and it CHANGES
+              while the pass runs, which is exactly why it cannot be a one-off
+              confirmation dialog. */}
+          {running && (
+            <p className="mt-1 text-[0.625rem] leading-tight text-content-subtle">
+              {previewStopCost(job)}
+            </p>
+          )}
+          {!running && previewStoppedNotice(job, resume) && (
+            <p role="status" className="mt-1 text-[0.6875rem] leading-relaxed text-content-muted">
+              {previewStoppedNotice(job, resume)}
+            </p>
+          )}
           {running && <PreviewProgress job={job} />}
           {err && !running && (
             <p role="alert" className="mt-1 text-amber-300 text-[0.6875rem] leading-relaxed">

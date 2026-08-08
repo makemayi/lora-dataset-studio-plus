@@ -2,6 +2,7 @@
 selective delete, run cleanup, cloud staging purge, source-side save cap."""
 import json
 import os
+from datetime import datetime
 
 import pytest
 
@@ -84,11 +85,20 @@ def test_purge_finished_runs_spares_active_and_pod_kept(app, ds, tmp_path):
             db.session.commit()
             return d
         done_dir = mk('done', 'r_done')
+        (done_dir / 'samples').mkdir()
+        (done_dir / 'samples' / 's.png').write_bytes(b'S' * 10)
         active_dir = mk('training', 'r_active')
         kept_dir = mk('error_pod_kept', 'r_kept')
+        # finished_at within the recovery window keeps the pod spared; without
+        # one the window cannot be established and the run is fair game.
+        CloudTrainingRun.query.filter_by(vast_label='lds-r_kept').first() \
+            .finished_at = datetime.utcnow()
+        db.session.commit()
         res = ct.purge_finished_runs()
         assert res['purged_runs'] == 1 and res['freed_bytes'] >= 10
-        assert not done_dir.exists()                 # trashed
+        # the working files went; the checkpoint was rescued into the store
+        assert not (done_dir / 'samples').exists()
+        assert not (done_dir / 'ck.safetensors').exists()
         assert active_dir.exists() and kept_dir.exists()   # spared
 
 

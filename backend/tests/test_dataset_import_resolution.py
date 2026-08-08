@@ -185,7 +185,7 @@ def test_invalid_policy_falls_back_to_preserve_default(app):
 class _OversizedImageHeader:
     """Pillow-like header object whose `load` must never be reached in a test."""
     format = 'JPEG'
-    size = (8192, 8192)  # valid side, unsafe 67 Mi-pixel raster
+    size = (12000, 9000)  # sides within budget, 103 Mi-pixel raster: over it
     n_frames = 1
 
     def __enter__(self):
@@ -199,7 +199,7 @@ class _OversizedImageHeader:
 
 
 def test_import_header_budget_rejects_before_decode_for_every_ingress_lane(app, monkeypatch):
-    """Manual, ZIP, scrape, crop and normalisation share the 16 Mi-pixel gate."""
+    """Manual, ZIP, scrape, crop and normalisation share ONE pixel gate."""
     from app.config import LOCAL_USER
     from app.services import face_dataset_service as svc
     from app.services import dataset_import_service
@@ -399,5 +399,6 @@ def test_settings_and_capabilities_advertise_preserve_as_the_default(client):
     capability = client.get('/api/capabilities').get_json()['dataset_import']
     assert capability['encoding'] == 'high'
     assert capability['max_side'] == 2048 and capability['ceiling'] >= 2048
-    assert capability['input_max_side'] == 8192
-    assert capability['input_max_pixels'] == 16 * 1024 * 1024
+    # The shipped budget, which is now a setting (see test_image_input_budget.py).
+    assert capability['input_max_side'] == 16384
+    assert capability['input_max_pixels'] == 64 * 1024 * 1024

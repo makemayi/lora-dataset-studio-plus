@@ -87,17 +87,98 @@ from PIL import Image
 # Shared ingress/staging safety budget. Dataset import and every ComfyUI hand-off
 # use the same header limits: no route may quietly decode or disclose a larger
 # camera master just because it happens after the initial upload.
-INPUT_MAX_SIDE = 8192
-INPUT_MAX_PIXELS = 16 * 1024 * 1024
+#
+# These are the SHIPPED DEFAULTS, not the law. The effective budget is a user
+# setting (`image_input.max_side` / `image_input.max_pixels`), and this module
+# cannot read it: it must keep working under the ML interpreter that loads this
+# file by path. So the app INJECTS a provider (see
+# `app/services/input_budget.py`) instead of this module reaching for config.
+# With no provider installed — the ML interpreter, a bare unit test — the
+# defaults below apply, which is the conservative side of the choice.
+#
+# Sized in DECODED MEMORY, which is what the guard actually protects: a decoded
+# RGB pixel costs 3 bytes, RGBA 4, and an edit or analysis pass can hold a
+# second copy at the same time. 64 Mi-pixels is ~192 MiB for one RGB decode
+# (~256 MiB RGBA), ~384-512 MiB while a working copy exists. That admits every
+# 35 mm / phone master shipping today (a 61 MP 9504x6336 is 57 Mi-pixels, a
+# 48 MP phone frame 46 Mi) and ordinary stitched panoramas, without putting a
+# single import near a gigabyte. 128 Mi-pixels would have doubled both numbers
+# (~768 MiB for one edit) and that is not a default, it is a choice — which is
+# exactly what the setting is for.
+DEFAULT_INPUT_MAX_SIDE = 16384
+DEFAULT_INPUT_MAX_PIXELS = 64 * 1024 * 1024
+
+#: Back-compatible names for the shipped defaults. Read `input_budget()` instead:
+#: these two do NOT move when the user changes the setting.
+INPUT_MAX_SIDE = DEFAULT_INPUT_MAX_SIDE
+INPUT_MAX_PIXELS = DEFAULT_INPUT_MAX_PIXELS
+
+#: Where a user changes the budget. Quoted by the rejection message, because
+#: "reduce the image before import" was the only honest advice while the number
+#: was hardcoded, and is a dead end now that it is not.
+INPUT_BUDGET_SETTING_PATH = 'Settings ▸ Captioning & quality ▸ Image size budget'
+
+_budget_provider = None
 
 
-def validate_input_header_dimensions(im: Image.Image, *, label: str) -> tuple[int, int]:
+def set_input_budget_provider(provider) -> None:
+    """Install the callable that resolves the effective budget, or None to reset.
+
+    `provider()` returns `(max_side, max_pixels)`, each a non-negative int where
+    **0 means no limit**. The app installs one that reads its config live, so a
+    changed setting takes effect without a restart and every consumer of this
+    guard sees the same number. Kept as an injection point rather than an import
+    because this module may not touch the app, the DB or config (see the note
+    above the `PIL` import).
+    """
+    global _budget_provider
+    _budget_provider = provider
+
+
+def input_budget() -> tuple[int, int]:
+    """The effective `(max_side, max_pixels)`; 0 on either means no limit.
+
+    Total by construction: a provider that raises or answers nonsense degrades
+    to the shipped defaults rather than letting every image path fail.
+    """
+    provider = _budget_provider
+    if provider is None:
+        return DEFAULT_INPUT_MAX_SIDE, DEFAULT_INPUT_MAX_PIXELS
+    try:
+        max_side, max_pixels = provider()
+        side = int(max_side)
+        pixels = int(max_pixels)
+        if side < 0 or pixels < 0:
+            raise ValueError((max_side, max_pixels))
+    except Exception:                              # noqa: BLE001 - never fail closed here
+        return DEFAULT_INPUT_MAX_SIDE, DEFAULT_INPUT_MAX_PIXELS
+    return side, pixels
+
+
+def input_budget_sentence() -> str:
+    """One human phrase for the effective budget, including "no limit"."""
+    side, pixels = input_budget()
+    parts = []
+    if pixels:
+        mebi = pixels / (1024 * 1024)
+        shown = f'{mebi:g}'
+        parts.append(f'{shown} Mi-pixels')
+    if side:
+        parts.append(f'{side} px per side')
+    return ' and '.join(parts) if parts else 'any size (no limit)'
+
+
+def validate_input_header_dimensions(im: Image.Image, *, label: str,
+                                     max_side: int | None = None,
+                                     max_pixels: int | None = None) -> tuple[int, int]:
     """Validate a raster header before any caller decodes pixels.
 
     This is the shared ingress/live-file guard.  The caller supplies a concise
     label for its user-facing error, but the byte/pixel budget is deliberately
     global so a later Bank scan, thumbnail or edit cannot materialise a source
-    that Dataset import would have rejected.
+    that Dataset import would have rejected.  `max_side`/`max_pixels` exist for
+    a caller that must pin a budget explicitly (tests, a narrower staging lane);
+    omitted, the shared configured budget applies. 0 on either means no limit.
     """
     try:
         width, height = im.size
@@ -105,12 +186,20 @@ def validate_input_header_dimensions(im: Image.Image, *, label: str) -> tuple[in
                       and width > 0 and height > 0)
     except (AttributeError, TypeError, ValueError, OverflowError, MemoryError) as exc:
         raise ValueError(f'{label} received an unreadable image') from exc
-    if (not valid_size or width > INPUT_MAX_SIDE or height > INPUT_MAX_SIDE
-            or width * height > INPUT_MAX_PIXELS):
+    if not valid_size:
+        raise ValueError(f'{label} received an unreadable image')
+    budget_side, budget_pixels = input_budget()
+    side = budget_side if max_side is None else int(max_side)
+    pixels = budget_pixels if max_pixels is None else int(max_pixels)
+    if ((side and (width > side or height > side))
+            or (pixels and width * height > pixels)):
+        limits = ' or '.join(
+            part for part in ((f'{side} px per side' if side else ''),
+                              (f'{pixels} pixels' if pixels else '')) if part)
         raise ValueError(
-            f'{label} rejects images above {INPUT_MAX_SIDE} px per side or '
-            f'{INPUT_MAX_PIXELS} pixels (got {width}x{height}); '
-            'reduce the image before import')
+            f'{label} rejects images above {limits} (got {width}x{height}); '
+            f'raise or remove this budget in {INPUT_BUDGET_SETTING_PATH}, '
+            'or reduce the image before import')
     return width, height
 
 

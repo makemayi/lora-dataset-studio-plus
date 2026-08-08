@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   deriveSetupSteps, deriveCapabilitySummary, kleinMissingLabels, KLEIN_ASSET_LABELS,
   comfyuiDirVerdict, COMFYUI_SKIP_LOST, COMFYUI_SKIP_KEPT,
-  aitoolkitVerdict, AITOOLKIT_INSTALL_STEPS,
+  aitoolkitVerdict, AITOOLKIT_INSTALL_STEPS, SETUP_STEP_IDS,
 } from './useSetupSteps.js';
 // installAllPlan / installCatalog are imported further down, next to their own
 // sections; kreaInstallPlan has no other importer here.
@@ -16,6 +16,20 @@ const comfyStep = (comfyui) => deriveSetupSteps({ comfyui }).find((s) => s.id ==
 // the shape the app actually receives, and the one where Setup reads the backend's
 // verdict instead of re-deriving its own.
 const comfyStepFull = (caps) => deriveSetupSteps(caps).find((s) => s.id === 'comfyui');
+const qualityStep = (caps) => deriveSetupSteps(caps).find((s) => s.id === 'quality');
+
+test('optional SigLIP2 readiness is visible without gating existing quality tools', () => {
+  const required = {
+    face_scoring: true, masks: true, watermark_inpaint: true, bank_scoring: true,
+  };
+  const without = qualityStep({ ...required, bank_siglip2: false });
+  assert.equal(without.status, 'ready');
+  assert.equal(without.bankSiglip2, false);
+  assert.match(without.unlocks.join(' | '), /SigLIP2/);
+  const withEngine = qualityStep({ ...required, bank_siglip2: true });
+  assert.equal(withEngine.status, 'ready');
+  assert.equal(withEngine.bankSiglip2, true);
+});
 
 test('Klein readiness needs the full trio, not just the UNET', () => {
   // UNET landed, but the backend still lists the text-encoder + VAE as missing:
@@ -341,6 +355,9 @@ import { installAllPlan, INSTALL_ALL_ORDER } from './useSetupSteps.js';
 const fullCaps = () => ({
   python: { ml_supported: true },
   face_scoring: true, masks: true, watermark_inpaint: true,
+  // Three video probes, not two: the `video` install action ships PyAV AND a
+  // bundled ffmpeg, so a "fully installed" snapshot has to assert both.
+  video_decode: true, video_detect: true, video_encode: true,
   ollama: { reachable: true, vision_model_ready: true, vision_model: 'qwen3-vl:8b' },
   // reachable matters for the Krea node pack: an unreachable ComfyUI's node probe
   // fails open, so "nothing missing" from a stopped ComfyUI must not read as
@@ -406,7 +423,8 @@ test('installCatalog lists every app-installable component, present + available'
   // card, this menu is the per-piece repair path each of them also deserves.
   assert.deepEqual(
     installCatalog(fullCaps()).map((c) => c.action),
-    ['face_scoring', 'masks', 'watermark_inpaint', 'ollama_model',
+    ['face_scoring', 'masks', 'watermark_inpaint', 'video', 'shot_detect',
+      'ollama_model',
       'klein_model', 'klein_text_encoder', 'klein_vae', 'klein_lora',
       'krea_nodes', 'krea_model', 'krea_text_encoder', 'krea_vae',
       'krea_identity_lora'],
@@ -421,7 +439,7 @@ test('installCatalog lists every app-installable component, present + available'
 test('installCatalog stays fully available for reinstall when all is green', () => {
   // The menu must never collapse once installed — each item can always be repaired.
   const cat = installCatalog(fullCaps());
-  assert.ok(cat.length === 13 && cat.every((c) => c.available));
+  assert.ok(cat.length === 15 && cat.every((c) => c.available));
 });
 
 test('installCatalog marks missing ML extras not-present but still available', () => {
@@ -568,4 +586,189 @@ test('SetupPage renders the verdict instead of hardcoding the old sentence', () 
   assert.doesNotMatch(page, /set up its venv per its README/);
   assert.match(page, /aitoolkitVerdict\(step, dir\)/);
   assert.match(page, /<SettingsLink section=\{verdict\.settingsSection\}/);
+});
+
+// --- The video extras are countable, listable and repairable ---------------------
+// The wizard certified "12 of 12 capabilities ready" on a machine whose video
+// lane could not cut a single file: the video capabilities were absent from the
+// summary (so the denominator lied — the exact defect the Krea comment in
+// deriveCapabilitySummary documents), absent from installCatalog (so the
+// "Install or repair individually" screen had no row to click), and the wizard
+// skipped the whole install screen because everything it DID count was green.
+// Found live by the first real user, the day after the wave landed.
+test('the capability summary counts the video pieces', () => {
+  const rows = deriveCapabilitySummary({ video_decode: false, video_detect: false });
+  const labels = rows.map((r) => r.label);
+  const decode = rows.find((r) => /video/i.test(r.label) && /read/i.test(r.label));
+  const detect = rows.find((r) => /shot detection/i.test(r.label));
+  assert.ok(decode, `no video-decode row in the summary: ${labels.join(', ')}`);
+  assert.ok(detect, `no shot-detection row in the summary: ${labels.join(', ')}`);
+  assert.equal(decode.ok, false);
+  assert.equal(detect.ok, false);
+  const on = deriveCapabilitySummary({ video_decode: true, video_detect: true });
+  assert.equal(on.find((r) => /shot detection/i.test(r.label)).ok, true);
+});
+
+// --- Four more installable capabilities were missing from "What's unlocked" -----
+// setup_installer.INSTALL_ACTIONS already knew bank_scoring, bank_siglip2,
+// watermark_detect and scrape_extras, and each already had a working Setup card
+// (mlInstallCards.js) or, for scraping, a working install button on the Concept
+// Sources panel — but none of the four had a row on the wizard's final screen.
+// Same defect as the video pieces above, just for four different engines: a
+// machine missing all four still certified "14 of 14 capabilities ready".
+test('the capability summary counts bank scoring, SigLIP2, the watermark detector and scraping extras', () => {
+  const off = deriveCapabilitySummary({
+    bank_scoring: false, bank_siglip2: false, watermark_detect: false, scrape_deps: false,
+  });
+  const labels = off.map((r) => r.label);
+  const bank = off.find((r) => /^Bank scoring/.test(r.label));
+  const siglip = off.find((r) => /SigLIP2/.test(r.label));
+  const wmDetect = off.find((r) => /Watermark detector/.test(r.label));
+  const scrape = off.find((r) => /Scraping extras/.test(r.label));
+  assert.ok(bank, `no bank-scoring row in the summary: ${labels.join(', ')}`);
+  assert.ok(siglip, `no SigLIP2 row in the summary: ${labels.join(', ')}`);
+  assert.ok(wmDetect, `no watermark-detector row in the summary: ${labels.join(', ')}`);
+  assert.ok(scrape, `no scraping-extras row in the summary: ${labels.join(', ')}`);
+  // Each reads its OWN capability key, not a neighbour's — the bug this guards
+  // against is a copy-pasted row that always reports another engine's state.
+  assert.equal(bank.ok, false);
+  assert.equal(siglip.ok, false);
+  assert.equal(wmDetect.ok, false);
+  assert.equal(scrape.ok, false);
+  assert.equal(bank.topic, 'setup-quality');
+  assert.equal(siglip.topic, 'setup-quality');
+  assert.equal(wmDetect.topic, 'setup-quality');
+  assert.equal(scrape.topic, 'setup-quality');
+
+  const on = deriveCapabilitySummary({
+    bank_scoring: true, bank_siglip2: true, watermark_detect: true, scrape_deps: true,
+  });
+  assert.equal(on.find((r) => /^Bank scoring/.test(r.label)).ok, true);
+  assert.equal(on.find((r) => /SigLIP2/.test(r.label)).ok, true);
+  assert.equal(on.find((r) => /Watermark detector/.test(r.label)).ok, true);
+  assert.equal(on.find((r) => /Scraping extras/.test(r.label)).ok, true);
+});
+
+// The third video piece. probe_video() reports decode / detect / encode apart
+// on purpose ("a single boolean would be a lie here"), and ffmpeg fails on its
+// own for a reason the backend documents: imageio-ffmpeg answers with a path
+// whether or not its binary download finished, so `av` can import on a machine
+// with no encoder at all. That machine scanned, detected and triaged fine — and
+// the summary certified it complete while it could not cut or export one clip.
+test('the capability summary counts clip encoding apart from decoding', () => {
+  const rows = deriveCapabilitySummary({ video_decode: true, video_detect: true, video_encode: false });
+  const labels = rows.map((r) => r.label);
+  const encode = rows.find((r) => /video/i.test(r.label) && /encod/i.test(r.label));
+  assert.ok(encode, `no clip-encoding row in the summary: ${labels.join(', ')}`);
+  // It reads its OWN key — a row copy-pasted from "reading files" would be green here.
+  assert.equal(encode.ok, false);
+  assert.equal(rows.find((r) => /read/i.test(r.label) && /video/i.test(r.label)).ok, true);
+  assert.equal(encode.topic, 'setup-quality');
+  const on = deriveCapabilitySummary({ video_decode: true, video_detect: true, video_encode: true });
+  assert.equal(on.find((r) => /video/i.test(r.label) && /encod/i.test(r.label)).ok, true);
+});
+
+// The `video` install action installs BOTH halves, so its catalog row cannot be
+// "present" on decoding alone: that badged ✓ Installed on a machine with no
+// encoder AND dropped the row from the install plans, hiding the one button
+// that fixes it.
+test('the install catalog treats the video action as missing when the encoder is', () => {
+  const rows = installCatalog({ video_decode: true, video_detect: true, video_encode: false });
+  const video = rows.find((r) => r.action === 'video');
+  assert.ok(video, 'no "video" row in installCatalog');
+  assert.equal(video.present, false);
+  const whole = installCatalog({ video_decode: true, video_detect: true, video_encode: true });
+  assert.equal(whole.find((r) => r.action === 'video').present, true);
+});
+
+// --- Every summary row must LEAD somewhere ---------------------------------
+// "Krea 2 Edit (local)" rendered a ✗ and did nothing when clicked: it had no
+// CAPABILITY_STEP_ID entry, so the row taught the user something was missing and
+// offered no way to reach it — half the requirement. This test is the general
+// form of that bug: any row added to deriveCapabilitySummary without a mapping,
+// or mapped at a screen the wizard does not have, fails here.
+const capabilityStepMap = () => {
+  const page = fs.readFileSync(new URL('../pages/SetupPage.jsx', import.meta.url), 'utf8');
+  const block = page.match(/const CAPABILITY_STEP_ID = \{([\s\S]*?)\n\}/);
+  assert.ok(block, 'CAPABILITY_STEP_ID not found in SetupPage.jsx');
+  const map = {};
+  for (const m of block[1].matchAll(/'([^']+)':\s*'([^']+)',/g)) map[m[1]] = m[2];
+  return { page, map };
+};
+
+test('every "What\'s unlocked" row maps to a wizard screen that exists', () => {
+  const { page, map } = capabilityStepMap();
+  // welcome is index 0 and screenOf() falls back to it — a row may never target it.
+  const screensLine = page.match(/const SCREENS = \[([^\]]*)\]/);
+  assert.ok(screensLine, 'SCREENS not found in SetupPage.jsx');
+  const extraScreens = [...screensLine[1].matchAll(/'([^']+)'/g)]
+    .map((m) => m[1]).filter((s) => s !== 'welcome');
+  const valid = new Set([...SETUP_STEP_IDS, ...extraScreens]);
+  const rows = deriveCapabilitySummary({});
+  assert.ok(rows.length > 10, 'the summary is suspiciously short — has it stopped deriving?');
+  for (const r of rows) {
+    assert.ok(map[r.label],
+      `"${r.label}" has no CAPABILITY_STEP_ID entry — its row renders inert`);
+    assert.ok(valid.has(map[r.label]),
+      `"${r.label}" points at "${map[r.label]}", which is not a wizard screen`);
+  }
+});
+
+test('Krea 2 Edit points at the install screen, and screenOf can resolve it', () => {
+  const { page, map } = capabilityStepMap();
+  // Its ONE-CLICK installer is KreaInstallCard, mounted only inside
+  // InstallEverything — i.e. on the install/repair screen. The comfyui step
+  // carries Klein's weights, never Krea's, so mapping it there would land the
+  // user on a screen with nothing to press.
+  assert.equal(map['Krea 2 Edit (local)'], 'install');
+  const installScreen = fs.readFileSync(
+    new URL('../components/setup/InstallEverything.jsx', import.meta.url), 'utf8');
+  assert.match(installScreen, /<KreaInstallCard/,
+    'the install screen no longer mounts KreaInstallCard — the mapping now leads nowhere');
+  assert.match(page, /<InstallEverything/,
+    'SetupPage no longer renders InstallEverything on the install screen');
+  // 'install' is not a tool step, so screenOf must fall back to SCREENS. Without
+  // that lookup it resolved to indexOf(-1)+1 = 0 and dumped the user on welcome.
+  const fn = page.match(/const screenOf = \(id\) => \{[\s\S]*?\n  \}/);
+  assert.ok(fn, 'screenOf is no longer a block — re-check it still resolves non-step screens');
+  assert.match(fn[0], /SCREENS\.indexOf\(id\)/,
+    'screenOf ignores SCREENS: a row pointing at the install menu lands on welcome');
+});
+
+test('each new capability row maps to the quality wizard step in SetupPage', () => {
+  const page = fs.readFileSync(new URL('../pages/SetupPage.jsx', import.meta.url), 'utf8');
+  for (const label of [
+    'Bank scoring (aesthetic · NSFW · style)',
+    'SigLIP2 Bank semantics (optional)',
+    'Watermark detector (optional)',
+    'Scraping extras (optional)',
+  ]) {
+    const esc = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`'${esc}':\\s*'quality'`);
+    assert.match(page, re, `"${label}" is not wired to the quality step in CAPABILITY_STEP_ID`);
+  }
+});
+
+// The scraping-extras install action now has a Setup card of its own — it used
+// to be installable only from the Datasets ▸ Concept Sources panel, which the
+// Setup wizard never pointed at (and could not: capabilityDestination() only
+// resolves /settings and /setup routes). Without this card the new row's
+// "manage in Setup wizard" promise would be a dead end.
+test('the quality step offers a Setup card for scraping extras', () => {
+  const cards = fs.readFileSync(new URL('../components/setup/mlInstallCards.js', import.meta.url), 'utf8');
+  assert.match(cards, /action:\s*'scrape_extras'/);
+  assert.match(cards, /cap:\s*'scrape_deps'/);
+});
+
+test('the install catalog offers the video extras for install and repair', () => {
+  const rows = installCatalog({ video_decode: false, video_detect: true });
+  const video = rows.find((r) => r.action === 'video');
+  const shot = rows.find((r) => r.action === 'shot_detect');
+  assert.ok(video, 'no "video" row in installCatalog');
+  assert.ok(shot, 'no "shot_detect" row in installCatalog');
+  assert.equal(video.present, false);
+  assert.equal(shot.present, true);
+  assert.ok(video.available && shot.available);
+  assert.notEqual(video.label, 'video', 'the row shows a raw action id instead of a label');
+  assert.notEqual(shot.label, 'shot_detect', 'the row shows a raw action id instead of a label');
 });

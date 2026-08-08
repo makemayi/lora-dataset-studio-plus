@@ -39,6 +39,7 @@ export const WORKSPACE_SECTIONS = [
       { id: 'face-analysis', title: 'Face analysis', targetId: 'ds-curation-face-analysis', when: 'character' },
       { id: 'watermarks', title: 'Watermarks', targetId: 'ds-curation-watermarks', when: 'always' },
       { id: 'review-flagged', title: 'Review flagged', targetId: 'ds-curation-review-flagged', when: 'watermarkDetected' },
+      { id: 'reject-flagged', title: 'Reject all flagged', targetId: 'ds-curation-reject-flagged', when: 'watermarkRejectable' },
       { id: 'rejected-cleanup', title: 'Rejected cleanup', targetId: 'ds-curation-rejected-cleanup', when: 'unused' },
     ] },
   { id: 'captions', title: 'Captions', icon: '✍️', eyebrow: 'text',

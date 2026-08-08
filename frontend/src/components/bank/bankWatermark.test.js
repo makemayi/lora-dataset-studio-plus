@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   cropLevelState, findLevelState, hasCleanedImages, inpaintLevelState, levelCounts,
-  maskNote, progressSummary, rescanNote,
+  maskNote, progressSummary, rescanNote, sourceNote,
 } from './bankWatermark.js';
 
 const levels = (over = {}) => ({
@@ -161,6 +161,58 @@ test('find is off without the vision model, and says where to get it', () => {
   assert.equal(s.disabled, true);
   assert.match(s.reason, /vision model/i);
   assert.match(s.reason, /Settings/);           // actionable, never a bare "unavailable"
+});
+
+test('find stays ON without the vision model when the detector is installed', () => {
+  // The detector needs no Ollama at all. Keeping the old refusal would lock the
+  // fast route behind the very dependency it removes.
+  const s = findLevelState(levels(), { visionReady: false, detectorReady: true });
+  assert.equal(s.disabled, false);
+  assert.equal(s.reason, null);
+});
+
+test('with neither route, the refusal names BOTH ways out', () => {
+  const s = findLevelState(levels(), { visionReady: false, detectorReady: false });
+  assert.equal(s.disabled, true);
+  assert.match(s.reason, /vision model/i);
+  assert.match(s.reason, /detector/i);
+  assert.match(s.reason, /Setup/);
+});
+
+test('sourceNote: nothing scanned yet still says who will do it', () => {
+  const line = sourceNote({ sources: { detector: 0, vision: 0, unknown: 0 },
+    next_source: 'detector', threshold: 0.94 });
+  assert.match(line, /Nothing scanned yet/);
+  assert.match(line, /detector/);
+  assert.match(line, /0\.94/);
+});
+
+test('sourceNote: a bank judged by both routes reports both', () => {
+  const line = sourceNote({ sources: { detector: 1240, vision: 300, unknown: 0 },
+    next_source: 'detector', threshold: 0.94 });
+  assert.match(line, /1240 by the detector/);
+  assert.match(line, /300 by the vision model/);
+});
+
+test('sourceNote: rows scanned before the source was recorded are NOT attributed', () => {
+  // Guessing "vision model" for them would be a lie — they predate the column.
+  const line = sourceNote({ sources: { detector: 0, vision: 0, unknown: 42 },
+    next_source: 'vision' });
+  assert.match(line, /42 before the source was recorded/);
+  assert.doesNotMatch(line, /42 by the/);
+});
+
+test('sourceNote: the vision route is never described with a threshold', () => {
+  // It produces a sentence, not a score — quoting a number would invent one.
+  const line = sourceNote({ sources: { vision: 10 }, next_source: 'vision',
+    threshold: 0.94 });
+  assert.match(line, /the vision model/);
+  assert.doesNotMatch(line, /0\.94/);
+});
+
+test('sourceNote: a half-loaded payload reads as zeros, never NaN', () => {
+  const line = sourceNote({});
+  assert.doesNotMatch(line, /NaN|undefined/);
 });
 
 test('find is off while another pass runs on the bank', () => {

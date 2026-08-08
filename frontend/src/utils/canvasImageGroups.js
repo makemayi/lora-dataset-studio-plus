@@ -38,6 +38,10 @@
 
 import { clampImageBox } from './canvasImageNodes.js';
 
+// Explicit extension: imported by `node --test`, which does not resolve
+// extensionless specifiers, as well as by Vite.
+import { groupBarMaxHeight } from './canvasNodeChrome.js';
+
 /** Sort key inside a strip: the stored position, then the image id so a tie
  *  (two rows written by different gestures in the same millisecond, or a hand-
  *  edited database) still draws the same order on every load. */
@@ -158,7 +162,28 @@ export function layoutImageNodes(nodes) {
 /** Flatten a layout back to plain boxes, for the lane extent (✦ Fit must not
  *  crop a strip off the board) and for anything that only needs geometry. */
 export function layoutBoxes(layout) {
-  return (layout || []).map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h }));
+  return (layout || []).map(occupiedBox);
+}
+
+/**
+ * The board space a layout row really OCCUPIES — which, for a group, is taller
+ * than the strip: its drag bar is drawn ABOVE the box, and that bar carries the
+ * group's only grip plus its ✕ and its Export grid.
+ *
+ * A placer that ignored this would drop a picture squarely on top of a group's
+ * bar and leave it unmovable and undeletable — measured, not feared: with a
+ * picture pinned flush above a two-image strip, 5 of 11 points sampled along
+ * the bar hand the pointer to the picture instead. `groupBarMaxHeight` reserves
+ * the bar at its zoom-out maximum, because a gap that is enough at 100 % is not
+ * enough at 40 %.
+ *
+ * Only about PLACEMENT: what is drawn, and where, is unchanged.
+ */
+export function occupiedBox(row) {
+  if (!row) return { x: 0, y: 0, w: 0, h: 0 };
+  if (row.kind !== 'group') return { x: row.x, y: row.y, w: row.w, h: row.h };
+  const bar = groupBarMaxHeight(row.h);
+  return { x: row.x, y: row.y - bar, w: row.w, h: row.h + bar };
 }
 
 /** Every picture with the box it is actually DRAWN in — a member's slot in its
@@ -170,6 +195,48 @@ export function drawnNodes(layout) {
   for (const r of (layout || [])) {
     if (r.kind === 'single') { out.push({ ...r.node, x: r.x, y: r.y, w: r.w, h: r.h }); continue; }
     for (const m of r.members) out.push({ ...m.node, x: m.x, y: m.y, w: m.w, h: m.h });
+  }
+  return out;
+}
+
+/**
+ * The nodes the LINKS back to the source checkpoints should be drawn from —
+ * which is NOT one per picture once pictures are grouped.
+ *
+ * A lone picture answers for itself. A STRIP answers as one object: it is one
+ * thing to the eye and to every gesture (one grip, one ✕, one Export), so eight
+ * lines fanning out of eight points along its band to the pills behind it is
+ * eight times the ink for one fact. All of them therefore leave the strip at the
+ * SAME point — its left edge, mid-height, where the anchor's own line already
+ * left — so a strip reads as a single object with threads, not as a comb.
+ *
+ * But one line per DISTINCT SOURCE, not one line per strip. A strip is routinely
+ * a whole generation run's contact sheet, so its pictures come from several
+ * checkpoints of the same card (📌 Pin all groups a lot by run, across its
+ * epochs). Collapsing to the anchor alone would draw one line to ONE pill and
+ * quietly attribute the other seven pictures to it — a provenance board must
+ * never invent an edge, and that includes the edge it leaves out. A strip whose
+ * pictures really do share one checkpoint collapses to exactly one line, which
+ * is the ordinary case; a mixed one says so, in as many lines as it has truths.
+ *
+ * The picture chosen to carry each line is the first in strip order, so the
+ * result is stable and its React key cannot collide.
+ */
+export function edgeAnchors(layout) {
+  const out = [];
+  for (const r of (layout || [])) {
+    if (r.kind === 'single') {
+      out.push({ ...r.node, x: r.x, y: r.y, w: r.w, h: r.h });
+      continue;
+    }
+    const seen = new Set();
+    for (const m of r.members) {
+      const key = `${m.node.image?.record_id ?? '?'}:${m.node.image?.step ?? '?'}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      // Every line leaves the STRIP, not the member's own slot.
+      out.push({ ...m.node, x: r.x, y: r.y, w: r.w, h: r.h });
+    }
   }
   return out;
 }

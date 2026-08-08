@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import {
   PIN_BATCH_MAX, batchTileSize, boardObstacles, pinBatchAnnouncement,
   groupPinnedBatchBySource, groupPinnedBatchTogether, pinBatchLabel, pinBatchPending,
-  pinBatchPendingAcrossLanes, placeImageBatch,
+  pinBatchPendingAcrossLanes, placeImageBatch, tidyGroupRows,
 } from './canvasPinBatch.js';
+import { layoutImageNodes, occupiedBox } from './canvasImageGroups.js';
 import { CARD_W } from './lineageGraph.js';
 
 /* 📌 Pin all — the one assertion that decides whether this feature is worth
@@ -73,7 +74,7 @@ test('different checkpoints and unknown sources never auto-group', () => {
   assert.ok(result.rows.every((r) => r.groupId == null));
 });
 
-test('Pin all concatenates one generated lot even when checkpoints differ', () => {
+test('legacy Pin all with no run id keeps one whole-gesture grid across checkpoints', () => {
   const result = groupPinnedBatchTogether({ placed: [
     placed(1, 82, 500), placed(2, 82, 1000), placed(3, 86, 6000),
   ] });
@@ -358,20 +359,23 @@ test('a run card and its pill block are ONE obstacle, pinned images are the rest
        TEXT, which puts step 1000 before step 500. An epoch axis sorted
        alphabetically is not an epoch axis. */
 
-const runImg = (id, recordId, step, runId) => ({
+const runImg = (id, recordId, step, runId, prompt = '') => ({
   id, dataset_id: 3, record_id: recordId, step, run_id: runId,
+  prompt,
   url: `/img/${id}.png`,
 });
-const runPlaced = (id, recordId, step, runId) => ({
+const runPlaced = (id, recordId, step, runId, prompt = '') => ({
   imageId: id, x: id * 10, y: 500, w: 320, h: 320,
-  image: runImg(id, recordId, step, runId),
+  image: runImg(id, recordId, step, runId, prompt),
 });
 // Pin one picture the way the gallery does, and fold the result back into the
 // board — the sequence that produced the reported bug.
-const pinOneByOne = (laneMap, image) => {
+const pinOneByOne = (laneMap, image,
+  box = { x: 0, y: 0, w: 320, h: 320 }, graph = null) => {
   const grouped = groupPinnedBatchBySource({
     nodes: Object.values(laneMap),
-    placed: [{ imageId: image.id, x: 0, y: 0, w: 320, h: 320, image }],
+    placed: [{ imageId: image.id, ...box, image }],
+    graph,
   });
   for (const r of grouped.rows) laneMap[r.imageId] = r;
   return laneMap;
@@ -393,6 +397,209 @@ test('two generations of the SAME checkpoint stay two strips', () => {
   assert.equal(groupOf(21), groupOf(22));
   assert.notEqual(groupOf(11), groupOf(21),
     'run B must NOT be concatenated onto run A');
+});
+
+test('Pin all makes one separate grid per prompt inside the SAME run', () => {
+  const result = groupPinnedBatchTogether({ placed: [
+    runPlaced(101, 82, 500, 'prompt-run', 'on a rooftop'),
+    runPlaced(102, 82, 1000, 'prompt-run', 'on a rooftop'),
+    runPlaced(103, 86, 1500, 'prompt-run', 'on a rooftop'),
+    runPlaced(201, 82, 500, 'prompt-run', 'in a cafe'),
+    runPlaced(202, 82, 1000, 'prompt-run', 'in a cafe'),
+    runPlaced(203, 86, 1500, 'prompt-run', 'in a cafe'),
+  ] });
+  const groupOf = (id) => result.rows.find((r) => r.imageId === id).groupId;
+
+  assert.ok(groupOf(101), 'the first prompt formed a real grid');
+  assert.equal(groupOf(101), groupOf(102));
+  assert.equal(groupOf(102), groupOf(103));
+  assert.ok(groupOf(201), 'the second prompt formed a real grid');
+  assert.equal(groupOf(201), groupOf(202));
+  assert.equal(groupOf(202), groupOf(203));
+  assert.notEqual(groupOf(101), groupOf(201),
+    'two prompts of one run must never be fused into the same Canvas grid');
+});
+
+test('prompt whitespace is normalised without merging different prompt text', () => {
+  const result = groupPinnedBatchTogether({ placed: [
+    runPlaced(301, 82, 500, 'normalised-run', '  on   a\nrooftop  '),
+    runPlaced(302, 82, 1000, 'normalised-run', 'on a rooftop'),
+    runPlaced(401, 82, 500, 'normalised-run', 'on a rooftop at night'),
+    runPlaced(402, 82, 1000, 'normalised-run', 'on a rooftop at night'),
+  ] });
+  const byId = Object.fromEntries(result.rows.map((row) => [row.imageId, row.groupId]));
+
+  assert.ok(byId[301]);
+  assert.equal(byId[301], byId[302], 'equivalent whitespace is one prompt grid');
+  assert.equal(byId[401], byId[402]);
+  assert.notEqual(byId[301], byId[401], 'meaningfully different prompts stay apart');
+});
+
+test('a mono-prompt run is still one grid across checkpoints', () => {
+  const result = groupPinnedBatchTogether({ placed: [
+    runPlaced(501, 82, 500, 'one-prompt', 'portrait in soft light'),
+    runPlaced(502, 86, 1000, 'one-prompt', 'portrait in soft light'),
+    runPlaced(503, 91, 1500, 'one-prompt', 'portrait in soft light'),
+  ] });
+  assert.ok(result.rows[0].groupId);
+  assert.equal(new Set(result.rows.map((row) => row.groupId)).size, 1);
+});
+
+test('gallery pins use the same run-and-prompt boundary as Pin all', () => {
+  const lane = {};
+  pinOneByOne(lane, runImg(601, 7, 500, 'gallery-run', 'on a rooftop'));
+  pinOneByOne(lane, runImg(701, 7, 500, 'gallery-run', 'in a cafe'));
+  pinOneByOne(lane, runImg(602, 7, 1000, 'gallery-run', 'on a rooftop'));
+  pinOneByOne(lane, runImg(702, 7, 1000, 'gallery-run', 'in a cafe'));
+
+  assert.ok(lane[601].groupId);
+  assert.equal(lane[601].groupId, lane[602].groupId);
+  assert.ok(lane[701].groupId);
+  assert.equal(lane[701].groupId, lane[702].groupId);
+  assert.notEqual(lane[601].groupId, lane[701].groupId,
+    'pinning prompts one by one must not recombine them');
+});
+
+test('interleaved gallery pins reflow their automatic prompt grids without overlap', () => {
+  const lane = {};
+  const a = 'on a rooftop';
+  const b = 'in a cafe';
+  // Each first picture is individually valid. Once A gets its second member,
+  // its derived 640-wide strip reaches across B's node; the gallery path must
+  // reflow that new automatic group just like Pin all does.
+  pinOneByOne(lane, runImg(711, 7, 500, 'interleaved-run', a),
+    { x: 0, y: 500, w: 320, h: 320 });
+  pinOneByOne(lane, runImg(721, 7, 500, 'interleaved-run', b),
+    { x: 344, y: 500, w: 320, h: 320 });
+  pinOneByOne(lane, runImg(712, 7, 1000, 'interleaved-run', a),
+    { x: 0, y: 900, w: 320, h: 320 });
+  pinOneByOne(lane, runImg(722, 7, 1000, 'interleaved-run', b),
+    { x: 344, y: 900, w: 320, h: 320 });
+
+  const layout = layoutImageNodes(Object.values(lane));
+  const groups = layout.filter((row) => row.kind === 'group');
+  assert.equal(groups.length, 2);
+  assert.deepEqual(new Set(groups.map((group) => group.members[0].node.image.prompt)),
+    new Set([a, b]));
+  assertNoOverlap(layout.map(occupiedBox));
+});
+
+test('gallery reflow moves an automatic grid around a manual group, never the manual group', () => {
+  const manual = [
+    { ...runPlaced(731, 7, 500, 'manual-a', 'manual left'), x: 0, y: 500,
+      visible: true, groupId: 'hand-made', groupPos: 0 },
+    { ...runPlaced(732, 7, 1000, 'manual-b', 'manual right'), x: 900, y: 900,
+      visible: true, groupId: 'hand-made', groupPos: 1 },
+  ];
+  const autoAnchor = { ...runPlaced(741, 7, 500, 'automatic', 'new prompt'),
+    x: 344, y: 500, visible: true, groupId: null, groupPos: null };
+  const nodes = [...manual, autoAnchor];
+  const result = groupPinnedBatchBySource({
+    nodes,
+    placed: [{ ...runPlaced(742, 7, 1000, 'automatic', 'new prompt'),
+      x: 344, y: 900 }],
+  });
+  const updates = new Map(result.rows.map((row) => [row.imageId, row]));
+  const after = nodes.map((node) => updates.get(node.imageId) || node);
+  after.push(...result.rows.filter((row) => !nodes.some((node) => node.imageId === row.imageId)));
+
+  assert.deepEqual(manual.map((node) => [node.x, node.y, node.groupId, node.groupPos]),
+    [[0, 500, 'hand-made', 0], [900, 900, 'hand-made', 1]]);
+  assertNoOverlap(layoutImageNodes(after).map(occupiedBox));
+});
+
+const promptGridLayout = (promptCount) => {
+  const images = Array.from({ length: promptCount }, (_, i) => `prompt ${i + 1}`)
+    .flatMap((prompt, i) => [
+      runImg(800 + i * 2, 106, 2500, 'multi-prompt-layout', prompt),
+      runImg(801 + i * 2, 114, 2000, 'multi-prompt-layout', prompt),
+    ]);
+  const placedBatch = placeImageBatch({ graph: GRAPH, existing: [], images });
+  const grouped = groupPinnedBatchTogether({ placed: placedBatch.placed, graph: GRAPH });
+  return layoutImageNodes(grouped.rows);
+};
+
+const assertSeparatePromptGrids = (layout, promptCount) => {
+  const groups = layout.filter((row) => row.kind === 'group');
+  assert.equal(groups.length, promptCount, 'one Canvas renderable per prompt');
+  for (const group of groups) {
+    assert.equal(new Set(group.members.map((m) => m.node.image.prompt)).size, 1,
+      'a rendered grid never mixes prompt text');
+    assert.deepEqual(group.members.map((m) => m.node.image.step), [2000, 2500],
+      'each prompt grid keeps checkpoint training order');
+  }
+  const gridBoxes = layout.map(occupiedBox);
+  // Keep the two contracts separate so a failure says whether prompt grids hit
+  // EACH OTHER (the COLUMN_ROWS wrap regression) or climb back into the tree
+  // through their title bar (the BAND_GAP regression).
+  assertNoOverlap(gridBoxes);
+  assertNoOverlap([
+    ...boardObstacles(GRAPH, []),
+    ...gridBoxes,
+  ]);
+};
+
+test('two prompts become two non-overlapping rendered Canvas grids', () => {
+  assertSeparatePromptGrids(promptGridLayout(2), 2);
+});
+
+test('seven prompt grids stay separate and non-overlapping after the placement column wraps', () => {
+  // COLUMN_ROWS is six: the seventh image of each source starts another
+  // placement column. This is the boundary where two independently derived
+  // strips can otherwise acquire the same visible footprint.
+  assertSeparatePromptGrids(promptGridLayout(7), 7);
+});
+
+test('remembered free pictures reflow when their future wide grid reaches across a card', () => {
+  const graph = { nodes: [card(999, 400, 0, [1000])], edges: [], width: 700, height: 120 };
+  const images = [
+    runImg(751, 999, 1000, 'remembered-run', 'remember this prompt'),
+    runImg(752, 999, 2000, 'remembered-run', 'remember this prompt'),
+  ];
+  const remembered = Object.fromEntries(images.map((image, i) => [image.id, {
+    imageId: image.id,
+    x: i ? 800 : 100,
+    y: 100,
+    w: 320,
+    h: 320,
+    visible: false,
+    groupId: null,
+    groupPos: null,
+    image,
+  }]));
+  const placedBatch = placeImageBatch({
+    graph, existing: [], images, remembered,
+  });
+
+  // Both remembered squares are individually clear of the card. The overlap
+  // only appears after the first one anchors the future 640-wide strip and its
+  // 112-unit title bar reaches upward.
+  assert.deepEqual(placedBatch.placed.map((row) => [row.imageId, row.x, row.y]),
+    [[751, 100, 100], [752, 800, 100]]);
+  assertNoOverlap([
+    ...boardObstacles(graph, []),
+    ...placedBatch.placed.map((row) => ({ x: row.x, y: row.y, w: row.w, h: row.h })),
+  ]);
+
+  const grouped = groupPinnedBatchTogether({
+    nodes: Object.values(remembered), placed: placedBatch.placed, graph,
+  });
+  const layout = layoutImageNodes(grouped.rows);
+  assert.equal(layout.length, 1);
+  assert.equal(layout[0].kind, 'group');
+  assertNoOverlap([...boardObstacles(graph, []), ...layout.map(occupiedBox)]);
+  assert.ok(grouped.rows.find((row) => row.imageId === 751).y > 100,
+    'the automatic grid anchor moved below the real card obstacle');
+  assert.deepEqual(grouped.undoRows.map((row) => [row.imageId, row.x, row.y, row.visible]),
+    [[751, 100, 100, false], [752, 800, 100, false]],
+    'undo restores every remembered position exactly');
+
+  const again = groupPinnedBatchTogether({
+    nodes: Object.values(remembered), placed: placedBatch.placed, graph,
+  });
+  assert.deepEqual(again.rows.map((row) => [row.imageId, row.x, row.y]),
+    grouped.rows.map((row) => [row.imageId, row.x, row.y]),
+    'the graph-aware reflow is deterministic');
 });
 
 test('images with no run id keep the old per-checkpoint behaviour', () => {
@@ -460,4 +667,109 @@ test('an over-cap lot keeps the EARLY epochs and says what it dropped', () => {
   const keptSteps = res.placed.map((p) => p.image.step);
   assert.ok(Math.min(...droppedSteps) > Math.max(...keptSteps),
     'the tail of the training is what gets refused, not an arbitrary slice');
+});
+
+// ---- ✦ Tidy up: bringing a strayed STRIP home -----------------------------
+/* Free placement lets a whole side-by-side strip be parked thousands of units
+   above or left of everything. ✦ Tidy up is the way back — and it has to bring
+   the strip back as ONE object. A tidy that re-flowed its members one by one
+   would not tidy the strip, it would dismantle it. */
+
+const stripRow = (groupId, anchor, members) => ({
+  kind: 'group',
+  key: `grp:${groupId}`,
+  groupId,
+  x: anchor.x,
+  y: anchor.y,
+  w: members.length * anchor.h,
+  h: anchor.h,
+  members: members.map((m, i) => ({
+    key: `img:${m.imageId}`,
+    node: m,
+    x: anchor.x + i * anchor.h,
+    y: anchor.y,
+    w: anchor.h,
+    h: anchor.h,
+  })),
+});
+
+const member = (imageId, recordId, over = {}) => ({
+  imageId,
+  x: 0,
+  y: 0,
+  w: 200,
+  h: 200,
+  visible: true,
+  groupId: 'g1',
+  groupPos: 0,
+  image: { id: imageId, url: `/img/${imageId}.png`, record_id: recordId, step: 2500 },
+  ...over,
+});
+
+const overlaps = (a, b) => (a.x < b.x + b.w && b.x < a.x + a.w
+  && a.y < b.y + b.h && b.y < a.y + a.h);
+
+test('a strip parked far off the board comes back beside the run that made it', () => {
+  const anchor = member(80, 114, { x: -9000, y: -7000, groupPos: 0 });
+  const layout = [stripRow('g1', anchor, [anchor, member(81, 114, { groupPos: 1 })])];
+  const { rows } = tidyGroupRows({ graph: GRAPH, layout });
+  assert.equal(rows.length, 1, 'only the anchor is written — the strip derives from it');
+  assert.equal(rows[0].imageId, 80);
+  const sourceCard = GRAPH.nodes.find((n) => n.node.record_id === 114);
+  assert.ok(rows[0].x >= sourceCard.x + CARD_W, 'to the right of its own card');
+  assert.ok(rows[0].x >= 0 && rows[0].y >= 0, 'back inside the lane');
+});
+
+test('tidying a strip never touches its membership, so it cannot dissolve', () => {
+  const anchor = member(80, 114, { x: -500, y: -500 });
+  const layout = [stripRow('g1', anchor, [anchor, member(81, 114, { groupPos: 1 })])];
+  const { rows } = tidyGroupRows({ graph: GRAPH, layout });
+  assert.ok(!('groupId' in rows[0]) && !('groupPos' in rows[0]),
+    'a write that only mentions geometry can never dissolve a group');
+  assert.deepEqual([rows[0].w, rows[0].h], [anchor.w, anchor.h],
+    'the strip keeps the size it had — only where it sits changes');
+});
+
+test('a repatriated strip lands on no card and on nothing already placed', () => {
+  const a1 = member(80, 114, { x: -900, y: -900, groupPos: 0 });
+  const a2 = member(90, 114, { x: -400, y: -400, groupId: 'g2', groupPos: 0 });
+  const layout = [
+    stripRow('g1', a1, [a1, member(81, 114, { groupPos: 1 })]),
+    stripRow('g2', a2, [a2, member(91, 114, { groupId: 'g2', groupPos: 1 })]),
+  ];
+  const { rows, boxes } = tidyGroupRows({ graph: GRAPH, layout });
+  assert.equal(rows.length, 2);
+  for (const n of GRAPH.nodes) {
+    const cardBox = { x: n.x, y: n.y, w: CARD_W, h: n.cellH };
+    for (const row of rows) {
+      assert.ok(!overlaps(row, cardBox),
+        `strip ${row.imageId} landed on run ${n.node.record_id}`);
+    }
+  }
+  const [b1, b2] = boxes.slice(-2);
+  assert.ok(!overlaps(b1, b2), 'the two strips do not land on each other');
+  // The footprints handed back are what the contact-sheet band must avoid, and
+  // they reserve the group's drag BAR as well as its pictures.
+  assert.ok(b1.h > rows[0].h, 'the bar above the strip is reserved too');
+});
+
+test('two strips are repatriated in the same order whatever order they arrive in', () => {
+  const build = (straight) => {
+    const a1 = member(80, 106, { x: -900, y: -900 });
+    const a2 = member(90, 117, { x: -400, y: -400, groupId: 'g2' });
+    const s1 = stripRow('g1', a1, [a1, member(81, 106, { groupPos: 1 })]);
+    const s2 = stripRow('g2', a2, [a2, member(91, 117, { groupId: 'g2', groupPos: 1 })]);
+    return tidyGroupRows({ graph: GRAPH, layout: straight ? [s1, s2] : [s2, s1] }).rows;
+  };
+  const byId = (list) => [...list].sort((a, b) => a.imageId - b.imageId)
+    .map((r) => [r.imageId, r.x, r.y]);
+  assert.deepEqual(byId(build(true)), byId(build(false)));
+});
+
+test('a lane with no strip on it asks for no writes at all', () => {
+  const lone = member(80, 114, { groupId: null, groupPos: null });
+  const layout = [{ kind: 'single', key: 'img:80', node: lone, x: 0, y: 0, w: 200, h: 200 }];
+  const { rows, boxes } = tidyGroupRows({ graph: GRAPH, layout });
+  assert.deepEqual(rows, []);
+  assert.deepEqual(boxes, [], 'and it does not pretend the cards are taken either');
 });

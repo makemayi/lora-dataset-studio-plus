@@ -121,7 +121,13 @@ def collect_grid(user_id, dataset_id, *, family=None, run_seed=None, prompt=None
     if not ds:
         return None
     eff = lts._resolve_family(ds, family, lts.available_families(ds))
-    rows_all = (LoraTestImage.query.filter_by(dataset_id=dataset_id)
+    # `lts._cells()`, not a bare query: an ✨ Upscale & improve result lives in the
+    # same table without being a sweep cell. It would have done real damage here —
+    # the current run is picked with `max(done, key=id)` below, and an improvement
+    # is newest by construction, so it would have hijacked the run_seed/prompt/
+    # aspect of the WHOLE export, and `_pick_representative` would have made it the
+    # face of its (checkpoint × strength) cell.
+    rows_all = (lts._cells().filter_by(dataset_id=dataset_id)
                 .order_by(LoraTestImage.id.asc()).all())
     # Family scope (from the checkpoint's folder) + only usable tiles (done + file).
     done = [r for r in rows_all

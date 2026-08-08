@@ -19,6 +19,8 @@ import time
 
 import pytest
 
+from _dataset_files import write_kept_image_files
+
 
 def _stub_aitoolkit(tmp_path, app, run_py_body):
     """ai-toolkit install whose run.py is a REAL python script we control, run
@@ -67,6 +69,10 @@ def dying_run(app, tmp_path, monkeypatch):
                 dataset_id=ds.id, status='keep', filename=f'x{i}.webp',
                 caption='a caption here'))
         svc.db.session.commit()
+        # The launch freezes the dataset's provenance by hashing every kept
+        # image's bytes, so the rows need their files even though the export
+        # below is stubbed. See tests/_dataset_files.py.
+        write_kept_image_files(ds.id)
 
         def fake_export(user_id, dataset_id, masked=True):
             folder = tmp_path / 'exported'

@@ -24,6 +24,13 @@
    configured in tailwind.config.js. */
 :root,
 [data-theme="dark"] {
+  /* The app is dark-only, so SAY SO to the browser. This is what makes Chrome
+     and Edge draw the parts they own — the native <select> popup, form-control
+     internals, default scrollbars — in their dark variant. Without it the popup
+     keeps the OS light palette: an <option> can be re-coloured from CSS (see the
+     base rule below) but an <optgroup> HEADER cannot, so group labels rendered
+     as white bands with near-invisible text on the Bank's Sort menu. */
+  color-scheme: dark;
   --bg-app: 10 10 15;           /* #0a0a0f — the page-shell background that
                                    sat over the gray-950 body in dark mode */
   --bg-surface: 17 24 39;       /* gray-900 (legacy var, kept for scrollbar) */
@@ -54,10 +61,24 @@
   }
   /* Native <select> dropdown options render with an OS/inherited background
      the page can't style per-element. Theme them globally so they're readable
-     in both modes (opaque overlay surface + content text). */
+     in both modes (opaque overlay surface + content text).
+     `optgroup` is here for the same reason and was the gap: the rule below used
+     to name `option` alone, which was enough while no menu in the app had
+     groups. The Bank's Sort menu introduced the first ones and they inherited
+     the OS light palette — hence the belt (color-scheme above, which fixes
+     Chromium) AND the braces (these declarations, which Firefox honours). */
   option {
     background-color: rgb(var(--surface-overlay));
     color: rgb(var(--content));
+  }
+  optgroup {
+    background-color: rgb(var(--surface-overlay));
+    /* Muted + bold: a group header is a signpost, not an entry you can pick.
+       Firefox italicises optgroup labels by default — undone, because the rest
+       of the app's small-caps section labels are upright. */
+    color: rgb(var(--content-muted));
+    font-style: normal;
+    font-weight: 600;
   }
   ::-webkit-scrollbar {
     @apply w-1.5;

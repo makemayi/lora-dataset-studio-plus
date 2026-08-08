@@ -20,6 +20,7 @@ tests pin the difference:
 * and the historical dataset outlet still behaves exactly as before.
 """
 import io
+import json
 import os
 import struct
 import zlib
@@ -60,6 +61,22 @@ def _compact_png_header(width, height):
 
 def _item(url):
     return {'url': url, 'title': ''}
+
+
+def _pexels_item(photo_id='123'):
+    return {
+        'url': f'https://images.pexels.com/photos/{photo_id}/photo.jpeg',
+        'title': 'A Pexels photo',
+        'platform': 'pexels',
+        'source_url': f'https://www.pexels.com/photo/example-{photo_id}/',
+        'photographer': f'Photographer {photo_id}',
+        'photographer_url': f'https://www.pexels.com/@photographer-{photo_id}/',
+    }
+
+
+def _websearch_item(url='https://cdn.example.test/photo.jpg'):
+    return {'url': url, 'title': 'x', 'platform': 'websearch',
+            'source_url': 'https://blog.example.test/post/42'}
 
 
 def _fake_downloader(by_url):
@@ -220,6 +237,107 @@ def test_batch_cap_is_the_same_number_as_the_dataset_outlet(app):
         items = [_item(f'http://x/{i}.jpg') for i in range(fsvc.SCRAPE_IMPORT_MAX + 1)]
         with pytest.raises(ValueError):
             banks.scrape_import_to_bank(LOCAL_USER, items, name='Too many')
+
+
+# --- provenance ---------------------------------------------------------------
+# A scan item's URL used to be the ONLY thing this outlet kept — a scraped image
+# lost its origin the moment it landed in a Bank, and a bank -> dataset promotion
+# (which already forwards BankImage.source_metadata, see
+# test_bank_dataset_metadata_transfer.py) had nothing to forward. These pin that
+# the bank path now validates and stores provenance exactly like the dataset
+# outlet does — via the SAME `normalize_source_metadata` gate, never trusting the
+# client's claim raw.
+def test_scraped_pexels_provenance_is_validated_and_stored_on_the_bank_image(app):
+    with app.app_context():
+        item = _pexels_item('9001')
+        by_url = {item['url']: _img_bytes(grad='ltr')}
+        with patch.object(banks, '_download_scrape_item', _fake_downloader(by_url)):
+            res = banks.scrape_import_to_bank(
+                LOCAL_USER, [item], name='Pexels provenance')
+        from app.models import BankImage
+        row = BankImage.query.filter_by(bank_id=res['bank_id']).one()
+        assert json.loads(row.source_metadata) == {
+            'platform': 'pexels',
+            'source_url': 'https://www.pexels.com/photo/example-9001/',
+            'photographer': 'Photographer 9001',
+            'photographer_url': 'https://www.pexels.com/@photographer-9001/',
+        }
+
+
+def test_scraped_websearch_provenance_is_validated_and_stored_on_the_bank_image(app):
+    with app.app_context():
+        item = _websearch_item()
+        by_url = {item['url']: _img_bytes(grad='rtl')}
+        with patch.object(banks, '_download_scrape_item', _fake_downloader(by_url)):
+            res = banks.scrape_import_to_bank(
+                LOCAL_USER, [item], name='Web search provenance')
+        from app.models import BankImage
+        row = BankImage.query.filter_by(bank_id=res['bank_id']).one()
+        assert json.loads(row.source_metadata) == {
+            'platform': 'websearch',
+            'source_url': 'https://blog.example.test/post/42',
+        }
+
+
+def test_a_spoofed_pexels_claim_is_dropped_not_trusted_raw(app):
+    """The client-side 'platform': 'pexels' tag is not proof: the image url must
+    actually be hosted by the official Pexels CDN, exactly like the dataset
+    outlet's gate. A raw pass-through would let anything wear the Pexels credit."""
+    with app.app_context():
+        item = _pexels_item('9002')
+        item['url'] = 'https://evil.example/lookalike.jpg'
+        by_url = {item['url']: _img_bytes(grad='ltr')}
+        with patch.object(banks, '_download_scrape_item', _fake_downloader(by_url)):
+            res = banks.scrape_import_to_bank(
+                LOCAL_USER, [item], name='Spoofed pexels')
+        assert res['saved'] == 1        # the download itself still succeeds…
+        from app.models import BankImage
+        row = BankImage.query.filter_by(bank_id=res['bank_id']).one()
+        assert row.source_metadata is None   # …but no provenance is credited to it
+
+
+def test_an_unrecognized_platform_stores_no_provenance(app):
+    with app.app_context():
+        item = {**_item('http://x/a.jpg'), 'platform': 'pornpics',
+                'source_url': 'https://pornpics.example/gallery/1'}
+        by_url = {item['url']: _img_bytes(grad='ltr')}
+        with patch.object(banks, '_download_scrape_item', _fake_downloader(by_url)):
+            res = banks.scrape_import_to_bank(
+                LOCAL_USER, [item], name='Unsupported platform')
+        from app.models import BankImage
+        row = BankImage.query.filter_by(bank_id=res['bank_id']).one()
+        assert row.source_metadata is None
+
+
+def test_scraped_provenance_survives_promotion_to_a_dataset(app):
+    """The whole point: a bank image scraped in with provenance can still hand
+    it to a dataset — the round trip debt #2 exists to close."""
+    with app.app_context():
+        from app.models import BankImage
+        from app.services import face_dataset_service as datasets
+
+        item = _pexels_item('9003')
+        by_url = {item['url']: _img_bytes(grad='ltr')}
+        with patch.object(banks, '_download_scrape_item', _fake_downloader(by_url)):
+            res = banks.scrape_import_to_bank(
+                LOCAL_USER, [item], name='Promoted provenance')
+        row = BankImage.query.filter_by(bank_id=res['bank_id']).one()
+        row.status = 'keep'          # only kept images are promotable
+        from app.extensions import db
+        db.session.commit()
+
+        dataset = datasets.create_dataset(
+            LOCAL_USER, 'CIM', 'cim_act', kind='concept', concept_desc='a mug')
+        banks.start_promote(app, LOCAL_USER, res['bank_id'], [row.id], dataset.id)
+
+        from app.models import FaceDatasetImage
+        promoted = FaceDatasetImage.query.filter_by(dataset_id=dataset.id).one()
+        assert json.loads(promoted.source_metadata) == {
+            'platform': 'pexels',
+            'source_url': 'https://www.pexels.com/photo/example-9003/',
+            'photographer': 'Photographer 9003',
+            'photographer_url': 'https://www.pexels.com/@photographer-9003/',
+        }
 
 
 # --- route ------------------------------------------------------------------

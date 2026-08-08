@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { useImageDownload } from '../../hooks/useImageDownload';
+import { useCapabilities } from '../../context/CapabilitiesContext';
+import { lightboxImproveButtons } from '../../utils/improveEngines';
+import KleinImproveNote from '../dataset/KleinImproveNote';
 import {
   imageHeadlineFacts, imagePromptBlocks, imageSettingFacts, promptFold,
 } from '../../utils/generatedImageFacts';
@@ -97,6 +100,61 @@ function PromptBlock({ block }) {
   );
 }
 
+/** ✨ The improve group: one button per engine this install can run, plus Klein's
+ *  note. Deliberately its OWN component, mounted only when the host passed
+ *  `onImprove` — `useCapabilities()` throws outside its provider, and two of this
+ *  lightbox's three hosts must keep working with nothing added.
+ *
+ *  Everything about the two engines is reused, not restated: the labels, the
+ *  per-engine disabled reasons, the trade-off sentences and the rule that Klein's
+ *  amber note follows KLEIN alone all come from utils/improveEngines.js, shared
+ *  with the dataset lightbox and the bulk toolbar. A second copy of those strings
+ *  here is exactly how two surfaces drift into telling different stories about
+ *  the same pass.
+ */
+function ImproveActions({ img, onImprove, improvePending, improveReady, busy,
+  subjectType, datasetId }) {
+  const { caps } = useCapabilities();
+  const [improving, setImproving] = useState(false);
+  const active = improving || improvePending;
+  const buttons = lightboxImproveButtons({
+    caps, engines: caps?.engines, improving, improvePending, improveReady, busy,
+  });
+  const run = (engineId, disabled) => async (event) => {
+    event.stopPropagation();
+    if (disabled) return;
+    setImproving(true);
+    try {
+      await onImprove(img.id, engineId);
+    } finally {
+      setImproving(false);
+    }
+  };
+  return (
+    <>
+      {buttons.map((btn) => (
+        <button key={btn.id} type="button" data-testid={`lightbox-improve-${btn.id}`}
+          onClick={run(btn.id, btn.disabled)} disabled={btn.disabled}
+          aria-busy={active} title={btn.title}
+          /* Full width under `sm`: this column is 22rem at its widest, so two
+             engine buttons beside a Download would each be a 5rem stub on a
+             400 px phone. Same class the dataset lightbox uses. */
+          className="min-h-9 w-full rounded-lg border border-indigo-400/50 bg-indigo-500/20 px-3 py-1.5 text-[0.75rem] font-semibold text-indigo-100 hover:bg-indigo-500/30 disabled:cursor-not-allowed disabled:opacity-45 sm:w-auto">
+          {btn.label}
+        </button>
+      ))}
+      {/* The note takes its OWN line under the whole group. `w-full` in a wrap
+          container IS a line break — the dataset lightbox learned this the hard
+          way: inline, the paragraph took the width the second engine button
+          needed and stranded it alone at the bottom of the screen. */}
+      {buttons.some((b) => b.showKleinNote) && !active && (
+        <KleinImproveNote subjectType={subjectType} datasetId={datasetId}
+          className="w-full border-t border-white/10 pt-2" />
+      )}
+    </>
+  );
+}
+
 /**
  * `img` is a gallery image row (see services.cloud_training._gallery_image).
  * `alt` names it. `actions` is an optional node rendered in the metadata
@@ -108,9 +166,17 @@ function PromptBlock({ block }) {
  * column announced "SEED —" and offered a Download whose file name is built
  * from a run and a step this picture does not have. An empty table is not a
  * neutral default; it is a wrong answer.
+ *
+ * `onImprove(imageId, engineId)` turns on the ✨ Upscale & improve group. It is an
+ * EXPLICIT opt-in, never inferred from the row's shape, because this component
+ * serves three surfaces and only one of them has somewhere for the result to go:
+ * the ◉ Canvas passes it, while the checkpoint gallery and the pill preview do
+ * not and therefore render exactly what they always did. Inferring it from
+ * `img.id` would have quietly lit the button in a preview whose "id" is a step.
  */
 export default function GeneratedImageLightbox({ img, alt, actions = null,
-  facts = true, onClose }) {
+  facts = true, onClose, onImprove = null, improvePending = false,
+  improveReady = false, busy = false, subjectType = '', datasetId = null }) {
   const dialogRef = useRef(null);
   const closeRef = useRef(null);
   const dl = useImageDownload();
@@ -213,6 +279,14 @@ export default function GeneratedImageLightbox({ img, alt, actions = null,
               className="rounded-md border border-white/25 px-3 py-1.5 text-[0.75rem] font-semibold text-white/85 hover:border-white/50 hover:text-white disabled:opacity-40">
               <span aria-hidden>⬇</span> {dl.busy ? 'Downloading…' : 'Download'}
             </button>
+            {/* ✨ Beside ⬇, because they are the two things you do once a render
+                is worth keeping: save it, or make it better. Only the host that
+                has a route for it passes `onImprove` — see the prop's note. */}
+            {onImprove && (
+              <ImproveActions img={img} onImprove={onImprove}
+                improvePending={improvePending} improveReady={improveReady}
+                busy={busy} subjectType={subjectType} datasetId={datasetId} />
+            )}
             {actions}
           </div>
           {dl.error && (

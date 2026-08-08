@@ -101,3 +101,61 @@ export function improveBatchLabel(activity) {
     ? `${engine.emoji} ${engine.label} ${done}/${total}`
     : `${engine.emoji} ${engine.label}…`
 }
+
+/** The per-image ✨ buttons for ONE image in the lightbox: one entry per engine
+    this install can run, in display order.
+
+    The lightbox is an EXPLICIT per-image choice, so both engines are offered
+    side by side and neither is decided by the `improve.engine` setting — that
+    setting only governs surfaces with a single ✨ button. This is the same rule
+    the bulk toolbar follows, expressed once.
+
+    `{id, label, title, disabled, showKleinNote}` per engine:
+      * `label` reflects the IMAGE's state (a candidate already waiting for
+        review, one still rendering) before the engine's own name, because that
+        state blocks every engine equally and is what the user needs to read.
+      * `showKleinNote` is true for Klein alone. The amber anime/drawn warning is
+        about Klein's INSTRUCTION ("detailed texture, sharp details") pulling
+        drawn skin towards realism — SeedVR2 sends no instruction at all, so
+        repeating the warning under it would be false and would push people away
+        from the very pass that fixes their case.
+
+    Pure: no JSX, no capabilities probing of its own — `node --test` covers it. */
+export function lightboxImproveButtons({ caps, engines, improving = false,
+  improvePending = false, improveReady = false, busy = false,
+  // Which dataset pass is holding this image, when the caller knows. "Another
+  // action is running" is true and useless; the named pass tells you how long.
+  busyReason = null } = {}) {
+  const active = improving || improvePending
+  // Blocked for reasons that have nothing to do with WHICH engine: one
+  // improvement per image at a time, and one waiting result must be reviewed
+  // before another is made.
+  const imageBlocked = busy || active || improveReady
+    ? (improveReady
+        ? 'A new version is waiting for validation.'
+        : active
+          ? 'An improvement is already running for this image.'
+          : (busyReason || 'Another action is running on this image.'))
+    : null
+  return availableImproveEngines(caps).map((engine) => {
+    // `eligibleCount: 1` — the lightbox always acts on exactly this image, so
+    // the shared reason function is asked only about engine readiness.
+    const engineBlocked = improveEngineBlockedReason(engine.id, {
+      caps, engines, eligibleCount: 1,
+    })
+    const reason = imageBlocked || engineBlocked
+    return {
+      id: engine.id,
+      label: improveReady
+        ? '✓ Review improvement first'
+        : active
+          ? `${engine.emoji} Improving…`
+          : `${engine.emoji} ${engine.action}`,
+      title: reason
+        ? `${reason} ${engine.summary}`
+        : `${engine.summary} The original stays intact — a separate candidate is created for you to validate.`,
+      disabled: !!reason,
+      showKleinNote: engine.id === 'klein',
+    }
+  })
+}

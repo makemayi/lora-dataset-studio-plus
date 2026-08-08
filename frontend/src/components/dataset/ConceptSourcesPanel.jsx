@@ -22,13 +22,17 @@ import PexelsAttribution from './PexelsAttribution';
 import SettingsLink from '../common/SettingsLink';
 import KleinModelSetting from '../shared/KleinModelSetting';
 import { localEngineUnavailableReason } from '../../utils/localEngineReason';
+import { scrapeDepsBanner } from '../../utils/scrapeDeps';
 import {
   buildPexelsSearchUrl,
+  buildWebSearchUrl,
   isPexelsUrl,
   loadPexelsAuthorization,
   normalizePexelsKeyword,
+  normalizeWebSearchKeyword,
   resolveScanTarget,
   savePexelsAuthorization,
+  scrapeItemToImportPayload,
 } from './scraperSourceSearch';
 
 const thumbFor = (it) =>
@@ -50,6 +54,7 @@ const SOURCE_GROUPS = [
 const SOURCE_MODES = [
   ['reddit', 'Reddit'],
   ['pexels', 'Pexels'],
+  ['websearch', 'Web images'],
   ['url', 'URL'],
 ];
 
@@ -58,6 +63,7 @@ const PEXELS_AUTH_ERROR = 'Confirm explicit Pexels authorization for dataset/ML 
 const PLATFORM_LABELS = {
   civitai: 'Civitai', instagram: 'Instagram', pexels: 'Pexels', pornpics: 'PornPics',
   reddit: 'Reddit', sexcom: 'Sex.com', x: 'X / Twitter', generic: 'URL source',
+  websearch: 'Web images',
 };
 
 const platformLabel = (platform) => PLATFORM_LABELS[platform]
@@ -95,11 +101,19 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
   const [pexelsLocale, setPexelsLocale] = useState(restoredScan.pexelsLocale);
   const [pexelsOrientation, setPexelsOrientation] = useState(restoredScan.pexelsOrientation);
   const [pexelsAuthorized, setPexelsAuthorized] = useState(() => loadPexelsAuthorization());
+  const [websearchKeyword, setWebsearchKeyword] = useState(restoredScan.websearchKeyword);
+  const [websearchSafe, setWebsearchSafe] = useState(restoredScan.websearchSafe);
   const [activeScanUrl, setActiveScanUrl] = useState(restoredScan.activeScanUrl);
   const [activePlatform, setActivePlatform] = useState(restoredScan.activePlatform);
   const [items, setItems] = useState(restoredScan.items);
   const [page, setPage] = useState(restoredScan.page);
   const [paginated, setPaginated] = useState(restoredScan.paginated);
+  // Time-budget truncation (backend `partial`, cf. gdl.enumerate): the listing
+  // was cut short before every album/page could be explored. Deliberately NOT
+  // persisted across reloads (scraperState.js) — it describes the scan that just
+  // ran, not a durable property of the saved items; a stale "truncated" banner
+  // surviving a page reload would be its own lie.
+  const [partial, setPartial] = useState(false);
   const [scanning, setScanning] = useState(false);
   // Gallery-listing scans (PornPics category/tag/search): OFF = one cover per
   // matched gallery (the keyword-relevant shot), ON = every photo of each gallery.
@@ -125,10 +139,12 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
 
   useEffect(() => {
     saveScraperScanState(scanKey, { sourceMode, url, kw, sub, pexelsKeyword,
-      pexelsLocale, pexelsOrientation, activeScanUrl, activePlatform,
+      pexelsLocale, pexelsOrientation, websearchKeyword, websearchSafe,
+      activeScanUrl, activePlatform,
       items, page, paginated, fullAlbums, rescueSmall, selected });
   }, [scanKey, sourceMode, url, kw, sub, pexelsKeyword, pexelsLocale,
-    pexelsOrientation, activeScanUrl, activePlatform, items, page, paginated,
+    pexelsOrientation, websearchKeyword, websearchSafe, activeScanUrl,
+    activePlatform, items, page, paginated,
     fullAlbums, rescueSmall, selected]);
 
   // Page zero uses the submitted form target. Later pages are deliberately pinned
@@ -162,6 +178,7 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
         return [...prev, ...additions];
       });
       setPaginated(!!body.paginated);
+      setPartial(!!body.partial);
       setPage(responsePage);
       if (isFreshScan) {
         setActiveScanUrl(target);
@@ -207,6 +224,13 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
   }, [pexelsKeyword, pexelsLocale, pexelsOrientation,
     pexelsAuthorized, scanning, runScan, toast]);
 
+  const runWebSearch = useCallback(() => {
+    if (scanning) return;
+    const built = buildWebSearchUrl(websearchKeyword, websearchSafe);
+    if (!built) return;
+    runScan(0, built);
+  }, [websearchKeyword, websearchSafe, scanning, runScan]);
+
   const changePexelsAuthorization = (confirmed) => {
     setPexelsAuthorized(confirmed);
     savePexelsAuthorization(confirmed);
@@ -231,16 +255,7 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
 
   const handleImport = async () => {
     const chosen = items.filter((it) => selected.has(it.url))
-      .map((it) => ({
-        url: it.url,
-        title: it.title || '',
-        ...(it.platform === 'pexels' ? {
-          platform: 'pexels',
-          source_url: it.source_url,
-          photographer: it.photographer,
-          photographer_url: it.photographer_url,
-        } : {}),
-      }));
+      .map(scrapeItemToImportPayload);
     if (chosen.length === 0 || importing) return;
     setImporting(true);
     try {
@@ -255,8 +270,9 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
     clearScraperScanState(scanKey);
     setSourceMode('reddit'); setUrl(''); setKw(''); setSub('');
     setPexelsKeyword(''); setPexelsLocale('fr-FR'); setPexelsOrientation('');
+    setWebsearchKeyword(''); setWebsearchSafe(false);
     setActiveScanUrl(''); setActivePlatform(''); setItems([]); setPage(0);
-    setPaginated(false); setFullAlbums(false); setRescueSmall(false);
+    setPaginated(false); setPartial(false); setFullAlbums(false); setRescueSmall(false);
     setSelected(new Set()); setBroken(new Set());
   };
 
@@ -294,15 +310,17 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
         ))}
       </div>
 
-      {/* Scrape extras (curl_cffi, gallery-dl, cloudscraper…) live in the
-          optional requirements-scrape.txt. Pexels enumeration uses its official
-          API, while thumbnail proxying and imports still need curl_cffi. */}
+      {/* Scrape extras live in the optional requirements-scrape.txt. The names
+          are NOT written here: the banner used to recite three of them while the
+          backend probe watches seven, so an install flagged because `ddgs` or
+          `yt_dlp` was absent got a warning that mentioned neither. It now quotes
+          what the probe actually reported missing (caps.scrape_deps_detail). */}
       {caps.scrape_deps === false && (
         <div className="rounded-lg border border-amber-400/40 bg-amber-500/10 p-2 flex flex-col gap-1.5">
           <p className="text-amber-200 text-[0.6875rem]">
-            ⚠ The optional scraper packages are not installed (curl_cffi, gallery-dl,
-            cloudscraper…). Install them for image previews and imports. Pexels uses
-            its official API for listing, but still needs curl_cffi to fetch images.
+            {scrapeDepsBanner(caps.scrape_deps_detail)} Install them for image previews,
+            imports, the keyless web image search and video sources. Pexels uses its
+            official API for listing, but still needs curl_cffi to fetch images.
           </p>
           <InstallRunner action="scrape_extras" buttonLabel="⬇ Install scraper extras"
             onDone={() => refresh(true)} />
@@ -421,6 +439,36 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
               {scanning ? 'Searching…' : 'Search Pexels'}
             </button>
           </div>
+        </div>
+      )}
+
+      {sourceMode === 'websearch' && (
+        <div className="rounded-lg border border-border bg-white/5 px-2.5 py-2 flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <input value={websearchKeyword} onChange={(e) => setWebsearchKeyword(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runWebSearch(); } }}
+              placeholder="keyword — e.g. curly hair portrait"
+              aria-label="Web image search keyword"
+              className="min-w-[12rem] flex-[2] px-2.5 py-1.5 rounded-lg bg-surface-raised border border-border text-content text-sm placeholder:text-content-subtle focus:border-indigo-500 outline-none" />
+            <label className="flex items-center gap-2 text-[0.6875rem] text-content-muted cursor-pointer shrink-0">
+              <input type="checkbox" checked={websearchSafe}
+                onChange={(e) => setWebsearchSafe(e.target.checked)}
+                className="h-4 w-4 rounded border-border accent-indigo-500" />
+              <span>SafeSearch</span>
+            </label>
+            <button type="button" onClick={runWebSearch}
+              disabled={scanning || !normalizeWebSearchKeyword(websearchKeyword)}
+              title="Search images across the open web"
+              className="px-3 py-1.5 rounded-lg bg-surface border border-border text-content text-sm hover:bg-white/10 disabled:opacity-40 shrink-0">
+              {scanning ? 'Searching…' : 'Search the web'}
+            </button>
+            <HelpBadge topic="action-scrape-websearch" className="self-center" />
+          </div>
+          <p className="text-content-muted text-[0.6875rem] leading-relaxed">
+            Searches images across the open web — no account and no API key.
+            Results come from third-party sites: check the licence before using an
+            image, and expect a broader mix than a curated source like Pexels.
+          </p>
         </div>
       )}
 
@@ -577,6 +625,19 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
               );
             })}
           </div>
+
+          {partial && (
+            // Backend `partial` now covers at least four causes (time budget,
+            // item cap, page cap, blocked/rate-limited source) — state the
+            // effect, not a specific cause. The items above are valid, but the
+            // listing was cut short before it could be fully explored, and it
+            // can happen even when `paginated` is false (a truncated album dive
+            // still looks "final" otherwise, cf. the gdl.enumerate `from_albums`
+            // note). Say so in plain English.
+            <p className="text-[0.6875rem] text-amber-500">
+              This scan stopped before the end of the listing — some images may be missing.
+            </p>
+          )}
 
           {paginated && (
             <button type="button" onClick={() => runScan(page + 1)} disabled={scanning}
