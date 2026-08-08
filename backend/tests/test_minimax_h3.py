@@ -321,6 +321,78 @@ def test_output_size_is_a_multiple_of_32_and_within_the_budget(h3, w, h):
     assert abs((ow / oh) / (w / h) - 1) < 0.06
 
 
+@pytest.mark.parametrize(('requested_aspect', 'expected_ratio'), [
+    ('1:1', 1.0),
+    ('3:4', 3 / 4),
+    ('16:9', 16 / 9),
+])
+def test_the_catalog_card_decides_the_shape_not_the_reference(
+        h3, requested_aspect, expected_ratio):
+    """Both callers resolve the card's ratio and pass it; H3 used to drop it and
+    copy the REFERENCE's aspect, so a square reference answered a full-body card
+    with a square. The pixel budget is unchanged — only the shape moves."""
+    mh, _base, _cfg = h3
+    ow, oh = mh.fit_output_size(1024, 1024, requested_aspect=requested_aspect)
+    assert ow % 32 == 0 and oh % 32 == 0
+    assert abs((ow / oh) / expected_ratio - 1) < 0.04
+
+
+def test_a_card_ratio_never_invents_pixels_the_reference_does_not_have(h3):
+    """A packet is sampled per image, so every extra pixel is paid once per
+    frame. Reshaping must not become upscaling."""
+    mh, _base, _cfg = h3
+    ow, oh = mh.fit_output_size(640, 640, requested_aspect='3:4')
+    assert ow * oh <= 640 * 640
+    assert abs((ow / oh) / (3 / 4) - 1) < 0.04
+    # ...and the megapixel budget still wins over a large reference.
+    ow, oh = mh.fit_output_size(4000, 4000, requested_aspect='3:4')
+    assert ow * oh <= mh.MAX_OUTPUT_MP * 1_000_000
+
+
+def test_the_enqueue_actually_forwards_the_card_ratio(h3, tmp_path, monkeypatch):
+    """The bug this file now guards was NOT in the geometry function: `enqueue`
+    accepted `aspect_ratio` from both callers and never read it. Every other test
+    here stubs the enqueue, so nothing noticed for a whole engine's lifetime."""
+    from PIL import Image
+    mh, _base, _cfg = h3
+    source = tmp_path / 'square_reference.png'
+    Image.new('RGB', (1024, 1024), (7, 7, 7)).save(source)
+    staged = tmp_path / 'staged.png'
+    Image.new('RGB', (1024, 1024), (7, 7, 7)).save(staged)
+
+    seen = {}
+    monkeypatch.setattr(mh, 'preflight', lambda *a, **k: None)
+    monkeypatch.setattr(mh, 'resolve_h3_unet', lambda *a, **k: 'unet.safetensors')
+    monkeypatch.setattr(mh, 'resolve_h3_text_encoder', lambda: 'clip.safetensors')
+    monkeypatch.setattr(mh, 'resolve_h3_video_vae', lambda: 'video.safetensors')
+    monkeypatch.setattr(mh, 'resolve_h3_audio_vae', lambda: 'audio.safetensors')
+    monkeypatch.setattr(mh, 'resolve_h3_clip_vision', lambda: 'vision.safetensors')
+    monkeypatch.setattr(mh, '_comfy_input_dir', lambda: str(tmp_path))
+    monkeypatch.setattr(mh.comfy_fs, 'ensure_input_usable', lambda d: str(tmp_path))
+    monkeypatch.setattr(mh.comfy_fs, 'stage_input_image',
+                        lambda src, name, d: str(staged))
+    monkeypatch.setattr(mh, 'available_optional_nodes',
+                        lambda: {'speed': False, 'upscale': False})
+    monkeypatch.setattr(mh, 'build_workflow',
+                        lambda *a, **kw: (seen.update(kw), {})[1])
+    monkeypatch.setattr(mh.queue_manager, 'add_job', lambda **kw: None)
+
+    mh.enqueue_minimax_h3(user_id='local', source_filename='square_reference.png',
+                          source_path=str(source), edit_prompt='p',
+                          aspect_ratio='3:4')
+
+    assert abs((seen['width'] / seen['height']) / (3 / 4) - 1) < 0.04, (
+        'a square reference must not decide the shape of a portrait card')
+
+
+def test_an_unusable_card_ratio_keeps_the_reference_geometry(h3):
+    """A custom catalog entry with a typo must not decide the canvas."""
+    mh, _base, _cfg = h3
+    plain = mh.fit_output_size(1536, 2048)
+    for bad in ('not-a-ratio', '0:1', '1:0', '', None, '99:1', 5):
+        assert mh.fit_output_size(1536, 2048, requested_aspect=bad) == plain, bad
+
+
 def test_packet_length_is_clamped_to_what_the_node_accepts(h3):
     """`length` is min 5, step 17 on the node. An out-of-step value is a
     validation error at queue time, i.e. a whole batch of failed tiles."""

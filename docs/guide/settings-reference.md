@@ -123,7 +123,7 @@ Good to know: in subscription mode you get up to **5 reference images** per gene
 ### Engines
 
 - **Default engine** → `engines.default`. Which engine is preselected in the workspace. One of `nanobanana`, `chatgpt`, `openrouter`, `klein`, `krea`. Default **`chatgpt`**.
-- **Enabled engines** → `engines.enabled`. Checkboxes deciding which engines appear as options at all. Default: **all five** enabled. Untick an engine you never use to declutter the generator picker. An engine added by a later update is offered here automatically, even on an install whose settings were saved long before it existed — while an engine you unticked on purpose stays unticked, because the app records which engines it was showing you at the moment you chose.
+- **Enabled engines** → `engines.enabled`. Checkboxes deciding which engines appear as options at all. Default: **all** enabled. Untick an engine you never use to declutter the generator picker. An engine added by a later update is offered here automatically, even on an install whose settings were saved long before it existed — while an engine you unticked on purpose stays unticked, because the app records which engines it was showing you at the moment you chose. **This list governs new batches, not retries**: 🔄 on an existing tile always re-renders on the engine that tile was made with. Until 2026-08-09 a retry was rewritten to your default engine when the tile's engine was not ticked, which sent every MiniMax H3 retry to another engine on any install whose selection predated H3 — and, on an install with only API engines ticked, could bill one for a tile that had run locally. An engine that is genuinely unavailable now fails with its own message naming what is missing.
 
 #### Using several engines in one batch
 
@@ -267,6 +267,16 @@ card together and pays that cost once per card, not once per image.
   something to decide only at higher frame counts.
 - **Sampler steps** → `minimax_h3.steps`. Default **`25`**. Paid once per frame
   in the packet.
+- **Output megapixels** → `minimax_h3.max_output_mp`. **`config.json` only** — no
+  checkbox, deliberately: it is the one dial here whose measurements do not hold
+  if you move it. Default **`1.0`**, the size every number on this page was taken
+  at. It is the *cap*, not a target: the canvas never exceeds what the reference
+  photo itself carries, because a packet is sampled per image and every extra
+  pixel is paid once per frame. The **shape**
+  comes from the catalog card you are generating (a full-body card is portrait, a
+  wide establishing card is landscape) — before 2026-08-09 H3 copied the aspect of
+  your *reference photo* instead, so a square reference produced a square version
+  of every shot.
 - **Reference downscaled to** → `minimax_h3.ref_longer_edge`. Default **`1024`**
   px. The reference is shrunk to this before it reaches the 32B vision encoder;
   every reference pixel is paid for again on each new shot description.
@@ -1467,7 +1477,7 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `onetrainer.python` | Full path to the Python interpreter to run OneTrainer with. Empty = auto-detect a `venv/` next to `scripts/train.py`. |
 | `onetrainer.peft_type` | The PEFT adapter OneTrainer trains: `LORA` (default) or `OFT_2` (Orthogonal Finetuning). |
 | `engines.default` | Default image-generation engine selected in the UI (`nanobanana`, `chatgpt`, `openrouter`, or `klein`). |
-| `engines.enabled` | List of engines shown as options in the UI. Doubles as the engine catalogue: an engine added by an update is merged into a stored list on read, so a new engine reaches installs that already have saved settings. An engine you removed yourself is never added back. |
+| `engines.enabled` | List of engines shown as options in the UI, for NEW batches only — a 🔄 retry keeps the engine its tile was made with. Doubles as the engine catalogue: an engine added by an update is merged into a stored list on read, so a new engine reaches installs that already have saved settings. An engine you removed yourself is never added back. |
 | `engines.known` | Not a setting — the ledger of which engines the app was offering the last time this list was saved. It is what tells "this engine did not exist yet" apart from "I unticked it". Written automatically; `[]` (or absent) means the app assumes the pre-OpenRouter trio. Delete it to be re-offered every engine. |
 | `engines.chatgpt_auth` | Which credential the ChatGPT engine uses: `auto` (subscription when connected, else API key), `api`, or `subscription`. |
 | `engines.openrouter_model` | Image model slug the OpenRouter engine requests. Free text; blank = `google/gemini-3-pro-image`. Must accept reference images. |

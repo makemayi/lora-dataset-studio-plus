@@ -385,13 +385,58 @@ def clamp_length(value):
     return LENGTH_MIN + ((n - LENGTH_MIN) // LENGTH_STEP) * LENGTH_STEP
 
 
-def fit_output_size(width, height, max_mp=None):
-    """A width/height inside the megapixel budget, both multiples of 32, keeping
-    the source aspect. The node takes plain INTs, so this replaces
-    `ResolutionSelector` and its ratio enum entirely."""
+def _aspect_ratio(requested_aspect):
+    """Return a positive finite ``W:H`` ratio, or None for an unusable request."""
+    if not isinstance(requested_aspect, str):
+        return None
+    try:
+        aw, ah = (float(part.strip()) for part in requested_aspect.split(':', 1))
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(aw) and math.isfinite(ah) and aw > 0 and ah > 0):
+        return None
+    ratio = aw / ah
+    # The widest shipped catalog card is 16:9. Past this it is a typo in a custom
+    # entry rather than a shot, and it would form a one-cell canvas.
+    if not math.isfinite(ratio) or not 1 / 32 <= ratio <= 32:
+        return None
+    return ratio
+
+
+def _requested_canvas(ratio, budget):
+    """Largest near-ratio 32-grid canvas that does not exceed ``budget``."""
+    cells = max(1, int(budget // (_SIZE_MULTIPLE ** 2)))
+    height_cells = max(1, int((cells / ratio) ** 0.5))
+    width_cells = max(1, int(round(ratio * height_cells)))
+    while width_cells * height_cells > cells:
+        # Step down whichever side currently sits furthest from the requested
+        # ratio. This only runs on the 32 grid, so it cannot drift above budget.
+        if width_cells / height_cells > ratio:
+            width_cells = max(1, width_cells - 1)
+        else:
+            height_cells = max(1, height_cells - 1)
+    return width_cells * _SIZE_MULTIPLE, height_cells * _SIZE_MULTIPLE
+
+
+def fit_output_size(width, height, max_mp=None, requested_aspect=None):
+    """A width/height inside the megapixel budget, both multiples of 32. The node
+    takes plain INTs, so this replaces `ResolutionSelector` and its ratio enum
+    entirely.
+
+    A valid ``requested_aspect`` (``W:H``, the catalog card's own ratio) decides
+    the SHAPE; without one, the source's aspect is kept. Either way the pixel
+    count stays inside the budget AND inside what the reference already carries:
+    a portrait card must not turn a 1024² reference into four times the pixels,
+    because H3 pays every one of them once per frame of the packet.
+
+    Before this, the shape came from the reference alone — so a square reference
+    answered a full-body card with a square, whatever the card asked for."""
     budget = (MAX_OUTPUT_MP if max_mp is None else float(max_mp)) * 1_000_000
     w = max(1.0, float(width or 0))
     h = max(1.0, float(height or 0))
+    ratio = _aspect_ratio(requested_aspect)
+    if ratio is not None:
+        return _requested_canvas(ratio, min(budget, w * h))
     scale = math.sqrt(budget / (w * h))
     if scale < 1.0:
         w, h = w * scale, h * scale
@@ -580,6 +625,10 @@ def enqueue_minimax_h3(user_id, source_filename, edit_prompt, source_path=None,
     (checked BEFORE anything is copied or queued), ValueError on a missing
     source, RuntimeError when ComfyUI isn't configured.
 
+    `aspect_ratio` is the catalog card's own ``W:H`` (both callers resolve it
+    with `aspect_for_label`). It decides the output SHAPE; the reference still
+    decides the pixel count. Absent or unusable keeps the reference's aspect.
+
     `framing` is accepted for signature parity with the Krea lane and is not read
     yet: H3 has no per-framing dial measured, and inventing one would be guessing.
     """
@@ -608,9 +657,14 @@ def enqueue_minimax_h3(user_id, source_filename, edit_prompt, source_path=None,
     comfy_input = os.path.basename(staged_source)
 
     src_w, src_h = _source_size(staged_source)
+    # The catalog card decides the SHAPE, the reference decides how many pixels
+    # (see fit_output_size). Both callers already resolve the card's ratio; H3
+    # used to drop it and copy the reference's own aspect, so a square reference
+    # answered a full-body card with a square.
     width, height = fit_output_size(src_w, src_h,
                                     max_mp=_cfg_float('minimax_h3.max_output_mp',
-                                                      MAX_OUTPUT_MP))
+                                                      MAX_OUTPUT_MP),
+                                    requested_aspect=aspect_ratio)
     optional = available_optional_nodes()
     workflow = build_workflow(
         comfy_input, edit_prompt, unet=unet, clip=clip, video_vae=video_vae,
