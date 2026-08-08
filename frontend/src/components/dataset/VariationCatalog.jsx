@@ -786,6 +786,27 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
     prompt_suffixes: Object.fromEntries(
       SUFFIX_KEYS.map((k) => [k, (fSuffix[k] || '').trim()]).filter(([, v]) => v)),
   });
+  // Saving ON GENERATE is not the same as saving. A suffix typed and not
+  // generated with was silently lost — the panel's own copy said "saved to the
+  // dataset when you generate", which describes the behaviour without making it
+  // any less surprising: every other text field in this app keeps what you
+  // typed. Hence an explicit Save. The save-before-enqueue in `go` stays exactly
+  // as it was, so a batch still can never run against a stale suffix.
+  const [suffixSaving, setSuffixSaving] = useState(false);
+  const [suffixSaved, setSuffixSaved] = useState(false);
+  const saveSuffixesNow = async () => {
+    if (!onSaveSuffixes || suffixSaving) return;
+    setSuffixSaving(true);
+    setSuffixSaved(false);
+    try {
+      const res = await onSaveSuffixes(suffixPayload());
+      // updateSettings toasts its own failure; the inline tick is for the
+      // success case, which is otherwise invisible on a quiet save.
+      if (res?.ok) setSuffixSaved(true);
+    } finally {
+      setSuffixSaving(false);
+    }
+  };
 
   const go = async () => {
     const variations = catalog.filter((e) => selected.has(e.id))
@@ -1733,10 +1754,22 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
               </label>
             ))}
           </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button type="button" onClick={saveSuffixesNow}
+              disabled={!suffixDirty || suffixSaving || !onSaveSuffixes}
+              className="rounded border border-border px-2 py-0.5 text-[0.6875rem] text-content
+                         hover:border-border-strong disabled:opacity-40 disabled:hover:border-border"
+              title="Save these suffixes to the dataset now, without generating">
+              {suffixSaving ? 'Saving…' : 'Save'}
+            </button>
+            <span className="text-[0.625rem] text-content-subtle" aria-live="polite">
+              {suffixDirty ? 'Unsaved changes' : suffixSaved ? '✓ Saved' : 'Saved to this dataset'}
+            </span>
+          </div>
           <p className="text-content-subtle text-[0.625rem]">
             Free text appended to every <b>generated</b> variation — the identity lock is
             untouched. A framing suffix applies to that shot type first, then the global one.
-            Saved to the dataset when you generate, and shared with ⚙️ Dataset settings.
+            Saved when you press Save or generate, and shared with ⚙️ Dataset settings.
           </p>
         </div>
       </details>

@@ -48,6 +48,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-08-prompt-suffixes-save',
+    date: '2026-08-08',
+    title: 'Prompt suffixes keep what you typed, without generating first',
+    blurb:
+      "The ✨ Prompt suffixes box in Add images only wrote your creative direction to the dataset when you pressed Generate — type one, walk away, and it was gone. It now has its own Save button, and says whether what you see is saved or not. Generating still saves first, so a batch can never run against a stale suffix.",
+    to: '/datasets?section=add&panel=generate',
+  },
+  {
     id: '2026-08-08-minimax-h3-engine',
     date: '2026-08-08',
     title: 'A third free local engine: MiniMax H3 builds your dataset from one photo',
