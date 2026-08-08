@@ -17,6 +17,18 @@ import pytest
 
 from app.services import chatgpt_comfy as lane
 
+#: Captured before the autouse fixture below replaces it — the two tests that
+#: exercise the wait itself need the real one.
+REAL_WAIT = lane.wait_until_comfyui_answers
+
+
+@pytest.fixture(autouse=True)
+def _no_real_comfyui_wait(monkeypatch):
+    """The readiness wait is exercised by its own two tests below. Everywhere
+    else it would poll a ComfyUI that the test config does not point at, and
+    spend the whole timeout doing it."""
+    monkeypatch.setattr(lane, 'wait_until_comfyui_answers', lambda: None)
+
 
 def _no_key(monkeypatch):
     monkeypatch.delenv(lane.API_KEY_ENV, raising=False)
@@ -234,3 +246,63 @@ def test_the_other_lanes_are_unchanged_by_the_new_branch(app, monkeypatch):
         monkeypatch.setattr('app.services.chatgpt_oauth.status',
                             lambda: {'connected': False})
         assert capabilities.probe_openai()['ok'] is False
+
+
+def test_a_rejected_key_says_what_to_do_in_this_app(app, monkeypatch, tmp_path):
+    """ComfyUI's own words for a 401 are "Please login first to use this node" —
+    written for someone sitting in its web UI. From here that is advice the user
+    cannot follow: they DID set a key, and no login would be read anyway."""
+    monkeypatch.setenv(lane.API_KEY_ENV, 'k')
+    monkeypatch.setattr(lane, 'node_available', lambda: True)
+    monkeypatch.setattr(lane, 'wait_until_comfyui_answers', lambda: None)
+    monkeypatch.setattr(lane.comfy_fs, 'ensure_input_usable', lambda d: str(tmp_path))
+    monkeypatch.setattr(lane, 'queue_prompt_to_comfyui',
+                        lambda *a, **k: ({'prompt_id': 'p'}, None))
+    monkeypatch.setattr(lane, 'get_comfyui_history', lambda pid: {
+        'p': {'status': {'status_str': 'error', 'messages': [
+            ['execution_error',
+             {'exception_message': 'Unauthorized: Please login first to use this node.'}]]}}})
+
+    with app.app_context():
+        with pytest.raises(lane.ComfyGptUnavailable, match='401'):
+            lane.generate_variation([_png()], 'x')
+
+
+def test_an_empty_balance_is_not_reported_as_a_bad_key(app, monkeypatch, tmp_path):
+    monkeypatch.setenv(lane.API_KEY_ENV, 'k')
+    monkeypatch.setattr(lane, 'node_available', lambda: True)
+    monkeypatch.setattr(lane, 'wait_until_comfyui_answers', lambda: None)
+    monkeypatch.setattr(lane.comfy_fs, 'ensure_input_usable', lambda d: str(tmp_path))
+    monkeypatch.setattr(lane, 'queue_prompt_to_comfyui',
+                        lambda *a, **k: ({'prompt_id': 'p'}, None))
+    monkeypatch.setattr(lane, 'get_comfyui_history', lambda pid: {
+        'p': {'status': {'status_str': 'error', 'messages': [
+            ['execution_error',
+             {'exception_message': 'Payment Required: Please add credits to your account.'}]]}}})
+
+    with app.app_context():
+        with pytest.raises(lane.ComfyGptUnavailable, match='out of credits'):
+            lane.generate_variation([_png()], 'x')
+
+
+def test_a_busy_comfyui_is_waited_for_instead_of_failing_the_row(monkeypatch):
+    """Three of four rows failed with "ComfyUI not running" against an instance
+    that was demonstrably up: the submit path's readiness probe is a 3 s GET and
+    the fan-out ran four of them at once. Waiting is free — the row would be
+    waiting anyway."""
+    answers = iter([(False, 'ComfyUI not running (Please start external supervisor)'),
+                    (False, 'ComfyUI not running (Please start external supervisor)'),
+                    (True, 'Running')])
+    monkeypatch.setattr('app.services.comfyui_service.ensure_comfyui_before_generation',
+                        lambda: next(answers))
+    monkeypatch.setattr(lane, '_READY_POLL_SECONDS', 0)
+    REAL_WAIT()                                # returns rather than raising
+
+
+def test_a_comfyui_that_never_answers_still_fails_the_row(monkeypatch):
+    monkeypatch.setattr('app.services.comfyui_service.ensure_comfyui_before_generation',
+                        lambda: (False, 'ComfyUI not running (Please start external supervisor)'))
+    monkeypatch.setattr(lane, '_READY_POLL_SECONDS', 0)
+    monkeypatch.setattr(lane, '_READY_TIMEOUT_SECONDS', 0.01)
+    with pytest.raises(lane.ComfyGptUnavailable, match='not running'):
+        REAL_WAIT()

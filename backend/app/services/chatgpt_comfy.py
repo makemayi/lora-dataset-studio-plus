@@ -34,6 +34,7 @@ is the cost of the lane, and it is why the two other lanes stay available.
 from __future__ import annotations
 import logging
 import os
+import threading
 import time
 import uuid
 
@@ -83,6 +84,19 @@ _SIZE_BY_RATIO = {
 _POLL_SECONDS = 2.0
 _TIMEOUT_SECONDS = 420.0
 
+#: One shot at a time on this lane. The API fan-out runs rows in parallel, which
+#: is right for a provider that answers per request — but here every row lands in
+#: the SAME single-prompt ComfyUI queue, so parallelism buys nothing and costs
+#: something: four threads probing "is ComfyUI up?" at once against a busy
+#: instance had three of them time out and fail rows that had nothing wrong with
+#: them. Measured on the maintainer's install, 2026-08-09.
+_LANE_LOCK = threading.Lock()
+
+#: How long to keep asking before calling a busy ComfyUI "down". Its readiness
+#: probe is a 3 s HTTP GET; one slow answer must not fail a row.
+_READY_TIMEOUT_SECONDS = 45.0
+_READY_POLL_SECONDS = 1.5
+
 
 class ComfyGptUnavailable(Exception):
     """This lane cannot run, with a reason the user can act on. Raised BEFORE
@@ -120,6 +134,31 @@ def preflight() -> None:
         raise ComfyGptUnavailable(
             f'This ComfyUI does not expose {NODE_CLASS}. Update ComfyUI, or '
             'switch the ChatGPT lane back to an API key / your subscription.')
+
+
+def wait_until_comfyui_answers() -> None:
+    """Block until ComfyUI answers its readiness probe, or raise.
+
+    `queue_prompt_to_comfyui` runs that probe itself and refuses on ONE failed
+    answer. That is right for a local render — a GPU job on an unreachable
+    ComfyUI is pointless — but this lane arrives with several rows at once and a
+    3 s HTTP timeout against an instance already working is a coin flip. Waiting
+    is free here: the wait is what the row would be doing anyway."""
+    from .comfyui_service import ensure_comfyui_before_generation
+    deadline = time.monotonic() + _READY_TIMEOUT_SECONDS
+    detail = 'ComfyUI did not answer'
+    while True:
+        try:
+            ok, message = ensure_comfyui_before_generation()
+        except Exception as exc:                   # a broken probe never decides
+            logger.debug('chatgpt/comfyui: readiness probe failed (%s)', exc)
+            return
+        if ok:
+            return
+        detail = message or detail
+        if time.monotonic() >= deadline:
+            raise ComfyGptUnavailable(f'ChatGPT via ComfyUI: {detail}')
+        time.sleep(_READY_POLL_SECONDS)
 
 
 def size_for_aspect(aspect_ratio) -> str:
@@ -181,6 +220,32 @@ def build_workflow(image_names, prompt, *, size='auto', model=DEFAULT_MODEL,
     return graph
 
 
+#: ComfyUI turns comfy.org's HTTP status into a sentence written for someone
+#: sitting in ITS web UI, where "log in" is a button. From here that reads as
+#: advice the user cannot follow — they did set a key — so the two statuses that
+#: are really about the credential say what to do in THIS app instead. Matched on
+#: the sentence rather than the status because the status never reaches us.
+_EXPLAINED = (
+    ('please login first',
+     'comfy.org rejected the credential (401). The key in Settings ▸ Engines ▸ '
+     'comfy.org API key is missing, mistyped or revoked — create a fresh one at '
+     'platform.comfy.org. Signing into the ComfyUI app does not help: a request '
+     'from LDS carries no browser session, only that key.'),
+    ('payment required',
+     'comfy.org accepted the key and refused the charge (402): the account is '
+     'out of credits. Top it up at platform.comfy.org, or switch the ChatGPT '
+     'lane back to an API key / your subscription in Settings ▸ Engines.'),
+)
+
+
+def _explain(message: str) -> str:
+    lowered = (message or '').lower()
+    for needle, replacement in _EXPLAINED:
+        if needle in lowered:
+            return replacement
+    return message
+
+
 def _saved_image(history_entry) -> tuple:
     """(filename, subfolder) of the SaveImage output, or (None, None)."""
     outputs = (history_entry or {}).get('outputs') or {}
@@ -219,6 +284,13 @@ def generate_variation(ref_bytes, prompt: str, model: str | None = None,
     exactly as they do for the direct lanes — none of them can tell where the
     bytes came from."""
     preflight()
+    with _LANE_LOCK:
+        wait_until_comfyui_answers()
+        return _generate_one(ref_bytes, prompt, model, aspect_ratio)
+
+
+def _generate_one(ref_bytes, prompt: str, model: str | None,
+                  aspect_ratio: str) -> bytes | None:
     refs = [r for r in (ref_bytes if isinstance(ref_bytes, (list, tuple)) else [ref_bytes]) if r]
 
     input_dir = comfy_fs.ensure_input_usable(cfg.comfyui_dir('input'))
@@ -255,7 +327,8 @@ def generate_variation(ref_bytes, prompt: str, model: str | None = None,
             if entry:
                 failure = _failure_message(entry)
                 if failure:
-                    raise ComfyGptUnavailable(f'ChatGPT via ComfyUI: {failure}')
+                    raise ComfyGptUnavailable(
+                        f'ChatGPT via ComfyUI: {_explain(failure)}')
                 filename, subfolder = _saved_image(entry)
                 if filename:
                     return fetch_output_image_bytes(filename, subfolder)
