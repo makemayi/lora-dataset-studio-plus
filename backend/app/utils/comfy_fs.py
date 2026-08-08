@@ -269,7 +269,7 @@ def stage_input_write(dest_name, writer, input_dir) -> str:
 #  3. LIVE JOBS. The caller passes the names every non-terminal queue row still
 #     references; those are skipped whatever their age or name.
 _STAGED_INPUT_RE = re.compile(
-    r'^(?:edit_source|edit_ref\d+|krea_source)_[0-9a-f]{8}_'
+    r'^(?:edit_source|edit_ref\d+|krea_source|h3_source|gptref\d+)_[0-9a-f]{8}_'
     r'|^wmklein_crop_[0-9a-f]{8}\.png$')
 
 # A staged input is dead once its job can no longer run. The worst case is a full

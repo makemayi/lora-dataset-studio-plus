@@ -1120,7 +1120,10 @@ const TOPICS = [
     ['enabled engines', 'engine', 'engines', 'show', 'hide', 'generate panel', 'nanobanana', 'chatgpt', 'klein',
      'openrouter']),
   setting('engines.chatgpt_auth', 'engines', 'chatgpt-auth-mode', 'ChatGPT engine auth',
-    ['chatgpt', 'auth', 'subscription', 'api key', 'codex', 'oauth', 'openai']),
+    ['chatgpt', 'auth', 'subscription', 'api key', 'codex', 'oauth', 'openai',
+     // The third lane: people look for it by what they want to spend.
+     'comfyui', 'comfy.org', 'credits', 'api node', 'OpenAIGPTImage1',
+     'without an openai key', 'gpt through comfyui']),
   setting('klein.unet', 'engines', 'klein-model-unet', 'Klein diffusion model (UNET) file',
     ['klein', 'unet', 'diffusion model', 'model file', 'path', 'override', 'pin', 'custom model',
      'unreadable', 'corrupt', 'says missing',

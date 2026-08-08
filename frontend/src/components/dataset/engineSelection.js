@@ -272,12 +272,18 @@ export function totalImages(shotCount, engines, mode, multiplier = 1) {
  *  ChatGPT when it runs on the subscription lane (plan quota, not dollars).
  *  In split mode each engine only pays for ITS share — which is why the split
  *  is computed here rather than averaged. */
-export function estimateCost(shotCount, engines, mode, { multiplier = 1, gptViaSub = false } = {}) {
+export function estimateCost(shotCount, engines, mode,
+                             { multiplier = 1, gptViaSub = false, gptViaComfy = false } = {}) {
   const n = Math.max(0, Number(shotCount) || 0);
   const mult = Math.max(1, Number(multiplier) || 1);
   const list = canonicalEngines(engines);
   if (!list.length || !n) return 0;
-  const rate = (engine) => (engine === 'chatgpt' && gptViaSub ? 0 : ENGINE_RATES[engine] || 0);
+  // The ChatGPT lane decides whether this run costs DOLLARS here at all: the
+  // subscription spends a plan quota and the ComfyUI lane spends comfy.org
+  // credits, and quoting "$0.17/image" for either would be a made-up number in
+  // the one place the user checks before spending.
+  const rate = (engine) => (engine === 'chatgpt' && (gptViaSub || gptViaComfy)
+    ? 0 : ENGINE_RATES[engine] || 0);
   if (mode === 'all') return list.reduce((sum, e) => sum + n * mult * rate(e), 0);
   // split: round-robin share, same arithmetic as distributeVariations.
   return list.reduce((sum, e, i) => {
@@ -288,9 +294,9 @@ export function estimateCost(shotCount, engines, mode, { multiplier = 1, gptViaS
 
 /** The engines that actually BILL for this run — names the guard-rail confirm
  *  ("this will cost $X on …") without listing free lanes. */
-export function billingEngines(engines, { gptViaSub = false } = {}) {
+export function billingEngines(engines, { gptViaSub = false, gptViaComfy = false } = {}) {
   return canonicalEngines(engines).filter(
-    (e) => (ENGINE_RATES[e] || 0) > 0 && !(e === 'chatgpt' && gptViaSub));
+    (e) => (ENGINE_RATES[e] || 0) > 0 && !(e === 'chatgpt' && (gptViaSub || gptViaComfy)));
 }
 
 /** Why Generate is unavailable, or null when it can run. The empty selection is

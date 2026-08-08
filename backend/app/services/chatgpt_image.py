@@ -390,12 +390,26 @@ def _generate_via_api(ref_bytes: bytes | list[bytes], prompt: str, model: str | 
 
 def _use_subscription() -> bool:
     mode = cfg.get('engines.chatgpt_auth') or 'auto'
-    if mode == 'api':
+    if mode in ('api', 'comfyui'):
         return False
     if mode == 'subscription':
         return True
     from . import chatgpt_oauth
     return chatgpt_oauth.status()['connected']
+
+
+def resolve_lane(force_lane: str | None = None) -> str:
+    """'subscription' | 'comfyui' | 'api' — the ONE place that reads the mode.
+
+    Batch callers pin this once and pass it back as `force_lane`, so a
+    mid-batch change (a subscription token that expires, a settings save) can
+    never move later rows onto a different lane — and therefore onto a
+    different bill — than the one the batch started on."""
+    if force_lane in ('subscription', 'comfyui', 'api'):
+        return force_lane
+    if (cfg.get('engines.chatgpt_auth') or 'auto') == 'comfyui':
+        return 'comfyui'
+    return 'subscription' if _use_subscription() else 'api'
 
 
 def generate_variation(ref_bytes: bytes | list[bytes], prompt: str, model: str | None = None,
@@ -408,10 +422,19 @@ def generate_variation(ref_bytes: bytes | list[bytes], prompt: str, model: str |
     burning rows / silently falling back to the paid API key.
 
     `force_lane`: None -> decide from engines.chatgpt_auth (single-call
-    callers); 'subscription' | 'api' -> pinned lane (batch callers pin once so
-    a mid-batch disconnect can't reroute later rows onto the paid API key)."""
-    use_sub = (force_lane == 'subscription') or (force_lane is None and _use_subscription())
-    if use_sub:
+    callers); 'subscription' | 'comfyui' | 'api' -> pinned lane (batch callers
+    pin once so a mid-batch disconnect can't reroute later rows onto the paid
+    API key).
+
+    The `comfyui` lane sends the same shot to ComfyUI's OpenAI API node and
+    bills comfy.org credits instead of this account — see chatgpt_comfy. It is
+    still an API engine: the picture is generated on a third-party server, so
+    every fail-closed rule that applies to this module applies to it."""
+    lane = resolve_lane(force_lane)
+    if lane == 'comfyui':
+        from . import chatgpt_comfy
+        return chatgpt_comfy.generate_variation(ref_bytes, prompt, model, aspect_ratio)
+    if lane == 'subscription':
         refs = list(ref_bytes) if isinstance(ref_bytes, (list, tuple)) else [ref_bytes]
         return _generate_via_subscription(refs, prompt, aspect_ratio)
     return _generate_via_api(ref_bytes, prompt, model, aspect_ratio)

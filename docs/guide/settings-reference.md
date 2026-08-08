@@ -115,6 +115,17 @@ If you have a ChatGPT Plus/Pro plan, you can run the ChatGPT engine on your subs
 | `auto` *(default)* | Use the subscription when connected, otherwise fall back to the API key. |
 | `api` | API key only — ignore the subscription. |
 | `subscription` | Subscription only — never touch the API key. |
+| `comfyui` | Send the same shot to **ComfyUI's own OpenAI node** (`OpenAIGPTImage1`) and bill **comfy.org credits** instead of your OpenAI account. |
+
+**The ComfyUI lane, and what it is not.** It needs a **comfy.org API key** (Settings ▸ Engines, created at platform.comfy.org) — being signed into ComfyUI itself is not enough: ComfyUI reads API-node credentials only from the credentials sent with each prompt, and a request from this app carries no browser session. It also needs a ComfyUI new enough to expose that node; if yours doesn't, the lane says so by name instead of failing on the provider's side.
+
+Three things stay true on this lane, because they are what the choice actually changes:
+
+- **It is not local.** The picture is still made on OpenAI's servers, so ChatGPT remains an API engine and **NSFW cards still never leave your GPU** — the same fail-closed rule, unchanged by the extra hop.
+- **It takes a slot in your ComfyUI queue.** ComfyUI runs one prompt at a time, so a shot waiting on OpenAI holds the slot a Klein or Krea render would use. The two direct lanes stay available for exactly this reason.
+- **The price on the generate panel changes with it.** The ChatGPT card reads "· via ComfyUI / comfy.org credits" and drops out of the dollar estimate — quoting `~$0.17/image` for credits you bought elsewhere would be a made-up number on the screen where you decide whether to spend.
+
+**Quality** → `engines.chatgpt_comfy_quality` (`low` / `medium` / `high`, default **`high`**). It moves the credit cost per image, which is why it is a setting. Ignored by the two direct lanes. The catalog card's own ratio picks the node's `size`; a ratio the node has no size for asks it for `auto`.
 
 Good to know: in subscription mode you get up to **5 reference images** per generation (versus 16 on the API), your plan's image cap applies, and when the quota runs out mid-batch the remaining rows fail with a clear message — **the app never silently switches to your paid API key**.
 
@@ -1487,7 +1498,8 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `engines.default` | Default image-generation engine selected in the UI (`nanobanana`, `chatgpt`, `openrouter`, or `klein`). |
 | `engines.enabled` | List of engines shown as options in the UI, for NEW batches only — a 🔄 retry keeps the engine its tile was made with. Doubles as the engine catalogue: an engine added by an update is merged into a stored list on read, so a new engine reaches installs that already have saved settings. An engine you removed yourself is never added back. |
 | `engines.known` | Not a setting — the ledger of which engines the app was offering the last time this list was saved. It is what tells "this engine did not exist yet" apart from "I unticked it". Written automatically; `[]` (or absent) means the app assumes the pre-OpenRouter trio. Delete it to be re-offered every engine. |
-| `engines.chatgpt_auth` | Which credential the ChatGPT engine uses: `auto` (subscription when connected, else API key), `api`, or `subscription`. |
+| `engines.chatgpt_auth` | Which credential the ChatGPT engine uses: `auto` (subscription when connected, else API key), `api`, `subscription`, or `comfyui` (ComfyUI's OpenAI node, billed in comfy.org credits). |
+| `engines.chatgpt_comfy_quality` | `low`/`medium`/`high` (default `high`) asked of the ComfyUI lane's node. Moves the credit cost per image; ignored by the two direct lanes. |
 | `engines.openrouter_model` | Image model slug the OpenRouter engine requests. Free text; blank = `google/gemini-3-pro-image`. Must accept reference images. |
 | `engines.nanobanana_model` | Image model the Nano Banana engine requests. Free text; blank = the `NANOBANANA_MODEL` environment variable if set, else `gemini-3-pro-image`. Must accept reference images. |
 | `engines.chatgpt_image_model` | Image model the ChatGPT engine requests on the **API-key** lane. Free text; blank = the `CHATGPT_IMAGE_MODEL` environment variable if set, else `gpt-image-2` (the only model that needs no OpenAI organization verification). Must accept reference images. The subscription lane ignores it. |

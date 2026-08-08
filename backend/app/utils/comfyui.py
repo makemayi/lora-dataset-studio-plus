@@ -457,13 +457,23 @@ def _ensure_comfyui_before_generation():
         return None
 
 
-def queue_prompt_to_comfyui(prompt_workflow, client_id, worker_url=None):
+def queue_prompt_to_comfyui(prompt_workflow, client_id, worker_url=None, *,
+                            extra_data=None):
     """Envoie un workflow à ComfyUI pour exécution.
 
     Args:
         prompt_workflow: Workflow JSON ComfyUI (format API).
         client_id: Identifiant du client (user_id).
         worker_url: URL optionnelle du worker distant. Si None, utilise api_address() (local).
+        extra_data: merged into the `/prompt` body as ComfyUI's own `extra_data`.
+            The ONLY way to drive an API node (`api_node: True` in /object_info —
+            OpenAI, Gemini, Kling…): ComfyUI reads their credentials from
+            `extra_data.api_key_comfy_org` / `.auth_token_comfy_org` and NOWHERE
+            else — see its `execution.py`, which treats both as sensitive and
+            never persists them in the history entry. A headless caller must
+            therefore carry the key per prompt; there is no stored login to
+            inherit. Omitted (None) = a body byte-identical to before, which is
+            what every local-model lane sends.
     """
     if not prompt_workflow:
         return None, "Workflow data is missing"
@@ -573,6 +583,8 @@ def queue_prompt_to_comfyui(prompt_workflow, client_id, worker_url=None):
 
     try:
         payload = {"prompt": prompt_workflow, "client_id": client_id}
+        if extra_data:
+            payload["extra_data"] = dict(extra_data)
         headers = {'Content-Type': 'application/json'}
         response = requests.post(
             urljoin(api_addr, "/prompt"), json=payload, headers=headers, timeout=10,

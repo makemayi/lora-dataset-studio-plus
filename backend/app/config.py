@@ -30,7 +30,11 @@ load_dotenv(ENV_PATH)
 # and set_secrets() stamps os.environ on save, so changes apply without restart.
 SECRET_KEYS = ('GEMINI_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'HF_TOKEN',
                'HF_CLOUD_TOKEN', 'VAST_API_KEY', 'REDDIT_CLIENT_ID', 'CIVITAI_API_KEY',
-               'PEXELS_API_KEY', 'QWEN_API_KEY')
+               'PEXELS_API_KEY', 'QWEN_API_KEY',
+               # comfy.org key for ComfyUI's API nodes (the ChatGPT 'comfyui'
+               # lane). It rides in each prompt's extra_data, so it is a
+               # credential like the rest: .env, never config.json.
+               'COMFY_ORG_API_KEY')
 
 # A Krea install saved by a previous release can carry its old *defaults* in
 # config.json, so a changed DEFAULTS value alone would never reach it. This
@@ -133,7 +137,16 @@ DEFAULTS = {
                             'krea', 'minimax_h3'],
                 'known': [],
                 # chatgpt_auth: 'auto' = subscription when connected, else API key.
-                'chatgpt_auth': 'auto',            # auto|api|subscription
+                # 'comfyui' is the third lane: the SAME shot through ComfyUI's
+                # OpenAI API node, billed in comfy.org credits instead of this
+                # OpenAI account (services/chatgpt_comfy.py). Still an API
+                # engine — the picture is made on a third-party server — so the
+                # NSFW fail-closed rule is unchanged.
+                'chatgpt_auth': 'auto',            # auto|api|subscription|comfyui
+                # Quality asked of the ComfyUI lane's node: low|medium|high.
+                # It moves the credit cost, which is why it is a setting and not
+                # a constant. Ignored by the two direct lanes.
+                'chatgpt_comfy_quality': 'high',
                 # The Codex ROUTER model of the subscription lane — NOT the image
                 # model. The image model of the API-key lane is
                 # engines.chatgpt_image_model (below); the subscription lane

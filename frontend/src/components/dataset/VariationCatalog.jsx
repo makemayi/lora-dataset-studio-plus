@@ -680,8 +680,13 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
   // Effective ChatGPT lane: the subscription (ChatGPT Plus/Pro image quota) vs the
   // pay-per-use API key. Mirrors the backend "auto = subscription when connected".
   const gptSub = caps.chatgpt_subscription || {};
-  const gptViaSub = chatgptAuth === 'subscription'
-    || (chatgptAuth === 'auto' && !!gptSub.connected);
+  // Three lanes, three bills. 'comfyui' runs the same shot on ComfyUI's OpenAI
+  // node and spends comfy.org credits, so it is neither the plan quota nor the
+  // per-image dollar rate — saying either here would be a made-up number on the
+  // screen where the user decides whether to spend.
+  const gptViaComfy = chatgptAuth === 'comfyui';
+  const gptViaSub = !gptViaComfy && (chatgptAuth === 'subscription'
+    || (chatgptAuth === 'auto' && !!gptSub.connected));
   const gptPlanLabel = gptSub.plan && gptSub.plan !== 'free'
     ? gptSub.plan.charAt(0).toUpperCase() + gptSub.plan.slice(1)
     : 'Plus/Pro';
@@ -689,7 +694,8 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
   // SERVER's per-batch cap, published by /api/capabilities — mirrored so the
   // limit is explained before the click, never hardcoded here. A server that
   // doesn't publish it (older build) simply keeps the check off.
-  const runCost = estimateCost(selected.size, engines, engineMode, { multiplier, gptViaSub });
+  const runCost = estimateCost(selected.size, engines, engineMode,
+    { multiplier, gptViaSub, gptViaComfy });
   const blockedReason = generateBlockedReason({
     engines, shotCount: selected.size, mode: engineMode, multiplier,
     maxFanout: Number(caps.max_fanout) || 0,
@@ -972,8 +978,9 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
     // ChatGPT subscription lane, which spends plan quota, not dollars). On a
     // multi-engine run the amount is the WHOLE run's, and only the lanes that
     // really charge are named.
-    const cost = estimateCost(toGen.length, engines, engineMode, { multiplier, gptViaSub });
-    const billing = billingEngines(engines, { gptViaSub });
+    const cost = estimateCost(toGen.length, engines, engineMode,
+      { multiplier, gptViaSub, gptViaComfy });
+    const billing = billingEngines(engines, { gptViaSub, gptViaComfy });
     if (cost > 5 && !window.confirm(
       `This will launch ${totalImages(toGen.length, engines, engineMode, multiplier)} generation(s) `
       + `≈ $${cost.toFixed(2)} (${billing.map((e) => ENGINE_LABELS[e]).join(' + ')}).\n\nProceed?`)) return;
@@ -1172,17 +1179,22 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
         <EngineCard id="chatgpt" checked={isGPT} available={gptAvailable} generating={generating}
           onToggle={toggleEngine} share={engineShare('chatgpt')}
           icon={<ChatGptIcon className={`w-9 h-9 shrink-0 ${isGPT ? ENGINE_ACCENTS.chatgpt.icon : 'text-content-subtle'}`} />}
-          title={<>ChatGPT <span className="font-normal text-content-subtle">{gptViaSub ? '· subscription' : '· API'}</span></>}
+          title={<>ChatGPT <span className="font-normal text-content-subtle">
+            {gptViaComfy ? '· via ComfyUI' : gptViaSub ? '· subscription' : '· API'}</span></>}
           tags={[
             <span key="gpu" className="px-1.5 py-px rounded-full bg-app/60 border border-border text-content-muted text-[0.625rem]">No GPU</span>,
-            <span key="price" className="px-1.5 py-px rounded-full bg-app/60 border border-border text-content-muted text-[0.625rem]">{gptViaSub ? 'Plan quota' : '~$0.17/image'}</span>,
+            <span key="price" className="px-1.5 py-px rounded-full bg-app/60 border border-border text-content-muted text-[0.625rem]">
+              {gptViaComfy ? 'comfy.org credits' : gptViaSub ? 'Plan quota' : '~$0.17/image'}</span>,
             <span key="sfw" className="px-1.5 py-px rounded-full bg-app/60 border border-border text-content-muted text-[0.625rem]">SFW</span>,
           ]}
           hint={gptAvailable ? (
             <span className={`text-[0.625rem] ${isGPT ? ENGINE_ACCENTS.chatgpt.text : 'text-content-subtle'}`}>
               {/* The subscription lane renders on the plan's own image model and
                   ignores the Settings field, so only the API lane names it. */}
-              {gptViaSub
+              {gptViaComfy
+                ? <><span className="break-all">{chatgptImageModel || 'gpt-image-2'}</span>
+                    {' · runs on ComfyUI’s OpenAI node, billed in comfy.org credits'}</>
+                : gptViaSub
                 ? `gpt-image-2 · uses your ChatGPT ${gptPlanLabel} quota`
                 : <><span className="break-all">{chatgptImageModel || 'gpt-image-2'}</span>
                     {` · ${engineShare('chatgpt')} image(s) ≈ $${(engineShare('chatgpt') * 0.17).toFixed(2)}`}</>}

@@ -41,6 +41,11 @@ const ENGINE_SECRETS = [
       + 'is sent until you generate.' },
   { key: 'QWEN_API_KEY', label: 'DashScope API key', testTarget: 'qwen',
     help: 'Powers the Qwen Image engine (Alibaba). Get a key at https://bailian.console.aliyun.com (百炼).' },
+  { key: 'COMFY_ORG_API_KEY', label: 'comfy.org API key',
+    help: 'Only for the ChatGPT lane "Through ComfyUI" below: the same shot runs on '
+      + "ComfyUI's OpenAI node and is billed in comfy.org credits instead of your OpenAI "
+      + 'account. Create a key at platform.comfy.org — signing into ComfyUI itself is not '
+      + 'enough, because a request sent from here carries no browser session.' },
 ]
 
 const ENGINE_OPTIONS = [
@@ -1930,6 +1935,7 @@ const CHATGPT_AUTH_OPTIONS = [
   { id: 'auto', label: 'Auto — subscription when connected, otherwise API key' },
   { id: 'api', label: 'API key only' },
   { id: 'subscription', label: 'Subscription only' },
+  { id: 'comfyui', label: 'Through ComfyUI — billed in comfy.org credits' },
 ]
 
 /* ChatGPT subscription (Codex OAuth) — EXPERIMENTAL lane. Device-code login:
@@ -2050,6 +2056,14 @@ function ChatgptSubscriptionCard({ caps, config, setField, refreshCaps, toast, c
         <p className="mt-1 text-xs text-content-muted">
           When the subscription quota runs out mid-batch, remaining rows fail with a clear message — the app never silently switches to your paid API key.
         </p>
+        {config.engines.chatgpt_auth === 'comfyui' && (
+          <p className="mt-1 text-xs text-content-muted">
+            Needs the <strong>comfy.org API key</strong> above, and a ComfyUI new enough to expose
+            the <code>OpenAIGPTImage1</code> node. The shot still runs on OpenAI&apos;s servers, so
+            NSFW cards stay on your local engines exactly as before — and it takes a slot in your
+            ComfyUI queue while it waits, so a Klein or Krea render queues behind it.
+          </p>
+        )}
         <ResetToDefault label="ChatGPT engine auth" section="engines" field="chatgpt_auth"
           config={config} configDefaults={configDefaults} setField={setField} />
       </div>

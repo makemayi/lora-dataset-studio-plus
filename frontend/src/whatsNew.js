@@ -50,6 +50,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-09-chatgpt-through-comfyui',
+    date: '2026-08-09',
+    title: 'Run the ChatGPT engine on comfy.org credits, without an OpenAI key',
+    blurb:
+      "Settings ▸ Engines ▸ ChatGPT engine auth gains a third lane: \"Through ComfyUI\". The same shot runs on ComfyUI's own OpenAI node and is billed in comfy.org credits, so you can use the ChatGPT engine with no OpenAI account at all. It needs a comfy.org API key (create one at platform.comfy.org — being signed into ComfyUI is not enough, since a request from here carries no browser session) and a ComfyUI new enough to have the node; if yours doesn't, it says so by name. Two things stay true: the picture is still made on OpenAI's servers, so NSFW cards still never leave your GPU — and the shot holds a slot in your ComfyUI queue while it waits, so a Klein or Krea render queues behind it. The generate panel prices it as credits instead of dollars.",
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-09-all-five-angle-references',
     date: '2026-08-09',
     title: 'All five angle reference photos are open: profiles and back, not just the 45s',

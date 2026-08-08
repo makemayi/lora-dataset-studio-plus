@@ -1509,8 +1509,8 @@ def _run_nanobanana_batch(app, items, ref_bytes, engine='nanobanana', dataset_id
     # (via SubscriptionUnavailable below) closes that hole.
     force_lane = None
     if engine == 'chatgpt':
-        from .chatgpt_image import _use_subscription
-        force_lane = 'subscription' if _use_subscription() else 'api'
+        from .chatgpt_image import resolve_lane
+        force_lane = resolve_lane()
     # Set the moment ANY row hits the plan quota (or the pinned subscription
     # lane loses its token) — every later row would fail too, so the rest of
     # the batch fails fast instead of burning one call each.
