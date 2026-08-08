@@ -828,28 +828,14 @@ function KreaCard({ config, setField, configDefaults, caps }) {
           field="identity_lora_strength" value={identityStrength} {...reset} />
       </div>
 
-      <div className="mt-3 sm:max-w-md">
-        <label htmlFor="krea-ref-boost" className="block text-xs font-medium text-content">
-          Reference boost ({boost})
-        </label>
-        <input
-          id="krea-ref-boost"
-          type="range"
-          min={KREA_REF_BOOST_MIN}
-          max={KREA_REF_BOOST_MAX}
-          step={0.25}
-          value={boost}
-          onChange={(e) => setField('krea', 'ref_boost', Number(e.target.value))}
-          className="mt-1 w-full accent-violet-500"
-        />
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
-          How hard the source latent is pushed back into the model each step — the same
-          consistency ↔ prompt dial as grounding above, at a different pipeline stage.
-          <b>Higher</b> = stronger identity retention, less room for the prompt to change
-          pose/outfit/scene; <b>lower</b> = more freedom, weaker likeness.
-        </p>
-        <ResetToDefault label="Reference boost" section="krea" field="ref_boost" {...reset} />
-      </div>
+      {/* The fork's own "Reference boost" slider used to live here, on the same
+          `krea.ref_boost` key as "Reference pull" above. The 2026-08-08 upstream
+          merge kept BOTH — two sliders, one value, one duplicated DOM id — and
+          this one still read a `boost` variable the merge had renamed, so the
+          whole Engines section threw and the Settings page would not open. One
+          dial per value: the clamped one above survives (it refuses an
+          out-of-range value instead of storing it), and the per-framing
+          overrides below are unaffected. */}
 
       <div id="krea-ref-boost-by-framing" className="mt-3 sm:max-w-md">
         <p className="block text-xs font-medium text-content">
@@ -877,7 +863,7 @@ function KreaCard({ config, setField, configDefaults, caps }) {
                   min={KREA_REF_BOOST_MIN}
                   max={KREA_REF_BOOST_MAX}
                   step={0.25}
-                  placeholder={String(boost)}
+                  placeholder={String(refBoost)}
                   value={value}
                   onChange={(e) => setField('krea', 'ref_boost_by_framing',
                     { ...dflt('ref_boost_by_framing'), ...byFraming,
