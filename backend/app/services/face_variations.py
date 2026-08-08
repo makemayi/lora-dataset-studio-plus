@@ -1176,6 +1176,49 @@ _KREA_POSE_RIGHT = re.compile(
 _KREA_POSE_SIDE_ISH_CN = re.compile(r'侧脸|侧面|半侧|半边|三分之二')
 
 
+# HOW FAR round the head is turned, for the 45 vs 90 slots. Bare numbers are
+# deliberately NOT enough ("90s fashion", "45 mm lens"): an explicit degree needs
+# a degree marker, except for the Chinese 左45/右45 shorthand, which is already a
+# direction word. Everything else falls back to the shared English cues below.
+_KREA_POSE_DEGREE_90 = re.compile(
+    r'\b90\s*(?:°|degrees?\b|deg\b)|90\s*度|九十度|正侧面?|全侧', re.I)
+_KREA_POSE_DEGREE_45 = re.compile(
+    r'\b45\s*(?:°|degrees?\b|deg\b)|45\s*度|四十五度|[左右]45|半侧|半边|三分之二', re.I)
+
+
+def krea_pose_degree(text: str) -> int | None:
+    """How far round the shot turns the subject: 90 (a true profile), 45 (a
+    three-quarter view), or None when nothing states a degree.
+
+    "side view" reads as 90 here, not as None: `_KREA_PROFILE_VIEW` has always
+    matched it and `_krea_angle_kind` answers 'profile' for it, so reading it any
+    other way would put two answers to "is this a profile" in one file. The
+    Chinese side words (侧脸, 侧面) land on None instead — they never clear that
+    English-only gate, the same divergence `krea_pose_direction` documents.
+
+    Separate from `krea_pose_direction` on purpose: direction picks WHICH side,
+    this picks WHICH slot on that side, and a prompt very often names one
+    without the other. None is a real answer, not a failure — the caller prefers
+    the 45 slot for it, which is what every dataset built before the 90 slots
+    existed already relies on.
+
+    Explicit degrees win over the English cues so "left profile, 45°" (a user
+    correcting the card's wording) is read as the user meant it."""
+    text = text or ''
+    if _KREA_POSE_DEGREE_90.search(text):
+        return 90
+    if _KREA_POSE_DEGREE_45.search(text):
+        return 45
+    # The catalog's own wording: "Face 3/4 left" vs "strict left profile view".
+    # _krea_true_profile_view already excludes three-quarter, so the order here
+    # only matters for text carrying both.
+    if _KREA_THREE_QUARTER_VIEW.search(text):
+        return 45
+    if _krea_true_profile_view(text):
+        return 90
+    return None
+
+
 def krea_pose_direction(text: str) -> str | None:
     """Which angle-slot direction this shot's text asks for.
 

@@ -248,11 +248,12 @@ def remove_extra_ref(user_id, dataset_id, filename) -> bool:
 # --- Angle reference photos (pose slots) — Krea 2 Edit only -----------------
 # `front` is NOT one of these — it stays FaceDataset.ref_filename/ref_original_filename.
 POSE_SLOT_KEYS = ('left45', 'right45', 'back', 'left90', 'right90')
-# v1 wires only these two through the upload UI and the Krea detector's direct
-# hits. The other three exist in the schema/API today (a later wave opens the
-# UI button, nothing else) — 'back' already resolves through
-# krea_pose_direction, it just has no enabled row to find yet on any dataset.
-POSE_SLOT_ACTIVE_KEYS = ('left45', 'right45')
+# All five are wired end to end since 2026-08-09 (upload UI + detector). The
+# SIDE ones are singled out because a bare "side view" — a side cue with no
+# left/right word — may only ever be answered by a side slot: 'back' answers a
+# different question than the prompt asked, and picking it would be a guess
+# rather than a match.
+POSE_SLOT_SIDE_KEYS = ('left45', 'right45', 'left90', 'right90')
 
 
 def _pose_slot_row(ds, pose_key):

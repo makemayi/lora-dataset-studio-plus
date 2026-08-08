@@ -148,7 +148,8 @@ const TOPICS = [
   // only exposes H2s as deep-link anchors, so the new subsection below lives
   // under that same anchor rather than minting its own.
   { id: 'krea-pose-slots', kind: 'setting', title: 'Angle reference photos (Krea 2 Edit)',
-    keywords: ['pose slot', 'angle reference', 'left45', 'right45', 'side view', 'profile',
+    keywords: ['pose slot', 'angle reference', 'left45', 'right45', 'left90', 'right90',
+      'back', 'from behind', 'rear view', '90', '45', 'side view', 'profile',
       'three-quarter', 'krea', 'mirror', 'flip', '180', 'crop'],
     guide: { chapter: 'settings-reference', anchor: 'image-engines' },
     app: { route: '/datasets?section=add&panel=reference' } },

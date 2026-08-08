@@ -222,9 +222,17 @@ Outfits and expressions are steered differently here than on the other engines: 
 
 A shot that asks for a side or three-quarter view still only had the FRONT reference to work from, so its pull constantly fought the prompt's angle request — often winning, which is why a "left profile" card could render close to front-on anyway.
 
-Per dataset, you can upload a **Left 45°** and/or **Right 45°** reference photo next to the primary one (✂ crop works the same way as the primary reference; a one-click ⇋ 180° mirror is new to angle slots — the primary reference has no mirror action). Each one has its own **On** checkbox — uploading a photo does NOT enable it by itself. When a shot's prompt names a matching angle (English or Chinese: "left profile", "右侧", "three-quarter left", "左45度"...) and that slot is enabled, Krea uses ITS photo instead of the front one for that one shot; every other shot keeps using the front reference exactly as before. A side/three-quarter request with no left/right word (bare "side view") uses whichever ONE angle slot is enabled — if both are enabled, or neither is, it falls back to the front reference rather than guess.
+Per dataset, you can upload **five** angle reference photos next to the primary one — **Left 45°**, **Right 45°**, **Left 90°**, **Right 90°** and **Back** (✂ crop works the same way as the primary reference; a one-click ⇋ 180° mirror is new to angle slots — the primary reference has no mirror action). Each one has its own **On** checkbox — uploading a photo does NOT enable it by itself. When a shot's prompt names a matching angle (English or Chinese: "left profile", "右侧", "three-quarter left", "左45度", "from behind", "背面"...) and that slot is enabled, Krea uses ITS photo instead of the front one for that one shot; every other shot keeps using the front reference exactly as before.
 
-A dataset that never uploads an angle photo behaves exactly as it always has — this is purely additive. Klein and the API engines never read these photos at all; they are Krea 2 Edit only. `back`, `left 90°` and `right 90°` slots are reserved for a later wave.
+Which of the five answers a given shot:
+
+- **The side comes from the words, the degree from the phrasing.** The catalog's own wording decides: "strict left profile view" (and a bare "side view") is a 90° shot, "3/4 left" a 45° one. An explicit degree you type — "left side view, 90°", "右45度" — wins over both.
+- **The other photo of the same side is the fallback, not the front one.** A profile card on a dataset that only uploaded the 45° photo uses that photo: it is still that side of the face, and the front reference is the thing this feature exists to stop using for an angled shot.
+- **"Side view" with no left/right word** is narrowed by its degree first, then answered only if exactly ONE enabled slot is left. Both profiles enabled and no side named? It falls back to the front reference rather than guess.
+- **Back never stands in for a side, and no side stands in for back.** Facing away is a different shot, not a stronger side view.
+- Chinese side words (侧脸, 侧面) state a side without stating a degree, and prefer the 45° slot — the same answer datasets built before the 90° slots existed already got.
+
+A dataset that never uploads an angle photo behaves exactly as it always has — this is purely additive. Klein and the API engines never read these photos at all; they are Krea 2 Edit only.
 
 Mirror then crop, in that order, silently loses the mirror: crop always re-derives the working photo from the untouched original you uploaded, so it has no way to know a mirror ever happened. Crop first if you need both.
 

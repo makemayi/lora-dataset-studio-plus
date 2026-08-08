@@ -1,15 +1,24 @@
 import { useRef, useEffect } from 'react';
 import { imageFromClipboard } from './clipboardImage';
 
-// v1 wires only these two through the backend detector (krea_pose_direction).
-// The other three (back/left90/right90) exist in the API/schema already — this
-// list is the ONLY change needed to open one later.
-const ACTIVE_POSE_KEYS = ['left45', 'right45'];
-const RESERVED_POSE_KEYS = ['back', 'left90', 'right90'];
+// All five, wired end to end since 2026-08-09. The order is the order they are
+// drawn in: the two three-quarter slots first because they are the ones a shot
+// catalog asks for most, then the profiles, then the back.
+const ACTIVE_POSE_KEYS = ['left45', 'right45', 'left90', 'right90', 'back'];
 
 const POSE_LABELS = {
   left45: 'Left 45°', right45: 'Right 45°',
   back: 'Back', left90: 'Left 90°', right90: 'Right 90°',
+};
+
+// What each slot answers, so the card says which shots it will be used for
+// rather than leaving the degree to be guessed from its name.
+const POSE_HINTS = {
+  left45: 'three-quarter left',
+  right45: 'three-quarter right',
+  left90: 'strict left profile',
+  right90: 'strict right profile',
+  back: 'from behind',
 };
 
 export default function PoseSlotPanel({ datasetId, poseSlots = {}, busy, importBusy = busy,
@@ -78,7 +87,10 @@ export default function PoseSlotPanel({ datasetId, poseSlots = {}, busy, importB
                 </>
               )}
             </div>
-            <span className="text-content-subtle text-[0.625rem]">{POSE_LABELS[poseKey]}</span>
+            <span className="text-content-subtle text-[0.625rem] text-center leading-tight"
+              title={`Used for shots asking for ${POSE_HINTS[poseKey]}`}>
+              {POSE_LABELS[poseKey]}
+            </span>
             {slot.filename && (
               <label className="flex items-center gap-1 text-[0.625rem] text-content-muted cursor-pointer">
                 <input type="checkbox" checked={!!slot.enabled} disabled={busy}
@@ -96,14 +108,6 @@ export default function PoseSlotPanel({ datasetId, poseSlots = {}, busy, importB
           </div>
         );
       })}
-      {RESERVED_POSE_KEYS.map((poseKey) => (
-        <div key={poseKey} className="flex flex-col items-center gap-1 w-16 opacity-40">
-          <div className="w-16 h-16 rounded-lg border border-dashed border-border-strong flex items-center justify-center text-content-subtle text-[0.625rem] text-center px-1">
-            Coming soon
-          </div>
-          <span className="text-content-subtle text-[0.625rem]">{POSE_LABELS[poseKey]}</span>
-        </div>
-      ))}
     </div>
   );
 }

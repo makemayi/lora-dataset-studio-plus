@@ -67,7 +67,7 @@ from .face_variations import (CAPTION_PROMPT, CAPTION_PROMPT_BOORU,
                               drop_identity_sentences, drop_identity_tags,
                               is_nsfw_label, prompt_by_label, wrap_variation,
                               wrap_variation_klein, wrap_variation_krea,
-                              krea_pose_direction,
+                              krea_pose_direction, krea_pose_degree,
                               get_identity_prompt,
                               normalize_subject_type,
                               KLEIN_IMAGE_IMPROVE_PROMPT)
@@ -489,7 +489,21 @@ def _read_external_reference(path, *, label: str) -> bytes:
     return sanitize_external_reference(raw, label=label)
 
 
-_POSE_DIRECTION_TO_KEY = {'left': 'left45', 'right': 'right45', 'back': 'back'}
+def _pose_slot_preference(direction, degree) -> tuple:
+    """The slots that answer this shot, best first.
+
+    A side direction resolves to a DEGREE PAIR, not one key: the 45 and 90 slots
+    are two photos of the same side, so when the one the text asked for is not
+    there, the other side-of-the-same-face still beats the front reference —
+    which is the photo this whole feature exists to stop using. An unstated
+    degree (bare "side view left") prefers 45: it is the ordinary three-quarter
+    shot, and it is what every dataset built before the 90 slots opened has."""
+    if direction == 'back':
+        return ('back',)
+    if direction not in ('left', 'right'):
+        return ()
+    asked = 90 if degree == 90 else 45
+    return (f'{direction}{asked}', f'{direction}{45 if asked == 90 else 90}')
 
 
 def _krea_pose_source_path(ds, prompt_text) -> str:
@@ -499,19 +513,27 @@ def _krea_pose_source_path(ds, prompt_text) -> str:
     branch below falls through to the last line — byte-identical to before
     this feature existed."""
     direction = krea_pose_direction(prompt_text)
+    degree = krea_pose_degree(prompt_text)
     enabled = enabled_pose_slot_paths(ds)
     if direction == 'ambiguous':
-        # Only left45/right45 are side-facing candidates for this heuristic —
-        # 'ambiguous' means "some side/three-quarter cue, no left/right word",
-        # so a lone 'back' (or a future left90/right90) slot must NOT be picked
-        # up here: it answers a different question than the prompt asked.
-        side_enabled = {k: v for k, v in enabled.items() if k in POSE_SLOT_ACTIVE_KEYS}
+        # 'ambiguous' means "some side/three-quarter cue, no left/right word", so
+        # only SIDE slots may answer it — a lone 'back' slot answers a different
+        # question than the prompt asked. With one candidate the choice is not a
+        # guess; with two it would be, and the front reference is the honest
+        # answer. A stated degree narrows the pool FIRST, which is how a dataset
+        # carrying all four side photos can still answer "profile view".
+        side_enabled = {k: v for k, v in enabled.items() if k in POSE_SLOT_SIDE_KEYS}
+        if degree:
+            at_degree = {k: v for k, v in side_enabled.items()
+                         if k.endswith(str(degree))}
+            if at_degree:
+                side_enabled = at_degree
         if len(side_enabled) == 1:
             return next(iter(side_enabled.values()))
         return _ref_path(ds)
-    pose_key = _POSE_DIRECTION_TO_KEY.get(direction)
-    if pose_key and pose_key in enabled:
-        return enabled[pose_key]
+    for pose_key in _pose_slot_preference(direction, degree):
+        if pose_key in enabled:
+            return enabled[pose_key]
     return _ref_path(ds)
 
 
@@ -3624,7 +3646,7 @@ from .reference_photos_service import (
     extra_ref_filenames, sanitize_external_reference, _all_ref_bytes, _extra_ref_paths,
     extra_ref_original_name, extra_ref_crop_source,
     add_extra_ref, crop_extra_ref, remove_extra_ref,
-    POSE_SLOT_KEYS, POSE_SLOT_ACTIVE_KEYS, pose_slot_rows, enabled_pose_slot_paths,
+    POSE_SLOT_KEYS, POSE_SLOT_SIDE_KEYS, pose_slot_rows, enabled_pose_slot_paths,
     set_pose_slot, crop_pose_slot, mirror_pose_slot, set_pose_slot_enabled, remove_pose_slot,
 )
 

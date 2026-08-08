@@ -1239,6 +1239,57 @@ def test_krea_pose_direction_none_for_a_front_shot():
     assert fv.krea_pose_direction(None) is None
 
 
+def test_krea_pose_degree_reads_the_catalogs_own_wording():
+    """The 45 and 90 slots are chosen by THIS function, and the two phrasings it
+    has to tell apart are the catalog's own: 'strict left profile view' against
+    'Face 3/4 left'."""
+    assert fv.krea_pose_degree('close-up portrait, strict left profile view') == 90
+    assert fv.krea_pose_degree('three-quarter view, right side') == 45
+    assert fv.krea_pose_degree('face 3/4 left, slight smile') == 45
+
+
+def test_krea_pose_degree_follows_the_existing_classifier_on_side_view():
+    """"side view" is read as a PROFILE here, not as an unstated degree — that
+    is what `_KREA_PROFILE_VIEW` has always matched, and `_krea_angle_kind`
+    answers 'profile' for the same text. Two different answers to "is this a
+    profile" in one file is the drift this reuse exists to prevent. A dataset
+    that only has the 45 photo is unaffected: the picker falls back to the other
+    slot on the SAME side before it ever returns to the front reference."""
+    assert fv.krea_pose_degree('side-view portrait, neutral expression') == 90
+    assert fv._krea_angle_kind('side-view portrait, neutral expression') == 'profile'
+
+
+def test_krea_pose_degree_is_none_when_nothing_states_a_degree():
+    """None is an answer, not a failure: the caller prefers the 45 slot for it,
+    which is what every dataset built before the 90 slots existed relies on.
+    Chinese side words land here because the shared English gate never sees
+    them — `krea_pose_direction` documents that same divergence."""
+    assert fv.krea_pose_degree('侧面照,自然表情') is None
+    assert fv.krea_pose_degree('左侧脸,自然表情') is None
+    assert fv.krea_pose_degree('front view, neutral expression') is None
+    assert fv.krea_pose_degree('') is None
+    assert fv.krea_pose_degree(None) is None
+
+
+def test_krea_pose_degree_reads_an_explicit_degree_in_either_language():
+    assert fv.krea_pose_degree('left side view, 90°') == 90
+    assert fv.krea_pose_degree('side view at 45 degrees') == 45
+    assert fv.krea_pose_degree('右45度侧脸') == 45
+    assert fv.krea_pose_degree('正侧面,自然表情') == 90
+    # An explicit degree beats the English cue, so a user correcting a card's
+    # wording is read as they meant it.
+    assert fv.krea_pose_degree('left profile view, 45 degrees') == 45
+
+
+def test_krea_pose_degree_ignores_numbers_that_are_not_degrees():
+    """A bare number is never a degree — a decade and a focal length both carry
+    one, and neither says how far the head is turned."""
+    assert fv.krea_pose_degree('90s fashion, front view') is None
+    assert fv.krea_pose_degree('shot on a 45 mm lens, front view') is None
+    # ...and a real degree still wins over the English cue in the same sentence.
+    assert fv.krea_pose_degree('90s fashion, three-quarter left, 90°') == 90
+
+
 def test_krea_pose_direction_agrees_with_krea_angle_kind_on_what_counts_as_side_ish():
     """The two classifiers must never disagree about whether a text IS a
     profile/three-quarter shot — only about which angle-kind SUBTYPE or which

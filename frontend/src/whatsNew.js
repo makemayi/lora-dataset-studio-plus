@@ -50,6 +50,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-09-all-five-angle-references',
+    date: '2026-08-09',
+    title: 'All five angle reference photos are open: profiles and back, not just the 45s',
+    blurb:
+      "Left 90°, Right 90° and Back stop saying \"coming soon\" — upload, crop, mirror and enable them like the two 45° slots you already had. Krea 2 Edit now reads the degree as well as the side: a \"strict left profile\" card takes your Left 90° photo, a \"3/4 left\" card takes Left 45°, and a shot from behind takes Back. Uploaded only one of a pair? The other photo of that same side answers instead — still that side of the face, which beats going back to the front reference. Back never stands in for a side view, and a side view never stands in for back.",
+    to: '/datasets?section=add&panel=reference',
+  },
+  {
     id: '2026-08-09-h3-shots-are-shaped-by-the-card',
     date: '2026-08-09',
     title: 'MiniMax H3 stops making every shot the shape of your reference photo',

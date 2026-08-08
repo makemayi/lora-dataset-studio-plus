@@ -12,9 +12,19 @@ test('renders one card per POSE_SLOT_KEYS entry, in a fixed order', () => {
   assert.match(src, /right90/);
 });
 
-test('only left45 and right45 are interactive — the other three are disabled placeholders', () => {
-  assert.match(src, /ACTIVE_POSE_KEYS|left45.*right45/);
-  assert.match(src, /coming soon|Coming soon|敬请期待/i);
+test('all five slots are interactive — no placeholder card is left', () => {
+  // One list, one map: a slot that renders is a slot the detector can pick, so
+  // the panel cannot drift back into offering an upload that nothing reads.
+  assert.match(src, /ACTIVE_POSE_KEYS\s*=\s*\[[^\]]*left45[^\]]*right45[^\]]*left90[^\]]*right90[^\]]*back[^\]]*\]/s);
+  assert.doesNotMatch(src, /RESERVED_POSE_KEYS/);
+  assert.doesNotMatch(src, /coming soon|敬请期待/i);
+});
+
+test('each card says which shots it answers, not just its degree', () => {
+  assert.match(src, /POSE_HINTS/);
+  assert.match(src, /strict left profile/);
+  assert.match(src, /three-quarter right/);
+  assert.match(src, /from behind/);
 });
 
 test('each active card offers upload, crop, mirror and an enabled checkbox', () => {

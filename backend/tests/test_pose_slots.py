@@ -1,5 +1,6 @@
-"""Angle reference photos for Krea 2 Edit (pose slots): left45/right45 now,
-back/left90/right90 reserved for a later wave. See
+"""Angle reference photos for Krea 2 Edit (pose slots). All five keys —
+left45/right45/left90/right90/back — are wired end to end since 2026-08-09; the
+first two shipped alone on 2026-08-03. See
 docs/superpowers/specs/2026-08-03-krea-pose-slots-design.md.
 """
 import io
@@ -383,3 +384,117 @@ def test_each_variation_in_one_batch_picks_its_own_source(app, monkeypatch):
              {'label': 'b', 'prompt': 'left profile view', 'framing': 'face'}], 1)
     assert seen[0]['source_path'] == expected_front
     assert seen[1]['source_path'] == expected_left
+
+
+# --- the other three slots (back / left90 / right90), wired 2026-08-09 --------
+
+def _krea_dataset_with_pose_slots(*pose_keys):
+    """A Krea dataset carrying SEVERAL enabled slots — the case the degree
+    preference and the ambiguous narrowing only differ on."""
+    ds = svc.create_dataset('local', 'ds', 'trg', train_type='krea')
+    folder = svc._dataset_path(ds.id)
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, 'ref.webp'), 'wb') as fh:
+        fh.write(svc.normalize_to_webp(_png(512, 512)))
+    ds.ref_filename = 'ref.webp'
+    db.session.commit()
+    for index, pose_key in enumerate(pose_keys):
+        svc.set_pose_slot('local', ds.id, pose_key,
+                          _png(600, 600, (30 + index * 20, 30, 30)))
+        svc.set_pose_slot_enabled('local', ds.id, pose_key, True)
+    return ds
+
+
+def _sources_for(app, monkeypatch, ds_factory, prompt):
+    """The source_path Krea would read for one shot."""
+    from app.services import krea_edit_helper as keh
+    seen = []
+    monkeypatch.setattr(keh, 'preflight', lambda *a, **k: None)
+    monkeypatch.setattr(keh, 'enqueue_krea_edit',
+                        lambda **kw: (seen.append(kw), 'job')[1])
+    with app.app_context():
+        ds = ds_factory()
+        paths = dict(svc.enabled_pose_slot_paths(ds))
+        paths['front'] = svc._ref_path(ds)
+        svc.generate_variations_krea(
+            'local', ds.id,
+            [{'label': 'a', 'prompt': prompt, 'framing': 'face'}], 1)
+    return seen[0]['source_path'], paths
+
+
+def test_a_profile_shot_reads_the_90_slot_when_there_is_one(app, monkeypatch):
+    """The catalog ships 'strict left profile view' cards; until this wave they
+    could only ever be answered by the 45 photo (or the front one)."""
+    source, paths = _sources_for(
+        app, monkeypatch, lambda: _krea_dataset_with_pose_slots('left90'),
+        'close-up portrait, strict left profile view, neutral')
+    assert source == paths['left90']
+
+
+def test_the_stated_degree_wins_when_both_slots_of_that_side_exist(app, monkeypatch):
+    """Both photos are of the same side, so the choice is the degree, and the
+    text states it. A 45 answer here would be the old behaviour surviving."""
+    source, paths = _sources_for(
+        app, monkeypatch,
+        lambda: _krea_dataset_with_pose_slots('left45', 'left90'),
+        'close-up portrait, strict left profile view, neutral')
+    assert source == paths['left90']
+
+
+def test_the_same_side_slot_answers_when_the_asked_degree_is_missing(app, monkeypatch):
+    """A three-quarter card with only a 90 photo uploaded: the other photo of
+    that side is still a photo of that side, and the front reference is the one
+    thing this feature exists to stop using for an angled shot."""
+    source, paths = _sources_for(
+        app, monkeypatch, lambda: _krea_dataset_with_pose_slots('left90'),
+        'face 3/4 left, slight smile')
+    assert source == paths['left90']
+
+
+def test_a_back_shot_reads_the_back_slot(app, monkeypatch):
+    """`back` needed no detector work — `krea_pose_direction` has answered
+    'back' since the first version; it simply had no slot to find."""
+    source, paths = _sources_for(
+        app, monkeypatch, lambda: _krea_dataset_with_pose_slots('back'),
+        'full body, shot from behind, standing')
+    assert source == paths['back']
+
+
+def test_a_back_shot_never_borrows_a_side_slot(app, monkeypatch):
+    """Facing away is not a side view: with only side photos uploaded, a back
+    card keeps the front reference rather than answering with a profile."""
+    source, paths = _sources_for(
+        app, monkeypatch,
+        lambda: _krea_dataset_with_pose_slots('left45', 'left90'),
+        'full body, shot from behind, standing')
+    assert source == paths['front']
+
+
+def test_a_side_cue_without_a_direction_is_narrowed_by_its_degree(app, monkeypatch):
+    """'side view' states a degree (a profile) but not a side. With one profile
+    photo and one three-quarter photo enabled, the degree leaves exactly one
+    candidate — so this is a match, not a guess."""
+    source, paths = _sources_for(
+        app, monkeypatch,
+        lambda: _krea_dataset_with_pose_slots('left90', 'right45'),
+        'side-view portrait, neutral expression')
+    assert source == paths['left90']
+
+
+def test_a_side_cue_with_two_candidates_at_that_degree_stays_on_the_front(app, monkeypatch):
+    """Both profiles enabled and no left/right word: nothing here says which
+    side, and the front reference beats a coin flip."""
+    source, paths = _sources_for(
+        app, monkeypatch,
+        lambda: _krea_dataset_with_pose_slots('left90', 'right90'),
+        'side-view portrait, neutral expression')
+    assert source == paths['front']
+
+
+def test_a_back_slot_never_answers_a_side_cue_with_no_direction(app, monkeypatch):
+    """The rule that survived the widening: 'side view' may only ever be
+    answered by a SIDE slot, even when the back slot is the only one enabled."""
+    source, paths = _sources_for(
+        app, monkeypatch, lambda: _krea_dataset_with_pose_slots('back'),
+        'side-view portrait, neutral expression')
+    assert source == paths['front']
