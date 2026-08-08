@@ -117,7 +117,8 @@ DEFAULTS = {
     # of which engines the app offered the last time the user picked, written by
     # save_config; [] means "no ledger yet".
     'engines': {'default': 'chatgpt',
-                'enabled': ['nanobanana', 'chatgpt', 'openrouter', 'qwen', 'klein', 'krea'],
+                'enabled': ['nanobanana', 'chatgpt', 'openrouter', 'qwen', 'klein',
+                            'krea', 'minimax_h3'],
                 'known': [],
                 # chatgpt_auth: 'auto' = subscription when connected, else API key.
                 'chatgpt_auth': 'auto',            # auto|api|subscription
@@ -482,6 +483,47 @@ DEFAULTS = {
         # Final output size, both paths. 2.0 is the calibrated default;
         # raise for more detail (slower), lower to speed either path up.
         'max_output_mp': 2.0,
+    },
+    # MiniMax H3 — the THIRD local generation engine (services/minimax_h3_helper.py).
+    # An identity engine like Krea, reached through a VIDEO model: it samples a
+    # short frame packet from one reference photo and keeps the best single frame.
+    # Blank/absent file keys mean "find it yourself", same contract as `krea`.
+    'minimax_h3': {
+        # Blank = auto-resolve the Ref2VA model under any diffusion-model root
+        # (any quantisation). The fl2va sibling is excluded by name: it loads and
+        # then does a different job. Set a filename to pin one build.
+        'base_model': '',
+        # Frames sampled per shot. The node's own minimum is 5 and its step is
+        # 17 (5, 22, 39 ...); we run the FLOOR because we want stills, and every
+        # extra frame is sampled at full cost. More frames = more candidates for
+        # the selector, which is the only reason to raise it.
+        'length': 5,
+        'steps': 25,
+        # THE identity <-> speed dial, H3's answer to krea.grounding_px:
+        # 'match' scales the reference to the generation's pixel area, 'max' uses
+        # the 2048px reference pipeline for the best likeness and is, per the
+        # node's own tooltip, several times slower — reference tokens ride
+        # through every sampling step.
+        'ref_image_size': 'match',
+        # The reference is downscaled to this longer edge BEFORE it reaches the
+        # 32B vision encoder. Every reference pixel is paid for on each prompt
+        # change; 1024 was the measured working point.
+        'ref_longer_edge': 1024,
+        # How much "looks like the reference photo" counts when picking which
+        # frame of the packet to keep, against sharpness and exposure. Non-zero
+        # because a dataset wants likeness — but UNVERIFIED: on a 5-frame packet
+        # raising it changed nothing, since the sharpest frame was also the most
+        # reference-like. It earns its keep at higher `length`.
+        'frame_weight_reference': 1.0,
+        # Two DEGRADATION switches, not features. On means "use these when the
+        # ComfyUI actually has them": the speed nodes (Spectrum forecasting +
+        # Sage attention) do not change the image, and the RTX upscaler is
+        # NVIDIA-only, so a card without it loses the 2x rather than the engine.
+        'use_speed_nodes': True,
+        'use_rtx_upscale': True,
+        # Measured at 1 MP. Larger canvases are untested here and cost five
+        # times more than they look, because the model samples a packet.
+        'max_output_mp': 1.0,
     },
     # The ✨ Upscale & improve pass — which engine runs it. Its own namespace
     # rather than a key under `klein`, because the whole point of the setting is

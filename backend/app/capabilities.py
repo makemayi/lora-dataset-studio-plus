@@ -1490,6 +1490,18 @@ def probe(force=False) -> dict:
     krea_blocking_invalid = any(i['blocking'] for i in krea_invalid)
     krea_ready = (comfy['ok'] and not krea_missing and not krea_nodes_missing
                   and not krea_blocking_invalid)
+    # MiniMax H3 — the third LOCAL engine. Five assets and ONE mandatory node
+    # pack (the frame selector); the three speed nodes and the RTX upscaler are
+    # optional by design and must never gate readiness, or an ordinary install
+    # would show the engine as unavailable for accelerators it does not need.
+    from .services import minimax_h3_helper as _mh3
+    h3_missing = _mh3.h3_missing_assets()
+    h3_nodes_missing = _mh3.h3_missing_nodes() if comfy['ok'] else []
+    h3_ready = comfy['ok'] and not h3_missing and not h3_nodes_missing
+    # Advisory, never a gate: ComfyUI started WITHOUT --disable-dynamic-vram
+    # still generates, it just pages VRAM and takes several times longer at
+    # random. Published so the engine card can say so before a batch, not after.
+    h3_vram_warning = _mh3.dynamic_vram_warning() if h3_ready else None
     # SeedVR2 — the fidelity upscaler (issue #32). Same three-part shape as Krea
     # (weights on disk / node pack present / weights actually loadable), because
     # it has the same three ways to be half-installed. It is NOT a generation
@@ -1535,6 +1547,15 @@ def probe(force=False) -> dict:
             'qwen': qwen_['ok'],
             'klein': klein_ready,
             'krea': krea_ready,
+            'minimax_h3': h3_ready,
+        },
+        'minimax_h3': {
+            'ready': h3_ready,
+            'missing': h3_missing,
+            'missing_files': _mh3.missing_file_entries(h3_missing),
+            'missing_nodes': h3_nodes_missing,
+            'node_hints': _mh3.h3_node_hints(h3_nodes_missing),
+            'vram_warning': h3_vram_warning,
         },
         'chatgpt_subscription': {
             'connected': sub_status['connected'],
