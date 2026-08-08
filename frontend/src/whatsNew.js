@@ -61,7 +61,7 @@ export const WHATS_NEW = [
     date: '2026-08-09',
     title: 'Pick what a ChatGPT-through-ComfyUI picture costs',
     blurb:
-      "The ComfyUI lane has an Image quality dial in Settings ▸ Engines — low, medium or high — and it now defaults to medium instead of high. It is the only setting there that moves what a picture costs, in credits and in waiting: three shots at high took about two minutes each, and that time is OpenAI's, not your GPU's. The lane also drives the newer OpenAI node when your ComfyUI has it, which takes your reference photos as up to 16 separate images rather than one stitched-together picture.",
+      "The ComfyUI lane has an Image quality dial in Settings ▸ Engines — low, medium or high — and it now defaults to low instead of high. It is the only setting there that moves what a picture costs, in credits and in waiting: three shots at high took about two minutes each, and that time is OpenAI's, not your GPU's. The lane also drives the newer OpenAI node when your ComfyUI has it, which takes your reference photos as up to 16 separate images rather than one stitched-together picture.",
     to: '/settings/engines',
   },
   {

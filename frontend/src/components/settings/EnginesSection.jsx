@@ -2056,12 +2056,12 @@ function ChatgptSubscriptionCard({ caps, config, setField, refreshCaps, toast, c
               </label>
               <select
                 id="chatgpt-comfy-quality"
-                value={config.engines.chatgpt_comfy_quality || 'medium'}
+                value={config.engines.chatgpt_comfy_quality || 'low'}
                 onChange={(e) => setField('engines', 'chatgpt_comfy_quality', e.target.value)}
                 className={INPUT_CLASS}
               >
-                <option value="low">Low — cheapest and fastest</option>
-                <option value="medium">Medium (default)</option>
+                <option value="low">Low — cheapest and fastest (default)</option>
+                <option value="medium">Medium</option>
                 <option value="high">High — most credits, slowest</option>
               </select>
               <p className="mt-1 text-xs text-content-muted">

@@ -90,7 +90,7 @@ DEFAULT_MODEL = 'gpt-image-2'
 #: 2'12" — the time is OpenAI's, not ours, so this is the only lever that
 #: touches it.
 QUALITIES = ('low', 'medium', 'high')
-DEFAULT_QUALITY = 'medium'
+DEFAULT_QUALITY = 'low'
 
 #: The node's `size` enum, mapped from the catalog card's own ratio. Anything
 #: else asks the node for 'auto' rather than inventing a size it would refuse.
