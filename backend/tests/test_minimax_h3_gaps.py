@@ -114,6 +114,38 @@ def test_an_explicit_engine_override_still_wins_over_the_row(app, monkeypatch):
     assert 'krea' in seen and 'h3' not in seen
 
 
+def test_an_engine_selection_saved_before_h3_existed_does_not_reroute_it(
+        app, monkeypatch):
+    """The SECOND way 🔄 answered with Krea 2 on an H3 tile — reported after the
+    first was fixed, and not the same bug.
+
+    `engines.enabled` is what a user ticked the last time they looked at
+    Settings. Anyone who narrowed it before H3 shipped has a list without H3 in
+    it, and regenerate used to rewrite the target to the default engine on that
+    basis. The row already ran on H3; the list is about what a NEW batch may
+    use. (`_merge_new_engines` also re-offers an engine that appeared since the
+    save, so this is belt AND braces — the two answer different questions: that
+    one restores the CHECKBOX, this one stops a retry from being rerouted at
+    all, including for an engine the user really did untick.)"""
+    from app.services import face_dataset_service as svc
+    from app.services import minimax_h3_helper as mh
+    from app.services import krea_edit_helper as keh2
+    from app import config as cfg
+    seen = {}
+    monkeypatch.setattr(mh, 'preflight', lambda *a, **k: None)
+    monkeypatch.setattr(mh, 'enqueue_minimax_h3',
+                        lambda **kw: (seen.setdefault('h3', kw), 'job-h3')[1])
+    monkeypatch.setattr(keh2, 'preflight', lambda *a, **k: None)
+    monkeypatch.setattr(keh2, 'enqueue_krea_edit',
+                        lambda **kw: (seen.setdefault('krea', kw), 'j')[1])
+    with app.app_context():
+        cfg.save_config({'engines': {'enabled': ['krea'], 'default': 'krea'}})
+        ds, img = _dataset(app, svc, 'minimax_h3')
+        svc.regenerate_image('local', ds.id, img.id)
+    assert 'h3' in seen, 'the H3 row was rerouted by a Settings list'
+    assert 'krea' not in seen
+
+
 def test_the_settings_toggle_list_offers_every_engine_the_backend_ships(app):
     """An engine absent from ENGINE_OPTIONS has no checkbox, so it can never be
     disabled — and, on an install that dropped it from engines.enabled, never

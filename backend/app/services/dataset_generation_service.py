@@ -1000,24 +1000,20 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
     # tag is therefore a Klein row.
     origin = img.klein_model if img.klein_model in KNOWN_ENGINES else 'klein'
     target = requested or origin
+    # `engines.enabled` deliberately does NOT gate a retry. It answers "what may
+    # a NEW batch use"; this row already ran on `origin`, and rewriting the
+    # target to the default engine is the silent engine swap the frontend refuses
+    # to cause (see useDataset.js: it sends no engine on 🔄 for exactly that
+    # reason). It was also a real trap: a selection saved before an engine
+    # existed — MiniMax H3 on any install narrowed to Krea — sent every H3 retry
+    # to Krea 2, and a Klein row on an install with only API engines ticked would
+    # quietly BILL one. An engine that is genuinely unusable now fails in its own
+    # preflight below, naming what is missing, which is the honest answer.
     if is_nsfw_label(img.variation_label) and target in API_ENGINES:
         # Fail-closed: NSFW never reaches a third-party API. It stays on whatever
         # LOCAL engine the row came from (a Krea row keeps Krea) — forcing Klein
         # here would silently change engine behind the user's back.
         target = origin if origin in LOCAL_ENGINES else 'klein'
-    else:
-        # Engines disabled in Settings must not be used even when the row (or a
-        # stale workspace selection) points at them: fall back to the default
-        # engine, then to the first enabled one. An empty list means "all
-        # enabled" (legacy configs).
-        enabled = [e for e in (cfg.get('engines.enabled') or [])
-                   if e in KNOWN_ENGINES]
-        if enabled and target not in enabled:
-            default = cfg.get('engines.default')
-            target = default if default in enabled else enabled[0]
-        # ...and the NSFW clamp must survive that fallback.
-        if is_nsfw_label(img.variation_label) and target in API_ENGINES:
-            target = origin if origin in LOCAL_ENGINES else 'klein'
     # Complete every fallible target-specific preflight before changing either
     # the row or its current file. Klein enqueue is itself part of preparation:
     # if the later DB transition fails, that exact new job is cancelled below.

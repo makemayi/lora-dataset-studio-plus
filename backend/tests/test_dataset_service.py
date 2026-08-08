@@ -1389,10 +1389,45 @@ def test_regenerate_custom_nsfw_label_stays_local_despite_api_engine(app, monkey
         assert seen['klein_model'] == 'flux-2-klein.safetensors'
 
 
-def test_regenerate_skips_engines_disabled_in_settings(app, monkeypatch):
-    """A Klein-born tile must not regenerate through Klein once Klein is
-    disabled in Settings (engines.enabled) — it falls back to the default
-    enabled engine, even when the client sends no engine at all."""
+def test_regenerate_uses_the_rows_own_engine_even_when_it_is_not_enabled(
+        app, monkeypatch):
+    """A retry answers with the engine the tile was MADE with.
+
+    `engines.enabled` says what a NEW batch may use; it is not a veto over a row
+    that already ran. Rewriting the target to the default engine was a silent
+    swap with two live consequences: a selection saved before an engine existed
+    sent every one of that engine's tiles somewhere else (MiniMax H3 → Krea 2),
+    and a local row on an install with only API engines ticked would quietly
+    BILL one. An engine that is genuinely unusable fails in its own preflight,
+    which names what is missing."""
+    from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service
+    from app import config as cfg
+    from app.models import FaceDatasetImage
+    from app.config import LOCAL_USER
+    from app.services import klein_edit_helper as keh
+    seen = {}
+    monkeypatch.setattr(
+        dataset_generation_service, '_api_generate_fn',
+        lambda engine: (_ for _ in ()).throw(
+            AssertionError(f'a Klein row must not be retried on {engine}')))
+    monkeypatch.setattr(keh, 'klein_missing_nodes', lambda *a, **k: [])
+    monkeypatch.setattr(keh, 'enqueue_klein_edit',
+                        lambda **kw: (seen.update(kw), 'job-klein')[1])
+    with app.app_context():
+        cfg.save_config({'engines': {'enabled': ['nanobanana', 'chatgpt'],
+                                     'default': 'nanobanana'}})
+        ds, img = _ds_with_ref_and_generated(svc, FaceDatasetImage, LOCAL_USER,
+                                             engine='flux-2-klein.safetensors')  # Klein-born
+        assert svc.regenerate_image(LOCAL_USER, img.id) == 'job-klein'
+        svc.db.session.expire_all()
+        assert (svc.db.session.get(FaceDatasetImage, img.id).klein_model
+                == 'flux-2-klein.safetensors')
+
+
+def test_regenerate_still_honours_an_explicit_engine_override(app, monkeypatch):
+    """Dropping the enabled-list rewrite must not drop the caller's own choice:
+    a client that deliberately names an engine still moves the tile there."""
     from app.services import face_dataset_service as svc
     from app.services import dataset_generation_service
     from app import config as cfg
@@ -1404,14 +1439,11 @@ def test_regenerate_skips_engines_disabled_in_settings(app, monkeypatch):
         return lambda refs, prompt, aspect_ratio=None: _png()
     monkeypatch.setattr(dataset_generation_service, '_api_generate_fn', make)
     with app.app_context():
-        cfg.save_config({'engines': {'enabled': ['nanobanana', 'chatgpt'],
-                                     'default': 'nanobanana'}})
+        cfg.save_config({'engines': {'enabled': ['krea'], 'default': 'krea'}})
         ds, img = _ds_with_ref_and_generated(svc, FaceDatasetImage, LOCAL_USER,
-                                             engine='flux-2-klein.safetensors')  # Klein-born
-        svc.regenerate_image(LOCAL_USER, img.id)          # legacy client: no engine sent
+                                             engine='flux-2-klein.safetensors')
+        svc.regenerate_image(LOCAL_USER, img.id, engine='nanobanana')
         assert seen['engine'] == 'nanobanana'
-        svc.db.session.expire_all()
-        assert svc.db.session.get(FaceDatasetImage, img.id).klein_model == 'nanobanana'
 
 
 def test_regenerate_rejects_unknown_engine(app):
