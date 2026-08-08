@@ -144,9 +144,13 @@ DEFAULTS = {
                 # NSFW fail-closed rule is unchanged.
                 'chatgpt_auth': 'auto',            # auto|api|subscription|comfyui
                 # Quality asked of the ComfyUI lane's node: low|medium|high.
-                # It moves the credit cost, which is why it is a setting and not
-                # a constant. Ignored by the two direct lanes.
-                'chatgpt_comfy_quality': 'high',
+                # THE cost dial of that lane — it moves both the credits and the
+                # wall clock, and nothing else there does (measured: three shots
+                # at `high` took 1'55", 2'11", 2'12", all of it OpenAI's time).
+                # `medium` rather than the `high` this shipped with on 2026-08-09:
+                # high is the expensive end of a per-image bill, and a dataset is
+                # a hundred images. Ignored by the two direct lanes.
+                'chatgpt_comfy_quality': 'medium',
                 # The Codex ROUTER model of the subscription lane — NOT the image
                 # model. The image model of the API-key lane is
                 # engines.chatgpt_image_model (below); the subscription lane

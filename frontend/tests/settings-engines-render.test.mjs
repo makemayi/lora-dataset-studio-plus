@@ -62,9 +62,19 @@ test('the comfy.org key field is offered, and needs no Test button to render', (
 
 test('the ComfyUI lane states its two costs where the choice is made', () => {
   const html = render({ engines: { chatgpt_auth: 'comfyui' } })
-  assert.match(html, /OpenAIGPTImage1/)
+  assert.match(html, /OpenAI image node/)
   assert.match(html, /queue/i)                 // it holds a ComfyUI queue slot
   assert.match(html, /NSFW/)                   // ...and is still not local
+})
+
+test('the quality dial is only offered on the lane it applies to', () => {
+  const on = render({ engines: { chatgpt_auth: 'comfyui' } })
+  assert.match(on, /chatgpt-comfy-quality/)
+  assert.match(on, /cheapest and fastest/)
+  for (const lane of ['auto', 'api', 'subscription']) {
+    assert.doesNotMatch(render({ engines: { chatgpt_auth: lane } }),
+      /chatgpt-comfy-quality/, lane)
+  }
 })
 
 /* The dataset side of the same class of bug: the angle-reference panel lost its

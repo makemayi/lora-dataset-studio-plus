@@ -44,7 +44,7 @@ def test_the_key_rides_in_extra_data_and_nowhere_else(app, monkeypatch, tmp_path
 
     monkeypatch.setenv(lane.API_KEY_ENV, 'comfy-key-123')
     monkeypatch.setattr(lane, 'queue_prompt_to_comfyui', fake_submit)
-    monkeypatch.setattr(lane, 'node_available', lambda: True)
+    monkeypatch.setattr(lane, 'resolve_node', lambda: lane.NODE_CLASS_V2)
     monkeypatch.setattr(lane.comfy_fs, 'ensure_input_usable', lambda d: str(tmp_path))
     monkeypatch.setattr(lane, 'get_comfyui_history', lambda pid: {
         'p1': {'outputs': {'101': {'images': [{'filename': 'out.png', 'subfolder': ''}]}}}})
@@ -62,7 +62,7 @@ def test_the_key_rides_in_extra_data_and_nowhere_else(app, monkeypatch, tmp_path
 def test_the_graph_is_the_node_the_install_actually_exposes(app, monkeypatch, tmp_path):
     seen = {}
     monkeypatch.setenv(lane.API_KEY_ENV, 'k')
-    monkeypatch.setattr(lane, 'node_available', lambda: True)
+    monkeypatch.setattr(lane, 'resolve_node', lambda: lane.NODE_CLASS_V2)
     monkeypatch.setattr(lane.comfy_fs, 'ensure_input_usable', lambda d: str(tmp_path))
     monkeypatch.setattr(lane, 'queue_prompt_to_comfyui',
                         lambda wf, cid, worker_url=None, *, extra_data=None:
@@ -75,14 +75,71 @@ def test_the_graph_is_the_node_the_install_actually_exposes(app, monkeypatch, tm
         lane.generate_variation([_png(), _png()], 'two references', aspect_ratio='16:9')
 
     classes = [n['class_type'] for n in seen['workflow'].values()]
-    assert lane.NODE_CLASS in classes and 'SaveImage' in classes
-    # Two references reach the node's single IMAGE input as ONE batch.
+    assert lane.NODE_CLASS_V2 in classes and 'SaveImage' in classes
     assert classes.count('LoadImage') == 2
-    assert lane.BATCH_NODE_CLASS in classes
     node = next(n for n in seen['workflow'].values()
-                if n['class_type'] == lane.NODE_CLASS)
-    assert node['inputs']['size'] == '1536x1024'      # from the card's ratio
+                if n['class_type'] == lane.NODE_CLASS_V2)
+    assert node['inputs']['model.size'] == '1536x1024'   # from the card's ratio
     assert node['inputs']['n'] == 1
+
+
+def test_v2_takes_the_references_as_separate_slots():
+    """The dynamic combo is filled with a dotted prefix, and `images` is an
+    autogrow list of 16 NAMED slots — the shape gpt-image's edit endpoint has.
+    Reading that combo as unfillable is what sent the first version of this lane
+    to the older node."""
+    graph = lane.build_workflow(['a.png', 'b.png', 'c.png'], 'p',
+                                size='1024x1536', quality='low',
+                                node_class=lane.NODE_CLASS_V2)
+    node = next(n for n in graph.values() if n['class_type'] == lane.NODE_CLASS_V2)
+    assert node['inputs']['model.quality'] == 'low'
+    assert node['inputs']['model.size'] == '1024x1536'
+    assert node['inputs']['model.background'] == 'auto'
+    assert [k for k in node['inputs'] if k.startswith('model.images.')] == [
+        'model.images.image_1', 'model.images.image_2', 'model.images.image_3']
+    assert lane.BATCH_NODE_CLASS not in [n['class_type'] for n in graph.values()]
+
+
+def test_v2_stops_at_the_sixteen_slots_it_declares():
+    graph = lane.build_workflow([f'{i}.png' for i in range(20)], 'p',
+                                node_class=lane.NODE_CLASS_V2)
+    node = next(n for n in graph.values() if n['class_type'] == lane.NODE_CLASS_V2)
+    slots = [k for k in node['inputs'] if k.startswith('model.images.')]
+    assert len(slots) == lane.MAX_REFS_V2 == 16
+
+
+def test_the_older_node_still_gets_its_batched_single_input():
+    """The fallback is not decoration: an install without V2 must still run, and
+    V1's single IMAGE input needs the references chained into one picture."""
+    graph = lane.build_workflow(['a.png', 'b.png'], 'p', size='1024x1024',
+                                quality='high', node_class=lane.NODE_CLASS)
+    classes = [n['class_type'] for n in graph.values()]
+    assert lane.BATCH_NODE_CLASS in classes
+    node = next(n for n in graph.values() if n['class_type'] == lane.NODE_CLASS)
+    assert node['inputs']['size'] == '1024x1024'         # flat, not dotted
+    assert node['inputs']['quality'] == 'high'
+    assert 'model.images.image_1' not in node['inputs']
+
+
+def test_the_node_choice_prefers_v2_and_falls_back(monkeypatch):
+    monkeypatch.setattr(lane, 'fetch_object_info_classes',
+                        lambda: {lane.NODE_CLASS_V2, lane.NODE_CLASS})
+    assert lane.resolve_node() == lane.NODE_CLASS_V2
+    monkeypatch.setattr(lane, 'fetch_object_info_classes', lambda: {lane.NODE_CLASS})
+    assert lane.resolve_node() == lane.NODE_CLASS
+    monkeypatch.setattr(lane, 'fetch_object_info_classes', lambda: {'KSampler'})
+    assert lane.resolve_node() is None
+    # A probe that cannot answer must not report the engine as unavailable.
+    monkeypatch.setattr(lane, 'fetch_object_info_classes',
+                        lambda: (_ for _ in ()).throw(OSError('unreachable')))
+    assert lane.resolve_node() == lane.NODE_CLASS_V2
+
+
+def test_an_unusable_quality_costs_a_cheaper_picture_not_the_shot():
+    assert lane.quality_for('low') == 'low'
+    assert lane.quality_for('HIGH') == 'high'
+    assert lane.quality_for('ultra') == lane.DEFAULT_QUALITY
+    assert lane.quality_for(None) == lane.DEFAULT_QUALITY
 
 
 def test_an_unknown_model_degrades_instead_of_failing_the_shot():
@@ -113,9 +170,9 @@ def test_no_key_refuses_before_anything_is_staged_or_queued(app, monkeypatch, tm
 
 def test_a_comfyui_without_the_node_says_so_by_name(app, monkeypatch):
     monkeypatch.setenv(lane.API_KEY_ENV, 'k')
-    monkeypatch.setattr(lane, 'node_available', lambda: False)
+    monkeypatch.setattr(lane, 'resolve_node', lambda: None)
     with app.app_context():
-        with pytest.raises(lane.ComfyGptUnavailable, match=lane.NODE_CLASS):
+        with pytest.raises(lane.ComfyGptUnavailable, match=lane.NODE_CLASS_V2):
             lane.generate_variation([_png()], 'x')
 
 
@@ -124,7 +181,7 @@ def test_a_failed_prompt_quotes_comfyuis_own_words(app, monkeypatch, tmp_path):
     as an execution error — inventing 'generation failed' would throw away the
     only sentence that says which one it was."""
     monkeypatch.setenv(lane.API_KEY_ENV, 'k')
-    monkeypatch.setattr(lane, 'node_available', lambda: True)
+    monkeypatch.setattr(lane, 'resolve_node', lambda: lane.NODE_CLASS_V2)
     monkeypatch.setattr(lane.comfy_fs, 'ensure_input_usable', lambda d: str(tmp_path))
     monkeypatch.setattr(lane, 'queue_prompt_to_comfyui',
                         lambda *a, **k: ({'prompt_id': 'p'}, None))
@@ -139,7 +196,7 @@ def test_a_failed_prompt_quotes_comfyuis_own_words(app, monkeypatch, tmp_path):
 
 def test_the_staged_reference_is_dropped_whatever_happened(app, monkeypatch, tmp_path):
     monkeypatch.setenv(lane.API_KEY_ENV, 'k')
-    monkeypatch.setattr(lane, 'node_available', lambda: True)
+    monkeypatch.setattr(lane, 'resolve_node', lambda: lane.NODE_CLASS_V2)
     monkeypatch.setattr(lane.comfy_fs, 'ensure_input_usable', lambda d: str(tmp_path))
     monkeypatch.setattr(lane, 'queue_prompt_to_comfyui',
                         lambda *a, **k: (None, 'ComfyUI is not running'))
@@ -209,7 +266,7 @@ def test_readiness_answers_from_the_lane_that_will_run(app, monkeypatch):
     from app import config as cfg
     with app.app_context():
         cfg.save_config({'engines': {'chatgpt_auth': 'comfyui'}})
-        monkeypatch.setattr(lane, 'node_available', lambda: True)
+        monkeypatch.setattr(lane, 'resolve_node', lambda: lane.NODE_CLASS_V2)
 
         monkeypatch.setenv(lane.API_KEY_ENV, 'comfy-key')
         ready = capabilities.probe_openai()
@@ -230,9 +287,9 @@ def test_a_comfyui_missing_the_node_is_named_in_the_readiness_detail(app, monkey
     with app.app_context():
         cfg.save_config({'engines': {'chatgpt_auth': 'comfyui'}})
         monkeypatch.setenv(lane.API_KEY_ENV, 'comfy-key')
-        monkeypatch.setattr(lane, 'node_available', lambda: False)
+        monkeypatch.setattr(lane, 'resolve_node', lambda: None)
         state = capabilities.probe_openai()
-        assert state['ok'] is False and lane.NODE_CLASS in state['detail']
+        assert state['ok'] is False and lane.NODE_CLASS_V2 in state['detail']
 
 
 def test_the_other_lanes_are_unchanged_by_the_new_branch(app, monkeypatch):
@@ -253,7 +310,7 @@ def test_a_rejected_key_says_what_to_do_in_this_app(app, monkeypatch, tmp_path):
     written for someone sitting in its web UI. From here that is advice the user
     cannot follow: they DID set a key, and no login would be read anyway."""
     monkeypatch.setenv(lane.API_KEY_ENV, 'k')
-    monkeypatch.setattr(lane, 'node_available', lambda: True)
+    monkeypatch.setattr(lane, 'resolve_node', lambda: lane.NODE_CLASS_V2)
     monkeypatch.setattr(lane, 'wait_until_comfyui_answers', lambda: None)
     monkeypatch.setattr(lane.comfy_fs, 'ensure_input_usable', lambda d: str(tmp_path))
     monkeypatch.setattr(lane, 'queue_prompt_to_comfyui',
@@ -270,7 +327,7 @@ def test_a_rejected_key_says_what_to_do_in_this_app(app, monkeypatch, tmp_path):
 
 def test_an_empty_balance_is_not_reported_as_a_bad_key(app, monkeypatch, tmp_path):
     monkeypatch.setenv(lane.API_KEY_ENV, 'k')
-    monkeypatch.setattr(lane, 'node_available', lambda: True)
+    monkeypatch.setattr(lane, 'resolve_node', lambda: lane.NODE_CLASS_V2)
     monkeypatch.setattr(lane, 'wait_until_comfyui_answers', lambda: None)
     monkeypatch.setattr(lane.comfy_fs, 'ensure_input_usable', lambda d: str(tmp_path))
     monkeypatch.setattr(lane, 'queue_prompt_to_comfyui',

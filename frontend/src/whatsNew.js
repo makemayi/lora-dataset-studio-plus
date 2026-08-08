@@ -50,6 +50,21 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-09-comfyui-liveness-check-stops-lying',
+    date: '2026-08-09',
+    title: 'A busy ComfyUI no longer reads as a stopped one',
+    blurb:
+      "\"ComfyUI not running (Please start external supervisor)\" could fail a generation row or an ✨ Upscale & improve candidate while ComfyUI was plainly running — five rows lost in one hour on the machine this was found on. The check asked ComfyUI for its whole job history, which grows without bound and gets slow exactly when ComfyUI is busy, then called a slow answer an outage. It now asks for the queue length instead — a constant-size answer — retries once, and only then says the word \"down\".",
+  },
+  {
+    id: '2026-08-09-chatgpt-comfy-quality-dial',
+    date: '2026-08-09',
+    title: 'Pick what a ChatGPT-through-ComfyUI picture costs',
+    blurb:
+      "The ComfyUI lane has an Image quality dial in Settings ▸ Engines — low, medium or high — and it now defaults to medium instead of high. It is the only setting there that moves what a picture costs, in credits and in waiting: three shots at high took about two minutes each, and that time is OpenAI's, not your GPU's. The lane also drives the newer OpenAI node when your ComfyUI has it, which takes your reference photos as up to 16 separate images rather than one stitched-together picture.",
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-09-chatgpt-through-comfyui',
     date: '2026-08-09',
     title: 'Run the ChatGPT engine on comfy.org credits, without an OpenAI key',

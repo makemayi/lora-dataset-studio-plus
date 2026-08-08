@@ -2043,12 +2043,38 @@ function ChatgptSubscriptionCard({ caps, config, setField, refreshCaps, toast, c
           When the subscription quota runs out mid-batch, remaining rows fail with a clear message — the app never silently switches to your paid API key.
         </p>
         {config.engines.chatgpt_auth === 'comfyui' && (
-          <p className="mt-1 text-xs text-content-muted">
-            Needs the <strong>comfy.org API key</strong> above, and a ComfyUI new enough to expose
-            the <code>OpenAIGPTImage1</code> node. The shot still runs on OpenAI&apos;s servers, so
-            NSFW cards stay on your local engines exactly as before — and it takes a slot in your
-            ComfyUI queue while it waits, so a Klein or Krea render queues behind it.
-          </p>
+          <>
+            <p className="mt-1 text-xs text-content-muted">
+              Needs the <strong>comfy.org API key</strong> above, and a ComfyUI new enough to expose
+              the OpenAI image node. The shot still runs on OpenAI&apos;s servers, so NSFW cards stay
+              on your local engines exactly as before — and it takes a slot in your ComfyUI queue
+              while it waits, so a Klein or Krea render queues behind it.
+            </p>
+            <div className="mt-2">
+              <label htmlFor="chatgpt-comfy-quality" className="block text-sm font-medium text-content">
+                Image quality on this lane
+              </label>
+              <select
+                id="chatgpt-comfy-quality"
+                value={config.engines.chatgpt_comfy_quality || 'medium'}
+                onChange={(e) => setField('engines', 'chatgpt_comfy_quality', e.target.value)}
+                className={INPUT_CLASS}
+              >
+                <option value="low">Low — cheapest and fastest</option>
+                <option value="medium">Medium (default)</option>
+                <option value="high">High — most credits, slowest</option>
+              </select>
+              <p className="mt-1 text-xs text-content-muted">
+                The only dial here that moves what a picture costs. The wait is OpenAI&apos;s, not
+                your GPU&apos;s: three shots at <strong>high</strong> took 1&apos;55&quot;,
+                2&apos;11&quot; and 2&apos;12&quot; on this machine, whether they came back with an
+                image or a refusal.
+              </p>
+              <ResetToDefault label="Image quality on this lane" section="engines"
+                field="chatgpt_comfy_quality"
+                config={config} configDefaults={configDefaults} setField={setField} />
+            </div>
+          </>
         )}
         <ResetToDefault label="ChatGPT engine auth" section="engines" field="chatgpt_auth"
           config={config} configDefaults={configDefaults} setField={setField} />

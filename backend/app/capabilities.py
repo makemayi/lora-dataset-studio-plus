@@ -172,7 +172,8 @@ def probe_openai() -> dict:
             return {'ok': True, 'detail': 'via ComfyUI (comfy.org credits)'}
         return {'ok': False,
                 'detail': ('comfy.org API key missing' if not state['key']
-                           else f"{chatgpt_comfy.NODE_CLASS} not in this ComfyUI")}
+                           else f'{chatgpt_comfy.NODE_CLASS_V2} / '
+                                f'{chatgpt_comfy.NODE_CLASS} not in this ComfyUI')}
     key = bool(cfg.secret('OPENAI_API_KEY'))
     sub = chatgpt_oauth.status()['connected']
     parts = (['key set'] if key else []) + (['subscription connected'] if sub else [])

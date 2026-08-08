@@ -46,13 +46,25 @@ from ..utils.comfyui import (api_address, fetch_object_info_classes,
 
 logger = logging.getLogger(__name__)
 
-#: The node the lane drives. `OpenAIGPTImageNodeV2` exists too, but its `model`
-#: input is a COMFY_DYNAMICCOMBO_V3 whose sub-inputs change with the chosen
-#: model — a shape a hand-built graph cannot fill without mirroring ComfyUI's
-#: own combo resolution. `OpenAIGPTImage1` takes plain inputs and reaches the
-#: same models, `gpt-image-2` included (it is that node's own default).
+#: The node this lane prefers, and the one it falls back to.
+#:
+#: V2's `model` input is a COMFY_DYNAMICCOMBO_V3, which this file first read as
+#: "a hand-built graph cannot fill it". WRONG, and a workflow the maintainer had
+#: on disk proved it: the sub-inputs are flattened with a dotted prefix
+#: (`model.quality`, `model.images.image_1`), so an API-format graph fills them
+#: like any other input. Verified against a live /object_info, 2026-08-09.
+#:
+#: V2 is worth preferring for one reason that is not cosmetic: its `images` is a
+#: COMFY_AUTOGROW_V3 with 16 named slots, so the dataset's references arrive as
+#: SEPARATE images — the shape gpt-image's edit endpoint actually takes, and the
+#: same 16 the direct API lane allows. V1 has a single IMAGE input, so several
+#: references have to be flattened into one batched picture first.
+NODE_CLASS_V2 = 'OpenAIGPTImageNodeV2'
 NODE_CLASS = 'OpenAIGPTImage1'
 BATCH_NODE_CLASS = 'ImageBatch'
+
+#: V2's own ceiling ("Up to 16 images" in its tooltip).
+MAX_REFS_V2 = 16
 
 #: comfy.org API key. A SECRET_KEYS entry, so it lives in .env like every other
 #: credential and never reaches config.json or a diagnostics paste.
@@ -65,6 +77,14 @@ API_KEY_ENV = 'COMFY_ORG_API_KEY'
 #: failing the shot.
 MODELS = ('gpt-image-1', 'gpt-image-1.5', 'gpt-image-2')
 DEFAULT_MODEL = 'gpt-image-2'
+
+#: What the node's `quality` combo accepts. THE cost dial of this lane: it moves
+#: both the credits spent and the wall-clock wait, and nothing else here does.
+#: Measured on the maintainer's install, three shots at `high`: 1'55", 2'11",
+#: 2'12" — the time is OpenAI's, not ours, so this is the only lever that
+#: touches it.
+QUALITIES = ('low', 'medium', 'high')
+DEFAULT_QUALITY = 'medium'
 
 #: The node's `size` enum, mapped from the catalog card's own ratio. Anything
 #: else asks the node for 'auto' rather than inventing a size it would refuse.
@@ -108,20 +128,34 @@ def api_key() -> str:
     return (os.environ.get(API_KEY_ENV) or '').strip()
 
 
-def node_available() -> bool:
-    """Does the target ComfyUI expose the API node at all? An install older than
-    the API nodes, or one running with them disabled, answers no."""
+def resolve_node() -> str | None:
+    """Which OpenAI image node THIS ComfyUI exposes: V2 for preference, V1 as the
+    fallback, None when neither is there (an install older than the API nodes, or
+    one running with them disabled).
+
+    A probe that cannot answer must not decide: an unreachable /object_info
+    returns the preferred node and lets the submit fail with ComfyUI's own words,
+    rather than reporting the engine as unavailable over a network blip."""
     try:
         classes = fetch_object_info_classes()
     except Exception:                              # a broken probe never decides
-        return True
-    return not classes or NODE_CLASS in classes
+        return NODE_CLASS_V2
+    if not classes:
+        return NODE_CLASS_V2
+    if NODE_CLASS_V2 in classes:
+        return NODE_CLASS_V2
+    return NODE_CLASS if NODE_CLASS in classes else None
+
+
+def node_available() -> bool:
+    return resolve_node() is not None
 
 
 def status() -> dict:
     """Readiness for the capabilities payload / Settings, without calling OpenAI."""
-    return {'key': bool(api_key()), 'node': node_available(),
-            'node_class': NODE_CLASS, 'url': api_address()}
+    node = resolve_node()
+    return {'key': bool(api_key()), 'node': node is not None,
+            'node_class': node or NODE_CLASS_V2, 'url': api_address()}
 
 
 def preflight() -> None:
@@ -130,10 +164,11 @@ def preflight() -> None:
         raise ComfyGptUnavailable(
             'ChatGPT through ComfyUI needs a comfy.org API key — add one in '
             'Settings ▸ Engines (create it at platform.comfy.org).')
-    if not node_available():
+    if resolve_node() is None:
         raise ComfyGptUnavailable(
-            f'This ComfyUI does not expose {NODE_CLASS}. Update ComfyUI, or '
-            'switch the ChatGPT lane back to an API key / your subscription.')
+            f'This ComfyUI exposes neither {NODE_CLASS_V2} nor {NODE_CLASS}. '
+            'Update ComfyUI, or switch the ChatGPT lane back to an API key / '
+            'your subscription.')
 
 
 def wait_until_comfyui_answers() -> None:
@@ -175,43 +210,74 @@ def model_for(model) -> str:
     return DEFAULT_MODEL
 
 
-def build_workflow(image_names, prompt, *, size='auto', model=DEFAULT_MODEL,
-                   quality='high', filename_prefix='LDS_ChatGPT') -> dict:
-    """LoadImage(s) -> [ImageBatch chain] -> OpenAIGPTImage1 -> SaveImage.
+def quality_for(quality) -> str:
+    """The configured quality, or the default — never a value the node refuses.
+    An unusable setting must cost the user a cheaper picture, not the shot."""
+    name = str(quality or '').strip().lower()
+    if name in QUALITIES:
+        return name
+    if name:
+        logger.info('chatgpt/comfyui: %r is not a quality this node offers — '
+                    'using %s', quality, DEFAULT_QUALITY)
+    return DEFAULT_QUALITY
 
-    Several references become ONE batched IMAGE, which is what the node's single
-    `image` input takes — the same "every reference rides along" contract the
-    direct API lane has. With no reference at all the input is simply absent,
-    and the node generates instead of editing."""
+
+def build_workflow(image_names, prompt, *, size='auto', model=DEFAULT_MODEL,
+                   quality=DEFAULT_QUALITY, filename_prefix='LDS_ChatGPT',
+                   node_class=None) -> dict:
+    """LoadImage(s) -> the OpenAI image node -> SaveImage.
+
+    V2 takes the references as SEPARATE slots (`model.images.image_1…`, up to
+    16) — the shape gpt-image's edit endpoint actually has. V1 has one IMAGE
+    input, so the same references are chained through ImageBatch into a single
+    picture first. With no reference at all the input is simply absent on either
+    node, and it generates instead of editing.
+
+    `seed` is documented by the node as "not implemented yet in backend"; it is
+    sent anyway so a build that starts honouring it sees a fresh value per shot
+    rather than a constant."""
+    node_class = node_class or NODE_CLASS_V2
     graph = {}
     loaded = []
+    limit = MAX_REFS_V2 if node_class == NODE_CLASS_V2 else None
     for index, name in enumerate(image_names or ()):
+        if limit is not None and index >= limit:
+            logger.info('chatgpt/comfyui: %s takes %d references, dropping the rest',
+                        node_class, limit)
+            break
         node_id = str(10 + index)
         graph[node_id] = {'class_type': 'LoadImage',
                           'inputs': {'image': name},
                           '_meta': {'title': f'Reference {index + 1}'}}
         loaded.append(node_id)
 
-    image_link = None
-    if loaded:
-        image_link = [loaded[0], 0]
-        for index, node_id in enumerate(loaded[1:], start=1):
-            batch_id = str(50 + index)
-            graph[batch_id] = {'class_type': BATCH_NODE_CLASS,
-                               'inputs': {'image1': image_link,
-                                          'image2': [node_id, 0]},
-                               '_meta': {'title': 'Chain the references'}}
-            image_link = [batch_id, 0]
+    seed = uuid.uuid4().int % 2_147_483_647
+    if node_class == NODE_CLASS_V2:
+        # The dynamic combo, flattened: every sub-input of the chosen model is
+        # sent under a `model.` prefix, and the autogrow list under
+        # `model.images.<slot name>`.
+        inputs = {'prompt': prompt, 'model': model, 'n': 1, 'seed': seed,
+                  'model.size': size, 'model.quality': quality,
+                  'model.background': 'auto'}
+        for index, node_id in enumerate(loaded, start=1):
+            inputs[f'model.images.image_{index}'] = [node_id, 0]
+    else:
+        image_link = None
+        if loaded:
+            image_link = [loaded[0], 0]
+            for index, node_id in enumerate(loaded[1:], start=1):
+                batch_id = str(50 + index)
+                graph[batch_id] = {'class_type': BATCH_NODE_CLASS,
+                                   'inputs': {'image1': image_link,
+                                              'image2': [node_id, 0]},
+                                   '_meta': {'title': 'Chain the references'}}
+                image_link = [batch_id, 0]
+        inputs = {'prompt': prompt, 'size': size, 'quality': quality,
+                  'model': model, 'n': 1, 'seed': seed}
+        if image_link is not None:
+            inputs['image'] = image_link
 
-    inputs = {'prompt': prompt, 'size': size, 'quality': quality,
-              'model': model, 'n': 1,
-              # The node documents `seed` as "not implemented yet in backend";
-              # it is sent anyway so a future build that honours it sees a fresh
-              # value per shot rather than a constant.
-              'seed': uuid.uuid4().int % 2_147_483_647}
-    if image_link is not None:
-        inputs['image'] = image_link
-    graph['100'] = {'class_type': NODE_CLASS, 'inputs': inputs,
+    graph['100'] = {'class_type': node_class, 'inputs': inputs,
                     '_meta': {'title': 'ChatGPT image (comfy.org credits)'}}
     graph['101'] = {'class_type': 'SaveImage',
                     'inputs': {'images': ['100', 0],
@@ -311,8 +377,9 @@ def _generate_one(ref_bytes, prompt: str, model: str | None,
             staged, prompt, size=size_for_aspect(aspect_ratio),
             model=model_for(model if model is not None
                             else cfg.get('engines.chatgpt_image_model')),
-            quality=str(cfg.get('engines.chatgpt_comfy_quality') or 'high'),
-            filename_prefix=f'LDS_ChatGPT_{tag}')
+            quality=quality_for(cfg.get('engines.chatgpt_comfy_quality')),
+            filename_prefix=f'LDS_ChatGPT_{tag}',
+            node_class=resolve_node())
         response, error = queue_prompt_to_comfyui(
             workflow, f'lds-chatgpt-{tag}',
             extra_data={'api_key_comfy_org': api_key()})

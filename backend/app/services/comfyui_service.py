@@ -55,15 +55,42 @@ class ComfyUIService:
             self.api_port = 8188
 
     def check_connection(self) -> bool:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(2)
-                if s.connect_ex((self.api_host, self.api_port)) != 0:
-                    return False
-            r = requests.get(urljoin(cfg.get('comfyui.api_url'), "/history"), timeout=3)
-            return r.status_code in (200, 404)
-        except (socket.error, requests.RequestException, ConnectionError, OSError):
-            return False
+        """Is ComfyUI answering? Asked before every submission, so a false NO
+        costs a whole generation.
+
+        It used to ask `/history` — which serialises the ENTIRE job history and
+        grows without bound. On an install with a few hundred jobs that answer
+        takes longer than the 3 s timeout while ComfyUI is also working, and the
+        submit path then reports "ComfyUI not running" for an instance that is
+        plainly running. Measured on the maintainer's machine, 2026-08-09: five
+        rows lost that way in one hour (three generation rows and an upscale
+        candidate), while `/queue` timed out at 5 s and `/prompt` answered
+        instantly.
+
+        `/prompt` is that same liveness answer in a constant-size body
+        (`{"exec_info": {"queue_remaining": n}}`), so it is asked first; the old
+        endpoint stays as the fallback for a build that does not serve it. One
+        retry, because a single slow answer from a busy ComfyUI is not an
+        outage."""
+        base = cfg.get('comfyui.api_url') or ''
+        for attempt in (0, 1):
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(2)
+                    if s.connect_ex((self.api_host, self.api_port)) != 0:
+                        return False        # nothing listening: not a slow answer
+                for path in ('/prompt', '/history'):
+                    try:
+                        r = requests.get(urljoin(base, path), timeout=5)
+                    except requests.RequestException:
+                        continue
+                    if r.status_code in (200, 404):
+                        return True
+            except (socket.error, ConnectionError, OSError):
+                return False
+            if attempt == 0:
+                time.sleep(0.5)
+        return False
 
     # ---------------- PID (DEPRECATED) ----------------
     def _read_pid(self) -> Optional[int]:
