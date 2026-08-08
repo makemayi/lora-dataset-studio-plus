@@ -107,8 +107,15 @@ _SIZE_BY_RATIO = {
 #: An OpenAI render is a network wait, not a GPU one: the poll is slow on
 #: purpose, and the ceiling is generous because the queue slot is already paid
 #: for by the time we are waiting.
+#:
+#: 15 minutes, not the 7 this shipped with. MEASURED on the maintainer's install:
+#: one reference at `low` came back in 47 s, and a four-reference shot with a
+#: 1 166-character prompt was still running at 4 minutes — every reference is
+#: uploaded and processed by the provider, so the shots that need the most
+#: references are exactly the ones the old ceiling cut off. A ceiling that fires
+#: while the picture is still coming costs the credits AND the picture.
 _POLL_SECONDS = 2.0
-_TIMEOUT_SECONDS = 420.0
+_TIMEOUT_SECONDS = 900.0
 
 #: One shot at a time on this lane. The API fan-out runs rows in parallel, which
 #: is right for a provider that answers per request — but here every row lands in
@@ -328,6 +335,38 @@ def _explain(message: str) -> str:
     return message
 
 
+def _give_up_message(prompt_id, client_id) -> str:
+    """Stop waiting — and take the prompt with us when that is still possible.
+
+    Giving up on the WAIT is not the same as giving up on the WORK: ComfyUI
+    keeps running what it accepted, and this lane's prompt holds the single
+    execution slot every local render needs. So the exact prompt is deleted when
+    it is still queued (an exact-id delete, never the global /interrupt, which
+    would kill whatever else is running).
+
+    A prompt already RUNNING cannot be stopped that way, and the message says so
+    rather than implying the credits were saved: OpenAI is mid-answer, and it
+    will finish or fail on its own."""
+    from ..utils.comfyui import ComfyPromptState, cancel_comfyui_prompt_state
+    minutes = int(_TIMEOUT_SECONDS // 60)
+    try:
+        state = cancel_comfyui_prompt_state(prompt_id, client_id)
+    except Exception:                          # never fail the failure path
+        state = None
+    if state is ComfyPromptState.DELETED:
+        return (f'ChatGPT via ComfyUI gave up after {minutes} min — the shot was '
+                'still queued behind other ComfyUI work, so it was removed from '
+                'the queue. Nothing was generated and nothing was charged.')
+    if state is ComfyPromptState.RUNNING:
+        return (f'ChatGPT via ComfyUI gave up waiting after {minutes} min. The '
+                'shot is STILL RUNNING in ComfyUI — it holds the queue slot '
+                'until OpenAI answers, and it may still consume credits. A shot '
+                'with several reference photos is the slow case; lowering the '
+                'image quality or using fewer references makes it cheaper.')
+    return (f'ChatGPT via ComfyUI did not finish within {minutes} min — '
+            'check the ComfyUI queue.')
+
+
 def _saved_image(history_entry) -> tuple:
     """(filename, subfolder) of the SaveImage output, or (None, None)."""
     outputs = (history_entry or {}).get('outputs') or {}
@@ -396,8 +435,9 @@ def _generate_one(ref_bytes, prompt: str, model: str | None,
             quality=quality_for(cfg.get('engines.chatgpt_comfy_quality')),
             filename_prefix=f'LDS_ChatGPT_{tag}',
             node_class=resolve_node())
+        client_id = f'lds-chatgpt-{tag}'
         response, error = queue_prompt_to_comfyui(
-            workflow, f'lds-chatgpt-{tag}',
+            workflow, client_id,
             extra_data={'api_key_comfy_org': api_key()})
         if error or not isinstance(response, dict) or not response.get('prompt_id'):
             raise ComfyGptUnavailable(error or 'ComfyUI refused the prompt')
@@ -416,9 +456,7 @@ def _generate_one(ref_bytes, prompt: str, model: str | None,
                 if filename:
                     return fetch_output_image_bytes(filename, subfolder)
             time.sleep(_POLL_SECONDS)
-        raise ComfyGptUnavailable(
-            f'ChatGPT via ComfyUI did not finish within '
-            f'{int(_TIMEOUT_SECONDS)}s — check the ComfyUI queue')
+        raise ComfyGptUnavailable(_give_up_message(prompt_id, client_id))
     finally:
         # The staged copies are full-resolution duplicates of the user's
         # reference; drop them whatever happened (see comfy_fs's own note on the

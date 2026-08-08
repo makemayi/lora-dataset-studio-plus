@@ -397,3 +397,67 @@ def test_the_custom_pair_is_only_sent_to_the_model_that_declares_it():
                       if n['class_type'] == lane.NODE_CLASS_V2)['inputs']
         assert 'model.custom_width' not in inputs, model
         assert 'model.custom_height' not in inputs, model
+
+
+def test_giving_up_removes_a_still_QUEUED_prompt(app, monkeypatch, tmp_path):
+    """Giving up on the wait is not giving up on the work: ComfyUI keeps what it
+    accepted, and this lane's prompt holds the single execution slot every local
+    render needs."""
+    from app.utils.comfyui import ComfyPromptState
+    seen = {}
+    monkeypatch.setenv(lane.API_KEY_ENV, 'k')
+    monkeypatch.setattr(lane, 'resolve_node', lambda: lane.NODE_CLASS_V2)
+    monkeypatch.setattr(lane.comfy_fs, 'ensure_input_usable', lambda d: str(tmp_path))
+    monkeypatch.setattr(lane, 'queue_prompt_to_comfyui',
+                        lambda wf, cid, worker_url=None, *, extra_data=None:
+                        (seen.update(client_id=cid), ({'prompt_id': 'p'}, None))[1])
+    monkeypatch.setattr(lane, 'get_comfyui_history', lambda pid: {})   # never lands
+    monkeypatch.setattr(lane, '_TIMEOUT_SECONDS', 0.01)
+    monkeypatch.setattr(lane, '_POLL_SECONDS', 0)
+    monkeypatch.setattr('app.utils.comfyui.cancel_comfyui_prompt_state',
+                        lambda pid, cid, worker_url=None:
+                        (seen.update(cancelled=(pid, cid)), ComfyPromptState.DELETED)[1])
+
+    with app.app_context():
+        with pytest.raises(lane.ComfyGptUnavailable, match='nothing was charged'):
+            lane.generate_variation([_png()], 'x')
+    # The exact prompt AND the client id it was submitted under — an id-less
+    # cancel would be a global interrupt, which kills someone else's render.
+    assert seen['cancelled'] == ('p', seen['client_id'])
+
+
+def test_giving_up_on_a_RUNNING_prompt_says_it_is_still_running(app, monkeypatch, tmp_path):
+    """It cannot be stopped without the global /interrupt, so the message must
+    not imply the credits were saved."""
+    from app.utils.comfyui import ComfyPromptState
+    monkeypatch.setenv(lane.API_KEY_ENV, 'k')
+    monkeypatch.setattr(lane, 'resolve_node', lambda: lane.NODE_CLASS_V2)
+    monkeypatch.setattr(lane.comfy_fs, 'ensure_input_usable', lambda d: str(tmp_path))
+    monkeypatch.setattr(lane, 'queue_prompt_to_comfyui',
+                        lambda *a, **k: ({'prompt_id': 'p'}, None))
+    monkeypatch.setattr(lane, 'get_comfyui_history', lambda pid: {})
+    monkeypatch.setattr(lane, '_TIMEOUT_SECONDS', 0.01)
+    monkeypatch.setattr(lane, '_POLL_SECONDS', 0)
+    monkeypatch.setattr('app.utils.comfyui.cancel_comfyui_prompt_state',
+                        lambda pid, cid, worker_url=None: ComfyPromptState.RUNNING)
+
+    with app.app_context():
+        with pytest.raises(lane.ComfyGptUnavailable, match='STILL RUNNING'):
+            lane.generate_variation([_png()], 'x')
+
+
+def test_a_broken_cancel_never_replaces_the_failure_it_reports(app, monkeypatch, tmp_path):
+    monkeypatch.setenv(lane.API_KEY_ENV, 'k')
+    monkeypatch.setattr(lane, 'resolve_node', lambda: lane.NODE_CLASS_V2)
+    monkeypatch.setattr(lane.comfy_fs, 'ensure_input_usable', lambda d: str(tmp_path))
+    monkeypatch.setattr(lane, 'queue_prompt_to_comfyui',
+                        lambda *a, **k: ({'prompt_id': 'p'}, None))
+    monkeypatch.setattr(lane, 'get_comfyui_history', lambda pid: {})
+    monkeypatch.setattr(lane, '_TIMEOUT_SECONDS', 0.01)
+    monkeypatch.setattr(lane, '_POLL_SECONDS', 0)
+    monkeypatch.setattr('app.utils.comfyui.cancel_comfyui_prompt_state',
+                        lambda *a, **k: (_ for _ in ()).throw(OSError('queue unreachable')))
+
+    with app.app_context():
+        with pytest.raises(lane.ComfyGptUnavailable, match='did not finish'):
+            lane.generate_variation([_png()], 'x')
