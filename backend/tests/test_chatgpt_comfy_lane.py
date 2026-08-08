@@ -187,3 +187,50 @@ def _png(size=(64, 64)):
     buf = io.BytesIO()
     Image.new('RGB', size, (10, 20, 30)).save(buf, 'PNG')
     return buf.getvalue()
+
+
+def test_readiness_answers_from_the_lane_that_will_run(app, monkeypatch):
+    """The engine card was greyed out with "add an API key" while the ComfyUI
+    lane was selected and its key was set: readiness still asked OpenAI's
+    question. The lane is pinned, so the probe must ask the lane's own."""
+    from app import capabilities
+    from app import config as cfg
+    with app.app_context():
+        cfg.save_config({'engines': {'chatgpt_auth': 'comfyui'}})
+        monkeypatch.setattr(lane, 'node_available', lambda: True)
+
+        monkeypatch.setenv(lane.API_KEY_ENV, 'comfy-key')
+        ready = capabilities.probe_openai()
+        assert ready['ok'] is True and 'ComfyUI' in ready['detail']
+
+        # ...and an OpenAI key does NOT light it up on this lane, because
+        # nothing here would ever read that key.
+        monkeypatch.delenv(lane.API_KEY_ENV, raising=False)
+        monkeypatch.setenv('OPENAI_API_KEY', 'sk-whatever')
+        blocked = capabilities.probe_openai()
+        assert blocked['ok'] is False
+        assert 'comfy.org' in blocked['detail']
+
+
+def test_a_comfyui_missing_the_node_is_named_in_the_readiness_detail(app, monkeypatch):
+    from app import capabilities
+    from app import config as cfg
+    with app.app_context():
+        cfg.save_config({'engines': {'chatgpt_auth': 'comfyui'}})
+        monkeypatch.setenv(lane.API_KEY_ENV, 'comfy-key')
+        monkeypatch.setattr(lane, 'node_available', lambda: False)
+        state = capabilities.probe_openai()
+        assert state['ok'] is False and lane.NODE_CLASS in state['detail']
+
+
+def test_the_other_lanes_are_unchanged_by_the_new_branch(app, monkeypatch):
+    from app import capabilities
+    from app import config as cfg
+    with app.app_context():
+        cfg.save_config({'engines': {'chatgpt_auth': 'api'}})
+        monkeypatch.setenv('OPENAI_API_KEY', 'sk-whatever')
+        assert capabilities.probe_openai()['ok'] is True
+        monkeypatch.delenv('OPENAI_API_KEY', raising=False)
+        monkeypatch.setattr('app.services.chatgpt_oauth.status',
+                            lambda: {'connected': False})
+        assert capabilities.probe_openai()['ok'] is False

@@ -156,9 +156,23 @@ def probe_gemini() -> dict:
 
 
 def probe_openai() -> dict:
-    """ChatGPT engine readiness: a pay-per-use API key OR a connected ChatGPT
-    subscription (Codex OAuth) both light the engine up."""
+    """ChatGPT engine readiness, ON THE LANE THAT WILL ACTUALLY RUN.
+
+    A pay-per-use API key OR a connected ChatGPT subscription (Codex OAuth) both
+    light the engine up. `engines.chatgpt_auth = comfyui` answers from what THAT
+    lane needs instead — a comfy.org key and a ComfyUI exposing the API node —
+    because the lane is pinned: an OpenAI key it will never reach must not read
+    as "ready", and its absence must not read as "not ready".
+    """
     from .services import chatgpt_oauth
+    if (cfg.get('engines.chatgpt_auth') or 'auto') == 'comfyui':
+        from .services import chatgpt_comfy
+        state = chatgpt_comfy.status()
+        if state['key'] and state['node']:
+            return {'ok': True, 'detail': 'via ComfyUI (comfy.org credits)'}
+        return {'ok': False,
+                'detail': ('comfy.org API key missing' if not state['key']
+                           else f"{chatgpt_comfy.NODE_CLASS} not in this ComfyUI")}
     key = bool(cfg.secret('OPENAI_API_KEY'))
     sub = chatgpt_oauth.status()['connected']
     parts = (['key set'] if key else []) + (['subscription connected'] if sub else [])

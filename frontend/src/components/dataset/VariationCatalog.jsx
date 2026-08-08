@@ -1200,7 +1200,14 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
                     {` · ${engineShare('chatgpt')} image(s) ≈ $${(engineShare('chatgpt') * 0.17).toFixed(2)}`}</>}
             </span>
           ) : (
-            <span className="text-amber-300 text-[0.625rem]">⚠ Add an API key or connect a subscription in Settings</span>
+            <span className="text-amber-300 text-[0.625rem]">
+              {/* Name the credential the SELECTED lane needs. On the ComfyUI
+                  lane an OpenAI key would not be read at all, so asking for one
+                  sends the user to set up the wrong thing. */}
+              {gptViaComfy
+                ? '⚠ Add a comfy.org API key in Settings (or a ComfyUI with the OpenAI node)'
+                : '⚠ Add an API key or connect a subscription in Settings'}
+            </span>
           )} />
         <EngineCard id="openrouter" checked={isOR} available={orAvailable} generating={generating}
           onToggle={toggleEngine} share={engineShare('openrouter')}
