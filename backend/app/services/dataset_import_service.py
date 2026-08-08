@@ -9,6 +9,7 @@ split) -- pure move, no behavior change.
 """
 import io
 import json
+import lzma
 import math
 import os
 from pathlib import Path
@@ -18,6 +19,7 @@ import time
 import uuid
 import warnings
 import zipfile
+import zlib
 from functools import wraps
 from typing import BinaryIO
 
@@ -55,7 +57,11 @@ def _serialize_dataset_ingest(fn):
 # Pillow's WebP encoder raises "Image size exceeds WebP limit of 16383 pixels" past
 # that side. It applies only to the opt-in normalisation modes; preserving a source
 # file never re-encodes it just to meet a WebP implementation limit.
-IMPORT_MAX_SIDE_CEILING = image_encoding.INPUT_MAX_SIDE
+# NOT the input budget: this one bounds what a WebP normalisation mode WRITES,
+# and it stays put when the user raises the ingress budget. Conflating the two
+# would let "accept a 24 000 px panorama" silently become "write a 24 000 px
+# WebP derivative", which the encoder cannot do anyway.
+IMPORT_MAX_SIDE_CEILING = 8192
 _IMPORT_ENCODINGS = {                       # label -> storage policy
     'preserve': {'preserve': True, 'quality': None, 'lossless': False},
     'standard': {'preserve': False, 'quality': 92, 'lossless': False},
@@ -76,14 +82,11 @@ _PRESERVED_IMPORT_EXTENSIONS = {
 # A raw master is intentionally NOT resized on import, but importing it must not
 # turn the process into an unbounded decompressor. These limits apply uniformly to
 # every image ingress path (preserve, crop, explicit normalisation, ZIP and scrape)
-# and are checked from Pillow's header before ``load()``: 8192 px on either side
-# and 16 Mi pixels (about 64 MiB for one decoded RGB buffer; substantially more
-# once an edit/analysis copy exists). This deliberately favours process safety and
-# a coherent contract over raw 50 MP phone masters: reduce those before importing.
-# The values are a safety budget, not an encoder limit; an accepted preserved image
-# remains byte-for-byte untouched on disk.
-PRESERVED_IMPORT_MAX_SIDE = IMPORT_MAX_SIDE_CEILING
-PRESERVED_IMPORT_MAX_PIXELS = image_encoding.INPUT_MAX_PIXELS
+# and are checked from Pillow's header before ``load()``. They are a SETTING now
+# (`image_input.*`, default 64 Mi-pixels / 16384 px per side, 0 = no limit), so
+# they are read through a function: a module-level snapshot taken at import would
+# freeze the first value the process ever saw. The budget is a memory guard, not
+# an encoder limit; an accepted preserved image remains byte-for-byte untouched.
 
 
 def preserved_import_limits() -> tuple[int, int]:
@@ -118,6 +121,7 @@ def import_encode_policy() -> dict:
             logger.warning('ignoring unusable dataset_import.encoding %r', encoding)
         encoding = defaults['encoding']
     policy = _IMPORT_ENCODINGS[encoding]
+    input_max_side, input_max_pixels = preserved_import_limits()
     # A preserved image is never sent through a WebP encoder, so a WebP ceiling
     # cannot cap it. Keep the resolved max_side in the payload so switching
     # back to a normalising mode remains predictable.
@@ -127,10 +131,10 @@ def import_encode_policy() -> dict:
             # Explicit names for the ingress safety budget. The older
             # `preserve_*` aliases stay below for clients released while this
             # policy only described raw-preserve imports.
-            'input_max_side': PRESERVED_IMPORT_MAX_SIDE,
-            'input_max_pixels': PRESERVED_IMPORT_MAX_PIXELS,
-            'preserve_max_side': PRESERVED_IMPORT_MAX_SIDE,
-            'preserve_max_pixels': PRESERVED_IMPORT_MAX_PIXELS,
+            'input_max_side': input_max_side,
+            'input_max_pixels': input_max_pixels,
+            'preserve_max_side': input_max_side,
+            'preserve_max_pixels': input_max_pixels,
             **policy}
 
 
@@ -821,6 +825,7 @@ def import_images(user_id, dataset_id, files_bytes, crop=False, dedupe=False, st
 DATASET_ZIP_MAX_FILES = 400
 DATASET_ZIP_MAX_BYTES = 2 * 1024 * 1024 * 1024
 DATASET_ZIP_MAX_IMAGE_BYTES = 128 * 1024 * 1024
+_DATASET_ZIP_MAX_CENTRAL_DIRECTORY_BYTES = 8 * 1024 * 1024
 _DATASET_ZIP_IMG_EXTS = ('.jpg', '.jpeg', '.png', '.webp', '.bmp')
 
 
@@ -838,7 +843,9 @@ def _merge_training_images(user_id, dataset_id, entries, captions, stats=None):
     for stem, display, getter in entries:
         try:
             raw = getter()
-        except (OSError, ValueError, MemoryError, zipfile.BadZipFile):
+        except (OSError, ValueError, MemoryError, zipfile.BadZipFile,
+                zipfile.LargeZipFile, zlib.error, lzma.LZMAError,
+                NotImplementedError, RuntimeError):
             failed += 1
             continue
         if stats is not None:   # même garde qualité que l'import de photos
@@ -879,7 +886,13 @@ def _merge_training_images(user_id, dataset_id, entries, captions, stats=None):
                         if stats is not None:
                             stats['captions_kept'] = stats.get('captions_kept', 0) + 1
                     else:
-                        row.caption = _cap_caption(incoming)
+                        # A .txt sidecar is work done by a human in another tool —
+                        # the whole point of the round-trip. It lands 'asserted',
+                        # which is the same rule the branch above already applies by
+                        # hand ("a caption written HERE is never overwritten"),
+                        # generalised so a LATER forced pass honours it too.
+                        caption_origin.stamp(row, _cap_caption(incoming),
+                                             caption_origin.ASSERTED)
                         db.session.commit()
                         if stats is not None:
                             stats['captions_applied'] = \
@@ -890,8 +903,10 @@ def _merge_training_images(user_id, dataset_id, entries, captions, stats=None):
         cap = _cap_caption(incoming) if incoming else None
         if cap and stats is not None:
             stats['captions'] = stats.get('captions', 0) + 1
-        img = FaceDatasetImage(dataset_id=dataset_id, source='import', status='keep',
-                               filename=fn, caption=cap)
+        img = FaceDatasetImage(
+            dataset_id=dataset_id, source='import', status='keep', filename=fn,
+            caption=cap,
+            caption_origin=caption_origin.ASSERTED if cap else None)
         db.session.add(img)
         db.session.commit()
         if fp is not None:
@@ -911,9 +926,15 @@ def import_dataset_zip(user_id: int, dataset_id: int,
         raise ValueError('dataset not found')
     stream, owned = _coerce_archive_stream(archive)
     try:
+        _preflight_zip_central_directory(
+            stream, max_entries=DATASET_ZIP_MAX_FILES,
+            max_central_bytes=_DATASET_ZIP_MAX_CENTRAL_DIRECTORY_BYTES,
+            label='zip')
         try:
             z = zipfile.ZipFile(stream)
-        except zipfile.BadZipFile as exc:
+        except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile,
+                zlib.error, lzma.LZMAError, NotImplementedError,
+                RuntimeError) as exc:
             raise ValueError('not a zip file') from exc
         try:
             infos = [i for i in z.infolist() if not i.is_dir()]
@@ -935,7 +956,9 @@ def import_dataset_zip(user_id: int, dataset_id: int,
                     try:
                         captions[os.path.splitext(i.filename)[0]] = \
                             z.read(i).decode('utf-8', 'replace').strip()
-                    except (OSError, zipfile.BadZipFile):
+                    except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile,
+                            zlib.error, lzma.LZMAError, NotImplementedError,
+                            RuntimeError):
                         pass
             entries = [
                 (os.path.splitext(i.filename)[0], i.filename,
@@ -1065,23 +1088,26 @@ def _dhash(im: Image.Image) -> int:
     return bits
 
 
-# Bank analysis needs to decode before its pure-Pillow metrics can downscale.
-# Keep the header guard local to this call rather than changing Pillow's process-
-# wide bomb policy: a 16 MP source is already a substantial RGB working set, and
-# the project itself caps stored Dataset sides at 8192 px.  A Bank may still copy
-# a larger file; it simply starts unanalysed and can be reviewed separately.
-BANK_ANALYSIS_MAX_SIDE = IMPORT_MAX_SIDE_CEILING
-BANK_ANALYSIS_MAX_PIXELS = 16 * 1024 * 1024
+# Bank analysis needs to decode before its pure-Pillow metrics can downscale, so
+# it keeps a header guard at this call.  A Bank may still copy a larger file; it
+# simply starts unanalysed and can be reviewed separately.
+# It follows the SHARED input budget rather than a private copy of it:
+# an image the user was allowed to import must not come back unanalysable because
+# a second, stricter number lives here. Kept as module attributes for the tests
+# and callers that read them, but resolved live by the check below.
+BANK_ANALYSIS_MAX_SIDE = image_encoding.DEFAULT_INPUT_MAX_SIDE
+BANK_ANALYSIS_MAX_PIXELS = image_encoding.DEFAULT_INPUT_MAX_PIXELS
 
 
 def _bank_analysis_dimensions_allowed(im: Image.Image) -> bool:
     """Reject headers whose full decode would exceed the local analysis budget."""
+    max_side, max_pixels = preserved_import_limits()
     try:
         width, height = im.size
         return (isinstance(width, int) and isinstance(height, int)
-                and 0 < width <= BANK_ANALYSIS_MAX_SIDE
-                and 0 < height <= BANK_ANALYSIS_MAX_SIDE
-                and width * height <= BANK_ANALYSIS_MAX_PIXELS)
+                and width > 0 and height > 0
+                and (not max_side or (width <= max_side and height <= max_side))
+                and (not max_pixels or width * height <= max_pixels))
     except (AttributeError, TypeError, ValueError, OverflowError):
         return False
 
@@ -1089,8 +1115,8 @@ def _bank_analysis_dimensions_allowed(im: Image.Image) -> bool:
 def _loaded_bank_deterministic_analysis(im: Image.Image) -> dict | None:
     """Apply the header guard, then decode only an image safe for this analysis."""
     if not _bank_analysis_dimensions_allowed(im):
-        logger.warning('bank analysis skipped image beyond %d px / %d px-side budget',
-                       BANK_ANALYSIS_MAX_PIXELS, BANK_ANALYSIS_MAX_SIDE)
+        logger.warning('bank analysis skipped image beyond the %s input budget',
+                       image_encoding.input_budget_sentence())
         return None
     # Match the Bank scan's JPEG fast path. It bounds decode work before the
     # quality metric performs its own <=1024px analysis copy; other formats
@@ -1599,4 +1625,6 @@ from .face_dataset_service import (
 # re-export: routing a cross-module borrow through the parent would make the
 # ORDER of the parent's re-export blocks load-bearing.
 from .dataset_generation_service import _sync_generate_activity
-from .dataset_backup_service import _coerce_archive_stream
+from .dataset_backup_service import (
+    _coerce_archive_stream, _preflight_zip_central_directory,
+)

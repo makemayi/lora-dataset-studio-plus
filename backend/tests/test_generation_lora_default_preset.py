@@ -106,7 +106,9 @@ def _probe(app, monkeypatch, resolved):
     30 s cache has to be cleared or a probe from an earlier test answers here."""
     from app import capabilities
     from app.services import krea_edit_helper as krh
-    monkeypatch.setattr(krh, 'resolve_krea_unet', lambda selected=None: resolved)
+    monkeypatch.setattr(
+        krh, 'resolve_krea_unet', lambda selected=None, **kw: resolved
+    )
     with app.app_context():
         capabilities._cache = None
         capabilities._cache_ts = 0.0

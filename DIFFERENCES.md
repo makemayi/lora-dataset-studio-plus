@@ -1,7 +1,9 @@
 # 本分支 vs 上游 perfectgf/lora-dataset-studio
 
 本分支（`makemayi/lora-dataset-studio-plus`）已经完整合并了上游 `main` 的全部历史，
-再叠加了以下上游没有的功能和修复。上游仍在开发，本分支不再跟进同步，独立维护。
+最近一次同步是 **2026-08-08**（上游 505 个 commit，含视频数据集与训练、Bank 语义引擎
+CLIP/SigLIP2、caption 作者归属、全模型训练与 fp8 量化、开放网络关键词搜图、Canvas 🧬 Blend）。
+在此之上再叠加以下上游没有的功能和修复。同步按需进行，不承诺跟进每次上游发布。
 
 ## 🎲 Quick generate（一键批量生成，全新功能）
 

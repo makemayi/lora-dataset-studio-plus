@@ -53,8 +53,6 @@ const CONNECTION_CHECKS = [
   + ' bar — LDS must point at that exact host and port.',
   'ComfyUI started without --listen only answers on its own machine. If it runs on'
   + ' another PC, start it with --listen and put that machine’s address here.',
-  'LDS in Docker with ComfyUI on the host: use http://host.docker.internal:8188 —'
-  + ' inside a container, 127.0.0.1 is the container itself.',
   'The address lives in Settings ▸ Local tools ▸ ComfyUI API URL.',
 ];
 

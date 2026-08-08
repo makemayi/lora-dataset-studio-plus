@@ -97,12 +97,14 @@ test('an unreachable ComfyUI is the headline, and it names the address', () => {
   assert.doesNotMatch(model.headline, /paused/i);
 });
 
-test('the unreachable banner lists what to check, including the two invisible ones', () => {
+test('the unreachable banner lists what to check, including the invisible one', () => {
   const { checks } = recoveryBannerModel(UNREACHABLE, { now: NOW });
   assert.ok(checks.length >= 3);
   assert.ok(checks.some((c) => /--listen/.test(c)));          // bound to 127.0.0.1
-  assert.ok(checks.some((c) => /host\.docker\.internal/.test(c)));
   assert.ok(checks.some((c) => /Settings/.test(c)));
+  // This fork runs one way (see the 2026-08-07 Docker removal): a container
+  // hint here would send every connection problem down a lane that is gone.
+  assert.ok(!checks.some((c) => /docker/i.test(c)));
 });
 
 test('the paused job is demoted to a footnote, not the accusation', () => {

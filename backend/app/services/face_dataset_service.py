@@ -3546,7 +3546,9 @@ from .dataset_backup_service import (
 
 # --- Re-exports: reference_edit_service.py (Phase 6 file split, 2026-08) ----
 from .reference_edit_service import (
-    LOCAL_EDIT_REF_SUPPORT, crop_reference, recrop_reference_auto,
+    LOCAL_EDIT_REF_SUPPORT, local_edit_extra_refs, local_edit_modal_refs,
+    local_engines_taking_dataset_refs, local_engines_taking_modal_refs,
+    crop_reference, recrop_reference_auto,
     normalize_edit_engines, start_reference_edit, link_completed_reference_edit,
     keep_reference_edit, discard_reference_edit, reference_mutation,
     invalidate_reference_edit, commit_edited_reference,
@@ -3587,7 +3589,7 @@ from .dataset_generation_service import (
 # order of these blocks load-bearing.
 from .dataset_import_service import (
     rollback_imported_images,
-    IMPORT_MAX_SIDE_CEILING, PRESERVED_IMPORT_MAX_SIDE, PRESERVED_IMPORT_MAX_PIXELS,
+    IMPORT_MAX_SIDE_CEILING,
     DATASET_ZIP_MAX_FILES, DATASET_ZIP_MAX_BYTES, DATASET_ZIP_MAX_IMAGE_BYTES,
     SCRAPE_IMPORT_MAX, SCRAPE_IMPORT_MIN_SIDE, SCRAPE_IMPORT_MAX_RATIO,
     SCRAPE_DHASH_MAX_DISTANCE, BANK_ANALYSIS_MAX_SIDE, BANK_ANALYSIS_MAX_PIXELS,

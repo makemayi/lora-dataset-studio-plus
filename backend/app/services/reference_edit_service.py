@@ -137,9 +137,10 @@ def start_reference_edit(app, user_id, dataset_id, engine, prompt,
 
     LOCAL engines (Klein, Krea 2 Edit) take a different route entirely — see
     _start_local_reference_edit: no blocking call, a ComfyUI queue job instead.
-    They also take FEWER references (Klein: the dataset's extras, by path; Krea:
-    the primary only), which is a fact of their graphs and is stated in the UI at
-    pick time rather than discovered as a silent drop here.
+    They also take their second reference from DIFFERENT places (Klein: the
+    dataset's extra angles, by path; Krea: one image uploaded in this dialog),
+    which is a fact of their graphs — see LOCAL_EDIT_REF_SUPPORT — and is stated
+    in the UI at pick time rather than discovered as a silent drop here.
 
     Raises ValueError for a bad engine / empty prompt / missing reference (the
     route maps it to 400/404)."""
@@ -168,21 +169,31 @@ def start_reference_edit(app, user_id, dataset_id, engine, prompt,
     # siblings consume the bytes directly; local siblings below consume temporary
     # files written once from these exact bytes, never a later read of the master.
     dataset_ref_bytes = tuple(_all_ref_bytes(ds))
+    # Which selected local engines can actually receive the dialog's uploads —
+    # computed BEFORE the refusal below, because it is what the refusal turns on.
+    modal_local = local_engines_taking_modal_refs(local_engines)
+    # Sanitize the dialog's uploads HERE — once, and before anything
+    # destructive. start_batch below SUPERSEDES the batch on screen: it unlinks
+    # the previous candidate and cancels a render still in flight. A rejected
+    # image (HEIC, animated GIF, truncated PNG — all of which pass the browser's
+    # image/* filter) must therefore fail before it, or dropping the wrong file
+    # destroys a candidate the user had not kept yet. The API lane always did
+    # this; the local lane used to be refused outright, so no ordering existed.
+    # Both lanes now read the SAME validated bytes.
+    modal_bytes = tuple(
+        sanitize_external_reference(raw, label=f'extra edit reference {index}')
+        for index, raw in enumerate(transient_refs, 1) if raw)
     refs = None
     if api_engines:
-        snapshotted = list(dataset_ref_bytes)
-        for index, raw in enumerate(transient_refs, 1):
-            if raw:
-                snapshotted.append(sanitize_external_reference(
-                    raw, label=f'extra edit reference {index}'))
-        refs = tuple(snapshotted)
-    elif transient_refs:
-        # Preserve the historical one-local-engine refusal. In a mixed batch the
-        # uploads are valid API-only inputs and are not silently discarded.
+        refs = tuple(list(dataset_ref_bytes) + list(modal_bytes))
+    elif transient_refs and not modal_local:
+        # Refuse ONLY when nothing selected can read these bytes. Krea now can,
+        # so this is no longer "local engines cannot take uploads" — it is the
+        # narrower, still-true "the engine you picked has nowhere to put them".
         local = local_engines[0]
         raise ValueError(
-            f'{engine_labels().get(local, local)} renders on your own GPU and cannot take '
-            'the extra reference images added here — remove them, or pick an API engine')
+            f'{engine_labels().get(local, local)} has no slot for the extra reference images '
+            'added here — remove them, or pick an engine that takes one')
 
     # Validate every selected local lane before replacing the current results.
     # Full enqueue happens before API threads below, closing remaining admission
@@ -206,25 +217,44 @@ def start_reference_edit(app, user_id, dataset_id, engine, prompt,
     # If the second local enqueue fails, clear cancels the first queue job and
     # closes the shared activity exactly once.
     local_snapshot_paths = []
+    local_modal_paths = []
     try:
         if local_engines:
             snapshot_tag = uuid.uuid4().hex[:8]
+            # The primary is always needed. The dataset's EXTRAS only when a
+            # selected engine reads them — Krea reads the dialog instead, so a
+            # Krea-only edit used to write files nobody would ever open. Derived
+            # from the support table, never from engine names.
+            wants_dataset_extras = bool(local_engines_taking_dataset_refs(local_engines))
             for index, raw in enumerate(dataset_ref_bytes):
+                if index and not wants_dataset_extras:
+                    break
                 filename = (
                     f'{user_id}{reference_edit_jobs.CANDIDATE_MARKER}'
                     f'snapshot_{snapshot_tag}_{index}.webp')
                 path = os.path.join(dsdir, filename)
                 local_snapshot_paths.append(path)
                 write_image_atomic(path, raw)
+            # The dialog's own uploads, given the SAME treatment as the primary:
+            # already-validated bytes, written once, handed over as paths. Only
+            # staged when an engine will read them — an upload for an API-only
+            # batch has no business touching the dataset folder.
+            for index, raw in enumerate(modal_bytes if modal_local else ()):
+                filename = (
+                    f'{user_id}{reference_edit_jobs.CANDIDATE_MARKER}'
+                    f'modalref_{snapshot_tag}_{index}.webp')
+                path = os.path.join(dsdir, filename)
+                local_modal_paths.append(path)
+                write_image_atomic(path, raw)
         for local in local_engines:
             _enqueue_local_reference_edit(
                 user_id, dataset_id, ds, local, prompt, tokens[local],
-                local_snapshot_paths[0], local_snapshot_paths[1:])
+                local_snapshot_paths[0], local_snapshot_paths[1:], local_modal_paths)
     except Exception:
         reference_edit_jobs.clear_batch(dataset_id, batch_token, dsdir)
         raise
     finally:
-        for path in local_snapshot_paths:
+        for path in local_snapshot_paths + local_modal_paths:
             reference_edit_jobs._unlink(path)
 
     for api_engine in api_engines:
@@ -249,14 +279,26 @@ def start_reference_edit(app, user_id, dataset_id, engine, prompt,
     return started['batch_id']
 
 
-#: Reference images each LOCAL engine actually consumes, so the UI can say it at
-#: pick time. Klein chains the dataset's extra refs as native ReferenceLatent
-#: nodes; Krea's Krea2EditModelPatch takes ONE source (a second slot exists but
-#: what it does to identity has not been measured — see enqueue_krea_edit).
-#: Neither takes the modal's transient uploads: both engines want file PATHS and
-#: the transient images are request-scoped bytes. Refused loudly by the route.
+#: Which second reference each LOCAL engine takes, and — the part that matters —
+#: WHERE it comes from. The two local engines want opposite things, so one pool
+#: cannot serve both:
+#:
+#:   * 'dataset_only' (Klein) — the dataset's extra refs, chained as native
+#:     ReferenceLatent nodes, no ceiling of its own. Those are ANGLES OF THE SAME
+#:     FACE and they lock identity across every generation, not just this edit.
+#:     Persistent input, so the dataset's reference card is their home.
+#:   * 'modal_one' (Krea) — ONE image uploaded in the edit dialog, and none of
+#:     the dataset's. Its node pack trained the `_b` slot for a DIFFERENT subject
+#:     ("scene first, subject second"), which makes the dataset pool precisely
+#:     the wrong source: everything in it is another angle of the same person,
+#:     the one photo that slot mis-handles (documented failure: the subject comes
+#:     back duplicated). It is a per-edit compositional input — "put her in this
+#:     room", "next to him" — so it belongs to the edit, not to the dataset.
+#:
+#: That split IS the design. The first version of this feature fed Krea from the
+#: dataset pool and therefore guaranteed the wrong photo on every run.
 #: LOAD-BEARING, not documentation: the enqueue below reads it, so a third local
-#: engine cannot be added without deciding what it does with the extra refs. The
+#: engine cannot be added without deciding where its references come from. The
 #: values are mirrored in frontend EDIT_REF_SUPPORT (contract-tested), because
 #: the UI has to say this at pick time, not discover it as a silent drop.
 LOCAL_EDIT_REF_SUPPORT = {'klein': 'dataset_only', 'krea': 'modal_one',

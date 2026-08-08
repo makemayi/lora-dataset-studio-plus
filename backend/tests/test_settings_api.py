@@ -625,34 +625,6 @@ def test_update_check_detects_newer_release(client, monkeypatch, _reset_update_c
     assert d['url'].endswith('v9999.12.31')
 
 
-def test_update_check_docker_reports_manual_rebuild_even_with_zip(
-        client, monkeypatch, _reset_update_cache):
-    import requests
-    from app.services import updater
-    monkeypatch.setenv('LDS_RUNTIME', 'docker-gpu')
-    monkeypatch.setattr(updater, 'is_git_checkout', lambda root=None: True)
-    monkeypatch.setattr(
-        updater, 'git_update_status',
-        lambda root=None: (_ for _ in ()).throw(
-            AssertionError('Docker checks must not fetch through the git updater')),
-    )
-    monkeypatch.setattr(requests, 'get', lambda *a, **k: _FakeResp(200, {
-        'tag_name': 'v9999.12.31',
-        'assets': [{'name': 'LoRA-Dataset-Studio-windows.zip',
-                    'browser_download_url': 'https://x/win'}],
-    }))
-
-    d = client.get('/api/update/check?force=1').get_json()
-
-    assert d['update_available'] is True
-    assert d['install_mode'] == 'docker' and d['can_apply'] is False
-    assert d['manual'] is True
-    assert d['instructions'] == [
-        'git pull',
-        'docker compose -f docker-compose.gpu.yml up -d --build',
-    ]
-
-
 def test_update_check_pinokio_keeps_the_git_answer_but_drops_the_button(
         client, monkeypatch, _reset_update_cache):
     """Unlike Docker, a Pinokio install IS a git checkout worth measuring: its

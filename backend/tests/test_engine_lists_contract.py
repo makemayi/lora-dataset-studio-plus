@@ -140,27 +140,27 @@ def test_each_local_engine_reads_only_its_own_pool():
     failing test rather than a quietly wrong render."""
     dataset, modal = ['a.png', 'b.png', 'c.png'], ['upload1.png', 'upload2.png']
 
-    assert svc.local_edit_extra_refs('klein', dataset) == dataset
-    assert svc.local_edit_modal_refs('klein', modal) == []
+    assert fsvc.local_edit_extra_refs('klein', dataset) == dataset
+    assert fsvc.local_edit_modal_refs('klein', modal) == []
 
-    assert svc.local_edit_extra_refs('krea', dataset) == []
-    assert svc.local_edit_modal_refs('krea', modal) == ['upload1.png']
+    assert fsvc.local_edit_extra_refs('krea', dataset) == []
+    assert fsvc.local_edit_modal_refs('krea', modal) == ['upload1.png']
 
-    assert svc.local_edit_extra_refs('krea', None) == []
-    assert svc.local_edit_modal_refs('krea', None) == []
+    assert fsvc.local_edit_extra_refs('krea', None) == []
+    assert fsvc.local_edit_modal_refs('krea', None) == []
     # An engine nobody has decided about reads NEITHER pool rather than both —
     # the safe default for a graph that may have no slot at all.
-    assert svc.local_edit_extra_refs('nanobanana', dataset) == []
-    assert svc.local_edit_modal_refs('nanobanana', modal) == []
+    assert fsvc.local_edit_extra_refs('nanobanana', dataset) == []
+    assert fsvc.local_edit_modal_refs('nanobanana', modal) == []
 
     # And the refusal path turns on this list, not on "is it local".
-    assert svc.local_engines_taking_modal_refs(['klein', 'krea']) == ['krea']
-    assert svc.local_engines_taking_modal_refs(['klein']) == []
+    assert fsvc.local_engines_taking_modal_refs(['klein', 'krea']) == ['krea']
+    assert fsvc.local_engines_taking_modal_refs(['klein']) == []
     # Its mirror gates DISK WRITES: a Krea-only edit must not copy the dataset's
     # extras to temporary files for a consumer that no longer exists.
-    assert svc.local_engines_taking_dataset_refs(['klein', 'krea']) == ['klein']
-    assert svc.local_engines_taking_dataset_refs(['krea']) == []
-    assert svc.local_engines_taking_dataset_refs(['chatgpt']) == []
+    assert fsvc.local_engines_taking_dataset_refs(['klein', 'krea']) == ['klein']
+    assert fsvc.local_engines_taking_dataset_refs(['krea']) == []
+    assert fsvc.local_engines_taking_dataset_refs(['chatgpt']) == []
 
 
 def test_the_engine_labels_are_worded_identically_on_both_sides():

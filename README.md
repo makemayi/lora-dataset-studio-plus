@@ -45,7 +45,7 @@ https://github.com/user-attachments/assets/d51ff89c-34e9-41a9-b47d-08939a8c867b
 |---|---|
 | **Character / Concept / Style** | Kind-aware captioning, masking, readiness checks and training policies rather than three cosmetic labels |
 | **Human / Animal / Creature / Object / Other / Anime subjects** | Subject-specific identity wording and shot catalogs; Anime protects the character design and illustrated rendering instead of forcing photorealism |
-| **Five generation engines** | Nano Banana Pro (Gemini), ChatGPT (`gpt-image-2`), OpenRouter, or local Klein and Krea 2 Edit through ComfyUI |
+| **Seven generation engines** | Nano Banana Pro (Gemini), ChatGPT (`gpt-image-2`), OpenRouter, Qwen Image (DashScope), or local Klein, Krea 2 Edit and MiniMax H3 through ComfyUI. H3 generates dataset images only — the ✦ Edit reference lane stays Klein, Krea and the API engines |
 | **Several engines in one batch** | Tick multiple engines and split one shot list across them; every result remains labelled with the engine that produced it |
 | **Krea 2 Edit** | Restage a single reference while preserving identity, without needing a character LoRA first; the selected card controls output framing |
 | **Variation catalog** | Balanced expression, angle, lighting, framing, outfit and background shots; import/export the catalog as JSON and keep custom entries |
@@ -868,7 +868,7 @@ Nothing here locks your data in — every stage has an exit.
 
 | Stage | ai-toolkit alone | LoRA Dataset Studio |
 |---|---|---|
-| Build from references | ❌ bring your own images | ✅ five engines, simultaneous multi-engine batches, subject-aware catalogs including Anime, reference edits and exact retries |
+| Build from references | ❌ bring your own images | ✅ seven engines, simultaneous multi-engine batches, subject-aware catalogs including Anime, reference edits and exact retries |
 | Build from the web | ❌ none | ✅ Reddit, Pexels, keyword search across the open web, and gallery/direct-media URL scans (through gallery-dl, which covers several hundred sites) into a dataset or Image Bank, with deduplication and explicit provider warnings |
 | Triage a large dump | ❌ none | ✅ Image Bank scans, scores, search, filters, sorts, balanced/diverse shortlists, watermark masks and dataset round trips |
 | Curate and repair | ❌ external file tools | ✅ keep/reject, crop/mirror/rotate, InsightFace scoring, composition guidance, improve/compare and recoverable originals |

@@ -461,13 +461,29 @@ def _improve_preflight(engine):
     khh.preflight()
 
 
-def _enqueue_improve(engine, *, user_id, source, source_path, prompt, label):
+def _enqueue_improve(engine, *, user_id, source, source_path, prompt, label,
+                     dataset=None, extra_metadata=None):
     """Hand ONE improve off to the chosen engine and return its job id.
 
     SeedVR2 needs no prompt (there is no prompt in a restoration); the
     'klein' engine's Krea2+SeedVR2 pipeline reuses the SAME editable
-    klein_improve `prompt` for its Krea2 edit stage."""
-    meta = _improve_extra_metadata(source, label, engine=engine)
+    klein_improve `prompt` for its Krea2 edit stage.
+
+    `extra_metadata` overrides what the finished job is linked back TO. Default
+    (None) keeps the dataset-image contract every existing caller relies on. The
+    ◉ Canvas improve passes its own because its source is a `LoraTestImage`, not
+    a `FaceDatasetImage`: the two live in different tables with independent id
+    spaces, and the completion callback is chosen by this metadata. The engine
+    dispatch below stays the single place that knows Krea HQ from SeedVR2 — that
+    is the whole point of routing the second lane through here rather than
+    growing a parallel copy of it.
+
+    `dataset` is accepted for that same caller symmetry; this fork's Krea2-HQ
+    improve resolves its own profile from the shipped workflow, so nothing here
+    reads it (upstream's Klein improve derived per-dataset LoRA strength and
+    steps from it)."""
+    meta = (dict(extra_metadata) if extra_metadata is not None
+            else _improve_extra_metadata(source, label, engine=engine))
     if engine == 'seedvr2':
         from . import seedvr2_helper
         return seedvr2_helper.enqueue_seedvr2_upscale(
@@ -1596,6 +1612,16 @@ def _run_nanobanana_batch(app, items, ref_bytes, engine='nanobanana', dataset_id
                 return
             if out:
                 ds = db.session.get(FaceDataset, img.dataset_id)
+                if ds is None:
+                    # The whole DATASET was deleted while this batch ran. The row
+                    # above survived only because its cascade has not landed yet;
+                    # reading ds.user_id here raised AttributeError, which escaped
+                    # _run_one and abandoned every REMAINING item of the batch.
+                    # Nothing to write this result to, so drop it and let the rest
+                    # of the batch finish.
+                    logger.info('%s batch: dataset gone for row %s, dropping the '
+                                'result', engine, image_id)
+                    return
                 fn = f"{ds.user_id}_{tag}_{uuid.uuid4().hex[:8]}.webp"
                 try:
                     # Conserve le ratio demandé (pas de letterbox carré sur les corps).

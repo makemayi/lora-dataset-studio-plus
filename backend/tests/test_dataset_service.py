@@ -480,7 +480,11 @@ def test_backup_aborts_if_dataset_generation_changes_while_streaming(
         svc.db.session.add(row)
         svc.db.session.commit()
 
-        native_write = svc._write_backup_file_member
+        # The backup writer moved to dataset_backup_service (2026-08 split) and
+        # calls its member writer as its OWN module global: patching the
+        # re-exported name on face_dataset_service would silently do nothing.
+        from app.services import dataset_backup_service as dbs
+        native_write = dbs._write_backup_file_member
         changed = False
 
         def mutate_after_member(*args, **kwargs):
@@ -492,7 +496,7 @@ def test_backup_aborts_if_dataset_generation_changes_while_streaming(
                 svc.db.session.commit()
             return result
 
-        monkeypatch.setattr(svc, '_write_backup_file_member', mutate_after_member)
+        monkeypatch.setattr(dbs, '_write_backup_file_member', mutate_after_member)
         with pytest.raises(ValueError, match='dataset changed while the backup'):
             svc.write_backup_zip(LOCAL_USER, ds.id, io.BytesIO())
         assert svc.dataset_activity.get(ds.id) is None
@@ -513,6 +517,9 @@ def test_backup_writer_refuses_reader_budgets_before_opening_destination(
     from app.config import LOCAL_USER
     from app.models import FaceDatasetImage
     from app.services import face_dataset_service as svc
+    # The caps live on dataset_backup_service and the writer reads them as its
+    # own module globals — patch the owner, not the re-export.
+    from app.services import dataset_backup_service as dbs
 
     with app.app_context():
         ds = svc.create_dataset(LOCAL_USER, 'Bounded backup', 'bounded_backup')
@@ -522,7 +529,7 @@ def test_backup_writer_refuses_reader_budgets_before_opening_destination(
         svc.db.session.add(FaceDatasetImage(
             dataset_id=ds.id, filename='a.webp', source='import', status='keep'))
         svc.db.session.commit()
-        monkeypatch.setattr(svc, cap_name, cap_value)
+        monkeypatch.setattr(dbs, cap_name, cap_value)
 
         output = io.BytesIO()
         with pytest.raises(ValueError, match=message):
@@ -569,7 +576,9 @@ def test_backup_basename_rejects_superscript_windows_devices(filename):
 )
 def test_backup_member_copy_requires_the_exact_preflight_size(
         tmp_path, monkeypatch, payload, declared_size):
-    from app.services import face_dataset_service as svc
+    # Owner module: the member writer reads `_backup_handle_generation` as its
+    # own global, so a patch on the face_dataset_service re-export is a no-op.
+    from app.services import dataset_backup_service as svc
 
     path = tmp_path / 'source.webp'
     path.write_bytes(payload)

@@ -363,7 +363,10 @@ def test_training_zip_eocd_cap_runs_before_zipfile_parses_the_directory(
 
 def test_backup_eocd_preflight_rewinds_before_zipfile(app, monkeypatch):
     from app.config import LOCAL_USER
-    from app.services import face_dataset_service as service
+    # The backup reader moved to dataset_backup_service (2026-08 split) and
+    # calls `_import_backup_zipfile` as its OWN module global, so the patches
+    # below have to drive the owner rather than the parent's re-export.
+    from app.services import dataset_backup_service as service
 
     data = _empty_backup(service)
     stream = io.BytesIO(data)
@@ -393,7 +396,9 @@ def test_backup_eocd_preflight_rewinds_before_zipfile(app, monkeypatch):
 
 def test_backup_eocd_preflight_has_a_compatibility_fallback(app, monkeypatch):
     from app.config import LOCAL_USER
-    from app.services import face_dataset_service as service
+    # Owner module: swapping `zipfile` on face_dataset_service would leave the
+    # reader reading the real one.
+    from app.services import dataset_backup_service as service
 
     stream = io.BytesIO(_empty_backup(service))
     stream.seek(7)

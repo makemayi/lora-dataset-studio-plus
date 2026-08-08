@@ -13,6 +13,7 @@ Split out of face_dataset_service.py (2026-08, Phase 7 of a multi-phase file
 split) -- pure move, no behavior change.
 """
 import io
+import lzma
 import math
 import json
 import ntpath
