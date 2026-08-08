@@ -1124,6 +1124,40 @@ def _fetch_object_info(timeout=None):
     return classes, enums, files
 
 
+_SYSTEM_ARGV_TTL = 300
+_system_argv_cache = {"argv": None, "timestamp": 0, "key": None}
+
+
+def fetch_system_argv(timeout=(3, 5)):
+    """The command line ComfyUI was started with, as a list, from
+    `GET /system_stats` → `system.argv`. None when it cannot be read.
+
+    None means "we do not know", never "no flags" — every caller must treat the
+    two differently, because the only consumer so far (MiniMax H3's
+    `--disable-dynamic-vram` check) would otherwise nag on every unreachable
+    probe about a flag that is probably already there.
+
+    Cached for five minutes: a launch command cannot change without a restart,
+    and this is a health-check-shaped call, not a hot path."""
+    addr = api_address()
+    now = time.time()
+    if (_system_argv_cache["key"] == addr
+            and now - _system_argv_cache["timestamp"] < _SYSTEM_ARGV_TTL):
+        return _system_argv_cache["argv"]
+    try:
+        resp = requests.get(urljoin(addr, '/system_stats'), timeout=timeout)
+        resp.raise_for_status()
+        argv = (resp.json() or {}).get('system', {}).get('argv')
+    except Exception as e:
+        logger.debug('fetch_system_argv failed: %s', e)
+        return None
+    if not isinstance(argv, list):
+        return None
+    argv = [str(a) for a in argv]
+    _system_argv_cache.update(argv=argv, timestamp=now, key=addr)
+    return argv
+
+
 def fetch_object_info_classes(timeout=None):
     """Set of node `class_type` names the target ComfyUI exposes = the KEYS of
     `GET /object_info`. Used by the Studio preflight to tell a required CUSTOM
