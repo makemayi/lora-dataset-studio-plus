@@ -51,8 +51,10 @@ test('the connection comes FIRST in the markup, the paused job after it', () => 
 test('the address and the concrete checks are on screen, not just in the model', () => {
   const html = render(UNREACHABLE)
   assert.match(html, /http:\/\/127\.0\.0\.1:8188/)
-  assert.match(html, /host\.docker\.internal/)
   assert.match(html, /--listen/)
+  // No container hint: this fork removed the Docker lanes (2026-08-07), so it
+  // would send every connection problem down a route that no longer exists.
+  assert.doesNotMatch(html, /docker/i)
   assert.match(html, /<ul/)                      // a list, not one wall of text
   assert.match(html, /I restarted ComfyUI/)      // the exit is still offered
 })

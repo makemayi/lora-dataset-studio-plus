@@ -50,6 +50,22 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-09-h3-shots-are-shaped-by-the-card',
+    date: '2026-08-09',
+    title: 'MiniMax H3 stops making every shot the shape of your reference photo',
+    blurb:
+      "A full-body card asks for a portrait frame and a wide card for a landscape one — H3 ignored both and copied the aspect of your reference photo instead, so a square reference produced a square version of every shot in the catalog. The card decides the shape now, exactly like Klein and Krea 2 Edit. The reference still decides how many pixels: reshaping never enlarges the image, because H3 pays for every pixel once per frame of the packet it samples.",
+    to: '/datasets?section=add&panel=generate',
+  },
+  {
+    id: '2026-08-09-retry-stays-on-its-own-engine',
+    date: '2026-08-09',
+    title: '🔄 Retry answers with the engine that made the tile',
+    blurb:
+      "Pressing 🔄 on a MiniMax H3 tile could come back rendered by Krea 2 — and on an install with only API engines ticked, a local tile's retry could quietly bill one. The Enabled engines list in Settings is about what a NEW batch may use; it was also being applied to retries, so a tile made before you narrowed that list (or before an engine existed) was silently rerouted to your default engine. A retry now uses the engine the tile was made with. Picking an engine explicitly still moves it, and an NSFW tile still never leaves your GPU.",
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-08-prompt-suffixes-save',
     date: '2026-08-08',
     title: 'Prompt suffixes keep what you typed, without generating first',
