@@ -2750,8 +2750,14 @@ def _image_engine(img):
     # Krea 2 Edit rows store the engine id here, like the API ones: the engine
     # resolves its base model deterministically at enqueue AND at regenerate
     # (krea_edit_helper.resolve_krea_unet), so there is no per-row model to keep.
-    if value == KREA_ENGINE:
-        return KREA_ENGINE
+    # Every local engine that stores its ENGINE ID here (rather than a model
+    # filename) answers with that id. Derived from LOCAL_ENGINES instead of
+    # naming Krea alone: the `return 'klein'` below is a fallthrough for a
+    # MODEL FILENAME, and reaching it with an engine id badged MiniMax H3 rows
+    # as Klein — the tile then claimed a different engine than the one that
+    # rendered it.
+    if value in LOCAL_ENGINES:
+        return value
     return 'klein'   # a local model file name — the row was rendered on the GPU
 
 

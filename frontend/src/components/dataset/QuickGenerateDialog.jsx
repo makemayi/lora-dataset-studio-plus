@@ -167,10 +167,13 @@ export default function QuickGenerateDialog({
       // fallback so Generate isn't silently disabled the moment NSFW turns on.
       if (available?.klein) return ['klein'];
       if (available?.krea) return ['krea'];
+      // An install whose only local engine is H3 would otherwise be left with
+      // an empty selection and a disabled Generate the moment NSFW turns on.
+      if (available?.minimax_h3) return ['minimax_h3'];
       return local;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nsfwRatio, available?.klein, available?.krea]);
+  }, [nsfwRatio, available?.klein, available?.krea, available?.minimax_h3]);
 
   const toggleDialogEngine = (name) => setDialogEngines((prev) => (
     prev.includes(name) ? prev.filter((e) => e !== name) : [...prev, name]

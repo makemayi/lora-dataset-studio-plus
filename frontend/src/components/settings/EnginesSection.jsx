@@ -35,6 +35,7 @@ const ENGINE_OPTIONS = [
   { id: 'qwen', label: 'Qwen Image (Alibaba)' },
   { id: 'klein', label: 'Klein (ComfyUI, local)' },
   { id: 'krea', label: 'Krea 2 Edit (ComfyUI, local)' },
+  { id: 'minimax_h3', label: 'MiniMax H3 (ComfyUI, local)' },
 ]
 
 /* Optional generation-LoRA PRESETS, originally for the local Klein engine

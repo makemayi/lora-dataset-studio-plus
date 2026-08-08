@@ -980,6 +980,27 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
             generation_loras=_keh.resolve_generation_lora_preset(generation_lora_preset),
             extra_metadata={'is_dataset': True, 'dataset_id': img.dataset_id,
                             'variation_label': img.variation_label})
+    elif target == MINIMAX_H3_ENGINE:
+        # MiniMax H3: same shape as the Krea branch above. It needs its OWN
+        # branch and not the Klein fallthrough below — the `else` was written
+        # when Klein was the only local engine, so without this a 🔄 on an H3
+        # tile silently re-rendered it on Klein, i.e. the retry answered with a
+        # different engine than the one the tile was made with.
+        engine = MINIMAX_H3_ENGINE
+        from . import minimax_h3_helper as _mh
+        ref_path = os.path.join(_dataset_path(ds.id), ds.ref_filename)
+        new_job_id = _mh.enqueue_minimax_h3(
+            user_id=str(user_id), source_filename=ds.ref_filename,
+            source_path=ref_path, framing=img.framing,
+            edit_prompt=wrap_variation_minimax_h3(
+                prompt, nsfw=is_nsfw_label(img.variation_label),
+                framing=img.framing,
+                suffix=dataset_prompt_suffix(ds, img.framing),
+                subject_type=subject_type_of(ds),
+                label=img.variation_label or ''),
+            aspect_ratio=aspect_for_label(img.variation_label, img.framing),
+            extra_metadata={'is_dataset': True, 'dataset_id': img.dataset_id,
+                            'variation_label': img.variation_label})
     else:
         try:
             from .klein_edit_helper import enqueue_klein_edit, resolve_generation_lora_preset

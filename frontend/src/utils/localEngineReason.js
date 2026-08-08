@@ -15,6 +15,7 @@
    available" is an inert button; the user cannot tell a missing weight from a
    stopped ComfyUI from a node pack that needs a restart. */
 import { kreaUnavailableReason } from './kreaEngine.js';
+import { minimaxH3UnavailableReason } from './minimaxH3Engine.js';
 import { comfyEnumUnavailableReason } from './comfyEnumSupport.js';
 // The REQUIRED-weights vocabulary already exists, next to the Setup step that
 // downloads them. Re-listing it here is how the picker and Setup end up naming
@@ -103,6 +104,22 @@ export function localEngineUnavailableReason(engine, caps, enabledEngines = null
       nodePackInstalled: comfy.krea_nodes_installed,
     });
   }
+  if (engine === 'minimax_h3') {
+    if (engines.minimax_h3) return null;
+    // H3 publishes its gaps under its own capabilities key, not under
+    // `comfyui.*` like the older two — see capabilities.probe.
+    const h3 = caps?.minimax_h3 || {};
+    return minimaxH3UnavailableReason({
+      enabledInSettings: enabled('minimax_h3'),
+      comfyuiReachable: !!comfy.reachable,
+      comfyui: comfy,
+      missingAssets: h3.missing,
+      missingNodes: h3.missing_nodes,
+    });
+  }
+  // A local engine with no branch here returns "no reason", which reads as
+  // "it is fine" on every screen that asks. That is why each one must be
+  // added: silence is the failure mode this helper exists to remove.
   return null;
 }
 
