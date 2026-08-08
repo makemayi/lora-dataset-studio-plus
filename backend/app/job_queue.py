@@ -438,6 +438,7 @@ DATASET_IMAGE_JOB_NAMES = frozenset({
     'klein_face_swap_dataset',      # Klein face swap (fixed workflow)
     'seedvr2_upscale',              # SeedVR2 (fidelity upscale)
     'krea2_hq_restore_dataset',     # ✨ Improve 'klein' engine: Krea 2 Ostris Edit + SeedVR2
+    'minimax_h3_dataset',           # MiniMax H3 (video packet -> one still)
 })
 # It happened a SECOND time, with SeedVR2, for the same reason and with the same
 # clean logs: rendered, `execution_success`, 2.2 MB PNG on disk, candidate row

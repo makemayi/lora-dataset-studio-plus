@@ -727,6 +727,45 @@ def _klein_missing_response(missing, missing_nodes=None):
                     'klein_nodes_missing': missing_nodes}), 409
 
 
+def _minimax_h3_missing_response(e):
+    """Turn a MinimaxH3ModelsMissing into a structured 409.
+
+    Same `{files, nodes, node_packs}` vocabulary as the Klein/Krea/Studio ones so
+    a single banner can render every engine — published under its own key for the
+    same reason theirs are.
+
+    NO auto-install, and that is deliberate rather than unfinished: H3's weights
+    are ~40 GB spread over five files, several of them community re-quantisations
+    whose canonical home moves, and the frame-selector pack is not in this app's
+    installer. Starting a 40 GB download from a toast would be a worse answer than
+    a list of five links. Klein and Krea auto-install because their assets are
+    small, pinned and first-party; saying so here keeps the difference honest
+    rather than looking like a gap.
+
+    The VRAM warning rides along when it applies: an install can be complete and
+    still generate six times slower than it should, and that is invisible without
+    being told."""
+    from ..services import minimax_h3_helper as mh
+    files = mh.missing_file_entries(e.missing)
+    node_packs = mh.h3_node_hints(e.missing_nodes)
+    parts = ["MiniMax H3 can't run yet."]
+    if e.missing_nodes:
+        parts.append(
+            f"Install the “{mh.H3_FRAME_SELECT_PACK['pack']}” custom-node pack "
+            f"({mh.H3_FRAME_SELECT_PACK['url']}) and RESTART ComfyUI — it only "
+            "registers custom nodes at startup.")
+    for f in files:
+        parts.append(f"{f['kind']} → {f['path']} ({f['source']})")
+    return jsonify({
+        'error': ' '.join(parts),
+        'minimax_h3_missing': {
+            'files': files,
+            'nodes': e.missing_nodes,
+            'node_packs': node_packs,
+        },
+    }), 409
+
+
 def _krea_missing_response(e):
     """Turn a KreaModelsMissing into a structured 409.
 
@@ -1049,6 +1088,15 @@ def dataset_generate(dataset_id):
             keh2.preflight()
         except keh2.KreaModelsMissing as e:
             return _krea_missing_response(e)
+    # Third LOCAL engine, same rule: five weights and one node pack checked once,
+    # up front, so a mixed run cannot bill an API batch and only then find out H3
+    # can't render its share.
+    if any(g == 'minimax_h3' for g, _ in batches):
+        from ..services import minimax_h3_helper as mh
+        try:
+            mh.preflight()
+        except mh.MinimaxH3ModelsMissing as e:
+            return _minimax_h3_missing_response(e)
     created, per_engine = 0, {}
     try:
         # The per-engine calls each enforce MAX_FANOUT on their own share, which
@@ -1074,6 +1122,14 @@ def dataset_generate(dataset_id):
                 ids = svc.generate_variations_krea(
                     LOCAL_USER, dataset_id, variations, multiplier,
                     generation_lora_preset=data.get('krea_generation_lora_preset'))
+            elif generator == 'minimax_h3':
+                # Third LOCAL path (MiniMax H3): GPU-bound, free, NSFW-capable,
+                # and the slowest of the three — it samples a frame packet and
+                # keeps one still. No per-run arguments at all: its dials
+                # (packet length, reference size, frame weighting) are settings,
+                # and it has no measured LoRA path to expose.
+                ids = svc.generate_variations_minimax_h3(
+                    LOCAL_USER, dataset_id, variations, multiplier)
             else:
                 ids = svc.generate_variations(LOCAL_USER, dataset_id,
                                               variations, multiplier,
@@ -1093,6 +1149,9 @@ def dataset_generate(dataset_id):
             return _klein_missing_response(e.missing)
         if isinstance(e, KreaModelsMissing):   # asset or node pack absent — no auto-fetch
             return _krea_missing_response(e)
+        from ..services.minimax_h3_helper import MinimaxH3ModelsMissing
+        if isinstance(e, MinimaxH3ModelsMissing):
+            return _minimax_h3_missing_response(e)
         return _map_error(e)
     return jsonify({'ok': True, 'created': created, 'per_engine': per_engine})
 

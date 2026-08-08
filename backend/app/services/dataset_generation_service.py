@@ -23,7 +23,8 @@ from . import dataset_activity, trash
 # this module, so there is no cycle to schedule around.
 from .face_variations import (
     aspect_for_label, is_nsfw_label, prompt_by_label, wrap_variation,
-    wrap_variation_klein, wrap_variation_krea, get_identity_prompt,
+    wrap_variation_klein, wrap_variation_krea, wrap_variation_minimax_h3,
+    get_identity_prompt,
 )
 
 
@@ -234,6 +235,89 @@ def generate_variations_krea(user_id, dataset_id, variations, multiplier,
                         # when it differs from the dataset reference.
                         aspect_ratio=aspect_for_label(v.get('label'), v.get('framing')),
                         generation_loras=run_loras,
+                        extra_metadata={'is_dataset': True, 'dataset_id': dataset_id,
+                                        'variation_label': v.get('label')})
+                except Exception:
+                    img.status = 'failed'
+                    db.session.commit()
+                    raise
+                img.job_id = job_id
+                db.session.commit()
+                ids.append(img.id)
+    finally:
+        _sync_generate_activity(dataset_id)
+    return ids
+
+
+def generate_variations_minimax_h3(user_id, dataset_id, variations, multiplier):
+    """MiniMax H3 fan-out — the third LOCAL engine, same contract as the Klein and
+    Krea lanes: one pending row committed BEFORE its job is enqueued, the whole
+    batch preflighted up front, the created ids returned.
+
+    No LoRA input at all, unlike Krea: H3 is a video model driven by a reference
+    photo, and nothing has been measured about stacking LoRAs on it. An
+    unmeasured knob is worse than a missing one.
+
+    THE LOOP NESTING IS LOAD-BEARING — do not "improve" it by interleaving for
+    variety. `for v in variations: for _ in range(mult)` puts every copy of one
+    catalog card on the queue CONSECUTIVELY, and H3's text encode depends only on
+    the prompt (the seed reaches the sampler through RandomNoise alone), so
+    ComfyUI serves the ~40 s encode from cache for every copy after the first.
+    Measured on an RTX 3090: 78 s for a new card, 37 s for another copy of it.
+    Interleaving would make every image pay the encode — 130 minutes instead of
+    75 for 100 images over 20 cards, with nothing visible in the UI to explain
+    it. `test_minimax_h3_lane` pins the ordering for that reason.
+
+    The row stores the ENGINE ID in `klein_model`, like the other lanes, so the
+    grid badge can say "MiniMax H3"; the models themselves are re-resolved
+    deterministically at enqueue and at regenerate."""
+    from . import minimax_h3_helper as mh
+    ds = get_dataset(user_id, dataset_id)
+    if not ds:
+        raise ValueError('dataset not found')
+    if not ds.ref_filename:
+        raise ValueError('reference image required')
+    # Assets AND the frame-selector pack, before any row exists: a missing piece
+    # then surfaces as one actionable 409 instead of a grid of failing tiles.
+    mh.preflight()
+    mult = max(1, int(multiplier))
+    total = len(variations) * mult
+    if total > MAX_FANOUT:
+        raise ValueError(f'fan-out too large ({total} > {MAX_FANOUT})')
+    in_flight = (FaceDatasetImage.query
+                 .filter_by(dataset_id=dataset_id, status='pending')
+                 .filter(FaceDatasetImage.filename.is_(None)).count())
+    if in_flight + total > MAX_FANOUT:
+        raise ValueError(f'too many generations in flight ({in_flight}), wait or cancel')
+    ids = []
+    try:
+        for v in variations:
+            # The angle reference slots are engine-agnostic: a shot whose prompt
+            # asks for a side view is fed the matching pose photo instead of the
+            # front one, exactly as the Krea lane does it.
+            source_path = _krea_pose_source_path(ds, v.get('prompt') or '')
+            for _ in range(mult):
+                img = FaceDatasetImage(dataset_id=dataset_id, source='generated',
+                                       status='pending', variation_label=v.get('label'),
+                                       framing=v.get('framing'),
+                                       variation_prompt=v['prompt'],
+                                       klein_model=MINIMAX_H3_ENGINE)
+                db.session.add(img)
+                db.session.commit()
+                nsfw = bool(v.get('nsfw')) or is_nsfw_label(v.get('label'))
+                try:
+                    job_id = mh.enqueue_minimax_h3(
+                        user_id=str(user_id), source_filename=os.path.basename(source_path),
+                        source_path=source_path, framing=v.get('framing'),
+                        # Suffix applied AT WRAP, like the other two lanes: the
+                        # row keeps the raw catalog prompt so a regenerate
+                        # re-applies the CURRENT suffix exactly once.
+                        edit_prompt=wrap_variation_minimax_h3(
+                            v['prompt'], nsfw=nsfw, framing=v.get('framing'),
+                            suffix=dataset_prompt_suffix(ds, v.get('framing')),
+                            subject_type=subject_type_of(ds),
+                            label=v.get('label') or ''),
+                        aspect_ratio=aspect_for_label(v.get('label'), v.get('framing')),
                         extra_metadata={'is_dataset': True, 'dataset_id': dataset_id,
                                         'variation_label': v.get('label')})
                 except Exception:
@@ -1201,12 +1285,26 @@ _ENGINE_FILE_TAG = {'nanobanana': 'NBFace', 'chatgpt': 'GPTFace', 'openrouter': 
 
 # The LOCAL engines — they render on the user's own GPU through ComfyUI, cost
 # nothing, and are the only ones allowed to receive NSFW shots. Klein is the
-# historical one; Krea 2 Identity Edit is the second (krea_edit_helper).
-# APPEND-ONLY for the same reason as API_ENGINES: 'krea' is persisted in
-# FaceDatasetImage.klein_model as this row's engine tag.
-LOCAL_ENGINES = ('klein', 'krea')
+# historical one; Krea 2 Identity Edit is the second (krea_edit_helper); MiniMax
+# H3 is the third (minimax_h3_helper).
+# APPEND-ONLY for the same reason as API_ENGINES: each id is persisted in
+# FaceDatasetImage.klein_model as that row's engine tag.
+LOCAL_ENGINES = ('klein', 'krea', 'minimax_h3')
 KREA_ENGINE = 'krea'
-LOCAL_ENGINE_LABELS = {'klein': 'Klein', 'krea': 'Krea 2 Edit'}
+# Stored on every row this lane creates (in `klein_model`, like the others) and
+# read back by the grid badge and by regenerate. NEVER rename: it is in user
+# databases the moment the first image is generated.
+MINIMAX_H3_ENGINE = 'minimax_h3'
+LOCAL_ENGINE_LABELS = {'klein': 'Klein', 'krea': 'Krea 2 Edit',
+                       'minimax_h3': 'MiniMax H3'}
+# Engines that GENERATE dataset images but do not edit a reference photo. Not a
+# permanent property of the engine — a deliberate scope line: MiniMax H3 ships as
+# a generation lane only, and `_enqueue_local_reference_edit` has no branch for
+# it. Offering it in the ✦ Edit modal would fail at enqueue instead of at pick
+# time, which is the exact failure `editable_engines()` exists to prevent.
+# Mirrored by GENERATE_ONLY_ENGINES in engineSelection.js; a contract test pins
+# the pair.
+GENERATE_ONLY_ENGINES = ('minimax_h3',)
 # Every engine a generate/regenerate request may name.
 KNOWN_ENGINES = LOCAL_ENGINES + API_ENGINES
 
@@ -1233,8 +1331,13 @@ def editable_engines():
     here. Klein and Krea used to be excluded because the edit ran as a blocking
     provider call and they have no blocking call to make; they now ride the same
     ComfyUI queue as every other local render, so the exclusion had outlived its
-    reason — and it was the reason the app's only FREE edit lane was invisible."""
-    return tuple(LOCAL_ENGINES) + tuple(API_ENGINES)
+    reason — and it was the reason the app's only FREE edit lane was invisible.
+
+    GENERATE_ONLY_ENGINES is the one thing this does not derive. An engine can be
+    a generation lane without being an edit lane, and offering one the route has
+    no branch for would fail at enqueue instead of at pick time."""
+    return (tuple(e for e in LOCAL_ENGINES if e not in GENERATE_ONLY_ENGINES)
+            + tuple(e for e in API_ENGINES if e not in GENERATE_ONLY_ENGINES))
 
 
 def edit_engine_choice_message():

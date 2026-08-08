@@ -49,12 +49,28 @@ def _js_api_engines():
     return tuple(re.findall(r"'([^']+)'", m.group(1)))
 
 
-def _js_edit_engines():
-    """EDIT_ENGINES lives in referenceEdit.js and is spelled `[...ENGINES]`, so
-    what has to match is the CANONICAL list it copies."""
+def _js_engines():
     m = re.search(r'export const ENGINES\s*=\s*\[(.*?)\];', _js_source(), re.S)
     assert m, 'ENGINES declaration not found in engineSelection.js'
     return tuple(re.findall(r"'([^']+)'", m.group(1)))
+
+
+def _js_generate_only_engines():
+    m = re.search(r'export const GENERATE_ONLY_ENGINES\s*=\s*\[(.*?)\];',
+                  _js_source(), re.S)
+    assert m, 'GENERATE_ONLY_ENGINES declaration not found in engineSelection.js'
+    return tuple(re.findall(r"'([^']+)'", m.group(1)))
+
+
+def _js_edit_engines():
+    """EDIT_ENGINES lives in referenceEdit.js and is now spelled
+    `ENGINES.filter(e => !GENERATE_ONLY_ENGINES.includes(e))` — it used to be a
+    whole copy of ENGINES, which stopped being right the moment an engine could
+    generate without editing. Recomputed here from the two declarations rather
+    than read as a literal, because a literal is what this whole file exists to
+    prevent."""
+    excluded = set(_js_generate_only_engines())
+    return tuple(e for e in _js_engines() if e not in excluded)
 
 
 def _js_edit_ref_support():
@@ -87,6 +103,18 @@ def test_the_editable_engine_ids_are_identical_on_both_sides():
     matters twice over: it is the toggle order in the modal, and it puts the free
     engines first on a gesture that is billed per press."""
     assert _js_edit_engines() == svc.editable_engines()
+
+
+def test_the_generate_only_engines_are_identical_on_both_sides():
+    """An engine that generates but cannot edit is a SCOPE line, and both sides
+    have to draw it in the same place: the client hiding it from the ✦ Edit modal
+    while the server still accepts it (or the reverse) is the same drift this
+    file exists for, one level down."""
+    assert _js_generate_only_engines() == svc.GENERATE_ONLY_ENGINES
+    # And it can only name engines that actually exist, or the exclusion is dead
+    # text that silently stops excluding anything.
+    for engine in svc.GENERATE_ONLY_ENGINES:
+        assert engine in svc.LOCAL_ENGINES + svc.API_ENGINES, engine
 
 
 def test_the_local_engines_reference_support_matches_on_both_sides():

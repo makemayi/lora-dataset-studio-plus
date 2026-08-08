@@ -3206,12 +3206,14 @@ from .reference_edit_service import (
 # it from that module directly, so these blocks stay order-independent.
 from .dataset_generation_service import (
     IMPROVE_ENGINES, API_ENGINES, LOCAL_ENGINES, KNOWN_ENGINES, KREA_ENGINE,
+    MINIMAX_H3_ENGINE, GENERATE_ONLY_ENGINES,
     LOCAL_ENGINE_LABELS, API_ENGINE_LABELS, _ENGINE_FILE_TAG,
     REIMPROVE_PARENT_GONE, REIMPROVE_SOURCE_FILE_GONE, REIMPROVE_IN_FLIGHT,
     REIMPROVE_STATE_CHANGED, IMPROVE_SLOT_POLL_SECONDS,
     IMPROVE_SLOT_TIMEOUT_SECONDS, _IMPROVE_ID_CHUNK,
     _EMPTY_MSG, _QUOTA_MSG, _LOST_MSG,
     generate_variations, generate_variations_krea, generate_variations_nanobanana,
+    generate_variations_minimax_h3,
     regenerate_image, face_swap_image, resolve_improve_engine,
     improve_existing_image, reimprove_image, bulk_improve_eligible_ids,
     start_bulk_improve, engine_labels, editable_engines, edit_engine_choice_message,

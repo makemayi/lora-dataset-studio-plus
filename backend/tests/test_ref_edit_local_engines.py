@@ -109,11 +109,21 @@ def test_both_local_engines_can_edit_the_reference():
 
 def test_the_api_engines_stay_editable_and_come_after_the_free_ones():
     """Non-regression on the paid lane, plus the reading order: a gesture billed
-    per press lists its free options first."""
+    per press lists its free options first.
+
+    "The free ones" is no longer the whole LOCAL list: MiniMax H3 generates and
+    does not edit (GENERATE_ONLY_ENGINES), so it is absent from `editable` by
+    design. Deriving the expected prefix instead of pinning the local tuple is
+    what keeps this test about the ORDER it was written for, rather than
+    accidentally re-asserting that every local engine can edit."""
     editable = svc.editable_engines()
     for engine in svc.API_ENGINES:
         assert engine in editable
-    assert editable[:len(svc.LOCAL_ENGINES)] == tuple(svc.LOCAL_ENGINES)
+    editable_local = tuple(e for e in svc.LOCAL_ENGINES
+                           if e not in svc.GENERATE_ONLY_ENGINES)
+    assert editable[:len(editable_local)] == editable_local
+    for engine in svc.GENERATE_ONLY_ENGINES:
+        assert engine not in editable
 
 
 def test_the_refusal_names_every_editable_engine_including_the_local_ones():

@@ -258,7 +258,13 @@ def start_reference_edit(app, user_id, dataset_id, engine, prompt,
 #: engine cannot be added without deciding what it does with the extra refs. The
 #: values are mirrored in frontend EDIT_REF_SUPPORT (contract-tested), because
 #: the UI has to say this at pick time, not discover it as a silent drop.
-LOCAL_EDIT_REF_SUPPORT = {'klein': 'dataset_only', 'krea': 'primary_only'}
+LOCAL_EDIT_REF_SUPPORT = {'klein': 'dataset_only', 'krea': 'primary_only',
+                          # H3 is GENERATE-ONLY today (see GENERATE_ONLY_ENGINES),
+                          # so this entry never reaches the modal. It is here
+                          # because every local engine must declare what it would
+                          # consume rather than defaulting to 'all' — and one
+                          # reference IS what its graph sends.
+                          'minimax_h3': 'primary_only'}
 
 
 def _enqueue_local_reference_edit(user_id, dataset_id, ds, engine, prompt, token,

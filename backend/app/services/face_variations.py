@@ -980,6 +980,39 @@ def wrap_variation_krea(prompt: str, nsfw: bool = False, framing: str | None = N
                                  card_pose_priority=True)
 
 
+# MiniMax H3 names its reference INSIDE the prompt: the model is told to place
+# "the subject from <Picture 1>" into the scene, and `<Picture 1>` is how it
+# addresses the first entry of the node's ref_images input. It is a token of the
+# model's own prompt language, not decoration — an H3 prompt that never mentions
+# the picture describes a scene with nobody in it.
+H3_REFERENCE_TOKEN = '<Picture 1>'
+_H3_SUBJECT_WORDS = {'human': 'person', 'animal': 'animal', 'object': 'object'}
+
+
+def wrap_variation_minimax_h3(prompt: str, nsfw: bool = False, framing: str | None = None,
+                              suffix: str = '', subject_type: str = 'human',
+                              label: str = '') -> str:
+    """Full MiniMax H3 prompt for one shot.
+
+    The body is the same local-edit assembly Klein and Krea share (concrete
+    garment instead of a negation, permanent markings held, catalog pose given
+    priority — H3 is an edit model with the same three weaknesses). What is H3's
+    own is the opening sentence: the reference has to be named as `<Picture 1>`
+    before the scene is described, or the model has nothing to place.
+
+    Deliberately built by PREFIXING rather than by a fifth variant of
+    `_compose_edit_prompt`: the reference sentence is a addressing convention of
+    one engine's prompt language, and the shared assembly must not grow a flag
+    for it."""
+    body = _compose_edit_prompt(prompt, nsfw=nsfw, framing=framing, suffix=suffix,
+                                subject_type=subject_type, label=label,
+                                concrete_outfit=True, markings_lock=True,
+                                card_pose_priority=True)
+    subject = _H3_SUBJECT_WORDS.get((subject_type or 'human').lower(), 'person')
+    return (f'Place the {subject} from {H3_REFERENCE_TOKEN} into the following '
+            f'scene: {body}')
+
+
 # Krea 2 is especially literal about the prompt tail.  The otherwise useful
 # generic human details say "both eyes in crisp focus" for a face and "natural
 # standing distance" for a body.  Those clauses directly fight a profile card
