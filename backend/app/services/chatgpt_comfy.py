@@ -66,6 +66,12 @@ BATCH_NODE_CLASS = 'ImageBatch'
 #: V2's own ceiling ("Up to 16 images" in its tooltip).
 MAX_REFS_V2 = 16
 
+#: Only gpt-image-2 declares the Custom-size pair, and V2 requires the pair to
+#: be PRESENT whatever `size` says (see build_workflow). The floor is that
+#: input's own `min`, and it is never read while size is a named enum value.
+MODELS_WITH_CUSTOM_SIZE = ('gpt-image-2',)
+CUSTOM_SIZE_FLOOR = 1024
+
 #: comfy.org API key. A SECRET_KEYS entry, so it lives in .env like every other
 #: credential and never reaches config.json or a diagnostics paste.
 API_KEY_ENV = 'COMFY_ORG_API_KEY'
@@ -259,6 +265,16 @@ def build_workflow(image_names, prompt, *, size='auto', model=DEFAULT_MODEL,
         inputs = {'prompt': prompt, 'model': model, 'n': 1, 'seed': seed,
                   'model.size': size, 'model.quality': quality,
                   'model.background': 'auto'}
+        if model in MODELS_WITH_CUSTOM_SIZE:
+            # REQUIRED even when `size` is not 'Custom'. Their tooltip says
+            # "used only when size is 'Custom'", and that is about the VALUE —
+            # ComfyUI still validates the sub-input's presence and answers a
+            # 400 `required_input_missing` without them. Measured: an 18-row
+            # batch refused in two seconds (which at least cost nothing, since
+            # validation happens before the provider is ever called). The
+            # reference workflow carries the same pair at the same 1024.
+            inputs['model.custom_width'] = CUSTOM_SIZE_FLOOR
+            inputs['model.custom_height'] = CUSTOM_SIZE_FLOOR
         for index, node_id in enumerate(loaded, start=1):
             inputs[f'model.images.image_{index}'] = [node_id, 0]
     else:

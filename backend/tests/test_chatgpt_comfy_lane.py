@@ -363,3 +363,37 @@ def test_a_comfyui_that_never_answers_still_fails_the_row(monkeypatch):
     monkeypatch.setattr(lane, '_READY_TIMEOUT_SECONDS', 0.01)
     with pytest.raises(lane.ComfyGptUnavailable, match='not running'):
         REAL_WAIT()
+
+
+#: The sub-inputs `OpenAIGPTImageNodeV2` declares REQUIRED for gpt-image-2,
+#: copied from a live /object_info (2026-08-09). `images` is the autogrow list,
+#: which is optional in practice — a prompt with no reference generates.
+_V2_REQUIRED_SUBINPUTS = ('size', 'custom_width', 'custom_height',
+                          'background', 'quality')
+
+
+def test_v2_carries_every_required_sub_input_even_the_unused_ones():
+    """The 400 that refused an 18-row batch in two seconds: `custom_width` and
+    `custom_height` say "used only when size is 'Custom'" — that is about their
+    VALUE. ComfyUI still validates that they are PRESENT, so a graph that omits
+    them never reaches OpenAI at all."""
+    graph = lane.build_workflow(['a.png'], 'p', size='1024x1536',
+                                model='gpt-image-2', node_class=lane.NODE_CLASS_V2)
+    inputs = next(n for n in graph.values()
+                  if n['class_type'] == lane.NODE_CLASS_V2)['inputs']
+    for name in _V2_REQUIRED_SUBINPUTS:
+        assert f'model.{name}' in inputs, name
+    assert inputs['model.custom_width'] == lane.CUSTOM_SIZE_FLOOR
+    assert inputs['model.custom_height'] == lane.CUSTOM_SIZE_FLOOR
+
+
+def test_the_custom_pair_is_only_sent_to_the_model_that_declares_it():
+    """gpt-image-1 and 1.5 have no Custom size, so the pair would be an unknown
+    input on their branch of the combo."""
+    for model in ('gpt-image-1', 'gpt-image-1.5'):
+        graph = lane.build_workflow(['a.png'], 'p', model=model,
+                                    node_class=lane.NODE_CLASS_V2)
+        inputs = next(n for n in graph.values()
+                      if n['class_type'] == lane.NODE_CLASS_V2)['inputs']
+        assert 'model.custom_width' not in inputs, model
+        assert 'model.custom_height' not in inputs, model
