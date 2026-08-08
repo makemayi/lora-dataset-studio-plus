@@ -30,6 +30,7 @@ import {
   readMode, totalImages, writeEngines, writeMode,
 } from './engineSelection.js';
 import { kreaUnavailableReason, groundingDescription } from '../../utils/kreaEngine.js';
+import { minimaxH3UnavailableReason, minimaxH3SpeedWarning } from '../../utils/minimaxH3Engine.js';
 import { kleinUnavailableReason } from '../../utils/localEngineReason.js';
 import {
   SUBJECT_TYPES, SUBJECT_TYPE_LABELS, SUBJECT_TYPE_HINTS,
@@ -459,6 +460,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
   // locally.
   const isKlein = engines.includes('klein');
   const isKrea = engines.includes('krea');
+  const isH3 = engines.includes('minimax_h3');
   const multiEngine = engines.length > 1;
   // 🔞 shots stay exactly as strict as before, only the wording of "local"
   // widened: they exist when EVERY selected engine is local. A local engine
@@ -531,8 +533,10 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
   const qwenAvailable = enabledEngines.includes('qwen') && caps.engines.qwen;
   const klAvailable = enabledEngines.includes('klein') && caps.engines.klein;
   const krAvailable = enabledEngines.includes('krea') && caps.engines.krea;
-  const available = { klein: klAvailable, krea: krAvailable, nanobanana: nbAvailable,
-    chatgpt: gptAvailable, openrouter: orAvailable, qwen: qwenAvailable };
+  const h3Available = enabledEngines.includes('minimax_h3') && caps.engines.minimax_h3;
+  const available = { klein: klAvailable, krea: krAvailable, minimax_h3: h3Available,
+    nanobanana: nbAvailable, chatgpt: gptAvailable, openrouter: orAvailable,
+    qwen: qwenAvailable };
 
   // The persisted selection can name engines that have since been disabled in
   // Settings (or lost their key/backend): drop those instead of trying to
@@ -544,10 +548,11 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
     if (usable.length === engines.length) return;
     const first = nbAvailable ? 'nanobanana' : gptAvailable ? 'chatgpt'
       : orAvailable ? 'openrouter' : qwenAvailable ? 'qwen' : klAvailable ? 'klein'
-      : krAvailable ? 'krea' : null;
+      : krAvailable ? 'krea' : h3Available ? 'minimax_h3' : null;
     setEngines(usable.length ? usable : (first ? [first] : []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engines, nbAvailable, gptAvailable, orAvailable, qwenAvailable, klAvailable, krAvailable]);
+  }, [engines, nbAvailable, gptAvailable, orAvailable, qwenAvailable, klAvailable,
+    krAvailable, h3Available]);
   // Effective ChatGPT lane: the subscription (ChatGPT Plus/Pro image quota) vs the
   // pay-per-use API key. Mirrors the backend "auto = subscription when connected".
   const gptSub = caps.chatgpt_subscription || {};
@@ -595,6 +600,18 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
     invalidAssets: caps.comfyui?.krea_invalid,
     nodePackInstalled: caps.comfyui?.krea_nodes_installed,
   });
+  // H3 has the same two hard gaps as Krea (five weights, one node pack) plus one
+  // that is NOT a gap: a complete install still crawls when ComfyUI was launched
+  // without --disable-dynamic-vram. That advisory rides beside the card instead
+  // of darkening it — see utils/minimaxH3Engine.js.
+  const h3Hint = h3Available ? null : minimaxH3UnavailableReason({
+    enabledInSettings: enabledEngines.includes('minimax_h3'),
+    comfyuiReachable: !!caps.comfyui?.reachable,
+    comfyui: caps.comfyui,
+    missingAssets: caps.minimax_h3?.missing,
+    missingNodes: caps.minimax_h3?.missing_nodes,
+  });
+  const h3SpeedWarning = minimaxH3SpeedWarning(caps);
 
   useEffect(() => {
     let cancelled = false;
@@ -955,6 +972,40 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
             <a href="#/setup" onClick={(e) => e.stopPropagation()}
               className="text-amber-300 text-[0.625rem] underline decoration-amber-300/50">
               {kreaHint}
+            </a>
+          )} />
+        {/* MiniMax H3 — the third LOCAL engine. Also identity-from-one-photo, but
+            reached through a VIDEO model: it samples a short frame packet and
+            keeps the best single frame. Slowest of the three, and the only
+            engine whose speed depends on how ComfyUI was LAUNCHED. */}
+        <EngineCard id="minimax_h3" checked={isH3} available={h3Available} generating={generating}
+          onToggle={toggleEngine} share={engineShare('minimax_h3')}
+          icon={<IdentityFrameIcon className={`w-9 h-9 shrink-0 ${isH3 ? ENGINE_ACCENTS.minimax_h3.icon : 'text-content-subtle'}`} />}
+          title={<>MiniMax H3 <span className="font-normal text-content-subtle">· local</span></>}
+          tags={[
+            <span key="free" className="px-1.5 py-px rounded-full bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 text-[0.625rem]">Free</span>,
+            <span key="gpu" className="px-1.5 py-px rounded-full bg-app/60 border border-border text-content-muted text-[0.625rem]">Your GPU</span>,
+            <span key="nsfw" className="px-1.5 py-px rounded-full bg-app/60 border border-border text-content-muted text-[0.625rem]">NSFW OK</span>,
+            <span key="slow" className="px-1.5 py-px rounded-full bg-app/60 border border-border text-content-muted text-[0.625rem]">~40-80s/image</span>,
+          ]}
+          hint={h3Available ? (
+            <span className="text-content-subtle text-[0.625rem]">
+              Identity from one reference photo, like Krea — but sampled as a short video
+              packet, with the best frame kept. Slower per image, and shots from the SAME
+              card are much faster than the first one.
+              {h3SpeedWarning && (
+                <> <span className="text-amber-300">{h3SpeedWarning}</span></>
+              )}
+              {localQueuesBehindApi(engines) && (
+                <> <span className={ENGINE_ACCENTS.minimax_h3.text}>
+                  Its {engineShare('minimax_h3')} shot(s) queue on your GPU, one at a time, after the API ones.
+                </span></>
+              )}
+            </span>
+          ) : (
+            <a href="#/setup" onClick={(e) => e.stopPropagation()}
+              className="text-amber-300 text-[0.625rem] underline decoration-amber-300/50">
+              {h3Hint}
             </a>
           )} />
         <EngineCard id="nanobanana" checked={isNB} available={nbAvailable} generating={generating}

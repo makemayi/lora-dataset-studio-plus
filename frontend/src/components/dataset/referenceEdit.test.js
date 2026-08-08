@@ -9,7 +9,15 @@ import {
 } from './referenceEdit.js';
 import {
   STORAGE_ENGINES, STORAGE_PRIMARY, ENGINES, API_ENGINES, LOCAL_ENGINES, ENGINE_LABELS,
+  GENERATE_ONLY_ENGINES,
 } from './engineSelection.js';
+
+/* The local engines that actually reach this modal. Not every local engine does:
+   MiniMax H3 generates and does not edit (GENERATE_ONLY_ENGINES), because the
+   server has no reference-edit branch for it. Derived here so these tests keep
+   asserting "every local engine the modal offers" rather than a hardcoded pair —
+   the mistake this file's own header describes twice over. */
+const EDITABLE_LOCAL_ENGINES = LOCAL_ENGINES.filter((e) => !GENERATE_ONLY_ENGINES.includes(e));
 
 function fakeStorage(seed = {}) {
   const data = { ...seed };
@@ -30,14 +38,20 @@ test('every engine can edit the reference, including the local ones', () => {
 });
 
 test('EDIT_ENGINES is derived from ENGINES, so it cannot drift from it', () => {
-  assert.deepEqual(EDIT_ENGINES, [...ENGINES]);
+  // Derived, minus the generate-only ones. It used to be a whole copy of
+  // ENGINES; that stopped being right the moment an engine could generate
+  // without editing, and a copy would have offered H3 in a modal whose route
+  // rejects it.
+  assert.deepEqual(EDIT_ENGINES, ENGINES.filter((e) => !GENERATE_ONLY_ENGINES.includes(e)));
   assert.notEqual(EDIT_ENGINES, ENGINES);   // a copy: mutating one can't move the other
+  for (const e of GENERATE_ONLY_ENGINES) assert.ok(!EDIT_ENGINES.includes(e), e);
 });
 
 test('the free local engines are listed FIRST — cheapest option first', () => {
   // Not a ranking: this gesture is billed per press, and the list is read
   // top-down. Burying the free option under three paid ones is a price tag.
-  assert.deepEqual(EDIT_ENGINES.slice(0, LOCAL_ENGINES.length), [...LOCAL_ENGINES]);
+  assert.deepEqual(EDIT_ENGINES.slice(0, EDITABLE_LOCAL_ENGINES.length),
+    [...EDITABLE_LOCAL_ENGINES]);
 });
 
 test('OpenRouter can edit the reference, like the other API engines', () => {
@@ -138,7 +152,7 @@ test('an unavailable local engine is never silently offered as usable', () => {
   // No diagnostic available (older server, unknown gap): still says something,
   // still not usable. Silence is the failure mode being removed.
   const opts = editEngineOptions({ comfyuiConfigured: true, available: {} });
-  for (const e of LOCAL_ENGINES) {
+  for (const e of EDITABLE_LOCAL_ENGINES) {
     const o = opts.find((x) => x.engine === e);
     assert.equal(o.usable, false, e);
     assert.ok(o.blocked && o.blocked.length, e);

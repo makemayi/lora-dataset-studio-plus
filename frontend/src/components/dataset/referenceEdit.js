@@ -11,6 +11,7 @@
    gesture in the app, the one you repeat until it looks right. */
 import {
   primaryEngine, readEngines, ENGINES, API_ENGINES, LOCAL_ENGINES, ENGINE_LABELS,
+  GENERATE_ONLY_ENGINES,
 } from './engineSelection.js';
 
 /** Engines that can edit the reference — DERIVED from the canonical engine list,
@@ -22,7 +23,7 @@ import {
  *  one. Order = canonical engine order = toggle order in the modal, which puts
  *  the FREE local engines first — cheapest option first is not a ranking, it is
  *  the honest reading order for a gesture billed per press. */
-export const EDIT_ENGINES = [...ENGINES];
+export const EDIT_ENGINES = ENGINES.filter((e) => !GENERATE_ONLY_ENGINES.includes(e));
 
 /** The refusal shown for a non-editable engine, DERIVED from EDIT_ENGINES:
  *  "Pick Klein, Krea 2 Edit, Nano Banana Pro, ChatGPT or OpenRouter". The old
@@ -75,6 +76,10 @@ export function defaultEditEngine(storage, usable = null) {
 export const EDIT_REF_SUPPORT = {
   klein: 'dataset_only',
   krea: 'primary_only',
+  // Generate-only today (see GENERATE_ONLY_ENGINES), so this never reaches the
+  // modal — declared because every local engine must say what it consumes
+  // instead of falling through to 'all', and one reference IS what H3 sends.
+  minimax_h3: 'primary_only',
 };
 export function editRefSupport(engine) {
   return EDIT_REF_SUPPORT[engine] || 'all';

@@ -7,6 +7,7 @@ import PromptPreview from './PromptPreview'
 import ResetToDefault from './ResetToDefault'
 import { defaultValueAt } from './settingDefaults.js'
 import { kreaStrengthRange, KREA_LORA_STRENGTH_DEFAULT } from '../../utils/kreaGenerationLoras'
+import { refImageSizeDescription, packetLengthDescription } from '../../utils/minimaxH3Engine.js'
 import {
   identityPromptFields, PROMPT_SUBJECT_TYPES,
   readIdentityPrompt, writeIdentityPrompt, subjectHasOverride,
@@ -290,6 +291,191 @@ const SEEDVR2_MAX_RESOLUTION_MAX = 8192
 const SEEDVR2_BLOCKS_MAX = 36
 // seedvr2_helper.COLOR_CORRECTIONS — the node's own enum, in its own order.
 const SEEDVR2_COLOR_MODES = ['lab', 'wavelet', 'wavelet_adaptive', 'hsv', 'adain', 'none']
+
+// minimax_h3_helper's own grid: the node accepts length = 5 + 17n only, so an
+// off-step value is a ComfyUI validation error, i.e. a whole batch of failed
+// tiles. The SERVER re-clamps; this only stops the input offering a bad number.
+const H3_LENGTH_MIN = 5
+const H3_LENGTH_STEP = 17
+const H3_LENGTH_MAX = 124
+const H3_STEPS_MAX = 60
+
+function MinimaxH3Card({ config, setField, configDefaults, caps }) {
+  const h3 = config.minimax_h3 || {}
+  const reset = { config, configDefaults, setField }
+  const dflt = (key) => defaultValueAt(configDefaults, 'minimax_h3', key)
+  const length = Number(h3.length ?? dflt('length'))
+  const refSize = String(h3.ref_image_size ?? dflt('ref_image_size'))
+  const vramWarning = caps?.minimax_h3?.vram_warning
+  return (
+    <Card
+      id="minimax-h3-engine"
+      title="MiniMax H3 (local)"
+      help="The third local engine, and the only one that reaches a still through a VIDEO model: it samples a short packet of frames from your reference photo and keeps the best single frame. Identity comes from that one photo with no character LoRA, like Krea. It needs the MinimaxH3-Image node pack plus five model files (~40 GB) — none of them auto-downloaded — and the engine card in the workspace names whatever is still missing."
+    >
+      {vramWarning && (
+        <p className="mb-3 rounded border border-amber-400/40 bg-amber-500/10 px-2 py-1.5 text-[0.6875rem] text-amber-200">
+          {vramWarning}
+        </p>
+      )}
+
+      <div className="sm:max-w-md">
+        <label htmlFor="h3-ref-size" className="block text-xs font-medium text-content">
+          Reference size
+        </label>
+        <select
+          id="h3-ref-size"
+          value={refSize}
+          onChange={(e) => setField('minimax_h3', 'ref_image_size', e.target.value)}
+          className={INPUT_CLASS}
+        >
+          <option value="match">match</option>
+          <option value="max">max</option>
+        </select>
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          {refImageSizeDescription(refSize)}. This is H3&rsquo;s likeness dial: the reference
+          rides through every sampling step, so &ldquo;max&rdquo; buys fidelity with time.
+        </p>
+        <ResetToDefault label="Reference size" section="minimax_h3" field="ref_image_size" {...reset} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="h3-length" className="block text-xs font-medium text-content">
+          Frames per shot ({length})
+        </label>
+        <input
+          id="h3-length"
+          type="range"
+          min={H3_LENGTH_MIN}
+          max={H3_LENGTH_MAX}
+          step={H3_LENGTH_STEP}
+          value={length}
+          onChange={(e) => setField('minimax_h3', 'length', Number(e.target.value))}
+          className="mt-1 w-full accent-purple-500"
+        />
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          {packetLengthDescription(length)}. One frame is kept either way — more frames
+          only give the selector more to choose between, at full sampling cost each.
+        </p>
+        <ResetToDefault label="Frames per shot" section="minimax_h3" field="length" {...reset} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="h3-frame-weight" className="block text-xs font-medium text-content">
+          Frame pick: likeness weight
+        </label>
+        <input
+          id="h3-frame-weight"
+          type="number"
+          min={0}
+          max={5}
+          step={0.1}
+          value={h3.frame_weight_reference ?? dflt('frame_weight_reference')}
+          onChange={(e) => setField('minimax_h3', 'frame_weight_reference',
+            e.target.value === '' ? dflt('frame_weight_reference') : Number(e.target.value))}
+          className={INPUT_CLASS}
+        />
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          How much &ldquo;looks like the reference photo&rdquo; counts against sharpness and
+          exposure when picking which frame to keep. 0 ignores likeness entirely. On a
+          5-frame packet this changed nothing in testing — the sharpest frame was also the
+          most reference-like — so it earns its keep at higher frame counts.
+        </p>
+        <ResetToDefault label="Likeness weight" section="minimax_h3" field="frame_weight_reference" {...reset} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="h3-steps" className="block text-xs font-medium text-content">
+          Sampler steps
+        </label>
+        <input
+          id="h3-steps"
+          type="number"
+          min={1}
+          max={H3_STEPS_MAX}
+          step={1}
+          value={h3.steps ?? dflt('steps')}
+          onChange={(e) => setField('minimax_h3', 'steps',
+            e.target.value === '' ? dflt('steps') : Number(e.target.value))}
+          className={INPUT_CLASS}
+        />
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          {dflt('steps')} is the measured working point. Every step is paid once per frame
+          in the packet.
+        </p>
+        <ResetToDefault label="Sampler steps" section="minimax_h3" field="steps" {...reset} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="h3-ref-edge" className="block text-xs font-medium text-content">
+          Reference downscaled to (longer edge, px)
+        </label>
+        <input
+          id="h3-ref-edge"
+          type="number"
+          min={256}
+          max={2048}
+          step={64}
+          value={h3.ref_longer_edge ?? dflt('ref_longer_edge')}
+          onChange={(e) => setField('minimax_h3', 'ref_longer_edge',
+            e.target.value === '' ? dflt('ref_longer_edge') : Number(e.target.value))}
+          className={INPUT_CLASS}
+        />
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          The reference is shrunk to this before it reaches the 32B vision encoder. Every
+          reference pixel is paid for again on each new shot description.
+        </p>
+        <ResetToDefault label="Reference downscale" section="minimax_h3" field="ref_longer_edge" {...reset} />
+      </div>
+
+      <fieldset className="mt-3">
+        <legend className="text-xs font-medium text-content">Optional accelerators</legend>
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          Both are used only when your ComfyUI actually exposes them, so leaving them on
+          costs nothing on an install that lacks the node packs.
+        </p>
+        <label className="mt-2 flex items-center gap-2 text-xs text-content">
+          <input
+            id="h3-speed-nodes"
+            type="checkbox"
+            checked={h3.use_speed_nodes ?? dflt('use_speed_nodes')}
+            onChange={(e) => setField('minimax_h3', 'use_speed_nodes', e.target.checked)}
+          />
+          Speed nodes (Spectrum forecasting + Sage attention) — faster, same image
+        </label>
+        <label className="mt-2 flex items-center gap-2 text-xs text-content">
+          <input
+            id="h3-rtx-upscale"
+            type="checkbox"
+            checked={h3.use_rtx_upscale ?? dflt('use_rtx_upscale')}
+            onChange={(e) => setField('minimax_h3', 'use_rtx_upscale', e.target.checked)}
+          />
+          RTX super resolution 2x — NVIDIA RTX only; without it you lose the upscale, not the engine
+        </label>
+      </fieldset>
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="h3-base" className="block text-xs font-medium text-content">
+          Ref2VA model file (blank = auto)
+        </label>
+        <input
+          id="h3-base"
+          type="text"
+          value={h3.base_model ?? ''}
+          onChange={(e) => setField('minimax_h3', 'base_model', e.target.value)}
+          placeholder="minimax_h3_ref2va_pruned_int8_convrot.safetensors"
+          className={INPUT_CLASS}
+        />
+        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          Blank finds any Ref2VA build (int8 / int4 / mixed) on its own. The fl2va sibling
+          is never picked: it loads, then does a different job. A filename that is no
+          longer on disk falls back to auto rather than failing.
+        </p>
+        <ResetToDefault label="Ref2VA model" section="minimax_h3" field="base_model" {...reset} />
+      </div>
+    </Card>
+  )
+}
 
 function KreaCard({ config, setField, configDefaults }) {
   const krea = config.krea || {}
@@ -1535,6 +1721,9 @@ export default function EnginesSection(props) {
       <KreaCard config={config} setField={setField} configDefaults={configDefaults} />
 
       <KreaLorasCard config={config} setField={setField} />
+
+      <MinimaxH3Card config={config} setField={setField} configDefaults={configDefaults}
+        caps={caps} />
 
       <SeedVr2Card config={config} setField={setField} configDefaults={configDefaults}
         caps={caps} />

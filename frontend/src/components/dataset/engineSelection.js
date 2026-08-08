@@ -20,7 +20,16 @@
 /** Canonical engine order — drives the card order, the primary pick and the
  *  round-robin. Stable: it is also the order batches are BUILT in, and the LOCAL
  *  engines must come last at DISPATCH time (see engineBatches). */
-export const ENGINES = ['klein', 'krea', 'nanobanana', 'chatgpt', 'openrouter', 'qwen'];
+export const ENGINES = ['klein', 'krea', 'minimax_h3', 'nanobanana', 'chatgpt', 'openrouter', 'qwen'];
+
+/** Engines that GENERATE dataset images but do NOT edit a reference photo, so
+ *  EDIT_ENGINES derives ENGINES minus this list instead of copying it whole.
+ *  MiniMax H3 is a generation lane only — the server has no reference-edit
+ *  branch for it, and offering it in the ✦ Edit modal would fail at enqueue
+ *  rather than at pick time. Mirrors
+ *  dataset_generation_service.GENERATE_ONLY_ENGINES; a contract test pins the
+ *  pair, in both directions. */
+export const GENERATE_ONLY_ENGINES = ['minimax_h3'];
 
 export const API_ENGINES = ['nanobanana', 'chatgpt', 'openrouter', 'qwen'];
 
@@ -28,11 +37,12 @@ export const API_ENGINES = ['nanobanana', 'chatgpt', 'openrouter', 'qwen'];
  *  serialized on one GPU, and the ONLY ones allowed to receive 🔞 shots (the
  *  server refuses NSFW on every API engine). Mirrors
  *  face_dataset_service.LOCAL_ENGINES — derive from this, never re-list it. */
-export const LOCAL_ENGINES = ['klein', 'krea'];
+export const LOCAL_ENGINES = ['klein', 'krea', 'minimax_h3'];
 
 export const ENGINE_LABELS = {
   klein: 'Klein',
   krea: 'Krea 2 Edit',
+  minimax_h3: 'MiniMax H3',
   nanobanana: 'Nano Banana Pro',
   chatgpt: 'ChatGPT',
   openrouter: 'OpenRouter',
@@ -66,6 +76,20 @@ export const ENGINE_ACCENTS = {
     icon: 'text-violet-300',
     pill: 'bg-violet-500/25 text-violet-200',
     dot: 'bg-violet-400',
+  },
+  /* Purple continues the local-GPU family (indigo -> violet -> purple) rather
+     than reaching for a hue that would read as a paid API engine. The three
+     local engines being neighbours IS the information; the icon, the title and
+     the "local" suffix carry the distinction between them. Green stays reserved
+     ("kept / free"), and every hue that would separate them further is already
+     spoken for. */
+  minimax_h3: {
+    card: 'border-purple-400/60 bg-purple-500/15 ring-1 ring-purple-400/40',
+    title: 'text-purple-200',
+    text: 'text-purple-300',
+    icon: 'text-purple-300',
+    pill: 'bg-purple-500/25 text-purple-200',
+    dot: 'bg-purple-400',
   },
   nanobanana: {
     card: 'border-amber-400/60 bg-amber-500/15 ring-1 ring-amber-400/40',
@@ -112,7 +136,7 @@ export const ENGINE_ACCENTS = {
  *  so a user who points it at a cheaper or dearer slug pays that instead. The
  *  engine card says so — a number here is better than no guard-rail at all, but
  *  it is the only rate in this table that the user can move. */
-export const ENGINE_RATES = { klein: 0, krea: 0, nanobanana: 0.15, chatgpt: 0.17, openrouter: 0.15, qwen: 0.08 };
+export const ENGINE_RATES = { klein: 0, krea: 0, minimax_h3: 0, nanobanana: 0.15, chatgpt: 0.17, openrouter: 0.15, qwen: 0.08 };
 
 export const STORAGE_ENGINES = 'datasetGenerators';     // JSON list (new)
 export const STORAGE_PRIMARY = 'datasetGenerator';      // legacy string mirror — NEVER renamed
