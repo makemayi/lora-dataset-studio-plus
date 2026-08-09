@@ -8369,6 +8369,34 @@ def launch_training(user_id, dataset_id, steps: int | None = None, check_caption
             raise GpuBusyError(
                 'ComfyUI has queued or active work, so local training cannot take the GPU. '
                 'Wait for it to finish or cancel it safely first.')
+        # An IDLE ComfyUI still holds its last models in VRAM, and that is not a
+        # rounding error: measured 2026-08-09, an idle ComfyUI sat on 4.4 GB
+        # (6005 MiB down to 1581 MiB after /free). Training then started with
+        # ~18 GB instead of ~22 GB on a 24 GB card, climbed to 23.8 GB, and WDDM
+        # began paging VRAM to system RAM — the step time went 8.4 s, then 78 s,
+        # then 104 s, and the process died at step 3 with no error in its log.
+        #
+        # The VISION lane has claimed the card this way since it shipped
+        # (gpu_window: claim, /free, refuse if it cannot confirm). Training —
+        # the single longest and most expensive GPU job the app runs — was the
+        # one path that never asked. Same verdicts and the same refusal as the
+        # vision lane on purpose: a third policy for the same question is how
+        # two callers end up disagreeing about who owns the card.
+        from ..utils.comfyui import ComfyVramFreeVerdict, free_comfyui_vram
+        try:
+            verdict = free_comfyui_vram()
+        except Exception:
+            logger.exception('training: ComfyUI /free raised unexpectedly')
+            verdict = None
+        if verdict not in (ComfyVramFreeVerdict.FREED,
+                           ComfyVramFreeVerdict.COMFYUI_OFFLINE):
+            from ..gpu_window import GpuBusyError
+            raise GpuBusyError(
+                'ComfyUI did not confirm that its GPU models were released, so '
+                'training would start on a card it is still holding. Wait for '
+                'ComfyUI to recover (or stop it) and start the run again.')
+        logger.info('training: ComfyUI VRAM release verdict=%s',
+                    getattr(verdict, 'value', verdict))
         try:
             from .ollama_gpu_fence import ensure_released_for_comfy
             ollama_released = ensure_released_for_comfy()

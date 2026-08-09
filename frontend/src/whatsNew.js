@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-09-training-frees-the-card-first',
+    date: '2026-08-09',
+    title: 'Training now takes the GPU properly instead of sharing it with ComfyUI',
+    blurb: 'An idle ComfyUI still holds its last models in VRAM — measured at 4.4 GB on one machine — and local training used to start anyway. On a card that was already tight the run crept up to the ceiling, Windows began paging VRAM out to system memory, and the step time went from 8 seconds to 78 to 104 before the trainer died with nothing in its log. Training now asks ComfyUI to release the card before it starts, exactly as the vision tasks have always done, and refuses to start rather than quietly fighting for memory it cannot get.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-09-scrape-thumbnails-teredo',
     date: '2026-08-09',
     title: 'Scanned a page, got a grid of nothing? Fixed',

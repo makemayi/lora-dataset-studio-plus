@@ -1824,3 +1824,80 @@ def test_hf_cache_pending_never_raises(monkeypatch):
     monkeypatch.setattr(lt, '_hf_hub_cache',
                         lambda: (_ for _ in ()).throw(RuntimeError('unconfigured')))
     assert lt.hf_cache_pending() is None
+
+
+# --- The card must be free before a run takes it (2026-08-09) ------------------
+# An IDLE ComfyUI still holds its last models in VRAM. Measured: 6005 MiB -> 1581
+# MiB after /free, i.e. 4.4 GB. Training started with ~18 GB instead of ~22 GB on
+# a 24 GB card, climbed to 23.8 GB, and WDDM began paging VRAM to system RAM: the
+# step time went 8.4 s -> 78 s -> 104 s and the process died at step 3 with no
+# error in its log. The vision lane has claimed the card this way since it
+# shipped; training, the longest GPU job the app runs, never asked.
+
+def _stub_launch_preconditions(lt, monkeypatch):
+    from app.services import ollama_gpu_fence
+    monkeypatch.setattr(lt, 'assert_interpreter_ready', lambda: None)
+    monkeypatch.setattr(lt, 'assert_free_disk', lambda *a, **k: None)
+    monkeypatch.setattr(lt, '_assert_no_vision_pass_on_gpu', lambda: None)
+    monkeypatch.setattr(lt.queue_manager, 'has_comfyui_work', lambda: False)
+    monkeypatch.setattr(ollama_gpu_fence, 'ensure_released_for_comfy', lambda: True)
+
+
+@pytest.mark.parametrize('verdict_name,should_pass', [
+    ('FREED', True),             # ComfyUI let go of the card
+    ('COMFYUI_OFFLINE', True),   # nothing there to let go of
+    ('UNKNOWN', False),          # it is up and did NOT confirm -> refuse
+])
+def test_training_refuses_a_card_comfyui_has_not_released(
+        app, tmp_path, monkeypatch, verdict_name, should_pass):
+    from app.services import lora_training as lt
+    from app.utils.comfyui import ComfyVramFreeVerdict
+    from app.gpu_window import GpuBusyError
+
+    _configure_aitoolkit(tmp_path, monkeypatch, app)
+    _stub_launch_preconditions(lt, monkeypatch)
+    called = []
+
+    def fake_free():
+        called.append(True)
+        return getattr(ComfyVramFreeVerdict, verdict_name)
+
+    monkeypatch.setattr('app.utils.comfyui.free_comfyui_vram', fake_free)
+    # The dataset export runs BEFORE the GPU guard, so it has to succeed for the
+    # guard to be reached at all. The sentinel goes on the spawn instead: the
+    # point is whether the guard raises, not what the trainer does next.
+    export_dir = tmp_path / 'exported'
+    export_dir.mkdir(exist_ok=True)
+    monkeypatch.setattr(lt, 'export_dataset_to_aitoolkit',
+                        lambda *a, **k: str(export_dir))
+    sentinel = RuntimeError('reached the launch body')
+    monkeypatch.setattr(lt.subprocess, 'Popen',
+                        lambda *a, **k: (_ for _ in ()).throw(sentinel))
+
+    from app import db
+    from app.config import LOCAL_USER
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+    from _dataset_files import write_kept_image_files
+    with app.app_context():
+        lt._clear_training_identity(ttl_seconds=1)
+        ds = svc.create_dataset(LOCAL_USER, f'vram {verdict_name}', f'vram_{verdict_name.lower()}')
+        # The GPU guard sits AFTER the readiness guards, so the dataset has to be
+        # trainable for this test to reach the thing it is testing.
+        for i in range(4):
+            db.session.add(FaceDatasetImage(
+                dataset_id=ds.id, status='keep', filename=f'k{i}.png',
+                caption='a photo', variation_label='shot'))
+        db.session.commit()
+        write_kept_image_files(ds.id)
+        with pytest.raises(Exception) as e:
+            lt.launch_training(LOCAL_USER, ds.id, check_captions=False,
+                               allow_not_ready=True, allow_uncaptioned=True,
+                               allow_unverified_weights=True)
+    assert called, f'guard not reached; launch raised {type(e.value).__name__}: {str(e.value)[:200]}'
+    if should_pass:
+        assert e.value is sentinel, (
+            f'{verdict_name} must not block the run, got {e.value!r}')
+    else:
+        assert isinstance(e.value, GpuBusyError), f'expected a refusal, got {e.value!r}'
+        assert 'did not confirm' in str(e.value)
