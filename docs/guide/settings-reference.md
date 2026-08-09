@@ -476,6 +476,18 @@ How presets are used matters:
 - There is deliberately **no automatic NSFW gating** on individual LoRAs — the preset you pick carries the intent. If you want an "NSFW full" stack, make it a preset.
 - **Trap:** a row pointing at the **same file as the consistency LoRA** (`klein.consistency_lora`) is skipped — it would chain that LoRA a second time on top of itself, summing both strengths into one delta well past what the file was trained for (visible as blocky, posterized output). **The preset editor now flags that row as you write it**, on the row itself, instead of leaving the only trace in the server log — which is how a preset holding exactly one such row produced a run with no extra LoRA and nothing on screen to explain it. The check compares paths the way the server does (separators unified, case ignored), so `klein/x.safetensors` and `klein\X.safetensors` are both caught. It does **not** claim to catch an absolute path aliasing the same file — the server still drops that row, quietly.
 
+### Face swap LoRAs
+
+**Settings → Image engines → Face swap LoRAs (optional)** → `klein.face_swap_loras` (default: empty).
+
+Your own LoRAs, chained onto the 🔀 face swap graph **after** the LoRAs that graph already loads. The list order **is** the chain order; max **8**.
+
+Deliberately **not** the named presets above. Presets exist because the Klein generation lane offers a per-run picker; face swap is one fixed action with no picker, so these are simply **always on** — a preset here would be a name nobody ever gets asked to select.
+
+- Each row is `{file, strength}`, strength clamped to **0–1.5** (a missing or unreadable value becomes `1.0`).
+- A row naming a file that is **not on disk** is **skipped**, with a line in the server log. That is on purpose: ComfyUI answers a validation error for the *whole job*, so one stale filename would otherwise cost every tile of a batch. A stale row costs you that LoRA and nothing else.
+- The face-swap graph's own LoRAs are separate and always applied: the swap LoRA proper (`klein/Klein2-9B-SmartCharacterSwap.safetensors`, required) and an optional style LoRA the shipped graph names, which is **dropped automatically** when that file is absent.
+
 ### Klein generation quality
 
 *Raised by ashish.sinha.* **Generation steps** → `klein.generation_steps` (1–50, default **5**). How many sampler steps the local **Klein** engine spends on each generated image — variations, regenerations and the automatic small-image rescue. The shipped workflow had this pinned at **5** with no way to change it; the default is that same 5, so nothing moves until you raise it. More steps usually render more cleanly and cost proportionally more time (10 steps ≈ twice the wait per image).
@@ -1613,6 +1625,7 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `klein.generation_steps` | Sampler steps for Klein **generation** (variations, regenerate, small-image rescue). Default `5` = the value hardcoded in the shipped workflow; 1–50. Not the improve pass (`klein.improve_steps`). |
 | `klein.edit_base_lora_strength` | Strength of the enhancement LoRA (`klein/realistic.safetensors`, node 139) on Klein **edits** — reference edit, variations, regenerate, small-image rescue. Default `0` = off, the render before that LoRA became a Setup download; 0–2. Not the improve pass (`klein.improve_base_lora_strength`). |
 | `klein.generation_lora_presets` | Named generation-LoRA stacks (default empty) picked per run in Klein tuning; each has a name and up to 8 `{file, strength}` rows. Managed in Settings → Image engines. |
+| `klein.face_swap_loras` | Flat `{file, strength}` list (default empty, max 8) chained onto the 🔀 face swap graph after its own LoRAs. Always on — no per-run picker. A row whose file is missing is skipped, not fatal. Managed in Settings → Image engines. |
 | `klein.default_generation_lora_preset` | Which of `klein.generation_lora_presets` the 🖥️ Klein tuning panel STARTS on. Default `''` = *None*, the behaviour before this key existed. A starting point only — the run panel still offers None and every other preset for that run, and picking there does not rewrite this. Fail-closed: a name matching no preset behaves as *None*. |
 | `krea.default_generation_lora_preset` | The same, for `krea.generation_lora_presets` and the 🧬 Krea 2 Edit tuning panel. A SEPARATE key on purpose: the two preset lists are independent and one name can designate two different chains. Default `''`. |
 | `identity_prompts.markings_lock` | Krea's “hold the skin” order — forbids inventing or redrawing marks. Blank = shipped default. Naming a body feature here summons it. |

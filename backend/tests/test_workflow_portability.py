@@ -132,6 +132,25 @@ DECLARED_THIRD_PARTY_NODES = {
     # None fallback, which prints the bare class name for exactly this case.
     'ResizeImageMaskNode': 'update ComfyUI (core node added in v0.9.2, no separate pack)',
     'ComfySwitchNode': 'update ComfyUI (core node, no separate pack)',
+    # 'face swap.json' was REBUILT on 2026-08-09 and brought its own packs with
+    # it. Every attribution here was MEASURED off /object_info's `python_module`
+    # on a live install rather than inferred from the node name — see
+    # klein_edit_helper.KLEIN_NODE_PACKS, the preflight that turns each of these
+    # into an actionable "install this" message.
+    'LayerColor: Brightness & Contrast': 'ComfyUI_LayerStyle',
+    'LayerUtility: CropByMask V2': 'ComfyUI_LayerStyle',
+    'RTXVideoSuperResolution': 'Nvidia_RTX_Nodes_ComfyUI',
+    'Text Multiline': 'was-node-suite-comfyui',
+    # The measured module for these four is `comfyui-workflow-encrypt` — one
+    # LOCAL folder bundling several upstream packs, so it is not an installable
+    # name. Upstream homes are inferred (node titles / usual publisher); the
+    # honest part is that the module we measured is a bundle, and the message
+    # says so rather than sending someone after a package that does not exist.
+    'SAM3Segment': 'ComfyUI-RMBG (inferred; measured module is a local bundle)',
+    'GrowMaskWithBlur': 'ComfyUI-KJNodes (inferred; measured module is a local bundle)',
+    'AddMask': 'unknown pack (measured module is a local bundle)',
+    'OTUNetLoaderW8A8': 'unknown pack (measured module is a local bundle); the '
+                        'face-swap lane degrades to core UNETLoader without it',
     # 'krea2 high resolution.json' — the ✨ Upscale & improve 'klein' engine's Krea 2
     # Ostris Edit + SeedVR2 restore graph (see krea_hq_helper). Gated by
     # krea_hq_helper.krea_hq_missing_nodes(), which scans the WHOLE graph against
@@ -163,6 +182,10 @@ ENUM_FIELD_NAME_COLLISIONS = {
     # validated by ComfyUI_LayerStyle's own node registration — unrelated to
     # CLIPLoader/UNETLoader's core `device` (default/cpu-only) selector.
     ('LayerMask: PersonMaskUltra V2', 'device'),
+    # SAM3Segment's own segmentation-device widget ('Auto'/'cuda'/'cpu'),
+    # validated by its own pack — unrelated to CLIPLoader/UNETLoader's core
+    # `device` (default/cpu-only) selector, which has no 'Auto'.
+    ('SAM3Segment', 'device'),
 }
 
 # The Klein lane is the one that broke, and the one the app leans on hardest
@@ -280,6 +303,10 @@ VANILLA_NODE_ALLOWLIST = frozenset({
     'CheckpointLoaderSimple', 'ConditioningZeroOut',
     'EmptyFlux2LatentImage', 'EmptyLatentImage', 'EmptySD3LatentImage',
     'FluxGuidance', 'GetImageSize', 'ImageScale', 'ImageScaleToTotalPixels',
+    # Added with the rebuilt 'face swap.json', 2026-08-09. Core confirmed by
+    # /object_info's python_module on a live install, not by reputation:
+    # comfy_extras.nodes_differential_diffusion, nodes_flux, nodes_mask x2.
+    'DifferentialDiffusion', 'Flux2Scheduler', 'ImageToMask', 'MaskToImage',
     'KSampler', 'KSamplerSelect', 'LatentUpscaleBy', 'LoadImage', 'LoraLoader',
     'LoraLoaderModelOnly', 'ModelSamplingFlux', 'PatchModelAddDownscale',
     'PreviewImage', 'PrimitiveFloat', 'PrimitiveInt', 'RandomNoise',

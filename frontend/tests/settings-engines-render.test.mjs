@@ -137,6 +137,31 @@ test('both Base URL hints stay in the DOM in BOTH states, toggled by hidden', ()
   assert.notEqual(blank, filled)
 })
 
+/* Face swap LoRAs. Both states mount: empty (the placeholder line) and filled
+   (rows with a combobox, a strength slider and the reorder buttons). */
+test('the face swap LoRA card renders empty and with rows', () => {
+  const empty = render({ engines: {} })
+  assert.match(empty, /Face swap LoRAs \(optional\)/)
+  assert.match(empty, /the face swap runs with just the LoRAs its own graph names/)
+
+  const filled = renderToStaticMarkup(createElement(EnginesSection, {
+    config: {
+      ...CONFIG,
+      klein: { face_swap_loras: [{ file: 'a.safetensors', strength: 0.8 },
+                                 { file: 'b.safetensors', strength: 1.2 }] },
+    },
+    configDefaults: CONFIG,
+    setField: () => {}, toggleEngine: () => {}, caps: {}, refreshCaps: () => {},
+    toast: { error: () => {}, success: () => {} },
+    secretsPresence: {}, secretInputs: {}, setSecretInputs: () => {},
+    testResults: {}, recordTestResult: () => {}, saveSecretIfPending: () => {},
+    handleDeleteSecret: () => {},
+  }))
+  assert.match(filled, /2\/8 in the chain/)
+  assert.match(filled, /Face swap LoRA 1 strength/)
+  assert.doesNotMatch(filled, /the face swap runs with just the LoRAs/)
+})
+
 /* The dataset side of the same class of bug: the angle-reference panel lost its
    placeholder branch when all five slots opened, and a source-text test cannot
    tell a removed branch from a broken one. */

@@ -586,6 +586,15 @@ DEFAULTS = {
               # nsfw_lora keys are migrated in by _migrate_klein_loras() and
               # then dropped.
               'generation_lora_presets': [],
+              # LoRAs chained onto the FACE SWAP graph, after its own swap LoRA
+              # and the optional style LoRA the shipped graph names. A FLAT
+              # [{file, strength}] list, not the named presets above: face swap
+              # is one fixed action with no per-run picker, so a preset would be
+              # a name nobody ever selects. Cap 8
+              # (face_swap_helper.MAX_FACE_SWAP_LORAS); a row whose file is not
+              # on disk is skipped with a log line rather than failing the whole
+              # batch on a ComfyUI validation 400.
+              'face_swap_loras': [],
               # Which of the presets above the run panel STARTS on. Empty = none,
               # which is byte-for-byte the behaviour every install had before this
               # key existed (the picker opened on "None" on every single visit —

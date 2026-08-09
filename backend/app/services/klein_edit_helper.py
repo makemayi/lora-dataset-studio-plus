@@ -787,11 +787,38 @@ def klein_engine_ready(comfy_ok, *, missing=None, invalid=None, unsupported_enum
 KLEIN_NODE_PACKS = {
     'TextBox1': ('RES4LYF', 'https://github.com/ClownsharkBatwing/RES4LYF'),
     'Any Switch (rgthree)': ('rgthree-comfy', 'https://github.com/rgthree/rgthree-comfy'),
-    # face swap.json (Klein face-swap workflow): LanPaint's inpainting sampler
-    # and LayerStyle's person-segmentation mask, both named in the graph.
+    # face swap.json (Klein face-swap workflow). Pack attribution MEASURED off
+    # /object_info's `python_module` on a live install, 2026-08-09 — not
+    # inferred from node names.
     'LanPaint_KSampler': ('LanPaint', 'https://github.com/scraed/LanPaint'),
     'LayerMask: PersonMaskUltra V2': (
         'ComfyUI_LayerStyle', 'https://github.com/chflame163/ComfyUI_LayerStyle'),
+    'LayerColor: Brightness & Contrast': (
+        'ComfyUI_LayerStyle', 'https://github.com/chflame163/ComfyUI_LayerStyle'),
+    'LayerUtility: CropByMask V2': (
+        'ComfyUI_LayerStyle', 'https://github.com/chflame163/ComfyUI_LayerStyle'),
+    'RTXVideoSuperResolution': (
+        'Nvidia_RTX_Nodes_ComfyUI',
+        'https://github.com/NVIDIA/Nvidia_RTX_Nodes_ComfyUI'),
+    'Text Multiline': ('was-node-suite-comfyui',
+                       'https://github.com/WASasquatch/was-node-suite-comfyui'),
+    # These four all report `custom_nodes.comfyui-workflow-encrypt` on the
+    # measured install — one LOCAL FOLDER bundling several upstream packs, so
+    # the folder name is not something a user can go and install. The upstream
+    # homes below are INFERRED from the node titles ("SAM3 Segmentation (RMBG)")
+    # and from where these classes are normally published; the search term is
+    # what actually helps, so that is what the message carries.
+    'SAM3Segment': ('ComfyUI-RMBG (inferred; measured module is the local '
+                    'bundle comfyui-workflow-encrypt)',
+                    'https://github.com/1038lab/ComfyUI-RMBG'),
+    'GrowMaskWithBlur': ('ComfyUI-KJNodes (inferred; measured module is the '
+                         'local bundle comfyui-workflow-encrypt)',
+                         'https://github.com/kijai/ComfyUI-KJNodes'),
+    'AddMask': ('unknown pack — measured module is the local bundle '
+                'comfyui-workflow-encrypt; search for the node name', None),
+    'OTUNetLoaderW8A8': ('unknown pack — measured module is the local bundle '
+                         'comfyui-workflow-encrypt; the face-swap lane drops '
+                         'to the core UNETLoader without it', None),
 }
 
 

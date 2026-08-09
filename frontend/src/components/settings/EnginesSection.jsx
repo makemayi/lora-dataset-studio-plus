@@ -237,6 +237,83 @@ function DefaultPresetField({ id, engineLabel, presets, value, onChange }) {
   )
 }
 
+const MAX_FACE_SWAP_LORAS = 8   // mirrors face_swap_helper.MAX_FACE_SWAP_LORAS
+
+/* Extra LoRAs for the 🔀 face swap graph.
+   A FLAT list, deliberately not the named presets above: face swap is one fixed
+   action with no per-run picker, so a preset would be a name nobody ever gets
+   asked to select. Same row controls though — reordering matters, because the
+   list IS the chain order. */
+function FaceSwapLorasCard({ config, setField }) {
+  const rows = Array.isArray(config.klein?.face_swap_loras)
+    ? config.klein.face_swap_loras : []
+  const save = (next) => setField('klein', 'face_swap_loras', next)
+  const loraScan = useKleinGenerationLoras()
+  const patchRow = (i, patch) =>
+    save(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  const moveRow = (i, delta) => {
+    const j = i + delta
+    if (j < 0 || j >= rows.length) return
+    const next = [...rows]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    save(next)
+  }
+  return (
+    <Card
+      id="klein-face-swap-loras"
+      title="Face swap LoRAs (optional)"
+      help={`Your own LoRAs, chained onto the 🔀 face swap graph after the LoRAs it already loads — the list order is the chain order (max ${MAX_FACE_SWAP_LORAS}). Always on: face swap has no per-run picker, so unlike the presets above there is nothing to select at generate time. A row naming a file that is not on disk is skipped with a line in the server log rather than failing the whole batch, so a stale entry costs you that LoRA and nothing else.`}
+    >
+      {rows.length === 0 && (
+        <p className="text-sm text-content-muted">
+          None — the face swap runs with just the LoRAs its own graph names.
+        </p>
+      )}
+      {rows.map((row, i) => {
+        const strength = Number.isFinite(Number(row?.strength)) ? Number(row.strength) : 1.0
+        return (
+          <div key={i} className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-content-muted w-4 shrink-0" aria-hidden="true">{i + 1}.</span>
+            <KleinLoraCombobox
+              ariaLabel={`Face swap LoRA file ${i + 1}`}
+              value={row?.file || ''}
+              onChange={(next) => patchRow(i, { file: next })}
+              engineLabel="Klein"
+              {...loraScan}
+            />
+            <label className="flex items-center gap-1.5 text-xs text-content-muted">
+              <span className="whitespace-nowrap">{strength.toFixed(2)}</span>
+              <input
+                type="range" min={0} max={1.5} step={0.05} value={strength}
+                aria-label={`Face swap LoRA ${i + 1} strength`}
+                onChange={(e) => patchRow(i, { strength: Number(e.target.value) })}
+                className="w-28 accent-indigo-500"
+              />
+            </label>
+            <button type="button" onClick={() => moveRow(i, -1)} disabled={i === 0}
+              aria-label={`Move face swap LoRA ${i + 1} up`} title="Chain earlier"
+              className={SMALL_BTN}>↑</button>
+            <button type="button" onClick={() => moveRow(i, 1)} disabled={i === rows.length - 1}
+              aria-label={`Move face swap LoRA ${i + 1} down`} title="Chain later"
+              className={SMALL_BTN}>↓</button>
+            <button type="button" onClick={() => save(rows.filter((_, j) => j !== i))}
+              aria-label={`Remove face swap LoRA ${i + 1}`} title="Remove this LoRA"
+              className={`${SMALL_BTN} hover:bg-red-500/15 hover:text-red-300`}>✕</button>
+          </div>
+        )
+      })}
+      <div className="flex items-center gap-3">
+        <button type="button" className={TEXT_BTN}
+          onClick={() => save([...rows, { file: '', strength: 1.0 }])}
+          disabled={rows.length >= MAX_FACE_SWAP_LORAS}>
+          ＋ Add LoRA
+        </button>
+        <span className="text-xs text-content-muted">{rows.length}/{MAX_FACE_SWAP_LORAS} in the chain</span>
+      </div>
+    </Card>
+  )
+}
+
 function KleinLorasCard({ config, setField }) {
   const presets = Array.isArray(config.klein?.generation_lora_presets)
     ? config.klein.generation_lora_presets : []
@@ -2197,6 +2274,7 @@ export default function EnginesSection(props) {
       <KleinGenerationCard config={config} setField={setField} configDefaults={configDefaults} />
 
       <KleinLorasCard config={config} setField={setField} />
+      <FaceSwapLorasCard config={config} setField={setField} />
 
       <KreaCard config={config} setField={setField} configDefaults={configDefaults} caps={caps} />
 
