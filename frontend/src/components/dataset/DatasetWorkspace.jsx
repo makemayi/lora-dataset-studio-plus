@@ -12,6 +12,7 @@ import ConceptSourcesPanel from './ConceptSourcesPanel';
 import BankImportPanel from './BankImportPanel';
 import DatasetFolderNote from './DatasetFolderNote';
 import { isDatasetImportBlocked, isStopGenerationBlocked } from './scraperState';
+import { ENGINE_LABELS } from './engineSelection';
 import { faceAnalysisState, faceAnalysisLabel } from './faceScoringGate.js';
 import DatasetGrid from './DatasetGrid';
 import { datasetBusyReason } from './datasetBusyReason.js';
@@ -809,7 +810,11 @@ export default function DatasetWorkspace({ ds, onBack }) {
             recaption: `Re-captioning…${prog}`,
             analyze_faces: `Analyzing faces…${prog}`,
             classify: `Classifying framing…${prog}`,
-            generate: `Generating variations…${prog}`,
+            // Name the engine. Without it, "Generating variations… 1/2" while a
+            // slow MiniMax H3 job sits behind a finished face swap reads as a
+            // hung batch — reported 2026-08-09. Unknown/mixed engines fall back
+            // to the bare sentence rather than inventing a name.
+            generate: `${ENGINE_LABELS[act.engine] ? `${ENGINE_LABELS[act.engine]} · ` : ''}Generating variations…${prog}`,
             improve: `Queuing improvements…${prog}`,
             edit_reference: 'Editing reference…',
             bank_export: `Copying into a Bank…${prog}`,

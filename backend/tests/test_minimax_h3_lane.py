@@ -155,3 +155,47 @@ def test_h3_generates_but_does_not_edit_a_reference(app):
     from app.services import dataset_generation_service as gen
     assert 'minimax_h3' in gen.LOCAL_ENGINES
     assert 'minimax_h3' not in gen.editable_engines()
+
+
+# --- the progress badge names the engine that is ACTUALLY running ------------
+
+def test_an_h3_run_is_not_badged_klein(app):
+    """Reported 2026-08-09 as "the task is stuck": a face swap had finished, two
+    H3 jobs were still queued behind it, and the progress indicator named Klein
+    — the engine that had already finished. The old two-way test claimed 'krea'
+    only when every row was Krea and said 'klein' for everything else, so H3
+    could never be named."""
+    from app import db
+    from app.models import FaceDataset, FaceDatasetImage
+    from app.services import dataset_activity
+    from app.services.dataset_generation_service import (
+        _sync_generate_activity, KREA_ENGINE, MINIMAX_H3_ENGINE)
+
+    with app.app_context():
+        ds = FaceDataset(name='badge', trigger_word='badgeperson')
+        db.session.add(ds)
+        db.session.commit()
+
+        def row(marker, jid):
+            db.session.add(FaceDatasetImage(
+                dataset_id=ds.id, status='pending', job_id=jid,
+                variation_label='shot', klein_model=marker))
+            db.session.commit()
+
+        row(MINIMAX_H3_ENGINE, 'j-h3')
+        _sync_generate_activity(ds.id)
+        assert dataset_activity.get(ds.id)['engine'] == MINIMAX_H3_ENGINE
+
+        # Mixed queue -> the vague answer, never a confident wrong one.
+        row(KREA_ENGINE, 'j-krea')
+        _sync_generate_activity(ds.id)
+        assert dataset_activity.get(ds.id)['engine'] == 'local'
+
+        # A Klein row carries a MODEL FILENAME (or NULL), not an engine id.
+        for r in FaceDatasetImage.query.filter_by(dataset_id=ds.id).all():
+            db.session.delete(r)
+        db.session.commit()
+        row('flux-2-klein-9b-fp8.safetensors', 'j-klein')
+        row(None, 'j-legacy-klein')
+        _sync_generate_activity(ds.id)
+        assert dataset_activity.get(ds.id)['engine'] == 'klein'

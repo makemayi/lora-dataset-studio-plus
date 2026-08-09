@@ -43,18 +43,27 @@ def _sync_generate_activity(dataset_id):
              .filter(FaceDatasetImage.filename.is_(None))
              .filter(FaceDatasetImage.job_id.isnot(None)))
     pending = local.count()
-    # There are TWO local engines now, and the indicator names one. Both queue on
-    # the same single GPU and complete the same way, so the COUNT is shared; the
-    # label just tells the truth about what is on it. Klein wins a mixed run only
-    # because it is the historical default — a wrong badge is worse than a vague
-    # one, so 'krea' is only claimed when every in-flight local row really is Krea.
-    # NB: `klein_model != 'krea'` alone would DROP the NULL rows (SQL three-valued
-    # logic), i.e. count a legacy Klein row as "not non-Krea" and mislabel the run.
+    # There are THREE local engines now. They queue on the same single GPU and
+    # complete the same way, so the COUNT is shared; the label says what is
+    # actually on it.
+    #
+    # This used to be a two-way test that claimed 'krea' only when every row was
+    # Krea and said **'klein' for everything else** — so a MiniMax H3 run was
+    # badged Klein. Reported 2026-08-09 as "the task is stuck": a face swap had
+    # finished, two H3 jobs were still queued behind it (H3 takes minutes), and
+    # a progress bar naming the engine that had already finished reads as a
+    # hung batch rather than a running one. The old comment even said a wrong
+    # badge is worse than a vague one; H3 shipped and made it wrong.
+    #
+    # `klein_model` carries the ENGINE ID for the non-Klein lanes and a model
+    # filename (or NULL) for Klein, so map first and count distinct after. A
+    # genuinely mixed queue gets the vague answer, on purpose.
     engine = 'klein'
-    if pending and not local.filter(db.or_(
-            FaceDatasetImage.klein_model.is_(None),
-            FaceDatasetImage.klein_model != KREA_ENGINE)).count():
-        engine = KREA_ENGINE
+    if pending:
+        markers = {m for (m,) in local.with_entities(FaceDatasetImage.klein_model)}
+        engines = {m if m in (KREA_ENGINE, MINIMAX_H3_ENGINE) else 'klein'
+                   for m in markers}
+        engine = engines.pop() if len(engines) == 1 else 'local'
     dataset_activity.sync_pending(dataset_id, 'generate', pending, engine=engine)
 
 
