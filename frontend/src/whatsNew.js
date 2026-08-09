@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-09-settings-rows-line-up',
+    date: '2026-08-09',
+    title: 'Settings rows line up now',
+    blurb: 'Every field in a settings card used to end somewhere different. Two causes: once the page went full-width a text box stretched the whole way across while the slider beside it stayed an inch wide, and in the API keys card the box was sized by whatever was left after that row’s buttons — so a key with Test and Remove got a shorter box than one with neither. Controls now share one comfortable width whatever the window size, the buttons sit in their own column so they stack in a straight line, and the explanatory text wraps at a readable measure instead of running to the far edge.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-09-settings-uses-the-screen',
     date: '2026-08-09',
     title: 'Settings uses the whole window, and reads better doing it',

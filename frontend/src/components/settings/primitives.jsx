@@ -1,8 +1,13 @@
 import { useState } from 'react'
 import { postJson } from '../../api/fetchClient'
 
+/* `max-w-xl` is the tidy-up: the settings shell went full-width on 2026-08-09
+   and every `w-full` control went with it, so a text input stretched ~1400px
+   across while the sliders beside it stayed 112px — the raggedness the user
+   reported. A control has a comfortable measure regardless of how wide the
+   window is; the CARD still fills the pane, only its contents are bounded. */
 export const INPUT_CLASS =
-  'mt-1 w-full rounded-md border border-border-strong bg-surface-raised px-3 py-2 text-sm text-content ' +
+  'mt-1 w-full max-w-xl rounded-md border border-border-strong bg-surface-raised px-3 py-2 text-sm text-content ' +
   'placeholder:text-content-subtle focus:border-primary focus:outline-none'
 
 /* Section heading: a small mono "rack tag" eyebrow above the title keeps every
@@ -101,7 +106,7 @@ export function Card({ title, help, children, id }) {
         hover:shadow-[0_1px_2px_rgba(0,0,0,.4),0_10px_28px_-8px_rgba(0,0,0,.65)]"
     >
       <h2 className="text-[0.9375rem] font-semibold tracking-[-0.01em] text-content">{title}</h2>
-      {help && <p className="mt-1 text-[0.8125rem] leading-relaxed text-content-muted">{help}</p>}
+      {help && <p className="mt-1 max-w-prose text-[0.8125rem] leading-relaxed text-content-muted">{help}</p>}
       <div className="mt-4 space-y-4">{children}</div>
     </section>
   )
@@ -115,7 +120,7 @@ export function TextField({ id, label, value, onChange, placeholder, help, warn,
   return (
     <div>
       <label htmlFor={id} className="block text-sm font-medium text-content">{label}</label>
-      {help && <p className="mb-1 text-xs text-content-muted">{help}</p>}
+      {help && <p className="mb-1 max-w-prose text-xs text-content-muted">{help}</p>}
       <input
         id={id}
         type="text"
@@ -143,16 +148,19 @@ export function SecretField({
 }) {
   const f = field
   return (
-    // flex-wrap + a full-width first child under `sm`: on a phone the Test and
-    // Remove buttons drop to their own line instead of squeezing the key input
-    // down to a few characters. From `sm` up it is the historical single row.
-    <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
-      <div className="w-full sm:w-auto sm:flex-1">
+    /* A GRID, not a flex row. Flex sized the input from what was left over, and
+       what was left over depended on how many buttons that key happened to have
+       — Test + Remove, Test alone, Remove alone — so no two inputs in the card
+       ended at the same x. The action column is now a fixed track whether or not
+       anything sits in it, and every input lines up. Under `sm` it collapses to
+       one column so the buttons drop below instead of crushing the field. */
+    <div className="grid items-end gap-x-3 gap-y-2 sm:grid-cols-[minmax(0,1fr)_9.5rem]">
+      <div className="min-w-0">
         <div className="flex items-center justify-between">
           <label htmlFor={f.key} className="block text-sm font-medium text-content">{f.label}</label>
           <StatusBadge ok={!!secretsPresence[f.key]} />
         </div>
-        <p className="mb-1 text-xs text-content-muted">{f.help}</p>
+        <p className="mb-1 max-w-prose text-xs text-content-muted">{f.help}</p>
         {f.guide}
         <input
           id={f.key}
@@ -165,20 +173,22 @@ export function SecretField({
         />
         {f.testTarget && <TestResult result={testResults[f.testTarget]} />}
       </div>
-      {f.testTarget && (
-        <TestButton target={f.testTarget} beforeTest={() => saveSecretIfPending(f.key)}
-          onResult={(r) => recordTestResult(f.testTarget, r)} />
-      )}
-      {secretsPresence[f.key] && (
-        <button
-          type="button"
-          onClick={() => handleDeleteSecret(f.key, f.label)}
-          title={`Remove the saved ${f.label}`}
-          className="shrink-0 rounded-md border border-rose-500/40 px-3 py-1.5 text-xs font-medium text-rose-300 hover:bg-rose-500/10"
-        >
-          Remove
-        </button>
-      )}
+      <div className="flex items-center gap-2">
+        {f.testTarget && (
+          <TestButton target={f.testTarget} beforeTest={() => saveSecretIfPending(f.key)}
+            onResult={(r) => recordTestResult(f.testTarget, r)} />
+        )}
+        {secretsPresence[f.key] && (
+          <button
+            type="button"
+            onClick={() => handleDeleteSecret(f.key, f.label)}
+            title={`Remove the saved ${f.label}`}
+            className="shrink-0 rounded-md border border-rose-500/40 px-3 py-1.5 text-xs font-medium text-rose-300 hover:bg-rose-500/10"
+          >
+            Remove
+          </button>
+        )}
+      </div>
     </div>
   )
 }
