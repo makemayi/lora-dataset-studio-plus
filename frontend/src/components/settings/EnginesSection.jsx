@@ -1841,6 +1841,30 @@ function ImageModelsCard({ config, setField, configDefaults }) {
           className="text-primary underline">ai.google.dev</a>.
       </ModelField>
 
+      <ModelField {...shared} id="engines-nanobanana_base_url" configKey="nanobanana_base_url"
+        label="Nano Banana (Gemini) Base URL"
+        placeholder="https://generativelanguage.googleapis.com">
+        Blank = Google itself, which is what almost everyone wants. Fill it in to send this
+        engine to a <strong>Gemini-compatible gateway or reseller</strong> instead. Paste the
+        host; the <code className="break-all">/v1beta/models/…</code> path and the model are
+        added for you.
+        {/* Both hints stay mounted, `hidden` flips — see the ChatGPT Base URL
+            field above for why a ternary here crashes a translated page. */}
+        <span hidden={!config.engines?.nanobanana_base_url}>
+          {' '}<strong className="text-amber-300">
+            Your reference photos go to that operator, not to Google.
+          </strong>{' '}
+          This engine uploads your primary reference and every extra on each call, under that
+          operator&apos;s retention policy with a key they issued. If the gateway then answers
+          401 or 404, suspect this field before your key — a wrong Base URL looks exactly like
+          a rejected key or an unknown model.
+        </span>
+        <span hidden={!!config.engines?.nanobanana_base_url}>
+          {' '}Applies to this engine only: OpenRouter reaches the same Gemini weights through
+          its own account and ignores this field.
+        </span>
+      </ModelField>
+
       <ModelField {...shared} id="engines-chatgpt_image_model" configKey="chatgpt_image_model"
         label="ChatGPT (OpenAI) image model" placeholder="gpt-image-2">
         Blank = <code className="break-all">gpt-image-2</code>, the model this engine has always

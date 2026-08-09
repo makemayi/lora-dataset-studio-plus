@@ -102,22 +102,38 @@ test('a filled Base URL says out loud that a third party sees the photos', () =>
   assert.match(html, /401 or 404, suspect this field before your key/)
 })
 
+test('the Nano Banana Base URL field renders in both states', () => {
+  assert.match(render({ engines: { nanobanana_base_url: '' } }),
+    /Nano Banana \(Gemini\) Base URL/)
+  assert.match(render({ engines: { nanobanana_base_url: 'https://gw.example.com' } }),
+    /Your reference photos go to that operator, not to Google/)
+})
+
+/* BOTH gateway fields, checked the same way. Two fields, four hints, and every
+   one of them must survive a value change without a text node being removed. */
 test('both Base URL hints stay in the DOM in BOTH states, toggled by hidden', () => {
-  const warning = /Your reference photos go to that operator/
-  const scope = /Applies to the API-key lane only/
-  for (const value of ['', 'https://gateway.example.com']) {
-    const html = render({ engines: { chatgpt_base_url: value } })
-    // Present either way: a ternary would drop one, and dropping a text node is
-    // exactly what kills a translated page.
-    assert.match(html, warning, `warning missing for ${value || 'blank'}`)
-    assert.match(html, scope, `scope note missing for ${value || 'blank'}`)
+  const cases = [
+    ['chatgpt_base_url', /not to OpenAI/, /Applies to the API-key lane only/],
+    ['nanobanana_base_url', /not to Google/, /Applies to this engine only/],
+  ]
+  for (const [key, warning, scope] of cases) {
+    for (const value of ['', 'https://gateway.example.com']) {
+      const html = render({ engines: { [key]: value } })
+      // Present either way: a ternary would drop one, and dropping a text node
+      // is exactly what kills a translated page.
+      assert.match(html, warning, `${key}: warning missing for ${value || 'blank'}`)
+      assert.match(html, scope, `${key}: scope note missing for ${value || 'blank'}`)
+    }
   }
-  // ...and exactly one of them is hidden in each state.
-  const blank = render({ engines: { chatgpt_base_url: '' } })
-  const filled = render({ engines: { chatgpt_base_url: 'https://gateway.example.com' } })
+  // Two fields, so exactly two hidden spans whichever way each one is set.
   const hiddenSpans = (html) => (html.match(/<span hidden=""/g) || []).length
-  assert.equal(hiddenSpans(blank), 1)
-  assert.equal(hiddenSpans(filled), 1)
+  const blank = render({ engines: { chatgpt_base_url: '', nanobanana_base_url: '' } })
+  const filled = render({
+    engines: { chatgpt_base_url: 'https://a.example.com',
+               nanobanana_base_url: 'https://b.example.com' },
+  })
+  assert.equal(hiddenSpans(blank), 2)
+  assert.equal(hiddenSpans(filled), 2)
   assert.notEqual(blank, filled)
 })
 

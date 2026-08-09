@@ -20,6 +20,29 @@ overridden when the user actually types a slug in Settings — i.e. by an explic
 more recent choice. This is why the config default is BLANK rather than a copy of
 DEFAULT_MODEL (see config.DEFAULTS['engines']).
 
+CHOOSING WHO ANSWERS
+--------------------
+`engines.nanobanana_base_url` (blank = Google) points this engine at any
+Gemini-compatible gateway, resolved the same way and at the same time as the
+model:
+
+    engines.nanobanana_base_url  >  GEMINI_BASE_URL (env)  >  DEFAULT_API_BASE
+
+It exists because resellers offer the same Gemini image models below Google's
+own per-image price. What the setting cannot make cheap is the part that is not
+money: this engine uploads the user's REFERENCE PHOTOS of a real person — the
+primary plus up to three extras — on every single call, so a non-blank value
+sends those photos, the prompts, and a third-party key to an operator whose
+retention policy nobody here has read. The Settings field, the Guide and
+`using_custom_api_base()` all say so; do not quietly soften any of them.
+
+The path is GOOGLE-NATIVE and carries the model inside it, so
+`generate_content_url()` is NOT interchangeable with `chatgpt_image.edits_url`
+even though the two settings are twins. A wrong Base URL is also the one
+misconfiguration that IMPERSONATES two others — 401/403/404, exactly like a bad
+key or an unknown model — which is why `_raise_for_status` appends the gateway
+clause on those.
+
 FAILING LOUDLY
 --------------
 Failures raise a NAMED cause (see engine_errors) instead of returning None, and
@@ -84,6 +107,27 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODEL = 'gemini-3-pro-image'
 _ENV_VAR = 'NANOBANANA_MODEL'
 _API = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+# --- Where this engine sends its traffic -------------------------------------
+# Twin of chatgpt_image's `chatgpt_base_url`, same resolution order, read at
+# CALL time:
+#
+#     engines.nanobanana_base_url  >  GEMINI_BASE_URL (env)  >  DEFAULT_API_BASE
+#
+# Blank = Google, and blank is right for almost everyone. It is configurable
+# because Gemini-compatible resellers exist and are cheaper on paper. What they
+# cost instead is not money: every request this engine makes carries the user's
+# REFERENCE PHOTOS of a real person — up to four of them — so a non-blank value
+# hands those photos, the prompts, and a key that operator issued to that
+# operator. Nobody should discover that from a bill.
+#
+# Unlike the OpenAI lane, the path here is GOOGLE-NATIVE and carries the model
+# inside it (`/v1beta/models/<slug>:generateContent`), so the joiner below is
+# not the same function as `chatgpt_image.edits_url` and must not be merged
+# with it.
+DEFAULT_API_BASE = 'https://generativelanguage.googleapis.com'
+_BASE_ENV_VAR = 'GEMINI_BASE_URL'
+_API_PATH = '/v1beta/models/{model}:generateContent'
 
 _NO_KEY = ('no Gemini API key saved — add GEMINI_API_KEY in '
            'Settings > Image engines')
@@ -219,6 +263,44 @@ def get_model() -> str:
             or DEFAULT_MODEL)
 
 
+def get_api_base() -> str:
+    """The API root this engine will call: setting > env var > Google. Read
+    fresh on every call, like the model slug."""
+    return ((cfg.get('engines.nanobanana_base_url') or '').strip()
+            or (os.environ.get(_BASE_ENV_VAR) or '').strip()
+            or DEFAULT_API_BASE)
+
+
+def generate_content_url(model, base=None) -> str:
+    """The full `:generateContent` URL for a model against a configured base.
+
+    Forgiving about the shapes people paste out of a gateway's docs:
+
+        https://gw.example.com          -> https://gw.example.com/v1beta/models/<m>:generateContent
+        https://gw.example.com/v1beta   -> the same (the version is not doubled)
+        .../v1beta/models/{model}:generateContent -> used verbatim, {model} filled
+
+    A base that already spells out `{model}` is trusted entirely — that is the
+    escape hatch for a gateway that mounts the API somewhere this cannot guess.
+    Otherwise a trailing `/v1beta` is absorbed rather than repeated, because
+    pasting the version is the obvious mistake and the resulting 404 reads to
+    the user as a bad key or an unknown model."""
+    base = (base if base is not None else get_api_base()).strip().rstrip('/')
+    if not base:
+        base = DEFAULT_API_BASE
+    if '{model}' in base:
+        return base.format(model=model)
+    if base.endswith('/v1beta'):
+        base = base[:-len('/v1beta')]
+    return base + _API_PATH.format(model=model)
+
+
+def using_custom_api_base() -> bool:
+    """True when this engine is NOT pointed at Google. Diagnostics and the
+    Settings panel both say so out loud: a third party is seeing the photos."""
+    return get_api_base().rstrip('/') != DEFAULT_API_BASE
+
+
 def _error_message(resp) -> str:
     """Gemini's own explanation, trimmed. Its documented envelope is
     {"error": {"code", "message", "status"}}; an edge failure answers something
@@ -255,12 +337,21 @@ def _raise_for_status(resp, *, model: str) -> None:
         return
     detail = _error_message(resp)
     suffix = f': {detail}' if detail else ''
+    # Worded for Google, and byte-identical when that is who we called. Against
+    # a gateway the statuses a wrong Base URL produces get ONE extra clause:
+    # 401/403/404 are indistinguishable from a bad key and an unknown model, and
+    # a user who just pasted a Base URL would go re-check their key instead.
+    gw = ''
+    if using_custom_api_base():
+        gw = (f' — this engine is pointed at {get_api_base()}, not Google; a '
+              'wrong Base URL answers exactly like a rejected key or an unknown '
+              'model (Settings > Image engines)')
     if status in (401, 403):
-        raise NanoBananaFatal(f'Gemini rejected the API key (HTTP {status}){suffix}')
+        raise NanoBananaFatal(f'Gemini rejected the API key (HTTP {status}){suffix}{gw}')
     if status == 404:
         raise NanoBananaFatal(
             f'Gemini does not serve the model "{model}" (HTTP 404){suffix} — '
-            'check the model in Settings > Image engines')
+            f'check the model in Settings > Image engines{gw}')
     if status == 429:
         raise NanoBananaError(f'Gemini rate-limited the request (HTTP 429){suffix}')
     if status == 400 and any(h in detail.lower() for h in _MODEL_FAULT_HINTS):
@@ -269,7 +360,7 @@ def _raise_for_status(resp, *, model: str) -> None:
             'this engine always sends your reference images with the prompt, so '
             'the model must be an IMAGE model that accepts image input; check the '
             'model in Settings > Image engines')
-    raise NanoBananaError(f'Gemini returned HTTP {status}{suffix}')
+    raise NanoBananaError(f'Gemini returned HTTP {status}{suffix}{gw}')
 
 
 def parse_image_response(data) -> bytes | None:
@@ -321,11 +412,16 @@ def generate_variation(ref_bytes: bytes | list[bytes], prompt: str, model: str |
     ]
     for i, payload in enumerate(payloads):
         try:
-            r = requests.post(_API.format(model=mdl),
+            r = requests.post(generate_content_url(mdl),
                               headers={"x-goog-api-key": key, "Content-Type": "application/json"},
                               json=payload, timeout=(10, 180))
         except requests.RequestException as e:
-            raise NanoBananaError(f'could not reach Gemini: {e}')
+            # Name the host that actually failed. Against a gateway, "could not
+            # reach Gemini" would send the user to Google's status page while
+            # their reseller is the thing that is down.
+            who = (f'the API gateway at {get_api_base()}'
+                   if using_custom_api_base() else 'Gemini')
+            raise NanoBananaError(f'could not reach {who}: {e}')
         if r.status_code == 400 and i == 0:
             continue  # retry without imageConfig
         _raise_for_status(r, model=mdl)

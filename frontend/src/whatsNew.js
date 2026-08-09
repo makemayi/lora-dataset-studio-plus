@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-09-nanobanana-base-url',
+    date: '2026-08-09',
+    title: 'Nano Banana can point at a cheaper gateway too',
+    blurb: 'The Base URL field the ChatGPT engine got now has a twin for Nano Banana: send it to any Gemini-compatible reseller by pasting the host, and the path and model slug are filled in for you. Same honest catch, stated in the field — your reference photos go to that operator instead of Google — and the same help when it breaks: a wrong Base URL answers 401 or 404 exactly like a bad key, so the message names the gateway rather than letting you re-check a key that was fine.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-09-chatgpt-base-url',
     date: '2026-08-09',
     title: 'Point the ChatGPT engine at a cheaper gateway — with the catch spelled out',

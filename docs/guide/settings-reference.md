@@ -60,6 +60,22 @@ One field per API engine — you choose the model each one asks for:
 
 All three are **free text on purpose**: providers publish image models far faster than this app publishes releases, and a dropdown frozen into a build would be out of date the day it shipped and would lock you out of a model that works. Leaving a field blank keeps that engine's historical model, so a field appearing here changes nothing about your results.
 
+#### Nano Banana (Gemini) Base URL — read this before you fill it in
+
+**Nano Banana (Gemini) Base URL** → `engines.nanobanana_base_url`. Blank (default) = Google itself. Fill it in and the Nano Banana engine calls a Gemini-compatible gateway instead. Resolution order, read at call time: this setting → the `GEMINI_BASE_URL` environment variable → Google.
+
+Paste the host; the path and the model are added for you. Unlike the OpenAI lane below, **Gemini carries the model inside the URL** (`/v1beta/models/<slug>:generateContent`), so the two fields are not interchangeable:
+
+| You paste | The app calls |
+| --- | --- |
+| `https://gw.example.com` | `https://gw.example.com/v1beta/models/<model>:generateContent` |
+| `https://gw.example.com/v1beta` | the same — the version is absorbed, not doubled |
+| `…/v1beta/models/{model}:generateContent` | used verbatim, with `{model}` filled in |
+
+**The trade is the same as the OpenAI lane's, and so is the warning.** This engine uploads your **primary reference plus every extra** on each call. Point the Base URL elsewhere and those photos of a real person, your prompts, and a key that operator issued all go to them. Everything in *ChatGPT (OpenAI) Base URL* below about distrusting a quoted price, and about 401/404 impersonating a bad key, applies here word for word — read it once and it covers both fields.
+
+**Scope.** This engine only. **OpenRouter** reaches the same Gemini weights through its own account and ignores this field, as do the OpenAI and Qwen engines.
+
 #### ChatGPT (OpenAI) Base URL — read this before you fill it in
 
 **ChatGPT (OpenAI) Base URL** → `engines.chatgpt_base_url`. Blank (default) = OpenAI itself. Fill it in and the ChatGPT **API-key** lane calls an OpenAI-compatible gateway or reseller instead. Resolution order, read at call time: this setting → the `OPENAI_BASE_URL` environment variable → OpenAI.
@@ -1544,6 +1560,7 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `engines.openrouter_model` | Image model slug the OpenRouter engine requests. Free text; blank = `google/gemini-3-pro-image`. Must accept reference images. |
 | `engines.nanobanana_model` | Image model the Nano Banana engine requests. Free text; blank = the `NANOBANANA_MODEL` environment variable if set, else `gemini-3-pro-image`. Must accept reference images. |
 | `engines.chatgpt_image_model` | Image model the ChatGPT engine requests on the **API-key** lane. Free text; blank = the `CHATGPT_IMAGE_MODEL` environment variable if set, else `gpt-image-2` (the only model that needs no OpenAI organization verification). Must accept reference images. The subscription lane ignores it. |
+| `engines.nanobanana_base_url` | API root for the Nano Banana engine. Blank (default) = Google; blank also lets the `GEMINI_BASE_URL` environment variable take over. A non-blank value sends your reference photos to that operator — see *Nano Banana (Gemini) Base URL* above. Ignored by OpenRouter, which reaches the same weights through its own account. |
 | `engines.chatgpt_base_url` | API root for the ChatGPT **API-key** lane. Blank (default) = OpenAI; blank also lets the `OPENAI_BASE_URL` environment variable take over. A non-blank value sends your reference photos to that operator — see *ChatGPT (OpenAI) Base URL* above. Ignored by the subscription and ComfyUI lanes. |
 | `engines.chatgpt_subscription_model` | Codex **router** model for the subscription lane (default `gpt-5.4-mini`) — not an image model. |
 | `captioning.backend` | Caption backend: `auto` (prefer JoyCaption, fall back to Ollama), `joycaption`, `ollama`, or `none`. |

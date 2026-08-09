@@ -152,7 +152,15 @@ def _cached_import(key: str, python: str, module_expr: str) -> bool:
 
 def probe_gemini() -> dict:
     ok = bool(cfg.secret('GEMINI_API_KEY'))
-    return {'ok': ok, 'detail': 'key set' if ok else 'key missing'}
+    if not ok:
+        return {'ok': False, 'detail': 'key missing'}
+    # Same reason as probe_openai: the Base URL is the one setting here that
+    # changes WHO receives the user's reference photos, and it lives in another
+    # card. Name the host where people already look for readiness.
+    from .services import nanobanana
+    if nanobanana.using_custom_api_base():
+        return {'ok': True, 'detail': f'key set, via {nanobanana.get_api_base()}'}
+    return {'ok': True, 'detail': 'key set'}
 
 
 def probe_openai() -> dict:

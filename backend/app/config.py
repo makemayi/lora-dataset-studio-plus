@@ -175,6 +175,12 @@ DEFAULTS = {
                 # (services/nanobanana.DEFAULT_MODEL, services/chatgpt_image.DEFAULT_IMAGE_MODEL,
                 # services/qwen_image.DEFAULT_MODEL).
                 'nanobanana_model': '',
+                # Twin of chatgpt_base_url below, same reasoning and same
+                # blank-means-Google default: non-blank points the Nano Banana
+                # engine at a Gemini-compatible gateway, and sends your
+                # reference PHOTOS there instead. A GEMINI_BASE_URL env var is
+                # honoured underneath it.
+                'nanobanana_base_url': '',
                 'chatgpt_image_model': '',
                 # Where the ChatGPT API-KEY lane sends its requests. Blank =
                 # OpenAI itself, and that is the only value most people should
