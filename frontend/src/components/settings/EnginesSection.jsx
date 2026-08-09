@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { apiFetch, postJson } from '../../api/fetchClient'
-import { INPUT_CLASS, Card, StatusBadge, SecretField } from './primitives'
+import { INPUT_CLASS, Card, StatusBadge, SecretField, HelpText } from './primitives'
 import KleinLoraCombobox, { useKleinGenerationLoras } from './KleinLoraCombobox'
 import ModelFilePicker, { useModelFiles } from './ModelFilePicker'
 import PromptOverrideField from '../common/PromptOverrideField'
@@ -126,7 +126,7 @@ function LoraPresetCard({ preset, index, presets, save, loraScan,
         </button>
       </div>
       {rows.length === 0 && (
-        <p className="text-xs text-content-muted">Empty preset — add a LoRA below.</p>
+        <HelpText className="text-xs text-content-muted">Empty preset — add a LoRA below.</HelpText>
       )}
       {rows.map((row, i) => {
         const strength = Number.isFinite(Number(row?.strength)) ? Number(row.strength) : defaultStrength
@@ -222,7 +222,7 @@ function DefaultPresetField({ id, engineLabel, presets, value, onChange }) {
         <option value="">None</option>
         {names.map((n) => <option key={n} value={n}>{n}</option>)}
       </select>
-      <p className="mt-1 text-[0.6875rem] text-content-subtle">
+      <p className="mt-1 text-xs text-content-muted">
         Which preset the {engineLabel} tuning panel starts on when you open a dataset.
         “None” is the shipped default and keeps today’s behaviour exactly. You can still
         pick another preset — or None — for a single run without changing this setting.
@@ -430,7 +430,7 @@ function KleinModelSlotRow({ spec, config, setField, override }) {
         placeholder={placeholder || 'Empty = auto-detect'}
         {...scan}
       />
-      <p className="mt-1 text-[0.6875rem] text-content-subtle">{hint}</p>
+      <HelpText className="mt-1 text-xs text-content-muted">{hint}</HelpText>
     </div>
   )
 }
@@ -494,7 +494,7 @@ function KleinGenerationCard({ config, setField, configDefaults }) {
             e.target.value === '' ? shipped : Number(e.target.value))}
           className={INPUT_CLASS}
         />
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <p className="mt-1 text-xs text-content-muted">
           {shipped} = the shipped value. More steps = slower, usually cleaner; 1–{KLEIN_GENERATION_STEPS_MAX}.
           Applies to variations, regenerations and the small-image rescue — not to
           “Upscale &amp; improve”, which has its own Steps below.
@@ -517,13 +517,13 @@ function KleinGenerationCard({ config, setField, configDefaults }) {
             e.target.value === '' ? editLoraShipped : Number(e.target.value))}
           className={INPUT_CLASS}
         />
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           0 = off. The workflow carries a detail LoRA (klein/realistic.safetensors) at
           0.8, and until now nothing turned it down on an edit — it pulled results
           away from the instruction you typed. Raise it to add its detail on purpose.
           Applies to reference edits, variations, regenerations and the small-image
           rescue — “Upscale &amp; improve” keeps its own Enhancement LoRA below.
-        </p>
+        </HelpText>
         <ResetToDefault label="Enhancement LoRA on edits"
           section="klein" field="edit_base_lora_strength"
           config={config} configDefaults={configDefaults} setField={setField} />
@@ -602,10 +602,10 @@ function MinimaxH3Card({ config, setField, configDefaults, caps }) {
           <option value="match">match</option>
           <option value="max">max</option>
         </select>
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           {refImageSizeDescription(refSize)}. This is H3&rsquo;s likeness dial: the reference
           rides through every sampling step, so &ldquo;max&rdquo; buys fidelity with time.
-        </p>
+        </HelpText>
         <ResetToDefault label="Reference size" section="minimax_h3" field="ref_image_size" {...reset} />
       </div>
 
@@ -623,10 +623,10 @@ function MinimaxH3Card({ config, setField, configDefaults, caps }) {
           onChange={(e) => setField('minimax_h3', 'length', Number(e.target.value))}
           className="mt-1 w-full accent-purple-500"
         />
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           {packetLengthDescription(length)}. One frame is kept either way — more frames
           only give the selector more to choose between, at full sampling cost each.
-        </p>
+        </HelpText>
         <ResetToDefault label="Frames per shot" section="minimax_h3" field="length" {...reset} />
       </div>
 
@@ -645,12 +645,12 @@ function MinimaxH3Card({ config, setField, configDefaults, caps }) {
             e.target.value === '' ? dflt('frame_weight_reference') : Number(e.target.value))}
           className={INPUT_CLASS}
         />
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           How much &ldquo;looks like the reference photo&rdquo; counts against sharpness and
           exposure when picking which frame to keep. 0 ignores likeness entirely. On a
           5-frame packet this changed nothing in testing — the sharpest frame was also the
           most reference-like — so it earns its keep at higher frame counts.
-        </p>
+        </HelpText>
         <ResetToDefault label="Likeness weight" section="minimax_h3" field="frame_weight_reference" {...reset} />
       </div>
 
@@ -669,10 +669,10 @@ function MinimaxH3Card({ config, setField, configDefaults, caps }) {
             e.target.value === '' ? dflt('steps') : Number(e.target.value))}
           className={INPUT_CLASS}
         />
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           {dflt('steps')} is the measured working point. Every step is paid once per frame
           in the packet.
-        </p>
+        </HelpText>
         <ResetToDefault label="Sampler steps" section="minimax_h3" field="steps" {...reset} />
       </div>
 
@@ -691,19 +691,19 @@ function MinimaxH3Card({ config, setField, configDefaults, caps }) {
             e.target.value === '' ? dflt('ref_longer_edge') : Number(e.target.value))}
           className={INPUT_CLASS}
         />
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           The reference is shrunk to this before it reaches the 32B vision encoder. Every
           reference pixel is paid for again on each new shot description.
-        </p>
+        </HelpText>
         <ResetToDefault label="Reference downscale" section="minimax_h3" field="ref_longer_edge" {...reset} />
       </div>
 
       <fieldset className="mt-3">
         <legend className="text-xs font-medium text-content">Optional accelerators</legend>
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           Both are used only when your ComfyUI actually exposes them, so leaving them on
           costs nothing on an install that lacks the node packs.
-        </p>
+        </HelpText>
         <label className="mt-2 flex items-center gap-2 text-xs text-content">
           <input
             id="h3-speed-nodes"
@@ -736,11 +736,11 @@ function MinimaxH3Card({ config, setField, configDefaults, caps }) {
           placeholder="minimax_h3_ref2va_pruned_int8_convrot.safetensors"
           className={INPUT_CLASS}
         />
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           Blank finds any Ref2VA build (int8 / int4 / mixed) on its own. The fl2va sibling
           is never picked: it loads, then does a different job. A filename that is no
           longer on disk falls back to auto rather than failing.
-        </p>
+        </HelpText>
         <ResetToDefault label="Ref2VA model" section="minimax_h3" field="base_model" {...reset} />
       </div>
     </Card>
@@ -788,7 +788,7 @@ function KreaCard({ config, setField, configDefaults, caps }) {
           onChange={(e) => setField('krea', 'grounding_px', Number(e.target.value))}
           className="mt-1 w-full accent-violet-500"
         />
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           The resolution your reference is shown to the model&rsquo;s vision encoder at — the
           consistency ↔ prompt dial. At the low end it follows the shot description (more
           variety in pose, outfit and scene, looser likeness). <b>Higher</b> = it resembles
@@ -797,7 +797,7 @@ function KreaCard({ config, setField, configDefaults, caps }) {
           in charge while preserving identity. Raise it deliberately when reference likeness
           matters more. Also adjustable, with this exact value, from the workspace&rsquo;s
           🧬 Krea 2 Edit tuning panel.
-        </p>
+        </HelpText>
         <ResetToDefault label="Reference grounding" section="krea" field="grounding_px" {...reset} />
       </div>
 
@@ -805,13 +805,13 @@ function KreaCard({ config, setField, configDefaults, caps }) {
         <p className="block text-xs font-medium text-content">
           Reference grounding, per framing (optional)
         </p>
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           The same pixel budget is not equally strong everywhere: on a face close-up the
           reference IS almost entirely face, so identity is already solid and a LOWER value
           buys more variety in expression/angle/background. On a full-body shot the face is a
           small fraction of the same reference, so a HIGHER value can help identity hold up.
           Blank = use the dial above for that framing.
-        </p>
+        </HelpText>
         <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {['face', 'bust', 'body', 'back'].map((framing) => {
             const byFraming = krea.grounding_px_by_framing || {}
@@ -857,10 +857,10 @@ function KreaCard({ config, setField, configDefaults, caps }) {
             e.target.value === '' ? dflt('steps') : Number(e.target.value))}
           className={INPUT_CLASS}
         />
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           {stepsDescription(steps)}. {dflt('steps')} is the value the model&rsquo;s own
           reference workflow uses. More is slower and rarely better on this pipeline.
-        </p>
+        </HelpText>
         <ResetToDefault label="Sampler steps" section="krea" field="steps" {...reset} />
       </div>
 
@@ -883,7 +883,7 @@ function KreaCard({ config, setField, configDefaults, caps }) {
             clampRefBoost(e.target.value, dflt('ref_boost')))}
           className="mt-1 w-full accent-violet-500"
         />
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <p className="mt-1 text-xs text-content-muted">
           {refBoostDescription(refBoost)}. How hard the source latent is pushed back into the
           model at every denoising step — the lever for &ldquo;the subject does not look enough
           like my reference&rdquo;. High values also recopy the composition, pose and outfit the
@@ -909,7 +909,7 @@ function KreaCard({ config, setField, configDefaults, caps }) {
             clampIdentityStrength(e.target.value, dflt('identity_lora_strength')))}
           className="mt-1 w-full accent-violet-500"
         />
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <p className="mt-1 text-xs text-content-muted">
           {identityStrengthDescription(identityStrength)}. The weight of the Krea 2
           identity-edit LoRA itself — the piece that carries the face across. Below 1 loosens
           the likeness, 0 disables the face transfer, above 1 is past what the file was
@@ -932,12 +932,12 @@ function KreaCard({ config, setField, configDefaults, caps }) {
         <p className="block text-xs font-medium text-content">
           Reference boost, per framing (optional)
         </p>
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           Same rationale as grounding per framing: a face close-up already holds identity at
           full strength, but a bust/body/back shot dilutes that signal across more of the
           frame, so a HIGHER boost is what it takes to hold the same identity there.
           Blank = use the dial above for that framing.
-        </p>
+        </HelpText>
         <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {['face', 'bust', 'body', 'back'].map((framing) => {
             const byFraming = krea.ref_boost_by_framing || {}
@@ -983,13 +983,13 @@ function KreaCard({ config, setField, configDefaults, caps }) {
         <p className={`mt-1 font-mono text-[0.6875rem] ${KREA_BASE_NOTE_CLASS[baseNote.tone]}`}>
           {baseNote.text}
         </p>
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           Leave blank unless you own several Krea builds. Blank = the app picks a Krea 2
           Turbo then Raw model from your ComfyUI. The list is what the app would actually
           elect from: non-Krea-2 checkpoints that merely carry &ldquo;krea&rdquo; in their name are
           skipped there too, because the identity LoRA renders pure noise on them. Pick a
           file that is not on disk and Krea refuses to run rather than loading another one.
-        </p>
+        </HelpText>
         {/* The default here is the EMPTY string, and resetting writes exactly
             that: blank means "resolve it yourself", and a reset must give that
             state back rather than freeze whichever file the app happens to
@@ -1009,11 +1009,11 @@ function KreaCard({ config, setField, configDefaults, caps }) {
           placeholder="blank = find krea2_identity_edit automatically"
           {...identityScan}
         />
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           Blank = the app searches your LoRA folders for a krea2_identity_edit file, so a
           renamed download still works. Name one here and that is the LoRA it loads — if it
           is not on disk, Krea refuses to run instead of substituting another face transfer.
-        </p>
+        </HelpText>
         <ResetToDefault label="Identity edit LoRA" section="krea" field="identity_lora" {...reset} />
       </div>
 
@@ -1028,7 +1028,7 @@ function KreaCard({ config, setField, configDefaults, caps }) {
           />
           Two-stage sampler (advanced)
         </label>
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           Replaces the single sampler above with a low-resolution pass handed off to an
           upscaled second pass, plus a stage-2-only accelerator LoRA
           (<code>krea2_turbo_lora_rank_64_bf16.safetensors</code>, searched for in your loras
@@ -1044,7 +1044,7 @@ function KreaCard({ config, setField, configDefaults, caps }) {
           Turbo entirely — including an explicit Base model file set to one — and looks for a
           Raw build instead. A Turbo-only install shows the base model as missing while this
           is on.
-        </p>
+        </HelpText>
         <ResetToDefault label="Two-stage sampler" section="krea" field="two_stage" {...reset} />
 
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -1134,10 +1134,10 @@ function KreaCard({ config, setField, configDefaults, caps }) {
             <ResetToDefault label="Final megapixels" section="krea" field="max_output_mp" {...reset} />
           </div>
         </div>
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           Lower step counts and megapixels trade quality for speed. Final megapixels also
           caps the single-stage sampler&rsquo;s output size, not just this path&rsquo;s.
-        </p>
+        </HelpText>
       </div>
 
       <KreaCharacterLorasCard krea={krea} setField={setField} />
@@ -1172,7 +1172,7 @@ function KreaCharacterLorasCard({ krea, setField }) {
       <span className="block text-xs font-medium text-content">
         Character LoRAs (optional, up to {KREA_CHARACTER_LORA_SLOTS})
       </span>
-      <p className="mt-1 mb-2 text-[0.6875rem] text-content-subtle">
+      <HelpText className="mt-1 mb-2 text-xs text-content-muted">
         Your own trained character/person LoRAs (e.g. from ai-toolkit), chained IN ORDER after
         the identity edit LoRA above for extra likeness on top of Krea&rsquo;s baseline
         consistency. Each path is relative to ComfyUI&rsquo;s models/loras. A blank row is simply
@@ -1180,7 +1180,7 @@ function KreaCharacterLorasCard({ krea, setField }) {
         existed. Unlike the identity edit LoRA there is no auto-detection: each names one
         specific file you trained, so a typo surfaces as ComfyUI&rsquo;s own &ldquo;file not
         found&rdquo; rather than silently using a guess.
-      </p>
+      </HelpText>
       {padded.map((row, i) => (
         <div key={i} className="mt-2 flex items-center gap-2 flex-wrap">
           <span className="text-xs text-content-muted w-4 shrink-0" aria-hidden="true">{i + 1}.</span>
@@ -1265,7 +1265,7 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
           : 'Not ready yet. Setup ▸ ComfyUI lists what is missing and can download the weights; the node pack itself is installed from ComfyUI (search “SeedVR2” in ComfyUI-Manager), then restart ComfyUI.'}
       </p>
 
-      <p className="mt-1 text-[0.6875rem] text-content-subtle">
+      <HelpText className="mt-1 text-xs text-content-muted">
         <a href="https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler" target="_blank"
           rel="noreferrer" className="text-sky-300 underline hover:text-sky-200">Node pack →</a>
         {' · '}
@@ -1275,7 +1275,7 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
         <a href="https://github.com/ByteDance-Seed/SeedVR" target="_blank"
           rel="noreferrer" className="text-sky-300 underline hover:text-sky-200">SeedVR2 by ByteDance-Seed →</a>
         {' — all Apache-2.0.'}
-      </p>
+      </HelpText>
 
       <div className="mt-3 sm:max-w-md">
         <label htmlFor="improve-engine" className="block text-xs font-medium text-content">
@@ -1290,11 +1290,11 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
           <option value="klein">Klein — re-renders detail (can shift skin and colour)</option>
           <option value="seedvr2">SeedVR2 — resolves detail, keeps the original look</option>
         </select>
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           Used by the ✨ button on a single tile and by ↻ Re-improve. Bulk runs always
           state their engine on the button you press, so this never decides a batch
           behind your back.
-        </p>
+        </HelpText>
         <ResetToDefault label="Default improve engine" section="improve" field="engine"
           config={config} configDefaults={configDefaults} setField={setField} />
       </div>
@@ -1312,12 +1312,12 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
           <option value="">auto — the 3B FP8 build, or whatever is installed</option>
           {installed.map((name) => <option key={name} value={name}>{name}</option>)}
         </select>
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           Only builds already in your ComfyUI&rsquo;s <code>models/SEEDVR2</code> folder are
           listed: the pack&rsquo;s loader downloads an unknown name on first use, and a
           dropdown must not start a multi-gigabyte download. To use another build, put the
           file in that folder — it then appears here.
-        </p>
+        </HelpText>
         {catalog.length > 0 && (
           <ul className="mt-1 space-y-0.5 text-[0.6875rem] text-content-subtle">
             {catalog.map((v) => (
@@ -1349,13 +1349,13 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
             </optgroup>
           )}
         </select>
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           Leave it on auto unless your VAE file is named something with no
           &ldquo;vae&rdquo; in it — that is the only case the automatic search misses, and
           the reason the second group above is offered at all. Picking a DiT build here
           fails inside the loader node, so choose from that group only if you know the
           file is a VAE.
-        </p>
+        </HelpText>
         <ResetToDefault label="VAE build" section="seedvr2" field="vae" {...reset} />
       </div>
 
@@ -1373,7 +1373,7 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
           <option value="always">Always tile large frames</option>
           <option value="never">Never tile</option>
         </select>
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <p className="mt-1 text-xs text-content-muted">
           Needs the <code>Comfyui_TTP_Toolset</code> node pack; without it this has no
           effect. Tiling is not only about memory: a tile is upscaled at the size the
           model works well at, so a large frame keeps far more fine detail than one
@@ -1404,7 +1404,7 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
             e.target.value === '' ? dflt('tile_px') : Number(e.target.value))}
           className={INPUT_CLASS}
         />
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <p className="mt-1 text-xs text-content-muted">
           The memory dial of this engine: a run holds one tile at a time, so
           <b> lower it if upscales run out of VRAM</b> (768 or 512 on an 8 GB card) and
           raise it on a big card for fewer seams and more context per tile.
@@ -1430,7 +1430,7 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
             e.target.value === '' ? dflt('tile_threshold') : Number(e.target.value))}
           className={INPUT_CLASS}
         />
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <p className="mt-1 text-xs text-content-muted">
           Where <b>Tile when it helps</b> switches over. <b>0</b> (default) follows the tile
           size — {SEEDVR2_TILE_ABOVE_FACTOR}&times; it, so {tilePx} px tiles start tiling
           above {Math.round(tilePx * SEEDVR2_TILE_ABOVE_FACTOR)} px. Set a number to place
@@ -1456,11 +1456,11 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
             e.target.value === '' ? dflt('resolution') : Number(e.target.value))}
           className={INPUT_CLASS}
         />
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           The SHORT edge is scaled to this and the aspect ratio is kept, so 1080 on a 3:2
           photo gives 1620&times;1080. LoRA training buckets rarely go above 1024&ndash;1280,
           so higher mostly costs VRAM and time.
-        </p>
+        </HelpText>
         <ResetToDefault label="Target resolution" section="seedvr2" field="resolution" {...reset} />
       </div>
 
@@ -1479,10 +1479,10 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
             e.target.value === '' ? dflt('max_resolution') : Number(e.target.value))}
           className={INPUT_CLASS}
         />
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           The safety valve on a wide crop: at a 1080 short edge a 4:1 panorama becomes
           4320 px across, which is where a run runs out of VRAM.
-        </p>
+        </HelpText>
         <ResetToDefault label="Maximum long edge" section="seedvr2" field="max_resolution" {...reset} />
       </div>
 
@@ -1498,13 +1498,13 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
         >
           {SEEDVR2_COLOR_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           How the result is graded back onto the source&rsquo;s colours. <b>lab</b> is the
           model&rsquo;s own default and the most conservative; <b>wavelet</b> holds broad tone
           better on heavily degraded sources; <b>none</b> shows the raw output. Colour
           fidelity is the reason this engine exists, so it is worth trying both ways on one
           image before a big batch.
-        </p>
+        </HelpText>
         <ResetToDefault label="Colour correction" section="seedvr2" field="color_correction" {...reset} />
       </div>
 
@@ -1523,19 +1523,19 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
             e.target.value === '' ? dflt('blocks_to_swap') : Number(e.target.value))}
           className={INPUT_CLASS}
         />
-        <p className="mt-1 text-[0.6875rem] text-content-subtle">
+        <HelpText className="mt-1 text-xs text-content-muted">
           0 = none, and fastest. Raise it to fit a bigger build on a smaller card: it trades
           speed for VRAM headroom and does not change the result.
-        </p>
+        </HelpText>
         <ResetToDefault label="Blocks offloaded" section="seedvr2" field="blocks_to_swap" {...reset} />
       </div>
 
-      <p className="mt-3 text-[0.6875rem] text-content-subtle">
+      <HelpText className="mt-3 text-xs text-content-muted">
         <b>No batch size here, on purpose.</b> SeedVR2&rsquo;s batch size is a <i>video</i> window
         whose frames share attention to stay coherent — feeding it unrelated photos would let
         them bleed into each other. Dataset images are upscaled one per job; the throughput
         comes from the normal generation queue.
-      </p>
+      </HelpText>
     </Card>
   )
 }
@@ -1650,11 +1650,11 @@ function IdentityPromptsCard({ config, setField, promptDefaults, promptDefaultsB
           on a phone — never a row that overflows the card. */}
       <div>
         <span className="block text-sm font-medium text-content">Subject type</span>
-        <p className="mt-1 mb-2 text-xs text-content-muted">
+        <HelpText className="mt-1 mb-2 text-xs text-content-muted">
           Which datasets these three prompts apply to. Each subject type keeps its own texts —
           editing the Animal ones leaves your Human datasets untouched. A dot marks a type you
           have already customised.
-        </p>
+        </HelpText>
         <div role="group" aria-label="Subject type to edit" className="flex flex-wrap gap-1.5">
           {PROMPT_SUBJECT_TYPES.map((st) => {
             const on = st === subject
@@ -1699,10 +1699,10 @@ function IdentityPromptsCard({ config, setField, promptDefaults, promptDefaultsB
         <h4 className="text-sm font-medium text-content">
           Klein &amp; Krea — the rest of the prompt ({SUBJECT_TYPE_LABELS[subject]})
         </h4>
-        <p className="mt-1 mb-3 text-xs text-content-muted">
+        <HelpText className="mt-1 mb-3 text-xs text-content-muted">
           These follow the subject type selected above, like the identity locks: the tail asks
           an Anime dataset for a drawing and every other type for a photograph.
-        </p>
+        </HelpText>
         {SUBJECT_PROMPT_PART_FIELDS.map((f) => (
           <PromptOverrideField
             key={`${subject}-${f.key}`}
@@ -1723,11 +1723,11 @@ function IdentityPromptsCard({ config, setField, promptDefaults, promptDefaultsB
         <h4 className="text-sm font-medium text-content">
           Shot detail per framing ({SUBJECT_TYPE_LABELS[subject]})
         </h4>
-        <p className="mt-1 mb-1 text-xs text-content-muted">
+        <HelpText className="mt-1 mb-1 text-xs text-content-muted">
           Klein and Krea under-fill a short tag prompt and invent the rest, so each shot carries
           a concrete description of what the framing should look like. This is where the lens
           talk (&ldquo;85mm portrait lens look&rdquo;) lives.
-        </p>
+        </HelpText>
         {/* Four boxes: two columns on a laptop, stacked on a phone. */}
         <div className="grid gap-3 sm:grid-cols-2">
           {FRAMING_PROMPT_PART_FIELDS.map((f) => (
@@ -1747,11 +1747,11 @@ function IdentityPromptsCard({ config, setField, promptDefaults, promptDefaultsB
 
       <div id="prompt-part-global" className="border-t border-border pt-4">
         <h4 className="text-sm font-medium text-content">Applied to every subject type</h4>
-        <p className="mt-1 mb-1 text-xs text-content-muted">
+        <HelpText className="mt-1 mb-1 text-xs text-content-muted">
           These four are <strong>not</strong> per subject type: the two directives are only ever
           injected into human shots, and the skin hold is one sentence about not inventing
           detail. Editing them here changes them everywhere.
-        </p>
+        </HelpText>
         {GLOBAL_PROMPT_PART_FIELDS.map((f) => (
           <PromptOverrideField
             key={f.key}
@@ -1826,17 +1826,17 @@ function IdentityPromptsCard({ config, setField, promptDefaults, promptDefaultsB
           the honest answer to what that label promises. */}
       <div id="klein-improve-strength" className="scroll-mt-24 border-t border-border pt-4">
         <h4 className="text-sm font-medium text-content">Upscale &amp; improve — strength</h4>
-        <p className="mt-1 mb-2 text-xs text-content-muted">
+        <HelpText className="mt-1 mb-2 text-xs text-content-muted">
           Output resolution, and how much the pass is allowed to change the image. All four
           start at the values the action used before they were exposed, so leaving them alone
           keeps today’s result.
-        </p>
-        <p className="mb-2 text-xs text-content-muted">
+        </HelpText>
+        <HelpText className="mb-2 text-xs text-content-muted">
           The <strong>enhancement LoRA</strong> needs its weights file
           (<code>klein/realistic.safetensors</code>): without it that node is skipped and the
           strength changes nothing. Setup downloads it with the other Klein assets — if the
           slider seems to do nothing, run <strong>Install everything</strong> there first.
-        </p>
+        </HelpText>
         <div className="grid gap-3 sm:grid-cols-2">
           {IMPROVE_KNOBS.map((k) => (
             <div key={k.key}>
@@ -1854,9 +1854,9 @@ function IdentityPromptsCard({ config, setField, promptDefaults, promptDefaultsB
                   e.target.value === '' ? kleinDefault(k.key) : Number(e.target.value))}
                 className={INPUT_CLASS}
               />
-              <p className="mt-1 text-[0.6875rem] text-content-subtle">
+              <HelpText className="mt-1 text-xs text-content-muted">
                 {k.hint} Default {String(kleinDefault(k.key))}.
-              </p>
+              </HelpText>
               <ResetToDefault label={k.label} section="klein" field={k.key}
                 config={config} configDefaults={configDefaults} setField={setField} />
             </div>
@@ -1903,7 +1903,7 @@ function ModelField({ id, configKey, label, placeholder, config, setField, confi
         placeholder={placeholder}
         className={INPUT_CLASS}
       />
-      <p className="mt-1 text-xs text-content-muted">{children}</p>
+      <HelpText className="mt-1 text-xs text-content-muted">{children}</HelpText>
       {/* Two of these three default to BLANK — "let the engine pick", which also
           keeps a pre-existing NANOBANANA_MODEL / CHATGPT_IMAGE_MODEL environment
           variable in charge. Reset writes the shipped default back, so on those
@@ -2025,12 +2025,12 @@ function ImageModelsCard({ config, setField, configDefaults }) {
           <option value="qwen-image-plus">qwen-image-plus</option>
           <option value="qwen-image">qwen-image</option>
         </select>
-        <p className="text-[0.6875rem] text-content-subtle">
+        <HelpText className="text-xs text-content-muted">
           Same model names work on every region below — DashScope resolves the alias to its
           current recommended snapshot. A dated snapshot name (e.g. a "-2026-06-25" suffix)
           pins one specific version and will eventually 400 once DashScope retires it, so this
           field always uses the alias form.
-        </p>
+        </HelpText>
       </div>
 
       <div {...shared} className="border-t border-border pt-3 space-y-3">
@@ -2047,11 +2047,11 @@ function ImageModelsCard({ config, setField, configDefaults }) {
           <option value="us">US</option>
           <option value="cn">China (华北2 / Beijing)</option>
         </select>
-        <p className="text-[0.6875rem] text-content-subtle">
+        <HelpText className="text-xs text-content-muted">
           Must match the region your DashScope API key was issued for — a key and endpoint from
           different regions fail authentication, even though the model catalog above is
           identical in every region.
-        </p>
+        </HelpText>
       </div>
 
       <p className="border-t border-border pt-3 text-xs text-content-subtle">
@@ -2186,17 +2186,17 @@ function ChatgptSubscriptionCard({ caps, config, setField, refreshCaps, toast, c
         >
           {CHATGPT_AUTH_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
         </select>
-        <p className="mt-1 text-xs text-content-muted">
+        <HelpText className="mt-1 text-xs text-content-muted">
           When the subscription quota runs out mid-batch, remaining rows fail with a clear message — the app never silently switches to your paid API key.
-        </p>
+        </HelpText>
         {config.engines.chatgpt_auth === 'comfyui' && (
           <>
-            <p className="mt-1 text-xs text-content-muted">
+            <HelpText className="mt-1 text-xs text-content-muted">
               Needs the <strong>comfy.org API key</strong> above, and a ComfyUI new enough to expose
               the OpenAI image node. The shot still runs on OpenAI&apos;s servers, so NSFW cards stay
               on your local engines exactly as before — and it takes a slot in your ComfyUI queue
               while it waits, so a Klein or Krea render queues behind it.
-            </p>
+            </HelpText>
             <div className="mt-2">
               <label htmlFor="chatgpt-comfy-quality" className="block text-sm font-medium text-content">
                 Image quality on this lane
@@ -2211,12 +2211,12 @@ function ChatgptSubscriptionCard({ caps, config, setField, refreshCaps, toast, c
                 <option value="medium">Medium</option>
                 <option value="high">High — most credits, slowest</option>
               </select>
-              <p className="mt-1 text-xs text-content-muted">
+              <HelpText className="mt-1 text-xs text-content-muted">
                 The only dial here that moves what a picture costs. The wait is OpenAI&apos;s, not
                 your GPU&apos;s: three shots at <strong>high</strong> took 1&apos;55&quot;,
                 2&apos;11&quot; and 2&apos;12&quot; on this machine, whether they came back with an
                 image or a refusal.
-              </p>
+              </HelpText>
               <ResetToDefault label="Image quality on this lane" section="engines"
                 field="chatgpt_comfy_quality"
                 config={config} configDefaults={configDefaults} setField={setField} />

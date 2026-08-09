@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { INPUT_CLASS, Card } from './primitives'
+import { INPUT_CLASS, Card, HelpText } from './primitives'
 import { defaultValueAt } from './settingDefaults.js'
 import { apiFetch, del, postJson } from '../../api/fetchClient'
 import { deletionSafety, formatBytes, lastRunLabel, sortedCaches, storageSummary } from './hfStorage.js'
@@ -128,10 +128,10 @@ export default function HfStorageCard({ config, setField, configDefaults }) {
             )}
           </div>
           {!caches.length && (
-            <p className="text-xs text-content-muted">
+            <HelpText className="text-xs text-content-muted">
               No <code>lds-base-*</code> repo on this account. Custom bases are pushed there once
               and reused by every cloud run on the same weights.
-            </p>
+            </HelpText>
           )}
           {caches.map((cache) => {
             const safety = deletionSafety(cache)
@@ -142,19 +142,19 @@ export default function HfStorageCard({ config, setField, configDefaults }) {
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
                     <p className="break-all text-sm font-medium text-content">{cache.name}</p>
-                    <p className="mt-0.5 text-xs text-content-muted">
+                    <HelpText className="mt-0.5 text-xs text-content-muted">
                       {formatBytes(cache.used_bytes)}
                       {cache.family ? ` · ${cache.family}` : ''}
                       {' · '}
                       <span className={safety.level === 'safe' ? 'text-emerald-300' : 'text-amber-300'}>
                         {safety.label}
                       </span>
-                    </p>
+                    </HelpText>
                     {cache.local_path && (
                       <p className="mt-0.5 break-all text-[0.6875rem] text-content-subtle">{cache.local_path}</p>
                     )}
-                    <p className="mt-0.5 text-[0.6875rem] text-content-subtle">{lastRunLabel(cache)}</p>
-                    <p className="mt-0.5 text-[0.6875rem] text-content-subtle">{safety.text}</p>
+                    <HelpText className="mt-0.5 text-xs text-content-muted">{lastRunLabel(cache)}</HelpText>
+                    <HelpText className="mt-0.5 text-xs text-content-muted">{safety.text}</HelpText>
                   </div>
                   <button
                     type="button"
@@ -188,7 +188,7 @@ export default function HfStorageCard({ config, setField, configDefaults }) {
           <option value="local">This computer only</option>
           <option value="hub">Hugging Face only (previous behaviour)</option>
         </select>
-        <p className="mt-1 text-xs text-content-muted">
+        <HelpText className="mt-1 text-xs text-content-muted">
           Where a finished full model goes. The default downloads it here first and only
           then backs the 26 GB master up to the private repository — so a full Hugging Face
           quota can no longer end a training the way it did at step 2750 of 3000. Nothing is
@@ -199,7 +199,7 @@ export default function HfStorageCard({ config, setField, configDefaults }) {
           get there from the Hub. “This computer only” saves your quota and gives that up.
           Checkpoints land in the folder set by Settings ▸ Storage ▸ Checkpoints, and a launch
           refuses (confirmably) when that drive plainly has no room.
-        </p>
+        </HelpText>
       </div>
 
       <div>
@@ -218,13 +218,13 @@ export default function HfStorageCard({ config, setField, configDefaults }) {
           })}
           className={INPUT_CLASS}
         />
-        <p className="mt-1 text-xs text-content-muted">
+        <HelpText className="mt-1 text-xs text-content-muted">
           What the pre-check compares against before renting a pod for a full-model run.
           Hugging Face publishes no quota endpoint, so at 0 this falls back to the documented
           plan figure (100 GB free, 1 TB PRO) — which is a guess: the refusal that prompted
           this feature arrived well below it. Put your real ceiling here to make the check exact.
           The refusal is confirmable either way — “Train anyway” always exists.
-        </p>
+        </HelpText>
       </div>
     </Card>
   )

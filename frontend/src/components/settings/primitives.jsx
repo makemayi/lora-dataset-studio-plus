@@ -12,14 +12,27 @@ export const INPUT_CLASS =
 
 /* Section heading: a small mono "rack tag" eyebrow above the title keeps every
    settings/guide section labeled the same way without shouting. */
+/* The `key`s are load-bearing, and they are about Chrome auto-translate.
+   Translate REPLACES a text node with its own <font> wrapper. React still holds
+   the original node, so when the route changes and React updates the heading it
+   writes `nodeValue` on a node that is no longer in the document: the new title
+   is applied to nothing and the OLD one stays on screen. Observed on
+   2026-08-10 — the Server page rendered "Image engines" over Storage's
+   description, three pages behind whatever had been visited first.
+
+   Keying on the text makes it a remount instead of a text update: React removes
+   the <h1> (an element it does own — translate rewrites what is inside it, not
+   the element itself) and mounts a fresh one. No crash, and the heading is
+   right. Same reason `hidden` is used instead of a ternary elsewhere: never ask
+   React to edit a text node translate may have taken. */
 export function SectionHeader({ eyebrow, title, description, badge }) {
   return (
     <div>
-      <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-content-subtle">{eyebrow}</p>
-      <h1 className="mt-1 flex items-center gap-2 text-xl font-semibold text-content">
+      <p key={eyebrow} className="font-mono text-[11px] uppercase tracking-[0.18em] text-content-subtle">{eyebrow}</p>
+      <h1 key={title} className="mt-1 flex items-center gap-2 text-xl font-semibold text-content">
         {title}{badge}
       </h1>
-      {description && <p className="mt-1 text-sm text-content-muted">{description}</p>}
+      {description && <p key={description} className="mt-1 text-sm text-content-muted">{description}</p>}
     </div>
   )
 }
@@ -102,22 +115,62 @@ export function TestButton({ target, onResult, beforeTest }) {
    the body are both always mounted, so React never removes a text node. */
 const HELP_FOLD_OVER = 140
 
-export function HelpText({ children, className = '', summary = 'Why this matters' }) {
+/* Most field help is not a bare string — it carries <span className="font-medium">
+   emphasis, a <code>, an <a> to the guide. Measuring `children.length` would see
+   an array of three and call a 500-character paragraph short, which is exactly
+   how the first pass folded thirteen card blurbs and left thirty field blurbs
+   open. Walk the tree instead. Interpolated values count as ~1 char each; that
+   is close enough for a threshold nothing sits near. */
+function plainLength(node) {
+  if (node === null || node === undefined || node === false || node === true) return 0
+  if (typeof node === 'string') return node.length
+  if (typeof node === 'number') return String(node).length
+  if (Array.isArray(node)) return node.reduce((n, child) => n + plainLength(child), 0)
+  if (node.props) return plainLength(node.props.children)
+  return 0
+}
+
+/* The caller's className positions the help relative to its input (`mt-0.5`
+   under a field, `mt-3` under a card's grid). That margin belongs to whatever
+   element is actually in the flow — the <p> when open, the <details> when
+   folded — while the rest of the classes style the text. Leaving `mt-3` on the
+   inner <p> of a <details> would both indent the body wrongly and fight the
+   `mt-1.5` this component wants there (same specificity: Tailwind's own order
+   decides, not the order written here). */
+const MARGIN_CLASS_RE = /(?:^|\s)-?m[tby]-[^\s]+/g
+
+function splitMargins(className) {
+  const margins = (className.match(MARGIN_CLASS_RE) || []).map((c) => c.trim())
+  return { outer: margins.join(' '), text: className.replace(MARGIN_CLASS_RE, ' ').trim() }
+}
+
+/* A caret, NOT a round "?" — that glyph is taken. `help/HelpMode.jsx` renders a
+   round indigo "?" badge beside titles in Help mode, and clicking it jumps to
+   the Guide. A second round "?" that expands text in place, sometimes on the
+   same row, is two meanings wearing one face. The caret is also just honest:
+   this is a disclosure triangle, so it looks like one and rotates like one.
+
+   `summary` defaults to the short form because most callers are FIELDS, where
+   the disclosure sits directly under a labelled input and a long label repeated
+   five times down one card is the same visual noise the fold was meant to
+   remove. `Card` passes the long form: it introduces a whole section, and there
+   is only ever one of it. */
+export function HelpText({ children, className = '', summary = 'More' }) {
   if (!children) return null
-  const long = typeof children === 'string' && children.length > HELP_FOLD_OVER
-  if (!long) {
-    return <p className={`max-w-prose ${className}`}>{children}</p>
+  const { outer, text } = splitMargins(className)
+  if (plainLength(children) <= HELP_FOLD_OVER) {
+    return <p className={`max-w-prose ${outer} ${text}`}>{children}</p>
   }
   return (
-    <details className="group max-w-prose">
-      <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 text-xs text-content-subtle hover:text-content-muted [&::-webkit-details-marker]:hidden">
+    <details className={`group max-w-prose ${outer}`}>
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-xs text-content-subtle hover:text-content-muted [&::-webkit-details-marker]:hidden">
         <span aria-hidden="true"
-          className="grid h-3.5 w-3.5 place-items-center rounded-full bg-surface-raised text-[0.5625rem] leading-none">
-          ?
+          className="inline-block text-[0.625rem] leading-none transition-transform duration-150 group-open:rotate-90">
+          ▶
         </span>
         {summary}
       </summary>
-      <p className={`mt-1.5 ${className}`}>{children}</p>
+      <p className={`mt-1.5 ${text}`}>{children}</p>
     </details>
   )
 }
@@ -146,7 +199,8 @@ export function Card({ title, help, children, id }) {
     >
       <h2 className="text-[0.9375rem] font-semibold tracking-[-0.01em] text-content">{title}</h2>
       <div className="mt-1">
-        <HelpText className="text-[0.8125rem] leading-relaxed text-content-muted">{help}</HelpText>
+        <HelpText summary="Why this matters"
+          className="text-[0.8125rem] leading-relaxed text-content-muted">{help}</HelpText>
       </div>
       <div className="mt-3 space-y-3">{children}</div>
     </section>

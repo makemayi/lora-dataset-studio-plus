@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiFetch, postJson } from '../../api/fetchClient'
-import { Card, INPUT_CLASS } from './primitives'
+import { Card, INPUT_CLASS, HelpText } from './primitives'
 import ResetToDefault from './ResetToDefault'
 import HfStorageCard from './HfStorageCard'
 import Fp8QuantizeTool from '../dataset/Fp8QuantizeTool'
@@ -133,11 +133,11 @@ function LocationEditor({
 
       {choices.length > 0 && !busy && (
         <div className="space-y-2 rounded-lg border border-border bg-surface-raised p-3">
-          <p className="text-xs text-content-muted">
+          <HelpText className="text-xs text-content-muted">
             {check.default
               ? 'This goes back to the folder inside the app’s data directory.'
               : `${check.path} is writable${check.empty === false ? ' and already has files in it' : ''}.`}
-          </p>
+          </HelpText>
           {choices.map((choice) => (
             <div key={choice.id} className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
               <p className="min-w-0 text-xs text-content-subtle">{choice.detail}</p>
@@ -153,7 +153,7 @@ function LocationEditor({
 
       {job && (
         <div className="space-y-1" role="status" aria-live="polite">
-          <p className="text-xs text-content-muted">{moveLabel(job)}</p>
+          <HelpText className="text-xs text-content-muted">{moveLabel(job)}</HelpText>
           {busy && (
             <div className="h-1.5 w-full max-w-sm overflow-hidden rounded-full bg-surface-raised">
               <div className="h-full rounded-full bg-gradient-primary transition-[width] duration-300"
@@ -235,9 +235,9 @@ function CloudRunHousekeeping({ toast, onChanged }) {
         </button>
       </div>
       {orphans && orphans.length === 0 && (
-        <p className="text-xs text-content-muted">
+        <HelpText className="text-xs text-content-muted">
           Every run folder on disk belongs to a run this app knows about.
-        </p>
+        </HelpText>
       )}
       {orphans && orphans.length > 0 && (
         <div className="space-y-2">
@@ -445,9 +445,9 @@ export default function StorageSection({
                 <p className="mt-0.5 break-all text-xs text-content-subtle">
                   {row.path || 'not configured'}{row.exists ? '' : ' (not created yet)'}
                 </p>
-                <p className="mt-0.5 text-xs text-content-muted">{row.holds}</p>
+                <HelpText className="mt-0.5 text-xs text-content-muted">{row.holds}</HelpText>
                 {row.volumeLabel && (
-                  <p className="mt-0.5 text-[0.6875rem] text-content-subtle">{row.volumeLabel}</p>
+                  <HelpText className="mt-0.5 text-xs text-content-muted">{row.volumeLabel}</HelpText>
                 )}
               </li>
             ))}

@@ -1,4 +1,4 @@
-import { INPUT_CLASS, Card } from './primitives'
+import { INPUT_CLASS, Card, HelpText } from './primitives'
 import ResetToDefault from './ResetToDefault'
 import { defaultValueAt } from './settingDefaults.js'
 import { importInputLimitLine, IMPORT_INPUT_UNLIMITED_NOTE } from '../dataset/importPolicy.js'
@@ -82,11 +82,11 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
               <option value="4096">4096 px long side</option>
               <option value="0">Original size — no downscale</option>
             </select>
-            <p className="mt-0.5 text-xs text-content-muted">
+            <HelpText className="mt-0.5 text-xs text-content-muted">
               {preservesOriginals
                 ? 'Preserve originals ignores this setting: no resize is performed. It becomes active only if you choose a WebP mode below.'
                 : 'Longest side kept; the aspect ratio is always preserved and an image is never enlarged. WebP normalization starts only after the source passes the import safety limit below.'}
-            </p>
+            </HelpText>
             <ResetToDefault label="Stored resolution" section="dataset_import" field="max_side"
               config={config} configDefaults={configDefaults} setField={setField} />
           </div>
@@ -103,11 +103,11 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
               <option value="high">High — WebP quality 100</option>
               <option value="lossless">Lossless — pixel-identical</option>
             </select>
-            <p className="mt-0.5 text-xs text-content-muted">
+            <HelpText className="mt-0.5 text-xs text-content-muted">
               {preservesOriginals
                 ? 'Non-cropped JPEG, PNG, WebP and BMP files keep their exact bytes with the matching extension. ai-toolkit receives a disposable PNG copy only when training starts.'
                 : 'WebP modes are opt-in normalization: they resize and re-encode each new import. Lossless keeps every pixel and costs about 5× the disk space (measured on a noisy photo: 158 KB → 797 KB).'}
-            </p>
+            </HelpText>
             <ResetToDefault label="Stored encoding" section="dataset_import" field="encoding"
               config={config} configDefaults={configDefaults} setField={setField} />
           </div>
@@ -118,7 +118,7 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
           rejected — change the budget in <span className="font-medium">Image size budget</span> below,
           or resize the file before importing.
         </p>
-        <p className="mt-3 text-xs text-content-muted">
+        <HelpText className="mt-3 text-xs text-content-muted">
           Applies to images imported <span className="font-medium">from now on</span>: changing
           it mid-way can leave a dataset holding mixed formats or sizes. That is harmless for
           training (every trainer buckets and downscales on its own) but it does mean the folder
@@ -126,7 +126,7 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
           WebPs cannot be turned back into their original files. Generated images and copies sent
           to an image API keep their own fixed sizes. Thanks to Qeeyana (Reddit) for asking why
           this was decided for you.
-        </p>
+        </HelpText>
       </Card>
 
       <Card
@@ -146,12 +146,12 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
                 <option key={o.value} value={String(o.value)}>{o.label}</option>
               ))}
             </select>
-            <p className="mt-0.5 text-xs text-content-muted">
+            <HelpText className="mt-0.5 text-xs text-content-muted">
               This is a memory budget: a decoded RGB pixel costs 3 bytes, and an edit or analysis
               pass can hold a second copy at once, so the real peak is roughly double the figure
               shown. The default admits current phone and 35 mm camera masters (a 61 MP frame is
               57 Mi-pixels) and ordinary panoramas.
-            </p>
+            </HelpText>
             <ResetToDefault label="Maximum total pixels" section="image_input" field="max_pixels"
               config={config} configDefaults={configDefaults} setField={setField} />
           </div>
@@ -167,11 +167,11 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
                 <option key={o.value} value={String(o.value)}>{o.label}</option>
               ))}
             </select>
-            <p className="mt-0.5 text-xs text-content-muted">
+            <HelpText className="mt-0.5 text-xs text-content-muted">
               Longest and shortest side of the source file. A very wide panorama can sit well
               inside the pixel budget and still exceed a side limit, which is why the two are
               separate knobs.
-            </p>
+            </HelpText>
             <ResetToDefault label="Maximum side" section="image_input" field="max_side"
               config={config} configDefaults={configDefaults} setField={setField} />
           </div>
@@ -279,10 +279,10 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
               config={config} configDefaults={configDefaults} setField={setField} />
           </div>
         </div>
-        <p className="text-xs text-content-muted">
+        <HelpText className="text-xs text-content-muted">
           Green marks a strong match to the reference face; orange is borderline — review it before keeping.
           Anything below orange is likely a different person and worth rejecting.
-        </p>
+        </HelpText>
       </Card>
 
       <Card
@@ -298,7 +298,7 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
               value={config.bank?.sharpness_min ?? bankDefault('sharpness_min')}
               onChange={(e) => setField('bank', 'sharpness_min', parseFloat(e.target.value) || 0)}
               className={INPUT_CLASS} />
-            <p className="mt-0.5 text-xs text-content-muted">Laplacian variance under this = 🌫 blurry.</p>
+            <HelpText className="mt-0.5 text-xs text-content-muted">Laplacian variance under this = 🌫 blurry.</HelpText>
             <ResetToDefault label="Sharpness minimum" section="bank" field="sharpness_min"
               config={config} configDefaults={configDefaults} setField={setField} />
           </div>
@@ -310,7 +310,7 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
               value={config.bank?.noise_max ?? bankDefault('noise_max')}
               onChange={(e) => setField('bank', 'noise_max', parseFloat(e.target.value) || 0)}
               className={INPUT_CLASS} />
-            <p className="mt-0.5 text-xs text-content-muted">Residual grain over this = 📺 noisy.</p>
+            <HelpText className="mt-0.5 text-xs text-content-muted">Residual grain over this = 📺 noisy.</HelpText>
             <ResetToDefault label="Noise maximum" section="bank" field="noise_max"
               config={config} configDefaults={configDefaults} setField={setField} />
           </div>
@@ -322,7 +322,7 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
               value={config.bank?.uniformity_min ?? bankDefault('uniformity_min')}
               onChange={(e) => setField('bank', 'uniformity_min', parseFloat(e.target.value) || 0)}
               className={INPUT_CLASS} />
-            <p className="mt-0.5 text-xs text-content-muted">Grayscale spread under this = ⬜ flat frame.</p>
+            <HelpText className="mt-0.5 text-xs text-content-muted">Grayscale spread under this = ⬜ flat frame.</HelpText>
             <ResetToDefault label="Uniformity minimum" section="bank" field="uniformity_min"
               config={config} configDefaults={configDefaults} setField={setField} />
           </div>
@@ -334,7 +334,7 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
               value={config.bank?.min_side ?? bankDefault('min_side')}
               onChange={(e) => setField('bank', 'min_side', parseInt(e.target.value, 10) || 0)}
               className={INPUT_CLASS} />
-            <p className="mt-0.5 text-xs text-content-muted">Smaller side under this = 📐 small (trainers only downscale).</p>
+            <HelpText className="mt-0.5 text-xs text-content-muted">Smaller side under this = 📐 small (trainers only downscale).</HelpText>
             <ResetToDefault label="Minimum side" section="bank" field="min_side"
               config={config} configDefaults={configDefaults} setField={setField} />
           </div>
@@ -346,9 +346,9 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
               value={config.bank?.detail_min ?? bankDefault('detail_min')}
               onChange={(e) => setField('bank', 'detail_min', parseFloat(e.target.value) || 0)}
               className={INPUT_CLASS} />
-            <p className="mt-0.5 text-xs text-content-muted">
+            <HelpText className="mt-0.5 text-xs text-content-muted">
               Share of the stored size that still carries real picture, under which an image is flagged 🫧 soft detail — the usual cause is an enlargement. 0.72 picks the softest few percent. A soft or out-of-focus photo reads the same way, so treat it as a score, not proof.
-            </p>
+            </HelpText>
             <ResetToDefault label="Real-detail minimum" section="bank" field="detail_min"
               config={config} configDefaults={configDefaults} setField={setField} />
           </div>
@@ -360,7 +360,7 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
               value={config.bank?.bars_max ?? bankDefault('bars_max')}
               onChange={(e) => setField('bank', 'bars_max', parseFloat(e.target.value) || 0)}
               className={INPUT_CLASS} />
-            <p className="mt-0.5 text-xs text-content-muted">Share of the frame that may be flat black letterbox before an image is flagged 🎞 black bars (video screenshots, padded stills).</p>
+            <HelpText className="mt-0.5 text-xs text-content-muted">Share of the frame that may be flat black letterbox before an image is flagged 🎞 black bars (video screenshots, padded stills).</HelpText>
             <ResetToDefault label="Black-bar maximum" section="bank" field="bars_max"
               config={config} configDefaults={configDefaults} setField={setField} />
           </div>
@@ -372,7 +372,7 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
               value={config.bank?.dup_distance ?? bankDefault('dup_distance')}
               onChange={(e) => setField('bank', 'dup_distance', parseInt(e.target.value, 10) || 0)}
               className={INPUT_CLASS} />
-            <p className="mt-0.5 text-xs text-content-muted">dHash bits (of 64) two images may differ by and still group as ≈ duplicates. Applies at the next scan.</p>
+            <HelpText className="mt-0.5 text-xs text-content-muted">dHash bits (of 64) two images may differ by and still group as ≈ duplicates. Applies at the next scan.</HelpText>
             <ResetToDefault label="Duplicate distance" section="bank" field="dup_distance"
               config={config} configDefaults={configDefaults} setField={setField} />
           </div>
@@ -384,7 +384,7 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
               value={config.bank?.face_threshold ?? bankDefault('face_threshold')}
               onChange={(e) => setField('bank', 'face_threshold', parseFloat(e.target.value) || 0)}
               className={INPUT_CLASS} />
-            <p className="mt-0.5 text-xs text-content-muted">Cosine similarity for the 👥 person clustering. Applies at the next face pass.</p>
+            <HelpText className="mt-0.5 text-xs text-content-muted">Cosine similarity for the 👥 person clustering. Applies at the next face pass.</HelpText>
             <ResetToDefault label="Same-person similarity" section="bank" field="face_threshold"
               config={config} configDefaults={configDefaults} setField={setField} />
           </div>
@@ -396,7 +396,7 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
               value={config.bank?.aesthetic_min ?? bankDefault('aesthetic_min')}
               onChange={(e) => setField('bank', 'aesthetic_min', parseFloat(e.target.value) || 0)}
               className={INPUT_CLASS} />
-            <p className="mt-0.5 text-xs text-content-muted">LAION score (~1–10) under which an image is flagged 💔 low aesthetic. Set by the ✨ Score pass.</p>
+            <HelpText className="mt-0.5 text-xs text-content-muted">LAION score (~1–10) under which an image is flagged 💔 low aesthetic. Set by the ✨ Score pass.</HelpText>
             <ResetToDefault label="Aesthetic minimum" section="bank" field="aesthetic_min"
               config={config} configDefaults={configDefaults} setField={setField} />
           </div>
@@ -408,7 +408,7 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
               value={config.bank?.nsfw_max ?? bankDefault('nsfw_max')}
               onChange={(e) => setField('bank', 'nsfw_max', parseFloat(e.target.value) || 0)}
               className={INPUT_CLASS} />
-            <p className="mt-0.5 text-xs text-content-muted">NSFW probability (0–1) over which an image is flagged 🔞 NSFW. Set by the ✨ Score pass.</p>
+            <HelpText className="mt-0.5 text-xs text-content-muted">NSFW probability (0–1) over which an image is flagged 🔞 NSFW. Set by the ✨ Score pass.</HelpText>
             <ResetToDefault label="NSFW maximum" section="bank" field="nsfw_max"
               config={config} configDefaults={configDefaults} setField={setField} />
           </div>
@@ -429,7 +429,7 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
                 (a toast on the dataset, the job's own line on the bank): a
                 setting that silently does nothing is how someone changes a
                 detector, sees no difference, and concludes the app is broken. */}
-            <p className="mt-0.5 text-xs text-content-muted">
+            <HelpText className="mt-0.5 text-xs text-content-muted">
               Which engine 🧽 Find watermarks uses, on datasets and banks alike.
               <strong> Auto</strong> takes the detector extra when it is installed
               (~0.14 s per image, and it returns a score) and the vision model
@@ -442,7 +442,7 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
               leaves them for 🔍 Review. Changing this applies at the next scan; images
               you already dismissed as false positives are only re-judged by
               <em> ⟲ Rescan incl. dismissed</em>.
-            </p>
+            </HelpText>
             <ResetToDefault label="Watermark detection" section="watermark_detect"
               field="backend" config={config} configDefaults={configDefaults}
               setField={setField} />
@@ -461,14 +461,14 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
                 this model's scores sit hard against 1, and the default is the
                 knee MEASURED on a real bank, not a probability you can reason
                 about from first principles. */}
-            <p className="mt-0.5 text-xs text-content-muted">
+            <HelpText className="mt-0.5 text-xs text-content-muted">
               Score (0–1) at or above which 🚩 Find flags an image, when the watermark
               detector extra is installed. 0.94 is measured on a 110-image hand-labelled
               sample of a real 29 759-image bank: it flagged none of the 55 clean images
               and 54 of the 55 marked ones. Lower it to ~0.92 to catch the faintest marks
               (and hand-check a few clean ones); raise it to ~0.96 to miss a mark rather
               than crop anything by mistake. Applies at the next scan.
-            </p>
+            </HelpText>
             <ResetToDefault label="Watermark detector sensitivity" section="watermark_detect"
               field="threshold" config={config} configDefaults={configDefaults}
               setField={setField} />
@@ -481,7 +481,7 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
               value={config.bank?.style_threshold ?? bankDefault('style_threshold')}
               onChange={(e) => setField('bank', 'style_threshold', parseFloat(e.target.value) || 0)}
               className={INPUT_CLASS} />
-            <p className="mt-0.5 text-xs text-content-muted">Cosine similarity for the 🎨 style clustering. Applies at the next scoring pass.</p>
+            <HelpText className="mt-0.5 text-xs text-content-muted">Cosine similarity for the 🎨 style clustering. Applies at the next scoring pass.</HelpText>
             <ResetToDefault label="Same-style similarity" section="bank" field="style_threshold"
               config={config} configDefaults={configDefaults} setField={setField} />
           </div>
@@ -493,7 +493,7 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
               value={config.bank?.semantic_dup_threshold ?? bankDefault('semantic_dup_threshold')}
               onChange={(e) => setField('bank', 'semantic_dup_threshold', parseFloat(e.target.value) || 0)}
               className={INPUT_CLASS} />
-            <p className="mt-0.5 text-xs text-content-muted">Cosine similarity at or above which two scored images are a ✂ semantic near-duplicate (crop/variant of the same shot). Re-runs instantly from cached embeddings — no re-scan.</p>
+            <HelpText className="mt-0.5 text-xs text-content-muted">Cosine similarity at or above which two scored images are a ✂ semantic near-duplicate (crop/variant of the same shot). Re-runs instantly from cached embeddings — no re-scan.</HelpText>
             <ResetToDefault label="Semantic duplicate similarity" section="bank" field="semantic_dup_threshold"
               config={config} configDefaults={configDefaults} setField={setField} />
           </div>

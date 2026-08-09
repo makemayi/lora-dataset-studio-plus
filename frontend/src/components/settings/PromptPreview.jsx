@@ -23,6 +23,7 @@
    what you last saved. */
 import { useEffect, useState } from 'react'
 import { postJson } from '../../api/fetchClient'
+import { HelpText } from './primitives'
 
 const ENGINES = [
   { id: 'krea', label: 'Krea (local)' },
@@ -86,11 +87,11 @@ export default function PromptPreview({ subject, identityPrompts }) {
   return (
     <div id="prompt-preview" className="border-t border-border pt-4">
       <h4 className="text-sm font-medium text-content">What actually gets sent</h4>
-      <p className="mt-1 mb-2 text-xs text-content-muted">
+      <HelpText className="mt-1 mb-2 text-xs text-content-muted">
         The full prompt for one real shot, assembled from every box on this card, as the
         engine receives it. Type above and watch it change — nothing is generated, nothing
         is saved and nothing is billed by this panel.
-      </p>
+      </HelpText>
 
       {/* Two columns from 400px (the two selects), the toggle on its own row. A
           three-across row of selects is what overflows a phone card. */}

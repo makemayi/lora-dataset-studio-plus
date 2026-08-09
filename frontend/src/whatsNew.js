@@ -50,6 +50,20 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-settings-help-folds-everywhere',
+    date: '2026-08-10',
+    title: 'Every Settings page folds its explanations now, not just Image engines',
+    blurb: 'The fold shipped yesterday only reached the section blurbs, so Captioning & quality, Training, Local tools and Storage still opened as walls of prose — about eighty field explanations, all expanded, all the time. They fold too now. Anything that reports a live value (your current image budget, what a slider is set to) stays open on purpose, because that is a readout, not an explanation. Field help also had two different sizes and two different greys depending on which page you were on; it is one style everywhere now, which is most of why the rows finally line up.',
+    to: '/settings/captioning',
+  },
+  {
+    id: '2026-08-10-settings-title-wrong-under-translate',
+    date: '2026-08-10',
+    title: 'Settings pages could show another page’s title when the browser translates the app',
+    blurb: 'With Chrome auto-translate on, the heading and description at the top of a Settings page stopped following the page: opening Server & access could show “Image engines” over Storage’s description. Translate swaps the text out from under the app, so the app’s update landed on text that was no longer on screen. The heading is now rebuilt when it changes instead of edited in place.',
+    to: '/settings/server',
+  },
+  {
     id: '2026-08-09-settings-explanations-fold',
     date: '2026-08-09',
     title: 'The long explanations fold away until you want them',

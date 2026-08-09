@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { INPUT_CLASS, Card, SecretField } from './primitives'
+import { INPUT_CLASS, Card, SecretField, HelpText } from './primitives'
 import ResetToDefault from './ResetToDefault'
 import { defaultValueAt } from './settingDefaults.js'
 
@@ -179,9 +179,9 @@ function CloudTrainingCard({ config, setField, configDefaults }) {
             onChange={(e) => setField('cloud', 'first_step_timeout_minutes', parseInt(e.target.value) || dflt('first_step_timeout_minutes'))}
             className={INPUT_CLASS}
           />
-          <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          <HelpText className="mt-1 text-xs text-content-muted">
             Before training starts, the pod downloads its base model. This is the idle budget for that phase — the clock restarts every time the pod reports more downloaded bytes, so a slow-but-working download is never cut. Only a pod that reports nothing at all for this long is terminated.
-          </p>
+          </HelpText>
           <ResetToDefault label="First-step timeout" section="cloud" field="first_step_timeout_minutes"
             config={config} configDefaults={configDefaults} setField={setField} />
         </div>
@@ -199,9 +199,9 @@ function CloudTrainingCard({ config, setField, configDefaults }) {
             onChange={(e) => setField('cloud', 'first_step_download_budget_minutes', Math.max(0, parseInt(e.target.value, 10) || 0))}
             className={INPUT_CLASS}
           />
-          <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          <HelpText className="mt-1 text-xs text-content-muted">
             The hard ceiling on that same phase. A host too slow to ever finish would otherwise keep its download alive — and your rental with it — until the runtime cap. Past this, the pod is terminated even though it is still downloading. Set 0 to rely on the runtime cap alone.
-          </p>
+          </HelpText>
           <ResetToDefault label="Base-model download ceiling" section="cloud" field="first_step_download_budget_minutes"
             config={config} configDefaults={configDefaults} setField={setField} />
         </div>
@@ -219,9 +219,9 @@ function CloudTrainingCard({ config, setField, configDefaults }) {
             onChange={(e) => setField('cloud', 'max_runtime_minutes', parseInt(e.target.value) || dflt('max_runtime_minutes'))}
             className={INPUT_CLASS}
           />
-          <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          <HelpText className="mt-1 text-xs text-content-muted">
             The last backstop on the bill: past this, the pod is terminated whatever it is doing, and the newest checkpoint is rescued first. Enforced from outside the run too, so it holds even if the run's own supervision dies.
-          </p>
+          </HelpText>
           <ResetToDefault label="Max runtime" section="cloud" field="max_runtime_minutes"
             config={config} configDefaults={configDefaults} setField={setField} />
         </div>
@@ -239,9 +239,9 @@ function CloudTrainingCard({ config, setField, configDefaults }) {
             onChange={(e) => setField('cloud', 'freeze_watchdog_minutes', Math.max(0, parseInt(e.target.value, 10) || 0))}
             className={INPUT_CLASS}
           />
-          <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          <HelpText className="mt-1 text-xs text-content-muted">
             Last-resort net when a training run stops reporting altogether (a restart, a connection wedged against the pod): the pod is terminated from outside the run, so it can't keep billing unnoticed. Checkpoints already downloaded are kept. Set 0 to only get the warning on the run card. Booting and downloading are never cut by this; the dataset upload has its own setting below.
-          </p>
+          </HelpText>
           <ResetToDefault label="Freeze watchdog" section="cloud" field="freeze_watchdog_minutes"
             config={config} configDefaults={configDefaults} setField={setField} />
         </div>
@@ -259,9 +259,9 @@ function CloudTrainingCard({ config, setField, configDefaults }) {
             onChange={(e) => setField('cloud', 'upload_stall_minutes', Math.max(0, parseInt(e.target.value, 10) || 0))}
             className={INPUT_CLASS}
           />
-          <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          <HelpText className="mt-1 text-xs text-content-muted">
             This is <strong>not</strong> a time limit on the upload — a large dataset is allowed to take as long as it needs, and the run card shows the files and gigabytes going across. It is how long the machine may sit with <strong>no data at all</strong> arriving before the run is given up and the pod released, so a wedged transfer stops billing in minutes instead of hours. Set 0 to never cut. Turning the freeze watchdog off turns this off too.
-          </p>
+          </HelpText>
           <ResetToDefault label="Dataset upload stall" section="cloud" field="upload_stall_minutes"
             config={config} configDefaults={configDefaults} setField={setField} />
         </div>
@@ -279,9 +279,9 @@ function CloudTrainingCard({ config, setField, configDefaults }) {
             onChange={(e) => setField('cloud', 'unreachable_grace_minutes', parseInt(e.target.value) || dflt('unreachable_grace_minutes'))}
             className={INPUT_CLASS}
           />
-          <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          <HelpText className="mt-1 text-xs text-content-muted">
             How long a mid-run pod may stay unreachable (a vast.ai network blip) before the run is given up and retried on a fresh host. Raise it if healthy runs die with "pod unreachable".
-          </p>
+          </HelpText>
           <ResetToDefault label="Unreachable grace" section="cloud" field="unreachable_grace_minutes"
             config={config} configDefaults={configDefaults} setField={setField} />
         </div>
@@ -299,9 +299,9 @@ function CloudTrainingCard({ config, setField, configDefaults }) {
             onChange={(e) => setField('cloud', 'min_reliability', Math.min(0.999, Math.max(0.9, parseFloat(e.target.value) || dflt('min_reliability'))))}
             className={INPUT_CLASS}
           />
-          <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          <HelpText className="mt-1 text-xs text-content-muted">
             Lower it (e.g. 0.95) to surface cheaper hosts in the GPU picker — at a higher risk of a pod that never boots (≈ a few wasted cents, auto-cleaned).
-          </p>
+          </HelpText>
           <ResetToDefault label="Min host reliability" section="cloud" field="min_reliability"
             config={config} configDefaults={configDefaults} setField={setField} />
         </div>
@@ -326,7 +326,7 @@ function CloudTrainingCard({ config, setField, configDefaults }) {
         </div>
       </div>
       {spend != null && (
-        <p className="text-xs text-content-muted">Spent this month: ${spend.toFixed(2)}</p>
+        <HelpText className="text-xs text-content-muted">Spent this month: ${spend.toFixed(2)}</HelpText>
       )}
     </Card>
   )
@@ -358,11 +358,11 @@ function ConceptFaceMaskCard({ config, setField, configDefaults }) {
             onChange={(e) => setField('face_mask', 'expand', parseFloat(e.target.value) || dflt('expand'))}
             className={INPUT_CLASS}
           />
-          <p className="mt-1 text-xs text-content-muted">
+          <HelpText className="mt-1 text-xs text-content-muted">
             Face detection returns a box from the eyes to the chin. This grows it into a head:
             higher covers hair and jaw, lower stays tight on the face. Preview it on your own
             images from the training panel — the right value depends on how your shots are framed.
-          </p>
+          </HelpText>
           <ResetToDefault label="Head coverage" section="face_mask" field="expand"
             config={config} configDefaults={configDefaults} setField={setField} />
         </div>
@@ -380,12 +380,12 @@ function ConceptFaceMaskCard({ config, setField, configDefaults }) {
             onChange={(e) => setField('face_mask', 'min_weight', parseFloat(e.target.value) || dflt('min_weight'))}
             className={INPUT_CLASS}
           />
-          <p className="mt-1 text-xs text-content-muted">
+          <HelpText className="mt-1 text-xs text-content-muted">
             How much the masked area still counts. Lower pushes the identity out harder.
             It does not go to zero on purpose: an area worth nothing is not ignored, it is
             unpenalised — the model can put anything there at no cost, and reports of
             degraded anatomy start right below this floor.
-          </p>
+          </HelpText>
           <ResetToDefault label="Loss weight kept on faces" section="face_mask" field="min_weight"
             config={config} configDefaults={configDefaults} setField={setField} />
         </div>

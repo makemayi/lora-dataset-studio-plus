@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { INPUT_CLASS, Card, TextField, TestResult, TestButton, SecretField } from './primitives'
+import { INPUT_CLASS, Card, TextField, TestResult, TestButton, SecretField, HelpText } from './primitives'
 import { postJson, apiFetch } from '../../api/fetchClient'
 import {
   COMFY_FOLDER_FIELDS, comfyFolderField, folderPlaceholder, folderEffective,
@@ -124,11 +124,11 @@ function OllamaStatus({ caps, refreshCaps, toast }) {
     )
   }
   return (
-    <p className="text-xs text-content-muted">
+    <HelpText className="text-xs text-content-muted">
       <span aria-hidden="true">✗</span> Not detected on this machine.{' '}
       <a href="https://ollama.com/download" target="_blank" rel="noreferrer"
         className="text-sky-300 underline hover:text-sky-200">Download Ollama →</a>
-    </p>
+    </HelpText>
   )
 }
 
@@ -184,12 +184,12 @@ function ComfyFolderOverrides({ config, setField }) {
         Advanced: ComfyUI folder overrides
       </summary>
       <div className="mt-3 space-y-4">
-        <p className="text-xs text-content-muted">
+        <HelpText className="text-xs text-content-muted">
           Leave these empty unless ComfyUI was started with its own folders (
           <code>--output-directory</code>, <code>--input-directory</code>,{' '}
           <code>--models-directory</code>). Each field shows the folder the app uses
           while it is empty.
-        </p>
+        </HelpText>
         <ComfyFolderRow {...rowProps} fieldKey="output_dir" id="comfyui-output-dir" />
         <ComfyFolderRow {...rowProps} fieldKey="input_dir" id="comfyui-input-dir" />
         <ComfyFolderRow {...rowProps} fieldKey="models_dir" id="comfyui-models-dir" />
@@ -288,7 +288,7 @@ export default function LocalToolsSection(props) {
             <option value="90">90 seconds</option>
             <option value="180">3 minutes — very large install</option>
           </select>
-          <p className="mt-1 text-xs text-content-muted">
+          <HelpText className="mt-1 text-xs text-content-muted">
             How long ComfyUI may take to list its nodes and model files. That list
             grows with every custom-node pack and every weight you install, so a
             heavily-loaded ComfyUI can need 15 seconds or more — and when the app gave
@@ -296,7 +296,7 @@ export default function LocalToolsSection(props) {
             see “ComfyUI is answering too slowly”. A ComfyUI that is genuinely stopped
             is detected in a couple of seconds either way, so a high value here costs
             you nothing. Reported and measured by j_o_e_l. (Discord).
-          </p>
+          </HelpText>
           <ResetToDefault label="ComfyUI response timeout" section="comfyui" field="object_info_timeout_s"
             config={config} configDefaults={configDefaults} setField={setField} />
         </div>
@@ -348,13 +348,13 @@ export default function LocalToolsSection(props) {
             <option value="6">6</option>
             <option value="8">8 — only if Ollama is set up for it</option>
           </select>
-          <p className="mt-1 text-xs text-content-muted">
+          <HelpText className="mt-1 text-xs text-content-muted">
             Bank passes that read every image — watermark scan, framing, captions — send
             this many requests to Ollama at the same time. Most of each request is
             waiting, not computing, so overlapping them roughly halves a long pass.
             Raising it past 4 gains little unless your Ollama is configured for more
             parallel requests, and it makes Stop take a few seconds longer.
-          </p>
+          </HelpText>
           <ResetToDefault label="Images analysed at once" section="ollama" field="vision_concurrency"
             config={config} configDefaults={configDefaults} setField={setField} />
         </div>
@@ -374,7 +374,7 @@ export default function LocalToolsSection(props) {
             <option value="300">5 minutes</option>
             <option value="600">10 minutes</option>
           </select>
-          <p className="mt-1 text-xs text-content-muted">
+          <HelpText className="mt-1 text-xs text-content-muted">
             Loading the vision model takes about 13 seconds; describing an image once
             it's loaded takes half a second. One-off jobs — the automatic head crop on a
             reference photo, Describe in Test Studio — used to unload it straight away,
@@ -382,7 +382,7 @@ export default function LocalToolsSection(props) {
             loaded for this long, but only while nothing else needs the graphics card,
             and hands the memory straight back the moment a generation or a training run
             starts. Set it to Off if your card is tight on memory.
-          </p>
+          </HelpText>
           <ResetToDefault label="Keep the vision model warm" section="ollama" field="vision_keep_warm_seconds"
             config={config} configDefaults={configDefaults} setField={setField} />
         </div>
@@ -481,12 +481,12 @@ export default function LocalToolsSection(props) {
             <option value="LORA">LoRA (default)</option>
             <option value="OFT_2">OFT_2 (Orthogonal Finetuning)</option>
           </select>
-          <p className="mt-1 text-[0.6875rem] text-content-subtle">
+          <HelpText className="mt-1 text-xs text-content-muted">
             The PEFT adapter OneTrainer trains. LoRA is what this app's own Krea 2 Edit
             inference graph expects. OFT_2 is a different adapter algorithm — user-confirmed
             to train and load correctly, offered as an alternative for anyone who wants to try
             it, not a recommended default swap.
-          </p>
+          </HelpText>
           <ResetToDefault label="Training method" section="onetrainer" field="peft_type"
             config={config} configDefaults={configDefaults} setField={setField} />
         </div>

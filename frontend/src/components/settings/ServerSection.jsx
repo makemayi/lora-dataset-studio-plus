@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { postJson } from '../../api/fetchClient'
 import { useToast } from '../common/Toast'
-import { INPUT_CLASS, Card } from './primitives'
+import { INPUT_CLASS, Card, HelpText } from './primitives'
 import ResetToDefault from './ResetToDefault'
 
 /* managed-access:start -- kept dependency-free so its real production logic can
@@ -199,13 +199,13 @@ export default function ServerSection({ config, setField, runtime, handleSave, c
           <p className="text-sm font-medium text-content">
             {bindManaged ? 'Current browser address uses a network host' : 'Available on the local network'}
           </p>
-          <p className="mt-0.5 text-xs text-content-muted">
+          <HelpText className="mt-0.5 text-xs text-content-muted">
             {bindManaged
               ? (lan
                 ? 'On because this browser is using a non-loopback address. The host’s own network rules still determine which other devices can reach it.'
                 : 'Off because this browser is using a loopback address. That does not reveal whether the service is exposed; open the app through the host’s LAN address to get a shareable link and QR code.')
               : 'Off (default): only this computer can open the app. On: any device on your Wi-Fi/LAN can reach it — e.g. from your phone — using the plain URL below.'}
-          </p>
+          </HelpText>
         </div>
         <button id="server-lan" type="button" role="switch" aria-checked={lan}
           data-focus-gate="server-require-token server-token"
@@ -226,7 +226,7 @@ export default function ServerSection({ config, setField, runtime, handleSave, c
           <div className="flex items-start justify-between gap-4 rounded-lg border border-border bg-surface-raised px-3 py-2.5">
             <div>
               <p className="text-sm font-medium text-content">Require an access token</p>
-              <p className="mt-0.5 text-xs text-content-muted">
+              <HelpText className="mt-0.5 text-xs text-content-muted">
                 {bindManaged
                   ? (requireToken
                     ? 'On: devices that can reach this service must open a tokenized URL once (a session cookie takes over after).'
@@ -234,7 +234,7 @@ export default function ServerSection({ config, setField, runtime, handleSave, c
                   : (requireToken
                     ? 'On: remote devices must open the URL WITH the token once (a session cookie takes over after). Extra safety on a shared or untrusted network.'
                     : 'Off (default): anyone on your Wi-Fi/LAN can open the app with no password. Fine for a home network; turn on if the network is shared or untrusted.')}
-              </p>
+              </HelpText>
             </div>
             <button id="server-require-token" type="button" role="switch" aria-checked={requireToken}
               data-focus-gate="server-token"
@@ -255,10 +255,10 @@ export default function ServerSection({ config, setField, runtime, handleSave, c
                   Generate new token
                 </button>
               </div>
-              <p className="mb-1 text-xs text-content-muted">
+              <HelpText className="mb-1 text-xs text-content-muted">
                 Remote devices present this once (baked into the link below) — a signed session
                 cookie takes over from there. Requests from this computer never need it.
-              </p>
+              </HelpText>
               <div className="flex gap-2">
                 <input id="server-token" type="text" readOnly
                   value={config.server.access_token || '(created automatically on the next restart — or click “Generate new token”)'}
@@ -286,11 +286,11 @@ export default function ServerSection({ config, setField, runtime, handleSave, c
                     </div>
                   )}
                   <div className="min-w-0 flex-1 space-y-2">
-                    <p className="text-xs text-content-muted">
+                    <HelpText className="text-xs text-content-muted">
                       {bindManaged
                         ? 'Open the same address below from another device that can reach this host.'
                         : 'Point your phone camera at the code — or open a link below. The LAN link needs the phone on the same Wi-Fi; the Tailscale link works from anywhere.'}
-                    </p>
+                    </HelpText>
                     {reachUrls.map((u) => (
                       <div key={u.key} className="flex items-center gap-2">
                         <div className="min-w-0 flex-1">
