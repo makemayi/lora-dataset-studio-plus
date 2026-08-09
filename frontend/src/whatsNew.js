@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-09-image-engines-rail',
+    date: '2026-08-09',
+    title: 'Image engines settings: pick an engine, see its settings',
+    blurb: 'The page used to open thirteen cards at once, eight of which belong to one specific engine — so most of what you scrolled past was settings for engines you do not run. There is now a list on the left: choose Klein, or Krea, or ChatGPT, and the panel shows only that. Nothing was removed and no setting changed its meaning. Links from the Guide and from Settings search still land on the exact field they name; they open the right entry on the way.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-09-onetrainer-config-parity',
     date: '2026-08-09',
     title: 'OneTrainer runs now use your settings, and your whole graphics card',

@@ -363,6 +363,9 @@ export default function SettingsPage() {
     handleDeleteSecret,
     toggleEngine, handleSave, saving, runtime, promptDefaults, promptDefaultsBySubject,
     faceSwapGraphLoras,
+    // The ?focus= target, so a section that hides part of itself can reveal the
+    // right part before the scroll lands (Image engines picks its rail entry).
+    focusId,
     configDefaults,
     setIdentityPrompts, caps, refreshCaps: refresh, toast,
   }

@@ -2230,20 +2230,132 @@ function ChatgptSubscriptionCard({ caps, config, setField, refreshCaps, toast, c
   )
 }
 
+/* ── The engine rail ──────────────────────────────────────────────────────────
+   This page used to render THIRTEEN cards, all open, all the time — and eight of
+   them belong to one specific engine. Nobody runs eight engines at once, so most
+   of the page was always somebody else's settings, and the ~6,500 characters of
+   explanatory copy that make this app worth using were competing with themselves.
+
+   So: pick an engine on the left, see only its settings on the right. The cards
+   themselves are UNCHANGED here on purpose — this commit moves them, it does not
+   restyle them, so the diff stays readable and nothing inside a card can break.
+
+   `focus` is the dom ids each entry owns, and it does two jobs:
+     * `data-focus-gate` on the button, so a help / Settings-search deep link that
+       lands on a now-hidden field rings the control that reveals it — the
+       machinery in help/revealTarget.js already looks for exactly this attribute;
+     * pre-selection below, which is better than ringing a gate: arriving with
+       ?focus=klein-face-swap-loras opens Klein and the field is simply there.
+   An id no entry claims still works, it just does not pre-select — and
+   engines-rail.test.mjs fails if a registered help anchor is one of those. */
+const ENGINE_RAIL = [
+  {
+    group: 'General',
+    items: [
+      { id: 'keys', label: 'API keys', owns: ENGINE_SECRETS.map((f) => f.key) },
+      { id: 'models', label: 'Image models',
+        owns: ['engine-image-models', 'klein-face-swap-loras'], prefix: ['engines-'] },
+      { id: 'visible', label: 'Which engines appear', owns: ['engine-default'] },
+      { id: 'prompts', label: 'Identity prompts', prefix: ['identity-', 'prompt-'] },
+    ],
+  },
+  {
+    group: 'Local',
+    items: [
+      { id: 'klein', label: 'Klein', engine: 'klein', prefix: ['klein-'] },
+      { id: 'krea', label: 'Krea 2 Edit', engine: 'krea', prefix: ['krea-'] },
+      { id: 'minimax_h3', label: 'MiniMax H3', engine: 'minimax_h3',
+        prefix: ['minimax-h3-', 'h3-'] },
+      { id: 'seedvr2', label: 'SeedVR2', engine: 'seedvr2', prefix: ['seedvr2-'] },
+    ],
+  },
+  {
+    group: 'API',
+    items: [
+      { id: 'chatgpt', label: 'ChatGPT', engine: 'chatgpt', prefix: ['chatgpt-'] },
+    ],
+  },
+]
+
+export const RAIL_ITEMS = ENGINE_RAIL.flatMap((g) => g.items)
+
+/* Which rail entry owns a deep-linked dom id, or null.
+
+   Ownership is by PREFIX, not an enumerated list. The help registry publishes 52
+   anchors for this page and most of them name a field INSIDE a card
+   (`klein-model-unet`, `krea-steps`, `seedvr2-tiling`), so a hand-written list
+   would be wrong within a week — the first hand-written version missed 40 of
+   them, which is how this rule got chosen. `owns` stays for the handful that do
+   not fit their engine's prefix (`klein-face-swap-loras` is edited under Image
+   models, next to the graph it chains onto).
+
+   Exact `owns` wins over a prefix, so a deliberate exception cannot be
+   swallowed by the general rule. engines-rail.test.mjs fails if any registered
+   anchor is unclaimed, or if two entries claim the same id. */
+export function railItemForFocus(focusId) {
+  if (!focusId) return null
+  const exact = RAIL_ITEMS.find((it) => (it.owns || []).includes(focusId))
+  if (exact) return exact.id
+  const byPrefix = RAIL_ITEMS.find(
+    (it) => (it.prefix || []).some((p) => focusId.startsWith(p)))
+  return byPrefix ? byPrefix.id : null
+}
+
+/* Every id an entry advertises to the deep-link machinery. Exact ids only —
+   a prefix is not something `data-focus-gate` can express. */
+function gateIds(item) {
+  return (item.owns || []).join(' ')
+}
+
+function RailButton({ item, active, enabled, onPick }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onPick(item.id)}
+      aria-current={active ? 'true' : undefined}
+      data-focus-gate={gateIds(item)}
+      className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-colors ${active ? 'bg-surface-raised' : 'hover:bg-surface'}`}
+    >
+      {item.engine && (
+        <span aria-hidden="true"
+          className={`h-1.5 w-1.5 shrink-0 rounded-full ${enabled ? 'bg-indigo-400' : 'bg-content-subtle opacity-50'}`} />
+      )}
+      <span className={`flex-1 text-[0.8125rem] ${active ? 'font-medium text-content' : 'text-content-muted'}`}>
+        {item.label}
+      </span>
+    </button>
+  )
+}
+
 export default function EnginesSection(props) {
   const { config, setField, toggleEngine, caps, refreshCaps, toast, configDefaults,
           faceSwapGraphLoras } = props
-  return (
-    <div className="space-y-6">
+  /* The deep-linked dom id, handed down by SettingsPage (which already reads it
+     off the query string). Taken as a PROP rather than via useSearchParams so
+     this section needs no Router context — every render test mounts it bare. */
+  const focusId = props.focusId || null
+  /* A deep link opens the entry that owns it. Keyed on focusId so a SECOND deep
+     link arriving without a remount moves the rail too — the bug a plain
+     useState initialiser would leave behind. */
+  const [picked, setPicked] = useState(null)
+  useEffect(() => { setPicked(null) }, [focusId])
+  const active = picked || railItemForFocus(focusId) || 'keys'
+
+  const enabled = config.engines?.enabled || []
+  const panels = {
+    keys: () => (
       <Card title="API keys" help="Keys are write-only — fields stay blank even when a key is already saved.">
         {ENGINE_SECRETS.map((f) => <SecretField key={f.key} field={f} {...props} />)}
       </Card>
-
-      <ImageModelsCard config={config} setField={setField} configDefaults={configDefaults} />
-
-      <ChatgptSubscriptionCard caps={caps} config={config} setField={setField} refreshCaps={refreshCaps}
-        toast={toast} configDefaults={configDefaults} />
-
+    ),
+    models: () => (
+      <>
+        <ImageModelsCard config={config} setField={setField} configDefaults={configDefaults}
+          faceSwapGraphLoras={faceSwapGraphLoras} />
+        <FaceSwapLorasCard config={config} setField={setField} graphLoras={faceSwapGraphLoras} />
+      </>
+    ),
+    visible: () => (
       <Card title="Engines" help="Which engines appear in the generate panel, and which one is preselected.">
         <div>
           <label htmlFor="engine-default" className="block text-sm font-medium text-content">Default engine</label>
@@ -2267,7 +2379,7 @@ export default function EnginesSection(props) {
                 <input
                   id={`engine-enabled-${o.id}`}
                   type="checkbox"
-                  checked={(config.engines.enabled || []).includes(o.id)}
+                  checked={enabled.includes(o.id)}
                   onChange={() => toggleEngine(o.id)}
                   className="h-4 w-4 rounded border-border-strong"
                 />
@@ -2275,36 +2387,60 @@ export default function EnginesSection(props) {
               </label>
             ))}
           </div>
-          {/* The only LIST with a reset. Ticking the boxes back one by one means
-              knowing which five shipped enabled — and the catalog grows with
-              releases, so that knowledge goes stale. Order is not compared: a
-              re-ticked selection is the same selection. */}
           <ResetToDefault label="Enabled engines" section="engines" field="enabled"
             config={config} configDefaults={configDefaults} setField={setField} />
         </fieldset>
       </Card>
-
-      <KleinModelFilesCard config={config} setField={setField} caps={caps} />
-
-      <KleinGenerationCard config={config} setField={setField} configDefaults={configDefaults} />
-
-      <KleinLorasCard config={config} setField={setField} />
-      <FaceSwapLorasCard config={config} setField={setField}
-        graphLoras={faceSwapGraphLoras} />
-
-      <KreaCard config={config} setField={setField} configDefaults={configDefaults} caps={caps} />
-
-      <KreaLorasCard config={config} setField={setField} />
-
-      <MinimaxH3Card config={config} setField={setField} configDefaults={configDefaults}
-        caps={caps} />
-
-      <SeedVr2Card config={config} setField={setField} configDefaults={configDefaults}
-        caps={caps} />
-
+    ),
+    prompts: () => (
       <IdentityPromptsCard config={config} setField={setField} promptDefaults={props.promptDefaults}
         promptDefaultsBySubject={props.promptDefaultsBySubject}
         setIdentityPrompts={props.setIdentityPrompts} configDefaults={configDefaults} />
+    ),
+    klein: () => (
+      <>
+        <KleinModelFilesCard config={config} setField={setField} caps={caps} />
+        <KleinGenerationCard config={config} setField={setField} configDefaults={configDefaults} />
+        <KleinLorasCard config={config} setField={setField} />
+      </>
+    ),
+    krea: () => (
+      <>
+        <KreaCard config={config} setField={setField} configDefaults={configDefaults} caps={caps} />
+        <KreaLorasCard config={config} setField={setField} />
+      </>
+    ),
+    minimax_h3: () => (
+      <MinimaxH3Card config={config} setField={setField} configDefaults={configDefaults} caps={caps} />
+    ),
+    seedvr2: () => (
+      <SeedVr2Card config={config} setField={setField} configDefaults={configDefaults} caps={caps} />
+    ),
+    chatgpt: () => (
+      <ChatgptSubscriptionCard caps={caps} config={config} setField={setField} refreshCaps={refreshCaps}
+        toast={toast} configDefaults={configDefaults} />
+    ),
+  }
+
+  return (
+    <div className="grid items-start gap-5 md:grid-cols-[210px_minmax(0,1fr)]">
+      <nav aria-label="Engine settings" className="flex flex-col gap-5 md:sticky md:top-5">
+        {ENGINE_RAIL.map((g) => (
+          <div key={g.group} className="flex flex-col gap-0.5">
+            <div className="px-3 pb-1.5 text-[0.625rem] uppercase tracking-wider text-content-subtle">
+              {g.group}
+            </div>
+            {g.items.map((item) => (
+              <RailButton key={item.id} item={item} active={item.id === active}
+                enabled={!item.engine || enabled.includes(item.engine)}
+                onPick={setPicked} />
+            ))}
+          </div>
+        ))}
+      </nav>
+      <div className="flex min-w-0 flex-col gap-5">
+        {(panels[active] || panels.keys)()}
+      </div>
     </div>
   )
 }

@@ -30,8 +30,17 @@ const CONFIG = {
   identity_prompts: {}, comfyui: {},
 }
 
+/* The page is a rail + detail: only the selected entry renders. `focusId` is the
+   deep-link id SettingsPage hands down, and it also decides which entry opens —
+   so a test asserting on a field says which field it means, exactly as a user
+   arriving from Settings search would. Default 'keys' matches the live page. */
+const CHATGPT = 'chatgpt-auth-mode'   // opens the ChatGPT rail entry
+const MODELS = 'engine-image-models'  // opens Image models
+
 const render = (overrides = {}) => renderToStaticMarkup(createElement(EnginesSection, {
-  config: { ...CONFIG, engines: { ...CONFIG.engines, ...(overrides.engines || {}) } },
+  config: { ...CONFIG, engines: { ...CONFIG.engines, ...(overrides.engines || {}) },
+            ...(overrides.klein ? { klein: overrides.klein } : {}) },
+  focusId: overrides.focusId,
   configDefaults: CONFIG,
   setField: () => {},
   toggleEngine: () => {},
@@ -49,31 +58,35 @@ const render = (overrides = {}) => renderToStaticMarkup(createElement(EnginesSec
 
 test('the section renders in every ChatGPT auth lane', () => {
   for (const lane of ['auto', 'api', 'subscription', 'comfyui']) {
-    const html = render({ engines: { chatgpt_auth: lane } })
+    const html = render({ engines: { chatgpt_auth: lane }, focusId: CHATGPT })
     assert.match(html, /ChatGPT engine auth/, lane)
   }
 })
 
 test('the comfy.org key field is offered, and needs no Test button to render', () => {
-  const html = render()
+  const html = render()   // an ENGINE_SECRET, so the default API keys entry
   assert.match(html, /comfy\.org API key/)
   assert.match(html, /platform\.comfy\.org/)
 })
 
 test('the ComfyUI lane states its two costs where the choice is made', () => {
-  const html = render({ engines: { chatgpt_auth: 'comfyui' } })
+  const html = render({ engines: { chatgpt_auth: 'comfyui' }, focusId: CHATGPT })
   assert.match(html, /OpenAI image node/)
   assert.match(html, /queue/i)                 // it holds a ComfyUI queue slot
   assert.match(html, /NSFW/)                   // ...and is still not local
 })
 
 test('the quality dial is only offered on the lane it applies to', () => {
-  const on = render({ engines: { chatgpt_auth: 'comfyui' } })
-  assert.match(on, /chatgpt-comfy-quality/)
+  // Match the CONTROL, not the string: the rail button advertises the ids it
+  // owns in data-focus-gate, so a bare /chatgpt-comfy-quality/ now matches the
+  // nav on every lane and the negatives below would pass for the wrong reason.
+  const dial = /id="chatgpt-comfy-quality"/
+  const on = render({ engines: { chatgpt_auth: 'comfyui' }, focusId: CHATGPT })
+  assert.match(on, dial)
   assert.match(on, /cheapest and fastest/)
   for (const lane of ['auto', 'api', 'subscription']) {
-    assert.doesNotMatch(render({ engines: { chatgpt_auth: lane } }),
-      /chatgpt-comfy-quality/, lane)
+    assert.doesNotMatch(render({ engines: { chatgpt_auth: lane }, focusId: CHATGPT }),
+      dial, lane)
   }
 })
 
@@ -89,13 +102,13 @@ test('the quality dial is only offered on the lane it applies to', () => {
    always there, in both states". A test cannot run Google Translate; it CAN
    refuse the shape that Translate breaks. */
 test('the ChatGPT Base URL field renders blank, pointing at OpenAI', () => {
-  const html = render({ engines: { chatgpt_base_url: '' } })
+  const html = render({ engines: { chatgpt_base_url: '' }, focusId: MODELS })
   assert.match(html, /ChatGPT \(OpenAI\) Base URL/)
   assert.match(html, /Blank = OpenAI itself/)
 })
 
 test('a filled Base URL says out loud that a third party sees the photos', () => {
-  const html = render({ engines: { chatgpt_base_url: 'https://gateway.example.com' } })
+  const html = render({ engines: { chatgpt_base_url: 'https://gateway.example.com' }, focusId: MODELS })
   assert.match(html, /Your reference photos go to that operator, not to OpenAI/)
   // ...and points at the field before the key, since 401/404 are what a wrong
   // Base URL returns and also what a bad key returns.
@@ -103,9 +116,9 @@ test('a filled Base URL says out loud that a third party sees the photos', () =>
 })
 
 test('the Nano Banana Base URL field renders in both states', () => {
-  assert.match(render({ engines: { nanobanana_base_url: '' } }),
+  assert.match(render({ engines: { nanobanana_base_url: '' }, focusId: MODELS }),
     /Nano Banana \(Gemini\) Base URL/)
-  assert.match(render({ engines: { nanobanana_base_url: 'https://gw.example.com' } }),
+  assert.match(render({ engines: { nanobanana_base_url: 'https://gw.example.com' }, focusId: MODELS }),
     /Your reference photos go to that operator, not to Google/)
 })
 
@@ -118,7 +131,7 @@ test('both Base URL hints stay in the DOM in BOTH states, toggled by hidden', ()
   ]
   for (const [key, warning, scope] of cases) {
     for (const value of ['', 'https://gateway.example.com']) {
-      const html = render({ engines: { [key]: value } })
+      const html = render({ engines: { [key]: value }, focusId: MODELS })
       // Present either way: a ternary would drop one, and dropping a text node
       // is exactly what kills a translated page.
       assert.match(html, warning, `${key}: warning missing for ${value || 'blank'}`)
@@ -127,10 +140,11 @@ test('both Base URL hints stay in the DOM in BOTH states, toggled by hidden', ()
   }
   // Two fields, so exactly two hidden spans whichever way each one is set.
   const hiddenSpans = (html) => (html.match(/<span hidden=""/g) || []).length
-  const blank = render({ engines: { chatgpt_base_url: '', nanobanana_base_url: '' } })
+  const blank = render({ engines: { chatgpt_base_url: '', nanobanana_base_url: '' }, focusId: MODELS })
   const filled = render({
     engines: { chatgpt_base_url: 'https://a.example.com',
                nanobanana_base_url: 'https://b.example.com' },
+    focusId: MODELS,
   })
   assert.equal(hiddenSpans(blank), 2)
   assert.equal(hiddenSpans(filled), 2)
@@ -140,7 +154,7 @@ test('both Base URL hints stay in the DOM in BOTH states, toggled by hidden', ()
 /* Face swap LoRAs. Both states mount: empty (the placeholder line) and filled
    (rows with a combobox, a strength slider and the reorder buttons). */
 test('the face swap LoRA card renders empty and with rows', () => {
-  const empty = render({ engines: {} })
+  const empty = render({ engines: {}, focusId: MODELS })
   assert.match(empty, /Face swap LoRAs \(optional\)/)
   assert.match(empty, /the face swap runs with just the LoRAs its own graph names/)
 
@@ -150,6 +164,7 @@ test('the face swap LoRA card renders empty and with rows', () => {
       klein: { face_swap_loras: [{ file: 'a.safetensors', strength: 0.8 },
                                  { file: 'b.safetensors', strength: 1.2 }] },
     },
+    focusId: MODELS,
     configDefaults: CONFIG,
     setField: () => {}, toggleEngine: () => {}, caps: {}, refreshCaps: () => {},
     toast: { error: () => {}, success: () => {} },
@@ -166,6 +181,7 @@ test('a row duplicating a LoRA the swap graph already loads is flagged', () => {
   const withGraphLoras = (file, graphLoras) => renderToStaticMarkup(
     createElement(EnginesSection, {
       config: { ...CONFIG, klein: { face_swap_loras: [{ file, strength: 1 }] } },
+      focusId: MODELS,
       configDefaults: CONFIG,
       faceSwapGraphLoras: graphLoras,
       setField: () => {}, toggleEngine: () => {}, caps: {}, refreshCaps: () => {},
@@ -205,4 +221,43 @@ test('the angle-reference panel renders all five slots, filled or empty', () => 
     assert.ok(html.includes(label), label)
   }
   assert.ok(!/coming soon/i.test(html))
+})
+
+
+/* ── Deep links must still land (2026-08-09) ──────────────────────────────────
+   The page now shows ONE rail entry at a time, so a help topic or Settings-search
+   result pointing at a field in a different entry would scroll to a page showing
+   something else. `railItemForFocus` is what prevents that, and this is the test
+   that keeps the two lists in step: every anchor the help registry publishes for
+   the `engines` section has to be claimed by exactly one entry. Adding a setting
+   without adding its id here is the regression, and it is invisible by eye. */
+const { railItemForFocus, RAIL_ITEMS } = await import(
+  '../src/components/settings/EnginesSection.jsx')
+const { helpTopics } = await import('../src/help/helpRegistry.js')
+
+test('every help anchor on this page is owned by a rail entry', () => {
+  const anchors = helpTopics
+    .filter((t) => t.app && t.app.route === '/settings/engines' && t.app.focus)
+    .map((t) => t.app.focus)
+  assert.ok(anchors.length >= 5, `expected engine help topics, saw ${anchors.length}`)
+  const orphans = anchors.filter((a) => !railItemForFocus(a))
+  assert.deepEqual(orphans, [],
+    'these help anchors open a rail entry that does not contain them')
+})
+
+test('no dom id is claimed by two rail entries', () => {
+  const seen = new Map()
+  for (const item of RAIL_ITEMS) {
+    for (const id of item.owns || []) {
+      assert.equal(seen.get(id), undefined,
+        `${id} is claimed by both ${seen.get(id)} and ${item.id}`)
+      seen.set(id, item.id)
+    }
+  }
+})
+
+test('an unknown focus id falls back instead of blanking the page', () => {
+  assert.equal(railItemForFocus('not-a-real-id'), null)
+  assert.equal(railItemForFocus(null), null)
+  assert.match(render({ focusId: 'not-a-real-id' }), /API keys/)
 })
