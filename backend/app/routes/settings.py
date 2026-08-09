@@ -127,6 +127,7 @@ def _settings_payload() -> dict:
     # unchanged for any client reading it); `_by_subject` adds the other four sets
     # so the Settings screen — which edits out of any dataset context — can show
     # the real default next to whichever subject type the user is editing.
+    from ..services import face_swap_helper
     from ..services.face_variations import (identity_prompt_defaults,
                                             identity_prompt_defaults_by_subject)
     return {
@@ -140,6 +141,12 @@ def _settings_payload() -> dict:
         # stale. No secret lives here — secrets are in .env, and `secrets` above
         # only reports presence.
         'config_defaults': cfg.defaults(),
+        # LoRAs the shipped face-swap graph loads on its own, so the Face swap
+        # LoRAs editor can flag a duplicate row WHERE IT IS WRITTEN. The server
+        # drops such a row either way, but the Klein sibling of this trap proved
+        # that a log line alone reads as "the app ignored my setting". Derived
+        # from the workflow file, never a frontend copy that could go stale.
+        'face_swap_graph_loras': face_swap_helper.graph_own_loras(),
         'identity_prompt_defaults': identity_prompt_defaults(),
         'identity_prompt_defaults_by_subject': identity_prompt_defaults_by_subject(),
         # What THIS running process is actually bound to — run.py stamps these

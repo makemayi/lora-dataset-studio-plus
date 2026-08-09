@@ -157,6 +157,50 @@ def test_settings_loras_are_chained_after_the_graphs_own(app, tmp_path, monkeypa
                     assert v[0] in wf, f'{nid} dangles after chaining'
 
 
+def test_a_lora_the_graph_already_loads_is_not_chained_twice(app, tmp_path, monkeypatch):
+    """Picking the swap LoRA (or the style LoRA) in Settings must NOT stack it a
+    second time: both strengths sum into one delta well past what the file was
+    trained for, which shows as macro-blocking. Same guard the Klein generation
+    presets have — this list shipped without it."""
+    from app import config as cfg
+    from app.services import face_swap_helper as fsh
+    from app.job_queue import queue_manager
+    with app.app_context():
+        base = _comfy(tmp_path, cfg)
+        _install(base, 'models', 'loras', 'mine.safetensors', data=b'x')
+        cfg.save_config({'klein': {'face_swap_loras': [
+            # exactly the graph's own swap LoRA...
+            {'file': 'klein\\Klein2-9B-SmartCharacterSwap.safetensors', 'strength': 1.0},
+            # ...the same file with the other separator and different case,
+            # which must not dodge the guard...
+            {'file': 'KLEIN/klein2-9b-smartcharacterswap.safetensors', 'strength': 1.0},
+            {'file': 'mine.safetensors', 'strength': 0.7},   # this one is fine
+            {'file': 'mine.safetensors', 'strength': 0.9},   # ...but not twice
+            {'file': 'mine.safetensors', 'strength': 0},     # row switched off
+        ]}})
+        captured = {}
+        monkeypatch.setattr(queue_manager, 'add_job',
+                            lambda **kw: (captured.update(kw), kw['job_id'])[1])
+        fsh.enqueue_face_swap(user_id='local', target_path=str(_img(tmp_path, 'a')),
+                              ref_path=str(_img(tmp_path, 'b')))
+        wf = captured['workflow_data']
+        names = [n['inputs']['lora_name'] for n in wf.values()
+                 if n.get('class_type') == 'LoraLoaderModelOnly']
+        swaps = [n for n in names if 'smartcharacterswap' in n.lower()]
+        assert len(swaps) == 1, f'swap LoRA chained {len(swaps)}x: {names}'
+        assert names.count('mine.safetensors') == 1, f'duplicate row chained: {names}'
+
+
+def test_graph_own_loras_is_read_from_the_shipped_workflow(app):
+    """The editor's duplicate warning is fed from here, so it must track the
+    graph rather than a hardcoded copy that goes stale on the next swap."""
+    from app.services import face_swap_helper as fsh
+    with app.app_context():
+        own = fsh.graph_own_loras()
+        assert any('SmartCharacterSwap' in n for n in own), own
+        assert len(own) == len(set(own))
+
+
 def test_the_lora_list_is_sanitised(app, tmp_path, monkeypatch):
     """Config is hand-editable, so junk must clamp rather than reach ComfyUI."""
     from app import config as cfg

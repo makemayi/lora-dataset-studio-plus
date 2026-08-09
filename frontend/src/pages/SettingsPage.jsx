@@ -65,6 +65,9 @@ export default function SettingsPage() {
   // UI can SHOW the real default text (and "Load default to edit") rather than
   // an empty box. Never persisted; a blank override still means "use default".
   const [promptDefaults, setPromptDefaults] = useState({})
+  // LoRAs the shipped face-swap graph loads by itself — the Face swap LoRAs
+  // editor flags a row duplicating one. Server-derived, never a local copy.
+  const [faceSwapGraphLoras, setFaceSwapGraphLoras] = useState([])
   // Same, one set PER SUBJECT TYPE ({human,animal,…}: {kind: text}) — the identity
   // card edits one subject at a time and must show that subject's real default.
   const [promptDefaultsBySubject, setPromptDefaultsBySubject] = useState({})
@@ -89,6 +92,7 @@ export default function SettingsPage() {
       setSavedConfig(data.config)
       setRuntime(data.runtime || { host: null, port: null })
       setPromptDefaults(data.identity_prompt_defaults || {})
+      setFaceSwapGraphLoras(data.face_swap_graph_loras || [])
       setPromptDefaultsBySubject(data.identity_prompt_defaults_by_subject || {})
       setConfigDefaults(data.config_defaults || {})
       setSecretsPresence(data.secrets)
@@ -358,6 +362,7 @@ export default function SettingsPage() {
     testResults, recordTestResult, saveSecretIfPending, saveConfigSection, saveConfigPatch,
     handleDeleteSecret,
     toggleEngine, handleSave, saving, runtime, promptDefaults, promptDefaultsBySubject,
+    faceSwapGraphLoras,
     configDefaults,
     setIdentityPrompts, caps, refreshCaps: refresh, toast,
   }

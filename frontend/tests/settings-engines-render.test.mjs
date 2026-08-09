@@ -162,6 +162,30 @@ test('the face swap LoRA card renders empty and with rows', () => {
   assert.doesNotMatch(filled, /the face swap runs with just the LoRAs/)
 })
 
+test('a row duplicating a LoRA the swap graph already loads is flagged', () => {
+  const withGraphLoras = (file, graphLoras) => renderToStaticMarkup(
+    createElement(EnginesSection, {
+      config: { ...CONFIG, klein: { face_swap_loras: [{ file, strength: 1 }] } },
+      configDefaults: CONFIG,
+      faceSwapGraphLoras: graphLoras,
+      setField: () => {}, toggleEngine: () => {}, caps: {}, refreshCaps: () => {},
+      toast: { error: () => {}, success: () => {} },
+      secretsPresence: {}, secretInputs: {}, setSecretInputs: () => {},
+      testResults: {}, recordTestResult: () => {}, saveSecretIfPending: () => {},
+      handleDeleteSecret: () => {},
+    }))
+  const own = ['klein\\Klein2-9B-SmartCharacterSwap.safetensors']
+  const warning = /face swap graph already loads this LoRA/
+
+  assert.match(withGraphLoras(own[0], own), warning)
+  // A separator/case difference must not dodge it, same as the server.
+  assert.match(withGraphLoras('KLEIN/klein2-9b-smartcharacterswap.safetensors', own),
+    warning)
+  assert.doesNotMatch(withGraphLoras('something-else.safetensors', own), warning)
+  // No server list yet (first paint) must not invent a warning.
+  assert.doesNotMatch(withGraphLoras(own[0], []), warning)
+})
+
 /* The dataset side of the same class of bug: the angle-reference panel lost its
    placeholder branch when all five slots opened, and a source-text test cannot
    tell a removed branch from a broken one. */

@@ -244,7 +244,7 @@ const MAX_FACE_SWAP_LORAS = 8   // mirrors face_swap_helper.MAX_FACE_SWAP_LORAS
    action with no per-run picker, so a preset would be a name nobody ever gets
    asked to select. Same row controls though — reordering matters, because the
    list IS the chain order. */
-function FaceSwapLorasCard({ config, setField }) {
+function FaceSwapLorasCard({ config, setField, graphLoras = [] }) {
   const rows = Array.isArray(config.klein?.face_swap_loras)
     ? config.klein.face_swap_loras : []
   const save = (next) => setField('klein', 'face_swap_loras', next)
@@ -271,6 +271,14 @@ function FaceSwapLorasCard({ config, setField }) {
       )}
       {rows.map((row, i) => {
         const strength = Number.isFinite(Number(row?.strength)) ? Number(row.strength) : 1.0
+        // The row the server will DROP: it names a LoRA the swap graph already
+        // loads, so a second copy would sum both strengths into one delta well
+        // past what the file was trained for (visible macro-blocking). Said
+        // HERE, where the row is written — the Klein sibling of this trap left
+        // its only trace in the server log, which reads as the app ignoring
+        // your setting. Names come from the server, so they cannot go stale.
+        const duplicate = graphLoras.some(
+          (own) => isFixedLoraDuplicate(row?.file, own))
         return (
           <div key={i} className="flex items-center gap-2 flex-wrap">
             <span className="text-xs text-content-muted w-4 shrink-0" aria-hidden="true">{i + 1}.</span>
@@ -299,6 +307,12 @@ function FaceSwapLorasCard({ config, setField }) {
             <button type="button" onClick={() => save(rows.filter((_, j) => j !== i))}
               aria-label={`Remove face swap LoRA ${i + 1}`} title="Remove this LoRA"
               className={`${SMALL_BTN} hover:bg-red-500/15 hover:text-red-300`}>✕</button>
+            {duplicate && (
+              <p role="alert" className="w-full pl-6 text-[0.6875rem] text-amber-400">
+                The face swap graph already loads this LoRA — this row is skipped.
+                A second copy would stack it on top of itself and block up the image.
+              </p>
+            )}
           </div>
         )
       })}
@@ -2217,7 +2231,8 @@ function ChatgptSubscriptionCard({ caps, config, setField, refreshCaps, toast, c
 }
 
 export default function EnginesSection(props) {
-  const { config, setField, toggleEngine, caps, refreshCaps, toast, configDefaults } = props
+  const { config, setField, toggleEngine, caps, refreshCaps, toast, configDefaults,
+          faceSwapGraphLoras } = props
   return (
     <div className="space-y-6">
       <Card title="API keys" help="Keys are write-only — fields stay blank even when a key is already saved.">
@@ -2274,7 +2289,8 @@ export default function EnginesSection(props) {
       <KleinGenerationCard config={config} setField={setField} configDefaults={configDefaults} />
 
       <KleinLorasCard config={config} setField={setField} />
-      <FaceSwapLorasCard config={config} setField={setField} />
+      <FaceSwapLorasCard config={config} setField={setField}
+        graphLoras={faceSwapGraphLoras} />
 
       <KreaCard config={config} setField={setField} configDefaults={configDefaults} caps={caps} />
 

@@ -53,7 +53,7 @@ export const WHATS_NEW = [
     id: '2026-08-09-face-swap-graph-rebuild',
     date: '2026-08-09',
     title: 'A rebuilt face swap, and your own LoRAs on it',
-    blurb: 'Face swap now runs the rebuilt graph: the head is found with three segmentation passes instead of one person mask, built from your reference, then painted back into the shot — and it uses a few-step INT8 model when you have one, falling back to the ordinary loader when you do not. New in Settings → Image engines: Face swap LoRAs, your own files chained onto that graph in the order you list them. Always on, since face swap has no per-run picker; a row pointing at a file you have since moved is skipped rather than failing the whole batch.',
+    blurb: 'Face swap now runs the rebuilt graph: the head is found with three segmentation passes instead of one person mask, built from your reference, then painted back into the shot — and it uses a few-step INT8 model when you have one, falling back to the ordinary loader when you do not. New in Settings → Image engines: Face swap LoRAs, your own files chained onto that graph in the order you list them. Always on, since face swap has no per-run picker; a row pointing at a file you have since moved is skipped rather than failing the whole batch, and picking one the graph already loads is caught as you write it instead of quietly stacking that LoRA on top of itself.',
     to: '/settings/engines',
   },
   {

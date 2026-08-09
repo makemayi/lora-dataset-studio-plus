@@ -486,6 +486,7 @@ Deliberately **not** the named presets above. Presets exist because the Klein ge
 
 - Each row is `{file, strength}`, strength clamped to **0–1.5** (a missing or unreadable value becomes `1.0`).
 - A row naming a file that is **not on disk** is **skipped**, with a line in the server log. That is on purpose: ComfyUI answers a validation error for the *whole job*, so one stale filename would otherwise cost every tile of a batch. A stale row costs you that LoRA and nothing else.
+- **A row naming a LoRA the graph already loads is skipped**, and the editor flags it as you write it. It would chain that file a second time and sum both strengths into one delta well past what it was trained for — visible as blocky, posterized output. The comparison ignores separator and case, so `klein/x.safetensors` and `klein\X.safetensors` are both caught. Same trap the Klein presets guard against.
 - The face-swap graph's own LoRAs are separate and always applied: the swap LoRA proper (`klein/Klein2-9B-SmartCharacterSwap.safetensors`, required) and an optional style LoRA the shipped graph names, which is **dropped automatically** when that file is absent.
 
 ### Klein generation quality

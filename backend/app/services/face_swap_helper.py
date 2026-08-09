@@ -154,6 +154,25 @@ NODE_MODEL_SINK = '262'          # DifferentialDiffusion — first consumer of t
 _LORA_NODE_PREFIX = 'faceswap_lora_'
 
 
+def graph_own_loras():
+    """The lora_name of every LoRA the SHIPPED graph loads by itself.
+
+    Read off the workflow, never hardcoded: the graph is the thing a maintainer
+    swaps, and this list has to move with it. Used by the settings editor to
+    flag a duplicate row where it is written — the server drops it either way,
+    but the only trace would otherwise be one line in the log, which is exactly
+    how the Klein sibling of this trap went unexplained."""
+    try:
+        workflow = load_workflow_local(str(WORKFLOW_FACE_SWAP_PATH)) or {}
+    except Exception:                                  # noqa: BLE001
+        logger.debug('face swap: could not read the shipped graph', exc_info=True)
+        return []
+    return sorted({n['inputs']['lora_name'] for n in workflow.values()
+                   if isinstance(n, dict)
+                   and n.get('class_type') == 'LoraLoaderModelOnly'
+                   and isinstance(n.get('inputs', {}).get('lora_name'), str)})
+
+
 def configured_face_swap_loras():
     """Sanitized `klein.face_swap_loras`: ordered [{file, strength}] with blank
     rows dropped, strengths clamped to [0, 1.5] (junk -> 1.0) and the list
@@ -190,20 +209,44 @@ def append_model_loras(workflow, rows):
     dropped for being absent — and would keep working if the graph gains
     another patch node before the sink.
 
-    A row naming a file that is not on disk is SKIPPED with a warning rather
-    than queued: ComfyUI would answer a validation 400 for the whole job, and
-    losing every tile of a batch to one stale filename in a settings list is a
-    bad trade for a LoRA the user can re-add in one click."""
+    Three kinds of row are SKIPPED rather than queued:
+
+    * a file that is not on disk — ComfyUI answers a validation 400 for the
+      whole job, and losing every tile of a batch to one stale filename in a
+      settings list is a bad trade for a LoRA the user can re-add in one click;
+    * strength 0, which is the row switched off;
+    * a file the graph ALREADY loads. That one is not merely redundant: it
+      chains the identical LoRA a second time and sums both strengths into one
+      delta well past what the file was trained for, which shows up as visible
+      macro-blocking. Same trap the Klein generation presets guard against
+      (measured on the Krea sibling, reported by waltm on Discord) — this list
+      shipped without the guard and would have double-stacked the swap LoRA
+      itself the moment someone picked it. Comparison is normcase+normpath, so
+      a '/' vs '\\' or a case difference cannot dodge it.
+    """
     sink = workflow.get(NODE_MODEL_SINK, {}).get('inputs', {}).get('model')
     if not (rows and isinstance(sink, list) and len(sink) == 2):
         return []
+    already = {os.path.normcase(os.path.normpath(n['inputs']['lora_name']))
+               for n in workflow.values()
+               if n.get('class_type') == 'LoraLoaderModelOnly'
+               and isinstance(n.get('inputs', {}).get('lora_name'), str)}
     usable = []
     for row in rows:
-        if _face_swap_lora_abs(row['file']):
-            usable.append(row)
-        else:
+        key = os.path.normcase(os.path.normpath(row['file']))
+        if not _face_swap_lora_abs(row['file']):
             logger.warning('face swap: LoRA %r is not on disk — skipped',
                            row['file'])
+        elif row['strength'] <= 0:
+            logger.info('face swap: LoRA %r strength 0 — skipped (row off)',
+                        row['file'])
+        elif key in already:
+            logger.warning('face swap: LoRA %r is already loaded by the swap '
+                           'graph — skipped (a second copy would double-stack '
+                           'it into visible blocking)', row['file'])
+        else:
+            already.add(key)          # ...and a row repeated twice in the list
+            usable.append(row)
     if not usable:
         return []
 
