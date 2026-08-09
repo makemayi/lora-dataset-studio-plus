@@ -270,3 +270,94 @@ def test_launch_training_forwards_the_configured_peft_type(
         result = ots.launch_training(LOCAL_USER, ds.id, steps=100, check_captions=False)
         written = _json.loads(open(result['config_path'], encoding='utf-8').read())
         assert written['peft_type'] == 'OFT_2'
+
+
+# --- The GPU guards this lane never had (2026-08-09) ---------------------------
+# OneTrainer's launch checked only "is another training running". It would start
+# on a card ComfyUI was rendering on, or one an idle ComfyUI was still holding —
+# and the second case killed an ai-toolkit run the same day: an idle ComfyUI sat
+# on 4.4 GB, the run got ~18 GB of a 24 GB card, and the step time went
+# 8.4 s -> 78 s -> 104 s before the process died at step 3 with no error.
+# OneTrainer trains the same 12B Krea model on the same card.
+
+def _trainable_krea_dataset(svc, LOCAL_USER, name):
+    import os as _os
+    from PIL import Image
+    from app.models import FaceDatasetImage
+    ds = svc.create_dataset(LOCAL_USER, name, name.lower().replace(' ', '_'))
+    d = svc._dataset_dir(ds.id)
+    _os.makedirs(d, exist_ok=True)
+    Image.new('RGB', (64, 64), (200, 100, 50)).save(_os.path.join(d, 'a.png'))
+    ds.train_type = 'krea'
+    svc.db.session.add(FaceDatasetImage(dataset_id=ds.id, filename='a.png',
+                                        status='keep', caption='a photo'))
+    svc.db.session.commit()
+    return ds
+
+
+def _installed_onetrainer(cfg, tmp_path):
+    root = tmp_path / 'OneTrainer'
+    (root / 'venv' / 'Scripts').mkdir(parents=True, exist_ok=True)
+    (root / 'venv' / 'Scripts' / 'python.exe').write_text('')
+    cfg.save_config({'onetrainer': {'dir': str(root)}})
+
+
+@pytest.mark.parametrize('verdict_name,should_pass', [
+    ('FREED', True),
+    ('COMFYUI_OFFLINE', True),
+    ('UNKNOWN', False),
+])
+def test_onetrainer_refuses_a_card_comfyui_has_not_released(
+        onetrainer, tmp_path, monkeypatch, app, verdict_name, should_pass):
+    from app.config import LOCAL_USER
+    from app.gpu_window import GpuBusyError
+    from app.services import face_dataset_service as svc
+    from app.utils.comfyui import ComfyVramFreeVerdict
+    ots, cfg = onetrainer
+    _installed_onetrainer(cfg, tmp_path)
+
+    called = []
+    monkeypatch.setattr(
+        'app.utils.comfyui.free_comfyui_vram',
+        lambda: (called.append(True), getattr(ComfyVramFreeVerdict, verdict_name))[1])
+
+    class FakeProc:
+        pid = 777
+        def poll(self):
+            return None
+    monkeypatch.setattr(ots.subprocess, 'Popen', lambda *a, **k: FakeProc())
+
+    with app.app_context():
+        ds = _trainable_krea_dataset(svc, LOCAL_USER, f'OT {verdict_name}')
+        if should_pass:
+            result = ots.launch_training(LOCAL_USER, ds.id, steps=100,
+                                         check_captions=False)
+            assert result['pid'] == 777
+        else:
+            with pytest.raises(GpuBusyError) as e:
+                ots.launch_training(LOCAL_USER, ds.id, steps=100,
+                                    check_captions=False)
+            assert 'did not confirm' in str(e.value)
+    assert called, 'the guard must actually ask ComfyUI to release the card'
+
+
+def test_onetrainer_refuses_while_comfyui_has_queued_work(
+        onetrainer, tmp_path, monkeypatch, app):
+    """The check the ai-toolkit lane always had and this one never did."""
+    from app.config import LOCAL_USER
+    from app.gpu_window import GpuBusyError
+    from app.job_queue import queue_manager
+    from app.services import face_dataset_service as svc
+    ots, cfg = onetrainer
+    _installed_onetrainer(cfg, tmp_path)
+    monkeypatch.setattr(queue_manager, 'has_comfyui_work', lambda: True)
+    spawned = []
+    monkeypatch.setattr(ots.subprocess, 'Popen',
+                        lambda *a, **k: spawned.append(True))
+
+    with app.app_context():
+        ds = _trainable_krea_dataset(svc, LOCAL_USER, 'OT busy')
+        with pytest.raises(GpuBusyError) as e:
+            ots.launch_training(LOCAL_USER, ds.id, steps=100, check_captions=False)
+    assert 'queued or active work' in str(e.value)
+    assert spawned == [], 'nothing may spawn while ComfyUI owns the card'

@@ -16,12 +16,15 @@ state machine.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import subprocess
 from pathlib import Path
 
 from .. import config as cfg
+
+logger = logging.getLogger(__name__)
 
 MODEL_TYPE_KREA_2 = 'KREA_2'
 TRAINING_METHOD_LORA = 'LORA'
@@ -225,6 +228,38 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
     if (queue_manager._get_system_state('training_in_progress', False)
             and _pid_alive(queue_manager._get_system_state('training_pid', None))):
         raise ValueError('a training is already in progress - wait for it to finish or queue this dataset')
+    # THE GPU, same three questions the ai-toolkit lane asks. This lane asked
+    # none of them: it checked only that no OTHER training was running, so it
+    # would start on a card ComfyUI was rendering on, or one an idle ComfyUI was
+    # still holding.
+    #
+    # That second case is not theoretical — it killed an ai-toolkit run on
+    # 2026-08-09. An idle ComfyUI sat on 4.4 GB (6005 MiB, 1581 MiB after
+    # /free), the run started with ~18 GB of a 24 GB card instead of ~22 GB,
+    # and WDDM paged VRAM to system RAM until the step time went 8.4 s -> 78 s
+    # -> 104 s and the process died at step 3 with no error. OneTrainer trains
+    # the same 12B Krea model on the same card and would fail the same way.
+    from ..gpu_window import GpuBusyError
+    from ..utils.comfyui import ComfyVramFreeVerdict, free_comfyui_vram
+    from .lora_training import _assert_no_vision_pass_on_gpu
+    _assert_no_vision_pass_on_gpu()
+    if queue_manager.has_comfyui_work():
+        raise GpuBusyError(
+            'ComfyUI has queued or active work, so local training cannot take the GPU. '
+            'Wait for it to finish or cancel it safely first.')
+    try:
+        verdict = free_comfyui_vram()
+    except Exception:
+        logger.exception('onetrainer: ComfyUI /free raised unexpectedly')
+        verdict = None
+    if verdict not in (ComfyVramFreeVerdict.FREED,
+                       ComfyVramFreeVerdict.COMFYUI_OFFLINE):
+        raise GpuBusyError(
+            'ComfyUI did not confirm that its GPU models were released, so '
+            'training would start on a card it is still holding. Wait for '
+            'ComfyUI to recover (or stop it) and start the run again.')
+    logger.info('onetrainer: ComfyUI VRAM release verdict=%s',
+                getattr(verdict, 'value', verdict))
     if check_captions:
         assert_trainable(dataset_id, train_type='krea')
 
