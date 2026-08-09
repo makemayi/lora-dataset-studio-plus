@@ -290,16 +290,25 @@ card together and pays that cost once per card, not once per image.
   something to decide only at higher frame counts.
 - **Sampler steps** → `minimax_h3.steps`. Default **`25`**. Paid once per frame
   in the packet.
-- **Output megapixels** → `minimax_h3.max_output_mp`. **`config.json` only** — no
-  checkbox, deliberately: it is the one dial here whose measurements do not hold
-  if you move it. Default **`1.0`**, the size every number on this page was taken
-  at. It is the *cap*, not a target: the canvas never exceeds what the reference
-  photo itself carries, because a packet is sampled per image and every extra
-  pixel is paid once per frame. The **shape**
+- **Output size.** Not a setting — H3 generates on **the canvas the model was
+  trained on**: 768 px on the short edge, total area capped at 768×1344. So a
+  1:1 card is 768×768, a 3:4 card 768×1024, a 16:9 card 1344×768, and the RTX 2×
+  upscale below (on by default) doubles whichever one you get. The **shape**
   comes from the catalog card you are generating (a full-body card is portrait, a
   wide establishing card is landscape) — before 2026-08-09 H3 copied the aspect of
   your *reference photo* instead, so a square reference produced a square version
-  of every shot.
+  of every shot. Your reference photo's own size no longer affects the output at
+  all; nothing is copied from it, the frame is re-synthesised.
+- **Output megapixels** → `minimax_h3.max_output_mp`. **`config.json` only** — no
+  checkbox, deliberately, and you should not normally touch it. It is a *cap* on
+  top of the canvas above, defaulting to the model's own (`1.032192`), so by
+  default it does nothing. Lowering it takes H3 **off** its trained canvas, which
+  is exactly what used to crop the top of heads out of portrait shots: until
+  2026-08-09 this dial was the only thing choosing the size, at a flat 1.0 MP,
+  which made a head-and-shoulders card 992×992 instead of 768×768 — 29 % over on
+  the short edge. Off-canvas the model enlarges the subject rather than showing
+  more of it, and the hairline leaves the frame. It stays available for a card
+  that genuinely cannot hold 768 short edge; it is not a quality dial.
 - **Reference downscaled to** → `minimax_h3.ref_longer_edge`. Default **`1024`**
   px. The reference is shrunk to this before it reaches the 32B vision encoder;
   every reference pixel is paid for again on each new shot description.

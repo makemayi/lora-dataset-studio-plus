@@ -330,23 +330,54 @@ def test_the_catalog_card_decides_the_shape_not_the_reference(
         h3, requested_aspect, expected_ratio):
     """Both callers resolve the card's ratio and pass it; H3 used to drop it and
     copy the REFERENCE's aspect, so a square reference answered a full-body card
-    with a square. The pixel budget is unchanged — only the shape moves."""
+    with a square. Only the shape comes from the card — the size is the model's."""
     mh, _base, _cfg = h3
     ow, oh = mh.fit_output_size(1024, 1024, requested_aspect=requested_aspect)
     assert ow % 32 == 0 and oh % 32 == 0
     assert abs((ow / oh) / expected_ratio - 1) < 0.04
 
 
-def test_a_card_ratio_never_invents_pixels_the_reference_does_not_have(h3):
-    """A packet is sampled per image, so every extra pixel is paid once per
-    frame. Reshaping must not become upscaling."""
+@pytest.mark.parametrize(('requested_aspect', 'expected'), [
+    ('1:1', (768, 768)),
+    ('3:4', (768, 1024)),
+    ('4:3', (1024, 768)),
+    ('16:9', (1344, 768)),
+    ('9:16', (768, 1344)),
+])
+def test_the_canvas_is_the_one_the_model_was_trained_on(h3, requested_aspect, expected):
+    """THE crop fix. `adapt_canvas` in comfy_extras/nodes_minimax_h3.py is 768
+    short edge, area capped at 768*1344 — and the ref2va node never calls it, so
+    whatever we send lands on the empty latent as-is. A flat 1 MP budget answered
+    a 1:1 card with 992x992 against a native 768x768, and off its trained canvas
+    the DiT enlarges the subject instead of showing more of it: the top of the
+    hair leaves the frame. These five numbers ARE the node's own, recomputed."""
     mh, _base, _cfg = h3
-    ow, oh = mh.fit_output_size(640, 640, requested_aspect='3:4')
-    assert ow * oh <= 640 * 640
-    assert abs((ow / oh) / (3 / 4) - 1) < 0.04
-    # ...and the megapixel budget still wins over a large reference.
-    ow, oh = mh.fit_output_size(4000, 4000, requested_aspect='3:4')
-    assert ow * oh <= mh.MAX_OUTPUT_MP * 1_000_000
+    assert mh.fit_output_size(1024, 1024, requested_aspect=requested_aspect) == expected
+
+
+def test_a_small_reference_no_longer_shrinks_the_canvas(h3):
+    """The old rule capped the canvas at the reference's own pixel count, which
+    re-created the same off-canvas bug pointing down (a 640² reference answered a
+    3:4 card at 640x832). Nothing is copied from the reference — H3 re-synthesises
+    the frame — so its size must not decide the generation's."""
+    mh, _base, _cfg = h3
+    assert mh.fit_output_size(640, 640, requested_aspect='3:4') == (768, 1024)
+    assert (mh.fit_output_size(640, 640, requested_aspect='3:4')
+            == mh.fit_output_size(4000, 4000, requested_aspect='3:4'))
+
+
+def test_the_config_cap_still_wins_over_the_canvas(h3):
+    """`minimax_h3.max_output_mp` stays a cap on top of the canvas — off-canvas
+    and all, it is a config-only escape hatch."""
+    mh, _base, _cfg = h3
+    ow, oh = mh.fit_output_size(1024, 1024, max_mp=0.3, requested_aspect='3:4')
+    assert ow % 32 == 0 and oh % 32 == 0
+    assert ow * oh <= 300_000
+    assert abs((ow / oh) / (3 / 4) - 1) < 0.06
+    # A cap at or above the model's own changes nothing.
+    assert (mh.fit_output_size(1024, 1024, max_mp=mh.MAX_OUTPUT_MP,
+                               requested_aspect='16:9')
+            == mh.fit_output_size(1024, 1024, requested_aspect='16:9'))
 
 
 def test_the_enqueue_actually_forwards_the_card_ratio(h3, tmp_path, monkeypatch):

@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-09-h3-stops-cropping-heads',
+    date: '2026-08-09',
+    title: 'MiniMax H3 stops cutting the top of heads off',
+    blurb: 'H3 was generating above the canvas the model was trained on — 992×992 for a portrait card instead of 768×768 — and off that canvas it enlarges your subject instead of showing more of them, so hairlines walked out of the frame. Every shot now lands on the model\'s own canvas for its shape, and takes about 40% fewer pixels to get there.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-09-comfyui-liveness-check-stops-lying',
     date: '2026-08-09',
     title: 'A busy ComfyUI no longer reads as a stopped one',

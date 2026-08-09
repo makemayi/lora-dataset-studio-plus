@@ -38,7 +38,9 @@ install carrying only core plus that one pack must generate, slower, same image.
 
 `ResolutionSelector` is dropped on purpose: the node's `width`/`height` are plain
 INTs with step 32, so `fit_output_size` owns the geometry and one more node-name
-dependency disappears.
+dependency disappears. What it must NOT drop with it is the model's own canvas
+rule — see the geometry section below; the first version did, and cut the top of
+people's heads off for it.
 
 MEASURED, 2026-08-08, RTX 3090 24 GB (do not "simplify" these away)
 -------------------------------------------------------------------
@@ -51,7 +53,8 @@ MEASURED, 2026-08-08, RTX 3090 24 GB (do not "simplify" these away)
     randomly takes 6x longer, which is why `preflight` says so out loud.
   * New prompt 77.5 s · same prompt, new seed 37-38 s · first run after a restart
     257 s. The encode is ~40 s of that, not the 300 s a naive subtraction across
-    a thrashing install suggests.
+    a thrashing install suggests. Taken at the OLD 992² canvas, so the sampling
+    half of those numbers is now an upper bound — 768² is 40% fewer pixels.
   * **The seed does not invalidate the encode**: `RandomNoise` feeds the sampler
     only, never `MiniMaxH3ReferenceToVideo`. A batch that emits one card's copies
     consecutively pays the encode ONCE — 75 min against 130 min for 100 images
@@ -363,9 +366,29 @@ def preflight():
 
 
 # --- Output geometry and packet length --------------------------------------
-# Measured at 1 MP. Larger canvases were not tested, and every extra pixel is
-# paid five times over because the model samples a packet, not an image.
-MAX_OUTPUT_MP = 1.0
+# THE CANVAS IS THE MODEL'S, NOT OURS.
+#
+# `comfy_extras/nodes_minimax_h3.py` defines `BASE_SHORT_EDGE = 768`,
+# `MAX_PIXELS = 768 * 1344` and an `adapt_canvas(w, h)` that turns a ratio into
+# the canvas H3 was trained on. The ref2va node does NOT call it — only the
+# reference-VIDEO branch does — so the `width`/`height` we send land on the empty
+# latent unchanged. Dropping `ResolutionSelector` therefore dropped the
+# constraint along with the node, and the first version of this function put a
+# flat 1 MP budget in its place:
+#
+#   card 1:1, 1024² reference -> 992x992   native 768x768   short edge +29%
+#   card 3:4, 1024² reference -> 864x1152  native 768x1024  short edge +12%
+#
+# Off its trained canvas the DiT enlarges the subject rather than showing more of
+# it, so the composition grows past the frame. On a head-and-shoulders card that
+# reads exactly as reported: the top of the hair is cut off, worst on 1:1, which
+# is also the framing that overshoots most. Reported 2026-08-09.
+#
+# So: the ratio still comes from the catalog card, and the SIZE now comes from
+# the model. `max_output_mp` stays a cap on top, defaulting to the model's own.
+BASE_SHORT_EDGE = 768             # nodes_minimax_h3.BASE_SHORT_EDGE
+MAX_CANVAS_PIXELS = 768 * 1344    # nodes_minimax_h3.MAX_PIXELS
+MAX_OUTPUT_MP = MAX_CANVAS_PIXELS / 1_000_000
 _SIZE_MULTIPLE = 32          # the node's own step for width/height
 
 # `length` is min 5, step 17 on the node — an off-step value is a validation
@@ -403,46 +426,71 @@ def _aspect_ratio(requested_aspect):
     return ratio
 
 
-def _requested_canvas(ratio, budget):
-    """Largest near-ratio 32-grid canvas that does not exceed ``budget``."""
-    cells = max(1, int(budget // (_SIZE_MULTIPLE ** 2)))
-    height_cells = max(1, int((cells / ratio) ** 0.5))
-    width_cells = max(1, int(round(ratio * height_cells)))
-    while width_cells * height_cells > cells:
-        # Step down whichever side currently sits furthest from the requested
-        # ratio. This only runs on the 32 grid, so it cannot drift above budget.
-        if width_cells / height_cells > ratio:
-            width_cells = max(1, width_cells - 1)
-        else:
-            height_cells = max(1, height_cells - 1)
-    return width_cells * _SIZE_MULTIPLE, height_cells * _SIZE_MULTIPLE
+def _snap(value):
+    """Round one axis onto the node's 32 grid, never below one cell."""
+    return max(_SIZE_MULTIPLE,
+               int(round(float(value) / _SIZE_MULTIPLE)) * _SIZE_MULTIPLE)
+
+
+def _model_canvas(ratio):
+    """The canvas H3 was trained on for a ``W:H`` ratio.
+
+    A port of `adapt_canvas` in `comfy_extras/nodes_minimax_h3.py`, deliberately
+    kept numerically identical line for line: short edge 768, total area capped
+    at 768*1344, each axis rounded to 32. The ref2va node never runs it on the
+    generation size, so this is the only place it happens.
+
+        1:1 -> 768x768    3:4 -> 768x1024    16:9 -> 1344x768
+    """
+    if ratio >= 1.0:
+        nom_w, nom_h = BASE_SHORT_EDGE * ratio, float(BASE_SHORT_EDGE)
+    else:
+        nom_w, nom_h = float(BASE_SHORT_EDGE), BASE_SHORT_EDGE / ratio
+    if nom_w * nom_h > MAX_CANVAS_PIXELS:
+        s = math.sqrt(MAX_CANVAS_PIXELS / (nom_w * nom_h))
+        nom_w, nom_h = nom_w * s, nom_h * s
+    return _snap(nom_w), _snap(nom_h)
 
 
 def fit_output_size(width, height, max_mp=None, requested_aspect=None):
-    """A width/height inside the megapixel budget, both multiples of 32. The node
-    takes plain INTs, so this replaces `ResolutionSelector` and its ratio enum
-    entirely.
+    """The model's own canvas for this shot: a width/height, both multiples of
+    32. The node takes plain INTs, so this replaces `ResolutionSelector` and its
+    ratio enum entirely.
 
     A valid ``requested_aspect`` (``W:H``, the catalog card's own ratio) decides
-    the SHAPE; without one, the source's aspect is kept. Either way the pixel
-    count stays inside the budget AND inside what the reference already carries:
-    a portrait card must not turn a 1024² reference into four times the pixels,
-    because H3 pays every one of them once per frame of the packet.
+    the SHAPE; without one, the source's aspect is kept. The SIZE is then the
+    trained canvas for that shape (see `_model_canvas`), optionally capped by
+    ``max_mp``. ``width``/``height`` are the reference's — they are read for
+    their ratio only.
 
-    Before this, the shape came from the reference alone — so a square reference
-    answered a full-body card with a square, whatever the card asked for."""
-    budget = (MAX_OUTPUT_MP if max_mp is None else float(max_mp)) * 1_000_000
-    w = max(1.0, float(width or 0))
-    h = max(1.0, float(height or 0))
+    Two rules used to live here and are gone on purpose:
+
+    * a flat megapixel budget instead of the canvas. It overshot every ratio,
+      worst on 1:1, and that overshoot is what crops the top of a head.
+    * "never invent pixels the reference does not have". It sounds thrifty and
+      it re-creates the same bug pointing down: a 640² reference would be
+      answered at 640x832 for a 3:4 card, off-canvas again, and no pixel is
+      copied from the reference anyway — H3 re-synthesises the whole frame from
+      a latent, so a small reference does not make a small shot cheaper to get
+      right. Cost is bounded by the canvas itself, which is smaller than the old
+      budget for every ratio except the widest.
+    """
     ratio = _aspect_ratio(requested_aspect)
-    if ratio is not None:
-        return _requested_canvas(ratio, min(budget, w * h))
-    scale = math.sqrt(budget / (w * h))
-    if scale < 1.0:
-        w, h = w * scale, h * scale
-    out_w = max(_SIZE_MULTIPLE, int(round(w / _SIZE_MULTIPLE)) * _SIZE_MULTIPLE)
-    out_h = max(_SIZE_MULTIPLE, int(round(h / _SIZE_MULTIPLE)) * _SIZE_MULTIPLE)
-    # Rounding UP on both axes can cross the budget; step the long side back.
+    if ratio is None:
+        ratio = max(1.0, float(width or 0)) / max(1.0, float(height or 0))
+        if not (math.isfinite(ratio) and ratio > 0):
+            ratio = 1.0
+    out_w, out_h = _model_canvas(ratio)
+    if max_mp is None:
+        return out_w, out_h
+    budget = float(max_mp) * 1_000_000
+    if out_w * out_h <= budget:
+        return out_w, out_h
+    # A user cap below the trained canvas is honoured, off-canvas and all: it is
+    # a config-only escape hatch for a card that cannot hold 768 short edge.
+    scale = math.sqrt(budget / (out_w * out_h))
+    out_w, out_h = _snap(out_w * scale), _snap(out_h * scale)
+    # Rounding UP on both axes can cross the cap; step the long side back.
     while out_w * out_h > budget and max(out_w, out_h) > _SIZE_MULTIPLE:
         if out_w >= out_h:
             out_w -= _SIZE_MULTIPLE
@@ -626,8 +674,9 @@ def enqueue_minimax_h3(user_id, source_filename, edit_prompt, source_path=None,
     source, RuntimeError when ComfyUI isn't configured.
 
     `aspect_ratio` is the catalog card's own ``W:H`` (both callers resolve it
-    with `aspect_for_label`). It decides the output SHAPE; the reference still
-    decides the pixel count. Absent or unusable keeps the reference's aspect.
+    with `aspect_for_label`). It decides the output SHAPE; the model's trained
+    canvas for that shape decides the size. Absent or unusable keeps the
+    reference's aspect.
 
     `framing` is accepted for signature parity with the Krea lane and is not read
     yet: H3 has no per-framing dial measured, and inventing one would be guessing.
@@ -657,10 +706,11 @@ def enqueue_minimax_h3(user_id, source_filename, edit_prompt, source_path=None,
     comfy_input = os.path.basename(staged_source)
 
     src_w, src_h = _source_size(staged_source)
-    # The catalog card decides the SHAPE, the reference decides how many pixels
-    # (see fit_output_size). Both callers already resolve the card's ratio; H3
-    # used to drop it and copy the reference's own aspect, so a square reference
-    # answered a full-body card with a square.
+    # The catalog card decides the SHAPE, the model's trained canvas decides the
+    # size (see fit_output_size). The reference is read for its ratio only, and
+    # only when the card has none. Both callers already resolve the card's ratio;
+    # H3 used to drop it and copy the reference's own aspect, so a square
+    # reference answered a full-body card with a square.
     width, height = fit_output_size(src_w, src_h,
                                     max_mp=_cfg_float('minimax_h3.max_output_mp',
                                                       MAX_OUTPUT_MP),
