@@ -91,6 +91,32 @@ function DownloadProgress({ download }) {
   );
 }
 
+/* Half-downloaded weights sitting in the cache. huggingface_hub resumes a
+   partial with an ITEM bar ('Fetching 2 files: 0/2'), never the byte bar
+   DownloadProgress understands — so a run pulling gigabytes showed no step, no
+   loss and no download, which is indistinguishable from a hang. Measured
+   2026-08-09: a run sat for 1h46m re-fetching a text encoder whose two shards
+   were 1.6 GB partials, and this panel said nothing at all.
+
+   Only shown while a run is ACTIVE and before it reports steps: once the
+   training loop is counting, leftover partials are not what the user is waiting
+   on. The figure is what is already on disk, not what remains — the remainder
+   is not knowable without asking Hugging Face, and guessing it would be the
+   kind of invented number this codebase refuses elsewhere. */
+function CachePending({ pending, active, hasStep }) {
+  if (!pending || !active || hasStep || !pending.files) return null;
+  const gb = pending.bytes / (1024 ** 3);
+  const size = gb >= 0.1 ? `${gb.toFixed(1)} GB` : `${Math.round(pending.bytes / (1024 ** 2))} MB`;
+  return (
+    <p className="m-0 text-[0.625rem] text-amber-300">
+      Still fetching weights — {pending.files} partially downloaded file
+      {pending.files === 1 ? '' : 's'} in the cache ({size} so far). A resumed
+      download prints no progress of its own, so this phase can look stuck when
+      it is not.
+    </p>
+  );
+}
+
 /* `showLaunch` is false where the CALLER already renders the launch checklist
    from the run's own payload (the Runs hub card): the poll answers for the
    dataset's newest run, so letting both draw it would print two checklists
@@ -161,6 +187,7 @@ export default function TrainingProgress({ datasetId, base, trainType, variant,
         <p className="m-0 text-sky-300 text-[0.625rem]">{prog.phase}{prog.phase_detail ? ` — ${prog.phase_detail}` : ''}</p>
       )}
       <DownloadProgress download={prog.download} />
+      <CachePending pending={prog.cache_pending} active={prog.active} hasStep={pct != null} />
       {pct != null && (
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2 text-[0.6875rem] text-content-muted flex-wrap">

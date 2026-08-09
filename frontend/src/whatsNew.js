@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-09-training-progress-tells-the-truth',
+    date: '2026-08-09',
+    title: 'Training that is downloading no longer looks like training that is stuck',
+    blurb: 'A run spent 1 hour 46 minutes quietly re-fetching a text encoder whose shards were half-downloaded in the cache, and the panel showed nothing at all — no step, no loss, no download bar — because a resumed download reports itself differently from a fresh one. It now says so out loud while it happens. Two more honesty fixes alongside it: the step counter no longer reports setup work as training progress (a 3500-step run used to display "0 / 2" while it was still loading the model), and the log is unbuffered so it updates as the run goes instead of in 8 KB bursts. A stalled download also gives up after 30 seconds now rather than hanging forever.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-09-face-swap-graph-rebuild',
     date: '2026-08-09',
     title: 'A rebuilt face swap, and your own LoRAs on it',

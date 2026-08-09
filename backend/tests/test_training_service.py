@@ -94,7 +94,7 @@ def test_training_progress_no_log_yet(app, tmp_path, monkeypatch):
         p = lt.training_progress(LOCAL_USER, ds.id)
     assert p == {'active': False, 'log_exists': False, 'step': None, 'total': None,
                  'loss': None, 'speed': None, 'eta': None, 'loss_curve': [], 'samples': [],
-                 'masks_skipped': False, 'download': None}
+                 'masks_skipped': False, 'download': None, 'cache_pending': None}
 
 
 # --- Disk-space guard ----------------------------------------------------------
@@ -1743,3 +1743,84 @@ def test_find_run_collision_only_names_datasets_the_library_lists(app, monkeypat
         # list must not make it collide with itself.
         monkeypatch.setattr(svc, 'list_datasets', lambda uid: [second])
         assert lt.find_run_collision(LOCAL_USER, second.id) is None
+
+
+# --- Setup bars are not training progress (2026-08-09) -------------------------
+# Reported as "I cannot see any progress": the panel showed **step 0 of 2** for a
+# 3500-step run that had not started training. The log's last bar was
+# 'Fetching 2 files: 0/2' — huggingface_hub resuming a half-downloaded text
+# encoder — and the parser took the last bar of any kind. Verbatim excerpts from
+# that run's training.log.
+
+_REAL_SETUP_LOG = (
+    "Loading Krea 2 model\r\n"
+    "Loading transformer (SingleStreamDiT)\r\n"
+    " - quantizing 28 transformer blocks\r\n"
+    " 79%|#######9  | 22/28 [00:15<00:04,  1.43it/s]\r"
+    "100%|##########| 28/28 [00:19<00:00,  1.43it/s]\r\n"
+    "Moving transformer to CPU\r\n"
+    "Loading Qwen3-VL text encoder from Qwen/Qwen3-VL-4B-Instruct\r\n"
+    "Fetching 2 files:   0%|          | 0/2 [00:00<?, ?it/s]\r\n"
+)
+
+
+def test_setup_bars_are_not_reported_as_training_progress():
+    """With the run's real step count known, ONLY a bar counting to it is
+    progress. Everything else yields no numbers — 'preparing', not a fake 0/2."""
+    from app.services.lora_training import _parse_training_log
+    p = _parse_training_log(_REAL_SETUP_LOG, expected_total=3500)
+    assert p['step'] is None, f"setup bar leaked through as step {p['step']}"
+    assert p['total'] is None
+    assert p['loss_curve'] == []
+
+
+def test_the_bug_as_shipped_without_the_step_count():
+    """Without expected_total the old last-bar-wins rule still applies, minus the
+    NAMED huggingface bars. 28/28 (quantizing) is indistinguishable from a real
+    28-step run, so it is still taken — which is exactly why the step count is
+    passed in production."""
+    from app.services.lora_training import _parse_training_log
+    p = _parse_training_log(_REAL_SETUP_LOG)
+    assert (p['step'], p['total']) == (28, 28)   # not (0, 2): 'Fetching 2 files' is filtered
+
+
+def test_the_real_training_bar_still_parses_with_a_step_count():
+    """The other half of the promise: ai-toolkit's own bar carries a desc too
+    ('lora_t:'), so the filter must key on the huggingface bar NAMES, never on
+    'has a description'."""
+    from app.services.lora_training import _parse_training_log
+    text = _REAL_SETUP_LOG + (
+        "lora_t:   5%|3         | 175/3500 [03:26<1:05:03,  1.37s/it, lr: 1.0e+00 loss: 2.9e-01]\r\n")
+    p = _parse_training_log(text, expected_total=3500)
+    assert (p['step'], p['total']) == (175, 3500)
+    assert p['loss'] == pytest.approx(0.29)
+
+
+def test_configured_steps_is_read_from_the_runs_own_config(tmp_path):
+    from app.services.lora_training import _configured_steps
+    assert _configured_steps(tmp_path) is None
+    job = tmp_path / 'lora_x'
+    job.mkdir()
+    (job / 'config.yaml').write_text(
+        "config:\n  process:\n    - train:\n        batch_size: 1\n"
+        "        steps: 3500\n        dtype: bf16\n", encoding='utf-8')
+    assert _configured_steps(tmp_path) == 3500
+
+
+def test_hf_cache_pending_reports_half_downloaded_weights(tmp_path, monkeypatch):
+    """A resumed download prints an item bar, not a byte bar, so nothing else in
+    the payload can tell the user gigabytes are still coming."""
+    from app.services import lora_training as lt
+    hub = tmp_path / 'hub'
+    (hub / 'models--x--y' / 'blobs').mkdir(parents=True)
+    monkeypatch.setattr(lt, '_hf_hub_cache', lambda: hub)
+    assert lt.hf_cache_pending() is None
+    (hub / 'models--x--y' / 'blobs' / 'abc.incomplete').write_bytes(b'0' * 2048)
+    assert lt.hf_cache_pending() == {'files': 1, 'bytes': 2048}
+
+
+def test_hf_cache_pending_never_raises(monkeypatch):
+    from app.services import lora_training as lt
+    monkeypatch.setattr(lt, '_hf_hub_cache',
+                        lambda: (_ for _ in ()).throw(RuntimeError('unconfigured')))
+    assert lt.hf_cache_pending() is None

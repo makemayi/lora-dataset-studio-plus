@@ -571,8 +571,17 @@ def training_subprocess_env(hf_home=None) -> dict:
 
     Never logs, and never copies a token anywhere but into this env dict.
     """
+    # PYTHONUNBUFFERED: the child's stdout is redirected to a FILE, so Python
+    # block-buffers it at 8 KB instead of line-buffering to a tty. A run that
+    # had written 1 KB of startup noise then showed nothing for over an hour —
+    # not because it was stuck, but because its next 7 KB were still in the
+    # buffer. Costs nothing; makes 'is it moving?' answerable.
+    # HF_HUB_DOWNLOAD_TIMEOUT: a stalled fetch must FAIL, not hang forever. The
+    # default is no deadline at all, and a half-open connection to the HF CDN
+    # then holds the whole run indefinitely with no output.
     env = dict(os.environ, HF_HOME=str(hf_home if hf_home is not None else _hf_home()),
-               PYTHONIOENCODING='utf-8', PYTHONUTF8='1')
+               PYTHONIOENCODING='utf-8', PYTHONUTF8='1', PYTHONUNBUFFERED='1',
+               HF_HUB_DOWNLOAD_TIMEOUT=os.environ.get('HF_HUB_DOWNLOAD_TIMEOUT', '30'))
     token = (cfg.secret('HF_TOKEN') or '').strip()
     if token:
         env['HF_TOKEN'] = token
@@ -5840,6 +5849,59 @@ def _run_root(ds, base_model=_PERSISTED, family=None, variant=_PERSISTED):
     return _output_dir() / _run_name(ds, base_model, family, variant)
 
 
+_CONFIG_STEPS_RE = re.compile(r'^\s*steps:\s*(\d+)\s*$', re.MULTILINE)
+
+
+def _configured_steps(run_root) -> int | None:
+    """The run's own step count, read from the `config.yaml` ai-toolkit copies
+    into its save_root — or None when it has not been written yet.
+
+    The log is full of tqdm bars that are not the training loop, and the only
+    reliable way to tell them apart is knowing what this run counts to. Read
+    from the config the run is ACTUALLY executing rather than from the DB
+    record: a resumed or hand-edited run must be measured against the file it
+    is following, not against what was requested when it was queued."""
+    try:
+        for cfg_path in Path(run_root).glob('*/config.yaml'):
+            m = _CONFIG_STEPS_RE.search(
+                cfg_path.read_text(encoding='utf-8', errors='ignore'))
+            if m:
+                n = int(m.group(1))
+                return n if n > 0 else None
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def hf_cache_pending() -> dict | None:
+    """Half-downloaded weights sitting in the cache this app points the trainer
+    at, as `{files, bytes}` — or None when there are none.
+
+    huggingface_hub parks a partial download as `<blob>.incomplete` and resumes
+    it on the next run. That resume is invisible: it prints an ITEM bar
+    ('Fetching 2 files: 0/2'), not the byte bar `parse_download_progress`
+    understands, so a run pulling gigabytes showed no step, no loss and no
+    download — indistinguishable from a hang. Measured 2026-08-09: a run sat for
+    1h46m re-fetching a text encoder whose two shards were 1.6 GB partials, and
+    the panel said nothing at all.
+
+    Advisory only, and cheap: one directory scan of the hub cache, no network,
+    never raises. The size is what is ALREADY on disk, not what is left to
+    fetch — the total is not knowable without asking Hugging Face."""
+    try:
+        hub = _hf_hub_cache()
+        files, size = 0, 0
+        for p in hub.glob('**/*.incomplete'):
+            try:
+                size += p.stat().st_size
+                files += 1
+            except OSError:
+                continue
+        return {'files': files, 'bytes': size} if files else None
+    except Exception:                                    # noqa: BLE001 — advisory
+        return None
+
+
 def _run_log_path(ds, base_model=_PERSISTED, family=None, variant=_PERSISTED) -> str:
     """Where the local run's `training.log` is written and read. Single source
     of truth: the writer, the progress reader and « 📂 Run folder » must never
@@ -9661,11 +9723,38 @@ _DOWNLOAD_PROG_RE = re.compile(
     r'(?P<done>[\d.]+\s*[kKMGTP]?)/(?P<total>[\d.]+\s*[kKMGTP]?)\s*'
     r'\[(?P<elapsed>[\d:]+)<(?P<eta>[\d:?]+),\s*(?P<speed>[\d.?]+\s*[kKMGTP]?B/s)\s*\]')
 _DOWNLOAD_RATE_RE = re.compile(r'[\d.?]\s*[kKMGTP]?B/s')
+# tqdm descs that belong to huggingface_hub / transformers rather than to the
+# training loop. Matched by NAME, not by "has a desc": ai-toolkit's own training
+# bar is also labelled ('lora_t:   5%|…'), so a generic desc rule silently threw
+# away real progress — caught by test_parse_training_log_extracts_progress.
+_SETUP_BAR_RE = re.compile(
+    r'\b(?:fetching\s+\d+\s+files?|loading\s+checkpoint\s+shards|'
+    r'downloading\s+shards|resolving\s+data\s+files)\b\s*:', re.IGNORECASE)
 
 
-def _parse_training_log(text: str) -> dict:
+def _parse_training_log(text: str, expected_total: int | None = None) -> dict:
     """Extract (step, total, loss, speed, eta, loss_curve) from raw log text.
-    Pure function — unit-testable without a real run."""
+    Pure function — unit-testable without a real run.
+
+    `expected_total` is the run's CONFIGURED step count. Pass it whenever it is
+    known: a training log is full of tqdm bars that are not the training loop,
+    and without it this function cannot tell them apart. Measured on a real run
+    2026-08-09, in the order they appeared:
+
+        ' 79%|…| 22/28'                     quantizing 28 transformer blocks
+        '100%|…| 28/28'                     …done
+        'Fetching 2 files:   0%|…| 0/2'     pulling the text encoder from HF
+
+    The old rule took the LAST bar of any kind, so the panel showed **step 0 of
+    2** for a 3500-step run that had not started training yet — reported as "I
+    cannot see any progress". Worse, it looked like a run stuck at zero when it
+    was actually mid-download.
+
+    With `expected_total` set, ONLY a bar counting to that total is progress.
+    Everything else is setup and yields no numbers at all, which is the honest
+    answer: "preparing", not a fake 0/2. Without it (older callers, cloud logs
+    whose total is not known here) the previous last-bar-wins behaviour stands,
+    minus labelled fetch bars."""
     out = {'step': None, 'total': None, 'loss': None, 'speed': None, 'eta': None,
            'loss_curve': []}
     curve = []
@@ -9680,6 +9769,10 @@ def _parse_training_log(text: str) -> dict:
         # step 0 of 26 is worse than no number at all.
         if _DOWNLOAD_RATE_RE.search(seg):
             continue
+        # A tqdm bar with a DESC ('Fetching 2 files: 0%|…') is some library's own
+        # sub-task. The training loop's bar carries no description.
+        if _SETUP_BAR_RE.search(seg):
+            continue
         sm = None
         for sm in _PROG_STEP_RE.finditer(seg):
             pass                             # last step/total occurrence of the segment
@@ -9688,6 +9781,11 @@ def _parse_training_log(text: str) -> dict:
         step, total = int(sm.group(1)), int(sm.group(2))
         if total <= 0 or step > total:
             continue                         # e.g. '1024x1024' image sizes, not progress
+        # The decisive filter when we know what the run is counting to: a bar
+        # ending anywhere else belongs to setup (quantizing 28 blocks, fetching
+        # 2 files) and must not be shown as training progress.
+        if expected_total and total != expected_total:
+            continue
         out['step'], out['total'] = step, total
         if lm:
             try:
@@ -9889,12 +9987,19 @@ def training_progress(user_id, dataset_id, base_model=_PERSISTED, family=None,
                 if size > _PROG_LOG_MAX_BYTES:
                     fh.seek(size - _PROG_LOG_MAX_BYTES)
                 text = fh.read()
-            parsed = _parse_training_log(text)
+            parsed = _parse_training_log(
+                text, expected_total=_configured_steps(
+                    _run_root(ds, base_model, family, variant)))
             download = parse_download_progress(text)
         except OSError:
             log_exists = False
     return {'active': active, 'log_exists': log_exists, **parsed,
             'download': download,
+            # What the run is still missing from the Hugging Face cache. A local
+            # run silently pulling several GB looked EXACTLY like a hung one:
+            # no step line, no byte bar the download parser recognises, nothing
+            # on screen for over an hour. Reported 2026-08-09.
+            'cache_pending': hf_cache_pending(),
             'masks_skipped': bool(active and queue_manager._get_system_state('training_masks_skipped', False)),
             'samples': list_training_samples(
                 user_id, dataset_id, base_model, family, variant=variant)}

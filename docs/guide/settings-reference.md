@@ -657,6 +657,13 @@ Under **Advanced: ai-toolkit overrides**, three optional path overrides (all def
 - **Output directory override** → `aitoolkit.output_dir` (defaults to `<dir>/output`).
 - **Hugging Face cache override** → `aitoolkit.hf_home` (defaults to a cache under the ai-toolkit folder). Point this at an existing HF cache to avoid re-downloading base models. It moves the *cache* only: a `hf auth login` token stored in your default Hugging Face home stays in use, so relocating the cache never de-authenticates you on gated bases.
 
+  **This default means training does not share your normal `~/.cache/huggingface`.** A model you already have there will be downloaded again, into this cache, the first time a run needs it — tens of GB. Two consequences worth knowing:
+
+  - If a previous download was interrupted, the partial sits in the cache as a `.incomplete` blob and the next run **resumes** it. `huggingface_hub` prints that as an item bar (`Fetching 2 files: 0/2`), not a byte counter, so it used to look exactly like a hang: no step, no loss, no download bar. The training panel now says **"Still fetching weights — N partially downloaded file(s) in the cache"** while that is happening. The size shown is what is already on disk, not what remains; the remainder is not knowable without asking Hugging Face.
+  - A stalled fetch now fails instead of hanging forever: the trainer runs with `HF_HUB_DOWNLOAD_TIMEOUT=30` (override it in your environment if you want a different deadline).
+
+  To use one cache everywhere, set this to your existing HF home — and copy the login token (`token`, `stored_tokens`) across if you move the other way.
+
 ### OneTrainer
 
 A second local training engine, **Krea 2 only** for now — picked per run from the training panel's trainer selector next to the Krea 2 family, not a global switch. ai-toolkit stays the default everywhere else.
