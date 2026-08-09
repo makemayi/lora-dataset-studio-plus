@@ -54,6 +54,51 @@ Run through this before calling a wave done:
 7. **Never rename catalog labels, config keys or What's-new ids** without an
    alias path — several of them are stored in user databases and localStorage.
 
+## UI changes — read before touching a component
+
+Written for humans and for any design-oriented skill or agent brought in to
+style this app. A generic design tool does not know these, and every one of
+them was learned by breaking something.
+
+1. **Use the existing semantic tokens. Never introduce a parallel palette.**
+   `bg-app`, `bg-surface`, `surface-raised`, `surface-overlay`, `border`,
+   `border-strong`, `text-content`, `content-muted`, `content-subtle`. A raw hex,
+   a new CSS variable or a second scale is a rejected change, not a preference.
+2. **Never `/NN` opacity on `bg-surface`, `bg-surface-raised`, `border-border`
+   or `border-border-strong`.** Those tokens already bake their alpha into
+   `tailwind.config.js`; adding a modifier replaces it and turns a dark surface
+   or a hairline into an opaque white slab. `tests/theme-token-contract.test.mjs`
+   fails the build on it — do not work around the test.
+3. **Green is taken.** It means "kept / already in the dataset / free"
+   everywhere. Do not use it for "selected", "active" or "primary". The engine
+   accents (indigo / amber / sky) were chosen to stay distinguishable in the
+   dark theme AND in deuteranopia, which green+amber does not — see
+   `components/dataset/engineSelection.js`.
+4. **Spell Tailwind class strings out in full.** Tailwind scans source text, so
+   a class built by concatenation or interpolation is silently absent from the
+   build. No `` `text-${tone}-400` ``.
+5. **Text that changes with state must stay mounted.** Render both variants and
+   flip a `hidden` attribute; never swap them with a ternary. Users read this
+   app through Chrome auto-translate, which rewrites text nodes into its own
+   `<font>` wrappers — React then throws `NotFoundError: removeChild` and the
+   error boundary eats the whole section. This is not hypothetical: it took out
+   the Settings page on 2026-08-09. Pattern:
+
+   ```jsx
+   <span hidden={!filled}>…one…</span>
+   <span hidden={!!filled}>…the other…</span>
+   ```
+
+6. **Mount every new branch in a test.** `frontend/tests/support/mountJsx.mjs`.
+   A source-text test cannot tell a removed branch from a broken one — a
+   white-screened Settings page shipped behind a green suite once already.
+7. **The app is dark-only** — `data-theme="dark"` is always on `<html>`
+   (`src/index.css`), and `darkMode` resolves through that selector. There is
+   no toggle, so a light-mode variant added "for completeness" is dead code
+   nobody can reach. Native controls are the exception the CSS already handles:
+   `<option>` and friends fall back to the OS light palette, which is why
+   `color-scheme` is pinned there.
+
 ## Releases
 
 Releases are cut on validated waves/milestones only — never per commit.
