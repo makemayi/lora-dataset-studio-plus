@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-09-scrape-thumbnails-teredo',
+    date: '2026-08-09',
+    title: 'Scanned a page, got a grid of nothing? Fixed',
+    blurb: 'On some networks the scan found images and every thumbnail then failed, leaving an empty grid with no explanation — and importing those images would have failed the same silent way. The cause was the safety check that stops the app fetching internal addresses: it rejected a perfectly public image host outright because the local DNS handed back one junk IPv6 record alongside the real ones. That kind of address is now judged on the machine it actually points at, so real sites work again while genuine internal addresses stay blocked exactly as before.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-09-training-progress-tells-the-truth',
     date: '2026-08-09',
     title: 'Training that is downloading no longer looks like training that is stuck',

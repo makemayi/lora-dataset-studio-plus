@@ -79,14 +79,33 @@ def _check_ytdlp_version():
 def _ip_is_blocked(ip):
     """True si `ip` (ipaddress) cible un espace réseau non-public.
 
-    Déballe les IPv6 IPv4-mapped (`::ffff:10.0.0.1`) et 6to4 avant de tester
-    l'espace réseau → bloque le contournement par encodage IPv6 d'une IPv4 privée.
+    Déballe les IPv6 IPv4-mapped (`::ffff:10.0.0.1`), 6to4 et Teredo avant de
+    tester l'espace réseau → bloque le contournement par encodage IPv6 d'une
+    IPv4 privée, dans les trois encodages.
+
+    TEREDO (`2001::/32`), ajouté le 2026-08-09 après un faux positif RÉEL.
+    Python classe tout le préfixe Teredo comme `is_private`, donc un host
+    parfaitement public était rejeté en bloc dès que le DNS renvoyait un AAAA
+    Teredo à côté de ses A publics — mesuré sur un CDN d'images joignable en
+    IPv4 (HTTP 200), dont chaque vignette répondait 400 « internal network
+    address », et dont l'import échouait pareil sans le dire.
+
+    Une adresse Teredo EMBARQUE l'IPv4 du client : la juger sur cette IPv4 est
+    exactement la discipline déjà appliquée au 6to4 et à l'IPv4-mapped, pas un
+    assouplissement. Une Teredo qui vise vraiment un hôte du LAN porte cette
+    IPv4 privée en clair (après dé-obfuscation) et reste bloquée — vérifié par
+    test avec une adresse forgée vers 192.168.1.1.
     """
     if isinstance(ip, ipaddress.IPv6Address):
         if ip.ipv4_mapped is not None:
             ip = ip.ipv4_mapped
         elif ip.sixtofour is not None:
             ip = ip.sixtofour
+        elif ip.teredo is not None:
+            # teredo == (serveur, client). Le SERVEUR est souvent 0.0.0.0 dans
+            # un enregistrement bidon ; c'est le CLIENT qui dit quelle machine
+            # serait jointe.
+            ip = ip.teredo[1]
     return (ip.is_private or ip.is_loopback or ip.is_link_local
             or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
 
