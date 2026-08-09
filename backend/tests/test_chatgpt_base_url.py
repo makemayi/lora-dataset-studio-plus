@@ -165,3 +165,23 @@ def test_an_unreachable_openai_still_says_openai(app, monkeypatch):
         with pytest.raises(ci.ChatGPTImageError) as e:
             ci.generate_variation(b'ref', 'a portrait', force_lane='api')
     assert 'could not reach OpenAI' in str(e.value)
+
+
+# --- the readiness line says which host the key will be used against ---------
+
+def test_the_readiness_detail_names_the_gateway(app, monkeypatch):
+    """The Base URL lives two cards away from the ChatGPT readiness line. Someone
+    who set it needs to see WHERE their key is going from the place they already
+    check, not only from the field they typed it into."""
+    from app import capabilities
+    monkeypatch.setattr(capabilities.cfg, 'secret', lambda name: 'sk-test')
+    _set_base(GATEWAY + '/v1')
+    detail = capabilities.probe_openai()['detail']
+    assert GATEWAY in detail
+    assert detail.startswith('key set, via ')
+
+
+def test_on_openai_the_readiness_detail_is_unchanged(app, monkeypatch):
+    from app import capabilities
+    monkeypatch.setattr(capabilities.cfg, 'secret', lambda name: 'sk-test')
+    assert capabilities.probe_openai()['detail'] == 'key set'

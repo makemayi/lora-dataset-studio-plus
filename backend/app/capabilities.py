@@ -177,6 +177,14 @@ def probe_openai() -> dict:
     key = bool(cfg.secret('OPENAI_API_KEY'))
     sub = chatgpt_oauth.status()['connected']
     parts = (['key set'] if key else []) + (['subscription connected'] if sub else [])
+    # A non-blank Base URL is the one setting here that changes WHO receives the
+    # user's reference photos, and it lives two cards away from this readiness
+    # line. Naming the host makes the answer to "am I actually on the gateway?"
+    # readable where people already look, instead of only in the field itself.
+    if key:
+        from .services import chatgpt_image
+        if chatgpt_image.using_custom_api_base():
+            parts[0] = f'key set, via {chatgpt_image.get_api_base()}'
     return {'ok': key or sub, 'detail': ' + '.join(parts) if parts else 'key missing'}
 
 
