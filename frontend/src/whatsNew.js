@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-09-ghost-progress-bar',
+    date: '2026-08-09',
+    title: 'No more "generating variations" when nothing is running',
+    blurb: 'If ComfyUI lives on a different drive from your datasets, Windows sometimes still had the finished PNG open when the app went to move it. The copy had already worked — but the failed cleanup threw, killed the rest of the completion, and left the dataset stuck on a progress bar no job could ever finish. The image arriving is now what counts: a file that will not delete gets left in ComfyUI\'s output folder with a note in the log instead of costing you the run. And if a completion ever does crash for some other reason, the progress indicator clears itself rather than running forever.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-09-nanobanana-base-url',
     date: '2026-08-09',
     title: 'Nano Banana can point at a cheaper gateway too',

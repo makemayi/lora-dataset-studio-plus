@@ -163,6 +163,63 @@ def ensure_input_usable(path) -> str:
     return str(path)
 
 
+_UNLINK_RETRIES = 5
+_UNLINK_BACKOFF_S = 0.4
+
+
+def collect_output(src, dst) -> bool:
+    """Bring a finished render out of ComfyUI's output folder into ours.
+
+    Returns True when the source was also removed, False when the bytes are
+    safely at `dst` but the original had to be left behind. Raises only when the
+    CONTENT did not arrive — which is the whole point of this function.
+
+    WHY THIS IS NOT `shutil.move`
+    -----------------------------
+    It was, at four call sites, and on Windows that is a trap with two jaws:
+
+      1. ComfyUI's output and the app's data folder are routinely on DIFFERENT
+         DRIVES (a portable ComfyUI on F:, datasets on E:). `os.rename` then
+         fails with WinError 17 and `shutil.move` degrades to copy + unlink —
+         correct, and not the problem.
+      2. The unlink is what breaks. ComfyUI has usually only just written the
+         file and Windows may still hold the handle, so `os.unlink` raises
+         WinError 32 ("another program is using this file"). `shutil.move`
+         propagates that AFTER the copy already succeeded.
+
+    So a render that arrived intact raised anyway, the completion callback that
+    called it died, and the batch's progress indicator stalled forever — the app
+    reporting "generating" with nothing running and the image already on disk.
+    Measured 2026-08-09, dataset 11, `local_FaceSwap_82fdc980_00001_.png`:
+    identical 3,169,043 bytes at both paths, and a stuck 1-of-2 counter.
+
+    A leftover file in ComfyUI's output folder costs disk. A raised exception
+    costs the run. They are not the same size of problem, so the unlink is
+    best-effort: retried briefly (the handle is normally released within a
+    second or two) and then given up on with a warning.
+    """
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    try:
+        os.replace(src, dst)               # same volume: atomic, nothing to clean up
+        return True
+    except OSError:
+        pass                               # cross-device, or the source is held open
+    shutil.copy2(src, dst)                 # RAISES if the content did not arrive
+    for attempt in range(_UNLINK_RETRIES):
+        try:
+            os.unlink(src)
+            return True
+        except FileNotFoundError:
+            return True                    # someone else cleaned it up; fine
+        except OSError:
+            if attempt < _UNLINK_RETRIES - 1:
+                time.sleep(_UNLINK_BACKOFF_S)
+    logger.warning('comfy_fs: copied out %s but could not remove the original '
+                   '(still open?) — leaving it in ComfyUI\'s output folder',
+                   redact_user_paths(src))
+    return False
+
+
 def stage_input_copy(src_path, dest_name, input_dir) -> str:
     """Copy `src_path` into ComfyUI's input folder as `dest_name`; return the full
     destination path. Any filesystem failure becomes a named, paste-safe 409."""

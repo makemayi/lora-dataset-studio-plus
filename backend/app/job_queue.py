@@ -557,11 +557,23 @@ def _dispatch_completion(job, filename, failed):
         # without this it strands the row looking like it's still generating.
         try:
             from .models import FaceDatasetImage, LoraTestImage
+            stranded_datasets = set()
             for model in (FaceDatasetImage, LoraTestImage):
                 row = model.query.filter_by(job_id=job.job_id).first()
                 if row is not None:
                     row.status = 'failed'
                     db.session.commit()
+                    if model is FaceDatasetImage:
+                        stranded_datasets.add(row.dataset_id)
+            # Flipping the ROW is only half the rescue. The batch's progress
+            # indicator is a separate in-memory count, reconciled by
+            # _sync_generate_activity on enqueue/completion/cancel — and this
+            # path is none of those, so without it the dataset kept reporting
+            # "generating 1 of 2" with nothing running and no job left to
+            # finish it. Observed 2026-08-09: only the registry TTL cleared it.
+            for dataset_id in stranded_datasets:
+                from .services.dataset_generation_service import _sync_generate_activity
+                _sync_generate_activity(dataset_id)
         except Exception:
             logger.exception('job_queue: could not mark linked row failed for job %s', job.job_id)
 

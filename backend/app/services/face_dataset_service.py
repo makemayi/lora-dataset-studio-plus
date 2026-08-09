@@ -3473,7 +3473,11 @@ def link_completed_dataset_image(job_id, filename, failed=False, reason=None):
             logger.warning(f"dataset link: name collision, storing as {filename}")
         img.filename = filename
         if src and os.path.exists(src):
-            shutil.move(src, dst)          # file where we expected it on disk
+            # NOT shutil.move: a held-open source on Windows made it raise AFTER
+            # the bytes had arrived, killing this whole callback and stranding
+            # the batch's progress. See comfy_fs.collect_output.
+            from ..utils.comfy_fs import collect_output
+            collect_output(src, dst)
         elif os.path.exists(dst):
             pass                           # already brought in (retry / dup completion)
         else:
@@ -3512,6 +3516,7 @@ def link_completed_dataset_image(job_id, filename, failed=False, reason=None):
 # --- Migration helper (run once manually after deploy) ---------------------
 def migrate_existing_images_to_per_dataset():
     """Migration helper - run once manually after deploy. Not called automatically."""
+    from ..utils.comfy_fs import collect_output
     counts = {'moved': 0, 'skipped': 0, 'missing': 0}
     output_dir = _comfy_output_dir()
     if output_dir is None:
@@ -3522,7 +3527,7 @@ def migrate_existing_images_to_per_dataset():
             src = os.path.join(output_dir, ds.ref_filename)
             dst = os.path.join(_dataset_dir(ds.id), ds.ref_filename)
             if os.path.exists(src) and not os.path.exists(dst):
-                shutil.move(src, dst)
+                collect_output(src, dst)
                 counts['moved'] += 1
             elif os.path.exists(dst):
                 counts['skipped'] += 1
@@ -3534,7 +3539,7 @@ def migrate_existing_images_to_per_dataset():
             src = os.path.join(output_dir, img.filename)
             dst = os.path.join(_dataset_dir(img.dataset_id), img.filename)
             if os.path.exists(src) and not os.path.exists(dst):
-                shutil.move(src, dst)
+                collect_output(src, dst)
                 counts['moved'] += 1
             elif os.path.exists(dst):
                 counts['skipped'] += 1

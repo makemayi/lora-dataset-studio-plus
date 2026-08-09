@@ -3094,7 +3094,10 @@ def link_completed_test_image(job_id, filename, failed=False, reason=None):
         out_dir = _comfy_output_dir()
         src = os.path.join(out_dir, filename) if out_dir else None
         if src and os.path.exists(src):
-            shutil.move(src, dst)
+            # Same reason as the dataset lane: a held-open source must not turn
+            # an arrived image into a failed row. See comfy_fs.collect_output.
+            from ..utils.comfy_fs import collect_output
+            collect_output(src, dst)
         elif not os.path.exists(dst):
             from ..utils.comfyui import fetch_output_image_bytes
             data = fetch_output_image_bytes(filename)
