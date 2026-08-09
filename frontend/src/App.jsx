@@ -427,7 +427,14 @@ function UpdateBanner() {
 
 function Shell() {
   const { pathname } = useLocation();
-  const wideWorkspaceRoute = pathname === '/canvas' || pathname === '/bank';
+  /* Settings joined the wide routes on 2026-08-09. It is a two-rail layout —
+     the section nav, then (on Image engines) the engine nav — and inside a
+     1024px `max-w-5xl` shell that left roughly 540px for the settings
+     themselves, with a broad empty margin down each side of the window. Nothing
+     here is a reading column; it is a control panel, and it should use the
+     screen it is given. */
+  const wideWorkspaceRoute = pathname === '/canvas' || pathname === '/bank'
+    || pathname.startsWith('/settings');
   return (
     <>
       <NavBar />

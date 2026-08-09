@@ -2254,7 +2254,7 @@ const ENGINE_RAIL = [
     items: [
       { id: 'keys', label: 'API keys', owns: ENGINE_SECRETS.map((f) => f.key) },
       { id: 'models', label: 'Image models',
-        owns: ['engine-image-models', 'klein-face-swap-loras'], prefix: ['engines-'] },
+        owns: ['engine-image-models'], prefix: ['engines-'] },
       { id: 'visible', label: 'Which engines appear', owns: ['engine-default'] },
       { id: 'prompts', label: 'Identity prompts', prefix: ['identity-', 'prompt-'] },
     ],
@@ -2286,8 +2286,7 @@ export const RAIL_ITEMS = ENGINE_RAIL.flatMap((g) => g.items)
    (`klein-model-unet`, `krea-steps`, `seedvr2-tiling`), so a hand-written list
    would be wrong within a week — the first hand-written version missed 40 of
    them, which is how this rule got chosen. `owns` stays for the handful that do
-   not fit their engine's prefix (`klein-face-swap-loras` is edited under Image
-   models, next to the graph it chains onto).
+   not fit any engine's prefix, such as the Image models card itself.
 
    Exact `owns` wins over a prefix, so a deliberate exception cannot be
    swallowed by the general rule. engines-rail.test.mjs fails if any registered
@@ -2349,11 +2348,8 @@ export default function EnginesSection(props) {
       </Card>
     ),
     models: () => (
-      <>
-        <ImageModelsCard config={config} setField={setField} configDefaults={configDefaults}
-          faceSwapGraphLoras={faceSwapGraphLoras} />
-        <FaceSwapLorasCard config={config} setField={setField} graphLoras={faceSwapGraphLoras} />
-      </>
+      <ImageModelsCard config={config} setField={setField} configDefaults={configDefaults}
+        faceSwapGraphLoras={faceSwapGraphLoras} />
     ),
     visible: () => (
       <Card title="Engines" help="Which engines appear in the generate panel, and which one is preselected.">
@@ -2402,6 +2398,7 @@ export default function EnginesSection(props) {
         <KleinModelFilesCard config={config} setField={setField} caps={caps} />
         <KleinGenerationCard config={config} setField={setField} configDefaults={configDefaults} />
         <KleinLorasCard config={config} setField={setField} />
+        <FaceSwapLorasCard config={config} setField={setField} graphLoras={faceSwapGraphLoras} />
       </>
     ),
     krea: () => (

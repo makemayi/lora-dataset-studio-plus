@@ -36,6 +36,7 @@ const CONFIG = {
    arriving from Settings search would. Default 'keys' matches the live page. */
 const CHATGPT = 'chatgpt-auth-mode'   // opens the ChatGPT rail entry
 const MODELS = 'engine-image-models'  // opens Image models
+const KLEIN = 'klein-face-swap-loras' // opens Klein (face swap is a Klein feature)
 
 const render = (overrides = {}) => renderToStaticMarkup(createElement(EnginesSection, {
   config: { ...CONFIG, engines: { ...CONFIG.engines, ...(overrides.engines || {}) },
@@ -154,7 +155,7 @@ test('both Base URL hints stay in the DOM in BOTH states, toggled by hidden', ()
 /* Face swap LoRAs. Both states mount: empty (the placeholder line) and filled
    (rows with a combobox, a strength slider and the reorder buttons). */
 test('the face swap LoRA card renders empty and with rows', () => {
-  const empty = render({ engines: {}, focusId: MODELS })
+  const empty = render({ engines: {}, focusId: KLEIN })
   assert.match(empty, /Face swap LoRAs \(optional\)/)
   assert.match(empty, /the face swap runs with just the LoRAs its own graph names/)
 
@@ -164,7 +165,7 @@ test('the face swap LoRA card renders empty and with rows', () => {
       klein: { face_swap_loras: [{ file: 'a.safetensors', strength: 0.8 },
                                  { file: 'b.safetensors', strength: 1.2 }] },
     },
-    focusId: MODELS,
+    focusId: KLEIN,
     configDefaults: CONFIG,
     setField: () => {}, toggleEngine: () => {}, caps: {}, refreshCaps: () => {},
     toast: { error: () => {}, success: () => {} },
@@ -181,7 +182,7 @@ test('a row duplicating a LoRA the swap graph already loads is flagged', () => {
   const withGraphLoras = (file, graphLoras) => renderToStaticMarkup(
     createElement(EnginesSection, {
       config: { ...CONFIG, klein: { face_swap_loras: [{ file, strength: 1 }] } },
-      focusId: MODELS,
+      focusId: KLEIN,
       configDefaults: CONFIG,
       faceSwapGraphLoras: graphLoras,
       setField: () => {}, toggleEngine: () => {}, caps: {}, refreshCaps: () => {},

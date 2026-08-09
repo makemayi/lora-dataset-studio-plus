@@ -78,11 +78,30 @@ export function TestButton({ target, onResult, beforeTest }) {
   )
 }
 
+/* Chrome's own Settings is the reference here (the user's, 2026-08-09): a card
+   is a raised surface with a soft shadow, not a boxed-in outline, and it lifts
+   slightly on hover. Two reasons that reads better than what was here:
+
+   * the tokens were ALREADY an elevation system — `surface` is white at 4% and
+     `surface-raised` at 9% — so adding `border border-border` on top meant two
+     separation mechanisms fighting for the same job, and thirteen of these
+     stacked down one page turned into a grid of boxes;
+   * on a near-black ground a hairline reads as a hard edge, while a shadow
+     reads as depth, which is what the hierarchy actually is.
+
+   The shadow is deliberately heavier than a light-theme card's: at these
+   background values a subtle one is invisible. Hover is a lift, not a colour
+   change, so it never competes with the accent. */
 export function Card({ title, help, children, id }) {
   return (
-    <section id={id} className="scroll-mt-24 rounded-xl border border-border bg-surface p-5">
-      <h2 className="text-base font-semibold text-content">{title}</h2>
-      {help && <p className="mt-1 text-sm text-content-muted">{help}</p>}
+    <section
+      id={id}
+      className="scroll-mt-24 rounded-xl bg-surface p-5 shadow-[0_1px_2px_rgba(0,0,0,.35),0_4px_16px_-6px_rgba(0,0,0,.5)]
+        transition-shadow duration-200
+        hover:shadow-[0_1px_2px_rgba(0,0,0,.4),0_10px_28px_-8px_rgba(0,0,0,.65)]"
+    >
+      <h2 className="text-[0.9375rem] font-semibold tracking-[-0.01em] text-content">{title}</h2>
+      {help && <p className="mt-1 text-[0.8125rem] leading-relaxed text-content-muted">{help}</p>}
       <div className="mt-4 space-y-4">{children}</div>
     </section>
   )

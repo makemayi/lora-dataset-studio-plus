@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-09-settings-uses-the-screen',
+    date: '2026-08-09',
+    title: 'Settings uses the whole window, and reads better doing it',
+    blurb: 'Settings was capped at 1024px wide. With a section list down one side and, on Image engines, an engine list next to it, that left about 540px for the settings themselves while the rest of a wide monitor sat empty. It now uses the window, like the Canvas and Bank workspaces already did. Cards lost their outlines and gained a soft shadow that lifts on hover, the way Chrome’s own settings behave — the surfaces were already shaded, so the border was a second separator doing the same job twice. Text is set in Inter, bundled with the app so it works with no internet, and numbers line up in columns. Face swap LoRAs moved to Klein, where the feature lives.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-09-image-engines-rail',
     date: '2026-08-09',
     title: 'Image engines settings: pick an engine, see its settings',

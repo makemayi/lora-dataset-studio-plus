@@ -58,6 +58,18 @@
   body {
     background-color: rgb(var(--bg-app));
     color: rgb(var(--text-base));
+    /* Inter, bundled in main.jsx. The stack keeps the old system fonts behind
+       it so a failed font load degrades instead of falling to a serif.
+       `antialiased` is not cosmetic here: Windows renders light-on-dark text
+       with subpixel AA by default, which fattens every glyph on a near-black
+       ground and is most of what "the type looks wrong" means in a dark app. */
+    font-family: 'Inter Variable', 'Inter', ui-sans-serif, system-ui,
+                 -apple-system, 'Segoe UI', Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* Inter ships proportional figures; settings pages are full of columns of
+       numbers (steps, px, strengths) that jitter without this. */
+    font-variant-numeric: tabular-nums;
   }
   /* Native <select> dropdown options render with an OS/inherited background
      the page can't style per-element. Theme them globally so they're readable
