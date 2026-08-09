@@ -46,6 +46,37 @@ PEFT_TYPES = (PEFT_TYPE_LORA, PEFT_TYPE_OFT_2)
 # base_model_name, transformer/text_encoder/vae dtypes, attention_mechanism,
 # ...) stays exactly whatever OneTrainer's own maintainers tuned it to.
 KREA2_PRESET_RELATIVE_PATH = 'training_presets/Krea 2/#krea2 LoRA 16GB.json'
+KREA2_PRESET_24GB_RELATIVE_PATH = 'training_presets/Krea 2/#krea2 LoRA 24GB.json'
+# Below this much VRAM, keep the 16 GB preset. The two shipped presets differ in
+# EXACTLY ONE field (diffed 2026-08-09):
+#
+#   16GB  transformer: {train, weight_dtype: INT_W8A8, offload_fraction: 0.3}
+#   24GB  transformer: {train, weight_dtype: INT_W8A8}
+#
+# `offload_fraction: 0.3` keeps 30% of the transformer in system RAM and swaps
+# it per step. On a 24 GB card that is a pure, unnecessary slowdown — the same
+# class of problem ("Moving transformer to CPU") that was chased for hours on
+# the ai-toolkit lane the same day. The app pinned the 16 GB preset
+# unconditionally, so every 24 GB machine paid for offload it did not need.
+#
+# 20 GB, not 24: a "24 GB" card reports ~23.99 GiB and a 20 GB card (RTX 4000
+# Ada) also has room to skip the offload. Detection is ADVISORY — an unknown
+# VRAM keeps the conservative 16 GB preset, because guessing wrong upward turns
+# a slow run into an OOM.
+KREA2_PRESET_24GB_MIN_VRAM_GB = 20
+
+
+def krea2_preset_relative_path(vram_gb=None) -> str:
+    """Which shipped Krea 2 LoRA preset to merge under this app's overrides."""
+    if vram_gb is None:
+        try:
+            from .run_environment import local_vram_gb
+            vram_gb = local_vram_gb()
+        except Exception:                                # noqa: BLE001 — advisory
+            vram_gb = None
+    if isinstance(vram_gb, (int, float)) and vram_gb >= KREA2_PRESET_24GB_MIN_VRAM_GB:
+        return KREA2_PRESET_24GB_RELATIVE_PATH
+    return KREA2_PRESET_RELATIVE_PATH
 
 
 def _derived_python(root: Path) -> Path:
@@ -84,7 +115,9 @@ KREA2_RESOLUTION = 1024
 
 def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
                      steps: int, num_images: int, rank: int,
-                     peft_type: str = PEFT_TYPE_LORA) -> dict:
+                     peft_type: str = PEFT_TYPE_LORA,
+                     learning_rate: float | None = None,
+                     resolution: int | None = None) -> dict:
     """The OVERRIDE config this app writes to --config-path, merged by
     OneTrainer OVER its own shipped Krea 2 preset (--preset-path). Contains
     ONLY the fields this app's own UI/dataset state actually owns — never a
@@ -124,8 +157,19 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
         'lora_rank': int(rank),
         'lora_alpha': float(rank),
         'batch_size': 1,
-        'resolution': KREA2_RESOLUTION,
+        # OneTrainer takes resolution as a STRING (its shipped preset says
+        # "512"), unlike ai-toolkit's list of ints. Passing an int here is not a
+        # type nit — it is how the two lanes end up training the same dataset at
+        # different sizes without anything on screen saying so.
+        'resolution': str(int(resolution or KREA2_RESOLUTION)),
         'peft_type': peft_type,
+        # The app owns the learning rate: it is a per-dataset setting the UI
+        # exposes and the ai-toolkit lane already honours. Left unset, this run
+        # silently used the shipped preset's 0.0003 while the SAME dataset
+        # trained at 0.0001 on ai-toolkit — a 3x divergence with no indication
+        # anywhere. Only written when the caller resolved one, so the preset
+        # still decides for any path that has no opinion.
+        **({'learning_rate': float(learning_rate)} if learning_rate else {}),
     }
 
 
@@ -147,7 +191,9 @@ def checkpoint_ready(output_model_destination: str) -> bool:
 
 def launch(trigger: str, dataset_folder: str, training_folder: str,
           steps: int, num_images: int, rank: int,
-          peft_type: str = PEFT_TYPE_LORA) -> dict:
+          peft_type: str = PEFT_TYPE_LORA,
+          learning_rate: float | None = None,
+          resolution: int | None = None) -> dict:
     """Write concepts.json + config.json under `training_folder` and spawn
     `scripts/train.py --preset-path <shipped Krea 2 preset> --config-path
     <our config.json>`. Returns {'pid': int, 'config_path': str,
@@ -164,7 +210,8 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
 
     config = build_job_config(trigger=trigger, dataset_folder=dataset_folder,
                               training_folder=training_folder, steps=steps,
-                              num_images=num_images, rank=rank, peft_type=peft_type)
+                              num_images=num_images, rank=rank, peft_type=peft_type,
+                              learning_rate=learning_rate, resolution=resolution)
     concepts = build_concepts(trigger=trigger, dataset_folder=dataset_folder)
 
     concepts_path = training_folder_p / 'concepts.json'
@@ -173,7 +220,9 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
     config_with_concepts = {**config, 'concept_file_name': str(concepts_path)}
     config_path.write_text(json.dumps(config_with_concepts, indent=2), encoding='utf-8')
 
-    preset_path = root / KREA2_PRESET_RELATIVE_PATH
+    preset_rel = krea2_preset_relative_path()
+    preset_path = root / preset_rel
+    logger.info('onetrainer: using shipped preset %s', preset_rel)
     log_path = training_folder_p / 'onetrainer.log'
     logf = open(log_path, 'w', encoding='utf-8')
     proc = subprocess.Popen(
@@ -279,9 +328,29 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
         user_id, dataset_id, masked=False, dest_dir=str(training_folder / 'dataset'))
 
     peft_type = cfg.get('onetrainer.peft_type') or PEFT_TYPE_LORA
+    # The learning rate and the resolution are the app's, not the preset's, and
+    # they come from the SAME resolvers the ai-toolkit lane uses — not a second
+    # constant that can drift. Without this, the same dataset trained at
+    # lr 0.0003 / 1024 here and lr 0.0001 / 768 there, with nothing on screen
+    # saying the two lanes disagreed.
+    from .lora_training import _effective_resolution, _lr_eff
+    try:
+        lr = _lr_eff(ds)
+    except Exception:                                    # noqa: BLE001
+        logger.exception('onetrainer: could not resolve the learning rate; '
+                         'leaving it to the shipped preset')
+        lr = None
+    try:
+        res_list = _effective_resolution(ds) or []
+        resolution = max(int(r) for r in res_list) if res_list else None
+    except Exception:                                    # noqa: BLE001
+        logger.exception('onetrainer: could not resolve the resolution; '
+                         'falling back to the module default')
+        resolution = None
     launched = launch(trigger=trigger, dataset_folder=dataset_folder,
                       training_folder=str(training_folder), steps=steps,
-                      num_images=max(1, num_images), rank=32, peft_type=peft_type)
+                      num_images=max(1, num_images), rank=32, peft_type=peft_type,
+                      learning_rate=lr, resolution=resolution)
 
     from . import checkpoint_registry
     checkpoint_registry.register_launch(

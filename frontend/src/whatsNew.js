@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-09-onetrainer-config-parity',
+    date: '2026-08-09',
+    title: 'OneTrainer runs now use your settings, and your whole graphics card',
+    blurb: 'Training a dataset through OneTrainer quietly ignored two things the app had already decided for it. Your learning rate was dropped, so the same dataset trained three times faster there than on ai-toolkit; your resolution was dropped too. Both now come from the same place both trainers read. Separately, the app always used the 16 GB preset that ships with OneTrainer, which parks 30% of the model in system memory and swaps it in every step — on a 20 GB or larger card it now picks the preset that keeps everything on the GPU, and still falls back to the careful one whenever your VRAM cannot be confirmed.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-09-training-frees-the-card-first',
     date: '2026-08-09',
     title: 'Training now takes the GPU properly instead of sharing it with ComfyUI',

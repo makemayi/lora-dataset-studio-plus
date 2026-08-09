@@ -72,7 +72,10 @@ def test_build_job_config_overrides_only_what_this_app_owns(onetrainer, tmp_path
     assert config['lora_rank'] == 32
     assert config['lora_alpha'] == 32.0     # scale factor 1.0 — MUST track rank
     assert config['batch_size'] == 1        # matches the epochs approximation
-    assert config['resolution'] == 1024
+    # A STRING, matching OneTrainer's own schema — its shipped Krea 2 preset
+    # writes "512", not 512. This assertion used to demand the int, which was
+    # never checked against the preset.
+    assert config['resolution'] == '1024'
     assert config['epochs'] == 80          # ceil(2000 / 25)
     assert config['peft_type'] == 'LORA'   # default when the caller doesn't pass one
     # Ownership boundary: everything else stays whatever OneTrainer's own
@@ -141,6 +144,10 @@ def test_launch_writes_config_and_concepts_and_spawns_the_right_command(
     venv_py = root / 'venv' / 'Scripts' / 'python.exe'
     venv_py.write_text('')
     cfg.save_config({'onetrainer': {'dir': str(root)}})
+
+    # Pin the VRAM: which shipped preset is used now depends on the card, and a
+    # test that reads the TEST MACHINE's GPU passes or fails by accident.
+    monkeypatch.setattr('app.services.run_environment.local_vram_gb', lambda: 16)
 
     captured = {}
     class FakeProc:
@@ -361,3 +368,76 @@ def test_onetrainer_refuses_while_comfyui_has_queued_work(
             ots.launch_training(LOCAL_USER, ds.id, steps=100, check_captions=False)
     assert 'queued or active work' in str(e.value)
     assert spawned == [], 'nothing may spawn while ComfyUI owns the card'
+
+
+# --- Config parity with the ai-toolkit lane (2026-08-09) -----------------------
+# Reported as "the in-app OneTrainer still needs polish — mainly the config".
+# Diffed against what the app generates for ai-toolkit: this lane dropped the
+# learning rate and the resolution on the floor and pinned the 16 GB preset.
+
+def test_the_24gb_preset_is_chosen_when_the_card_can_take_it(onetrainer):
+    """The two shipped presets differ in EXACTLY ONE field: the 16 GB one adds
+    transformer.offload_fraction 0.3, i.e. 30% of the transformer swapped from
+    system RAM every step. Pinning it on a 24 GB card is a pure slowdown."""
+    ots, _cfg = onetrainer
+    assert ots.krea2_preset_relative_path(24) == ots.KREA2_PRESET_24GB_RELATIVE_PATH
+    assert ots.krea2_preset_relative_path(23.99) == ots.KREA2_PRESET_24GB_RELATIVE_PATH
+    assert ots.krea2_preset_relative_path(20) == ots.KREA2_PRESET_24GB_RELATIVE_PATH
+
+
+@pytest.mark.parametrize('vram', [16, 12, 19.9, None, 'unknown'])
+def test_an_unknown_or_small_card_keeps_the_conservative_preset(onetrainer, vram, monkeypatch):
+    """Guessing upward turns a slow run into an OOM, so anything that is not a
+    confident 20 GB+ keeps the offloading preset."""
+    ots, _cfg = onetrainer
+    if vram is None:
+        monkeypatch.setattr('app.services.run_environment.local_vram_gb', lambda: None)
+        assert ots.krea2_preset_relative_path() == ots.KREA2_PRESET_RELATIVE_PATH
+    else:
+        assert ots.krea2_preset_relative_path(vram) == ots.KREA2_PRESET_RELATIVE_PATH
+
+
+def test_the_learning_rate_is_written_only_when_the_app_resolved_one(onetrainer):
+    """Left unset, a run silently used the preset's 0.0003 while the SAME
+    dataset trained at 0.0001 on ai-toolkit — a 3x divergence with nothing on
+    screen. Absent still means 'the preset decides', for callers with no view."""
+    ots, _cfg = onetrainer
+    common = dict(trigger='t', dataset_folder='d', training_folder='tf',
+                  steps=100, num_images=10, rank=32)
+    assert 'learning_rate' not in ots.build_job_config(**common)
+    assert ots.build_job_config(**common, learning_rate=0.0001)['learning_rate'] == 0.0001
+
+
+def test_resolution_is_a_string_and_overridable(onetrainer):
+    ots, _cfg = onetrainer
+    common = dict(trigger='t', dataset_folder='d', training_folder='tf',
+                  steps=100, num_images=10, rank=32)
+    assert ots.build_job_config(**common)['resolution'] == str(ots.KREA2_RESOLUTION)
+    assert ots.build_job_config(**common, resolution=768)['resolution'] == '768'
+
+
+def test_launch_training_forwards_the_datasets_lr_and_resolution(
+        onetrainer, tmp_path, monkeypatch, app):
+    """Both come from the SAME resolvers the ai-toolkit lane uses, so the two
+    lanes cannot drift apart on the values the app owns."""
+    import json as _json
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as lt
+    ots, cfg = onetrainer
+    _installed_onetrainer(cfg, tmp_path)
+    monkeypatch.setattr(lt, '_lr_eff', lambda _ds: 0.00012)
+    monkeypatch.setattr(lt, '_effective_resolution', lambda _ds: [768, 1024])
+
+    class FakeProc:
+        pid = 888
+        def poll(self):
+            return None
+    monkeypatch.setattr(ots.subprocess, 'Popen', lambda *a, **k: FakeProc())
+
+    with app.app_context():
+        ds = _trainable_krea_dataset(svc, LOCAL_USER, 'OT cfg')
+        result = ots.launch_training(LOCAL_USER, ds.id, steps=100, check_captions=False)
+        written = _json.loads(open(result['config_path'], encoding='utf-8').read())
+    assert written['learning_rate'] == 0.00012
+    assert written['resolution'] == '1024', 'the largest of the resolution list'
