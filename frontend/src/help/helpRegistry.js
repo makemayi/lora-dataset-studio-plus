@@ -1329,6 +1329,10 @@ const TOPICS = [
     ['chatgpt', 'openai', 'gpt-image', 'gpt-image-2', 'gpt-image-1.5', 'model', 'image model',
      'change model', 'choose model', '403', 'organization verification', 'verified',
      'reference images', 'CHATGPT_IMAGE_MODEL']),
+  setting('engines.chatgpt_base_url', 'engines', 'engines-chatgpt_base_url', 'ChatGPT (OpenAI) Base URL',
+    ['chatgpt', 'openai', 'base url', 'endpoint', 'gateway', 'proxy', 'reseller',
+     'compatible', 'cheaper', 'price', 'cost', '401', '404', 'privacy',
+     'OPENAI_BASE_URL']),
   // scraping
   setting('REDDIT_CLIENT_ID', 'scraping', 'REDDIT_CLIENT_ID', 'Reddit client ID',
     ['reddit', 'client id', 'scrape', '429', 'rate limit', 'quota', 'key']),

@@ -1852,6 +1852,27 @@ function ImageModelsCard({ config, setField, configDefaults }) {
         image model your plan serves and ignores this field.
       </ModelField>
 
+      <ModelField {...shared} id="engines-chatgpt_base_url" configKey="chatgpt_base_url"
+        label="ChatGPT (OpenAI) Base URL" placeholder="https://api.openai.com/v1">
+        Blank = OpenAI itself, which is what almost everyone wants. Fill it in to send this
+        engine to an <strong>OpenAI-compatible gateway or reseller</strong> instead — they
+        advertise the same models well below OpenAI&apos;s per-image price. Paste the host or the{' '}
+        <code className="break-all">/v1</code> root; the endpoint path is added for you.
+        {config.engines?.chatgpt_base_url
+          ? (
+            <>
+              {' '}<strong className="text-amber-300">
+                Your reference photos go to that operator, not to OpenAI.
+              </strong>{' '}
+              This engine uploads your reference images on every single call, and they will be
+              handled under that operator&apos;s retention policy with a key they issued. If the
+              gateway then answers 401 or 404, suspect this field before your key — a wrong Base
+              URL looks exactly like a rejected key or an unknown model.
+            </>
+          )
+          : ' Applies to the API-key lane only: the subscription lane rides your ChatGPT session and the ComfyUI lane spends comfy.org credits, so neither is OpenAI-key traffic and neither reads this.'}
+      </ModelField>
+
       <ModelField {...shared} id="engines-openrouter_model" configKey="openrouter_model"
         label="OpenRouter model slug" placeholder="google/gemini-3-pro-image">
         Blank = <code className="break-all">google/gemini-3-pro-image</code> — the same weights the

@@ -77,6 +77,24 @@ test('the quality dial is only offered on the lane it applies to', () => {
   }
 })
 
+/* The Base URL field draws DIFFERENT text depending on whether it is filled, and
+   the filled branch is the one carrying the privacy warning — the one nobody
+   would notice missing, because the field works either way. Both are mounted. */
+test('the ChatGPT Base URL field renders blank, pointing at OpenAI', () => {
+  const html = render({ engines: { chatgpt_base_url: '' } })
+  assert.match(html, /ChatGPT \(OpenAI\) Base URL/)
+  assert.match(html, /Blank = OpenAI itself/)
+  assert.doesNotMatch(html, /go to that operator/)
+})
+
+test('a filled Base URL says out loud that a third party sees the photos', () => {
+  const html = render({ engines: { chatgpt_base_url: 'https://gateway.example.com' } })
+  assert.match(html, /Your reference photos go to that operator, not to OpenAI/)
+  // ...and points at the field before the key, since 401/404 are what a wrong
+  // Base URL returns and also what a bad key returns.
+  assert.match(html, /401 or 404, suspect this field before your key/)
+})
+
 /* The dataset side of the same class of bug: the angle-reference panel lost its
    placeholder branch when all five slots opened, and a source-text test cannot
    tell a removed branch from a broken one. */

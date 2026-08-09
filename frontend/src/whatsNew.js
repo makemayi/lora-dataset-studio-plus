@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-09-chatgpt-base-url',
+    date: '2026-08-09',
+    title: 'Point the ChatGPT engine at a cheaper gateway — with the catch spelled out',
+    blurb: 'A new Base URL field sends the ChatGPT API-key lane to any OpenAI-compatible reseller, which is where the price difference is: OpenAI itself charges about $18 for a hundred high-quality dataset images. The field tells you the part the price tags do not — your reference photos go to that operator instead — and names the gateway when it answers 401 or 404, so you do not go and re-check a key that was fine. Cheaper without leaving OpenAI: set CHATGPT_IMAGE_QUALITY=medium and the same hundred images cost about a quarter.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-09-h3-stops-cropping-heads',
     date: '2026-08-09',
     title: 'MiniMax H3 stops cutting the top of heads off',

@@ -26,6 +26,26 @@ there, and the field says so. `engines.chatgpt_subscription_model` is a third
 thing again: the Codex ROUTER model of that lane, which decides nothing about the
 pixels. None of the three are ever merged.
 
+CHOOSING WHO ANSWERS
+--------------------
+`engines.chatgpt_base_url` (blank = OpenAI) points the API-KEY lane at any
+OpenAI-compatible gateway, resolved the same way and at the same time as the
+model:
+
+    engines.chatgpt_base_url  >  OPENAI_BASE_URL (env)  >  DEFAULT_API_BASE
+
+This exists because resellers advertise gpt-image-2 far below OpenAI's own
+per-image price. What the setting cannot make cheap is the part that is not
+money: this lane uploads the user's REFERENCE PHOTOS of a real person on every
+single call, so a non-blank value sends those photos, the prompts, and a
+third-party key to an operator whose retention policy nobody here has read. The
+Settings field, the Guide and `using_custom_api_base()` all say so; do not
+quietly soften any of them.
+
+A wrong Base URL is also the one misconfiguration that IMPERSONATES two others —
+it answers 401 or 404, exactly like a bad key or an unknown model. That is why
+`_raise_for_api_status` appends the gateway clause on those statuses.
+
 FAILING LOUDLY
 --------------
 A rejected key, an unknown model, or a model gated behind OpenAI organization
@@ -88,7 +108,25 @@ _ENV_VAR = 'CHATGPT_IMAGE_MODEL'
 # Dataset images are final training material -> default to 'high' (≈ Nano
 # Banana's price point). Override with CHATGPT_IMAGE_QUALITY=medium to iterate.
 CHATGPT_IMAGE_QUALITY = os.environ.get('CHATGPT_IMAGE_QUALITY', 'high')
-_API = "https://api.openai.com/v1/images/edits"
+
+# --- Where the API-key lane sends its traffic --------------------------------
+# Same resolution order as the model slug, read at CALL time:
+#
+#     engines.chatgpt_base_url  >  OPENAI_BASE_URL (env)  >  DEFAULT_API_BASE
+#
+# Blank = OpenAI, and blank is the right answer for almost everyone. The reason
+# this is configurable at all is that OpenAI-compatible resellers exist and are
+# much cheaper on paper. What they cost instead is worth stating in code, not
+# only in the help text: every request this lane makes carries the user's
+# REFERENCE PHOTOS of a real person, and pointing the base URL elsewhere hands
+# those photos, the prompts, and a key that operator issued to that operator.
+# Nobody should discover that from a bill.
+#
+# SCOPE: the /images/edits lane only. `CODEX_RESPONSES_URL` (subscription) and
+# the ComfyUI lane are not OpenAI-key traffic and never read this.
+DEFAULT_API_BASE = 'https://api.openai.com/v1'
+_BASE_ENV_VAR = 'OPENAI_BASE_URL'
+_EDITS_PATH = '/images/edits'
 
 _NO_KEY = ('no OpenAI API key saved — add OPENAI_API_KEY in '
            'Settings > Image engines, or connect a ChatGPT subscription')
@@ -175,6 +213,48 @@ def get_image_model() -> str:
     return ((cfg.get('engines.chatgpt_image_model') or '').strip()
             or (os.environ.get(_ENV_VAR) or '').strip()
             or DEFAULT_IMAGE_MODEL)
+
+
+def get_api_base() -> str:
+    """The API root this lane will call: setting > env var > OpenAI. Read fresh
+    on every call, like the model slug."""
+    return ((cfg.get('engines.chatgpt_base_url') or '').strip()
+            or (os.environ.get(_BASE_ENV_VAR) or '').strip()
+            or DEFAULT_API_BASE)
+
+
+def edits_url(base=None) -> str:
+    """The full /images/edits URL for a configured base.
+
+    Gateways are pasted from a hundred different docs pages, so this is
+    deliberately forgiving about the three shapes people actually paste:
+
+        https://gw.example.com                -> https://gw.example.com/v1/images/edits
+        https://gw.example.com/v1             -> https://gw.example.com/v1/images/edits
+        https://gw.example.com/v1/images/edits-> used verbatim
+
+    A bare host gets `/v1` because that is the OpenAI-compatible convention every
+    such gateway follows; a base that already carries ANY path is trusted as
+    typed, because a gateway that mounts the API somewhere else is exactly the
+    case a guess would break. Getting this wrong is a 404 the user then reads as
+    "my key is bad", which is why it is a function with tests and not an
+    f-string at the call site."""
+    base = (base if base is not None else get_api_base()).strip().rstrip('/')
+    if not base:
+        base = DEFAULT_API_BASE
+    if base.endswith(_EDITS_PATH):
+        return base
+    # Path-less host (scheme://host[:port]) -> the conventional /v1 root.
+    tail = base.split('://', 1)[-1]
+    if '/' not in tail:
+        base += '/v1'
+    return base + _EDITS_PATH
+
+
+def using_custom_api_base() -> bool:
+    """True when this lane is NOT pointed at OpenAI. Diagnostics and the Settings
+    panel both need to say so out loud: a third party is seeing the photos."""
+    return get_api_base().rstrip('/') != DEFAULT_API_BASE
 
 
 def _error_body(resp):
@@ -279,8 +359,18 @@ def _raise_for_api_status(resp, *, model: str) -> None:
         return
     detail = _error_message(resp)
     suffix = f': {detail}' if detail else ''
+    # Every sentence below is worded for OpenAI, and stays byte-identical when
+    # that is who we called. Against a gateway the four statuses a wrong Base URL
+    # produces (401/403/404 and the generic tail) get ONE extra clause: those
+    # four are indistinguishable from a bad key or an unknown model, and a user
+    # who just pasted a Base URL would otherwise go and re-check their key.
+    gw = ''
+    if using_custom_api_base():
+        gw = (f' — this lane is pointed at {get_api_base()}, not OpenAI; a wrong '
+              'Base URL answers exactly like a rejected key or an unknown model '
+              '(Settings > Image engines)')
     if status == 401:
-        raise ChatGPTImageFatal(f'OpenAI rejected the API key (HTTP 401){suffix}')
+        raise ChatGPTImageFatal(f'OpenAI rejected the API key (HTTP 401){suffix}{gw}')
     if status == 403:
         # The organization-verification wall lands here: `gpt-image-2` is the one
         # model that does not need it, so name that instead of leaving the user to
@@ -289,11 +379,11 @@ def _raise_for_api_status(resp, *, model: str) -> None:
             f'OpenAI refused the model "{model}" (HTTP 403){suffix} — models newer '
             f'than {DEFAULT_IMAGE_MODEL} need OpenAI organization verification; '
             f'set the model back to {DEFAULT_IMAGE_MODEL} in Settings > Image '
-            'engines, or verify your organization with OpenAI')
+            f'engines, or verify your organization with OpenAI{gw}')
     if status == 404:
         raise ChatGPTImageFatal(
             f'OpenAI does not serve the model "{model}" (HTTP 404){suffix} — '
-            'check the model in Settings > Image engines')
+            f'check the model in Settings > Image engines{gw}')
     if status == 429:
         raise ChatGPTImageError(f'OpenAI rate-limited the request (HTTP 429){suffix}')
     if status == 400:
@@ -319,7 +409,7 @@ def _raise_for_api_status(resp, *, model: str) -> None:
         raise ChatGPTImageError(
             f'OpenAI is having trouble (HTTP {status}){suffix} — nothing was '
             'generated for this image; your prompt was not refused')
-    raise ChatGPTImageError(f'OpenAI returned HTTP {status}{suffix}')
+    raise ChatGPTImageError(f'OpenAI returned HTTP {status}{suffix}{gw}')
 
 
 def size_for_aspect(aspect_ratio: str) -> str:
@@ -370,12 +460,18 @@ def _generate_via_api(ref_bytes: bytes | list[bytes], prompt: str, model: str | 
         'size': size_for_aspect(aspect_ratio),
         'quality': CHATGPT_IMAGE_QUALITY,
     }
+    url = edits_url()
+    custom = using_custom_api_base()
     try:
         # 'high' renders take 1-3 min -> generous read timeout (connect stays short).
-        r = requests.post(_API, headers={"Authorization": f"Bearer {key}"},
+        r = requests.post(url, headers={"Authorization": f"Bearer {key}"},
                           data=data, files=files, timeout=(10, 420))
     except requests.RequestException as e:
-        raise ChatGPTImageError(f'could not reach OpenAI: {e}')
+        # Name the host that actually failed. Against a gateway, "could not reach
+        # OpenAI" would send the user to check OpenAI's status page while their
+        # reseller is the thing that is down.
+        who = f'the API gateway at {get_api_base()}' if custom else 'OpenAI'
+        raise ChatGPTImageError(f'could not reach {who}: {e}')
     if r.status_code != 200:
         # Raises for everything the user can act on; returns for a moderation 400,
         # where the row simply fails and the shot can be switched to Klein (local).

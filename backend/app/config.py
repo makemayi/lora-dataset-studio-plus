@@ -176,6 +176,17 @@ DEFAULTS = {
                 # services/qwen_image.DEFAULT_MODEL).
                 'nanobanana_model': '',
                 'chatgpt_image_model': '',
+                # Where the ChatGPT API-KEY lane sends its requests. Blank =
+                # OpenAI itself, and that is the only value most people should
+                # ever have. Non-blank points the lane at an OpenAI-compatible
+                # gateway/reseller — which means your reference PHOTOS and
+                # prompts go to that operator instead, under their retention
+                # policy, with a key they issued. It buys nothing but price.
+                # Same blank-default reasoning as the model slugs above: an
+                # OPENAI_BASE_URL env var is honoured underneath it.
+                # NEVER read by the subscription lane or the ComfyUI lane —
+                # those two are not OpenAI-key traffic at all.
+                'chatgpt_base_url': '',
                 'qwen_model': '',
                 # DashScope region configuration: 'sg' (Singapore, default), 'cn', or 'us'.
                 'qwen_region': 'sg'},

@@ -60,6 +60,34 @@ One field per API engine — you choose the model each one asks for:
 
 All three are **free text on purpose**: providers publish image models far faster than this app publishes releases, and a dropdown frozen into a build would be out of date the day it shipped and would lock you out of a model that works. Leaving a field blank keeps that engine's historical model, so a field appearing here changes nothing about your results.
 
+#### ChatGPT (OpenAI) Base URL — read this before you fill it in
+
+**ChatGPT (OpenAI) Base URL** → `engines.chatgpt_base_url`. Blank (default) = OpenAI itself. Fill it in and the ChatGPT **API-key** lane calls an OpenAI-compatible gateway or reseller instead. Resolution order, read at call time: this setting → the `OPENAI_BASE_URL` environment variable → OpenAI.
+
+Paste whichever shape the gateway's docs give you — the endpoint path is added for you:
+
+| You paste | The app calls |
+| --- | --- |
+| `https://gw.example.com` | `https://gw.example.com/v1/images/edits` |
+| `https://gw.example.com/v1` | `https://gw.example.com/v1/images/edits` |
+| `https://gw.example.com/v1/images/edits` | used verbatim |
+
+A base carrying any path is trusted exactly as typed; only a bare host gets `/v1` added.
+
+**Why anyone would.** Resellers advertise the same OpenAI models well below OpenAI's own per-image price. At the time of writing OpenAI charges **$0.211** for a high-quality 1024×1024 image and **$0.165** for 1024×1536 — a 100-image dataset at `high` is roughly **$18**. Gateways quoting a fraction of that are the reason this field exists.
+
+**What it costs instead.** This engine uploads your **reference photos of a real person on every single call**. Point the Base URL somewhere else and those photos, your prompts, and a key that operator issued all go to them, under a retention policy nobody here has read. That is the trade; the price is the only thing a gateway can improve.
+
+**Two things worth knowing before you trust a quoted price.** Aggregator listings often show a generic per-token rate rather than the *image-output* rate that actually bills — a give-away is an image model listed with an output price of `$0`, or the same input price repeated across every model in a family. And check what the quote implies per image against OpenAI's own **low**-quality price: a gateway selling `high` for less than OpenAI charges for `low` is quoting something other than what you will be billed. Generate ten images and read the actual invoice before you plan a dataset around it.
+
+**When it goes wrong.** A wrong Base URL answers **401** or **404** — the same two statuses as a rejected key and an unknown model. The app names the gateway in those messages so you check this field first, but the ambiguity is real: if you have just pasted a Base URL and your key stopped working, the Base URL is the suspect.
+
+**One incompatibility to expect.** This app posts its reference photos as the **`image[]`** multipart field, which is what OpenAI's current `/v1/images/edits` takes and what lets a dataset send several identity references at once (16 max). Some gateways only implement the older singular **`image`** field, and will answer 400 on every row — the failed tiles will say so in the provider's own words. "Compatible with the OpenAI protocol" is not the same as compatible with all of it; a gateway's own docs showing `-F "image=@file.png"` is the sign to test with one image before planning a run.
+
+**Scope.** API-key lane only. The **subscription** lane rides your ChatGPT session and the **ComfyUI** lane spends comfy.org credits — neither is OpenAI-key traffic and neither reads this field. Nor do Nano Banana, OpenRouter or Qwen.
+
+**Cheaper without any of this:** set `CHATGPT_IMAGE_QUALITY=medium` in the environment. Same OpenAI account, same endpoint, and 1024×1024 drops from $0.211 to **$0.053** — about a quarter of the bill, with nothing new seeing your photos.
+
 ### What the Gemini engine will and will not do
 
 Two properties of Nano Banana that no setting on this page can change. They are here because both are easier to meet in advance than to diagnose afterwards.
@@ -1516,6 +1544,7 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `engines.openrouter_model` | Image model slug the OpenRouter engine requests. Free text; blank = `google/gemini-3-pro-image`. Must accept reference images. |
 | `engines.nanobanana_model` | Image model the Nano Banana engine requests. Free text; blank = the `NANOBANANA_MODEL` environment variable if set, else `gemini-3-pro-image`. Must accept reference images. |
 | `engines.chatgpt_image_model` | Image model the ChatGPT engine requests on the **API-key** lane. Free text; blank = the `CHATGPT_IMAGE_MODEL` environment variable if set, else `gpt-image-2` (the only model that needs no OpenAI organization verification). Must accept reference images. The subscription lane ignores it. |
+| `engines.chatgpt_base_url` | API root for the ChatGPT **API-key** lane. Blank (default) = OpenAI; blank also lets the `OPENAI_BASE_URL` environment variable take over. A non-blank value sends your reference photos to that operator — see *ChatGPT (OpenAI) Base URL* above. Ignored by the subscription and ComfyUI lanes. |
 | `engines.chatgpt_subscription_model` | Codex **router** model for the subscription lane (default `gpt-5.4-mini`) — not an image model. |
 | `captioning.backend` | Caption backend: `auto` (prefer JoyCaption, fall back to Ollama), `joycaption`, `ollama`, or `none`. |
 | `training.default_family` | Default model family preselected for new training runs (`zimage`, `sdxl`, `krea`, `flux`, `flux2klein`, or `anima`). |
