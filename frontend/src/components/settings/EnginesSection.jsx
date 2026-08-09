@@ -1858,19 +1858,30 @@ function ImageModelsCard({ config, setField, configDefaults }) {
         engine to an <strong>OpenAI-compatible gateway or reseller</strong> instead — they
         advertise the same models well below OpenAI&apos;s per-image price. Paste the host or the{' '}
         <code className="break-all">/v1</code> root; the endpoint path is added for you.
-        {config.engines?.chatgpt_base_url
-          ? (
-            <>
-              {' '}<strong className="text-amber-300">
-                Your reference photos go to that operator, not to OpenAI.
-              </strong>{' '}
-              This engine uploads your reference images on every single call, and they will be
-              handled under that operator&apos;s retention policy with a key they issued. If the
-              gateway then answers 401 or 404, suspect this field before your key — a wrong Base
-              URL looks exactly like a rejected key or an unknown model.
-            </>
-          )
-          : ' Applies to the API-key lane only: the subscription lane rides your ChatGPT session and the ComfyUI lane spends comfy.org credits, so neither is OpenAI-key traffic and neither reads this.'}
+        {/* BOTH sentences are ALWAYS MOUNTED; only the `hidden` attribute flips.
+            Swapping them as a ternary crashed the whole Settings page for anyone
+            reading it through Chrome's auto-translate: Translate replaces text
+            nodes with its own <font> wrappers, so React's removeChild then fails
+            on a node it no longer owns ("NotFoundError: The node to be removed is
+            not a child of this node"), and the error boundary eats the section.
+            This was the only value-dependent TEXT on the page, which is why this
+            field alone died — on the very keystroke that filled it in. Toggling
+            an attribute touches no text node, so it survives translation.
+            Reported 2026-08-09. Do not turn this back into a ternary. */}
+        <span hidden={!config.engines?.chatgpt_base_url}>
+          {' '}<strong className="text-amber-300">
+            Your reference photos go to that operator, not to OpenAI.
+          </strong>{' '}
+          This engine uploads your reference images on every single call, and they will be
+          handled under that operator&apos;s retention policy with a key they issued. If the
+          gateway then answers 401 or 404, suspect this field before your key — a wrong Base
+          URL looks exactly like a rejected key or an unknown model.
+        </span>
+        <span hidden={!!config.engines?.chatgpt_base_url}>
+          {' '}Applies to the API-key lane only: the subscription lane rides your ChatGPT
+          session and the ComfyUI lane spends comfy.org credits, so neither is OpenAI-key
+          traffic and neither reads this.
+        </span>
       </ModelField>
 
       <ModelField {...shared} id="engines-openrouter_model" configKey="openrouter_model"

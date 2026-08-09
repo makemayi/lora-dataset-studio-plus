@@ -77,14 +77,21 @@ test('the quality dial is only offered on the lane it applies to', () => {
   }
 })
 
-/* The Base URL field draws DIFFERENT text depending on whether it is filled, and
-   the filled branch is the one carrying the privacy warning — the one nobody
-   would notice missing, because the field works either way. Both are mounted. */
+/* The Base URL field shows one of two hints depending on whether it is filled.
+   It first shipped as a ternary, which CRASHED the whole Settings section for
+   anyone reading the page through Chrome's auto-translate: Translate rewrites
+   text nodes into its own <font> wrappers, so React's removeChild threw
+   "NotFoundError: The node to be removed is not a child of this node" on the
+   keystroke that filled the field, and the error boundary swallowed the section.
+
+   The fix is structural — BOTH hints stay mounted and only `hidden` flips — so
+   the invariant worth pinning is not "which text appears" but "the text is
+   always there, in both states". A test cannot run Google Translate; it CAN
+   refuse the shape that Translate breaks. */
 test('the ChatGPT Base URL field renders blank, pointing at OpenAI', () => {
   const html = render({ engines: { chatgpt_base_url: '' } })
   assert.match(html, /ChatGPT \(OpenAI\) Base URL/)
   assert.match(html, /Blank = OpenAI itself/)
-  assert.doesNotMatch(html, /go to that operator/)
 })
 
 test('a filled Base URL says out loud that a third party sees the photos', () => {
@@ -93,6 +100,25 @@ test('a filled Base URL says out loud that a third party sees the photos', () =>
   // ...and points at the field before the key, since 401/404 are what a wrong
   // Base URL returns and also what a bad key returns.
   assert.match(html, /401 or 404, suspect this field before your key/)
+})
+
+test('both Base URL hints stay in the DOM in BOTH states, toggled by hidden', () => {
+  const warning = /Your reference photos go to that operator/
+  const scope = /Applies to the API-key lane only/
+  for (const value of ['', 'https://gateway.example.com']) {
+    const html = render({ engines: { chatgpt_base_url: value } })
+    // Present either way: a ternary would drop one, and dropping a text node is
+    // exactly what kills a translated page.
+    assert.match(html, warning, `warning missing for ${value || 'blank'}`)
+    assert.match(html, scope, `scope note missing for ${value || 'blank'}`)
+  }
+  // ...and exactly one of them is hidden in each state.
+  const blank = render({ engines: { chatgpt_base_url: '' } })
+  const filled = render({ engines: { chatgpt_base_url: 'https://gateway.example.com' } })
+  const hiddenSpans = (html) => (html.match(/<span hidden=""/g) || []).length
+  assert.equal(hiddenSpans(blank), 1)
+  assert.equal(hiddenSpans(filled), 1)
+  assert.notEqual(blank, filled)
 })
 
 /* The dataset side of the same class of bug: the angle-reference panel lost its
