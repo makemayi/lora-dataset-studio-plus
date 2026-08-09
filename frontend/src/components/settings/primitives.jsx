@@ -83,6 +83,45 @@ export function TestButton({ target, onResult, beforeTest }) {
   )
 }
 
+
+/* ── Help copy: shown when it is a sentence, folded when it is a paragraph ────
+   This page carries ~6,500 characters of explanatory prose and it is the most
+   valuable thing about the app — it is why a setting is understandable at all.
+   It is also why the page felt heavy: eleven of the thirteen card blurbs run
+   263–1006 characters and every one of them was open, forever, competing with
+   the controls and with each other.
+
+   So: fold the paragraphs, keep the one-liners. The split in the real copy is
+   bimodal (two blurbs at 73 chars, the rest 263+), so the threshold is not a
+   fussy judgement call — nothing sits near it.
+
+   A native <details> on purpose, not a React toggle. help/revealTarget.js
+   already walks up from a deep-linked field and opens every collapsed <details>
+   ancestor, so a Guide link into a folded explanation keeps working with no new
+   machinery. It also sidesteps the Chrome-auto-translate crash: the summary and
+   the body are both always mounted, so React never removes a text node. */
+const HELP_FOLD_OVER = 140
+
+export function HelpText({ children, className = '', summary = 'Why this matters' }) {
+  if (!children) return null
+  const long = typeof children === 'string' && children.length > HELP_FOLD_OVER
+  if (!long) {
+    return <p className={`max-w-prose ${className}`}>{children}</p>
+  }
+  return (
+    <details className="group max-w-prose">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 text-xs text-content-subtle hover:text-content-muted [&::-webkit-details-marker]:hidden">
+        <span aria-hidden="true"
+          className="grid h-3.5 w-3.5 place-items-center rounded-full bg-surface-raised text-[0.5625rem] leading-none">
+          ?
+        </span>
+        {summary}
+      </summary>
+      <p className={`mt-1.5 ${className}`}>{children}</p>
+    </details>
+  )
+}
+
 /* Chrome's own Settings is the reference here (the user's, 2026-08-09): a card
    is a raised surface with a soft shadow, not a boxed-in outline, and it lifts
    slightly on hover. Two reasons that reads better than what was here:
@@ -101,13 +140,15 @@ export function Card({ title, help, children, id }) {
   return (
     <section
       id={id}
-      className="scroll-mt-24 rounded-xl bg-surface p-5 shadow-[0_1px_2px_rgba(0,0,0,.35),0_4px_16px_-6px_rgba(0,0,0,.5)]
+      className="scroll-mt-24 rounded-xl bg-surface p-4 shadow-[0_1px_2px_rgba(0,0,0,.35),0_4px_16px_-6px_rgba(0,0,0,.5)]
         transition-shadow duration-200
         hover:shadow-[0_1px_2px_rgba(0,0,0,.4),0_10px_28px_-8px_rgba(0,0,0,.65)]"
     >
       <h2 className="text-[0.9375rem] font-semibold tracking-[-0.01em] text-content">{title}</h2>
-      {help && <p className="mt-1 max-w-prose text-[0.8125rem] leading-relaxed text-content-muted">{help}</p>}
-      <div className="mt-4 space-y-4">{children}</div>
+      <div className="mt-1">
+        <HelpText className="text-[0.8125rem] leading-relaxed text-content-muted">{help}</HelpText>
+      </div>
+      <div className="mt-3 space-y-3">{children}</div>
     </section>
   )
 }
@@ -120,7 +161,7 @@ export function TextField({ id, label, value, onChange, placeholder, help, warn,
   return (
     <div>
       <label htmlFor={id} className="block text-sm font-medium text-content">{label}</label>
-      {help && <p className="mb-1 max-w-prose text-xs text-content-muted">{help}</p>}
+      <HelpText className="mb-1 text-xs text-content-muted">{help}</HelpText>
       <input
         id={id}
         type="text"
@@ -160,7 +201,7 @@ export function SecretField({
           <label htmlFor={f.key} className="block text-sm font-medium text-content">{f.label}</label>
           <StatusBadge ok={!!secretsPresence[f.key]} />
         </div>
-        <p className="mb-1 max-w-prose text-xs text-content-muted">{f.help}</p>
+        <HelpText className="mb-1 text-xs text-content-muted">{f.help}</HelpText>
         {f.guide}
         <input
           id={f.key}

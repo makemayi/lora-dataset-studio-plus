@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-09-settings-explanations-fold',
+    date: '2026-08-09',
+    title: 'The long explanations fold away until you want them',
+    blurb: 'Image engines carries about 6,500 characters of guidance and it was all open at once, every visit, competing with the controls it was meant to explain. Paragraphs now sit behind a small “Why this matters” you can open per field; one-line notes stay where they were, because hiding a sentence behind a click helps nobody. Nothing was deleted, and a link from the Guide still opens the right explanation on its way to the field. The rows also sit closer together, and API keys shares a panel with the engine list instead of floating alone in an empty pane.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-09-settings-rows-line-up',
     date: '2026-08-09',
     title: 'Settings rows line up now',

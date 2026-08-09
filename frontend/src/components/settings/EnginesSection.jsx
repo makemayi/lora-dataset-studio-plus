@@ -2252,10 +2252,12 @@ const ENGINE_RAIL = [
   {
     group: 'General',
     items: [
-      { id: 'keys', label: 'API keys', owns: ENGINE_SECRETS.map((f) => f.key) },
+      { id: 'keys', label: 'Keys & availability',
+        // 'engines-enabled' would otherwise be swallowed by the 'engines-'
+        // prefix that belongs to Image models, and the fieldset lives here.
+        owns: [...ENGINE_SECRETS.map((f) => f.key), 'engine-default', 'engines-enabled'] },
       { id: 'models', label: 'Image models',
         owns: ['engine-image-models'], prefix: ['engines-'] },
-      { id: 'visible', label: 'Which engines appear', owns: ['engine-default'] },
       { id: 'prompts', label: 'Identity prompts', prefix: ['identity-', 'prompt-'] },
     ],
   },
@@ -2313,7 +2315,7 @@ function RailButton({ item, active, enabled, onPick }) {
       onClick={() => onPick(item.id)}
       aria-current={active ? 'true' : undefined}
       data-focus-gate={gateIds(item)}
-      className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-colors ${active ? 'bg-surface-raised' : 'hover:bg-surface'}`}
+      className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-left transition-colors ${active ? 'bg-surface-raised' : 'hover:bg-surface'}`}
     >
       {item.engine && (
         <span aria-hidden="true"
@@ -2343,9 +2345,12 @@ export default function EnginesSection(props) {
   const enabled = config.engines?.enabled || []
   const panels = {
     keys: () => (
-      <Card title="API keys" help="Keys are write-only — fields stay blank even when a key is already saved.">
-        {ENGINE_SECRETS.map((f) => <SecretField key={f.key} field={f} {...props} />)}
-      </Card>
+      <>
+        <Card title="API keys" help="Keys are write-only — fields stay blank even when a key is already saved.">
+          {ENGINE_SECRETS.map((f) => <SecretField key={f.key} field={f} {...props} />)}
+        </Card>
+        {panels.visible()}
+      </>
     ),
     models: () => (
       <ImageModelsCard config={config} setField={setField} configDefaults={configDefaults}
@@ -2420,8 +2425,8 @@ export default function EnginesSection(props) {
   }
 
   return (
-    <div className="grid items-start gap-5 md:grid-cols-[210px_minmax(0,1fr)]">
-      <nav aria-label="Engine settings" className="flex flex-col gap-5 md:sticky md:top-5">
+    <div className="grid items-start gap-4 md:grid-cols-[200px_minmax(0,1fr)]">
+      <nav aria-label="Engine settings" className="flex flex-col gap-4 md:sticky md:top-5">
         {ENGINE_RAIL.map((g) => (
           <div key={g.group} className="flex flex-col gap-0.5">
             <div className="px-3 pb-1.5 text-[0.625rem] uppercase tracking-wider text-content-subtle">
@@ -2435,7 +2440,7 @@ export default function EnginesSection(props) {
           </div>
         ))}
       </nav>
-      <div className="flex min-w-0 flex-col gap-5">
+      <div className="flex min-w-0 flex-col gap-4">
         {(panels[active] || panels.keys)()}
       </div>
     </div>
