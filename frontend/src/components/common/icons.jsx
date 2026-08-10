@@ -171,6 +171,16 @@ export function FolderIcon(props) {
   );
 }
 
+export function TrashIcon(props) {
+  return (
+    <Glyph name="trash" {...props}>
+      <path d="M4.5 6.5h15M9.5 6.5V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v1.5" />
+      <path d="M6.5 6.5l.8 12a1.5 1.5 0 0 0 1.5 1.4h6.4a1.5 1.5 0 0 0 1.5-1.4l.8-12" />
+      <path d="M10.5 10.5v6M13.5 10.5v6" />
+    </Glyph>
+  );
+}
+
 export function PlusIcon(props) {
   return (
     <Glyph name="plus" {...props}>

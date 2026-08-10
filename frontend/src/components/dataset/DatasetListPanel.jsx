@@ -10,6 +10,37 @@ import {
   datasetKind, datasetMatches, groupDatasets, kindsPresent,
   normalizeCollapsedMap, normalizeTileSize,
 } from '../../utils/datasetLibrary';
+import { CARD_SURFACE, CARD_SURFACE_INTERACTIVE } from '../common/surfaces';
+import {
+  BankIcon, CloseIcon, DownloadIcon, ImageIcon, SettingsIcon, TrashIcon,
+} from '../common/icons';
+
+/* A tile's own two actions (ZIP, Backup). Raised pill, no outline — the tile
+   under them is already a surface. */
+const TILE_ACTION =
+  'inline-flex items-center justify-center gap-1.5 rounded-full bg-surface-raised px-2 py-1 '
+  + 'text-[0.6875rem] font-semibold text-content-muted transition-colors '
+  + 'hover:bg-surface hover:text-content';
+
+/* The two controls that sit ON the reference photo. Same reasoning as the
+   canvas' pinned images: a dark scrim and a hairline are what keep a control
+   visible over an arbitrary picture, so these keep both while the rest of the
+   card drops its outline. */
+const OVER_IMAGE_BUTTON =
+  'grid h-7 w-7 place-items-center rounded-full border border-white/15 bg-black/50 '
+  + 'opacity-80 backdrop-blur-sm transition hover:opacity-100';
+
+/* The new-dataset form: a segmented choice (Character / Concept / Style, then
+   Face / Face+body) and its fields. The selected segment is a FILLED pill, the
+   others are plain — the same "where am I" grammar as the nav bar, instead of
+   two different outlines. */
+const SEGMENT_BUTTON =
+  'flex-1 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors';
+const SEGMENT_ON = 'bg-primary/25 text-content';
+const SEGMENT_OFF = 'bg-surface-raised text-content-muted hover:bg-surface hover:text-content';
+const FORM_FIELD =
+  'rounded-lg bg-surface-raised px-3 py-1.5 text-sm text-content '
+  + 'placeholder:text-content-subtle focus:outline-none focus:ring-1 focus:ring-primary';
 
 // Fixed gradient palette for the dataset avatars — deterministic per name so a
 // dataset keeps its color across sessions (Tailwind needs literal class names).
@@ -39,8 +70,8 @@ function PipelineSteps() {
   return (
     <ol className="grid grid-cols-1 sm:grid-cols-3 gap-2">
       {steps.map((s, i) => (
-        <li key={s.n} className="relative flex items-start gap-2.5 rounded-lg border border-border bg-app/40 p-2.5">
-          <span className="grid place-items-center w-8 h-8 shrink-0 rounded-full bg-primary/15 border border-primary/40 text-base"
+        <li key={s.n} className="relative flex items-start gap-2.5 rounded-lg bg-surface-raised p-2.5">
+          <span className="grid place-items-center w-8 h-8 shrink-0 rounded-full bg-primary/20 text-base"
             aria-hidden="true">{s.icon}</span>
           <span className="min-w-0">
             <span className="block text-content text-[0.75rem] font-semibold">
@@ -71,14 +102,14 @@ function EmptyState() {
   ];
   return (
     <div className="mx-auto w-full max-w-4xl flex flex-col gap-3">
-      <div className="rounded-xl border border-border bg-gradient-to-br from-surface to-app/60 p-3 flex flex-col gap-2.5">
+      <div className={`p-3 flex flex-col gap-2.5 ${CARD_SURFACE}`}>
         <p className="text-content-subtle text-xs">
           Build a consistent character: one reference photo becomes a curated,
           captioned training set for a LoRA you can use in every generator.
         </p>
         <PipelineSteps />
       </div>
-      <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-app/30 px-4 py-8 text-center">
+      <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-surface px-4 py-8 text-center">
         <div className="grid grid-cols-6 gap-1.5" aria-hidden="true">
           {shots.map((s, i) => (
             <ShotIllustration key={i} framing={s.framing} label={s.label}
@@ -150,11 +181,11 @@ function DatasetTile({ d, onOpen, onDelete, onExportZip, onExportBackup, onSetti
                        settingsLoading = false, showPreviews }) {
   const canExportZip = (d.images_kept ?? 0) > 0;
   return (
-    <div className="library-card group relative overflow-hidden rounded-xl border border-border bg-surface transition-colors hover:border-primary/40">
+    <div className={`library-card group relative overflow-hidden ${CARD_SURFACE_INTERACTIVE}`}>
       <button type="button" onClick={() => onOpen(d.id)}
         aria-label={`Open the dataset ${d.name}`}
         className="block w-full text-left">
-        <div className="relative aspect-[4/3] bg-app/60">
+        <div className="relative aspect-[4/3] bg-surface-raised">
           {showPreviews && d.ref_filename ? (
             <img
               src={`/api/dataset/${d.id}/img/${encodeURIComponent(d.ref_filename)}`}
@@ -196,7 +227,7 @@ function DatasetTile({ d, onOpen, onDelete, onExportZip, onExportBackup, onSetti
           <span className="text-[0.6875rem] text-content-subtle">{tileStats(d)}</span>
         </div>
       </button>
-      <div className="library-card__actions grid grid-cols-2 gap-1.5 border-t border-border px-2 py-2">
+      <div className="library-card__actions grid grid-cols-2 gap-1.5 px-2 pb-2">
         <button type="button"
           onClick={() => onExportZip?.(d.id)}
           disabled={!canExportZip}
@@ -204,15 +235,15 @@ function DatasetTile({ d, onOpen, onDelete, onExportZip, onExportBackup, onSetti
             ? 'Download the kept images and captions as a training-ready ZIP'
             : 'Keep at least one image before exporting a training ZIP'}
           aria-label={`Export training ZIP for ${d.name}`}
-          className="rounded-md border border-border bg-app/50 px-2 py-1 text-[0.6875rem] font-semibold text-content-muted transition-colors hover:border-primary/40 hover:bg-surface-raised hover:text-content disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-app/50 disabled:hover:text-content-muted">
-          ⬇ ZIP
+          className={`${TILE_ACTION} disabled:cursor-not-allowed disabled:opacity-40`}>
+          <DownloadIcon className="h-3.5 w-3.5 shrink-0" /> ZIP
         </button>
         <button type="button"
           onClick={() => onExportBackup?.(d.id)}
           title="Download a portable backup with all images, captions and settings"
           aria-label={`Export portable backup for ${d.name}`}
-          className="rounded-md border border-border bg-app/50 px-2 py-1 text-[0.6875rem] font-semibold text-content-muted transition-colors hover:border-primary/40 hover:bg-surface-raised hover:text-content">
-          💾 Backup
+          className={TILE_ACTION}>
+          <BankIcon className="h-3.5 w-3.5 shrink-0" /> Backup
         </button>
       </div>
       {(onSettings || onDelete) && (
@@ -222,8 +253,10 @@ function DatasetTile({ d, onOpen, onDelete, onExportZip, onExportBackup, onSetti
               disabled={settingsLoading}
               title="Edit dataset settings (name, trigger, prompt suffixes)"
               aria-label={`Edit settings for ${d.name}`}
-              className="rounded-lg border border-border bg-black/50 px-2 py-1 text-xs text-content-muted opacity-70 backdrop-blur-sm transition-opacity hover:bg-surface-raised hover:opacity-100 disabled:cursor-wait disabled:opacity-100">
-              {settingsLoading ? '…' : '⚙️'}
+              className={`${OVER_IMAGE_BUTTON} text-content-muted hover:bg-black/70 disabled:cursor-wait disabled:opacity-100`}>
+              {/* Both states mounted — see CLAUDE.md ▸ UI changes. */}
+              <span hidden={!settingsLoading} className="text-xs leading-none">…</span>
+              <span hidden={!!settingsLoading}><SettingsIcon className="h-3.5 w-3.5" /></span>
             </button>
           )}
           {onDelete && (
@@ -232,8 +265,8 @@ function DatasetTile({ d, onOpen, onDelete, onExportZip, onExportBackup, onSetti
                 if (window.confirm(`Permanently delete the dataset "${d.name}" and all its images? This cannot be undone.`)) onDelete(d.id);
               }}
               title="Delete this dataset" aria-label={`Delete the dataset ${d.name}`}
-              className="rounded-lg border border-red-500/40 bg-black/50 px-2 py-1 text-xs text-red-300 opacity-70 backdrop-blur-sm transition-opacity hover:bg-red-500/25 hover:opacity-100">
-              🗑
+              className={`${OVER_IMAGE_BUTTON} text-red-300 hover:bg-red-500/60`}>
+              <TrashIcon className="h-3.5 w-3.5" />
             </button>
           )}
         </div>
@@ -248,13 +281,13 @@ function DatasetRow({ d, onOpen, onDelete, onExportZip, onExportBackup, onSettin
                       settingsLoading = false, showPreviews }) {
   const canExportZip = (d.images_kept ?? 0) > 0;
   const kind = datasetKind(d);
-  const iconBtn = 'grid h-7 w-7 shrink-0 place-items-center rounded-md border border-border bg-app/50 text-xs text-content-muted transition-colors hover:border-primary/40 hover:bg-surface-raised hover:text-content';
+  const iconBtn = 'grid h-7 w-7 shrink-0 place-items-center rounded-full bg-surface-raised text-xs text-content-muted transition-colors hover:bg-surface hover:text-content';
   return (
-    <div className="library-card flex items-center gap-1.5 rounded-lg border border-border bg-surface pr-1.5 transition-colors hover:border-primary/40">
+    <div className={`library-card flex items-center gap-1.5 pr-1.5 ${CARD_SURFACE_INTERACTIVE}`}>
       <button type="button" onClick={() => onOpen(d.id)}
         aria-label={`Open the dataset ${d.name}`}
         className="flex min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-1.5 text-left">
-        <span className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md bg-app/60">
+        <span className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md bg-surface-raised">
           {showPreviews && d.ref_filename ? (
             <img
               src={`/api/dataset/${d.id}/img/${encodeURIComponent(d.ref_filename)}`}
@@ -298,21 +331,22 @@ function DatasetRow({ d, onOpen, onDelete, onExportZip, onExportBackup, onSettin
             ? 'Download the kept images and captions as a training-ready ZIP'
             : 'Keep at least one image before exporting a training ZIP'}
           aria-label={`Export training ZIP for ${d.name}`}
-          className={`${iconBtn} disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-app/50 disabled:hover:text-content-muted`}>
-          ⬇
+          className={`${iconBtn} disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-surface-raised disabled:hover:text-content-muted`}>
+          <DownloadIcon className="h-3.5 w-3.5" />
         </button>
         <button type="button" onClick={() => onExportBackup?.(d.id)}
           title="Download a portable backup with all images, captions and settings"
           aria-label={`Export portable backup for ${d.name}`}
           className={iconBtn}>
-          💾
+          <BankIcon className="h-3.5 w-3.5" />
         </button>
         {onSettings && (
           <button type="button" onClick={() => onSettings(d.id)} disabled={settingsLoading}
             title="Edit dataset settings (name, trigger, prompt suffixes)"
             aria-label={`Edit settings for ${d.name}`}
             className={`${iconBtn} disabled:cursor-wait`}>
-            {settingsLoading ? '…' : '⚙️'}
+            <span hidden={!settingsLoading}>…</span>
+            <span hidden={!!settingsLoading}><SettingsIcon className="h-3.5 w-3.5" /></span>
           </button>
         )}
         {onDelete && (
@@ -321,8 +355,8 @@ function DatasetRow({ d, onOpen, onDelete, onExportZip, onExportBackup, onSettin
               if (window.confirm(`Permanently delete the dataset "${d.name}" and all its images? This cannot be undone.`)) onDelete(d.id);
             }}
             title="Delete this dataset" aria-label={`Delete the dataset ${d.name}`}
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-red-500/40 bg-app/50 text-xs text-red-300 transition-colors hover:bg-red-500/25">
-            🗑
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-red-500/15 text-xs text-red-300 transition-colors hover:bg-red-500/30">
+            <TrashIcon className="h-3.5 w-3.5" />
           </button>
         )}
       </div>
@@ -360,14 +394,14 @@ function NewDatasetForm({ onCreate, onClose }) {
   // server with the button enabled and 400 silently (no toast, no feedback).
   const canCreate = name.trim() && (!concept || conceptDesc.trim()) && (style || trigger.trim());
   return (
-    <div id="new-dataset-form" className="mx-auto w-full max-w-4xl rounded-xl border border-border bg-surface p-3 flex flex-col gap-2.5">
+    <div id="new-dataset-form" className={`mx-auto w-full max-w-4xl p-3 flex flex-col gap-2.5 ${CARD_SURFACE}`}>
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-content font-semibold text-sm flex items-center gap-2">
-          <span aria-hidden="true">🆕</span> New dataset
-        </h2>
+        <h2 className="text-content font-semibold text-sm">New dataset</h2>
         {onClose && (
           <button type="button" onClick={onClose} aria-label="Close the new-dataset form"
-            className="rounded px-1.5 text-content-subtle hover:text-content">✕</button>
+            className="grid h-7 w-7 place-items-center rounded-full text-content-subtle transition-colors hover:bg-surface-raised hover:text-content">
+            <CloseIcon className="h-3.5 w-3.5" />
+          </button>
         )}
       </div>
       {/* Nature : personnage (défaut) vs concept. Choisir « Concept » adapte tout le
@@ -379,10 +413,7 @@ function NewDatasetForm({ onCreate, onClose }) {
           ['style', '🎨 Style', 'An always-on aesthetic: load the LoRA and control its influence with the LoRA weight']].map(
           ([val, label, hint]) => (
             <button key={val} type="button" onClick={() => setKind(val)} title={hint}
-              className={`flex-1 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
-                kind === val
-                  ? 'border-primary/60 bg-primary/15 text-content'
-                  : 'border-border bg-app/40 text-content-muted hover:bg-surface-raised'}`}>
+              className={`${SEGMENT_BUTTON} ${kind === val ? SEGMENT_ON : SEGMENT_OFF}`}>
               {label}
             </button>
           ))}
@@ -392,14 +423,14 @@ function NewDatasetForm({ onCreate, onClose }) {
           {concept ? 'Concept name' : style ? 'Style name' : 'Character name'}
           <input id="new-dataset-name" value={name} onChange={(e) => setName(e.target.value)}
             placeholder={concept ? 'e.g. cim' : style ? 'e.g. ink-wash' : 'e.g. Emma'}
-            className="bg-app/60 border border-border rounded px-2 py-1.5 text-sm text-content" />
+            className={FORM_FIELD} />
         </label>
         {!style && (
           <label className="flex flex-col gap-1 text-[0.6875rem] text-content-muted">
             Trigger word
             <input value={trigger} onChange={(e) => setTrigger(e.target.value)}
               placeholder={concept ? 'e.g. cim_act' : 'e.g. zchar_emma'}
-              className="bg-app/60 border border-border rounded px-2 py-1.5 text-sm text-content" />
+              className={FORM_FIELD} />
             {/* Guard-rail: a plain short word ("emma", "girl") collides with the base
                 model's existing vocabulary — the identity bleeds into that word
                 everywhere. A unique token (prefix/underscore/digits) binds cleanly. */}
@@ -418,7 +449,7 @@ function NewDatasetForm({ onCreate, onClose }) {
       <label className="flex flex-col gap-1 text-[0.6875rem] text-content-muted">
         Target model <span className="text-content-subtle normal-case">— sets the caption style &amp; groups the menu (changeable later)</span>
         <select value={trainType} onChange={(e) => setTrainType(e.target.value)}
-          className="bg-app/60 border border-border rounded px-2 py-1.5 text-sm text-content">
+          className={FORM_FIELD}>
           <option value="zimage">Z-Image (prose captions)</option>
           <option value="sdxl">SDXL (booru-tag captions)</option>
           <option value="krea">Krea 2 (prose captions)</option>
@@ -438,10 +469,8 @@ function NewDatasetForm({ onCreate, onClose }) {
               ['body', '🧍 Face + body', 'Total fidelity: body shape, tattoos and marks bind to the trigger too. Prefers full-frame imports and more bust/body shots.']].map(
               ([val, label, hint]) => (
                 <button key={val} type="button" onClick={() => setFidelity(val)} title={hint}
-                  className={`flex-1 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
-                    fidelity === val
-                      ? 'border-primary/60 bg-primary/15 text-content'
-                      : 'border-border bg-app/40 text-content-muted hover:bg-surface-raised'}`}>
+                  className={`${SEGMENT_BUTTON} ${
+                    fidelity === val ? SEGMENT_ON : SEGMENT_OFF}`}>
                   {label}
                 </button>
               ))}
@@ -455,7 +484,7 @@ function NewDatasetForm({ onCreate, onClose }) {
           What is the recurring concept? <span className="text-fuchsia-300">(required — it will be omitted from every caption)</span>
           <textarea value={conceptDesc} onChange={(e) => setConceptDesc(e.target.value)} rows={2}
             placeholder="Describe the recurring act/effect itself, not the people — e.g. “a tongue licking an ice-cream cone”"
-            className="bg-app/60 border border-border rounded px-2 py-1.5 text-sm text-content resize-y" />
+            className={`${FORM_FIELD} resize-y`} />
         </label>
       )}
       <div className="flex items-center gap-2 flex-wrap">
@@ -570,8 +599,10 @@ export default function DatasetListPanel({
               }}
               aria-expanded={empty ? undefined : formOpen}
               aria-controls={empty ? undefined : 'new-dataset-form'}
-              className="rounded-lg bg-gradient-primary px-3.5 py-1.5 text-sm font-semibold text-white transition-transform hover:-translate-y-px">
-              {!empty && creating ? '✕ Close' : '+ New dataset'}
+              className="rounded-full bg-gradient-primary px-4 py-1.5 text-sm font-semibold text-white transition-transform hover:-translate-y-px">
+              {/* Both labels mounted — see CLAUDE.md ▸ UI changes. */}
+              <span hidden={!(!empty && creating)}>Close</span>
+              <span hidden={!!(!empty && creating)}>+ New dataset</span>
             </button>
             {/* Back up everything, its "include LoRAs" option and Import backup
                 all live in ONE 💾 Backup menu — only "+ New dataset" stays out,
@@ -587,7 +618,7 @@ export default function DatasetListPanel({
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Find a dataset…"
               aria-label="Find a dataset"
-              className="min-w-[9rem] flex-1 rounded-md border border-border bg-surface px-3 py-1.5 text-xs text-content placeholder:text-content-subtle focus:border-primary focus:outline-none sm:max-w-xs"
+              className="min-w-[9rem] flex-1 rounded-full bg-surface-raised px-3.5 py-1.5 text-xs text-content placeholder:text-content-subtle focus:outline-none focus:ring-1 focus:ring-primary sm:max-w-xs"
             />
             {kinds.length >= 2 && (
               <div role="group" aria-label="Filter by dataset kind" className="flex items-center gap-1">
@@ -595,10 +626,8 @@ export default function DatasetListPanel({
                   <button key={k} type="button"
                     onClick={() => setKindFilter(k)}
                     aria-pressed={kindFilter === k}
-                    className={`rounded-full border px-2.5 py-1 text-[0.6875rem] font-semibold transition-colors ${
-                      kindFilter === k
-                        ? 'border-primary/60 bg-primary/15 text-content'
-                        : 'border-border bg-surface text-content-muted hover:bg-surface-raised'}`}>
+                    className={`rounded-full px-2.5 py-1 text-[0.6875rem] font-semibold transition-colors ${
+                      kindFilter === k ? SEGMENT_ON : SEGMENT_OFF}`}>
                     {k === 'all' ? 'All' : KIND_CHIPS[k]}
                   </button>
                 ))}
@@ -609,12 +638,16 @@ export default function DatasetListPanel({
                 onClick={() => setShowPreviews((visible) => !visible)}
                 aria-pressed={showPreviews}
                 title={showPreviews ? 'Hide image previews' : 'Show image previews'}
-                className={`flex h-6 items-center gap-1 rounded-md border px-1.5 text-[0.6875rem] font-semibold transition-colors ${
+                className={`flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[0.6875rem] font-semibold transition-colors ${
                   showPreviews
-                    ? 'border-indigo-400/60 bg-indigo-500/20 text-indigo-200'
-                    : 'border-border bg-surface text-content-muted hover:bg-surface-raised'}`}>
-                <span aria-hidden="true">{showPreviews ? '🖼️' : '▧'}</span>
-                <span className="hidden sm:inline">{showPreviews ? 'Hide previews' : 'Show previews'}</span>
+                    ? 'bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30'
+                    : SEGMENT_OFF}`}>
+                <ImageIcon className="h-3.5 w-3.5 shrink-0" />
+                <span className="hidden sm:inline">
+                  {/* Both labels mounted — see CLAUDE.md ▸ UI changes. */}
+                  <span hidden={!showPreviews}>Hide previews</span>
+                  <span hidden={!!showPreviews}>Show previews</span>
+                </span>
                 <span className="sr-only">Image previews {showPreviews ? 'shown' : 'hidden'}</span>
               </button>
               <TileSizeControl size={tileSize} onChange={setTileSize}
@@ -632,7 +665,7 @@ export default function DatasetListPanel({
       {empty ? (
         <EmptyState />
       ) : groups.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-border bg-app/30 px-4 py-8 text-center text-sm text-content-muted">
+        <p className="rounded-xl border border-dashed border-border bg-surface px-4 py-8 text-center text-sm text-content-muted">
           {query.trim()
             ? <>No dataset matches “{query.trim()}”{kindFilter !== 'all' ? ` in ${KIND_CHIPS[kindFilter]}` : ''}.</>
             : <>No {KIND_CHIPS[kindFilter]} dataset.</>}

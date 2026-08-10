@@ -60,5 +60,8 @@ test('library cards follow the fine-pointer hover-action contract', () => {
   assert.doesNotMatch(css, /\.library-card \.library-card__actions\s*\{[^}]*display:\s*none/s)
   // Applied on the photo tile (export bar + delete overlay) AND the S row.
   assert.ok((panel.match(/library-card__actions/g) || []).length >= 3)
-  assert.ok((panel.match(/className="library-card /g) || []).length >= 2)
+  // Both card roots carry the class. Written as a template literal since the
+  // 2026-08-10 restyle (the surface comes from a shared constant), so match the
+  // class itself rather than one spelling of the attribute.
+  assert.ok((panel.match(/className=[{`"]`?library-card /g) || []).length >= 2)
 })

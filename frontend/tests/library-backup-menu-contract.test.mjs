@@ -38,8 +38,11 @@ test('"Import backup" moved into the same menu, "+ New dataset" stayed out of it
 })
 
 test('a running backup stays visible with the menu closed', () => {
-  // The label itself reports the in-flight state…
-  assert.match(controls, /running \? 'Backing up…' : 'Backup'/)
+  // The label itself reports the in-flight state — both halves mounted, one
+  // hidden, since the 2026-08-10 restyle (a swapped text node is the Chrome
+  // auto-translate crash; see CLAUDE.md ▸ UI changes).
+  assert.match(controls, /<span hidden=\{!running\}>Backing up…<\/span>/)
+  assert.match(controls, /<span hidden=\{!!running\}>Backup<\/span>/)
   // …and both overlays are siblings of the <details>, never nested in it.
   const detailsEnd = controls.indexOf('</details>')
   assert.ok(controls.indexOf('<BackupOverlay') > detailsEnd, 'BackupOverlay must live outside the menu')

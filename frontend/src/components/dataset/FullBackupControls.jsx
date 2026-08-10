@@ -16,6 +16,7 @@
  */
 import { useRef, useState } from 'react';
 import { HelpBadge } from '../../help/HelpMode';
+import { BankIcon, SpinnerIcon } from '../common/icons';
 import {
   describeProgress, progressPercent, summarizeBackupResult, summarizeRestoreReport,
 } from '../../utils/fullBackup';
@@ -157,21 +158,27 @@ export default function FullBackupControls({ backup, onRestore }) {
       <details ref={menuRef} className="relative">
         <summary
           title="Back up the whole library, or import a backup archive"
-          className="flex items-center gap-1 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-semibold text-content-muted hover:text-content hover:bg-surface-raised cursor-pointer select-none">
-          <span aria-hidden>{running ? '⏳' : '💾'}</span>
+          className="flex cursor-pointer select-none items-center gap-1.5 rounded-full bg-surface-raised px-3 py-1.5 text-sm font-semibold text-content-muted transition-colors hover:bg-surface hover:text-content">
+          <span hidden={!running}><SpinnerIcon className="h-3.5 w-3.5 shrink-0" /></span>
+          <span hidden={!!running}><BankIcon className="h-3.5 w-3.5 shrink-0" /></span>
           {/* The label itself carries the in-flight state, so a closed menu
-              still says a backup is running. */}
-          <span className="hidden sm:inline">{running ? 'Backing up…' : 'Backup'}</span>
+              still says a backup is running. Both are mounted and one is
+              hidden — a ternary here is the Chrome-translate crash. */}
+          <span className="hidden sm:inline">
+            <span hidden={!running}>Backing up…</span>
+            <span hidden={!!running}>Backup</span>
+          </span>
           <span aria-hidden className="text-content-subtle">⋯</span>
         </summary>
-        <div className="absolute right-0 top-full mt-1 z-20 w-80 rounded-lg border border-border bg-surface-overlay shadow-xl p-1.5 flex flex-col gap-0.5">
+        <div className="absolute right-0 top-full mt-2 z-20 w-80 rounded-xl bg-surface-overlay shadow-2xl p-1.5 flex flex-col gap-0.5">
           {backup && (
             <>
               <button type="button" disabled={running}
                 onClick={() => { closeMenu(); backup.start(includeLoras); }}
                 title="Archive every dataset, its training history + your settings (API keys excluded) into one file"
                 className={MENU_ITEM}>
-                <span className="whitespace-nowrap">💾 Back up everything</span>
+                <BankIcon className="h-4 w-4 shrink-0" />
+                <span className="whitespace-nowrap">Back up everything</span>
                 <span className="ml-auto shrink-0 text-content-subtle text-[0.625rem]">
                   {running ? 'running…' : 'datasets · settings'}
                 </span>

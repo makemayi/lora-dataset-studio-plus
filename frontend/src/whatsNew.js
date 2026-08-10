@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-library-restyle',
+    date: '2026-08-10',
+    title: 'The dataset library lifts its cards instead of framing them',
+    blurb: 'Your datasets are shaded cards that lift under the pointer, not outlined boxes — the same surface Settings, the bank and the runs list now use. The four per-card actions (ZIP, Backup, settings, delete) are drawn icons rather than emoji, the search box and the kind filters are pills, and in the new-dataset form the choice you have made — Character / Concept / Style, Face / Face + body — is a filled pill instead of a slightly different outline. This is the first slice of the datasets pass: the library page. The workspace inside a dataset is next.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-10-setup-restyle',
     date: '2026-08-10',
     title: 'The setup wizard matches the app it sets up',
