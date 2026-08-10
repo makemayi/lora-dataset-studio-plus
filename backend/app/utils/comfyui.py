@@ -706,6 +706,22 @@ def _queue_entry_identity(entry):
     return None, None
 
 
+# Cancelling, and asking whether a prompt is still queued, both talk to a ComfyUI
+# that is BY DEFINITION busy — you press Stop while it is sampling, and the
+# recovery probe runs while it may still be mid-job. A 3-second read timeout is
+# far too tight for that: measured on this app's own log, `POST /queue` against a
+# ComfyUI mid-generation answered "Read timed out. (read timeout=3)" over and
+# over, so the cancel never landed, the prompt stayed queued, the durable barrier
+# stayed with it, and every pending tile behind it became unclearable. Reported
+# as "dead tasks I cannot clear", twice.
+#
+# The CONNECT half stays short — a ComfyUI that is down must still fail fast, and
+# that is the case the connect timeout covers. Only the READ half is patient,
+# and only on these two paths: a poll that waited this long would be a different
+# bug.
+_CANCEL_TIMEOUT = (3, 25)
+
+
 def comfyui_prompt_is_absent(prompt_id, worker_url=None):
     """Return True only after a healthy queue response proves this id absent.
 
@@ -717,7 +733,7 @@ def comfyui_prompt_is_absent(prompt_id, worker_url=None):
     try:
         api_addr = worker_url or api_address()
         response = requests.get(
-            urljoin(api_addr, '/queue'), timeout=3, allow_redirects=False)
+            urljoin(api_addr, '/queue'), timeout=_CANCEL_TIMEOUT, allow_redirects=False)
         status = getattr(response, 'status_code', None)
         if type(status) is not int or not 200 <= status < 300:
             return None
@@ -754,7 +770,7 @@ def cancel_comfyui_prompt_state(prompt_id, client_id, worker_url=None) -> ComfyP
 
     try:
         response = requests.get(
-            urljoin(api_addr, '/queue'), timeout=3, allow_redirects=False)
+            urljoin(api_addr, '/queue'), timeout=_CANCEL_TIMEOUT, allow_redirects=False)
         status = getattr(response, 'status_code', None)
         if type(status) is not int or not 200 <= status < 300:
             return ComfyPromptState.UNKNOWN
@@ -771,8 +787,8 @@ def cancel_comfyui_prompt_state(prompt_id, client_id, worker_url=None) -> ComfyP
             return ComfyPromptState.UNKNOWN
         if any(exact(entry) for entry in pending):
             response = requests.post(
-                urljoin(api_addr, '/queue'), json={'delete': [prompt_id]}, timeout=3,
-                allow_redirects=False)
+                urljoin(api_addr, '/queue'), json={'delete': [prompt_id]},
+                timeout=_CANCEL_TIMEOUT, allow_redirects=False)
             status = getattr(response, 'status_code', None)
             return (ComfyPromptState.DELETED if type(status) is int and 200 <= status < 300
                     else ComfyPromptState.UNKNOWN)

@@ -50,6 +50,12 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-11-cancel-reaches-a-busy-comfyui',
+    date: '2026-08-11',
+    title: 'Stop now reaches a ComfyUI that is actually busy',
+    blurb: 'A tile stuck on "generating" that nothing could clear, twice reported. The cause was a three-second timeout: LDS will not drop a card while the ComfyUI job behind it might still exist, and it asks ComfyUI whether that job is still queued — but a ComfyUI in the middle of a generation does not answer HTTP in three seconds, so the cancel never landed and the card stayed forever. Exactly the moment you press Stop is the moment ComfyUI is busiest. The cancel and the recovery probe now wait up to 25 seconds for an answer, while still giving up immediately when ComfyUI is simply not running.',
+  },
+  {
     id: '2026-08-11-recent-variations-rail',
     date: '2026-08-11',
     title: 'Recent faces in the workspace rail — one click back into any dataset',

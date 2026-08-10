@@ -176,6 +176,38 @@ guide. The one trap: on reddit.com/prefs/apps, pick the app type
 Reddit then rejects the anonymous login this app uses (every scan fails
 with 401). Takes effect immediately, no restart needed.
 
+## A pending tile will not clear, and ⏹ Stop does nothing
+
+**Why:** LDS refuses to drop a card while the ComfyUI prompt behind it might
+still exist — dropping it would leave real GPU work with no handle and no owner.
+So the whole chain hangs on one question: *is that prompt still queued?* If LDS
+cannot get an answer, it keeps the card.
+
+Until 2026-08-11 it usually could not get one at the worst moment. The cancel
+and the "is it still there?" probe both gave ComfyUI **three seconds** to answer,
+and a ComfyUI in the middle of a generation does not answer HTTP in three
+seconds:
+
+    Could not cancel ComfyUI prompt 5242c1e0…: Read timed out. (read timeout=3)
+
+The cancel never landed, the prompt stayed queued, and every tile behind it
+became unclearable. Both paths now wait up to 25 seconds to be *read* while
+still failing fast to *connect*, so a ComfyUI that is down is still detected
+immediately.
+
+**If you are on an older build, or it happens anyway:**
+
+1. Let ComfyUI finish or interrupt it there — the moment its queue no longer
+   holds the prompt, LDS proves the work is gone and clears the barrier by
+   itself.
+2. Then press **⏹ Stop** on the dataset; the leftover cards go.
+
+**Also worth fixing at the source:** if generations regularly take long enough
+for this to happen, check that ComfyUI was started with
+`--disable-dynamic-vram` (see the MiniMax H3 notes) — a model set larger than
+the card makes Windows page VRAM, and the same job then takes several times
+longer, at random.
+
 ## ComfyUI shows as unreachable
 
 Check **Settings → Local tools → ComfyUI API URL** (default
