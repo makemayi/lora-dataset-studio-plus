@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-training-panel-restyle',
+    date: '2026-08-10',
+    title: 'The training panel matches the rest of the app',
+    blurb: 'Last slice of the datasets pass. Seventy-five outlined boxes in the training panel — every number field, every recipe row, the launch dialogs — become shaded rows, pills and fields that light a focus ring when you are in them. The sky-tinted "what this run will cost you" facts keep their colour; they just stop being boxes. Nothing about a recipe, a default or a launch changed.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-10-generation-panels-restyle',
     date: '2026-08-10',
     title: 'The generation, captioning and import panels lose their frames too',
