@@ -557,7 +557,7 @@ def _comfy_input_dir() -> str:
 
 
 def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None,
-                        mask_image=None):
+                        mask_image=None, pose_hint=None):
     """Load the shipped graph, apply the stage switches, resolve every loader
     against what is actually installed, and return (workflow, stages_kept).
 
@@ -679,6 +679,14 @@ def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None
     prompt_override = cfg.get('minimax_h3.swap_prompt')
     if isinstance(prompt_override, str) and prompt_override.strip():
         workflow[NODE_H3]['inputs']['prompt'] = prompt_override.strip()
+    # APPENDED, never substituted: the base instruction is what the graph was
+    # tuned with, and this is one sentence of per-tile fact on top of it — which
+    # way this head is turned and what its face is doing. It rides after any
+    # override too, because a user rewording the instruction has not stopped
+    # wanting the head to face the right way.
+    if pose_hint:
+        workflow[NODE_H3]['inputs']['prompt'] = (
+            workflow[NODE_H3]['inputs']['prompt'].rstrip() + ' ' + pose_hint.strip())
     ref_size = cfg.get('minimax_h3.ref_image_size')
     if ref_size:
         workflow[NODE_H3]['inputs']['ref_image_size'] = ref_size
@@ -732,9 +740,18 @@ def enqueue_h3_swap(user_id, target_path, ref_path, extra_metadata=None):
             mask_path, f'h3swap_mask_{uid}_{target_stem}.png', comfy_input_dir))
         staged_inputs.append(staged_mask)
 
+    hint = None
+    if cfg.get('face_swap.h3_pose_hint') is not False:
+        from .face_swap_pose import pose_hint as _pose_hint
+        meta = extra_metadata or {}
+        hint = _pose_hint(meta.get('variation_prompt'), meta.get('framing'),
+                          meta.get('variation_label'))
     workflow, kept = build_swap_workflow(
         staged_inputs[0], staged_inputs[1],
-        filename_prefix=f'{user_id}_H3Swap_{uid}', mask_image=staged_mask)
+        filename_prefix=f'{user_id}_H3Swap_{uid}', mask_image=staged_mask,
+        pose_hint=hint)
+    if hint:
+        logger.info('h3 swap: pose hint — %s', hint)
     if kept:
         logger.info('h3 swap: optional stages on — %s',
                     ', '.join(STAGE_LABELS[k] for k in kept))

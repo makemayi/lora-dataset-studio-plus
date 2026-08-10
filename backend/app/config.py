@@ -907,6 +907,18 @@ DEFAULTS = {
         # more of the OLD head's edge pixels survive at the boundary, so past
         # ~48 px a hairline can start to ghost.
         'h3_blend_pixels': 40,
+        # Tell the swap HOW THE HEAD SITS in the tile it is repainting, taken
+        # from the catalog prompt that generated that tile ("three-quarter
+        # view", "a calm neutral facial expression" — see face_swap_pose).
+        #
+        # Without it the model has to infer orientation and expression from a
+        # cropped photo, and the expression is the one it most often invents: a
+        # laughing body under a calm face reads as a paste-up as loudly as a bad
+        # seam does. The sentence is APPENDED to the instruction, never replaces
+        # it, and a tile whose row says nothing usable (an imported photo) keeps
+        # the generic "match the shoulders" wording rather than being given a
+        # guess. False turns it off.
+        'h3_pose_hint': True,
         # Which inpainting model the `lama` stage runs. The maintainer's graph
         # asked for 'zits', and on this lane that CRASHES: ZITS pads to a
         # multiple of 32 and drives a 256->512 structure upsampler, while the

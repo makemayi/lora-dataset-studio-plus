@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-11-swap-knows-the-pose',
+    date: '2026-08-11',
+    title: 'The swap is told which way the head is turned, instead of guessing',
+    blurb: 'A swapped head had to infer its own orientation and expression from a cropped photo, and the expression is the one it most often invented — a laughing body under a calm face looks as pasted-on as a bad seam. But nothing needed inferring: the tile still carries the catalog prompt that generated it, and that prompt says "three-quarter view" and "a calm neutral facial expression" in so many words. One sentence built from it now rides along with every swap, telling the model exactly what to reproduce and not to import the reference photo’s own expression. On a real dataset 82% of tiles produce one; the rest — imported photos mostly — get nothing rather than a guess.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-11-swap-blends-in',
     date: '2026-08-11',
     title: 'A swapped head that looks like it belongs in the photo',

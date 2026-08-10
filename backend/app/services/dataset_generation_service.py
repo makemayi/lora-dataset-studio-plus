@@ -1497,8 +1497,15 @@ def _face_swap_image_claimed(user_id, img, ds, engine):
     old_state = {field: getattr(img, field) for field in SWAP_RESTORE_FIELDS}
     new_job_id = enqueue_face_swap(
         user_id=str(user_id), target_path=target_path, ref_path=ref_path,
+        # The catalog prompt and framing ride along so the swap can tell the
+        # model HOW THE HEAD SITS in this particular shot instead of leaving it
+        # to infer that from a cropped photo — see face_swap_pose. Additive: the
+        # Klein swap ignores both, and a row that carries neither degrades to
+        # the generic wording.
         extra_metadata={'is_dataset': True, 'dataset_id': img.dataset_id,
-                        'variation_label': img.variation_label})
+                        'variation_label': img.variation_label,
+                        'variation_prompt': img.variation_prompt,
+                        'framing': img.framing})
 
     # Persist the replacement state, carrying the snapshot that puts it back.
     # The old FILE is deliberately left on disk: it is what the snapshot names,

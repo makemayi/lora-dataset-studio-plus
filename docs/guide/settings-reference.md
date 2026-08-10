@@ -516,6 +516,20 @@ A phrase that matches nothing in a given photo contributes nothing (verified pix
 
 The mask is produced at the tile's own size and then put through the workflow's **own** `ResizeImagesByLongerEdge` node, at the same setting as the target — reproducing that node's arithmetic anywhere else is how an off-by-one size mismatch would reach ComfyUI instead of a test.
 
+#### MiniMax H3 — tell the swap how the head sits
+
+→ `face_swap.h3_pose_hint` (default **on**).
+
+The swap's instruction can only ask the model to *match the shoulders*, so which way the head is turned and what the face is doing are inferred from a cropped photo. The expression is the one it most often invents — a laughing body under a calm face reads as a paste-up as loudly as a bad seam does.
+
+It does not have to be inferred. The tile carries the **catalog prompt that generated it**, and that prompt says both things in words (*"upper body portrait, three-quarter view, … a calm neutral facial expression"*). With this on, one sentence is appended to the instruction for that tile:
+
+> In this shot the head is turned three-quarters towards the camera and the face wears a calm, neutral expression, mouth closed — reproduce that exactly, and do not carry over the expression or the head direction of `<Picture 1>`.
+
+Measured on a real database: **82% of tiles** produce a sentence. The rest — imported photos, rows whose prompt names neither — get **nothing**, and keep the generic wording: a wrong orientation stated confidently is worse than none. The sentence is *appended*, never substituted, and it survives a `minimax_h3.swap_prompt` override, because rewording the instruction is not the same as no longer wanting the head to face the right way.
+
+It reads the row, not the picture. Estimating the angle from the pixels is possible here (the face scorer already computes yaw) and is what an imported photo would need; that is a second source, not this one.
+
 #### MiniMax H3 — how far the head is blended back
 
 → `face_swap.h3_blend_pixels` (0–64, default **40**).
@@ -1717,6 +1731,7 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `auto_mask.device` | Blank = CUDA when torch sees a card, else CPU. Pin `cpu` to leave the GPU to a running generation; expect it to be slow. |
 | `auto_mask.threshold` | Detection confidence for automatic masking (default `0.5`). |
 | `face_swap.h3_mask_opacity` | How opaque the placeholder painted over the head is (0–1, default `1.0`). Below 1.0 a ghost of the head shows through — and that ghost is the face being REPLACED, so 0.75 measurably returns the original face. Keep 1.0. It is also why the `lama` stage cannot change anything at 1.0. |
+| `face_swap.h3_pose_hint` | Append one sentence to the H3 swap instruction describing how the head sits and what the face is doing, read from the catalog prompt that generated the tile (default `true`; ~82% of tiles yield one). A row that says nothing usable gets nothing rather than a guess. |
 | `face_swap.h3_blend_pixels` | How wide the feather is when the swapped head is composited back (0–64, default `40`). The mechanical half of "it does not blend" — the prompt matches light, colour and grain, this matches the edge. Past ~48 px an old hairline can ghost. |
 | `face_swap.h3_lama_model` | Which inpainting model the `lama` stage runs (default `lama`). The shipped graph asked for `zits`, which crashes on this lane: it pads to a multiple of 32 and drives a 256→512 structure upsampler, while the inpaint crop is an arbitrary size. Also accepts `ldm`, `mat`, `fcf`, `manga`, `spread`. |
 | `face_swap.h3_stages` | Three booleans for the H3 swap graph, all `false`: `hair_removal` (a Klein pass strips the hair first — makes the Klein models required too), `lama` (LaMa wipes the masked region), `face_detail` (Z-Image detailer on eyes and mouth; the ONLY stage whose model filenames are not re-resolved for your install). |

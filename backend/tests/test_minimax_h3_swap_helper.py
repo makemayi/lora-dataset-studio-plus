@@ -478,3 +478,28 @@ def test_the_blend_width_is_configurable_and_clamped(swap):
     assert _build(sh)[0]['426:402']['inputs']['mask_blend_pixels'] == sh.BLEND_PIXELS_MAX
     _set(config, 'face_swap', h3_blend_pixels='soft please')
     assert _build(sh)[0]['426:402']['inputs']['mask_blend_pixels'] == sh.DEFAULT_BLEND_PIXELS
+
+
+def test_the_pose_hint_is_APPENDED_to_the_instruction(swap):
+    """Never substituted: the base instruction is what the graph was tuned with,
+    and the hint is one sentence of per-tile fact on top of it."""
+    sh, _mh, _base, _config = swap
+    base = _build(sh)[0]['426:170']['inputs']['prompt']
+    wf, _ = _build(sh, pose_hint='In this shot the head is in full profile.')
+    assert wf['426:170']['inputs']['prompt'].startswith(base.rstrip()[:80])
+    assert wf['426:170']['inputs']['prompt'].endswith('full profile.')
+
+
+def test_the_hint_survives_a_user_rewriting_the_instruction(swap):
+    """Rewording the instruction is not the same as no longer wanting the head
+    to face the right way."""
+    sh, _mh, _base, config = swap
+    _set(config, 'minimax_h3', swap_prompt='swap the head please')
+    wf, _ = _build(sh, pose_hint='In this shot the face wears a smile.')
+    assert wf['426:170']['inputs']['prompt'] == 'swap the head please In this shot the face wears a smile.'
+
+
+def test_no_hint_leaves_the_instruction_untouched(swap):
+    sh, _mh, _base, _config = swap
+    assert _build(sh)[0]['426:170']['inputs']['prompt'] == \
+        _build(sh, pose_hint=None)[0]['426:170']['inputs']['prompt']
