@@ -1,9 +1,15 @@
 /**
- * The workspace rail's recent-variations strip, RENDERED.
+ * The workspace rail's recent-variations strip, RENDERED WITH ITEMS.
  *
- * It is the only surface in the app that shows output from OTHER datasets, and
- * the one thing it must never do is occupy the rail when there is nothing to
- * show — the rail's dead space is what it was built to use, not to double.
+ * The first version of this file only asserted the EMPTY case, because the
+ * component both fetched and rendered and a static render never runs an effect.
+ * That is precisely how it shipped broken: `apiFetch` resolves to the parsed
+ * body, not to a Response, so the fetch stored nothing and the strip was empty
+ * forever — and the one test that could run passed, because "renders nothing"
+ * was what it asserted.
+ *
+ * The list is a pure function of its items now, so the case that matters is the
+ * one being tested.
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -11,35 +17,55 @@ import { readFileSync } from 'node:fs'
 
 import { render } from './support/mountJsx.mjs'
 
-const { default: RecentVariations, RECENT_LIMIT } = await import(
-  '../src/components/dataset/RecentVariations.jsx')
+const { default: RecentVariations, RecentVariationsList, RECENT_LIMIT } =
+  await import('../src/components/dataset/RecentVariations.jsx')
 
-test('it draws nothing at all until something has been generated', () => {
-  // The fetch never resolves in this environment, so this is the first paint on
-  // a fresh install — where an empty heading and an empty row would be worse
-  // than the dead space it replaces.
+const IMAGES = [
+  { image_id: 9, dataset_id: 3, dataset_name: 'Ana', filename: 'a 1.png', label: 'Bust' },
+  { image_id: 8, dataset_id: 5, dataset_name: 'Bea', filename: 'b1.png', label: '' },
+]
+
+test('every face is a round button into its own dataset', () => {
+  const html = render(RecentVariationsList, { images: IMAGES, onOpen: () => {} })
+  assert.match(html, /Recent/)
+  assert.match(html, /rounded-full/)
+  // The filename is URL-encoded — a space in it must not break the src.
+  assert.match(html, /\/api\/dataset\/3\/img\/a%201\.png/)
+  assert.match(html, /\/api\/dataset\/5\/img\/b1\.png/)
+  assert.match(html, /Open Ana — Bust/)
+  // A dataset with no label still gets a usable title.
+  assert.match(html, /Open Bea/)
+})
+
+test('the dataset you are already in is marked, not hidden', () => {
+  const html = render(RecentVariationsList,
+    { images: IMAGES, onOpen: () => {}, currentId: 3 })
+  assert.match(html, /aria-current="true"/)
+  assert.match(html, /this dataset/)
+  // ...and it is the only one so marked.
+  assert.equal(html.match(/aria-current="true"/g).length, 1)
+})
+
+test('it draws nothing at all when there is nothing to show', () => {
+  /* A fresh install must not pay a permanently empty section — the rail's dead
+     space is what this replaces, not what it doubles. */
+  assert.equal(render(RecentVariationsList, { images: [], onOpen: () => {} }).trim(), '')
+  assert.equal(render(RecentVariationsList, { images: null, onOpen: () => {} }).trim(), '')
+  // The fetching wrapper renders nothing before its request resolves, too.
   assert.equal(render(RecentVariations, { onOpen: () => {} }).trim(), '')
 })
 
-test('the strip asks for a bounded number of images', () => {
+test('the wrapper reads apiFetch the way apiFetch actually behaves', () => {
   const src = readFileSync(
     new URL('../src/components/dataset/RecentVariations.jsx', import.meta.url), 'utf8')
   assert.ok(RECENT_LIMIT > 0 && RECENT_LIMIT <= 12)
   assert.match(src, /recent-images\?limit=\$\{RECENT_LIMIT\}/)
-  // A shortcut is not worth a toast: it shows faces or it shows nothing.
+  // It resolves to the PARSED BODY and throws on a bad status; treating it as a
+  // Response is what broke the first version. (Matched on the CALL, not on the
+  // prose: the file explains that mistake in its own header.)
+  assert.match(src, /\.then\(\(d\) => \{ if \(alive\) setImages/)
+  assert.doesNotMatch(src, /then\(\(r\) => \(r\.ok/)
   assert.match(src, /\.catch\(\(\) => \{\}\)/)
-})
-
-test('each face is a round button into its own dataset', () => {
-  const src = readFileSync(
-    new URL('../src/components/dataset/RecentVariations.jsx', import.meta.url), 'utf8')
-  assert.match(src, /onClick=\{\(\) => onOpen\?\.\(img\.dataset_id\)\}/)
-  assert.match(src, /rounded-full/)
-  // The frame is pulled up because these are portraits — a face detection per
-  // thumbnail would cost more than the feature is worth.
-  assert.match(src, /objectPosition: '50% 28%'/)
-  // The dataset you are already in is marked rather than hidden.
-  assert.match(src, /aria-current=\{here \? 'true' : undefined\}/)
 })
 
 test('the rail mounts it under the checklist, not in place of it', () => {

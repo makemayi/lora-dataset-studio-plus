@@ -11,28 +11,22 @@
  * per thumbnail would cost more than the feature is worth. A body shot lands on
  * a chest rather than a face — a fair trade for something that is a shortcut,
  * not a gallery.
+ *
+ * SPLIT IN TWO ON PURPOSE. The list is a pure function of its items, and the
+ * fetching lives in the wrapper. The first version was one component that
+ * fetched and rendered, and it shipped BROKEN: `apiFetch` resolves to parsed
+ * JSON, not to a Response, so `r.ok ? r.json() : null` evaluated `undefined` and
+ * stored nothing — the strip rendered empty forever, and the only test that
+ * could run against a static render was the one asserting it renders nothing.
+ * A pure list can be tested WITH items, which is the case that matters.
  */
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../../api/fetchClient';
 
 export const RECENT_LIMIT = 8;
 
-export default function RecentVariations({ onOpen, currentId = null, refreshKey = 0 }) {
-  const [images, setImages] = useState([]);
-
-  useEffect(() => {
-    let alive = true;
-    apiFetch(`/api/dataset/recent-images?limit=${RECENT_LIMIT}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (alive && d) setImages(Array.isArray(d.images) ? d.images : []); })
-      /* A shortcut strip is not worth a toast: it either shows faces or it
-         shows nothing, and the page it lives on works either way. */
-      .catch(() => {});
-    return () => { alive = false; };
-  }, [refreshKey]);
-
-  if (!images.length) return null;
-
+export function RecentVariationsList({ images, onOpen, currentId = null }) {
+  if (!images || !images.length) return null;
   return (
     <section aria-labelledby="recent-variations-heading" className="flex flex-col gap-2">
       <p id="recent-variations-heading"
@@ -69,4 +63,22 @@ export default function RecentVariations({ onOpen, currentId = null, refreshKey 
       </ul>
     </section>
   );
+}
+
+export default function RecentVariations({ onOpen, currentId = null, refreshKey = 0 }) {
+  const [images, setImages] = useState([]);
+
+  useEffect(() => {
+    let alive = true;
+    // apiFetch RESOLVES TO THE PARSED BODY and throws on a bad status — it is
+    // not fetch(). Treating it as a Response is what broke the first version.
+    apiFetch(`/api/dataset/recent-images?limit=${RECENT_LIMIT}`)
+      .then((d) => { if (alive) setImages(Array.isArray(d?.images) ? d.images : []); })
+      /* A shortcut strip is not worth a toast: it either shows faces or it
+         shows nothing, and the page it lives on works either way. */
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [refreshKey]);
+
+  return <RecentVariationsList images={images} onOpen={onOpen} currentId={currentId} />;
 }
