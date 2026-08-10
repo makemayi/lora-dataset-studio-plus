@@ -129,11 +129,36 @@ NODE_H3 = '426:170'              # MiniMaxH3ReferenceToVideo — the prompt live
 NODE_LENGTH = '426:139'          # PrimitiveInt -> frame packet length
 NODE_SEED = '426:131'            # RandomNoise -> 'noise_seed'
 NODE_CROP = '426:402'            # InpaintCropImproved — how much shot H3 sees
+NODE_MASK_OVERLAY = '426:413'    # AILab_MaskOverlay — paints the hole H3 fills
+NODE_FRAME_SELECT = '426:304'    # H3FrameSelect — which frame of the packet wins
 NODE_SAVE = '412'
 
 _REQUIRED_NODES = (NODE_TARGET_IMAGE, NODE_REF_IMAGE, NODE_H3_UNET, NODE_H3_CLIP,
                    NODE_VIDEO_VAE, NODE_AUDIO_VAE, NODE_CLIP_VISION, NODE_H3,
-                   NODE_LENGTH, NODE_SEED, NODE_CROP, NODE_SAVE)
+                   NODE_LENGTH, NODE_SEED, NODE_CROP, NODE_MASK_OVERLAY,
+                   NODE_FRAME_SELECT, NODE_SAVE)
+
+# How opaque the placeholder painted over the head is, in `face_swap.h3_mask_opacity`.
+# AILab_MaskOverlay composites a flat colour with `mask * opacity` as its alpha,
+# so 1.0 replaces the head with a structureless white slab — and a generative
+# model asked to fill a white slab sometimes just draws the slab back. That is
+# the "white face" result. Below 1.0 a ghost of the original head shows through
+# and gives the model geometry to work with; too low and the OLD identity starts
+# coming back, which is the thing the swap exists to remove.
+DEFAULT_MASK_OPACITY = 1.0
+
+
+def mask_opacity():
+    """Opacity of the placeholder over the head, clamped to [0, 1]. Junk falls
+    back to the default: this tunes a result, it cannot make one invalid."""
+    raw = cfg.get('face_swap.h3_mask_opacity')
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_MASK_OPACITY
+    if value != value:                          # NaN
+        return DEFAULT_MASK_OPACITY
+    return max(0.0, min(1.0, value))
 
 # `context_from_mask_extend_factor` bounds. The node itself allows up to 100,
 # which is meaningless here: past the point where the crop covers the frame the
@@ -419,6 +444,13 @@ def _degrade_w8a8(workflow, node_id, unet_name, title):
     workflow[node_id]['inputs']['unet_name'] = unet_name
 
 
+def _cfg_float(key, default):
+    try:
+        return float(cfg.get(key))
+    except (TypeError, ValueError):
+        return default
+
+
 def _comfy_input_dir() -> str:
     d = cfg.comfyui_dir('input')
     if not d:
@@ -509,6 +541,17 @@ def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None
     # grows from the mask and clamps to the frame, so this one number gives a
     # full-body shot its chest and leaves a portrait uncropped.
     workflow[NODE_CROP]['inputs']['context_from_mask_extend_factor'] = context_factor()
+    # How solid the hole H3 is asked to fill is. See `mask_opacity`: at 1.0 the
+    # head is a structureless slab of colour, and a model asked to fill a slab
+    # sometimes paints the slab back — the "white face" result.
+    workflow[NODE_MASK_OVERLAY]['inputs']['mask_opacity'] = mask_opacity()
+    # Which frame of the packet is kept. The graph shipped this at 0, i.e. the
+    # selector judged sharpness and exposure and never asked whether the face
+    # looks like the person — so a blank or wrong face competed on equal terms
+    # with a good one. The generation lane has defaulted it to 1.0 all along;
+    # this reads the SAME setting rather than inventing a second one.
+    workflow[NODE_FRAME_SELECT]['inputs']['weight_reference'] = _cfg_float(
+        'minimax_h3.frame_weight_reference', mh.DEFAULT_FRAME_WEIGHT_REFERENCE)
     # Frames sampled per shot. Snapped onto the node's own min/step grid — an
     # off-step value is a validation error, i.e. a whole batch of dead tiles.
     length = cfg.get('minimax_h3.length')

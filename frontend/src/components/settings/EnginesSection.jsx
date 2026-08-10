@@ -341,6 +341,8 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
   const isH3 = (fs.engine ?? defaultValueAt(configDefaults, 'face_swap', 'engine')) === 'minimax_h3'
   const contextFactor = Number(
     fs.h3_context_factor ?? defaultValueAt(configDefaults, 'face_swap', 'h3_context_factor') ?? 3)
+  const maskOpacity = Number(
+    fs.h3_mask_opacity ?? defaultValueAt(configDefaults, 'face_swap', 'h3_mask_opacity') ?? 1)
   const setStage = (key, on) => setField('face_swap', 'h3_stages', { ...stages, [key]: on })
   return (
     <Card
@@ -390,6 +392,31 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
           is composited back.
         </HelpText>
         <ResetToDefault label="H3 swap crop" section="face_swap" field="h3_context_factor"
+          config={config} configDefaults={configDefaults} setField={setField} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="face-swap-h3-mask-opacity" className="block text-xs font-medium text-content">
+          How solidly the head is painted out ({maskOpacity.toFixed(2)})
+        </label>
+        <input
+          id="face-swap-h3-mask-opacity"
+          type="range" min={0} max={1} step={0.05}
+          value={maskOpacity}
+          onChange={(e) => setField('face_swap', 'h3_mask_opacity', Number(e.target.value))}
+          className="mt-1 w-full accent-indigo-500"
+        />
+        <HelpText className="mt-1 text-xs text-content-muted">
+          Before H3 redraws the head it is painted over, and at 1.00 what is left is
+          a flat slab with no structure — which is where a blank white face comes
+          from, a model filling a slab by drawing the slab back. Lower it (0.70–0.85
+          is the range worth trying) and a ghost of the original head shows through
+          for the model to build on. Too low and the old face starts surviving,
+          which is the thing the swap is for. It is also what makes the LaMa stage
+          below do anything at all: at 1.00 the paint covers LaMa&apos;s work
+          entirely.
+        </HelpText>
+        <ResetToDefault label="H3 swap mask opacity" section="face_swap" field="h3_mask_opacity"
           config={config} configDefaults={configDefaults} setField={setField} />
       </div>
 

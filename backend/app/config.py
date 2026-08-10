@@ -854,6 +854,21 @@ DEFAULTS = {
         # price of sampling time. A bigger crop does NOT risk repainting the
         # body — InpaintStitchImproved composites only the masked region back.
         'h3_context_factor': 3.0,
+        # How solidly the head is painted out before H3 is asked to redraw it —
+        # AILab_MaskOverlay's `mask_opacity` on the swap graph.
+        #
+        # At 1.0 (the shipped graph's value) the head becomes a flat white slab
+        # with no structure at all, and a generative model asked to fill a flat
+        # slab sometimes paints the slab back: that is the "white face" result.
+        # Below 1.0 a ghost of the original head shows through — enough geometry
+        # to build on. Too low and the OLD identity starts surviving, which is
+        # the thing the swap exists to remove. 0.7-0.85 is the range worth
+        # trying; the default stays 1.0 so nothing moves until it is asked to.
+        #
+        # It is also what makes the `lama` stage mean anything: LaMa wipes the
+        # masked region, and at opacity 1.0 the overlay paints straight over its
+        # work, so that stage cannot change a single pixel until this is lowered.
+        'h3_mask_opacity': 1.0,
     },
     # The ✨ Upscale & improve pass — which engine runs it. Its own namespace
     # rather than a key under `klein`, because the whole point of the setting is

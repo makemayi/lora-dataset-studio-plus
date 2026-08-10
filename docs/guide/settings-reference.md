@@ -503,6 +503,18 @@ Lower means more pixels on the face; higher gives the model the shoulders it nee
 
 **The cost, stated plainly:** H3 renders one ~1 MP canvas whatever the crop, so doubling the crop's side quarters the pixels the head gets. `minimax_h3.max_output_mp` buys them back for sampling time. Widening the crop never risks the body — only the masked head region is composited back.
 
+#### MiniMax H3 — how solidly the head is painted out
+
+→ `face_swap.h3_mask_opacity` (0.0–1.0, default **1.00**).
+
+Before H3 redraws the head, the masked region is painted over with a flat colour. This is how opaque that paint is — and it is the dial for **blank white faces**: at 1.00 the model is handed a slab with no structure in it at all, and a model asked to fill a slab sometimes fills it by drawing the slab back.
+
+- **0.70–0.85** leaves a ghost of the original head visible — enough geometry (where the eyes sit, where the jaw ends) for the model to build on.
+- **Too low** and the original face starts surviving the swap, which is the thing the swap exists to remove.
+- It is also what makes the **LaMa** stage below able to change anything: LaMa wipes the masked region, and at 1.00 the paint goes straight over its work.
+
+Two other levers on the same failure, both under `minimax_h3`: **`frame_weight_reference`** (how much "looks like the reference" counts when the best frame of the packet is picked — the swap now honours the same setting the generation engine does, instead of the 0 the graph shipped with) and **`length`** (5 by default; at 22 the selector has real candidates to choose between, at roughly four times the sampling cost).
+
 #### MiniMax H3 — optional stages
 
 → `face_swap.h3_stages`, three booleans, all **off** by default. Each switches on a pass the H3 swap graph ships wired but does not run:
@@ -1675,6 +1687,7 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `klein.face_swap_loras` | Flat `{file, strength}` list (default empty, max 8) chained onto the 🔀 face swap graph after its own LoRAs. Always on — no per-run picker. A row whose file is missing is skipped, not fatal. Managed in Settings → Image engines. |
 | `face_swap.engine` | Which engine the 🎭↔ swap runs: `klein` (default, swap LoRA repaints the head) or `minimax_h3` (masks the head, H3 re-stages it from the reference — no LoRA, ~40 GB of weights, much slower). |
 | `face_swap.h3_context_factor` | How far the H3 swap's crop reaches around the head (1.0–8.0, default `3.0`). A factor of the head, clamped to the photo — so 3.0 crops a full-body shot to head and chest and leaves a portrait uncropped. Lower = more pixels on the face; higher = the shoulders the model sizes the head against. |
+| `face_swap.h3_mask_opacity` | How opaque the placeholder painted over the head is (0–1, default `1.0`). The dial for blank white faces: at 1.0 the model gets a structureless slab and sometimes draws the slab back; 0.70–0.85 leaves a ghost of the head to build on. Also what lets the `lama` stage change anything. |
 | `face_swap.h3_stages` | Three booleans for the H3 swap graph, all `false`: `hair_removal` (a Klein pass strips the hair first — makes the Klein models required too), `lama` (LaMa wipes the masked region), `face_detail` (Z-Image detailer on eyes and mouth; the ONLY stage whose model filenames are not re-resolved for your install). |
 | `minimax_h3.swap_prompt` | Overrides the instruction the H3 head-swap graph sends. Blank (default) = the shipped prompt: subject-neutral, and explicit about keeping the reference's identity, repainting nothing outside the white mask, matching the shot's head angle and lighting, and leaving no seam at the hairline and neck. Set it to A/B a wording without editing a workflow file an update replaces. In that prompt `<Picture 1>` is your reference photo and `<Picture 2>` is the **masked crop**, not the whole tile — the white area being the head (face + hair). |
 | `klein.default_generation_lora_preset` | Which of `klein.generation_lora_presets` the 🖥️ Klein tuning panel STARTS on. Default `''` = *None*, the behaviour before this key existed. A starting point only — the run panel still offers None and every other preset for that run, and picking there does not rewrite this. Fail-closed: a name matching no preset behaves as *None*. |

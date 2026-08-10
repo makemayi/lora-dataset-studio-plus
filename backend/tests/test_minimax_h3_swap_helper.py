@@ -358,3 +358,35 @@ def test_junk_in_the_context_factor_frames_the_shot_rather_than_refusing_it(swap
     _set(config, 'face_swap', h3_context_factor='wide please')
     assert (_build(sh)[0]['426:402']['inputs']['context_from_mask_extend_factor']
             == sh.DEFAULT_CONTEXT_FACTOR)
+
+
+# --- the "white face" levers -------------------------------------------------
+# The overlay paints the head out with `mask * opacity` as its alpha, so at 1.0
+# the model is handed a structureless slab and sometimes paints the slab back.
+# And the frame selector shipped weighing sharpness and exposure only, so a
+# blank face competed on equal terms with a good one.
+
+def test_the_frame_selector_asks_whether_the_face_looks_like_the_reference(swap):
+    sh, mh, _base, _config = swap
+    wf, _ = _build(sh)
+    assert wf['426:304']['inputs']['weight_reference'] == mh.DEFAULT_FRAME_WEIGHT_REFERENCE
+    assert wf['426:304']['inputs']['weight_reference'] > 0
+
+
+def test_the_frame_reference_weight_follows_the_h3_engine_setting(swap):
+    """One setting, both lanes — a swap that judged frames differently from the
+    generation engine would be a second dial nobody knew they owned."""
+    sh, _mh, _base, config = swap
+    _set(config, 'minimax_h3', frame_weight_reference=0.25)
+    assert _build(sh)[0]['426:304']['inputs']['weight_reference'] == 0.25
+
+
+def test_the_head_placeholder_opacity_is_configurable(swap):
+    sh, _mh, _base, config = swap
+    assert _build(sh)[0]['426:413']['inputs']['mask_opacity'] == 1.0
+    _set(config, 'face_swap', h3_mask_opacity=0.75)
+    assert _build(sh)[0]['426:413']['inputs']['mask_opacity'] == 0.75
+    _set(config, 'face_swap', h3_mask_opacity=5)
+    assert _build(sh)[0]['426:413']['inputs']['mask_opacity'] == 1.0
+    _set(config, 'face_swap', h3_mask_opacity='opaque-ish')
+    assert _build(sh)[0]['426:413']['inputs']['mask_opacity'] == sh.DEFAULT_MASK_OPACITY

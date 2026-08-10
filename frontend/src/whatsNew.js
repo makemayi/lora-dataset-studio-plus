@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-h3-swap-blank-faces',
+    date: '2026-08-10',
+    title: 'Fewer blank faces out of the MiniMax H3 swap',
+    blurb: 'Sometimes the swap came back with a white, featureless face. Two reasons, both fixed. The head is painted out before H3 redraws it, and at full opacity what the model gets is a flat slab with no structure — so it occasionally fills the slab by drawing the slab back; that opacity is now a slider (0.70–0.85 leaves a ghost of the head to build on, and it is also what finally makes the LaMa stage do anything). And when the model picks the best frame of the packet it renders, it was judging sharpness and exposure only — never whether the face looks like your reference — so a blank face competed on equal terms with a good one. The swap now honours the same "looks like the reference" weight the H3 generation engine has always used. The instruction was strengthened to match: the white shape is named as a placeholder that must be completely covered, never copied.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-10-swap-keeps-your-original',
     date: '2026-08-10',
     title: 'A face swap you stop — or that fails — gives you your picture back',
