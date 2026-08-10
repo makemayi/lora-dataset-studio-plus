@@ -56,11 +56,11 @@ import {
 // request instead of three, short enough to still feel attached to the keystroke.
 const PREVIEW_DEBOUNCE_MS = 350
 
-const INPUT = 'mt-1 w-full rounded-md border border-border bg-surface px-2 py-1 ' +
-  'text-sm text-content tabular-nums focus:border-indigo-400 focus:outline-none'
+const INPUT = 'mt-1 w-full rounded-lg bg-surface-raised px-2 py-1 ' +
+  'text-sm text-content tabular-nums focus:outline-none focus:ring-1 focus:ring-indigo-400'
 
-const SMALL_BTN = 'rounded-md border border-border px-2 py-1 text-xs text-content-muted ' +
-  'hover:bg-surface-raised hover:text-content disabled:opacity-50'
+const SMALL_BTN = 'rounded-full bg-surface-raised px-2.5 py-1 text-xs text-content-muted ' +
+  'transition-colors hover:bg-surface hover:text-content disabled:opacity-50'
 
 /** One collapsible group of thresholds. A folded group still advertises how
     many of its fields you have moved off the default — otherwise folding it
@@ -68,7 +68,7 @@ const SMALL_BTN = 'rounded-md border border-border px-2 py-1 text-xs text-conten
 function Group({ group, open, onToggle, customised, children }) {
   const panelId = `bank-th-group-${group.id}`
   return (
-    <section className="rounded-lg border border-border bg-surface">
+    <section className="rounded-lg bg-surface">
       <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={panelId}
         className="flex w-full items-center gap-2 px-3 py-2 text-left">
         <span aria-hidden className="text-sm">{group.emoji}</span>
@@ -325,7 +325,7 @@ export default function BankThresholdsPanel({
   }, [dirty, edits, configDefaults, toast, onSaved])
 
   if (loadError) {
-    return <p className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-amber-300">{loadError}</p>
+    return <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-300">{loadError}</p>
   }
   if (!saved) {
     return <p className="text-xs text-content-subtle">Loading thresholds…</p>
@@ -337,7 +337,7 @@ export default function BankThresholdsPanel({
   return (
     <div className="space-y-3">
       {/* Scope, in words, before any group is unfolded. */}
-      <div className="flex flex-wrap items-start gap-x-3 gap-y-2 rounded-lg border border-border bg-surface-raised px-3 py-2">
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-2 rounded-lg bg-surface-raised px-3 py-2">
         <p className="min-w-[12rem] flex-1 text-xs text-content-muted">
           These apply to <strong className="text-content">every bank</strong> — they are the same
           values as Settings ▸ Captioning &amp; quality. Most re-sort this bank the moment you
@@ -345,7 +345,7 @@ export default function BankThresholdsPanel({
         </p>
         {canResetAll && (
           <button type="button" onClick={() => setEdits(resetAll)}
-            className="rounded-md border border-border-strong px-2 py-1 text-xs font-medium text-content hover:bg-surface">
+            className="rounded-full bg-surface-raised px-2.5 py-1 text-xs font-medium text-content transition-colors hover:bg-surface">
             <span aria-hidden>↺ </span>Reset all to defaults
           </button>
         )}
@@ -433,7 +433,7 @@ export default function BankThresholdsPanel({
         </button>
         {dirty.length > 0 && (
           <button type="button" onClick={() => { setEdits({}); setPreviewFlags(null) }}
-            className="rounded-md border border-border px-3 py-1.5 text-sm text-content-muted hover:text-content">
+            className="rounded-full bg-surface-raised px-3 py-1.5 text-sm text-content-muted transition-colors hover:text-content">
             Discard changes
           </button>
         )}

@@ -42,7 +42,7 @@ const COMPARE_SAMPLE = 8
 
 function LevelCard({ index, title, blurb, state, onRun }) {
   return (
-    <div className="flex-1 min-w-[15rem] rounded-lg border border-border bg-app/40 p-2.5 space-y-1.5">
+    <div className="flex-1 min-w-[15rem] rounded-lg bg-surface p-2.5 space-y-1.5">
       <div className="flex items-baseline gap-1.5">
         <span className="text-[0.625rem] font-bold uppercase tracking-wide text-content-subtle">
           Level {index}
@@ -176,7 +176,7 @@ export default function BankWatermarkPanel({
 
   return (
     <div id="bank-watermark-cleaning" data-workspace-focus
-      className="rounded-lg border border-border bg-surface-raised">
+      className="rounded-lg bg-surface-raised">
       <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
         className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 p-3 text-left">
         <span className="text-sm font-semibold text-content">🚩 Watermarks</span>
@@ -213,7 +213,7 @@ export default function BankWatermarkPanel({
         <span className="text-[0.6875rem] font-semibold uppercase tracking-wide text-content-subtle">
           Level 3 engine
         </span>
-        <div className="flex items-center gap-1 rounded-lg border border-border bg-app/60 p-0.5 text-xs">
+        <div className="flex items-center gap-1 rounded-full bg-surface p-0.5 text-xs">
           <button type="button" aria-pressed={method !== 'klein'} onClick={() => setMethod('auto')}
             title="LaMa: fast, non-generative repaint of small off-centre marks. Marks on the subject stay flagged."
             className={`rounded-md px-2.5 py-1 font-semibold ${method !== 'klein'
@@ -242,13 +242,13 @@ export default function BankWatermarkPanel({
               onClick={() => run(`/api/bank/${bankId}/watermark/undo`, {},
                 'Cleaned versions removed — your originals are back.')}
               title="Throw away every cleaned version and flag those images again. Your original files were never modified, so nothing is lost."
-              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-content disabled:opacity-40">
+              className="rounded-lg bg-surface-raised px-3 py-1.5 text-xs text-content disabled:opacity-40">
               ↩ Undo cleaning
             </button>
             <button type="button" onClick={() => setComparing((v) => !v)}
               aria-expanded={comparing}
               title="Show a sample of the cleaned images so you can flip between the cleaned version and your original."
-              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-content">
+              className="rounded-lg bg-surface-raised px-3 py-1.5 text-xs text-content">
               {comparing ? '✕ Hide before/after' : '👁 Before / after'}
             </button>
           </>
@@ -267,7 +267,7 @@ export default function BankWatermarkPanel({
               <li key={id} className="shrink-0">
                 <img alt={showOriginal ? `Original of image ${id}` : `Cleaned image ${id}`}
                   src={`/api/bank/${bankId}/file/${id}${showOriginal ? '?original=1' : ''}`}
-                  className="h-28 w-auto rounded-lg border border-border object-contain" />
+                  className="h-28 w-auto rounded-lg bg-surface-raised object-contain" />
               </li>
             ))}
           </ul>
@@ -297,7 +297,7 @@ export default function BankWatermarkPanel({
                authorities for one value is how they drift — but a window that
                named no engine would hide the single biggest difference between
                two runs of this level. */
-            <p className="m-0 rounded-md border border-border bg-surface-raised px-2 py-1.5 text-[11px] leading-snug text-content-muted">
+            <p className="m-0 rounded-lg bg-surface-raised px-2 py-1.5 text-[11px] leading-snug text-content-muted">
               Engine: <span className="font-semibold text-content">
                 {method === 'klein' ? 'Klein' : 'LaMa'}
               </span>{method === 'klein'

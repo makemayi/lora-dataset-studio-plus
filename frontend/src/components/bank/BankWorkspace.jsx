@@ -251,12 +251,12 @@ function UndoBar({ offer, busy, onUndo, onDismiss }) {
         </span>
       </p>
       <button type="button" onClick={onUndo} disabled={busy}
-        className="rounded border border-sky-400/60 px-2 py-1 text-xs font-semibold hover:bg-white/10 disabled:opacity-50">
+        className="rounded-full bg-sky-500/20 px-2.5 py-1 text-xs font-semibold hover:bg-sky-500/30 disabled:opacity-50">
         {busy ? 'Undoing…' : '↩ Undo'}
       </button>
       <button type="button" onClick={onDismiss} disabled={busy}
         title="Keep the change and hide this"
-        className="rounded border border-border px-2 py-1 text-xs text-content-muted hover:bg-surface-raised hover:text-content disabled:opacity-50">
+        className="rounded-full bg-surface-raised px-2.5 py-1 text-xs text-content-muted transition-colors hover:bg-surface hover:text-content disabled:opacity-50">
         Dismiss
       </button>
     </div>
@@ -324,7 +324,7 @@ export function ProgressBar({ activity, onCancel, offline = false }) {
             presses; the line below carries it for everyone else. */}
         <button type="button" disabled={asked} title={note || undefined}
           onClick={() => { setStopAskedFor(jobKey(activity)); onCancel?.() }}
-          className="ml-auto rounded-md border border-border px-2 py-0.5 text-xs text-content hover:bg-surface-raised disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent">
+          className="ml-auto rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content transition-colors hover:bg-surface disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent">
           {stopLabel(asked)}
         </button>
       </div>
@@ -412,12 +412,12 @@ function SelectionTagsPanel({ tagRow, tagPicked, onToggle, onClear }) {
           attributes you pick — unlike 🎯 Similar, which matches the look
         </span>
         {tagRow.frozen && (
-          <span className="rounded border border-border px-1.5 text-[11px] text-content-subtle">
+          <span className="rounded-full bg-surface-raised px-2 text-[11px] text-content-subtle">
             held from the selection you filtered on
           </span>
         )}
         <button type="button" onClick={onClear}
-          className="ml-auto rounded border border-border px-2 py-0.5 text-[11px] text-content-muted hover:text-content">
+          className="ml-auto rounded-full bg-surface-raised px-2.5 py-0.5 text-[11px] text-content-muted transition-colors hover:text-content">
           ✕ Close
         </button>
       </div>
@@ -464,7 +464,7 @@ function SelectionTagsPanel({ tagRow, tagPicked, onToggle, onClear }) {
 function PassButton({ onClick, disabled, title, children }) {
   return (
     <button type="button" onClick={onClick} disabled={disabled} title={title}
-      className="rounded-md border border-border bg-surface-raised px-3 py-1.5 text-sm text-content transition-colors hover:bg-surface disabled:opacity-50 disabled:hover:bg-surface-raised">
+      className="rounded-full bg-surface-raised px-3 py-1.5 text-sm text-content transition-colors hover:bg-surface disabled:opacity-50 disabled:hover:bg-surface-raised">
       {children}
     </button>
   )
@@ -596,7 +596,7 @@ function CoveragePanel({ coverage, semanticEngine, semanticLabel,
         <span className="ml-auto rounded border border-indigo-400/40 px-1.5 py-px text-[10px] uppercase tracking-wide text-indigo-300"
           title="Community idea by @antonp">idea by @antonp</span>
         <button type="button" onClick={onClose} aria-label="Hide coverage advice"
-          className="rounded-md border border-border px-1.5 py-0.5 text-xs text-content-subtle hover:text-content">✕</button>
+          className="rounded-full bg-surface-raised px-2 py-0.5 text-xs text-content-subtle transition-colors hover:text-content">✕</button>
       </div>
       {coverage.framing_available && <FramingBar framing={coverage.framing} />}
       <VisualSpread visual={coverage.visual} total={coverage.total}
@@ -646,7 +646,7 @@ function Tile({ img, bankId, selected, onToggle, onReview, onTags, size }) {
     <span key={key} className={`rounded px-1 py-px text-[10px] font-semibold leading-none ${cls}`}>{txt}</span>
   )
   return (
-    <li className={`relative overflow-hidden rounded-lg border border-border bg-surface ${STATUS_RING[img.status] || ''}`}>
+    <li className={`relative overflow-hidden rounded-lg bg-surface ${STATUS_RING[img.status] || ''}`}>
       <button type="button" onClick={onToggle}
         title={`${img.name} — ${img.width || '?'}×${img.height || '?'}`
           + (img.blur_score != null ? ` · sharpness ${Math.round(img.blur_score)}` : '')
@@ -1972,7 +1972,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
      and overflow on their own); the rest are max-w-full with a 16rem ceiling from
      sm up, because capping them by symmetry truncated them into nonsense
      ("Standard — the prompt as⌄"). */
-  const captionSelectClass = 'mt-0.5 w-full rounded-lg border border-border bg-app/60 '
+  const captionSelectClass = 'mt-0.5 w-full rounded-lg bg-surface-raised '
     + 'px-2 py-1 text-xs text-content disabled:opacity-40'
   /* Rendered UNDER the engine picker, because it is about the engine and the picker
      is the lever it names. It re-computes as the engine changes, so ticking
@@ -1985,7 +1985,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
     engineId: captionEngine,
   })
   const captionRunControls = (
-    <div className="space-y-2 rounded-md border border-border bg-surface-raised p-2">
+    <div className="space-y-2 rounded-lg bg-surface-raised p-2">
       <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-content-muted">
         Options for this run
       </p>
@@ -2151,10 +2151,10 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
 
   return (
     <div className="space-y-4">
-      <header className="space-y-2 rounded-xl border border-border bg-surface px-4 py-3">
+      <header className="space-y-2 rounded-xl bg-surface px-4 py-3">
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={onBack}
-            className="rounded-md border border-border px-2 py-1 text-xs text-content-muted hover:text-content hover:bg-surface-raised">
+            className="rounded-full bg-surface-raised px-2.5 py-1 text-xs text-content-muted transition-colors hover:text-content hover:bg-surface">
             ← Banks
           </button>
           <h1 className="text-lg font-bold text-content">🗃️ {payload?.name || `Bank #${bankId}`}</h1>
@@ -2168,7 +2168,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
             <button type="button" onClick={openSourceFolder}
               disabled={openingSourceFolder} aria-busy={openingSourceFolder}
               title="Open this Bank's source folder in the system file explorer."
-              className="shrink-0 rounded border border-border px-2 py-0.5 text-xs text-content-muted hover:bg-surface-raised hover:text-content disabled:cursor-wait disabled:opacity-60">
+              className="shrink-0 rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content-muted transition-colors hover:bg-surface hover:text-content disabled:cursor-wait disabled:opacity-60">
               {openingSourceFolder ? 'Opening…' : '📂 Open folder'}
             </button>
             {/* Cold path. The folder-sync note below offers this too, but only once
@@ -2177,7 +2177,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                 after breaking the bank to discover it could have been repaired. */}
             <button type="button" onClick={() => setRelocating(true)}
               title="Moving this folder to another disk? Point the bank at its new location."
-              className="shrink-0 rounded border border-border px-2 py-0.5 text-xs text-content-muted hover:bg-surface-raised hover:text-content">
+              className="shrink-0 rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content-muted transition-colors hover:bg-surface hover:text-content">
               📦 Move folder…
             </button>
           </div>
@@ -2465,14 +2465,14 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
       )}
 
       {/* Search, subfolder scoping, and the grouped flag filters. */}
-      <div className="space-y-2.5 rounded-lg border border-border bg-surface px-3 py-2.5">
+      <div className="space-y-2.5 rounded-lg bg-surface px-3 py-2.5">
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[12rem] max-w-md flex-1">
             <span aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-content-subtle">🔍</span>
             <input type="search" value={searchText} onChange={(e) => setSearchText(e.target.value)}
               placeholder="Search captions and file names… (e.g. red dress)"
               aria-label="Search the bank by caption or file name"
-              className="w-full rounded-md border border-border bg-surface py-1.5 pl-8 pr-8 text-sm text-content placeholder:text-content-subtle" />
+              className="w-full rounded-full bg-surface-raised py-1.5 pl-8 pr-8 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-content-subtle" />
             {searchText && (
               <button type="button" onClick={() => setSearchText('')} aria-label="Clear search"
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-content-subtle hover:text-content">✕</button>
@@ -2492,7 +2492,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
               placeholder="Exclude words… (e.g. logo, watermark)"
               aria-label="Hide images whose caption or file name contains these words"
               title="Hides every image whose caption or file name contains one of these words (comma-separated). Matches anywhere in the text, so 'car' also hides 'scarf'. Images with no caption are never hidden."
-              className="w-full rounded-md border border-border bg-surface py-1.5 pl-8 pr-8 text-sm text-content placeholder:text-content-subtle" />
+              className="w-full rounded-full bg-surface-raised py-1.5 pl-8 pr-8 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-content-subtle" />
             {excludeText && (
               <button type="button" onClick={() => setExcludeText('')} aria-label="Clear the exclude filter"
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-content-subtle hover:text-content">✕</button>
@@ -2509,7 +2509,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                 <GroupLabel>Subfolder</GroupLabel>
                 <select value={filter.subfolder ?? '__all__'}
                   onChange={(e) => setF({ subfolder: e.target.value === '__all__' ? null : e.target.value })}
-                  className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-content">
+                  className="rounded-lg bg-surface-raised px-2 py-1 text-xs text-content">
                   <option value="__all__">All subfolders</option>
                   {subfolders.map((s) => (
                     <option key={s.name || '__root__'} value={s.name}>
@@ -2710,7 +2710,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                   <span>{angleState.offer.why}</span>
                   <button type="button" onClick={() => setPassOpen('angles')} disabled={!!live}
                     title={angleState.offer.why}
-                    className="rounded-md border border-border bg-surface-raised px-2 py-0.5 text-[11px] text-content transition-colors hover:bg-surface disabled:opacity-50">
+                    className="rounded-full bg-surface-raised px-2.5 py-0.5 text-[11px] text-content transition-colors hover:bg-surface disabled:opacity-50">
                     ⤢ {angleState.offer.label}
                   </button>
                 </p>
@@ -2777,7 +2777,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
             <select value={filter.sort} onChange={(e) => setSort(e.target.value)}
               title="Order the grid by anything the passes measured — resolution, size, aesthetic, NSFW, sharpness, noise, contrast, detail, bars, JPEG quality, face confidence. Images a pass never reached sink to the end. Remembered for this bank."
               aria-label="Sort the grid"
-              className="max-w-[11rem] rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-content">
+              className="max-w-[11rem] rounded-lg bg-surface-raised px-2 py-0.5 text-xs text-content focus:outline-none focus:ring-1 focus:ring-primary">
               {sortGroups.map((g) => (g.group ? (
                 <optgroup key={g.group} label={g.group}>
                   {g.options.map((o) => (
@@ -2795,7 +2795,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
           </label>
           <span className="ml-auto" />
           <button type="button" onClick={() => setTileSize((s) => (s === 'M' ? 'S' : 'M'))}
-            className="rounded-md border border-border px-2 py-0.5 text-xs text-content-muted hover:text-content">
+            className="rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content-muted transition-colors hover:text-content">
             {tileSize === 'M' ? 'Small tiles' : 'Medium tiles'}
           </button>
         </div>
@@ -2821,7 +2821,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
         <span aria-hidden className="h-4 w-px bg-border" />
         <span className="text-content-muted">{selected.size} selected</span>
         <button type="button" onClick={selectAllCurrent}
-          className="rounded-md border border-border px-2 py-0.5 text-xs text-content-muted hover:text-content hover:bg-surface-raised">
+          className="rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content-muted transition-colors hover:text-content hover:bg-surfaced">
           Select all in filter
         </button>
         {/* Bulk-reject undecided images by quality flag — a triage shortcut that
@@ -2830,7 +2830,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
           <button type="button" onClick={() => setShowAutoReject((v) => !v)} disabled={live}
             aria-expanded={showAutoReject}
             title="Bulk-reject the still-undecided images carrying the chosen quality flags"
-            className="rounded-md border border-border bg-surface-raised px-2 py-0.5 text-xs text-content disabled:opacity-50 hover:bg-surface">
+            className="rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content transition-colors disabled:opacity-50 hover:bg-surface">
             🧹 Auto-reject…
           </button>
           {showAutoReject && (
@@ -2843,7 +2843,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                   counts this panel exists to show. Capped height + internal
                   scroll so "Reject them" is reachable however long the caveats
                   get. */}
-              <div className="fixed inset-x-3 bottom-3 z-50 max-h-[70vh] overflow-y-auto rounded-lg border border-border bg-surface-overlay p-3 shadow-xl space-y-2 sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:mt-1 sm:w-72">
+              <div className="fixed inset-x-3 bottom-3 z-50 max-h-[70vh] overflow-y-auto rounded-xl bg-surface-overlay p-3 shadow-2xl space-y-2 sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:mt-1 sm:w-72">
                 <p className="text-xs text-content-muted">
                   Rejects the UNDECIDED images with these flags. Your manual ✓/✕ are never changed;
                   everything stays reversible (nothing is deleted from disk).
@@ -2924,26 +2924,26 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
         {selected.size > 0 && (
           <>
             <button type="button" onClick={() => { setSelected(new Set()); if (showSelected) { exitSelectionView(); setOffset(0); refreshImages(filter, 0, { on: false }) } }}
-              className="rounded-md border border-border px-2 py-0.5 text-xs text-content-muted hover:text-content">Clear</button>
+              className="rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content-muted transition-colors hover:text-content">Clear</button>
             <button type="button" onClick={() => batchStatus([...selected], 'keep')}
               className="rounded-md border border-emerald-400/50 bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20">✓ Keep</button>
             <button type="button" onClick={() => batchStatus([...selected], 'reject')}
               className="rounded-md border border-rose-400/50 bg-rose-500/10 px-2 py-0.5 text-xs font-semibold text-rose-200 hover:bg-rose-500/20">✕ Reject</button>
             <button type="button" onClick={() => batchStatus([...selected], 'pending')}
-              className="rounded-md border border-border px-2 py-0.5 text-xs text-content-muted hover:text-content">↺ Undecided</button>
+              className="rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content-muted transition-colors hover:text-content">↺ Undecided</button>
             {/* 🔄 Rotate the selection. Your own files are never rewritten: the
                 angle is stored on the row and applied to what the app shows and
                 to what it promotes — so four turns cost the original nothing. */}
             <button type="button" onClick={() => rotateSelection(-90)}
               aria-label={`Rotate the ${selected.size} selected image(s) 90 degrees left`}
               title="Rotate 90° left (counter-clockwise). Your own files are never modified — the turn is stored and applied to what you see and to what gets promoted."
-              className="rounded-md border border-border px-2 py-0.5 text-xs text-content-muted hover:bg-surface-raised hover:text-content">
+              className="rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content-muted transition-colors hover:bg-surface hover:text-content">
               <span aria-hidden="true">↺</span> Rotate left
             </button>
             <button type="button" onClick={() => rotateSelection(90)}
               aria-label={`Rotate the ${selected.size} selected image(s) 90 degrees right`}
               title="Rotate 90° right (clockwise). Your own files are never modified — the turn is stored and applied to what you see and to what gets promoted."
-              className="rounded-md border border-border px-2 py-0.5 text-xs text-content-muted hover:bg-surface-raised hover:text-content">
+              className="rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content-muted transition-colors hover:bg-surface hover:text-content">
               <span aria-hidden="true">↻</span> Rotate right
             </button>
           </>
@@ -2972,13 +2972,13 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
             title={semanticReady
               ? `Pick the N images that best COVER the visual variety of the current filter (varied angles/outfits/scenes) using the ${semanticState.label} semantic index.`
               : semanticBlocked}
-            className="rounded-md border border-border bg-surface-raised px-2.5 py-0.5 text-xs text-content disabled:opacity-50 hover:bg-surface">
+            className="rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content transition-colors disabled:opacity-50 hover:bg-surface">
             🎨 Pick diverse…{!semanticReady && ` (needs ${semanticState.label})`}{diverseBusy && ' (sampling…)'}
           </button>
           {curateOpen === 'diverse' && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setCurateOpen(null)} aria-hidden />
-              <div className="absolute z-50 mt-1 w-72 rounded-lg border border-border bg-surface-overlay p-3 shadow-xl space-y-2">
+              <div className="absolute z-50 mt-1 w-72 rounded-xl bg-surface-overlay p-3 shadow-2xl space-y-2">
                 <p className="text-xs text-content-muted">
                   Selects the most <strong>varied</strong> images of the current filter — the best
                   coverage of the visual space, not N look-alikes. Reviews as a normal selection
@@ -2988,7 +2988,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                   How many
                   <input type="number" min={1} max={2000} value={diverseN}
                     onChange={(e) => setDiverseN(Math.max(1, Math.min(2000, Number(e.target.value) || 1)))}
-                    className="w-20 rounded-md border border-border bg-surface px-2 py-0.5 text-sm text-content" />
+                    className="w-20 rounded-lg bg-surface-raised px-2 py-0.5 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary" />
                 </label>
                 {/* Typicality guard — "most diverse" used to mean "most isolated",
                     which is how a meme or a photo of someone else won the first
@@ -3029,7 +3029,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
             title={balanceReady.ready
               ? `Select N images SPREAD OVER the framings (face / bust / body / back), then diversify each bucket with the ${semanticState.label} semantic index.`
               : balanceReady.reason}
-            className="rounded-md border border-border bg-surface-raised px-2.5 py-0.5 text-xs text-content disabled:opacity-50 hover:bg-surface">
+            className="rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content transition-colors disabled:opacity-50 hover:bg-surface">
             ⚖️ Balanced pick…{balanceBusy && ' (sampling…)'}
           </button>
           {curateOpen === 'balanced' && (
@@ -3037,7 +3037,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
               <div className="fixed inset-0 z-40" onClick={() => setCurateOpen(null)} aria-hidden />
               {/* Bottom sheet below sm (measured at 400 px, an anchored w-80 panel
                   pushes the page sideways), normal popover from sm up. */}
-              <div className="fixed inset-x-4 bottom-4 z-50 max-h-[75vh] overflow-y-auto rounded-lg border border-border bg-surface-overlay p-3 shadow-xl space-y-2 sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:mt-1 sm:max-h-none sm:w-80 sm:overflow-visible">
+              <div className="fixed inset-x-4 bottom-4 z-50 max-h-[75vh] overflow-y-auto rounded-xl bg-surface-overlay p-3 shadow-2xl space-y-2 sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:mt-1 sm:max-h-none sm:w-80 sm:overflow-visible">
                 <p className="text-xs text-content-muted">
                   Splits your pick <strong>evenly across the framings</strong> — “20 face, 20 bust,
                   20 body” — and fills each bucket with the same most-varied sampling.
@@ -3047,7 +3047,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                   How many
                   <input type="number" min={1} max={2000} value={balanceN}
                     onChange={(e) => setBalanceN(Math.max(1, Math.min(2000, Number(e.target.value) || 1)))}
-                    className="w-20 rounded-md border border-border bg-surface px-2 py-0.5 text-sm text-content" />
+                    className="w-20 rounded-lg bg-surface-raised px-2 py-0.5 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary" />
                 </label>
                 <fieldset className="space-y-1">
                   <legend className="text-sm text-content">Balance on</legend>
@@ -3084,13 +3084,13 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
               : selected.size === 1
                 ? `Rank the current filter against the ONE selected image with the ${semanticState.label} semantic index and select the closest N.`
                 : 'Select exactly one image to use as the reference'}
-            className="rounded-md border border-border bg-surface-raised px-2.5 py-0.5 text-xs text-content disabled:opacity-50 hover:bg-surface">
+            className="rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content transition-colors disabled:opacity-50 hover:bg-surface">
             🎯 Similar to selected…{similarBusy && ' (ranking…)'}
           </button>
           {curateOpen === 'similar' && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setCurateOpen(null)} aria-hidden />
-              <div className="absolute z-50 mt-1 w-72 rounded-lg border border-border bg-surface-overlay p-3 shadow-xl space-y-2">
+              <div className="absolute z-50 mt-1 w-72 rounded-xl bg-surface-overlay p-3 shadow-2xl space-y-2">
                 <p className="text-xs text-content-muted">
                   Ranks the current filter by {semanticState.label} similarity to your one selected image and selects
                   the closest — a fast way to extract one person or look. The reference is kept in
@@ -3100,7 +3100,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                   How many
                   <input type="number" min={1} max={2000} value={similarN}
                     onChange={(e) => setSimilarN(Math.max(1, Math.min(2000, Number(e.target.value) || 1)))}
-                    className="w-20 rounded-md border border-border bg-surface px-2 py-0.5 text-sm text-content" />
+                    className="w-20 rounded-lg bg-surface-raised px-2 py-0.5 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary" />
                 </label>
                 <button type="button" onClick={findSimilar} disabled={similarBusy}
                   className="w-full rounded-md bg-gradient-primary px-3 py-1 text-xs font-semibold text-white disabled:opacity-60">
@@ -3117,7 +3117,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
             title={semanticReady
               ? `Describe what you are looking for in words ("brunette outdoors, wide shot") and rank the current filter with ${semanticState.label}.`
               : semanticBlocked}
-            className="rounded-md border border-border bg-surface-raised px-2.5 py-0.5 text-xs text-content disabled:opacity-50 hover:bg-surface">
+            className="rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content transition-colors disabled:opacity-50 hover:bg-surface">
             🔤 Find by text…{!semanticReady && ` (needs ${semanticState.label})`}
           </button>
           {curateOpen === 'text' && (
@@ -3133,7 +3133,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                   page is scrolled. So the vertical anchor is explicit, and the
                   sheet scrolls internally when the copy is long. From sm up it
                   behaves exactly like its two sibling popovers. */}
-              <div className="fixed inset-x-4 bottom-4 z-50 max-h-[75vh] overflow-y-auto rounded-lg border border-border bg-surface-overlay p-3 shadow-xl space-y-2 sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:mt-1 sm:max-h-none sm:w-80 sm:overflow-visible">
+              <div className="fixed inset-x-4 bottom-4 z-50 max-h-[75vh] overflow-y-auto rounded-xl bg-surface-overlay p-3 shadow-2xl space-y-2 sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:mt-1 sm:max-h-none sm:w-80 sm:overflow-visible">
                 <p className="text-xs text-content-muted">
                   Ranks the <strong>current filter</strong> by how close each image is to your
                   words. It refines what the grid is showing — it does not search the whole bank.
@@ -3145,7 +3145,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                   placeholder="brunette outdoors, wide shot"
                   onChange={(e) => setTextQuery(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !textPending) runTextSearch() }}
-                  className="w-full rounded-md border border-border bg-surface px-2 py-1 text-sm text-content" />
+                  className="w-full rounded-lg bg-surface-raised px-2 py-1 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary" />
                 {/* The pedagogy that matters most, because the failure it
                     prevents is INVISIBLE: "without a hat" comes back full of
                     hats, confidently, with no signal. Offered, never applied on
@@ -3171,14 +3171,14 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                   placeholder="hat, sunglasses"
                   onChange={(e) => setTextExclude(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !textPending) runTextSearch() }}
-                  className="w-full rounded-md border border-border bg-surface px-2 py-1 text-sm text-content" />
+                  className="w-full rounded-lg bg-surface-raised px-2 py-1 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary" />
                 <p className="text-xs text-content-subtle">{pushDownCaveat()}</p>
                 {textExclude.trim() && (
                   <label className="flex flex-wrap items-center gap-2 text-sm text-content">
                     How hard
                     <select value={textExcludeW}
                       onChange={(e) => setTextExcludeW(Number(e.target.value))}
-                      className="rounded-md border border-border bg-surface px-2 py-0.5 text-sm text-content">
+                      className="rounded-lg bg-surface-raised px-2 py-0.5 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary">
                       {PUSH_DOWN_STRENGTHS.map((s) => (
                         <option key={s.value} value={s.value}>{s.label}</option>
                       ))}
@@ -3192,7 +3192,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                   How many
                   <input type="number" min={1} max={2000} value={textN}
                     onChange={(e) => setTextN(Math.max(1, Math.min(2000, Number(e.target.value) || 1)))}
-                    className="w-20 rounded-md border border-border bg-surface px-2 py-0.5 text-sm text-content" />
+                    className="w-20 rounded-lg bg-surface-raised px-2 py-0.5 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary" />
                 </label>
                 {/* The cost, BEFORE the click — a cold CLIP load is ~10 s and an
                     unexplained wait is exactly how this reads as a hang. */}
@@ -3217,7 +3217,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
         <button type="button" onClick={() => setCoverageOpen((v) => !v)}
           aria-expanded={coverageOpen}
           title="See what your kept set leans on and what's thin for a good LoRA — advice only, nothing is kept or rejected."
-          className="rounded-md border border-border bg-surface-raised px-2.5 py-0.5 text-xs text-content disabled:opacity-50 hover:bg-surface">
+          className="rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content transition-colors disabled:opacity-50 hover:bg-surface">
           📊 Coverage advice{coverageOpen ? ' ▲' : ' ▼'}
         </button>
       </div>
@@ -3237,7 +3237,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
               </span>
               <button type="button"
                 onClick={() => { setTextResult(null); setShowSelected(false); refreshImages(filter, 0, { on: false }) }}
-                className="shrink-0 rounded-md border border-border px-2 py-0.5 text-xs text-content hover:bg-surface-raised">
+                className="shrink-0 rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content transition-colors hover:bg-surface">
                 Clear search
               </button>
             </div>
@@ -3267,7 +3267,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
               <span aria-hidden>⚖️</span>
               <span className="min-w-0 flex-1">{summarizeBalance(balanceResult)}</span>
               <button type="button" onClick={() => setBalanceResult(null)}
-                className="shrink-0 rounded-md border border-border px-2 py-0.5 text-xs text-content hover:bg-surface-raised">
+                className="shrink-0 rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content transition-colors hover:bg-surface">
                 Dismiss
               </button>
             </div>
@@ -3373,13 +3373,13 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
           {page.total > PAGE_SIZE && (
             <nav className="flex items-center gap-3 text-sm" aria-label="Grid pages">
               <button type="button" disabled={offset === 0} onClick={() => goto(Math.max(0, offset - PAGE_SIZE))}
-                className="rounded-md border border-border px-2 py-1 text-content disabled:opacity-40">← Prev</button>
+                className="rounded-full bg-surface-raised px-2.5 py-1 text-content transition-colors hover:bg-surface disabled:opacity-40">← Prev</button>
               <span className="text-content-muted">
                 {offset + 1}–{Math.min(offset + PAGE_SIZE, page.total)} of {page.total}
               </span>
               <button type="button" disabled={offset + PAGE_SIZE >= page.total}
                 onClick={() => goto(offset + PAGE_SIZE)}
-                className="rounded-md border border-border px-2 py-1 text-content disabled:opacity-40">Next →</button>
+                className="rounded-full bg-surface-raised px-2.5 py-1 text-content transition-colors hover:bg-surface disabled:opacity-40">Next →</button>
             </nav>
           )}
           </>

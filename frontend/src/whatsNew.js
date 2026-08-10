@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-bank-workspace-restyle',
+    date: '2026-08-10',
+    title: 'Inside a bank, the triage tools stop competing with the pictures',
+    blurb: 'The bank workspace — the analyse rail, the pass buttons, the whole filter row, the thresholds and duplicate panels — was drawn as a few dozen outlined boxes above a wall of photographs. They are shaded rows and pills now, so the strongest edges on screen belong to the images you are judging. Nothing about a pass, a threshold or a promotion changed.',
+    to: '/bank',
+  },
+  {
     id: '2026-08-10-training-panel-restyle',
     date: '2026-08-10',
     title: 'The training panel matches the rest of the app',

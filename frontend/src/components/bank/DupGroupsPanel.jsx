@@ -77,7 +77,7 @@ export default function DupGroupsPanel({ bankId, live, onChanged, kind = 'exact'
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2 rounded-lg bg-surface px-3 py-2">
         <span className="text-sm font-semibold text-content">{k.header(data.total)}</span>
         <span className="text-xs text-content-subtle">{k.lead}</span>
         <span className="ml-auto" />
@@ -90,26 +90,26 @@ export default function DupGroupsPanel({ bankId, live, onChanged, kind = 'exact'
         <button type="button" disabled={busy || live}
           onClick={() => resolve({ strategy: 'first' })}
           title="In every group: keep the first member (import order), reject the rest"
-          className="rounded-md border border-border bg-surface-raised px-3 py-1 text-xs font-semibold text-content disabled:opacity-50 hover:bg-surface">
+          className="rounded-full bg-surface-raised px-3 py-1 text-xs font-semibold text-content transition-colors disabled:opacity-50 hover:bg-surface">
           Resolve ALL — keep first
         </button>
       </div>
 
       <ul className="space-y-3">
         {data.groups.map((g) => (
-          <li key={g.group} className="rounded-lg border border-border bg-surface p-3">
+          <li key={g.group} className="rounded-lg bg-surface p-3">
             <div className="mb-2 flex items-center gap-2 text-xs text-content-muted">
               <span className="font-semibold text-content">Group #{g.group}</span>
               <span>{g.images.length} images — {k.cardHint}</span>
               <span className="ml-auto" />
               <button type="button" disabled={busy || live}
                 onClick={() => resolve({ strategy: 'best', group: g.group })}
-                className="rounded-md border border-border px-2 py-0.5 text-content hover:bg-surface-raised disabled:opacity-50">
+                className="rounded-full bg-surface-raised px-2.5 py-0.5 text-content transition-colors hover:bg-surface disabled:opacity-50">
                 Keep best
               </button>
               <button type="button" disabled={busy || live}
                 onClick={() => resolve({ strategy: 'first', group: g.group })}
-                className="rounded-md border border-border px-2 py-0.5 text-content hover:bg-surface-raised disabled:opacity-50">
+                className="rounded-full bg-surface-raised px-2.5 py-0.5 text-content transition-colors hover:bg-surface disabled:opacity-50">
                 Keep first
               </button>
             </div>
@@ -142,13 +142,13 @@ export default function DupGroupsPanel({ bankId, live, onChanged, kind = 'exact'
         <nav className="flex items-center gap-3 text-sm" aria-label={k.pagesLabel}>
           <button type="button" disabled={offset === 0}
             onClick={() => refresh(Math.max(0, offset - GROUPS_PAGE))}
-            className="rounded-md border border-border px-2 py-1 text-content disabled:opacity-40">← Prev</button>
+            className="rounded-full bg-surface-raised px-2.5 py-1 text-content transition-colors hover:bg-surface disabled:opacity-40">← Prev</button>
           <span className="text-content-muted">
             groups {offset + 1}–{Math.min(offset + GROUPS_PAGE, data.total)} of {data.total}
           </span>
           <button type="button" disabled={offset + GROUPS_PAGE >= data.total}
             onClick={() => refresh(offset + GROUPS_PAGE)}
-            className="rounded-md border border-border px-2 py-1 text-content disabled:opacity-40">Next →</button>
+            className="rounded-full bg-surface-raised px-2.5 py-1 text-content transition-colors hover:bg-surface disabled:opacity-40">Next →</button>
         </nav>
       )}
     </div>

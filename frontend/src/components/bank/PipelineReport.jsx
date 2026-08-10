@@ -42,7 +42,7 @@ export default function PipelineReport({ report, onDismiss }) {
   const c = report.counts || {}
 
   return (
-    <div className="rounded-lg border border-border bg-surface-raised">
+    <div className="rounded-lg bg-surface-raised">
       <div className="flex items-center gap-2 px-3 py-2">
         <button type="button" onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
@@ -55,7 +55,7 @@ export default function PipelineReport({ report, onDismiss }) {
         <span className="ml-auto text-xs text-content-subtle">{fmtWhen(report.finished_at)}</span>
         {onDismiss && (
           <button type="button" onClick={onDismiss} aria-label="Dismiss the report"
-            className="rounded border border-border px-1.5 text-xs text-content-subtle hover:text-content">✕</button>
+            className="rounded-full bg-surface-raised px-2 text-xs text-content-subtle transition-colors hover:text-content">✕</button>
         )}
       </div>
       {open && (

@@ -25,7 +25,7 @@ export default function SubfolderPersonPanel({
   const scan = offer && onScan ? (
     <div className="flex flex-wrap items-center gap-2 text-xs text-content-subtle">
       <button type="button" onClick={onScan} disabled={busy} title={offer.note}
-        className="rounded-md border border-border px-2 py-1 font-semibold text-content hover:bg-white/10 disabled:opacity-50">
+        className="rounded-full bg-surface-raised px-2.5 py-1 font-semibold text-content transition-colors hover:bg-surface disabled:opacity-50">
         {offer.label}
       </button>
       <span>{offer.note}</span>
@@ -53,10 +53,10 @@ export default function SubfolderPersonPanel({
           <button type="button" onClick={onAssert} disabled={busy}
             title={`Group every image of ${folderLabel(subfolder)} as one person, `
               + 'with no face pass. Undoable at any time.'}
-            className={`rounded-md border px-2 py-1 font-semibold hover:bg-white/10 disabled:opacity-50 ${
+            className={`rounded-full px-2.5 py-1 font-semibold transition-colors disabled:opacity-50 ${
               suggestionTone(suggestion) === 'ok'
-                ? 'border-emerald-400/50 text-emerald-200'
-                : 'border-border text-content'}`}>
+                ? 'bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30'
+                : 'bg-surface-raised text-content hover:bg-surface'}`}>
             👤 Single person here
           </button>
           {offered
@@ -84,12 +84,12 @@ export default function SubfolderPersonPanel({
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" onClick={onCheck} disabled={busy}
           title={checkCostNote(entry)}
-          className="rounded border border-border px-2 py-0.5 font-semibold text-content hover:bg-white/10 disabled:opacity-50">
+          className="rounded-full bg-surface-raised px-2.5 py-0.5 font-semibold text-content transition-colors hover:bg-surface disabled:opacity-50">
           🔍 {sample ? 'Check the sample again' : `Check a sample (${SAMPLE_SIZE} images)`}
         </button>
         <button type="button" onClick={onRevoke} disabled={busy}
           title={revokeNote(subfolder)}
-          className="rounded border border-border px-2 py-0.5 text-content-subtle hover:bg-white/10 disabled:opacity-50">
+          className="rounded-full bg-surface-raised px-2.5 py-0.5 text-content-subtle transition-colors hover:bg-surface disabled:opacity-50">
           ↩ Not one person after all
         </button>
       </div>

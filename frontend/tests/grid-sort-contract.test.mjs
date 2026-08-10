@@ -121,7 +121,9 @@ test('the persisted sort id is normalised on read (legacy/hand-edited values)', 
 test('both selects stay inside a 400 px toolbar', () => {
   // A <select> with long option labels stretches its own box; without a bound it
   // pushes the toolbar into a horizontal scroll on a phone.
-  assert.match(BANK, /max-w-\[11rem\][^"]*rounded-md border border-border bg-surface[^"]*text-xs text-content"\n?\s*>\n?\s*\{sortGroups/)
+  // The BOUND is what this pins, not the chrome around it — the 2026-08-10
+  // restyle moved the select onto the raised surface with a focus ring.
+  assert.match(BANK, /max-w-\[11rem\][^"]*text-xs text-content[^"]*"\n?\s*>\n?\s*\{sortGroups/)
   assert.match(WORKSPACE, /max-w-\[13rem\]/)
   // The dataset control wraps onto its own line rather than squeezing the chips.
   assert.match(WORKSPACE, /flex flex-wrap items-center gap-x-3 gap-y-1\.5/)

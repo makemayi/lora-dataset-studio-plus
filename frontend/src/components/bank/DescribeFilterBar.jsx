@@ -38,22 +38,24 @@ export default function DescribeFilterBar({ bankId, onApply, onFenceBlocked }) {
 
   const s = describeSummary(res)
   return (
-    <div className="rounded-lg border border-border bg-surface-raised p-2">
+    <div className="rounded-lg bg-surface-raised p-2">
       {/* flex-wrap and a full-width field: at 400 px the label, the input and the
           button cannot share a row. */}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-content-muted">🗣 Describe the set you want</span>
         <input
-          className="min-w-0 flex-1 rounded-md border border-border bg-surface px-2 py-1 text-sm"
+          className="min-w-0 flex-1 rounded-lg bg-surface-raised px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
           placeholder="an amateur photo set, least polished first"
           value={text} maxLength={400} disabled={busy}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') run() }} />
         <button type="button" onClick={run} disabled={busy || !text.trim()}
-          className="rounded-md border border-border px-2 py-1 text-xs font-medium
-            text-content-muted hover:bg-surface-raised hover:text-content
+          className="rounded-full bg-surface-raised px-2.5 py-1 text-xs font-medium
+            text-content-muted transition-colors hover:bg-surface hover:text-content
             disabled:opacity-50">
-          {busy ? 'Reading…' : 'Set the filters'}
+          {/* Both labels mounted — see CLAUDE.md ▸ UI changes. */}
+          <span hidden={!busy}>Reading…</span>
+          <span hidden={!!busy}>Set the filters</span>
         </button>
       </div>
 

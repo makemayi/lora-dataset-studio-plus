@@ -48,7 +48,7 @@ export default function BankOverview({ payload }) {
 
   return (
     <section aria-labelledby="bank-overview-title"
-      className="rounded-xl border border-border bg-surface p-4 space-y-3">
+      className="rounded-xl bg-surface p-4 space-y-3">
       <div className="flex items-center justify-between gap-3">
         <h2 id="bank-overview-title" className="min-w-0 text-sm font-semibold text-content">
           <button type="button" onClick={() => setOpen((value) => !value)}
@@ -99,7 +99,7 @@ export default function BankOverview({ payload }) {
               <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-content-muted">Pass coverage</h3>
               <ul className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 xl:grid-cols-2 2xl:grid-cols-3">
                 {model.passes.map((pass) => (
-                  <li key={pass.key} className="rounded-md border border-border bg-surface-raised px-2 py-1.5">
+                  <li key={pass.key} className="rounded-lg bg-surface-raised px-2 py-1.5">
                     <span className="block text-[11px] text-content-muted">{pass.label}</span>
                     <span className={`block text-[10px] tabular-nums ${pass.value == null ? 'text-amber-300/90' : 'text-content'}`}>
                       {pass.text}
@@ -123,7 +123,7 @@ export default function BankOverview({ payload }) {
               <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-content-muted">Structure</h3>
               <dl className="grid grid-cols-2 gap-1.5 sm:grid-cols-4 xl:grid-cols-2 2xl:grid-cols-4">
                 {model.kpis.map((kpi) => (
-                  <div key={kpi.label} className="rounded-md border border-border bg-surface-raised px-2 py-1.5">
+                  <div key={kpi.label} className="rounded-lg bg-surface-raised px-2 py-1.5">
                     <dt className="text-[10px] text-content-subtle">{kpi.label}</dt>
                     <dd className="text-sm font-semibold tabular-nums text-content">{kpi.value}</dd>
                     <dd className="text-[10px] leading-tight text-content-subtle">{kpi.detail}</dd>
