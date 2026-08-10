@@ -53,7 +53,7 @@ export const WHATS_NEW = [
     id: '2026-08-10-quieter-palette',
     date: '2026-08-10',
     title: 'A quieter palette — the pictures are the brightest thing again',
-    blurb: 'The app sat on a near-black with a violet cast, and every photograph in it picked that cast up. The ground is a neutral graphite now, two steps lighter, because maximum contrast against a face is the last thing you want when the face is what you are judging. Body text is a shade softer than the old pure grey-100 so a dark screen stops glaring, the hairlines are fainter, and the indigo accent lost a third of its saturation — as did the purple gradient on the primary buttons, which now reads as depth rather than as a second colour. The model badges on your dataset cards are quiet tinted pills instead of outlined chips. Only colour changed: nothing moved.',
+    blurb: 'The app sat on a near-black with a violet cast (#0a0a0f), and every photograph in it picked that cast up. The ground is a neutral graphite now and genuinely lighter — #16181c, about twice the brightness — because maximum contrast against a face is the last thing you want when the face is what you are judging. Cards and raised controls went up with it, so a panel, a button and the page are three distinct planes instead of three shades of black. Body text is softer than the old pure grey-100, the hairlines are fainter, and the primary buttons lost their indigo-to-violet sweep for a near-flat muted one: a dozen of those on a page of photographs were the loudest thing on screen. Only colour changed — nothing moved.',
   },
   {
     id: '2026-08-10-empty-states',

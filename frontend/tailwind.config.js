@@ -13,8 +13,8 @@ export default {
            (#764ba2) to one a shade off the accent, so the gradient reads as
            depth rather than as two different colours. */
         primary: {
-          DEFAULT: '#6a74cc',
-          dark: '#7b6bb4',
+          DEFAULT: '#6470b4',
+          dark: '#6a63a6',
         },
         // ── Semantic theme tokens (backed by CSS vars in index.css) ──────────
         // App is dark-only. The *-alpha-baked tokens (surface, surface-raised,
@@ -33,7 +33,12 @@ export default {
         'border-strong': 'rgb(var(--border-strong) / var(--border-strong-alpha))',
       },
       backgroundImage: {
-        'gradient-primary': 'linear-gradient(135deg, #6069bd 0%, #7264a8 100%)',
+        /* Near-flat on purpose. Every primary button in the app paints itself
+           with this, and a visible indigo→violet sweep on a dozen buttons was
+           the single loudest thing on a page of photographs. Two stops half a
+           step apart still give the button a body without announcing a second
+           colour — and the class name stays, so no call site changes. */
+        'gradient-primary': 'linear-gradient(135deg, #5a63a8 0%, #5f5c9c 100%)',
       },
     },
   },

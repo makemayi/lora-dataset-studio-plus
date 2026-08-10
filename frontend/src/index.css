@@ -38,9 +38,12 @@
      · The ground was #0a0a0f — a near-black with a violet cast. Under it every
        photograph in this app (faces, skin) picked up that cast, and the
        interface read as an effect rather than as a room the pictures sit in.
-       It is now a NEUTRAL cool graphite, and two steps lighter: pure black
-       maximises contrast against a photo, which is exactly what you do not
-       want when the photo is the thing being judged.
+       It is now #16181c: NEUTRAL, and genuinely lighter. The first attempt at
+       this moved it to #0e0f12 and the user could not see the difference —
+       correctly, four levels of grey is not a change. Pure black maximises
+       contrast against a photograph, which is the last thing you want when the
+       photograph is the thing being judged; a graphite room lets the pictures
+       be the brightest objects in it.
      · The text was gray-100 at full strength. On a dark ground that glares;
        #e8eaee carries the same hierarchy with less of it.
      · The hairlines dropped from 10%/20% white to 8%/16%. After the surfaces
@@ -49,18 +52,21 @@
 
      Everything here is a TOKEN — the whole palette is these fourteen lines,
      and no component may spell a colour of its own (CLAUDE.md ▸ UI, rule 1). */
-  --bg-app: 14 15 18;           /* #0e0f12 — neutral graphite page ground */
-  --bg-surface: 22 23 27;       /* legacy var, kept for the scrollbar */
+  --bg-app: 22 24 28;           /* #16181c — neutral graphite page ground */
+  --bg-surface: 31 34 39;       /* legacy var, kept for the scrollbar */
   --text-base: 232 234 238;     /* #e8eaee — softer than gray-100 */
-  --scrollbar-track: 22 23 27;
-  --scrollbar-thumb: 62 67 76;
+  --scrollbar-track: 31 34 39;
+  --scrollbar-thumb: 72 78 88;
 
-  /* Semantic — dark canonical */
+  /* Semantic — dark canonical.
+     The alphas went UP with the ground: a 4% white veil that read as a panel
+     over near-black is invisible over graphite. These are the values at which
+     a card, a raised control and the page are three distinct planes. */
   --surface: 255 255 255;          /* used at low alpha → faint white on dark */
-  --surface-alpha: 0.045;
+  --surface-alpha: 0.055;
   --surface-raised: 255 255 255;
-  --surface-raised-alpha: 0.085;
-  --surface-overlay: 22 23 27;     /* #16171b — neutral panel for modals */
+  --surface-raised-alpha: 0.105;
+  --surface-overlay: 31 34 39;     /* #1f2227 — neutral panel for modals */
   --content: 232 234 238;          /* #e8eaee */
   --content-muted: 154 161 172;    /* #9aa1ac */
   --content-subtle: 116 123 134;   /* #747b86 */
