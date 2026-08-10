@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch, postJson } from '../../api/fetchClient';
 import { useToast } from '../common/Toast';
+import { HelpText } from '../common/HelpText';
 
 /* ⚙️ Caption method options (per-dataset). Lets the user override, for THIS dataset:
    - the caption engine (or leave it on the global default);
@@ -268,12 +269,12 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
                         : 'Pull & use'}
                     </button>
                   </div>
-                  <p id="krea-caption-model-note" className="mt-2 text-xs leading-relaxed text-content-subtle">
+                  <HelpText id="krea-caption-model-note" className="mt-2 text-xs leading-relaxed text-content-subtle">
                     Uses the same Qwen3-VL-4B Instruct base model family/checkpoint as Krea 2 Edit.
                     Ollama uses a different quantization and runtime, so captions are not bit-identical.
                     The vanilla model can refuse explicit content; the default 8B abliterated model
                     remains the better choice for NSFW.
-                  </p>
+                  </HelpText>
                 </section>
               )}
               <p className="text-xs text-content-subtle">
@@ -308,11 +309,11 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
                 className={inputCls}>
                 {VOCABULARY_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
               </select>
-              <p className="text-xs text-content-subtle">
+              <HelpText className="text-xs text-content-subtle">
                 How the model names nude or sexual content. “Explicit” needs an uncensored
                 (abliterated) vision model — pull one above. The omission rules and leak
                 cleaners still run, so this changes wording, not what binds to the trigger.
-              </p>
+              </HelpText>
             </div>
 
             {/* Caption length preset */}
@@ -322,7 +323,7 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
                 className={inputCls}>
                 {CAPTION_LENGTH_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
               </select>
-              <p className="text-xs text-content-subtle">
+              <HelpText className="text-xs text-content-subtle">
                 How much the captioner writes. “Standard” leaves the prompt untouched.
                 “Concise” aims for one short sentence, “Detailed” for several — a target the
                 model follows loosely, not a hard cap. Measured on 18 photos with the default
@@ -330,7 +331,7 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
                 another engine or model will land elsewhere. Both stay full prose, so a Concise
                 dataset still trains on prose-native families without forcing past the
                 caption-style check.
-              </p>
+              </HelpText>
               <p className="text-xs text-content-subtle">
                 Different axis from the long + short dual captions: the short one is derived
                 from the long caption and stored separately, while this changes the long

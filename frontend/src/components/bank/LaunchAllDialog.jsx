@@ -5,6 +5,7 @@ import {
   defaultPipelineStepKeys, normalizeSemanticEngine, pipelineStepKeys,
   semanticEngineLabel,
 } from './bankSemanticEngine.js'
+import { HelpText } from '../common/HelpText';
 
 /** 🚀 Launch all — the overnight funnel. The user picks which passes run and how
  * auto-reject behaves, sees a plain "here's what will run" preview, and hits Go.
@@ -152,11 +153,11 @@ export default function LaunchAllDialog({
         className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl bg-surface-overlay p-5 shadow-2xl space-y-4">
         <div>
           <h2 className="text-base font-bold text-content">🚀 Launch all</h2>
-          <p className="mt-1 text-sm text-content-muted">
+          <HelpText className="mt-1 text-sm text-content-muted">
             Chain the whole triage in one go — start it, walk away, come back to a
             cleaned bank. Each pass runs in order; you can Stop it any time, and a
             pass whose tool isn't installed is skipped (never fails the run).
-          </p>
+          </HelpText>
         </div>
 
         <ul className="space-y-1.5">

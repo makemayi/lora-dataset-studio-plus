@@ -9,6 +9,7 @@ import {
   runBankScrapeImport,
   summarizeBankScrapeImport,
 } from './bankScrapeImport'
+import { HelpText } from '../common/HelpText'
 
 /**
  * 🕸 Scrape into a bank — the scraper's second destination.
@@ -130,11 +131,11 @@ export default function BankScrapePanel({ banks, onDone }) {
                 </select>
               </label>
             )}
-            <p className="text-[0.6875rem] leading-relaxed text-content-subtle">
+            <HelpText className="text-[0.6875rem] leading-relaxed text-content-subtle">
               Images are stored exactly as downloaded. Small shots, near-duplicates and
               framing stay for the bank&rsquo;s own passes to judge — that is the point of
               triaging here rather than importing straight into a dataset.
-            </p>
+            </HelpText>
           </div>
 
           <ConceptSourcesPanel destination="bank" stateKey="bank"

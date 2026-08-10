@@ -11,6 +11,7 @@ import {
   CARD_SURFACE, CARD_SURFACE_INTERACTIVE, INPUT_CLASS, PRIMARY_BUTTON, QUIET_BUTTON,
 } from '../components/common/surfaces'
 import { CloseIcon, PlusIcon, ArrowRightIcon } from '../components/common/icons'
+import { HelpText } from '../components/common/HelpText'
 
 const CURRENT_KEY = 'videoBankCurrentId'
 
@@ -151,13 +152,13 @@ export default function VideoBankPage() {
           <BankLaneTabs className="w-full sm:ml-auto sm:w-auto" />
         </div>
       </header>
-      <p className="max-w-3xl text-sm text-content-muted">
+      <HelpText summary="What this page is for" className="text-sm text-content-muted">
         Point the app at a folder of rushes and turn it into a video training set: each
         file is cut at its shot boundaries, you keep the shots worth training on, and
         only those get encoded — at the length and frame rate your target model
         actually demands. Nothing is copied and nothing is re-encoded until you promote,
         so a bank of hundreds of shots costs no disk space at all.
-      </p>
+      </HelpText>
 
       <VideoCapabilityStrip capability={capability} />
 

@@ -34,6 +34,7 @@ import {
   savePexelsAuthorization,
   scrapeItemToImportPayload,
 } from './scraperSourceSearch';
+import { HelpText } from '../common/HelpText';
 
 const thumbFor = (it) =>
   `/api/scrape/thumb?url=${encodeURIComponent(it.thumbnail || it.url)}`;
@@ -464,11 +465,11 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
             </button>
             <HelpBadge topic="action-scrape-websearch" className="self-center" />
           </div>
-          <p className="text-content-muted text-[0.6875rem] leading-relaxed">
+          <HelpText className="text-content-muted text-[0.6875rem] leading-relaxed">
             Searches images across the open web — no account and no API key.
             Results come from third-party sites: check the licence before using an
             image, and expect a broader mix than a curated source like Pexels.
-          </p>
+          </HelpText>
         </div>
       )}
 

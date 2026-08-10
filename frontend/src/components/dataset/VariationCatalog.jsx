@@ -48,6 +48,7 @@ import {
   SUBJECT_TYPES, SUBJECT_TYPE_LABELS, SUBJECT_TYPE_HINTS,
   normalizeSubjectType, framingLabel, defaultPresetKey,
 } from './subjectTypes.js';
+import { HelpText } from '../common/HelpText';
 
 /** localStorage, or null when it can't be touched (private mode / SSR) — the
  *  engine helpers degrade to their defaults instead of throwing. */
@@ -1314,11 +1315,11 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
                   aria-label="Consistency LoRA strength"
                   className="flex-1 min-w-[120px] accent-indigo-500" />
               </label>
-              <p className="text-content-subtle text-[0.625rem]">
+              <HelpText className="text-content-subtle text-[0.625rem]">
                 Anchors the COMPOSITION, not the face — high values suppress pose/framing changes.
                 ~0.5 balanced · 0.2–0.4 for big restagings · 0 = off. Face identity comes from the
                 reference photo(s); add extra references for a stronger identity lock.
-              </p>
+              </HelpText>
             </div>
             {/* Optional generation-LoRA preset (Idea by @waltm) — pick one of
                 the named combinations from Settings; its chain (read-only
@@ -1399,11 +1400,11 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
             </span>
           </summary>
           <div className="px-2.5 pt-1 flex flex-col gap-1.5">
-            <p className="text-content-subtle text-[0.625rem]">
+            <HelpText className="text-content-subtle text-[0.625rem]">
               Identity comes from the reference photo alone — no character LoRA needed. Extra
               reference images are not used by this engine. Krea Fit v1.2 honors each selected
               card&rsquo;s framing and aspect ratio instead of forcing the source photo&rsquo;s shape.
-            </p>
+            </HelpText>
             <p className="text-content-subtle text-[0.625rem]">
               The engine&rsquo;s <b className="text-content-muted font-semibold">file paths</b> and
               its LoRA presets are defined in{' '}
@@ -1803,11 +1804,11 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
                   );
                 })}
               </div>
-              <p className="text-content-subtle text-[0.625rem]">
+              <HelpText className="text-content-subtle text-[0.625rem]">
                 Captions must keep describing the state (nude / lingerie…) so it stays
                 promptable and does not bind to the trigger word — the captioner does this
                 automatically. The Custom shot below follows this register while 🔞 is on.
-              </p>
+              </HelpText>
             </>
           )}
         </div>

@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-explanations-fold-everywhere',
+    date: '2026-08-10',
+    title: 'The long explanations fold on every page, not just in Settings',
+    blurb: 'Fourteen paragraphs of 200–470 characters were open on every visit, between the title of a page and the thing you came to click. They now sit behind a caret you can open when you need them, exactly like the Settings help does — same threshold, so one-line notes stay where they were. Nothing was deleted and nothing moved. What deliberately does NOT fold: a live readout, a warning about something wrong right now, and the explanation of a refusal — those are the state of the app, not documentation.',
+    to: '/bank',
+  },
+  {
     id: '2026-08-10-pages-use-the-screen',
     date: '2026-08-10',
     title: 'Every workspace uses your whole screen now',

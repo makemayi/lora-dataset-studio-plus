@@ -3,6 +3,7 @@ import { apiFetch } from '../../api/fetchClient';
 import {
   axisRows, axisSummary, coverageReadiness, coverageScope, generateMoreHint,
 } from './datasetCoverage.js';
+import { HelpText } from '../common/HelpText';
 
 /** 🔍 Coverage — the variety read that sits under the composition meter.
  *
@@ -107,12 +108,12 @@ export default function CoveragePanel({ datasetId, refreshKey = 0 }) {
               </div>
             </>
           )}
-          <p className="m-0 text-content-subtle text-[0.6875rem]">
+          <HelpText className="m-0 text-content-subtle text-[0.6875rem]">
             Reads the same images as the Composition bar above (everything except rejected
             and failed). Advice only — nothing is kept, rejected or changed. This reads the words in your
             captions, not the pixels: a shot the captioner never described is invisible here,
             and “not smiling” still counts as a smile.
-          </p>
+          </HelpText>
         </div>
       )}
     </div>

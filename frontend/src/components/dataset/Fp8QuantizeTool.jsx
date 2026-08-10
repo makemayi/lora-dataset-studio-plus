@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../api/fetchClient';
 import { postJson } from '../../hooks/useDataset';
+import { HelpText } from '../common/HelpText';
 
 /** Turn a full-precision model into the fp8 file ComfyUI loads — in one click.
  *
@@ -305,13 +306,13 @@ export default function Fp8QuantizeTool({
       {framed && (
         <>
           <span className="font-semibold">Quantize a model to fp8</span>
-          <p className="m-0 mt-1 text-sky-200/75 text-[0.6875rem] leading-relaxed">
+          <HelpText className="m-0 mt-1 text-sky-200/75 text-[0.6875rem] leading-relaxed">
             Turns a full-precision checkpoint into the ~10 GB fp8 file ComfyUI loads with the
             standard Load Diffusion Model node, and puts it in ComfyUI’s own models folder. The
             source is never modified and nothing is ever overwritten. This is not the same thing
             as the “quantize” training option, which only shrinks the model in memory while it
             trains and writes no file.
-          </p>
+          </HelpText>
         </>
       )}
 

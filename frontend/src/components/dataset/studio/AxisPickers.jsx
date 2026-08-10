@@ -1,4 +1,7 @@
 // Axes optionnels du balayage : modèle Z-Image (select), formats / CFG / steps (multi-toggles).
+
+import { HelpText } from '../../common/HelpText';
+// Axes optionnels du balayage : modèle Z-Image (select), formats / CFG / steps (multi-toggles).
 // Extrait behavior-preserving de LoraTestStudio.jsx (blocs modèle/formats/CFG/steps).
 // Chaque bloc conserve sa garde de rendu d'origine :
 //   - modèle : z_models tableau de longueur > 1
@@ -72,12 +75,12 @@ export default function AxisPickers({
       )}
 
       {mixedDefaults && (
-        <p className="m-0 text-[0.625rem] leading-snug text-amber-300/80">
+        <HelpText className="m-0 text-[0.625rem] leading-snug text-amber-300/80">
           The selected base models want different sampler settings (a distilled
           “Turbo” build runs at CFG 1 / 8 steps; a non-distilled “Base” build needs
           higher guidance and far more steps). The CFG and steps axes below apply to
           every base in the run — add the values both need, or run them separately.
-        </p>
+        </HelpText>
       )}
 
       {Array.isArray(cfgChoices) && (

@@ -8,6 +8,7 @@
  * le delta net porte un signe explicite (+/−).
  */
 import { useState } from 'react';
+import { HelpText } from '../../common/HelpText';
 
 export default function LoraRankingPanel({ ranking }) {
   const [open, setOpen] = useState(true);
@@ -77,11 +78,11 @@ export function HowVotingWorks() {
           with <strong>2👍/2</strong> (34%) outranks one with <strong>6👍4👎</strong> (31%),
           and <strong>5👍/5</strong> (57%) outranks <strong>2👍/2</strong>.
         </p>
-        <p className="m-0">
+        <HelpText className="m-0">
           Ranking on raw 👍−👎 would just favour whatever you tested the most, and ranking on
           the plain rate would put a single lucky vote on top. Below 3 votes a configuration is
           flagged low-confidence: it is a hint, not a verdict — keep voting to settle it.
-        </p>
+        </HelpText>
       </div>
     </details>
   );

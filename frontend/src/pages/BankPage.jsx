@@ -21,6 +21,7 @@ import {
   MoveIcon, CloseIcon, PlusIcon, ArrowRightIcon, SpinnerIcon,
   ICON_BUTTON_QUIET,
 } from '../components/common/icons'
+import { HelpText } from '../components/common/HelpText'
 
 const CURRENT_KEY = 'bankCurrentId'
 
@@ -256,12 +257,14 @@ export default function BankPage() {
           <BankLaneTabs className="w-full sm:ml-auto sm:w-auto" />
         </div>
       </header>
-      <p className="text-sm text-content-muted max-w-3xl">
+      {/* Folded: it explains the page once, and after the first visit it is
+          300 characters between the title and the thing you came to click. */}
+      <HelpText summary="What this page is for" className="text-sm text-content-muted">
         Point the app at a big unsorted folder (a Telegram export, a scrape dump…) and triage it
         into dataset-ready selections: a quality pass flags blur/noise/flat/small shots and groups
         near-duplicates, the face pass sorts the dump by person — then you promote the keepers
         into a dataset. The folder itself is never modified.
-      </p>
+      </HelpText>
 
       <form onSubmit={create}
         className={`flex flex-wrap items-end gap-3 p-4 ${CARD_SURFACE}`}>
