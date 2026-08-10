@@ -21,8 +21,14 @@ test('Runs uses one dataset-aware helper for every Test Studio surface', () => {
     /const openTestStudio = \(id\) => \{\s*if \(id == null\) return;\s*navigate\(`\/dataset\/studio\/\$\{id\}`\);/);
   assert.equal((source.match(/onClick=\{\(\) => openTestStudio\(/g) || []).length, 4,
     'history cards, active local/cloud runs, and folded recent groups stay covered');
-  assert.equal((source.match(/🧪 Test in Studio/g) || []).length, 4,
+  // Text-labelled, and since the 2026-08-10 restyle the glyph beside the label
+  // is the app's drawn Studio icon rather than a 🧪 — the LABEL is what this
+  // contract is about, so it counts labels and requires the icon to travel
+  // with each one.
+  assert.equal((source.match(/Test in Studio/g) || []).length, 4,
     'each Runs surface keeps a visible, text-labelled Studio action');
+  assert.equal((source.match(/<StudioIcon [^>]*\/> Test in Studio/g) || []).length, 4,
+    'every Studio action carries the icon set glyph, none kept an emoji');
   assert.match(source, /data\.local_active\.current\.dataset_id != null/);
   assert.match(source, /group\.datasetId != null/);
 });

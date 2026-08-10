@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-runs-restyle',
+    date: '2026-08-10',
+    title: 'Runs reads as a list of runs, not a page of frames',
+    blurb: 'Every run card was an outlined box, and inside it every chip and button had an outline of its own. The cards are shaded panels now and keep only the coloured left edge that tells you the status; the chips and buttons are pills. A live run is still tinted by where it runs — violet for local, sky for cloud. Test in Studio, Share config, the LoRA download and the graph toggle take the app\'s drawn icons, and four button labels that used to be swapped in place are now mounted side by side, which is what stops the browser\'s auto-translate from breaking them.',
+    to: '/cloud',
+  },
+  {
     id: '2026-08-10-canvas-restyle',
     date: '2026-08-10',
     title: 'The canvas toolbar stops being a row of little boxes',

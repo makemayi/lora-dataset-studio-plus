@@ -165,8 +165,14 @@ test('every popover action is live, or stated with its reason — never a silent
 test('the graph opens for any run with a checkpoint, not only 2+ run lineages', () => {
   // button + body both gate on lineage OR a saved checkpoint
   assert.match(cloud, /run\.lineage\s*\|\|\s*run\.checkpoint_ready/);
-  // single-run graph is labelled ◉ Graph, a real lineage stays 🌳 Lineage
-  assert.match(cloud, /run\.lineage \? '🌳 Lineage' : '◉ Graph'/);
+  // A single-run graph is labelled "Graph", a real lineage stays "Lineage" —
+  // and since 2026-08-10 all four labels are MOUNTED with `hidden` flipped
+  // rather than swapped by a ternary (a swapped text node is the Chrome
+  // auto-translate crash; see CLAUDE.md ▸ UI changes).
+  for (const label of ['Hide lineage', 'Hide graph', 'Lineage', 'Graph']) {
+    assert.match(cloud, new RegExp(`<span hidden=\\{[^}]+\\}>${label}</span>`));
+  }
+  assert.doesNotMatch(cloud, /\? '🌳 Lineage' : '◉ Graph'/);
 });
 
 test('continue-from-checkpoint is cloud-only by default and allows terminal (done OR failed) runs', () => {
@@ -307,7 +313,10 @@ test('a persisted 🔍 Big-previews mode enlarges the generated tiles', () => {
 
 test('the ◉ Graph button is the prominent (accent) view control', () => {
   // On the Runs hub the graph toggle wears the indigo accent, not a bare grey.
-  assert.match(cloud, /border-indigo-400\/40 bg-indigo-500\/10 text-indigo-200/);
+  // The accent is one constant since the restyle (the outline it used to carry
+  // went with every other outline on that card).
+  assert.match(cloud, /const ACCENT_CHIP =\s*\n?\s*`\$\{ACCENT_CHIP_BASE\} bg-indigo-500\/15 text-indigo-200/);
+  assert.match(cloud, /className=\{lineageOpen\[run\.record_id\]\s*\n?\s*\? `\$\{ACCENT_CHIP_BASE\}[^`]*`\s*\n?\s*: ACCENT_CHIP\}/);
 });
 
 test('the pill delete aims at what the pill SHOWS — deployed copy vs training save', () => {

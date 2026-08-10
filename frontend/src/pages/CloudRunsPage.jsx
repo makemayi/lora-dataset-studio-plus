@@ -50,6 +50,17 @@ import {
   purgeRunResultMessage,
   runStagingCleanup,
 } from '../utils/stagingCleanup';
+import { CARD_SHADOW, CARD_SURFACE } from '../components/common/surfaces';
+import { DownloadIcon, ImageIcon, StudioIcon } from '../components/common/icons';
+
+/* An accented secondary action (open the Test Studio, open the lineage). It is
+   indigo because those two lead somewhere else in the app; the fill alone says
+   so now — the outline it used to carry was a third separator on a card that
+   already has a surface and a status edge. */
+const ACCENT_CHIP_BASE =
+  'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold transition-colors';
+const ACCENT_CHIP =
+  `${ACCENT_CHIP_BASE} bg-indigo-500/15 text-indigo-200 hover:bg-indigo-500/25`;
 
 /* Dedicated hub for cloud training runs across ALL datasets: watch the ones in
    progress (live progress + samples), stop them, and download finished LoRAs —
@@ -130,7 +141,7 @@ function RunThumb({ run, broken, onBroken }) {
     return (
       <a href={run.preview_url} target="_blank" rel="noreferrer"
         title="Last sample this run generated (open full size)"
-        className="relative block h-16 w-16 sm:h-20 sm:w-20 shrink-0 overflow-hidden rounded-lg border border-border hover:border-indigo-400">
+        className="relative block h-16 w-16 sm:h-20 sm:w-20 shrink-0 overflow-hidden rounded-lg ring-indigo-400 hover:ring-2">
         <img src={run.preview_url} loading="lazy" onError={onBroken}
           alt={`Last training sample of ${run.dataset_name || run.run_name || 'this run'}`}
           className="h-full w-full object-cover" />
@@ -139,8 +150,8 @@ function RunThumb({ run, broken, onBroken }) {
   }
   return (
     <div aria-hidden
-      className="flex h-16 w-16 sm:h-20 sm:w-20 shrink-0 flex-col items-center justify-center gap-1 rounded-lg border border-border bg-app/60 text-content-subtle">
-      <span className="text-base opacity-50">🖼</span>
+      className="flex h-16 w-16 sm:h-20 sm:w-20 shrink-0 flex-col items-center justify-center gap-1 rounded-lg bg-surface-raised text-content-subtle">
+      <ImageIcon className="h-5 w-5 opacity-50" />
       <span className="px-1 text-center text-[0.5625rem] uppercase tracking-wide leading-tight">
         {FAMILY_SHORT[run.train_type] || 'LoRA'}
       </span>
@@ -274,14 +285,14 @@ function AutoRetryBadges({ run }) {
     <>
       {run.auto_retry_of != null && (
         <span
-          className="rounded border border-sky-400/40 bg-sky-500/10 px-1.5 py-0.5 text-sky-200 text-[0.625rem]"
+          className="rounded-full bg-sky-500/15 px-2 py-0.5 text-sky-200 text-[0.625rem]"
           title={`Automatic retry of cloud run #${run.auto_retry_of}`}>
           ↻ automatic retry {run.auto_retry_count || 1}/1
         </span>
       )}
       {run.auto_retry_run_id != null && (
         <span
-          className="rounded border border-violet-400/40 bg-violet-500/10 px-1.5 py-0.5 text-violet-200 text-[0.625rem]"
+          className="rounded-full bg-violet-500/15 px-2 py-0.5 text-violet-200 text-[0.625rem]"
           title={`Automatically relaunched as cloud run #${run.auto_retry_run_id}`}>
           ↻ auto-retried as #{run.auto_retry_run_id}
         </span>
@@ -914,7 +925,10 @@ export default function CloudRunsPage() {
     const cleanup = runStagingCleanup(run, stagingSizes);
     return (
       <div key={key} id={ident ? runRowDomId(ident.source, ident.id) : undefined}
-        className={`flex gap-2.5 sm:gap-3 rounded-lg border border-border border-l-2 bg-app/40 p-2.5 ${cardAccent(run.status)}`}>
+        /* The left edge stays — it is the status, not decoration (cardAccent).
+           The other three sides go: the card is separated by its own surface
+           and shadow now, like every other card in the app. */
+        className={`flex gap-2.5 sm:gap-3 rounded-lg border-l-2 bg-surface p-2.5 ${CARD_SHADOW} ${cardAccent(run.status)}`}>
         <RunThumb run={run} broken={!!brokenThumbs[thumbKey]}
           onBroken={() => setBrokenThumbs((m) => ({ ...m, [thumbKey]: true }))} />
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
@@ -933,7 +947,7 @@ export default function CloudRunsPage() {
             </button>
             <StatusBadge status={run.status} />
             {fullModel && (
-              <span className="rounded border border-sky-400/40 bg-sky-500/10 px-1.5 py-0.5 text-sky-100 text-[0.625rem] font-semibold uppercase">
+              <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-sky-100 text-[0.625rem] font-semibold uppercase">
                 full model · experimental
               </span>
             )}
@@ -954,7 +968,7 @@ export default function CloudRunsPage() {
               <button type="button"
                 onClick={() => run.record_id != null && toggleLineage(run.record_id)}
                 title="This run resumed from an earlier checkpoint — open its lineage"
-                className="rounded border border-border px-1 py-0.5 text-content-subtle text-[0.5625rem] hover:text-content">
+                className="rounded-full bg-surface-raised px-1.5 py-0.5 text-content-subtle text-[0.5625rem] hover:text-content">
                 ↳ from step {run.resumed_from}
               </button>
             )}
@@ -1006,7 +1020,7 @@ export default function CloudRunsPage() {
             // own error string), so the first one that answers is rendered.
             const failure = podBootFailureView(run) || uploadStallFailureView(run);
             return failure && (
-              <div className="rounded border border-amber-400/40 bg-amber-500/10 px-2 py-1.5 text-amber-100 text-[0.6875rem] leading-snug">
+              <div className="rounded-lg bg-amber-500/15 px-2.5 py-1.5 text-amber-100 text-[0.6875rem] leading-snug">
                 <div className="font-semibold">{failure.title}</div>
                 <p className="m-0 mt-0.5 break-words text-amber-200/90">{failure.message}</p>
               </div>
@@ -1056,22 +1070,23 @@ export default function CloudRunsPage() {
                     ? (denseContinueBlocker(run, hubPresence[run.run_id])
                       || "Resume this full model on a fresh pod — pick how its 26 GB gets there")
                     : "Resume from any of this run's checkpoints for more steps, on a fresh pod"}
-                className="px-3 py-1.5 rounded-lg bg-sky-600/80 hover:bg-sky-600 text-white text-xs font-semibold disabled:opacity-40">
-                {continuing[run.run_id] ? '▶ Continuing…' : '▶ Continue…'}
+                className="px-3 py-1.5 rounded-full bg-sky-600/80 hover:bg-sky-600 text-white text-xs font-semibold disabled:opacity-40">
+                <span hidden={!continuing[run.run_id]}>Continuing…</span>
+                <span hidden={!!continuing[run.run_id]}>Continue…</span>
               </button>
             )}
             {!fullModel && run.checkpoint_ready && (
               <a href={checkpointHref(run)}
                 title="Download this run's LoRA checkpoint"
-                className="px-3 py-1.5 rounded-lg bg-emerald-600/80 hover:bg-emerald-600 text-white text-xs font-semibold no-underline">
-                ⬇ LoRA
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-600/80 hover:bg-emerald-600 text-white text-xs font-semibold no-underline">
+                <DownloadIcon className="h-3.5 w-3.5 shrink-0" /> LoRA
               </a>
             )}
             {!fullModel && run.dataset_id != null && (
               <button type="button" onClick={() => openTestStudio(run.dataset_id)}
                 title="Open Test Studio with this run's dataset selected"
-                className="rounded-lg border border-indigo-400/40 bg-indigo-500/10 px-2 py-1 text-indigo-100 hover:bg-indigo-500/20 text-xs font-semibold">
-                🧪 Test in Studio
+                className={`${ACCENT_CHIP} gap-1.5`}>
+                <StudioIcon className="h-3.5 w-3.5 shrink-0" /> Test in Studio
               </button>
             )}
             {/* The graph opens for ANY run with saved checkpoints (a single run
@@ -1083,20 +1098,22 @@ export default function CloudRunsPage() {
                 title={run.lineage
                   ? "Show this run's lineage — the runs it continued from or that branched off it"
                   : "Show this run's checkpoints as a graph — import / generate / download / continue from any of them"}
-                className={'rounded-lg border px-2 py-1 text-xs font-semibold transition-colors '
-                  + (lineageOpen[run.record_id]
-                    ? 'border-indigo-400/60 bg-indigo-500/20 text-indigo-100 '
-                    : 'border-indigo-400/40 bg-indigo-500/10 text-indigo-200 hover:bg-indigo-500/20 ')}>
-                {lineageOpen[run.record_id]
-                  ? (run.lineage ? '🌳 Hide lineage' : '◉ Hide graph')
-                  : (run.lineage ? '🌳 Lineage' : '◉ Graph')}
+                className={lineageOpen[run.record_id]
+                  ? `${ACCENT_CHIP_BASE} bg-indigo-500/25 text-indigo-100`
+                  : ACCENT_CHIP}>
+                {/* Four labels, all mounted, three hidden. A ternary here is a
+                    text node React later edits — the Chrome-translate crash. */}
+                <span hidden={!(lineageOpen[run.record_id] && run.lineage)}>Hide lineage</span>
+                <span hidden={!(lineageOpen[run.record_id] && !run.lineage)}>Hide graph</span>
+                <span hidden={!(!lineageOpen[run.record_id] && run.lineage)}>Lineage</span>
+                <span hidden={!(!lineageOpen[run.record_id] && !run.lineage)}>Graph</span>
               </button>
             )}
             {run.share_key && (
               <button type="button" onClick={() => shareConfig(run)}
                 title="Download this run's full settings as a paste-safe text file (recipe / help thread)"
-                className="ml-auto rounded-lg border border-transparent px-2 py-1 text-content-muted hover:border-border hover:text-content text-xs font-medium">
-                ⎘ Share config
+                className="ml-auto inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-content-muted transition-colors hover:bg-surface-raised hover:text-content text-xs font-medium">
+                <DownloadIcon className="h-3.5 w-3.5 shrink-0" /> Share config
               </button>
             )}
             {/* Per-run cleanup, so a long history no longer forces the all-or-
@@ -1107,8 +1124,9 @@ export default function CloudRunsPage() {
               <button type="button" onClick={() => purgeRun(run)}
                 disabled={!!purgingRun[run.run_id]}
                 title={cleanup.title}
-                className={`rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 text-red-200 hover:bg-red-500/20 text-xs font-semibold disabled:opacity-40 ${run.share_key ? '' : 'ml-auto'}`}>
-                {purgingRun[run.run_id] ? '🧹 Cleaning…' : `🧹 Clean ${cleanup.size}`}
+                className={`inline-flex items-center gap-1.5 rounded-full bg-red-500/15 px-2.5 py-1 text-red-200 hover:bg-red-500/25 text-xs font-semibold disabled:opacity-40 ${run.share_key ? '' : 'ml-auto'}`}>
+                <span hidden={!purgingRun[run.run_id]}>Cleaning…</span>
+                <span hidden={!!purgingRun[run.run_id]}>Clean {cleanup.size}</span>
               </button>
             )}
           </div>
@@ -1135,9 +1153,10 @@ export default function CloudRunsPage() {
   return (
     <section className="flex flex-col gap-5">
       <header className="flex flex-col gap-1">
+        <p className="m-0 font-mono text-[11px] uppercase tracking-[0.18em] text-content-subtle">training</p>
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="m-0 flex items-center gap-2 text-content text-xl font-bold">
-            <span><span aria-hidden>🏋️</span> Training runs</span>
+          <h1 className="m-0 flex items-center gap-2 text-content text-xl font-semibold">
+            Training runs
             <HelpBadge topic="page-cloud" />
           </h1>
           {/* Escape hatch to the provider: see the pod's own console (billing,
@@ -1154,7 +1173,7 @@ export default function CloudRunsPage() {
       </header>
 
       {data && !configured && (
-        <div className="rounded-lg border border-border bg-surface p-4 text-content-muted text-sm">
+        <div className={`p-4 text-content-muted text-sm ${CARD_SURFACE}`}>
           Cloud training isn’t configured yet. Add your vast.ai API key in{' '}
           {/* Land on the section that actually holds the key and the cloud
               guard-rails, not the Settings landing page. */}
@@ -1165,7 +1184,7 @@ export default function CloudRunsPage() {
       )}
 
       {configured && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm">
+        <div className={`flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-sm ${CARD_SURFACE}`}>
           <span className="text-content">
             <b className="tabular-nums">{actives.length}</b>
             <span className="text-content-muted">/{limit} active</span>
@@ -1187,7 +1206,7 @@ export default function CloudRunsPage() {
         {/* Live LOCAL training — its own card next to the cloud actives. */}
         {data?.local_active?.current && (
           <div id={runRowDomId('local', data.local_active.record_id)}
-            className="flex flex-col gap-2 rounded-xl border border-violet-500/30 bg-violet-500/5 p-3">
+            className={`flex flex-col gap-2 rounded-xl bg-violet-500/10 p-3 ${CARD_SHADOW}`}>
             <div className="flex flex-wrap items-center gap-2">
               {data.local_active.record_id != null
                 ? <RunIdChip source="local" id={data.local_active.record_id} />
@@ -1197,7 +1216,7 @@ export default function CloudRunsPage() {
                 className="text-content font-semibold text-sm hover:underline">
                 {data.local_active.current.name || `Dataset #${data.local_active.current.dataset_id}`}
               </button>
-              <span className="rounded border border-violet-400/40 bg-violet-500/10 px-1.5 py-0.5 text-violet-200 text-[0.625rem] uppercase">
+              <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-violet-200 text-[0.625rem] uppercase">
                 local · training
               </span>
               {/* A live local run with no custom base IS the family's official
@@ -1221,7 +1240,7 @@ export default function CloudRunsPage() {
                 {data.local_active.share_key && (
                   <button type="button" onClick={() => shareConfig(data.local_active)}
                     title="Download this run's full settings as a paste-safe text file (recipe / help thread)"
-                    className="px-2 py-1 rounded-lg border border-border bg-surface text-content-muted hover:text-content text-xs font-semibold">
+                    className="px-2.5 py-1 rounded-full bg-surface-raised text-content-muted transition-colors hover:bg-surface hover:text-content text-xs font-semibold">
                     ⎘ Share config
                   </button>
                 )}
@@ -1232,8 +1251,8 @@ export default function CloudRunsPage() {
                 {data.local_active.current.dataset_id != null && (
                   <button type="button" onClick={() => openTestStudio(data.local_active.current.dataset_id)}
                     title="Open Test Studio with this run's dataset selected"
-                    className="px-2 py-1 rounded-lg text-indigo-200 hover:bg-indigo-500/10 hover:text-indigo-100 text-xs font-semibold">
-                    🧪 Test in Studio
+                    className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-indigo-200 transition-colors hover:bg-indigo-500/15 hover:text-indigo-100 text-xs font-semibold">
+                    <StudioIcon className="h-3.5 w-3.5 shrink-0" /> Test in Studio
                   </button>
                 )}
               </span>
@@ -1256,7 +1275,7 @@ export default function CloudRunsPage() {
         ) : (
           actives.map((run) => (
             <div key={run.run_id} id={runRowDomId('cloud', run.run_id)}
-              className="flex flex-col gap-2 rounded-xl border border-sky-500/30 bg-sky-500/5 p-3">
+              className={`flex flex-col gap-2 rounded-xl bg-sky-500/10 p-3 ${CARD_SHADOW}`}>
               <div className="flex flex-wrap items-center gap-2">
                 <RunIdChip source="cloud" id={run.run_id} />
                 <button type="button" onClick={() => openDataset(run.dataset_id)}
@@ -1264,7 +1283,7 @@ export default function CloudRunsPage() {
                   className="text-content font-semibold text-sm hover:underline">
                   {run.dataset_name || run.run_name || `Dataset #${run.dataset_id}`}
                 </button>
-                <span className="rounded border border-border bg-surface px-1.5 py-0.5 text-content-muted text-[0.625rem] uppercase">
+                <span className="rounded-full bg-surface-raised px-2 py-0.5 text-content-muted text-[0.625rem] uppercase">
                   {famLabel(run.train_type)}
                 </span>
                 {/* No variant shown on the active card, so spell the base in
@@ -1273,7 +1292,7 @@ export default function CloudRunsPage() {
                 <DatasetVersionChip version={run.version} />
                 <StatusBadge status={run.status} />
                 {isFullTransformerRun(run) && (
-                  <span className="rounded border border-sky-400/40 bg-sky-500/10 px-1.5 py-0.5 text-sky-100 text-[0.625rem] font-semibold uppercase">
+                  <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-sky-100 text-[0.625rem] font-semibold uppercase">
                     full model · experimental
                   </span>
                 )}
@@ -1315,14 +1334,14 @@ export default function CloudRunsPage() {
                 </button>
                 {!isFullTransformerRun(run) && run.checkpoint_ready && (
                   <a href={checkpointHref(run)}
-                    className="px-3 py-1.5 rounded-lg border border-emerald-400/40 bg-emerald-500/10 text-emerald-200 text-xs font-semibold no-underline">
+                    className="px-3 py-1.5 rounded-full bg-emerald-500/15 text-emerald-200 text-xs font-semibold no-underline">
                     ⬇ Download the LoRA
                   </a>
                 )}
                 {run.share_key && (
                   <button type="button" onClick={() => shareConfig(run)}
                     title="Download this run's full settings as a paste-safe text file (recipe / help thread)"
-                    className="px-2 py-1.5 rounded-lg border border-border bg-surface text-content-muted hover:text-content text-xs font-semibold">
+                    className="px-3 py-1.5 rounded-full bg-surface-raised text-content-muted transition-colors hover:bg-surface hover:text-content text-xs font-semibold">
                     ⎘ Share config
                   </button>
                 )}
@@ -1344,8 +1363,8 @@ export default function CloudRunsPage() {
                   {!isFullTransformerRun(run) && run.dataset_id != null && (
                     <button type="button" onClick={() => openTestStudio(run.dataset_id)}
                       title="Open Test Studio with this run's dataset selected"
-                      className="px-2 py-1 rounded-lg text-indigo-200 hover:bg-indigo-500/10 hover:text-indigo-100 text-xs font-semibold">
-                      🧪 Test in Studio
+                      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-indigo-200 transition-colors hover:bg-indigo-500/15 hover:text-indigo-100 text-xs font-semibold">
+                      <StudioIcon className="h-3.5 w-3.5 shrink-0" /> Test in Studio
                     </button>
                   )}
                 </span>
@@ -1412,7 +1431,7 @@ export default function CloudRunsPage() {
               const hasLoraRun = group.runs.some((run) => !isFullTransformerRun(run));
               return (
                 <section key={`g${gi}-${gkey}`}
-                  className="flex flex-col rounded-xl border border-border bg-surface">
+                  className={`flex flex-col ${CARD_SURFACE}`}>
                   {/* discreet group header: the dataset these consecutive runs share */}
                   <div className="flex items-center gap-2 px-3 py-2">
                     <button type="button" onClick={() => toggleGroup(group.datasetId)}
@@ -1435,8 +1454,8 @@ export default function CloudRunsPage() {
                     {hasLoraRun && group.datasetId != null && (
                       <button type="button" onClick={() => openTestStudio(group.datasetId)}
                         title="Open Test Studio with this run's dataset selected"
-                        className="whitespace-nowrap rounded-lg px-2 py-0.5 text-indigo-200 hover:bg-indigo-500/10 hover:text-indigo-100 text-[0.6875rem] font-semibold">
-                        🧪 Test in Studio
+                        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-indigo-200 transition-colors hover:bg-indigo-500/15 hover:text-indigo-100 text-[0.6875rem] font-semibold">
+                        <StudioIcon className="h-3 w-3 shrink-0" /> Test in Studio
                       </button>
                     )}
                   </div>
@@ -1452,7 +1471,7 @@ export default function CloudRunsPage() {
               <button type="button"
                 onClick={() => setHistoryLimit((n) => Math.min(n + 25, 100))}
                 title="The list keeps only the most recent runs to stay light; load older ones on demand."
-                className="self-center mt-1 rounded-lg border border-border bg-surface px-3 py-1.5 text-content-muted hover:text-content text-xs font-semibold">
+                className="self-center mt-1 rounded-full bg-surface-raised px-3 py-1.5 text-content-muted transition-colors hover:bg-surface hover:text-content text-xs font-semibold">
                 Load older runs
               </button>
             )}
