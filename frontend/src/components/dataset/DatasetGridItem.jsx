@@ -93,7 +93,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
                                          onLockToggle, onMirror, mirrorBusy = false, busy = false,
                                          busyReason = null,
                                           onScoreFace, scoreFaceBusy = false, faceScoringBusy = false, faceScoringBlocked = null,
-                                          onRegenerate, onReimprove, onFaceSwap, hasRef = false, onView, nonce = 0, faceThresholds,
+                                          onRegenerate, onReimprove, onFaceSwap, swapBusy = false, hasRef = false, onView, nonce = 0, faceThresholds,
                                           selected = false, onToggleSelect, tileSize = 'M',
                                           datasetKind = 'character', dualCaptions = false,
                                           improvementState = undefined }) {
@@ -337,11 +337,23 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               className="px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">✏️</button>
           )}
           {canFaceSwap && onFaceSwap && (
+            /* Disabled WHILE THE REQUEST IS OUT, not merely while the row is
+               pending: on the app-mask lane the server spends ~20 s masking
+               before the row changes at all, and a button that still looks
+               clickable through that gets clicked again — one tile, three
+               swaps. `aria-busy` is what a screen reader hears meanwhile. */
             <button type="button"
               onClick={(e) => { e.stopPropagation(); onFaceSwap(img.id); }}
-              title="Swap this tile's face with the reference image"
-              aria-label="Swap this tile's face with the reference image"
-              className="px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px]">🎭↔</button>
+              disabled={busy || swapBusy}
+              aria-busy={swapBusy}
+              title={swapBusy ? 'Preparing the face swap…'
+                : "Swap this tile's face with the reference image"}
+              aria-label={swapBusy ? 'Preparing the face swap…'
+                : "Swap this tile's face with the reference image"}
+              className="px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">
+              <span hidden={swapBusy}>🎭↔</span>
+              <span hidden={!swapBusy} className="animate-pulse">🎭…</span>
+            </button>
           )}
           {rerunImprove && (
             <button type="button"

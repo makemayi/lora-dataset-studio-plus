@@ -201,6 +201,14 @@ export function useDataset() {
   // has rendered the disabled button.
   const [mirroringIds, setMirroringIds] = useState(() => new Set());
   const mirroringRef = useRef(new Set());
+  // A 🎭↔ swap can take twenty seconds to even ANSWER on the app-mask lane (the
+  // masker loads a 3.4 GB model before anything is queued), and the tile shows
+  // nothing until the row flips. Without a scoped busy state that is a button
+  // that looks broken and gets clicked again — which is exactly how one tile
+  // ended up with three swaps queued on it. Same synchronous-ref pattern as the
+  // mirror above: the ref closes the window before React re-renders.
+  const [swappingIds, setSwappingIds] = useState(() => new Set());
+  const swappingRef = useRef(new Set());
   // Per-image re-caption in flight (Identity-leak panel's targeted 🔄): keep the busy
   // state scoped to the offending row so the rest of the panel stays usable, with a
   // synchronous ref guard against a double-click enqueuing the same image twice.
@@ -1369,10 +1377,22 @@ export function useDataset() {
   }, [refresh, toast]);
 
   const faceSwapImage = useCallback(async (imageId) => {
-    const d = await postJson(`/api/dataset/image/${imageId}/face-swap`, {});
-    if (d.ok) { toast.success('Face swap started'); await refresh(); return { ok: true }; }
-    toast.error(d.error || 'Unexpected error');
-    return { ok: false, error: d.error };
+    if (swappingRef.current.has(imageId)) return { ok: false, error: 'already running' };
+    swappingRef.current.add(imageId);
+    setSwappingIds((previous) => new Set(previous).add(imageId));
+    try {
+      const d = await postJson(`/api/dataset/image/${imageId}/face-swap`, {});
+      if (d.ok) { toast.success('Face swap started'); await refresh(); return { ok: true }; }
+      toast.error(d.error || 'Unexpected error');
+      return { ok: false, error: d.error };
+    } finally {
+      swappingRef.current.delete(imageId);
+      setSwappingIds((previous) => {
+        const next = new Set(previous);
+        next.delete(imageId);
+        return next;
+      });
+    }
   }, [refresh, toast]);
 
   const purgeUnused = useCallback(async () => {
@@ -1779,7 +1799,7 @@ export function useDataset() {
   return { datasets, currentId, data, busy: busyLive, localBusy: busy, captioning: captioningLive,
            lastCaptionRun,
            analyzing: analyzingLive, watermarking: watermarkingLive, activity,
-           nonces, mirroringIds, refNonce, scoringFaceIds, recaptioningIds, create, open,
+           nonces, mirroringIds, swappingIds, refNonce, scoringFaceIds, recaptioningIds, create, open,
           deleteDataset, updateSettings, updateSettingsFor, fetchList, setCurrentId,
           setRef, addExtraRef, removeExtraRef, setPoseSlot, cropPoseSlot, mirrorPoseSlot,
           togglePoseSlotEnabled, removePoseSlot, generate, quickGenerateCompose,

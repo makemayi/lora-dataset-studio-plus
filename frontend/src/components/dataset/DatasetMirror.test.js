@@ -19,7 +19,7 @@ test('dataset hook mirrors once, refreshes, and cache-busts only after success',
   assert.match(action, /mirroringRef\.current\.has\(imageId\)/);
   assert.match(action, /if \(!d\.ok\)[\s\S]*return false;[\s\S]*await refresh\(\);[\s\S]*setNonces/);
   assert.match(action, /finally[\s\S]*mirroringRef\.current\.delete\(imageId\)/);
-  assert.match(hook, /nonces, mirroringIds, refNonce/);
+  assert.match(hook, /nonces, mirroringIds, swappingIds, refNonce/);
   assert.match(hook, /setStatus, setCaption, mirrorImage, rotateImage, crop/);
 });
 

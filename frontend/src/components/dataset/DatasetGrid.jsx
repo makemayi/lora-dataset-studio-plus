@@ -251,6 +251,7 @@ function GridPager({ view, onGo, where }) {
 
 export default function DatasetGrid({ images, datasetId, onStatus, onCaption, onCrop, onDelete,
                                       onLockToggle, onMirror, onRegenerate, onScoreFace, scoringFaceIds,
+                                      swappingIds,
                                       onFaceSwap, hasRef = false, onReimprove, onView, onBatch, busy, nonces,
                                       mirroringIds, faceThresholds, datasetKind = 'character',
                                       onImproveBatch,
@@ -578,7 +579,7 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
             faceScoringBusy={Boolean(scoringFaceIds?.size)}
             faceScoringBlocked={faceScoringBlocked}
               onRegenerate={bulkBusy ? undefined : onRegenerate}
-              onFaceSwap={onFaceSwap} hasRef={hasRef}
+              onFaceSwap={onFaceSwap} swapBusy={Boolean(swappingIds?.has(img.id))} hasRef={hasRef}
               /* onView is handed over UNCONDITIONALLY: withholding it made the
                  inspect button a no-op even once its `disabled` was lifted. */
               onReimprove={onReimprove} onView={onView}

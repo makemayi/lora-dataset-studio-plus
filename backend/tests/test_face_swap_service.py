@@ -295,3 +295,47 @@ def test_an_unreadable_fence_does_not_ground_the_swap(app, client, tmp_path, mon
     monkeypatch.setattr(queue_manager, 'add_job', lambda **kw: kw['job_id'])
     resp = client.post(f'/api/dataset/image/{img_id}/face-swap')
     assert resp.status_code == 200 and resp.get_json()['ok'] is True
+
+
+def test_a_second_swap_on_the_same_tile_is_refused_while_the_first_is_preparing(
+        app, tmp_path, monkeypatch):
+    """The row is the guard once it flips to pending — but on the app-mask lane
+    the server masks for ~20 s BEFORE that, and every click inside that window
+    used to pass every check and queue another job."""
+    from app import config as cfg
+    from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service as dgs
+    from app.config import LOCAL_USER
+    import pytest as _pytest
+    with app.app_context():
+        _comfy(tmp_path, cfg)
+        _ds, img = _dataset_with_image(svc, cfg, tmp_path)
+        img_id = img.id
+        # Stand in for "the first click is inside its slow masking pass".
+        assert dgs._claim_swap(img_id) is True
+        try:
+            assert dgs.swap_in_flight(img_id) is True
+            with _pytest.raises(RuntimeError, match='already being prepared'):
+                svc.face_swap_image(LOCAL_USER, img_id)
+        finally:
+            dgs._release_swap(img_id)
+        # ...and the claim is gone afterwards, so the tile is not dead forever.
+        assert dgs.swap_in_flight(img_id) is False
+
+
+def test_the_claim_is_released_even_when_the_swap_raises(app, tmp_path, monkeypatch):
+    from app import config as cfg
+    from app.services import face_dataset_service as svc
+    from app.services import dataset_generation_service as dgs
+    from app.services import face_swap_helper
+    from app.config import LOCAL_USER
+    import pytest as _pytest
+    with app.app_context():
+        _comfy(tmp_path, cfg)
+        _ds, img = _dataset_with_image(svc, cfg, tmp_path)
+        img_id = img.id
+        monkeypatch.setattr(face_swap_helper, 'enqueue_face_swap',
+                            lambda **_kw: (_ for _ in ()).throw(RuntimeError('boom')))
+        with _pytest.raises(RuntimeError, match='boom'):
+            svc.face_swap_image(LOCAL_USER, img_id)
+        assert dgs.swap_in_flight(img_id) is False

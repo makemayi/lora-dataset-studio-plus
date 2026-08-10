@@ -50,6 +50,12 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-11-swap-double-click',
+    date: '2026-08-11',
+    title: 'Clicking 🎭↔ twice no longer swaps the same tile twice',
+    blurb: 'The swap button can take a while to answer — on the app-mask lane the server loads a 3.4 GB masking model before anything is even queued — and until now nothing on the tile changed while that happened. So it looked like the click had missed, people clicked again, and the same tile quietly ended up with two or three swaps queued on it. The button now goes busy the moment you press it, with the second click dropped before the screen can even repaint, and the server refuses a second swap on a tile whose first one is still being prepared.',
+  },
+  {
     id: '2026-08-11-ollama-fence-says-so',
     date: '2026-08-11',
     title: 'A generation blocked by Ollama now says so, instead of sitting there',

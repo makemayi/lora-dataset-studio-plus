@@ -1321,6 +1321,37 @@ SWAP_RESTORE_FIELDS = (
     'face_score', 'face_state', 'content_sig', 'content_sig_stat')
 
 
+# Images with a swap being PREPARED right now. The row itself is the guard once
+# it has been flipped to pending — but on the app-mask lane the preparation runs
+# a SAM 3 pass first, which is ~20 s on a cold model, and the row is untouched
+# for all of it. Every click in that window passed the row check and queued
+# another job: reported as "the button feels slow so I clicked again, and it ran
+# three times". A claim taken before the slow part closes that window.
+_swaps_in_flight: set = set()
+_swaps_lock = threading.Lock()
+
+
+def _claim_swap(image_id):
+    with _swaps_lock:
+        if image_id in _swaps_in_flight:
+            return False
+        _swaps_in_flight.add(image_id)
+        return True
+
+
+def _release_swap(image_id):
+    with _swaps_lock:
+        _swaps_in_flight.discard(image_id)
+
+
+def swap_in_flight(image_id) -> bool:
+    """Whether a swap is being prepared for this image right now. Process-local
+    on purpose: it guards one user's double-click, not a distributed queue, and
+    the durable half of that job is the row's own pending state."""
+    with _swaps_lock:
+        return image_id in _swaps_in_flight
+
+
 def _swap_restore_state(img):
     """The snapshot a swap left on this row, or None. Junk is treated as absent:
     a corrupt snapshot must degrade to today's behaviour, not crash a completion
@@ -1441,13 +1472,28 @@ def face_swap_image(user_id, image_id, engine=None):
     ds = db.session.get(FaceDataset, img.dataset_id)
     if not ds.ref_filename:
         raise ValueError('reference image required')
+    # Claimed BEFORE the engine is even chosen: on the app-mask lane everything
+    # below is preceded by a ~20 s SAM 3 pass during which the row still looks
+    # idle, so a second click would sail past every check here and queue a
+    # second job on the same tile.
+    if not _claim_swap(img.id):
+        raise RuntimeError('a face swap is already being prepared for this image')
+    try:
+        return _face_swap_image_claimed(user_id, img, ds, engine)
+    finally:
+        _release_swap(img.id)
+
+
+def _face_swap_image_claimed(user_id, img, ds, engine):
+    """The body of face_swap_image, with this image's swap claim already held."""
+    image_id = img.id
+    target_path = os.path.join(_dataset_path(img.dataset_id), img.filename)
+    ref_path = os.path.join(_dataset_path(ds.id), ds.ref_filename)
     if resolve_face_swap_engine(engine) == 'minimax_h3':
         from .minimax_h3_swap_helper import enqueue_h3_swap as enqueue_face_swap
     else:
         from .face_swap_helper import enqueue_face_swap
     from ..job_queue import queue_manager
-    target_path = os.path.join(_dataset_path(img.dataset_id), img.filename)
-    ref_path = os.path.join(_dataset_path(ds.id), ds.ref_filename)
     old_state = {field: getattr(img, field) for field in SWAP_RESTORE_FIELDS}
     new_job_id = enqueue_face_swap(
         user_id=str(user_id), target_path=target_path, ref_path=ref_path,
