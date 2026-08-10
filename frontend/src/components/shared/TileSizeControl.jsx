@@ -6,16 +6,19 @@
  */
 export default function TileSizeControl({ size, onChange, titles, className = '' }) {
   return (
-    <div role="group" aria-label="Thumbnail size" className={`flex items-center gap-1 shrink-0 ${className}`}>
-      <span aria-hidden className="text-content-subtle text-xs">🔳</span>
+    /* One rounded track holding three segments — the selected one is filled,
+       the others are plain. Three separately outlined squares read as three
+       controls; this reads as one control with a state. */
+    <div role="group" aria-label="Thumbnail size"
+      className={`flex shrink-0 items-center gap-0.5 rounded-full bg-surface p-0.5 ${className}`}>
       {['S', 'M', 'L'].map((s) => (
         <button key={s} type="button" onClick={() => onChange(s)}
           aria-pressed={size === s} title={titles[s]}
           aria-label={`${titles[s]}${size === s ? ' (active)' : ''}`}
-          className={`w-6 h-6 rounded-md border text-[0.6875rem] font-semibold transition-colors ${
+          className={`h-6 w-6 rounded-full text-[0.6875rem] font-semibold transition-colors ${
             size === s
-              ? 'border-indigo-400/60 bg-indigo-500/20 text-indigo-200'
-              : 'border-border bg-surface text-content-muted hover:bg-surface-raised'}`}>
+              ? 'bg-indigo-500/25 text-indigo-200'
+              : 'text-content-muted hover:bg-surface-raised hover:text-content'}`}>
           {s}
         </button>
       ))}

@@ -166,7 +166,9 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
 
   return (
     <div tabIndex={0} aria-label={`${displayLabel(img.variation_label) || 'Dataset image'} card`}
-      className={`dataset-grid-item rounded-lg ${borderCls} ${selected ? 'ring-2 ring-indigo-400' : ''} bg-app/40 overflow-hidden flex flex-col`}>
+      /* The tile keeps `borderCls`: that edge is the decision (kept / rejected /
+         undecided), not decoration. Only the fill moves onto the token. */
+      className={`dataset-grid-item rounded-lg ${borderCls} ${selected ? 'ring-2 ring-indigo-400' : ''} bg-surface overflow-hidden flex flex-col`}>
       <div className="relative aspect-square bg-black">
         {/* Fresh content nobody has looked at yet — a first-time generation
             OR a regenerate, not yet opened (unlike the in-progress emerald
@@ -423,7 +425,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy}
               title={refused || 'Open a larger caption editor'}
               aria-label={refused || 'Expand caption editor'}
-              className="rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] text-content-muted hover:text-content disabled:cursor-not-allowed disabled:opacity-45">
+              className="rounded-full bg-surface-raised px-2 py-0.5 text-[10px] text-content-muted hover:text-content disabled:cursor-not-allowed disabled:opacity-45">
               ⛶ Expand
             </button>
             {cap && (
@@ -469,7 +471,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               : datasetKind === 'concept'
                 ? 'caption without naming the concept…'
                 : 'caption (without the face)…'} aria-label="Image caption"
-            className="text-[11px] bg-app/60 border border-border rounded p-1 text-content resize-none" />
+            className="text-[11px] rounded-lg bg-surface-raised p-1.5 text-content resize-none focus:outline-none focus:ring-1 focus:ring-primary" />
         </div>
       )}
       {captionEditorOpen && (

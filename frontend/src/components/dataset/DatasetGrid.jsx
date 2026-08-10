@@ -164,12 +164,12 @@ function AutoTriageBar({ images, datasetId, faceThresholds, onBatch, busy,
   };
 
   return (
-    <div className="relative flex items-center gap-3 flex-wrap rounded-lg border border-border bg-surface px-3 py-2">
+    <div className="relative flex items-center gap-3 flex-wrap rounded-lg bg-surface px-3 py-2">
       <span className="text-content text-sm font-semibold shrink-0">🎯 Auto-triage</span>
       <button type="button" onClick={() => setShowHelp((v) => !v)}
         aria-expanded={showHelp} aria-label="What does auto-triage do?"
         title="What does auto-triage do?"
-        className="shrink-0 w-5 h-5 -ml-1 rounded-full border border-border bg-surface-raised text-content-muted text-xs font-bold leading-none hover:text-content hover:bg-surface">
+        className="shrink-0 w-5 h-5 -ml-1 rounded-full bg-surface-raised text-content-muted text-xs font-bold leading-none transition-colors hover:text-content hover:bg-surface">
         ?
       </button>
       {showHelp && (
@@ -177,7 +177,7 @@ function AutoTriageBar({ images, datasetId, faceThresholds, onBatch, busy,
           {/* Transparent backdrop: an outside click dismisses the popover. */}
           <div className="fixed inset-0 z-40" onClick={() => setShowHelp(false)} aria-hidden />
           <div role="tooltip"
-            className="absolute z-50 top-full left-2 mt-1 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-surface-overlay p-3 shadow-xl flex flex-col gap-1.5">
+            className="absolute z-50 top-full left-2 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-xl bg-surface-overlay p-3 shadow-2xl flex flex-col gap-1.5">
             {AUTO_TRIAGE_HELP.map((line) => (
               <p key={line} className="text-[11px] leading-snug text-content-muted">{line}</p>
             ))}
@@ -199,8 +199,11 @@ function AutoTriageBar({ images, datasetId, faceThresholds, onBatch, busy,
       </span>
       <button type="button" onClick={apply} disabled={busy || applying || nothingToDo}
         title="Marks only scored images — your manual ✓/✕ choices are never changed"
-        className="ml-auto px-3 py-1 rounded-lg bg-surface-raised border border-border text-content text-xs font-semibold disabled:opacity-40 hover:bg-surface">
-        {applying ? 'Applying…' : isReplay ? 'Re-apply' : 'Apply'}
+        className="ml-auto px-3 py-1 rounded-full bg-surface-raised text-content text-xs font-semibold transition-colors disabled:opacity-40 hover:bg-surface">
+        {/* Three labels, all mounted, two hidden — see CLAUDE.md ▸ UI changes. */}
+        <span hidden={!applying}>Applying…</span>
+        <span hidden={applying || !isReplay}>Re-apply</span>
+        <span hidden={applying || isReplay}>Apply</span>
       </button>
       <span role="status" aria-live="polite" aria-atomic="true"
         className="text-xs text-emerald-400">
@@ -227,8 +230,8 @@ function AutoTriageBar({ images, datasetId, faceThresholds, onBatch, busy,
    whole thing is usable with a thumb at 400 px, where the row wraps. */
 function GridPager({ view, onGo, where }) {
   if (!view.paged) return null;
-  const btn = 'min-h-11 rounded-lg border border-border bg-surface px-3 py-1 '
-    + 'text-content font-semibold disabled:opacity-40 hover:bg-surface-raised';
+  const btn = 'min-h-11 rounded-full bg-surface-raised px-3.5 py-1 '
+    + 'text-content font-semibold transition-colors disabled:opacity-40 hover:bg-surface';
   return (
     <nav aria-label={`Image grid pages (${where})`}
       className="flex flex-wrap items-center gap-2 text-xs">
@@ -451,7 +454,9 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
       setLaunchingImprove(false);
     }
   };
-  const batchBtn = 'px-2.5 py-1 rounded-lg text-xs font-semibold disabled:opacity-40';
+  const batchBtn = 'px-2.5 py-1 rounded-full text-xs font-semibold transition-colors disabled:opacity-40';
+  // The neutral ones in that toolbar: raised pill, no outline.
+  const batchQuiet = `${batchBtn} bg-surface-raised text-content hover:bg-surface`;
 
   return (
     <div id="ds-images-review" tabIndex={-1} data-workspace-focus
@@ -460,7 +465,7 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
           which pass, and a title is not readable on a touch screen at all. */}
       {busyReason && (
         <p role="status" aria-live="polite"
-          className="rounded-lg border border-amber-400/30 bg-amber-400/5 px-2.5 py-1.5 text-[11px] leading-snug text-amber-100/90">
+          className="rounded-lg bg-amber-500/15 px-2.5 py-1.5 text-[11px] leading-snug text-amber-100/90">
           <span aria-hidden="true">🔒 </span>{READS_STAY_OPEN}
         </p>
       )}
@@ -487,11 +492,11 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
             </>
           ) : (
             <div role="toolbar" aria-label="Bulk actions on the selection"
-              className="flex items-center gap-2 flex-wrap rounded-lg border border-indigo-400/40 bg-indigo-500/10 px-2.5 py-1.5 w-full">
+              className="flex items-center gap-2 flex-wrap rounded-lg bg-indigo-500/15 px-2.5 py-1.5 w-full">
               <span className="text-content font-semibold">{selected.size} selected</span>
               {bulkAction && (
                 <span role="status" aria-live="polite" aria-atomic="true"
-                  className="rounded-md border border-amber-400/40 bg-amber-500/10 px-2 py-1 text-amber-200">
+                  className="rounded-full bg-amber-500/15 px-2.5 py-1 text-amber-200">
                   {bulkActionMessage(bulkAction)}
                 </span>
               )}
@@ -500,10 +505,10 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
               <button type="button" disabled={bulkBusy} onClick={() => act('reject')}
                 className={`${batchBtn} bg-red-600/80 text-white`}>✕ Reject</button>
               <button type="button" disabled={bulkBusy} onClick={() => act('pending')}
-                title="Back to undecided" className={`${batchBtn} bg-surface text-content border border-border`}>↺ Undecide</button>
+                title="Back to undecided" className={batchQuiet}>↺ Undecide</button>
               <button type="button" disabled={bulkBusy} onClick={() => act('clear_caption')}
                 title="Delete the selected images' captions (the Caption button then regenerates them)"
-                className={`${batchBtn} bg-surface text-content border border-border`}>🧹 Clear captions</button>
+                className={batchQuiet}>🧹 Clear captions</button>
               {/* One button per engine that can actually run, because the two
                   passes are a CHOICE, not two qualities of the same thing:
                   Klein re-renders detail (and can move skin and colour),

@@ -22,7 +22,7 @@ export default function NextStepCard({ step, trainMode, busy, totalImages, onAct
   const key = step.id === 'finish' ? (trainMode ? 'finish_train' : 'finish_export') : step.id;
 
   return (
-    <div role="status" className="rounded-lg border border-indigo-400/40 bg-indigo-500/10 px-3 py-2">
+    <div role="status" className="rounded-lg bg-indigo-500/15 px-3 py-2">
       <div className="flex items-center gap-2">
         <span aria-hidden>💡</span>
         <span className="text-content text-sm font-semibold">Next step: {step.label}</span>

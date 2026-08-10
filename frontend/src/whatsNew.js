@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-workspace-restyle',
+    date: '2026-08-10',
+    title: 'The dataset workspace stops boxing every row',
+    blurb: 'Inside a dataset, forty-three panels and buttons were each drawn as an outlined box stacked down the page. They are shaded rows and pills now, the section chips on a phone match the top bar, and the S/M/L thumbnail control is one segmented track instead of three little squares. An image tile keeps its coloured edge — that is your kept/rejected decision, not decoration. Second slice of the datasets pass; the generation, captioning and training panels are next.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-10-library-restyle',
     date: '2026-08-10',
     title: 'The dataset library lifts its cards instead of framing them',

@@ -65,6 +65,7 @@ import { WORKSPACE_SECTIONS, SECTION_FOR_TARGET } from './workspaceSections';
 import { postJson, putJson } from '../../api/fetchClient';
 import { datasetToBankRequest, datasetToBankUrl } from './datasetToBank';
 import { HelpBadge } from '../../help/HelpMode';
+import { RefreshIcon } from '../common/icons';
 import { requestHelpTip } from '../../help/helpTips';
 import { openCollapsedAncestors } from '../../help/revealTarget';
 import {
@@ -90,7 +91,24 @@ const GRID_STATUS_FILTER_KEY = 'datasetGridStatusFilter';
 const GRID_SORT_KEY = 'datasetGridSort';
 
 // Style partagé des items du menu « ⋯ More » du header (actions secondaires).
-const MENU_ITEM = 'w-full flex items-center gap-2 text-left px-2.5 py-1.5 rounded-md text-sm text-content hover:bg-surface-raised disabled:opacity-40';
+const MENU_ITEM = 'w-full flex items-center gap-2 text-left px-2.5 py-1.5 rounded-lg text-sm text-content hover:bg-surface-raised disabled:opacity-40';
+
+/* ── The workspace's own three shapes (2026-08-10 restyle) ──────────────────
+   This file used to spell out `rounded-lg border border-border bg-surface`
+   forty-three times: every action row, every button, every note was its own
+   outlined box, stacked down a page that is itself inside a card. The tokens
+   already separate them — `surface` is white at 4%, `surface-raised` at 9% —
+   so the outline was a second mechanism doing the same job.
+
+   PANEL = a row or block of controls. ACTION = a button in one. Both are the
+   same shapes the nav bar, the bank and the runs list use.
+   Tinted notices (amber warnings, the indigo "picked" bar) keep their colour
+   and, where they are `border-2`, their edge: those are stop-and-read markers,
+   not panels, and there is only ever one of them on screen. */
+const PANEL = 'rounded-lg bg-surface px-3 py-2';
+const PANEL_ROW = `flex items-center gap-2 flex-wrap ${PANEL}`;
+const ACTION = 'px-3 py-1.5 rounded-full bg-surface-raised text-content text-sm '
+  + 'transition-colors hover:bg-surface disabled:opacity-40';
 
 /* En-tête de section (miroir visuel du SectionHeader de Settings, en h2 : le h1
    de la page reste le nom du dataset) : eyebrow mono + titre + description. */
@@ -165,7 +183,7 @@ function GridSortSelect({ value, images, onChange }) {
       <select value={value} onChange={(e) => onChange(e.target.value)}
         aria-label="Sort the grid"
         title="Order the images by face similarity to your reference. Unscored images sink to the end."
-        className="max-w-[13rem] rounded-md border border-border bg-surface px-2 py-0.5 text-[0.6875rem] text-content">
+        className="max-w-[13rem] rounded-full bg-surface-raised px-2.5 py-0.5 text-[0.6875rem] text-content">
         {datasetSortOptions(images).map((o) => (
           <option key={o.id} value={o.id} disabled={o.disabled} title={o.title}>
             {o.label}
@@ -893,8 +911,8 @@ export default function DatasetWorkspace({ ds, onBack }) {
   const navItem = (s, chip) => {
     const isActive = s.id === section;
     const base = chip
-      ? `flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-medium ${
-          isActive ? 'border-border-strong bg-surface-raised text-content' : 'border-border text-content-muted hover:text-content'}`
+      ? `flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+          isActive ? 'bg-surface-raised text-content' : 'text-content-muted hover:bg-surface hover:text-content'}`
       : `relative flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm font-medium ${
           isActive ? 'bg-surface-raised text-content' : 'text-content-muted hover:bg-surface hover:text-content'}`;
     return (
@@ -938,7 +956,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
   // long accordion. Navigates to the Scrape section and focuses its gallery-URL input.
   const scrapeLink = (
     <button type="button" onClick={() => navigateToPanel('scrape', 'scan')}
-      className="flex w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-left text-content-muted hover:text-content hover:bg-surface-raised transition-colors">
+      className="flex w-full items-center gap-2 rounded-lg bg-surface px-3 py-2 text-left text-content-muted hover:text-content hover:bg-surface-raised transition-colors">
       <span aria-hidden>🕸</span>
       <span className="text-sm font-medium">Scrape images from the web</span>
       <span className="text-content-subtle text-[0.6875rem]">scan a gallery URL, pick images, import full-frame</span>
@@ -964,20 +982,20 @@ export default function DatasetWorkspace({ ds, onBack }) {
           le z-20 du menu « ⋯ More » resterait piégé sous les frères plus bas. */}
       <div className="relative z-30 flex items-center gap-2 flex-wrap">
         <button type="button" onClick={onBack}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-border bg-surface text-content-muted hover:text-content hover:bg-surface-raised text-sm transition-colors">
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-raised text-content-muted hover:text-content hover:bg-surface text-sm transition-colors">
           ← Datasets
         </button>
         <h1 className="text-content font-bold">{d.name}</h1>
         {isStyle ? (
           <span title="This Style LoRA is always active when loaded; adjust its LoRA weight to control the effect."
-            className="flex items-center gap-1 px-2 py-0.5 rounded-lg border border-cyan-400/40 bg-cyan-500/10 text-cyan-200 text-[0.6875rem]">
+            className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-200 text-[0.6875rem]">
             always-on style · no trigger
           </span>
         ) : (
           <button type="button"
             onClick={() => { try { navigator.clipboard.writeText(d.trigger_word || ''); } catch { /* ignore */ } }}
             title="Copy the trigger word (to put in your prompts)"
-            className="flex items-center gap-1 px-2 py-0.5 rounded-lg border border-indigo-400/40 bg-indigo-500/10 text-[0.6875rem]">
+            className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-indigo-500/15 text-[0.6875rem] transition-colors hover:bg-indigo-500/25">
             <span className="text-content-subtle">trigger:</span>
             <code className="text-indigo-300 font-semibold">{d.trigger_word || '—'}</code>
             <span aria-hidden className="text-content-subtle">⧉</span>
@@ -993,10 +1011,10 @@ export default function DatasetWorkspace({ ds, onBack }) {
           <details className="relative">
             <summary
               title="More dataset actions — edit settings, body fidelity"
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-border bg-surface text-content-muted hover:text-content hover:bg-surface-raised text-sm cursor-pointer select-none">
+              className="flex cursor-pointer select-none items-center gap-1 px-3 py-1.5 rounded-full bg-surface-raised text-content-muted transition-colors hover:bg-surface hover:text-content text-sm">
               ⋯ More
             </summary>
-            <div className="absolute right-0 top-full mt-1 z-20 w-72 rounded-lg border border-border bg-surface-overlay shadow-xl p-1.5 flex flex-col gap-0.5">
+            <div className="absolute right-0 top-full mt-1 z-20 w-72 rounded-xl bg-surface-overlay shadow-2xl p-1.5 flex flex-col gap-0.5">
               <button type="button" onClick={() => setSettingsOpen(true)}
                 title={isStyle ? 'Edit the Style dataset name and review its always-on behavior.' : 'Edit the dataset name, trigger word, and (for concept datasets) the concept description that drives the caption avoid-list.'}
                 className={MENU_ITEM}>
@@ -1243,7 +1261,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
               {filtersActive && gridImages.length === 0 ? (
                 // Filtered down to nothing: say so plainly (the grid's own "no images"
                 // empty-state would read as "everything's gone", which would be a lie).
-                <p className="rounded-lg border border-border bg-surface px-3 py-4 text-center text-content-subtle text-sm">
+                <p className="rounded-lg bg-surface px-3 py-4 text-center text-content-subtle text-sm">
                   No images match the active filters —{' '}
                   <button type="button" onClick={clearFilters} className="underline hover:text-content">clear all</button>{' '}
                   to see all {rescueGridImages.length} again.
@@ -1386,12 +1404,12 @@ export default function DatasetWorkspace({ ds, onBack }) {
                 onResolve={ds.resolveSmallImageRescue}
                 onPreview={(image) => setViewImg({ ...image, _rescueReviewPreview: true })}
                 nonces={ds.nonces} />
-              <div className="flex items-center gap-2 flex-wrap rounded-lg border border-border bg-surface px-3 py-2">
+              <div className="flex items-center gap-2 flex-wrap rounded-lg bg-surface px-3 py-2">
                 {!isConceptual && (
                   <button id="ds-curation-face-analysis" type="button" data-workspace-focus
                     onClick={ds.analyzeFaces} disabled={faceAnalysis.disabled}
                     title={faceAnalysis.title}
-                    className="px-3 py-1.5 rounded-lg bg-surface text-content text-sm disabled:opacity-40 border border-border scroll-mt-20">
+                    className={`${ACTION} scroll-mt-20`}>
                     {ds.analyzing
                       ? `🎭 Analyzing…${act?.kind === 'analyze_faces' && act.total ? ` ${act.done}/${act.total}` : ''}`
                       : faceAnalysisLabel(d.face_scoring_scope)}
@@ -1416,7 +1434,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                     inpaint, on-subject → manual review). Applies to any dataset kind. */}
                 <button type="button" data-workspace-focus onClick={ds.findWatermarks} disabled={ds.busy}
                   title="Scans the kept images for overlaid watermarks/logos/URLs added on top of the photo (deletes nothing)"
-                  className="px-3 py-1.5 rounded-lg bg-surface text-content text-sm disabled:opacity-40 border border-border">
+                  className={ACTION}>
                   {ds.watermarking
                     ? `🧽 Scanning…${act?.kind === 'watermark_detect' && act.total ? ` ${act.done}/${act.total}` : ''}`
                     : '🧽 Find watermarks'}
@@ -1429,7 +1447,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                       marks actionable, but GPU + slower). Klein is greyed until ComfyUI
                       + the Klein models are ready (caps.watermark_klein). */}
                   <div role="group" aria-label="Watermark inpaint method"
-                    className="flex items-center rounded-lg border border-border bg-surface p-0.5 text-xs">
+                    className="flex items-center rounded-full bg-surface p-0.5 text-xs">
                     <button type="button" aria-pressed={watermarkMethod === 'lama'}
                       onClick={() => setWatermarkMethod('lama')} disabled={ds.busy}
                       title="LaMa: fast, non-generative. Crops border marks, repaints small off-center marks; on-subject marks go to manual review."
@@ -1496,7 +1514,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                     disabled={ds.busy}
                     onClick={() => setReviewQueue(images.filter((i) => i.watermark_state === 'detected'))}
                     title="Step through the flagged images one by one — see each detected box and Clean, dismiss a false positive, or reject"
-                    className="px-3 py-1.5 rounded-lg bg-surface border border-border text-content text-sm disabled:opacity-40 scroll-mt-20">
+                    className={`${ACTION} scroll-mt-20`}>
                     🔍 Review flagged ({watermarkDetected})
                   </button>
                 )}
@@ -1553,7 +1571,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   <button type="button" disabled={ds.busy}
                     onClick={() => ds.findWatermarks({ includeDismissed: true })}
                     title="Re-examines the images you ruled false positives too. Use it after changing the watermark detector — a normal scan skips them forever."
-                    className="px-3 py-1.5 rounded-lg bg-surface border border-dashed border-border text-content-subtle text-sm disabled:opacity-40 hover:text-content">
+                    className={`${ACTION} border border-dashed border-border text-content-subtle hover:text-content`}>
                     ⟲ Rescan incl. dismissed ({flagged.dismissed})
                   </button>
                 )}
@@ -1606,7 +1624,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   c'est une action de curation, elle vit avec les autres). */}
               {unused > 0 && (
                 <div id="ds-curation-rejected-cleanup" tabIndex={-1}
-                  className="flex items-center gap-2 flex-wrap rounded-lg border border-border bg-surface px-3 py-2 scroll-mt-20">
+                  className="flex items-center gap-2 flex-wrap rounded-lg bg-surface px-3 py-2 scroll-mt-20">
                   <button type="button" data-workspace-focus disabled={ds.busy}
                     onClick={() => {
                       if (window.confirm(`Permanently delete the ${unused} rejected/failed image(s) (files included)?`)) ds.purgeUnused();
@@ -1636,18 +1654,18 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   readable at 400px. In-session only; it disappears on reload. */}
               {lastCaptionEngines && (
                 <p title={CAPTION_ENGINE_WHY}
-                  className="break-words rounded-lg border border-border bg-surface px-3 py-1.5 text-[0.75rem] text-content-muted">
+                  className="break-words rounded-lg bg-surface px-3 py-1.5 text-[0.75rem] text-content-muted">
                   ✍️ Last pass: {ds.lastCaptionRun.captioned} caption(s) — {lastCaptionEngines}
                 </p>
               )}
               <div id="ds-captions-generate" tabIndex={-1}
-                className="flex items-center gap-2 flex-wrap rounded-lg border border-border bg-surface px-3 py-2 scroll-mt-20">
+                className="flex items-center gap-2 flex-wrap rounded-lg bg-surface px-3 py-2 scroll-mt-20">
                 {!isConceptual && (
                   <select value={effCaptionMode} onChange={(e) => setCaptionMode(e.target.value)} disabled={ds.busy}
                     title={d.train_type === 'anima'
                       ? "Caption style — Anima reads BOTH: booru tags and natural language are first-class on this model. Prose is only the default; switching to Booru tags trains fine and is never flagged as a mismatch."
                       : "Caption style — Prose (Z-Image) or Booru tags (SDXL booru-native, e.g. bigLove). Defaults to auto based on the dataset's type."}
-                    className="px-2 py-1.5 rounded-lg bg-surface border border-border text-content text-[0.8125rem] disabled:opacity-40">
+                    className={`${ACTION} px-2.5 py-1.5 text-[0.8125rem]`}>
                     <option value="prose">📝 Prose</option>
                     <option value="booru">🏷️ Booru tags</option>
                   </select>
@@ -1667,13 +1685,13 @@ export default function DatasetWorkspace({ ds, onBack }) {
                     : isStyle
                       ? "Re-generates every caption as content-only text without naming the aesthetic"
                       : "Re-generates every caption without describing identity (face/hair)"}
-                  className="px-3 py-1.5 rounded-lg bg-surface text-content text-sm disabled:opacity-40 border border-border">
+                  className={ACTION}>
                   🔄 Re-caption
                 </button>
                 <button type="button" data-workspace-focus
                   onClick={() => setCaptionOptionsOpen(true)} disabled={ds.busy}
                   title="Choose the caption engine, Ollama model and vocabulary, pull a new model, and add custom instructions — for this dataset"
-                  className="px-3 py-1.5 rounded-lg bg-surface text-content text-sm disabled:opacity-40 border border-border">
+                  className={ACTION}>
                   ⚙️ Options
                 </button>
                 <HelpBadge topic="action-caption-options" />
@@ -1730,7 +1748,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   editable IN PLACE (saves on blur, like the grid). Style sets have no leak
                   concept, so the panel only opens for character/concept. */}
               {showLeaks && !isStyle && (
-                <div className="rounded-lg border border-border bg-surface-raised p-3 flex flex-col gap-3 text-[0.75rem]">
+                <div className="rounded-lg bg-surface-raised p-3 flex flex-col gap-3 text-[0.75rem]">
                   <div className="flex items-start gap-2">
                     <span aria-hidden className="text-base leading-none">🎭</span>
                     <div className="flex flex-col gap-1">
@@ -1786,7 +1804,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                         {['hair', 'eye colour', 'skin · complexion · freckles',
                           'jawline · eyebrows · facial features', 'face shape',
                           ...(bodyFid ? ['tattoos · scars · piercings (body fidelity)'] : [])].map((c) => (
-                          <span key={c} className="rounded-full bg-surface border border-border px-2 py-0.5 text-content-muted text-[0.6875rem]">{c}</span>
+                          <span key={c} className="rounded-full bg-surface-raised px-2 py-0.5 text-content-muted text-[0.6875rem]">{c}</span>
                         ))}
                       </div>
                     )}
@@ -1864,7 +1882,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                                   if (e.target.value !== (img.caption || '')) ds.setCaption(img.id, e.target.value);
                                 }}
                                 aria-label={`Caption of image ${img.id}`}
-                                className="w-full bg-app/60 border border-amber-400/30 rounded px-2 py-1 text-[0.6875rem] text-content resize-y" />
+                                className="w-full rounded-lg bg-surface-raised px-2 py-1 text-[0.6875rem] text-content resize-y focus:outline-none focus:ring-1 focus:ring-amber-400/60" />
                               {/* WHO WROTE THE LEAKING SENTENCE. This list is read
                                   caption by caption to decide what to redo, and the
                                   'auto' backend chains two engines inside one run —
@@ -1883,8 +1901,12 @@ export default function DatasetWorkspace({ ds, onBack }) {
                                 title={isConcept
                                   ? 'Re-generate this caption while keeping the concept unspoken'
                                   : 'Re-generate this caption without describing identity (face/hair)'}
-                                className="self-start px-2 py-0.5 rounded-lg bg-surface text-content text-[0.6875rem] border border-border hover:bg-surface-raised disabled:opacity-40">
-                                {rowBusy ? '⏳ Re-captioning…' : '🔄 Re-caption'}
+                                className={`self-start ${ACTION} px-2.5 py-0.5 text-[0.6875rem]`}>
+                                {/* Both labels mounted — see CLAUDE.md ▸ UI changes. */}
+                                <span hidden={!rowBusy}>Re-captioning…</span>
+                                <span hidden={!!rowBusy} className="inline-flex items-center gap-1.5">
+                                  <RefreshIcon className="h-3 w-3 shrink-0" /> Re-caption
+                                </span>
                               </button>
                             </div>
                           </div>
@@ -1926,16 +1948,16 @@ export default function DatasetWorkspace({ ds, onBack }) {
             <div id="gf-export" className="scroll-mt-20 flex flex-col gap-2">
               <span className="text-content-subtle text-[0.625rem] uppercase tracking-wide">Bring images in</span>
               <div id="ds-export-import" tabIndex={-1}
-                className="flex items-center gap-2 flex-wrap rounded-lg border border-border bg-surface px-3 py-2 scroll-mt-20">
+                className="flex items-center gap-2 flex-wrap rounded-lg bg-surface px-3 py-2 scroll-mt-20">
                 <button type="button" data-workspace-focus
                   onClick={() => zipInput.current?.click()} disabled={importBusy}
                   title="Merge an existing training dataset into this one: a ZIP of images with kohya-style same-name .txt captions (any folder layout). Aspect kept, perceptual duplicates skipped."
-                  className="px-3 py-1.5 rounded-lg bg-surface border border-border text-content text-sm disabled:opacity-40">
+                  className={ACTION}>
                   📦 Import dataset (ZIP)
                 </button>
                 <button type="button" disabled={importBusy} onClick={importFolderPrompt}
                   title="Merge an existing training dataset already on this machine's disk: a folder of images with kohya-style same-name .txt captions (subfolders included). Aspect kept, perceptual duplicates skipped."
-                  className="px-3 py-1.5 rounded-lg bg-surface border border-border text-content text-sm disabled:opacity-40">
+                  className={ACTION}>
                   📂 Import from folder…
                 </button>
                 <span className="text-content-subtle text-[0.6875rem]">
@@ -1948,7 +1970,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   being dropped with its duplicate (see _merge_training_images).
                   Reported by Qeeyana (Reddit). */}
               <p id="ds-caption-elsewhere" tabIndex={-1}
-                className="scroll-mt-20 rounded-lg border border-border bg-surface px-3 py-2 text-[0.6875rem] text-content-muted">
+                className="scroll-mt-20 rounded-lg bg-surface px-3 py-2 text-[0.6875rem] text-content-muted">
                 <span className="font-medium text-content">Want to caption in another tool?</span>{' '}
                 Export the ZIP below, caption it wherever you like, then bring the same
                 folder back through 📦 Import dataset: images already here are not
@@ -1963,7 +1985,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                 }} />
 
               <span className="text-content-subtle text-[0.625rem] uppercase tracking-wide">Get this dataset out</span>
-              <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface px-3 py-2">
+              <div className="flex flex-col gap-2 rounded-lg bg-surface px-3 py-2">
                 <div id="ds-export-training-zip" tabIndex={-1}
                   className="flex items-center gap-2 flex-wrap scroll-mt-20">
                   <button type="button" data-workspace-focus={kept ? '' : undefined}
@@ -1983,7 +2005,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                     jump, so the sidebar links to Import to bank / Backup /
                     Hugging Face keep working. Do NOT make this a controlled
                     <details> without teaching `land` about it. */}
-                <details className="rounded-lg border border-border bg-surface-raised">
+                <details className="rounded-lg bg-surface-raised">
                   <summary className="flex items-center gap-2 px-2.5 py-1.5 text-[0.6875rem] text-content-muted hover:text-content cursor-pointer select-none">
                     ⋯ More ways out
                     <span className="text-content-subtle">
@@ -1996,7 +2018,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                       <button type="button" data-workspace-focus disabled={!kept}
                         onClick={() => setImportToBankOpen(true)}
                         title="Turn this dataset back into a bank: its kept images are COPIED into a bank of their own. Both choices keep Dataset-owned captions, curation, framing, watermark and provenance. By default compatible final-file technical analysis is restored; Start fresh skips only reuse of prior analysis. This dataset is never touched."
-                        className="px-3 py-1.5 rounded-lg bg-surface border border-border text-content text-sm disabled:opacity-40">
+                        className={ACTION}>
                         ↑ Import to bank
                       </button>
                       <span className="text-content-subtle text-[0.6875rem]">
@@ -2007,7 +2029,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                       className="flex items-center gap-2 flex-wrap scroll-mt-20">
                       <button type="button" data-workspace-focus onClick={ds.exportBackup}
                         title="Full portable backup: all images with statuses, captions, scores and settings — restore it on any machine from the Datasets page."
-                        className="px-3 py-1.5 rounded-lg bg-surface border border-border text-content text-sm">
+                        className={ACTION}>
                         💾 Backup
                       </button>
                       <span className="text-content-subtle text-[0.6875rem]">
@@ -2020,7 +2042,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                         <button type="button" data-workspace-focus
                           onClick={() => setPublishHfOpen(true)}
                           title="Publish this dataset (kept images + captions) as a dataset repo on the Hugging Face Hub. Private by default; you choose the license and confirm you have the right to share."
-                          className="px-3 py-1.5 rounded-lg bg-surface border border-border text-content text-sm">
+                          className={ACTION}>
                           🤗 Publish to Hugging Face
                         </button>
                         <span className="text-content-subtle text-[0.6875rem]">
@@ -2090,7 +2112,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   </span>
                 </button>
               ) : (
-                <p className="m-0 rounded-lg border border-border bg-surface px-3 py-2 text-content-muted text-sm">
+                <p className="m-0 rounded-lg bg-surface px-3 py-2 text-content-muted text-sm">
                   Configure ComfyUI in Settings to use the LoRA testing Studio.
                 </p>
               )}
