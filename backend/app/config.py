@@ -825,7 +825,8 @@ DEFAULTS = {
         #                 swap — the stage is a full second engine.
         #   lama          LaMa inpainting wipes the masked head region before
         #                 H3 sees it, so the model is not reading the old head
-        #                 through a translucent mask.
+        #                 through a translucent mask. See `h3_lama_model`: the
+        #                 graph's own choice (zits) fails on this lane.
         #   face_detail   a Z-Image Turbo detailer over the eyes and mouth of
         #                 the chosen frame. The ONLY stage whose model
         #                 filenames are not re-resolved: it names a Z-Image
@@ -860,10 +861,15 @@ DEFAULTS = {
         # At 1.0 (the shipped graph's value) the head becomes a flat white slab
         # with no structure at all, and a generative model asked to fill a flat
         # slab sometimes paints the slab back: that is the "white face" result.
-        # Below 1.0 a ghost of the original head shows through — enough geometry
-        # to build on. Too low and the OLD identity starts surviving, which is
-        # the thing the swap exists to remove. 0.7-0.85 is the range worth
-        # trying; the default stays 1.0 so nothing moves until it is asked to.
+        #
+        # LOWERING IT IS NOT THE FIX, MEASURED 2026-08-11. At 0.75 the swap
+        # returned the ORIGINAL face: the ghost showing through is the very face
+        # being replaced, so the model reconstructs it instead of the reference.
+        # There is no useful middle — the structure a partial mask leaks IS the
+        # identity. Leave this at 1.0 and reach for `h3_lama_model` (fills the
+        # hole with plausible NON-face content) or a less copyable placeholder
+        # colour instead. Kept configurable because it is the dial the failure
+        # was diagnosed with, not because 0.75 is a setting worth using.
         #
         # It is also what makes the `lama` stage mean anything: LaMa wipes the
         # masked region, and at opacity 1.0 the overlay paints straight over its
@@ -889,6 +895,15 @@ DEFAULTS = {
         # nothing in a photo costs one cheap grounding pass (the image is encoded
         # once for all of them) and adds nothing to the mask.
         'h3_mask_prompt': 'head, glasses, sunglasses, hat, headband, earrings',
+        'h3_lama_model': 'lama',
+        # Which inpainting model the `lama` stage runs. The maintainer's graph
+        # asked for 'zits', and on this lane that CRASHES: ZITS pads to a
+        # multiple of 32 and drives a 256->512 structure upsampler, while the
+        # inpaint crop here is an arbitrary size (output_resize_to_target_size is
+        # off), so it dies inside TorchScript at `upsample_bilinear2d`. Plain
+        # 'lama' pads to 8, has no such upsampler, and is iopaint's own default —
+        # hence the default here. The node also offers ldm / mat / fcf / manga /
+        # spread; they differ in look, not in this constraint.
     },
     # Automatic masking (services/auto_mask.py) — SAM 3, open-vocabulary: the
     # region is named in words ("head", "hands", "watermark", "clothing"), so one

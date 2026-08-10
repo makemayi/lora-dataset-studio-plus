@@ -447,14 +447,15 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
           className="mt-1 w-full accent-indigo-500"
         />
         <HelpText className="mt-1 text-xs text-content-muted">
-          Before H3 redraws the head it is painted over, and at 1.00 what is left is
-          a flat slab with no structure — which is where a blank white face comes
-          from, a model filling a slab by drawing the slab back. Lower it (0.70–0.85
-          is the range worth trying) and a ghost of the original head shows through
-          for the model to build on. Too low and the old face starts surviving,
-          which is the thing the swap is for. It is also what makes the LaMa stage
-          below do anything at all: at 1.00 the paint covers LaMa&apos;s work
-          entirely.
+          Before H3 redraws the head it is painted over. At 1.00 what is left is a
+          flat slab with no structure, which is where a blank white face comes from
+          — a model filling a slab by drawing the slab back. Lowering it is
+          <strong> not</strong> the answer though: at 0.75 the swap came back with the
+          ORIGINAL face, because the ghost showing through is the very face you are
+          replacing. There is no useful middle here. Leave it at 1.00 and use the
+          LaMa stage below, which fills the hole with plausible non-face content
+          instead — and note that this is also what makes that stage able to change
+          anything at all, since at 1.00 the paint covers its work.
         </HelpText>
         <ResetToDefault label="H3 swap mask opacity" section="face_swap" field="h3_mask_opacity"
           config={config} configDefaults={configDefaults} setField={setField} />

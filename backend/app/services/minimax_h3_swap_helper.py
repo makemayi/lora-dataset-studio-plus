@@ -224,7 +224,7 @@ NODE_HAIR_REMOVAL_KLEIN_UNET = '426:423:424'   # OTUNetLoaderW8A8 (Klein INT8)
 NODE_HAIR_REMOVAL_CLIP = '426:423:71'
 NODE_HAIR_REMOVAL_VAE = '426:423:72'
 NODE_HAIR_REMOVAL_SEED = '426:423:73'          # RandomNoise -> 'noise_seed'
-NODE_LAMA_TAIL = '426:411'
+NODE_LAMA_TAIL = '426:411'          # LayerUtility: LaMa — also its own model pick
 NODE_FACE_DETAIL_TAIL = '426:396:370'          # DetailerForEach -> 'seed'
 
 STAGES = {
@@ -346,6 +346,11 @@ MASK_SOURCES = ('graph', 'app')
 # one cheap grounding pass and contributes nothing, which is why naming the
 # accessories that are usually absent is still the right default.
 DEFAULT_MASK_PROMPT = 'head, glasses, sunglasses, hat, headband, earrings'
+
+# iopaint's own default and the only one measured to survive an arbitrarily
+# sized crop here. The node offers lama / ldm / zits / mat / fcf / manga /
+# spread; they differ in look, not in that constraint.
+DEFAULT_LAMA_MODEL = 'lama'
 
 
 def mask_source():
@@ -604,6 +609,16 @@ def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None
     # The face-detail stage's Z-Image files are deliberately NOT resolved — see
     # the module docstring. Its seed still has to move, or every tile of a batch
     # gets the identical detailer pass.
+    # The LaMa stage's inpainting model. The graph asks for 'zits', which CANNOT
+    # run on this lane: ZITS pads to a multiple of 32 and drives a 256->512
+    # structure upsampler, and the inpaint crop here is an arbitrary size
+    # (output_resize_to_target_size is off), so it dies inside TorchScript at
+    # `upsample_bilinear2d`. Reported as "enabling LaMa errors", 2026-08-11.
+    if 'lama' in kept and NODE_LAMA_TAIL in workflow:
+        model = cfg.get('face_swap.h3_lama_model')
+        model = model.strip() if isinstance(model, str) else ''
+        workflow[NODE_LAMA_TAIL]['inputs']['lama_model'] = model or DEFAULT_LAMA_MODEL
+
     if 'face_detail' in kept and NODE_FACE_DETAIL_TAIL in workflow:
         workflow[NODE_FACE_DETAIL_TAIL]['inputs']['seed'] = \
             random.randint(0, 2 ** 64 - 1)

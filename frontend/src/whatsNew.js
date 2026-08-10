@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-11-lama-stage-runs',
+    date: '2026-08-11',
+    title: 'The LaMa cleanup stage of the H3 swap actually runs now',
+    blurb: 'Switching it on ended in a ComfyUI error every time. The graph asked for the ZITS inpainting model, which needs its input padded to a multiple of 32 and drives a 256→512 structure upsampler — and the swap hands it a crop of whatever size the head happened to need, so it died inside TorchScript before doing anything. It runs plain LaMa now, which has no such constraint, and the model is a setting if you want to compare the others. Related correction: lowering "how solidly the head is painted out" is not the fix for a blank face after all — at 0.75 the swap gives you the ORIGINAL face back, because the ghost showing through is the very face being replaced. That guidance is corrected in Settings and the guide.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-11-mask-keeps-the-glasses',
     date: '2026-08-11',
     title: 'A head mask now takes the glasses with it',
@@ -86,7 +93,7 @@ export const WHATS_NEW = [
     id: '2026-08-10-h3-swap-blank-faces',
     date: '2026-08-10',
     title: 'Fewer blank faces out of the MiniMax H3 swap',
-    blurb: 'Sometimes the swap came back with a white, featureless face. Two reasons, both fixed. The head is painted out before H3 redraws it, and at full opacity what the model gets is a flat slab with no structure — so it occasionally fills the slab by drawing the slab back; that opacity is now a slider (0.70–0.85 leaves a ghost of the head to build on, and it is also what finally makes the LaMa stage do anything). And when the model picks the best frame of the packet it renders, it was judging sharpness and exposure only — never whether the face looks like your reference — so a blank face competed on equal terms with a good one. The swap now honours the same "looks like the reference" weight the H3 generation engine has always used. The instruction was strengthened to match: the white shape is named as a placeholder that must be completely covered, never copied.',
+    blurb: 'Sometimes the swap came back with a white, featureless face. Two reasons, both fixed. The head is painted out before H3 redraws it, and at full opacity what the model gets is a flat slab with no structure — so it occasionally fills the slab by drawing the slab back; that opacity is now a slider, though the honest answer turned out to be that lowering it does not help — the ghost it lets through is the face you are replacing, so the swap comes back with the original one; use the LaMa stage instead. And when the model picks the best frame of the packet it renders, it was judging sharpness and exposure only — never whether the face looks like your reference — so a blank face competed on equal terms with a good one. The swap now honours the same "looks like the reference" weight the H3 generation engine has always used. The instruction was strengthened to match: the white shape is named as a placeholder that must be completely covered, never copied.',
     to: '/settings/engines',
   },
   {

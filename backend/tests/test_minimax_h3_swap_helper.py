@@ -446,3 +446,19 @@ def test_the_mask_source_and_phrase_are_configurable(swap):
     _set(config, 'face_swap', h3_mask_source='telepathy', h3_mask_prompt='')
     assert sh.mask_source() == 'graph'
     assert sh.mask_prompt() == sh.DEFAULT_MASK_PROMPT
+
+
+def test_the_lama_stage_does_not_run_the_model_that_crashes(swap):
+    """The graph asks for 'zits', which pads to a multiple of 32 and drives a
+    256->512 structure upsampler — on an arbitrarily sized inpaint crop it dies
+    inside TorchScript. Reported as "enabling LaMa errors"."""
+    sh, _mh, _base, config = swap
+    assert sh.DEFAULT_LAMA_MODEL == 'lama'
+    wf, kept = _build(sh, stages={'lama': True})
+    assert kept == ['lama']
+    assert wf['426:411']['inputs']['lama_model'] == 'lama'
+    _set(config, 'face_swap', h3_lama_model='mat')
+    assert _build(sh, stages={'lama': True})[0]['426:411']['inputs']['lama_model'] == 'mat'
+    # Blank falls back rather than sending an empty enum ComfyUI would refuse.
+    _set(config, 'face_swap', h3_lama_model='   ')
+    assert _build(sh, stages={'lama': True})[0]['426:411']['inputs']['lama_model'] == 'lama'
