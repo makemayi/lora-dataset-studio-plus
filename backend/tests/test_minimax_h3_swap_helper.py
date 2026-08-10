@@ -462,3 +462,19 @@ def test_the_lama_stage_does_not_run_the_model_that_crashes(swap):
     # Blank falls back rather than sending an empty enum ComfyUI would refuse.
     _set(config, 'face_swap', h3_lama_model='   ')
     assert _build(sh, stages={'lama': True})[0]['426:411']['inputs']['lama_model'] == 'lama'
+
+
+def test_the_blend_width_is_configurable_and_clamped(swap):
+    """The composite is the half of "it does not blend" that no prompt reaches:
+    the join is a feather this wide, written on the crop node and read back off
+    the stitcher."""
+    sh, _mh, _base, config = swap
+    wf, _ = _build(sh)
+    assert wf['426:402']['inputs']['mask_blend_pixels'] == sh.DEFAULT_BLEND_PIXELS
+    _set(config, 'face_swap', h3_blend_pixels=64)
+    assert _build(sh)[0]['426:402']['inputs']['mask_blend_pixels'] == 64
+    # The node's own ceiling is 64 — past it ComfyUI refuses the whole prompt.
+    _set(config, 'face_swap', h3_blend_pixels=200)
+    assert _build(sh)[0]['426:402']['inputs']['mask_blend_pixels'] == sh.BLEND_PIXELS_MAX
+    _set(config, 'face_swap', h3_blend_pixels='soft please')
+    assert _build(sh)[0]['426:402']['inputs']['mask_blend_pixels'] == sh.DEFAULT_BLEND_PIXELS

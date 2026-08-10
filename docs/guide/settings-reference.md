@@ -516,6 +516,16 @@ A phrase that matches nothing in a given photo contributes nothing (verified pix
 
 The mask is produced at the tile's own size and then put through the workflow's **own** `ResizeImagesByLongerEdge` node, at the same setting as the target — reproducing that node's arithmetic anywhere else is how an off-by-one size mismatch would reach ComfyUI instead of a test.
 
+#### MiniMax H3 — how far the head is blended back
+
+→ `face_swap.h3_blend_pixels` (0–64, default **40**).
+
+The swapped head is composited back into the untouched photo over a feather this wide. It is the half of *"the head does not blend"* that no instruction can reach: the prompt can make the model match the shot's lighting, white balance, grain, focus and skin tone — and it is written to ask for exactly those — but the **join itself** is this band, and no wording widens it.
+
+Wider hides the seam. It also lets more of the old head's edge pixels survive at the boundary, so past roughly 48 px a hairline can start to ghost. The node's own ceiling is 64.
+
+Two things to try before reaching further: the **crop factor** above (more surrounding photo in frame gives the model more tone to match against), and the **LaMa stage** with an opacity below 1.00, which replaces the head with plausible non-face content instead of a slab. Global colour drift that survives all of that is a colour-transfer problem, not a prompt or a feather one.
+
 #### MiniMax H3 — how solidly the head is painted out
 
 → `face_swap.h3_mask_opacity` (0.0–1.0, default **1.00**).
@@ -1707,6 +1717,7 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `auto_mask.device` | Blank = CUDA when torch sees a card, else CPU. Pin `cpu` to leave the GPU to a running generation; expect it to be slow. |
 | `auto_mask.threshold` | Detection confidence for automatic masking (default `0.5`). |
 | `face_swap.h3_mask_opacity` | How opaque the placeholder painted over the head is (0–1, default `1.0`). Below 1.0 a ghost of the head shows through — and that ghost is the face being REPLACED, so 0.75 measurably returns the original face. Keep 1.0. It is also why the `lama` stage cannot change anything at 1.0. |
+| `face_swap.h3_blend_pixels` | How wide the feather is when the swapped head is composited back (0–64, default `40`). The mechanical half of "it does not blend" — the prompt matches light, colour and grain, this matches the edge. Past ~48 px an old hairline can ghost. |
 | `face_swap.h3_lama_model` | Which inpainting model the `lama` stage runs (default `lama`). The shipped graph asked for `zits`, which crashes on this lane: it pads to a multiple of 32 and drives a 256→512 structure upsampler, while the inpaint crop is an arbitrary size. Also accepts `ldm`, `mat`, `fcf`, `manga`, `spread`. |
 | `face_swap.h3_stages` | Three booleans for the H3 swap graph, all `false`: `hair_removal` (a Klein pass strips the hair first — makes the Klein models required too), `lama` (LaMa wipes the masked region), `face_detail` (Z-Image detailer on eyes and mouth; the ONLY stage whose model filenames are not re-resolved for your install). |
 | `minimax_h3.swap_prompt` | Overrides the instruction the H3 head-swap graph sends. Blank (default) = the shipped prompt: subject-neutral, and explicit about keeping the reference's identity, repainting nothing outside the white mask, matching the shot's head angle and lighting, and leaving no seam at the hairline and neck. Set it to A/B a wording without editing a workflow file an update replaces. In that prompt `<Picture 1>` is your reference photo and `<Picture 2>` is the **masked crop**, not the whole tile — the white area being the head (face + hair). |

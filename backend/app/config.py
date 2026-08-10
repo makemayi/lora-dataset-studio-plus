@@ -896,6 +896,17 @@ DEFAULTS = {
         # once for all of them) and adds nothing to the mask.
         'h3_mask_prompt': 'head, glasses, sunglasses, hat, headband, earrings',
         'h3_lama_model': 'lama',
+        # How wide the band is over which the swapped head is blended back into
+        # the untouched photo — InpaintStitchImproved's `mask_blend_pixels`, 0-64.
+        #
+        # This is the MECHANICAL half of "it does not blend". The prompt can ask
+        # the model to match the picture's light, colour, grain and focus, and it
+        # helps, but the composite itself is a feather this wide: a hard-ish edge
+        # at 32 px is visible on a large head, and no wording changes that. The
+        # trade is the usual one — a wider feather hides the join and also lets
+        # more of the OLD head's edge pixels survive at the boundary, so past
+        # ~48 px a hairline can start to ghost.
+        'h3_blend_pixels': 40,
         # Which inpainting model the `lama` stage runs. The maintainer's graph
         # asked for 'zits', and on this lane that CRASHES: ZITS pads to a
         # multiple of 32 and drives a 256->512 structure upsampler, while the

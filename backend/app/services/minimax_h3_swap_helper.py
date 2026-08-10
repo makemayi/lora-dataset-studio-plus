@@ -128,7 +128,8 @@ NODE_CLIP_VISION = '426:305'     # scores which frame of the packet to keep
 NODE_H3 = '426:170'              # MiniMaxH3ReferenceToVideo — the prompt lives here
 NODE_LENGTH = '426:139'          # PrimitiveInt -> frame packet length
 NODE_SEED = '426:131'            # RandomNoise -> 'noise_seed'
-NODE_CROP = '426:402'            # InpaintCropImproved — how much shot H3 sees
+NODE_CROP = '426:402'            # InpaintCropImproved — how much shot H3 sees,
+                                 # and how wide the blend back into the photo is
 NODE_MASK_OVERLAY = '426:413'    # AILab_MaskOverlay — paints the hole H3 fills
 NODE_FRAME_SELECT = '426:304'    # H3FrameSelect — which frame of the packet wins
 NODE_TARGET_RESIZE = '426:401'   # ResizeImagesByLongerEdge — what the mask must match
@@ -351,6 +352,24 @@ DEFAULT_MASK_PROMPT = 'head, glasses, sunglasses, hat, headband, earrings'
 # sized crop here. The node offers lama / ldm / zits / mat / fcf / manga /
 # spread; they differ in look, not in that constraint.
 DEFAULT_LAMA_MODEL = 'lama'
+
+# InpaintStitchImproved's feather, in pixels (the node's own ceiling is 64).
+# The composite is the mechanical half of "the head does not blend": the prompt
+# can make the model MATCH the photo's light, colour, grain and focus, but the
+# join itself is this band and no wording widens it.
+DEFAULT_BLEND_PIXELS = 40
+BLEND_PIXELS_MAX = 64
+
+
+def blend_pixels():
+    """Feather width for stitching the head back, clamped to the node's range.
+    Junk falls back to the default: this softens a seam, it cannot make a job
+    invalid."""
+    try:
+        value = int(float(cfg.get('face_swap.h3_blend_pixels')))
+    except (TypeError, ValueError):
+        return DEFAULT_BLEND_PIXELS
+    return max(0, min(BLEND_PIXELS_MAX, value))
 
 
 def mask_source():
@@ -640,6 +659,9 @@ def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None
     # head is a structureless slab of colour, and a model asked to fill a slab
     # sometimes paints the slab back — the "white face" result.
     workflow[NODE_MASK_OVERLAY]['inputs']['mask_opacity'] = mask_opacity()
+    # How wide the swapped head is feathered back into the untouched photo. The
+    # crop node writes it; InpaintStitchImproved reads it off the stitcher.
+    workflow[NODE_CROP]['inputs']['mask_blend_pixels'] = blend_pixels()
     # Which frame of the packet is kept. The graph shipped this at 0, i.e. the
     # selector judged sharpness and exposure and never asked whether the face
     # looks like the person — so a blank or wrong face competed on equal terms

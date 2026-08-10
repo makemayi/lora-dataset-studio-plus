@@ -343,6 +343,8 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
     fs.h3_context_factor ?? defaultValueAt(configDefaults, 'face_swap', 'h3_context_factor') ?? 3)
   const maskOpacity = Number(
     fs.h3_mask_opacity ?? defaultValueAt(configDefaults, 'face_swap', 'h3_mask_opacity') ?? 1)
+  const blendPixels = Number(
+    fs.h3_blend_pixels ?? defaultValueAt(configDefaults, 'face_swap', 'h3_blend_pixels') ?? 40)
   const setStage = (key, on) => setField('face_swap', 'h3_stages', { ...stages, [key]: on })
   return (
     <Card
@@ -432,6 +434,29 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
           stitch both assume. Blank means “head”. App lane only.
         </HelpText>
         <ResetToDefault label="H3 swap mask source" section="face_swap" field="h3_mask_source"
+          config={config} configDefaults={configDefaults} setField={setField} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="face-swap-h3-blend" className="block text-xs font-medium text-content">
+          How far the head is blended back into the photo ({blendPixels} px)
+        </label>
+        <input
+          id="face-swap-h3-blend"
+          type="range" min={0} max={64} step={4}
+          value={blendPixels}
+          onChange={(e) => setField('face_swap', 'h3_blend_pixels', Number(e.target.value))}
+          className="mt-1 w-full accent-indigo-500"
+        />
+        <HelpText className="mt-1 text-xs text-content-muted">
+          The swapped head is composited back over this many pixels. It is the half
+          of &ldquo;it does not blend&rdquo; that no instruction can reach: the prompt can
+          make the model match the photo&apos;s light, colour, grain and focus, but the
+          join itself is this band. Wider hides the seam and also lets more of the
+          old head&apos;s edge survive, so past about 48 px a hairline can start to
+          ghost.
+        </HelpText>
+        <ResetToDefault label="H3 swap blend width" section="face_swap" field="h3_blend_pixels"
           config={config} configDefaults={configDefaults} setField={setField} />
       </div>
 

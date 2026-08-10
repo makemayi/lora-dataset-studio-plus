@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-11-swap-blends-in',
+    date: '2026-08-11',
+    title: 'A swapped head that looks like it belongs in the photo',
+    blurb: 'Swaps could come back looking pasted on — right face, wrong picture. Two things changed. The instruction now asks for the whole rendering to come from the shot being edited, not just its lighting: same white balance and contrast, the same focus and depth of field, the same grain and sensor noise, skin tone carried continuously into the neck already in frame, and hair that overlaps the shoulders the way real hair does. And the join itself is now a setting — the head is feathered back over 40 px by default instead of 32, adjustable up to 64 in Settings ▸ Image engines ▸ Klein, because no wording can widen a composite.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-11-lama-stage-runs',
     date: '2026-08-11',
     title: 'The LaMa cleanup stage of the H3 swap actually runs now',
