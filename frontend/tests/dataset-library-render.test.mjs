@@ -72,3 +72,25 @@ test('library cards separate by elevation, not by an outline', () => {
   assert.match(card, /shadow-\[/)
   assert.ok(!/border border-border/.test(card), 'the card outline is back')
 })
+
+/* THE COVER IS ROUND, AND ITS BOX IS SQUARE — the two go together.
+   It used to be a 4:3 banner with `object-cover`, and a reference photo is a
+   square head crop: the crop ate the top and bottom of every one of them, so
+   the library was a wall of half faces. A square box takes a square image
+   whole, and the circle is then only the shape. */
+test('a dataset cover is a circle in a square box, not a cropped banner', () => {
+  const html = render(DATASETS)
+  assert.match(html, /aspect-square[^"]*rounded-full[^"]*object-cover/)
+  assert.doesNotMatch(html, /aspect-\[4\/3\]/)
+  // The image is still the reference photo, still decorative (the card's own
+  // button carries the accessible name).
+  assert.match(html, /\/api\/dataset\/1\/img\/ref\.png/)
+})
+
+test('a dataset with no reference photo still gets a round initial', () => {
+  const html = render(DATASETS)
+  // The second fixture has no ref_filename: it falls back to the gradient
+  // initial, which must be the same shape as the photo it stands in for.
+  assert.match(html, /grid aspect-square[^"]*rounded-full/)
+  assert.match(html, />I</)
+})

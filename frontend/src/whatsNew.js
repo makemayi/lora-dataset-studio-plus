@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-11-round-dataset-covers',
+    date: '2026-08-11',
+    title: 'Dataset covers are round, and no longer cut faces in half',
+    blurb: 'The library showed each dataset behind a 4:3 banner, and a reference photo is a square head crop — so the crop ate the top and bottom of every one of them and the page was a wall of half faces. The cover is a circle in a square box now: a square photo fits it whole, so nothing of the face is lost, and a dataset with no reference photo yet gets the same round shape with its initial in it.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-11-cancel-reaches-a-busy-comfyui',
     date: '2026-08-11',
     title: 'Stop now reaches a ComfyUI that is actually busy',

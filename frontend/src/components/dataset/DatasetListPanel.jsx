@@ -195,31 +195,37 @@ function DatasetTile({ d, onOpen, onDelete, onExportZip, onExportBackup, onSetti
       <button type="button" onClick={() => onOpen(d.id)}
         aria-label={`Open the dataset ${d.name}`}
         className="block w-full text-left">
-        <div className="relative aspect-[4/3] bg-surface-raised">
+        {/* A ROUND cover in a SQUARE box, and the two go together.
+            It used to be a 4:3 banner with `object-cover`, and a reference photo
+            is a square head crop — so the crop ate the top and bottom of every
+            one of them and the library was a wall of half faces. A square box
+            takes a square image whole; the circle is then just the shape, and
+            costs no pixels of the face. */}
+        <div className="relative flex items-center justify-center bg-surface-raised px-3 pt-3 pb-1">
           {showPreviews && d.ref_filename ? (
             <img
               src={`/api/dataset/${d.id}/img/${encodeURIComponent(d.ref_filename)}`}
               alt="" loading="lazy" aria-hidden="true"
-              className="h-full w-full object-cover" />
+              className="aspect-square w-[62%] max-w-[8rem] rounded-full object-cover ring-1 ring-border" />
           ) : (
-            <span className={`grid h-full w-full place-items-center bg-gradient-to-br ${gradientFor(d.name)} text-white text-3xl font-bold`}
+            <span className={`grid aspect-square w-[62%] max-w-[8rem] place-items-center rounded-full bg-gradient-to-br ${gradientFor(d.name)} text-white text-3xl font-bold ring-1 ring-border`}
               aria-hidden="true">
               {(d.name || '?').charAt(0).toUpperCase()}
             </span>
           )}
           {d.kind === 'concept' && (
-            <span className="absolute left-1.5 top-1.5 rounded border border-fuchsia-400/40 bg-black/50 px-1.5 py-px text-[0.5625rem] font-semibold uppercase text-fuchsia-300 backdrop-blur-sm">
+            <span className="absolute left-1.5 top-1.5 z-10 rounded border border-fuchsia-400/40 bg-black/50 px-1.5 py-px text-[0.5625rem] font-semibold uppercase text-fuchsia-300 backdrop-blur-sm">
               💡 Concept
             </span>
           )}
           {d.kind === 'style' && (
-            <span className="absolute left-1.5 top-1.5 rounded border border-cyan-400/40 bg-black/50 px-1.5 py-px text-[0.5625rem] font-semibold uppercase text-cyan-300 backdrop-blur-sm">
+            <span className="absolute left-1.5 top-1.5 z-10 rounded border border-cyan-400/40 bg-black/50 px-1.5 py-px text-[0.5625rem] font-semibold uppercase text-cyan-300 backdrop-blur-sm">
               🎨 Style
             </span>
           )}
         </div>
-        <div className="flex flex-col gap-0.5 p-2.5">
-          <span className="flex items-center gap-1.5 min-w-0">
+        <div className="flex flex-col gap-0.5 p-2.5 text-center">
+          <span className="flex items-center justify-center gap-1.5 min-w-0">
             <span className="truncate text-sm font-semibold text-content">{d.name}</span>
             {(d.trained_families || []).map((f) => {
               const [lbl, cls] = FAMILY_BADGE[f] || [f, 'bg-surface-raised text-content-muted'];
