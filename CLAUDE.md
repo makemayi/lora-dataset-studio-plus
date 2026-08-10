@@ -60,6 +60,24 @@ Written for humans and for any design-oriented skill or agent brought in to
 style this app. A generic design tool does not know these, and every one of
 them was learned by breaking something.
 
+0. **Take the shape from `components/common/surfaces.js` and the glyph from
+   `components/common/icons.jsx`.** `CARD_SURFACE` / `CARD_SURFACE_INTERACTIVE`
+   / `CARD_SHADOW` / `INPUT_CLASS` / `QUIET_BUTTON` / `PRIMARY_BUTTON`, and one
+   drawn inline-SVG set (every glyph carries `data-icon="<name>"` so a test can
+   name it). Three grammar rules came out of the 2026-08-10 pass and hold
+   everywhere:
+   - **A panel separates by ELEVATION, not by an outline.** The tokens are
+     already an elevation system, so `border border-border` on a filled surface
+     is two mechanisms doing one job — and a page of them is a grid of boxes.
+   - **The current thing is a FILLED PILL** (`rounded-full bg-surface-raised`),
+     hover is `bg-surface`. Never "selected owns a border, the rest own a
+     different border". If the unselected state must keep a `border` for layout,
+     paint it `border-transparent`.
+   - **Three exceptions keep their edge, on purpose:** a control painted ON an
+     image (`border-white/15` over a dark scrim is what makes it visible over
+     arbitrary content); an edge that carries MEANING (a run card's status rule,
+     an image tile's kept/rejected border, the canvas viewport frame); and
+     Settings' own `border-border-strong` buttons, settled in its redesign.
 1. **Use the existing semantic tokens. Never introduce a parallel palette.**
    `bg-app`, `bg-surface`, `surface-raised`, `surface-overlay`, `border`,
    `border-strong`, `text-content`, `content-muted`, `content-subtle`. A raw hex,
