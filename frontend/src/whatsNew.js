@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-canvas-restyle',
+    date: '2026-08-10',
+    title: 'The canvas toolbar stops being a row of little boxes',
+    blurb: 'Zoom, Fit, Tidy up, Generate, the gesture list and every filter chip were each drawn as an outlined box, sitting on a panel that was itself outlined, above a framed board — three nested outlines before you reached a run card. They are raised pills now, the same shape as the top bar. Tidy up, Generate and the buttons on a pinned image (open, close, download) use the app\'s drawn icons instead of emoji. Nothing moved and no gesture changed: the board frame keeps its edge, because a viewport you can pan needs one.',
+    to: '/canvas',
+  },
+  {
     id: '2026-08-10-guide-restyle',
     date: '2026-08-10',
     title: 'The Guide reads like the rest of the app now',

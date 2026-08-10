@@ -1,5 +1,6 @@
 import { canvasResultLabel, describeCanvasRun } from '../../utils/canvasRunResults';
 import { pinBatchLabel } from '../../utils/canvasPinBatch';
+import { ImageIcon } from '../common/icons';
 
 /* 🎨 The board's own generation bar: what is being rendered, and where it went.
 
@@ -48,7 +49,7 @@ export default function CanvasRunTracker({ run, targets, onStop, onResume, onOpe
       {working && (
         <>
           <button type="button" onClick={onOpenPanel}
-            className="rounded-md border border-border bg-app/60 px-2 py-0.5 text-content-muted hover:text-content">
+            className="rounded-full bg-surface-raised px-2.5 py-0.5 text-content-muted transition-colors hover:bg-surface hover:text-content">
             Settings
           </button>
           <button type="button" onClick={onStop}
@@ -80,8 +81,8 @@ export default function CanvasRunTracker({ run, targets, onStop, onResume, onOpe
               <button key={`${t.datasetId}:${t.recordId}:${t.step}`} type="button"
                 onClick={() => onOpenResult(t)}
                 title={`Open the images generated from run #${t.recordId} at step ${t.step}`}
-                className="rounded-md border border-emerald-400/50 bg-emerald-500/10 px-1.5 py-0.5 text-emerald-100 tabular-nums hover:bg-emerald-500/25">
-                <span aria-hidden>🖼</span> {canvasResultLabel(t)}
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-emerald-100 tabular-nums hover:bg-emerald-500/25">
+                <ImageIcon className="h-3 w-3 shrink-0" /> {canvasResultLabel(t)}
               </button>
             ))}
           </span>
@@ -94,15 +95,18 @@ export default function CanvasRunTracker({ run, targets, onStop, onResume, onOpe
             <button type="button" onClick={onPinAll} disabled={pinBusy}
               data-testid="canvas-pin-all"
               title="Put every image this run produced on the board, each under the checkpoint that made it"
-              className="shrink-0 rounded-md border border-emerald-400/60 bg-emerald-500/20 px-2 py-0.5 font-semibold text-emerald-50 hover:bg-emerald-500/35 disabled:opacity-50">
-              {pinBusy ? '📌 Pinning…' : pinLabel}
+              className="shrink-0 rounded-full bg-emerald-500/25 px-2.5 py-0.5 font-semibold text-emerald-50 hover:bg-emerald-500/40 disabled:opacity-50">
+              {/* Both labels mounted, one hidden — a ternary on button text is
+                  the Chrome-translate removeChild crash. */}
+              <span hidden={!pinBusy}>Pinning…</span>
+              <span hidden={!!pinBusy}>{pinLabel}</span>
             </button>
           )}
           {onUndoPinAll && (
             <button type="button" onClick={onUndoPinAll}
               data-testid="canvas-pin-all-undo"
               title="Take those images back off the board"
-              className="shrink-0 rounded-md border border-border bg-app/60 px-2 py-0.5 text-content-muted hover:text-content">
+              className="shrink-0 rounded-full bg-surface-raised px-2.5 py-0.5 text-content-muted transition-colors hover:bg-surface hover:text-content">
               ↩ Undo
             </button>
           )}

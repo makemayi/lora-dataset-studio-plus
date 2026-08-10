@@ -3,6 +3,7 @@ import { selectionSummary } from '../../utils/canvasSelection';
 import {
   familyLabel, readCanvasFilterOpen, writeCanvasFilterOpen,
 } from '../../utils/canvasFamilyFilter';
+import { CARD_SURFACE } from '../common/surfaces';
 
 /* Which datasets sit on the board.
 
@@ -17,6 +18,16 @@ import {
    Nothing is hidden by that: the button says what is currently shown ("3 of 7"),
    so the state is readable folded, never behind a mystery icon. And unfolding is
    REMEMBERED, so someone who works with the filter open keeps it open. */
+
+/* One shape for every control in this bar. It used to be a grid of little
+   outlined boxes — `border border-border bg-app/60` on the fold button, on
+   Select all, on Clear, on the search field, on every status and model
+   checkbox, on Reset — which is exactly the "boxes inside boxes" look the
+   redesign is removing. They are all the same raised pill now; the tokens
+   already separate them from the panel they sit on. */
+const CONTROL = 'rounded-full bg-surface-raised px-3 text-content transition-colors hover:bg-surface';
+const CHECK_CHIP =
+  `flex min-h-9 cursor-pointer items-center gap-1.5 py-1 text-[0.6875rem] ${CONTROL}`;
 
 export default function CanvasDatasetFilter({
   datasets, selected, onToggle, onAll, onNone,
@@ -40,24 +51,29 @@ export default function CanvasDatasetFilter({
   const total = (datasets || []).length;
 
   return (
-    <section className="mb-3 rounded-xl border border-border bg-surface-raised p-2.5">
+    <section className={`mb-3 p-3 ${CARD_SURFACE}`}>
       <div className="flex flex-wrap items-center gap-2">
         <button type="button"
           onClick={toggleOpen}
           aria-expanded={open}
-          className="flex h-9 items-center gap-1.5 rounded-md border border-border bg-app/60 px-2.5 text-content text-[0.75rem] font-semibold hover:border-indigo-400/50">
-          <span aria-hidden>{open ? '▾' : '▸'}</span> Datasets
+          className={`flex h-9 items-center gap-1.5 text-[0.75rem] font-semibold ${CONTROL}`}>
+          {/* One caret, rotated: two glyphs swapped by a ternary is a text node
+              React must not edit under Chrome auto-translate. */}
+          <span aria-hidden
+            className={`text-[0.625rem] transition-transform duration-150 ${open ? 'rotate-90' : ''}`}>
+            ▶
+          </span> Datasets
           <span className="font-normal text-content-muted">· {selectionSummary(sel.size, total)}</span>
           <span className="font-normal text-content-subtle">· {visibleRuns} runs shown</span>
         </button>
         {open && total > 0 && (
           <div className="flex items-center gap-1.5">
             <button type="button" onClick={onAll}
-              className="flex h-9 items-center rounded-md border border-border bg-app/60 px-2.5 text-content-muted text-[0.6875rem] hover:text-content">
+              className={`flex h-9 items-center text-[0.6875rem] ${CONTROL}`}>
               Select all
             </button>
             <button type="button" onClick={onNone}
-              className="flex h-9 items-center rounded-md border border-border bg-app/60 px-2.5 text-content-muted text-[0.6875rem] hover:text-content">
+              className={`flex h-9 items-center text-[0.6875rem] ${CONTROL}`}>
               Clear
             </button>
           </div>
@@ -71,19 +87,19 @@ export default function CanvasDatasetFilter({
           </p>
         ) : (
           <>
-          <div className="mt-2 grid gap-2 border-t border-border pt-2 sm:grid-cols-[minmax(12rem,1fr)_auto_auto]">
+          <div className="mt-2 grid gap-2 pt-2 sm:grid-cols-[minmax(12rem,1fr)_auto_auto]">
             <label className="sr-only" htmlFor="canvas-filter-search">Search canvas runs</label>
             <input id="canvas-filter-search" type="search" value={query}
               onChange={(e) => onQueryChange(e.target.value)}
               placeholder="Search dataset, run ID, model or variant…"
-              className="h-9 min-w-0 rounded-md border border-border bg-app/60 px-3 text-content text-[0.75rem] placeholder:text-content-subtle" />
-            <label className="flex min-h-9 cursor-pointer items-center gap-2 rounded-md border border-border bg-app/50 px-2 text-content text-[0.75rem]">
+              className="h-9 min-w-0 rounded-full bg-surface-raised px-3 text-[0.75rem] text-content placeholder:text-content-subtle focus:outline-none focus:ring-1 focus:ring-primary" />
+            <label className={`${CHECK_CHIP} text-[0.75rem]`}>
               <input type="checkbox" checked={showPinned} onChange={onTogglePinned}
                 className="h-4 w-4 accent-indigo-500" />
               Pinned images
             </label>
             <button type="button" onClick={onResetFilters}
-              className="h-9 rounded-md border border-border px-3 text-content-muted text-[0.75rem] hover:text-content">
+              className={`h-9 text-[0.75rem] ${CONTROL}`}>
               Reset filters
             </button>
           </div>
@@ -92,8 +108,7 @@ export default function CanvasDatasetFilter({
               <legend className="sr-only">Filter by run status</legend>
               <span className="text-content-muted text-[0.6875rem] font-semibold">Status</span>
               {statuses.map((status) => (
-                <label key={status}
-                  className="flex min-h-9 cursor-pointer items-center gap-1.5 rounded-md border border-border bg-app/50 px-2 text-content text-[0.6875rem]">
+                <label key={status} className={CHECK_CHIP}>
                   <input type="checkbox" checked={selectedStatuses.includes(status)}
                     onChange={() => onToggleStatus(status)} className="h-4 w-4 accent-indigo-500" />
                   {status === 'active' ? 'Active' : status === 'completed' ? 'Completed'
@@ -106,8 +121,7 @@ export default function CanvasDatasetFilter({
             aria-label="Filter canvas by model">
             <span className="mr-0.5 text-content-muted text-[0.6875rem] font-semibold">Models</span>
             {(families || []).map((family) => (
-              <label key={family}
-                className="flex min-h-9 cursor-pointer items-center gap-1.5 rounded-md border border-border bg-app/50 px-2 text-content text-[0.6875rem] hover:border-indigo-400/50">
+              <label key={family} className={CHECK_CHIP}>
                 <input type="checkbox" checked={familySel.has(family)}
                   onChange={() => onToggleFamily(family)}
                   className="h-4 w-4 shrink-0 accent-indigo-500" />
@@ -135,7 +149,7 @@ export default function CanvasDatasetFilter({
           <ul className="mt-2 grid max-h-56 list-none grid-cols-1 gap-1 overflow-y-auto p-0 sm:grid-cols-2 lg:grid-cols-3">
             {datasets.map((d) => (
               <li key={d.id}>
-                <label className="flex min-h-[2.25rem] cursor-pointer items-center gap-2 rounded-md border border-transparent px-2 py-1 hover:border-border hover:bg-app/50">
+                <label className="flex min-h-[2.25rem] cursor-pointer items-center gap-2 rounded-lg px-2 py-1 transition-colors hover:bg-surface-raised">
                   <input type="checkbox" checked={sel.has(d.id)}
                     onChange={() => onToggle(d.id)}
                     className="h-4 w-4 shrink-0 accent-indigo-500" />

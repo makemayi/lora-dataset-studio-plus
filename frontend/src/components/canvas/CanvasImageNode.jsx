@@ -2,6 +2,17 @@ import { nudgeImageNode } from '../../utils/canvasImageNodes';
 import { CLUSTER_UNITS, chromeScale } from '../../utils/canvasNodeChrome';
 import { imageFactsLine } from '../../utils/generatedImageFacts';
 import { useImageDownload } from '../../hooks/useImageDownload';
+import { MagnifierIcon, CloseIcon, DownloadIcon } from '../common/icons';
+
+/* The chrome buttons sit ON a photograph, which is the one place in the app
+   where a hairline earns its keep: nothing else guarantees the control is
+   visible over whatever the picture happens to be. So these keep their
+   `border-white/15` over a dark scrim while the rest of the board drops its
+   outlines — and the glyphs inside come from the app's icon set like everywhere
+   else, instead of three emoji drawn by three different fonts. */
+const IMAGE_CHROME_BUTTON =
+  'flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/15 '
+  + 'bg-black/50 text-white backdrop-blur-sm transition-colors';
 
 /* 🖼 One generated image, pinned ON the board.
 
@@ -172,14 +183,14 @@ export default function CanvasImageNode({ node, datasetId, laneName, onGeometry,
         <button type="button" onClick={(e) => { e.stopPropagation(); onOpen?.(node); }}
           title="Open this image full-screen with all its settings"
           aria-label={`Open ${imageLabel} full-screen`}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/15 bg-black/50 text-white backdrop-blur-sm transition-colors text-[0.75rem] leading-none hover:bg-black/70">🔍</button>
+          className={`${IMAGE_CHROME_BUTTON} hover:bg-black/70`}><MagnifierIcon className="h-3.5 w-3.5" /></button>
         {/* ✕ closes the node and REMEMBERS where it was. Re-pinning the same
             image from its gallery brings it back here, this size. */}
         <button type="button" onClick={(e) => { e.stopPropagation(); onClose?.(node); }}
           data-testid="canvas-image-close"
           title="Close this image — re-opening it from its gallery puts it back here, at this size"
           aria-label={`Close the pinned image at ${imageLabel}`}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/15 bg-black/50 text-white backdrop-blur-sm transition-colors text-[0.875rem] leading-none hover:border-red-400/60 hover:bg-red-500/70">✕</button>
+          className={`${IMAGE_CHROME_BUTTON} hover:border-red-400/60 hover:bg-red-500/70`}><CloseIcon className="h-3.5 w-3.5" /></button>
         {/* ⬇ Keep this picture. LAST in the cluster, so it wraps onto its own
             line and 🔍 and ✕ stay at the pixel a hand already knows.
             The file lands under a name that still says where it came from —
@@ -192,8 +203,10 @@ export default function CanvasImageNode({ node, datasetId, laneName, onGeometry,
           data-testid="canvas-image-download"
           title="Download this image — the file name keeps its dataset, run, step and seed"
           aria-label={`Download the image at ${imageLabel}`}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/15 bg-black/50 text-white backdrop-blur-sm transition-colors text-[0.75rem] leading-none hover:bg-black/70 disabled:opacity-50">
-          {dl.busy ? '…' : '⬇'}
+          className={`${IMAGE_CHROME_BUTTON} hover:bg-black/70 disabled:opacity-50`}>
+          {/* Both states mounted, one hidden — see CLAUDE.md ▸ UI changes. */}
+          <span hidden={!dl.busy} className="text-[0.75rem] leading-none">…</span>
+          <span hidden={!!dl.busy}><DownloadIcon className="h-3.5 w-3.5" /></span>
         </button>
       </div>
       {/* A refusal has to be READABLE, and the node is small — so it is a strip

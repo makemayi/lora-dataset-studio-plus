@@ -62,6 +62,23 @@ import CheckpointGalleryPanel from '../shared/CheckpointGalleryPanel';
 import { useToast } from '../common/Toast';
 import { useCapabilities } from '../../context/CapabilitiesContext';
 import { HelpBadge } from '../../help/HelpMode';
+import { WandIcon, PaletteIcon } from '../common/icons';
+
+/* The board's toolbar. Every control was its own outlined box over `bg-app/60`
+   — six of them in a row above a board that is itself framed, which is three
+   nested outlines before you reach a run card. They are raised pills now, the
+   same shape as the filter bar above them and the nav bar above that.
+   The 40px height below `lg` is not cosmetic and stays: this row is the only
+   way to zoom without a wheel, and a 36px target is under what a finger lands
+   on — a miss pans the board instead. */
+const TOOL_BUTTON_BASE =
+  'flex h-10 items-center justify-center gap-1.5 rounded-full px-3 text-[0.6875rem] '
+  + 'font-semibold transition-colors disabled:opacity-40 lg:h-9';
+const TOOL_BUTTON =
+  `${TOOL_BUTTON_BASE} bg-surface-raised text-content-muted hover:bg-surface hover:text-content`;
+const TOOL_ICON =
+  'flex items-center justify-center rounded-full bg-surface-raised text-content-muted '
+  + 'transition-colors hover:bg-surface hover:text-content disabled:opacity-40';
 
 /* ◉ The LoRA Canvas surface — every selected dataset's genealogy on ONE board,
    with zoom and pan.
@@ -150,7 +167,7 @@ function LaneHeader({ lane, onZoomRef }) {
           onClick={() => onZoomRef?.({ url: refUrl, name: lane.name })}
           title={`Reference image — ${lane.name} (click to enlarge)`}
           aria-label={`Reference image of ${lane.name} — click to enlarge`}
-          className="shrink-0 overflow-hidden rounded border border-border bg-app/60 hover:border-indigo-400/60"
+          className="shrink-0 overflow-hidden rounded-md bg-surface-raised ring-indigo-400/60 hover:ring-2"
           style={{ width: LANE_HEADER_H - 4, height: LANE_HEADER_H - 4 }}>
           <img src={refUrl} alt="" loading="lazy" draggable={false}
             className="h-full w-full object-cover" />
@@ -159,7 +176,7 @@ function LaneHeader({ lane, onZoomRef }) {
       <span className="truncate text-[0.8125rem] font-semibold text-content" title={lane.name}>
         {lane.name}
       </span>
-      <span className="shrink-0 rounded-full border border-border bg-app/60 px-1.5 py-0.5 text-content-muted text-[0.5625rem] font-medium tabular-nums">
+      <span className="shrink-0 rounded-full bg-surface-raised px-1.5 py-0.5 text-content-muted text-[0.5625rem] font-medium tabular-nums">
         {lane.runs} run{lane.runs === 1 ? '' : 's'}
       </span>
       {lane.status === 'loading' && (
@@ -1499,16 +1516,16 @@ export default function LineageCanvas({ entries, positions, imageNodes, allImage
           <button type="button" onClick={() => zoomByButton(1 / ZOOM_STEP)}
             disabled={view.scale <= MIN_SCALE + 1e-9}
             title="Zoom out" aria-label="Zoom out"
-            className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-app/60 text-content-muted hover:text-content disabled:opacity-40 lg:h-9 lg:w-9">−</button>
+            className={`h-10 w-10 lg:h-9 lg:w-9 ${TOOL_ICON}`}>−</button>
           <span className="min-w-[3.25rem] text-center text-content-muted text-[0.6875rem] tabular-nums">{pct}%</span>
           <button type="button" onClick={() => zoomByButton(ZOOM_STEP)}
             disabled={view.scale >= MAX_SCALE - 1e-9}
             title="Zoom in" aria-label="Zoom in"
-            className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-app/60 text-content-muted hover:text-content disabled:opacity-40 lg:h-9 lg:w-9">+</button>
+            className={`h-10 w-10 lg:h-9 lg:w-9 ${TOOL_ICON}`}>+</button>
         </div>
         <button type="button" onClick={fitNow}
           title="Fit the whole board in view"
-          className="flex h-10 items-center rounded-md border border-border bg-app/60 px-3 text-content-muted text-[0.6875rem] font-semibold hover:text-content lg:h-9">
+          className={TOOL_BUTTON}>
           Fit
         </button>
         {/* The way out of an arrangement that got away from you. Twenty runs
@@ -1521,8 +1538,8 @@ export default function LineageCanvas({ entries, positions, imageNodes, allImage
             ? 'Forget every moved card, rebuild the automatic tree, and bring '
               + 'every pinned image back beside its run'
             : 'Nothing has been moved yet'}
-          className="flex h-10 items-center gap-1 rounded-md border border-border bg-app/60 px-3 text-content-muted text-[0.6875rem] font-semibold hover:text-content disabled:opacity-40 lg:h-9">
-          <span aria-hidden>✦</span> Tidy up
+          className={TOOL_BUTTON}>
+          <WandIcon className="h-3.5 w-3.5 shrink-0" /> Tidy up
         </button>
         <HelpBadge topic="canvas-arrange" />
         {/* 🎨 The board's own launch button. It carries the pick count so the
@@ -1533,11 +1550,10 @@ export default function LineageCanvas({ entries, positions, imageNodes, allImage
           title={picks.length
             ? `${picks.length} checkpoint(s) picked — open the run settings`
             : 'Tick checkpoints on the board, then set the run up here'}
-          className={'flex h-10 items-center gap-1 rounded-md border px-3 text-[0.6875rem] font-semibold lg:h-9 '
-            + (picks.length
-              ? 'border-indigo-400/60 bg-indigo-500/15 text-indigo-100 '
-              : 'border-border bg-app/60 text-content-muted hover:text-content ')}>
-          <span aria-hidden>🎨</span> Generate
+          className={picks.length
+            ? `${TOOL_BUTTON_BASE} bg-indigo-500/20 text-indigo-100 hover:bg-indigo-500/30`
+            : TOOL_BUTTON}>
+          <PaletteIcon className="h-3.5 w-3.5 shrink-0" /> Generate
           {picks.length > 0 && (
             <span className="rounded-full bg-indigo-500/40 px-1.5 tabular-nums">{picks.length}</span>
           )}
@@ -1578,16 +1594,16 @@ export default function LineageCanvas({ entries, positions, imageNodes, allImage
             of its own: every pixel spent above the frame is a pixel of board
             pushed under the fold, which is the other half of this same pass. */}
         <details className="lg:hidden">
-          <summary className="flex h-10 cursor-pointer list-none items-center rounded-md border border-border bg-app/60 px-3 text-content-muted text-[0.6875rem] font-semibold hover:text-content">
-            <span aria-hidden className="mr-1">☝</span> Gestures
+          <summary className={`cursor-pointer list-none ${TOOL_BUTTON}`}>
+            Gestures
           </summary>
-          <p className="mt-1.5 rounded-md border border-border bg-app/40 px-2.5 py-2 text-content-subtle text-[0.6875rem] leading-relaxed">
+          <p className="mt-1.5 rounded-lg bg-surface-raised px-2.5 py-2 text-content-subtle text-[0.6875rem] leading-relaxed">
             {BOARD_GESTURES}
           </p>
         </details>
         {selectedForDiff.length > 0 && (
           <button type="button" onClick={() => setSelectedForDiff([])}
-            className="rounded-md border border-amber-400/50 bg-amber-500/10 px-2 py-1 text-amber-100 text-[0.625rem]">
+            className="rounded-full bg-amber-500/15 px-2.5 py-1 text-amber-200 text-[0.625rem] hover:bg-amber-500/25">
             Clear compare ({selectedForDiff.length})
           </button>
         )}

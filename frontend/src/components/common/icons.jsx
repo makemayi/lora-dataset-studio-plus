@@ -196,6 +196,48 @@ export function RefreshIcon(props) {
   );
 }
 
+/** Open this full-screen — the pinned images' old 🔍. */
+export function MagnifierIcon(props) {
+  return (
+    <Glyph name="magnifier" {...props}>
+      <circle cx="10.75" cy="10.75" r="6.25" />
+      <path d="M15.4 15.4L20 20" />
+    </Glyph>
+  );
+}
+
+export function DownloadIcon(props) {
+  return (
+    <Glyph name="download" {...props}>
+      <path d="M12 4v10.5M8.2 11l3.8 3.8L15.8 11" />
+      <path d="M4.5 17.5V19a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-1.5" />
+    </Glyph>
+  );
+}
+
+/** Tidy up / rearrange automatically — the canvas' old ✦. */
+export function WandIcon(props) {
+  return (
+    <Glyph name="wand" {...props}>
+      <path d="M4 20l10.5-10.5" />
+      <path d="M14 4.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z" />
+      <path d="M19 13l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z" />
+    </Glyph>
+  );
+}
+
+/** Generate images — the canvas' and studio's old 🎨. */
+export function PaletteIcon(props) {
+  return (
+    <Glyph name="palette" {...props}>
+      <path d="M12 3.2a8.8 8.8 0 0 0 0 17.6c1.4 0 2.1-.9 2.1-1.9 0-1.5-1.2-1.8-1.2-3 0-1 .8-1.8 1.8-1.8h1.6a4.5 4.5 0 0 0 4.5-4.5c0-3.6-3.7-6.4-8.8-6.4z" />
+      <circle cx="8" cy="10" r="1.1" />
+      <circle cx="12" cy="7.6" r="1.1" />
+      <circle cx="16" cy="9.6" r="1.1" />
+    </Glyph>
+  );
+}
+
 export function ImageIcon(props) {
   return (
     <Glyph name="image" {...props}>

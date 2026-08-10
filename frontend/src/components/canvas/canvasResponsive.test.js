@@ -25,9 +25,13 @@ const filter = fs.readFileSync(new URL('./CanvasDatasetFilter.jsx', import.meta.
 test('the board toolbar carries 40-px targets on a phone and 36 on a desktop', () => {
   const bar = canvas.slice(canvas.indexOf('aria-label="Zoom out"') - 400,
     canvas.indexOf('data-testid="canvas-deploy-legend"'));
-  // − and + are square; Fit, Tidy up and 🎨 Generate are tall only.
-  assert.equal((bar.match(/h-10 w-10 [^"']*lg:h-9 lg:w-9/g) || []).length, 2);
-  assert.ok((bar.match(/h-10 [^"'+]*lg:h-9/g) || []).length >= 3);
+  // − and + are square, written where they are used…
+  assert.equal((bar.match(/h-10 w-10 lg:h-9 lg:w-9/g) || []).length, 2);
+  // …and Fit, Tidy up and Generate take the shared shape, whose height is
+  // declared once (the 2026-08-10 restyle moved the row onto raised pills; the
+  // sizes had to survive that move, which is what this pins).
+  assert.match(canvas, /const TOOL_BUTTON_BASE =\s*\n?\s*'flex h-10 [^']*'\s*\n?\s*\+ '[^']*lg:h-9'/);
+  assert.ok((bar.match(/\{TOOL_BUTTON\}|\{TOOL_BUTTON_BASE\}/g) || []).length >= 3);
   // No 36-px target left in the row at phone width.
   assert.doesNotMatch(bar, /className="flex h-9 /);
   // …and it still WRAPS rather than overflowing: 400 px cannot hold this row.

@@ -38,14 +38,14 @@ export default function CanvasBlendPanel({
   const configCount = canvasBlendConfigCount(selection, { weights, sets });
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-app/40 p-2">
+    <div className="flex flex-col gap-2 rounded-lg bg-surface-raised p-2">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="text-[0.6875rem] font-semibold text-content">
           <span aria-hidden>⚗️</span> How to use these checkpoints
         </span>
         <HelpBadge topic="canvas-blend" />
         <div role="group" aria-label="Canvas run mode"
-          className="ml-auto flex rounded-lg border border-border bg-app/60 p-0.5">
+          className="ml-auto flex rounded-full bg-surface p-0.5">
           {[['compare', '⚖ Compare'], ['blend', '🧬 Blend']].map(([value, label]) => {
             // Mixed families is not "a blend that fails", it is a run that cannot
             // exist: the toggle goes dead and SAYS which families are in the way,
@@ -98,7 +98,7 @@ export default function CanvasBlendPanel({
               is neither, which is a result people ask for on purpose and also the
               one that surprises everybody who expected "both people". Saying it
               here costs a line; not saying it costs a GPU hour and a bug report. */}
-          <p className="m-0 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-content-muted text-[0.6875rem]">
+          <p className="m-0 rounded-lg bg-surface px-2.5 py-1.5 text-content-muted text-[0.6875rem]">
             <span aria-hidden>💡</span> Two identity LoRAs blend into a hybrid person —
             neither of the two, sometimes exactly what you want. The usual sweet spot is
             identity + style, or identity + concept.

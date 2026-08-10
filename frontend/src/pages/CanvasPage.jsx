@@ -389,9 +389,10 @@ export default function CanvasPage() {
           from `sm` up, and the ? badge next to the title carries the same
           explanation at every width, so nothing is actually hidden. */}
       <header className="mb-2 sm:mb-3">
-        <h1 className="flex items-center gap-2 text-lg font-semibold text-content">
-          <span aria-hidden>◉</span> LoRA Canvas
-          <span className="px-1.5 py-0.5 rounded border border-amber-400/50 bg-amber-500/10 text-amber-300 text-[0.625rem] font-semibold uppercase tracking-wide">Beta</span>
+        <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-content-subtle">board</p>
+        <h1 className="mt-1 flex items-center gap-2 text-lg font-semibold text-content">
+          LoRA Canvas
+          <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-amber-300">Beta</span>
           <HelpBadge topic="page-canvas" />
         </h1>
         <p className="mt-1 hidden text-content-muted text-[0.75rem] sm:block">
