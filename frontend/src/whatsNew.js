@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-setup-restyle',
+    date: '2026-08-10',
+    title: 'The setup wizard matches the app it sets up',
+    blurb: 'It was the last page still drawing outlined boxes around everything: the machine scan, each install card, each note. They are shaded panels now, the buttons are pills, and the fields use the same measure as Settings — the wizard had its own copy of that. Five button and heading labels that used to be swapped in place (Saving…, Starting…, Scanning your machine…) are now mounted side by side, which is what keeps the browser\'s auto-translate from breaking the first screen a new install ever shows.',
+    to: '/setup',
+  },
+  {
     id: '2026-08-10-runs-restyle',
     date: '2026-08-10',
     title: 'Runs reads as a list of runs, not a page of frames',
