@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-11-undo-a-swap',
+    date: '2026-08-11',
+    title: 'Undo a face swap that came out wrong',
+    blurb: 'A swap overwrites the tile, so until now a bad one meant going into data/trash by hand to find the picture it replaced — if you even knew it was there. Swapped tiles carry an ↩🎭 button now: press it and the previous image comes back, with its caption, face score and keep/reject state intact. The swapped version is trashed in its turn rather than deleted, so you can change your mind twice. The button is only offered while that file is genuinely still in the Trash — empty the Trash and it disappears instead of failing when you click it.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-11-swap-knows-the-pose',
     date: '2026-08-11',
     title: 'The swap is told which way the head is turned, instead of guessing',

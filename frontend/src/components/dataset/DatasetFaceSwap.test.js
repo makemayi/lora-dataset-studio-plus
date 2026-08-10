@@ -11,7 +11,7 @@ test('dataset hook exposes a face-swap action posting to /face-swap', () => {
   assert.ok(hook.includes('`/api/dataset/image/${imageId}/face-swap`'));
   const start = hook.indexOf('const faceSwapImage = useCallback');
   assert.ok(start !== -1, 'faceSwapImage not defined');
-  assert.match(hook, /regenerate, faceSwapImage, analyzeFaces, scoreFace/);
+  assert.match(hook, /regenerate, faceSwapImage, undoFaceSwap, analyzeFaces, scoreFace/);
 });
 
 test('workspace passes hasRef and the face-swap action into the grid', () => {
@@ -20,8 +20,9 @@ test('workspace passes hasRef and the face-swap action into the grid', () => {
 });
 
 test('grid forwards onFaceSwap/hasRef down to each tile', () => {
-  assert.match(grid, /onFaceSwap, hasRef = false/);
-  assert.match(grid, /onFaceSwap=\{onFaceSwap\} swapBusy=\{Boolean\(swappingIds\?\.has\(img\.id\)\)\}/);
+  assert.match(grid, /onFaceSwap, onUndoFaceSwap, hasRef = false/);
+  assert.match(grid, /onFaceSwap=\{onFaceSwap\} onUndoFaceSwap=\{onUndoFaceSwap\}/);
+  assert.match(grid, /swapBusy=\{Boolean\(swappingIds\?\.has\(img\.id\)\)\}/);
   assert.match(grid, /hasRef=\{hasRef\}/);
 });
 
@@ -56,3 +57,26 @@ test('the hook drops a second click before React can re-render', () => {
   // ...and it is released whatever happened, or the tile stays dead forever.
   assert.match(hook, /swappingRef\.current\.delete\(imageId\)/);
 });
+
+/* ↩ UNDO A SWAP THAT ALREADY LANDED.
+   The swap overwrites in place, so the only copy of what it replaced is the
+   file it moved to Trash. The button is offered only while the server says that
+   file is still there (`can_undo_swap`), so it never promises something
+   emptying the Trash has taken away. */
+test('a swapped tile offers an undo, and only while the server says it can', () => {
+  assert.match(gridItem, /img\.can_undo_swap && onUndoFaceSwap/);
+  assert.match(gridItem, /Undo the face swap/);
+  assert.match(gridItem, /↩🎭/);
+  assert.match(grid, /onUndoFaceSwap=\{onUndoFaceSwap\}/);
+  assert.match(workspace, /onUndoFaceSwap=\{ds\.undoFaceSwap\}/);
+})
+
+test('undo posts to its own route and shares the double-click guard', () => {
+  assert.ok(hook.includes('`/api/dataset/image/${imageId}/face-swap/undo`'));
+  const start = hook.indexOf('const undoFaceSwap = useCallback');
+  const body = hook.slice(start, start + 900);
+  assert.match(body, /swappingRef\.current\.has\(imageId\)/);
+  // The restored file can carry the SAME name as before, so the tile has to be
+  // told to stop trusting its cached copy.
+  assert.match(body, /setNonces/);
+})

@@ -3336,6 +3336,11 @@ def dataset_payload(user_id, dataset_id):
                     # inside the caption instead of leaving the user to hunt by eye.
                     'leak_terms': _img_leak_terms(i),
                     'face_score': i.face_score, 'face_state': i.face_state,
+                    # A completed 🎭↔ swap can still be undone: the picture it
+                    # replaced is in the Trash and the row remembers where. The
+                    # tile shows ↩ only while that is true, so the button never
+                    # offers something the Trash no longer holds.
+                    'can_undo_swap': can_undo_swap(i),
                     # Watermark V1: state drives the tile badge (🚩 detected / ⊘ dismissed
                     # / ✨ cleaned / ⚠ failed) and the "Clean (N)" count; bbox lets the UI
                     # draw the detected box (review lightbox); watermark_route(_nocrop)
@@ -3663,6 +3668,7 @@ from .dataset_generation_service import (
     regenerate_image, face_swap_image, resolve_improve_engine,
     FACE_SWAP_ENGINES, resolve_face_swap_engine, SWAP_RESTORE_FIELDS,
     restore_swapped_original, finish_swapped_original, swap_restore_filename,
+    undo_face_swap, can_undo_swap, swap_undo_state,
     improve_existing_image, reimprove_image, bulk_improve_eligible_ids,
     start_bulk_improve, engine_labels, editable_engines, edit_engine_choice_message,
     _sync_generate_activity, _improve_prompt, _improve_candidate_label,

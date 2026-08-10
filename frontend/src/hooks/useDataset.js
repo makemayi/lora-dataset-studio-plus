@@ -1395,6 +1395,35 @@ export function useDataset() {
     }
   }, [refresh, toast]);
 
+  /* ↩ Undo a swap that already finished. No GPU and no queue: the picture the
+     swap replaced is in the Trash and the server moves it back. Shares the
+     swapping ref-guard so a double click cannot race the restore against
+     itself. */
+  const undoFaceSwap = useCallback(async (imageId) => {
+    if (swappingRef.current.has(imageId)) return { ok: false, error: 'busy' };
+    swappingRef.current.add(imageId);
+    setSwappingIds((previous) => new Set(previous).add(imageId));
+    try {
+      const d = await postJson(`/api/dataset/image/${imageId}/face-swap/undo`, {});
+      if (d.ok) {
+        toast.success('Face swap undone — the previous image is back');
+        // Same filename may return; bust this tile's cache like the mirror does.
+        setNonces((m) => ({ ...m, [imageId]: (m[imageId] || 0) + 1 }));
+        await refresh();
+        return { ok: true };
+      }
+      toast.error(d.error || 'Unexpected error');
+      return { ok: false, error: d.error };
+    } finally {
+      swappingRef.current.delete(imageId);
+      setSwappingIds((previous) => {
+        const next = new Set(previous);
+        next.delete(imageId);
+        return next;
+      });
+    }
+  }, [refresh, toast]);
+
   const purgeUnused = useCallback(async () => {
     const d = await postJson(`/api/dataset/${currentId}/purge`);
     if (d.ok) { toast.success(`${d.purged} image(s) deleted`); await refresh(); }
@@ -1814,7 +1843,7 @@ export function useDataset() {
           editReference, retryReferenceEdit, canRetryReferenceEdit, keepEditedReference,
           discardEditedReference, setDatasetTrainType, setDatasetFidelity, deleteImage,
           lockImage, batchImages, replaceCaptions, writeCaptionFiles, openDatasetFolder,
-          cancelPending, cancelCaption, regenerate, faceSwapImage, analyzeFaces, scoreFace,
+          cancelPending, cancelCaption, regenerate, faceSwapImage, undoFaceSwap, analyzeFaces, scoreFace,
           findWatermarks, cleanWatermarks, cleanWatermarkImages, restoreWatermarkImage,
           dismissWatermarks, saveWatermarkRegions, cancelWatermarkScan,
           purgeUnused, exportZip, exportBackup, exportZipFor, exportBackupFor, importBackup, importDatasetZip, importDatasetFolder,

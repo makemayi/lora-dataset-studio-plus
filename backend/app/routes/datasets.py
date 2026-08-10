@@ -1958,6 +1958,22 @@ def dataset_image_face_swap(image_id):
     return jsonify({'ok': True, 'job_id': job_id})
 
 
+@bp.post('/dataset/image/<int:image_id>/face-swap/undo')
+def dataset_image_face_swap_undo(image_id):
+    """Put a tile back the way it was before a completed 🎭↔ swap.
+
+    No GPU, no queue: the picture the swap replaced is in the Trash and this
+    moves it back. The swapped image is trashed in its turn rather than deleted,
+    so the decision stays reversible in both directions."""
+    try:
+        ok = svc.undo_face_swap(LOCAL_USER, image_id)
+    except Exception as e:
+        return _map_error(e)
+    if not ok:
+        return jsonify({'error': 'not found'}), 404
+    return jsonify({'ok': True})
+
+
 @bp.post('/dataset/<int:dataset_id>/import-zip')
 def dataset_import_zip(dataset_id):
     """Merge an EXISTING training dataset (ZIP of images + kohya-style same-stem

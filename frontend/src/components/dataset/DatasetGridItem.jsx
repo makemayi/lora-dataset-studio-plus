@@ -93,7 +93,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
                                          onLockToggle, onMirror, mirrorBusy = false, busy = false,
                                          busyReason = null,
                                           onScoreFace, scoreFaceBusy = false, faceScoringBusy = false, faceScoringBlocked = null,
-                                          onRegenerate, onReimprove, onFaceSwap, swapBusy = false, hasRef = false, onView, nonce = 0, faceThresholds,
+                                          onRegenerate, onReimprove, onFaceSwap, onUndoFaceSwap, swapBusy = false, hasRef = false, onView, nonce = 0, faceThresholds,
                                           selected = false, onToggleSelect, tileSize = 'M',
                                           datasetKind = 'character', dualCaptions = false,
                                           improvementState = undefined }) {
@@ -354,6 +354,17 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               <span hidden={swapBusy}>🎭↔</span>
               <span hidden={!swapBusy} className="animate-pulse">🎭…</span>
             </button>
+          )}
+          {/* ↩ Undo a swap that already landed. Offered only while the server
+              says the picture it replaced is still in the Trash, so the button
+              never promises something emptying the Trash has taken away. */}
+          {img.can_undo_swap && onUndoFaceSwap && (
+            <button type="button"
+              onClick={(e) => { e.stopPropagation(); onUndoFaceSwap(img.id); }}
+              disabled={busy || swapBusy}
+              title="Undo the face swap — bring back the image it replaced"
+              aria-label="Undo the face swap — bring back the image it replaced"
+              className="px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">↩🎭</button>
           )}
           {rerunImprove && (
             <button type="button"

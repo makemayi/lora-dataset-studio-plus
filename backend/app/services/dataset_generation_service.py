@@ -10,6 +10,7 @@ split) -- pure move, no behavior change.
 import json
 import os
 import re
+import shutil
 import threading
 import time
 import uuid
@@ -1408,15 +1409,101 @@ def finish_swapped_original(img):
     if not previous or previous == img.filename:
         return True
     path = os.path.join(_dataset_path(img.dataset_id), previous)
+    trashed = None
     try:
         if os.path.exists(path):
-            trash.send_to_trash(
+            trashed = trash.send_to_trash(
                 path, context=f'dataset-{img.dataset_id}-faceswap-{img.id}')
     except Exception:                                   # noqa: BLE001
         # The swap SUCCEEDED. Failing the completion callback over a locked file
         # would strand the batch's progress for a file the user still has.
         logger.warning('face_swap: could not trash the replaced original %s',
                        path, exc_info=True)
+    # Remember WHERE it went, so ↩ Undo can bring it back. The file is in Trash
+    # either way; only this pointer is new, and without it the only way back was
+    # to go and find the folder by hand.
+    state['trashed'] = trashed
+    state['swapped_to'] = img.filename
+    img.swap_undo = json.dumps(state)
+    return True
+
+
+def swap_undo_state(img):
+    """The undo record a completed swap left, or None. Same tolerance as its
+    in-flight sibling: unreadable JSON reads as "nothing to undo"."""
+    raw = getattr(img, 'swap_undo', None)
+    if not raw:
+        return None
+    try:
+        state = json.loads(raw)
+    except (TypeError, ValueError):
+        logger.warning('face_swap: unreadable swap_undo on image %s', img.id)
+        return None
+    return state if isinstance(state, dict) else None
+
+
+def can_undo_swap(img) -> bool:
+    """Whether ↩ Undo has something to put back for this tile."""
+    return swap_undo_state(img) is not None
+
+
+def undo_face_swap(user_id, image_id):
+    """Put a tile back the way it was before a COMPLETED swap. Returns True.
+
+    A swap overwrites in place, so the only copy of what it replaced is the file
+    it moved to Trash — this brings that file back and restores the row's
+    caption, status, scores and watermark verdicts with it.
+
+    The swapped image is not deleted, it is TRASHED in turn: undoing a swap is
+    a judgement about a picture, and judgements get revised. Nothing here is
+    destroyed by either direction.
+
+    Raises ValueError when the tile is not owned or has no undo record, and
+    RuntimeError when the file itself is gone — the one case this cannot fix,
+    because emptying the Trash is exactly what "permanently" means there."""
+    img = _owned_image(user_id, image_id)
+    if not img:
+        return False
+    state = swap_undo_state(img)
+    if state is None:
+        raise ValueError('there is no face swap to undo on this image')
+    previous = state.get('filename')
+    trashed = state.get('trashed')
+    folder = _dataset_path(img.dataset_id)
+    target = os.path.join(folder, previous) if previous else None
+    if not previous:
+        raise RuntimeError('the image this swap replaced was never recorded')
+    if not os.path.exists(target):
+        if not (trashed and os.path.exists(trashed)):
+            raise RuntimeError(
+                'the image this swap replaced is no longer in the Trash, so it '
+                'cannot be restored — emptying the Trash is permanent.')
+        os.makedirs(folder, exist_ok=True)
+        shutil.move(trashed, target)
+
+    swapped = img.filename
+    for field in SWAP_RESTORE_FIELDS:
+        if field in state:
+            setattr(img, field, state[field])
+    img.filename = previous
+    img.swap_undo = None
+    img.swap_restore = None
+    img.fail_reason = None
+    img.fail_kind = None
+    db.session.commit()
+
+    # The swap's own result goes to Trash rather than being deleted: the user
+    # may well want it back after looking at the two side by side.
+    if swapped and swapped != previous:
+        swapped_path = os.path.join(folder, swapped)
+        try:
+            if os.path.exists(swapped_path):
+                trash.send_to_trash(
+                    swapped_path,
+                    context=f'dataset-{img.dataset_id}-faceswap-undo-{img.id}')
+        except Exception:                               # noqa: BLE001
+            logger.warning('face_swap undo: could not trash the swapped image %s',
+                           swapped_path, exc_info=True)
     return True
 
 

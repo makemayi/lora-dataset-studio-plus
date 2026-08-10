@@ -1861,6 +1861,21 @@ Only a swap that actually produced an image sends the picture it replaced to
 Trash. Stop reports restored tiles separately from cancelled generations, since
 a Stop pressed during swaps cancels nothing and puts pictures back instead.
 
+## Undo a face swap you do not like
+
+A swap overwrites the tile, so the picture it replaced only exists as the copy
+LDS moved to the Trash. The tile now remembers where that went: a swapped tile
+carries an **↩🎭** button, and pressing it puts the previous image back — same
+file, same caption, same face score, same keep/reject state.
+
+- The **swapped** image is trashed in its turn, not deleted. Undoing is a
+  judgement about a picture, and judgements get revised.
+- The button appears **only while the file is still in the Trash**. Empty the
+  Trash (Settings ▸ Storage) and it disappears rather than failing on click —
+  emptying is what "permanently" means there.
+- This is separate from ⏹ Stop and from a failed swap: those put the tile back
+  on their own, because the swap never produced anything.
+
 ## Clean the watermarks a bank found
 
 **🚩 Find watermarks** flags the images carrying an overlaid logo, URL or

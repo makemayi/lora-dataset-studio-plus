@@ -280,6 +280,16 @@ class FaceDatasetImage(db.Model):
     # is what puts the row back. See dataset_generation_service.face_swap_image
     # and restore_swapped_original. Additive column; see _SCHEMA_ADDITIONS.
     swap_restore = db.Column(Text, nullable=True)
+    # What a COMPLETED 🎭↔ swap replaced, so it can be put back: the same column
+    # vocabulary as swap_restore plus `trashed`, the path the replaced file was
+    # moved to. Nothing extra is kept on disk — a successful swap trashes the old
+    # picture either way, and this only remembers WHERE (send_to_thrash returns
+    # it, and that return value used to be dropped on the floor).
+    #
+    # Separate from swap_restore on purpose: that one means "a swap is in flight
+    # on this row" and the cancel/failure paths act on it. Mixing the two would
+    # make a Stop pressed long after a successful swap silently revert it.
+    swap_undo = db.Column(Text, nullable=True)
     # Bidirectional, bounded metadata envelope for fields that only one side of
     # Bank <-> Dataset exposes (short caption, generation provenance, Bank reject
     # reason, etc.). It is inert history unless the transfer validator explicitly

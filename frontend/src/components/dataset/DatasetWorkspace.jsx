@@ -1272,7 +1272,8 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   onMirror={ds.mirrorImage} mirroringIds={ds.mirroringIds}
                   onScoreFace={ds.scoreFace} scoringFaceIds={ds.scoringFaceIds}
                   onRegenerate={(id, loraStrength, prompt, opts) => ds.regenerate(id, loraStrength, prompt, opts)}
-                  onFaceSwap={ds.faceSwapImage} swappingIds={ds.swappingIds}
+                  onFaceSwap={ds.faceSwapImage} onUndoFaceSwap={ds.undoFaceSwap}
+                  swappingIds={ds.swappingIds}
                   hasRef={!!d.ref_filename}
                   onReimprove={ds.reimproveImage}
                   onView={(img) => {

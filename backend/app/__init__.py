@@ -250,6 +250,8 @@ _SCHEMA_ADDITIONS = (
     # cancel or a failure puts the original back instead of losing it. NULL on
     # every row that predates it, which reads exactly right: nothing to restore.
     ('face_dataset_image', 'swap_restore', 'TEXT'),
+    # What a COMPLETED swap replaced, so ↩ Undo can put the tile back.
+    ('face_dataset_image', 'swap_undo', 'TEXT'),
     # OneTrainer backend tag — additive and nullable; every existing row
     # simply carries NULL, read as 'ai_toolkit' by the code that consumes it
     # (see checkpoint_registry / lora_training call sites).

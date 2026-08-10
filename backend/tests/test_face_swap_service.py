@@ -339,3 +339,90 @@ def test_the_claim_is_released_even_when_the_swap_raises(app, tmp_path, monkeypa
         with _pytest.raises(RuntimeError, match='boom'):
             svc.face_swap_image(LOCAL_USER, img_id)
         assert dgs.swap_in_flight(img_id) is False
+
+
+# --- undoing a swap that finished --------------------------------------------
+
+def _swap_landed(svc, monkeypatch, cfg, tmp_path):
+    """A tile whose swap completed. Returns (ds, img_id)."""
+    from app.services import face_swap_helper
+    from app.config import LOCAL_USER
+    _comfy(tmp_path, cfg)
+    ds, img = _dataset_with_image(svc, cfg, tmp_path)
+    img_id = img.id
+    monkeypatch.setattr(face_swap_helper, 'enqueue_face_swap',
+                        lambda **_kwargs: 'swap-job')
+    job_id = svc.face_swap_image(LOCAL_USER, img_id)
+    out_dir = svc._comfy_output_dir()
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, 'swapped.png'), 'wb') as fh:
+        fh.write(_png((5, 5, 200)))
+    svc.link_completed_dataset_image(job_id, 'swapped.png')
+    return ds, img_id
+
+
+def test_a_finished_swap_can_be_undone(app, tmp_path, monkeypatch):
+    """The swap overwrites in place, so the only copy of what it replaced is the
+    file it moved to Trash. Without a pointer to it, the way back was to go and
+    find the folder by hand."""
+    from app import config as cfg
+    from app.services import face_dataset_service as svc
+    from app.config import LOCAL_USER
+    with app.app_context():
+        ds, img_id = _swap_landed(svc, monkeypatch, cfg, tmp_path)
+        row = svc.db.session.get(svc.FaceDatasetImage, img_id)
+        assert row.filename == 'swapped.png' and row.swap_undo
+        assert svc.can_undo_swap(row) is True
+
+        assert svc.undo_face_swap(LOCAL_USER, img_id) is True
+
+        row = svc.db.session.get(svc.FaceDatasetImage, img_id)
+        assert (row.filename, row.status) == ('tile.png', 'finished')
+        assert row.swap_undo is None and row.swap_restore is None
+        assert os.path.isfile(os.path.join(svc._dataset_dir(ds.id), 'tile.png'))
+        # The swapped result is TRASHED, not destroyed: undoing is a judgement,
+        # and judgements get revised.
+        assert not os.path.exists(os.path.join(svc._dataset_dir(ds.id), 'swapped.png'))
+        assert svc.can_undo_swap(row) is False
+
+
+def test_undo_is_refused_when_there_was_no_swap(app, tmp_path):
+    from app import config as cfg
+    from app.services import face_dataset_service as svc
+    from app.config import LOCAL_USER
+    import pytest as _pytest
+    with app.app_context():
+        _comfy(tmp_path, cfg)
+        _ds, img = _dataset_with_image(svc, cfg, tmp_path)
+        with _pytest.raises(ValueError, match='no face swap to undo'):
+            svc.undo_face_swap(LOCAL_USER, img.id)
+
+
+def test_undo_says_so_when_the_trash_was_emptied(app, tmp_path, monkeypatch):
+    """The one case it cannot fix — and the message says why rather than
+    restoring nothing and reporting success."""
+    from app import config as cfg
+    from app.services import face_dataset_service as svc
+    from app.services import trash
+    from app.config import LOCAL_USER
+    import pytest as _pytest
+    with app.app_context():
+        _ds, img_id = _swap_landed(svc, monkeypatch, cfg, tmp_path)
+        for entry in trash.trash_root().rglob('tile.png'):
+            entry.unlink()
+        with _pytest.raises(RuntimeError, match='no longer in the Trash'):
+            svc.undo_face_swap(LOCAL_USER, img_id)
+
+
+def test_the_tile_payload_advertises_the_undo(app, client, tmp_path, monkeypatch):
+    from app import config as cfg
+    from app.services import face_dataset_service as svc
+    with app.app_context():
+        ds, img_id = _swap_landed(svc, monkeypatch, cfg, tmp_path)
+        ds_id = ds.id
+    body = client.get(f'/api/dataset/{ds_id}').get_json()
+    tile = next(i for i in body['images'] if i['id'] == img_id)
+    assert tile['can_undo_swap'] is True
+    assert client.post(f'/api/dataset/image/{img_id}/face-swap/undo').status_code == 200
+    body = client.get(f'/api/dataset/{ds_id}').get_json()
+    assert next(i for i in body['images'] if i['id'] == img_id)['can_undo_swap'] is False
