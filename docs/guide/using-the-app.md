@@ -1861,6 +1861,21 @@ Only a swap that actually produced an image sends the picture it replaced to
 Trash. Stop reports restored tiles separately from cancelled generations, since
 a Stop pressed during swaps cancels nothing and puts pictures back instead.
 
+## Jump between datasets from the rail
+
+The left rail of an open dataset ends with **Recent**: round thumbnails of the
+last few variations generated anywhere in the library, newest first. Click one
+and you are in the dataset it came from; the one you are already in is ringed.
+
+It is the only place in the app that shows output *across* datasets — every
+other surface is scoped to the one that is open. Imports, rejected tiles and
+images still generating are left out, and the strip renders nothing at all until
+something has been generated.
+
+The circles crop the top of the frame, where a portrait's head is. That is a
+crop, not a face detection: a full-body variation lands on a chest rather than a
+face, which is a fair trade for a shortcut that costs nothing to draw.
+
 ## Undo a face swap you do not like
 
 A swap overwrites the tile, so the picture it replaced only exists as the copy

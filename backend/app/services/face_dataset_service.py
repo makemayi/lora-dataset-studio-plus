@@ -2900,6 +2900,40 @@ def confirm_unknown_generation_restart(user_id, dataset_id, *,
     return n
 
 
+RECENT_VARIATIONS_MAX = 24
+
+
+def recent_generated_images(user_id, limit=12):
+    """The most recently generated variations across EVERY dataset, newest
+    first: [{image_id, dataset_id, dataset_name, filename, label}].
+
+    For the workspace rail, which sat with dead space under its nav: a strip of
+    faces is both a way back into a dataset you were working on ten minutes ago
+    and the only place in the app that shows recent output ACROSS datasets —
+    everything else is scoped to the one that is open.
+
+    Generated rows only, and only ones with a file: an import is not a
+    variation, and a pending row has no picture to show. Rejected ones are
+    skipped too — a strip of pictures you have already thrown away is not a
+    memory aid.
+    """
+    try:
+        limit = max(1, min(int(limit), RECENT_VARIATIONS_MAX))
+    except (TypeError, ValueError):
+        limit = 12
+    rows = (db.session.query(FaceDatasetImage, FaceDataset.name)
+            .join(FaceDataset, FaceDataset.id == FaceDatasetImage.dataset_id)
+            .filter(FaceDataset.user_id == str(user_id))
+            .filter(FaceDatasetImage.source == 'generated')
+            .filter(FaceDatasetImage.filename.isnot(None))
+            .filter(FaceDatasetImage.status != 'reject')
+            .order_by(FaceDatasetImage.id.desc())
+            .limit(limit).all())
+    return [{'image_id': img.id, 'dataset_id': img.dataset_id,
+             'dataset_name': name, 'filename': img.filename,
+             'label': img.variation_label or ''} for img, name in rows]
+
+
 def purge_unused(user_id, dataset_id):
     """Permanently delete all REJECTED and FAILED images of a dataset (rows +
     files). Returns the number purged."""

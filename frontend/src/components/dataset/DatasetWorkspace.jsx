@@ -43,6 +43,7 @@ import { pickNativeFolder, FolderBrowserModal } from '../common/FolderPicker';
 import { useCapabilities } from '../../context/CapabilitiesContext';
 import InstallRunner from '../setup/InstallRunner';
 import GuidedChecklist from './GuidedChecklist';
+import RecentVariations from './RecentVariations';
 import NextStepCard from './NextStepCard';
 import TrainingReadiness from './TrainingReadiness';
 import useGuidedFlow from '../../hooks/useGuidedFlow';
@@ -1109,6 +1110,12 @@ export default function DatasetWorkspace({ ds, onBack }) {
             {!isConceptual && (
               <GuidedChecklist steps={steps} currentId={nextStep ? nextStep.id : null} onJump={jumpTo} />
             )}
+            {/* The rail ended here, in dead space. A strip of recent faces uses
+                it for the one thing no other surface does: showing output from
+                OTHER datasets, and getting back into them in one click. It
+                renders nothing at all until something has been generated. */}
+            <RecentVariations onOpen={ds.open} currentId={d.id}
+              refreshKey={d.images ? d.images.length : 0} />
           </div>
         </aside>
 

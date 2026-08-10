@@ -343,6 +343,16 @@ def dataset_list():
         for d in dss]})
 
 
+@bp.get('/dataset/recent-images')
+def dataset_recent_images():
+    """The newest generated variations across every dataset, for the workspace
+    rail's shortcut strip. Read-only and cheap: ids and filenames, no counts and
+    no pixels — the tiles fetch the images through the existing per-dataset
+    image route."""
+    limit = request.args.get('limit', 12)
+    return jsonify({'images': svc.recent_generated_images(LOCAL_USER, limit)})
+
+
 @bp.get('/dataset/<int:dataset_id>')
 def dataset_get(dataset_id):
     payload = svc.dataset_payload(LOCAL_USER, dataset_id)
