@@ -870,6 +870,31 @@ DEFAULTS = {
         # work, so that stage cannot change a single pixel until this is lowered.
         'h3_mask_opacity': 1.0,
     },
+    # Automatic masking (services/auto_mask.py) — SAM 3, open-vocabulary: the
+    # region is named in words ("head", "hands", "watermark", "clothing"), so one
+    # mechanism serves the face swap, image repair and whatever asks next.
+    'auto_mask': {
+        # The app-managed interpreter Setup builds (data/envs/automask). Blank =
+        # not installed yet; the service then names the Setup action instead of
+        # failing obscurely. NEVER the Flask venv: SAM 3 wants torch >= 2.7 and
+        # CUDA >= 12.6 and documents no CPU path, which is not something to force
+        # into the app's own Python.
+        'python': '',
+        # Meta's own `sam3.pt`, BORROWED from whatever ComfyUI install has it —
+        # any segmentation pack fetches it from facebook/sam3. Blank = resolve it
+        # (models/sam3, then the other model roots, extra_model_paths.yaml
+        # included). An absolute path anywhere is honoured too: this checkpoint
+        # is not loaded by ComfyUI, so it need not live under one.
+        # NOT the Comfy-Org `sam3.1_multiplex_fp16.safetensors`: that build is
+        # remapped for ComfyUI's own loader and will not load here.
+        'checkpoint': '',
+        # Blank = CUDA when torch sees a card, else CPU. Pin 'cpu' to keep the
+        # GPU free for a generation that is running; expect it to be slow.
+        'device': '',
+        # Detection confidence. Lower finds more (and more of the wrong thing);
+        # the service refuses an answer covering the whole frame either way.
+        'threshold': 0.5,
+    },
     # The ✨ Upscale & improve pass — which engine runs it. Its own namespace
     # rather than a key under `klein`, because the whole point of the setting is
     # that the pass is no longer Klein-only: 'klein' rewrites detail, 'seedvr2'
