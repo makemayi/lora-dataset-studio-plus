@@ -150,9 +150,14 @@ const TILE_SIZE_TITLE = {
   M: 'Medium tiles (default)',
   L: 'Large tiles — big reference previews',
 };
+/* The library went full-width on 2026-08-10, so the column counts had to grow
+   with it: at 1800px the old four-column M grid drew 430px-wide thumbnails of
+   a face, which is a poster, not a library. M now reaches six columns and L
+   four, so a wide monitor shows MORE datasets rather than bigger ones — which
+   is the whole point of giving the page the screen. */
 const GRID_COLS = {
-  M: 'grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4',
-  L: 'grid grid-cols-1 gap-2.5 sm:grid-cols-2',
+  M: 'grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6',
+  L: 'grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4',
 };
 
 // Kind filter chips — only rendered when at least two kinds coexist in the

@@ -1459,8 +1459,14 @@ export default function CloudRunsPage() {
                       </button>
                     )}
                   </div>
+                  {/* Two columns from 1536px: the page went full-width on
+                      2026-08-10 and a run card is a fixed-height row, so one
+                      column of them on a wide monitor is a stripe of cards down
+                      the middle with a metre of empty page either side. Below
+                      that it stays a single column — a card needs about 640px
+                      before its facts line starts wrapping. */}
                   {!collapsed && (
-                    <div className="flex flex-col gap-2 px-2 pb-2">
+                    <div className="grid gap-2 px-2 pb-2 2xl:grid-cols-2">
                       {group.runs.map((run, i) => renderRunCard(run, i))}
                     </div>
                   )}

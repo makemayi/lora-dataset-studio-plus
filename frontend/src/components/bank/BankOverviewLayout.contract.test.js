@@ -7,13 +7,17 @@ const page = readFileSync(new URL('../../pages/BankPage.jsx', import.meta.url), 
 const workspace = readFileSync(new URL('./BankWorkspace.jsx', import.meta.url), 'utf8')
 const overview = readFileSync(new URL('./BankOverview.jsx', import.meta.url), 'utf8')
 
-test('/bank shares the wide 1800px shell with Canvas', () => {
-  assert.match(app, /pathname === '\/canvas' \|\| pathname === '\/bank'/)
+test('/bank shares the wide 1800px shell with every other workspace', () => {
+  // The rule inverted on 2026-08-10: workspaces are wide by DEFAULT and only
+  // the reading surfaces (Guide/Help) and the Setup wizard opt out. What this
+  // pins is that /bank is not one of the exceptions.
+  assert.match(app, /const readingRoute = [^\n]*'\/guide'[\s\S]{0,120}?'\/setup'/)
+  assert.doesNotMatch(app, /readingRoute = [^\n]*'\/bank'/)
   assert.match(app, /max-w-\[1800px\]/)
 })
 
-test('bank list grows to three columns only at xl', () => {
-  assert.match(page, /grid-cols-1 sm:grid-cols-2 xl:grid-cols-3/)
+test('bank list grows to three columns only at xl, four on a very wide screen', () => {
+  assert.match(page, /grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4/)
 })
 
 test('the four-megapixel resolution bucket is inclusive in the workspace too', () => {

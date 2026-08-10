@@ -195,7 +195,7 @@ export default function VideoBankPage() {
            column is sized on max-content, so the unbreakable source PATH inside a
            card stretches it past the viewport and scrolls the whole page sideways
            on a phone — with `truncate` never getting a chance to fire. */
-        <ul className="grid gap-3 grid-cols-1 sm:grid-cols-2">
+        <ul className="grid gap-3 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
           {banks.map((b) => (
             <VideoBankCard key={b.id} bank={b}
               onOpen={() => open(b.id)} onRemove={() => remove(b)} />

@@ -473,14 +473,23 @@ function UpdateBanner() {
 
 function Shell() {
   const { pathname } = useLocation();
-  /* Settings joined the wide routes on 2026-08-09. It is a two-rail layout —
-     the section nav, then (on Image engines) the engine nav — and inside a
-     1024px `max-w-5xl` shell that left roughly 540px for the settings
-     themselves, with a broad empty margin down each side of the window. Nothing
-     here is a reading column; it is a control panel, and it should use the
-     screen it is given. */
-  const wideWorkspaceRoute = pathname === '/canvas' || pathname === '/bank'
-    || pathname.startsWith('/settings');
+  /* The rule is INVERTED since 2026-08-10, and the list is the short one.
+     Canvas, Bank and Settings went wide one at a time, each for the same
+     reason — a rail plus a grid inside a 1024px column leaves ~540px of actual
+     workspace and a broad empty margin down each side of the window. Everything
+     else on this app is the same kind of surface: a grid of images, a list of
+     runs, a workspace with a rail. So workspaces are wide by default and the
+     exceptions are named, which also means a new route does not have to
+     remember to opt in.
+
+     Two exceptions, both deliberate:
+      · the Guide and Help — a reading column, and it lays out its own rails
+        against a `max-w-4xl` measure; a wider shell would only push its
+        on-this-page rail off to the far right;
+      · the Setup wizard — one `max-w-2xl` column of questions by design. */
+  const readingRoute = pathname.startsWith('/guide') || pathname === '/help'
+    || pathname === '/setup';
+  const wideWorkspaceRoute = !readingRoute;
   return (
     <>
       <NavBar />

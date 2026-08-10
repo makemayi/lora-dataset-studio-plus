@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-pages-use-the-screen',
+    date: '2026-08-10',
+    title: 'Every workspace uses your whole screen now',
+    blurb: 'Only Bank, Canvas and Settings did. Everything else sat in a 1024px column down the middle of the window — and the dataset pages were narrower still, capped at 1152px INSIDE that. On a 1920px monitor the library now fits six dataset tiles per row instead of four, the Runs history shows two run cards side by side instead of one, and a dataset workspace puts its rail at the left edge with the whole width for the panel you are working in. The Guide and the Setup wizard stay narrow on purpose: one is a reading column, the other is a single column of questions.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-10-dialogs-and-sweep',
     date: '2026-08-10',
     title: 'Every dialog, lightbox and leftover panel now matches',

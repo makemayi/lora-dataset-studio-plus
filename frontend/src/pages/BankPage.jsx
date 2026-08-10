@@ -312,7 +312,7 @@ export default function BankPage() {
         // column is sized on max-content, so the unbreakable source PATH inside
         // a card stretched it past the viewport and scrolled the whole page
         // sideways on a phone — with `truncate` never getting a chance to fire.
-        <ul className="grid gap-3 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
+        <ul className="grid gap-3 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {banks.map((b) => (
             <BankCard key={b.id} bank={b} onOpen={() => open(b.id)}
               onRelocate={() => setRelocating(b)} onRemove={() => remove(b)} />

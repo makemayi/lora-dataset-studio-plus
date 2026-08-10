@@ -11,13 +11,17 @@ import VideoDatasetsPanel from '../components/videobank/VideoDatasetsPanel';
 export default function DatasetPage() {
   const ds = useDataset();
   return (
-    <div className="p-4 max-w-6xl mx-auto">
+    /* No measure of its own since 2026-08-10. This page carried `max-w-6xl`
+       (1152px) INSIDE the shell, so making the shell wide changed nothing here
+       — the library still drew four columns in the middle of a 1920px screen
+       and the workspace still put its rail and its grid in a 1150px box. The
+       shell (App.jsx) owns the measure for every route; a page that wants a
+       narrower one caps its own CONTENT, the way the empty-state hero and the
+       creation form below do. */
+    <div>
       {ds.currentId ? (
         <DatasetWorkspace ds={ds} onBack={() => ds.setCurrentId(null)} />
       ) : (
-        /* Full page width (max-w-6xl above): the library is a desktop-first
-           browsing surface — more columns beat a narrower reading measure.
-           The empty-state hero and the creation form re-cap themselves. */
         <div className="flex flex-col gap-4">
           <DatasetListPanel datasets={ds.datasets} onOpen={ds.open} onCreate={ds.create}
             onDelete={ds.deleteDataset} onRestore={ds.importBackup}
