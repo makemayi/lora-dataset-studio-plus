@@ -476,6 +476,29 @@ How presets are used matters:
 - There is deliberately **no automatic NSFW gating** on individual LoRAs — the preset you pick carries the intent. If you want an "NSFW full" stack, make it a preset.
 - **Trap:** a row pointing at the **same file as the consistency LoRA** (`klein.consistency_lora`) is skipped — it would chain that LoRA a second time on top of itself, summing both strengths into one delta well past what the file was trained for (visible as blocky, posterized output). **The preset editor now flags that row as you write it**, on the row itself, instead of leaving the only trace in the server log — which is how a preset holding exactly one such row produced a run with no extra LoRA and nothing on screen to explain it. The check compares paths the way the server does (separators unified, case ignored), so `klein/x.safetensors` and `klein\X.safetensors` are both caught. It does **not** claim to catch an absolute path aliasing the same file — the server still drops that row, quietly.
 
+### Face / head swap engine
+
+**Settings → Image engines → Klein → Face / head swap engine** → `face_swap.engine`. One of `klein`, `minimax_h3`. Default **`klein`** — what every swap did before this setting existed.
+
+Which engine the 🎭↔ button on a tile runs. Both take the same two pictures — the tile is the target, the dataset's reference photo is the identity — and both overwrite the tile in place.
+
+- **`klein`** repaints the head with a swap LoRA on a Flux.2 Klein graph. One model family, markedly faster, and it requires `klein/Klein2-9B-SmartCharacterSwap.safetensors` on disk (never auto-downloaded).
+- **`minimax_h3`** masks the head out of the tile, hands H3 both the identity photo and the masked shot, lets the video model re-stage the head into the hole, and stitches the crop back. **No swap LoRA at all** — but it loads the whole MiniMax H3 stack (~40 GB across five files), so it is much slower and wants ComfyUI started with `--disable-dynamic-vram`. It needs the same five H3 files the H3 generation engine does, plus custom nodes from four other packs (LayerStyle, Inpaint-CropAndStitch, KJNodes, RMBG).
+
+Whichever is selected, a missing weight or node pack is named in one message **before** anything is queued — the tile is not consumed by a swap that cannot run.
+
+#### MiniMax H3 — optional stages
+
+→ `face_swap.h3_stages`, three booleans, all **off** by default. Each switches on a pass the H3 swap graph ships wired but does not run:
+
+| Stage | Key | What it adds |
+| --- | --- | --- |
+| Klein hair removal | `hair_removal` | A full Klein edit pass strips the hair from the target *before* the head is masked. Switching it on makes the **Klein** models required as well — a missing Klein file then blocks the swap. |
+| LaMa cleanup | `lama` | LaMa inpainting wipes the masked head region, so H3 is not reading the old head through the mask. |
+| Z-Image face detail | `face_detail` | A Z-Image Turbo detailer refines eyes and mouth on the chosen frame before it is stitched back. |
+
+**One limit worth knowing before you switch the last one on:** `face_detail` is the only place in the app where model filenames are *not* re-resolved for your install. It names a Z-Image checkpoint, a lumina2 text encoder and its own LoRA stack, and there is no Z-Image resolver here — on a ComfyUI without those exact files it answers a ComfyUI validation error naming the file it wanted. The other two stages resolve their weights like every other engine does.
+
 ### Face swap LoRAs
 
 **Settings → Image engines → Face swap LoRAs (optional)** → `klein.face_swap_loras` (default: empty).
@@ -1634,6 +1657,9 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `klein.edit_base_lora_strength` | Strength of the enhancement LoRA (`klein/realistic.safetensors`, node 139) on Klein **edits** — reference edit, variations, regenerate, small-image rescue. Default `0` = off, the render before that LoRA became a Setup download; 0–2. Not the improve pass (`klein.improve_base_lora_strength`). |
 | `klein.generation_lora_presets` | Named generation-LoRA stacks (default empty) picked per run in Klein tuning; each has a name and up to 8 `{file, strength}` rows. Managed in Settings → Image engines. |
 | `klein.face_swap_loras` | Flat `{file, strength}` list (default empty, max 8) chained onto the 🔀 face swap graph after its own LoRAs. Always on — no per-run picker. A row whose file is missing is skipped, not fatal. Managed in Settings → Image engines. |
+| `face_swap.engine` | Which engine the 🎭↔ swap runs: `klein` (default, swap LoRA repaints the head) or `minimax_h3` (masks the head, H3 re-stages it from the reference — no LoRA, ~40 GB of weights, much slower). |
+| `face_swap.h3_stages` | Three booleans for the H3 swap graph, all `false`: `hair_removal` (a Klein pass strips the hair first — makes the Klein models required too), `lama` (LaMa wipes the masked region), `face_detail` (Z-Image detailer on eyes and mouth; the ONLY stage whose model filenames are not re-resolved for your install). |
+| `minimax_h3.swap_prompt` | Overrides the instruction the H3 head-swap graph sends. Blank (default) = the prompt the shipped graph carries, which names a subject because that is what it was tuned on. |
 | `klein.default_generation_lora_preset` | Which of `klein.generation_lora_presets` the 🖥️ Klein tuning panel STARTS on. Default `''` = *None*, the behaviour before this key existed. A starting point only — the run panel still offers None and every other preset for that run, and picking there does not rewrite this. Fail-closed: a name matching no preset behaves as *None*. |
 | `krea.default_generation_lora_preset` | The same, for `krea.generation_lora_presets` and the 🧬 Krea 2 Edit tuning panel. A SEPARATE key on purpose: the two preset lists are independent and one name can designate two different chains. Default `''`. |
 | `identity_prompts.markings_lock` | Krea's “hold the skin” order — forbids inventing or redrawing marks. Blank = shipped default. Naming a body feature here summons it. |

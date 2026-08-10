@@ -761,13 +761,19 @@ def _minimax_h3_missing_response(e):
     being told."""
     from ..services import minimax_h3_helper as mh
     files = mh.missing_file_entries(e.missing)
-    node_packs = mh.h3_node_hints(e.missing_nodes)
+    # The HEAD-SWAP graph needs custom nodes from four other packs on top of the
+    # frame selector, so the exception may carry its own attribution. Fall back
+    # to the generation lane's single-pack hint when it does not.
+    node_packs = getattr(e, 'node_packs', None) or mh.h3_node_hints(e.missing_nodes)
     parts = ["MiniMax H3 can't run yet."]
     if e.missing_nodes:
+        named = sorted({f"“{h['pack']}” ({h['url']})" if h.get('pack') and h.get('url')
+                        else f"“{h.get('pack') or h['class_type']}”"
+                        for h in node_packs})
         parts.append(
-            f"Install the “{mh.H3_FRAME_SELECT_PACK['pack']}” custom-node pack "
-            f"({mh.H3_FRAME_SELECT_PACK['url']}) and RESTART ComfyUI — it only "
-            "registers custom nodes at startup.")
+            'Install the custom-node ' + ('packs ' if len(named) > 1 else 'pack ')
+            + ', '.join(named) + ' and RESTART ComfyUI — it only registers '
+            'custom nodes at startup.')
     for f in files:
         parts.append(f"{f['kind']} → {f['path']} ({f['source']})")
     return jsonify({
@@ -1907,14 +1913,19 @@ def dataset_image_regenerate(image_id):
 @bp.post('/dataset/image/<int:image_id>/face-swap')
 def dataset_image_face_swap(image_id):
     """Face-swap this tile in place: its current image becomes the target,
-    the dataset's reference photo becomes the identity source, fixed Klein
-    workflow, in-place overwrite. No request body — there is nothing to
-    configure, unlike Regenerate."""
+    the dataset's reference photo becomes the identity source, the swap
+    workflow of whichever engine `face_swap.engine` names, in-place overwrite.
+    No request body — there is nothing to configure per run, unlike Regenerate:
+    the engine is a setting, so one click never means two different things
+    depending on what a stale tab remembered."""
     try:
         job_id = svc.face_swap_image(LOCAL_USER, image_id)
     except Exception as e:
         from ..services.klein_edit_helper import KleinModelsMissing
         from ..services.face_swap_helper import FaceSwapLoraMissing
+        from ..services.minimax_h3_helper import MinimaxH3ModelsMissing
+        if isinstance(e, MinimaxH3ModelsMissing):
+            return _minimax_h3_missing_response(e)
         if isinstance(e, svc.KleinNodesMissing):
             return _klein_missing_response(e.missing, e.missing_nodes)
         if isinstance(e, KleinModelsMissing):

@@ -328,6 +328,98 @@ function FaceSwapLorasCard({ config, setField, graphLoras = [] }) {
   )
 }
 
+/* Which engine the 🎭↔ swap button runs, and the three optional stages of the
+   H3 graph.
+
+   The engine is a SETTING rather than a per-click picker on purpose: the button
+   is one click on a tile, and a picker there would mean the same click did two
+   different things depending on what a stale tab remembered. The stage switches
+   live with it because they only exist for one of the two engines. */
+function FaceSwapEngineCard({ config, setField, configDefaults }) {
+  const fs = config.face_swap || {}
+  const stages = fs.h3_stages || {}
+  const isH3 = (fs.engine ?? defaultValueAt(configDefaults, 'face_swap', 'engine')) === 'minimax_h3'
+  const setStage = (key, on) => setField('face_swap', 'h3_stages', { ...stages, [key]: on })
+  return (
+    <Card
+      id="face-swap-engine"
+      title="Face / head swap engine"
+      help="Which engine the 🎭↔ button on a tile runs. Klein repaints the head with a swap LoRA — one graph, fast, and it needs Klein2-9B-SmartCharacterSwap on disk. MiniMax H3 masks the head out and lets the video model re-stage your reference into the hole, then stitches the crop back: no swap LoRA, but it loads the whole ~40 GB H3 stack and takes considerably longer. Both take the tile as the target and the dataset's reference photo as the identity."
+    >
+      <div className="sm:max-w-md">
+        <label htmlFor="face-swap-engine-select" className="block text-xs font-medium text-content">
+          Engine for 🎭↔ swap
+        </label>
+        <select
+          id="face-swap-engine-select"
+          value={fs.engine ?? defaultValueAt(configDefaults, 'face_swap', 'engine')}
+          onChange={(e) => setField('face_swap', 'engine', e.target.value)}
+          className={INPUT_CLASS}
+        >
+          <option value="klein">Klein — swap LoRA repaints the head (fast)</option>
+          <option value="minimax_h3">MiniMax H3 — masks the head, re-stages it from the reference (slow)</option>
+        </select>
+        <HelpText className="mt-1 text-xs text-content-muted">
+          Each engine reports its own missing files: switching to one you have not
+          installed does not break the button, it tells you what to place where.
+        </HelpText>
+        <ResetToDefault label="Face swap engine" section="face_swap" field="engine"
+          config={config} configDefaults={configDefaults} setField={setField} />
+      </div>
+
+      <fieldset className="mt-3" id="face-swap-h3-stages">
+        <legend className="text-xs font-medium text-content">
+          MiniMax H3 — optional stages
+        </legend>
+        <HelpText className="mt-1 text-xs text-content-muted">
+          <span hidden={!isH3}>
+            Three extra passes the swap graph can run. Each adds a second model
+            family to a job that already loads 40 GB, so they are off until you
+            want them.
+          </span>
+          <span hidden={isH3}>
+            These apply to the MiniMax H3 engine only — they do nothing while the
+            swap runs on Klein.
+          </span>
+        </HelpText>
+        <label className="mt-2 flex items-center gap-2 text-xs text-content">
+          <input
+            id="face-swap-h3-hair-removal"
+            type="checkbox"
+            checked={Boolean(stages.hair_removal)}
+            onChange={(e) => setStage('hair_removal', e.target.checked)}
+          />
+          Klein hair removal — a Klein edit pass strips the hair before the head is masked (needs the Klein models)
+        </label>
+        <label className="mt-2 flex items-center gap-2 text-xs text-content">
+          <input
+            id="face-swap-h3-lama"
+            type="checkbox"
+            checked={Boolean(stages.lama)}
+            onChange={(e) => setStage('lama', e.target.checked)}
+          />
+          LaMa cleanup — wipes the masked head region so H3 is not reading the old head through the mask
+        </label>
+        <label className="mt-2 flex items-center gap-2 text-xs text-content">
+          <input
+            id="face-swap-h3-face-detail"
+            type="checkbox"
+            checked={Boolean(stages.face_detail)}
+            onChange={(e) => setStage('face_detail', e.target.checked)}
+          />
+          Z-Image face detail — refines eyes and mouth before the crop is stitched back
+        </label>
+        <HelpText className="mt-1 text-[0.6875rem] text-amber-400">
+          The face-detail stage is the one place the app does not resolve model
+          files for you: it names a Z-Image checkpoint, a lumina2 text encoder and
+          its own LoRA stack, so on a ComfyUI without those exact files it answers
+          a validation error naming the file it wanted.
+        </HelpText>
+      </fieldset>
+    </Card>
+  )
+}
+
 function KleinLorasCard({ config, setField }) {
   const presets = Array.isArray(config.klein?.generation_lora_presets)
     ? config.klein.generation_lora_presets : []
@@ -2264,7 +2356,11 @@ const ENGINE_RAIL = [
   {
     group: 'Local',
     items: [
-      { id: 'klein', label: 'Klein', engine: 'klein', prefix: ['klein-'] },
+      // The 🎭↔ swap card lives in the Klein panel (its LoRA chain already
+      // does), so the Klein entry owns its anchors even though one of them
+      // configures the H3 engine.
+      { id: 'klein', label: 'Klein', engine: 'klein', prefix: ['klein-'],
+        owns: ['face-swap-engine', 'face-swap-h3-stages'] },
       { id: 'krea', label: 'Krea 2 Edit', engine: 'krea', prefix: ['krea-'] },
       { id: 'minimax_h3', label: 'MiniMax H3', engine: 'minimax_h3',
         prefix: ['minimax-h3-', 'h3-'] },
@@ -2403,6 +2499,7 @@ export default function EnginesSection(props) {
         <KleinModelFilesCard config={config} setField={setField} caps={caps} />
         <KleinGenerationCard config={config} setField={setField} configDefaults={configDefaults} />
         <KleinLorasCard config={config} setField={setField} />
+        <FaceSwapEngineCard config={config} setField={setField} configDefaults={configDefaults} />
         <FaceSwapLorasCard config={config} setField={setField} graphLoras={faceSwapGraphLoras} />
       </>
     ),

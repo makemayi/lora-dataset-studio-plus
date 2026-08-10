@@ -88,6 +88,10 @@ CORE_CLIP_TYPES = frozenset({
     'pixart', 'cosmos', 'lumina2', 'wan', 'hidream', 'chroma', 'ace', 'omnigen2',
     'qwen_image', 'hunyuan_image', 'flux2', 'ovis', 'longcat_image', 'cogvideox',
     'lens', 'pixeldit', 'ideogram4', 'boogu', 'krea2',
+    # Core MiniMax H3 support (comfy_extras/nodes_minimax_h3). MEASURED off
+    # /object_info on a live ComfyUI 0.30.0, 2026-08-10 — the H3 lanes build
+    # graphs that pin it, and it is core there, not a pack's injection.
+    'minimax',
 })
 
 # UNETLoader / CLIPLoader `weight_dtype` and `device`.
@@ -170,6 +174,35 @@ DECLARED_THIRD_PARTY_NODES = {
     'SeedVR2Preprocess': 'ComfyUI-SeedVR2_VideoUpscaler (inferred: same author/folder convention as SeedVR2VideoUpscaler above, not measured against a live install)',
     'SeedVR2Conditioning': 'ComfyUI-SeedVR2_VideoUpscaler (inferred: same author/folder convention as SeedVR2VideoUpscaler above, not measured against a live install)',
     'SeedVR2PostProcessing': 'ComfyUI-SeedVR2_VideoUpscaler (inferred: same author/folder convention as SeedVR2VideoUpscaler above, not measured against a live install)',
+    # 'minimax h3 swap.json' — the MiniMax H3 head swap (minimax_h3_swap_helper).
+    # Gated by that module's own probe, which scans the PRUNED graph against
+    # /object_info generically and answers with H3_SWAP_NODE_PACKS attribution —
+    # so a stage the user switched off never appears in the shopping list.
+    # Attributions MEASURED off /object_info on a live ComfyUI 0.30.0 (2026-08-10)
+    # except where marked.
+    'LayerMask: PersonMaskUltra': 'ComfyUI_LayerStyle',
+    'LayerUtility: LaMa': 'ComfyUI_LayerStyle',
+    'InpaintCropImproved': 'ComfyUI-Inpaint-CropAndStitch',
+    'InpaintStitchImproved': 'ComfyUI-Inpaint-CropAndStitch',
+    'AILab_MaskOverlay': 'ComfyUI-RMBG',
+    'FaceSegment': 'ComfyUI-RMBG',
+    'MaskToSEGS': 'ComfyUI-Impact-Pack',
+    'DetailerForEach': 'ComfyUI-Impact-Pack',
+    'GrowMask': 'ComfyUI-Impact-Pack (inferred; a mask utility several packs ship)',
+    'PathchSageAttentionKJ': 'ComfyUI-KJNodes',
+    'Power Lora Loader (rgthree)': 'rgthree-comfy',
+    'H3FrameSelect': 'MinimaxH3-Image',
+    'H3ImageResolutionPreset': 'MinimaxH3-Image',
+    'SpectrumApplyMiniMaxH3': 'unknown pack — an optional speed node; '
+                              'minimax_h3.use_speed_nodes off runs without it',
+    'ZImageTurboLoraLoader': 'unknown pack — only the optional Z-Image '
+                             'face-detail stage needs it',
+    # Core as of ComfyUI 0.30.0 (MiniMax H3 support) and core-ish for longer, but
+    # newer than this repo's v0.28.3 floor — declared rather than allowlisted so
+    # an older install gets a named message instead of ComfyUI's raw 400.
+    'MiniMaxH3ReferenceToVideo': 'update ComfyUI (core MiniMax H3 support, no separate pack)',
+    'CLIPVisionLoader': 'update ComfyUI (core node, no separate pack)',
+    'ModelSamplingAuraFlow': 'update ComfyUI (core node, no separate pack)',
 }
 
 # (class_type, field) pairs where a DECLARED_THIRD_PARTY_NODES class happens to
@@ -186,6 +219,10 @@ ENUM_FIELD_NAME_COLLISIONS = {
     # validated by its own pack — unrelated to CLIPLoader/UNETLoader's core
     # `device` (default/cpu-only) selector, which has no 'Auto'.
     ('SAM3Segment', 'device'),
+    # LayerUtility: LaMa's own inference-device widget ('cuda'/'cpu'), validated
+    # by ComfyUI_LayerStyle — unrelated to the core loaders' `device` selector,
+    # which has no 'cuda'.
+    ('LayerUtility: LaMa', 'device'),
 }
 
 # The Klein lane is the one that broke, and the one the app leans on hardest

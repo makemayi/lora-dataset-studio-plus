@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-h3-head-swap',
+    date: '2026-08-10',
+    title: 'A second engine behind the 🎭↔ swap — MiniMax H3',
+    blurb: 'The swap button ran one fixed Klein graph: a swap LoRA repaints the head, fast, and it needs that LoRA on disk. There is now a choice in Settings ▸ Engines ▸ Klein. Pick MiniMax H3 and the same click masks the head out of the tile instead, hands H3 your reference photo and the masked shot, and lets the video model re-stage the head into the hole before stitching the crop back — no swap LoRA at all, at the price of loading the whole H3 stack, so it is markedly slower. Three extra passes of that graph are switches next to it, all off: a Klein pass that strips the hair first, a LaMa cleanup of the masked region, and a Z-Image detailer for the eyes and mouth. Whichever engine you pick, a missing file is named before anything is queued.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-10-quieter-palette',
     date: '2026-08-10',
     title: 'A quieter palette — the pictures are the brightest thing again',

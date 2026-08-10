@@ -3601,6 +3601,7 @@ from .dataset_generation_service import (
     generate_variations, generate_variations_krea, generate_variations_nanobanana,
     generate_variations_minimax_h3,
     regenerate_image, face_swap_image, resolve_improve_engine,
+    FACE_SWAP_ENGINES, resolve_face_swap_engine,
     improve_existing_image, reimprove_image, bulk_improve_eligible_ids,
     start_bulk_improve, engine_labels, editable_engines, edit_engine_choice_message,
     _sync_generate_activity, _improve_prompt, _improve_candidate_label,

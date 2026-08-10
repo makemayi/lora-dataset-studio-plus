@@ -794,6 +794,43 @@ DEFAULTS = {
         # Measured at 1 MP. Larger canvases are untested here and cost five
         # times more than they look, because the model samples a packet.
         'max_output_mp': 1.0,
+        # The instruction the H3 HEAD-SWAP graph sends (minimax_h3_swap_helper).
+        # Blank = the prompt the shipped graph carries, which is the one it was
+        # tuned and measured with. It names a subject on purpose; override it
+        # here when your dataset is a different one, rather than editing the
+        # workflow file, which an app update replaces.
+        'swap_prompt': '',
+    },
+    # Which engine the 🎭↔ face/head swap runs on. Its own namespace, exactly
+    # like `improve` above and for the same reason: the action is no longer
+    # Klein-only. 'klein' repaints the head with a swap LoRA (fast, one graph,
+    # needs Klein2-9B-SmartCharacterSwap on disk); 'minimax_h3' masks the head
+    # out and lets the H3 video model re-stage the identity into the hole (no
+    # LoRA, ~40 GB of H3 weights, slower). 'klein' is the default because it is
+    # what every swap did before this setting existed.
+    'face_swap': {
+        'engine': 'klein',
+        # Three optional stages of the H3 swap graph, each a step the graph
+        # ships WIRED and this switch removes when off (minimax_h3_swap_helper
+        # only ever subtracts — the fallback wiring is read off the maintainer's
+        # own bypassed export, never reconstructed). All three cost a second
+        # model family in a job that already loads 40 GB of H3, which is why
+        # they default to off:
+        #   hair_removal  a Klein 9B edit pass ("remove the hair, change
+        #                 nothing else") on the target before the head is
+        #                 masked. With it ON, a missing Klein asset blocks the
+        #                 swap — the stage is a full second engine.
+        #   lama          LaMa inpainting wipes the masked head region before
+        #                 H3 sees it, so the model is not reading the old head
+        #                 through a translucent mask.
+        #   face_detail   a Z-Image Turbo detailer over the eyes and mouth of
+        #                 the chosen frame. The ONLY stage whose model
+        #                 filenames are not re-resolved: it names a Z-Image
+        #                 checkpoint, a lumina2 encoder and a private LoRA
+        #                 stack, and this app has no Z-Image resolver — so on a
+        #                 ComfyUI without those exact files it answers a
+        #                 validation error naming the file.
+        'h3_stages': {'hair_removal': False, 'lama': False, 'face_detail': False},
     },
     # The ✨ Upscale & improve pass — which engine runs it. Its own namespace
     # rather than a key under `klein`, because the whole point of the setting is

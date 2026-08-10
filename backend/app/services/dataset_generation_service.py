@@ -1301,10 +1301,38 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
     return new_job_id
 
 
-def face_swap_image(user_id, image_id):
+# --- Which engine runs the 🎭↔ swap ------------------------------------------
+# Two engines, one button. Klein REPAINTS the head with a swap LoRA on a Flux.2
+# graph; MiniMax H3 masks the head out and lets a VIDEO model re-stage the
+# identity into the hole, then stitches the crop back. They need different
+# weights (Klein 9B + the swap LoRA vs ~40 GB of H3), take different times, and
+# fail differently — so it is a choice, not a default anyone can pick for
+# everyone. APPEND-ONLY: the ids are stored in config, never renamed.
+FACE_SWAP_ENGINES = ('klein', 'minimax_h3')
+
+
+def resolve_face_swap_engine(requested=None):
+    """The engine a 🎭↔ swap will run on: the explicit pick when it names a known
+    engine, else the `face_swap.engine` setting, else Klein.
+
+    Fail-SAFE rather than fail-closed, exactly like resolve_improve_engine: an
+    unknown name falls back instead of raising, because a stale tab must degrade
+    to the historical behaviour rather than refuse the click. Klein is the
+    fallback because it is what every swap did before this setting existed."""
+    for candidate in (requested, cfg.get('face_swap.engine')):
+        name = str(candidate or '').strip().lower()
+        if name in FACE_SWAP_ENGINES:
+            return name
+        if name:
+            logger.warning('unknown face swap engine %r — falling back to klein',
+                           candidate)
+    return 'klein'
+
+
+def face_swap_image(user_id, image_id, engine=None):
     """Face-swap this tile in place: its CURRENT image becomes the target
     (image1), the dataset's reference photo becomes the identity source
-    (image2), and the fixed Klein face-swap workflow overwrites the tile
+    (image2), and the chosen engine's fixed swap workflow overwrites the tile
     with the result. Same cancel/trash/pending-transition shape as
     regenerate_image, EXCEPT it does not touch variation_prompt /
     variation_label / klein_model — a face swap is an identity post-process
@@ -1314,14 +1342,23 @@ def face_swap_image(user_id, image_id):
 
     Returns the new job_id, or None if the image is not owned / has no
     current file to use as the target. Raises ValueError if the dataset has
-    no reference image (there is nothing to use as image2)."""
+    no reference image (there is nothing to use as image2).
+
+    `engine` picks the swap engine for THIS call (see resolve_face_swap_engine);
+    None uses the `face_swap.engine` setting. Both engines take the identical
+    (user_id, target_path, ref_path, extra_metadata) contract, so the choice is
+    one lookup — and the row bookkeeping below is engine-agnostic on purpose: a
+    swap is a post-process on an already-generated tile either way."""
     img = _owned_image(user_id, image_id)
     if not img or not img.filename:
         return None
     ds = db.session.get(FaceDataset, img.dataset_id)
     if not ds.ref_filename:
         raise ValueError('reference image required')
-    from .face_swap_helper import enqueue_face_swap
+    if resolve_face_swap_engine(engine) == 'minimax_h3':
+        from .minimax_h3_swap_helper import enqueue_h3_swap as enqueue_face_swap
+    else:
+        from .face_swap_helper import enqueue_face_swap
     from ..job_queue import queue_manager
     target_path = os.path.join(_dataset_path(img.dataset_id), img.filename)
     ref_path = os.path.join(_dataset_path(ds.id), ds.ref_filename)

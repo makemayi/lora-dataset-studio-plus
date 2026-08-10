@@ -262,3 +262,56 @@ test('an unknown focus id falls back instead of blanking the page', () => {
   assert.equal(railItemForFocus(null), null)
   assert.match(render({ focusId: 'not-a-real-id' }), /API keys/)
 })
+
+/* The 🎭↔ swap engine card. Both branches of its help line mount — the H3 one
+   and the "these do nothing on Klein" one — because a `hidden` pair that only
+   ever renders on one branch is a branch nobody has seen. */
+test('the face swap engine card offers both engines and all three H3 stages', () => {
+  const html = render({ engines: {}, focusId: KLEIN })
+  assert.match(html, /Face \/ head swap engine/)
+  assert.match(html, /value="klein"/)
+  assert.match(html, /value="minimax_h3"/)
+  assert.match(html, /Klein hair removal/)
+  assert.match(html, /LaMa cleanup/)
+  assert.match(html, /Z-Image face detail/)
+  // The one stage whose model files the app does not resolve says so.
+  assert.match(html, /does not resolve model\s+files for you/)
+})
+
+test('the stage help says which engine it applies to, without swapping a text node', () => {
+  const withEngine = (engine) => renderToStaticMarkup(createElement(EnginesSection, {
+    config: { ...CONFIG, face_swap: { engine } },
+    focusId: KLEIN,
+    configDefaults: { ...CONFIG, face_swap: { engine: 'klein' } },
+    setField: () => {}, toggleEngine: () => {}, caps: {}, refreshCaps: () => {},
+    toast: { error: () => {}, success: () => {} },
+    secretsPresence: {}, secretInputs: {}, setSecretInputs: () => {},
+    testResults: {}, recordTestResult: () => {}, saveSecretIfPending: () => {},
+    handleDeleteSecret: () => {},
+  }))
+  const klein = withEngine('klein')
+  const h3 = withEngine('minimax_h3')
+  // Both sentences are always in the markup; only `hidden` moves. Chrome
+  // auto-translate rewrites text nodes, and a ternary swap throws there.
+  for (const html of [klein, h3]) {
+    assert.match(html, /Three extra passes the swap graph can run/)
+    assert.match(html, /do nothing while the\s+swap runs on Klein/)
+  }
+  assert.notEqual(klein, h3)
+})
+
+test('a checked H3 stage renders checked', () => {
+  const html = renderToStaticMarkup(createElement(EnginesSection, {
+    config: { ...CONFIG, face_swap: { engine: 'minimax_h3',
+                                      h3_stages: { lama: true } } },
+    focusId: KLEIN,
+    configDefaults: { ...CONFIG, face_swap: { engine: 'klein' } },
+    setField: () => {}, toggleEngine: () => {}, caps: {}, refreshCaps: () => {},
+    toast: { error: () => {}, success: () => {} },
+    secretsPresence: {}, secretInputs: {}, setSecretInputs: () => {},
+    testResults: {}, recordTestResult: () => {}, saveSecretIfPending: () => {},
+    handleDeleteSecret: () => {},
+  }))
+  assert.match(html, /id="face-swap-h3-lama"[^>]*checked/)
+  assert.doesNotMatch(html, /id="face-swap-h3-hair-removal"[^>]*checked/)
+})
