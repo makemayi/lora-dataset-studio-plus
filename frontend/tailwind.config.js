@@ -5,9 +5,16 @@ export default {
   theme: {
     extend: {
       colors: {
+        /* The accent, softened on 2026-08-10 with the rest of the tone pass.
+           #5567d5 → #6a74cc keeps the same indigo but drops a third of its
+           chroma: on a neutral graphite ground the old one read as the loudest
+           thing on screen, above the photographs. `dark` is the second stop of
+           gradient-primary and moved the same way — from a saturated violet
+           (#764ba2) to one a shade off the accent, so the gradient reads as
+           depth rather than as two different colours. */
         primary: {
-          DEFAULT: '#5567d5',
-          dark: '#764ba2',
+          DEFAULT: '#6a74cc',
+          dark: '#7b6bb4',
         },
         // ── Semantic theme tokens (backed by CSS vars in index.css) ──────────
         // App is dark-only. The *-alpha-baked tokens (surface, surface-raised,
@@ -26,7 +33,7 @@ export default {
         'border-strong': 'rgb(var(--border-strong) / var(--border-strong-alpha))',
       },
       backgroundImage: {
-        'gradient-primary': 'linear-gradient(135deg, #5567d5 0%, #764ba2 100%)',
+        'gradient-primary': 'linear-gradient(135deg, #6069bd 0%, #7264a8 100%)',
       },
     },
   },

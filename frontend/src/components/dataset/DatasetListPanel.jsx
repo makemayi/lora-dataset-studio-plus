@@ -128,15 +128,19 @@ function EmptyState() {
 }
 
 // Badges de famille des LoRA entraînés — mêmes couleurs que le LoraPicker du Studio.
+/* Tinted fill, no outline, and the label a shade off full strength — five of
+   these sit in a row of cards over photographs, and at the old
+   border+bright-text weight they were the loudest thing on the page. The HUE
+   still carries the family; it just stops shouting it. */
 const FAMILY_BADGE = {
-  zimage: ['Z-Image', 'border-sky-400/40 bg-sky-500/10 text-sky-300'],
-  sdxl: ['SDXL', 'border-violet-400/40 bg-violet-500/10 text-violet-300'],
-  krea: ['Krea', 'border-amber-400/40 bg-amber-500/10 text-amber-300'],
-  flux: ['FLUX.1', 'border-emerald-400/40 bg-emerald-500/10 text-emerald-300'],
+  zimage: ['Z-Image', 'bg-sky-500/15 text-sky-200/90'],
+  sdxl: ['SDXL', 'bg-violet-500/15 text-violet-200/90'],
+  krea: ['Krea', 'bg-amber-500/15 text-amber-200/90'],
+  flux: ['FLUX.1', 'bg-emerald-500/15 text-emerald-200/90'],
   // rose: libre (fuchsia/cyan sont pris par les badges kind Concept/Style au-dessus
   // de la vignette — une couleur distincte évite de les confondre avec une famille).
-  flux2klein: ['FLUX.2 Klein', 'border-rose-400/40 bg-rose-500/10 text-rose-300'],
-  anima: ['Anima', 'border-teal-400/40 bg-teal-500/10 text-teal-300'],
+  flux2klein: ['FLUX.2 Klein', 'bg-rose-500/15 text-rose-200/90'],
+  anima: ['Anima', 'bg-teal-500/15 text-teal-200/90'],
 };
 
 // Display preferences — persisted globally (display settings, not dataset
@@ -218,9 +222,9 @@ function DatasetTile({ d, onOpen, onDelete, onExportZip, onExportBackup, onSetti
           <span className="flex items-center gap-1.5 min-w-0">
             <span className="truncate text-sm font-semibold text-content">{d.name}</span>
             {(d.trained_families || []).map((f) => {
-              const [lbl, cls] = FAMILY_BADGE[f] || [f, 'border-border bg-white/5 text-content-muted'];
+              const [lbl, cls] = FAMILY_BADGE[f] || [f, 'bg-surface-raised text-content-muted'];
               return (
-                <span key={f} className={`shrink-0 rounded border px-1.5 py-px text-[0.5625rem] font-semibold uppercase ${cls}`}
+                <span key={f} className={`shrink-0 rounded-full px-1.5 py-px text-[0.5625rem] font-semibold uppercase ${cls}`}
                   title={`A ${lbl} LoRA has been trained from this dataset`}>
                   {lbl}
                 </span>
@@ -314,9 +318,9 @@ function DatasetRow({ d, onOpen, onDelete, onExportZip, onExportBackup, onSettin
             )}
             <span className="truncate text-xs font-semibold text-content">{d.name}</span>
             {(d.trained_families || []).map((f) => {
-              const [lbl, cls] = FAMILY_BADGE[f] || [f, 'border-border bg-white/5 text-content-muted'];
+              const [lbl, cls] = FAMILY_BADGE[f] || [f, 'bg-surface-raised text-content-muted'];
               return (
-                <span key={f} className={`shrink-0 rounded border px-1 py-px text-[0.5rem] font-semibold uppercase ${cls}`}
+                <span key={f} className={`shrink-0 rounded-full px-1.5 py-px text-[0.5rem] font-semibold uppercase ${cls}`}
                   title={`A ${lbl} LoRA has been trained from this dataset`}>
                   {lbl}
                 </span>

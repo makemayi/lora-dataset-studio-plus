@@ -50,6 +50,12 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-quieter-palette',
+    date: '2026-08-10',
+    title: 'A quieter palette — the pictures are the brightest thing again',
+    blurb: 'The app sat on a near-black with a violet cast, and every photograph in it picked that cast up. The ground is a neutral graphite now, two steps lighter, because maximum contrast against a face is the last thing you want when the face is what you are judging. Body text is a shade softer than the old pure grey-100 so a dark screen stops glaring, the hairlines are fainter, and the indigo accent lost a third of its saturation — as did the purple gradient on the primary buttons, which now reads as depth rather than as a second colour. The model badges on your dataset cards are quiet tinted pills instead of outlined chips. Only colour changed: nothing moved.',
+  },
+  {
     id: '2026-08-10-empty-states',
     date: '2026-08-10',
     title: 'An empty page now tells you what to do next',
