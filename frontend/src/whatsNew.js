@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-empty-states',
+    date: '2026-08-10',
+    title: 'An empty page now tells you what to do next',
+    blurb: 'A bank list with no banks, a Runs page with nothing training, a studio with no LoRA yet — each was one grey sentence floating where the cards will be, which on a dark screen looks like a page that failed to load. They are proper blocks now: an icon, what is missing, one line saying why, and the button that fixes it (create the first bank, open a dataset). The dataset library already had one; this is the same idea everywhere else.',
+    to: '/bank',
+  },
+  {
     id: '2026-08-10-page-titles-and-density',
     date: '2026-08-10',
     title: 'Pages announce themselves, and waste less room doing it',

@@ -52,7 +52,8 @@ import {
 } from '../utils/stagingCleanup';
 import { CARD_SHADOW, CARD_SURFACE } from '../components/common/surfaces';
 import PageHeader from '../components/common/PageHeader';
-import { DownloadIcon, ImageIcon, StudioIcon } from '../components/common/icons';
+import { DownloadIcon, ImageIcon, StudioIcon, RunsIcon } from '../components/common/icons';
+import EmptyState from '../components/common/EmptyState';
 
 /* An accented secondary action (open the Test Studio, open the lineage). It is
    indigo because those two lead somewhere else in the app; the fill alone says
@@ -1266,9 +1267,16 @@ export default function CloudRunsPage() {
           <p className="m-0 text-content-subtle text-sm">Loading…</p>
         ) : actives.length === 0 ? (
           !data.local_active && (
-            <p className="m-0 text-content-subtle text-sm">
-              No run in progress. Launch one from a dataset’s training panel.
-            </p>
+            <EmptyState icon={<RunsIcon className="h-5 w-5" />} title="No run in progress"
+              action={(
+                <button type="button" onClick={() => navigate('/datasets')}
+                  className="rounded-full bg-surface-raised px-3.5 py-1.5 text-xs font-semibold text-content transition-colors hover:bg-surface">
+                  Open a dataset
+                </button>
+              )}>
+              A training starts from a dataset&rsquo;s training panel — locally on your
+              own GPU, or on a rented one. Finished runs stay listed below.
+            </EmptyState>
           )
         ) : (
           actives.map((run) => (

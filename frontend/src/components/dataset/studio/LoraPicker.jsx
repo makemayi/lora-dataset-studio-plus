@@ -19,6 +19,8 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useToast } from '../../common/Toast';
+import EmptyState from '../../common/EmptyState';
+import { StudioIcon } from '../../common/icons';
 
 // Famille de l'entrée (le backend la fournit ; `train_type` = alias rétro-compat).
 const famOf = (l) => l.family || l.train_type || 'zimage';
@@ -167,9 +169,10 @@ export default function LoraPicker({ preselectDataset, preselectFamily = null, o
       {loading ? (
         <p className="text-content-subtle text-sm">Loading LoRA…</p>
       ) : loras.length === 0 ? (
-        <p className="text-content-subtle text-sm">
-          No trained LoRA available. Train a LoRA from the Dataset Maker first.
-        </p>
+        <EmptyState icon={<StudioIcon className="h-5 w-5" />} title="No trained LoRA yet">
+          The studio tests LoRAs you have trained. Build a dataset, train it —
+          locally or on a rented GPU — and every checkpoint it saves shows up here.
+        </EmptyState>
       ) : (
         <div className="max-h-72 overflow-auto flex flex-col gap-1.5">
           {loras.map((l) => {

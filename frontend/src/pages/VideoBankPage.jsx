@@ -10,7 +10,8 @@ import { countsSummary } from '../components/videobank/videoBankStatus'
 import {
   CARD_SURFACE, CARD_SURFACE_INTERACTIVE, INPUT_CLASS, PRIMARY_BUTTON, QUIET_BUTTON,
 } from '../components/common/surfaces'
-import { CloseIcon, PlusIcon, ArrowRightIcon } from '../components/common/icons'
+import { CloseIcon, PlusIcon, ArrowRightIcon, FilmIcon } from '../components/common/icons'
+import EmptyState from '../components/common/EmptyState'
 import { HelpText } from '../components/common/HelpText'
 import PageHeader from '../components/common/PageHeader'
 
@@ -186,9 +187,16 @@ export default function VideoBankPage() {
       {banks == null ? (
         <p className="text-sm text-content-muted">Loading…</p>
       ) : banks.length === 0 ? (
-        <p className="text-sm text-content-muted">
-          No video bank yet — create one above to cut a folder of rushes into shots.
-        </p>
+        <EmptyState icon={<FilmIcon className="h-5 w-5" />} title="No video bank yet"
+          action={(
+            <button type="button" className={PRIMARY_BUTTON}
+              onClick={() => document.getElementById('video-bank-name')?.focus()}>
+              <PlusIcon /> Create your first video bank
+            </button>
+          )}>
+          Point it at a folder of rushes above. Each file is cut at its shot
+          boundaries and nothing is encoded until you promote the shots you kept.
+        </EmptyState>
       ) : (
         /* grid-cols-1 (= minmax(0,1fr)), NOT the implicit auto column: an auto
            column is sized on max-content, so the unbreakable source PATH inside a

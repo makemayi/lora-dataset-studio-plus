@@ -18,9 +18,10 @@ import {
   CARD_SURFACE, CARD_SURFACE_INTERACTIVE, INPUT_CLASS, PRIMARY_BUTTON, QUIET_BUTTON,
 } from '../components/common/surfaces'
 import {
-  MoveIcon, CloseIcon, PlusIcon, ArrowRightIcon, SpinnerIcon,
+  MoveIcon, CloseIcon, PlusIcon, ArrowRightIcon, SpinnerIcon, BankIcon,
   ICON_BUTTON_QUIET,
 } from '../components/common/icons'
+import EmptyState from '../components/common/EmptyState'
 import { HelpText } from '../components/common/HelpText'
 import PageHeader from '../components/common/PageHeader'
 
@@ -301,9 +302,16 @@ export default function BankPage() {
       {banks == null ? (
         <p className="text-sm text-content-muted">Loading…</p>
       ) : banks.length === 0 ? (
-        <p className="text-sm text-content-muted">
-          No bank yet — create one above to start triaging a folder.
-        </p>
+        <EmptyState icon={<BankIcon className="h-5 w-5" />} title="No bank yet"
+          action={(
+            <button type="button" className={PRIMARY_BUTTON}
+              onClick={() => document.getElementById('bank-name')?.focus()}>
+              <PlusIcon /> Create your first bank
+            </button>
+          )}>
+          A bank points at a folder you already have — nothing is copied, and the
+          folder is never modified. Name it and pick the folder above.
+        </EmptyState>
       ) : (
         // grid-cols-1 (= minmax(0,1fr)), NOT the implicit auto column: an auto
         // column is sized on max-content, so the unbreakable source PATH inside
