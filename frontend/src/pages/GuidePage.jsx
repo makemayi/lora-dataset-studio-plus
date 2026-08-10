@@ -3,6 +3,8 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import Markdown, { markdownHeadingId } from '../components/common/Markdown'
 import DiagnosticReport from '../components/common/DiagnosticReport'
 import { helpTopicsForChapter } from '../help/helpRegistry'
+import { CARD_SURFACE, CARD_SURFACE_INTERACTIVE } from '../components/common/surfaces'
+import { ArrowRightIcon } from '../components/common/icons'
 // Vite inlines every chapter as a string at build time (?raw) → the guide
 // lives in the bundle, no fetch, nothing extra to ship in the portable build.
 // DATASET_GUIDE.md keeps its historical path (linked from GitHub); the other
@@ -60,8 +62,8 @@ export default function GuidePage({ helpOnly = false }) {
       if (map[t.guide.anchor]) continue
       map[t.guide.anchor] = (
         <button type="button" onClick={() => navigate(routeWithFocus(t.app))}
-          className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-indigo-400/40 bg-indigo-500/10 px-2.5 py-1 text-xs font-medium text-indigo-200 transition-colors hover:bg-indigo-500/20">
-          Open this screen →
+          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-indigo-500/15 px-3 py-1 text-xs font-medium text-indigo-200 transition-colors hover:bg-indigo-500/25">
+          Open this screen <ArrowRightIcon className="h-3.5 w-3.5 shrink-0" />
         </button>
       )
     }
@@ -87,9 +89,11 @@ export default function GuidePage({ helpOnly = false }) {
 
   const navItem = (c, chip) => {
     const isActive = c.id === chapter.id
+    // Same grammar as the nav bar and the bank's lane switch: the current one
+    // is a filled pill, the others are plain text until hovered.
     const base = chip
-      ? `flex shrink-0 items-baseline gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-medium ${
-          isActive ? 'border-border-strong bg-surface-raised text-content' : 'border-border text-content-muted hover:text-content'}`
+      ? `flex shrink-0 items-baseline gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+          isActive ? 'bg-surface-raised text-content' : 'text-content-muted hover:bg-surface hover:text-content'}`
       : `relative flex w-full items-baseline gap-2.5 rounded-md px-3 py-2 text-left text-sm ${
           isActive ? 'bg-surface-raised text-content' : 'text-content-muted hover:bg-surface hover:text-content'}`
     return (
@@ -126,11 +130,11 @@ export default function GuidePage({ helpOnly = false }) {
       </aside>}
 
       <main className={`min-w-0 max-w-4xl pb-10 ${helpOnly ? 'mx-auto' : 'mt-2 lg:mt-0'}`}>
-        <header className="relative mb-4 overflow-hidden rounded-2xl border border-border bg-surface px-5 py-5 sm:px-6 sm:py-6">
+        <header className={`relative mb-4 overflow-hidden px-5 py-5 sm:px-6 sm:py-6 ${CARD_SURFACE}`}>
           <div aria-hidden className="absolute -right-16 -top-20 h-52 w-52 rounded-full bg-indigo-500/10 blur-3xl" />
           <div className="relative">
             <div className="mb-3 flex flex-wrap items-center gap-2 font-mono text-[0.6875rem] uppercase tracking-[0.14em] text-content-subtle">
-              <span className="rounded-md border border-indigo-400/30 bg-indigo-500/10 px-2 py-1 text-indigo-300">
+              <span className="rounded-full bg-indigo-500/15 px-2.5 py-1 text-indigo-300">
                 {helpOnly ? 'Support' : `Chapter ${chapter.num}`}
               </span>
               <span>{readingMinutes} min read</span>
@@ -142,12 +146,12 @@ export default function GuidePage({ helpOnly = false }) {
         </header>
 
         {headings.length > 0 && (
-          <nav aria-label="On this page" className="mb-4 rounded-xl border border-border bg-surface p-3 xl:hidden">
+          <nav aria-label="On this page" className={`mb-4 p-3 xl:hidden ${CARD_SURFACE}`}>
             <p className="m-0 mb-2 font-mono text-[0.625rem] uppercase tracking-[0.16em] text-content-subtle">On this page</p>
             <div className="flex gap-2 overflow-x-auto pb-0.5">
               {headings.map((item) => (
                 <button key={item.id} type="button" onClick={() => jumpToHeading(item.id)}
-                  className="shrink-0 rounded-full border border-border bg-transparent px-2.5 py-1 text-xs text-content-muted hover:border-border-strong hover:text-content">{item.title}</button>
+                  className="shrink-0 rounded-full bg-surface-raised px-2.5 py-1 text-xs text-content-muted transition-colors hover:text-content">{item.title}</button>
               ))}
             </div>
           </nav>
@@ -161,15 +165,15 @@ export default function GuidePage({ helpOnly = false }) {
           </div>
         )}
 
-        {!helpOnly && <div className="mt-6 grid grid-cols-2 gap-3 border-t border-border pt-4">
+        {!helpOnly && <div className="mt-6 grid grid-cols-2 gap-3 pt-4">
           {prev ? (
-            <Link to={`/guide/${prev.id}`} className="group flex min-w-0 items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2.5 no-underline hover:bg-surface-raised">
+            <Link to={`/guide/${prev.id}`} className={`group flex min-w-0 items-center gap-2 px-3 py-2.5 no-underline ${CARD_SURFACE_INTERACTIVE}`}>
               <span aria-hidden className="text-content-subtle">←</span>
               <span className="min-w-0"><span className="block font-mono text-[0.625rem] uppercase tracking-wider text-content-subtle">Previous</span><span className="block truncate text-sm font-medium text-content-muted group-hover:text-content">{prev.title}</span></span>
             </Link>
           ) : <span />}
           {next ? (
-            <Link to={`/guide/${next.id}`} className="group flex min-w-0 items-center justify-end gap-2 rounded-lg border border-border bg-surface px-3 py-2.5 text-right no-underline hover:bg-surface-raised">
+            <Link to={`/guide/${next.id}`} className={`group flex min-w-0 items-center justify-end gap-2 px-3 py-2.5 text-right no-underline ${CARD_SURFACE_INTERACTIVE}`}>
               <span className="min-w-0"><span className="block font-mono text-[0.625rem] uppercase tracking-wider text-content-subtle">Next</span><span className="block truncate text-sm font-medium text-content-muted group-hover:text-content">{next.title}</span></span>
               <span aria-hidden className="text-content-subtle">→</span>
             </Link>

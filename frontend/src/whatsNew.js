@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-guide-restyle',
+    date: '2026-08-10',
+    title: 'The Guide reads like the rest of the app now',
+    blurb: 'Same pass as the bank pages: the chapter header, the "on this page" strip and the previous/next cards are shaded panels instead of outlined boxes, and the chapter you are reading is a filled pill — the same way the top bar shows which workspace you are on. "Open this screen" is a pill too. Nothing moved and no text changed; the page is also rendered by a test for the first time, so a broken chapter cannot ship behind a green suite.',
+    to: '/guide',
+  },
+  {
     id: '2026-08-10-bank-list-restyle',
     date: '2026-08-10',
     title: 'The bank pages lost their boxes',
