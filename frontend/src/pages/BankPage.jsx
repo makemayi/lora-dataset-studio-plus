@@ -22,6 +22,7 @@ import {
   ICON_BUTTON_QUIET,
 } from '../components/common/icons'
 import { HelpText } from '../components/common/HelpText'
+import PageHeader from '../components/common/PageHeader'
 
 const CURRENT_KEY = 'bankCurrentId'
 
@@ -98,7 +99,7 @@ function BankListSummary({ bank }) {
 export function BankCard({ bank, onOpen, onRelocate, onRemove }) {
   const b = bank
   return (
-    <li className={`flex min-w-0 flex-col gap-2 p-4 ${CARD_SURFACE_INTERACTIVE}`}>
+    <li className={`flex min-w-0 flex-col gap-2 p-3.5 ${CARD_SURFACE_INTERACTIVE}`}>
       <div className="flex min-w-0 items-center gap-1">
         <button type="button" onClick={onOpen}
           className="min-w-0 truncate text-left text-base font-semibold text-content hover:underline">
@@ -242,32 +243,25 @@ export default function BankPage() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Same header shape as the Datasets library: a mono "rack tag" eyebrow
-          over the title, which is how every other section of the app is
-          labelled since the Settings redesign. */}
-      <header>
-        <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-content-subtle">bank</p>
-        <div className="mt-1 flex flex-wrap items-center gap-2">
-          <h1 className="text-xl font-semibold text-content">Image bank</h1>
-          <HelpBadge topic="page-bank" />
-          {/* The kind of bank you are making, said WHERE you make one. Until now
-              a .mp4 dropped in this folder was skipped in silence — this is the
-              only place someone with a folder of rushes would ever have looked. */}
-          <BankLaneTabs className="w-full sm:ml-auto sm:w-auto" />
-        </div>
-      </header>
-      {/* Folded: it explains the page once, and after the first visit it is
-          300 characters between the title and the thing you came to click. */}
-      <HelpText summary="What this page is for" className="text-sm text-content-muted">
-        Point the app at a big unsorted folder (a Telegram export, a scrape dump…) and triage it
-        into dataset-ready selections: a quality pass flags blur/noise/flat/small shots and groups
-        near-duplicates, the face pass sorts the dump by person — then you promote the keepers
-        into a dataset. The folder itself is never modified.
-      </HelpText>
+    <div className="space-y-5">
+      <PageHeader eyebrow="bank" title="Image bank" badge={<HelpBadge topic="page-bank" />}
+        /* The kind of bank you are making, said WHERE you make one. Until now a
+           .mp4 dropped in this folder was skipped in silence — this is the only
+           place someone with a folder of rushes would ever have looked. */
+        actions={<BankLaneTabs />}
+        description={(
+          /* Folded: it explains the page once, and after the first visit it is
+             300 characters between the title and the thing you came to click. */
+          <HelpText summary="What this page is for" className="text-sm text-content-muted">
+            Point the app at a big unsorted folder (a Telegram export, a scrape dump…) and triage it
+            into dataset-ready selections: a quality pass flags blur/noise/flat/small shots and groups
+            near-duplicates, the face pass sorts the dump by person — then you promote the keepers
+            into a dataset. The folder itself is never modified.
+          </HelpText>
+        )} />
 
       <form onSubmit={create}
-        className={`flex flex-wrap items-end gap-3 p-4 ${CARD_SURFACE}`}>
+        className={`flex flex-wrap items-end gap-3 p-3.5 ${CARD_SURFACE}`}>
         <div className="grow min-w-40">
           <label htmlFor="bank-name" className="block text-sm font-medium text-content">Name</label>
           <input id="bank-name" value={name} onChange={(e) => setName(e.target.value)}

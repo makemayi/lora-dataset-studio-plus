@@ -12,6 +12,7 @@ import {
 } from '../components/common/surfaces'
 import { CloseIcon, PlusIcon, ArrowRightIcon } from '../components/common/icons'
 import { HelpText } from '../components/common/HelpText'
+import PageHeader from '../components/common/PageHeader'
 
 const CURRENT_KEY = 'videoBankCurrentId'
 
@@ -20,7 +21,7 @@ const CURRENT_KEY = 'videoBankCurrentId'
  *  page alone never executes a single card. */
 export function VideoBankCard({ bank, onOpen, onRemove }) {
   return (
-    <li className={`flex min-w-0 flex-col gap-2 p-4 ${CARD_SURFACE_INTERACTIVE}`}>
+    <li className={`flex min-w-0 flex-col gap-2 p-3.5 ${CARD_SURFACE_INTERACTIVE}`}>
       <div className="flex min-w-0 items-center gap-1">
         <button type="button" onClick={onOpen}
           className="min-w-0 truncate text-left text-base font-semibold text-content hover:underline">
@@ -139,31 +140,28 @@ export default function VideoBankPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <header>
-        <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-content-subtle">bank</p>
-        <div className="mt-1 flex flex-wrap items-center gap-2">
-          {/* No Beta chip here: the lane switch two inches to the right carries
-              one on its Video tab, and it is visible from BOTH bank pages —
-              which is where the warning is actually needed. Two identical amber
-              chips on one row read as a mistake. */}
-          <h1 className="text-xl font-semibold text-content">Video bank</h1>
-          <HelpBadge topic="page-video-bank" />
-          <BankLaneTabs className="w-full sm:ml-auto sm:w-auto" />
-        </div>
-      </header>
-      <HelpText summary="What this page is for" className="text-sm text-content-muted">
-        Point the app at a folder of rushes and turn it into a video training set: each
-        file is cut at its shot boundaries, you keep the shots worth training on, and
-        only those get encoded — at the length and frame rate your target model
-        actually demands. Nothing is copied and nothing is re-encoded until you promote,
-        so a bank of hundreds of shots costs no disk space at all.
-      </HelpText>
+    <div className="space-y-5">
+      {/* No Beta chip on the title: the lane switch to its right carries one on
+          its Video tab, and it is visible from BOTH bank pages — which is where
+          the warning is actually needed. Two identical amber chips on one row
+          read as a mistake. */}
+      <PageHeader eyebrow="bank" title="Video bank"
+        badge={<HelpBadge topic="page-video-bank" />}
+        actions={<BankLaneTabs />}
+        description={(
+          <HelpText summary="What this page is for" className="text-sm text-content-muted">
+            Point the app at a folder of rushes and turn it into a video training set: each
+            file is cut at its shot boundaries, you keep the shots worth training on, and
+            only those get encoded — at the length and frame rate your target model
+            actually demands. Nothing is copied and nothing is re-encoded until you promote,
+            so a bank of hundreds of shots costs no disk space at all.
+          </HelpText>
+        )} />
 
       <VideoCapabilityStrip capability={capability} />
 
       <form onSubmit={create}
-        className={`flex flex-wrap items-end gap-3 p-4 ${CARD_SURFACE}`}>
+        className={`flex flex-wrap items-end gap-3 p-3.5 ${CARD_SURFACE}`}>
         <div className="grow min-w-40">
           <label htmlFor="video-bank-name" className="block text-sm font-medium text-content">Name</label>
           <input id="video-bank-name" value={name} onChange={(e) => setName(e.target.value)}

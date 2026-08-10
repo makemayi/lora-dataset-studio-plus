@@ -51,6 +51,7 @@ import {
   runStagingCleanup,
 } from '../utils/stagingCleanup';
 import { CARD_SHADOW, CARD_SURFACE } from '../components/common/surfaces';
+import PageHeader from '../components/common/PageHeader';
 import { DownloadIcon, ImageIcon, StudioIcon } from '../components/common/icons';
 
 /* An accented secondary action (open the Test Studio, open the lineage). It is
@@ -1151,26 +1152,23 @@ export default function CloudRunsPage() {
   };
 
   return (
-    <section className="flex flex-col gap-5">
-      <header className="flex flex-col gap-1">
-        <p className="m-0 font-mono text-[11px] uppercase tracking-[0.18em] text-content-subtle">training</p>
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="m-0 flex items-center gap-2 text-content text-xl font-semibold">
-            Training runs
-            <HelpBadge topic="page-cloud" />
-          </h1>
-          {/* Escape hatch to the provider: see the pod's own console (billing,
-              logs, manual destroy) when something looks off app-side. */}
+    <section className="flex flex-col gap-4">
+      <PageHeader eyebrow="training" title="Training runs"
+        badge={<HelpBadge topic="page-cloud" />}
+        /* Escape hatch to the provider: see the pod's own console (billing,
+           logs, manual destroy) when something looks off app-side. */
+        actions={(
           <a href="https://cloud.vast.ai/instances/" target="_blank" rel="noreferrer"
-            className="ml-auto text-xs font-medium text-sky-300 underline hover:text-sky-200">
+            className="text-xs font-medium text-sky-300 underline hover:text-sky-200">
             Open the vast.ai console ↗
           </a>
-        </div>
-        <p className="m-0 text-content-muted text-sm">
-          Every training in one place — cloud and local: watch progress, stop a run,
-          recover a verified artifact, and see the exact settings each launch used.
-        </p>
-      </header>
+        )}
+        description={(
+          <p className="m-0 text-content-muted text-sm">
+            Every training in one place — cloud and local: watch progress, stop a run,
+            recover a verified artifact, and see the exact settings each launch used.
+          </p>
+        )} />
 
       {data && !configured && (
         <div className={`p-4 text-content-muted text-sm ${CARD_SURFACE}`}>

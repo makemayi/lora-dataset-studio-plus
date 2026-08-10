@@ -11,6 +11,7 @@ import {
   normalizeCollapsedMap, normalizeTileSize,
 } from '../../utils/datasetLibrary';
 import { CARD_SURFACE, CARD_SURFACE_INTERACTIVE } from '../common/surfaces';
+import PageHeader from '../common/PageHeader';
 import {
   BankIcon, CloseIcon, DownloadIcon, ImageIcon, SettingsIcon, TrashIcon,
 } from '../common/icons';
@@ -588,33 +589,37 @@ export default function DatasetListPanel({
   return (
     <div className="flex flex-col gap-4">
       {/* Header: the page IS the library. Row 1 = title + primary actions;
-          row 2 (below, non-empty library only) = search + filters + size. */}
-      <div>
-        <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-content-subtle">library</p>
-        {/* relative z-30 : sans stacking-context propre, le z-20 du panneau du
-            menu « 💾 Backup » resterait piégé sous les tuiles plus bas. */}
-        <div className="relative z-30 mt-1 flex flex-wrap items-center gap-2">
-          <h1 className="text-xl font-semibold text-content flex items-center gap-2">Datasets<HelpBadge topic="page-datasets" /></h1>
-          {!empty && <span className="text-sm text-content-subtle">{datasets.length}</span>}
-          <div className="ml-auto flex items-center gap-2">
-            <button type="button"
-              onClick={() => {
-                if (empty) document.getElementById('new-dataset-name')?.focus();
-                else setCreating((v) => !v);
-              }}
-              aria-expanded={empty ? undefined : formOpen}
-              aria-controls={empty ? undefined : 'new-dataset-form'}
-              className="rounded-full bg-gradient-primary px-4 py-1.5 text-sm font-semibold text-white transition-transform hover:-translate-y-px">
-              {/* Both labels mounted — see CLAUDE.md ▸ UI changes. */}
-              <span hidden={!(!empty && creating)}>Close</span>
-              <span hidden={!!(!empty && creating)}>+ New dataset</span>
-            </button>
-            {/* Back up everything, its "include LoRAs" option and Import backup
-                all live in ONE 💾 Backup menu — only "+ New dataset" stays out,
-                it is the page's primary action. */}
-            <FullBackupControls backup={backup} onRestore={onRestore} />
-          </div>
-        </div>
+          row 2 (below, non-empty library only) = search + filters + size.
+          relative z-30 : sans stacking-context propre, le z-20 du panneau du
+          menu Backup resterait piégé sous les tuiles plus bas. */}
+      <div className="relative z-30">
+        <PageHeader eyebrow="library" title="Datasets"
+          badge={(
+            <>
+              <HelpBadge topic="page-datasets" />
+              {!empty && <span className="text-sm font-normal text-content-subtle">{datasets.length}</span>}
+            </>
+          )}
+          actions={(
+            <>
+              <button type="button"
+                onClick={() => {
+                  if (empty) document.getElementById('new-dataset-name')?.focus();
+                  else setCreating((v) => !v);
+                }}
+                aria-expanded={empty ? undefined : formOpen}
+                aria-controls={empty ? undefined : 'new-dataset-form'}
+                className="rounded-full bg-gradient-primary px-4 py-1.5 text-sm font-semibold text-white transition-transform hover:-translate-y-px">
+                {/* Both labels mounted — see CLAUDE.md ▸ UI changes. */}
+                <span hidden={!(!empty && creating)}>Close</span>
+                <span hidden={!!(!empty && creating)}>+ New dataset</span>
+              </button>
+              {/* Back up everything, its "include LoRAs" option and Import
+                  backup all live in ONE Backup menu — only "+ New dataset"
+                  stays out, it is the page's primary action. */}
+              <FullBackupControls backup={backup} onRestore={onRestore} />
+            </>
+          )} />
         {!empty && (
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <input

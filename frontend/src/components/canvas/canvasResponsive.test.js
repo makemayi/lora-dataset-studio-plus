@@ -61,7 +61,9 @@ test('the board gestures are reachable below lg, from a single source', () => {
    65vh = 520, and 304 + 520 > 800 — the board's bottom edge never fit. The
    blurb is 72 of those pixels and it explains the page exactly once. */
 test('the canvas page drops its blurb on a phone, never its help', () => {
-  assert.match(page, /className="mt-1 hidden text-content-muted text-\[0\.75rem\] sm:block"/);
+  // The blurb moved into PageHeader's `description` slot on 2026-08-10; what
+  // this pins is that it is still the phone that loses it, not the desktop.
+  assert.match(page, /className="m-0 hidden text-content-muted text-\[0\.75rem\] sm:block"/);
   // The ? badge stays at every width, so the explanation is still one tap away.
   assert.match(page, /<HelpBadge topic="page-canvas" \/>/);
 });

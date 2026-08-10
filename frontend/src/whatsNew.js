@@ -50,6 +50,12 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-page-titles-and-density',
+    date: '2026-08-10',
+    title: 'Pages announce themselves, and waste less room doing it',
+    blurb: 'Five pages had grown their own version of the same title block, at four different sizes — a 20px title one line under an 11px label is not a hierarchy, it is two lines of grey. They now share one header: small wide-tracked eyebrow, 24px title, actions on the right, description below. Everything around it tightened by a notch too (page padding, the gap between blocks, card padding), so more of the screen belongs to your images and less to the frame around them.',
+  },
+  {
     id: '2026-08-10-explanations-fold-everywhere',
     date: '2026-08-10',
     title: 'The long explanations fold on every page, not just in Settings',

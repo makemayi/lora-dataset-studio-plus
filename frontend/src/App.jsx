@@ -507,7 +507,7 @@ function Shell() {
       <UpdateBanner />
       <main id="main-content" tabIndex={-1}
         className={wideWorkspaceRoute
-          ? 'mx-auto w-full max-w-[1800px] px-3 py-4 sm:px-4 sm:py-6'
+          ? 'mx-auto w-full max-w-[1800px] px-3 py-4 sm:px-4 sm:py-5'
           : 'mx-auto max-w-5xl px-4 py-6'}>
         <Outlet />
       </main>

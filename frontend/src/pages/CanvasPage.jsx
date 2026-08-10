@@ -17,6 +17,7 @@ import { placeImageBatch, tidyGroupRows } from '../utils/canvasPinBatch';
 import CanvasDatasetFilter from '../components/canvas/CanvasDatasetFilter';
 import LineageCanvas from '../components/canvas/LineageCanvas';
 import { HelpBadge } from '../help/HelpMode';
+import PageHeader from '../components/common/PageHeader';
 
 /* ◉ LoRA Canvas — every dataset's training genealogy on one board.
 
@@ -388,18 +389,21 @@ export default function CanvasPage() {
           pushed the frame's bottom edge past the fold at 400 px. It stays in full
           from `sm` up, and the ? badge next to the title carries the same
           explanation at every width, so nothing is actually hidden. */}
-      <header className="mb-2 sm:mb-3">
-        <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-content-subtle">board</p>
-        <h1 className="mt-1 flex items-center gap-2 text-lg font-semibold text-content">
-          LoRA Canvas
-          <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-amber-300">Beta</span>
-          <HelpBadge topic="page-canvas" />
-        </h1>
-        <p className="mt-1 hidden text-content-muted text-[0.75rem] sm:block">
-          Every training run you have made, on one board: each dataset gets a lane, each run a card,
-          and a continuation is joined to the exact checkpoint it resumed from.
-        </p>
-      </header>
+      <div className="mb-2 sm:mb-3">
+        <PageHeader eyebrow="board" title="LoRA Canvas"
+          badge={(
+            <>
+              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-amber-300">Beta</span>
+              <HelpBadge topic="page-canvas" />
+            </>
+          )}
+          description={(
+            <p className="m-0 hidden text-content-muted text-[0.75rem] sm:block">
+              Every training run you have made, on one board: each dataset gets a lane, each run a card,
+              and a continuation is joined to the exact checkpoint it resumed from.
+            </p>
+          )} />
+      </div>
 
       {index.status === 'error' && (
         <p className="mb-3 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-amber-100 text-[0.75rem]">
