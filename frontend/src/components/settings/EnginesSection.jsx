@@ -339,6 +339,8 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
   const fs = config.face_swap || {}
   const stages = fs.h3_stages || {}
   const isH3 = (fs.engine ?? defaultValueAt(configDefaults, 'face_swap', 'engine')) === 'minimax_h3'
+  const contextFactor = Number(
+    fs.h3_context_factor ?? defaultValueAt(configDefaults, 'face_swap', 'h3_context_factor') ?? 3)
   const setStage = (key, on) => setField('face_swap', 'h3_stages', { ...stages, [key]: on })
   return (
     <Card
@@ -364,6 +366,30 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
           installed does not break the button, it tells you what to place where.
         </HelpText>
         <ResetToDefault label="Face swap engine" section="face_swap" field="engine"
+          config={config} configDefaults={configDefaults} setField={setField} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="face-swap-h3-context" className="block text-xs font-medium text-content">
+          How much of the shot MiniMax H3 sees ({contextFactor.toFixed(1)}×)
+        </label>
+        <input
+          id="face-swap-h3-context"
+          type="range" min={1} max={8} step={0.1}
+          value={contextFactor}
+          onChange={(e) => setField('face_swap', 'h3_context_factor', Number(e.target.value))}
+          className="mt-1 w-full accent-indigo-500"
+        />
+        <HelpText className="mt-1 text-xs text-content-muted">
+          The swap works on a crop around the head, grown from the head by this
+          factor and then stopped at the edges of the photo — so one number adapts:
+          at 3× a full-body shot is cropped to head and chest, while a bust or a
+          portrait already fills the frame and is not cropped at all. Lower is more
+          pixels on the face; higher gives the model the shoulders it needs to judge
+          how big the head should be. It never risks the body: only the masked head
+          is composited back.
+        </HelpText>
+        <ResetToDefault label="H3 swap crop" section="face_swap" field="h3_context_factor"
           config={config} configDefaults={configDefaults} setField={setField} />
       </div>
 
@@ -2359,8 +2385,7 @@ const ENGINE_RAIL = [
       // The 🎭↔ swap card lives in the Klein panel (its LoRA chain already
       // does), so the Klein entry owns its anchors even though one of them
       // configures the H3 engine.
-      { id: 'klein', label: 'Klein', engine: 'klein', prefix: ['klein-'],
-        owns: ['face-swap-engine', 'face-swap-h3-stages'] },
+      { id: 'klein', label: 'Klein', engine: 'klein', prefix: ['klein-', 'face-swap-'] },
       { id: 'krea', label: 'Krea 2 Edit', engine: 'krea', prefix: ['krea-'] },
       { id: 'minimax_h3', label: 'MiniMax H3', engine: 'minimax_h3',
         prefix: ['minimax-h3-', 'h3-'] },

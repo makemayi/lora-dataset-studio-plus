@@ -834,6 +834,26 @@ DEFAULTS = {
         #                 ComfyUI without those exact files it answers a
         #                 validation error naming the file.
         'h3_stages': {'hair_removal': False, 'lama': False, 'face_detail': False},
+        # How much of the shot around the head the H3 swap actually looks at —
+        # InpaintCropImproved's `context_from_mask_extend_factor` on the swap
+        # graph. The node grows the crop from the MASK box, then clamps it to
+        # the image:
+        #     grow_per_side = head_box * (factor - 1) / 2, clamped to the frame
+        # so ONE number adapts by itself. At 3.0 a full-body shot crops to head
+        # plus chest, while a bust or a portrait — where the head already fills
+        # much of the frame — hits the edges and is not cropped at all.
+        #
+        # The graph shipped at 1.3, i.e. head-only everywhere. That is the most
+        # pixels per head, and it is also why the model had nothing to size the
+        # head against: the prompt asks it to match the shoulders, and at 1.3
+        # there are no shoulders in the picture.
+        #
+        # The cost is real and worth knowing: H3 renders one ~1 MP canvas
+        # whatever the crop, so doubling the crop's side quarters the pixels the
+        # head gets. Raising `minimax_h3.max_output_mp` buys them back at the
+        # price of sampling time. A bigger crop does NOT risk repainting the
+        # body — InpaintStitchImproved composites only the masked region back.
+        'h3_context_factor': 3.0,
     },
     # The ✨ Upscale & improve pass — which engine runs it. Its own namespace
     # rather than a key under `klein`, because the whole point of the setting is

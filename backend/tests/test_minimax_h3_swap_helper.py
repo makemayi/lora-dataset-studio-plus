@@ -322,3 +322,39 @@ def test_the_job_name_is_registered_for_completion_dispatch(swap):
     queue marks it done, and the row stays pending forever."""
     from app.job_queue import DATASET_IMAGE_JOB_NAMES
     assert 'minimax_h3_face_swap_dataset' in DATASET_IMAGE_JOB_NAMES
+
+
+# --- how much of the shot the swap looks at ---------------------------------
+
+def test_the_crop_reaches_past_the_head_by_default(swap):
+    """The graph shipped at 1.3 — head only, in every photo. That is the most
+    pixels per head, and it also crops away the shoulders the prompt asks the
+    model to size the head against."""
+    sh, _mh, _base, _config = swap
+    wf, _ = _build(sh)
+    assert sh.DEFAULT_CONTEXT_FACTOR == 3.0
+    assert wf['426:402']['inputs']['context_from_mask_extend_factor'] == 3.0
+
+
+def test_the_context_factor_is_configurable_and_bounded(swap):
+    """The node accepts up to 100, which is meaningless: past the point where
+    the crop covers the frame the number does nothing, and every value on the
+    way there costs head pixels."""
+    sh, _mh, _base, config = swap
+    _set(config, 'face_swap', h3_context_factor=2.0)
+    assert _build(sh)[0]['426:402']['inputs']['context_from_mask_extend_factor'] == 2.0
+    _set(config, 'face_swap', h3_context_factor=99)
+    assert (_build(sh)[0]['426:402']['inputs']['context_from_mask_extend_factor']
+            == sh.CONTEXT_FACTOR_MAX)
+    _set(config, 'face_swap', h3_context_factor=0.2)
+    assert (_build(sh)[0]['426:402']['inputs']['context_from_mask_extend_factor']
+            == sh.CONTEXT_FACTOR_MIN)
+
+
+def test_junk_in_the_context_factor_frames_the_shot_rather_than_refusing_it(swap):
+    """It decides framing, not correctness. A bad value in config must not cost
+    the user the swap."""
+    sh, _mh, _base, config = swap
+    _set(config, 'face_swap', h3_context_factor='wide please')
+    assert (_build(sh)[0]['426:402']['inputs']['context_from_mask_extend_factor']
+            == sh.DEFAULT_CONTEXT_FACTOR)

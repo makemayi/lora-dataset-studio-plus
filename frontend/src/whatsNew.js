@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-h3-swap-framing',
+    date: '2026-08-10',
+    title: 'The H3 head swap no longer judges a head with the shoulders cropped off',
+    blurb: 'The swap works on a crop around the head, and that crop was tight enough that nothing in the picture said how big a head belonged there — heads came back the wrong size. It now reaches further by default, and because the crop grows from the head and then stops at the edges of the photo, one setting adapts on its own: a full-body shot is cropped to head and chest, while a bust or a portrait is not cropped at all. The slider is in Settings ▸ Image engines ▸ Klein — lower puts more pixels on the face, higher gives the model the shoulders to measure against. The instruction it runs on was rewritten to match: it takes only the identity from your reference photo now, never the head size.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-10-h3-head-swap',
     date: '2026-08-10',
     title: 'A second engine behind the 🎭↔ swap — MiniMax H3',

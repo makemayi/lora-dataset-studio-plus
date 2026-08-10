@@ -487,6 +487,22 @@ Which engine the 🎭↔ button on a tile runs. Both take the same two pictures 
 
 Whichever is selected, a missing weight or node pack is named in one message **before** anything is queued — the tile is not consumed by a swap that cannot run.
 
+#### MiniMax H3 — how much of the shot it sees
+
+→ `face_swap.h3_context_factor` (1.0–8.0, default **3.0**).
+
+The H3 swap does not work on the whole tile: it crops around the head, repaints there, and composites the head back. This is how far that crop reaches. It is a **factor of the head**, not a pixel size, and the crop is stopped at the edges of the photo — which is what makes one number adapt to the photo:
+
+| Shot | Head is about | Crop at 3.0 |
+| --- | --- | --- |
+| Full body | 13% of the height | head and chest |
+| Half body / bust | 40% | hits the edges — not cropped |
+| Head-and-shoulders | 65% | hits the edges — not cropped |
+
+Lower means more pixels on the face; higher gives the model the shoulders it needs to judge how big the head should be, which is what the prompt asks it to measure against. It shipped at 1.3 (head only, in every photo) and that is exactly the value at which nothing in frame says how large a head belongs there.
+
+**The cost, stated plainly:** H3 renders one ~1 MP canvas whatever the crop, so doubling the crop's side quarters the pixels the head gets. `minimax_h3.max_output_mp` buys them back for sampling time. Widening the crop never risks the body — only the masked head region is composited back.
+
 #### MiniMax H3 — optional stages
 
 → `face_swap.h3_stages`, three booleans, all **off** by default. Each switches on a pass the H3 swap graph ships wired but does not run:
@@ -1658,6 +1674,7 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `klein.generation_lora_presets` | Named generation-LoRA stacks (default empty) picked per run in Klein tuning; each has a name and up to 8 `{file, strength}` rows. Managed in Settings → Image engines. |
 | `klein.face_swap_loras` | Flat `{file, strength}` list (default empty, max 8) chained onto the 🔀 face swap graph after its own LoRAs. Always on — no per-run picker. A row whose file is missing is skipped, not fatal. Managed in Settings → Image engines. |
 | `face_swap.engine` | Which engine the 🎭↔ swap runs: `klein` (default, swap LoRA repaints the head) or `minimax_h3` (masks the head, H3 re-stages it from the reference — no LoRA, ~40 GB of weights, much slower). |
+| `face_swap.h3_context_factor` | How far the H3 swap's crop reaches around the head (1.0–8.0, default `3.0`). A factor of the head, clamped to the photo — so 3.0 crops a full-body shot to head and chest and leaves a portrait uncropped. Lower = more pixels on the face; higher = the shoulders the model sizes the head against. |
 | `face_swap.h3_stages` | Three booleans for the H3 swap graph, all `false`: `hair_removal` (a Klein pass strips the hair first — makes the Klein models required too), `lama` (LaMa wipes the masked region), `face_detail` (Z-Image detailer on eyes and mouth; the ONLY stage whose model filenames are not re-resolved for your install). |
 | `minimax_h3.swap_prompt` | Overrides the instruction the H3 head-swap graph sends. Blank (default) = the shipped prompt: subject-neutral, and explicit about keeping the reference's identity, repainting nothing outside the white mask, matching the shot's head angle and lighting, and leaving no seam at the hairline and neck. Set it to A/B a wording without editing a workflow file an update replaces. In that prompt `<Picture 1>` is your reference photo and `<Picture 2>` is the **masked crop**, not the whole tile — the white area being the head (face + hair). |
 | `klein.default_generation_lora_preset` | Which of `klein.generation_lora_presets` the 🖥️ Klein tuning panel STARTS on. Default `''` = *None*, the behaviour before this key existed. A starting point only — the run panel still offers None and every other preset for that run, and picking there does not rewrite this. Fail-closed: a name matching no preset behaves as *None*. |

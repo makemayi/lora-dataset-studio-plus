@@ -74,6 +74,15 @@ about a head sitting on a neck and shoulders that must not change: the mask
 does not cover them, so anything the prompt makes the model reconsider down
 there comes back as a seam.
 
+HOW MUCH OF THE SHOT <Picture 2> SHOWS
+---------------------------------------
+`face_swap.h3_context_factor` (see `context_factor`). The crop is grown from the
+mask box and clamped to the frame, so one number adapts to the photo: a
+full-body shot gets head plus chest, a portrait clamps to its own edges and is
+not cropped at all. It shipped at 1.3 — head only, everywhere — which is the
+most pixels per head and also leaves the model nothing to size the head
+against, since the prompt asks it to match shoulders that were cropped away.
+
 PersonMaskUltra is therefore set to face + hair and NOTHING else. It shipped
 with `body` on as well, which is a person-shaped mask: InpaintCropImproved
 crops to whatever the mask covers, so that made the repainted region grow down
@@ -119,11 +128,41 @@ NODE_CLIP_VISION = '426:305'     # scores which frame of the packet to keep
 NODE_H3 = '426:170'              # MiniMaxH3ReferenceToVideo — the prompt lives here
 NODE_LENGTH = '426:139'          # PrimitiveInt -> frame packet length
 NODE_SEED = '426:131'            # RandomNoise -> 'noise_seed'
+NODE_CROP = '426:402'            # InpaintCropImproved — how much shot H3 sees
 NODE_SAVE = '412'
 
 _REQUIRED_NODES = (NODE_TARGET_IMAGE, NODE_REF_IMAGE, NODE_H3_UNET, NODE_H3_CLIP,
                    NODE_VIDEO_VAE, NODE_AUDIO_VAE, NODE_CLIP_VISION, NODE_H3,
-                   NODE_LENGTH, NODE_SEED, NODE_SAVE)
+                   NODE_LENGTH, NODE_SEED, NODE_CROP, NODE_SAVE)
+
+# `context_from_mask_extend_factor` bounds. The node itself allows up to 100,
+# which is meaningless here: past the point where the crop covers the frame the
+# number stops doing anything, and every value in between only costs head
+# pixels. 1.0 is "crop to the mask box exactly".
+CONTEXT_FACTOR_MIN = 1.0
+CONTEXT_FACTOR_MAX = 8.0
+DEFAULT_CONTEXT_FACTOR = 3.0
+
+
+def context_factor():
+    """How far the crop reaches around the head, from `face_swap.h3_context_factor`.
+
+    The crop is grown from the MASK box and then clamped to the image, so one
+    number adapts to the shot by itself: at 3.0 a full-body photo crops to head
+    and chest, while a bust or a head-and-shoulders — where the head already
+    fills the frame — clamps to the edges and is not cropped at all. That is the
+    whole reason this is a factor and not a pixel size.
+
+    Junk falls back to the default rather than raising: this decides framing, not
+    correctness, and a bad value in config must not refuse the swap."""
+    raw = cfg.get('face_swap.h3_context_factor')
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_CONTEXT_FACTOR
+    if not (value == value and value not in (float('inf'), float('-inf'))):
+        return DEFAULT_CONTEXT_FACTOR
+    return max(CONTEXT_FACTOR_MIN, min(CONTEXT_FACTOR_MAX, value))
 
 # Optional accelerators: (node id, the input carrying its pass-through).
 NODE_SPEED_SPECTRUM = '426:310'  # SpectrumApplyMiniMaxH3   -> 'model'
@@ -466,6 +505,10 @@ def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None
 
     workflow[NODE_TARGET_IMAGE]['inputs']['image'] = target_image
     workflow[NODE_REF_IMAGE]['inputs']['image'] = ref_image
+    # How much of the shot travels with the head. See `context_factor`: the crop
+    # grows from the mask and clamps to the frame, so this one number gives a
+    # full-body shot its chest and leaves a portrait uncropped.
+    workflow[NODE_CROP]['inputs']['context_from_mask_extend_factor'] = context_factor()
     # Frames sampled per shot. Snapped onto the node's own min/step grid — an
     # off-step value is a validation error, i.e. a whole batch of dead tiles.
     length = cfg.get('minimax_h3.length')
