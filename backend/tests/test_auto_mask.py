@@ -245,3 +245,48 @@ def test_the_child_refuses_a_payload_it_cannot_honour(am, tmp_path):
     last = [ln for ln in proc.stdout.splitlines() if ln.strip().startswith('{')][-1]
     assert json.loads(last) == {'ok': False,
                                 'error': 'a phrase naming the region is required'}
+
+
+# --- a region is usually several objects -------------------------------------
+
+def test_a_region_can_be_named_as_several_phrases(am):
+    """'head' segments the head and leaves the glasses on it behind — to an
+    open-vocabulary model those are two objects. The masks are unioned."""
+    auto_mask, _base, _config, _tmp = am
+    assert auto_mask.normalize_prompts('head, glasses') == ['head', 'glasses']
+    assert auto_mask.normalize_prompts(['Head', ' GLASSES ']) == ['head', 'glasses']
+    # Junk, blanks and repeats do not become phrases.
+    assert auto_mask.normalize_prompts(' head ,, head,  ') == ['head']
+    assert auto_mask.normalize_prompts('') == []
+    assert auto_mask.normalize_prompts(None) == []
+
+
+def test_the_cache_key_does_not_care_about_phrase_ORDER(am):
+    """Otherwise re-ordering a settings field silently re-runs every mask."""
+    auto_mask, _base, _config, _tmp = am
+    a = auto_mask.cache_key(b'PIX', 'head, glasses', threshold=0.5)
+    b = auto_mask.cache_key(b'PIX', 'glasses,Head', threshold=0.5)
+    assert a == b
+    assert auto_mask.cache_key(b'PIX', 'head', threshold=0.5) != a
+
+
+def test_every_phrase_reaches_the_child_as_a_list(am, monkeypatch, tmp_path):
+    """One `set_image` covers all of them — the image encode is nearly the whole
+    cost — so the phrases have to travel together, not one run each."""
+    auto_mask, _base, config, _tmp = am
+    image = str(_write(tmp_path / 'tile.png', b'PIXELS'))
+    _write(_write(tmp_path / 'ckpt' / 'sam3.pt').parent / 'sam3.pt')
+    config.save_config({'auto_mask': {
+        'python': str(_write(tmp_path / 'py' / 'python.exe')),
+        'checkpoint': str(tmp_path / 'ckpt' / 'sam3.pt')}})
+    sent = {}
+
+    def _fake_run(python, script, payload, timeout, **kw):
+        sent.update(json.loads(payload))
+        return ('{"ok": true, "written": 0, "cancelled": false, "results": {}}',
+                [], 0, False)
+
+    monkeypatch.setattr(auto_mask, 'run_infer_script', _fake_run)
+    auto_mask.mask_images([image], 'head, glasses, hat')
+    assert sent['prompts'] == ['head', 'glasses', 'hat']
+    assert 'prompt' not in sent

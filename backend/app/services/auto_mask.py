@@ -230,14 +230,37 @@ def cache_dir():
     return d
 
 
+def normalize_prompts(prompt):
+    """A phrase, a comma-separated list, or a list -> an ordered, de-duplicated,
+    lower-cased list of phrases.
+
+    Several phrases exist because a REGION is usually several OBJECTS. To an
+    open-vocabulary model 'head' is the head and the glasses on it are a
+    different thing, so a head mask asked for in one word comes back with holes
+    exactly where the accessories are — and a swap then repaints a head around
+    the old pair of glasses. The phrases' masks are unioned."""
+    if isinstance(prompt, (list, tuple, set)):
+        raw = list(prompt)
+    else:
+        raw = str(prompt or '').split(',')
+    out, seen = [], set()
+    for item in raw:
+        text = str(item or '').strip().lower()
+        if text and text not in seen:
+            seen.add(text)
+            out.append(text)
+    return out
+
+
 def cache_key(image_bytes, prompt, *, threshold):
     """Content-addressed: the same picture under another name is the same mask,
-    and an edited picture is a different one. The phrase and the threshold are
-    part of the key because they change the answer."""
+    and an edited picture is a different one. The phrases and the threshold are
+    part of the key because they change the answer — normalized and sorted
+    first, so 'Head, glasses' and 'glasses,head' are one entry, not two."""
     h = hashlib.sha256()
     h.update(hashlib.sha256(image_bytes).digest())
     h.update(b'\x00')
-    h.update(str(prompt).strip().lower().encode('utf-8'))
+    h.update('\x1f'.join(sorted(normalize_prompts(prompt))).encode('utf-8'))
     h.update(b'\x00')
     h.update(f'{float(threshold):.3f}'.encode('ascii'))
     return h.hexdigest()[:32]
@@ -264,8 +287,8 @@ def mask_images(image_paths, prompt, *, threshold=DEFAULT_THRESHOLD,
     if not paths:
         return {'ok': True, 'written': 0, 'cancelled': False, 'results': {},
                 'out_dir': out_dir}
-    prompt = (prompt or '').strip()
-    if not prompt:
+    prompts = normalize_prompts(prompt)
+    if not prompts:
         raise ValueError('a phrase naming the region is required')
     python, checkpoint = preflight()
     out_dir = out_dir or tempfile.mkdtemp(prefix='lds-masks-')
@@ -273,7 +296,7 @@ def mask_images(image_paths, prompt, *, threshold=DEFAULT_THRESHOLD,
 
     cancel_file = os.path.join(out_dir, '.stop')
     payload = json.dumps({
-        'images': paths, 'prompt': prompt, 'out_dir': out_dir,
+        'images': paths, 'prompts': prompts, 'out_dir': out_dir,
         'checkpoint': checkpoint, 'threshold': float(threshold),
         'device': device or (cfg.get('auto_mask.device') or None),
         'cancel_file': cancel_file,
@@ -317,9 +340,10 @@ def mask_for(image_path, prompt, *, threshold=DEFAULT_THRESHOLD, use_cache=True,
     both are answers that would silently do nothing downstream — ValueError on a
     missing image or an empty phrase, and AutoMaskUnavailable when the engine
     itself cannot run."""
-    prompt = (prompt or '').strip()
-    if not prompt:
+    prompts = normalize_prompts(prompt)
+    if not prompts:
         raise ValueError('a phrase naming the region is required')
+    label = ' + '.join(prompts)
     if not image_path or not os.path.isfile(image_path):
         raise ValueError(f'image not found: {image_path}')
     with open(image_path, 'rb') as fh:
@@ -337,14 +361,14 @@ def mask_for(image_path, prompt, *, threshold=DEFAULT_THRESHOLD, use_cache=True,
         info = (result.get('results') or {}).get(image_path) or {}
         state = info.get('state')
         if state == 'no_match':
-            raise NoMatch(f'nothing in this image matched “{prompt}” — try '
+            raise NoMatch(f'nothing in this image matched “{label}” — try '
                           'another phrase, or a lower threshold')
         if state != 'ok':
             raise AutoMaskUnavailable(state or 'the mask could not be produced')
         coverage = float(info.get('coverage') or 0.0)
         if coverage >= MAX_COVERAGE:
             raise NoMatch(
-                f'“{prompt}” matched {coverage:.0%} of the picture, which is not '
+                f'“{label}” matched {coverage:.0%} of the picture, which is not '
                 'a region — name something narrower')
         produced = os.path.join(
             work_dir, os.path.splitext(os.path.basename(image_path))[0] + '.png')

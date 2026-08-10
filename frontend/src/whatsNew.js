@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-11-mask-keeps-the-glasses',
+    date: '2026-08-11',
+    title: 'A head mask now takes the glasses with it',
+    blurb: 'Automatic masking is open-vocabulary, and to a model like that a head is a head — the glasses on it are a different object. So a mask asked for as "head" came back with holes exactly where the frames and temples were, and the swap painted a new face around the old pair of spectacles. What to mask is a LIST now, unioned: head, glasses, sunglasses, hat, headband, earrings by default, editable in Settings ▸ Image engines ▸ Klein. A phrase that matches nothing in a photo adds nothing to the mask and costs almost nothing to ask for — the picture is analysed once for all of them.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-11-paste-to-import',
     date: '2026-08-11',
     title: 'Paste an image straight into a dataset with Ctrl+V',

@@ -425,13 +425,24 @@ def test_the_app_mask_is_resized_by_the_graphs_own_node(swap):
     assert wf['app_mask_resize']['inputs']['images'] == ['app_mask_load', 0]
 
 
+def test_the_default_region_includes_what_is_WORN_on_the_head(swap):
+    """A head is not one object to a segmenter: asked for as 'head' alone the
+    mask comes back with a hole where the glasses are, and the swap then paints
+    a new face around the old pair. Reported on a real tile."""
+    sh, _mh, _base, _config = swap
+    phrases = [p.strip() for p in sh.mask_prompt().split(',')]
+    assert phrases[0] == 'head'
+    for worn in ('glasses', 'sunglasses', 'hat', 'earrings'):
+        assert worn in phrases, f'{worn} would be left behind by the swap'
+
+
 def test_the_mask_source_and_phrase_are_configurable(swap):
     sh, _mh, _base, config = swap
-    assert sh.mask_prompt() == 'head'
+    assert sh.mask_prompt().startswith('head')
     _set(config, 'face_swap', h3_mask_source='app', h3_mask_prompt='  hair  ')
     assert sh.mask_source() == 'app'
     assert sh.mask_prompt() == 'hair'
     # Fail-safe: junk falls back to the graph rather than refusing the swap.
     _set(config, 'face_swap', h3_mask_source='telepathy', h3_mask_prompt='')
     assert sh.mask_source() == 'graph'
-    assert sh.mask_prompt() == 'head'
+    assert sh.mask_prompt() == sh.DEFAULT_MASK_PROMPT

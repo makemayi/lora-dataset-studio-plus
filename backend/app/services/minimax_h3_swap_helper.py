@@ -337,7 +337,15 @@ class H3SwapNodesMissing(mh.MinimaxH3ModelsMissing):
 
 
 MASK_SOURCES = ('graph', 'app')
-DEFAULT_MASK_PROMPT = 'head'
+# A HEAD IS NOT ONE OBJECT.
+# To an open-vocabulary segmenter, 'head' is the head and the glasses on it are
+# something else — so a one-word head mask comes back with a hole exactly where
+# the accessories are, and the swap paints a new head around the old spectacles.
+# Everything that sits ON the head and would go with it belongs in the list;
+# their masks are unioned. A phrase that matches nothing in a given photo costs
+# one cheap grounding pass and contributes nothing, which is why naming the
+# accessories that are usually absent is still the right default.
+DEFAULT_MASK_PROMPT = 'head, glasses, sunglasses, hat, headband, earrings'
 
 
 def mask_source():
@@ -355,9 +363,10 @@ def mask_source():
 
 
 def mask_prompt():
-    """The phrase the app-side masker is given. Open-vocabulary, so this is the
-    one place the masked REGION is decided: 'head' is face plus hair cut at the
-    jaw, which is what the swap's prompt and its stitch both assume."""
+    """The phrases the app-side masker is given, comma-separated. Open-vocabulary,
+    so this is the one place the masked REGION is decided: face plus hair cut at
+    the jaw, PLUS whatever is worn on the head, which is what the swap's prompt
+    and its stitch both assume."""
     value = cfg.get('face_swap.h3_mask_prompt')
     value = value.strip() if isinstance(value, str) else ''
     return value or DEFAULT_MASK_PROMPT

@@ -66,7 +66,14 @@ def main() -> int:
     try:
         payload = json.loads(sys.stdin.read())
         images = [p for p in (payload.get('images') or []) if p]
-        prompt = (payload.get('prompt') or '').strip()
+        # A LIST, because a region is often several objects: "head" segments the
+        # head and leaves the glasses on it behind, since to an open-vocabulary
+        # model those are a different thing. The masks are unioned. `prompt`
+        # (singular) is still accepted so an older caller keeps working.
+        prompts = payload.get('prompts')
+        if not isinstance(prompts, list):
+            prompts = [payload.get('prompt') or '']
+        prompts = [str(p).strip() for p in prompts if str(p or '').strip()]
         out_dir = payload['out_dir']
         checkpoint = payload['checkpoint']
         threshold = float(payload.get('threshold') or 0.5)
@@ -74,7 +81,7 @@ def main() -> int:
         cancel_file = payload.get('cancel_file') or None
     except Exception as e:                              # noqa: BLE001
         return _fail(f'payload: {e}')
-    if not prompt:
+    if not prompts:
         return _fail('a phrase naming the region is required')
     if not os.path.isfile(checkpoint):
         return _fail(f'checkpoint not found: {checkpoint}')
@@ -122,6 +129,8 @@ def main() -> int:
             cancelled = True
             break
         try:
+            per_prompt = {}
+            stack = None
             with Image.open(path) as im:
                 image = im.convert('RGB')
                 width, height = image.size
@@ -131,23 +140,36 @@ def main() -> int:
                 # "mat1 and mat2 must have the same dtype, but got BFloat16 and
                 # Float" the moment the first linear layer is reached.
                 with _autocast(torch, device):
+                    # ONE set_image for every phrase: that call is the image
+                    # encode and it is nearly the whole cost, while each extra
+                    # phrase is only another grounding pass over features that
+                    # already exist. Asking for four regions is therefore not
+                    # four times the work.
                     state = processor.set_image(image)
-                    state = processor.set_text_prompt(prompt, state)
-            masks = _as_numpy(state)
-            if masks is None or not len(masks):
-                results[path] = {'state': 'no_match', 'coverage': 0.0}
+                    for phrase in prompts:
+                        found = _as_numpy(processor.set_text_prompt(phrase, state))
+                        per_prompt[phrase] = 0 if found is None else int(len(found))
+                        if found is None or not len(found):
+                            continue
+                        merged = np.any(found, axis=0)
+                        stack = merged if stack is None else (stack | merged)
+            if stack is None:
+                results[path] = {'state': 'no_match', 'coverage': 0.0,
+                                 'per_prompt': per_prompt}
                 _log(f'[sam3] {i}/{total} no_match')
                 continue
-            # ONE mask covering every match. A caller that wanted the instances
-            # apart would have to compose them again, and none does yet.
-            union = np.any(masks, axis=0).astype('uint8') * 255
+            # ONE mask covering every match of every phrase. A caller that wanted
+            # them apart would have to compose them again, and none does yet.
+            union = stack.astype('uint8') * 255
             coverage = float((union > 127).sum()) / float(max(1, width * height))
             name = os.path.splitext(os.path.basename(path))[0] + '.png'
             Image.fromarray(union, mode='L').save(os.path.join(out_dir, name), 'PNG')
             results[path] = {'state': 'ok', 'coverage': round(coverage, 4),
-                             'instances': int(len(masks))}
+                             'instances': int(sum(per_prompt.values())),
+                             'per_prompt': per_prompt}
             written += 1
-            _log(f'[sam3] {i}/{total} ok coverage={coverage:.3f}')
+            _log(f'[sam3] {i}/{total} ok coverage={coverage:.3f} '
+                 f'matched={"+".join(k for k, v in per_prompt.items() if v) or "-"}')
         except Exception as e:                          # noqa: BLE001
             results[path] = {'state': f'error: {type(e).__name__}: {e}',
                              'coverage': 0.0}

@@ -880,11 +880,15 @@ DEFAULTS = {
         # and sam3.pt, and a swap must not start failing on an install that has
         # neither.
         'h3_mask_source': 'graph',
-        # The phrase the app lane masks by. Open-vocabulary, so this is where the
-        # masked REGION is decided — 'head' is face plus hair, cut at the jaw,
-        # which is what the swap prompt and the stitch both assume. Change it and
-        # you change what gets replaced.
-        'h3_mask_prompt': 'head',
+        # What the app lane masks, comma-separated. Open-vocabulary, so this is
+        # where the masked REGION is decided, and the list is a list for one
+        # reason: a head is not one object to a segmenter. Asked for as 'head'
+        # alone it returns the head with a HOLE where the glasses are, and the
+        # swap then paints a new face around the old pair. Everything worn on the
+        # head belongs here; the masks are unioned, and a phrase that matches
+        # nothing in a photo costs one cheap grounding pass (the image is encoded
+        # once for all of them) and adds nothing to the mask.
+        'h3_mask_prompt': 'head, glasses, sunglasses, hat, headband, earrings',
     },
     # Automatic masking (services/auto_mask.py) — SAM 3, open-vocabulary: the
     # region is named in words ("head", "hands", "watermark", "clothing"), so one
