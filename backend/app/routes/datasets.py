@@ -1924,8 +1924,21 @@ def dataset_image_face_swap(image_id):
         from ..services.klein_edit_helper import KleinModelsMissing
         from ..services.face_swap_helper import FaceSwapLoraMissing
         from ..services.minimax_h3_helper import MinimaxH3ModelsMissing
+        from ..services.auto_mask import AutoMaskUnavailable, NoMatch
         if isinstance(e, MinimaxH3ModelsMissing):
             return _minimax_h3_missing_response(e)
+        if isinstance(e, AutoMaskUnavailable):
+            # Two different problems in one exception tree, and the UI must not
+            # confuse them: NoMatch is about the PHRASE (the fix is another
+            # word), everything else is about the install (the fix is a file or
+            # a Setup action). `automask_missing` carries the install half so a
+            # banner can offer the button; a NoMatch carries no action and
+            # renders as a plain message.
+            return jsonify({
+                'ok': False, 'error': str(e),
+                'automask_missing': {'files': e.files, 'actions': e.actions},
+                'no_match': isinstance(e, NoMatch),
+            }), 409
         if isinstance(e, svc.KleinNodesMissing):
             return _klein_missing_response(e.missing, e.missing_nodes)
         if isinstance(e, KleinModelsMissing):

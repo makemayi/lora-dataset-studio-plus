@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-11-app-side-masks',
+    date: '2026-08-11',
+    title: 'The app can make its own masks now — name a region, get a mask',
+    blurb: 'Masking used to happen inside the ComfyUI workflow, where the app could not see it, keep it or check it. There is now a masker of its own: SAM 3, running in its own environment on the SAM 3 checkpoint your ComfyUI already has, so nothing is downloaded twice and no node pack is involved. It is open-vocabulary — you name the region in plain words — which is why it is a service and not a head detector: the same call will serve image repair. The MiniMax H3 head swap is the first thing wired to it (Settings ▸ Image engines ▸ Klein ▸ where the head mask comes from), and switching it over also drops the LayerStyle node pack from the job. It needs the automatic-masking environment; without it the swap says so instead of failing.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-10-h3-swap-blank-faces',
     date: '2026-08-10',
     title: 'Fewer blank faces out of the MiniMax H3 swap',

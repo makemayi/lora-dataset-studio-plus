@@ -869,6 +869,22 @@ DEFAULTS = {
         # masked region, and at opacity 1.0 the overlay paints straight over its
         # work, so that stage cannot change a single pixel until this is lowered.
         'h3_mask_opacity': 1.0,
+        # WHERE the head mask comes from:
+        #   'graph' — LayerMask: PersonMaskUltra inside the workflow (the
+        #             shipped behaviour; needs ComfyUI_LayerStyle, and the app
+        #             never sees the mask it is about to repaint through);
+        #   'app'   — services/auto_mask (SAM 3 in the app's own interpreter),
+        #             which makes the mask visible, cacheable and testable here,
+        #             and drops the LayerStyle dependency with it.
+        # 'graph' stays the default: the app lane needs the automask environment
+        # and sam3.pt, and a swap must not start failing on an install that has
+        # neither.
+        'h3_mask_source': 'graph',
+        # The phrase the app lane masks by. Open-vocabulary, so this is where the
+        # masked REGION is decided — 'head' is face plus hair, cut at the jaw,
+        # which is what the swap prompt and the stitch both assume. Change it and
+        # you change what gets replaced.
+        'h3_mask_prompt': 'head',
     },
     # Automatic masking (services/auto_mask.py) — SAM 3, open-vocabulary: the
     # region is named in words ("head", "hands", "watermark", "clothing"), so one

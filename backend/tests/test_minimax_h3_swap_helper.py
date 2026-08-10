@@ -390,3 +390,48 @@ def test_the_head_placeholder_opacity_is_configurable(swap):
     assert _build(sh)[0]['426:413']['inputs']['mask_opacity'] == 1.0
     _set(config, 'face_swap', h3_mask_opacity='opaque-ish')
     assert _build(sh)[0]['426:413']['inputs']['mask_opacity'] == sh.DEFAULT_MASK_OPACITY
+
+
+# --- where the mask comes from ----------------------------------------------
+
+def test_the_graph_masks_by_itself_by_default(swap):
+    sh, _mh, _base, _config = swap
+    assert sh.mask_source() == 'graph'
+    wf, _ = _build(sh)
+    assert wf['426:340']['class_type'] == 'LayerMask: PersonMaskUltra'
+    assert wf['426:402']['inputs']['mask'] == ['426:340', 1]
+
+
+def test_an_app_mask_replaces_person_mask_ultra_entirely(swap):
+    """And takes the ComfyUI_LayerStyle dependency with it: the pack is only
+    still needed if the LaMa stage is on."""
+    sh, _mh, _base, _config = swap
+    wf, _ = _build(sh, mask_image='mask.png')
+    assert wf['426:402']['inputs']['mask'] == ['app_mask_to_mask', 0]
+    assert 'LayerMask: PersonMaskUltra' not in _classes(wf)
+    assert wf['app_mask_load']['inputs']['image'] == 'mask.png'
+    assert wf['app_mask_to_mask']['inputs']['channel'] == 'red'
+
+
+def test_the_app_mask_is_resized_by_the_graphs_own_node(swap):
+    """Not app-side: ResizeImagesByLongerEdge truncates
+    (new_h = int(h * edge / w)), and reproducing that arithmetic anywhere else
+    is how an off-by-one size mismatch reaches ComfyUI instead of a test."""
+    sh, _mh, _base, _config = swap
+    wf, _ = _build(sh, mask_image='mask.png')
+    target_edge = wf['426:401']['inputs']['longer_edge']
+    assert wf['app_mask_resize']['class_type'] == 'ResizeImagesByLongerEdge'
+    assert wf['app_mask_resize']['inputs']['longer_edge'] == target_edge
+    assert wf['app_mask_resize']['inputs']['images'] == ['app_mask_load', 0]
+
+
+def test_the_mask_source_and_phrase_are_configurable(swap):
+    sh, _mh, _base, config = swap
+    assert sh.mask_prompt() == 'head'
+    _set(config, 'face_swap', h3_mask_source='app', h3_mask_prompt='  hair  ')
+    assert sh.mask_source() == 'app'
+    assert sh.mask_prompt() == 'hair'
+    # Fail-safe: junk falls back to the graph rather than refusing the swap.
+    _set(config, 'face_swap', h3_mask_source='telepathy', h3_mask_prompt='')
+    assert sh.mask_source() == 'graph'
+    assert sh.mask_prompt() == 'head'

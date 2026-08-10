@@ -396,6 +396,46 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
       </div>
 
       <div className="mt-3 sm:max-w-md">
+        <label htmlFor="face-swap-h3-mask-source" className="block text-xs font-medium text-content">
+          Where the head mask comes from
+        </label>
+        <select
+          id="face-swap-h3-mask-source"
+          value={fs.h3_mask_source ?? defaultValueAt(configDefaults, 'face_swap', 'h3_mask_source')}
+          onChange={(e) => setField('face_swap', 'h3_mask_source', e.target.value)}
+          className={INPUT_CLASS}
+        >
+          <option value="graph">The workflow (PersonMaskUltra, needs ComfyUI_LayerStyle)</option>
+          <option value="app">The app (SAM 3 — you can name any region)</option>
+        </select>
+        <HelpText className="mt-1 text-xs text-content-muted">
+          The app lane runs SAM 3 in its own environment on the SAM 3 checkpoint
+          your ComfyUI already has, which makes the mask something this app can
+          see, cache and reuse — and drops the LayerStyle node pack from the job.
+          It needs the automatic-masking environment from Setup; without it the
+          swap says so instead of failing.
+        </HelpText>
+        <label htmlFor="face-swap-h3-mask-prompt" className="mt-2 block text-xs font-medium text-content">
+          What to mask
+        </label>
+        <input
+          id="face-swap-h3-mask-prompt"
+          type="text"
+          value={fs.h3_mask_prompt ?? ''}
+          placeholder="head"
+          onChange={(e) => setField('face_swap', 'h3_mask_prompt', e.target.value)}
+          className={INPUT_CLASS}
+        />
+        <HelpText className="mt-1 text-xs text-content-muted">
+          Open-vocabulary, so this is what actually gets replaced. “head” is face
+          plus hair cut at the jaw — what the swap&apos;s instruction and its
+          stitch both assume. Blank means “head”. App lane only.
+        </HelpText>
+        <ResetToDefault label="H3 swap mask source" section="face_swap" field="h3_mask_source"
+          config={config} configDefaults={configDefaults} setField={setField} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
         <label htmlFor="face-swap-h3-mask-opacity" className="block text-xs font-medium text-content">
           How solidly the head is painted out ({maskOpacity.toFixed(2)})
         </label>

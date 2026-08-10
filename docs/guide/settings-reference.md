@@ -503,6 +503,17 @@ Lower means more pixels on the face; higher gives the model the shoulders it nee
 
 **The cost, stated plainly:** H3 renders one ~1 MP canvas whatever the crop, so doubling the crop's side quarters the pixels the head gets. `minimax_h3.max_output_mp` buys them back for sampling time. Widening the crop never risks the body — only the masked head region is composited back.
 
+#### MiniMax H3 — where the head mask comes from
+
+→ `face_swap.h3_mask_source` (`graph` | `app`, default **`graph`**) and `face_swap.h3_mask_prompt` (default **`head`**).
+
+- **`graph`** — `LayerMask: PersonMaskUltra` inside the workflow. What shipped; needs the **ComfyUI_LayerStyle** node pack, and the app never sees the mask it is about to repaint through.
+- **`app`** — the app's own masker (`services/auto_mask`, SAM 3), which runs in its own environment on the `sam3.pt` your ComfyUI already has. The mask becomes something this app can see, cache and reuse, and **LayerStyle leaves the job with it** (unless the LaMa stage is on). It needs the automatic-masking environment; without it the swap says so rather than failing obscurely.
+
+`h3_mask_prompt` is what the app lane masks — it is open-vocabulary, so this is the setting that decides **what actually gets replaced**. `head` means face plus hair, cut at the jaw, which is what the swap's instruction and its stitch both assume; a different phrase changes the region and probably wants a different instruction too.
+
+The mask is produced at the tile's own size and then put through the workflow's **own** `ResizeImagesByLongerEdge` node, at the same setting as the target — reproducing that node's arithmetic anywhere else is how an off-by-one size mismatch would reach ComfyUI instead of a test.
+
 #### MiniMax H3 — how solidly the head is painted out
 
 → `face_swap.h3_mask_opacity` (0.0–1.0, default **1.00**).
@@ -1687,6 +1698,12 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `klein.face_swap_loras` | Flat `{file, strength}` list (default empty, max 8) chained onto the 🔀 face swap graph after its own LoRAs. Always on — no per-run picker. A row whose file is missing is skipped, not fatal. Managed in Settings → Image engines. |
 | `face_swap.engine` | Which engine the 🎭↔ swap runs: `klein` (default, swap LoRA repaints the head) or `minimax_h3` (masks the head, H3 re-stages it from the reference — no LoRA, ~40 GB of weights, much slower). |
 | `face_swap.h3_context_factor` | How far the H3 swap's crop reaches around the head (1.0–8.0, default `3.0`). A factor of the head, clamped to the photo — so 3.0 crops a full-body shot to head and chest and leaves a portrait uncropped. Lower = more pixels on the face; higher = the shoulders the model sizes the head against. |
+| `face_swap.h3_mask_source` | Where the H3 swap's head mask comes from: `graph` (PersonMaskUltra in the workflow, needs ComfyUI_LayerStyle) or `app` (services/auto_mask — SAM 3 in the app's own environment, on the sam3.pt ComfyUI already has). Default `graph`. |
+| `face_swap.h3_mask_prompt` | What the app lane masks (default `head` = face + hair, cut at the jaw). Open-vocabulary, so it decides what actually gets replaced. |
+| `auto_mask.python` | The app-managed interpreter for automatic masking (data/envs/automask). Blank = not installed. |
+| `auto_mask.checkpoint` | Meta's `sam3.pt`, borrowed from a ComfyUI install. Blank = resolve it (models/sam3 first, extra_model_paths.yaml roots included). An absolute path anywhere is honoured. NOT the Comfy-Org `sam3.1_multiplex_fp16.safetensors`, which is remapped for ComfyUI's own loader. |
+| `auto_mask.device` | Blank = CUDA when torch sees a card, else CPU. Pin `cpu` to leave the GPU to a running generation; expect it to be slow. |
+| `auto_mask.threshold` | Detection confidence for automatic masking (default `0.5`). |
 | `face_swap.h3_mask_opacity` | How opaque the placeholder painted over the head is (0–1, default `1.0`). The dial for blank white faces: at 1.0 the model gets a structureless slab and sometimes draws the slab back; 0.70–0.85 leaves a ghost of the head to build on. Also what lets the `lama` stage change anything. |
 | `face_swap.h3_stages` | Three booleans for the H3 swap graph, all `false`: `hair_removal` (a Klein pass strips the hair first — makes the Klein models required too), `lama` (LaMa wipes the masked region), `face_detail` (Z-Image detailer on eyes and mouth; the ONLY stage whose model filenames are not re-resolved for your install). |
 | `minimax_h3.swap_prompt` | Overrides the instruction the H3 head-swap graph sends. Blank (default) = the shipped prompt: subject-neutral, and explicit about keeping the reference's identity, repainting nothing outside the white mask, matching the shot's head angle and lighting, and leaving no seam at the hairline and neck. Set it to A/B a wording without editing a workflow file an update replaces. In that prompt `<Picture 1>` is your reference photo and `<Picture 2>` is the **masked crop**, not the whole tile — the white area being the head (face + hair). |

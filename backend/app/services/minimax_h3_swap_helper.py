@@ -131,7 +131,15 @@ NODE_SEED = '426:131'            # RandomNoise -> 'noise_seed'
 NODE_CROP = '426:402'            # InpaintCropImproved — how much shot H3 sees
 NODE_MASK_OVERLAY = '426:413'    # AILab_MaskOverlay — paints the hole H3 fills
 NODE_FRAME_SELECT = '426:304'    # H3FrameSelect — which frame of the packet wins
+NODE_TARGET_RESIZE = '426:401'   # ResizeImagesByLongerEdge — what the mask must match
+NODE_PERSON_MASK = '426:340'     # LayerMask: PersonMaskUltra — the in-graph masker
 NODE_SAVE = '412'
+
+# Ids for the nodes that carry an APP-SIDE mask into the graph. Named rather
+# than numbered because they do not come from the maintainer's export.
+NODE_APP_MASK_LOAD = 'app_mask_load'
+NODE_APP_MASK_RESIZE = 'app_mask_resize'
+NODE_APP_MASK_TO_MASK = 'app_mask_to_mask'
 
 _REQUIRED_NODES = (NODE_TARGET_IMAGE, NODE_REF_IMAGE, NODE_H3_UNET, NODE_H3_CLIP,
                    NODE_VIDEO_VAE, NODE_AUDIO_VAE, NODE_CLIP_VISION, NODE_H3,
@@ -328,6 +336,63 @@ class H3SwapNodesMissing(mh.MinimaxH3ModelsMissing):
         self.node_packs = node_hints(nodes)
 
 
+MASK_SOURCES = ('graph', 'app')
+DEFAULT_MASK_PROMPT = 'head'
+
+
+def mask_source():
+    """Where the head mask comes from: 'graph' (PersonMaskUltra inside the
+    workflow) or 'app' (services/auto_mask, SAM 3 in the app's own interpreter).
+
+    Fail-SAFE like every other engine pick here: an unknown value falls back to
+    the graph rather than refusing the swap."""
+    name = str(cfg.get('face_swap.h3_mask_source') or '').strip().lower()
+    if name in MASK_SOURCES:
+        return name
+    if name:
+        logger.warning('unknown h3 mask source %r — using the graph', name)
+    return 'graph'
+
+
+def mask_prompt():
+    """The phrase the app-side masker is given. Open-vocabulary, so this is the
+    one place the masked REGION is decided: 'head' is face plus hair cut at the
+    jaw, which is what the swap's prompt and its stitch both assume."""
+    value = cfg.get('face_swap.h3_mask_prompt')
+    value = value.strip() if isinstance(value, str) else ''
+    return value or DEFAULT_MASK_PROMPT
+
+
+def attach_app_mask(workflow, mask_image):
+    """Feed an app-produced mask PNG into the graph in place of PersonMaskUltra.
+
+    The mask arrives at the TILE's own resolution while the graph masks a copy
+    resized to `longer_edge`, so it is put through the SAME
+    `ResizeImagesByLongerEdge` node with the SAME value rather than resized
+    app-side: that node truncates (`new_h = int(h * (edge / w))`), and
+    reproducing its arithmetic somewhere else is how an off-by-one size mismatch
+    gets discovered by ComfyUI at queue time instead of here.
+
+    PersonMaskUltra is left unwired and disappears in `prune_to_outputs` — with
+    it goes the ComfyUI_LayerStyle dependency, unless the LaMa stage is on."""
+    longer_edge = ((workflow.get(NODE_TARGET_RESIZE) or {}).get('inputs', {})
+                   .get('longer_edge', 1536))
+    workflow[NODE_APP_MASK_LOAD] = {
+        'class_type': 'LoadImage', 'inputs': {'image': mask_image},
+        '_meta': {'title': 'Mask (from the app)'}}
+    workflow[NODE_APP_MASK_RESIZE] = {
+        'class_type': 'ResizeImagesByLongerEdge',
+        'inputs': {'longer_edge': longer_edge,
+                   'images': [NODE_APP_MASK_LOAD, 0]},
+        '_meta': {'title': 'Mask, to the same geometry as the target'}}
+    workflow[NODE_APP_MASK_TO_MASK] = {
+        'class_type': 'ImageToMask',
+        'inputs': {'image': [NODE_APP_MASK_RESIZE, 0], 'channel': 'red'},
+        '_meta': {'title': 'Mask'}}
+    workflow[NODE_CROP]['inputs']['mask'] = [NODE_APP_MASK_TO_MASK, 0]
+    return NODE_APP_MASK_TO_MASK
+
+
 def enabled_stages():
     """{stage: bool} from `face_swap.h3_stages`, defaulting to OFF.
 
@@ -458,7 +523,8 @@ def _comfy_input_dir() -> str:
     return str(d)
 
 
-def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None):
+def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None,
+                        mask_image=None):
     """Load the shipped graph, apply the stage switches, resolve every loader
     against what is actually installed, and return (workflow, stages_kept).
 
@@ -476,6 +542,11 @@ def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None
 
     stages = enabled_stages() if stages is None else dict(stages)
     kept = apply_stages(workflow, stages)
+    # An app-produced mask replaces PersonMaskUltra BEFORE the node probe, so an
+    # install without ComfyUI_LayerStyle is never told to install a pack for a
+    # node this job no longer contains.
+    if mask_image:
+        attach_app_mask(workflow, mask_image)
 
     # Config asks; /object_info decides. A user who leaves an accelerator on
     # without the pack installed gets the image, not a validation 400.
@@ -591,6 +662,15 @@ def enqueue_h3_swap(user_id, target_path, ref_path, extra_metadata=None):
     if not ref_path or not os.path.exists(ref_path):
         raise ValueError(f'reference image not found: {ref_path}')
 
+    # The mask is computed FIRST, on the tile as it is on disk: it is the one
+    # step that can still refuse the whole job for a reason the user can act on
+    # ("nothing matched that phrase"), and doing it before anything is staged or
+    # queued keeps that refusal free.
+    mask_path = None
+    if mask_source() == 'app':
+        from . import auto_mask
+        mask_path = auto_mask.mask_for(target_path, mask_prompt())
+
     comfy_input_dir = comfy_fs.ensure_input_usable(_comfy_input_dir())
     uid = uuid.uuid4().hex[:8]
     target_stem = os.path.splitext(os.path.basename(str(target_path)))[0] or 'target'
@@ -600,10 +680,15 @@ def enqueue_h3_swap(user_id, target_path, ref_path, extra_metadata=None):
     staged_ref = comfy_fs.stage_input_image(
         ref_path, f'h3swap_ref_{uid}_{ref_stem}.png', comfy_input_dir)
     staged_inputs = [os.path.basename(staged_target), os.path.basename(staged_ref)]
+    staged_mask = None
+    if mask_path:
+        staged_mask = os.path.basename(comfy_fs.stage_input_image(
+            mask_path, f'h3swap_mask_{uid}_{target_stem}.png', comfy_input_dir))
+        staged_inputs.append(staged_mask)
 
     workflow, kept = build_swap_workflow(
         staged_inputs[0], staged_inputs[1],
-        filename_prefix=f'{user_id}_H3Swap_{uid}')
+        filename_prefix=f'{user_id}_H3Swap_{uid}', mask_image=staged_mask)
     if kept:
         logger.info('h3 swap: optional stages on — %s',
                     ', '.join(STAGE_LABELS[k] for k in kept))
