@@ -25,7 +25,7 @@ import { HelpBadge } from '../../help/HelpMode';
 import { KIND_LABELS, kindSwitchSummary, normalizeKindLabel } from './datasetKindSwitch';
 
 const FIELD =
-  'px-3 py-1.5 rounded-lg bg-surface-raised border border-border text-content text-sm ' +
+  'px-3 py-1.5 rounded-lg bg-surface-raised text-content text-sm ' +
   'placeholder:text-content-subtle focus:border-indigo-500 outline-none';
 
 const SUFFIX_FRAMINGS = [
@@ -89,7 +89,7 @@ export default function DatasetSettingsModal({ d, busy, onSave, onClose }) {
     <div role="dialog" aria-modal="true" aria-label="Dataset settings"
       className="fixed inset-0 z-[9990] bg-black/80 flex items-center justify-center p-3"
       onClick={onClose}>
-      <div className="w-full max-w-md rounded-xl border border-border bg-surface-overlay p-4 flex flex-col gap-3 max-h-[90vh] overflow-y-auto"
+      <div className="w-full max-w-md rounded-xl bg-surface-overlay p-4 flex flex-col gap-3 max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}>
         <h2 className="text-content font-semibold flex items-center gap-1.5">⚙️ Dataset settings</h2>
 
@@ -112,7 +112,7 @@ export default function DatasetSettingsModal({ d, busy, onSave, onClose }) {
                 className={`flex-1 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
                   kind === val
                     ? 'border-primary/60 bg-primary/15 text-content'
-                    : 'border-border bg-app/40 text-content-muted hover:bg-surface-raised'}`}>
+                    : 'border-transparent bg-surface-raised text-content-muted hover:bg-surface'}`}>
                 {label}
               </button>
             ))}
@@ -160,7 +160,7 @@ export default function DatasetSettingsModal({ d, busy, onSave, onClose }) {
             <span className="text-content-subtle font-normal">— optional creative direction</span>
           </button>
           {suffixOpen && (
-            <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface px-3 py-2.5">
+            <div className="flex flex-col gap-2 rounded-lg bg-surface px-3 py-2.5">
               <label className="flex flex-col gap-1">
                 <span className="text-content-muted text-xs">All shots</span>
                 <input value={gSuffix} onChange={(e) => setGSuffix(e.target.value)}
@@ -218,7 +218,7 @@ export default function DatasetSettingsModal({ d, busy, onSave, onClose }) {
 
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" onClick={onClose}
-            className="px-3 py-1.5 rounded-lg border border-border bg-surface text-content-muted hover:text-content text-sm">
+            className="px-3 py-1.5 rounded-full bg-surface-raised text-content-muted transition-colors hover:bg-surface hover:text-content text-sm">
             Cancel
           </button>
           <button type="button" onClick={save} disabled={!canSave || busy}

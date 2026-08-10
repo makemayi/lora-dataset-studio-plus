@@ -95,7 +95,7 @@ export default function CaptionEditorDialog({
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-3 sm:p-6"
       onMouseDown={(event) => { if (event.target === event.currentTarget) dismiss(); }}>
       <section role="dialog" aria-modal="true" aria-labelledby="caption-editor-title"
-        className="flex h-[min(92vh,50rem)] w-[min(96vw,72rem)] flex-col overflow-hidden rounded-2xl border border-border bg-app shadow-2xl">
+        className="flex h-[min(92vh,50rem)] w-[min(96vw,72rem)] flex-col overflow-hidden rounded-2xl bg-surface shadow-2xl">
         <header className="flex items-start justify-between gap-4 border-b border-border bg-surface px-4 py-3 sm:px-5">
           <div className="flex min-w-0 items-center gap-3">
             <div className="min-w-0">
@@ -105,7 +105,7 @@ export default function CaptionEditorDialog({
               </h2>
             </div>
             {labAvailable && (
-              <div className="ml-1 flex rounded-lg border border-border bg-app p-0.5" role="tablist" aria-label="Caption editor mode">
+              <div className="ml-1 flex rounded-lg bg-surface p-0.5" role="tablist" aria-label="Caption editor mode">
                 <button type="button" role="tab" aria-selected={mode === 'edit'} onClick={() => setMode('edit')}
                   className={`rounded-md px-2.5 py-1 text-xs font-semibold ${mode === 'edit' ? 'bg-surface text-content shadow-sm' : 'text-content-muted hover:text-content'}`}>
                   Edit
@@ -118,7 +118,7 @@ export default function CaptionEditorDialog({
             )}
           </div>
           <button type="button" onClick={dismiss} disabled={busy} aria-label="Close expanded caption editor"
-            className="rounded-lg border border-border bg-app px-2.5 py-1.5 text-sm text-content-muted hover:text-content disabled:opacity-40">
+            className="rounded-lg bg-surface px-2.5 py-1.5 text-sm text-content-muted hover:text-content disabled:opacity-40">
             ✕
           </button>
         </header>
@@ -172,10 +172,10 @@ export default function CaptionEditorDialog({
                  refusal box and the short-caption section are both open at
                  400 px a flex-1 child is free to be squeezed to nothing. The
                  column scrolls instead (overflow-y-auto above). */
-              className="min-h-[6rem] flex-1 resize-none rounded-xl border border-border bg-surface p-4 text-sm leading-6 text-content outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/25" />
+              className="min-h-[6rem] flex-1 resize-none rounded-xl bg-surface p-4 text-sm leading-6 text-content outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/25" />
 
             {showShort && (
-              <div className="rounded-xl border border-border bg-surface">
+              <div className="rounded-xl bg-surface">
                 <button type="button" onClick={() => setShortOpen((open) => !open)}
                   aria-expanded={shortOpen}
                   className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-[0.75rem] font-semibold text-content-muted hover:text-content">
@@ -209,7 +209,7 @@ export default function CaptionEditorDialog({
                         }
                       }}
                       rows={2} placeholder="Short caption (optional)…"
-                      className="resize-none rounded-lg border border-border bg-app p-3 text-sm leading-6 text-content outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/25" />
+                      className="resize-none rounded-lg bg-surface p-3 text-sm leading-6 text-content outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/25" />
                   </div>
                 )}
               </div>
@@ -236,7 +236,7 @@ export default function CaptionEditorDialog({
               <span className="text-[0.6875rem] text-content-subtle">Esc to close · Ctrl/⌘ + Enter to save</span>
               <div className="flex justify-end gap-2">
                 <button type="button" onClick={dismiss} disabled={busy}
-                  className="rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium text-content-muted hover:text-content disabled:opacity-40">
+                  className="rounded-lg bg-surface px-3 py-2 text-sm font-medium text-content-muted hover:text-content disabled:opacity-40">
                   Cancel
                 </button>
                 <button type="button" onClick={save} disabled={busy}

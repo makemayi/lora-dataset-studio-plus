@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from 'react';
 import { postJson } from '../../hooks/useDataset';
 
 const FIELD =
-  'px-3 py-1.5 rounded-lg bg-surface-raised border border-border text-content text-sm ' +
+  'px-3 py-1.5 rounded-lg bg-surface-raised text-content text-sm ' +
   'placeholder:text-content-subtle focus:border-indigo-500 outline-none';
 
 const LICENSES = [
@@ -93,7 +93,7 @@ export default function PublishHfModal({ datasetId, onClose }) {
     <div role="dialog" aria-modal="true" aria-label="Publish to Hugging Face"
       className="fixed inset-0 z-[9990] bg-black/80 flex items-center justify-center p-3"
       onClick={busy ? undefined : onClose}>
-      <div className="w-full max-w-lg rounded-xl border border-border bg-surface-overlay p-4 flex flex-col gap-3 max-h-[92vh] overflow-y-auto"
+      <div className="w-full max-w-lg rounded-xl bg-surface-overlay p-4 flex flex-col gap-3 max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}>
         <h2 className="text-content font-semibold flex items-center gap-1.5">
           🤗 Publish to Hugging Face
@@ -173,7 +173,7 @@ export default function PublishHfModal({ datasetId, onClose }) {
 
             <div className="flex justify-end gap-2 pt-1">
               <button type="button" onClick={onClose} disabled={busy}
-                className="px-3 py-1.5 rounded-lg border border-border bg-surface text-content-muted hover:text-content text-sm disabled:opacity-40">
+                className="px-3 py-1.5 rounded-full bg-surface-raised text-content-muted transition-colors hover:bg-surface hover:text-content text-sm disabled:opacity-40">
                 Cancel
               </button>
               <button type="button" onClick={publish} disabled={!consent || !repoId.trim() || busy}

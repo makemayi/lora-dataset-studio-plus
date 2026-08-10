@@ -108,7 +108,7 @@ export default function ScoringPythonDialog({ onClose, onChanged,
   return (
     <div role="dialog" aria-modal="true" aria-label={picker.ariaLabel}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-2 sm:p-4">
-      <div className="w-full max-w-2xl max-h-[92vh] overflow-y-auto rounded-xl border border-border bg-surface-overlay p-4 shadow-2xl space-y-4 sm:p-5">
+      <div className="w-full max-w-2xl max-h-[92vh] overflow-y-auto rounded-xl bg-surface-overlay p-4 shadow-2xl space-y-4 sm:p-5">
         <div>
           <h2 className="text-base font-bold text-content">{copy.title}</h2>
           <p className="mt-1 text-sm text-content-muted">{copy.intro}</p>
@@ -186,7 +186,7 @@ export default function ScoringPythonDialog({ onClose, onChanged,
                       onClick={() => choose(r.path)}
                       title={canSelect(r) ? `Point ${picker.feature} at this interpreter`
                         : r.selected ? 'Already in use' : 'This one cannot run the pass yet'}
-                      className="rounded-md border border-border px-2.5 py-1 text-xs text-content hover:bg-surface-raised disabled:opacity-40 disabled:hover:bg-transparent">
+                      className="rounded-full bg-surface-raised px-2.5 py-1 text-xs text-content hover:bg-surface-raised disabled:opacity-40 disabled:hover:bg-transparent">
                       {busy === r.path ? 'Checking…' : 'Use this one'}
                     </button>
                   </div>
@@ -204,10 +204,10 @@ export default function ScoringPythonDialog({ onClose, onChanged,
             <input id={picker.inputId} type="text" value={typed} spellCheck={false}
               onChange={(e) => setTyped(e.target.value)}
               placeholder="…/envs/myenv  or  …/envs/myenv/Scripts/python.exe"
-              className="min-w-0 flex-1 rounded-md border border-border bg-surface px-2 py-1 font-mono text-xs text-content" />
+              className="min-w-0 flex-1 rounded-md bg-surface px-2 py-1 font-mono text-xs text-content" />
             <button type="button" disabled={!typed.trim() || loading}
               onClick={() => load({ force: true, path: typed.trim() })}
-              className="rounded-md border border-border px-2.5 py-1 text-xs text-content hover:bg-surface-raised disabled:opacity-40">
+              className="rounded-full bg-surface-raised px-2.5 py-1 text-xs text-content hover:bg-surface-raised disabled:opacity-40">
               Check it
             </button>
           </div>
@@ -228,19 +228,19 @@ export default function ScoringPythonDialog({ onClose, onChanged,
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
           <button type="button" onClick={() => load({ force: true })} disabled={loading || !!busy}
             title="Re-check every interpreter — use this right after installing a package"
-            className="rounded-md border border-border px-2.5 py-1 text-xs text-content-muted hover:text-content hover:bg-surface-raised disabled:opacity-40">
+            className="rounded-full bg-surface-raised px-2.5 py-1 text-xs text-content-muted transition-colors hover:text-content hover:bg-surface-raised disabled:opacity-40">
             ↻ Check again
           </button>
           <div className="flex flex-wrap gap-2">
             {hasOverride && (
               <button type="button" onClick={() => choose('')} disabled={!!busy}
                 title="Go back to the environment the app set up for this pass"
-                className="rounded-md border border-border px-2.5 py-1 text-xs text-content-muted hover:text-content hover:bg-surface-raised disabled:opacity-40">
+                className="rounded-full bg-surface-raised px-2.5 py-1 text-xs text-content-muted transition-colors hover:text-content hover:bg-surface-raised disabled:opacity-40">
                 Back to the app default
               </button>
             )}
             <button type="button" onClick={onClose}
-              className="rounded-md border border-border px-3 py-1 text-xs text-content hover:bg-surface-raised">
+              className="rounded-full bg-surface-raised px-3 py-1 text-xs text-content hover:bg-surface-raised">
               Close
             </button>
           </div>

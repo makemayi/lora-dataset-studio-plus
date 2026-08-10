@@ -239,7 +239,7 @@ export default function ContinueDialog({
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-content text-[0.75rem] w-28 shrink-0">Run it</span>
               <div role="radiogroup" aria-label="Where to run the continuation"
-                className="flex items-center gap-1 rounded-lg border border-border bg-surface p-0.5">
+                className="flex items-center gap-1 rounded-lg bg-surface p-0.5">
                 {[['local', '💻 Local'], ['cloud', '☁ Cloud']].map(([id, label]) => {
                   const st = laneState(id);
                   const off = st.available === false;
@@ -278,7 +278,7 @@ export default function ContinueDialog({
             <div className="flex items-start gap-2 flex-wrap">
               <span className="text-content text-[0.75rem] w-28 shrink-0 pt-1">Send it via</span>
               <div role="radiogroup" aria-label="How the checkpoint reaches the pod"
-                className="flex items-center gap-1 rounded-lg border border-border bg-surface p-0.5 flex-wrap">
+                className="flex items-center gap-1 rounded-lg bg-surface p-0.5 flex-wrap">
                 {TRANSPORTS.map((id) => {
                   const option = transportOption(transportPlan.options, id);
                   const off = option.available === false;
@@ -339,7 +339,7 @@ export default function ContinueDialog({
             <span className="text-content text-[0.75rem] w-28 shrink-0">Resume from</span>
             <select value={String(fromStep)} onChange={(e) => setFromStep(Number(e.target.value))}
               aria-label="Checkpoint to resume from"
-              className="px-2 py-1 rounded-lg border border-border bg-surface text-content text-[0.75rem]">
+              className="px-2 py-1 rounded-lg bg-surface text-content text-[0.75rem]">
               {steps.length === 0 && <option value="0">no checkpoint</option>}
               {steps.slice().reverse().map((s) => (
                 <option key={s} value={String(s)}>{stepLabel(s)}</option>
@@ -358,7 +358,7 @@ export default function ContinueDialog({
         <div className="flex flex-col gap-1">
           <span className="text-content text-[0.75rem]">Resume mode</span>
           <div role="radiogroup" aria-label="Training state to restore"
-            className="flex flex-col gap-1.5 rounded-lg border border-border bg-surface-raised p-2.5">
+            className="flex flex-col gap-1.5 rounded-lg bg-surface-raised p-2.5">
             <label className={'flex items-start gap-2 text-[0.75rem] '
               + (fullStateAvailable ? 'text-content' : 'text-content-subtle')}>
               <input type="radio" name="resume-mode" value="full_state"
@@ -390,7 +390,7 @@ export default function ContinueDialog({
             <input type="number" min="100" step="100" value={extra}
               onChange={(e) => setExtra(e.target.value)}
               aria-label="Additional steps to train"
-              className="w-28 px-2 py-1 rounded-lg border border-border bg-surface text-content text-[0.75rem] tabular-nums" />
+              className="w-28 px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] tabular-nums focus:outline-none focus:ring-1 focus:ring-primary" />
             <span className="text-content-muted text-[0.6875rem] tabular-nums">
               → target step {target}
             </span>
@@ -414,7 +414,7 @@ export default function ContinueDialog({
             {showSettings ? '▾' : '▸'} Adjust settings (optional)
           </button>
           {showSettings && (
-            <div className="flex flex-col gap-2.5 rounded-lg border border-border bg-surface-raised p-2.5">
+            <div className="flex flex-col gap-2.5 rounded-lg bg-surface-raised p-2.5">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-content text-[0.75rem] w-28 shrink-0">Save checkpoint</span>
                 <select value={String(trajectoryLocked ? inheritedSave : saveEvery)}
@@ -424,7 +424,7 @@ export default function ContinueDialog({
                   title={trajectoryLocked
                     ? 'Full state preserves the checkpoint save cadence'
                     : undefined}
-                  className="px-2 py-1 rounded-lg border border-border bg-surface text-content text-[0.75rem] disabled:opacity-40">
+                  className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-40">
                   {SAVE_CHOICES.map((n) => <option key={n} value={String(n)}>every {n} steps</option>)}
                 </select>
                 <span className="text-content-subtle text-[0.625rem]">how often a checkpoint is written</span>
@@ -438,7 +438,7 @@ export default function ContinueDialog({
                   title={trajectoryLocked
                     ? 'Full state preserves the checkpoint preview cadence'
                     : undefined}
-                  className="px-2 py-1 rounded-lg border border-border bg-surface text-content text-[0.75rem] disabled:opacity-40">
+                  className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-40">
                   {SAMPLE_EVERY_CHOICES.map((n) => <option key={n} value={String(n)}>every {n} steps</option>)}
                 </select>
                 <span className="text-content-subtle text-[0.625rem]">preview images cadence</span>
@@ -448,7 +448,7 @@ export default function ContinueDialog({
                 <textarea value={prompts} onChange={(e) => setPrompts(e.target.value)} rows={3}
                   placeholder={inheritedPrompts || 'one prompt per line — blank keeps the run’s prompts'}
                   aria-label="Preview sample prompts, one per line"
-                  className="px-2 py-1.5 rounded-lg border border-border bg-surface text-content text-[0.6875rem] font-mono leading-relaxed resize-y placeholder:text-content-subtle" />
+                  className="px-2 py-1.5 rounded-lg bg-surface-raised text-content text-[0.6875rem] font-mono leading-relaxed focus:outline-none focus:ring-1 focus:ring-primary resize-y placeholder:text-content-subtle" />
                 <span className="text-content-subtle text-[0.625rem]">test images only — never affects the weights</span>
               </label>
               <div className="flex items-center gap-2 flex-wrap">
@@ -459,7 +459,7 @@ export default function ContinueDialog({
                   title={trajectoryLocked
                     ? 'Full state preserves the checkpoint training trajectory'
                     : undefined}
-                  className="px-2 py-1 rounded-lg border border-border bg-surface text-content text-[0.75rem] disabled:opacity-40">
+                  className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-40">
                   <option value="">keep current</option>
                   {TIMESTEP_CHOICES.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
@@ -480,7 +480,7 @@ export default function ContinueDialog({
                     : (isAdaptiveLR
                       ? 'Prodigy adapts the learning rate itself (lr=1) — there is no base rate to scale'
                       : undefined)}
-                  className="px-2 py-1 rounded-lg border border-border bg-surface text-content text-[0.75rem] disabled:opacity-40">
+                  className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-40">
                   {LR_FACTOR_CHOICES.map((c) => <option key={c.value} value={String(c.value)}>{c.label}</option>)}
                 </select>
                 <span className="text-content-muted text-[0.625rem] tabular-nums">

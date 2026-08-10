@@ -106,7 +106,7 @@ export default function PromoteDialog({ bankId, selectedIds, onClose, onStarted 
   return (
     <div role="dialog" aria-modal="true" aria-label="Promote the selection"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-3 sm:p-4">
-      <div className="w-full max-w-md max-h-full overflow-y-auto rounded-xl border border-border bg-surface-overlay p-4 sm:p-5 shadow-2xl space-y-4">
+      <div className="w-full max-w-md max-h-full overflow-y-auto rounded-xl bg-surface-overlay p-4 sm:p-5 shadow-2xl space-y-4">
         <h2 className="text-base font-bold text-content">⬆ Promote the selection</h2>
 
         <div>
@@ -125,7 +125,7 @@ export default function PromoteDialog({ bankId, selectedIds, onClose, onStarted 
         </p>
 
         {weight && (
-          <p className="rounded-md border border-border bg-surface-raised px-3 py-2 text-xs text-content-muted">
+          <p className="rounded-md bg-surface-raised px-3 py-2 text-xs text-content-muted">
             💾 {weight}
           </p>
         )}
@@ -138,7 +138,7 @@ export default function PromoteDialog({ bankId, selectedIds, onClose, onStarted 
             <input id="promote-bank-name" type="text" value={bankName} autoFocus
               onChange={(e) => setBankName(e.target.value)}
               placeholder="Candidates"
-              className="mt-1 w-full rounded-md border border-border bg-surface-raised px-3 py-1.5 text-sm text-content" />
+              className="mt-1 w-full rounded-lg bg-surface-raised px-3 py-1.5 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary" />
             <p className="mt-1 text-xs text-content-subtle">
               The copies get a folder of their own inside the app's data, so this bank and the
               new one can be curated independently — neither ever touches the other's files, nor
@@ -152,7 +152,7 @@ export default function PromoteDialog({ bankId, selectedIds, onClose, onStarted 
             </label>
             <select id="promote-dataset" value={datasetId}
               onChange={(e) => setDatasetId(e.target.value)}
-              className="mt-1 w-full rounded-md border border-border bg-surface-raised px-3 py-1.5 text-sm text-content">
+              className="mt-1 w-full rounded-lg bg-surface-raised px-3 py-1.5 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary">
               <option value="">{datasets == null ? 'Loading…' : 'Choose a dataset…'}</option>
               {(datasets || []).map((d) => (
                 <option key={d.id} value={d.id}>
@@ -171,7 +171,7 @@ export default function PromoteDialog({ bankId, selectedIds, onClose, onStarted 
 
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button type="button" onClick={onClose}
-            className="rounded-md border border-border px-3 py-1.5 text-sm text-content hover:bg-surface-raised">
+            className="rounded-full bg-surface-raised px-3 py-1.5 text-sm text-content transition-colors hover:bg-surface">
             Cancel
           </button>
           <button type="button" onClick={start}

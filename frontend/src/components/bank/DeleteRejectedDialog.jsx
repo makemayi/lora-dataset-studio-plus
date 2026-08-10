@@ -108,11 +108,11 @@ export default function DeleteRejectedDialog({ bankId, count, sourcePath, onClos
           </label>
           <input id="delete-rejected-confirm" type="text" autoComplete="off"
             value={confirm} onChange={(e) => setConfirm(e.target.value)}
-            className="mt-1 w-full rounded-md border border-border bg-surface-raised px-3 py-1.5 text-sm text-content" />
+            className="mt-1 w-full rounded-lg bg-surface-raised px-3 py-1.5 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary" />
         </div>
         <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
           <button type="button" onClick={onClose} autoFocus
-            className="rounded-md border border-border px-3 py-1.5 text-sm text-content hover:bg-surface-raised">
+            className="rounded-full bg-surface-raised px-3 py-1.5 text-sm text-content transition-colors hover:bg-surface">
             Cancel
           </button>
           <button type="button" onClick={run}

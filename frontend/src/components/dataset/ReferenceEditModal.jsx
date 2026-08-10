@@ -163,7 +163,7 @@ export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
           the one every other modal here uses. (Regressed once when this file was
           rewritten; kept explicit so it survives the next rewrite.) */}
       <div className="w-full max-w-3xl mx-auto my-auto flex flex-col gap-3
-                      bg-surface-overlay border border-border rounded-2xl shadow-2xl p-4 sm:p-5">
+                      bg-surface-overlay rounded-2xl shadow-2xl p-4 sm:p-5">
         <div className="flex items-center justify-between">
           <h2 className="text-content text-base font-semibold">✦ Edit reference</h2>
           <button type="button" onClick={onClose} disabled={busy}
@@ -185,7 +185,7 @@ export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
                 const label = ENGINE_LABELS[candidate.engine] || candidate.engine;
                 return (
                   <div key={candidate.engine}
-                    className="rounded-lg bg-surface-raised border border-border px-3 py-2">
+                    className="rounded-lg bg-surface-raised px-3 py-2">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-content text-xs font-semibold">{label}</span>
                       <span className={`text-[0.6875rem] ${candidate.status === 'failed'
@@ -225,7 +225,7 @@ export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
                 const afterUrl = `/api/dataset/${datasetId}/img/${encodeURIComponent(candidate.candidate_filename)}`;
                 return (
                   <figure key={candidate.engine}
-                    className="flex flex-col gap-2 rounded-lg border border-border p-2 bg-surface-raised">
+                    className="flex flex-col gap-2 rounded-lg p-2 bg-surface-raised">
                     <figcaption className="flex items-center justify-between gap-2 text-xs">
                       <span className="text-sky-300">{label}</span>
                       <span className="text-emerald-300">Ready</span>
@@ -296,7 +296,7 @@ export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
               <textarea ref={promptRef} value={prompt} onChange={(e) => setPrompt(e.target.value)}
                 rows={3} disabled={busy}
                 placeholder="e.g. plain studio-grey background, add glasses, warmer lighting"
-                className="w-full rounded-lg bg-surface-raised border border-border text-content text-sm p-2 resize-y disabled:opacity-40" />
+                className="w-full rounded-lg bg-surface-raised text-content text-sm p-2 resize-y disabled:opacity-40" />
             </label>
 
             {/* Engine pills. `flex-wrap` + `min-w-0` is what keeps five of them on

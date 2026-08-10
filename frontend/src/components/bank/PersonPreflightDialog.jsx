@@ -110,7 +110,7 @@ export default function PersonPreflightDialog({
     <div role="dialog" aria-modal="true" aria-label="Check folders before the person pass"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
       onMouseDown={(e) => { if (e.target === e.currentTarget) dismiss() }}>
-      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl border border-border bg-surface-overlay p-4 shadow-2xl space-y-3 sm:p-5">
+      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl bg-surface-overlay p-4 shadow-2xl space-y-3 sm:p-5">
         <div>
           <h2 className="flex flex-wrap items-center gap-1.5 text-base font-bold text-content">
             👤 Before the person pass
@@ -143,7 +143,7 @@ export default function PersonPreflightDialog({
                 {headline}
               </p>
             ) : (
-              <p className="rounded-md border border-border bg-surface px-3 py-2 text-sm text-content-muted">
+              <p className="rounded-md bg-surface px-3 py-2 text-sm text-content-muted">
                 {nothing}
               </p>
             )}
@@ -156,7 +156,7 @@ export default function PersonPreflightDialog({
                     : r.tone === 'warn' ? 'text-amber-300' : 'text-content-subtle'
                   return (
                     <li key={r.subfolder || '(root)'}>
-                      <label className="flex items-start gap-2 rounded-md border border-border bg-surface p-2 text-sm">
+                      <label className="flex items-start gap-2 rounded-lg bg-surface-raised p-2 text-sm">
                         <input type="checkbox" className="mt-0.5" checked={on}
                           onChange={() => setPicked(togglePicked(picked, r.subfolder))} />
                         <span className="min-w-0 flex-1">
@@ -203,14 +203,14 @@ export default function PersonPreflightDialog({
         {/* 400 px: the buttons stack instead of being squeezed to slivers. */}
         <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
           <button type="button" onClick={dismiss} disabled={busy || phase === 'stopping'}
-            className="order-3 rounded-md border border-border px-3 py-2 text-sm text-content-muted hover:bg-surface-raised hover:text-content disabled:opacity-50 sm:order-1">
+            className="order-3 rounded-full bg-surface-raised px-3 py-2 text-sm text-content-muted hover:bg-surface-raised hover:text-content disabled:opacity-50 sm:order-1">
             Cancel
           </button>
           {/* Hidden only when it would be the SAME action as the primary (no
               folder ticked): two identical buttons is not two ways out. */}
           {(phase !== 'choose' || picked.length > 0) && (
             <button type="button" onClick={skip} disabled={busy} title={skipNote(plan)}
-              className="order-2 rounded-md border border-border px-3 py-2 text-sm text-content hover:bg-surface-raised disabled:opacity-50">
+              className="order-2 rounded-full bg-surface-raised px-3 py-2 text-sm text-content hover:bg-surface-raised disabled:opacity-50">
               {SKIP_LABEL}
             </button>
           )}

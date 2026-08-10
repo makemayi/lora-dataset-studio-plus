@@ -38,7 +38,7 @@ import {
 
 function Block({ title, subtitle, children }) {
   return (
-    <section className="rounded-lg border border-border bg-surface p-3 space-y-2">
+    <section className="rounded-lg bg-surface p-3 space-y-2">
       <div>
         <h3 className="text-xs font-bold uppercase tracking-wide text-content-muted">{title}</h3>
         {subtitle && <p className="mt-0.5 text-[11px] leading-snug text-content-subtle">{subtitle}</p>}
@@ -135,7 +135,7 @@ export default function PassDialog({
     <div role="dialog" aria-modal="true" aria-label={spec.label}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-2 sm:p-4"
       onMouseDown={(e) => { if (e.target === e.currentTarget) dismiss() }}>
-      <div className="flex w-full max-w-lg max-h-[92vh] flex-col overflow-hidden rounded-xl border border-border bg-surface-overlay shadow-2xl">
+      <div className="flex w-full max-w-lg max-h-[92vh] flex-col overflow-hidden rounded-xl bg-surface-overlay shadow-2xl">
         <header className="shrink-0 border-b border-border p-4">
           <h2 className="text-base font-bold text-content">{spec.label}</h2>
           <p className="mt-1 text-sm text-content-muted">{spec.what}</p>
@@ -146,7 +146,7 @@ export default function PassDialog({
             subtitle="Where this pass applies, and how many images that is.">
             {/* ① the selection, when there is one. */}
             {selectionSize > 0 && (
-              <label className={`flex items-start gap-2 rounded-md border border-border p-2 text-sm ${selection.ok ? 'bg-surface-raised' : 'opacity-70'}`}>
+              <label className={`flex items-start gap-2 rounded-lg bg-surface-raised p-2 text-sm ${selection.ok ? 'bg-surface-raised' : 'opacity-70'}`}>
                 <input type="radio" name={`scope-${passId}`} className="mt-1"
                   checked={selection.ok && useSelection} disabled={!selection.ok}
                   onChange={() => setUseSelection(true)} />
@@ -168,7 +168,7 @@ export default function PassDialog({
                 ONE immutable line instead, and the objection under it. */}
             {spec.scopes === true ? rows.map((r) => (
               <label key={r.id || 'default'}
-                className={`flex items-start gap-2 rounded-md border border-border p-2 text-sm ${
+                className={`flex items-start gap-2 rounded-lg bg-surface-raised p-2 text-sm ${
                   r.ok ? 'bg-surface-raised' : 'opacity-70'}`}>
                 <input type="radio" name={`scope-${passId}`} className="mt-1"
                   checked={!(useSelection && canUseSelection) && scope === r.id}
@@ -184,7 +184,7 @@ export default function PassDialog({
                 </span>
               </label>
             )) : (
-              <div className="rounded-md border border-border bg-surface-raised p-2 text-sm">
+              <div className="rounded-md bg-surface-raised p-2 text-sm">
                 <p className="m-0 font-medium text-content">
                   {spec.fixedScopeLine}
                   {countable && passScopeCount(payload, passId, DEFAULT_PASS_SCOPE, false) !== null
@@ -196,7 +196,7 @@ export default function PassDialog({
 
             {/* ③ the "do it again" line — where “Rescan all” went. */}
             {spec.redo && (
-              <label className="flex items-start gap-2 rounded-md border border-border bg-surface-raised p-2 text-sm">
+              <label className="flex items-start gap-2 rounded-md bg-surface-raised p-2 text-sm">
                 <input type="checkbox" className="mt-1" checked={redo}
                   onChange={(e) => setRedo(e.target.checked)} />
                 <span className="min-w-0">
@@ -283,7 +283,7 @@ export default function PassDialog({
             : secondary}
           <div className="flex flex-wrap justify-end gap-2">
             <button type="button" onClick={dismiss} disabled={busy}
-              className="rounded-md border border-border px-3 py-1.5 text-sm text-content-muted hover:bg-surface-raised hover:text-content disabled:opacity-50">
+              className="rounded-full bg-surface-raised px-3 py-1.5 text-sm text-content-muted hover:bg-surface-raised hover:text-content disabled:opacity-50">
               Cancel
             </button>
             <button type="button" onClick={launch} disabled={busy || !!blocked}

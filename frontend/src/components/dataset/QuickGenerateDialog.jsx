@@ -236,7 +236,7 @@ export default function QuickGenerateDialog({
             <input type="number" min="1" max="200" value={total}
               onChange={(e) => setTotal(Math.max(1, Math.min(200, Number(e.target.value) || 1)))}
               aria-label="Total images to generate"
-              className="w-28 px-2 py-1 rounded-lg border border-border bg-surface text-content text-[0.75rem] tabular-nums" />
+              className="w-28 px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] tabular-nums focus:outline-none focus:ring-1 focus:ring-primary" />
           </div>
           <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
             Capped at 200 per run, same as the backend enforces.

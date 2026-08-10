@@ -74,7 +74,7 @@ export default function PreflightModal({ report, datasetId, ds, onResolve }) {
                 <textarea defaultValue={li.caption} rows={2}
                   aria-label={`Caption of image ${li.id}`}
                   onBlur={(e) => { if (e.target.value !== li.caption) ds.setCaption(li.id, e.target.value); }}
-                  className="flex-1 bg-app/60 border border-amber-400/30 rounded px-2 py-1 text-[0.6875rem] text-content resize-y" />
+                  className="flex-1 rounded-lg bg-surface-raised px-2 py-1 text-[0.6875rem] text-content resize-y" />
               </div>
             ))}
           </div>

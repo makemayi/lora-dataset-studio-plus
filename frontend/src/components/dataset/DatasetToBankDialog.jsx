@@ -53,7 +53,7 @@ export default function DatasetToBankDialog({ datasetName, keptCount, onClose, o
       <form ref={dialogRef} role="dialog" aria-modal="true"
         aria-labelledby="dataset-to-bank-title" aria-describedby="dataset-to-bank-copy-note"
         onSubmit={submit}
-        className="flex w-full max-w-md max-h-[90vh] flex-col gap-4 overflow-y-auto rounded-xl border border-border bg-surface-overlay p-4 shadow-2xl sm:p-5">
+        className="flex w-full max-w-md max-h-[90vh] flex-col gap-4 overflow-y-auto rounded-xl bg-surface-overlay p-4 shadow-2xl sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 id="dataset-to-bank-title" className="m-0 text-base font-bold text-content">
@@ -64,7 +64,7 @@ export default function DatasetToBankDialog({ datasetName, keptCount, onClose, o
             </p>
           </div>
           <button type="button" onClick={dismiss} disabled={busy} aria-label="Close import to bank"
-            className="shrink-0 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-content-muted hover:text-content disabled:opacity-40">
+            className="shrink-0 rounded-lg bg-surface px-2.5 py-1.5 text-sm text-content-muted hover:text-content disabled:opacity-40">
             ✕
           </button>
         </div>
@@ -73,7 +73,7 @@ export default function DatasetToBankDialog({ datasetName, keptCount, onClose, o
           <span className="text-sm font-medium text-content">Name of the new bank</span>
           <input ref={nameRef} value={name} onChange={(event) => setName(event.target.value)}
             disabled={busy} maxLength={120} placeholder="Candidates" autoComplete="off"
-            className="w-full rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm text-content outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/25 disabled:opacity-40" />
+            className="w-full rounded-lg bg-surface-raised px-3 py-2 text-sm text-content outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/25 disabled:opacity-40" />
         </label>
 
         <fieldset className="flex flex-col gap-2">
@@ -124,7 +124,7 @@ export default function DatasetToBankDialog({ datasetName, keptCount, onClose, o
 
         <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end">
           <button type="button" onClick={dismiss} disabled={busy}
-            className="rounded-lg border border-border px-3 py-2 text-sm text-content hover:bg-surface-raised disabled:opacity-40">
+            className="rounded-full bg-surface-raised px-3 py-2 text-sm text-content hover:bg-surface-raised disabled:opacity-40">
             Cancel
           </button>
           <button type="submit" disabled={!canStart}

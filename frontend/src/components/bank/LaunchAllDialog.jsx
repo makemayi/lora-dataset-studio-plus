@@ -149,7 +149,7 @@ export default function LaunchAllDialog({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
       onMouseDown={(e) => { if (e.target === e.currentTarget) dismiss() }}>
       <div ref={cardRef}
-        className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl border border-border bg-surface-overlay p-5 shadow-2xl space-y-4">
+        className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl bg-surface-overlay p-5 shadow-2xl space-y-4">
         <div>
           <h2 className="text-base font-bold text-content">🚀 Launch all</h2>
           <p className="mt-1 text-sm text-content-muted">
@@ -162,7 +162,7 @@ export default function LaunchAllDialog({
         <ul className="space-y-1.5">
           {STEPS.map((s) => (
             <li key={s.key}>
-              <label className="flex items-start gap-2 rounded-md border border-border bg-surface p-2 text-sm">
+              <label className="flex items-start gap-2 rounded-lg bg-surface-raised p-2 text-sm">
                 <input type="checkbox" className="mt-0.5" checked={steps.has(s.key)}
                   onChange={() => toggleStep(s.key)} />
                 <span className="min-w-0">
@@ -176,7 +176,7 @@ export default function LaunchAllDialog({
                 </span>
               </label>
               {s.key === 'auto_reject' && autoRejectOn && (
-                <div className="ml-6 mt-1.5 space-y-2 rounded-md border border-border bg-surface p-2">
+                <div className="ml-6 mt-1.5 space-y-2 rounded-md bg-surface p-2">
                   <p className="text-xs text-content-muted">
                     Reject the still-undecided images with these flags (manual ✓/✕ are never touched):
                   </p>
@@ -254,7 +254,7 @@ export default function LaunchAllDialog({
 
         <div className="flex justify-end gap-2">
           <button type="button" onClick={dismiss} disabled={busy}
-            className="rounded-md border border-border px-3 py-1.5 text-sm text-content-muted hover:text-content hover:bg-surface-raised disabled:opacity-50">
+            className="rounded-full bg-surface-raised px-3 py-1.5 text-sm text-content-muted hover:text-content hover:bg-surface-raised disabled:opacity-50">
             Cancel
           </button>
           <button type="button" onClick={launch} disabled={busy || nRun === 0}
