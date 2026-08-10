@@ -6,7 +6,9 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { apiFetch } from '../api/fetchClient'
 
-const CapabilitiesContext = createContext(null)
+/* Exported so a test can mount a caps-gated component against a fixed rig
+   (the provider itself only ever fills from /api/capabilities). */
+export const CapabilitiesContext = createContext(null)
 
 const EMPTY_CAPS = {
   configured: false,

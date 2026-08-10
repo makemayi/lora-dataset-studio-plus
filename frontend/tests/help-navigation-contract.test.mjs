@@ -7,7 +7,9 @@ const guide = readFileSync(new URL('../src/pages/GuidePage.jsx', import.meta.url
 const help = readFileSync(new URL('../../docs/guide/getting-help.md', import.meta.url), 'utf8')
 
 test('Help is a top-level destination beside Settings', () => {
-  assert.match(app, /to="\/settings"[\s\S]*>Settings<\/NavLink>[\s\S]*to="\/help"[\s\S]*>Help<\/NavLink>/)
+  // Loose about what sits INSIDE the link (both carry an icon since the
+  // 2026-08-10 nav restyle) and strict about the pair existing, in order.
+  assert.match(app, /to="\/settings"[\s\S]*?Settings\s*<\/NavLink>[\s\S]*?to="\/help"[\s\S]*?Help\s*<\/NavLink>/)
   assert.match(app, /path="\/help" element={<GuidePage helpOnly \/>}/)
 })
 

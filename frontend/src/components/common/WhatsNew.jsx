@@ -14,6 +14,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { GiftIcon, ICON_BUTTON_BASE, ICON_BUTTON_QUIET } from './navIcons';
 import {
   WHATS_NEW,
   sortedEntries,
@@ -24,9 +25,6 @@ import {
   WHATS_NEW_OPEN_EVENT,
   WHATS_NEW_SEEN_EVENT,
 } from '../../whatsNew';
-
-const NAV_ITEM_BASE =
-  'px-3 py-1.5 rounded-md text-sm font-medium no-underline transition-colors';
 
 function formatDate(iso) {
   // iso is 'YYYY-MM-DD'. Parse as local midnight so the day never shifts.
@@ -64,14 +62,18 @@ export function WhatsNewButton() {
       type="button"
       onClick={open}
       title={has ? `What's new — ${count} new` : "What's new"}
-      className={`${NAV_ITEM_BASE} relative ${
-        has ? 'text-content hover:text-content' : 'text-content-muted hover:text-content'
-      } hover:bg-surface-raised`}
+      className={`${ICON_BUTTON_BASE} ${
+        has ? 'text-content hover:bg-surface' : ICON_BUTTON_QUIET
+      }`}
     >
-      <span aria-hidden>🎁</span>
+      <GiftIcon />
       {has && (
+        /* translate="no": Chrome auto-translate turned the count "9+" into
+           「9岁以上」 — four characters in a 16px circle, wrapped to two lines
+           and spilling over the icon. A count is a number, not prose. */
         <span
           aria-hidden
+          translate="no"
           className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold leading-none text-white"
         >
           {count > 9 ? '9+' : count}

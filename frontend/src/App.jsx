@@ -23,6 +23,11 @@ import CanvasPage from './pages/CanvasPage'
 import { recommendedMet } from './hooks/useSetupSteps'
 import { HelpModeProvider, useHelpMode, TipHost } from './help/HelpMode'
 import HeaderMenu from './components/common/HeaderMenu'
+import {
+  DatasetsIcon, BankIcon, RunsIcon, CanvasIcon, StudioIcon,
+  HelpIcon, SettingsIcon, UpdateIcon, SpinnerIcon, MenuIcon, CloseIcon,
+  ICON_BUTTON_BASE, ICON_BUTTON_QUIET,
+} from './components/common/navIcons'
 import { versionLabel } from './utils/versionLabel'
 import { useTrainingActivity } from './hooks/useTrainingActivity'
 import { activityLabel } from './utils/trainingActivity'
@@ -32,19 +37,26 @@ import { activityLabel } from './utils/trainingActivity'
 // icons. At the old px-3 that row overflowed the viewport at exactly 768 and
 // clipped the What's-new button off the right edge. Nothing is hidden — the
 // items simply breathe less until there is room for it.
+// The item is a flex row because every workspace now carries an icon (see
+// components/common/navIcons) — the label and the glyph are children of the
+// link itself, not of a wrapper span inside it.
 const NAV_ITEM_BASE =
-  'px-2 lg:px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap no-underline transition-colors'
+  'inline-flex items-center gap-1.5 px-2 lg:px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap no-underline transition-colors'
+// Active is a FILLED PILL, and the two states must not both be "a lighter
+// panel": hover therefore lands on `bg-surface` (the fainter of the two
+// tokens) so the current workspace stays the brightest thing in the row even
+// while the pointer is somewhere else in it.
 const navItemClass = ({ isActive }) =>
   `${NAV_ITEM_BASE} ${
-    isActive ? 'bg-surface-raised text-content' : 'text-content-muted hover:text-content hover:bg-surface-raised'
+    isActive ? 'bg-surface-raised text-content' : 'text-content-muted hover:text-content hover:bg-surface'
   }`
 
 // Full-width variant for links that live inside a HeaderMenu dropdown.
 const MENU_ITEM_BASE =
-  'block w-full text-left px-3 py-1.5 rounded-md text-sm font-medium no-underline transition-colors'
+  'block w-full text-left px-3 py-1.5 rounded-lg text-sm font-medium no-underline transition-colors'
 const menuItemClass = ({ isActive }) =>
   `${MENU_ITEM_BASE} ${
-    isActive ? 'bg-surface-raised text-content' : 'text-content-muted hover:text-content hover:bg-surface-raised'
+    isActive ? 'bg-surface-raised text-content' : 'text-content-muted hover:text-content hover:bg-surface'
   }`
 
 /** Nav action (right of Settings): force an update check and give immediate
@@ -104,12 +116,16 @@ function CheckUpdatesButton() {
   return (
     <button type="button" onClick={check} disabled={busy}
       title={available ? 'Update available — click to review' : 'Check for updates'}
-      className={`${NAV_ITEM_BASE} relative ${available
-        ? 'text-emerald-300 hover:text-emerald-200'
-        : 'text-content-muted hover:text-content'} hover:bg-surface-raised disabled:opacity-50`}>
-      <span aria-hidden>{busy ? '⏳' : '⬆'}</span>
+      className={`${ICON_BUTTON_BASE} ${available
+        ? 'text-emerald-300 hover:text-emerald-200 hover:bg-surface'
+        : ICON_BUTTON_QUIET} disabled:opacity-50`}>
+      {/* Both glyphs stay mounted and flip `hidden`: swapping them with a
+          ternary is what Chrome's auto-translate turns into a removeChild
+          crash (see CLAUDE.md ▸ UI changes). */}
+      <span hidden={!busy}><SpinnerIcon /></span>
+      <span hidden={!!busy}><UpdateIcon /></span>
       {available && (
-        <span aria-hidden className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-emerald-400" />
+        <span aria-hidden className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-emerald-400" />
       )}
       <span className="sr-only">{available ? 'Update available' : 'Check for updates'}</span>
     </button>
@@ -127,16 +143,18 @@ function HelpModeToggle({ onToggle }) {
       title={enabled
         ? 'Help mode is on — click any ? badge to jump to the guide'
         : 'Turn on Help mode to reveal ? badges that link to the guide'}
-      className={`${NAV_ITEM_BASE} inline-flex items-center gap-1.5 ${enabled
+      className={`flex w-full items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-left transition-colors ${enabled
         ? 'bg-indigo-500/20 text-indigo-200 ring-1 ring-inset ring-indigo-400/50'
-        : 'text-content-muted hover:text-content hover:bg-surface-raised'}`}>
-      <span aria-hidden className="grid h-4 w-4 place-items-center rounded-full border border-current text-[10px] font-bold leading-none">?</span>
+        : 'text-content-muted hover:text-content hover:bg-surface'}`}>
+      <span aria-hidden className="grid h-4 w-4 shrink-0 place-items-center rounded-full border border-current text-[10px] font-bold leading-none">?</span>
       <span>Help mode</span>
     </button>
   )
 }
 
-function NavBar() {
+/** Exported for `tests/nav-shell-render.test.mjs` — the bar is on every screen
+ *  in the app, so a crash in it is a crash in all of them. */
+export function NavBar() {
   const { caps } = useCapabilities()
   // 🏋️ Live indicator on Runs: a training can hold the GPU for hours (local) or
   // bill by the minute (cloud), and from any other page nothing said so.
@@ -148,6 +166,16 @@ function NavBar() {
   // mounted (not just hidden) inside the mobile panel so a closed menu costs
   // nothing extra in the DOM.
   const [open, setOpen] = useState(false)
+  // Elevation-on-scroll: the bar is flat over an unscrolled page and lifts
+  // once anything passes under it. 4px of slack so a trackpad's rubber-band
+  // does not flicker the shadow.
+  const [scrolled, setScrolled] = useState(false)
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 4)
+    onScroll()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
   const goHome = () => {
     // Home = the datasets LIST: clear the persisted open dataset and tell
     // the mounted page (same-route clicks don't remount) to close it.
@@ -166,50 +194,52 @@ function NavBar() {
   // mobile panel. Same caps gates in both places.
   const workspaceLinks = (
     <>
-      <NavLink to="/datasets" className={navItemClass} onClick={() => setOpen(false)}>Datasets</NavLink>
+      <NavLink to="/datasets" className={navItemClass} onClick={() => setOpen(false)}>
+        <DatasetsIcon /> Datasets
+      </NavLink>
       {/* Bank sits right after Datasets: it FEEDS them (triage a big unsorted
           folder, then promote the keepers into a dataset). */}
       <NavLink to="/bank" className={navItemClass} onClick={() => setOpen(false)}>
-        <span className="inline-flex items-center gap-1"><span aria-hidden>🗃️</span> Bank</span>
+        <BankIcon /> Bank
       </NavLink>
       {/* Unified runs hub (cloud + local history) — useful as soon as ANY
           training path exists, not just the cloud one. */}
       {(caps.cloud_training || caps.training_visible) && (
         <NavLink to="/cloud" className={navItemClass} onClick={() => setOpen(false)}>
-          <span className="inline-flex items-center gap-1"><span aria-hidden>🏋️</span> Runs
-            {activity.running && (
-              /* Presence IS the message, so it must not be colour-only: the
-                 label is read out and shown on hover/long-press. */
-              <span title={activityTitle} aria-label={activityTitle} role="status"
-                className="relative inline-flex h-2 w-2 shrink-0">
-                <span aria-hidden className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/70" />
-                <span aria-hidden className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
-              </span>
-            )}
-          </span>
+          <RunsIcon /> Runs
+          {activity.running && (
+            /* Presence IS the message, so it must not be colour-only: the
+               label is read out and shown on hover/long-press. */
+            <span title={activityTitle} aria-label={activityTitle} role="status"
+              className="relative inline-flex h-2 w-2 shrink-0">
+              <span aria-hidden className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/70" />
+              <span aria-hidden className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+            </span>
+          )}
         </NavLink>
       )}
-      {/* ◉ Canvas — the whole training history on one board. It lives next to
+      {/* Canvas — the whole training history on one board. It lives next to
           Runs because it answers the same question from the other end: Runs
           lists what happened, the canvas shows how the runs descend from each
           other, across every dataset at once. */}
       {(caps.cloud_training || caps.training_visible) && (
         <NavLink to="/canvas" className={navItemClass} onClick={() => setOpen(false)}>
-          <span className="inline-flex items-center gap-1"><span aria-hidden>◉</span> Canvas
-            {/* The Beta chip marks the newest surface, not the oldest: the Bank
-                has been in daily use for weeks, the canvas ships today.
+          <CanvasIcon /> Canvas
+          {/* The Beta chip marks the newest surface, not the oldest: the Bank
+              has been in daily use for weeks, the canvas ships today.
 
-                It hides ONLY on the tight desktop bar (md→lg), where a fifth
-                workspace already overflows the row. It stays visible in the
-                mobile panel — a vertical list with room to spare — because that
-                is where this app is actually browsed, and a "beta" warning that
-                disappears on the reader's own screen warns nobody. */}
-            <span className="px-1 py-0.5 rounded border border-amber-400/50 bg-amber-500/10 text-amber-300 text-[0.5625rem] font-semibold uppercase tracking-wide leading-none md:hidden lg:inline">Beta</span>
-          </span>
+              It hides ONLY on the tight desktop bar (md→lg), where a fifth
+              workspace already overflows the row. It stays visible in the
+              mobile panel — a vertical list with room to spare — because that
+              is where this app is actually browsed, and a "beta" warning that
+              disappears on the reader's own screen warns nobody. */}
+          <span className="px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 text-[0.5625rem] font-semibold uppercase tracking-wide leading-none md:hidden lg:inline">Beta</span>
         </NavLink>
       )}
       {caps.studio_visible && (
-        <NavLink to="/studio" className={navItemClass} onClick={() => setOpen(false)}>Test Studio</NavLink>
+        <NavLink to="/studio" className={navItemClass} onClick={() => setOpen(false)}>
+          <StudioIcon /> Test Studio
+        </NavLink>
       )}
     </>
   )
@@ -219,23 +249,36 @@ function NavBar() {
   const mobileLinks = (
     <>
       {workspaceLinks}
-      <NavLink to="/guide" className={navItemClass} onClick={() => setOpen(false)}>Guide</NavLink>
-      <NavLink to="/setup" className={navItemClass} onClick={() => setOpen(false)}>
-        <span className="inline-flex items-center gap-1">
-          Setup
-          {setupNeedsAttention && <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-primary" />}
-        </span>
+      <NavLink to="/guide" className={navItemClass} onClick={() => setOpen(false)}>
+        <HelpIcon /> Guide
       </NavLink>
-      <NavLink to="/settings" className={navItemClass} onClick={() => setOpen(false)}>Settings</NavLink>
-      <NavLink to="/help" className={navItemClass} onClick={() => setOpen(false)}>Help</NavLink>
+      <NavLink to="/setup" className={navItemClass} onClick={() => setOpen(false)}>
+        <SettingsIcon /> Setup
+        {setupNeedsAttention && <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-primary" />}
+      </NavLink>
+      <NavLink to="/settings" className={navItemClass} onClick={() => setOpen(false)}>
+        <SettingsIcon /> Settings
+      </NavLink>
+      <NavLink to="/help" className={navItemClass} onClick={() => setOpen(false)}>
+        <HelpIcon /> Help
+      </NavLink>
       <HelpModeToggle onToggle={() => setOpen(false)} />
     </>
   )
   return (
-    <header className="border-b border-border bg-surface-overlay/90 backdrop-blur-sm sticky top-0 z-40">
-      <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3 sm:gap-6">
+    /* No bottom hairline. The bar separates itself the way the rest of the
+       redesign does — by elevation, and only once there is something to
+       separate FROM: flat while the page is at the top, a shadow the moment
+       content starts sliding under it. A permanent border drew a line across
+       every screen to solve a problem that only exists when scrolled. */
+    <header className={`sticky top-0 z-40 bg-surface-overlay/90 backdrop-blur-sm transition-shadow ${
+      scrolled ? 'shadow-lg' : ''}`}>
+      {/* Same measure as the wide workspaces (Shell ▸ wideWorkspaceRoute).
+          At max-w-5xl the brand sat ~350px inside the left edge of the Bank,
+          Canvas and Settings content it was supposed to sit above. */}
+      <div className="mx-auto flex w-full max-w-[1800px] items-center gap-3 px-3 py-2.5 sm:gap-6 sm:px-4">
         <NavLink to="/datasets" title="Back to the datasets page" onClick={goHome}
-          className="shrink-0 whitespace-nowrap bg-gradient-primary bg-clip-text text-base font-bold text-transparent no-underline">
+          className="shrink-0 whitespace-nowrap text-base font-semibold tracking-tight text-content no-underline">
           LoRA Dataset Studio
         </NavLink>
         {/* Desktop: workspaces on the left, utilities grouped into icon menus
@@ -255,7 +298,7 @@ function NavBar() {
             {workspaceLinks}
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-1">
-            <HeaderMenu triggerLabel={<span aria-hidden>?</span>}
+            <HeaderMenu triggerLabel={<HelpIcon />}
               triggerTitle="Help & guide" active={helpMenuActive}>
               {(close) => (
                 <>
@@ -265,7 +308,7 @@ function NavBar() {
                 </>
               )}
             </HeaderMenu>
-            <HeaderMenu triggerLabel={<span aria-hidden>⚙</span>}
+            <HeaderMenu triggerLabel={<SettingsIcon />}
               triggerTitle="Setup & settings" active={settingsMenuActive} dot={setupNeedsAttention}>
               {(close) => (
                 <>
@@ -288,14 +331,17 @@ function NavBar() {
           <CheckUpdatesButton />
           <button type="button" onClick={() => setOpen((v) => !v)}
             aria-expanded={open} aria-label={open ? 'Close navigation menu' : 'Open navigation menu'}
-            className="rounded-md p-2 text-content-muted hover:text-content hover:bg-surface-raised">
-            <span aria-hidden className="block text-lg leading-none">{open ? '✕' : '☰'}</span>
+            className={`${ICON_BUTTON_BASE} ${ICON_BUTTON_QUIET}`}>
+            {/* Both glyphs mounted, `hidden` flipped — a ternary here is the
+                Chrome-translate removeChild crash. */}
+            <span hidden={!open}><CloseIcon /></span>
+            <span hidden={!!open}><MenuIcon /></span>
           </button>
         </div>
       </div>
       {open && (
         <nav aria-label="Main navigation (mobile)"
-          className="flex flex-col gap-1 border-t border-border px-4 py-2 md:hidden">
+          className="flex flex-col gap-1 px-3 pb-3 pt-1 md:hidden">
           {mobileLinks}
         </nav>
       )}

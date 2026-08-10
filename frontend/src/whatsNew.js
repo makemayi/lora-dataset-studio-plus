@@ -50,6 +50,12 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-nav-bar-restyle',
+    date: '2026-08-10',
+    title: 'The top bar tells you where you are',
+    blurb: 'The workspace you are on is now a filled pill instead of slightly brighter text, and every workspace carries an icon from one drawn set — the bar used to put an emoji on three of them and nothing on the other two, each rendered by a different font. The bar also spans the window like the wide pages under it, so on Bank, Canvas and Settings the app name no longer starts hundreds of pixels inside the content it sits above. The line under the header is gone: it lifts with a shadow once you scroll, and stays flat when there is nothing to separate from.',
+  },
+  {
     id: '2026-08-10-settings-help-folds-everywhere',
     date: '2026-08-10',
     title: 'Every Settings page folds its explanations now, not just Image engines',

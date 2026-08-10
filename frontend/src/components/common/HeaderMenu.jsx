@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { ICON_BUTTON_BASE, ICON_BUTTON_QUIET } from './navIcons';
 
 /** A small header dropdown (the ? Help menu and the ⚙ Settings menu share it).
  *  Follows the same interaction contract as the app's other popovers
@@ -17,8 +18,10 @@ import { useEffect, useRef, useState } from 'react';
  *   - dot          : true to paint a small primary attention dot on the trigger
  *                    (Setup's "recommended steps unmet" indicator moved up here).
  *   - align        : menu horizontal alignment; 'right' (default) or 'left'. */
-const TRIGGER_BASE =
-  'relative px-3 py-1.5 rounded-md text-sm font-medium transition-colors';
+// The trigger is one of the header's round icon buttons — same 32px target as
+// What's-new and the update check, so the utility cluster is one row of equal
+// circles rather than a mix of text buttons and glyphs.
+const TRIGGER_BASE = ICON_BUTTON_BASE;
 
 export default function HeaderMenu({ triggerLabel, triggerTitle, active = false, dot = false, align = 'right', children }) {
   const [open, setOpen] = useState(false);
@@ -57,15 +60,13 @@ export default function HeaderMenu({ triggerLabel, triggerTitle, active = false,
         title={triggerTitle}
         onClick={() => setOpen((v) => !v)}
         className={`${TRIGGER_BASE} ${
-          open || active
-            ? 'bg-surface-raised text-content'
-            : 'text-content-muted hover:text-content hover:bg-surface-raised'
+          open || active ? 'bg-surface-raised text-content' : ICON_BUTTON_QUIET
         }`}
       >
         {triggerLabel}
         {dot && (
           <span aria-hidden="true"
-            className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary" />
+            className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-primary" />
         )}
         <span className="sr-only">{triggerTitle}</span>
       </button>
@@ -73,8 +74,10 @@ export default function HeaderMenu({ triggerLabel, triggerTitle, active = false,
         <div
           role="menu"
           aria-label={triggerTitle}
-          className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full mt-1 z-50 min-w-[11rem]
-            flex flex-col gap-0.5 rounded-lg border border-border bg-surface-overlay p-1 shadow-2xl`}
+          /* Elevation, not an outline: the shadow already separates the panel
+             from the page, and the border only added a bright edge to it. */
+          className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full mt-2 z-50 min-w-[11rem]
+            flex flex-col gap-0.5 rounded-xl bg-surface-overlay p-1.5 shadow-2xl`}
         >
           {typeof children === 'function' ? children(close) : children}
         </div>

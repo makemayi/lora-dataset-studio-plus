@@ -88,6 +88,14 @@ registerHooks({
     // A stylesheet import is a Vite concern with no meaning here; an empty
     // module keeps a component that has one importable.
     if (url.endsWith('.css')) return { format: 'module', source: '', shortCircuit: true }
+    // `import doc from '…/guide.md?raw'` — Vite hands the file over as a
+    // string. Node has no loader for .md at all, so anything that reaches the
+    // guide (and therefore anything that imports App.jsx) died on the import
+    // rather than on a render. Same contract as Vite: default export = text.
+    if (url.endsWith('.md') || url.includes('.md?')) {
+      const text = readFileSync(fileURLToPath(new URL(url).href.split('?')[0]), 'utf8')
+      return { format: 'module', source: `export default ${JSON.stringify(text)}`, shortCircuit: true }
+    }
     if (!url.endsWith('.jsx')) return nextLoad(url, context)
     const source = readFileSync(fileURLToPath(url), 'utf8')
     const { code } = esbuild.transformSync(source, {
