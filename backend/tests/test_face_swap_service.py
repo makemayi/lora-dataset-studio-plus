@@ -138,51 +138,113 @@ def test_face_swap_route_404_for_unknown_image(client):
     assert resp.status_code == 404
 
 
-def test_face_swap_trash_failure_restores_previous_row_and_cancels_new_job(
-        app, tmp_path, monkeypatch):
-    """Highest-risk branch: the row has already been flipped to pending/no
-    filename/new job_id (DB committed) when Trash raises. Mirrors
-    test_regenerate_trash_failure_restores_previous_row_and_cancels_new_job
-    in test_data_integrity_trash.py, adapted to face_swap_image's fields."""
+# --- The original survives every way a swap can end ---------------------------
+# A swap overwrites the tile IN PLACE, so while the job runs the row carries no
+# file and the picture exists only as the file the snapshot names. Both ways a
+# swap ends badly used to destroy it: ⏹ Stop deletes rows that are `pending`
+# with no file — exactly a swapping tile — and a ComfyUI failure left an empty
+# ⚠ tile. The original was then recoverable by hand, out of the app trash, and
+# nowhere else.
+
+def _swap_started(svc, monkeypatch, cfg, tmp_path):
+    """A dataset whose tile has a swap in flight. Returns (ds, img_id, job_id)."""
+    from app.services import face_swap_helper
+    from app.config import LOCAL_USER
+    ds, img = _dataset_with_image(svc, cfg, tmp_path)
+    img_id = img.id
+    monkeypatch.setattr(face_swap_helper, 'enqueue_face_swap',
+                        lambda **_kwargs: 'swap-job')
+    job_id = svc.face_swap_image(LOCAL_USER, img_id)
+    return ds, img_id, job_id
+
+
+def test_the_original_stays_on_disk_while_the_swap_runs(app, tmp_path, monkeypatch):
+    """It used to go to Trash the moment the job was queued, which is what left
+    both failure paths with nothing to put back."""
     from app import config as cfg
     from app.services import face_dataset_service as svc
-    from app.services import face_swap_helper, trash
+    with app.app_context():
+        _comfy(tmp_path, cfg)
+        ds, img_id, job_id = _swap_started(svc, monkeypatch, cfg, tmp_path)
+        row = svc.db.session.get(svc.FaceDatasetImage, img_id)
+        assert (row.filename, row.status, row.job_id) == (None, 'pending', job_id)
+        assert os.path.isfile(os.path.join(svc._dataset_dir(ds.id), 'tile.png'))
+        assert 'tile.png' in (row.swap_restore or '')
+
+
+def test_stopping_a_swap_restores_the_tile_instead_of_deleting_it(app, tmp_path, monkeypatch):
+    from app import config as cfg
+    from app.services import face_dataset_service as svc
     from app.config import LOCAL_USER
     from app.job_queue import queue_manager
     with app.app_context():
         _comfy(tmp_path, cfg)
-        ds, img = _dataset_with_image(svc, cfg, tmp_path)
-        img_id = img.id
-        old_path = os.path.join(svc._dataset_dir(ds.id), 'tile.png')
+        ds, img_id, _job = _swap_started(svc, monkeypatch, cfg, tmp_path)
+        monkeypatch.setattr(queue_manager, 'cancel_job_outcome',
+                            lambda *a, **k: 'cancelled')
 
-        monkeypatch.setattr(face_swap_helper, 'enqueue_face_swap',
-                            lambda **_kwargs: 'new-job')
-
-        cancellations = []
-
-        def cancel(job_id, user_id=None, job_type='image', *, commit=True):
-            cancellations.append((job_id, user_id, job_type, commit))
-            return True
-
-        monkeypatch.setattr(queue_manager, 'cancel_job', cancel)
-
-        def fail_trash(_path, context=''):
-            svc.db.session.expire_all()
-            pending = svc.db.session.get(svc.FaceDatasetImage, img_id)
-            assert pending.filename is None and pending.status == 'pending'
-            assert pending.job_id == 'new-job'
-            raise OSError('injected Trash failure')
-
-        monkeypatch.setattr(trash, 'send_to_trash', fail_trash)
-
-        with pytest.raises(OSError, match='injected Trash failure'):
-            svc.face_swap_image(LOCAL_USER, img_id)
+        out = svc.cancel_pending(LOCAL_USER, ds.id)
 
         row = svc.db.session.get(svc.FaceDatasetImage, img_id)
-        assert (row.filename, row.status, row.job_id) == ('tile.png', 'finished', None)
-        # Provenance was never touched by face_swap_image in the first place,
-        # but assert it for symmetry with the regenerate rollback test.
-        assert row.variation_prompt == 'p'
-        assert row.variation_label == 'x'
-        assert os.path.isfile(old_path)
-        assert ('new-job', LOCAL_USER, 'image', False) in cancellations
+        assert row is not None, 'Stop deleted the tile it was asked to leave alone'
+        assert (row.filename, row.status) == ('tile.png', 'finished')
+        assert row.job_id is None and row.swap_restore is None
+        assert os.path.isfile(os.path.join(svc._dataset_dir(ds.id), 'tile.png'))
+        # It was restored, not cancelled-away: the count is what the UI reports.
+        assert out['cancelled'] == 0
+        assert 'cancelled' in (row.fail_reason or '').lower()
+
+
+def test_a_failed_swap_restores_the_tile(app, tmp_path, monkeypatch):
+    from app import config as cfg
+    from app.services import face_dataset_service as svc
+    with app.app_context():
+        _comfy(tmp_path, cfg)
+        ds, img_id, job_id = _swap_started(svc, monkeypatch, cfg, tmp_path)
+
+        svc.link_completed_dataset_image(job_id, None, failed=True,
+                                         reason='ComfyUI said no')
+
+        row = svc.db.session.get(svc.FaceDatasetImage, img_id)
+        assert (row.filename, row.status) == ('tile.png', 'finished')
+        assert row.swap_restore is None
+        assert os.path.isfile(os.path.join(svc._dataset_dir(ds.id), 'tile.png'))
+        # The failure is not swallowed: a restored tile shows its own picture
+        # again, so the reason is the only trace that anything was attempted.
+        assert 'ComfyUI said no' in (row.fail_reason or '')
+
+
+def test_a_swap_that_lands_trashes_the_picture_it_replaced(app, tmp_path, monkeypatch):
+    from app import config as cfg
+    from app.services import face_dataset_service as svc
+    with app.app_context():
+        _comfy(tmp_path, cfg)
+        ds, img_id, job_id = _swap_started(svc, monkeypatch, cfg, tmp_path)
+        out_dir = svc._comfy_output_dir()
+        os.makedirs(out_dir, exist_ok=True)
+        with open(os.path.join(out_dir, 'swapped.png'), 'wb') as fh:
+            fh.write(_png((5, 5, 200)))
+
+        svc.link_completed_dataset_image(job_id, 'swapped.png')
+
+        row = svc.db.session.get(svc.FaceDatasetImage, img_id)
+        assert row.filename == 'swapped.png'
+        assert row.swap_restore is None
+        assert row.unseen is True
+        # NOW the replaced picture leaves — not one step earlier.
+        assert not os.path.exists(os.path.join(svc._dataset_dir(ds.id), 'tile.png'))
+
+
+def test_deleting_a_swapping_tile_takes_the_held_original_with_it(app, tmp_path, monkeypatch):
+    """Otherwise the retained file outlives the only row that could name it."""
+    from app import config as cfg
+    from app.services import face_dataset_service as svc
+    from app.config import LOCAL_USER
+    from app.job_queue import queue_manager
+    with app.app_context():
+        _comfy(tmp_path, cfg)
+        ds, img_id, _job = _swap_started(svc, monkeypatch, cfg, tmp_path)
+        monkeypatch.setattr(queue_manager, 'cancel_job', lambda *a, **k: True)
+
+        assert svc.delete_image(LOCAL_USER, img_id) is True
+        assert not os.path.exists(os.path.join(svc._dataset_dir(ds.id), 'tile.png'))

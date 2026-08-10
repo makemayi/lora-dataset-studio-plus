@@ -2591,6 +2591,17 @@ def delete_image(user_id, image_id):
         if original_path and os.path.exists(original_path):
             trashed_path = trash.send_to_trash(
                 original_path, context=f'dataset-{img.dataset_id}-image-{img.id}')
+        # A row being face-swapped right now holds a SECOND file: the picture the
+        # swap is replacing, kept on disk until the new one lands. Deleting the
+        # row is the moment that file stops having an owner, so it goes to Trash
+        # with it instead of staying behind as an orphan nobody can name.
+        from .dataset_generation_service import swap_restore_filename
+        held = swap_restore_filename(img)
+        held_path = (os.path.join(_dataset_path(img.dataset_id), held)
+                     if held and held != img.filename else None)
+        if held_path and os.path.exists(held_path):
+            trash.send_to_trash(
+                held_path, context=f'dataset-{img.dataset_id}-image-{img.id}-preswap')
         db.session.delete(img)
         db.session.commit()
     except trash.TrashLockError as e:
@@ -2740,7 +2751,17 @@ def delete_dataset(user_id, dataset_id):
 
 
 def _finish_cancelled_generation_row(img):
-    """Remove one safely terminal generation while preserving rescue originals."""
+    """Remove one safely terminal generation while preserving rescue originals
+    — and, since it also targets tiles being FACE SWAPPED, their originals.
+
+    A swap empties the row it is overwriting (no file, status pending), which is
+    exactly the shape this function deletes. Stop therefore used to destroy the
+    picture the user was only trying to leave alone: the row went, and the
+    original was recoverable by hand out of the app trash and nowhere else."""
+    from .dataset_generation_service import restore_swapped_original
+    if restore_swapped_original(img, reason='The face swap was cancelled — '
+                                            'the original image was restored.'):
+        return
     if img.derivation_kind == KLEIN_SMALL_IMAGE:
         img.status = 'failed'
         img.fail_reason = 'Klein small-image rescue was cancelled.'
@@ -2768,7 +2789,7 @@ def cancel_pending(user_id, dataset_id):
     image in between the arming and the row deletion."""
     ds = get_dataset(user_id, dataset_id)
     if not ds:
-        return {'cancelled': 0, 'recovery_pending': 0,
+        return {'cancelled': 0, 'restored': 0, 'recovery_pending': 0,
                 'retry_pending': 0, 'restart_required': 0,
                 'recovery_error': 0}
     dataset_activity.request_cancel(dataset_id, dataset_activity.IMPROVE_KINDS)
@@ -2781,6 +2802,12 @@ def cancel_pending(user_id, dataset_id):
     retry_pending = 0
     restart_required = 0
     recovery_error = 0
+    # Rows a Stop RESTORES rather than removes: a tile being face-swapped is
+    # `pending` with no file, so it is caught by the query above — but its
+    # picture predates the swap and must come back. Counted separately because
+    # the toast otherwise reports "0 generation(s) cancelled" for a Stop that
+    # visibly put three tiles back.
+    restored = 0
     for img in rows:
         if img.job_id:  # Klein rows only - API rows never carry a job_id
             try:
@@ -2802,6 +2829,8 @@ def cancel_pending(user_id, dataset_id):
                 continue
             # cancelled / terminal / missing are all safe: cancel_job_outcome
             # proved that this exact job owns no durable recovery barrier.
+        if img.swap_restore:
+            restored += 1
         _finish_cancelled_generation_row(img)
     db.session.commit()
     # Counted from the DATABASE, never from the loop. `cancel_job_outcome` can
@@ -2823,6 +2852,7 @@ def cancel_pending(user_id, dataset_id):
     _sync_generate_activity(dataset_id)
     return {
         'cancelled': n,
+        'restored': restored,
         'retry_pending': retry_pending,
         'restart_required': restart_required,
         'recovery_error': recovery_error,
@@ -3450,6 +3480,21 @@ def link_completed_dataset_image(job_id, filename, failed=False, reason=None):
                 'dataset link: terminal rescue activity sync failed for job %s', job_id)
         return
     if failed:
+        # A FACE SWAP failing is not a failed generation: the row already had a
+        # picture, and the swap was overwriting it. Put that picture back rather
+        # than leaving an empty ⚠ tile whose original only exists in the trash.
+        from .dataset_generation_service import restore_swapped_original
+        swap_reason = 'The face swap failed and the original image was restored.'
+        if restore_swapped_original(
+                img, reason=f'{swap_reason} {reason}'.strip() if reason else swap_reason):
+            db.session.commit()
+            try:
+                _sync_generate_activity(img.dataset_id)
+            except Exception:
+                logger.exception(
+                    'dataset link: activity sync failed after a restored swap (job %s)',
+                    job_id)
+            return
         # A cancel racing with the worker dispatches a failure callback. Never let
         # that callback overwrite an already-resolved rescue choice (keep/reject).
         if not (img.derivation_kind == KLEIN_SMALL_IMAGE
@@ -3458,6 +3503,7 @@ def link_completed_dataset_image(job_id, filename, failed=False, reason=None):
             img.fail_reason = (img.fail_reason or reason
                                or 'Klein generation failed (see 🪵 Server log in Settings for the ComfyUI error)')
     else:
+        restored = False
         output_dir = _comfy_output_dir()
         src = os.path.join(output_dir, filename) if output_dir else None
         dst = os.path.join(_dataset_dir(img.dataset_id), filename)
@@ -3491,14 +3537,28 @@ def link_completed_dataset_image(job_id, filename, failed=False, reason=None):
                 with open(dst, 'wb') as f:
                     f.write(data)
             else:
-                img.status = 'failed'
-                img.fail_reason = ('The finished image could not be retrieved from ComfyUI '
-                                   '(not on disk, and the /view API fetch failed).')
                 logger.warning(f"dataset link: file not on disk and /view API fetch failed (job {job_id})")
+                # Same rule as an outright failure: a swap whose result never
+                # arrived must give the tile its own picture back, not become an
+                # empty ⚠ tile. Checked BEFORE the failed state is written, so
+                # the restored status is the one the tile had before the swap.
+                from .dataset_generation_service import restore_swapped_original
+                restored = restore_swapped_original(
+                    img, reason='The face swap result could not be retrieved from '
+                                'ComfyUI — the original image was restored.')
+                if not restored:
+                    img.status = 'failed'
+                    img.fail_reason = ('The finished image could not be retrieved from ComfyUI '
+                                       '(not on disk, and the /view API fetch failed).')
         # Only a genuine success (not the late-turned-'failed' /view fetch miss
-        # right above) counts as fresh, unopened content.
-        if img.status != 'failed':
+        # right above, nor the swap it just put back) counts as fresh, unopened
+        # content: a restored tile is the picture the user already had.
+        if img.status != 'failed' and not restored:
             img.unseen = True
+            # A swap that landed: NOW the picture it replaced can go to Trash.
+            # Not one step earlier — until this point it was the only copy.
+            from .dataset_generation_service import finish_swapped_original
+            finish_swapped_original(img)
         # A user may have marked this in-flight improvement Keep while waiting.
         # Only the freshly linked, on-disk result may now replace its parent;
         # the helper also preserves a later explicit return to Pending.
@@ -3601,7 +3661,8 @@ from .dataset_generation_service import (
     generate_variations, generate_variations_krea, generate_variations_nanobanana,
     generate_variations_minimax_h3,
     regenerate_image, face_swap_image, resolve_improve_engine,
-    FACE_SWAP_ENGINES, resolve_face_swap_engine,
+    FACE_SWAP_ENGINES, resolve_face_swap_engine, SWAP_RESTORE_FIELDS,
+    restore_swapped_original, finish_swapped_original, swap_restore_filename,
     improve_existing_image, reimprove_image, bulk_improve_eligible_ids,
     start_bulk_improve, engine_labels, editable_engines, edit_engine_choice_message,
     _sync_generate_activity, _improve_prompt, _improve_candidate_label,

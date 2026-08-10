@@ -267,6 +267,19 @@ class FaceDatasetImage(db.Model):
     # on a locked image; it just refuses single delete, batch delete and purge.
     # Additive column (migration in create_app); see _SCHEMA_ADDITIONS.
     is_locked = db.Column(db.Boolean, nullable=True, default=False)
+    # What this tile looked like BEFORE an in-flight 🎭↔ face swap: a JSON
+    # snapshot of the columns the swap clears, plus the filename of the original,
+    # which stays on disk while the swap runs. NULL for everything else.
+    #
+    # It exists because a swap overwrites the tile in place, and the two ways a
+    # swap ends badly both used to destroy the original: ⏹ Stop deleted the row
+    # outright (cancel_pending targets exactly `pending` + no file, which is what
+    # a swapping tile is), and a ComfyUI failure left a `failed` tile with no
+    # picture. The original was recoverable only by hand, out of the app trash.
+    # Now the old file is kept until the new one actually lands, and this column
+    # is what puts the row back. See dataset_generation_service.face_swap_image
+    # and restore_swapped_original. Additive column; see _SCHEMA_ADDITIONS.
+    swap_restore = db.Column(Text, nullable=True)
     # Bidirectional, bounded metadata envelope for fields that only one side of
     # Bank <-> Dataset exposes (short caption, generation provenance, Bank reject
     # reason, etc.). It is inert history unless the transfer validator explicitly

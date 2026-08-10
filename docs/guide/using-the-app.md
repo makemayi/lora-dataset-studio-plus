@@ -1823,11 +1823,23 @@ overwrite as Regenerate, no separate backup. The button only appears when
 the dataset has a reference photo (there is otherwise nothing to swap in);
 it stays hidden rather than showing a button that would fail on click.
 
-This runs one fixed ComfyUI workflow (Klein Flux.2 9B + a dedicated
-character-swap LoRA) — not a general "run any workflow" tool, and not
-configurable per-tile. The swap LoRA is a separate file from the Klein
-model Setup already installs; if it isn't on disk yet the button's error
-names the exact path to place it at.
+This runs one fixed ComfyUI workflow per engine — not a general "run any
+workflow" tool, and not configurable per-tile. Which engine runs is a setting
+(**Settings ▸ Image engines ▸ Klein ▸ Face / head swap engine**): **Klein**
+(Flux.2 9B plus a dedicated character-swap LoRA, fast) or **MiniMax H3** (masks
+the head out and re-stages your reference into it — no swap LoRA, but the whole
+H3 stack and much slower). Whichever is selected, a missing weight or node pack
+is named before anything is queued. The Klein swap LoRA is a separate file from
+the Klein model Setup already installs; if it isn't on disk the error names the
+exact path to place it at.
+
+**Your original is kept until the new image lands.** The swap overwrites the tile
+in place, so if you press **⏹ Stop** while swaps are running, or ComfyUI fails
+one, the tile comes back exactly as it was — same picture, caption, face score
+and keep/reject state — with a small **↩ restored** badge carrying the reason.
+Only a swap that actually produced an image sends the picture it replaced to
+Trash. Stop reports restored tiles separately from cancelled generations, since
+a Stop pressed during swaps cancels nothing and puts pictures back instead.
 
 ## Clean the watermarks a bank found
 

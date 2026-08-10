@@ -121,6 +121,11 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
   const isImageImproveCandidate = isImageImproveRow(img);
   const canRegenerate = canRegenerateGeneric(img, { isRescueDerived });
   const canFaceSwap = hasRef && !!img.filename;
+  // A swap that came back empty restored this tile's own picture; the server
+  // leaves its reason behind so the tile can say so. A row that IS failed shows
+  // the reason in its placeholder instead, so this is the with-a-picture case.
+  const swapRestoredNote = (img.filename && img.status !== 'failed' && img.fail_reason)
+    ? img.fail_reason : null;
   const rerunImprove = onReimprove ? improveRerunAffordance(img) : null;
   const scoreFaceTitle = faceScoringBlocked
     || (scoreFaceBusy
@@ -252,6 +257,18 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             provenance badge back to the top-left as soon as the TILE — not the
             window — is wide enough to hold it next to the action buttons. */}
         <div className={TILE_BADGE_STACK_CLASS}>
+          {/* A face swap that ended without a picture — cancelled, or failed in
+              ComfyUI — puts this tile's PREVIOUS image back. Without a badge the
+              restore is completely silent: the tile shows the same photo it
+              showed before, so nothing anywhere says the swap was attempted and
+              lost. `fail_reason` on a row that has an image and is not `failed`
+              is exactly that case, and only that case. */}
+          {swapRestoredNote && (
+            <span className={`${WATERMARK_BADGE_CLASS} bg-black/70 text-amber-300`}
+              title={swapRestoredNote} aria-label={swapRestoredNote}>
+              ↩ restored
+            </span>
+          )}
           {/* An upscale of THIS image is waiting (or still rendering). The
               candidate is a separate row that lands on its own tile elsewhere
               in the grid, so from here nothing looked like it had happened —

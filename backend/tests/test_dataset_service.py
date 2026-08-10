@@ -1780,7 +1780,7 @@ def test_cancel_pending_keeps_card_when_comfyui_cancel_is_unconfirmed(app, monke
         result = svc.cancel_pending(LOCAL_USER, ds.id)
 
         assert result == {
-            'cancelled': 0, 'recovery_pending': 1,
+            'cancelled': 0, 'restored': 0, 'recovery_pending': 1,
             'retry_pending': 1, 'restart_required': 0, 'recovery_error': 0,
         }
         preserved = svc.db.session.get(FaceDatasetImage, image_id)
@@ -1792,7 +1792,7 @@ def test_cancel_pending_keeps_card_when_comfyui_cancel_is_unconfirmed(app, monke
 
         retried = svc.cancel_pending(LOCAL_USER, ds.id)
         assert retried == {
-            'cancelled': 1, 'recovery_pending': 0,
+            'cancelled': 1, 'restored': 0, 'recovery_pending': 0,
             'retry_pending': 0, 'restart_required': 0, 'recovery_error': 0,
         }
         assert svc.db.session.get(FaceDatasetImage, image_id) is None
@@ -1820,7 +1820,7 @@ def test_cancel_pending_preserves_card_behind_corrupt_global_barrier(app):
 
         result = svc.cancel_pending(LOCAL_USER, ds.id)
         assert result == {
-            'cancelled': 0, 'recovery_pending': 1,
+            'cancelled': 0, 'restored': 0, 'recovery_pending': 1,
             'retry_pending': 0, 'restart_required': 0, 'recovery_error': 1,
         }
         preserved = svc.db.session.get(FaceDatasetImage, card_id)

@@ -1323,7 +1323,15 @@ export function useDataset() {
         'The cards were preserved — wait for ComfyUI to respond, then press Stop again.'
       );
     } else if (d.ok) {
-      toast.success(`${d.cancelled} generation(s) cancelled`);
+      /* Restored tiles are counted apart from cancelled ones: a Stop pressed
+         during face swaps removes nothing — each swapped tile gets its previous
+         picture back — and reporting that as "0 generation(s) cancelled" reads
+         as a Stop that did nothing at all. */
+      toast.success(
+        d.restored
+          ? `${d.cancelled} generation(s) cancelled, ${d.restored} image(s) restored`
+          : `${d.cancelled} generation(s) cancelled`
+      );
     } else {
       toast.error(d.error || 'Unexpected error');
     }

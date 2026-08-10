@@ -246,6 +246,10 @@ _SCHEMA_ADDITIONS = (
     # Versioned, byte-fingerprinted Bank analysis used by the durable Bank <-> Dataset
     # transfer path. Legacy Dataset rows simply have no snapshot to restore.
     ('face_dataset_image', 'bank_analysis_snapshot', 'TEXT'),
+    # Pre-swap snapshot of a tile a 🎭↔ face swap is currently overwriting, so a
+    # cancel or a failure puts the original back instead of losing it. NULL on
+    # every row that predates it, which reads exactly right: nothing to restore.
+    ('face_dataset_image', 'swap_restore', 'TEXT'),
     # OneTrainer backend tag — additive and nullable; every existing row
     # simply carries NULL, read as 'ai_toolkit' by the code that consumes it
     # (see checkpoint_registry / lora_training call sites).

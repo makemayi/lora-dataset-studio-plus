@@ -7,6 +7,7 @@ and the bulk server job that drains them.
 Split out of face_dataset_service.py (2026-08, Phase 5 of a multi-phase file
 split) -- pure move, no behavior change.
 """
+import json
 import os
 import re
 import threading
@@ -1310,6 +1311,91 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
 # everyone. APPEND-ONLY: the ids are stored in config, never renamed.
 FACE_SWAP_ENGINES = ('klein', 'minimax_h3')
 
+# What a 🎭↔ swap snapshots before it overwrites a tile, into
+# `FaceDatasetImage.swap_restore`. Exactly the columns the swap itself clears —
+# putting back MORE than the swap cleared would resurrect state the user changed
+# while the job was in flight.
+SWAP_RESTORE_FIELDS = (
+    'filename', 'caption', 'status', 'fail_reason', 'fail_kind',
+    'watermark_state', 'watermark_bbox', 'watermark_regions',
+    'face_score', 'face_state', 'content_sig', 'content_sig_stat')
+
+
+def _swap_restore_state(img):
+    """The snapshot a swap left on this row, or None. Junk is treated as absent:
+    a corrupt snapshot must degrade to today's behaviour, not crash a completion
+    callback running in the queue's monitor thread."""
+    raw = getattr(img, 'swap_restore', None)
+    if not raw:
+        return None
+    try:
+        state = json.loads(raw)
+    except (TypeError, ValueError):
+        logger.warning('face_swap: unreadable swap_restore on image %s', img.id)
+        return None
+    return state if isinstance(state, dict) else None
+
+
+def restore_swapped_original(img, reason=None):
+    """Put a tile back the way it was before its in-flight swap. Returns True
+    when a snapshot was found and applied.
+
+    Called from BOTH ways a swap ends without a picture — ⏹ Stop and a failed
+    job — because both used to lose the original: the tile carries no file while
+    the job runs, so Stop deleted the row and a failure left an empty ⚠ tile.
+
+    `reason` is kept in `fail_reason` even though the row goes back to its old
+    status. A restored tile shows its own picture again, so without that line
+    nothing anywhere would say the swap had been attempted and lost."""
+    state = _swap_restore_state(img)
+    if state is None:
+        return False
+    for field in SWAP_RESTORE_FIELDS:
+        if field in state:
+            setattr(img, field, state[field])
+    img.swap_restore = None
+    img.job_id = None
+    if reason:
+        img.fail_reason = str(reason)[:500]
+        img.fail_kind = 'error'
+    return True
+
+
+def finish_swapped_original(img):
+    """The swap landed: the original this row was holding on to goes to Trash.
+
+    Called only once the NEW file is on disk and attached to the row, which is
+    the whole ordering guarantee — nothing is destroyed while the outcome is
+    still unknown. A missing file (already moved, dataset folder cleaned) is not
+    an error: the snapshot is cleared either way, because the row it described
+    no longer exists."""
+    state = _swap_restore_state(img)
+    if state is None:
+        return False
+    previous = state.get('filename')
+    img.swap_restore = None
+    if not previous or previous == img.filename:
+        return True
+    path = os.path.join(_dataset_path(img.dataset_id), previous)
+    try:
+        if os.path.exists(path):
+            trash.send_to_trash(
+                path, context=f'dataset-{img.dataset_id}-faceswap-{img.id}')
+    except Exception:                                   # noqa: BLE001
+        # The swap SUCCEEDED. Failing the completion callback over a locked file
+        # would strand the batch's progress for a file the user still has.
+        logger.warning('face_swap: could not trash the replaced original %s',
+                       path, exc_info=True)
+    return True
+
+
+def swap_restore_filename(img):
+    """The original filename this row is holding for an in-flight swap, or None.
+    Used by delete paths so the retained file is disposed of with the row rather
+    than left behind as an orphan nobody can name."""
+    state = _swap_restore_state(img)
+    return (state or {}).get('filename') or None
+
 
 def resolve_face_swap_engine(requested=None):
     """The engine a 🎭↔ swap will run on: the explicit pick when it names a known
@@ -1362,20 +1448,18 @@ def face_swap_image(user_id, image_id, engine=None):
     from ..job_queue import queue_manager
     target_path = os.path.join(_dataset_path(img.dataset_id), img.filename)
     ref_path = os.path.join(_dataset_path(ds.id), ds.ref_filename)
-    old_state = {
-        field: getattr(img, field) for field in (
-            'filename', 'caption', 'status', 'fail_reason', 'fail_kind', 'job_id',
-            'watermark_state', 'watermark_bbox', 'watermark_regions',
-            'face_score', 'face_state', 'content_sig', 'content_sig_stat')
-    }
-    old_path = target_path
+    old_state = {field: getattr(img, field) for field in SWAP_RESTORE_FIELDS}
     new_job_id = enqueue_face_swap(
         user_id=str(user_id), target_path=target_path, ref_path=ref_path,
         extra_metadata={'is_dataset': True, 'dataset_id': img.dataset_id,
                         'variation_label': img.variation_label})
 
-    # Persist the replacement state first — the old file stays on disk until
-    # this commit succeeds, same ordering rationale as regenerate_image.
+    # Persist the replacement state, carrying the snapshot that puts it back.
+    # The old FILE is deliberately left on disk: it is what the snapshot names,
+    # and it only goes to Trash once the swapped image has actually landed
+    # (see finish_swapped_original). Trashing it here — which is what this did —
+    # meant that ⏹ Stop and a ComfyUI failure both destroyed the tile, because
+    # neither path had anything left to put back.
     try:
         _clear_watermark_metadata(img)
         img.face_score = None
@@ -1388,6 +1472,7 @@ def face_swap_image(user_id, image_id, engine=None):
         img.job_id = new_job_id
         img.fail_reason = None
         img.fail_kind = None
+        img.swap_restore = json.dumps(old_state)
         db.session.commit()
     except Exception:
         db.session.rollback()
@@ -1395,27 +1480,6 @@ def face_swap_image(user_id, image_id, engine=None):
             queue_manager.cancel_job(new_job_id, str(user_id), 'image')
         except Exception:
             logger.exception('face_swap: failed to cancel unlinked job %s', new_job_id)
-        raise
-
-    # The DB no longer references the old filename. If Trash itself fails,
-    # put the exact previous row state back and cancel the prepared job.
-    try:
-        if old_path and os.path.exists(old_path):
-            trash.send_to_trash(
-                old_path, context=f'dataset-{img.dataset_id}-faceswap-{img.id}')
-    except Exception:
-        try:
-            if new_job_id and not queue_manager.cancel_job(
-                    new_job_id, str(user_id), 'image', commit=False):
-                raise RuntimeError(
-                    'The replacement generation still has unconfirmed ComfyUI work.')
-            for field, value in old_state.items():
-                setattr(img, field, value)
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-            logger.exception('face_swap: failed to restore row %s after Trash error',
-                             image_id)
         raise
     return new_job_id
 

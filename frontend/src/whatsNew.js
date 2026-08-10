@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-swap-keeps-your-original',
+    date: '2026-08-10',
+    title: 'A face swap you stop — or that fails — gives you your picture back',
+    blurb: 'A swap overwrites the tile in place, and until now it sent your original to the trash the moment the job was queued. So pressing ⏹ Stop on a few swaps deleted those tiles outright, and a swap ComfyUI failed left an empty ⚠ card: in both cases the photo still existed, but only as a file you had to go and find in data/trash by hand. The original now stays where it is until the swapped image actually lands. Cancel a swap, or let it fail, and the tile simply comes back — same picture, same caption, same face score, same keep/reject state — with a small ↩ restored badge saying what happened. Stop also counts them separately now, so it no longer reports "0 generations cancelled" for a click that visibly put three tiles back.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-10-h3-swap-framing',
     date: '2026-08-10',
     title: 'The H3 head swap no longer judges a head with the shoulders cropped off',
