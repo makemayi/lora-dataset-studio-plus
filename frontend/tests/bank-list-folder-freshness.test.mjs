@@ -28,7 +28,8 @@ const sync = (over = {}) => ({
 test('a never-walked list warns that its counts can lag AND offers the walk', () => {
   const html = render(FolderCheckLine, { banks: [sync(), sync()] })
   assert.match(html, /counts below are what the app knew last time/i)
-  assert.match(html, /🔄 Rescan folders/)
+  assert.match(html, /Rescan folders/)
+  assert.match(html, /data-icon="refresh"/)
   assert.match(html, /<button[^>]*type="button"/)
 })
 
@@ -56,5 +57,5 @@ test('the bank page itself still renders (no ReferenceError on the way in)', () 
   const html = renderToStaticMarkup(createElement(
     MemoryRouter, null,
     createElement(ToastProvider, null, createElement(BankPage))))
-  assert.match(html, /🗃️ Image bank/)
+  assert.match(html, /<h1[^>]*>Image bank<\/h1>/)
 })

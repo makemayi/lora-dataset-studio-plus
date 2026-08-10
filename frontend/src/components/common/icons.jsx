@@ -1,16 +1,21 @@
 /**
- * The header's icon set 鈥?one system, drawn here, shipped in the bundle.
+ * The app's icon set — one system, drawn here, shipped in the bundle.
  *
  * Why hand-drawn SVG and not an icon package or emoji:
- *  路 The app must work with no internet, so no CDN sprite and no webfont.
- *  路 Emoji were what the bar had, and they were the problem: 馃梼锔?/ 馃弸锔?/ 鈼?sat
- *    next to two labels with no glyph at all, each rendered by a different
- *    font at a different weight and baseline. Three of five items decorated is
- *    noise, not navigation.
+ *  - The app must work with no internet, so no CDN sprite and no webfont.
+ *  - Emoji were what the UI had, and they were the problem: three of the five
+ *    workspaces carried one and the other two carried nothing, each drawn by a
+ *    different font at a different weight and baseline. Half-decorated is
+ *    noise, not navigation. Same story on the bank cards, where a package and
+ *    a cross stood in for "move" and "delete".
  *
  * Every icon is the same 24-box, the same 1.75 stroke, and paints in
- * `currentColor`, so a nav item's colour transition carries the glyph with it
+ * `currentColor`, so a control's colour transition carries the glyph with it
  * and nothing has to be re-tinted per state.
+ *
+ * Emoji are NOT banned everywhere — they still carry meaning in prose, in
+ * headings and in the Guide. What they may no longer do is stand in for a
+ * control's icon.
  */
 
 /** Shared frame. `className` reaches the <svg> for sizing (default 16px).
@@ -27,7 +32,7 @@ function Glyph({ name, children, className = 'h-4 w-4 shrink-0' }) {
   );
 }
 
-/* 鈹€鈹€ Workspaces 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
+/* ── Workspaces (the nav bar) ────────────────────────────────────────────── */
 
 export function DatasetsIcon(props) {
   return (
@@ -77,7 +82,7 @@ export function StudioIcon(props) {
   );
 }
 
-/* 鈹€鈹€ Utilities 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
+/* ── Utilities (header chrome) ───────────────────────────────────────────── */
 
 export function HelpIcon(props) {
   return (
@@ -145,11 +150,76 @@ export function CloseIcon(props) {
   );
 }
 
+/* ── Actions (cards, lists, forms) ───────────────────────────────────────── */
+
+/** Repoint something at a new folder — the bank cards' old package emoji. */
+export function MoveIcon(props) {
+  return (
+    <Glyph name="move" {...props}>
+      <path d="M3 7.5h6.5l1.8 2H21v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19z" />
+      <path d="M3 7.5V5.5A1.5 1.5 0 0 1 4.5 4h4l1.8 2" />
+      <path d="M10.5 14.5h5M13.5 12.5l2 2-2 2" />
+    </Glyph>
+  );
+}
+
+export function FolderIcon(props) {
+  return (
+    <Glyph name="folder" {...props}>
+      <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.2l1.8 2.2h8A1.5 1.5 0 0 1 20 8.7V18a1.5 1.5 0 0 1-1.5 1.5h-14A1.5 1.5 0 0 1 3 18z" />
+    </Glyph>
+  );
+}
+
+export function PlusIcon(props) {
+  return (
+    <Glyph name="plus" {...props}>
+      <path d="M12 5v14M5 12h14" />
+    </Glyph>
+  );
+}
+
+export function ArrowRightIcon(props) {
+  return (
+    <Glyph name="arrow-right" {...props}>
+      <path d="M4.5 12h15M14 6.5l5.5 5.5L14 17.5" />
+    </Glyph>
+  );
+}
+
+export function RefreshIcon(props) {
+  return (
+    <Glyph name="refresh" {...props}>
+      <path d="M20 11.5a8 8 0 1 0-.8 4.3" />
+      <path d="M20 5.5v6h-6" />
+    </Glyph>
+  );
+}
+
+export function ImageIcon(props) {
+  return (
+    <Glyph name="image" {...props}>
+      <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
+      <circle cx="8.75" cy="9.75" r="1.6" />
+      <path d="M3.5 17l4.8-4.6 3.7 3.5 3-2.7 5.5 5" />
+    </Glyph>
+  );
+}
+
+export function FilmIcon(props) {
+  return (
+    <Glyph name="film" {...props}>
+      <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
+      <path d="M7.5 4.5v15M16.5 4.5v15M3 12h18M3 8.25h4.5M3 15.75h4.5M16.5 8.25H21M16.5 15.75H21" />
+    </Glyph>
+  );
+}
+
 /**
- * The header's round icon-button shell, shared by every utility control
- * (What's new, update check, the ? and 鈿?menus, the mobile hamburger) so the
- * cluster on the right reads as one row of equal targets instead of five
- * differently-sized text buttons. 32px is the hit target; the pill radius is
+ * The round icon-button shell, shared by every utility control in the header
+ * (What's new, update check, the ? and gear menus, the mobile hamburger) and by
+ * the small per-card actions, so a row of them reads as equal targets instead
+ * of differently-sized text buttons. 32px is the hit target; the pill radius is
  * the same one the nav links use.
  */
 export const ICON_BUTTON_BASE =

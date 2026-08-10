@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ICON_BUTTON_BASE, ICON_BUTTON_QUIET } from './navIcons';
+import { ICON_BUTTON_BASE, ICON_BUTTON_QUIET } from './icons';
 
 /** A small header dropdown (the ? Help menu and the ⚙ Settings menu share it).
  *  Follows the same interaction contract as the app's other popovers

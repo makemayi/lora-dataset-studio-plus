@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
-import { GiftIcon, ICON_BUTTON_BASE, ICON_BUTTON_QUIET } from './navIcons';
+import { GiftIcon, ICON_BUTTON_BASE, ICON_BUTTON_QUIET } from './icons';
 import {
   WHATS_NEW,
   sortedEntries,

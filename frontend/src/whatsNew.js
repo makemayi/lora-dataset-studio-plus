@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-bank-list-restyle',
+    date: '2026-08-10',
+    title: 'The bank pages lost their boxes',
+    blurb: 'Both bank list pages now use the surface the Settings redesign introduced: cards are shaded and lift on hover instead of being drawn as outlined boxes, the thumbnails have no frame around them, and the small controls on a card — move the folder, remove the bank, open it, rescan the folders — are drawn icons instead of the emoji that stood in for them. The Images/Video switch matches the top bar: the lane you are on is a filled pill, the other one is plain. Same header shape as the Datasets library, so the three list pages finally look related.',
+    to: '/bank',
+  },
+  {
     id: '2026-08-10-nav-bar-restyle',
     date: '2026-08-10',
     title: 'The top bar tells you where you are',

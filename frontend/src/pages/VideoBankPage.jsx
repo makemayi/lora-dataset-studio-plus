@@ -7,8 +7,40 @@ import BankLaneTabs from '../components/videobank/BankLaneTabs'
 import VideoBankWorkspace from '../components/videobank/VideoBankWorkspace'
 import VideoCapabilityStrip from '../components/videobank/VideoCapabilityStrip'
 import { countsSummary } from '../components/videobank/videoBankStatus'
+import {
+  CARD_SURFACE, CARD_SURFACE_INTERACTIVE, INPUT_CLASS, PRIMARY_BUTTON, QUIET_BUTTON,
+} from '../components/common/surfaces'
+import { CloseIcon, PlusIcon, ArrowRightIcon } from '../components/common/icons'
 
 const CURRENT_KEY = 'videoBankCurrentId'
+
+/** One video bank in the list. Exported for the same reason as BankCard: the
+ *  page shows "Loading…" until the server answers, so a test that renders the
+ *  page alone never executes a single card. */
+export function VideoBankCard({ bank, onOpen, onRemove }) {
+  return (
+    <li className={`flex min-w-0 flex-col gap-2 p-4 ${CARD_SURFACE_INTERACTIVE}`}>
+      <div className="flex min-w-0 items-center gap-1">
+        <button type="button" onClick={onOpen}
+          className="min-w-0 truncate text-left text-base font-semibold text-content hover:underline">
+          {bank.name}
+        </button>
+        <button type="button" onClick={onRemove}
+          aria-label={`Remove video bank ${bank.name}`}
+          className="ml-auto grid h-7 w-7 shrink-0 place-items-center rounded-full text-content-subtle transition-colors hover:bg-surface hover:text-rose-300">
+          <CloseIcon />
+        </button>
+      </div>
+      <p className="truncate font-mono text-xs text-content-subtle" title={bank.source_path}>
+        {bank.source_path}
+      </p>
+      <p className="text-xs text-content-muted">{countsSummary(bank.counts)}</p>
+      <button type="button" onClick={onOpen} className={`self-start ${QUIET_BUTTON}`}>
+        Open <ArrowRightIcon className="h-3.5 w-3.5 shrink-0" />
+      </button>
+    </li>
+  )
+}
 
 /** 🎬 Video bank — triage a folder of RUSHES before it becomes a training set.
  *
@@ -107,15 +139,17 @@ export default function VideoBankPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-wrap items-center gap-2">
-        <h1 className="flex items-center gap-2 text-xl font-bold text-content">
-          🎬 Video bank
-          <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">
-            Beta
-          </span>
-        </h1>
-        <HelpBadge topic="page-video-bank" />
-        <BankLaneTabs className="w-full sm:ml-auto sm:w-auto" />
+      <header>
+        <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-content-subtle">bank</p>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          {/* No Beta chip here: the lane switch two inches to the right carries
+              one on its Video tab, and it is visible from BOTH bank pages —
+              which is where the warning is actually needed. Two identical amber
+              chips on one row read as a mistake. */}
+          <h1 className="text-xl font-semibold text-content">Video bank</h1>
+          <HelpBadge topic="page-video-bank" />
+          <BankLaneTabs className="w-full sm:ml-auto sm:w-auto" />
+        </div>
       </header>
       <p className="max-w-3xl text-sm text-content-muted">
         Point the app at a folder of rushes and turn it into a video training set: each
@@ -128,12 +162,11 @@ export default function VideoBankPage() {
       <VideoCapabilityStrip capability={capability} />
 
       <form onSubmit={create}
-        className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface p-4">
+        className={`flex flex-wrap items-end gap-3 p-4 ${CARD_SURFACE}`}>
         <div className="grow min-w-40">
           <label htmlFor="video-bank-name" className="block text-sm font-medium text-content">Name</label>
           <input id="video-bank-name" value={name} onChange={(e) => setName(e.target.value)}
-            placeholder="City rushes 08/2026" required
-            className="mt-1 w-full rounded-md border border-border bg-surface-raised px-3 py-1.5 text-sm text-content" />
+            placeholder="City rushes 08/2026" required className={INPUT_CLASS} />
         </div>
         <div className="grow-[3] min-w-64">
           <FolderPickerField id="video-bank-folder" label="Folder on this computer"
@@ -141,9 +174,13 @@ export default function VideoBankPage() {
             placeholder="path\to\rushes (subfolders included)"
             hint="Reads .mp4, .mov, .mkv, .webm and .avi. The folder is never modified." />
         </div>
-        <button type="submit" disabled={creating}
-          className="rounded-md bg-gradient-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-          {creating ? 'Inventorying…' : '➕ Create video bank'}
+        {/* Both labels mounted, one hidden — a ternary on button text is the
+            Chrome-translate removeChild crash. */}
+        <button type="submit" disabled={creating} className={PRIMARY_BUTTON}>
+          <span hidden={!creating}>Inventorying…</span>
+          <span hidden={!!creating} className="inline-flex items-center gap-1.5">
+            <PlusIcon /> Create video bank
+          </span>
         </button>
       </form>
 
@@ -160,26 +197,8 @@ export default function VideoBankPage() {
            on a phone — with `truncate` never getting a chance to fire. */
         <ul className="grid gap-3 grid-cols-1 sm:grid-cols-2">
           {banks.map((b) => (
-            <li key={b.id}
-              className="flex min-w-0 flex-col gap-2 rounded-lg border border-border bg-surface p-4">
-              <div className="flex min-w-0 items-center gap-2">
-                <button type="button" onClick={() => open(b.id)}
-                  className="min-w-0 truncate text-left text-base font-semibold text-content hover:underline">
-                  {b.name}
-                </button>
-                <button type="button" onClick={() => remove(b)}
-                  aria-label={`Remove video bank ${b.name}`}
-                  className="ml-auto px-1.5 text-content-subtle hover:text-rose-300">✕</button>
-              </div>
-              <p className="truncate font-mono text-xs text-content-subtle" title={b.source_path}>
-                {b.source_path}
-              </p>
-              <p className="text-xs text-content-muted">{countsSummary(b.counts)}</p>
-              <button type="button" onClick={() => open(b.id)}
-                className="self-start rounded-md border border-border bg-surface-raised px-3 py-1 text-xs font-semibold text-content hover:bg-surface">
-                Open →
-              </button>
-            </li>
+            <VideoBankCard key={b.id} bank={b}
+              onOpen={() => open(b.id)} onRemove={() => remove(b)} />
           ))}
         </ul>
       )}

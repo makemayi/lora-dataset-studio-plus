@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiFetch, postJson } from '../../api/fetchClient'
 import { attemptModalSubmit } from '../../utils/submitOutcome.js'
+import { QUIET_BUTTON } from './surfaces'
+import { FolderIcon } from './icons'
 
 /** Ask the SERVER to open its native "choose a folder" dialog (the folder lives
  * on the machine running the app, so a browser file-picker can't reach it).
@@ -210,10 +212,14 @@ export default function FolderPickerField({
       <div className="mt-1 flex items-stretch gap-2">
         <input id={id} value={value} onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder} required={required}
-          className="w-full min-w-0 grow rounded-md border border-border bg-surface-raised px-3 py-1.5 text-sm text-content font-mono" />
+          className="w-full min-w-0 grow rounded-md border border-border-strong bg-surface-raised px-3 py-2 font-mono text-sm text-content placeholder:text-content-subtle focus:border-primary focus:outline-none" />
+        {/* Both labels mounted, one hidden — see CLAUDE.md ▸ UI changes. */}
         <button type="button" onClick={browse} disabled={busy}
-          className="shrink-0 rounded-md border border-border bg-surface-raised px-3 py-1.5 text-sm font-semibold text-content hover:bg-surface disabled:opacity-50">
-          {busy ? 'Opening…' : '📂 Browse…'}
+          className={`shrink-0 ${QUIET_BUTTON} text-sm`}>
+          <span hidden={!busy}>Opening…</span>
+          <span hidden={!!busy} className="inline-flex items-center gap-1.5">
+            <FolderIcon /> Browse…
+          </span>
         </button>
       </div>
       {hint && <p className="mt-1 text-xs text-content-muted">{hint}</p>}

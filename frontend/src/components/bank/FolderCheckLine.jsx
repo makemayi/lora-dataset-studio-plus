@@ -1,4 +1,6 @@
 import { folderCheckNote } from './bankSync'
+import { QUIET_BUTTON } from '../common/surfaces'
+import { RefreshIcon } from '../common/icons'
 
 /** 🗃️ Bank list — how fresh these cards are, and the one click that refreshes them.
  *
@@ -23,10 +25,14 @@ export default function FolderCheckLine({ banks, busy = false, onRescan }) {
       <p className={`min-w-0 grow text-xs ${note.stale ? 'text-amber-300/90' : 'text-content-subtle'}`}>
         {note.text}
       </p>
+      {/* Both labels mounted, one hidden — see CLAUDE.md ▸ UI changes. */}
       <button type="button" onClick={onRescan} disabled={busy}
         title="Walk every bank's source folder now and pick up the images added to it"
-        className="shrink-0 rounded-md border border-border bg-surface-raised px-3 py-1.5 text-xs font-semibold text-content hover:bg-surface disabled:opacity-50">
-        {busy ? 'Checking folders…' : '🔄 Rescan folders'}
+        className={`shrink-0 ${QUIET_BUTTON}`}>
+        <span hidden={!busy}>Checking folders…</span>
+        <span hidden={!!busy} className="inline-flex items-center gap-1.5">
+          <RefreshIcon className="h-3.5 w-3.5 shrink-0" /> Rescan folders
+        </span>
       </button>
     </div>
   )

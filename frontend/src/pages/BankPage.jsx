@@ -14,6 +14,13 @@ import RelocateBankDialog from '../components/bank/RelocateBankDialog'
 import BankScrapePanel from '../components/bank/BankScrapePanel'
 import BankLaneTabs from '../components/videobank/BankLaneTabs'
 import { bankListOverview } from '../components/bank/bankOverview.js'
+import {
+  CARD_SURFACE, CARD_SURFACE_INTERACTIVE, INPUT_CLASS, PRIMARY_BUTTON, QUIET_BUTTON,
+} from '../components/common/surfaces'
+import {
+  MoveIcon, CloseIcon, PlusIcon, ArrowRightIcon, SpinnerIcon,
+  ICON_BUTTON_QUIET,
+} from '../components/common/icons'
 
 const CURRENT_KEY = 'bankCurrentId'
 
@@ -29,7 +36,7 @@ function BankPreviewStrip({ bank, onOpen }) {
     <div className="relative grid grid-cols-5 gap-1">
       {previewSlots(bank.preview_ids).map((id, i) => (
         <div key={id ?? `empty-${i}`}
-          className="aspect-square overflow-hidden rounded border border-border bg-surface-raised">
+          className="aspect-square overflow-hidden rounded-md bg-surface-raised">
           {id != null && (
             <button type="button" onClick={onOpen} tabIndex={-1} aria-hidden="true"
               className="block h-full w-full">
@@ -81,6 +88,47 @@ function BankListSummary({ bank }) {
         </span>
       </div>
     </div>
+  )
+}
+
+/** One bank in the list. Exported so a test can render a card without the page
+ *  having to reach the server for the list first — the page renders "Loading…"
+ *  until /api/banks answers, so nothing below it was ever executed by a test. */
+export function BankCard({ bank, onOpen, onRelocate, onRemove }) {
+  const b = bank
+  return (
+    <li className={`flex min-w-0 flex-col gap-2 p-4 ${CARD_SURFACE_INTERACTIVE}`}>
+      <div className="flex min-w-0 items-center gap-1">
+        <button type="button" onClick={onOpen}
+          className="min-w-0 truncate text-left text-base font-semibold text-content hover:underline">
+          {b.name}
+        </button>
+        {b.activity && !b.activity.finished && (
+          <span className="inline-flex shrink-0 items-center gap-1 text-xs text-amber-300">
+            <SpinnerIcon className="h-3.5 w-3.5 shrink-0" />{b.activity.kind}…
+          </span>
+        )}
+        <button type="button" onClick={onRelocate}
+          aria-label={`Move the folder of bank ${b.name}`}
+          title="Moved this folder to another disk? Point the bank at its new location."
+          className={`ml-auto grid h-7 w-7 shrink-0 place-items-center rounded-full transition-colors ${ICON_BUTTON_QUIET}`}>
+          <MoveIcon />
+        </button>
+        <button type="button" onClick={onRemove} aria-label={`Remove bank ${b.name}`}
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-content-subtle transition-colors hover:bg-surface hover:text-rose-300">
+          <CloseIcon />
+        </button>
+      </div>
+      <p className="truncate font-mono text-xs text-content-subtle" title={b.source_path}>
+        {b.source_path}
+      </p>
+      <BankPreviewStrip bank={b} onOpen={onOpen} />
+      <BankListSummary bank={b} />
+      <FolderSyncNote sync={b.folder_sync} onRelocate={onRelocate} />
+      <button type="button" onClick={onOpen} className={`self-start ${QUIET_BUTTON}`}>
+        Open <ArrowRightIcon className="h-3.5 w-3.5 shrink-0" />
+      </button>
+    </li>
   )
 }
 
@@ -194,13 +242,19 @@ export default function BankPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-wrap items-center gap-2">
-        <h1 className="text-xl font-bold text-content">🗃️ Image bank</h1>
-        <HelpBadge topic="page-bank" />
-        {/* The kind of bank you are making, said WHERE you make one. Until now a
-            .mp4 dropped in this folder was skipped in silence — this is the only
-            place someone with a folder of rushes would ever have looked. */}
-        <BankLaneTabs className="w-full sm:ml-auto sm:w-auto" />
+      {/* Same header shape as the Datasets library: a mono "rack tag" eyebrow
+          over the title, which is how every other section of the app is
+          labelled since the Settings redesign. */}
+      <header>
+        <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-content-subtle">bank</p>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <h1 className="text-xl font-semibold text-content">Image bank</h1>
+          <HelpBadge topic="page-bank" />
+          {/* The kind of bank you are making, said WHERE you make one. Until now
+              a .mp4 dropped in this folder was skipped in silence — this is the
+              only place someone with a folder of rushes would ever have looked. */}
+          <BankLaneTabs className="w-full sm:ml-auto sm:w-auto" />
+        </div>
       </header>
       <p className="text-sm text-content-muted max-w-3xl">
         Point the app at a big unsorted folder (a Telegram export, a scrape dump…) and triage it
@@ -210,22 +264,26 @@ export default function BankPage() {
       </p>
 
       <form onSubmit={create}
-        className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface p-4">
+        className={`flex flex-wrap items-end gap-3 p-4 ${CARD_SURFACE}`}>
         <div className="grow min-w-40">
           <label htmlFor="bank-name" className="block text-sm font-medium text-content">Name</label>
           <input id="bank-name" value={name} onChange={(e) => setName(e.target.value)}
-            placeholder="Telegram export 07/2026" required
-            className="mt-1 w-full rounded-md border border-border bg-surface-raised px-3 py-1.5 text-sm text-content" />
+            placeholder="Telegram export 07/2026" required className={INPUT_CLASS} />
         </div>
         <div className="grow-[3] min-w-64">
           <FolderPickerField id="bank-folder" label="Folder on this computer"
             value={folder} onChange={setFolder} required
             placeholder="C:\path\to\unsorted-images (subfolders included)" />
         </div>
+        {/* Both labels mounted, one hidden: a ternary on the button's text is
+            the shape Chrome auto-translate turns into a removeChild crash. */}
         <button type="submit" disabled={creating || !!folderNotice}
           title={folderNotice ? 'That folder belongs to a dataset' : undefined}
-          className="rounded-md bg-gradient-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-          {creating ? 'Inventorying…' : '➕ Create bank'}
+          className={PRIMARY_BUTTON}>
+          <span hidden={!creating}>Inventorying…</span>
+          <span hidden={!!creating} className="inline-flex items-center gap-1.5">
+            <PlusIcon /> Create bank
+          </span>
         </button>
         {/* basis-full: its own row inside the wrapping flex form, so the sentence
             never squeezes the fields — including at 400 px. */}
@@ -256,35 +314,8 @@ export default function BankPage() {
         // sideways on a phone — with `truncate` never getting a chance to fire.
         <ul className="grid gap-3 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
           {banks.map((b) => (
-            <li key={b.id}
-              className="flex min-w-0 flex-col gap-2 rounded-lg border border-border bg-surface p-4">
-              <div className="flex min-w-0 items-center gap-2">
-                <button type="button" onClick={() => open(b.id)}
-                  className="min-w-0 truncate text-left text-base font-semibold text-content hover:underline">
-                  {b.name}
-                </button>
-                {b.activity && !b.activity.finished && (
-                  <span className="text-xs text-amber-300">⏳ {b.activity.kind}…</span>
-                )}
-                <button type="button" onClick={() => setRelocating(b)}
-                  aria-label={`Move the folder of bank ${b.name}`}
-                  title="Moved this folder to another disk? Point the bank at its new location."
-                  className="ml-auto px-1.5 text-content-subtle hover:text-content">📦</button>
-                <button type="button" onClick={() => remove(b)} aria-label={`Remove bank ${b.name}`}
-                  className="px-1.5 text-content-subtle hover:text-rose-300">✕</button>
-              </div>
-              <p className="truncate font-mono text-xs text-content-subtle" title={b.source_path}>
-                {b.source_path}
-              </p>
-              <BankPreviewStrip bank={b} onOpen={() => open(b.id)} />
-              <BankListSummary bank={b} />
-              <FolderSyncNote sync={b.folder_sync}
-                onRelocate={() => setRelocating(b)} />
-              <button type="button" onClick={() => open(b.id)}
-                className="self-start rounded-md border border-border bg-surface-raised px-3 py-1 text-xs font-semibold text-content hover:bg-surface">
-                Open →
-              </button>
-            </li>
+            <BankCard key={b.id} bank={b} onOpen={() => open(b.id)}
+              onRelocate={() => setRelocating(b)} onRemove={() => remove(b)} />
           ))}
         </ul>
       )}

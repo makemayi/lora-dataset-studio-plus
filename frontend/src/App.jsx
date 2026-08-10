@@ -27,7 +27,7 @@ import {
   DatasetsIcon, BankIcon, RunsIcon, CanvasIcon, StudioIcon,
   HelpIcon, SettingsIcon, UpdateIcon, SpinnerIcon, MenuIcon, CloseIcon,
   ICON_BUTTON_BASE, ICON_BUTTON_QUIET,
-} from './components/common/navIcons'
+} from './components/common/icons'
 import { versionLabel } from './utils/versionLabel'
 import { useTrainingActivity } from './hooks/useTrainingActivity'
 import { activityLabel } from './utils/trainingActivity'
@@ -38,7 +38,7 @@ import { activityLabel } from './utils/trainingActivity'
 // clipped the What's-new button off the right edge. Nothing is hidden — the
 // items simply breathe less until there is room for it.
 // The item is a flex row because every workspace now carries an icon (see
-// components/common/navIcons) — the label and the glyph are children of the
+// components/common/icons) — the label and the glyph are children of the
 // link itself, not of a wrapper span inside it.
 const NAV_ITEM_BASE =
   'inline-flex items-center gap-1.5 px-2 lg:px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap no-underline transition-colors'

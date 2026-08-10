@@ -1,4 +1,5 @@
 import { folderSyncNote } from './bankSync'
+import { MoveIcon } from '../common/icons'
 
 /** 🗃️ The state of a bank's SOURCE FOLDER as of the last automatic walk.
  *
@@ -23,8 +24,8 @@ export default function FolderSyncNote({ sync, onRelocate }) {
       <p>{note.tone === 'error' ? '⚠️ ' : 'ℹ️ '}{note.text}</p>
       {note.canRelocate && onRelocate && (
         <button type="button" onClick={onRelocate}
-          className="mt-1 rounded border border-current px-2 py-0.5 text-xs font-semibold hover:bg-white/10">
-          📦 Move folder…
+          className="mt-1 inline-flex items-center gap-1.5 rounded-full border border-current px-2 py-0.5 text-xs font-semibold hover:bg-white/10">
+          <MoveIcon className="h-3.5 w-3.5 shrink-0" /> Move folder…
         </button>
       )}
     </div>

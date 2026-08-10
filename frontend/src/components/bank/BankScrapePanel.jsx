@@ -3,6 +3,7 @@ import { postJson } from '../../api/fetchClient'
 import { useToast } from '../common/Toast'
 import { HelpBadge } from '../../help/HelpMode'
 import ConceptSourcesPanel from '../dataset/ConceptSourcesPanel'
+import { CARD_SURFACE } from '../common/surfaces'
 import {
   bankScrapeDestination,
   runBankScrapeImport,
@@ -66,24 +67,30 @@ export default function BankScrapePanel({ banks, onDone }) {
   }
 
   return (
-    <section className="rounded-lg border border-border bg-surface">
+    <section className={CARD_SURFACE}>
       <button type="button" onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         className="flex w-full items-center gap-2 px-4 py-3 text-left">
-        <span aria-hidden>🕸</span>
         <span className="text-sm font-semibold text-content">Scrape the web into a bank</span>
         <span className="hidden text-[0.6875rem] text-content-subtle sm:inline">
           no folder to prepare — the images land in a bank ready to triage
         </span>
         <HelpBadge topic="bank-scrape" />
-        <span aria-hidden className="ml-auto text-content-subtle">{open ? '▾' : '▸'}</span>
+        {/* One caret, rotated — not two glyphs swapped, which is both a text
+            node React must not edit under Chrome translate and a second shape
+            to recognise. */}
+        <span aria-hidden
+          className={`ml-auto text-[0.625rem] text-content-subtle transition-transform duration-150 ${
+            open ? 'rotate-90' : ''}`}>
+          ▶
+        </span>
       </button>
 
       {open && (
         <div className="flex flex-col gap-3 border-t border-border p-3 sm:p-4">
           {/* Destination first: it decides whether this scrape starts a pile or
               grows one. Wraps to one column at 400 px. */}
-          <div className="flex flex-col gap-2 rounded-lg border border-border bg-white/[0.03] p-3">
+          <div className="flex flex-col gap-2 rounded-lg bg-surface-raised p-3">
             <span className="text-[0.6875rem] font-semibold uppercase tracking-wide text-content-subtle">
               Destination
             </span>
@@ -108,14 +115,14 @@ export default function BankScrapePanel({ banks, onDone }) {
                 <input value={name} onChange={(e) => setName(e.target.value)}
                   aria-label="Name of the new bank"
                   placeholder="Scraped portraits 07/2026"
-                  className="w-full rounded-md border border-border bg-surface-raised px-3 py-1.5 text-sm text-content" />
+                  className="w-full rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-content placeholder:text-content-subtle focus:border-primary focus:outline-none" />
               </label>
             ) : (
               <label className="flex flex-col gap-1">
                 <span className="text-xs text-content-muted">Bank</span>
                 <select value={bankId} onChange={(e) => setBankId(e.target.value)}
                   aria-label="Bank that receives the images"
-                  className="w-full rounded-md border border-border bg-surface-raised px-3 py-1.5 text-sm text-content">
+                  className="w-full rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-content focus:border-primary focus:outline-none">
                   <option value="">Choose a bank…</option>
                   {known.map((b) => (
                     <option key={b.id} value={b.id}>{b.name} ({b.total})</option>
