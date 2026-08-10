@@ -221,6 +221,26 @@ its settings stay untouched. Once ComfyUI is responding, **Cancel** the paused
 batch and resume it from Studio. That makes the next prompt an explicit choice,
 never an automatic continuation.
 
+## Paste an image straight into a dataset
+
+The **📥 Import real photos** box takes four gestures now, not three: drag, drop,
+click — and **Ctrl+V**. Anything image-shaped on the clipboard (a screenshot, an
+image copied out of a browser or another editor) is imported into the open
+dataset, with the same auto-head-crop choice and the same size budget as a file
+you picked by hand.
+
+Worth knowing:
+
+- **You do not have to click the box first.** The paste is caught at the page
+  level, because a paste has no drop target and nothing under the pointer.
+- **A paste inside a text box stays text.** Captions are typed in this app, and
+  hijacking Ctrl+V there would be a surprise in the one place that would hurt.
+- **PNG, JPEG, WebP and BMP only.** Anything else on the clipboard (SVG, HEIC,
+  copied text) is ignored rather than sent to be rejected by the server.
+- Pasted images have no filename of their own — Chrome calls every screenshot
+  `image.png` — so they are stored as `pasted-<date>-<time>.<ext>`, which is
+  also what stops several pastes in a row from colliding.
+
 ## Concept datasets (an object or action, not a person)
 
 Pick **Concept** at creation and describe the concept in the required field —

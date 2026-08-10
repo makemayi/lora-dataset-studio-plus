@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-11-paste-to-import',
+    date: '2026-08-11',
+    title: 'Paste an image straight into a dataset with Ctrl+V',
+    blurb: 'Screenshots and images copied out of a browser had to be saved to disk first, then dragged in. Now the import box takes a fourth gesture: press Ctrl+V anywhere on the dataset page and whatever image is on the clipboard is imported, with the same head-crop choice and size budget as a file you picked by hand. Pasting inside a caption box still pastes text — that one is left alone on purpose. Clipboard images have no filename of their own (every screenshot is called image.png), so they are stored as pasted-<date>-<time>, which also keeps several pastes in a row from colliding.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-11-swap-double-click',
     date: '2026-08-11',
     title: 'Clicking 🎭↔ twice no longer swaps the same tile twice',

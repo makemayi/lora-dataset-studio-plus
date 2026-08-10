@@ -6,9 +6,14 @@
  * changes it. The value comes from capabilities, never from a copy of the
  * default kept here: a hint that can go stale is worse than no hint.
  */
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useCapabilities } from '../../context/CapabilitiesContext';
 import SettingsLink from '../common/SettingsLink';
+import {
+  clipboardImageBlobs,
+  isEditableTarget,
+  pastedFileName,
+} from './clipboardImages.js';
 import {
   IMPORT_IMAGE_ACCEPT,
   IMPORT_IMAGE_FORMATS,
@@ -35,6 +40,30 @@ export default function ImportDropzone({ onImport, busy, visionBusy = false, cro
     if (files && files.length) onImport(files, { crop: cropOption ? crop && !visionBusy : false });
   };
 
+  /* Ctrl+V anywhere on the page imports what is on the clipboard.
+     A window listener rather than one on this box, because a paste has no drop
+     target: nothing is under the pointer and nothing has focus, so requiring
+     the user to click the dropzone first would make the gesture undiscoverable.
+     Only ONE dropzone is ever mounted (the conceptual and the character branch
+     are exclusive), so this cannot import twice.
+     A paste into a text field is left alone — see isEditableTarget: that is a
+     text gesture, and the caption box is the one place the app asks people to
+     type. */
+  useEffect(() => {
+    const onPaste = (event) => {
+      if (busy) return;
+      if (isEditableTarget(event.target)) return;
+      const blobs = clipboardImageBlobs(event.clipboardData);
+      if (!blobs.length) return;
+      event.preventDefault();
+      const now = new Date();
+      handle(blobs.map(({ blob, type }, i) => new File(
+        [blob], pastedFileName(type, i, now), { type: blob.type || type })));
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  });
+
   return (
     <div
       onDragOver={(e) => { e.preventDefault(); setOver(true); }}
@@ -47,7 +76,7 @@ export default function ImportDropzone({ onImport, busy, visionBusy = false, cro
       <span className="text-xl">📥</span>
       <span className="text-content text-xs font-medium">Import real photos</span>
       <span className="text-content-subtle text-[0.625rem]">
-        drag and drop or click — {autoCropEnabled
+        drag, drop, click or paste (Ctrl+V) — {autoCropEnabled
           ? `auto head-crop is on (input limit: ${inputLimit})`
           : importPolicyLine(importPolicy)}
       </span>
