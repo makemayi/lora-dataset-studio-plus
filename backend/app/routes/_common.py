@@ -2,7 +2,7 @@
 import json
 import logging
 
-from flask import jsonify, request
+from flask import current_app, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
 from .. import capabilities
@@ -123,6 +123,45 @@ def _require_comfyui(*, force=False):
                                   else 'ComfyUI is not reachable'),
                         'hint': comfy.get('hint') or 'Check the URL in Settings'}), 409
     return None
+
+
+def _require_gpu_not_fenced():
+    """None when local Ollama is not holding the GPU, else the (body, 409).
+
+    The queue is allowed to WAIT behind this fence — a model another tool loaded
+    idles out on its own after a few minutes, and job_queue deliberately defers
+    rather than fails (see require_comfyui_enqueue_ready). That waiting is fine.
+    Accepting the CLICK silently is not: the row went pending, the tile showed
+    "generating", the queue re-deferred it once a second, and the only trace was
+    a WARNING line in the server log. Reported as "submitted but ComfyUI does
+    nothing", and it took reading the log to find out why.
+
+    So a user-initiated action refuses UP FRONT, names the model in the way, and
+    says the one thing the fence will never do by itself: LDS does not unload a
+    model it did not load. Work already queued is untouched — it keeps waiting,
+    which is still the right behaviour for it."""
+    from ..services import ollama_gpu_fence
+    try:
+        state = ollama_gpu_fence.fence_status()
+    except Exception:                                    # noqa: BLE001
+        # A fence that cannot answer is not evidence of a blocked GPU, and
+        # refusing here would ground every local engine on a probe hiccup.
+        current_app.logger.exception('could not read the Ollama GPU fence')
+        return None
+    if not state.get('blocked'):
+        return None
+    models = state.get('models') or []
+    named = ', '.join(models) if models else 'a local model'
+    return jsonify({
+        'ok': False,
+        'code': 'ollama_gpu_fence',
+        'error': (f'Ollama is holding the GPU ({named}). LDS will not unload a '
+                  'model it did not load, so ComfyUI stays blocked until it '
+                  'goes: unload it from the ⚙ Local tools panel, run '
+                  f'"ollama stop {models[0] if models else "<model>"}", or wait '
+                  'for Ollama to idle it out.'),
+        'ollama_fence': state,
+    }), 409
 
 
 def _require_no_stalled_comfyui():

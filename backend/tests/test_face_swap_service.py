@@ -248,3 +248,50 @@ def test_deleting_a_swapping_tile_takes_the_held_original_with_it(app, tmp_path,
 
         assert svc.delete_image(LOCAL_USER, img_id) is True
         assert not os.path.exists(os.path.join(svc._dataset_dir(ds.id), 'tile.png'))
+
+
+# --- the fence must refuse the CLICK, not swallow it -------------------------
+
+def test_a_swap_is_refused_while_ollama_holds_the_gpu(app, client, tmp_path, monkeypatch):
+    """Reported as "submitted but ComfyUI does nothing": the row went pending,
+    the tile said generating, the queue re-deferred it once a second, and the
+    only trace was a WARNING in the server log. The queue may WAIT behind that
+    fence — the click may not be accepted in silence."""
+    from app import config as cfg
+    from app.services import face_dataset_service as svc
+    from app.services import ollama_gpu_fence
+    with app.app_context():
+        _comfy(tmp_path, cfg)
+        _ds, img = _dataset_with_image(svc, cfg, tmp_path)
+        img_id = img.id
+    monkeypatch.setattr(ollama_gpu_fence, 'fence_status',
+                        lambda: {'applies': True, 'blocked': True, 'scope': 'local',
+                                 'reachable': True, 'models': ['gemma:7b']})
+    resp = client.post(f'/api/dataset/image/{img_id}/face-swap')
+    assert resp.status_code == 409
+    body = resp.get_json()
+    assert body['code'] == 'ollama_gpu_fence'
+    # It names the model in the way and the command that clears it, because the
+    # fence itself will never unload a model LDS did not load.
+    assert 'gemma:7b' in body['error']
+    assert 'ollama stop gemma:7b' in body['error']
+    with app.app_context():
+        row = svc.db.session.get(svc.FaceDatasetImage, img_id)
+        assert (row.filename, row.status) == ('tile.png', 'finished')
+
+
+def test_an_unreadable_fence_does_not_ground_the_swap(app, client, tmp_path, monkeypatch):
+    """A probe hiccup is not evidence of a blocked GPU."""
+    from app import config as cfg
+    from app.services import face_dataset_service as svc
+    from app.services import ollama_gpu_fence
+    from app.job_queue import queue_manager
+    with app.app_context():
+        _comfy(tmp_path, cfg)
+        _ds, img = _dataset_with_image(svc, cfg, tmp_path)
+        img_id = img.id
+    monkeypatch.setattr(ollama_gpu_fence, 'fence_status',
+                        lambda: (_ for _ in ()).throw(OSError('probe down')))
+    monkeypatch.setattr(queue_manager, 'add_job', lambda **kw: kw['job_id'])
+    resp = client.post(f'/api/dataset/image/{img_id}/face-swap')
+    assert resp.status_code == 200 and resp.get_json()['ok'] is True

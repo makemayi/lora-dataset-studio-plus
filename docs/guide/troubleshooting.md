@@ -92,6 +92,26 @@ shows a warning toast naming the missing model when this happens.
 variant, not *Thinking*), or click the tile's crop button and frame it by hand.
 **↺ Reset to auto** re-runs the auto-crop after the model is installed.
 
+## A generation is refused with "Ollama is holding the GPU"
+
+**Why:** Ollama has a model resident that LDS did not load — a captioning model
+you ran yourself, or one another tool started. LDS never unloads a model it
+does not own (closing someone else's session mid-use is not its call), and
+ComfyUI cannot have the card while that model is on it.
+
+**Fix, any one of:**
+
+- unload it from **⚙ Local tools ▸ Ollama** in the app;
+- run `ollama stop <model>` — the message names the model and the exact command;
+- wait: Ollama unloads an idle model by itself after a few minutes.
+
+**Note:** the refusal happens at the click. Work that was ALREADY queued when
+the model appeared keeps waiting instead of failing, and starts on its own the
+moment the GPU frees up. Before 2026-08-11 the click was accepted too, so the
+tile said "generating" while the queue silently re-deferred the job once a
+second and only the server log said why — if you are on an older build, that is
+what you are seeing.
+
 ## Ollama isn't detected (or is installed but stopped)
 
 LDS distinguishes **not installed**, **installed but stopped**, and **running**. The **▶ Start Ollama** button applies only to a detected native binary.

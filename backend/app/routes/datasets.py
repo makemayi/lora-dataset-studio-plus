@@ -36,7 +36,8 @@ from ..services.face_variations import (NSFW_VARIATION_CATALOG, VARIATION_CATALO
                                         _quick_gen_nsfw_pool_for,
                                         QUICK_GEN_TOTAL_CAP)
 from ..utils.comfyui import KREA_ALLOWED_SAMPLERS, KREA_ALLOWED_SCHEDULERS, get_krea_loras
-from ._common import (_map_error, _require_comfyui, _require_no_stalled_comfyui,
+from ._common import (_map_error, _require_comfyui, _require_gpu_not_fenced,
+                      _require_no_stalled_comfyui,
                       _studio_arch_mismatch_response, _studio_missing_response)
 
 logger = logging.getLogger(__name__)
@@ -1771,7 +1772,7 @@ def dataset_image_improve(image_id):
 
     `engine` (optional): 'klein' (rewrites detail) or 'seedvr2' (restores it).
     Absent = the improve.engine setting, which defaults to the historical Klein."""
-    gate = _require_no_stalled_comfyui()
+    gate = _require_no_stalled_comfyui() or _require_gpu_not_fenced()
     if gate:
         return gate
     data = request.get_json(silent=True) or {}
@@ -1795,7 +1796,7 @@ def dataset_image_reimprove(image_id):
 
     The generic /regenerate route stays closed to these rows on purpose (it would
     restart from the dataset reference and make an unrelated variation)."""
-    gate = _require_no_stalled_comfyui()
+    gate = _require_no_stalled_comfyui() or _require_gpu_not_fenced()
     if gate:
         return gate
     try:
@@ -1824,7 +1825,7 @@ def canvas_image_improve(image_id):
     Same body and same answers as its dataset sibling: `engine` ('klein' |
     'seedvr2', absent = the improve.engine setting), and the same 409 that offers
     to install a missing engine, because both go through the one preflight."""
-    gate = _require_no_stalled_comfyui()
+    gate = _require_no_stalled_comfyui() or _require_gpu_not_fenced()
     if gate:
         return gate
     data = request.get_json(silent=True) or {}
@@ -1857,7 +1858,7 @@ def dataset_improve_batch(dataset_id):
     if not isinstance(ids, list):
         return jsonify({'error': 'image_ids must be a list'}), 400
     engine = (data.get('engine') or '').strip() or None
-    gate = _require_no_stalled_comfyui()
+    gate = _require_no_stalled_comfyui() or _require_gpu_not_fenced()
     if gate:
         return gate
     try:
@@ -1883,6 +1884,9 @@ def dataset_image_regenerate(image_id):
     # workspace (absent = legacy behaviour, reuse the row's origin engine).
     engine = (data.get('engine') or '').strip() or None
     klein_model = (data.get('klein_model') or '').strip() or None
+    gate = _require_gpu_not_fenced()
+    if gate:
+        return gate
     try:
         from flask import current_app
         # `engine` is absent for an ordinary Retry. The service then resolves the
@@ -1918,6 +1922,9 @@ def dataset_image_face_swap(image_id):
     No request body — there is nothing to configure per run, unlike Regenerate:
     the engine is a setting, so one click never means two different things
     depending on what a stale tab remembered."""
+    gate = _require_gpu_not_fenced()
+    if gate:
+        return gate
     try:
         job_id = svc.face_swap_image(LOCAL_USER, image_id)
     except Exception as e:
@@ -2246,7 +2253,7 @@ def lora_test_run(dataset_id):
     gate = _require_comfyui()
     if gate:
         return gate
-    gate = _require_no_stalled_comfyui()
+    gate = _require_no_stalled_comfyui() or _require_gpu_not_fenced()
     if gate:
         return gate
     d = request.get_json(silent=True) or {}
@@ -2323,7 +2330,7 @@ def lora_test_resume(dataset_id):
     gate = _require_comfyui()
     if gate:
         return gate
-    gate = _require_no_stalled_comfyui()
+    gate = _require_no_stalled_comfyui() or _require_gpu_not_fenced()
     if gate:
         return gate
     if not svc.get_dataset(LOCAL_USER, dataset_id):

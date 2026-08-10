@@ -50,6 +50,12 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-11-ollama-fence-says-so',
+    date: '2026-08-11',
+    title: 'A generation blocked by Ollama now says so, instead of sitting there',
+    blurb: 'If Ollama is holding the GPU with a model LDS did not load, LDS refuses to unload it — that part is on purpose, it is not our model to close. But the click was accepted anyway: the tile went to "generating", the queue quietly re-deferred the job once a second, and the only trace was a line in the server log. Generate, 🔄 Regenerate, 🎭↔ Swap and ✨ Improve now refuse up front instead, naming the model in the way and the exact "ollama stop …" that clears it. Work already queued still waits, which is right for it — Ollama unloads an idle model by itself after a few minutes.',
+  },
+  {
     id: '2026-08-11-app-side-masks',
     date: '2026-08-11',
     title: 'The app can make its own masks now — name a region, get a mask',
