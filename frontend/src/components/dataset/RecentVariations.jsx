@@ -46,7 +46,7 @@ export function RecentVariationsList({ images, onOpen, currentId = null }) {
                 aria-label={here ? `${title}, the dataset you are in`
                   : `Open the dataset ${img.dataset_name}`}
                 aria-current={here ? 'true' : undefined}
-                className={`block h-11 w-11 overflow-hidden rounded-full transition-transform hover:scale-105 ${
+                className={`block h-11 w-11 overflow-hidden rounded-full shadow-md transition duration-200 hover:scale-110 hover:shadow-xl hover:ring-2 hover:ring-indigo-400/70 ${
                   here ? 'ring-2 ring-indigo-400' : 'ring-1 ring-border'}`}
               >
                 <img

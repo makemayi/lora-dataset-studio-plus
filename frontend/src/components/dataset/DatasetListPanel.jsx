@@ -201,14 +201,14 @@ function DatasetTile({ d, onOpen, onDelete, onExportZip, onExportBackup, onSetti
             one of them and the library was a wall of half faces. A square box
             takes a square image whole; the circle is then just the shape, and
             costs no pixels of the face. */}
-        <div className="relative flex items-center justify-center bg-surface-raised px-3 pt-3 pb-1">
+        <div className="relative flex items-center justify-center overflow-hidden bg-surface-raised px-3 pt-3 pb-1">
           {showPreviews && d.ref_filename ? (
             <img
               src={`/api/dataset/${d.id}/img/${encodeURIComponent(d.ref_filename)}`}
               alt="" loading="lazy" aria-hidden="true"
-              className="aspect-square w-[62%] max-w-[8rem] rounded-full object-cover ring-1 ring-border" />
+              className="aspect-square w-[62%] max-w-[8rem] rounded-full object-cover ring-1 ring-border shadow-md transition duration-200 group-hover:scale-105 group-hover:ring-2 group-hover:ring-indigo-400/70 group-hover:shadow-xl" />
           ) : (
-            <span className={`grid aspect-square w-[62%] max-w-[8rem] place-items-center rounded-full bg-gradient-to-br ${gradientFor(d.name)} text-white text-3xl font-bold ring-1 ring-border`}
+            <span className={`grid aspect-square w-[62%] max-w-[8rem] place-items-center rounded-full bg-gradient-to-br ${gradientFor(d.name)} text-white text-3xl font-bold ring-1 ring-border shadow-md transition duration-200 group-hover:scale-105 group-hover:ring-2 group-hover:ring-indigo-400/70 group-hover:shadow-xl`}
               aria-hidden="true">
               {(d.name || '?').charAt(0).toUpperCase()}
             </span>

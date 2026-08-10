@@ -94,3 +94,16 @@ test('a dataset with no reference photo still gets a round initial', () => {
   assert.match(html, /grid aspect-square[^"]*rounded-full/)
   assert.match(html, />I</)
 })
+
+test('the cover answers the pointer, and the placeholder answers it the same way', () => {
+  /* The whole card is the button, so the lift is driven by `group-hover` on the
+     card rather than by hovering the image itself — otherwise the corner of a
+     card would feel dead. The global prefers-reduced-motion reset in index.css
+     neutralises the transition, so no `motion-safe:` prefix is needed here. */
+  const html = render(DATASETS)
+  const hovers = html.match(/group-hover:scale-105/g) || []
+  assert.equal(hovers.length, 2, 'the photo and the initial must lift alike')
+  assert.match(html, /group-hover:ring-2 group-hover:ring-indigo-400\/70/)
+  // A circle that grows must not be clipped by the box it grows in.
+  assert.match(html, /flex items-center justify-center overflow-hidden bg-surface-raised/)
+})
