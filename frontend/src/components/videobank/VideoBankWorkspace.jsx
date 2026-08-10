@@ -321,14 +321,14 @@ export default function VideoBankWorkspace({ bankId, onBack, onGone }) {
     <div className="space-y-4">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <button type="button" onClick={onBack}
-          className="rounded-md border border-border bg-surface-raised px-2.5 py-1 text-sm text-content hover:bg-surface">
+          className="rounded-md bg-surface-raised px-2.5 py-1 text-sm text-content hover:bg-surface">
           ← Banks
         </button>
         <h1 className="min-w-0 truncate text-lg font-bold text-content">🎬 {bank.name}</h1>
         <HelpBadge topic="page-video-bank" />
         <button type="button" onClick={rescan}
           title="Re-walk the folder and inventory anything new"
-          className="ml-auto rounded-md border border-border bg-surface-raised px-2.5 py-1 text-xs font-semibold text-content hover:bg-surface">
+          className="ml-auto rounded-md bg-surface-raised px-2.5 py-1 text-xs font-semibold text-content hover:bg-surface">
           ↻ Rescan folder
         </button>
       </div>
@@ -346,7 +346,7 @@ export default function VideoBankWorkspace({ bankId, onBack, onGone }) {
       {/* What to do next, as ONE sentence. Four equal buttons and no order is
           how a user runs detection before the probe, gets "0 shots" and a green
           success, and concludes the app cannot read their files. */}
-      <div className="rounded-lg border border-border bg-surface p-3 text-sm">
+      <div className="rounded-lg bg-surface p-3 text-sm">
         <p className="text-content">{step.text}</p>
         {step.blocked && (
           <p className="mt-1 text-xs text-amber-300">⚠ {step.blocked.why}</p>
@@ -368,7 +368,7 @@ export default function VideoBankWorkspace({ bankId, onBack, onGone }) {
               className={`rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-40 ${
                 primary
                   ? 'bg-gradient-primary text-white'
-                  : 'border border-border bg-surface-raised text-content hover:bg-surface'}`}>
+                  : 'bg-surface-raised text-content hover:bg-surface'}`}>
               {primary ? '▶ ' : ''}{PASS_LABELS[pass]}
             </button>
           )
@@ -413,7 +413,7 @@ export default function VideoBankWorkspace({ bankId, onBack, onGone }) {
           totalClips={counts.clips || 0} onApplied={() => loadBank(false)} />
       )}
 
-      <details className="rounded-lg border border-border bg-surface">
+      <details className="rounded-lg bg-surface">
         <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-content">
           Files ({counts.sources || 0})
         </summary>
@@ -434,7 +434,7 @@ export default function VideoBankWorkspace({ bankId, onBack, onGone }) {
           <select id="video-caption-style"
             value={captionStyle || bank?.caption_model?.style || 'standard'}
             onChange={(e) => setCaptionStyle(e.target.value)}
-            className="rounded-md border border-border bg-surface-raised px-2 py-1 text-content">
+            className="rounded-md bg-surface-raised px-2 py-1 text-content">
             {(bank?.caption_model?.styles || []).map((s) => (
               <option key={s.key} value={s.key}>{s.label}</option>
             ))}
@@ -500,7 +500,7 @@ export default function VideoBankWorkspace({ bankId, onBack, onGone }) {
           ))}
           {flag && (
             <button type="button" onClick={() => setFlag(null)}
-              className="rounded-full border border-border bg-surface px-2.5 py-1 text-[0.6875rem] text-content-muted hover:bg-surface-raised">
+              className="rounded-full bg-surface px-2.5 py-1 text-[0.6875rem] text-content-muted hover:bg-surface-raised">
               show all ✕
             </button>
           )}
@@ -528,12 +528,12 @@ export default function VideoBankWorkspace({ bankId, onBack, onGone }) {
         </button>
         <button type="button" onClick={() => setSelected(shownClips.map((c) => c.id))}
           disabled={!shownClips.length}
-          className="rounded-md border border-border bg-surface-raised px-2.5 py-1 text-content hover:bg-surface disabled:opacity-30">
+          className="rounded-md bg-surface-raised px-2.5 py-1 text-content hover:bg-surface disabled:opacity-30">
           Select page
         </button>
         {selected.length > 0 && (
           <button type="button" onClick={() => setSelected([])}
-            className="rounded-md border border-border bg-surface-raised px-2.5 py-1 text-content hover:bg-surface">
+            className="rounded-md bg-surface-raised px-2.5 py-1 text-content hover:bg-surface">
             Clear
           </button>
         )}
@@ -541,7 +541,7 @@ export default function VideoBankWorkspace({ bankId, onBack, onGone }) {
             here that also hits shots you cannot see. */}
         <button type="button" onClick={() => triageEverything('reject')}
           disabled={!counts.clips}
-          className="ml-auto rounded-md border border-border bg-surface-raised px-2.5 py-1 text-content-muted hover:bg-surface disabled:opacity-30">
+          className="ml-auto rounded-md bg-surface-raised px-2.5 py-1 text-content-muted hover:bg-surface disabled:opacity-30">
           Reject all…
         </button>
       </div>
@@ -559,7 +559,7 @@ export default function VideoBankWorkspace({ bankId, onBack, onGone }) {
       {!search && hasMore({ loaded: clips.length, total }) && (
         <div className="flex justify-center">
           <button type="button" onClick={() => loadClips(true)} disabled={loadingClips}
-            className="rounded-md border border-border bg-surface-raised px-4 py-1.5 text-sm font-semibold text-content hover:bg-surface disabled:opacity-40">
+            className="rounded-md bg-surface-raised px-4 py-1.5 text-sm font-semibold text-content hover:bg-surface disabled:opacity-40">
             {loadingClips ? 'Loading…' : `Load more (${total - clips.length} left)`}
           </button>
         </div>

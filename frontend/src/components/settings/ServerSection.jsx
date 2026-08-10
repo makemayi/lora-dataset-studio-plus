@@ -194,7 +194,7 @@ export default function ServerSection({ config, setField, runtime, handleSave, c
         )}
       </div>
 
-      <div className="flex items-start justify-between gap-4 rounded-lg border border-border bg-surface-raised px-3 py-2.5">
+      <div className="flex items-start justify-between gap-4 rounded-lg bg-surface-raised px-3 py-2.5">
         <div>
           <p className="text-sm font-medium text-content">
             {bindManaged ? 'Current browser address uses a network host' : 'Available on the local network'}
@@ -213,7 +213,7 @@ export default function ServerSection({ config, setField, runtime, handleSave, c
           aria-describedby={bindManaged ? 'server-bind-managed-note' : undefined}
           onClick={() => setField('server', 'host', lan ? '127.0.0.1' : '0.0.0.0')}
           aria-label={bindManaged ? 'Current browser address uses a network host' : 'Available on the local network'}
-          className={`relative h-6 w-11 shrink-0 scroll-mt-24 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${lan ? 'bg-emerald-500' : 'bg-surface border border-border-strong'}`}>
+          className={`relative h-6 w-11 shrink-0 scroll-mt-24 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${lan ? 'bg-emerald-500' : 'bg-surface-strong'}`}>
           <span aria-hidden
             className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform ${lan ? 'translate-x-5' : 'translate-x-0'}`} />
         </button>
@@ -223,7 +223,7 @@ export default function ServerSection({ config, setField, runtime, handleSave, c
         <>
           {/* Trusted-LAN default: no token to type on a phone. The token is an
               opt-in extra layer, off by default (see backend server.require_token). */}
-          <div className="flex items-start justify-between gap-4 rounded-lg border border-border bg-surface-raised px-3 py-2.5">
+          <div className="flex items-start justify-between gap-4 rounded-lg bg-surface-raised px-3 py-2.5">
             <div>
               <p className="text-sm font-medium text-content">Require an access token</p>
               <HelpText className="mt-0.5 text-xs text-content-muted">
@@ -240,7 +240,7 @@ export default function ServerSection({ config, setField, runtime, handleSave, c
               data-focus-gate="server-token"
               onClick={() => setField('server', 'require_token', !requireToken)}
               aria-label="Require an access token"
-              className={`relative h-6 w-11 shrink-0 scroll-mt-24 rounded-full transition-colors ${requireToken ? 'bg-emerald-500' : 'bg-surface border border-border-strong'}`}>
+              className={`relative h-6 w-11 shrink-0 scroll-mt-24 rounded-full transition-colors ${requireToken ? 'bg-emerald-500' : 'bg-surface-strong'}`}>
               <span aria-hidden
                 className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform ${requireToken ? 'translate-x-5' : 'translate-x-0'}`} />
             </button>
@@ -276,7 +276,7 @@ export default function ServerSection({ config, setField, runtime, handleSave, c
           {lan && (
             /* Open it on your phone: scannable QR + copyable URLs, detected from
                the machine's real addresses — no more guessing which IP/port. */
-            <div className="rounded-lg border border-border bg-surface-raised px-3 py-3">
+            <div className="rounded-lg bg-surface-raised px-3 py-3">
               <p className="text-sm font-medium text-content">Open it on your phone</p>
               {reachUrls.length > 0 ? (
                 <div className="mt-2 flex items-start gap-4">

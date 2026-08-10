@@ -95,7 +95,7 @@ export function FolderBrowserModal({ initial, onPick, onClose }) {
     <div role="dialog" aria-modal="true" aria-label="Choose a folder"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       onMouseDown={(e) => { if (e.target === e.currentTarget) dismiss() }}>
-      <div className="flex w-full max-w-lg flex-col rounded-xl border border-border bg-surface-overlay p-5 shadow-2xl"
+      <div className="flex w-full max-w-lg flex-col rounded-xl bg-surface-overlay p-5 shadow-2xl"
         style={{ maxHeight: '80vh' }}>
         <h2 className="text-base font-bold text-content">📁 Choose a folder</h2>
         <p className="mt-1 text-xs text-content-muted">
@@ -114,7 +114,7 @@ export function FolderBrowserModal({ initial, onPick, onClose }) {
           onSubmit={(e) => { e.preventDefault(); const v = typed.trim(); if (v) load(v) }}>
           <button type="button" onClick={() => load(atRoot ? null : (data?.parent ?? null))}
             disabled={loading || atRoot}
-            className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-content hover:bg-surface-raised disabled:opacity-40">
+            className="shrink-0 rounded-full bg-surface-raised px-2 py-1 text-xs text-content hover:bg-surface-raised disabled:opacity-40">
             ⬆ Up
           </button>
           <input
@@ -123,16 +123,16 @@ export function FolderBrowserModal({ initial, onPick, onClose }) {
             onChange={(e) => setTyped(e.target.value)}
             placeholder={data?.path || 'Paste or type a path'}
             spellCheck={false}
-            className="min-w-0 grow rounded-md border border-border bg-surface-raised px-2 py-1 font-mono text-xs text-content placeholder:text-content-subtle" />
+            className="min-w-0 grow rounded-md bg-surface-raised px-2 py-1 font-mono text-xs text-content placeholder:text-content-subtle" />
           <button type="submit" disabled={loading || !typed.trim()}
-            className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-content hover:bg-surface-raised disabled:opacity-40">
+            className="shrink-0 rounded-full bg-surface-raised px-2 py-1 text-xs text-content hover:bg-surface-raised disabled:opacity-40">
             Go
           </button>
         </form>
 
         {browseError && <p className="mt-2 text-xs text-amber-300">{browseError}</p>}
 
-        <ul className="mt-2 grow overflow-y-auto rounded-md border border-border bg-surface-raised">
+        <ul className="mt-2 grow overflow-y-auto rounded-md bg-surface-raised">
           {loading ? (
             <li className="px-3 py-2 text-xs text-content-muted">Loading…</li>
           ) : entries.length === 0 ? (
@@ -165,7 +165,7 @@ export function FolderBrowserModal({ initial, onPick, onClose }) {
 
         <div className="mt-4 flex shrink-0 justify-end gap-2">
           <button type="button" onClick={dismiss} disabled={busy}
-            className="rounded-md border border-border px-3 py-1.5 text-sm text-content hover:bg-surface-raised disabled:opacity-50">
+            className="rounded-full bg-surface-raised px-3 py-1.5 text-sm text-content hover:bg-surface-raised disabled:opacity-50">
             Cancel
           </button>
           <button type="button" disabled={busy || atRoot || loading} onClick={use}

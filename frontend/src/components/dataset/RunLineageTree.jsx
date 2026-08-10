@@ -141,7 +141,7 @@ function ViewToggle({ view, onChange }) {
     </button>
   );
   return (
-    <div className="flex items-center gap-0.5 rounded-lg border border-border bg-app/40 p-0.5">
+    <div className="flex items-center gap-0.5 rounded-lg bg-surface-raised p-0.5">
       {opt('list', '☰', 'List')}
       {opt('graph', '◉', 'Graph')}
     </div>
@@ -158,7 +158,7 @@ export default function RunLineageTree({ tree, loading, error, onSelect, onConti
 
   if (loading) {
     return (
-      <div className="lds-lineage-in flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-content-subtle text-[0.6875rem]">
+      <div className="lds-lineage-in flex items-center gap-2 rounded-lg bg-surface px-3 py-2 text-content-subtle text-[0.6875rem]">
         <span aria-hidden className="h-3 w-3 animate-spin rounded-full border-2 border-border-strong border-t-indigo-400" />
         Resolving lineage…
       </div>
@@ -168,7 +168,7 @@ export default function RunLineageTree({ tree, loading, error, onSelect, onConti
   const rows = buildLineageRows(tree);
   if (!rows.length) return null;
   return (
-    <div className="lds-lineage-in overflow-x-auto rounded-xl border border-border bg-surface p-2.5">
+    <div className="lds-lineage-in overflow-x-auto rounded-xl bg-surface p-2.5">
       <div className="mb-1.5 flex items-center gap-2 px-0.5">
         <span aria-hidden className="text-[0.8125rem] leading-none">🌳</span>
         <span className="text-content text-[0.6875rem] font-semibold">Lineage</span>

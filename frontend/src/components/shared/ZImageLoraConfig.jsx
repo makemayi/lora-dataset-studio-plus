@@ -129,7 +129,7 @@ export default function ZImageLoraConfig({ loras = [], onChange, zModel = '', is
         const c = cfg[l.filename] || {};
         const fav = !!(zModel && isFavorite?.(zModel, l.filename));
         return (
-          <div key={l.filename} className="flex flex-col gap-1 rounded-md border border-border bg-app/40 px-2 py-1.5">
+          <div key={l.filename} className="flex flex-col gap-1 rounded-md bg-surface-raised px-2 py-1.5">
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -204,7 +204,7 @@ export default function ZImageLoraConfig({ loras = [], onChange, zModel = '', is
           const active = enabledItems[0];
           const anyFav = !!(zModel && isFavorite && items.some((l) => isFavorite(zModel, l.filename)));
           return (
-            <div key={key} className="rounded-md border border-border bg-app/40">
+            <div key={key} className="rounded-md bg-surface-raised">
               <button type="button" onClick={() => toggleGroup(key)} aria-expanded={open}
                 title={open ? 'Collapse this dataset' : 'Expand to pick a checkpoint'}
                 className="flex items-center gap-2 w-full px-2 py-1.5 text-left">

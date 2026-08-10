@@ -1639,7 +1639,7 @@ export default function LineageCanvas({ entries, positions, imageNodes, allImage
            little was on it. 60vh brings the WHOLE frame on screen, which is what
            makes Fit mean anything: a board you have to scroll the page to see
            the bottom of is a board whose pan gesture fights the page's. */
-        className="lds-canvas-frame relative h-[60vh] min-h-[320px] w-full select-none touch-none overflow-hidden rounded-xl border border-border bg-app/40 sm:h-[65vh]"
+        className="lds-canvas-frame relative h-[60vh] min-h-[320px] w-full select-none touch-none overflow-hidden rounded-xl bg-surface-raised sm:h-[65vh]"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endPointer}

@@ -138,7 +138,7 @@ export function WhatsNewModal() {
       <div
         ref={dialogRef}
         onClick={(e) => e.stopPropagation()}
-        className="flex w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-surface-overlay shadow-2xl"
+        className="flex w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-surface-overlay shadow-2xl"
       >
         <header className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
           <h2 id="whats-new-title" className="flex items-center gap-2 text-base font-semibold text-content">

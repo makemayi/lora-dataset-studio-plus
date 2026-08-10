@@ -140,7 +140,7 @@ export default function InstallRunner({ action, buttonLabel, onDone }) {
         </div>
       )}
       {(log.length > 0 || running) && (
-        <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-surface-raised p-2 text-[11px] text-content-muted">
+        <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-surface-raised p-2 text-[11px] text-content-muted">
           {log.slice(-40).join('\n') || 'starting…'}
         </pre>
       )}

@@ -112,7 +112,7 @@ export default function KreaInstallCard({ caps, onDone }) {
   const nothingToInstall = plan.length === 0 && phase !== 'running'
 
   return (
-    <section className="rounded-xl border border-border bg-surface p-4 sm:p-5">
+    <section className="rounded-xl bg-surface p-4 sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
         <h3 className="text-base font-semibold text-content">
           Krea 2 Edit — optional second local engine

@@ -22,7 +22,7 @@ import { checkpointActionModel } from './checkpointPopover.js';
 const ROW = 'flex items-center gap-1.5 rounded-md border px-2 py-1 text-[0.6875rem] font-medium';
 // Disabled rows are TEXT, not buttons: a greyed-out button invites the click it
 // will not honour. This states the situation and gets out of the way.
-const MUTED = 'rounded-md border border-border bg-app/40 px-2 py-1 text-content-subtle text-[0.625rem]';
+const MUTED = 'rounded-md bg-surface-raised px-2 py-1 text-content-subtle text-[0.625rem]';
 
 export default function CheckpointActionsPopover({
   node, pill, runLabel = null,

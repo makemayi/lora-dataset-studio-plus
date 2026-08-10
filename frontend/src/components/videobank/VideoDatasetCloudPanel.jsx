@@ -89,19 +89,19 @@ export default function VideoDatasetCloudPanel({ dataset }) {
           Steps
           <input type="number" min={100} step={100} value={steps}
             onChange={(e) => setSteps(Number(e.target.value) || 1000)}
-            className="w-20 rounded border border-border bg-surface-raised px-1.5 py-0.5 text-[0.6875rem] text-content" />
+            className="w-20 rounded bg-surface-raised px-1.5 py-0.5 text-[0.6875rem] text-content" />
         </label>
         <button type="button" disabled={busy || Boolean(blocked)}
           onClick={() => post(videoDatasetCloudUrl(id), { steps },
             'Renting a pod — the panel follows it from here.')}
-          className="rounded border border-border bg-surface-raised px-2 py-1 text-[0.6875rem] font-semibold text-content hover:bg-surface disabled:opacity-40">
+          className="rounded bg-surface-raised px-2 py-1 text-[0.6875rem] font-semibold text-content hover:bg-surface disabled:opacity-40">
           ☁ Train in the cloud
         </button>
         {canRetry(run) && (
           <button type="button" disabled={busy}
             onClick={() => post(videoDatasetCloudRetryUrl(id), { run_id: run.run_id },
               'Relaunched on a fresh pod with the same settings.')}
-            className="rounded border border-border bg-surface-raised px-2 py-1 text-[0.6875rem] text-content hover:bg-surface disabled:opacity-40">
+            className="rounded bg-surface-raised px-2 py-1 text-[0.6875rem] text-content hover:bg-surface disabled:opacity-40">
             ↻ Retry
           </button>
         )}
@@ -110,7 +110,7 @@ export default function VideoDatasetCloudPanel({ dataset }) {
             onClick={() => post(videoDatasetCloudContinueUrl(id),
               { run_id: latestGroup.run_id, extra_steps: steps },
               `Continuing from the last harvested step, +${steps} steps.`)}
-            className="rounded border border-border bg-surface-raised px-2 py-1 text-[0.6875rem] text-content hover:bg-surface disabled:opacity-40">
+            className="rounded bg-surface-raised px-2 py-1 text-[0.6875rem] text-content hover:bg-surface disabled:opacity-40">
             ▶ Train further
           </button>
         )}
@@ -147,7 +147,7 @@ export default function VideoDatasetCloudPanel({ dataset }) {
           <ul className="flex flex-wrap gap-1.5">
             {g.steps.map((s) => (
               <li key={`${g.run_id}-${s.step}-${s.final ? 'f' : 'i'}`}
-                className="flex items-center gap-1 rounded border border-border bg-surface-raised px-1.5 py-0.5 text-[0.625rem] text-content">
+                className="flex items-center gap-1 rounded bg-surface-raised px-1.5 py-0.5 text-[0.625rem] text-content">
                 <span>{stepLabel(s)}</span>
                 {/* One link per FILE, because both experts of a Wan pair have
                     to land side by side for the LoRA to load at all. */}

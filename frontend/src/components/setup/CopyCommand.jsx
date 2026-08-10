@@ -11,7 +11,7 @@ export default function CopyCommand({ command }) {
   }
   return (
     <div className="flex items-center gap-2">
-      <code className="flex-1 overflow-x-auto rounded-md border border-border bg-surface-raised px-2 py-1 text-[11px] text-content">
+      <code className="flex-1 overflow-x-auto rounded-md bg-surface-raised px-2 py-1 text-[11px] text-content">
         {command}
       </code>
       <button type="button" onClick={copy}

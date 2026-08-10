@@ -73,7 +73,7 @@ export default function VideoClipSearchBox({
   }
 
   return (
-    <section className="rounded-lg border border-border bg-surface p-3">
+    <section className="rounded-lg bg-surface p-3">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-sm font-semibold text-content">🔎 Find scenes</h2>
         <HelpBadge topic="video-bank-search" />
@@ -103,14 +103,14 @@ export default function VideoClipSearchBox({
               onChange={(e) => setQuery(e.target.value)}
               placeholder="a woman walking on a beach"
               aria-label="Describe the scene to look for"
-              className="min-w-[12rem] flex-1 rounded-md border border-border bg-app px-2.5 py-1.5 text-sm text-content placeholder:text-content-subtle" />
+              className="min-w-[12rem] flex-1 rounded-md bg-surface-raised px-2.5 py-1.5 text-sm text-content placeholder:text-content-subtle" />
             <button type="submit" disabled={searching || !query.trim()}
               className="rounded-md bg-gradient-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
               {searching ? pendingLabel(status) : 'Search'}
             </button>
             {result && (
               <button type="button" onClick={clear}
-                className="rounded-md border border-border bg-surface-raised px-2.5 py-1.5 text-xs font-semibold text-content hover:bg-surface">
+                className="rounded-md bg-surface-raised px-2.5 py-1.5 text-xs font-semibold text-content hover:bg-surface">
                 Clear
               </button>
             )}
@@ -156,7 +156,7 @@ export default function VideoClipSearchBox({
             {showLimits ? 'Hide what it cannot do' : 'What it cannot do'}
           </button>
           {showLimits && (
-            <div className="space-y-1 rounded-md border border-border bg-app/40 p-2">
+            <div className="space-y-1 rounded-md bg-surface-raised p-2">
               <p className="text-xs text-content-muted">{limitsSentence()}</p>
               <ul className="list-disc space-y-0.5 pl-4 text-xs text-content-subtle">
                 {VIDEO_CLIP_LIMITS.map((l) => <li key={l}>{l}</li>)}

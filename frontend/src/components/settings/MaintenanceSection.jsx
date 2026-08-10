@@ -232,7 +232,7 @@ function LogViewer() {
   }, [open])
   const copy = () => { try { navigator.clipboard.writeText(lines.join('\n')) } catch { /* ignore */ } }
   return (
-    <section className="rounded-xl border border-border bg-surface p-5">
+    <section className="rounded-xl bg-surface p-5">
       <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
         className="flex w-full items-center gap-2 text-left">
         <h2 className="text-base font-semibold text-content">🪵 Server log</h2>
@@ -246,15 +246,15 @@ function LogViewer() {
         <div className="mt-3 space-y-2">
           <div className="flex gap-2">
             <button type="button" onClick={load}
-              className="rounded-md border border-border bg-surface-raised px-2.5 py-1 text-xs text-content">
+              className="rounded-md bg-surface-raised px-2.5 py-1 text-xs text-content">
               ↻ Refresh
             </button>
             <button type="button" onClick={copy} disabled={!lines.length}
-              className="rounded-md border border-border bg-surface-raised px-2.5 py-1 text-xs text-content disabled:opacity-40">
+              className="rounded-md bg-surface-raised px-2.5 py-1 text-xs text-content disabled:opacity-40">
               📋 Copy all
             </button>
           </div>
-          <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-app/60 p-2 text-[11px] leading-snug text-content-muted">
+          <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-md bg-surface-raised p-2 text-[11px] leading-snug text-content-muted">
             {lines.length ? lines.join('\n') : 'Log is empty.'}
           </pre>
         </div>

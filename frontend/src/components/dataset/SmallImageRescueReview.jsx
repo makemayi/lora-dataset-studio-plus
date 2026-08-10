@@ -10,7 +10,7 @@ function imageUrl(datasetId, image, nonce = 0) {
 function ImagePane({ datasetId, image, nonce, label, tone, fallback, onPreview }) {
   const url = imageUrl(datasetId, image, nonce);
   return (
-    <div className="min-w-0 overflow-hidden rounded-lg border border-border bg-app/50">
+    <div className="min-w-0 overflow-hidden rounded-lg bg-surface-raised">
       <div className="flex min-h-8 items-center justify-between gap-1 border-b border-border px-2 py-1">
         <span className={`truncate text-[0.6875rem] font-semibold ${tone}`}>{label}</span>
         <span className="shrink-0 text-[0.625rem] text-content-subtle">
@@ -108,7 +108,7 @@ export default function SmallImageRescueReview({
               : 'Candidate ready — inspect it at full size before choosing.';
           return (
             <article key={candidate.id} aria-busy={resolving}
-              className="min-w-0 rounded-lg border border-border bg-surface p-2.5">
+              className="min-w-0 rounded-lg bg-surface p-2.5">
               <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2">
                 <span className="text-xs font-semibold text-content">Pair {index + 1}</span>
                 <span className={`min-w-0 break-words text-[0.6875rem] ${
@@ -135,7 +135,7 @@ export default function SmallImageRescueReview({
                 className="mt-2 grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
                 <button type="button" disabled={controlsDisabled}
                   onClick={() => resolve(candidate.id, 'original')}
-                  className="min-h-9 min-w-0 rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs font-semibold text-content hover:bg-white/10 disabled:opacity-40">
+                  className="min-h-9 min-w-0 rounded-lg bg-surface-raised px-2 py-1.5 text-xs font-semibold text-content hover:bg-white/10 disabled:opacity-40">
                   Keep original
                 </button>
                 <button type="button" disabled={controlsDisabled || phase !== 'ready'}

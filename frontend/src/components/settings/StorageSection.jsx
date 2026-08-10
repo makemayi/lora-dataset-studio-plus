@@ -132,7 +132,7 @@ function LocationEditor({
       )}
 
       {choices.length > 0 && !busy && (
-        <div className="space-y-2 rounded-lg border border-border bg-surface-raised p-3">
+        <div className="space-y-2 rounded-lg bg-surface-raised p-3">
           <HelpText className="text-xs text-content-muted">
             {check.default
               ? 'This goes back to the folder inside the app’s data directory.'
@@ -230,7 +230,7 @@ function CloudRunHousekeeping({ toast, onChanged }) {
           {busy === 'scan' ? 'Scanning…' : 'Find unclaimed run folders'}
         </button>
         <button id="storage-adopt-checkpoints" type="button" onClick={adopt} disabled={!!busy}
-          className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-content hover:bg-surface-raised disabled:opacity-50">
+          className="rounded-full bg-surface-raised px-3 py-1.5 text-sm font-medium text-content hover:bg-surface-raised disabled:opacity-50">
           {busy === 'adopt' ? 'Moving…' : 'Move stray checkpoints into the store'}
         </button>
       </div>
@@ -313,7 +313,7 @@ function TrashCard({ reloadKey }) {
         </span>
         <button type="button" onClick={openFolder} disabled={opening}
           title="Open the trash folder in the file explorer"
-          className="rounded-md border border-border bg-surface-raised px-3 py-1.5 text-sm font-medium text-content disabled:opacity-40">
+          className="rounded-md bg-surface-raised px-3 py-1.5 text-sm font-medium text-content disabled:opacity-40">
           {opening ? 'Opening…' : '📂 Open folder'}
         </button>
         <button type="button" onClick={empty} disabled={busy || !size}
@@ -430,7 +430,7 @@ export default function StorageSection({
         <div className="-mx-2 overflow-x-auto px-2">
           <ul className="min-w-[18rem] space-y-2">
             {rows.map((row) => (
-              <li key={row.key} className="rounded-lg border border-border bg-surface-raised p-3">
+              <li key={row.key} className="rounded-lg bg-surface-raised p-3">
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
                   <p className="text-sm font-medium text-content">
                     {row.label}

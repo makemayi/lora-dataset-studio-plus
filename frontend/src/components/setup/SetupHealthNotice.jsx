@@ -129,7 +129,7 @@ export default function SetupHealthNotice() {
     // never squeezes into a two-word column at 400 px.
     <div className="pointer-events-none fixed bottom-3 left-3 right-3 z-30 flex justify-center sm:left-auto sm:right-4 sm:justify-end">
       <div role="status"
-        className="max-w-full rounded-full border border-border bg-surface-raised px-3 py-1.5 text-xs text-content-muted shadow-lg">
+        className="max-w-full rounded-full bg-surface-raised px-3 py-1.5 text-xs text-content-muted shadow-lg">
         {phase === 'checking' && (
           <span aria-hidden="true"
             className="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-border-strong border-t-primary align-[-1px]" />

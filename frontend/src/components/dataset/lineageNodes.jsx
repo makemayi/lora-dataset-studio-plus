@@ -195,7 +195,7 @@ export function CheckpointPill({ pill, offX, offY, active, selected, preview, bi
       </span>
     ) : (
       <span title={resultsTitle}
-        className={'lds-ckcount flex shrink-0 items-center gap-px rounded-full border border-border bg-surface-overlay font-semibold leading-none tabular-nums text-content-muted '
+        className={'lds-ckcount flex shrink-0 items-center gap-px rounded-full bg-surface-overlay font-semibold leading-none tabular-nums text-content-muted '
           + (inline ? 'ml-0.5 h-3.5 px-1 text-[0.5rem] ' : 'h-4 px-1 text-[0.5625rem] ')}>
         <span aria-hidden>🖼</span>{count}
       </span>

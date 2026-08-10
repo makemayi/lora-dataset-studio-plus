@@ -45,7 +45,7 @@ function LossSparkline({ curve }) {
           </span>
         )}
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-16 rounded bg-app/40 border border-border"
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-16 rounded bg-surface-raised"
         role="img" aria-label={`Training loss curve, ${curve.length} points, latest ${losses[losses.length - 1].toExponential(3)}`}
         onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
         <polyline points={points} fill="none" stroke="#818cf8" strokeWidth="2"
@@ -80,7 +80,7 @@ function DownloadProgress({ download }) {
         {d.detail && <span className="text-content-muted tabular-nums">{d.detail}</span>}
       </div>
       {d.percent != null && (
-        <div className="h-1.5 rounded bg-app/60 border border-border overflow-hidden"
+        <div className="h-1.5 rounded bg-surface-raised overflow-hidden"
           role="progressbar" aria-valuenow={d.percent} aria-valuemin={0} aria-valuemax={100}
           aria-label={d.aria}>
           <div className="h-full bg-sky-400/70 transition-all duration-700"
@@ -181,7 +181,7 @@ export default function TrainingProgress({ datasetId, base, trainType, variant,
   const pct = prog.step && prog.total ? Math.min(100, Math.round((prog.step / prog.total) * 100)) : null;
   const samples = prog.samples || [];
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface px-3 py-2">
+    <div className="flex flex-col gap-2 rounded-lg bg-surface px-3 py-2">
       {masksWarn}
       {cloud && showLaunch && prog.launch ? <LaunchProgress launch={prog.launch} /> : cloud && prog.phase && (
         <p className="m-0 text-sky-300 text-[0.625rem]">{prog.phase}{prog.phase_detail ? ` — ${prog.phase_detail}` : ''}</p>
@@ -196,7 +196,7 @@ export default function TrainingProgress({ datasetId, base, trainType, variant,
             {prog.speed && <span className="tabular-nums">{prog.speed}</span>}
             {prog.eta && <span className="tabular-nums">ETA {prog.eta}</span>}
           </div>
-          <div className="h-2 rounded bg-app/60 border border-border overflow-hidden"
+          <div className="h-2 rounded bg-surface-raised overflow-hidden"
             role="progressbar" aria-valuenow={prog.step} aria-valuemin={0} aria-valuemax={prog.total}
             aria-label="Training progress">
             <div className="h-full bg-gradient-primary transition-all duration-700" style={{ width: `${pct}%` }} />
@@ -219,7 +219,7 @@ export default function TrainingProgress({ datasetId, base, trainType, variant,
               return (
                 <a key={s.filename} href={url} target="_blank" rel="noreferrer"
                   title={`Step ${s.step} — prompt ${s.prompt_idx + 1} (open full size)`}
-                  className="relative shrink-0 w-20 h-20 rounded border border-border overflow-hidden hover:border-indigo-400">
+                  className="relative shrink-0 w-20 h-20 rounded bg-surface-raised overflow-hidden hover:border-indigo-400">
                   <img src={url} alt={`Training sample at step ${s.step}`} loading="lazy"
                     className="w-full h-full object-cover" />
                   <span className="absolute bottom-0 inset-x-0 bg-black/70 text-white text-[0.5625rem] text-center tabular-nums">

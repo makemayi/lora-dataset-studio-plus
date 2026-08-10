@@ -332,13 +332,13 @@ export default function RunLineageGraph({ tree, onSelect, onContinueCheckpoint,
         </div>
         <textarea value={genPrompt} onChange={(e) => setGenPrompt(e.target.value)}
           rows={2} placeholder="Shared prompt — leave blank to use the dataset's identity prompt (trigger)"
-          className="w-full resize-y rounded-md border border-border bg-app/60 px-2 py-1.5 text-[0.6875rem] text-content placeholder:text-content-subtle focus:border-indigo-400/60 focus:outline-none" />
+          className="w-full resize-y rounded-md bg-surface-raised px-2 py-1.5 text-[0.6875rem] text-content placeholder:text-content-subtle focus:border-indigo-400/60 focus:outline-none" />
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
           <label className="flex items-center gap-1 text-[0.625rem] text-content-muted">
             Seed
             <input value={genSeed} onChange={(e) => setGenSeed(e.target.value)}
               inputMode="numeric" placeholder="random"
-              className="w-24 rounded-md border border-border bg-app/60 px-1.5 py-1 text-[0.6875rem] tabular-nums text-content placeholder:text-content-subtle focus:border-indigo-400/60 focus:outline-none" />
+              className="w-24 rounded-md bg-surface-raised px-1.5 py-1 text-[0.6875rem] tabular-nums text-content placeholder:text-content-subtle focus:border-indigo-400/60 focus:outline-none" />
           </label>
           <button type="button" onClick={handleGenerate} disabled={!sel.enabled || gen.busy}
             className={'rounded-md px-3 py-1 text-[0.6875rem] font-semibold '

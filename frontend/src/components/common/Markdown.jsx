@@ -112,7 +112,7 @@ function renderBlock(b, idx, guide = false) {
             </blockquote>
           );
           case 'code': return (
-            <pre key={key} className="m-0 rounded-lg border border-border bg-app/60 p-3 overflow-x-auto text-[0.8125rem] text-content-muted font-mono">{b.body}</pre>
+            <pre key={key} className="m-0 rounded-lg bg-surface-raised p-3 overflow-x-auto text-[0.8125rem] text-content-muted font-mono">{b.body}</pre>
           );
           case 'table': return (
             <div key={key} className="overflow-x-auto rounded-lg border border-border">
@@ -152,7 +152,7 @@ function renderBlock(b, idx, guide = false) {
                   }
                   if (guide && b.ordered) {
                     return (
-                      <li key={ii} className="flex gap-3 rounded-lg border border-border bg-app px-3 py-3 leading-relaxed">
+                      <li key={ii} className="flex gap-3 rounded-lg bg-surface-raised px-3 py-3 leading-relaxed">
                         <span aria-hidden className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-indigo-500/15 font-mono text-[0.6875rem] font-bold text-indigo-300">{String(ii + 1).padStart(2, '0')}</span>
                         <span>{renderInline(it, `${key}i${ii}`)}</span>
                       </li>
@@ -193,7 +193,7 @@ export default function Markdown({ source, variant = 'default', sectionActions =
           const action = sectionActions ? sectionActions[headingId] : null;
           return (
           <section key={`section-${index}`} id={headingId}
-            className="scroll-mt-24 rounded-xl border border-border bg-surface px-4 py-4 shadow-sm shadow-black/10 sm:px-5 sm:py-5">
+            className="scroll-mt-24 rounded-xl bg-surface px-4 py-4 shadow-sm shadow-black/10 sm:px-5 sm:py-5">
             <div className="mb-4 flex items-start gap-3 border-b border-border pb-3">
               <span aria-hidden className="mt-1 h-5 w-1 shrink-0 rounded-full bg-gradient-primary" />
               <div className="min-w-0 flex-1">{renderBlock(heading, index, true)}</div>

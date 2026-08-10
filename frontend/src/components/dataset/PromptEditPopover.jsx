@@ -53,7 +53,7 @@ export default function PromptEditPopover({ initialPrompt = '', onSubmit, onClos
           image; over the page it was see-through (measured at 400 px — the grid
           headings showed straight through the refusal). */}
       <div role="dialog" aria-modal="true" aria-label="Edit prompt & regenerate"
-        className="w-full max-w-[20rem] max-h-[85vh] overflow-y-auto rounded-lg border border-border bg-surface-overlay p-3 shadow-2xl flex flex-col gap-2"
+        className="w-full max-w-[20rem] max-h-[85vh] overflow-y-auto rounded-lg bg-surface-overlay p-3 shadow-2xl flex flex-col gap-2"
         onClick={(e) => e.stopPropagation()}>
         <span className="text-[0.625rem] uppercase text-content-muted">Edit prompt &amp; regenerate</span>
         <textarea ref={areaRef} value={text} onChange={(e) => setText(e.target.value)}
@@ -63,7 +63,7 @@ export default function PromptEditPopover({ initialPrompt = '', onSubmit, onClos
           }}
           rows={4} placeholder="describe the shot (the face is kept automatically)…"
           aria-label="Edit the generation prompt"
-          className="text-[11px] bg-app/60 border border-border rounded p-1.5 text-content resize-none" />
+          className="text-[11px] bg-surface-raised rounded p-1.5 text-content resize-none" />
         {/* shrink-0: this is a flex column with a max height, so the box would
             otherwise be squashed to a clipped sliver. */}
         {error && (
@@ -79,7 +79,7 @@ export default function PromptEditPopover({ initialPrompt = '', onSubmit, onClos
         )}
         <div className="flex gap-1.5 justify-end">
           <button type="button" onClick={dismiss} disabled={busy}
-            className="px-2 py-1 rounded text-[11px] bg-surface border border-border text-content-muted disabled:opacity-40">
+            className="px-2 py-1 rounded text-[11px] bg-surface text-content-muted disabled:opacity-40">
             Cancel
           </button>
           <button type="button" onClick={submit} disabled={busy || !text.trim()}

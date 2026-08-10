@@ -50,6 +50,12 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-dialogs-and-sweep',
+    date: '2026-08-10',
+    title: 'Every dialog, lightbox and leftover panel now matches',
+    blurb: 'The end of the redesign: the pass, promote, crop, caption, publish and continue dialogs, the four lightboxes, the video bank, the popovers and the progress panels all take the same shaded panel, pill buttons and focus-ring fields as the rest of the app. Controls that sit on top of a photograph keep their outline on purpose — over an arbitrary picture nothing else keeps them visible. Settings keeps the button style it was given in its own redesign.',
+  },
+  {
     id: '2026-08-10-bank-workspace-restyle',
     date: '2026-08-10',
     title: 'Inside a bank, the triage tools stop competing with the pictures',

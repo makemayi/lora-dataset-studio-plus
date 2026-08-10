@@ -94,7 +94,7 @@ const GRID_SORT_KEY = 'datasetGridSort';
 const MENU_ITEM = 'w-full flex items-center gap-2 text-left px-2.5 py-1.5 rounded-lg text-sm text-content hover:bg-surface-raised disabled:opacity-40';
 
 /* ── The workspace's own three shapes (2026-08-10 restyle) ──────────────────
-   This file used to spell out `rounded-lg border border-border bg-surface`
+   This file used to spell out `rounded-lg bg-surface`
    forty-three times: every action row, every button, every note was its own
    outlined box, stacked down a page that is itself inside a card. The tokens
    already separate them — `surface` is white at 4%, `surface-raised` at 9% —

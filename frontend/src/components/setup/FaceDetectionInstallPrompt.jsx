@@ -56,7 +56,7 @@ export default function FaceDetectionInstallPrompt({ why, compact = false, onIns
           // interpreter override lives, so point at it — with a real link, not
           // an instruction to go find a tab.
           <a href="#/settings/local-tools"
-            className="self-start rounded-md border border-border bg-surface px-2.5 py-1
+            className="self-start rounded-md bg-surface px-2.5 py-1
               font-semibold text-content hover:bg-surface-raised">
             Open Settings ▸ Local tools
           </a>

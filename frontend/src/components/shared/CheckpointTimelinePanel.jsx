@@ -567,7 +567,7 @@ export default function CheckpointTimelinePanel({ recordId, onClose }) {
                 The run is unchanged. Check the connection, then try loading its timeline again.
               </p>
               <button type="button" onClick={() => setRequestVersion((value) => value + 1)}
-                className="mt-3 rounded-md border border-border px-3 py-2 text-sm text-content hover:border-indigo-400/60">
+                className="mt-3 rounded-full bg-surface-raised px-3 py-2 text-sm text-content hover:border-indigo-400/60">
                 Retry
               </button>
             </div>
@@ -596,7 +596,7 @@ export default function CheckpointTimelinePanel({ recordId, onClose }) {
                   Preview series
                   <select value={String(selectedSeries.id)} onChange={chooseSeries}
                     aria-label="Timeline preview series"
-                    className="mt-1 block w-full rounded-md border border-border bg-app px-2 py-2 text-[0.75rem] text-content">
+                    className="mt-1 block w-full rounded-md bg-surface-raised px-2 py-2 text-[0.75rem] text-content">
                     {state.series.map((series, index) => (
                       <option key={series.id ?? index} value={String(series.id)}>
                         {timelineSeriesLabel(series, index)}
@@ -618,7 +618,7 @@ export default function CheckpointTimelinePanel({ recordId, onClose }) {
               )}
 
               {frames.length === 0 ? (
-                <div className="flex min-h-64 items-center justify-center rounded-xl border border-border bg-app/40 px-4 text-center text-sm text-content-muted">
+                <div className="flex min-h-64 items-center justify-center rounded-xl bg-surface-raised px-4 text-center text-sm text-content-muted">
                   This preview series has no available frames. Choose another series, or generate previews
                   from at least 2 checkpoints in the same launch with the same prompt, seed, and settings.
                 </div>

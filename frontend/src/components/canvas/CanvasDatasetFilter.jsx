@@ -20,7 +20,7 @@ import { CARD_SURFACE } from '../common/surfaces';
    REMEMBERED, so someone who works with the filter open keeps it open. */
 
 /* One shape for every control in this bar. It used to be a grid of little
-   outlined boxes — `border border-border bg-app/60` on the fold button, on
+   outlined boxes — `bg-surface-raised` on the fold button, on
    Select all, on Clear, on the search field, on every status and model
    checkbox, on Reset — which is exactly the "boxes inside boxes" look the
    redesign is removing. They are all the same raised pill now; the tokens

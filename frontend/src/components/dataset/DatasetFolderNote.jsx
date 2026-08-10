@@ -25,7 +25,7 @@ export default function DatasetFolderNote({ path }) {
     } catch { /* clipboard denied — the path is still readable on screen */ }
   }
   return (
-    <div className="min-w-0 rounded-lg border border-border bg-surface px-3 py-2 text-xs">
+    <div className="min-w-0 rounded-lg bg-surface px-3 py-2 text-xs">
       <div className="flex min-w-0 items-center gap-2">
         <span className="shrink-0 text-content-subtle">📁 Images folder</span>
         <code className="min-w-0 grow truncate font-mono text-content-muted" title={path}>
@@ -33,7 +33,7 @@ export default function DatasetFolderNote({ path }) {
         </code>
         <button type="button" onClick={copy}
           aria-label="Copy the dataset's images folder path"
-          className="shrink-0 rounded border border-border px-2 py-0.5 text-content-muted hover:bg-surface-raised hover:text-content">
+          className="shrink-0 rounded-full bg-surface-raised px-2 py-0.5 text-content-muted hover:bg-surface-raised hover:text-content">
           {copied ? '✓ Copied' : '⧉ Copy'}
         </button>
       </div>

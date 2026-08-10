@@ -135,7 +135,7 @@ export default function ModelFilePicker({
       </div>
 
       {open && (
-        <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border bg-surface-overlay shadow-lg">
+        <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md bg-surface-overlay shadow-lg">
           {emptyMsg && <p className="px-2 py-2 text-xs text-content-muted">{emptyMsg}</p>}
           {!emptyMsg && shown.length === 0 && (
             <p className="px-2 py-2 text-xs text-content-muted">No file matches “{value}”.</p>

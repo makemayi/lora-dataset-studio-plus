@@ -166,7 +166,7 @@ export default function KleinLoraCombobox({
       </div>
 
       {open && (
-        <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border bg-surface-overlay shadow-lg">
+        <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md bg-surface-overlay shadow-lg">
           {loading && <p className="px-2 py-2 text-xs text-content-muted">Scanning LoRAs…</p>}
           {!loading && error && (
             <p className="px-2 py-2 text-xs text-content-muted">

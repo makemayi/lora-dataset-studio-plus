@@ -77,7 +77,7 @@ export function SavesChip({ node }) {
   }
   if (node.checkpoint_ready === false) {
     return (
-      <span className="inline-flex items-center rounded-full border border-border px-1.5 py-0.5 text-content-subtle text-[0.5625rem] font-medium"
+      <span className="inline-flex items-center rounded-full bg-surface-raised px-1.5 py-0.5 text-content-subtle text-[0.5625rem] font-medium"
         title="This run's checkpoint is no longer on disk (set aside by a later resume, or deleted)">
         gone
       </span>

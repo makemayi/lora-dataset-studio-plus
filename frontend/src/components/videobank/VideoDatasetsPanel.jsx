@@ -58,7 +58,7 @@ export default function VideoDatasetsPanel() {
       <ul className="grid gap-2 grid-cols-1 sm:grid-cols-2">
         {datasets.map((d) => (
           <li key={d.id}
-            className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-border bg-surface p-3">
+            className="flex min-w-0 flex-col gap-1.5 rounded-lg bg-surface p-3">
             <div className="flex min-w-0 items-center gap-2">
               <button type="button" onClick={() => setOpenId(openId === d.id ? null : d.id)}
                 aria-expanded={openId === d.id}
@@ -197,7 +197,7 @@ function VideoTrainingSection({ ds }) {
           </button>
         ) : (
           <button type="button" onClick={() => start(false)} disabled={busy}
-            className="rounded border border-border bg-surface-raised px-2 py-1 text-[0.6875rem] font-semibold text-content hover:bg-surface disabled:opacity-50">
+            className="rounded bg-surface-raised px-2 py-1 text-[0.6875rem] font-semibold text-content hover:bg-surface disabled:opacity-50">
             {busy ? 'Starting…' : '▶ Train this dataset'}
           </button>
         )}
@@ -284,7 +284,7 @@ function VideoDatasetClips({ datasetId }) {
         <li key={item.id} className="min-w-0 space-y-1">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <button type="button" onClick={() => setPlaying(playing === item.id ? null : item.id)}
-              className="rounded border border-border bg-surface-raised px-1.5 py-0.5 text-[0.625rem] font-semibold text-content hover:bg-surface">
+              className="rounded bg-surface-raised px-1.5 py-0.5 text-[0.625rem] font-semibold text-content hover:bg-surface">
               {playing === item.id ? '⏹ Close' : '▶ Play'}
             </button>
             <span className="min-w-0 truncate font-mono text-[0.625rem] text-content-subtle"
@@ -304,7 +304,7 @@ function VideoDatasetClips({ datasetId }) {
             onBlur={() => save(item)}
             aria-label={`Caption for ${item.filename}`}
             placeholder="Describe the clip — this is written to the .txt next to it."
-            className="w-full rounded border border-border bg-surface-raised px-2 py-1 text-[0.6875rem] text-content" />
+            className="w-full rounded bg-surface-raised px-2 py-1 text-[0.6875rem] text-content" />
         </li>
       ))}
     </ul>

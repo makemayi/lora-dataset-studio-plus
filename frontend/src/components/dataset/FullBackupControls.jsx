@@ -47,7 +47,7 @@ function Overlay({ label, children }) {
 function Notes({ notes }) {
   if (!notes?.length) return null;
   return (
-    <ul className="max-h-48 overflow-y-auto rounded-lg border border-border bg-surface-raised p-2 text-xs text-content-muted">
+    <ul className="max-h-48 overflow-y-auto rounded-lg bg-surface-raised p-2 text-xs text-content-muted">
       {notes.map((n, i) => <li key={i} className="py-0.5">{n}</li>)}
     </ul>
   );
@@ -78,7 +78,7 @@ function BackupOverlay({ job, onDownload, onOpenFolder, onDismiss }) {
           <Notes notes={summary.notes} />
           <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
             <button type="button" onClick={onOpenFolder}
-              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-semibold text-content hover:bg-surface-raised">
+              className="rounded-lg bg-surface px-3 py-1.5 text-sm font-semibold text-content hover:bg-surface-raised">
               📂 Open folder
             </button>
             <button type="button" onClick={() => onDownload(job.result?.name)}
@@ -86,7 +86,7 @@ function BackupOverlay({ job, onDownload, onOpenFolder, onDismiss }) {
               ⬇ Download
             </button>
             <button type="button" onClick={onDismiss}
-              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-content-muted hover:bg-surface-raised">
+              className="rounded-lg bg-surface px-3 py-1.5 text-sm text-content-muted hover:bg-surface-raised">
               Close
             </button>
           </div>
@@ -97,7 +97,7 @@ function BackupOverlay({ job, onDownload, onOpenFolder, onDismiss }) {
           <p className="text-sm text-rose-300">{job.error || 'Something went wrong.'}</p>
           <div className="flex justify-end pt-1">
             <button type="button" onClick={onDismiss}
-              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-content hover:bg-surface-raised">
+              className="rounded-lg bg-surface px-3 py-1.5 text-sm text-content hover:bg-surface-raised">
               Close
             </button>
           </div>
@@ -131,7 +131,7 @@ function RestoreOverlay({ job, onDismiss }) {
       {(done || error) && (
         <div className="flex justify-end pt-1">
           <button type="button" onClick={onDismiss}
-            className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-content hover:bg-surface-raised">
+            className="rounded-lg bg-surface px-3 py-1.5 text-sm text-content hover:bg-surface-raised">
             Close
           </button>
         </div>

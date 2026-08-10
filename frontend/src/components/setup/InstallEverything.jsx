@@ -53,7 +53,7 @@ function InstallItem({ item, onDone }) {
     : state === 'restart' || state === 'broken_optional' ? 'text-amber-400'
       : present ? 'text-emerald-400' : 'text-content-subtle'
   return (
-    <div className="rounded-md border border-border bg-surface-raised p-3 space-y-2">
+    <div className="rounded-md bg-surface-raised p-3 space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
         <span className="text-sm font-semibold text-content">{lbl}</span>
         <span className={`shrink-0 text-xs font-medium ${badgeCls}`}>
@@ -255,7 +255,7 @@ export default function InstallEverything({ plan, caps, onDone }) {
       <SeedVr2InstallCard caps={caps} onDone={onDone} />
 
       {/* Path 3 — the one-by-one menu, always visible (install/repair a single component). */}
-      <section className="rounded-xl border border-border bg-surface p-5">
+      <section className="rounded-xl bg-surface p-5">
         <h3 className="text-base font-semibold text-content">Install or repair individually</h3>
         <p className="mt-1 text-sm text-content-muted">
           Prefer to pick and choose? Install any component on its own here. Already installed?

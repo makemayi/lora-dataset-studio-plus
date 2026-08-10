@@ -65,7 +65,7 @@ export default function VideoSourceList({ sources, activeSourceId, onFilter, onC
             {onCut && firstShotBounds(s) && (
               <button type="button" onClick={() => onCut(s, firstShotBounds(s))}
                 title="Add a 5 s shot at the start of this file, then trim or split it in the player"
-                className="self-start rounded border border-border bg-surface-raised px-1.5 py-0.5 text-[0.625rem] font-semibold text-content-muted hover:bg-surface">
+                className="self-start rounded bg-surface-raised px-1.5 py-0.5 text-[0.625rem] font-semibold text-content-muted hover:bg-surface">
                 ✂ Cut a shot by hand
               </button>
             )}

@@ -140,7 +140,7 @@ export default function RunDeleteSection({ recordId, datasetId, onDeleted, onClo
         <div className="fixed inset-0 z-[75] flex items-center justify-center bg-black/70 p-3">
           <div ref={dialogRef} role="dialog" aria-modal="true"
             aria-label="Confirm run deletion" data-testid="run-delete-confirm"
-            className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-xl border border-border bg-surface-overlay p-4 shadow-xl">
+            className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-xl bg-surface-overlay p-4 shadow-xl">
             <h4 className="m-0 mb-2 break-words text-sm font-semibold text-content">
               {confirmation.title}
             </h4>

@@ -114,7 +114,7 @@ export default function CaptionLab({ datasetId, imageId, currentCaption, onKeep 
     }
   };
 
-  const selectCls = 'w-full px-2 py-1 rounded-lg bg-app/60 border border-border text-content text-xs';
+  const selectCls = 'w-full px-2 py-1 rounded-lg bg-surface-raised text-content text-xs';
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
@@ -145,7 +145,7 @@ export default function CaptionLab({ datasetId, imageId, currentCaption, onKeep 
       )}
 
       {/* Reference: the caption currently on the image. */}
-      <div className="rounded-xl border border-border bg-surface p-3">
+      <div className="rounded-xl bg-surface p-3">
         <p className="m-0 text-[0.625rem] font-semibold uppercase tracking-[0.16em] text-content-subtle">Current caption</p>
         <p className="m-0 mt-1 whitespace-pre-wrap text-xs leading-5 text-content-muted">
           {currentCaption?.trim() ? currentCaption : <span className="italic text-content-subtle">— no caption yet —</span>}
@@ -154,7 +154,7 @@ export default function CaptionLab({ datasetId, imageId, currentCaption, onKeep 
 
       <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto sm:grid-cols-2">
         {candidates.map((c) => (
-          <div key={c.id} className="flex flex-col gap-2 rounded-xl border border-border bg-surface p-3">
+          <div key={c.id} className="flex flex-col gap-2 rounded-xl bg-surface p-3">
             {/* Config picker */}
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between gap-2">
@@ -189,7 +189,7 @@ export default function CaptionLab({ datasetId, imageId, currentCaption, onKeep 
             </div>
 
             {/* Result */}
-            <div className="flex min-h-[4rem] flex-1 flex-col rounded-lg border border-border bg-app/60 p-2">
+            <div className="flex min-h-[4rem] flex-1 flex-col rounded-lg bg-surface-raised p-2">
               {c.status === 'running' && <span className="text-xs text-content-subtle">Generating…</span>}
               {c.status === 'idle' && <span className="text-xs italic text-content-subtle">Not generated yet</span>}
               {c.status === 'cancelled' && <span className="text-xs text-amber-300">Stopped before it finished</span>}
@@ -209,7 +209,7 @@ export default function CaptionLab({ datasetId, imageId, currentCaption, onKeep 
             <div className="flex flex-wrap justify-end gap-2">
               <button type="button" onClick={() => makeDefault(c)} disabled={running}
                 title="Store this config as the dataset's default caption method"
-                className="rounded-lg border border-border bg-surface px-2.5 py-1 text-[0.6875rem] font-medium text-content-muted hover:text-content disabled:opacity-40">
+                className="rounded-lg bg-surface px-2.5 py-1 text-[0.6875rem] font-medium text-content-muted hover:text-content disabled:opacity-40">
                 ⚙️ Make default
               </button>
               <button type="button" onClick={() => onKeep(c.caption)} disabled={c.status !== 'done' || !c.caption}

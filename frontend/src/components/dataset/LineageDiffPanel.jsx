@@ -97,7 +97,7 @@ export default function LineageDiffPanel({ a, b, onClose }) {
       </div>
 
       <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-        <div className="rounded-md border border-border bg-app/50 px-2 py-1.5">
+        <div className="rounded-md bg-surface-raised px-2 py-1.5">
           <div className="text-[10px] font-semibold uppercase tracking-wide text-content-subtle">Run A</div>
           <div className="break-words font-mono text-content">
             {data?.a ? sideLabel(data.a) : `#${a.record_id}`}
@@ -244,7 +244,7 @@ function ImageList({ kind, items, withheld }) {
   return (
     <div className="mt-2 space-y-2">
       {items.map((it) => (
-        <div key={it.id} className="rounded-md border border-border bg-app/40 p-2">
+        <div key={it.id} className="rounded-md bg-surface-raised p-2">
           <div className="flex gap-2">
             {it.thumb ? (
               <img src={it.thumb} alt="" loading="lazy"

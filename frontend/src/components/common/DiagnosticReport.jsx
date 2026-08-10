@@ -21,7 +21,7 @@ export default function DiagnosticReport() {
     }
   }
   return (
-    <div className="rounded-xl border border-border bg-surface p-4">
+    <div className="rounded-xl bg-surface p-4">
       <p className="text-sm font-medium text-content">One-click bug report</p>
       <p className="mt-1 text-xs text-content-muted">
         Copies version, environment health (Python/Pillow/disk), per-engine status with the

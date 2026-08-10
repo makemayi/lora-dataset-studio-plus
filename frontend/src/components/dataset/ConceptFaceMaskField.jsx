@@ -283,12 +283,12 @@ export default function ConceptFaceMaskField({
               squeezed next to Stop. */}
           <div className="flex flex-wrap items-center gap-1.5">
             <button type="button" onClick={runPreview} disabled={running}
-              className="min-h-8 rounded-lg border border-border bg-surface px-2.5 text-[0.6875rem] font-semibold text-content hover:bg-surface-raised disabled:opacity-50">
+              className="min-h-8 rounded-lg bg-surface px-2.5 text-[0.6875rem] font-semibold text-content hover:bg-surface-raised disabled:opacity-50">
               {running ? 'Looking for faces…' : previewStartLabel(resume, Boolean(preview))}
             </button>
             {running && (
               <button type="button" onClick={stopPreview} disabled={Boolean(job && job.stopping)}
-                className="min-h-8 rounded-lg border border-border bg-surface px-2.5 text-[0.6875rem] font-semibold text-amber-200 hover:bg-surface-raised disabled:opacity-50">
+                className="min-h-8 rounded-lg bg-surface px-2.5 text-[0.6875rem] font-semibold text-amber-200 hover:bg-surface-raised disabled:opacity-50">
                 {previewStopLabel(job)}
               </button>
             )}
@@ -319,7 +319,7 @@ export default function ConceptFaceMaskField({
           )}
 
           {preview && (
-            <div className="mt-2 rounded-lg border border-border bg-app/40 p-2">
+            <div className="mt-2 rounded-lg bg-surface-raised p-2">
               {/* A preview describes the exact kept set it was computed from. Once
                   that set moves, showing it as fresh would be worse than showing
                   nothing — the boxes would be drawn from photos that are no longer

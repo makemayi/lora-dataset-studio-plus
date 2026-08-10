@@ -32,7 +32,7 @@ export default function OverviewSection({ caps }) {
         </div>
       )}
 
-      <section className="rounded-xl border border-border bg-surface p-5">
+      <section className="rounded-xl bg-surface p-5">
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
           <h2 className="text-base font-semibold text-content">Capabilities</h2>
           <span className="font-mono text-xs text-content-subtle">
@@ -49,7 +49,7 @@ export default function OverviewSection({ caps }) {
             const glyphCls = s.pending ? 'text-amber-400' : (s.ok ? 'text-emerald-400' : 'text-content-subtle')
             return (
               <Link key={s.label} to={dest.href} aria-label={dest.announce}
-                className="group flex min-w-0 items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2
+                className="group flex min-w-0 items-center gap-2 rounded-lg bg-surface px-3 py-2
                   text-sm no-underline transition-colors hover:border-border-strong hover:bg-surface-raised
                   focus:outline-none focus-visible:ring-2 focus-visible:ring-primary">
                 <span aria-hidden className={glyphCls}>{glyph}</span>

@@ -102,7 +102,7 @@ export default function HfStorageCard({ config, setField, configDefaults }) {
       </div>
 
       {summary && (
-        <div className={`space-y-1 rounded-lg border border-border bg-surface-raised p-3 text-xs ${toneClass[summary.tone] || 'text-content-muted'}`}>
+        <div className={`space-y-1 rounded-lg bg-surface-raised p-3 text-xs ${toneClass[summary.tone] || 'text-content-muted'}`}>
           {summary.lines.map((line) => (
             <p key={line} className="break-words">{line}</p>
           ))}
@@ -136,7 +136,7 @@ export default function HfStorageCard({ config, setField, configDefaults }) {
           {caches.map((cache) => {
             const safety = deletionSafety(cache)
             return (
-              <div key={cache.name} className="rounded-lg border border-border bg-surface-raised p-3">
+              <div key={cache.name} className="rounded-lg bg-surface-raised p-3">
                 {/* Column on a phone, row from sm up: the repo hash + a size + a
                     button never fit on 400 px in one line. */}
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">

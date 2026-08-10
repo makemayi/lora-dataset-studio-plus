@@ -66,9 +66,9 @@ export default function QuickGenerateComponentsEditor({
       </p>
       <textarea value={text} onChange={(e) => setText(e.target.value)}
         rows={8} spellCheck={false} aria-label="Quick-generate custom components JSON"
-        className="bg-app/60 border border-border rounded px-2 py-1 text-content text-[0.6875rem] font-mono resize-y" />
+        className="bg-surface-raised rounded px-2 py-1 text-content text-[0.6875rem] font-mono resize-y" />
       <button type="button" onClick={save}
-        className="self-end px-2.5 py-1 rounded-lg border border-border text-content text-[0.6875rem] font-semibold hover:bg-surface-raised">
+        className="self-end px-2.5 py-1 rounded-full bg-surface-raised text-content text-[0.6875rem] font-semibold hover:bg-surface-raised">
         Save custom components
       </button>
     </div>

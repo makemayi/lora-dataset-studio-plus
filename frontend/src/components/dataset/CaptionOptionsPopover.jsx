@@ -200,14 +200,14 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
     }
     startPullByName(KREA_2_OLLAMA_MODEL, true);
   };
-  const inputCls = 'w-full px-2 py-1.5 rounded-lg bg-app/60 border border-border text-content text-sm';
+  const inputCls = 'w-full px-2 py-1.5 rounded-lg bg-surface-raised text-content text-sm';
 
   return (
     <div className="fixed inset-0 z-[9990] flex items-center justify-center bg-black/80 p-3"
       onClick={(e) => { e.stopPropagation(); onClose(); }}
       onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } }}>
       <div role="dialog" aria-modal="true" aria-label="Caption method options"
-        className="w-full max-w-md max-h-[92vh] overflow-y-auto rounded-xl border border-border bg-surface-overlay p-4 shadow-2xl flex flex-col gap-4"
+        className="w-full max-w-md max-h-[92vh] overflow-y-auto rounded-xl bg-surface-overlay p-4 shadow-2xl flex flex-col gap-4"
         onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="text-content font-semibold text-sm">⚙️ Caption method — this dataset</h3>
@@ -284,9 +284,9 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); startPull(); } }}
                   placeholder="e.g. huihui_ai/qwen3-vl-abliterated:8b-instruct"
                   aria-label="Ollama model to pull"
-                  className="min-w-0 w-full flex-1 px-2 py-1.5 rounded-lg bg-app/60 border border-border text-content text-xs" />
+                  className="min-w-0 w-full flex-1 px-2 py-1.5 rounded-lg bg-surface-raised text-content text-xs" />
                 <button type="button" onClick={startPull} disabled={pulling || !pullName.trim() || !modelsReachable}
-                  className="w-full px-3 py-1.5 rounded-lg bg-surface-raised border border-border text-content text-xs font-semibold disabled:opacity-40 hover:bg-surface sm:w-auto">
+                  className="w-full px-3 py-1.5 rounded-lg bg-surface-raised text-content text-xs font-semibold disabled:opacity-40 hover:bg-surface sm:w-auto">
                   {pulling ? 'Pulling…' : '⇩ Pull'}
                 </button>
               </div>
@@ -344,7 +344,7 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
               <textarea id="cap-opt-instructions" value={instructions} rows={3}
                 onChange={(e) => setInstructions(e.target.value)}
                 placeholder="e.g. Always name the visible clothing colors and the time of day."
-                className="w-full px-2 py-1.5 rounded-lg bg-app/60 border border-border text-content text-sm resize-y" />
+                className="w-full px-2 py-1.5 rounded-lg bg-surface-raised text-content text-sm resize-y" />
               <p className="text-xs text-content-subtle">
                 Added to the end of the caption prompt (both engines), <em>after</em> the vocabulary
                 and length presets — so when yours contradicts one of them, yours is what the model
@@ -355,7 +355,7 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
 
             <div className="flex justify-end gap-2 pt-1">
               <button type="button" onClick={onClose}
-                className="px-3 py-1.5 rounded-lg bg-surface border border-border text-content-muted text-sm">
+                className="px-3 py-1.5 rounded-lg bg-surface text-content-muted text-sm">
                 Cancel
               </button>
               <button type="button" onClick={save} disabled={saving}

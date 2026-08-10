@@ -158,7 +158,7 @@ export default function LineageDetailPanel({ node, onClose, onNodeChanged, onNod
           onBlur={saveRunNote}
           rows={3}
           placeholder="e.g. best overall — v3 dataset, ProdigyPlus"
-          className="mt-1 w-full resize-y rounded-md border border-border bg-app/60 p-2 text-xs text-content placeholder:text-content-subtle focus:border-indigo-400/60 focus:outline-none" />
+          className="mt-1 w-full resize-y rounded-md bg-surface-raised p-2 text-xs text-content placeholder:text-content-subtle focus:border-indigo-400/60 focus:outline-none" />
       </section>
 
       {checkpoints.length > 0 && (
@@ -176,7 +176,7 @@ export default function LineageDetailPanel({ node, onClose, onNodeChanged, onNod
                   onChange={(e) => setCkNotes((m) => ({ ...m, [c.step]: e.target.value }))}
                   onBlur={() => saveCkNote(c.step)}
                   placeholder="note…"
-                  className="min-w-0 flex-1 rounded-md border border-border bg-app/60 px-2 py-1 text-xs text-content placeholder:text-content-subtle focus:border-indigo-400/60 focus:outline-none" />
+                  className="min-w-0 flex-1 rounded-md bg-surface-raised px-2 py-1 text-xs text-content placeholder:text-content-subtle focus:border-indigo-400/60 focus:outline-none" />
               </li>
             ))}
           </ul>

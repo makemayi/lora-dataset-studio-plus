@@ -57,7 +57,7 @@ export function DatasetVersionChip({ version, className = '' }) {
   return (
     <span
       title="Dataset version at training time"
-      className={'inline-flex items-center rounded border border-border '
+      className={'inline-flex items-center rounded-full bg-surface-raised '
         + 'bg-surface-raised px-1.5 py-0.5 text-[0.625rem] text-content-subtle '
         + (className ? ` ${className}` : '')}>
       v{version}
