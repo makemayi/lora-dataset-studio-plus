@@ -224,7 +224,7 @@ function DatasetTile({ d, onOpen, onDelete, onExportZip, onExportBackup, onSetti
             </span>
           )}
         </div>
-        <div className="flex flex-col gap-0.5 p-2.5 text-center">
+        <div className="flex flex-col gap-px px-2 pb-2 pt-1 text-center leading-tight">
           <span className="flex items-center justify-center gap-1.5 min-w-0">
             <span className="truncate text-sm font-semibold text-content">{d.name}</span>
             {(d.trained_families || []).map((f) => {
@@ -243,27 +243,36 @@ function DatasetTile({ d, onOpen, onDelete, onExportZip, onExportBackup, onSetti
           <span className="text-[0.6875rem] text-content-subtle">{tileStats(d)}</span>
         </div>
       </button>
-      <div className="library-card__actions grid grid-cols-2 gap-1.5 px-2 pb-2">
-        <button type="button"
-          onClick={() => onExportZip?.(d.id)}
-          disabled={!canExportZip}
-          title={canExportZip
-            ? 'Download the kept images and captions as a training-ready ZIP'
-            : 'Keep at least one image before exporting a training ZIP'}
-          aria-label={`Export training ZIP for ${d.name}`}
-          className={`${TILE_ACTION} disabled:cursor-not-allowed disabled:opacity-40`}>
-          <DownloadIcon className="h-3.5 w-3.5 shrink-0" /> ZIP
-        </button>
-        <button type="button"
-          onClick={() => onExportBackup?.(d.id)}
-          title="Download a portable backup with all images, captions and settings"
-          aria-label={`Export portable backup for ${d.name}`}
-          className={TILE_ACTION}>
-          <BankIcon className="h-3.5 w-3.5 shrink-0" /> Backup
-        </button>
-      </div>
-      {(onSettings || onDelete) && (
+      {/* ONE cluster of four icon buttons, not two rows of two.
+          Export and Backup used to be labelled buttons in a grid under the
+          card, which cost a whole row of height on every tile for two actions
+          nobody takes often — while Edit and Delete, taken just as rarely, were
+          already 28 px circles. They are the same weight of action, so they get
+          the same weight of control: same size, same place, ordered
+          least-destructive first. The card is a row shorter for it. */}
+      {(onExportZip || onExportBackup || onSettings || onDelete) && (
         <div className="library-card__actions absolute right-1.5 top-1.5 flex gap-1">
+          {onExportZip && (
+            <button type="button"
+              onClick={() => onExportZip(d.id)}
+              disabled={!canExportZip}
+              title={canExportZip
+                ? 'Download the kept images and captions as a training-ready ZIP'
+                : 'Keep at least one image before exporting a training ZIP'}
+              aria-label={`Export training ZIP for ${d.name}`}
+              className={`${OVER_IMAGE_BUTTON} text-content-muted hover:bg-black/70 disabled:cursor-not-allowed disabled:opacity-40`}>
+              <DownloadIcon className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {onExportBackup && (
+            <button type="button"
+              onClick={() => onExportBackup(d.id)}
+              title="Download a portable backup with all images, captions and settings"
+              aria-label={`Export portable backup for ${d.name}`}
+              className={`${OVER_IMAGE_BUTTON} text-content-muted hover:bg-black/70`}>
+              <BankIcon className="h-3.5 w-3.5" />
+            </button>
+          )}
           {onSettings && (
             <button type="button" onClick={() => onSettings(d.id)}
               disabled={settingsLoading}

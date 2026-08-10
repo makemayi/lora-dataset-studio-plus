@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-11-tighter-library-cards',
+    date: '2026-08-11',
+    title: 'Shorter dataset cards — four actions in one place',
+    blurb: 'Every card carried a labelled “ZIP / Backup” bar under it, costing a whole row of height on every tile for two actions nobody takes often — while Edit and Delete, taken just as rarely, were already small circles up in the corner. They are the same weight of action, so they now get the same weight of control: one hover-revealed cluster of four icons, least-destructive first, and the caption block under the picture is tighter. More datasets fit on screen, and the round cover has room to be the thing you look at.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-11-round-dataset-covers',
     date: '2026-08-11',
     title: 'Dataset covers are round, and no longer cut faces in half',

@@ -58,8 +58,13 @@ test('library cards follow the fine-pointer hover-action contract', () => {
   // Hidden without reflow (visibility, not display) and touch keeps controls.
   assert.match(css, /\.library-card \.library-card__actions\s*\{[^}]*visibility: hidden/s)
   assert.doesNotMatch(css, /\.library-card \.library-card__actions\s*\{[^}]*display:\s*none/s)
-  // Applied on the photo tile (export bar + delete overlay) AND the S row.
-  assert.ok((panel.match(/library-card__actions/g) || []).length >= 3)
+  // Applied on the photo tile AND the S row. The tile carried TWO clusters
+  // until 2026-08-11 — a labelled export bar under the card plus the icon
+  // overlay — and now carries one: export, backup, edit and delete are the same
+  // weight of action, so they are one cluster of icons and the card is a row
+  // shorter. What this asserts is that every cluster that exists is
+  // hover-revealed, not how many there happen to be.
+  assert.ok((panel.match(/library-card__actions/g) || []).length >= 2)
   // Both card roots carry the class. Written as a template literal since the
   // 2026-08-10 restyle (the surface comes from a shared constant), so match the
   // class itself rather than one spelling of the attribute.

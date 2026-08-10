@@ -107,3 +107,25 @@ test('the cover answers the pointer, and the placeholder answers it the same way
   // A circle that grows must not be clipped by the box it grows in.
   assert.match(html, /flex items-center justify-center overflow-hidden bg-surface-raised/)
 })
+
+test('export, backup, edit and delete are one cluster of icon buttons', () => {
+  /* They are the same weight of action — taken rarely, never in bulk — so they
+     get the same weight of control. The labelled export bar that used to sit
+     under every card cost a row of height on every tile for two of them. */
+  const html = render(DATASETS)
+  for (const label of [/Export training ZIP for Emma/, /Export portable backup for Emma/,
+                       /Edit settings for Emma/, /Delete the dataset Emma/]) {
+    assert.match(html, label)
+  }
+  // The labelled bar under the card is gone — its own container, not the word
+  // "Backup", which the library-wide backup menu in the header also uses.
+  assert.doesNotMatch(html, /library-card__actions grid grid-cols-2/)
+  // ...and all four now live in the one hover-revealed cluster.
+  const cluster = html.slice(html.indexOf('library-card__actions absolute'))
+  assert.match(cluster.slice(0, 3000), /data-icon="download"[\s\S]*data-icon="trash"/)
+  // A dataset with nothing kept cannot export a training ZIP, and the button
+  // says why rather than going quietly grey.
+  const empty = render([{ ...DATASETS[0], id: 7, images_kept: 0, images_captioned: 0 }])
+  assert.match(empty, /Keep at least one image before exporting a training ZIP/)
+  assert.match(empty, /disabled=""/)
+})
