@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-10-generation-panels-restyle',
+    date: '2026-08-10',
+    title: 'The generation, captioning and import panels lose their frames too',
+    blurb: 'The variation catalogue alone had ninety-three outlined boxes: every shot chip, every engine card, every field. An engine or a shot you have picked is now told apart by its fill and its accent, not by owning a border while the others own a different one — so what is selected reads at a glance instead of after a second look. Same for the scrape, caption, reference and dense-model panels. Third slice of the datasets pass; the training panel is the last one.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-10-workspace-restyle',
     date: '2026-08-10',
     title: 'The dataset workspace stops boxing every row',

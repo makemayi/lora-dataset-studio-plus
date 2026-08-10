@@ -75,7 +75,7 @@ export default function CoveragePanel({ datasetId, refreshKey = 0 }) {
   const hint = generateMoreHint(coverage);
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface px-3 py-2">
+    <div className="flex flex-col gap-2 rounded-lg bg-surface px-3 py-2">
       <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
         className="flex flex-wrap items-center gap-2 text-left">
         <span className="text-content-muted text-[0.6875rem] uppercase tracking-wide">🔍 Coverage</span>

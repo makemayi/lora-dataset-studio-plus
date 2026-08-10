@@ -277,7 +277,7 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
   };
 
   return (
-    <section className="bg-surface rounded-xl border border-border p-3 flex flex-col gap-2">
+    <section className="bg-surface rounded-xl p-3 flex flex-col gap-2">
       <div className="flex items-center gap-2 flex-wrap">
         <h2 className="text-content font-semibold text-sm">
           {toBank ? '🕷️ Scrape into the bank' : '🕷️ Build from scraped images'}
@@ -335,7 +335,7 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
           Source credentials
         </SettingsLink>
         <div role="group" aria-label="Scraper source"
-          className="inline-flex rounded-lg border border-border bg-surface-raised p-0.5">
+          className="inline-flex rounded-lg bg-surface-raised p-0.5">
           {SOURCE_MODES.map(([mode, label]) => (
             <button key={mode} type="button"
               aria-pressed={sourceMode === mode}
@@ -343,7 +343,7 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
               className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${
                 sourceMode === mode
                   ? 'bg-indigo-500 text-white shadow-sm'
-                  : 'text-content-muted hover:bg-white/5 hover:text-content'}`}>
+                  : 'text-content-muted hover:bg-surface-raised hover:text-content'}`}>
               {label}
             </button>
           ))}
@@ -355,7 +355,7 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
       </div>
 
       {sourceMode === 'reddit' && (
-        <div className="rounded-lg border border-border bg-white/5 px-2 py-2 flex flex-col gap-1.5">
+        <div className="rounded-lg bg-surface-raised px-2 py-2 flex flex-col gap-1.5">
           <span className="text-content-subtle text-[0.6875rem] flex items-center gap-1">
             <span aria-hidden>🔎</span> Search Reddit
           </span>
@@ -366,7 +366,7 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runRedditSearch(); } }}
               placeholder="keyword — what to look for (e.g. film portrait)"
               title="The term to search for across Reddit. Leave empty to browse a subreddit's top posts."
-              className="flex-[2] min-w-[9rem] px-2.5 py-1.5 rounded-lg bg-surface-raised border border-border text-content text-sm placeholder:text-content-subtle focus:border-indigo-500 outline-none"
+              className="flex-[2] min-w-[9rem] px-2.5 py-1.5 rounded-lg bg-surface-raised text-content text-sm placeholder:text-content-subtle focus:border-indigo-500 outline-none"
             />
             <span className="text-content-subtle text-sm shrink-0">in r/</span>
             <input
@@ -375,11 +375,11 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runRedditSearch(); } }}
               placeholder="community, e.g. analog (optional)"
               title="A subreddit name (community). Restricts the search to it — cleaner results. This is also how you reach NSFW communities."
-              className="flex-[1] min-w-[7rem] px-2.5 py-1.5 rounded-lg bg-surface-raised border border-border text-content text-sm placeholder:text-content-subtle focus:border-indigo-500 outline-none"
+              className="flex-[1] min-w-[7rem] px-2.5 py-1.5 rounded-lg bg-surface-raised text-content text-sm placeholder:text-content-subtle focus:border-indigo-500 outline-none"
             />
             <button type="button" onClick={runRedditSearch}
               disabled={scanning || (!kw.trim() && !sub.trim())}
-              className="px-3 py-1.5 rounded-lg bg-surface border border-border text-content text-sm hover:bg-white/10 disabled:opacity-40 shrink-0">
+              className="px-3 py-1.5 rounded-full bg-surface-raised text-content text-sm transition-colors hover:bg-surface disabled:opacity-40 shrink-0">
               {scanning ? 'Searching…' : 'Search Reddit'}
             </button>
           </div>
@@ -393,7 +393,7 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
       )}
 
       {sourceMode === 'pexels' && (
-        <div className="rounded-lg border border-border bg-white/5 px-2.5 py-2 flex flex-col gap-2">
+        <div className="rounded-lg bg-surface-raised px-2.5 py-2 flex flex-col gap-2">
           <div className="rounded-lg border border-amber-400/40 bg-amber-500/10 p-2 text-[0.6875rem] leading-relaxed text-amber-100">
             <p>
               <b>Pexels authorization required.</b> An API key alone does not authorize
@@ -417,16 +417,16 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runPexelsSearch(); } }}
               placeholder="keyword — e.g. cinematic portrait"
               aria-label="Pexels search keyword"
-              className="min-w-[12rem] flex-[2] px-2.5 py-1.5 rounded-lg bg-surface-raised border border-border text-content text-sm placeholder:text-content-subtle focus:border-indigo-500 outline-none" />
+              className="min-w-[12rem] flex-[2] px-2.5 py-1.5 rounded-lg bg-surface-raised text-content text-sm placeholder:text-content-subtle focus:border-indigo-500 outline-none" />
             <select value={pexelsLocale} onChange={(e) => setPexelsLocale(e.target.value)}
               aria-label="Pexels search language"
-              className="px-2.5 py-1.5 rounded-lg bg-surface-raised border border-border text-content text-sm focus:border-indigo-500 outline-none">
+              className="px-2.5 py-1.5 rounded-lg bg-surface-raised text-content text-sm focus:border-indigo-500 outline-none">
               <option value="fr-FR">French (fr-FR)</option>
               <option value="en-US">English (en-US)</option>
             </select>
             <select value={pexelsOrientation} onChange={(e) => setPexelsOrientation(e.target.value)}
               aria-label="Pexels image orientation"
-              className="px-2.5 py-1.5 rounded-lg bg-surface-raised border border-border text-content text-sm focus:border-indigo-500 outline-none">
+              className="px-2.5 py-1.5 rounded-lg bg-surface-raised text-content text-sm focus:border-indigo-500 outline-none">
               <option value="">Any orientation</option>
               <option value="portrait">Portrait</option>
               <option value="landscape">Landscape</option>
@@ -435,7 +435,7 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
             <button type="button" onClick={runPexelsSearch}
               disabled={scanning || !pexelsAuthorized || !normalizePexelsKeyword(pexelsKeyword)}
               title={pexelsAuthorized ? 'Search the official Pexels API' : 'Confirm explicit Pexels authorization first'}
-              className="px-3 py-1.5 rounded-lg bg-surface border border-border text-content text-sm hover:bg-white/10 disabled:opacity-40 shrink-0">
+              className="px-3 py-1.5 rounded-full bg-surface-raised text-content text-sm transition-colors hover:bg-surface disabled:opacity-40 shrink-0">
               {scanning ? 'Searching…' : 'Search Pexels'}
             </button>
           </div>
@@ -443,13 +443,13 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
       )}
 
       {sourceMode === 'websearch' && (
-        <div className="rounded-lg border border-border bg-white/5 px-2.5 py-2 flex flex-col gap-2">
+        <div className="rounded-lg bg-surface-raised px-2.5 py-2 flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <input value={websearchKeyword} onChange={(e) => setWebsearchKeyword(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runWebSearch(); } }}
               placeholder="keyword — e.g. curly hair portrait"
               aria-label="Web image search keyword"
-              className="min-w-[12rem] flex-[2] px-2.5 py-1.5 rounded-lg bg-surface-raised border border-border text-content text-sm placeholder:text-content-subtle focus:border-indigo-500 outline-none" />
+              className="min-w-[12rem] flex-[2] px-2.5 py-1.5 rounded-lg bg-surface-raised text-content text-sm placeholder:text-content-subtle focus:border-indigo-500 outline-none" />
             <label className="flex items-center gap-2 text-[0.6875rem] text-content-muted cursor-pointer shrink-0">
               <input type="checkbox" checked={websearchSafe}
                 onChange={(e) => setWebsearchSafe(e.target.checked)}
@@ -459,7 +459,7 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
             <button type="button" onClick={runWebSearch}
               disabled={scanning || !normalizeWebSearchKeyword(websearchKeyword)}
               title="Search images across the open web"
-              className="px-3 py-1.5 rounded-lg bg-surface border border-border text-content text-sm hover:bg-white/10 disabled:opacity-40 shrink-0">
+              className="px-3 py-1.5 rounded-full bg-surface-raised text-content text-sm transition-colors hover:bg-surface disabled:opacity-40 shrink-0">
               {scanning ? 'Searching…' : 'Search the web'}
             </button>
             <HelpBadge topic="action-scrape-websearch" className="self-center" />
@@ -473,15 +473,15 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
       )}
 
       {sourceMode === 'url' && (
-        <div className="rounded-lg border border-border bg-white/5 px-2 py-2 flex flex-col gap-1.5">
+        <div className="rounded-lg bg-surface-raised px-2 py-2 flex flex-col gap-1.5">
           <form className="flex flex-wrap gap-2"
             onSubmit={(e) => { e.preventDefault(); runScan(0); }}>
             <input type="url" value={url} onChange={(e) => setUrl(e.target.value)}
               aria-label="Gallery or media URL"
               placeholder="Gallery, album, collection or direct photo URL"
-              className="flex-1 min-w-[14rem] px-3 py-1.5 rounded-lg bg-surface-raised border border-border text-content text-sm placeholder:text-content-subtle focus:border-indigo-500 outline-none" />
+              className="flex-1 min-w-[14rem] px-3 py-1.5 rounded-lg bg-surface-raised text-content text-sm placeholder:text-content-subtle focus:border-indigo-500 outline-none" />
             <button type="submit" disabled={scanning || !url.trim()}
-              className="px-3 py-1.5 rounded-lg bg-surface border border-border text-content text-sm hover:bg-white/10 disabled:opacity-40">
+              className="px-3 py-1.5 rounded-full bg-surface-raised text-content text-sm transition-colors hover:bg-surface disabled:opacity-40">
               {scanning ? 'Scanning…' : 'Scan URL'}
             </button>
             <HelpBadge topic="action-scrape-scan" className="self-center" />
@@ -506,7 +506,7 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
       <label className={`flex items-start gap-2 rounded-lg border px-2.5 py-2 text-[0.75rem] ${
         rescueSmall
           ? 'border-indigo-400/50 bg-indigo-500/10 text-content'
-          : 'border-border bg-white/[0.03] text-content-muted'} ${
+          : 'border-transparent bg-surface-raised text-content-muted'} ${
         caps.engines?.klein === false ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
         <input type="checkbox" checked={rescueSmall}
           disabled={busy || importing || caps.engines?.klein === false}
@@ -546,13 +546,13 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
         return (
         <>
           <div className="flex items-center gap-2 text-[0.6875rem] text-content-subtle flex-wrap">
-            <span className="rounded-full border border-border bg-surface-raised px-2 py-0.5 font-semibold text-content"
+            <span className="rounded-full bg-surface-raised px-2 py-0.5 font-semibold text-content"
               title={activeScanUrl || undefined}>
               Results from {platformLabel(activePlatform)}
             </span>
             <button type="button" onClick={() => setSelected(new Set(liveItems.map((it) => it.url)))}
               title="Selects all live (loaded) images"
-              className="px-2 py-0.5 rounded border border-border hover:text-content">
+              className="px-2 py-0.5 rounded-full bg-surface-raised hover:text-content">
               Select all ({liveItems.length})
             </button>
             {deadCount > 0 && (
@@ -562,7 +562,7 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
             )}
             {selected.size > 0 && (
               <button type="button" onClick={() => setSelected(new Set())}
-                className="px-2 py-0.5 rounded border border-border hover:text-content">
+                className="px-2 py-0.5 rounded-full bg-surface-raised hover:text-content">
                 Clear
               </button>
             )}
@@ -574,7 +574,7 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
                 className="w-24 sm:w-32 accent-indigo-500 cursor-pointer" />
             </label>
             <button type="button" onClick={resetScan} disabled={scanning || importing}
-              className="px-2 py-0.5 rounded border border-border hover:text-content disabled:opacity-40">
+              className="px-2 py-0.5 rounded-full bg-surface-raised hover:text-content disabled:opacity-40">
               Reset scan
             </button>
             {/* The honest one-liner about what the chosen destination does to the
@@ -641,7 +641,7 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
 
           {paginated && (
             <button type="button" onClick={() => runScan(page + 1)} disabled={scanning}
-              className="self-start px-3 py-1.5 rounded-lg border border-border bg-surface text-content-muted hover:text-content text-xs disabled:opacity-40">
+              className="self-start px-3 py-1.5 rounded-lg bg-surface text-content-muted hover:text-content text-xs disabled:opacity-40">
               {scanning ? 'Loading…' : 'Load more images'}
             </button>
           )}

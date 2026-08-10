@@ -51,7 +51,7 @@ export default function CaptionToolsBar({ images, kind = 'character', mode = 'bo
     : 'Captions here are comma-separated tags, so a filter matches one whole tag exactly (case-insensitive).';
 
   return (
-    <div className="rounded-lg border border-border bg-surface px-3 py-2">
+    <div className="rounded-lg bg-surface px-3 py-2">
       <button type="button" data-workspace-focus
         onClick={() => setOpen((v) => !v)} aria-expanded={open}
         className="flex items-center gap-2 w-full text-left text-content text-sm font-semibold">
@@ -81,12 +81,12 @@ export default function CaptionToolsBar({ images, kind = 'character', mode = 'bo
             <input value={find} onChange={(e) => setFind(e.target.value)}
               placeholder={tagMode ? 'tag to replace/remove' : 'text to find'}
               aria-label="Find in captions"
-              className="px-2 py-1 rounded bg-app/60 border border-border text-content text-xs w-44" />
+              className="px-2 py-1 rounded-lg bg-surface-raised text-content text-xs focus:outline-none focus:ring-1 focus:ring-primary w-44" />
             <span aria-hidden className="text-content-subtle text-xs">→</span>
             <input value={replace} onChange={(e) => setReplace(e.target.value)}
               placeholder="replacement (empty = remove)"
               aria-label="Replace with"
-              className="px-2 py-1 rounded bg-app/60 border border-border text-content text-xs w-48" />
+              className="px-2 py-1 rounded-lg bg-surface-raised text-content text-xs focus:outline-none focus:ring-1 focus:ring-primary w-48" />
             <label className="flex items-center gap-1 text-xs text-content-muted"
               title="Tag mode treats captions as comma-separated tags: the whole tag must match (case-insensitive), and removal keeps the commas clean. Recommended for booru (SDXL).">
               <input type="checkbox" checked={tagMode} onChange={(e) => setTagMode(e.target.checked)}
@@ -94,7 +94,7 @@ export default function CaptionToolsBar({ images, kind = 'character', mode = 'bo
               tag mode
             </label>
             <button type="button" onClick={apply} disabled={busy || !find.trim()}
-              className="px-3 py-1 rounded-lg bg-surface-raised border border-border text-content text-xs font-semibold disabled:opacity-40 hover:bg-surface">
+              className="px-3 py-1 rounded-full bg-surface-raised text-content text-xs font-semibold transition-colors hover:bg-surface disabled:opacity-40 hover:bg-surface">
               Apply to {captioned.length} caption(s)
             </button>
           </div>
@@ -117,16 +117,16 @@ export default function CaptionToolsBar({ images, kind = 'character', mode = 'bo
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submitFilter(onExclude); } }}
               placeholder={categoryCopy.filterPlaceholder}
               aria-label={`${categoryCopy.frequencyItem} to filter the grid by`}
-              className="px-2 py-1 rounded bg-app/60 border border-border text-content text-xs w-44" />
+              className="px-2 py-1 rounded-lg bg-surface-raised text-content text-xs focus:outline-none focus:ring-1 focus:ring-primary w-44" />
             <button type="button" onClick={() => submitFilter(onExclude)} disabled={!onExclude || !filterInput.trim()}
               title="Hide every image that already carries this tag from the grid"
-              className="px-3 py-1 rounded-lg bg-surface-raised border border-border text-content text-xs font-semibold disabled:opacity-40 hover:bg-rose-500/15 hover:border-rose-400/50">
+              className="px-3 py-1 rounded-full bg-surface-raised text-content text-xs font-semibold transition-colors hover:bg-surface disabled:opacity-40 hover:bg-rose-500/15 hover:border-rose-400/50">
               ⊘ Exclude
             </button>
             {onInclude && (
               <button type="button" onClick={() => submitFilter(onInclude)} disabled={!filterInput.trim()}
                 title="Show ONLY images that carry this tag (hide the rest)"
-                className="px-3 py-1 rounded-lg bg-surface-raised border border-border text-content text-xs font-semibold disabled:opacity-40 hover:bg-indigo-500/15 hover:border-indigo-400/50">
+                className="px-3 py-1 rounded-full bg-surface-raised text-content text-xs font-semibold transition-colors hover:bg-surface disabled:opacity-40 hover:bg-indigo-500/15 hover:border-indigo-400/50">
                 ◉ Only with
               </button>
             )}
@@ -153,7 +153,7 @@ export default function CaptionToolsBar({ images, kind = 'character', mode = 'bo
                       <button type="button"
                         onClick={() => { setFind(tag); setTagMode(mode === 'booru'); }}
                         title={`"${tag}" appears in ${n} caption(s) — click to fill Find (${mode === 'booru' ? 'tag' : 'text'} mode)`}
-                        className="px-1.5 py-0.5 bg-app/60 text-[0.6875rem] text-content-muted hover:text-content hover:bg-surface-raised">
+                        className="px-2 py-0.5 rounded-full bg-surface-raised text-[0.6875rem] text-content-muted hover:text-content hover:bg-surface-raised">
                         {tag} <span className="text-content-subtle">×{n}</span>
                       </button>
                       {onExclude && (
@@ -166,7 +166,7 @@ export default function CaptionToolsBar({ images, kind = 'character', mode = 'bo
                             : `Hide images already tagged "${tag}" from the grid`}
                           className={`px-1.5 border-l text-[0.6875rem] ${
                             isExcluded ? 'bg-rose-500/25 border-rose-400/50 text-rose-200'
-                              : 'bg-app/40 border-border text-content-subtle hover:text-rose-200 hover:bg-rose-500/15'}`}>
+                              : 'bg-surface-raised border-transparent text-content-subtle hover:text-rose-200 hover:bg-rose-500/15'}`}>
                           ⊘
                         </button>
                       )}
@@ -185,14 +185,14 @@ export default function CaptionToolsBar({ images, kind = 'character', mode = 'bo
               <div className="flex items-center gap-2 flex-wrap">
                 <button type="button" onClick={onWriteFiles} disabled={busy}
                   title="Writes <image>.txt next to each kept image in the dataset folder — same format as the ZIP export, for external tools"
-                  className="px-3 py-1 rounded-lg bg-surface-raised border border-border text-content text-xs font-semibold disabled:opacity-40 hover:bg-surface">
+                  className="px-3 py-1 rounded-full bg-surface-raised text-content text-xs font-semibold transition-colors hover:bg-surface disabled:opacity-40 hover:bg-surface">
                   💾 Write .txt files
                 </button>
                 {onOpenFolder && (
                   <button type="button" onClick={onOpenFolder}
                     title="Open the dataset folder in the file explorer"
                     aria-label="Open the dataset folder"
-                    className="px-2 py-1 rounded-lg bg-surface-raised border border-border text-content text-xs hover:bg-surface">
+                    className="px-2.5 py-1 rounded-full bg-surface-raised text-content text-xs transition-colors hover:bg-surface">
                     📂
                   </button>
                 )}

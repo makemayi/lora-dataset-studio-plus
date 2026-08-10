@@ -25,7 +25,7 @@ export default function CompositionBar({ composition, upscaled, bodyFidelity = f
     .filter((m) => m.n > 0 && m.n >= Math.ceil(m.of / 2));
 
   return (
-    <div className="flex flex-col gap-1 rounded-lg border border-border bg-surface px-3 py-2">
+    <div className="flex flex-col gap-1 rounded-lg bg-surface px-3 py-2">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-content-muted text-[0.6875rem] uppercase tracking-wide">
           Composition ({total}){bodyFidelity && <span className="text-emerald-400 normal-case"> · body fidelity</span>}

@@ -56,7 +56,7 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
   // paid result would sit unannounced until the TTL deleted it.
   const waiting = onEditRef ? pendingEditNote(referenceEdit) : null;
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-3">
+    <div className="flex flex-col gap-2 rounded-lg bg-surface p-3">
       <div className="flex items-center gap-3">
         <div className="w-20 h-20 rounded-lg bg-black overflow-hidden shrink-0 flex items-center justify-center"
           onMouseEnter={() => { refHover.current = true; }} onMouseLeave={() => { refHover.current = false; }}
@@ -157,7 +157,7 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
           <button type="button" onClick={() => setPromptModal(true)}
             aria-label="Edit the identity instruction used with multiple references"
             title="Edit the identity instruction sent with multiple references — one box per engine family, for this dataset's subject type"
-            className="w-6 h-6 rounded-lg border border-border-strong text-content-muted text-xs leading-none hover:bg-surface-raised">
+            className="w-6 h-6 rounded-full bg-surface-raised text-content-muted text-xs leading-none hover:bg-surface hover:text-contentd">
             ✎
           </button>
           <input ref={inpExtra} type="file" accept="image/*" className="hidden" disabled={importBusy}

@@ -84,7 +84,7 @@ export function HubLine({ entry, presence = null }) {
  *  the state — the two things the row exists to show. */
 function FileRow({ row, children }) {
   return (
-    <li className="rounded-md border border-border bg-app/60 px-2 py-1.5">
+    <li className="rounded-lg bg-surface-raised px-2 py-1.5">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <span className="text-content text-[0.6875rem] font-semibold">{row.label}</span>
         {row.bytes ? (
@@ -147,7 +147,7 @@ function SendPlan({ plan, busy, onSend, onCancel }) {
           {busy ? 'Working…' : (linked ? 'Link it' : 'Copy it')}
         </button>
         <button type="button" onClick={onCancel}
-          className="rounded-md border border-border px-2.5 py-1 font-medium text-content-muted hover:bg-app">
+          className="rounded-full bg-surface-raised px-2.5 py-1 font-medium text-content-muted hover:bg-surface">
           Cancel
         </button>
       </div>
@@ -264,7 +264,7 @@ export default function DenseModelsPanel({ datasetId, models = [], onChanged = n
           const plan = plans[entry.run_id];
           return (
             <li key={entry.run_id}
-              className="rounded-lg border border-border bg-surface px-2.5 py-2">
+              className="rounded-lg bg-surface px-2.5 py-2">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span className="text-content text-[0.75rem] font-semibold">
                   {denseModelTitle(entry)}
@@ -303,7 +303,7 @@ export default function DenseModelsPanel({ datasetId, models = [], onChanged = n
                             onClick={() => trash(entry.run_id, row.filename, row.label)}
                             disabled={busy}
                             title="Move this file to the app trash — recoverable"
-                            className="rounded-md border border-border px-2 py-0.5 text-[0.625rem] font-medium text-content-muted hover:bg-app disabled:opacity-40">
+                            className="rounded-full bg-surface-raised px-2.5 py-0.5 text-[0.625rem] font-medium text-content-muted hover:bg-surface disabled:opacity-40">
                             🗑 Trash
                           </button>
                         )}
@@ -368,7 +368,7 @@ export default function DenseModelsPanel({ datasetId, models = [], onChanged = n
               )}
 
               {mergeFor?.run_id === entry.run_id && (
-                <div className="mt-1.5 rounded-md border border-sky-300/30 bg-app/50 px-2 py-1.5">
+                <div className="mt-1.5 rounded-lg bg-sky-500/10 px-2 py-1.5">
                   <LoraMergeTool framed={false} family={entry.train_type}
                     base={entry.master.path}
                     baseLabel="this run’s full model" />
@@ -395,7 +395,7 @@ export default function DenseModelsPanel({ datasetId, models = [], onChanged = n
               )}
 
               {quantizeFor?.run_id === entry.run_id && (
-                <div className="mt-1.5 rounded-md border border-sky-300/30 bg-app/50 px-2 py-1.5">
+                <div className="mt-1.5 rounded-lg bg-sky-500/10 px-2 py-1.5">
                   <Fp8QuantizeTool framed={false} manualPath={false}
                     target={{
                       label: 'This run’s full model',

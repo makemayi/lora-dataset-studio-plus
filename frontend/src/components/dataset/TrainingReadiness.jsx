@@ -84,7 +84,7 @@ export default function TrainingReadiness({ datasetId, trainType, variant, refre
               <span className="text-content-subtle">— {c.detail}</span>
               {c.status !== 'ok' && c.target && (
                 <button type="button" onClick={() => onJump?.(c.target)}
-                  className="ml-auto shrink-0 px-1.5 py-0.5 rounded border border-border text-content-muted hover:text-content hover:bg-surface-raised text-[0.6875rem]">
+                  className="ml-auto shrink-0 px-2 py-0.5 rounded-full bg-surface-raised text-content-muted hover:text-content hover:bg-surface-raised text-[0.6875rem]">
                   Fix →
                 </button>
               )}

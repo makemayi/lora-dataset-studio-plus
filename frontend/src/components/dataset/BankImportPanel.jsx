@@ -115,7 +115,7 @@ export default function BankImportPanel({ datasetId, onImported, disabled = fals
   if (!open) {
     return (
       <button type="button" onClick={() => setOpen(true)} disabled={disabled}
-        className="flex w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-left text-content-muted hover:text-content hover:bg-surface-raised transition-colors disabled:opacity-50">
+        className="flex w-full items-center gap-2 rounded-lg bg-surface px-3 py-2 text-left text-content-muted hover:text-content hover:bg-surface-raised transition-colors disabled:opacity-50">
         <span aria-hidden>🗃</span>
         <span className="text-sm font-medium">Import from a bank</span>
         <span className="text-content-subtle text-[0.6875rem]">copy the kept images of a triaged bank into this dataset</span>
@@ -126,7 +126,7 @@ export default function BankImportPanel({ datasetId, onImported, disabled = fals
 
   return (
     <div id="ds-add-bank-import" tabIndex={-1}
-      className="scroll-mt-20 flex flex-col gap-2 rounded-lg border border-border bg-surface px-3 py-2">
+      className="scroll-mt-20 flex flex-col gap-2 rounded-lg bg-surface px-3 py-2">
       <div className="flex items-center gap-2">
         <span aria-hidden>🗃</span>
         <span className="text-sm font-medium text-content">Import from a bank</span>
@@ -159,7 +159,7 @@ export default function BankImportPanel({ datasetId, onImported, disabled = fals
             </label>
             <select id="ds-bank-import-select" value={chosen} disabled={busy}
               onChange={(e) => setChosen(e.target.value)}
-              className="mt-1 w-full rounded-md border border-border bg-surface-raised px-3 py-1.5 text-sm text-content disabled:opacity-50">
+              className="mt-1 w-full rounded-lg bg-surface-raised px-3 py-1.5 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50">
               <option value="">Choose a bank…</option>
               {rows.map((r) => (
                 <option key={r.id} value={r.id}>
