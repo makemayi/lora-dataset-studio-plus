@@ -85,13 +85,13 @@ export default function DescribeImageModal({ open, onClose, onResult }) {
     <div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
       role="dialog" aria-modal="true" aria-label="Describe an image into a test prompt" ref={ref}
       onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
-      <div className="w-full max-w-md rounded-2xl border border-border bg-surface-overlay p-4 flex flex-col gap-3 shadow-xl">
+      <div className="w-full max-w-md rounded-2xl bg-surface-overlay p-4 flex flex-col gap-3 shadow-2xl">
         <div className="flex items-center justify-between">
           <h2 className="text-content text-sm font-semibold flex items-center gap-1.5">
             <span aria-hidden>🔎</span> Describe an image
           </h2>
           <button type="button" onClick={onClose} disabled={busy} aria-label="Close"
-            className="w-8 h-8 rounded-lg border border-border bg-app text-content-muted hover:text-content disabled:opacity-40">×</button>
+            className="w-8 h-8 rounded-full bg-surface-raised text-content-muted transition-colors hover:bg-surface hover:text-content disabled:opacity-40">×</button>
         </div>
         <p className="text-content-subtle text-[0.6875rem] leading-snug">
           The vision model turns the image into a test prompt (scene, pose, framing, outfit).
@@ -109,7 +109,7 @@ export default function DescribeImageModal({ open, onClose, onResult }) {
           }}
           disabled={busy}
           className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors ${
-            dragOver ? 'border-purple-400/70 bg-purple-500/10' : 'border-border bg-app/60'} disabled:opacity-60`}>
+            dragOver ? 'border-purple-400/70 bg-purple-500/10' : 'border-transparent bg-surface-raised'} disabled:opacity-60`}>
           {busy ? (
             <>
               <span className="inline-block w-6 h-6 border-2 border-purple-400/40 border-t-purple-400 rounded-full animate-spin" aria-hidden />
@@ -137,7 +137,7 @@ export default function DescribeImageModal({ open, onClose, onResult }) {
 
         <div className="flex items-center justify-end pt-1">
           <button type="button" onClick={onClose} disabled={busy}
-            className="px-3 py-1.5 rounded-lg border border-border bg-app text-content-muted text-[0.75rem] hover:text-content disabled:opacity-40">
+            className="px-3 py-1.5 rounded-full bg-surface-raised text-content-muted text-[0.75rem] transition-colors hover:bg-surface hover:text-content disabled:opacity-40">
             Cancel
           </button>
         </div>

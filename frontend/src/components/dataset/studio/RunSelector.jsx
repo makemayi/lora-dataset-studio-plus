@@ -42,13 +42,13 @@ export default function RunSelector({
       )}
       <button type="button" onClick={onExport} disabled={!canExport}
         title={canExport ? 'Compose this run into one shareable image (checkpoints × strengths)' : 'No finished image to export yet'}
-        className="px-2.5 py-1 rounded-lg border border-border bg-surface text-content-muted text-[0.6875rem] font-semibold hover:text-content disabled:opacity-40 disabled:cursor-not-allowed">
+        className="px-2.5 py-1 rounded-full bg-surface-raised text-content-muted text-[0.6875rem] font-semibold transition-colors hover:text-content disabled:opacity-40 disabled:cursor-not-allowed">
         🖼 Export grid
       </button>
       {runs.length > 1 && (
         <select value={activeRunKey || ''} onChange={(e) => onSelect(e.target.value)}
           aria-label="Choose the test run to display"
-          className="ml-auto rounded-lg border border-border bg-surface px-2 py-1 text-[0.6875rem] text-content max-w-[280px]">
+          className="ml-auto rounded-lg bg-surface-raised px-2 py-1 text-[0.6875rem] text-content max-w-[280px]">
           {runs.map((r, i) => {
             // Taux de 👍 parmi les votes du run (likes / votés), comme le « % 👍 »
             // affiché par cellule. Caché si aucun vote (division par zéro).

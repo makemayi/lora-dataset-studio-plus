@@ -28,7 +28,7 @@ export default function StudioActionBar({ shortcuts = [], canRun, running, onRun
       <div className="flex items-center gap-1.5 px-3 sm:px-5 py-2 overflow-x-auto">
         {shortcuts.map((s) => (
           <button key={s.id} type="button" onClick={() => jump(s.id)}
-            className="shrink-0 px-2.5 py-1 rounded-full border border-border bg-surface text-content-muted hover:text-content hover:bg-surface-raised text-[0.6875rem] font-medium transition-colors">
+            className="shrink-0 px-2.5 py-1 rounded-full bg-surface-raised text-content-muted transition-colors hover:text-content hover:bg-surface-raised text-[0.6875rem] font-medium transition-colors">
             <span aria-hidden="true">{s.emoji}</span> {s.label}
           </button>
         ))}

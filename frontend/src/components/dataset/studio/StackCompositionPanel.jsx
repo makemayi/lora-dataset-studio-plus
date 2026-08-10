@@ -37,7 +37,7 @@ export default function StackCompositionPanel({ members, onSaveBest, saving = fa
           <ol className="m-0 flex list-none flex-col gap-1 p-0">
             {members.map((m, i) => (
               <li key={`${m.dataset_id}:${m.filename}`}
-                className="flex flex-col gap-0.5 rounded bg-app/30 px-1.5 py-1 text-[0.6875rem]">
+                className="flex flex-col gap-0.5 rounded-lg bg-surface px-1.5 py-1 text-[0.6875rem]">
                 <div className="flex min-w-0 items-center gap-1.5">
                   <span className="w-4 shrink-0 text-right text-content-subtle tabular-nums">{i + 1}.</span>
                   <span className="min-w-0 flex-1 truncate text-content font-medium" title={m.label}>

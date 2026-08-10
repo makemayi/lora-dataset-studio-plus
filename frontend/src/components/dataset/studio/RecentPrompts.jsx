@@ -79,7 +79,7 @@ export default function RecentPrompts({
                   ? <img src={`/api/dataset/${pr.thumb_dataset_id ?? datasetId}/img/${encodeURIComponent(pr.thumbnail)}`}
                       alt="" loading="lazy"
                       className="w-8 h-10 object-cover rounded shrink-0" />
-                  : <span className="w-8 h-10 rounded bg-app/60 shrink-0 flex items-center justify-center text-content-subtle">?</span>}
+                  : <span className="w-8 h-10 rounded bg-surface-raised shrink-0 flex items-center justify-center text-content-subtle">?</span>}
                 <span className="flex flex-col items-start min-w-0">
                   <span className="truncate max-w-[150px]">{pr.prompt}</span>
                   {pr.count ? <span className="text-content-subtle">{pr.count} img{pr.thumb_rating === 1 ? ' · 👍' : ''}</span> : null}

@@ -309,7 +309,7 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
             (défaut élu + alternatives) que si des UNET Krea locaux existent ; sinon
             vide → le sélecteur reste caché (défaut élu appliqué au node 20). */}
         {baseModels.length > 0 && (
-          <div className="flex flex-col gap-1 rounded-lg border border-border bg-surface p-3">
+          <div className="flex flex-col gap-1 rounded-lg bg-surface p-3">
             <span className="text-content-muted text-[0.625rem] uppercase">
               Base model ({FAMILY_LABELS[runType] || 'Z-Image'})
             </span>
@@ -317,7 +317,7 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
               value={selectedBase}
               onChange={(e) => setSelectedBase(e.target.value)}
               aria-label="Base model for this run"
-              className="rounded border border-border bg-app/60 px-1.5 py-1 text-content text-sm"
+              className="rounded-lg bg-surface-raised px-1.5 py-1 text-content text-sm"
             >
               {baseModels.map((m) => (
                 <option key={m.filename} value={m.filename}>{m.label}</option>
@@ -437,7 +437,7 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
         )}
 
         {!runId ? (
-          <p className="text-content-subtle text-sm rounded-lg border border-border bg-surface px-3 py-6 text-center">
+          <p className="text-content-subtle text-sm rounded-lg bg-surface px-3 py-6 text-center">
             Set up the run on the left then “🚀 Run the test”{combine
               ? ` to render the ${selection.length} LoRAs together in one image.`
               : ` to compare the ${selection.length} LoRAs side by side.`}

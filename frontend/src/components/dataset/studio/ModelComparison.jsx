@@ -9,7 +9,7 @@ export default function ModelComparison({ items }) {
   if (!Array.isArray(items) || items.length < 2) return null;
 
   return (
-    <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-surface-raised px-3 py-2">
+    <div className="flex flex-col gap-1.5 rounded-lg bg-surface-raised px-3 py-2">
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
         className="flex items-center gap-2 text-left text-content-muted text-[0.625rem] uppercase">
         <span aria-hidden>{open ? '▾' : '▸'}</span>

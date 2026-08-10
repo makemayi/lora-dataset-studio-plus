@@ -36,7 +36,7 @@ export default function PromptField({ value, placeholder, onChange, onReset, isC
           <EnhancePromptButton prompt={value} onResult={onChange} />
           <button type="button" onClick={() => setDescribeOpen(true)}
             title="Describe an image into a test prompt (vision model)"
-            className="px-2 py-0.5 rounded border border-border bg-surface text-content-subtle text-[0.625rem] hover:text-content">
+            className="px-2 py-0.5 rounded-full bg-surface-raised text-content-subtle text-[0.625rem] transition-colors hover:text-content">
             🔎 Describe
           </button>
         </div>
@@ -47,7 +47,7 @@ export default function PromptField({ value, placeholder, onChange, onReset, isC
         rows={5}
         placeholder={placeholder}
         aria-label="LoRA test prompt"
-        className="w-full rounded-lg border border-border bg-surface px-2 py-1.5 text-[0.75rem] text-content resize-y focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
+        className="w-full rounded-lg bg-surface-raised px-2 py-1.5 text-[0.75rem] text-content focus:outline-none focus:ring-1 focus:ring-primary resize-y focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
       />
       {isCustom && (
         <button type="button" onClick={onReset}

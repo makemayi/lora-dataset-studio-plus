@@ -21,7 +21,7 @@ export default function BlendWeightRow({
   const sweeping = set.length > 0;
 
   return (
-    <li className="flex flex-col gap-1 rounded-lg border border-border bg-surface-raised px-2.5 py-1.5">
+    <li className="flex flex-col gap-1 rounded-lg bg-surface-raised px-2.5 py-1.5">
       <div className="flex min-w-0 items-center gap-2">
         <span className="shrink-0 text-content-subtle text-[0.625rem] tabular-nums">{index}.</span>
         <span className="min-w-0 flex-1 truncate text-content text-[0.8125rem]" title={title || label}>
@@ -56,7 +56,7 @@ export default function BlendWeightRow({
               className={'rounded border px-1.5 py-0.5 text-[0.625rem] font-semibold tabular-nums '
                 + (on
                   ? 'border-primary/60 bg-primary/25 text-content'
-                  : 'border-border bg-app/60 text-content-subtle hover:text-content')}>
+                  : 'border-transparent bg-surface-raised text-content-subtle hover:text-content')}>
               {w}
             </button>
           );

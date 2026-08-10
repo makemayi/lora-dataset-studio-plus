@@ -17,7 +17,7 @@ const scoreCls = (avg) => (avg >= 0.50 ? 'text-emerald-300'
 
 export default function FaceRankingPanel({ ranking = [], onScore, scoring, hasCells }) {
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface px-3 py-2.5">
+    <div className="flex flex-col gap-2 rounded-lg bg-surface px-3 py-2.5">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-content font-semibold text-sm">🎯 Best epoch (face score)</span>
         <span className="text-content-subtle text-[0.625rem]">
@@ -37,7 +37,7 @@ export default function FaceRankingPanel({ ranking = [], onScore, scoring, hasCe
             <li key={r.checkpoint}
               className={`flex items-center gap-2 rounded-md px-2 py-1 text-[0.75rem] ${i === 0
                 ? 'border border-amber-400/40 bg-amber-400/10'
-                : 'bg-app/40'}`}>
+                : 'bg-surface-raised'}`}>
               <span aria-hidden="true" className="shrink-0 w-5 text-center">
                 {i === 0 ? '🏆' : `${i + 1}.`}
               </span>

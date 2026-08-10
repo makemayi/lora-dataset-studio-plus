@@ -57,7 +57,7 @@ export default function EnhancePromptButton({ prompt, onResult, className = '' }
     <>
       <button type="button" onClick={run} disabled={!!blocked || empty || busy} title={title}
         aria-label="Enhance the prompt with the local model"
-        className={`px-2 py-0.5 rounded border border-border bg-surface text-content-subtle text-[0.625rem] hover:text-content disabled:opacity-40 disabled:cursor-not-allowed ${className}`}>
+        className={`px-2 py-0.5 rounded-full bg-surface-raised text-content-subtle text-[0.625rem] transition-colors hover:text-content disabled:opacity-40 disabled:cursor-not-allowed ${className}`}>
         {busy ? '✨ …' : '✨ Enhance'}
       </button>
       {/* w-full so it claims its own line in the flex-wrap toolbars that host

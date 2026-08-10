@@ -42,7 +42,7 @@ export default function QuickVoteModal({ vote, datasetId, fmt }) {
         <button type="button" onClick={() => vote.voteCurrent(-1)} aria-label="Dislike"
           className="px-7 py-3 rounded-2xl text-2xl border border-red-400/60 bg-red-500/20 text-red-200 hover:bg-red-500/30">👎</button>
         <button type="button" onClick={vote.advanceVote} aria-label="Skip"
-          className="px-3 py-2 rounded-xl text-xs border border-border bg-surface text-content-muted hover:text-content">skip</button>
+          className="px-3 py-2 rounded-xl text-xs bg-surface-raised text-content-muted transition-colors hover:text-content">skip</button>
         <button type="button" onClick={() => vote.voteCurrent(1)} aria-label="Like"
           className="px-7 py-3 rounded-2xl text-2xl border border-green-400/60 bg-green-500/20 text-green-200 hover:bg-green-500/30">👍</button>
       </div>

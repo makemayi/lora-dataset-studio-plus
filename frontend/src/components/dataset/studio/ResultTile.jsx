@@ -31,7 +31,7 @@ export default function ResultTile({ cell, row, strength, variant, datasetId, on
         </div>
       )}
       {cell.status === 'pending' && !isStalled && (
-        <div className="w-20 h-28 rounded-md border border-border bg-surface flex flex-col gap-2 items-center justify-center"
+        <div className="w-20 h-28 rounded-md bg-surface-raised flex flex-col gap-2 items-center justify-center"
           role="status" aria-label={isGenerating ? 'Generating' : 'Queued'}>
           <span className="inline-block w-5 h-5 border-2 border-purple-400/40 border-t-purple-400 rounded-full animate-spin" aria-hidden />
           <span className="text-content-muted text-[0.625rem]">
@@ -60,7 +60,7 @@ export default function ResultTile({ cell, row, strength, variant, datasetId, on
           className="block p-0 m-0 border-0 bg-transparent cursor-pointer">
           <img src={`/api/dataset/${datasetId}/img/${encodeURIComponent(cell.filename)}`}
             alt={`${row.label} strength ${fmt(strength)} ${variant.aspect || ''} seed ${cell.seed}`} loading="lazy"
-            className="w-20 h-28 object-cover rounded-md border border-border" />
+            className="w-20 h-28 object-cover rounded-md bg-surface-raised" />
         </button>
       )}
       {/* Score facial objectif (InsightFace vs référence) — mêmes seuils que le

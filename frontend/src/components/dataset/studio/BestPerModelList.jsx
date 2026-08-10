@@ -14,7 +14,7 @@ export default function BestPerModelList({ items, breakdown, datasetId, onMemori
   (breakdown || []).forEach((b) => { (byCheckpoint[b.checkpoint] ||= []).push(b); });
 
   return (
-    <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-surface-raised px-3 py-2">
+    <div className="flex flex-col gap-1.5 rounded-lg bg-surface-raised px-3 py-2">
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
         className="flex items-center gap-2 text-left text-content-muted text-[0.625rem] uppercase">
         <span aria-hidden>{open ? '▾' : '▸'}</span>
@@ -26,7 +26,7 @@ export default function BestPerModelList({ items, breakdown, datasetId, onMemori
             {m.filename
               ? <img src={`/api/dataset/${datasetId}/img/${encodeURIComponent(m.filename)}`}
                   alt="" loading="lazy" className="w-8 h-10 object-cover rounded shrink-0" />
-              : <span className="w-8 h-10 rounded bg-app/60 shrink-0" />}
+              : <span className="w-8 h-10 rounded bg-surface-raised shrink-0" />}
             <span className="text-content font-medium truncate max-w-[150px]" title={m.label}>{m.label}</span>
             <span className="text-content-subtle">
               str {fmt(m.strength)}{m.cfg != null ? ` · cfg ${m.cfg}` : ''}{m.steps != null ? ` · ${m.steps}${m.steps2 != null ? '/' + m.steps2 : ''}st` : ''}{m.aspect ? ` · ${m.aspect}` : ''}

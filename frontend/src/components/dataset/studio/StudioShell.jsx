@@ -112,7 +112,7 @@ export default function StudioShell({ preselectDataset = null, preselectFamily =
           datasetId={String(soloDatasetId)} initialFamily={soloFamily}
           initialBase={preselectBase} />
       ) : (
-        <p className="text-content-subtle text-sm rounded-lg border border-border bg-surface px-3 py-6 text-center">
+        <p className="text-content-subtle text-sm rounded-lg bg-surface px-3 py-6 text-center">
           Check a LoRA above to tune and test it. Check ≥2 to compare them side by side.
         </p>
       )}

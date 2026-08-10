@@ -140,7 +140,7 @@ export default function StackVariantsGrid({
                 <td key={variantKey(v)} className="px-1 py-1">
                   <div className="flex flex-col gap-1">
                     <button type="button" disabled={v.active} onClick={() => onSelectRun?.(v.run_id)}
-                      className="rounded border border-border bg-surface px-1.5 py-0.5 text-[0.625rem] text-content disabled:opacity-40">
+                      className="rounded-full bg-surface-raised px-2 py-0.5 text-[0.625rem] text-content transition-colors hover:bg-surface disabled:opacity-40">
                       {v.active ? 'Shown' : 'Open this run'}
                     </button>
                     <button type="button"

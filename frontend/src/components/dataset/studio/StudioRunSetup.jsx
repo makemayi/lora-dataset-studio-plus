@@ -80,7 +80,7 @@ export default function StudioRunSetup({
   }, [loadRecent]);
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-3">
+    <div className="flex flex-col gap-3 rounded-lg bg-surface p-3">
       {gpuBusy && (
         <p className="m-0 rounded-lg border border-red-400/40 bg-red-500/10 px-3 py-2 text-red-300 text-sm" role="status">
           {gpuBusy}
@@ -106,14 +106,14 @@ export default function StudioRunSetup({
             <EnhancePromptButton prompt={prompt} onResult={onPrompt} />
           <button type="button" onClick={() => setDescribeOpen(true)}
             title="Describe an image into a test prompt (vision model)"
-            className="px-2 py-0.5 rounded border border-border bg-surface text-content-subtle text-[0.625rem] hover:text-content">
+            className="px-2 py-0.5 rounded-full bg-surface-raised text-content-subtle text-[0.625rem] transition-colors hover:text-content">
             🔎 Describe
           </button>
           </div>
         </div>
         <textarea id="studio-run-prompt" value={prompt} onChange={(e) => onPrompt(e.target.value)} rows={5}
           placeholder="Leave empty for the LoRA's default prompt…"
-          className="rounded-lg border border-border bg-app/60 px-2.5 py-1.5 text-content text-sm resize-y min-h-[7rem]" />
+          className="rounded-lg bg-surface-raised px-2.5 py-1.5 text-content text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-y min-h-[7rem]" />
       </div>
       <DescribeImageModal open={describeOpen} onClose={() => setDescribeOpen(false)}
         onResult={applyDescription} />
@@ -126,17 +126,17 @@ export default function StudioRunSetup({
       <div className="flex items-center gap-2 flex-wrap">
         <label className="flex items-center gap-1.5 text-content-muted text-[0.6875rem]">
           <span className="uppercase">Seed</span>
-          <span className="tabular-nums text-content px-2 py-0.5 rounded border border-border bg-app/60">{seed}</span>
+          <span className="tabular-nums text-content px-2 py-0.5 rounded-lg bg-surface-raised">{seed}</span>
           <button type="button" onClick={onReroll} aria-label="New random seed"
             title="New random seed"
-            className="px-2 py-0.5 rounded border border-border bg-surface text-content hover:bg-surface-raised">🎲</button>
+            className="px-2 py-0.5 rounded-full bg-surface-raised text-content transition-colors hover:bg-surface">🎲</button>
         </label>
 
         <label className="flex items-center gap-1.5 text-content-muted text-[0.6875rem]">
           <span className="uppercase">Images / config</span>
           <select value={count} onChange={(e) => onCount(Number(e.target.value))}
             aria-label="Number of images per configuration"
-            className="rounded border border-border bg-app/60 px-1.5 py-0.5 text-content">
+            className="rounded-lg bg-surface-raised px-1.5 py-0.5 text-content">
             {[1, 2, 3, 4].map((n) => <option key={n} value={n}>×{n}</option>)}
           </select>
         </label>

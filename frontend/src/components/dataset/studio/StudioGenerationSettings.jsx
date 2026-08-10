@@ -208,7 +208,7 @@ export default function StudioGenerationSettings({ family = 'zimage', storagePre
                   aria-pressed={aspect === a.key}
                   className={`flex flex-col items-center gap-0.5 py-1.5 px-1 rounded-[10px] border transition-all duration-150 ${aspect === a.key
                     ? 'border-primary/70 bg-primary/15 text-white'
-                    : 'border-white/10 bg-white/[0.04] text-content-muted'}`}>
+                    : 'border-transparent bg-surface-raised text-content-muted'}`}>
                   <span className="text-[0.6875rem] font-semibold">{a.key}</span>
                   <span className="text-[0.5625rem] opacity-60">{a.label}</span>
                 </button>
@@ -240,7 +240,7 @@ export default function StudioGenerationSettings({ family = 'zimage', storagePre
                 value={sampler}
                 onChange={(e) => setSampler(e.target.value)}
                 aria-label="Krea sampler"
-                className="w-full bg-app/60 border border-border rounded-md px-2 py-1.5 text-content text-[0.8125rem] focus:border-primary focus:outline-none normal-case tracking-normal"
+                className="w-full rounded-lg bg-surface-raised px-2 py-1.5 text-content text-[0.8125rem] focus:ring-1 focus:ring-primary focus:outline-none normal-case tracking-normal"
               >
                 <option value="">Auto (er_sde)</option>
                 {kreaSamplers.map((s) => (<option key={s} value={s}>{s}</option>))}
@@ -252,7 +252,7 @@ export default function StudioGenerationSettings({ family = 'zimage', storagePre
                 value={scheduler}
                 onChange={(e) => setScheduler(e.target.value)}
                 aria-label="Krea scheduler"
-                className="w-full bg-app/60 border border-border rounded-md px-2 py-1.5 text-content text-[0.8125rem] focus:border-primary focus:outline-none normal-case tracking-normal"
+                className="w-full rounded-lg bg-surface-raised px-2 py-1.5 text-content text-[0.8125rem] focus:ring-1 focus:ring-primary focus:outline-none normal-case tracking-normal"
               >
                 <option value="">Auto (simple)</option>
                 {kreaSchedulers.map((s) => (<option key={s} value={s}>{s}</option>))}
@@ -343,7 +343,7 @@ export default function StudioGenerationSettings({ family = 'zimage', storagePre
                 value={weightDtype}
                 onChange={(e) => setWeightDtype(e.target.value)}
                 aria-label="Krea loader precision (weight dtype)"
-                className="w-full bg-app/60 border border-border rounded-md px-2 py-1.5 text-content text-[0.8125rem] focus:border-primary focus:outline-none normal-case tracking-normal"
+                className="w-full rounded-lg bg-surface-raised px-2 py-1.5 text-content text-[0.8125rem] focus:ring-1 focus:ring-primary focus:outline-none normal-case tracking-normal"
               >
                 <option value="default">ComfyUI default (auto · dtype varies)</option>
                 <option value="fp8_e4m3fn">FP8 e4m3fn (recommended)</option>
@@ -385,7 +385,7 @@ export default function StudioGenerationSettings({ family = 'zimage', storagePre
               rows={3}
               placeholder="Leave empty for the pipeline default…"
               aria-label="Negative prompt"
-              className="rounded-lg border border-border bg-app/60 px-2.5 py-1.5 text-content text-sm resize-y min-h-[4rem]"
+              className="rounded-lg bg-surface-raised px-2.5 py-1.5 text-content text-sm resize-y min-h-[4rem] focus:outline-none focus:ring-1 focus:ring-primary"
             />
           </label>
         </StudioSection>
