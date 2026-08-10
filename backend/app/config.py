@@ -795,10 +795,13 @@ DEFAULTS = {
         # times more than they look, because the model samples a packet.
         'max_output_mp': 1.0,
         # The instruction the H3 HEAD-SWAP graph sends (minimax_h3_swap_helper).
-        # Blank = the prompt the shipped graph carries, which is the one it was
-        # tuned and measured with. It names a subject on purpose; override it
-        # here when your dataset is a different one, rather than editing the
-        # workflow file, which an app update replaces.
+        # Blank = the prompt the shipped graph carries: subject-neutral, and
+        # explicit about the four things that fail silently (keep <Picture 1>'s
+        # identity, repaint nothing outside the white mask, match <Picture 2>'s
+        # head angle and lighting, no seam at hairline and neck). Set this to
+        # A/B a wording without editing the workflow file, which an app update
+        # replaces. NOTE <Picture 2> is the masked inpaint CROP, not the tile,
+        # and the white area is the HEAD (face + hair).
         'swap_prompt': '',
     },
     # Which engine the 🎭↔ face/head swap runs on. Its own namespace, exactly

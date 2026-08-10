@@ -153,6 +153,45 @@ def test_the_shipped_copy_carries_no_maintainer_filenames():
     assert wf['426:396:370']['inputs']['seed'] == 0
 
 
+def test_the_mask_covers_the_head_and_nothing_else():
+    """The mask decides the CROP (InpaintCropImproved crops to it), so switching
+    `body` back on does not merely mask more — it hands H3 the whole torso to
+    re-invent, and the prompt, which talks about a head sitting on an unchanged
+    neck and shoulders, is then describing the wrong region."""
+    mask = _load()['426:340']
+    assert mask['class_type'] == 'LayerMask: PersonMaskUltra'
+    assert mask['inputs']['face'] is True
+    assert mask['inputs']['hair'] is True
+    for part in ('body', 'clothes', 'accessories', 'background'):
+        assert mask['inputs'][part] is False, f'{part} must stay out of the mask'
+
+
+def test_the_swap_prompt_names_no_subject():
+    """It used to say "black short hair woman" — a fact about the ONE reference
+    it was tuned on. Any other subject then put the prompt in a fight with the
+    picture and the model split the difference."""
+    prompt = _load()['426:170']['inputs']['prompt'].lower()
+    # 'white' is deliberately NOT in this list: the mask overlay paints the
+    # region white, and the prompt has to be able to say so.
+    for word in ('woman', 'girl', 'boy', 'blonde', 'brunette', 'short hair',
+                 'long hair', 'asian', 'caucasian', 'black hair'):
+        assert word not in prompt, f'the swap prompt hardcodes a subject: {word!r}'
+
+
+def test_the_swap_prompt_addresses_both_pictures_and_the_mask():
+    """The four failures that are silent rather than loud: the identity drifts,
+    something outside the mask gets repainted, the head lands at the wrong angle
+    or light, or the neck shows a seam. Each has a clause; losing one is not
+    visible in any test but this."""
+    prompt = _load()['426:170']['inputs']['prompt'].lower()
+    assert '<picture 1>' in prompt and '<picture 2>' in prompt
+    assert 'white' in prompt          # the mask overlay paints the region white
+    assert 'identity' in prompt
+    assert 'outside' in prompt        # ...nothing outside it may change
+    assert 'lighting' in prompt
+    assert 'seam' in prompt
+
+
 def test_the_frame_selector_keeps_exactly_one_frame():
     """H3 samples a packet. Without select_count 1 this is a video model writing
     several tiles per swap."""

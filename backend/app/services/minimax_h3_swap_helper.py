@@ -60,11 +60,34 @@ WHAT IS RESOLVED, WHAT IS LEFT ALONE
 * The two RTX upscalers and the two speed nodes follow the H3 engine's own
   `use_rtx_upscale` / `use_speed_nodes` settings AND /object_info: an install
   without the NVIDIA pack loses the 2x, not the swap.
-* The H3 PROMPT stays as tuned in the graph unless `minimax_h3.swap_prompt`
-  overrides it. It names a subject because that is what it was measured on; a
-  different subject degrades the result rather than failing, and inventing a
-  substitution would change results nobody has looked at. Same rule as the
-  Klein swap's SAM3 prompts.
+* The H3 PROMPT comes from the graph unless `minimax_h3.swap_prompt` overrides
+  it, which is the key to A/B a wording without editing a file an update
+  replaces.
+
+THE PROMPT, AND WHAT IT IS TALKING ABOUT
+----------------------------------------
+`<Picture 1>` is the identity photo. `<Picture 2>` is NOT the tile: it is the
+inpaint CROP with the mask painted solid white over it (AILab_MaskOverlay). The
+white area is therefore exactly the region being repainted — the HEAD, face and
+hair, per the maintainer's own mask (2026-08-10). Which is why every clause is
+about a head sitting on a neck and shoulders that must not change: the mask
+does not cover them, so anything the prompt makes the model reconsider down
+there comes back as a seam.
+
+PersonMaskUltra is therefore set to face + hair and NOTHING else. It shipped
+with `body` on as well, which is a person-shaped mask: InpaintCropImproved
+crops to whatever the mask covers, so that made the repainted region grow down
+the torso — a much larger area for H3 to re-invent, and a prompt about a head
+describing the wrong region. Turned off 2026-08-10 at the maintainer's word
+that the painted area is the head.
+
+The wording was generalised on 2026-08-10. It used to name one subject ("black
+short hair woman"), which is a fact about the reference it was tuned on: any
+other subject put the prompt in a fight with the picture, and the model split
+the difference. What it now spells out instead is the four things that fail
+silently — keep the identity of <Picture 1>, change nothing outside the white
+area, match <Picture 2>'s head angle and lighting, and leave no seam at the
+neck and hairline.
 """
 from __future__ import annotations
 import logging

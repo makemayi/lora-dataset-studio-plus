@@ -34,7 +34,7 @@
     "inputs": {
       "face": true,
       "hair": true,
-      "body": true,
+      "body": false,
       "clothes": false,
       "accessories": false,
       "background": false,
@@ -369,7 +369,7 @@
   },
   "426:170": {
     "inputs": {
-      "prompt": "Place the black  short hair woman head(face and hair) from <Picture 1>  into the the Head position（白色区域） from <Picture 2>，自然的表情,真实自然合理的人体比例，头身比在1：7到1：8之间",
+      "prompt": "Replace the head in the white masked area (白色区域) of <Picture 2> with the head — face and hair — of the person in <Picture 1>. Keep the identity of <Picture 1> exactly: face shape, facial features, skin tone, hairstyle and hair colour. Repaint nothing outside the white area: the body, neck, clothing, background, pose, camera angle and framing all stay exactly as in <Picture 2>. Size and angle the head to the neck and shoulders it sits on in <Picture 2> — same tilt, same rotation, gaze consistent with the body; match its lighting direction, colour temperature and shadows; blend the hairline and the join at the neck with no visible seam or colour break. Natural expression, photorealistic skin texture, natural head-to-body proportion (roughly 1:7 to 1:8).",
       "width": [
         "426:338",
         0
