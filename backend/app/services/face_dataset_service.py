@@ -10,6 +10,7 @@ import io
 import json
 import lzma
 import logging
+from datetime import datetime
 import math
 import ntpath
 import os
@@ -2921,13 +2922,21 @@ def recent_generated_images(user_id, limit=12):
         limit = max(1, min(int(limit), RECENT_VARIATIONS_MAX))
     except (TypeError, ValueError):
         limit = 12
+    from sqlalchemy import func
     rows = (db.session.query(FaceDatasetImage, FaceDataset.name)
             .join(FaceDataset, FaceDataset.id == FaceDatasetImage.dataset_id)
             .filter(FaceDataset.user_id == str(user_id))
             .filter(FaceDatasetImage.source == 'generated')
             .filter(FaceDatasetImage.filename.isnot(None))
             .filter(FaceDatasetImage.status != 'reject')
-            .order_by(FaceDatasetImage.id.desc())
+            # By when the PICTURE last changed, not when the row appeared. A
+            # 🎭↔ swap reuses its row — same id, new file — so id order buries a
+            # swap from a minute ago behind rows merely created later. Coalesced
+            # with created_at for every row that predates the column, and id
+            # breaks the tie so the order is stable.
+            .order_by(func.coalesce(FaceDatasetImage.content_changed_at,
+                                    FaceDatasetImage.created_at).desc(),
+                      FaceDatasetImage.id.desc())
             .limit(limit).all())
     return [{'image_id': img.id, 'dataset_id': img.dataset_id,
              'dataset_name': name, 'filename': img.filename,
@@ -3594,6 +3603,12 @@ def link_completed_dataset_image(job_id, filename, failed=False, reason=None):
         # content: a restored tile is the picture the user already had.
         if img.status != 'failed' and not restored:
             img.unseen = True
+            # The row now shows a DIFFERENT picture than it did a moment ago —
+            # true of a first generation and equally of a swap, which reuses the
+            # row. Stamped here, at the one point every engine's result passes
+            # through, so "recent output" can be ordered by when the pictures
+            # changed instead of by when the rows happened to be created.
+            img.content_changed_at = datetime.utcnow()
             # A swap that landed: NOW the picture it replaced can go to Trash.
             # Not one step earlier — until this point it was the only copy.
             from .dataset_generation_service import finish_swapped_original

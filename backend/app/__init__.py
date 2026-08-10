@@ -252,6 +252,9 @@ _SCHEMA_ADDITIONS = (
     ('face_dataset_image', 'swap_restore', 'TEXT'),
     # What a COMPLETED swap replaced, so ↩ Undo can put the tile back.
     ('face_dataset_image', 'swap_undo', 'TEXT'),
+    # When the row's PICTURE last changed (a swap reuses the row, so id order
+    # is not recency). NULL on older rows; readers coalesce with created_at.
+    ('face_dataset_image', 'content_changed_at', 'DATETIME'),
     # OneTrainer backend tag — additive and nullable; every existing row
     # simply carries NULL, read as 'ai_toolkit' by the code that consumes it
     # (see checkpoint_registry / lora_training call sites).

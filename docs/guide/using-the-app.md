@@ -1872,6 +1872,12 @@ other surface is scoped to the one that is open. Imports, rejected tiles and
 images still generating are left out, and the strip renders nothing at all until
 something has been generated.
 
+**A 🎭↔ swap counts as recent output.** A swap reuses its tile rather than making
+a new one, so the strip is ordered by when each picture last *changed*, not by
+when its row was created — a swap you ran a minute ago on a month-old tile
+appears at the front, showing the swapped face. An ↩ undo does not bump the tile,
+because what it puts back is not new.
+
 The circles crop the top of the frame, where a portrait's head is. That is a
 crop, not a face detection: a full-body variation lands on a chest rather than a
 face, which is a fair trade for a shortcut that costs nothing to draw.

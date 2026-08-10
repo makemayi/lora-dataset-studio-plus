@@ -80,3 +80,53 @@ def test_the_route_answers_the_strip(app, client):
     body = client.get('/api/dataset/recent-images?limit=5').get_json()
     assert body['images'][0]['dataset_id'] == ds_id
     assert body['images'][0]['filename'] == 'a1.png'
+
+
+def test_a_face_swap_moves_its_tile_to_the_FRONT(app, monkeypatch, tmp_path):
+    """A swap REUSES its row — same id, new file — so ordering by id (or by
+    created_at) buries a swap from a minute ago behind rows that merely happened
+    to be created later. The strip is about pictures, not about row numbers."""
+    from app import config as cfg
+    from app.services import face_dataset_service as svc
+    from app.services import face_swap_helper
+    from app.config import LOCAL_USER
+    with app.app_context():
+        base = tmp_path / 'comfyui'
+        (base / 'input').mkdir(parents=True); (base / 'output').mkdir(parents=True)
+        (base / 'main.py').write_text('# fake', encoding='utf-8')
+        cfg.save_config({'comfyui': {'base_dir': str(base)}})
+        ds = svc.create_dataset(LOCAL_USER, 'Ana', 'ana')
+        d = svc._dataset_dir(ds.id)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, 'ref.png'), 'wb') as fh:
+            fh.write(_png((200, 10, 10)))
+        ds.ref_filename = 'ref.png'
+        old_row = _image(svc, ds, 'old.png')          # generated first
+        _image(svc, ds, 'newer.png')                  # ...and this one after it
+        assert [i['filename'] for i in svc.recent_generated_images(LOCAL_USER)] \
+            == ['newer.png', 'old.png']
+
+        monkeypatch.setattr(face_swap_helper, 'enqueue_face_swap',
+                            lambda **_kw: 'swap-job')
+        job_id = svc.face_swap_image(LOCAL_USER, old_row.id)
+        out_dir = svc._comfy_output_dir()
+        os.makedirs(out_dir, exist_ok=True)
+        with open(os.path.join(out_dir, 'swapped.png'), 'wb') as fh:
+            fh.write(_png((5, 5, 200)))
+        svc.link_completed_dataset_image(job_id, 'swapped.png')
+
+        out = svc.recent_generated_images(LOCAL_USER)
+        assert [i['filename'] for i in out] == ['swapped.png', 'newer.png']
+
+
+def test_rows_that_predate_the_column_still_sort(app):
+    """Every existing row has content_changed_at NULL; without the coalesce they
+    would all sort together at one end and the strip would look random."""
+    from app.services import face_dataset_service as svc
+    from app.config import LOCAL_USER
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'Old', 'old')
+        for name in ('a.png', 'b.png', 'c.png'):
+            _image(svc, ds, name)
+        got = [i['filename'] for i in svc.recent_generated_images(LOCAL_USER)]
+        assert got == ['c.png', 'b.png', 'a.png']

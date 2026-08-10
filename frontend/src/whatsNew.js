@@ -53,7 +53,7 @@ export const WHATS_NEW = [
     id: '2026-08-11-recent-variations-rail',
     date: '2026-08-11',
     title: 'Recent faces in the workspace rail — one click back into any dataset',
-    blurb: 'The left rail of an open dataset ran out of content halfway down, and nothing anywhere showed what had come out of your OTHER datasets — every surface in the app is scoped to the one you have open. There is now a row of round thumbnails under the checklist: the last few generated variations across the whole library, newest first, with the dataset you are currently in ringed. Click one and you are in that dataset. Imports, rejects and tiles still generating are left out — a shortcut made of pictures you threw away is not a shortcut. It shows nothing at all until something has been generated.',
+    blurb: 'The left rail of an open dataset ran out of content halfway down, and nothing anywhere showed what had come out of your OTHER datasets — every surface in the app is scoped to the one you have open. There is now a row of round thumbnails under the checklist: the last few generated variations across the whole library, newest first, with the dataset you are currently in ringed. Click one and you are in that dataset. It is ordered by when each picture last changed rather than by when its tile was made, so a face swap you just ran shows up at the front even on a month-old tile. Imports, rejects and tiles still generating are left out — a shortcut made of pictures you threw away is not a shortcut. It shows nothing at all until something has been generated.',
     to: '/datasets',
   },
   {

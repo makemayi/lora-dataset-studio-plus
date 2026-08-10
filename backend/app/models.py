@@ -290,6 +290,14 @@ class FaceDatasetImage(db.Model):
     # on this row" and the cancel/failure paths act on it. Mixing the two would
     # make a Stop pressed long after a successful swap silently revert it.
     swap_undo = db.Column(Text, nullable=True)
+    # When this row's PICTURE last changed — not when the row was created.
+    # A generation, a regenerate, an improve and a 🎭↔ swap all end at
+    # link_completed_dataset_image, and a swap REUSES the row: same id, new
+    # file. So ordering "recent output" by id (or by created_at) buries a swap
+    # that happened a minute ago behind rows that were merely created later.
+    # NULL on every row that predates the column, which is why every reader
+    # coalesces it with created_at. Additive; see _SCHEMA_ADDITIONS.
+    content_changed_at = db.Column(DateTime, nullable=True)
     # Bidirectional, bounded metadata envelope for fields that only one side of
     # Bank <-> Dataset exposes (short caption, generation provenance, Bank reject
     # reason, etc.). It is inert history unless the transfer validator explicitly
