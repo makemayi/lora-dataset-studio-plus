@@ -57,12 +57,12 @@ export const ENGINE_LABELS = {
    Tailwind scans source text — never build them by concatenation. */
 export const ENGINE_ACCENTS = {
   klein: {
-    card: 'border-indigo-400/60 bg-indigo-500/15 ring-1 ring-indigo-400/40',
-    title: 'text-indigo-200',
-    text: 'text-indigo-300',
-    icon: 'text-indigo-300',
-    pill: 'bg-indigo-500/25 text-indigo-200',
-    dot: 'bg-indigo-400',
+    card: 'bg-indigo-50',
+    title: 'text-indigo-700',
+    text: 'text-indigo-600',
+    icon: 'text-indigo-600',
+    pill: 'bg-indigo-100 text-indigo-700',
+    dot: 'bg-indigo-500',
   },
   /* Violet deliberately sits NEXT to Klein's indigo: both are local-GPU engines,
      and reading them as a pair is information, not a collision — the icon and
@@ -70,12 +70,12 @@ export const ENGINE_ACCENTS = {
      further is already taken (amber/sky/fuchsia) or reserved (green means
      "kept / free" everywhere else in the app). */
   krea: {
-    card: 'border-violet-400/60 bg-violet-500/15 ring-1 ring-violet-400/40',
-    title: 'text-violet-200',
-    text: 'text-violet-300',
-    icon: 'text-violet-300',
-    pill: 'bg-violet-500/25 text-violet-200',
-    dot: 'bg-violet-400',
+    card: 'bg-violet-50',
+    title: 'text-violet-700',
+    text: 'text-violet-600',
+    icon: 'text-violet-600',
+    pill: 'bg-violet-100 text-violet-700',
+    dot: 'bg-violet-500',
   },
   /* Purple continues the local-GPU family (indigo -> violet -> purple) rather
      than reaching for a hue that would read as a paid API engine. The three
@@ -84,48 +84,48 @@ export const ENGINE_ACCENTS = {
      ("kept / free"), and every hue that would separate them further is already
      spoken for. */
   minimax_h3: {
-    card: 'border-purple-400/60 bg-purple-500/15 ring-1 ring-purple-400/40',
-    title: 'text-purple-200',
-    text: 'text-purple-300',
-    icon: 'text-purple-300',
-    pill: 'bg-purple-500/25 text-purple-200',
-    dot: 'bg-purple-400',
+    card: 'bg-purple-50',
+    title: 'text-purple-700',
+    text: 'text-purple-600',
+    icon: 'text-purple-600',
+    pill: 'bg-purple-100 text-purple-700',
+    dot: 'bg-purple-500',
   },
   nanobanana: {
-    card: 'border-amber-400/60 bg-amber-500/15 ring-1 ring-amber-400/40',
-    title: 'text-amber-200',
-    text: 'text-amber-300',
-    icon: 'text-amber-300',
-    pill: 'bg-amber-500/25 text-amber-200',
-    dot: 'bg-amber-400',
+    card: 'bg-amber-50',
+    title: 'text-amber-700',
+    text: 'text-amber-600',
+    icon: 'text-amber-600',
+    pill: 'bg-amber-100 text-amber-700',
+    dot: 'bg-amber-500',
   },
   chatgpt: {
-    card: 'border-sky-400/60 bg-sky-500/15 ring-1 ring-sky-400/40',
-    title: 'text-sky-200',
-    text: 'text-sky-300',
-    icon: 'text-sky-300',
-    pill: 'bg-sky-500/25 text-sky-200',
-    dot: 'bg-sky-400',
+    card: 'bg-sky-50',
+    title: 'text-sky-700',
+    text: 'text-sky-600',
+    icon: 'text-sky-600',
+    pill: 'bg-sky-100 text-sky-700',
+    dot: 'bg-sky-500',
   },
   // Fuchsia is the 4th hue that stays apart from the other three in a dark
   // theme AND in deuteranopia: indigo and sky are both blue-side but far apart
   // in lightness, amber is the warm one, fuchsia is the only magenta. Still not
   // green — green keeps meaning "kept / free" everywhere else.
   openrouter: {
-    card: 'border-fuchsia-400/60 bg-fuchsia-500/15 ring-1 ring-fuchsia-400/40',
-    title: 'text-fuchsia-200',
-    text: 'text-fuchsia-300',
-    icon: 'text-fuchsia-300',
-    pill: 'bg-fuchsia-500/25 text-fuchsia-200',
-    dot: 'bg-fuchsia-400',
+    card: 'bg-fuchsia-50',
+    title: 'text-fuchsia-700',
+    text: 'text-fuchsia-600',
+    icon: 'text-fuchsia-600',
+    pill: 'bg-fuchsia-100 text-fuchsia-700',
+    dot: 'bg-fuchsia-500',
   },
   qwen: {
-    card: 'border-rose-400/60 bg-rose-500/15 ring-1 ring-rose-400/40',
-    title: 'text-rose-200',
-    text: 'text-rose-300',
-    icon: 'text-rose-300',
-    pill: 'bg-rose-500/25 text-rose-200',
-    dot: 'bg-rose-400',
+    card: 'bg-rose-50',
+    title: 'text-rose-700',
+    text: 'text-rose-600',
+    icon: 'text-rose-600',
+    pill: 'bg-rose-100 text-rose-700',
+    dot: 'bg-rose-500',
   },
 };
 
