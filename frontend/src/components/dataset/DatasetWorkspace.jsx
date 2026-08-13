@@ -1008,7 +1008,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
         )}
         <div className="ml-auto flex items-center gap-2">
           <button type="button" disabled={!kept} onClick={exportZipGuarded}
-            className="px-5 py-2 rounded-full bg-gradient-primary text-white text-sm font-semibold disabled:opacity-40">
+            className="px-5 py-2 rounded-full bg-gradient-primary text-white text-sm font-semibold transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(47,125,224,0.35),0_2px_6px_rgba(0,0,0,0.10)] disabled:opacity-40">
             ⬇ Export ZIP ({kept})
           </button>
           {/* summary en display:flex → pas de marqueur natif ; les items restent

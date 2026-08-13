@@ -59,4 +59,6 @@ export const QUIET_BUTTON =
 /** The primary action on a page (create, promote, generate). */
 export const PRIMARY_BUTTON =
   'inline-flex items-center gap-1.5 rounded-full bg-gradient-primary px-4 py-2 text-sm font-semibold ' +
-  'text-white transition-opacity hover:opacity-95 disabled:opacity-50';
+  'text-white transition-[box-shadow,transform,opacity] duration-200 hover:opacity-95 ' +
+  'hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(47,125,224,0.35),0_2px_6px_rgba(0,0,0,0.10)] ' +
+  'disabled:opacity-50';
