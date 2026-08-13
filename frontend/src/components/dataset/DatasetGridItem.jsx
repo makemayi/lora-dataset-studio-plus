@@ -454,7 +454,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             disabled={busy}
             title={refused || 'Keep'} aria-label={refused || 'Keep'}
             aria-pressed={img.status === 'keep'}
-            className={`flex-1 py-1.5 rounded-lg text-[11px] disabled:cursor-not-allowed disabled:opacity-45 ${img.status === 'keep' ? 'bg-green-600 text-white' : 'bg-white/10 text-white/70'}`}>✓</button>
+            className={`flex-1 py-1.5 rounded-full text-[11px] disabled:cursor-not-allowed disabled:opacity-45 ${img.status === 'keep' ? 'bg-gradient-to-b from-green-400 to-green-700 text-white shadow-[0_2px_6px_rgba(22,163,74,0.35)]' : 'bg-white/10 text-white/70'}`}>✓</button>
           <button type="button"
             onClick={() => {
               // Rejecting a GENERATED image offers an immediate retry of the same
