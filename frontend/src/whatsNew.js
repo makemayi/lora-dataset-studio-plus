@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-13-modern-shell',
+    date: '2026-08-13',
+    title: 'A sharper studio — a real mark, confident color, clearer hierarchy',
+    blurb: 'The app now wears a proper brand mark (a dataset grid with its kept image lit up) in the top bar and the tab, trades grey-on-grey for a confident indigo accent, lights the workspace you are in as a solid pill, gives pages a bolder title, and makes cards lift and glow under the pointer. Same dark room, far more designed.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-13-ambient-glass-theme',
     date: '2026-08-13',
     title: 'A softer room to work in — ambient light and glass panels',
