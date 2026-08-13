@@ -25,20 +25,18 @@
 /** The elevation alone, for a card that brings its own background — a run card
  *  tinted by where it ran, a status panel tinted by its tone. */
 export const CARD_SHADOW =
-  'shadow-[0_0_20px_rgba(0,0,0,0.06),0_16px_40px_rgba(0,0,0,0.08)]';
+  'shadow-[0_4px_12px_rgba(0,0,0,0.03),0_2px_4px_rgba(0,0,0,0.02)]';
 
 /** A card that does not react: a panel, a form, a section. */
-export const CARD_SURFACE = `rounded-[28px] bg-surface ${CARD_SHADOW} card-light-edge`;
+export const CARD_SURFACE = `rounded-[20px] bg-surface ${CARD_SHADOW} card-light-edge`;
 
 /** The ONE hover gesture every interactive surface shares — cards, image tiles,
- *  covers: a 2px lift and a soft brand-coloured ring over a deeper diffuse
- *  shadow, so the thing under the pointer reads as floating above the page.
- *  This string is the source of truth; a surface that hand-rolls its own hover
- *  drifts away. The ring colour is `primary` (#0e6b54) as an RGB triplet — keep
- *  in step with tailwind.config.js. */
+ *  covers: a 4px lift and a widened diffuse shadow, so the thing under the
+ *  pointer reads as floating above the page. This string is the source of
+ *  truth; a surface that hand-rolls its own hover drifts away. */
 export const FLOAT_HOVER =
-  'transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 ' +
-  'hover:shadow-[0_0_0_1px_rgba(0,0,0,0.04),0_0_24px_rgba(0,0,0,0.08),0_16px_44px_rgba(0,0,0,0.10)]';
+  'transition-[box-shadow,transform] duration-200 hover:-translate-y-1 ' +
+  'hover:shadow-[0_12px_40px_rgba(0,0,0,0.06),0_4px_12px_rgba(0,0,0,0.03)]';
 
 export const CARD_SURFACE_INTERACTIVE = `${CARD_SURFACE} ${FLOAT_HOVER}`;
 
@@ -60,5 +58,5 @@ export const QUIET_BUTTON =
 export const PRIMARY_BUTTON =
   'inline-flex items-center gap-1.5 rounded-full bg-gradient-primary px-4 py-2 text-sm font-semibold ' +
   'text-white transition-[box-shadow,transform,opacity] duration-200 hover:opacity-95 ' +
-  'hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(47,125,224,0.35),0_2px_6px_rgba(0,0,0,0.10)] ' +
+  'hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(79,70,229,0.35),0_2px_6px_rgba(0,0,0,0.10)] ' +
   'disabled:opacity-50';

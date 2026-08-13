@@ -11,11 +11,11 @@ export default {
            fills), not action colours — kept here as `accent.rose`/`accent.peach`
            so decorations can reach for them without hardcoding. */
         primary: {
-          DEFAULT: '#2f7de0',
-          dark: '#6478d6',
+          DEFAULT: '#4F46E5',
+          dark: '#7C3AED',
         },
         accent: {
-          DEFAULT: '#6478d6',
+          DEFAULT: '#7C3AED',
           peach: '#fad6be',
           rose: '#d48ec2',
         },
@@ -40,7 +40,7 @@ export default {
            paint. A white top sheen is layered ahead of it so buttons read as
            having material. The sweep stays one colour family so it announces
            the action without announcing a second colour. */
-        'gradient-primary': 'linear-gradient(135deg, rgba(255 255 255 / 0.10) 0%, rgba(255 255 255 / 0) 42%), linear-gradient(135deg, #2f7de0 0%, #6478d6 100%)',
+        'gradient-primary': 'linear-gradient(135deg, rgba(255 255 255 / 0.10) 0%, rgba(255 255 255 / 0) 42%), linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%)',
       },
     },
   },

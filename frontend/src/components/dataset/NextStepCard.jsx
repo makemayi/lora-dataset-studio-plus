@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { CARD_SURFACE, FLOAT_HOVER } from '../common/surfaces.js';
+// No surfaces import here — this hero banner has its OWN recipe (indigo gradient
+// + indigo-tinted glow) per the design doc, not the neutral CARD_SURFACE.
 
 const LS_KEY = 'guidedCardCollapsed';
 
@@ -23,7 +24,8 @@ export default function NextStepCard({ step, trainMode, busy, totalImages, onAct
   const key = step.id === 'finish' ? (trainMode ? 'finish_train' : 'finish_export') : step.id;
 
   return (
-    <div role="status" className={`${CARD_SURFACE} ${FLOAT_HOVER} px-4 py-3`}>
+    <div role="status"
+      className="rounded-[20px] bg-gradient-to-br from-[#EBF0FF] to-white px-4 py-3 transition-[box-shadow,transform] duration-200 hover:-translate-y-1 shadow-[0_12px_40px_rgba(79,70,229,0.08),0_4px_12px_rgba(0,0,0,0.02)] hover:shadow-[0_20px_60px_rgba(79,70,229,0.15),0_8px_20px_rgba(0,0,0,0.05)]">
       <div className="flex items-center gap-2">
         <span aria-hidden>💡</span>
         <span className="text-content text-sm font-semibold">Next step: {step.label}</span>
