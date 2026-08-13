@@ -28,7 +28,7 @@ export const CARD_SHADOW =
   'shadow-[0_1px_2px_rgba(0,0,0,.35),0_4px_16px_-6px_rgba(0,0,0,.5)]';
 
 /** A card that does not react: a panel, a form, a section. */
-export const CARD_SURFACE = `rounded-xl bg-surface ${CARD_SHADOW}`;
+export const CARD_SURFACE = `rounded-xl bg-surface ${CARD_SHADOW} card-light-edge`;
 
 /** The same card when the whole thing is a target (a bank, a dataset, a run):
  *  the lift on hover is the affordance the removed border used to imply. */

@@ -113,6 +113,13 @@
       radial-gradient(50rem 50rem at 100% 8%, rgba(106 99 166 / 0.05), transparent 60%),
       radial-gradient(46rem 46rem at 50% 115%, rgba(100 112 180 / 0.04), transparent 60%);
   }
+  /* Card top light edge — a faint white highlight that fades out over 28px, the
+     "caught by the light" rim on every CARD_SURFACE. A background IMAGE (not a
+     border, not an opacity modifier) so it layers over bg-surface and stays
+     clipped by rounded-xl. */
+  .card-light-edge {
+    background-image: linear-gradient(180deg, rgba(255 255 255 / 0.05), rgba(255 255 255 / 0) 28px);
+  }
   /* Native <select> dropdown options render with an OS/inherited background
      the page can't style per-element. Theme them globally so they're readable
      in both modes (opaque overlay surface + content text).
