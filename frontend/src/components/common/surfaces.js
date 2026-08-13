@@ -25,20 +25,20 @@
 /** The elevation alone, for a card that brings its own background — a run card
  *  tinted by where it ran, a status panel tinted by its tone. */
 export const CARD_SHADOW =
-  'shadow-[0_2px_4px_rgba(0,0,0,.4),0_10px_28px_-8px_rgba(0,0,0,.6)]';
+  'shadow-[0_2px_8px_rgba(0,0,0,0.03),0_20px_40px_rgba(0,0,0,0.06)]';
 
 /** A card that does not react: a panel, a form, a section. */
-export const CARD_SURFACE = `rounded-xl bg-surface ${CARD_SHADOW} card-light-edge`;
+export const CARD_SURFACE = `rounded-[28px] bg-surface ${CARD_SHADOW} card-light-edge`;
 
 /** The ONE hover gesture every interactive surface shares — cards, image tiles,
- *  covers: a 2px lift and an indigo ring over a deeper shadow, so the thing
- *  under the pointer reads as floating above the page. This string is the
- *  source of truth; a surface that hand-rolls its own hover drifts away.
- *  The ring colour is `primary` (#6b74e8) as an RGB triplet — keep in step
- *  with tailwind.config.js. */
+ *  covers: a 2px lift and a soft brand-coloured ring over a deeper diffuse
+ *  shadow, so the thing under the pointer reads as floating above the page.
+ *  This string is the source of truth; a surface that hand-rolls its own hover
+ *  drifts away. The ring colour is `primary` (#0e6b54) as an RGB triplet — keep
+ *  in step with tailwind.config.js. */
 export const FLOAT_HOVER =
   'transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 ' +
-  'hover:shadow-[0_0_0_1px_rgba(107,116,232,.4),0_10px_28px_-8px_rgba(0,0,0,.7)]';
+  'hover:shadow-[0_0_0_1px_rgba(14,107,84,.25),0_24px_48px_rgba(0,0,0,0.08)]';
 
 export const CARD_SURFACE_INTERACTIVE = `${CARD_SURFACE} ${FLOAT_HOVER}`;
 

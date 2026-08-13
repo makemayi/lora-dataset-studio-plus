@@ -130,13 +130,13 @@ test('both selects stay inside a 400 px toolbar', () => {
   assert.match(WORKSPACE, /flex shrink-0 items-center gap-1 text-xs/)
 })
 
-test('the grouped menu is readable in a dark-only app', () => {
+test('the grouped menu is readable in a light-themed app', () => {
   // Reported from a real 13 299-image bank: the Sort menu's group headers came
   // out as WHITE BANDS with near-invisible text. The page can re-colour an
   // <option> from CSS but NOT an <optgroup> header — the browser owns the popup
-  // and, absent `color-scheme`, paints it with the OS light palette.
-  assert.match(CSS, /:root,\s*\n\[data-theme="dark"\] \{[\s\S]{0,600}?color-scheme: dark;/,
-    'a dark-only app must declare color-scheme: dark — that is what darkens the native popup')
+  // and, absent `color-scheme`, paints it with the wrong palette.
+  assert.match(CSS, /:root,\s*\n\[data-theme="light"\] \{[\s\S]{0,600}?color-scheme: light;/,
+    'a light-themed app must declare color-scheme: light — that is what matches the native popup')
   // The belt-and-braces half, for engines that honour the declarations instead
   // (Firefox). `option` alone was the gap that let this ship.
   assert.match(CSS, /\n\s*optgroup \{[^}]*background-color: rgb\(var\(--surface-overlay\)\);/)

@@ -13,8 +13,12 @@ export default {
            engine accents, and `dark` (#8b5cf6) is the violet second stop of
            gradient-primary — one colour family, two depths. */
         primary: {
-          DEFAULT: '#6b74e8',
-          dark: '#8b5cf6',
+          DEFAULT: '#0e6b54',
+          dark: '#0d9488',
+        },
+        accent: {
+          DEFAULT: '#f97316',
+          peach: '#fdba74',
         },
         // ── Semantic theme tokens (backed by CSS vars in index.css) ──────────
         // App is dark-only. The *-alpha-baked tokens (surface, surface-raised,
@@ -37,7 +41,7 @@ export default {
            paint. A white top sheen is layered ahead of it so buttons read as
            having material. The sweep stays one colour family so it announces
            the action without announcing a second colour. */
-        'gradient-primary': 'linear-gradient(135deg, rgba(255 255 255 / 0.10) 0%, rgba(255 255 255 / 0) 42%), linear-gradient(135deg, #6b74e8 0%, #8b5cf6 100%)',
+        'gradient-primary': 'linear-gradient(135deg, rgba(255 255 255 / 0.10) 0%, rgba(255 255 255 / 0) 42%), linear-gradient(135deg, #0e6b54 0%, #0d9488 100%)',
       },
     },
   },
