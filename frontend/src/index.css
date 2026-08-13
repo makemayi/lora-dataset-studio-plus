@@ -24,7 +24,7 @@
 
   --bg-app: 245 247 250;         /* #F5F7FA — page ground */
   --bg-surface: 255 255 255;
-  --text-base: 31 41 55;         /* #1F2937 */
+  --text-base: 55 65 81;         /* #374151 — greyer, softer than near-black */
   --scrollbar-track: 245 247 250;
   --scrollbar-thumb: 209 213 219;
 
@@ -33,12 +33,12 @@
   --surface-raised: 249 250 251; /* #F9FAFB — raised controls/inputs */
   --surface-raised-alpha: 1;
   --surface-overlay: 255 255 255; /* white modal panel */
-  --content: 31 41 55;           /* #1F2937 */
+  --content: 55 65 81;           /* #374151 */
   --content-muted: 107 114 128;  /* #6B7280 */
   --content-subtle: 156 163 175; /* #9CA3AF */
-  --border: 229 231 235;         /* #E5E7EB — near-invisible hairline (去线化) */
+  --border: 243 244 246;         /* #F3F4F6 — near-invisible (去线化) */
   --border-alpha: 1;
-  --border-strong: 209 213 219;  /* #D1D5DB */
+  --border-strong: 229 231 235;  /* #E5E7EB */
   --border-strong-alpha: 1;
 }
 

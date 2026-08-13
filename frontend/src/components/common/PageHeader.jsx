@@ -31,7 +31,7 @@ export default function PageHeader({ eyebrow, title, badge, actions, description
       </p>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <h1 key={title}
-          className="m-0 flex items-center gap-2 text-3xl font-bold tracking-tight text-content">
+          className="m-0 flex items-center gap-2 text-3xl font-semibold tracking-tight text-content">
           {title}{badge}
         </h1>
         {actions && <div className="ml-auto flex flex-wrap items-center gap-2">{actions}</div>}

@@ -25,18 +25,17 @@
 /** The elevation alone, for a card that brings its own background — a run card
  *  tinted by where it ran, a status panel tinted by its tone. */
 export const CARD_SHADOW =
-  'shadow-[0_4px_12px_rgba(0,0,0,0.03),0_2px_4px_rgba(0,0,0,0.02)]';
+  'shadow-[0_4px_12px_rgba(0,0,0,0.04),0_10px_30px_rgba(0,0,0,0.05)]';
 
 /** A card that does not react: a panel, a form, a section. */
-export const CARD_SURFACE = `rounded-[20px] bg-surface ${CARD_SHADOW} card-light-edge`;
+export const CARD_SURFACE = `rounded-2xl bg-surface ${CARD_SHADOW} card-light-edge`;
 
 /** The ONE hover gesture every interactive surface shares — cards, image tiles,
- *  covers: a 4px lift and a widened diffuse shadow, so the thing under the
- *  pointer reads as floating above the page. This string is the source of
- *  truth; a surface that hand-rolls its own hover drifts away. */
+ *  covers: a 6px lift and a big diffuse shadow, so the thing under the pointer
+ *  clearly floats above the page. This string is the source of truth. */
 export const FLOAT_HOVER =
-  'transition-[box-shadow,transform] duration-200 hover:-translate-y-1 ' +
-  'hover:shadow-[0_12px_40px_rgba(0,0,0,0.06),0_4px_12px_rgba(0,0,0,0.03)]';
+  'transition-[box-shadow,transform] duration-200 hover:-translate-y-1.5 ' +
+  'hover:shadow-[0_20px_60px_rgba(0,0,0,0.10),0_6px_18px_rgba(0,0,0,0.06)]';
 
 export const CARD_SURFACE_INTERACTIVE = `${CARD_SURFACE} ${FLOAT_HOVER}`;
 
@@ -46,8 +45,8 @@ export const CARD_SURFACE_INTERACTIVE = `${CARD_SURFACE} ${FLOAT_HOVER}`;
    control has a comfortable measure regardless of how wide the window is; the
    CARD still fills the pane, only its contents are bounded. */
 export const INPUT_CLASS =
-  'mt-1 w-full max-w-xl rounded-md border border-border-strong bg-surface-raised px-3 py-2 text-sm text-content ' +
-  'placeholder:text-content-subtle focus:border-primary focus:outline-none';
+  'mt-1 w-full max-w-xl rounded-xl bg-surface-raised px-3 py-2 text-sm text-content ' +
+  'placeholder:text-content-subtle focus:outline-none focus:ring-2 focus:ring-primary/40';
 
 /** A secondary action: the outline button, minus the outline. */
 export const QUIET_BUTTON =

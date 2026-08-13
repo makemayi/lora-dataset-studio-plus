@@ -272,7 +272,7 @@ export function NavBar() {
        content starts sliding under it. A permanent border drew a line across
        every screen to solve a problem that only exists when scrolled. */
     <header className={`sticky top-0 z-40 bg-surface-overlay/80 backdrop-blur-md transition-shadow ${
-      scrolled ? 'shadow-lg' : ''}`}>
+      scrolled ? 'shadow-[0_8px_40px_rgba(0,0,0,0.08)]' : ''}`}>
       {/* Same measure as the wide workspaces (Shell ▸ wideWorkspaceRoute).
           At max-w-5xl the brand sat ~350px inside the left edge of the Bank,
           Canvas and Settings content it was supposed to sit above. */}
