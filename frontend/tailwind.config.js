@@ -5,19 +5,19 @@ export default {
   theme: {
     extend: {
       colors: {
-        /* The soft-pastel accent pair pulled from the reference UI: a muted
-           mauve-pink brand (#d48ec2 deepened to #c983b7 for enough contrast
-           on a light ground) and a sky blue (#5fb9dc) as its gradient second
-           stop / secondary accent. Peach (#fad6be) is the warm third voice.
-           All three live on a light grey-blue ground — Morandi-soft, never
-           saturated. */
+        /* The functional accents pulled from the reference UI: the nav's
+           primary button is a vivid blue (#0b71e8), and the secondary voice is
+           an indigo-purple (#6478d6). Pink/peach are DECORATIVE (illustration
+           fills), not action colours — kept here as `accent.rose`/`accent.peach`
+           so decorations can reach for them without hardcoding. */
         primary: {
-          DEFAULT: '#c983b7',
-          dark: '#5fb9dc',
+          DEFAULT: '#2f7de0',
+          dark: '#6478d6',
         },
         accent: {
-          DEFAULT: '#5fb9dc',
+          DEFAULT: '#6478d6',
           peach: '#fad6be',
+          rose: '#d48ec2',
         },
         // ── Semantic theme tokens (backed by CSS vars in index.css) ──────────
         // App is dark-only. The *-alpha-baked tokens (surface, surface-raised,
@@ -40,7 +40,7 @@ export default {
            paint. A white top sheen is layered ahead of it so buttons read as
            having material. The sweep stays one colour family so it announces
            the action without announcing a second colour. */
-        'gradient-primary': 'linear-gradient(135deg, rgba(255 255 255 / 0.10) 0%, rgba(255 255 255 / 0) 42%), linear-gradient(135deg, #c983b7 0%, #5fb9dc 100%)',
+        'gradient-primary': 'linear-gradient(135deg, rgba(255 255 255 / 0.10) 0%, rgba(255 255 255 / 0) 42%), linear-gradient(135deg, #2f7de0 0%, #6478d6 100%)',
       },
     },
   },

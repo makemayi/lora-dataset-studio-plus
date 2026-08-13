@@ -42,8 +42,8 @@ export function LogoMark({ className = 'h-7 w-7 shrink-0' }) {
     <svg aria-hidden="true" data-icon="logo" viewBox="0 0 24 24" className={className}>
       <defs>
         <linearGradient id="lds-logo-grad" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#c983b7" />
-          <stop offset="1" stopColor="#5fb9dc" />
+          <stop offset="0" stopColor="#2f7de0" />
+          <stop offset="1" stopColor="#6478d6" />
         </linearGradient>
       </defs>
       <rect x="1.5" y="1.5" width="21" height="21" rx="6" fill="url(#lds-logo-grad)" />

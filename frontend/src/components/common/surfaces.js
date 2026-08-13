@@ -38,7 +38,7 @@ export const CARD_SURFACE = `rounded-[28px] bg-surface ${CARD_SHADOW} card-light
  *  in step with tailwind.config.js. */
 export const FLOAT_HOVER =
   'transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 ' +
-  'hover:shadow-[0_0_0_1px_rgba(201,131,183,.35),0_24px_48px_rgba(0,0,0,0.08)]';
+  'hover:shadow-[0_0_0_1px_rgba(47,125,224,.35),0_24px_48px_rgba(0,0,0,0.08)]';
 
 export const CARD_SURFACE_INTERACTIVE = `${CARD_SURFACE} ${FLOAT_HOVER}`;
 
