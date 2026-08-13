@@ -122,7 +122,7 @@ export default function PromoteVideoDialog({
     <div role="dialog" aria-modal="true" aria-label="Build a video training set"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-3 sm:p-4">
       <form onSubmit={submit}
-        className="w-full max-w-lg max-h-[90vh] space-y-4 overflow-y-auto rounded-xl bg-surface-overlay p-4 shadow-2xl sm:p-5">
+        className="w-full max-w-lg max-h-[90vh] space-y-4 overflow-y-auto rounded-xl bg-surface-overlay/85 backdrop-blur-md p-4 shadow-2xl sm:p-5">
         <h2 className="text-base font-bold text-content">🎬 Build a video training set</h2>
         <p className="text-sm text-content-muted">
           Encodes {promoteScopeLabel((selectedIds || []).length, keepCount)} into a flat

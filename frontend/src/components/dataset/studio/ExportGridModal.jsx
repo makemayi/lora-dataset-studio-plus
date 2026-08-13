@@ -97,7 +97,7 @@ export default function ExportGridModal({ open, onClose, datasetId, family, run,
     <div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
       role="dialog" aria-modal="true" aria-label="Export grid" ref={ref}
       onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
-      <div className="w-full max-w-md rounded-2xl bg-surface-overlay p-4 flex flex-col gap-3 shadow-2xl">
+      <div className="w-full max-w-md rounded-2xl bg-surface-overlay/85 backdrop-blur-md p-4 flex flex-col gap-3 shadow-2xl">
         <div className="flex items-center justify-between">
           <h2 className="text-content text-sm font-semibold flex items-center gap-1.5">
             <span aria-hidden>🖼</span> Export grid

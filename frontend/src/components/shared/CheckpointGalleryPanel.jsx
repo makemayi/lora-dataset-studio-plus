@@ -567,7 +567,7 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
         <div role="dialog" aria-modal="true" aria-label="Confirm deletion"
           data-testid="gallery-confirm"
           className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-3">
-          <div className="w-full max-w-sm rounded-xl bg-surface-overlay p-4 shadow-xl">
+          <div className="w-full max-w-sm rounded-xl bg-surface-overlay/85 backdrop-blur-md p-4 shadow-xl">
             <h4 className="m-0 mb-2 text-sm font-semibold text-content">{confirmation.title}</h4>
             <ul className="m-0 mb-3 list-disc space-y-1 pl-4 text-content-muted text-[0.75rem]">
               {confirmation.lines.map((line) => <li key={line}>{line}</li>)}

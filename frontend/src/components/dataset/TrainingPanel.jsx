@@ -4356,7 +4356,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
         <div role="dialog" aria-modal="true" aria-label="Previous training run found"
           className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4"
           onKeyDown={(e) => { if (e.key === 'Escape') resolveResume(null); }}>
-          <div className="w-full max-w-md rounded-xl bg-surface-overlay p-4 flex flex-col gap-3">
+          <div className="w-full max-w-md rounded-xl bg-surface-overlay/85 backdrop-blur-md p-4 flex flex-col gap-3">
             <h3 className="m-0 text-content font-bold text-sm">
               ⚠ Previous run found ({resumeAsk.final ? 'complete' : 'stopped'} · step {resumeAsk.latest})
             </h3>
@@ -4705,7 +4705,7 @@ function CloudLaunchDialog({
       aria-label={fullMode ? 'Choose an 80 GB cloud GPU for full-model training' : 'Choose cloud GPU speed'}
       className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4"
       onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
-      <div className="w-full max-w-lg rounded-xl bg-surface-overlay p-4 flex flex-col gap-3">
+      <div className="w-full max-w-lg rounded-xl bg-surface-overlay/85 backdrop-blur-md p-4 flex flex-col gap-3">
         <h3 className="m-0 text-content font-bold text-sm">
           <span aria-hidden>☁️</span> {fullMode
             ? 'Choose an 80 GB GPU for full-model training'

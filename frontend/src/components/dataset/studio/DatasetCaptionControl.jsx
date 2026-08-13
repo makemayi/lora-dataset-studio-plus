@@ -86,7 +86,7 @@ function DatasetCaptionDialog({ open, onClose, onChoose }) {
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-3 sm:p-4"
       role="dialog" aria-modal="true" aria-labelledby="caption-dataset-title" ref={dialogRef}
       onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div className="flex max-h-[calc(100vh-1.5rem)] w-full max-w-lg flex-col gap-3 overflow-y-auto rounded-2xl bg-surface-overlay p-4 shadow-2xl sm:max-h-[calc(100vh-2rem)]">
+      <div className="flex max-h-[calc(100vh-1.5rem)] w-full max-w-lg flex-col gap-3 overflow-y-auto rounded-2xl bg-surface-overlay/85 backdrop-blur-md p-4 shadow-2xl sm:max-h-[calc(100vh-2rem)]">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 id="caption-dataset-title" className="text-sm font-semibold text-content">

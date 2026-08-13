@@ -62,6 +62,14 @@ const OVERLAY_FILES = [
   'src/components/dataset/DatasetGrid.jsx',
   'src/components/dataset/DatasetWorkspace.jsx',
   'src/components/dataset/FullBackupControls.jsx',
+  'src/components/dataset/studio/DatasetCaptionControl.jsx',
+  'src/components/dataset/studio/DescribeImageModal.jsx',
+  'src/components/dataset/studio/ExportGridModal.jsx',
+  'src/components/shared/RunDeleteSection.jsx',
+  'src/components/settings/KleinLoraCombobox.jsx',
+  'src/components/settings/ModelFilePicker.jsx',
+  'src/components/shared/CheckpointGalleryPanel.jsx',
+  'src/components/videobank/PromoteVideoDialog.jsx',
 ]
 
 test('floating overlays use the glass recipe', () => {
@@ -73,4 +81,6 @@ test('floating overlays use the glass recipe', () => {
 test('multi-panel files migrate every floating panel', () => {
   const bank = read('src/components/bank/BankWorkspace.jsx')
   assert.equal(bank.split('bg-surface-overlay/85 backdrop-blur-md').length - 1, 5, bank)
+  const training = read('src/components/dataset/TrainingPanel.jsx')
+  assert.equal(training.split('bg-surface-overlay/85 backdrop-blur-md').length - 1, 2, training)
 })
