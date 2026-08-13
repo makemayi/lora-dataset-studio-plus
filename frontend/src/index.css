@@ -22,7 +22,7 @@
 [data-theme="light"] {
   color-scheme: light;
 
-  --bg-app: 236 239 244;         /* #ECEFF4 — deeper cool grey, so glass cards read against it */
+  --bg-app: 245 247 250;         /* #F5F7FA — clean page ground (doc) */
   --bg-surface: 255 255 255;
   --text-base: 55 65 81;         /* #374151 — greyer, softer than near-black */
   --scrollbar-track: 245 247 250;
@@ -51,10 +51,8 @@
        still reads as "extremely clean". `background-attachment: fixed` keeps
        the pools anchored to the viewport corners while scrolling. */
     background-image:
-      radial-gradient(42rem 42rem at 12% 18%, rgba(99 102 241 / 0.24), transparent 62%),
-      radial-gradient(42rem 42rem at 88% 8%, rgba(168 85 247 / 0.22), transparent 62%),
-      radial-gradient(36rem 36rem at 78% 92%, rgba(236 72 153 / 0.18), transparent 62%),
-      radial-gradient(32rem 32rem at 16% 88%, rgba(59 130 246 / 0.18), transparent 62%);
+      radial-gradient(50rem 50rem at 0% 0%, rgba(79 70 229 / 0.05), transparent 60%),
+      radial-gradient(50rem 50rem at 100% 100%, rgba(124 58 237 / 0.04), transparent 60%);
     background-attachment: fixed;
     color: rgb(var(--text-base));
     /* Inter, bundled in main.jsx. The stack keeps the old system fonts behind

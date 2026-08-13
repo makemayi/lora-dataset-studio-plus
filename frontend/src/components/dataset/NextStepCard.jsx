@@ -25,7 +25,7 @@ export default function NextStepCard({ step, trainMode, busy, totalImages, onAct
 
   return (
     <div role="status"
-      className="rounded-2xl bg-gradient-to-br from-[#EBF0FF] to-white px-4 py-3 transition-[box-shadow,transform] duration-200 hover:-translate-y-2 shadow-[0_16px_50px_rgba(79,70,229,0.12),0_6px_16px_rgba(0,0,0,0.03)] hover:shadow-[0_36px_100px_rgba(79,70,229,0.25),0_12px_28px_rgba(0,0,0,0.08)]">
+      className="rounded-[20px] bg-gradient-to-br from-[#EBF0FF] to-white px-4 py-3 transition-[box-shadow,transform] duration-200 hover:-translate-y-1 shadow-[0_12px_40px_rgba(79,70,229,0.08),0_4px_12px_rgba(0,0,0,0.02)] hover:shadow-[0_20px_60px_rgba(79,70,229,0.15),0_8px_20px_rgba(0,0,0,0.05)]">
       <div className="flex items-center gap-2">
         <span aria-hidden>💡</span>
         <span className="text-content text-sm font-semibold">Next step: {step.label}</span>

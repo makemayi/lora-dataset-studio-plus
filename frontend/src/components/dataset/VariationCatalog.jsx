@@ -173,7 +173,7 @@ function EngineCard({ id, checked, available, generating, onToggle, icon, title,
       onClick={() => onToggle(id)}
       disabled={!available || !!generating}
       title={generating ? 'A generation batch is running — wait for it to finish before changing engines' : undefined}
-      className={`relative flex items-start gap-3 rounded-xl p-3 text-left transition-[box-shadow,transform,background-color] duration-200 shadow-[0_4px_12px_rgba(0,0,0,0.05),0_12px_36px_rgba(0,0,0,0.06)] hover:-translate-y-2 hover:shadow-[0_24px_80px_rgba(0,0,0,0.12),0_8px_24px_rgba(0,0,0,0.08)] disabled:opacity-50 disabled:cursor-not-allowed ${checked
+      className={`relative flex items-start gap-3 rounded-xl p-3 text-left transition-[box-shadow,transform,background-color] duration-200 shadow-[0_2px_8px_rgba(0,0,0,0.03),0_6px_16px_rgba(0,0,0,0.02)] hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(0,0,0,0.06),0_4px_10px_rgba(0,0,0,0.03)] disabled:opacity-50 disabled:cursor-not-allowed ${checked
         ? accent.card
         : 'bg-surface-raised hover:enabled:bg-surface'}`}>
       <span aria-hidden="true"
