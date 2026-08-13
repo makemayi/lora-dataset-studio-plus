@@ -2,6 +2,7 @@
 import { improvementBadge } from './improveCandidates.js';
 import { FLOAT_HOVER } from '../common/surfaces.js';
 import { TrashIcon } from '../common/icons.jsx';
+import { FaceSwapIcon } from '../common/icons.jsx';
 import { useEffect, useRef, useState } from 'react';
 import { displayLabel } from '../../utils/labels';
 // WHO wrote this tile's caption — the per-image half of the provenance the pass
@@ -311,7 +312,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             {fb.icon} 🎭 {fb.label}
           </span>
         )}
-        <div className="dataset-grid-item__actions absolute top-1.5 right-1.5 flex max-w-[calc(100%_-_1rem)] flex-wrap justify-end gap-0.5 rounded-full bg-black/40 backdrop-blur-md ring-1 ring-white/15 p-1">
+        <div className="dataset-grid-item__actions absolute top-1.5 right-1.5 flex max-w-[calc(100%_-_1rem)] flex-wrap justify-end gap-0.5 rounded-full bg-black/40 backdrop-blur-md ring-1 ring-white/15 p-0.5">
           {fb && (
             <span className={`flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${fb.cls}`}
               title={`Resemblance to the reference face — ${fb.label}`}>
@@ -324,7 +325,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy || faceScoringBusy || !!faceScoringBlocked || scoreFaceBusy}
               aria-busy={scoreFaceBusy}
               title={scoreFaceTitle} aria-label={scoreFaceTitle}
-              className="grid min-h-7 min-w-7 place-items-center rounded-full hover:bg-white/20 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-45">
+              className="grid min-h-6 min-w-6 place-items-center rounded-full hover:bg-white/20 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-45">
               <span aria-hidden="true" className={scoreFaceBusy ? 'animate-pulse' : ''}>{scoreFaceBusy ? '…' : '🎭'}</span>
             </button>
           )}
@@ -358,9 +359,9 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
                 : "Swap this tile's face with the reference image"}
               aria-label={swapBusy ? 'Preparing the face swap…'
                 : "Swap this tile's face with the reference image"}
-              className="px-1.5 py-0.5 rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">
-              <span hidden={swapBusy}>🎭↔</span>
-              <span hidden={!swapBusy} className="animate-pulse">🎭…</span>
+              className="grid min-h-6 min-w-6 place-items-center rounded-full hover:bg-white/20 text-white disabled:cursor-not-allowed disabled:opacity-45">
+              <span hidden={swapBusy}><FaceSwapIcon className="h-3.5 w-3.5" /></span>
+              <span hidden={!swapBusy} className="animate-pulse text-[10px]">…</span>
             </button>
           )}
           {/* ↩ Undo a swap that already landed. Offered only while the server
@@ -380,7 +381,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy || !rerunImprove.enabled}
               title={refused || rerunImprove.title}
               aria-label={refused || rerunImprove.title}
-              className="grid min-h-7 min-w-7 place-items-center rounded-full hover:bg-white/20 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-45">
+              className="grid min-h-6 min-w-6 place-items-center rounded-full hover:bg-white/20 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-45">
               <span aria-hidden="true">🔄✨</span>
             </button>
           )}
@@ -394,7 +395,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
                 : `Mirror ${displayLabel(img.variation_label) || 'this image'} horizontally`)}
               title={refused
                 || (mirrorBusy ? 'Mirroring horizontally…' : 'Mirror horizontally (flip left and right)')}
-              className="grid min-h-7 min-w-7 place-items-center rounded-full hover:bg-white/20 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-45">
+              className="grid min-h-6 min-w-6 place-items-center rounded-full hover:bg-white/20 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-45">
               <span aria-hidden="true">{mirrorBusy ? '…' : '⇆'}</span>
             </button>
           )}
@@ -424,7 +425,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy || img.is_locked}
               title={img.is_locked ? 'Locked — unlock to delete' : (refused || 'Delete permanently')}
               aria-label={img.is_locked ? 'Locked — unlock to delete' : (refused || 'Delete permanently')}
-              className="grid min-h-7 min-w-7 place-items-center rounded-full text-red-300 hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-45">
+              className="grid min-h-6 min-w-6 place-items-center rounded-full text-red-300 hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-45">
               <TrashIcon className="h-3.5 w-3.5" />
             </button>
           )}

@@ -292,6 +292,18 @@ export function FilmIcon(props) {
   );
 }
 
+export function FaceSwapIcon(props) {
+  return (
+    <Glyph name="faceswap" {...props}>
+      <circle cx="6" cy="9" r="2.5" />
+      <circle cx="18" cy="9" r="2.5" />
+      <path d="M3.5 14.5c1-1.8 1.6-2.5 2.5-2.5s1.5.7 2.5 2.5" />
+      <path d="M15.5 14.5c1-1.8 1.6-2.5 2.5-2.5s1.5.7 2.5 2.5" />
+      <path d="M9.75 9h4.5M9.75 9l-1.4-1.4M9.75 9l-1.4 1.4M14.25 9l1.4-1.4M14.25 9l1.4 1.4" />
+    </Glyph>
+  );
+}
+
 /**
  * The round icon-button shell, shared by every utility control in the header
  * (What's new, update check, the ? and gear menus, the mobile hamburger) and by

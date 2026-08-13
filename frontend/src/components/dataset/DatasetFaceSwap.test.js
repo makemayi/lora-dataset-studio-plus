@@ -31,7 +31,7 @@ test('grid item renders a gated face-swap button', () => {
   assert.match(gridItem, /\{canFaceSwap && onFaceSwap && \(/);
   assert.match(gridItem, /e\.stopPropagation\(\); onFaceSwap\(img\.id\)/);
   assert.match(gridItem, /Swap this tile's face with the reference image/);
-  assert.match(gridItem, /🎭↔/);
+  assert.match(gridItem, /FaceSwapIcon/);
 });
 
 /* THE BUTTON MUST GO BUSY WHILE THE REQUEST IS OUT.
@@ -46,7 +46,7 @@ test('the swap button is disabled while its own request is in flight', () => {
   assert.match(gridItem, /aria-busy=\{swapBusy\}/);
   // Both labels stay MOUNTED (Chrome auto-translate rewrites text nodes; a
   // ternary swap throws NotFoundError) — see CLAUDE.md.
-  assert.match(gridItem, /<span hidden=\{swapBusy\}>🎭↔<\/span>/);
+  assert.match(gridItem, /<span hidden=\{swapBusy\}><FaceSwapIcon/);
   assert.match(gridItem, /<span hidden=\{!swapBusy\}/);
 });
 

@@ -37,7 +37,7 @@ test('grid exposes an accessible per-image mirror action with busy protection', 
   assert.match(gridItem, /aria-busy=\{mirrorBusy\}/);
   assert.match(gridItem, /Mirror \$\{displayLabel\(img\.variation_label\)/);
   assert.match(gridItem, /e\.stopPropagation\(\); onMirror\(img\.id\)/);
-  assert.match(gridItem, /min-h-7 min-w-7/);
+  assert.match(gridItem, /min-h-6 min-w-6/);
   assert.match(gridItem, /flex-wrap justify-end/);
 });
 
