@@ -33,3 +33,7 @@ test('the primary button gradient layers a top sheen over the base', () => {
   assert.ok(g.includes('rgba(255 255 255 / 0.10)'), g)
   assert.equal((g.match(/linear-gradient/g) || []).length, 2)
 })
+
+test('the app header is translucent glass', () => {
+  assert.match(read('src/App.jsx'), /bg-surface-overlay\/80\s+backdrop-blur-md/)
+})

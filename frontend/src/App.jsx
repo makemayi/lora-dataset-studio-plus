@@ -271,7 +271,7 @@ export function NavBar() {
        separate FROM: flat while the page is at the top, a shadow the moment
        content starts sliding under it. A permanent border drew a line across
        every screen to solve a problem that only exists when scrolled. */
-    <header className={`sticky top-0 z-40 bg-surface-overlay/90 backdrop-blur-sm transition-shadow ${
+    <header className={`sticky top-0 z-40 bg-surface-overlay/80 backdrop-blur-md transition-shadow ${
       scrolled ? 'shadow-lg' : ''}`}>
       {/* Same measure as the wide workspaces (Shell ▸ wideWorkspaceRoute).
           At max-w-5xl the brand sat ~350px inside the left edge of the Bank,
