@@ -83,7 +83,7 @@ export default function RelocateBankDialog({ bankId, bankName, sourcePath, onClo
   return (
     <div role="dialog" aria-modal="true" aria-label="Move this bank's folder"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-3 sm:p-4">
-      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl bg-surface-overlay p-4 sm:p-5 shadow-2xl space-y-4">
+      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl bg-surface-overlay/85 backdrop-blur-md p-4 sm:p-5 shadow-2xl space-y-4">
         <h2 className="text-base font-bold text-content">📦 Move this bank&apos;s folder</h2>
         <p className="text-sm text-content-muted">
           Moved <span className="font-semibold text-content">{bankName}</span> to

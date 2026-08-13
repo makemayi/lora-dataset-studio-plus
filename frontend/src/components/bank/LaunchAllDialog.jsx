@@ -150,7 +150,7 @@ export default function LaunchAllDialog({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
       onMouseDown={(e) => { if (e.target === e.currentTarget) dismiss() }}>
       <div ref={cardRef}
-        className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl bg-surface-overlay p-5 shadow-2xl space-y-4">
+        className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl bg-surface-overlay/85 backdrop-blur-md p-5 shadow-2xl space-y-4">
         <div>
           <h2 className="text-base font-bold text-content">🚀 Launch all</h2>
           <HelpText className="mt-1 text-sm text-content-muted">

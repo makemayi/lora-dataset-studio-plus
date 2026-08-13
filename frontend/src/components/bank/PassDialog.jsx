@@ -135,7 +135,7 @@ export default function PassDialog({
     <div role="dialog" aria-modal="true" aria-label={spec.label}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-2 sm:p-4"
       onMouseDown={(e) => { if (e.target === e.currentTarget) dismiss() }}>
-      <div className="flex w-full max-w-lg max-h-[92vh] flex-col overflow-hidden rounded-xl bg-surface-overlay shadow-2xl">
+      <div className="flex w-full max-w-lg max-h-[92vh] flex-col overflow-hidden rounded-xl bg-surface-overlay/85 backdrop-blur-md shadow-2xl">
         <header className="shrink-0 border-b border-border p-4">
           <h2 className="text-base font-bold text-content">{spec.label}</h2>
           <p className="mt-1 text-sm text-content-muted">{spec.what}</p>

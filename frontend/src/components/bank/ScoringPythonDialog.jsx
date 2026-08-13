@@ -108,7 +108,7 @@ export default function ScoringPythonDialog({ onClose, onChanged,
   return (
     <div role="dialog" aria-modal="true" aria-label={picker.ariaLabel}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-2 sm:p-4">
-      <div className="w-full max-w-2xl max-h-[92vh] overflow-y-auto rounded-xl bg-surface-overlay p-4 shadow-2xl space-y-4 sm:p-5">
+      <div className="w-full max-w-2xl max-h-[92vh] overflow-y-auto rounded-xl bg-surface-overlay/85 backdrop-blur-md p-4 shadow-2xl space-y-4 sm:p-5">
         <div>
           <h2 className="text-base font-bold text-content">{copy.title}</h2>
           <p className="mt-1 text-sm text-content-muted">{copy.intro}</p>

@@ -45,10 +45,22 @@ const OVERLAY_FILES = [
   'src/components/common/HeaderMenu.jsx',
   'src/components/common/WhatsNew.jsx',
   'src/components/common/FolderPicker.jsx',
+  'src/components/bank/DeleteRejectedDialog.jsx',
+  'src/components/bank/LaunchAllDialog.jsx',
+  'src/components/bank/PassDialog.jsx',
+  'src/components/bank/PersonPreflightDialog.jsx',
+  'src/components/bank/PromoteDialog.jsx',
+  'src/components/bank/RelocateBankDialog.jsx',
+  'src/components/bank/ScoringPythonDialog.jsx',
 ]
 
 test('floating overlays use the glass recipe', () => {
   const offenders = OVERLAY_FILES.filter((rel) => !GLASS.test(read(rel)))
   assert.deepEqual(offenders, [],
     'floating overlays must use bg-surface-overlay/85 backdrop-blur-md:\n' + offenders.join('\n'))
+})
+
+test('multi-panel files migrate every floating panel', () => {
+  const bank = read('src/components/bank/BankWorkspace.jsx')
+  assert.equal(bank.split('bg-surface-overlay/85 backdrop-blur-md').length - 1, 5, bank)
 })

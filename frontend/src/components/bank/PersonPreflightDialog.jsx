@@ -110,7 +110,7 @@ export default function PersonPreflightDialog({
     <div role="dialog" aria-modal="true" aria-label="Check folders before the person pass"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
       onMouseDown={(e) => { if (e.target === e.currentTarget) dismiss() }}>
-      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl bg-surface-overlay p-4 shadow-2xl space-y-3 sm:p-5">
+      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl bg-surface-overlay/85 backdrop-blur-md p-4 shadow-2xl space-y-3 sm:p-5">
         <div>
           <h2 className="flex flex-wrap items-center gap-1.5 text-base font-bold text-content">
             👤 Before the person pass

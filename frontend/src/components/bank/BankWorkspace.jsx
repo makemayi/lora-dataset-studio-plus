@@ -2843,7 +2843,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                   counts this panel exists to show. Capped height + internal
                   scroll so "Reject them" is reachable however long the caveats
                   get. */}
-              <div className="fixed inset-x-3 bottom-3 z-50 max-h-[70vh] overflow-y-auto rounded-xl bg-surface-overlay p-3 shadow-2xl space-y-2 sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:mt-1 sm:w-72">
+              <div className="fixed inset-x-3 bottom-3 z-50 max-h-[70vh] overflow-y-auto rounded-xl bg-surface-overlay/85 backdrop-blur-md p-3 shadow-2xl space-y-2 sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:mt-1 sm:w-72">
                 <p className="text-xs text-content-muted">
                   Rejects the UNDECIDED images with these flags. Your manual ✓/✕ are never changed;
                   everything stays reversible (nothing is deleted from disk).
@@ -2978,7 +2978,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
           {curateOpen === 'diverse' && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setCurateOpen(null)} aria-hidden />
-              <div className="absolute z-50 mt-1 w-72 rounded-xl bg-surface-overlay p-3 shadow-2xl space-y-2">
+              <div className="absolute z-50 mt-1 w-72 rounded-xl bg-surface-overlay/85 backdrop-blur-md p-3 shadow-2xl space-y-2">
                 <p className="text-xs text-content-muted">
                   Selects the most <strong>varied</strong> images of the current filter — the best
                   coverage of the visual space, not N look-alikes. Reviews as a normal selection
@@ -3037,7 +3037,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
               <div className="fixed inset-0 z-40" onClick={() => setCurateOpen(null)} aria-hidden />
               {/* Bottom sheet below sm (measured at 400 px, an anchored w-80 panel
                   pushes the page sideways), normal popover from sm up. */}
-              <div className="fixed inset-x-4 bottom-4 z-50 max-h-[75vh] overflow-y-auto rounded-xl bg-surface-overlay p-3 shadow-2xl space-y-2 sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:mt-1 sm:max-h-none sm:w-80 sm:overflow-visible">
+              <div className="fixed inset-x-4 bottom-4 z-50 max-h-[75vh] overflow-y-auto rounded-xl bg-surface-overlay/85 backdrop-blur-md p-3 shadow-2xl space-y-2 sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:mt-1 sm:max-h-none sm:w-80 sm:overflow-visible">
                 <p className="text-xs text-content-muted">
                   Splits your pick <strong>evenly across the framings</strong> — “20 face, 20 bust,
                   20 body” — and fills each bucket with the same most-varied sampling.
@@ -3090,7 +3090,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
           {curateOpen === 'similar' && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setCurateOpen(null)} aria-hidden />
-              <div className="absolute z-50 mt-1 w-72 rounded-xl bg-surface-overlay p-3 shadow-2xl space-y-2">
+              <div className="absolute z-50 mt-1 w-72 rounded-xl bg-surface-overlay/85 backdrop-blur-md p-3 shadow-2xl space-y-2">
                 <p className="text-xs text-content-muted">
                   Ranks the current filter by {semanticState.label} similarity to your one selected image and selects
                   the closest — a fast way to extract one person or look. The reference is kept in
@@ -3133,7 +3133,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                   page is scrolled. So the vertical anchor is explicit, and the
                   sheet scrolls internally when the copy is long. From sm up it
                   behaves exactly like its two sibling popovers. */}
-              <div className="fixed inset-x-4 bottom-4 z-50 max-h-[75vh] overflow-y-auto rounded-xl bg-surface-overlay p-3 shadow-2xl space-y-2 sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:mt-1 sm:max-h-none sm:w-80 sm:overflow-visible">
+              <div className="fixed inset-x-4 bottom-4 z-50 max-h-[75vh] overflow-y-auto rounded-xl bg-surface-overlay/85 backdrop-blur-md p-3 shadow-2xl space-y-2 sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:mt-1 sm:max-h-none sm:w-80 sm:overflow-visible">
                 <p className="text-xs text-content-muted">
                   Ranks the <strong>current filter</strong> by how close each image is to your
                   words. It refines what the grid is showing — it does not search the whole bank.
