@@ -162,6 +162,12 @@ class FaceDatasetImage(db.Model):
     # them. See services/caption_origin.py. Additive columns (see _SCHEMA_ADDITIONS).
     caption_origin = db.Column(String(16), nullable=True)
     caption_short_origin = db.Column(String(16), nullable=True)
+    # When the row's CAPTION last changed (a generation, a re-caption pass or a
+    # hand edit) — the picture and the text change on different clocks, so the
+    # workspace rail's "recent captions" list needs its own stamp. NULL on rows
+    # predating the column; readers coalesce with created_at. Additive column
+    # (see _SCHEMA_ADDITIONS).
+    caption_changed_at = db.Column(DateTime, nullable=True)
     job_id = db.Column(String(36), nullable=True, index=True)
     variation_prompt = db.Column(String(500), nullable=True)    # RAW catalog prompt (regenerate)
     klein_model = db.Column(String(255), nullable=True)         # UNET used (regenerate)

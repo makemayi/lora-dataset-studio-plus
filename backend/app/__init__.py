@@ -217,6 +217,9 @@ _SCHEMA_ADDITIONS = (
     # older engines and would rewrite the table for no gain. Do not reuse the
     # name for anything else — an old database would hand you stale values.
     ('face_dataset_image', 'caption_short', 'TEXT'),
+    # When the caption last changed (the workspace rail's "recent captions").
+    # NULL on older rows; readers coalesce with created_at.
+    ('face_dataset_image', 'caption_changed_at', 'DATETIME'),
     ('face_dataset_image', 'fail_reason', 'TEXT'),
     # Nature de l'échec ('refused' | 'empty' | 'error') pour compter les refus
     # fournisseur séparément des pannes. Les lignes existantes restent NULL :

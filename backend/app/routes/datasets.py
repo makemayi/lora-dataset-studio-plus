@@ -353,6 +353,16 @@ def dataset_recent_images():
     return jsonify({'images': svc.recent_generated_images(LOCAL_USER, limit)})
 
 
+@bp.get('/dataset/recent-activity')
+def dataset_recent_activity():
+    """The workspace rail's "recent" strip, split into four lists by what
+    happened last to each image — generated / edited (face swap or watermark
+    inpaint) / upscaled (Klein rescue or improve) / captioned. Same cheap
+    read-only shape as recent-images: ids and filenames, no pixels."""
+    limit = request.args.get('limit', 8)
+    return jsonify(svc.recent_activity(LOCAL_USER, limit))
+
+
 @bp.get('/dataset/<int:dataset_id>')
 def dataset_get(dataset_id):
     payload = svc.dataset_payload(LOCAL_USER, dataset_id)

@@ -2943,6 +2943,69 @@ def recent_generated_images(user_id, limit=12):
              'label': img.variation_label or ''} for img, name in rows]
 
 
+def recent_activity(user_id, limit=8):
+    """The workspace rail's "recent" strip, split by what happened LAST to each
+    image — generated / edited (face swap or watermark inpaint) / upscaled (Klein
+    rescue or improve) / captioned — so a face the user swapped an hour ago is no
+    longer buried under rows merely generated later.
+
+    Four independent lists, newest first, same item shape as
+    recent_generated_images. An image can appear in more than one (generated,
+    then captioned): each list answers "what did I just do?", not a partition.
+    """
+    try:
+        limit = max(1, min(int(limit), RECENT_VARIATIONS_MAX))
+    except (TypeError, ValueError):
+        limit = 8
+
+    from sqlalchemy import func, or_
+
+    base = (db.session.query(FaceDatasetImage, FaceDataset.name)
+            .join(FaceDataset, FaceDataset.id == FaceDatasetImage.dataset_id)
+            .filter(FaceDataset.user_id == str(user_id))
+            .filter(FaceDatasetImage.filename.isnot(None))
+            .filter(FaceDatasetImage.status != 'reject'))
+
+    def rows_of(query):
+        return [{'image_id': img.id, 'dataset_id': img.dataset_id,
+                 'dataset_name': name, 'filename': img.filename,
+                 'label': img.variation_label or ''}
+                for img, name in query.limit(limit).all()]
+
+    changed = func.coalesce(FaceDatasetImage.content_changed_at,
+                            FaceDatasetImage.created_at)
+    # A caption shares the row with its picture, so "when the TEXT changed" needs
+    # its own clock — stamped by caption_origin.stamp, coalesced for old rows.
+    captioned_at = func.coalesce(FaceDatasetImage.caption_changed_at,
+                                 FaceDatasetImage.created_at)
+
+    generated = rows_of(base
+        .filter(FaceDatasetImage.source == 'generated')
+        .filter(FaceDatasetImage.derivation_kind.is_(None))
+        .filter(FaceDatasetImage.swap_undo.is_(None))
+        .filter(or_(FaceDatasetImage.watermark_state.is_(None),
+                    FaceDatasetImage.watermark_state != 'cleaned'))
+        .order_by(changed.desc(), FaceDatasetImage.id.desc()))
+
+    edited = rows_of(base
+        .filter(or_(FaceDatasetImage.swap_undo.isnot(None),
+                    FaceDatasetImage.watermark_state == 'cleaned'))
+        .order_by(changed.desc(), FaceDatasetImage.id.desc()))
+
+    upscaled = rows_of(base
+        .filter(FaceDatasetImage.derivation_kind.in_(
+            ('klein_small_image', 'klein_image_improve')))
+        .order_by(changed.desc(), FaceDatasetImage.id.desc()))
+
+    captioned = rows_of(base
+        .filter(FaceDatasetImage.caption.isnot(None))
+        .filter(FaceDatasetImage.caption != '')
+        .order_by(captioned_at.desc(), FaceDatasetImage.id.desc()))
+
+    return {'generated': generated, 'edited': edited,
+            'upscaled': upscaled, 'captioned': captioned}
+
+
 def purge_unused(user_id, dataset_id):
     """Permanently delete all REJECTED and FAILED images of a dataset (rows +
     files). Returns the number purged."""

@@ -34,6 +34,8 @@ cleared can never stay protected on an empty string — that would be a row the
 pass skips forever, and it would never be visible from the screen.
 """
 
+from datetime import datetime, timezone
+
 from sqlalchemy import and_, or_
 
 # A human wrote or corrected this text.  Same token, same contract as
@@ -77,6 +79,9 @@ def stamp(row, text, origin, *, field='caption'):
     """
     setattr(row, field, text)
     setattr(row, f'{field}_origin', origin if (text or '').strip() else None)
+    # The "recent captions" rail orders by when the TEXT last changed, not when
+    # the picture or the row did — caption and picture change on separate clocks.
+    row.caption_changed_at = datetime.utcnow()
     return row
 
 
