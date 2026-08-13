@@ -94,6 +94,25 @@
        numbers (steps, px, strengths) that jitter without this. */
     font-variant-numeric: tabular-nums;
   }
+  /* ── Ambient light ──────────────────────────────────────────────────────────
+     A fixed, static, pointer-events-none veil behind all content: faint indigo
+     pools in the corners so the graphite ground stops reading as a flat grey
+     slab. SAME hue as --primary / --primary-dark, NOT a new palette:
+     100 112 180 = #6470b4 (primary), 106 99 166 = #6a63a6 (primary.dark).
+     Alpha stays low enough that a photograph anywhere on the page reads
+     neutral — the glow lives only in the empty margins. z-index:-1 sits above
+     the body background colour and below every card and text node. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(60rem 60rem at 8% 0%, rgba(100 112 180 / 0.055), transparent 60%),
+      radial-gradient(50rem 50rem at 100% 8%, rgba(106 99 166 / 0.05), transparent 60%),
+      radial-gradient(46rem 46rem at 50% 115%, rgba(100 112 180 / 0.04), transparent 60%);
+  }
   /* Native <select> dropdown options render with an OS/inherited background
      the page can't style per-element. Theme them globally so they're readable
      in both modes (opaque overlay surface + content text).
