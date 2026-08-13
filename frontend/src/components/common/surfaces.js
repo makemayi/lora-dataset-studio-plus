@@ -25,19 +25,22 @@
 /** The elevation alone, for a card that brings its own background — a run card
  *  tinted by where it ran, a status panel tinted by its tone. */
 export const CARD_SHADOW =
-  'shadow-[0_1px_2px_rgba(0,0,0,.35),0_4px_16px_-6px_rgba(0,0,0,.5)]';
+  'shadow-[0_2px_4px_rgba(0,0,0,.4),0_10px_28px_-8px_rgba(0,0,0,.6)]';
 
 /** A card that does not react: a panel, a form, a section. */
 export const CARD_SURFACE = `rounded-xl bg-surface ${CARD_SHADOW} card-light-edge`;
 
-/** The same card when the whole thing is a target (a bank, a dataset, a run):
- *  the lift on hover is the affordance the removed border used to imply, and
- *  the lift is now physical (2px up) plus an indigo ring — hover reads as
- *  "this is the thing under the pointer", not just a shadow change. */
-export const CARD_SURFACE_INTERACTIVE =
-  `${CARD_SURFACE} transition-[box-shadow,transform] duration-200 ` +
-  'hover:-translate-y-0.5 hover:ring-1 hover:ring-primary/40 ' +
-  'hover:shadow-[0_1px_2px_rgba(0,0,0,.4),0_14px_32px_-8px_rgba(0,0,0,.7)]';
+/** The ONE hover gesture every interactive surface shares — cards, image tiles,
+ *  covers: a 2px lift and an indigo ring over a deeper shadow, so the thing
+ *  under the pointer reads as floating above the page. This string is the
+ *  source of truth; a surface that hand-rolls its own hover drifts away.
+ *  The ring colour is `primary` (#6b74e8) as an RGB triplet — keep in step
+ *  with tailwind.config.js. */
+export const FLOAT_HOVER =
+  'transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 ' +
+  'hover:shadow-[0_0_0_1px_rgba(107,116,232,.4),0_10px_28px_-8px_rgba(0,0,0,.7)]';
+
+export const CARD_SURFACE_INTERACTIVE = `${CARD_SURFACE} ${FLOAT_HOVER}`;
 
 /* `max-w-xl` is the tidy-up from the same wave: the settings shell went
    full-width on 2026-08-09 and every `w-full` control went with it, so a text

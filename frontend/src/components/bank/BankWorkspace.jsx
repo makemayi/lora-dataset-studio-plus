@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch, del, patchJson, postJson } from '../../api/fetchClient'
 import { useToast } from '../common/Toast'
+import { FLOAT_HOVER } from '../common/surfaces.js'
 // "This is configurable, here" — a deep link that lands ON the field, not on a tab.
 import SettingsLink from '../common/SettingsLink'
 import { useCapabilities } from '../../context/CapabilitiesContext'
@@ -646,7 +647,7 @@ function Tile({ img, bankId, selected, onToggle, onReview, onTags, size }) {
     <span key={key} className={`rounded px-1 py-px text-[10px] font-semibold leading-none ${cls}`}>{txt}</span>
   )
   return (
-    <li className={`relative overflow-hidden rounded-lg bg-surface ${STATUS_RING[img.status] || ''}`}>
+    <li className={`relative overflow-hidden rounded-xl bg-surface ${STATUS_RING[img.status] || ''} ${FLOAT_HOVER}`}>
       <button type="button" onClick={onToggle}
         title={`${img.name} — ${img.width || '?'}×${img.height || '?'}`
           + (img.blur_score != null ? ` · sharpness ${Math.round(img.blur_score)}` : '')

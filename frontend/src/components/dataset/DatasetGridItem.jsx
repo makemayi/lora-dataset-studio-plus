@@ -1,5 +1,6 @@
 /** One curation tile: image + keep/reject + source/framing badges + caption + crop. */
 import { improvementBadge } from './improveCandidates.js';
+import { FLOAT_HOVER } from '../common/surfaces.js';
 import { useEffect, useRef, useState } from 'react';
 import { displayLabel } from '../../utils/labels';
 // WHO wrote this tile's caption — the per-image half of the provenance the pass
@@ -173,7 +174,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
     <div tabIndex={0} aria-label={`${displayLabel(img.variation_label) || 'Dataset image'} card`}
       /* The tile keeps `borderCls`: that edge is the decision (kept / rejected /
          undecided), not decoration. Only the fill moves onto the token. */
-      className={`dataset-grid-item rounded-xl ${borderCls} ${selected ? 'ring-2 ring-indigo-400' : ''} bg-surface overflow-hidden flex flex-col transition-shadow hover:shadow-[0_0_0_1px_rgba(107,116,232,.45)]`}>
+      className={`dataset-grid-item rounded-xl ${borderCls} ${selected ? 'ring-2 ring-indigo-400' : ''} bg-surface overflow-hidden flex flex-col ${FLOAT_HOVER}`}>
       <div className="relative aspect-square bg-black">
         {/* Fresh content nobody has looked at yet — a first-time generation
             OR a regenerate, not yet opened (unlike the in-progress emerald
