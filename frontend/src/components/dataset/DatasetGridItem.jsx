@@ -173,7 +173,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
     <div tabIndex={0} aria-label={`${displayLabel(img.variation_label) || 'Dataset image'} card`}
       /* The tile keeps `borderCls`: that edge is the decision (kept / rejected /
          undecided), not decoration. Only the fill moves onto the token. */
-      className={`dataset-grid-item rounded-lg ${borderCls} ${selected ? 'ring-2 ring-indigo-400' : ''} bg-surface overflow-hidden flex flex-col`}>
+      className={`dataset-grid-item rounded-xl ${borderCls} ${selected ? 'ring-2 ring-indigo-400' : ''} bg-surface overflow-hidden flex flex-col transition-shadow hover:shadow-[0_0_0_1px_rgba(107,116,232,.45)]`}>
       <div className="relative aspect-square bg-black">
         {/* Fresh content nobody has looked at yet — a first-time generation
             OR a regenerate, not yet opened (unlike the in-progress emerald
@@ -439,7 +439,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             disabled={busy}
             title={refused || 'Keep'} aria-label={refused || 'Keep'}
             aria-pressed={img.status === 'keep'}
-            className={`flex-1 py-1 rounded text-[11px] disabled:cursor-not-allowed disabled:opacity-45 ${img.status === 'keep' ? 'bg-green-600 text-white' : 'bg-surface text-content-muted'}`}>✓</button>
+            className={`flex-1 py-1.5 rounded-lg text-[11px] disabled:cursor-not-allowed disabled:opacity-45 ${img.status === 'keep' ? 'bg-green-600 text-white' : 'bg-surface-raised text-content-muted'}`}>✓</button>
           <button type="button"
             onClick={() => {
               // Rejecting a GENERATED image offers an immediate retry of the same
@@ -455,7 +455,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             disabled={busy}
             title={refused || 'Reject (offers a regeneration)'} aria-label={refused || 'Reject'}
             aria-pressed={img.status === 'reject'}
-            className={`flex-1 py-1 rounded text-[11px] disabled:cursor-not-allowed disabled:opacity-45 ${img.status === 'reject' ? 'bg-red-600 text-white' : 'bg-surface text-content-muted'}`}>✕</button>
+            className={`flex-1 py-1.5 rounded-lg text-[11px] disabled:cursor-not-allowed disabled:opacity-45 ${img.status === 'reject' ? 'bg-red-600 text-white' : 'bg-surface-raised text-content-muted'}`}>✕</button>
         </div>
       )}
       {img.status === 'keep' && (
