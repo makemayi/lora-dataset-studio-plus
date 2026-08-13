@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { CARD_SURFACE } from '../common/surfaces.js';
 
 const LS_KEY = 'guidedCardCollapsed';
 
@@ -22,7 +23,7 @@ export default function NextStepCard({ step, trainMode, busy, totalImages, onAct
   const key = step.id === 'finish' ? (trainMode ? 'finish_train' : 'finish_export') : step.id;
 
   return (
-    <div role="status" className="rounded-lg bg-indigo-500/15 px-3 py-2">
+    <div role="status" className={`${CARD_SURFACE} px-4 py-3`}>
       <div className="flex items-center gap-2">
         <span aria-hidden>💡</span>
         <span className="text-content text-sm font-semibold">Next step: {step.label}</span>
@@ -39,7 +40,7 @@ export default function NextStepCard({ step, trainMode, busy, totalImages, onAct
         <div className="mt-1 flex items-center gap-3 flex-wrap">
           <p className="text-content-muted text-sm m-0">{COPY[key]}</p>
           <button type="button" onClick={onAction} disabled={busy}
-            className="ml-auto px-3 py-1.5 rounded-lg bg-gradient-primary text-white text-sm font-semibold disabled:opacity-40">
+            className="ml-auto px-5 py-2 rounded-full bg-gradient-primary text-white text-sm font-semibold disabled:opacity-40">
             {actionLabel}
           </button>
         </div>

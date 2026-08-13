@@ -986,7 +986,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-raised text-content-muted hover:text-content hover:bg-surface text-sm transition-colors">
           ← Datasets
         </button>
-        <h1 className="text-content font-bold">{d.name}</h1>
+        <h1 className="text-content text-xl font-bold">{d.name}</h1>
         {isStyle ? (
           <span title="This Style LoRA is always active when loaded; adjust its LoRA weight to control the effect."
             className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-200 text-[0.6875rem]">
@@ -996,15 +996,15 @@ export default function DatasetWorkspace({ ds, onBack }) {
           <button type="button"
             onClick={() => { try { navigator.clipboard.writeText(d.trigger_word || ''); } catch { /* ignore */ } }}
             title="Copy the trigger word (to put in your prompts)"
-            className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-indigo-500/15 text-[0.6875rem] transition-colors hover:bg-indigo-500/25">
+            className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-surface-raised text-[0.6875rem] transition-colors hover:bg-surface">
             <span className="text-content-subtle">trigger:</span>
-            <code className="text-indigo-300 font-semibold">{d.trigger_word || '—'}</code>
+            <code className="text-primary font-semibold">{d.trigger_word || '—'}</code>
             <span aria-hidden className="text-content-subtle">⧉</span>
           </button>
         )}
         <div className="ml-auto flex items-center gap-2">
           <button type="button" disabled={!kept} onClick={exportZipGuarded}
-            className="px-3 py-1.5 rounded-lg bg-gradient-primary text-white text-sm font-semibold disabled:opacity-40">
+            className="px-5 py-2 rounded-full bg-gradient-primary text-white text-sm font-semibold disabled:opacity-40">
             ⬇ Export ZIP ({kept})
           </button>
           {/* summary en display:flex → pas de marqueur natif ; les items restent
