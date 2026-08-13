@@ -311,6 +311,12 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
           </span>
         )}
         <div className="dataset-grid-item__actions absolute top-1.5 right-1.5 flex max-w-[calc(100%_-_1rem)] flex-wrap justify-end gap-0.5 rounded-full bg-black/40 backdrop-blur-md ring-1 ring-white/15 p-1">
+          {fb && (
+            <span className={`flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${fb.cls}`}
+              title={`Resemblance to the reference face — ${fb.label}`}>
+              {fb.icon} {fb.label}
+            </span>
+          )}
           {url && onScoreFace && ['keep', 'pending'].includes(img.status) && (
             <button type="button"
               onClick={(e) => { e.stopPropagation(); onScoreFace(img.id); }}

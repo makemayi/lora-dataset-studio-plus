@@ -223,6 +223,14 @@
   align-items: center;
   gap: 0.125rem;
   pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+/* The score ALSO lives in the toolbar's first slot on hover — this top-left
+   copy fades out then, so the score reads once, not twice. */
+.dataset-grid-item:hover .dataset-tile-badge--face,
+.dataset-grid-item:focus-within .dataset-tile-badge--face {
+  opacity: 0;
 }
 
 /* Wide tile: back to the familiar top-left, on one line, with the button row's
