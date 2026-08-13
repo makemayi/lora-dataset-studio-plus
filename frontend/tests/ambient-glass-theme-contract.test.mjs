@@ -18,13 +18,9 @@ test('the page ground carries a static ambient-light veil', () => {
   assert.doesNotMatch(css, /body\s*\{[^}]*animation:/s)
 })
 
-test('cards catch a top light edge via a CSS class, not an opacity modifier', () => {
-  const css = read('src/index.css')
-  assert.match(css, /\.card-light-edge\s*\{[^}]*linear-gradient\(180deg,\s*rgba\(255/s)
-})
-
-test('CARD_SURFACE carries the light edge', () => {
-  assert.match(CARD_SURFACE, /card-light-edge/)
+test('cards are frosted glass — translucent white over a blur', () => {
+  assert.match(CARD_SURFACE, /bg-white\/70/)
+  assert.match(CARD_SURFACE, /backdrop-blur/)
 })
 
 test('the primary button gradient layers a top sheen over the base', () => {
