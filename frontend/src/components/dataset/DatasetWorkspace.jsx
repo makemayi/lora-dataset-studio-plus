@@ -45,6 +45,7 @@ import InstallRunner from '../setup/InstallRunner';
 import GuidedChecklist from './GuidedChecklist';
 import RecentVariations from './RecentVariations';
 import NextStepCard from './NextStepCard';
+import { FLOAT_HOVER } from '../common/surfaces.js';
 import TrainingReadiness from './TrainingReadiness';
 import useGuidedFlow from '../../hooks/useGuidedFlow';
 import { filterImages, normalizeTag } from '../../utils/tagFilter';
@@ -982,11 +983,14 @@ export default function DatasetWorkspace({ ds, onBack }) {
       {/* relative z-30 : le header est un flex item ; sans stacking-context propre,
           le z-20 du menu « ⋯ More » resterait piégé sous les frères plus bas. */}
       <div className="relative z-30 flex items-center gap-2 flex-wrap">
-        <button type="button" onClick={onBack}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-raised text-content-muted hover:text-content hover:bg-surface text-sm transition-colors">
-          ← Datasets
-        </button>
-        <h1 className="text-content text-xl font-bold">{d.name}</h1>
+        {/* Breadcrumb (back + name) — the whole block floats on hover. */}
+        <div className={`group flex items-center gap-0.5 rounded-xl py-1 pr-2 ${FLOAT_HOVER}`}>
+          <button type="button" onClick={onBack}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-surface-raised text-content-muted hover:text-content group-hover:bg-surface text-sm transition-colors">
+            ← Datasets
+          </button>
+          <h1 className="text-content text-xl font-bold px-1.5">{d.name}</h1>
+        </div>
         {isStyle ? (
           <span title="This Style LoRA is always active when loaded; adjust its LoRA weight to control the effect."
             className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-200 text-[0.6875rem]">
