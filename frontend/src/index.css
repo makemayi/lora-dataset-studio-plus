@@ -22,24 +22,24 @@
 [data-theme="light"] {
   color-scheme: light;
 
-  --bg-app: 250 250 250;         /* #FAFAFA — off-white page ground */
+  --bg-app: 231 232 239;         /* #e7e8ef — light grey-blue ground */
   --bg-surface: 255 255 255;
   --text-base: 51 51 51;         /* #333333 */
-  --scrollbar-track: 245 245 245;
-  --scrollbar-thumb: 205 205 205;
+  --scrollbar-track: 231 232 239;
+  --scrollbar-thumb: 190 196 206;
 
   --surface: 255 255 255;        /* white card */
   --surface-alpha: 1;
-  --surface-raised: 245 245 245; /* #F5F5F5 — raised controls/inputs */
+  --surface-raised: 245 246 248; /* #f5f6f8 — raised controls/inputs */
   --surface-raised-alpha: 1;
   --surface-overlay: 255 255 255; /* white modal panel */
   --content: 51 51 51;           /* #333333 */
-  --content-muted: 102 102 102;  /* #666666 */
-  --content-subtle: 153 153 153; /* #999999 */
-  --border: 0 0 0;               /* black hairline at low alpha */
-  --border-alpha: 0.08;
-  --border-strong: 0 0 0;
-  --border-strong-alpha: 0.14;
+  --content-muted: 107 114 128;  /* #6b7280 */
+  --content-subtle: 154 163 175; /* #9aa3af */
+  --border: 213 218 226;         /* #d5dae2 hairline */
+  --border-alpha: 1;
+  --border-strong: 180 188 200;  /* #b4bcc8 */
+  --border-strong-alpha: 1;
 }
 
 
@@ -51,8 +51,9 @@
        still reads as "extremely clean". `background-attachment: fixed` keeps
        the pools anchored to the viewport corners while scrolling. */
     background-image:
-      radial-gradient(50rem 50rem at 8% 0%, rgba(14 107 84 / 0.05), transparent 60%),
-      radial-gradient(50rem 50rem at 100% 8%, rgba(249 115 22 / 0.05), transparent 60%);
+      radial-gradient(60rem 60rem at 0% 0%, rgba(95 185 220 / 0.12), transparent 60%),
+      radial-gradient(60rem 60rem at 100% 0%, rgba(212 142 194 / 0.12), transparent 60%),
+      radial-gradient(50rem 50rem at 100% 100%, rgba(250 214 190 / 0.22), transparent 60%);
     background-attachment: fixed;
     color: rgb(var(--text-base));
     /* Inter, bundled in main.jsx. The stack keeps the old system fonts behind
@@ -106,7 +107,7 @@
     @apply rounded-full;
   }
   *:focus-visible {
-    outline: 2px solid rgb(14, 107, 84);
+    outline: 2px solid rgb(201, 131, 183);
     outline-offset: 2px;
   }
 }
@@ -116,7 +117,7 @@
   top: -3rem;
   left: 1rem;
   z-index: 9999;
-  background-color: rgb(14, 107, 84);
+  background-color: rgb(201, 131, 183);
   color: white;
   padding: 0.5rem 1rem;
   border-radius: 0.375rem;
