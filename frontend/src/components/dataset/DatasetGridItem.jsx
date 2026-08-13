@@ -175,7 +175,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
     <div tabIndex={0} aria-label={`${displayLabel(img.variation_label) || 'Dataset image'} card`}
       /* The tile keeps `borderCls`: that edge is the decision (kept / rejected /
          undecided), not decoration. Only the fill moves onto the token. */
-      className={`dataset-grid-item rounded-xl ${borderCls} ${selected ? 'ring-2 ring-indigo-400' : ''} bg-surface overflow-hidden flex flex-col ${FLOAT_HOVER}`}>
+      className={`dataset-grid-item rounded-2xl ${borderCls} ${selected ? 'ring-2 ring-indigo-400' : ''} bg-surface overflow-hidden flex flex-col ${FLOAT_HOVER}`}>
       <div className="relative aspect-square bg-black">
         {/* Fresh content nobody has looked at yet — a first-time generation
             OR a regenerate, not yet opened (unlike the in-progress emerald
@@ -521,7 +521,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               : datasetKind === 'concept'
                 ? 'caption without naming the concept…'
                 : 'caption (without the face)…'} aria-label="Image caption"
-            className="text-[11px] rounded-lg bg-surface-raised p-1.5 text-content resize-none focus:outline-none focus:ring-1 focus:ring-primary" />
+            className="text-[11px] rounded-xl bg-surface-raised p-2 text-content resize-none focus:outline-none focus:ring-1 focus:ring-primary" />
         </div>
       )}
       {captionEditorOpen && (
