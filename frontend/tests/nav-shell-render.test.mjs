@@ -8,7 +8,7 @@
  * "tidy-up" cannot quietly undo them:
  *   · every workspace carries an icon from one set (the bar used to mix three
  *     emoji with two bare labels),
- *   · the active workspace is a filled pill, not just differently-coloured text,
+ *   · the active workspace is a primary-filled pill, not just differently-coloured text,
  *   · the bar separates itself by elevation — no permanent bottom hairline.
  */
 import assert from 'node:assert/strict'
@@ -59,15 +59,15 @@ test('every workspace link carries an icon, and no emoji are left in the bar', (
   }
 })
 
-test('the current workspace is a filled pill', () => {
+test('the current workspace is a primary-filled pill', () => {
   const html = render(CAPS_FULL, '/bank')
   const link = html.match(/<a[^>]*href="\/bank"[^>]*>/)?.[0]
   assert.ok(link, 'no /bank link in the bar')
   assert.match(link, /rounded-full/)
-  assert.match(link, /bg-surface-raised/)
+  assert.match(link, /bg-primary/)
   // …and an inactive one is not.
   const inactive = html.match(/<a[^>]*href="\/canvas"[^>]*>/)?.[0]
-  assert.ok(inactive && !/bg-surface-raised/.test(inactive), '/canvas looks active too')
+  assert.ok(inactive && !/bg-primary/.test(inactive), '/canvas looks active too')
 })
 
 test('the header separates by elevation, not by a permanent hairline', () => {

@@ -36,7 +36,7 @@ test('the title is the biggest thing in the header, the eyebrow the smallest', (
   const title = html.match(/<h1[^>]*>/)?.[0]
   assert.match(eyebrow, /text-\[11px\]/)
   assert.match(eyebrow, /tracking-\[0\.18em\]/)
-  assert.match(title, /text-2xl/)
+  assert.match(title, /text-3xl/)
   assert.match(title, /tracking-tight/)
 })
 

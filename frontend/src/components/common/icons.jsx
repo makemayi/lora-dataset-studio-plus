@@ -32,6 +32,31 @@ function Glyph({ name, children, className = 'h-4 w-4 shrink-0' }) {
   );
 }
 
+/* ── Brand mark ────────────────────────────────────────────────────────────
+ *  A rounded-square tile in the primary gradient, holding a 2×2 image grid
+ *  where three cells are outlines and one is filled solid — the image that
+ *  made it into the dataset. That is the whole loop of the app in one glyph:
+ *  gather → keep → train. Sized by the caller (the header uses ~28px). */
+export function LogoMark({ className = 'h-7 w-7 shrink-0' }) {
+  return (
+    <svg aria-hidden="true" data-icon="logo" viewBox="0 0 24 24" className={className}>
+      <defs>
+        <linearGradient id="lds-logo-grad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#6b74e8" />
+          <stop offset="1" stopColor="#8b5cf6" />
+        </linearGradient>
+      </defs>
+      <rect x="1.5" y="1.5" width="21" height="21" rx="6" fill="url(#lds-logo-grad)" />
+      <g stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none">
+        <rect x="6.4" y="6.4" width="4.7" height="4.7" rx="1.25" />
+        <rect x="12.9" y="6.4" width="4.7" height="4.7" rx="1.25" />
+        <rect x="6.4" y="12.9" width="4.7" height="4.7" rx="1.25" />
+        <rect x="12.9" y="12.9" width="4.7" height="4.7" rx="1.25" fill="white" stroke="none" />
+      </g>
+    </svg>
+  );
+}
+
 /* ── Workspaces (the nav bar) ────────────────────────────────────────────── */
 
 export function DatasetsIcon(props) {

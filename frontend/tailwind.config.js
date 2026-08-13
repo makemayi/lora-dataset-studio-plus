@@ -5,16 +5,16 @@ export default {
   theme: {
     extend: {
       colors: {
-        /* The accent, softened on 2026-08-10 with the rest of the tone pass.
-           #5567d5 → #6a74cc keeps the same indigo but drops a third of its
-           chroma: on a neutral graphite ground the old one read as the loudest
-           thing on screen, above the photographs. `dark` is the second stop of
-           gradient-primary and moved the same way — from a saturated violet
-           (#764ba2) to one a shade off the accent, so the gradient reads as
-           depth rather than as two different colours. */
+        /* The accent, brought BACK to life on 2026-08-13. The 2026-08-10 pass
+           had desaturated it to #6470b4 so it would not compete with the
+           photographs; in practice it faded into the graphite until the UI
+           read as grey-on-grey. #6b74e8 is a confident indigo that still sits
+           clearly apart from the semantic green (kept) and the amber/sky
+           engine accents, and `dark` (#8b5cf6) is the violet second stop of
+           gradient-primary — one colour family, two depths. */
         primary: {
-          DEFAULT: '#6470b4',
-          dark: '#6a63a6',
+          DEFAULT: '#6b74e8',
+          dark: '#8b5cf6',
         },
         // ── Semantic theme tokens (backed by CSS vars in index.css) ──────────
         // App is dark-only. The *-alpha-baked tokens (surface, surface-raised,
@@ -33,14 +33,11 @@ export default {
         'border-strong': 'rgb(var(--border-strong) / var(--border-strong-alpha))',
       },
       backgroundImage: {
-        /* Near-flat on purpose. Every primary button in the app paints itself
-           with this, and a visible indigo→violet sweep on a dozen buttons was
-           the single loudest thing on a page of photographs. Two stops half a
-           step apart still give the button a body without announcing a second
-           colour — and the class name stays, so no call site changes. A white
-           top sheen is layered ahead of it so buttons read as having material,
-           not a second colour. */
-        'gradient-primary': 'linear-gradient(135deg, rgba(255 255 255 / 0.10) 0%, rgba(255 255 255 / 0) 42%), linear-gradient(135deg, #5a63a8 0%, #5f5c9c 100%)',
+        /* A real indigo→violet sweep again: the flattened version read as grey
+           paint. A white top sheen is layered ahead of it so buttons read as
+           having material. The sweep stays one colour family so it announces
+           the action without announcing a second colour. */
+        'gradient-primary': 'linear-gradient(135deg, rgba(255 255 255 / 0.10) 0%, rgba(255 255 255 / 0) 42%), linear-gradient(135deg, #6b74e8 0%, #8b5cf6 100%)',
       },
     },
   },

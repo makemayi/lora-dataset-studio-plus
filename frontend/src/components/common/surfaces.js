@@ -31,10 +31,13 @@ export const CARD_SHADOW =
 export const CARD_SURFACE = `rounded-xl bg-surface ${CARD_SHADOW} card-light-edge`;
 
 /** The same card when the whole thing is a target (a bank, a dataset, a run):
- *  the lift on hover is the affordance the removed border used to imply. */
+ *  the lift on hover is the affordance the removed border used to imply, and
+ *  the lift is now physical (2px up) plus an indigo ring — hover reads as
+ *  "this is the thing under the pointer", not just a shadow change. */
 export const CARD_SURFACE_INTERACTIVE =
-  `${CARD_SURFACE} transition-shadow duration-200 ` +
-  'hover:shadow-[0_1px_2px_rgba(0,0,0,.4),0_10px_28px_-8px_rgba(0,0,0,.65)]';
+  `${CARD_SURFACE} transition-[box-shadow,transform] duration-200 ` +
+  'hover:-translate-y-0.5 hover:ring-1 hover:ring-primary/40 ' +
+  'hover:shadow-[0_1px_2px_rgba(0,0,0,.4),0_14px_32px_-8px_rgba(0,0,0,.7)]';
 
 /* `max-w-xl` is the tidy-up from the same wave: the settings shell went
    full-width on 2026-08-09 and every `w-full` control went with it, so a text

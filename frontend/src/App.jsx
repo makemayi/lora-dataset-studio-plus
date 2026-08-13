@@ -26,7 +26,7 @@ import HeaderMenu from './components/common/HeaderMenu'
 import {
   DatasetsIcon, BankIcon, RunsIcon, CanvasIcon, StudioIcon,
   HelpIcon, SettingsIcon, UpdateIcon, SpinnerIcon, MenuIcon, CloseIcon,
-  ICON_BUTTON_BASE, ICON_BUTTON_QUIET,
+  LogoMark, ICON_BUTTON_BASE, ICON_BUTTON_QUIET,
 } from './components/common/icons'
 import { versionLabel } from './utils/versionLabel'
 import { useTrainingActivity } from './hooks/useTrainingActivity'
@@ -48,7 +48,7 @@ const NAV_ITEM_BASE =
 // while the pointer is somewhere else in it.
 const navItemClass = ({ isActive }) =>
   `${NAV_ITEM_BASE} ${
-    isActive ? 'bg-surface-raised text-content' : 'text-content-muted hover:text-content hover:bg-surface'
+    isActive ? 'bg-primary text-white' : 'text-content-muted hover:text-content hover:bg-surface'
   }`
 
 // Full-width variant for links that live inside a HeaderMenu dropdown.
@@ -56,7 +56,7 @@ const MENU_ITEM_BASE =
   'block w-full text-left px-3 py-1.5 rounded-lg text-sm font-medium no-underline transition-colors'
 const menuItemClass = ({ isActive }) =>
   `${MENU_ITEM_BASE} ${
-    isActive ? 'bg-surface-raised text-content' : 'text-content-muted hover:text-content hover:bg-surface'
+    isActive ? 'bg-primary text-white' : 'text-content-muted hover:text-content hover:bg-surface'
   }`
 
 /** Nav action (right of Settings): force an update check and give immediate
@@ -278,7 +278,8 @@ export function NavBar() {
           Canvas and Settings content it was supposed to sit above. */}
       <div className="mx-auto flex w-full max-w-[1800px] items-center gap-3 px-3 py-2.5 sm:gap-6 sm:px-4">
         <NavLink to="/datasets" title="Back to the datasets page" onClick={goHome}
-          className="shrink-0 whitespace-nowrap text-base font-semibold tracking-tight text-content no-underline">
+          className="shrink-0 inline-flex items-center gap-2 whitespace-nowrap text-base font-semibold tracking-tight text-content no-underline">
+          <LogoMark />
           LoRA Dataset Studio
         </NavLink>
         {/* Desktop: workspaces on the left, utilities grouped into icon menus

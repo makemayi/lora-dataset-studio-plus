@@ -63,9 +63,9 @@
      over near-black is invisible over graphite. These are the values at which
      a card, a raised control and the page are three distinct planes. */
   --surface: 255 255 255;          /* used at low alpha → faint white on dark */
-  --surface-alpha: 0.055;
+  --surface-alpha: 0.065;
   --surface-raised: 255 255 255;
-  --surface-raised-alpha: 0.105;
+  --surface-raised-alpha: 0.12;
   --surface-overlay: 31 34 39;     /* #1f2227 — neutral panel for modals */
   --content: 232 234 238;          /* #e8eaee */
   --content-muted: 154 161 172;    /* #9aa1ac */
@@ -149,7 +149,7 @@
     @apply rounded-full;
   }
   *:focus-visible {
-    outline: 2px solid rgb(85, 103, 213);
+    outline: 2px solid rgb(107, 116, 232);
     outline-offset: 2px;
   }
 }
