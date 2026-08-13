@@ -25,7 +25,7 @@
 /** The elevation alone, for a card that brings its own background — a run card
  *  tinted by where it ran, a status panel tinted by its tone. */
 export const CARD_SHADOW =
-  'shadow-[0_4px_12px_rgba(0,0,0,0.04),0_10px_30px_rgba(0,0,0,0.05)]';
+  'shadow-[0_4px_12px_rgba(0,0,0,0.05),0_12px_36px_rgba(0,0,0,0.06)]';
 
 /** A card that does not react: a panel, a form, a section. */
 export const CARD_SURFACE = `rounded-2xl bg-surface ${CARD_SHADOW} card-light-edge`;
@@ -34,8 +34,8 @@ export const CARD_SURFACE = `rounded-2xl bg-surface ${CARD_SHADOW} card-light-ed
  *  covers: a 6px lift and a big diffuse shadow, so the thing under the pointer
  *  clearly floats above the page. This string is the source of truth. */
 export const FLOAT_HOVER =
-  'transition-[box-shadow,transform] duration-200 hover:-translate-y-1.5 ' +
-  'hover:shadow-[0_20px_60px_rgba(0,0,0,0.10),0_6px_18px_rgba(0,0,0,0.06)]';
+  'transition-[box-shadow,transform] duration-200 hover:-translate-y-2 ' +
+  'hover:shadow-[0_24px_80px_rgba(0,0,0,0.12),0_8px_24px_rgba(0,0,0,0.08)]';
 
 export const CARD_SURFACE_INTERACTIVE = `${CARD_SURFACE} ${FLOAT_HOVER}`;
 
@@ -57,5 +57,5 @@ export const QUIET_BUTTON =
 export const PRIMARY_BUTTON =
   'inline-flex items-center gap-1.5 rounded-full bg-gradient-primary px-4 py-2 text-sm font-semibold ' +
   'text-white transition-[box-shadow,transform,opacity] duration-200 hover:opacity-95 ' +
-  'hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(79,70,229,0.35),0_2px_6px_rgba(0,0,0,0.10)] ' +
+  'hover:-translate-y-1 hover:shadow-[0_12px_28px_rgba(79,70,229,0.45),0_4px_10px_rgba(0,0,0,0.15)] ' +
   'disabled:opacity-50';
