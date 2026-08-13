@@ -28,9 +28,10 @@ export const CARD_SHADOW =
   'shadow-[0_4px_12px_rgba(0,0,0,0.05),0_12px_36px_rgba(0,0,0,0.06)]';
 
 /** A card that does not react: a panel, a form, a section. Frosted glass —
- *  translucent white over a backdrop blur, so the page's colour shows through
- *  as a soft wash and the card reads as a pane of glass above the ground. */
-export const CARD_SURFACE = `rounded-2xl bg-white/70 backdrop-blur-xl ${CARD_SHADOW}`;
+ *  translucent white over a backdrop blur, with a thin white edge that reads
+ *  as the light catching the pane. The page's colour blobs bleed through as a
+ *  soft wash, so the card is clearly a pane of glass above the ground. */
+export const CARD_SURFACE = `rounded-2xl bg-white/60 backdrop-blur-xl ring-1 ring-white/70 ${CARD_SHADOW}`;
 
 /** The ONE hover gesture every interactive surface shares — cards, image tiles,
  *  covers: a 6px lift and a big diffuse shadow, so the thing under the pointer

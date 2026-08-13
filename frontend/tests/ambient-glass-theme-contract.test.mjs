@@ -19,8 +19,9 @@ test('the page ground carries a static ambient-light veil', () => {
 })
 
 test('cards are frosted glass — translucent white over a blur', () => {
-  assert.match(CARD_SURFACE, /bg-white\/70/)
+  assert.match(CARD_SURFACE, /bg-white\/60/)
   assert.match(CARD_SURFACE, /backdrop-blur/)
+  assert.match(CARD_SURFACE, /ring-white\/70/)
 })
 
 test('the primary button gradient layers a top sheen over the base', () => {
