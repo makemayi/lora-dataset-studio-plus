@@ -25,17 +25,21 @@
 /** The elevation alone, for a card that brings its own background — a run card
  *  tinted by where it ran, a status panel tinted by its tone. */
 export const CARD_SHADOW =
-  'shadow-[0_2px_8px_rgba(0,0,0,0.03),0_6px_16px_rgba(0,0,0,0.02)]';
+  'shadow-[0_12px_40px_rgba(79,70,229,0.08),0_4px_12px_rgba(0,0,0,0.02)]';
 
-/** A card that does not react: a panel, a form, a section. Solid white per the
- *  design doc, radius 16px, with the doc's soft diffuse shadow. */
-export const CARD_SURFACE = `rounded-2xl bg-surface ${CARD_SHADOW}`;
+/** A card that does not react: a panel, a form, a section. THE glass recipe —
+ *  the same one the hero "next step" card wears: a soft indigo-to-white
+ *  gradient over a backdrop blur, with an indigo-tinted glow, so every card
+ *  reads as a pane of tinted glass floating above the colourful ground. */
+export const CARD_SURFACE =
+  'rounded-2xl bg-gradient-to-br from-[#EBF0FF] to-white backdrop-blur-xl ' +
+  `${CARD_SHADOW}`;
 
 /** The ONE hover gesture every interactive surface shares — cards, image tiles,
- *  covers: a 4px lift and the doc's widened diffuse shadow. */
+ *  covers: a 4px lift and a deeper indigo glow, matching the hero card. */
 export const FLOAT_HOVER =
   'transition-[box-shadow,transform] duration-200 hover:-translate-y-1 ' +
-  'hover:shadow-[0_8px_30px_rgba(0,0,0,0.06),0_4px_10px_rgba(0,0,0,0.03)]';
+  'hover:shadow-[0_20px_60px_rgba(79,70,229,0.15),0_8px_20px_rgba(0,0,0,0.05)]';
 
 export const CARD_SURFACE_INTERACTIVE = `${CARD_SURFACE} ${FLOAT_HOVER}`;
 

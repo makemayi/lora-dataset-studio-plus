@@ -18,10 +18,10 @@ test('the page ground carries a static ambient-light veil', () => {
   assert.doesNotMatch(css, /body\s*\{[^}]*animation:/s)
 })
 
-test('cards are solid white with a 16px radius and a soft diffuse shadow', () => {
-  assert.match(CARD_SURFACE, /bg-surface/)
-  assert.match(CARD_SURFACE, /rounded-2xl/)
-  assert.match(CARD_SURFACE, /shadow-\[/)
+test('cards are glass like the hero banner — indigo gradient, blur, purple glow', () => {
+  assert.match(CARD_SURFACE, /backdrop-blur/)
+  assert.match(CARD_SURFACE, /from-\[#EBF0FF\]/)
+  assert.match(CARD_SURFACE, /rgba\(79,70,229/)
 })
 
 test('the primary button gradient layers a top sheen over the base', () => {
