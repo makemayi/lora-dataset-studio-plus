@@ -37,3 +37,18 @@ test('the primary button gradient layers a top sheen over the base', () => {
 test('the app header is translucent glass', () => {
   assert.match(read('src/App.jsx'), /bg-surface-overlay\/80\s+backdrop-blur-md/)
 })
+
+const GLASS = /bg-surface-overlay\/85\s+backdrop-blur-md/
+
+// Floating overlays that must carry the glass recipe. Grown per task.
+const OVERLAY_FILES = [
+  'src/components/common/HeaderMenu.jsx',
+  'src/components/common/WhatsNew.jsx',
+  'src/components/common/FolderPicker.jsx',
+]
+
+test('floating overlays use the glass recipe', () => {
+  const offenders = OVERLAY_FILES.filter((rel) => !GLASS.test(read(rel)))
+  assert.deepEqual(offenders, [],
+    'floating overlays must use bg-surface-overlay/85 backdrop-blur-md:\n' + offenders.join('\n'))
+})

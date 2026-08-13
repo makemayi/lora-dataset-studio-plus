@@ -77,7 +77,7 @@ export default function HeaderMenu({ triggerLabel, triggerTitle, active = false,
           /* Elevation, not an outline: the shadow already separates the panel
              from the page, and the border only added a bright edge to it. */
           className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full mt-2 z-50 min-w-[11rem]
-            flex flex-col gap-0.5 rounded-xl bg-surface-overlay p-1.5 shadow-2xl`}
+            flex flex-col gap-0.5 rounded-xl bg-surface-overlay/85 backdrop-blur-md p-1.5 shadow-2xl`}
         >
           {typeof children === 'function' ? children(close) : children}
         </div>

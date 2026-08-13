@@ -95,7 +95,7 @@ export function FolderBrowserModal({ initial, onPick, onClose }) {
     <div role="dialog" aria-modal="true" aria-label="Choose a folder"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       onMouseDown={(e) => { if (e.target === e.currentTarget) dismiss() }}>
-      <div className="flex w-full max-w-lg flex-col rounded-xl bg-surface-overlay p-5 shadow-2xl"
+      <div className="flex w-full max-w-lg flex-col rounded-xl bg-surface-overlay/85 backdrop-blur-md p-5 shadow-2xl"
         style={{ maxHeight: '80vh' }}>
         <h2 className="text-base font-bold text-content">📁 Choose a folder</h2>
         <p className="mt-1 text-xs text-content-muted">
