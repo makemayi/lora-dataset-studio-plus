@@ -25,7 +25,7 @@
 /** The elevation alone, for a card that brings its own background — a run card
  *  tinted by where it ran, a status panel tinted by its tone. */
 export const CARD_SHADOW =
-  'shadow-[0_0_20px_rgba(30,40,60,.10),0_16px_40px_rgba(30,40,60,.16)]';
+  'shadow-[0_0_20px_rgba(0,0,0,0.06),0_16px_40px_rgba(0,0,0,0.08)]';
 
 /** A card that does not react: a panel, a form, a section. */
 export const CARD_SURFACE = `rounded-[28px] bg-surface ${CARD_SHADOW} card-light-edge`;
@@ -38,7 +38,7 @@ export const CARD_SURFACE = `rounded-[28px] bg-surface ${CARD_SHADOW} card-light
  *  in step with tailwind.config.js. */
 export const FLOAT_HOVER =
   'transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 ' +
-  'hover:shadow-[0_0_0_1px_rgba(30,40,60,.12),0_0_28px_rgba(30,40,60,.18),0_24px_56px_rgba(30,40,60,.22)]';
+  'hover:shadow-[0_0_0_1px_rgba(0,0,0,0.04),0_0_24px_rgba(0,0,0,0.08),0_16px_44px_rgba(0,0,0,0.10)]';
 
 export const CARD_SURFACE_INTERACTIVE = `${CARD_SURFACE} ${FLOAT_HOVER}`;
 

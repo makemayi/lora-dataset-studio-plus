@@ -22,11 +22,11 @@
 [data-theme="light"] {
   color-scheme: light;
 
-  --bg-app: 222 225 233;         /* #dde1e9 — grey-blue ground (deepened) */
+  --bg-app: 233 232 240;         /* #e9e8f0 — light purple-grey ground */
   --bg-surface: 255 255 255;
   --text-base: 33 37 43;         /* #21252b — near-black for contrast */
-  --scrollbar-track: 222 225 233;
-  --scrollbar-thumb: 180 186 198;
+  --scrollbar-track: 233 232 240;
+  --scrollbar-thumb: 195 192 205;
 
   --surface: 255 255 255;        /* white card */
   --surface-alpha: 1;
@@ -51,9 +51,8 @@
        still reads as "extremely clean". `background-attachment: fixed` keeps
        the pools anchored to the viewport corners while scrolling. */
     background-image:
-      radial-gradient(60rem 60rem at 0% 0%, rgba(95 185 220 / 0.12), transparent 60%),
-      radial-gradient(60rem 60rem at 100% 0%, rgba(212 142 194 / 0.12), transparent 60%),
-      radial-gradient(50rem 50rem at 100% 100%, rgba(250 214 190 / 0.22), transparent 60%);
+      radial-gradient(60rem 60rem at 0% 0%, rgba(140 145 215 / 0.08), transparent 60%),
+      radial-gradient(60rem 60rem at 100% 0%, rgba(210 155 210 / 0.08), transparent 60%);
     background-attachment: fixed;
     color: rgb(var(--text-base));
     /* Inter, bundled in main.jsx. The stack keeps the old system fonts behind
