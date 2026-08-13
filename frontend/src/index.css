@@ -22,23 +22,23 @@
 [data-theme="light"] {
   color-scheme: light;
 
-  --bg-app: 231 232 239;         /* #e7e8ef — light grey-blue ground */
+  --bg-app: 222 225 233;         /* #dde1e9 — grey-blue ground (deepened) */
   --bg-surface: 255 255 255;
-  --text-base: 51 51 51;         /* #333333 */
-  --scrollbar-track: 231 232 239;
-  --scrollbar-thumb: 190 196 206;
+  --text-base: 33 37 43;         /* #21252b — near-black for contrast */
+  --scrollbar-track: 222 225 233;
+  --scrollbar-thumb: 180 186 198;
 
   --surface: 255 255 255;        /* white card */
   --surface-alpha: 1;
-  --surface-raised: 245 246 248; /* #f5f6f8 — raised controls/inputs */
+  --surface-raised: 240 242 246; /* #f0f2f6 — raised controls/inputs */
   --surface-raised-alpha: 1;
   --surface-overlay: 255 255 255; /* white modal panel */
-  --content: 51 51 51;           /* #333333 */
-  --content-muted: 107 114 128;  /* #6b7280 */
-  --content-subtle: 154 163 175; /* #9aa3af */
-  --border: 213 218 226;         /* #d5dae2 hairline */
+  --content: 33 37 43;           /* #21252b */
+  --content-muted: 79 87 99;     /* #4f5763 */
+  --content-subtle: 113 120 132; /* #717884 */
+  --border: 198 204 214;         /* #c6ccd6 hairline */
   --border-alpha: 1;
-  --border-strong: 180 188 200;  /* #b4bcc8 */
+  --border-strong: 168 176 190;  /* #a8b0be */
   --border-strong-alpha: 1;
 }
 
