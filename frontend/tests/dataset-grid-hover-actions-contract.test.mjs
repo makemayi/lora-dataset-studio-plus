@@ -11,7 +11,9 @@ const css = fs.readFileSync(path.join(frontend, 'src/index.css'), 'utf8')
 
 test('all image-card control groups share the hover-action contract', () => {
   assert.match(item, /dataset-grid-item rounded-\[28px\]/)
-  assert.ok((item.match(/dataset-grid-item__actions/g) || []).length >= 4)
+  // Three groups: bulk-select tick, the hover toolbar (which now also holds
+  // the ⛶/🗑 caption actions), and the keep/reject row.
+  assert.ok((item.match(/dataset-grid-item__actions/g) || []).length >= 3)
 })
 
 test('fine pointers hide controls without reflow and hover or focus reveals them', () => {

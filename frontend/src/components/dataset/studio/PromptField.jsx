@@ -47,7 +47,7 @@ export default function PromptField({ value, placeholder, onChange, onReset, isC
         rows={5}
         placeholder={placeholder}
         aria-label="LoRA test prompt"
-        className="w-full rounded-lg bg-surface-raised px-2 py-1.5 text-[0.75rem] text-content focus:outline-none focus:ring-1 focus:ring-primary resize-y focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
+        className="w-full rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]-raised px-2 py-1.5 text-[0.75rem] text-content focus:outline-none focus:ring-1 focus:ring-primary resize-y focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
       />
       {isCustom && (
         <button type="button" onClick={onReset}

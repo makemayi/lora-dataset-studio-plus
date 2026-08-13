@@ -97,20 +97,20 @@ function DatasetCaptionDialog({ open, onClose, onChoose }) {
             </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close dataset picker"
-            className="h-8 w-8 shrink-0 rounded-full bg-surface-raised text-content-muted transition-colors hover:bg-surface hover:text-content">
+            className="h-8 w-8 shrink-0 rounded-full bg-surface-raised text-content-muted shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content">
             ×
           </button>
         </div>
 
         {loading && (
-          <p className="m-0 flex items-center gap-2 rounded-lg bg-surface-raised px-3 py-2 text-[0.75rem] text-content-muted" role="status">
+          <p className="m-0 flex items-center gap-2 rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]-raised px-3 py-2 text-[0.75rem] text-content-muted" role="status">
             <span className="inline-block h-4 w-4 rounded-full border-2 border-purple-400/40 border-t-purple-400 animate-spin" aria-hidden />
             Loading datasets…
           </p>
         )}
 
         {error && (
-          <div className="rounded-lg border border-red-400/40 bg-red-50 px-3 py-2 text-[0.75rem] text-red-700" role="alert">
+          <div className="rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-red-400/40 bg-red-50 px-3 py-2 text-[0.75rem] text-red-700" role="alert">
             <p className="m-0">{error}</p>
             <button type="button" onClick={loadDatasets}
               className="mt-2 rounded border border-red-300/40 px-2 py-1 text-[0.6875rem] font-semibold hover:bg-red-50">
@@ -120,7 +120,7 @@ function DatasetCaptionDialog({ open, onClose, onChoose }) {
         )}
 
         {!loading && !error && datasets.length === 0 && (
-          <p className="m-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[0.75rem] text-amber-700" role="status">
+          <p className="m-0 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-amber-200 bg-amber-50 px-3 py-2 text-[0.75rem] text-amber-700" role="status">
             No datasets yet. Create a dataset and add captions before using this shortcut.
           </p>
         )}
@@ -133,7 +133,7 @@ function DatasetCaptionDialog({ open, onClose, onChoose }) {
               const meta = datasetMeta(dataset);
               return (
                 <button type="button" key={choice.id} onClick={() => onChoose(choice)}
-                  className="flex min-w-0 items-center gap-3 rounded-xl bg-surface-raised px-3 py-2.5 text-left hover:border-purple-400/60 hover:bg-purple-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400">
+                  className="flex min-w-0 items-center gap-3 rounded-xl bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]-raised px-3 py-2.5 text-left hover:border-purple-400/60 hover:bg-purple-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400">
                   <span className="text-base" aria-hidden>🔒</span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-semibold text-content">{choice.name}</span>
@@ -259,7 +259,7 @@ export default function DatasetCaptionControl({ onCaption }) {
       )}
 
       {error && (
-        <span className="basis-full rounded-lg border border-red-400/40 bg-red-50 px-2 py-1.5 text-[0.6875rem] leading-snug text-red-700" role="alert">
+        <span className="basis-full rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-red-400/40 bg-red-50 px-2 py-1.5 text-[0.6875rem] leading-snug text-red-700" role="alert">
           {error.message}{' '}
           <button type="button" onClick={retry}
             className="font-semibold underline underline-offset-2 hover:text-white">

@@ -10,27 +10,27 @@ export const WORKSPACE_SECTIONS = [
   // workflow order (build the set first, then review it) — matching the
   // guided PROGRESS list. The default landing section stays 'images'
   // (workspaceNavigation.js), which is position-independent.
-  { id: 'add', title: 'Add images', icon: '📸', eyebrow: 'build',
-    description: 'Generate AI variations from the reference — and mix in real photos (import or scrape).',
+  { id: 'add', title: 'Add images', icon: 'plus', eyebrow: 'build',
+    description: '',
     conceptDescription: 'Drop photos, or scrape galleries from the Scrape section — a concept LoRA learns from real images.',
     panels: [
       { id: 'reference', title: 'Reference photo', targetId: 'ds-add-reference', when: 'character' },
       { id: 'generate', title: 'Generate variations', targetId: 'ds-add-generate', when: 'character' },
       { id: 'import', title: 'Import photos', targetId: 'ds-add-import', when: 'always' },
     ] },
-  { id: 'images', title: 'Images', icon: '🖼️', eyebrow: 'overview',
+  { id: 'images', title: 'Images', icon: 'image', eyebrow: 'overview',
     description: 'Everything in the dataset — keep ✓ the good shots, reject ✕ the rest, edit a caption right on its tile.',
     panels: [
       { id: 'review', title: 'Review images', targetId: 'ds-images-review', when: 'always' },
       { id: 'bulk', title: 'Bulk actions', targetId: 'ds-images-bulk', when: 'hasSelectableImages' },
     ] },
-  { id: 'scrape', title: 'Scrape', icon: '🕸', eyebrow: 'build',
+  { id: 'scrape', title: 'Scrape', icon: 'search', eyebrow: 'build',
     description: 'Scan a gallery URL, pick the images you want, and import them full-frame — crop each one afterwards on its tile.',
     panels: [
       { id: 'scan', title: 'Scan a gallery', targetId: 'ds-scrape-scan', when: 'always',
         focusSelector: 'input[type="url"]' },
     ] },
-  { id: 'curation', title: 'Curation', icon: '🧹', eyebrow: 'quality',
+  { id: 'curation', title: 'Curation', icon: 'wand', eyebrow: 'quality',
     // "kept images" was true of every pass here until face resemblance started
     // scoring the undecided pile too — which is the whole point of scoring it.
     description: 'Quality passes — face resemblance (kept + still undecided), watermark find & clean, cleanup.',
@@ -42,14 +42,14 @@ export const WORKSPACE_SECTIONS = [
       { id: 'reject-flagged', title: 'Reject all flagged', targetId: 'ds-curation-reject-flagged', when: 'watermarkRejectable' },
       { id: 'rejected-cleanup', title: 'Rejected cleanup', targetId: 'ds-curation-rejected-cleanup', when: 'unused' },
     ] },
-  { id: 'captions', title: 'Captions', icon: '✍️', eyebrow: 'text',
+  { id: 'captions', title: 'Captions', icon: 'caption', eyebrow: 'text',
     description: 'Captions are what training reads each image by — generate them, watch for leaks, edit in bulk.',
     panels: [
       { id: 'generate', title: 'Generate captions', targetId: 'ds-captions-generate', when: 'always' },
       { id: 'leak-review', title: 'Leak review', targetId: 'ds-captions-leak-review', when: 'leakReview', reveal: 'caption-leak' },
       { id: 'tools', title: 'Caption tools', targetId: 'ds-captions-tools', when: 'hasCaptionedKept', reveal: 'caption-tools' },
     ] },
-  { id: 'export', title: 'Import & export', icon: '📦', eyebrow: 'data',
+  { id: 'export', title: 'Import & export', icon: 'download', eyebrow: 'data',
     description: 'Merge an existing dataset in — or get this one out: training ZIP, bank, portable backup, Hugging Face.',
     panels: [
       { id: 'import', title: 'Import dataset', targetId: 'ds-export-import', when: 'always' },
@@ -58,19 +58,19 @@ export const WORKSPACE_SECTIONS = [
       { id: 'backup', title: 'Portable backup', targetId: 'ds-export-backup', when: 'always' },
       { id: 'hugging-face', title: 'Publish to Hugging Face', targetId: 'ds-export-hugging-face', when: 'huggingFace' },
     ] },
-  { id: 'training', title: 'Training', icon: '🎓', eyebrow: 'train',
+  { id: 'training', title: 'Training', icon: 'training', eyebrow: 'train',
     description: 'Turn the kept & captioned images into a LoRA — locally or in the cloud.',
     panels: [
       { id: 'launch', title: 'Training status & launch', targetId: 'ds-training-launch', when: 'always' },
       { id: 'advanced', title: 'Advanced options', targetId: 'ds-training-advanced', when: 'trainingVisible', reveal: 'training-advanced' },
       { id: 'queue', title: 'Training queue', targetId: 'ds-training-queue', when: 'trainingQueue' },
     ] },
-  { id: 'checkpoints', title: 'Checkpoints & LoRAs', icon: '📦', eyebrow: 'results',
+  { id: 'checkpoints', title: 'Checkpoints & LoRAs', icon: 'folder', eyebrow: 'results',
     description: 'Review training saves, pick an epoch, import LoRAs into ComfyUI, and clean up old files.',
     panels: [
       { id: 'manager', title: 'Checkpoint manager', targetId: 'ds-checkpoints-manager', when: 'trainingVisible' },
     ] },
-  { id: 'studio', title: 'Studio', icon: '🎛️', eyebrow: 'test',
+  { id: 'studio', title: 'Studio', icon: 'studio', eyebrow: 'test',
     description: 'Test the trained LoRA with saved winning settings in the dedicated Studio.',
     panels: [
       { id: 'launcher', title: 'LoRA testing studio', targetId: 'ds-studio-launcher', when: 'studioVisible' },

@@ -63,6 +63,7 @@ export const ENGINE_ACCENTS = {
     icon: 'text-indigo-600',
     pill: 'bg-indigo-100 text-indigo-700',
     dot: 'bg-indigo-500',
+    ring: 'ring-indigo-400',
   },
   /* Violet deliberately sits NEXT to Klein's indigo: both are local-GPU engines,
      and reading them as a pair is information, not a collision — the icon and
@@ -76,6 +77,7 @@ export const ENGINE_ACCENTS = {
     icon: 'text-violet-600',
     pill: 'bg-violet-100 text-violet-700',
     dot: 'bg-violet-500',
+    ring: 'ring-violet-400',
   },
   /* Purple continues the local-GPU family (indigo -> violet -> purple) rather
      than reaching for a hue that would read as a paid API engine. The three
@@ -90,6 +92,7 @@ export const ENGINE_ACCENTS = {
     icon: 'text-purple-600',
     pill: 'bg-purple-100 text-purple-700',
     dot: 'bg-purple-500',
+    ring: 'ring-purple-400',
   },
   nanobanana: {
     card: 'bg-amber-50',
@@ -98,6 +101,7 @@ export const ENGINE_ACCENTS = {
     icon: 'text-amber-600',
     pill: 'bg-amber-100 text-amber-700',
     dot: 'bg-amber-500',
+    ring: 'ring-amber-400',
   },
   chatgpt: {
     card: 'bg-sky-50',
@@ -106,6 +110,7 @@ export const ENGINE_ACCENTS = {
     icon: 'text-sky-600',
     pill: 'bg-sky-100 text-sky-700',
     dot: 'bg-sky-500',
+    ring: 'ring-sky-400',
   },
   // Fuchsia is the 4th hue that stays apart from the other three in a dark
   // theme AND in deuteranopia: indigo and sky are both blue-side but far apart
@@ -118,6 +123,7 @@ export const ENGINE_ACCENTS = {
     icon: 'text-fuchsia-600',
     pill: 'bg-fuchsia-100 text-fuchsia-700',
     dot: 'bg-fuchsia-500',
+    ring: 'ring-fuchsia-400',
   },
   qwen: {
     card: 'bg-rose-50',
@@ -126,6 +132,7 @@ export const ENGINE_ACCENTS = {
     icon: 'text-rose-600',
     pill: 'bg-rose-100 text-rose-700',
     dot: 'bg-rose-500',
+    ring: 'ring-rose-400',
   },
 };
 

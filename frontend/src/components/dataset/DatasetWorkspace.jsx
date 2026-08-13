@@ -67,7 +67,26 @@ import { WORKSPACE_SECTIONS, SECTION_FOR_TARGET } from './workspaceSections';
 import { postJson, putJson } from '../../api/fetchClient';
 import { datasetToBankRequest, datasetToBankUrl } from './datasetToBank';
 import { HelpBadge } from '../../help/HelpMode';
-import { RefreshIcon } from '../common/icons';
+import {
+  RefreshIcon, PlusIcon, ImageIcon, MagnifierIcon, WandIcon, CaptionIcon,
+  DownloadIcon, TrainingIcon, FolderIcon, StudioIcon,
+} from '../common/icons';
+
+/* Section icon key (workspaceSections.js `icon`) → the monochrome SVG glyph
+   drawn in icons.jsx. The rail stopped using emoji for its controls: emoji
+   draw at a different weight and baseline per platform, and a control's glyph
+   should tint with its state, which `currentColor` SVGs do and emoji cannot. */
+const WORKSPACE_ICONS = {
+  plus: PlusIcon,
+  image: ImageIcon,
+  search: MagnifierIcon,
+  wand: WandIcon,
+  caption: CaptionIcon,
+  download: DownloadIcon,
+  training: TrainingIcon,
+  folder: FolderIcon,
+  studio: StudioIcon,
+};
 import { requestHelpTip } from '../../help/helpTips';
 import { openCollapsedAncestors } from '../../help/revealTarget';
 import {
@@ -138,6 +157,30 @@ function NavBadge({ badge }) {
       <span aria-hidden>{badge.n}</span>
       <span className="sr-only"> — {badge.srLabel}</span>
     </span>
+  );
+}
+
+/* The recent-activity strip, split OUT of the nav rail into its own block below
+   it, with a fold button. Defaults OPEN so the shortcut stays discoverable, but
+   folds away when four buckets would crowd the real nav. */
+function RecentActivityFold({ onOpen, currentId, refreshKey }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <section className="hidden lg:block lg:mt-4 rounded-[28px] bg-white/60 p-3 backdrop-blur-xl shadow-[0_0_0_1px_rgba(255,255,255,0.4),0_8px_28px_rgba(0,0,0,0.08),0_2px_8px_rgba(0,0,0,0.04)]">
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
+        className="flex w-full items-center gap-2 px-3 text-left">
+        <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-content-subtle">Recent</span>
+        <span aria-hidden className="ml-auto flex text-xs text-content-subtle">
+          <span hidden={!open}>▲</span>
+          <span hidden={open}>▼</span>
+        </span>
+      </button>
+      {open && (
+        <div className="mt-2">
+          <RecentVariations onOpen={onOpen} currentId={currentId} refreshKey={refreshKey} />
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -886,13 +929,13 @@ export default function DatasetWorkspace({ ds, onBack }) {
   const panelNavItem = (sectionId, destination, chip = false) => {
     const isActive = sectionId === section && destination.id === panel;
     const className = chip
-      ? `shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs ${
+      ? `shrink-0 whitespace-nowrap rounded-full border border-transparent px-3 py-1.5 text-xs ${
           isActive
-            ? 'border-indigo-400/60 bg-indigo-50 text-indigo-100'
-            : 'border-border text-content-subtle hover:text-content'}`
-      : `relative w-full rounded-md py-1.5 pl-8 pr-3 text-left text-xs ${
+            ? 'bg-surface-raised text-content'
+            : 'text-content-subtle hover:text-content'}`
+      : `relative w-full rounded-full px-3 py-1.5 text-left text-xs ${
           isActive
-            ? 'bg-indigo-50 text-indigo-700'
+            ? 'bg-surface-raised text-content'
             : 'text-content-subtle hover:bg-surface hover:text-content-muted'}`;
     return (
       <button type="button"
@@ -900,9 +943,6 @@ export default function DatasetWorkspace({ ds, onBack }) {
         aria-current={isActive ? 'location' : undefined}
         data-mobile-panel={chip ? destination.id : undefined}
         className={className}>
-        {!chip && isActive && (
-          <span aria-hidden className="absolute bottom-1.5 left-4 top-1.5 w-px rounded bg-indigo-400" />
-        )}
         {destination.title}
       </button>
     );
@@ -910,13 +950,16 @@ export default function DatasetWorkspace({ ds, onBack }) {
 
   // Un item de la sidebar : rail vertical desktop (chip=false) ou chip du bandeau
   // horizontal mobile (chip=true) — mêmes classes que la sidebar de Settings.
+  // macOS pill selection: the current item is a filled rounded-full surface,
+  // never an outline or a left-edge bar (see the 2026-08-10 UI pass).
   const navItem = (s, chip) => {
     const isActive = s.id === section;
+    const Icon = WORKSPACE_ICONS[s.icon] || ImageIcon;
     const base = chip
-      ? `flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium transition-[box-shadow,background-color,color] duration-200 ${
-          isActive ? 'bg-surface-raised text-content' : 'text-content-muted hover:bg-surface-raised hover:text-content hover:shadow-[0_2px_8px_rgba(0,0,0,0.08)]'}`
-      : `relative flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition-[box-shadow,background-color,color] duration-200 ${
-          isActive ? 'bg-surface-raised text-content' : 'text-content-muted hover:bg-surface-raised hover:text-content hover:shadow-[0_2px_8px_rgba(0,0,0,0.08),0_6px_18px_rgba(0,0,0,0.06)]'}`;
+      ? `flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-transparent px-3 py-1.5 text-xs font-medium transition-[box-shadow,background-color,color] duration-200 ${
+          isActive ? 'bg-surface-raised text-content' : 'text-content-muted hover:bg-surface-raised hover:text-content hover:shadow-[0_2px_4px_rgba(0,0,0,0.14),0_8px_16px_rgba(0,0,0,0.12)]'}`
+      : `relative flex w-full items-center gap-2.5 rounded-full px-3 py-2 text-left text-sm font-medium transition-[box-shadow,background-color,color] duration-200 ${
+          isActive ? 'bg-surface-raised text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_0_0_1px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.10)]' : 'text-content-muted hover:bg-surface hover:text-content'}`;
     return (
       <button type="button" onClick={() => setSection(s.id)}
         aria-current={isActive ? 'page' : undefined}
@@ -926,13 +969,9 @@ export default function DatasetWorkspace({ ds, onBack }) {
           : undefined}
         data-mobile-section={chip ? s.id : undefined}
         className={base}>
-        {!chip && isActive && (
-          <span aria-hidden className="absolute bottom-1.5 left-0 top-1.5 w-0.5 rounded bg-gradient-primary" />
-        )}
-        <span aria-hidden>{s.icon}</span>
+        <Icon className="h-4 w-4 shrink-0" />
         <span>{s.title}</span>
         <NavBadge badge={navBadges[s.id]} />
-        {!chip && <span aria-hidden className="text-content-subtle text-[0.625rem]">{isActive ? '▾' : '▸'}</span>}
       </button>
     );
   };
@@ -1088,7 +1127,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
             </nav>
           )}
           {/* Desktop: sticky rail + guided progress below it */}
-          <div className="hidden lg:sticky lg:top-20 lg:flex lg:flex-col lg:gap-3">
+          <div className="hidden lg:sticky lg:top-20 lg:flex lg:flex-col lg:gap-3 rounded-[28px] bg-white/60 p-3 backdrop-blur-xl shadow-[0_0_0_1px_rgba(255,255,255,0.4),0_8px_28px_rgba(0,0,0,0.08),0_2px_8px_rgba(0,0,0,0.04)]">
             <nav aria-label="Dataset sections">
               <p className="m-0 px-3 pb-2 font-mono text-[11px] uppercase tracking-[0.18em] text-content-subtle">Dataset</p>
               <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
@@ -1100,7 +1139,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                       {navItem(s, false)}
                       {isActive && (
                         <ul id={`dataset-nav-panels-${s.id}`}
-                          className="m-0 ml-4 flex list-none flex-col gap-0.5 border-l border-border py-1 pl-1 p-0">
+                          className="m-0 ml-4 flex list-none flex-col gap-0.5 p-0">
                           {destinations.map((destination) => (
                             <li key={destination.id}>{panelNavItem(s.id, destination, false)}</li>
                           ))}
@@ -1114,13 +1153,11 @@ export default function DatasetWorkspace({ ds, onBack }) {
             {!isConceptual && (
               <GuidedChecklist steps={steps} currentId={nextStep ? nextStep.id : null} onJump={jumpTo} />
             )}
-            {/* The rail ended here, in dead space. A strip of recent faces uses
-                it for the one thing no other surface does: showing output from
-                OTHER datasets, and getting back into them in one click. It
-                renders nothing at all until something has been generated. */}
-            <RecentVariations onOpen={ds.open} currentId={d.id}
-              refreshKey={d.images ? d.images.length : 0} />
           </div>
+          {/* Recent activity — split out of the nav rail into its own block
+              below it, with its own fold button. */}
+          <RecentActivityFold onOpen={ds.open} currentId={d.id}
+            refreshKey={d.images ? d.images.length : 0} />
         </aside>
 
         <div className="flex flex-col gap-3 min-w-0 mt-1 lg:mt-0">
@@ -1326,11 +1363,8 @@ export default function DatasetWorkspace({ ds, onBack }) {
               <>
                 <div id="gf-reference" className="scroll-mt-20">
                   <div id="ds-add-reference" tabIndex={-1} className="scroll-mt-20 flex flex-col gap-1">
-                    <span className="text-content-subtle text-[0.6875rem]">
-                      one clear photo of the face — every generated variation starts from it
-                    </span>
                     <ReferencePanel refFilename={d.ref_filename} datasetId={d.id} onSetRef={ds.setRef}
-                      onCropRef={() => setRefCrop(true)} onEditRef={() => setRefEdit(true)} busy={ds.busy} importBusy={importBusy} visionBusy={visionImportBusy} nonce={ds.refNonce}
+                      onCropRef={() => setRefCrop(true)} onEditRef={() => setRefEdit(true)} onRecropAuto={ds.recropRefAuto} busy={ds.busy} importBusy={importBusy} visionBusy={visionImportBusy} nonce={ds.refNonce}
                       extraRefs={d.ref_extra_filenames || []}
                       onAddExtraRef={ds.addExtraRef} onRemoveExtraRef={ds.removeExtraRef}
                       onCropExtraRef={(fn) => setExtraRefCrop(fn)}

@@ -25,7 +25,7 @@ export default function SubfolderPersonPanel({
   const scan = offer && onScan ? (
     <div className="flex flex-wrap items-center gap-2 text-xs text-content-subtle">
       <button type="button" onClick={onScan} disabled={busy} title={offer.note}
-        className="rounded-full bg-surface-raised px-2.5 py-1 font-semibold text-content transition-colors hover:bg-surface disabled:opacity-50">
+        className="rounded-full bg-surface-raised px-2.5 py-1 font-semibold text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 disabled:opacity-50">
         {offer.label}
       </button>
       <span>{offer.note}</span>
@@ -84,12 +84,12 @@ export default function SubfolderPersonPanel({
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" onClick={onCheck} disabled={busy}
           title={checkCostNote(entry)}
-          className="rounded-full bg-surface-raised px-2.5 py-0.5 font-semibold text-content transition-colors hover:bg-surface disabled:opacity-50">
+          className="rounded-full bg-surface-raised px-2.5 py-0.5 font-semibold text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 disabled:opacity-50">
           🔍 {sample ? 'Check the sample again' : `Check a sample (${SAMPLE_SIZE} images)`}
         </button>
         <button type="button" onClick={onRevoke} disabled={busy}
           title={revokeNote(subfolder)}
-          className="rounded-full bg-surface-raised px-2.5 py-0.5 text-content-subtle transition-colors hover:bg-surface disabled:opacity-50">
+          className="rounded-full bg-surface-raised px-2.5 py-0.5 text-content-subtle shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 disabled:opacity-50">
           ↩ Not one person after all
         </button>
       </div>

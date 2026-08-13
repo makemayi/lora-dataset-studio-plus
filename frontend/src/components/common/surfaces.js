@@ -25,7 +25,7 @@
 /** The elevation alone, for a card that brings its own background — a run card
  *  tinted by where it ran, a status panel tinted by its tone. */
 export const CARD_SHADOW =
-  'shadow-[0_12px_40px_rgba(79,70,229,0.08),0_4px_12px_rgba(0,0,0,0.02)]';
+  'shadow-[0_0_0_1px_rgba(255,255,255,0.4),0_2px_4px_rgba(0,0,0,0.10),0_10px_20px_rgba(0,0,0,0.10),0_12px_40px_rgba(79,70,229,0.10)]';
 
 /** A card that does not react: a panel, a form, a section. THE glass recipe —
  *  the same one the hero "next step" card wears: a soft indigo-to-white
@@ -39,9 +39,34 @@ export const CARD_SURFACE =
  *  covers: a 4px lift and a deeper indigo glow, matching the hero card. */
 export const FLOAT_HOVER =
   'transition-[box-shadow,transform] duration-200 hover:-translate-y-1 ' +
-  'hover:shadow-[0_20px_60px_rgba(79,70,229,0.15),0_8px_20px_rgba(0,0,0,0.05)]';
+  'hover:shadow-[0_20px_60px_rgba(79,70,229,0.18),0_8px_20px_rgba(0,0,0,0.10)]';
 
 export const CARD_SURFACE_INTERACTIVE = `${CARD_SURFACE} ${FLOAT_HOVER}`;
+
+/* ── 2026-08-13 wave — the "floating" recipes first established on the dataset
+   workspace (engine cards, preset/shot pills, the reference card, the sidebar)
+   and now shared so every page reads the same. ──────────────────────────── */
+
+/** At-rest two-layer shadow: a close definition layer + a larger diffuse layer.
+ *  Heavy enough (0.12–0.14 alpha) that elevation reads WITHOUT a hover — the
+ *  earlier 0.05-alpha shadows were invisible on the light ground. */
+export const FLOAT_SHADOW =
+  'shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]';
+
+/** The hover twin: lift a hair and deepen the shadow so the press-in feels real. */
+export const FLOAT_HOVER_SHADOW =
+  'hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(0,0,0,0.18),0_10px_20px_rgba(0,0,0,0.16)]';
+
+/** A frosted-glass PILL for tags / chips: white glass + blur + float shadow. */
+export const GLASS_PILL =
+  'rounded-full bg-white/60 backdrop-blur-md ' +
+  `${FLOAT_SHADOW} ${FLOAT_HOVER_SHADOW} hover:bg-white/80`;
+
+/** The CURRENT thing as a filled pill — macOS selection, never an outline.
+ *  Neutral (not accent-tinted): the accent belongs to the primary action. */
+export const SELECTED_PILL =
+  'rounded-full bg-surface-raised text-content ' +
+  'shadow-[0_1px_2px_rgba(0,0,0,0.14),0_0_0_1px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.10)]';
 
 /* `max-w-xl` is the tidy-up from the same wave: the settings shell went
    full-width on 2026-08-09 and every `w-full` control went with it, so a text
@@ -52,13 +77,19 @@ export const INPUT_CLASS =
   'mt-1 w-full max-w-xl rounded-xl bg-surface-raised px-3 py-2 text-sm text-content ' +
   'placeholder:text-content-subtle focus:outline-none focus:ring-2 focus:ring-primary/40';
 
-/** A secondary action: the outline button, minus the outline. */
+/** A secondary action: the outline button, minus the outline — now a filled
+ *  pill that floats via the shared shadow. */
 export const QUIET_BUTTON =
   'inline-flex items-center gap-1.5 rounded-full bg-surface-raised px-3 py-1.5 text-xs font-semibold ' +
-  'text-content transition-colors hover:bg-surface disabled:opacity-50';
+  'text-content ' + `${FLOAT_SHADOW} ` +
+  'transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface ' + `${FLOAT_HOVER_SHADOW} ` +
+  'disabled:opacity-50';
 
-/** The primary action on a page (create, promote, generate). */
+/** The primary action on a page (create, promote, generate). Indigo gradient
+ *  pill with its own indigo-tinted float shadow, deepened on hover. */
 export const PRIMARY_BUTTON =
   'inline-flex items-center gap-1.5 rounded-full bg-gradient-primary px-4 py-2 text-sm font-semibold ' +
-  'text-white transition-all duration-200 hover:scale-[1.02] hover:shadow-[0_4px_12px_rgba(79,70,229,0.30)] ' +
+  'text-white shadow-[0_2px_4px_rgba(79,70,229,0.30),0_4px_10px_rgba(79,70,229,0.18)] ' +
+  'transition-all duration-200 hover:scale-[1.02] ' +
+  'hover:shadow-[0_4px_12px_rgba(79,70,229,0.40),0_8px_20px_rgba(79,70,229,0.25)] ' +
   'disabled:opacity-50';

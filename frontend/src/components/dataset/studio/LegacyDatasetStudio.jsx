@@ -68,7 +68,7 @@ function StudioBody({ datasetId, family, onFamilyChange, initialBase = null }) {
     return (
       <div className="flex flex-col gap-3">
         {d && <FamilySelector families={d.available_families} active={d.family} onSelect={onFamilyChange} />}
-        <p className="text-content-subtle text-sm rounded-lg bg-surface px-3 py-6 text-center">
+        <p className="text-content-subtle text-sm rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-3 py-6 text-center">
           {d ? 'No testable checkpoint for this pipeline (train it first).' : 'Loading…'}
         </p>
       </div>
@@ -80,7 +80,7 @@ function StudioBody({ datasetId, family, onFamilyChange, initialBase = null }) {
       <FamilySelector families={d.available_families} active={d.family} onSelect={onFamilyChange} />
       {d?.trigger_word && (
         <div className="flex items-center gap-2 flex-wrap">
-          <code className="px-2 py-0.5 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-[0.6875rem] font-semibold">
+          <code className="px-2 py-0.5 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-indigo-200 bg-indigo-50 text-indigo-700 text-[0.6875rem] font-semibold">
             {d.trigger_word}
           </code>
           {d?.best_settings && (

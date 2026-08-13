@@ -80,9 +80,9 @@ export default function StudioRunSetup({
   }, [loadRecent]);
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg bg-surface p-3">
+    <div className="flex flex-col gap-3 rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] p-3">
       {gpuBusy && (
-        <p className="m-0 rounded-lg border border-red-400/40 bg-red-50 px-3 py-2 text-red-600 text-sm" role="status">
+        <p className="m-0 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-red-400/40 bg-red-50 px-3 py-2 text-red-600 text-sm" role="status">
           {gpuBusy}
         </p>
       )}
@@ -113,7 +113,7 @@ export default function StudioRunSetup({
         </div>
         <textarea id="studio-run-prompt" value={prompt} onChange={(e) => onPrompt(e.target.value)} rows={5}
           placeholder="Leave empty for the LoRA's default prompt…"
-          className="rounded-lg bg-surface-raised px-2.5 py-1.5 text-content text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-y min-h-[7rem]" />
+          className="rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]-raised px-2.5 py-1.5 text-content text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-y min-h-[7rem]" />
       </div>
       <DescribeImageModal open={describeOpen} onClose={() => setDescribeOpen(false)}
         onResult={applyDescription} />
@@ -126,17 +126,17 @@ export default function StudioRunSetup({
       <div className="flex items-center gap-2 flex-wrap">
         <label className="flex items-center gap-1.5 text-content-muted text-[0.6875rem]">
           <span className="uppercase">Seed</span>
-          <span className="tabular-nums text-content px-2 py-0.5 rounded-lg bg-surface-raised">{seed}</span>
+          <span className="tabular-nums text-content px-2 py-0.5 rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]-raised">{seed}</span>
           <button type="button" onClick={onReroll} aria-label="New random seed"
             title="New random seed"
-            className="px-2 py-0.5 rounded-full bg-surface-raised text-content transition-colors hover:bg-surface">🎲</button>
+            className="px-2 py-0.5 rounded-full bg-surface-raised text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5">🎲</button>
         </label>
 
         <label className="flex items-center gap-1.5 text-content-muted text-[0.6875rem]">
           <span className="uppercase">Images / config</span>
           <select value={count} onChange={(e) => onCount(Number(e.target.value))}
             aria-label="Number of images per configuration"
-            className="rounded-lg bg-surface-raised px-1.5 py-0.5 text-content">
+            className="rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]-raised px-1.5 py-0.5 text-content">
             {[1, 2, 3, 4].map((n) => <option key={n} value={n}>×{n}</option>)}
           </select>
         </label>
@@ -174,7 +174,7 @@ export default function StudioRunSetup({
       </div>
       {cost.heavy && (
         <p data-testid="heavy-run-notice"
-          className="m-0 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[0.6875rem] text-amber-700"
+          className="m-0 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[0.6875rem] text-amber-700"
           role="status">
           <span aria-hidden>⏱</span> {heavyRunNotice(cost)}
         </p>

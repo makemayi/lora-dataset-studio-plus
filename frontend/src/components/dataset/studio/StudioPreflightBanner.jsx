@@ -26,7 +26,7 @@ export default function StudioPreflightBanner({ missing, archMismatch, onDismiss
     const name = (archMismatch.checkpoint || '').replace(/\\/g, '/').split('/').pop();
     return (
       <div role="alert"
-        className="rounded-lg border border-amber-200 bg-amber-400/10 px-3 py-2.5 text-sm text-amber-700 flex items-start gap-2">
+        className="rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-amber-200 bg-amber-400/10 px-3 py-2.5 text-sm text-amber-700 flex items-start gap-2">
         <span aria-hidden className="text-base leading-none">⚠</span>
         <p className="m-0">
           <b className="font-semibold">“{name}” is a {det} LoRA</b>, but this is the {fam} Studio —
@@ -50,7 +50,7 @@ export default function StudioPreflightBanner({ missing, archMismatch, onDismiss
 
   return (
     <div role="alert"
-      className="rounded-lg border border-red-400/40 bg-red-50 px-3 py-2.5 text-sm text-red-700 flex flex-col gap-2">
+      className="rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-red-400/40 bg-red-50 px-3 py-2.5 text-sm text-red-700 flex flex-col gap-2">
       <div className="flex items-start gap-2">
         <span aria-hidden className="text-base leading-none">⚠</span>
         <p className="m-0 font-semibold">

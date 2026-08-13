@@ -71,7 +71,7 @@ export default function CanvasImageGroup({ group, datasetId, laneName, boardScal
       aria-label={`Group of ${count} pinned images from ${laneName || 'this dataset'}`}
       style={{ position: 'absolute', left: group.x, top: group.y,
         width: group.w, height: group.h }}
-      className="lds-canvas-group rounded-md border border-indigo-200 bg-surface-overlay shadow-lg">
+      className="lds-canvas-group rounded-md border border-indigo-200 bg-surface-overlay shadow-[0_2px_4px_rgba(0,0,0,0.14),0_8px_16px_rgba(0,0,0,0.12)]">
 
       {/* The pictures. Edge to edge, gap zero — the strip is one band. */}
       {group.members.map((m) => (

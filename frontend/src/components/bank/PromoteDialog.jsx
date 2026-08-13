@@ -171,7 +171,7 @@ export default function PromoteDialog({ bankId, selectedIds, onClose, onStarted 
 
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button type="button" onClick={onClose}
-            className="rounded-full bg-surface-raised px-3 py-1.5 text-sm text-content transition-colors hover:bg-surface">
+            className="rounded-full bg-surface-raised px-3 py-1.5 text-sm text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5">
             Cancel
           </button>
           <button type="button" onClick={start}

@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-14-glass-redesign',
+    date: '2026-08-14',
+    title: 'A lighter, floatier studio — frosted glass, pills, and a split Recent rail',
+    blurb: 'The app now reads as frosted glass over a soft light ground: the sidebar and every card float on real shadows, the current thing is a filled pill, and engine + shot tags are monochrome glossy pills. The workspace Recent strip is split into Recent generations, edits, upscales and captions — each foldable — so a face you swapped an hour ago is never buried.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-13-modern-shell',
     date: '2026-08-13',
     title: 'A sharper studio — a real mark, confident color, clearer hierarchy',

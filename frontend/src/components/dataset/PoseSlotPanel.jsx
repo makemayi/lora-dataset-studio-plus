@@ -21,6 +21,19 @@ const POSE_HINTS = {
   back: 'from behind',
 };
 
+/* Same pill + frame recipes as the main reference card in ReferencePanel.jsx —
+   one voice across every card in the row. */
+const CARD_BUTTON =
+  'w-full rounded-full bg-surface-raised px-2 py-1 text-[0.6875rem] font-medium text-content ' +
+  'shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_8px_rgba(0,0,0,0.12)] transition-[box-shadow,background-color,transform] duration-200 ' +
+  'hover:bg-surface hover:shadow-[0_2px_4px_rgba(0,0,0,0.18),0_8px_16px_rgba(0,0,0,0.14)] hover:-translate-y-px ' +
+  'disabled:cursor-not-allowed disabled:opacity-40';
+
+const CARD_FRAME =
+  'relative w-28 h-28 rounded-2xl bg-black overflow-hidden shrink-0 ' +
+  'shadow-[0_2px_4px_rgba(0,0,0,0.16),0_8px_16px_rgba(0,0,0,0.12)] transition-shadow duration-200 ' +
+  'hover:shadow-[0_6px_14px_rgba(0,0,0,0.24),0_16px_28px_rgba(0,0,0,0.16)]';
+
 export default function PoseSlotPanel({ datasetId, poseSlots = {}, busy, importBusy = busy,
                                        nonce = 0, onSetPoseSlot, onCropPoseSlot,
                                        onMirrorPoseSlot, onTogglePoseSlotEnabled, onRemovePoseSlot }) {
@@ -45,15 +58,27 @@ export default function PoseSlotPanel({ datasetId, poseSlots = {}, busy, importB
   }, [onSetPoseSlot, importBusy]);
 
   return (
-    <div className="flex items-center gap-2 flex-nowrap overflow-x-auto border-t border-border pt-2">
-      <span className="text-content-subtle text-[0.6875rem]">
-        Angle references <span className="opacity-70">(Krea 2 Edit — matched to the shot's angle)</span>
-      </span>
+    <>
       {ACTIVE_POSE_KEYS.map((poseKey) => {
         const slot = poseSlots[poseKey] || { filename: null, enabled: false };
         return (
-          <div key={poseKey} className="flex flex-col items-center gap-1 w-16">
-            <div className="relative w-16 h-16 rounded-lg overflow-hidden bg-black shrink-0"
+          <div key={poseKey} className="flex w-28 shrink-0 flex-col items-center gap-2">
+            <div className="flex w-full items-center justify-center gap-1.5">
+              <span className="truncate text-xs text-content-muted"
+                title={`Used for shots asking for ${POSE_HINTS[poseKey]}`}>
+                {POSE_LABELS[poseKey]}
+              </span>
+              {slot.filename && (
+                <label className="flex items-center gap-0.5 text-[0.5625rem] text-content-subtle cursor-pointer"
+                  title="Enable this angle for generation">
+                  <input type="checkbox" checked={!!slot.enabled} disabled={busy}
+                    onChange={(e) => onTogglePoseSlotEnabled?.(poseKey, e.target.checked)}
+                    className="accent-indigo-500 h-3 w-3" />
+                  On
+                </label>
+              )}
+            </div>
+            <div className={CARD_FRAME}
               onMouseEnter={() => { hoverKey.current = poseKey; }} onMouseLeave={() => { hoverKey.current = null; }}
               title={`Hover and press Ctrl+V to paste the ${POSE_LABELS[poseKey]} reference`}>
               {slot.filename
@@ -67,11 +92,11 @@ export default function PoseSlotPanel({ datasetId, poseSlots = {}, busy, importB
                   </button>}
               {slot.filename && (
                 <>
-                  <button type="button" onClick={() => onCropPoseSlot?.(poseKey)} disabled={busy}
-                    aria-label={`Crop the ${POSE_LABELS[poseKey]} reference`}
-                    title="Crop this angle reference — the full frame stays kept"
-                    className="absolute bottom-0 left-0 w-4 h-4 flex items-center justify-center rounded-tr bg-black/70 text-white text-[0.625rem] leading-none disabled:opacity-40">
-                    ✂
+                  <button type="button" onClick={() => onRemovePoseSlot?.(poseKey)} disabled={busy}
+                    aria-label={`Remove the ${POSE_LABELS[poseKey]} reference`}
+                    title="Remove this angle reference"
+                    className="absolute top-0 right-0 w-4 h-4 flex items-center justify-center rounded-bl bg-black/70 text-white text-[0.625rem] leading-none disabled:opacity-40">
+                    ✕
                   </button>
                   <button type="button" onClick={() => onMirrorPoseSlot?.(poseKey)} disabled={busy}
                     aria-label={`Flip the ${POSE_LABELS[poseKey]} reference 180 degrees horizontally`}
@@ -79,26 +104,18 @@ export default function PoseSlotPanel({ datasetId, poseSlots = {}, busy, importB
                     className="absolute bottom-0 right-0 w-4 h-4 flex items-center justify-center rounded-tl bg-black/70 text-white text-[0.625rem] leading-none disabled:opacity-40">
                     ⇋
                   </button>
-                  <button type="button" onClick={() => onRemovePoseSlot?.(poseKey)} disabled={busy}
-                    aria-label={`Remove the ${POSE_LABELS[poseKey]} reference`}
-                    className="absolute top-0 right-0 w-4 h-4 flex items-center justify-center rounded-bl bg-black/70 text-white text-[0.625rem] leading-none disabled:opacity-40">
-                    ✕
-                  </button>
                 </>
               )}
             </div>
-            <span className="text-content-subtle text-[0.625rem] text-center leading-tight"
-              title={`Used for shots asking for ${POSE_HINTS[poseKey]}`}>
-              {POSE_LABELS[poseKey]}
-            </span>
-            {slot.filename && (
-              <label className="flex items-center gap-1 text-[0.625rem] text-content-muted cursor-pointer">
-                <input type="checkbox" checked={!!slot.enabled} disabled={busy}
-                  onChange={(e) => onTogglePoseSlotEnabled?.(poseKey, e.target.checked)}
-                  className="accent-indigo-500 w-3 h-3" />
-                On
-              </label>
-            )}
+            <div className="flex w-full flex-col gap-1">
+              <button type="button" onClick={() => inputs.current[poseKey]?.click()} disabled={importBusy}
+                className={CARD_BUTTON}>
+                {slot.filename ? 'Change' : 'Set'}
+              </button>
+              <button type="button" onClick={() => onCropPoseSlot?.(poseKey)} disabled={busy || !slot.filename}
+                title="Crop this angle reference — the full frame stays kept"
+                className={CARD_BUTTON}>✂ Crop</button>
+            </div>
             <input ref={(el) => { inputs.current[poseKey] = el; }} type="file" accept="image/*"
               className="hidden" disabled={importBusy}
               onChange={(e) => {
@@ -108,6 +125,6 @@ export default function PoseSlotPanel({ datasetId, poseSlots = {}, busy, importB
           </div>
         );
       })}
-    </div>
+    </>
   );
 }

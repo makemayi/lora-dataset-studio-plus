@@ -28,7 +28,7 @@ export default function BankSemanticEngine({ state, disabled = false,
     && offersSemanticGpuPython(state, gpuPresent)
 
   return (
-    <fieldset className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 space-y-2"
+    <fieldset className="rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-indigo-100 bg-indigo-50 p-3 space-y-2"
       disabled={disabled || switching || live}>
       <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-content-muted">
         Semantic engine

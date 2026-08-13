@@ -1,5 +1,5 @@
 /**
- * The workspace rail's recent-variations strip, RENDERED WITH ITEMS.
+ * The workspace rail's recent-activity strip, RENDERED WITH ITEMS.
  *
  * The first version of this file only asserted the EMPTY case, because the
  * component both fetched and rendered and a static render never runs an effect.
@@ -9,7 +9,8 @@
  * was what it asserted.
  *
  * The list is a pure function of its items now, so the case that matters is the
- * one being tested.
+ * one being tested. It also grew from one "Recent" strip into FOUR buckets
+ * (generated / edited / upscaled / captioned), each with its own heading.
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -17,7 +18,7 @@ import { readFileSync } from 'node:fs'
 
 import { render } from './support/mountJsx.mjs'
 
-const { default: RecentVariations, RecentVariationsList, RECENT_LIMIT } =
+const { default: RecentVariations, RecentVariationsList, RECENT_LIMIT, RECENT_SECTIONS } =
   await import('../src/components/dataset/RecentVariations.jsx')
 
 const IMAGES = [
@@ -26,8 +27,8 @@ const IMAGES = [
 ]
 
 test('every face is a round button into its own dataset', () => {
-  const html = render(RecentVariationsList, { images: IMAGES, onOpen: () => {} })
-  assert.match(html, /Recent/)
+  const html = render(RecentVariationsList, { activity: { generated: IMAGES }, onOpen: () => {} })
+  assert.match(html, /Recent generations/)
   assert.match(html, /rounded-full/)
   // The filename is URL-encoded — a space in it must not break the src.
   assert.match(html, /\/api\/dataset\/3\/img\/a%201\.png/)
@@ -39,18 +40,35 @@ test('every face is a round button into its own dataset', () => {
 
 test('the dataset you are already in is marked, not hidden', () => {
   const html = render(RecentVariationsList,
-    { images: IMAGES, onOpen: () => {}, currentId: 3 })
+    { activity: { generated: IMAGES }, onOpen: () => {}, currentId: 3 })
   assert.match(html, /aria-current="true"/)
   assert.match(html, /this dataset/)
   // ...and it is the only one so marked.
   assert.equal(html.match(/aria-current="true"/g).length, 1)
 })
 
+test('each non-empty bucket renders under its own English heading', () => {
+  const activity = {
+    generated: [IMAGES[0]],
+    edited: [IMAGES[1]],
+    upscaled: [],
+    captioned: [IMAGES[0]],
+  }
+  const html = render(RecentVariationsList, { activity, onOpen: () => {} })
+  for (const s of RECENT_SECTIONS) {
+    if (activity[s.key].length) assert.match(html, new RegExp(s.label))
+  }
+  // An empty bucket draws nothing — no heading, no empty gap.
+  assert.doesNotMatch(html, /Recent upscales/)
+  // A face that appears in two buckets appears twice (it is two answers).
+  assert.equal(html.match(/Open Ana/g).length, 2)
+})
+
 test('it draws nothing at all when there is nothing to show', () => {
   /* A fresh install must not pay a permanently empty section — the rail's dead
      space is what this replaces, not what it doubles. */
-  assert.equal(render(RecentVariationsList, { images: [], onOpen: () => {} }).trim(), '')
-  assert.equal(render(RecentVariationsList, { images: null, onOpen: () => {} }).trim(), '')
+  assert.equal(render(RecentVariationsList, { activity: {}, onOpen: () => {} }).trim(), '')
+  assert.equal(render(RecentVariationsList, { activity: null, onOpen: () => {} }).trim(), '')
   // The fetching wrapper renders nothing before its request resolves, too.
   assert.equal(render(RecentVariations, { onOpen: () => {} }).trim(), '')
 })
@@ -59,11 +77,11 @@ test('the wrapper reads apiFetch the way apiFetch actually behaves', () => {
   const src = readFileSync(
     new URL('../src/components/dataset/RecentVariations.jsx', import.meta.url), 'utf8')
   assert.ok(RECENT_LIMIT > 0 && RECENT_LIMIT <= 12)
-  assert.match(src, /recent-images\?limit=\$\{RECENT_LIMIT\}/)
+  assert.match(src, /recent-activity\?limit=\$\{RECENT_LIMIT\}/)
   // It resolves to the PARSED BODY and throws on a bad status; treating it as a
   // Response is what broke the first version. (Matched on the CALL, not on the
   // prose: the file explains that mistake in its own header.)
-  assert.match(src, /\.then\(\(d\) => \{ if \(alive\) setImages/)
+  assert.match(src, /\.then\(\(d\) => \{ if \(alive\) setActivity/)
   assert.doesNotMatch(src, /then\(\(r\) => \(r\.ok/)
   assert.match(src, /\.catch\(\(\) => \{\}\)/)
 })
@@ -71,7 +89,10 @@ test('the wrapper reads apiFetch the way apiFetch actually behaves', () => {
 test('the rail mounts it under the checklist, not in place of it', () => {
   const workspace = readFileSync(
     new URL('../src/components/dataset/DatasetWorkspace.jsx', import.meta.url), 'utf8')
-  assert.match(workspace, /<RecentVariations onOpen=\{ds\.open\} currentId=\{d\.id\}/)
+  // Recent now lives in its own foldable block BELOW the nav rail, not inside
+  // it — the fold block is what the workspace mounts, and it renders the list.
+  assert.match(workspace, /<RecentActivityFold onOpen=\{ds\.open\} currentId=\{d\.id\}/)
+  assert.match(workspace, /<RecentVariations onOpen=\{onOpen\} currentId=\{currentId\}/)
   const checklist = workspace.indexOf('<GuidedChecklist')
-  assert.ok(checklist > 0 && workspace.indexOf('<RecentVariations') > checklist)
+  assert.ok(checklist > 0 && workspace.indexOf('<RecentActivityFold') > checklist)
 })

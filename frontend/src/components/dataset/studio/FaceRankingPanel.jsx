@@ -17,7 +17,7 @@ const scoreCls = (avg) => (avg >= 0.50 ? 'text-emerald-700'
 
 export default function FaceRankingPanel({ ranking = [], onScore, scoring, hasCells }) {
   return (
-    <div className="flex flex-col gap-2 rounded-lg bg-surface px-3 py-2.5">
+    <div className="flex flex-col gap-2 rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-3 py-2.5">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-content font-semibold text-sm">🎯 Best epoch (face score)</span>
         <span className="text-content-subtle text-[0.625rem]">

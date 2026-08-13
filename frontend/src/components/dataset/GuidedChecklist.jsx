@@ -8,7 +8,7 @@ import { Link } from 'react-router';
 export default function GuidedChecklist({ steps, currentId, onJump }) {
   return (
     <nav aria-label="Dataset progress"
-      className="rounded-lg bg-surface p-2">
+      className="p-1">
       <p className="px-1.5 pb-1.5 text-[0.6875rem] font-semibold uppercase tracking-wide text-content-subtle">
         Progress
       </p>

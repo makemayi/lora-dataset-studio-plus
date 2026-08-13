@@ -300,7 +300,7 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
         {/* Ce que le défaut de base a d'anormal — affiché même sans sélecteur :
             l'install qui n'a qu'une base est celle qui doit le lire. */}
         {baseNote && (
-          <p className="m-0 rounded-lg border border-amber-400/30 bg-amber-400/5 px-3 py-2
+          <p className="m-0 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-amber-400/30 bg-amber-400/5 px-3 py-2
                         text-[0.6875rem] leading-snug text-amber-700/80 break-words">
             {baseNote}
           </p>
@@ -309,7 +309,7 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
             (défaut élu + alternatives) que si des UNET Krea locaux existent ; sinon
             vide → le sélecteur reste caché (défaut élu appliqué au node 20). */}
         {baseModels.length > 0 && (
-          <div className="flex flex-col gap-1 rounded-lg bg-surface p-3">
+          <div className="flex flex-col gap-1 rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] p-3">
             <span className="text-content-muted text-[0.625rem] uppercase">
               Base model ({FAMILY_LABELS[runType] || 'Z-Image'})
             </span>
@@ -317,7 +317,7 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
               value={selectedBase}
               onChange={(e) => setSelectedBase(e.target.value)}
               aria-label="Base model for this run"
-              className="rounded-lg bg-surface-raised px-1.5 py-1 text-content text-sm"
+              className="rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]-raised px-1.5 py-1 text-content text-sm"
             >
               {baseModels.map((m) => (
                 <option key={m.filename} value={m.filename}>{m.label}</option>
@@ -402,7 +402,7 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
         <StudioPreflightBanner missing={preflight} archMismatch={archMismatch}
           onDismiss={() => { setPreflight(null); setArchMismatch(null); }} />
         {data?.comfyui_recovery?.requires_comfyui_restart_confirmation && (
-          <div className="flex items-center gap-2 flex-wrap rounded-lg border border-amber-200 bg-amber-400/10 px-3 py-2" role="status">
+          <div className="flex items-center gap-2 flex-wrap rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-amber-200 bg-amber-400/10 px-3 py-2" role="status">
             <span aria-hidden>⚠</span>
             <span className="text-content text-sm">A ComfyUI submission has an unknown outcome. Restart ComfyUI first, then confirm it here; the paused cell will become resumable.</span>
             <button type="button" disabled={run.confirmingComfyuiRestart}
@@ -414,7 +414,7 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
         )}
 
         {data?.pending > 0 && (
-          <div className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2" role="status">
+          <div className="flex items-center gap-2 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-indigo-200 bg-indigo-50 px-3 py-2" role="status">
             <span className="inline-block w-4 h-4 border-2 border-indigo-200 border-t-indigo-400 rounded-full animate-spin" aria-hidden />
             <span className="text-content text-sm">
               {data.generating ?? data.running ?? 0} generating · {data.queued ?? data.pending} queued
@@ -426,7 +426,7 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
           </div>
         )}
         {!data?.pending && data?.resumable > 0 && (
-          <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-400/10 px-3 py-2" role="status">
+          <div className="flex items-center gap-2 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-amber-200 bg-amber-400/10 px-3 py-2" role="status">
             <span aria-hidden>⏸</span>
             <span className="text-content text-sm">{data.resumable} stopped cell(s) — resumable with their settings</span>
             <button type="button" disabled={!!data?.gpu_busy} onClick={run.resume}
@@ -437,7 +437,7 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
         )}
 
         {!runId ? (
-          <p className="text-content-subtle text-sm rounded-lg bg-surface px-3 py-6 text-center">
+          <p className="text-content-subtle text-sm rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-3 py-6 text-center">
             Set up the run on the left then “🚀 Run the test”{combine
               ? ` to render the ${selection.length} LoRAs together in one image.`
               : ` to compare the ${selection.length} LoRAs side by side.`}

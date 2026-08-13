@@ -25,7 +25,7 @@ import { CARD_SURFACE } from '../common/surfaces';
    checkbox, on Reset — which is exactly the "boxes inside boxes" look the
    redesign is removing. They are all the same raised pill now; the tokens
    already separate them from the panel they sit on. */
-const CONTROL = 'rounded-full bg-surface-raised px-3 text-content transition-colors hover:bg-surface';
+const CONTROL = 'rounded-full bg-surface-raised px-3 text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5';
 const CHECK_CHIP =
   `flex min-h-9 cursor-pointer items-center gap-1.5 py-1 text-[0.6875rem] ${CONTROL}`;
 

@@ -43,7 +43,7 @@ export default function StudioSection({ title, defaultOpen = true, storageKey, a
   const bodyId = `studio-section-${String(storageKey || title).replace(/\W+/g, '-')}`;
 
   return (
-    <div id={anchorId} className="rounded-lg bg-surface px-3 py-2 scroll-mt-16">
+    <div id={anchorId} className="rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-3 py-2 scroll-mt-16">
       <button
         type="button"
         onClick={toggle}

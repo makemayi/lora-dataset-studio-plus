@@ -51,7 +51,7 @@ export default function DescribeFilterBar({ bankId, onApply, onFenceBlocked }) {
           onKeyDown={(e) => { if (e.key === 'Enter') run() }} />
         <button type="button" onClick={run} disabled={busy || !text.trim()}
           className="rounded-full bg-surface-raised px-2.5 py-1 text-xs font-medium
-            text-content-muted transition-colors hover:bg-surface hover:text-content
+            text-content-muted shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content
             disabled:opacity-50">
           {/* Both labels mounted — see CLAUDE.md ▸ UI changes. */}
           <span hidden={!busy}>Reading…</span>

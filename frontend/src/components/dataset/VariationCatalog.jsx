@@ -155,6 +155,51 @@ function IdentityFrameIcon({ className }) {
   );
 }
 
+/** MiniMax H3 — identity reached through a VIDEO model (a short frame packet,
+ *  best single frame kept): a film frame holding a face, with sprocket holes so
+ *  it reads as "video", never as Krea's plain portrait frame. */
+function VideoFrameIcon({ className }) {
+  return (
+    <svg viewBox="0 0 32 32" className={className} aria-hidden="true" focusable="false">
+      <g stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="4" y="7.5" width="24" height="17" rx="2.5" />
+        <path d="M9 3.5v4M16 3.5v4M23 3.5v4" />
+        <path d="M9 28.5v-4M16 28.5v-4M23 28.5v-4" />
+        <circle cx="16" cy="14.5" r="3.1" />
+        <path d="M10.5 21.5c1.4-2.9 3.5-4.3 5.5-4.3s4.1 1.4 5.5 4.3" />
+      </g>
+    </svg>
+  );
+}
+
+/** Stacked-layer mark for the shot PRESET pills: a preset is a pre-baked
+ *  composition, one layer per framing it mixes together. */
+function StackIcon({ className }) {
+  return (
+    <svg viewBox="0 0 32 32" className={className} aria-hidden="true" focusable="false">
+      <g stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M6 11.5l10-5 10 5-10 5z" />
+        <path d="M6 17.5l10 5 10-5" />
+      </g>
+    </svg>
+  );
+}
+
+/** Nano Banana Pro — a banana crescent with a stem, drawn as line art in
+ *  currentColor like every other engine glyph (the yellow 🍌 emoji clashed with
+ *  the monochrome set and could not tint with the card's state). */
+function BananaIcon({ className }) {
+  return (
+    <svg viewBox="0 0 32 32" className={className} aria-hidden="true" focusable="false">
+      <g stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M8 21C6.2 13.5 12.5 5.5 21 5.5 24.8 5.5 27 9 27 13" />
+        <path d="M8 21c2.6-2.8 7.6-4.2 19-8" />
+        <path d="M6.3 18.4c-1.5 1-2.3 2.6-1.7 4.4" />
+      </g>
+    </svg>
+  );
+}
+
 const MODE_CHOICES = [
   { id: 'split', name: 'Split across engines',
     desc: 'Each shot goes to ONE engine — same image count and cost as a single engine, but a more varied dataset.' },
@@ -173,20 +218,20 @@ function EngineCard({ id, checked, available, generating, onToggle, icon, title,
       onClick={() => onToggle(id)}
       disabled={!available || !!generating}
       title={generating ? 'A generation batch is running — wait for it to finish before changing engines' : undefined}
-      className={`relative flex items-start gap-3 rounded-xl p-3 text-left transition-[box-shadow,transform,background-color] duration-200 shadow-[0_2px_8px_rgba(0,0,0,0.03),0_6px_16px_rgba(0,0,0,0.02)] hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(0,0,0,0.06),0_4px_10px_rgba(0,0,0,0.03)] disabled:opacity-50 disabled:cursor-not-allowed ${checked
-        ? accent.card
-        : 'bg-surface-raised hover:enabled:bg-surface'}`}>
+      className={`relative flex h-full flex-col items-center justify-center gap-2 rounded-[28px] p-4 text-center transition-[box-shadow,transform] duration-200 ${
+        checked
+          ? `${accent.card} ${accent.ring} ring-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_4px_8px_rgba(0,0,0,0.12),0_10px_20px_rgba(0,0,0,0.12)] -translate-y-0.5`
+          : 'bg-gradient-to-b from-white/85 via-white/55 to-white/40 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.95),inset_0_-1px_0_rgba(0,0,0,0.06),0_2px_4px_rgba(0,0,0,0.12),0_10px_20px_rgba(0,0,0,0.14)] hover:-translate-y-1 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.95),inset_0_-1px_0_rgba(0,0,0,0.06),0_4px_8px_rgba(0,0,0,0.16),0_16px_32px_rgba(0,0,0,0.16)]'
+      } disabled:opacity-50 disabled:cursor-not-allowed`}>
       <span aria-hidden="true"
-        className={`absolute top-2 right-2 w-4 h-4 rounded border grid place-items-center text-[0.625rem] font-bold ${checked
-          ? `${accent.pill} border-transparent` : 'border-border text-transparent'}`}>✓</span>
+        className={`absolute top-2.5 right-2.5 w-5 h-5 rounded-full grid place-items-center text-[0.6875rem] font-bold ${checked
+          ? accent.pill : 'border border-border-strong text-transparent'}`}>✓</span>
       {icon}
-      <span className="flex flex-col gap-1 min-w-0">
-        <span className={`text-[0.8125rem] font-semibold ${checked ? accent.title : 'text-content-muted'}`}>
-          {title}
-        </span>
-        <span className="flex flex-wrap gap-1">{tags}</span>
-        {hint}
+      <span className={`text-sm font-semibold ${checked ? accent.title : 'text-content-muted'}`}>
+        {title}
       </span>
+      <span className="flex flex-wrap justify-center gap-1">{tags}</span>
+      {hint}
     </button>
   );
 }
@@ -439,12 +484,12 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
     const done = doneByLabel.get(c.label) || 0;
     const blocked = c.nsfw && !localOnlyRun;   // 🔞 card while an API engine is in the run
     const cls = on
-      ? 'bg-primary/20 border-primary/50 text-white ring-1 ring-primary/30'
+      ? 'bg-primary/20 backdrop-blur-md text-indigo-800 ring-1 ring-primary/40 shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(79,70,229,0.22),0_10px_20px_rgba(79,70,229,0.18)]'
       : done > 0
-        ? 'border-emerald-500/40 bg-emerald-50 text-emerald-100/90 hover:bg-emerald-50'
-        : 'border-transparent bg-surface-raised text-content-muted hover:bg-surface';
+        ? 'bg-emerald-50/80 backdrop-blur-md text-emerald-800 ring-1 ring-emerald-500/40 shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(16,185,129,0.22),0_10px_20px_rgba(16,185,129,0.18)]'
+        : 'bg-white/60 backdrop-blur-md text-content-muted shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:bg-white/80 hover:shadow-[0_2px_4px_rgba(0,0,0,0.18),0_10px_20px_rgba(0,0,0,0.16)]';
     return (
-      <div key={c.id} className={`relative flex items-center gap-1.5 px-1.5 py-1 rounded-lg text-[0.625rem] border transition-colors ${cls} ${blocked ? 'opacity-40' : ''}`}>
+      <div key={c.id} className={`relative flex items-center gap-1.5 px-2 py-1 rounded-full text-[0.625rem] transition-[box-shadow,transform,background-color] duration-200 ${cls} ${blocked ? 'opacity-40' : ''}`}>
         <button type="button" onClick={() => !blocked && toggle(c.id)} aria-pressed={on}
           disabled={blocked}
           title={blocked ? '🔞 shot — check Klein alone to generate it' : c.prompt}
@@ -1043,37 +1088,16 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
           its own accent colour so a mixed run stays readable at a glance. */}
       <div className="flex items-center gap-2">
         <span className="text-content-muted text-[0.6875rem] uppercase">Engines</span>
-        <span className="text-content-subtle text-[0.625rem]">
-          where the images are made — pick one or several · Klein and Krea 2 Edit run free on your GPU · APIs bill per image (or use your ChatGPT subscription)
-        </span>
         <HelpBadge topic="dataset-engine-mode" />
       </div>
-      {/* Discoverability: the generation prompt (identity/style directives) is
-          editable, but users don't know where. Point them at it right where the
-          "why is this coming out realistic?" question arises. */}
-      <p className="text-content-subtle text-[0.625rem] -mt-1">
-        Not the look you wanted (a stylized reference coming out realistic)? Edit the generation prompt in{' '}
-        <a href="#/settings/engines" className="text-amber-700 underline decoration-amber-300/50">Settings › Image engines →</a>
-      </p>
-      {/* Two facts about the Gemini engine that belong next to the choice, not in
-          a support thread after the fact. Both are stated flat, with no verdict
-          attached: the filter has no setting to offer, and nobody — in either
-          direction — has measured what SynthID does to trained weights, so this
-          says it is present and stops there. Plain <p>: wraps freely at 400 px. */}
-      <p className="text-content-subtle text-[0.625rem] -mt-1">
-        Building with <span className="text-content-muted">Nano Banana</span>? Google
-        screens every image it returns and refuses some of them — LDS names each
-        refusal on the tile; the filter itself is not configurable. Its outputs also
-        carry SynthID, Google&apos;s invisible provenance watermark.{' '}
-        <HelpBadge topic="nanobanana-filter-and-synthid" />
-      </p>
       {/* Five cards now, and the column stops at THREE. Tailwind breakpoints read
           the VIEWPORT, but these cards live in the workspace column next to the
           sidebar — a `2xl:grid-cols-5` measured on a 1600 px window put five cards
           in ~700 px (≈130 px each) and wrapped every hint to one word per line.
           Three-across is wider per card than the four-across this grid shipped
           with. One column on a phone (nothing is clipped at 400 px), two from sm. */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 auto-rows-fr">
+        {enabledEngines.includes('klein') && (
         <EngineCard id="klein" checked={isKlein} available={klAvailable} generating={generating}
           onToggle={toggleEngine} share={engineShare('klein')}
           icon={<GpuIcon className={`w-9 h-9 shrink-0 ${isKlein ? ENGINE_ACCENTS.klein.icon : 'text-content-subtle'}`} />}
@@ -1084,24 +1108,17 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
             <span key="gpu" className="px-2 py-px rounded-full bg-surface-raised text-content-muted text-[0.625rem]">Your GPU</span>,
             <span key="nsfw" className="px-2 py-px rounded-full bg-surface-raised text-content-muted text-[0.625rem]">NSFW OK</span>,
           ]}
-          hint={klAvailable ? (
-            <span className="text-content-subtle text-[0.625rem]">
-              Runs on this machine — slower, tunable face fidelity.
-              {localQueuesBehindApi(engines) && (
-                <> <span className={ENGINE_ACCENTS.klein.text}>
-                  Its {engineShare('klein')} shot(s) queue on your GPU, one at a time, after the API ones.
-                </span></>
-              )}
-            </span>
-          ) : (
+          hint={klAvailable ? null : (
             <a href="#/setup" onClick={(e) => e.stopPropagation()}
               className="text-amber-700 text-[0.625rem] underline decoration-amber-300/50">
               {kleinHint}
             </a>
           )} />
+        )}
         {/* Krea 2 Identity Edit — the second LOCAL engine. It keeps the identity
             from the reference photo ALONE (no character LoRA needed), which is
             exactly the bootstrap case: a character that has no LoRA yet. */}
+        {enabledEngines.includes('krea') && (
         <EngineCard id="krea" checked={isKrea} available={krAvailable} generating={generating}
           onToggle={toggleEngine} share={engineShare('krea')}
           icon={<IdentityFrameIcon className={`w-9 h-9 shrink-0 ${isKrea ? ENGINE_ACCENTS.krea.icon : 'text-content-subtle'}`} />}
@@ -1111,29 +1128,21 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
             <span key="gpu" className="px-2 py-px rounded-full bg-surface-raised text-content-muted text-[0.625rem]">Your GPU</span>,
             <span key="nsfw" className="px-2 py-px rounded-full bg-surface-raised text-content-muted text-[0.625rem]">NSFW OK</span>,
           ]}
-          hint={krAvailable ? (
-            <span className="text-content-subtle text-[0.625rem]">
-              Identity-preserving edit — strongest likeness from a single reference photo.
-              Krea Fit v1.2 honors the selected shot card&rsquo;s framing and aspect ratio.
-              {localQueuesBehindApi(engines) && (
-                <> <span className={ENGINE_ACCENTS.krea.text}>
-                  Its {engineShare('krea')} shot(s) queue on your GPU, one at a time, after the API ones.
-                </span></>
-              )}
-            </span>
-          ) : (
+          hint={krAvailable ? null : (
             <a href="#/setup" onClick={(e) => e.stopPropagation()}
               className="text-amber-700 text-[0.625rem] underline decoration-amber-300/50">
               {kreaHint}
             </a>
           )} />
+        )}
         {/* MiniMax H3 — the third LOCAL engine. Also identity-from-one-photo, but
             reached through a VIDEO model: it samples a short frame packet and
             keeps the best single frame. Slowest of the three, and the only
             engine whose speed depends on how ComfyUI was LAUNCHED. */}
+        {enabledEngines.includes('minimax_h3') && (
         <EngineCard id="minimax_h3" checked={isH3} available={h3Available} generating={generating}
           onToggle={toggleEngine} share={engineShare('minimax_h3')}
-          icon={<IdentityFrameIcon className={`w-9 h-9 shrink-0 ${isH3 ? ENGINE_ACCENTS.minimax_h3.icon : 'text-content-subtle'}`} />}
+          icon={<VideoFrameIcon className={`w-9 h-9 shrink-0 ${isH3 ? ENGINE_ACCENTS.minimax_h3.icon : 'text-content-subtle'}`} />}
           title={<>MiniMax H3 <span className="font-normal text-content-subtle">· local</span></>}
           tags={[
             <span key="free" className="px-1.5 py-px rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[0.625rem]">Free</span>,
@@ -1141,29 +1150,17 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
             <span key="nsfw" className="px-2 py-px rounded-full bg-surface-raised text-content-muted text-[0.625rem]">NSFW OK</span>,
             <span key="slow" className="px-2 py-px rounded-full bg-surface-raised text-content-muted text-[0.625rem]">~40-80s/image</span>,
           ]}
-          hint={h3Available ? (
-            <span className="text-content-subtle text-[0.625rem]">
-              Identity from one reference photo, like Krea — but sampled as a short video
-              packet, with the best frame kept. Slower per image, and shots from the SAME
-              card are much faster than the first one.
-              {h3SpeedWarning && (
-                <> <span className="text-amber-700">{h3SpeedWarning}</span></>
-              )}
-              {localQueuesBehindApi(engines) && (
-                <> <span className={ENGINE_ACCENTS.minimax_h3.text}>
-                  Its {engineShare('minimax_h3')} shot(s) queue on your GPU, one at a time, after the API ones.
-                </span></>
-              )}
-            </span>
-          ) : (
+          hint={h3Available ? null : (
             <a href="#/setup" onClick={(e) => e.stopPropagation()}
               className="text-amber-700 text-[0.625rem] underline decoration-amber-300/50">
               {h3Hint}
             </a>
           )} />
+        )}
+        {enabledEngines.includes('nanobanana') && (
         <EngineCard id="nanobanana" checked={isNB} available={nbAvailable} generating={generating}
           onToggle={toggleEngine} share={engineShare('nanobanana')}
-          icon={<span className="w-9 h-9 shrink-0 grid place-items-center text-2xl" aria-hidden="true">🍌</span>}
+          icon={<BananaIcon className={`w-9 h-9 shrink-0 ${isNB ? ENGINE_ACCENTS.nanobanana.icon : 'text-content-subtle'}`} />}
           title={<>Nano Banana Pro <span className="font-normal text-content-subtle">· API</span></>}
           tags={[
             <span key="gpu" className="px-2 py-px rounded-full bg-surface-raised text-content-muted text-[0.625rem]">No GPU</span>,
@@ -1177,6 +1174,8 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
           ) : (
             <span className="text-amber-700 text-[0.625rem]">⚠ Add GEMINI_API_KEY in Settings</span>
           )} />
+        )}
+        {enabledEngines.includes('chatgpt') && (
         <EngineCard id="chatgpt" checked={isGPT} available={gptAvailable} generating={generating}
           onToggle={toggleEngine} share={engineShare('chatgpt')}
           icon={<ChatGptIcon className={`w-9 h-9 shrink-0 ${isGPT ? ENGINE_ACCENTS.chatgpt.icon : 'text-content-subtle'}`} />}
@@ -1210,6 +1209,8 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
                 : '⚠ Add an API key or connect a subscription in Settings'}
             </span>
           )} />
+        )}
+        {enabledEngines.includes('openrouter') && (
         <EngineCard id="openrouter" checked={isOR} available={orAvailable} generating={generating}
           onToggle={toggleEngine} share={engineShare('openrouter')}
           icon={<RouterIcon className={`w-9 h-9 shrink-0 ${isOR ? ENGINE_ACCENTS.openrouter.icon : 'text-content-subtle'}`} />}
@@ -1230,6 +1231,8 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
           ) : (
             <span className="text-amber-700 text-[0.625rem]">⚠ Add OPENROUTER_API_KEY in Settings</span>
           )} />
+        )}
+        {enabledEngines.includes('qwen') && (
         <EngineCard id="qwen" checked={isQwen} available={qwenAvailable} generating={generating}
           onToggle={toggleEngine} share={engineShare('qwen')}
           icon={<span className={`w-9 h-9 flex items-center justify-center shrink-0 text-lg font-bold ${isQwen ? ENGINE_ACCENTS.qwen.icon : 'text-content-subtle'}`}>🌟</span>}
@@ -1247,6 +1250,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
           ) : (
             <span className="text-amber-700 text-[0.625rem]">⚠ Add QWEN_API_KEY in Settings</span>
           )} />
+        )}
       </div>
 
       {/* How several engines share the run. Only shown when it can change
@@ -1576,11 +1580,12 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
             return (
               <button key={key} type="button" onClick={() => applyPreset(key)} title={hint}
                 aria-pressed={active} disabled={!st?.total}
-                className={`flex flex-col gap-1.5 rounded-lg border p-2 text-left transition-colors disabled:opacity-40 ${active
-                  ? 'border-primary/60 bg-primary/15 ring-1 ring-primary/40'
-                  : 'border-transparent bg-surface-raised hover:bg-surface'}`}>
-                <span className="flex items-baseline gap-1 min-w-0">
-                  <span className={`text-[0.6875rem] font-semibold truncate ${active ? 'text-white' : 'text-content'}`}>{name}</span>
+                className={`flex flex-col gap-1.5 rounded-full px-3 py-1.5 text-left transition-[box-shadow,transform,background-color] duration-200 disabled:opacity-40 ${active
+                  ? 'bg-primary/20 backdrop-blur-md ring-1 ring-primary/40 shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]'
+                  : 'bg-white/60 backdrop-blur-md shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:bg-white/80 hover:shadow-[0_2px_4px_rgba(0,0,0,0.18),0_10px_20px_rgba(0,0,0,0.16)]'}`}>
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <StackIcon className={`w-3.5 h-3.5 shrink-0 ${active ? 'text-indigo-700' : 'text-content-subtle'}`} />
+                  <span className={`text-[0.6875rem] font-semibold truncate ${active ? 'text-indigo-800' : 'text-content'}`}>{name}</span>
                   <span className="ml-auto text-content-subtle text-[0.625rem] shrink-0">{st?.total || 0}</span>
                 </span>
                 <CompositionMiniBar counts={st?.counts || {}} total={st?.total || 0} />
@@ -1592,15 +1597,16 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
             const st = customPresetStats[preset.id];
             return (
               <div key={preset.id}
-                className={`relative min-w-0 rounded-lg border transition-colors ${active
-                  ? 'border-primary/60 bg-primary/15 ring-1 ring-primary/40'
-                  : 'border-transparent bg-surface-raised hover:bg-surface'}`}>
+                className={`relative min-w-0 rounded-full transition-[box-shadow,transform,background-color] duration-200 ${active
+                  ? 'bg-primary/20 backdrop-blur-md ring-1 ring-primary/40 shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]'
+                  : 'bg-white/60 backdrop-blur-md shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:bg-white/80 hover:shadow-[0_2px_4px_rgba(0,0,0,0.18),0_10px_20px_rgba(0,0,0,0.16)]'}`}>
                 <button type="button" onClick={() => applyCustomPreset(preset)} aria-pressed={active}
                   aria-label={`Apply custom preset ${preset.name}`}
-                  className="flex w-full min-w-0 flex-col gap-1.5 p-2 pr-12 text-left">
-                  <span className="flex w-full min-w-0 items-baseline gap-1">
-                    <span className={`truncate text-[0.6875rem] font-semibold ${active ? 'text-white' : 'text-content'}`}>
-                      ✨ {preset.name}
+                  className="flex w-full min-w-0 flex-col gap-1.5 px-3 py-1.5 pr-12 text-left">
+                  <span className="flex w-full min-w-0 items-center gap-1.5">
+                    <StackIcon className={`w-3.5 h-3.5 shrink-0 ${active ? 'text-indigo-700' : 'text-content-subtle'}`} />
+                    <span className={`truncate text-[0.6875rem] font-semibold ${active ? 'text-indigo-800' : 'text-content'}`}>
+                      {preset.name}
                     </span>
                     <span className="ml-auto shrink-0 text-[0.625rem] text-content-subtle">{st?.total || 0}</span>
                   </span>
@@ -1685,15 +1691,15 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
                   // The old amber "deficit" glow on unselected cards read as a
                   // selection — the quota cue now lives only in the group header.
                   const cls = on
-                    ? 'bg-primary/20 border-primary/50 text-white ring-1 ring-primary/30'
+                    ? 'bg-primary/20 backdrop-blur-md text-indigo-800 ring-1 ring-primary/40 shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(79,70,229,0.22),0_10px_20px_rgba(79,70,229,0.18)]'
                     : done > 0
-                      ? 'border-emerald-500/40 bg-emerald-50 text-emerald-100/90 hover:bg-emerald-50'
-                      : 'border-transparent bg-surface-raised text-content-muted hover:bg-surface';
+                      ? 'bg-emerald-50/80 backdrop-blur-md text-emerald-800 ring-1 ring-emerald-500/40 shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(16,185,129,0.22),0_10px_20px_rgba(16,185,129,0.18)]'
+                      : 'bg-white/60 backdrop-blur-md text-content-muted shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:bg-white/80 hover:shadow-[0_2px_4px_rgba(0,0,0,0.18),0_10px_20px_rgba(0,0,0,0.16)]';
                   return (
                     <button key={e.id} type="button" onClick={() => toggle(e.id)}
                       aria-pressed={on}
                       title={done > 0 ? `${done} image(s) of this shot already in the dataset` : undefined}
-                      className={`flex items-center gap-1.5 px-1.5 py-1 rounded-lg text-[0.625rem] border text-left transition-colors ${cls}`}>
+                      className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[0.625rem] text-left transition-[box-shadow,transform,background-color] duration-200 ${cls}`}>
                       <ShotIllustration framing={e.framing} label={e.label} className="w-7 h-7 shrink-0" />
                       <span className="min-w-0 leading-tight">
                         {emoji && <span className="mr-1" aria-hidden="true">{emoji}</span>}
@@ -1786,14 +1792,14 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
                   const on = selected.has(e.id);
                   const done = doneByLabel.get(e.label) || 0;
                   const cls = on
-                    ? 'bg-rose-500/20 border-rose-400/60 text-white ring-1 ring-rose-400/30'
+                    ? 'bg-rose-500/20 backdrop-blur-md text-rose-800 ring-1 ring-rose-400/40 shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(244,63,94,0.22),0_10px_20px_rgba(244,63,94,0.18)]'
                     : done > 0
-                      ? 'border-emerald-500/40 bg-emerald-50 text-emerald-100/90 hover:bg-emerald-50'
-                      : 'border-transparent bg-surface-raised text-content-muted hover:bg-surface';
+                      ? 'bg-emerald-50/80 backdrop-blur-md text-emerald-800 ring-1 ring-emerald-500/40 shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(16,185,129,0.22),0_10px_20px_rgba(16,185,129,0.18)]'
+                      : 'bg-white/60 backdrop-blur-md text-content-muted shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:bg-white/80 hover:shadow-[0_2px_4px_rgba(0,0,0,0.18),0_10px_20px_rgba(0,0,0,0.16)]';
                   return (
                     <button key={e.id} type="button" onClick={() => toggle(e.id)} aria-pressed={on}
                       title={done > 0 ? `${done} image(s) of this shot already in the dataset` : e.prompt}
-                      className={`flex items-center gap-1.5 px-1.5 py-1 rounded-lg text-[0.625rem] border text-left transition-colors ${cls}`}>
+                      className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[0.625rem] text-left transition-[box-shadow,transform,background-color] duration-200 ${cls}`}>
                       <ShotIllustration framing={e.framing} label={e.label} className="w-7 h-7 shrink-0" />
                       <span className="min-w-0 leading-tight">{displayLabel(e.label)}</span>
                       <span className="ml-auto shrink-0 flex items-center gap-1">

@@ -42,6 +42,8 @@ test('hovering the primary ref or extra-refs row and pressing Ctrl+V pastes an i
   assert.match(src, /addEventListener\('paste'/);
   assert.match(src, /refHover\.current = true/);
   assert.match(src, /extraHover\.current = true/);
-  assert.match(src, /onSetRef\(file, \{ autoCrop/);
+  // Auto head-crop is no longer an upload-time opt-in checkbox: it moved to a
+  // "✂ Auto head-crop" button that re-crops the kept original (recrop-auto).
+  assert.match(src, /onSetRef\(file\)/);
   assert.match(src, /onAddExtraRef\?\.\(file\)/);
 });

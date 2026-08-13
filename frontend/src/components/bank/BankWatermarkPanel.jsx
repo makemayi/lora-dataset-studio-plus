@@ -51,7 +51,7 @@ function LevelCard({ index, title, blurb, state, onRun }) {
       </div>
       <p className="text-[0.6875rem] leading-snug text-content-subtle">{blurb}</p>
       <button type="button" onClick={onRun} disabled={state.disabled} title={state.reason || title}
-        className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-700 disabled:opacity-40">
+        className="rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-700 disabled:opacity-40">
         {state.label}
       </button>
       <p className="text-[0.6875rem] text-content-subtle">

@@ -143,7 +143,7 @@ export default function CanvasImageNode({ node, datasetId, laneName, onGeometry,
           // inset ring on hover is what replaces it: it lights the picture you
           // are pointing at without ever drawing a rule between two of them.
           ? 'hover:ring-2 hover:ring-inset hover:ring-indigo-300/70 '
-          : 'rounded-lg border border-indigo-200 shadow-lg ')
+          : 'rounded-lg border border-indigo-200 shadow-[0_2px_4px_rgba(0,0,0,0.14),0_8px_16px_rgba(0,0,0,0.12)] ')
         + 'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-300'}>
       {/* ⚠️ A member's label is an OVERLAY, not a row. Left in the flex flow it
           still reserved its height while invisible, the picture below it was

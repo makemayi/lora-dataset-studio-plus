@@ -233,6 +233,26 @@
   opacity: 0;
 }
 
+/* Water reflection under a dataset tile's photo. The photo is drawn a second
+   time — flipped vertically and faded downward — so the image melts into a
+   mirror pond instead of a hard bottom edge. `object-position: bottom` +
+   `scaleY(-1)` mirror the photo's OWN bottom edge, keeping the reflection
+   continuous with it; the blur + vertical mask read as water. */
+.dataset-tile-reflection {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: bottom;
+  transform: scaleY(-1);
+  filter: blur(1.5px) brightness(0.3);
+  opacity: 1;
+  -webkit-mask-image: linear-gradient(to bottom, black, black 30%, transparent 92%);
+  mask-image: linear-gradient(to bottom, black, black 30%, transparent 92%);
+  pointer-events: none;
+}
+
 /* Wide tile: back to the familiar top-left, on one line, with the button row's
    width reserved so the badge can never slide under it again. Threshold and
    reserve mirror TILE_BADGE_TOP_MIN_WIDTH_REM / TILE_BADGE_ACTIONS_RESERVE_REM. */

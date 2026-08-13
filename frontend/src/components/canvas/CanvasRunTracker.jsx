@@ -49,7 +49,7 @@ export default function CanvasRunTracker({ run, targets, onStop, onResume, onOpe
       {working && (
         <>
           <button type="button" onClick={onOpenPanel}
-            className="rounded-full bg-surface-raised px-2.5 py-0.5 text-content-muted transition-colors hover:bg-surface hover:text-content">
+            className="rounded-full bg-surface-raised px-2.5 py-0.5 text-content-muted shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content">
             Settings
           </button>
           <button type="button" onClick={onStop}
@@ -106,7 +106,7 @@ export default function CanvasRunTracker({ run, targets, onStop, onResume, onOpe
             <button type="button" onClick={onUndoPinAll}
               data-testid="canvas-pin-all-undo"
               title="Take those images back off the board"
-              className="shrink-0 rounded-full bg-surface-raised px-2.5 py-0.5 text-content-muted transition-colors hover:bg-surface hover:text-content">
+              className="shrink-0 rounded-full bg-surface-raised px-2.5 py-0.5 text-content-muted shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content">
               ↩ Undo
             </button>
           )}

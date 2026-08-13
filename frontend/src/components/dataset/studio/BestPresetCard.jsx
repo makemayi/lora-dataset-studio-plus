@@ -5,7 +5,7 @@ export default function BestPresetCard({ preset, onMemorize, fmt }) {
   if (!preset) return null;
 
   return (
-    <div className="flex flex-col gap-1.5 rounded-lg border border-emerald-400/50 bg-emerald-400/10 px-3 py-2">
+    <div className="flex flex-col gap-1.5 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-emerald-400/50 bg-emerald-400/10 px-3 py-2">
       <div className="flex items-center gap-2 flex-wrap">
         <span aria-hidden>🏆</span>
         <span className="text-content text-sm font-semibold">Best setting (based on your votes)</span>
@@ -22,7 +22,7 @@ export default function BestPresetCard({ preset, onMemorize, fmt }) {
         )}
         <button type="button" onClick={() => onMemorize(preset)}
           title="Save this config as the dataset's best setting"
-          className="ml-auto px-3 py-1.5 rounded-lg border border-amber-200 bg-amber-400/10 text-amber-700 text-xs font-semibold">
+          className="ml-auto px-3 py-1.5 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-amber-200 bg-amber-400/10 text-amber-700 text-xs font-semibold">
           ★ Save
         </button>
       </div>

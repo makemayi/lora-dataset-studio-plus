@@ -78,7 +78,7 @@ const TOOL_BUTTON =
   `${TOOL_BUTTON_BASE} bg-surface-raised text-content-muted hover:bg-surface hover:text-content`;
 const TOOL_ICON =
   'flex items-center justify-center rounded-full bg-surface-raised text-content-muted '
-  + 'transition-colors hover:bg-surface hover:text-content disabled:opacity-40';
+  + 'shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content disabled:opacity-40';
 
 /* ◉ The LoRA Canvas surface — every selected dataset's genealogy on ONE board,
    with zoom and pan.

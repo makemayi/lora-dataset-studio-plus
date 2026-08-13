@@ -176,7 +176,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
       /* The tile keeps `borderCls`: that edge is the decision (kept / rejected /
          undecided), not decoration. Only the fill moves onto the token. */
       className={`dataset-grid-item rounded-[28px] ${borderCls} ${selected ? 'ring-2 ring-indigo-400' : ''} bg-white/60 backdrop-blur-xl overflow-hidden flex flex-col shadow-[0_0_0_1px_rgba(255,255,255,0.4),0_12px_40px_rgba(0,0,0,0.12),0_4px_12px_rgba(0,0,0,0.05)] ${FLOAT_HOVER}`}>
-      <div className="relative aspect-square bg-black rounded-[22px] overflow-hidden m-2">
+      <div className="relative aspect-square bg-black rounded-t-[22px] overflow-hidden mx-2 mt-2">
         {/* Fresh content nobody has looked at yet — a first-time generation
             OR a regenerate, not yet opened (unlike the in-progress emerald
             glow above, this one is meant to survive being buried back among
@@ -311,7 +311,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             {fb.graded ? fb.label : fb.icon}
           </span>
         )}
-        <div className="dataset-grid-item__actions absolute top-1.5 right-1.5 flex max-w-[calc(100%_-_1rem)] flex-wrap justify-end gap-1 rounded-full bg-black/40 backdrop-blur-md border border-white/10 p-1">
+        <div className="dataset-grid-item__actions absolute top-1.5 right-1.5 z-10 flex max-w-[calc(100%_-_1rem)] flex-wrap justify-end gap-1 rounded-full bg-black/40 backdrop-blur-md border border-white/10 p-1">
           {fb && (
             <span className={`flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${fb.cls}`}
               title={`Resemblance to the reference face — ${fb.label}`}>
@@ -404,6 +404,22 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               title={refused || 'Crop'} aria-label={refused || 'Crop'}
               className="grid min-h-6 min-w-6 place-items-center rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">✂</button>
           )}
+          {img.status === 'keep' && (
+            <button type="button"
+              onClick={(e) => { e.stopPropagation(); setCaptionEditorOpen(true); }}
+              disabled={busy}
+              title={refused || 'Open a larger caption editor'}
+              aria-label={refused || 'Expand caption editor'}
+              className="grid min-h-6 min-w-6 place-items-center rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">⛶</button>
+          )}
+          {img.status === 'keep' && cap && (
+            <button type="button"
+              onClick={(e) => { e.stopPropagation(); editingRef.current = false; setCap(''); onCaption(img.id, ''); }}
+              disabled={busy}
+              title={refused || 'Delete this image’s caption (then “Caption” regenerates it via JoyCaption)'}
+              aria-label={refused || 'Delete this image’s caption'}
+              className="grid min-h-6 min-w-6 place-items-center rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">🗑</button>
+          )}
           {onLockToggle && (
             <button type="button"
               onClick={(e) => { e.stopPropagation(); onLockToggle(img.id, !img.is_locked); }}
@@ -435,13 +451,18 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             onSubmit={(prompt) => onRegenerate?.(img.id, undefined, prompt, { silent: true })}
             onClose={() => setEditingPrompt(false)} />
         )}
-        {/* Frosted fade: the photo's bottom edge blurs and darkens into the
-            base below, so the image and its caption read as one continuous
-            surface rather than two stacked boxes. */}
-        <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/30 via-black/10 to-transparent" />
       </div>
-      <div className="flex flex-1 flex-col rounded-b-[28px] bg-black/30 backdrop-blur-[8px] px-3 py-3">
-      <SourceAttribution metadata={img.source_metadata}
+      <div className="relative mx-2 mb-2 flex flex-1 flex-col overflow-hidden rounded-b-[22px] bg-[#0a0b0d]">
+        {/* Water reflection of the photo — the same image flipped and faded, so
+            the caption surface is a mirror pond instead of a hard black slab. */}
+        {url && (
+          <img src={url} alt="" aria-hidden loading="lazy"
+            className="dataset-tile-reflection" />
+        )}
+        {/* Frosted-glass caption surface: translucent so the reflection reads
+            through it, and white text stays legible on the dark pond. */}
+        <div className="relative z-10 flex flex-1 flex-col rounded-b-[22px] bg-black/15 px-3 py-3 backdrop-blur-[2px]">
+        <SourceAttribution metadata={img.source_metadata}
         className="mx-0.5 mb-1.5 block text-[0.625rem] leading-relaxed text-white/70" />
       {isRescueDerived ? (
         <p className="m-2 rounded-lg border border-indigo-400/40 bg-indigo-500/20 px-2 py-1 text-center text-[0.625rem] text-indigo-200"
@@ -475,31 +496,11 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
       )}
       {img.status === 'keep' && (
         <div className="m-1.5 mt-0 flex flex-col gap-1">
-          <div className="dataset-grid-item__actions flex items-center justify-end gap-1">
-            <button type="button" onClick={() => setCaptionEditorOpen(true)}
-              disabled={busy}
-              title={refused || 'Open a larger caption editor'}
-              aria-label={refused || 'Expand caption editor'}
-              className="rounded-full bg-white px-2.5 py-0.5 text-[10px] font-medium text-content shadow-[0_1px_2px_rgba(0,0,0,0.15)] hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45">
-              ⛶ Expand
-            </button>
-            {cap && (
-              <button type="button"
-                onClick={() => { editingRef.current = false; setCap(''); onCaption(img.id, ''); }}
-                disabled={busy}
-                title={refused || 'Delete this image’s caption (then “Caption” regenerates it via JoyCaption)'}
-                aria-label={refused || 'Delete this image’s caption'}
-                className="rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] text-red-300 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-45">
-                🗑 Caption
-              </button>
-            )}
-          </div>
           {/* WHO WROTE THE TEXT IN THE BOX BELOW.
-              ITS OWN LINE, not a badge slipped into the action row: at the M tile
-              density that row already holds ⛶ Expand and 🗑 Caption, and a third
-              item there is clipped at the tile's left edge — measured headless at
-              that density, where the chip read "yCaption".
-              ALWAYS VISIBLE, unlike that row: this is a readout, not an action, and
+              ITS OWN LINE: the ⛶ / 🗑 caption actions now live in the hover
+              toolbar, so the chip stays beside the textarea as a readout rather
+              than a third control that clipped at the tile's left edge.
+              ALWAYS VISIBLE, unlike those hover actions: this is a readout, not an action, and
               a provenance you have to hover to discover is one nobody discovers.
               Only when there IS a caption and its author was recorded — stamping
               "author not recorded" on every legacy tile would be a grid of identical
@@ -529,6 +530,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             className="text-[11px] leading-relaxed rounded-xl bg-white/10 p-2.5 text-white placeholder:text-white/40 resize-none focus:outline-none focus:ring-1 focus:ring-primary" />
         </div>
       )}
+        </div>
       </div>
       {captionEditorOpen && (
         <CaptionEditorDialog initialCaption={cap} imageUrl={url}

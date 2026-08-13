@@ -406,7 +406,7 @@ export default function CanvasPage() {
       </div>
 
       {index.status === 'error' && (
-        <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-100 text-[0.75rem]">
+        <p className="mb-3 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-amber-200 bg-amber-50 px-3 py-2 text-amber-100 text-[0.75rem]">
           {index.error}
         </p>
       )}

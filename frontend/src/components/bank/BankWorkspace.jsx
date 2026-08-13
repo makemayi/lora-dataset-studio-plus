@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch, del, patchJson, postJson } from '../../api/fetchClient'
 import { useToast } from '../common/Toast'
-import { FLOAT_HOVER } from '../common/surfaces.js'
+import { FLOAT_HOVER, FLOAT_SHADOW } from '../common/surfaces.js'
 // "This is configurable, here" — a deep link that lands ON the field, not on a tab.
 import SettingsLink from '../common/SettingsLink'
 import { useCapabilities } from '../../context/CapabilitiesContext'
@@ -217,7 +217,7 @@ const STEP_SHORT = {
    once, and a second live region would double every announcement. */
 function ProgressUnknown({ stale }) {
   return (
-    <p className="m-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-content-muted">
+    <p className="m-0 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-content-muted">
       <span aria-hidden>📡</span>{' '}
       {stale
         ? 'Lost contact — the progress above is the last thing we heard. The pass keeps running on the server.'
@@ -243,7 +243,7 @@ function UndoBar({ offer, busy, onUndo, onDismiss }) {
   if (!offer) return null
   return (
     <div role="status" aria-live="polite"
-      className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-content">
+      className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-content">
       <p className="m-0 min-w-0 grow basis-full sm:basis-auto">
         <span aria-hidden>↩</span>{' '}
         <span className="font-semibold">{undoBannerText(offer)}</span>
@@ -257,7 +257,7 @@ function UndoBar({ offer, busy, onUndo, onDismiss }) {
       </button>
       <button type="button" onClick={onDismiss} disabled={busy}
         title="Keep the change and hide this"
-        className="rounded-full bg-surface-raised px-2.5 py-1 text-xs text-content-muted transition-colors hover:bg-surface hover:text-content disabled:opacity-50">
+        className="rounded-full bg-surface-raised px-2.5 py-1 text-xs text-content-muted shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content disabled:opacity-50">
         Dismiss
       </button>
     </div>
@@ -287,7 +287,7 @@ export function ProgressBar({ activity, onCancel, offline = false }) {
   const note = stopNote(activity, asked)
   const pipe = kind === 'pipeline' ? activity.pipeline : null
   return (
-    <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm">
+    <div className="space-y-2 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-amber-200 bg-amber-50 px-3 py-2 text-sm">
       {/* flex-wrap: at 400 px the label, the bar and Stop cannot share one row —
           they used to squash the label to a sliver. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -325,7 +325,7 @@ export function ProgressBar({ activity, onCancel, offline = false }) {
             presses; the line below carries it for everyone else. */}
         <button type="button" disabled={asked} title={note || undefined}
           onClick={() => { setStopAskedFor(jobKey(activity)); onCancel?.() }}
-          className="ml-auto rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content transition-colors hover:bg-surface disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent">
+          className="ml-auto rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent">
           {stopLabel(asked)}
         </button>
       </div>
@@ -402,7 +402,7 @@ function FilterGroup({ label, children }) {
 // xl, and as a sticky inspector beside the gallery on desktop.
 function SelectionTagsPanel({ tagRow, tagPicked, onToggle, onClear }) {
   return (
-    <div className="space-y-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2">
+    <div className="space-y-1.5 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-emerald-200 bg-emerald-50 px-2.5 py-2">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <GroupLabel>
           {tagRow.kind === 'image' ? `🏷️ Tags of ${tagRow.name}`
@@ -465,7 +465,7 @@ function SelectionTagsPanel({ tagRow, tagPicked, onToggle, onClear }) {
 function PassButton({ onClick, disabled, title, children }) {
   return (
     <button type="button" onClick={onClick} disabled={disabled} title={title}
-      className="rounded-full bg-surface-raised px-3 py-1.5 text-sm text-content transition-colors hover:bg-surface disabled:opacity-50 disabled:hover:bg-surface-raised">
+      className="rounded-full bg-surface-raised px-3 py-1.5 text-sm text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:bg-surface-raised">
       {children}
     </button>
   )
@@ -478,7 +478,7 @@ function PassButton({ onClick, disabled, title, children }) {
 function ZoneSection({ zone, accented, children }) {
   const [open, setOpen] = useState(true)
   return (
-    <section className={`rounded-xl border bg-surface ${accented
+    <section className={`rounded-xl border bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] ${accented
       ? 'border-amber-400/60 ring-1 ring-amber-400/40' : 'border-border'}`}>
       <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
         className="flex w-full items-center gap-2 px-4 py-2 text-left">
@@ -588,7 +588,7 @@ function CoveragePanel({ coverage, semanticEngine, semanticLabel,
   }
   const poolWord = coverage.pool === 'kept' ? 'kept' : 'candidate (nothing kept yet)'
   return (
-    <div className="space-y-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5">
+    <div className="space-y-3 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-indigo-200 bg-indigo-50 px-3 py-2.5">
       <div className="flex items-center gap-2">
         <span className="text-sm font-semibold text-content">📊 Coverage advice</span>
         <span className="text-xs text-content-subtle">
@@ -647,7 +647,7 @@ function Tile({ img, bankId, selected, onToggle, onReview, onTags, size }) {
     <span key={key} className={`rounded px-1 py-px text-[10px] font-semibold leading-none ${cls}`}>{txt}</span>
   )
   return (
-    <li className={`relative overflow-hidden rounded-xl bg-surface ${STATUS_RING[img.status] || ''} ${FLOAT_HOVER}`}>
+    <li className={`relative overflow-hidden rounded-xl bg-surface ${STATUS_RING[img.status] || ''} ${FLOAT_SHADOW} ${FLOAT_HOVER}`}>
       <button type="button" onClick={onToggle}
         title={`${img.name} — ${img.width || '?'}×${img.height || '?'}`
           + (img.blur_score != null ? ` · sharpness ${Math.round(img.blur_score)}` : '')
@@ -2169,7 +2169,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
             <button type="button" onClick={openSourceFolder}
               disabled={openingSourceFolder} aria-busy={openingSourceFolder}
               title="Open this Bank's source folder in the system file explorer."
-              className="shrink-0 rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content-muted transition-colors hover:bg-surface hover:text-content disabled:cursor-wait disabled:opacity-60">
+              className="shrink-0 rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content-muted shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content disabled:cursor-wait disabled:opacity-60">
               {openingSourceFolder ? 'Opening…' : '📂 Open folder'}
             </button>
             {/* Cold path. The folder-sync note below offers this too, but only once
@@ -2178,7 +2178,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                 after breaking the bank to discover it could have been repaired. */}
             <button type="button" onClick={() => setRelocating(true)}
               title="Moving this folder to another disk? Point the bank at its new location."
-              className="shrink-0 rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content-muted transition-colors hover:bg-surface hover:text-content">
+              className="shrink-0 rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content-muted shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content">
               📦 Move folder…
             </button>
           </div>
@@ -2711,7 +2711,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                   <span>{angleState.offer.why}</span>
                   <button type="button" onClick={() => setPassOpen('angles')} disabled={!!live}
                     title={angleState.offer.why}
-                    className="rounded-full bg-surface-raised px-2.5 py-0.5 text-[11px] text-content transition-colors hover:bg-surface disabled:opacity-50">
+                    className="rounded-full bg-surface-raised px-2.5 py-0.5 text-[11px] text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 disabled:opacity-50">
                     ⤢ {angleState.offer.label}
                   </button>
                 </p>
@@ -2938,13 +2938,13 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
             <button type="button" onClick={() => rotateSelection(-90)}
               aria-label={`Rotate the ${selected.size} selected image(s) 90 degrees left`}
               title="Rotate 90° left (counter-clockwise). Your own files are never modified — the turn is stored and applied to what you see and to what gets promoted."
-              className="rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content-muted transition-colors hover:bg-surface hover:text-content">
+              className="rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content-muted shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content">
               <span aria-hidden="true">↺</span> Rotate left
             </button>
             <button type="button" onClick={() => rotateSelection(90)}
               aria-label={`Rotate the ${selected.size} selected image(s) 90 degrees right`}
               title="Rotate 90° right (clockwise). Your own files are never modified — the turn is stored and applied to what you see and to what gets promoted."
-              className="rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content-muted transition-colors hover:bg-surface hover:text-content">
+              className="rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content-muted shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content">
               <span aria-hidden="true">↻</span> Rotate right
             </button>
           </>
@@ -3230,7 +3230,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
           a screen reader hears the outcome — the grid change is silent. */}
       <div aria-live="polite">
         {textResult && (
-          <div className="mt-2 space-y-1 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-content">
+          <div className="mt-2 space-y-1 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-content">
             <div className="flex flex-wrap items-start gap-x-2 gap-y-1">
               <span aria-hidden>🔤</span>
               <span className="min-w-0 flex-1">
@@ -3238,7 +3238,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
               </span>
               <button type="button"
                 onClick={() => { setTextResult(null); setShowSelected(false); refreshImages(filter, 0, { on: false }) }}
-                className="shrink-0 rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content transition-colors hover:bg-surface">
+                className="shrink-0 rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5">
                 Clear search
               </button>
             </div>
@@ -3263,12 +3263,12 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
           numbers first — the bar is decoration over a list that reads out. */}
       <div aria-live="polite">
         {balanceResult && (
-          <div className="mt-2 space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-content">
+          <div className="mt-2 space-y-2 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-content">
             <div className="flex flex-wrap items-start gap-x-2 gap-y-1">
               <span aria-hidden>⚖️</span>
               <span className="min-w-0 flex-1">{summarizeBalance(balanceResult)}</span>
               <button type="button" onClick={() => setBalanceResult(null)}
-                className="shrink-0 rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content transition-colors hover:bg-surface">
+                className="shrink-0 rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5">
                 Dismiss
               </button>
             </div>

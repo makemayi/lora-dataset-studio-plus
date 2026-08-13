@@ -409,18 +409,15 @@ export default function SettingsPage() {
     const isActive = s.id === activeId
     const activeKb = resultIdx !== null && resultIdx === activeResult
     const base = chip
-      ? `flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-medium ${
-          isActive ? 'border-border-strong bg-surface-raised text-content' : 'border-border text-content-muted hover:text-content'}`
-      : `relative flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm font-medium ${
-          isActive ? 'bg-surface-raised text-content' : 'text-content-muted hover:bg-surface hover:text-content'} ${
+      ? `flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-transparent px-3 py-1.5 text-xs font-medium transition-[box-shadow,background-color,color] duration-200 ${
+          isActive ? 'bg-surface-raised text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.10)]' : 'text-content-muted hover:bg-surface-raised hover:text-content hover:shadow-[0_2px_4px_rgba(0,0,0,0.14),0_8px_16px_rgba(0,0,0,0.12)]'}`
+      : `relative flex w-full items-center gap-2.5 rounded-full px-3 py-2 text-left text-sm font-medium transition-[box-shadow,background-color,color] duration-200 ${
+          isActive ? 'bg-surface-raised text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_0_0_1px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.10)]' : 'text-content-muted hover:bg-surface hover:text-content'} ${
           activeKb ? 'ring-1 ring-inset ring-indigo-400/50' : ''}`
     return (
       <button key={s.id} type="button" onClick={() => navigate(`/settings/${s.id}`)}
         onMouseEnter={resultIdx !== null ? () => setActiveResult(resultIdx) : undefined}
         aria-current={isActive ? 'page' : undefined} className={base}>
-        {!chip && isActive && (
-          <span aria-hidden className="absolute bottom-1.5 left-0 top-1.5 w-0.5 rounded bg-gradient-primary" />
-        )}
         <span aria-hidden>{s.icon}</span>
         <span>{s.title}</span>
         {!chip && <StatusLed status={sectionStatus(s.id, caps)} />}
@@ -433,8 +430,8 @@ export default function SettingsPage() {
     return (
       <button key={t.id} type="button" onClick={() => goToSetting(t)}
         onMouseEnter={() => setActiveResult(resultIdx)}
-        className={`flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm ${
-          activeKb ? 'bg-surface text-content ring-1 ring-inset ring-indigo-400/50'
+        className={`flex w-full items-center gap-2 rounded-full px-3 py-1.5 text-left text-sm transition-[box-shadow,background-color,color] duration-200 ${
+          activeKb ? 'bg-surface-raised text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.10)] ring-1 ring-inset ring-indigo-400/50'
             : 'text-content-muted hover:bg-surface hover:text-content'}`}>
         <span aria-hidden className="text-content-subtle">›</span>
         <span className="truncate">{t.title}</span>

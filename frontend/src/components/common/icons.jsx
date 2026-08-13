@@ -292,6 +292,26 @@ export function FilmIcon(props) {
   );
 }
 
+/** Captions — three left-aligned text lines, the SF "text.alignleft" shape. */
+export function CaptionIcon(props) {
+  return (
+    <Glyph name="caption" {...props}>
+      <path d="M4 6.5h16M4 11.5h10M4 16.5h13" />
+    </Glyph>
+  );
+}
+
+/** Training — a graduation cap: mortarboard, band, tassel. */
+export function TrainingIcon(props) {
+  return (
+    <Glyph name="training" {...props}>
+      <path d="M12 3.5L22 8.5 12 13.5 2 8.5z" />
+      <path d="M6 10.5v4.7c0 1.5 2.7 2.7 6 2.7s6-1.2 6-2.7v-4.7" />
+      <path d="M22 8.5v5" />
+    </Glyph>
+  );
+}
+
 export function FaceSwapIcon(props) {
   return (
     <Glyph name="faceswap" {...props}>
