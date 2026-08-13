@@ -17,7 +17,7 @@ export default function TileSizeControl({ size, onChange, titles, className = ''
           aria-label={`${titles[s]}${size === s ? ' (active)' : ''}`}
           className={`h-6 w-6 rounded-full text-[0.6875rem] font-semibold transition-colors ${
             size === s
-              ? 'bg-indigo-500/25 text-indigo-200'
+              ? 'bg-primary text-white'
               : 'text-content-muted hover:bg-surface-raised hover:text-content'}`}>
           {s}
         </button>

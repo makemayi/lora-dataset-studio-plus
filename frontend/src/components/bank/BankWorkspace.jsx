@@ -3373,13 +3373,13 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
           {page.total > PAGE_SIZE && (
             <nav className="flex items-center gap-3 text-sm" aria-label="Grid pages">
               <button type="button" disabled={offset === 0} onClick={() => goto(Math.max(0, offset - PAGE_SIZE))}
-                className="rounded-full bg-surface-raised px-2.5 py-1 text-content transition-colors hover:bg-surface disabled:opacity-40">← Prev</button>
+                className="rounded-full bg-surface-raised px-2.5 py-1 text-content transition-colors hover:bg-primary hover:text-white disabled:opacity-40">← Prev</button>
               <span className="text-content-muted">
                 {offset + 1}–{Math.min(offset + PAGE_SIZE, page.total)} of {page.total}
               </span>
               <button type="button" disabled={offset + PAGE_SIZE >= page.total}
                 onClick={() => goto(offset + PAGE_SIZE)}
-                className="rounded-full bg-surface-raised px-2.5 py-1 text-content transition-colors hover:bg-surface disabled:opacity-40">Next →</button>
+                className="rounded-full bg-surface-raised px-2.5 py-1 text-content transition-colors hover:bg-primary hover:text-white disabled:opacity-40">Next →</button>
             </nav>
           )}
           </>

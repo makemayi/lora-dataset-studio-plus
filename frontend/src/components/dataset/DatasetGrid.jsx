@@ -230,8 +230,9 @@ function AutoTriageBar({ images, datasetId, faceThresholds, onBatch, busy,
    whole thing is usable with a thumb at 400 px, where the row wraps. */
 function GridPager({ view, onGo, where }) {
   if (!view.paged) return null;
-  const btn = 'min-h-11 rounded-full bg-surface-raised px-3.5 py-1 '
-    + 'text-content font-semibold transition-colors disabled:opacity-40 hover:bg-surface';
+  const btn = 'min-h-11 rounded-full bg-surface-raised px-3.5 '
+    + 'text-content font-semibold transition-colors disabled:opacity-40 '
+    + 'hover:bg-primary hover:text-white';
   return (
     <nav aria-label={`Image grid pages (${where})`}
       className="flex flex-wrap items-center gap-2 text-xs">
@@ -242,7 +243,7 @@ function GridPager({ view, onGo, where }) {
       <span className="text-content-muted tabular-nums">
         {view.from}–{view.to} of {view.total}
       </span>
-      <span className="text-content-subtle tabular-nums">
+      <span className="ml-auto rounded-full bg-surface px-2.5 py-1 tabular-nums text-content-subtle">
         page {view.page + 1}/{view.pages}
       </span>
     </nav>

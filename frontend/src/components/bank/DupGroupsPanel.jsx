@@ -142,13 +142,13 @@ export default function DupGroupsPanel({ bankId, live, onChanged, kind = 'exact'
         <nav className="flex items-center gap-3 text-sm" aria-label={k.pagesLabel}>
           <button type="button" disabled={offset === 0}
             onClick={() => refresh(Math.max(0, offset - GROUPS_PAGE))}
-            className="rounded-full bg-surface-raised px-2.5 py-1 text-content transition-colors hover:bg-surface disabled:opacity-40">← Prev</button>
+            className="rounded-full bg-surface-raised px-2.5 py-1 text-content transition-colors hover:bg-primary hover:text-white disabled:opacity-40">← Prev</button>
           <span className="text-content-muted">
             groups {offset + 1}–{Math.min(offset + GROUPS_PAGE, data.total)} of {data.total}
           </span>
           <button type="button" disabled={offset + GROUPS_PAGE >= data.total}
             onClick={() => refresh(offset + GROUPS_PAGE)}
-            className="rounded-full bg-surface-raised px-2.5 py-1 text-content transition-colors hover:bg-surface disabled:opacity-40">Next →</button>
+            className="rounded-full bg-surface-raised px-2.5 py-1 text-content transition-colors hover:bg-primary hover:text-white disabled:opacity-40">Next →</button>
         </nav>
       )}
     </div>
