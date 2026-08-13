@@ -1,6 +1,7 @@
 /** One curation tile: image + keep/reject + source/framing badges + caption + crop. */
 import { improvementBadge } from './improveCandidates.js';
 import { FLOAT_HOVER } from '../common/surfaces.js';
+import { TrashIcon } from '../common/icons.jsx';
 import { useEffect, useRef, useState } from 'react';
 import { displayLabel } from '../../utils/labels';
 // WHO wrote this tile's caption — the per-image half of the provenance the pass
@@ -423,7 +424,9 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy || img.is_locked}
               title={img.is_locked ? 'Locked — unlock to delete' : (refused || 'Delete permanently')}
               aria-label={img.is_locked ? 'Locked — unlock to delete' : (refused || 'Delete permanently')}
-              className="px-1.5 py-0.5 rounded bg-red-600 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">🗑</button>
+              className="grid min-h-7 min-w-7 place-items-center rounded-full text-red-300 hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-45">
+              <TrashIcon className="h-3.5 w-3.5" />
+            </button>
           )}
         </div>
         {editingPrompt && (
