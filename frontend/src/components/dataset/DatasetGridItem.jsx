@@ -50,14 +50,14 @@ const GREY_LABEL = { no_face: 'no face detected', low_det: 'low detection',
 function faceBadge(img) {
   if (img.face_state == null) return null;
   if (img.face_state !== 'scorable' || img.face_score == null) {
-    return { border: 'border-2 border-dashed border-gray-500', icon: '👁', cls: 'text-gray-600',
+    return { border: 'border-2 border-dashed border-gray-500', icon: '👁', cls: 'text-gray-600', graded: false,
       label: GREY_LABEL[img.face_state] || 'not scored' };
   }
   const s = img.face_score;
-  if (s >= 0.9) return { border: 'border-2 border-green-500', icon: '✓', cls: 'text-green-700', label: 'A' };
-  if (s >= 0.8) return { border: 'border-2 border-emerald-500', icon: '✓', cls: 'text-emerald-700', label: 'B' };
-  if (s >= 0.7) return { border: 'border-2 border-amber-500', icon: '~', cls: 'text-amber-700', label: 'C' };
-  return { border: 'border-2 border-red-500', icon: '⚠', cls: 'text-red-600', label: 'D' };
+  if (s >= 0.9) return { border: 'border-2 border-green-500', icon: '✓', cls: 'text-green-700', graded: true, label: 'A' };
+  if (s >= 0.8) return { border: 'border-2 border-emerald-500', icon: '✓', cls: 'text-emerald-700', graded: true, label: 'B' };
+  if (s >= 0.7) return { border: 'border-2 border-amber-500', icon: '~', cls: 'text-amber-700', graded: true, label: 'C' };
+  return { border: 'border-2 border-red-500', icon: '⚠', cls: 'text-red-600', graded: true, label: 'D' };
 }
 
 // Watermark V1 badge from watermark_state (🚩 detected / ⊘ dismissed / ✨ cleaned /
@@ -308,14 +308,14 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
         {fb && (
           <span className={`${FACE_BADGE_CLASS} px-1.5 py-0.5 rounded bg-black/70 ${fb.cls}`}
             title={`Resemblance to the reference face — ${fb.label}`}>
-            {fb.icon} 🎭 {fb.label}
+            {fb.graded ? fb.label : fb.icon}
           </span>
         )}
         <div className="dataset-grid-item__actions absolute top-1.5 right-1.5 flex max-w-[calc(100%_-_1rem)] flex-wrap justify-end gap-0.5 rounded-full bg-black/40 backdrop-blur-md ring-1 ring-white/15 p-0.5">
           {fb && (
             <span className={`flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${fb.cls}`}
               title={`Resemblance to the reference face — ${fb.label}`}>
-              {fb.icon} {fb.label}
+              {fb.graded ? fb.label : fb.icon}
             </span>
           )}
           {url && onScoreFace && ['keep', 'pending'].includes(img.status) && (
