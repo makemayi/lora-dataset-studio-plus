@@ -37,8 +37,10 @@ export default {
            with this, and a visible indigo→violet sweep on a dozen buttons was
            the single loudest thing on a page of photographs. Two stops half a
            step apart still give the button a body without announcing a second
-           colour — and the class name stays, so no call site changes. */
-        'gradient-primary': 'linear-gradient(135deg, #5a63a8 0%, #5f5c9c 100%)',
+           colour — and the class name stays, so no call site changes. A white
+           top sheen is layered ahead of it so buttons read as having material,
+           not a second colour. */
+        'gradient-primary': 'linear-gradient(135deg, rgba(255 255 255 / 0.10) 0%, rgba(255 255 255 / 0) 42%), linear-gradient(135deg, #5a63a8 0%, #5f5c9c 100%)',
       },
     },
   },

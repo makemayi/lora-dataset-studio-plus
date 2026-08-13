@@ -27,3 +27,9 @@ test('cards catch a top light edge via a CSS class, not an opacity modifier', ()
 test('CARD_SURFACE carries the light edge', () => {
   assert.match(CARD_SURFACE, /card-light-edge/)
 })
+
+test('the primary button gradient layers a top sheen over the base', () => {
+  const g = tailwindConfig.theme.extend.backgroundImage['gradient-primary']
+  assert.ok(g.includes('rgba(255 255 255 / 0.10)'), g)
+  assert.equal((g.match(/linear-gradient/g) || []).length, 2)
+})
