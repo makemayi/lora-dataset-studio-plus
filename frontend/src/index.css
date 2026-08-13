@@ -80,6 +80,21 @@
 @layer base {
   body {
     background-color: rgb(var(--bg-app));
+    /* ── Ambient light ── layered as a background IMAGE over the flat graphite
+       ground. NOT a ::before with z-index:-1: a negative-z-index child paints
+       BELOW the body's own opaque background, so it was invisible (shipped once
+       that way — the fix is this image-on-body). An image on the body itself is
+       always above the ground colour and always behind the content.
+       `background-attachment: fixed` anchors the glows to the VIEWPORT corners
+       so they stay present while scrolling. SAME hue as primary / primary.dark,
+       NOT a new palette: 100 112 180 = #6470b4, 106 99 166 = #6a63a6. Alphas
+       read as light without tinting a photograph (the glow lives in the empty
+       margins). */
+    background-image:
+      radial-gradient(60rem 60rem at 8% 0%, rgba(100 112 180 / 0.14), transparent 60%),
+      radial-gradient(50rem 50rem at 100% 8%, rgba(106 99 166 / 0.12), transparent 60%),
+      radial-gradient(46rem 46rem at 50% 115%, rgba(100 112 180 / 0.10), transparent 60%);
+    background-attachment: fixed;
     color: rgb(var(--text-base));
     /* Inter, bundled in main.jsx. The stack keeps the old system fonts behind
        it so a failed font load degrades instead of falling to a serif.
@@ -94,31 +109,12 @@
        numbers (steps, px, strengths) that jitter without this. */
     font-variant-numeric: tabular-nums;
   }
-  /* ── Ambient light ──────────────────────────────────────────────────────────
-     A fixed, static, pointer-events-none veil behind all content: faint indigo
-     pools in the corners so the graphite ground stops reading as a flat grey
-     slab. SAME hue as --primary / --primary-dark, NOT a new palette:
-     100 112 180 = #6470b4 (primary), 106 99 166 = #6a63a6 (primary.dark).
-     Alpha stays low enough that a photograph anywhere on the page reads
-     neutral — the glow lives only in the empty margins. z-index:-1 sits above
-     the body background colour and below every card and text node. */
-  body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    z-index: -1;
-    pointer-events: none;
-    background:
-      radial-gradient(60rem 60rem at 8% 0%, rgba(100 112 180 / 0.055), transparent 60%),
-      radial-gradient(50rem 50rem at 100% 8%, rgba(106 99 166 / 0.05), transparent 60%),
-      radial-gradient(46rem 46rem at 50% 115%, rgba(100 112 180 / 0.04), transparent 60%);
-  }
-  /* Card top light edge — a faint white highlight that fades out over 28px, the
+  /* Card top light edge — a white highlight that fades out over 32px, the
      "caught by the light" rim on every CARD_SURFACE. A background IMAGE (not a
      border, not an opacity modifier) so it layers over bg-surface and stays
      clipped by rounded-xl. */
   .card-light-edge {
-    background-image: linear-gradient(180deg, rgba(255 255 255 / 0.05), rgba(255 255 255 / 0) 28px);
+    background-image: linear-gradient(180deg, rgba(255 255 255 / 0.09), rgba(255 255 255 / 0) 32px);
   }
   /* Native <select> dropdown options render with an OS/inherited background
      the page can't style per-element. Theme them globally so they're readable

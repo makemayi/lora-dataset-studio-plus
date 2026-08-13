@@ -12,11 +12,10 @@ const read = (rel) => readFileSync(join(frontend, rel), 'utf8')
 
 test('the page ground carries a static ambient-light veil', () => {
   const css = read('src/index.css')
-  assert.match(css, /body::before\s*\{[^}]*position:\s*fixed/s)
-  assert.match(css, /body::before\s*\{[^}]*pointer-events:\s*none/s)
-  assert.match(css, /body::before\s*\{[^}]*radial-gradient/s)
-  // static — no animation on the veil, so reduced-motion is satisfied by construction
-  assert.doesNotMatch(css, /body::before\s*\{[^}]*animation:/s)
+  assert.match(css, /body\s*\{[^}]*background-image:[^}]*radial-gradient/s)
+  assert.match(css, /body\s*\{[^}]*background-attachment:\s*fixed/s)
+  // static — no animation on the ground, so reduced-motion is satisfied by construction
+  assert.doesNotMatch(css, /body\s*\{[^}]*animation:/s)
 })
 
 test('cards catch a top light edge via a CSS class, not an opacity modifier', () => {
