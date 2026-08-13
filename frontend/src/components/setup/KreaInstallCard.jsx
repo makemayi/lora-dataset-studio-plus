@@ -143,11 +143,11 @@ export default function KreaInstallCard({ caps, onDone }) {
         // Generate page refused Krea. It now shows the engine's real verdict — the
         // same one that page reads — and, when it is not ready, the same sentence.
         readiness.ready ? (
-          <p className="mt-3 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-content">
+          <p className="mt-3 rounded-md border border-emerald-500/30 bg-emerald-50 px-3 py-2 text-sm text-content">
             ✓ Krea 2 Edit is ready — nothing left to install.
           </p>
         ) : (
-          <p className="mt-3 break-words rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-content">
+          <p className="mt-3 break-words rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2 text-sm text-content">
             {readiness.reason || '⚠ Krea 2 Edit is not ready yet.'}
             {!readiness.verified && (
               <span className="mt-1 block text-content-muted">
@@ -199,7 +199,7 @@ export default function KreaInstallCard({ caps, onDone }) {
           on disk but ComfyUI has not loaded it — including long after the install,
           because until the restart the engine card stays red. */}
       {needsRestart && (
-        <p className="mt-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-content">
+        <p className="mt-3 rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2 text-sm text-content">
           ⚠ The node pack is installed but ComfyUI has not loaded it yet.
           <span className="text-content-muted"> ComfyUI only registers custom nodes at startup —
             restart it, then this page turns green on its own.</span>

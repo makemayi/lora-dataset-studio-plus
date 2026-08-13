@@ -96,14 +96,14 @@ export default function IdentityPromptModal({ onClose, subjectType = 'human' }) 
     <div role="dialog" aria-modal="true" aria-label={`${stLabel} identity instruction for multiple references`}
       className="fixed inset-0 z-[9990] bg-black/80 flex items-center justify-center p-3"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl border border-indigo-400/40 bg-app p-4 flex flex-col gap-3">
+      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl border border-indigo-200 bg-app p-4 flex flex-col gap-3">
         {/* flex-wrap + a min-w-0 title: on a phone the title, the subject badge,
             the help dot and ✕ wrap onto two lines instead of pushing ✕ off-screen. */}
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-indigo-300 font-semibold min-w-0">
+          <span className="text-indigo-700 font-semibold min-w-0">
             <span aria-hidden>✎</span> Identity instruction — multiple references
           </span>
-          <span className="rounded-full border border-indigo-400/50 bg-indigo-500/15 px-2 py-0.5 text-[0.625rem] font-semibold text-indigo-200">
+          <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[0.625rem] font-semibold text-indigo-700">
             {stLabel} subject
           </span>
           <HelpBadge topic="action-edit-identity-prompt" />
@@ -136,7 +136,7 @@ export default function IdentityPromptModal({ onClose, subjectType = 'human' }) 
             defaultText={defaults[f.key]}
             onChange={(v) => setPrompts((p) => writeIdentityPrompt(p, st, f.key, v))}
             badge={activeKeys.includes(f.key) ? (
-              <span className="rounded-full border border-indigo-400/50 bg-indigo-500/15 px-2 py-0.5 text-[0.625rem] font-semibold text-indigo-200">
+              <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[0.625rem] font-semibold text-indigo-700">
                 used by your selected engine{activeKeys.length > 1 ? 's' : ''}
               </span>
             ) : null}
@@ -144,7 +144,7 @@ export default function IdentityPromptModal({ onClose, subjectType = 'human' }) 
         ))}
 
         <div className="flex items-center gap-2 flex-wrap pt-1">
-          <a href="#/settings/engines" className="text-indigo-300 hover:text-indigo-200 text-xs underline decoration-indigo-300/50">
+          <a href="#/settings/engines" className="text-indigo-700 hover:text-indigo-700 text-xs underline decoration-indigo-300/50">
             All identity &amp; Klein prompts →
           </a>
           <button type="button" onClick={onClose}

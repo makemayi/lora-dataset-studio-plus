@@ -38,7 +38,7 @@ function ImagePane({ datasetId, image, nonce, label, tone, fallback, onPreview }
               <span aria-hidden className="h-6 w-6 animate-spin rounded-full border-2 border-indigo-300/30 border-t-indigo-300" />
             )}
             <span className={`max-w-full break-words text-[0.6875rem] leading-relaxed ${
-              image?.status === 'failed' ? 'text-rose-300' : 'text-content-subtle'}`}>
+              image?.status === 'failed' ? 'text-rose-700' : 'text-content-subtle'}`}>
               {fallback}
             </span>
           </div>
@@ -79,7 +79,7 @@ export default function SmallImageRescueReview({
 
   return (
     <section id="ds-curation-small-image-rescue"
-      className="flex min-w-0 scroll-mt-20 flex-col gap-3 rounded-xl border border-indigo-400/40 bg-indigo-500/[0.06] p-3 lg:scroll-mt-24"
+      className="flex min-w-0 scroll-mt-20 flex-col gap-3 rounded-xl border border-indigo-200 bg-indigo-500/[0.06] p-3 lg:scroll-mt-24"
       aria-labelledby="small-image-rescue-title">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
@@ -91,7 +91,7 @@ export default function SmallImageRescueReview({
             of training until you make one atomic choice; the original is never overwritten.
           </p>
         </div>
-        <span className="shrink-0 rounded-full border border-indigo-400/40 bg-indigo-500/10 px-2 py-0.5 text-[0.6875rem] font-semibold text-indigo-200">
+        <span className="shrink-0 rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[0.6875rem] font-semibold text-indigo-700">
           {pairs.length} to review
         </span>
       </div>
@@ -112,7 +112,7 @@ export default function SmallImageRescueReview({
               <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2">
                 <span className="text-xs font-semibold text-content">Pair {index + 1}</span>
                 <span className={`min-w-0 break-words text-[0.6875rem] ${
-                  phase === 'failed' ? 'text-rose-300' : phase === 'queued' ? 'text-indigo-200' : 'text-emerald-300'}`}>
+                  phase === 'failed' ? 'text-rose-700' : phase === 'queued' ? 'text-indigo-700' : 'text-emerald-700'}`}>
                   {phase === 'failed' ? '⚠ ' : phase === 'queued' ? '⏳ ' : '✓ '}{detail}
                 </span>
                 {resolving && (
@@ -127,7 +127,7 @@ export default function SmallImageRescueReview({
                   label="Original small image" tone="text-content" fallback="Original unavailable"
                   onPreview={onPreview} />
                 <ImagePane datasetId={datasetId} image={candidate} nonce={nonces[candidate.id] || 0}
-                  label="Klein candidate" tone="text-indigo-200" fallback={detail}
+                  label="Klein candidate" tone="text-indigo-700" fallback={detail}
                   onPreview={onPreview} />
               </div>
 
@@ -141,12 +141,12 @@ export default function SmallImageRescueReview({
                 <button type="button" disabled={controlsDisabled || phase !== 'ready'}
                   title={phase === 'ready' ? 'Keep the Klein result and reject the original' : 'Wait for a completed Klein candidate'}
                   onClick={() => resolve(candidate.id, 'klein')}
-                  className="min-h-9 min-w-0 rounded-lg border border-indigo-400/50 bg-indigo-500/15 px-2 py-1.5 text-xs font-semibold text-indigo-100 hover:bg-indigo-500/25 disabled:opacity-40">
+                  className="min-h-9 min-w-0 rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1.5 text-xs font-semibold text-indigo-100 hover:bg-indigo-500/25 disabled:opacity-40">
                   Use Klein
                 </button>
                 <button type="button" disabled={controlsDisabled}
                   onClick={() => resolve(candidate.id, 'reject')}
-                  className="min-h-9 min-w-0 rounded-lg border border-rose-500/40 bg-rose-500/10 px-2 py-1.5 text-xs font-semibold text-rose-300 hover:bg-rose-500/20 disabled:opacity-40">
+                  className="min-h-9 min-w-0 rounded-lg border border-rose-500/40 bg-rose-50 px-2 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-500/20 disabled:opacity-40">
                   Reject both
                 </button>
               </div>

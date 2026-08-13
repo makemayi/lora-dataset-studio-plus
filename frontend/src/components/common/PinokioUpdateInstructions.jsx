@@ -10,7 +10,7 @@ import {
  * component — three clicks, no terminal. */
 export default function PinokioUpdateInstructions() {
   return (
-    <div className="w-full space-y-2 rounded-md border border-sky-400/30 bg-sky-500/10 px-3 py-2 text-content">
+    <div className="w-full space-y-2 rounded-md border border-sky-400/30 bg-sky-50 px-3 py-2 text-content">
       <p className="text-sm">
         This install is launched by Pinokio, which starts and stops the app. Update it from there:
       </p>
@@ -26,7 +26,7 @@ export default function PinokioUpdateInstructions() {
         Pinokio&rsquo;s Update runs the same fast-forward pull as this app, then reinstalls changed
         requirements; your datasets, config and Image Bank stay in place.{' '}
         <a href={PINOKIO_UPDATE_GUIDE_URL} target="_blank" rel="noreferrer"
-          className="font-medium text-sky-300 underline hover:text-sky-200">
+          className="font-medium text-sky-700 underline hover:text-sky-200">
           Pinokio install guide ↗
         </a>
       </p>

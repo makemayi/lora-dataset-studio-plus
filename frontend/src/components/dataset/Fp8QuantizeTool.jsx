@@ -69,7 +69,7 @@ export function Fp8DeliverPlan({
         {' '}(~{fmtGB(plan.estimated_bytes)}) into
         {' '}<span className="font-mono break-all">{plan.destination_dir}</span>.
       </p>
-      <p className={`m-0 mt-1 ${plan.destination_dir_kind === 'comfyui' ? 'opacity-85' : 'text-amber-200'}`}>
+      <p className={`m-0 mt-1 ${plan.destination_dir_kind === 'comfyui' ? 'opacity-85' : 'text-amber-700'}`}>
         {plan.destination_dir_kind === 'comfyui'
           ? `✓ ${plan.destination_dir_note} — ComfyUI lists it after a refresh.`
           : `⚠ ${plan.destination_dir_note}.`}
@@ -178,7 +178,7 @@ export function Fp8DeliverOutcome({ state }) {
   const result = state.result || null;
   if (state.status === 'done') {
     return (
-      <p className="m-0 mt-1.5 text-emerald-200 text-[0.6875rem] leading-relaxed" role="status">
+      <p className="m-0 mt-1.5 text-emerald-700 text-[0.6875rem] leading-relaxed" role="status">
         ✓ <span className="font-mono break-all">{state.destination_name}</span>
         {' '}({fmtGB(result?.bytes_after)}) is in
         {' '}<span className="font-mono break-all">{state.destination_dir}</span> and was
@@ -192,7 +192,7 @@ export function Fp8DeliverOutcome({ state }) {
   }
   if (state.status === 'cancelled') {
     return (
-      <p className="m-0 mt-1.5 text-amber-200 text-[0.6875rem] leading-relaxed" role="status">
+      <p className="m-0 mt-1.5 text-amber-700 text-[0.6875rem] leading-relaxed" role="status">
         ■ {state.error}
       </p>
     );
@@ -370,7 +370,7 @@ export default function Fp8QuantizeTool({
       )}
 
       {plan && !plan.ok && !running && (
-        <p className="m-0 mt-1 text-amber-200 text-[0.6875rem]" role="alert">⚠ {plan.error}</p>
+        <p className="m-0 mt-1 text-amber-700 text-[0.6875rem]" role="alert">⚠ {plan.error}</p>
       )}
       {!running && (
         <Fp8DeliverPlan plan={plan} keepMaster={keepMaster} busy={busy} disabled={disabled}

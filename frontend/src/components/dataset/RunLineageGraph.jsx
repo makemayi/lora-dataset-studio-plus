@@ -302,7 +302,7 @@ export default function RunLineageGraph({ tree, onSelect, onContinueCheckpoint,
         title={bigPreviews ? 'Back to compact pills' : 'Enlarge the generated previews to compare checkpoints at a glance'}
         className={'mr-auto rounded-md border px-2 py-0.5 text-[0.625rem] font-semibold transition-colors '
           + (bigPreviews
-            ? 'border-indigo-400/60 bg-indigo-500/20 text-indigo-100 '
+            ? 'border-indigo-400/60 bg-indigo-100 text-indigo-100 '
             : 'border-border bg-app/60 text-content-muted hover:text-content ')}>
         🔍 Big previews
       </button>
@@ -310,7 +310,7 @@ export default function RunLineageGraph({ tree, onSelect, onContinueCheckpoint,
         <span><span className="font-semibold">⇧ Shift-click</span> two runs to compare · tick the <span aria-hidden>☑</span> corner box on an <span className="font-semibold">imported</span> checkpoint to preview it (import one with <span aria-hidden>📦</span> first)</span>
       ) : (
         <>
-          <span className="text-amber-200">
+          <span className="text-amber-700">
             {selectedForDiff.length === 1 ? 'Shift-click another run to compare' : 'Comparing two runs →'}
           </span>
           <button type="button" onClick={() => setSelectedForDiff([])}
@@ -323,7 +323,7 @@ export default function RunLineageGraph({ tree, onSelect, onContinueCheckpoint,
         Test-Studio engine), so a LoRA's epoch-by-epoch evolution reads at a glance.
         Disabled with an honest reason when the picks aren't deployable. */}
     {selectedCk.size > 0 && (
-      <div className="lds-lgen mb-2 rounded-xl border border-indigo-400/40 bg-indigo-500/5 p-2.5">
+      <div className="lds-lgen mb-2 rounded-xl border border-indigo-200 bg-indigo-50 p-2.5">
         <div className="mb-1.5 flex items-center gap-2 text-[0.6875rem]">
           <span className="font-semibold text-content">🎨 Generate previews</span>
           <span className="text-content-muted">{sel.testableCount} checkpoint{sel.testableCount !== 1 ? 's' : ''}, one shared prompt + seed, strength 1.0</span>
@@ -347,9 +347,9 @@ export default function RunLineageGraph({ tree, onSelect, onContinueCheckpoint,
                 : 'cursor-not-allowed bg-app/60 text-content-subtle ')}>
             {gen.busy ? 'Generating…' : 'Generate'}
           </button>
-          {sel.hint && <span className="text-[0.625rem] text-amber-200/90">{sel.hint}</span>}
-          {gen.error && <span className="text-[0.625rem] text-red-300">{gen.error}</span>}
-          {gen.note && !gen.error && <span className="text-[0.625rem] text-emerald-300">{gen.note}</span>}
+          {sel.hint && <span className="text-[0.625rem] text-amber-700/90">{sel.hint}</span>}
+          {gen.error && <span className="text-[0.625rem] text-red-600">{gen.error}</span>}
+          {gen.note && !gen.error && <span className="text-[0.625rem] text-emerald-700">{gen.note}</span>}
         </div>
       </div>
     )}

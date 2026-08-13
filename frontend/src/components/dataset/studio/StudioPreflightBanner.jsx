@@ -26,7 +26,7 @@ export default function StudioPreflightBanner({ missing, archMismatch, onDismiss
     const name = (archMismatch.checkpoint || '').replace(/\\/g, '/').split('/').pop();
     return (
       <div role="alert"
-        className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2.5 text-sm text-amber-200 flex items-start gap-2">
+        className="rounded-lg border border-amber-200 bg-amber-400/10 px-3 py-2.5 text-sm text-amber-700 flex items-start gap-2">
         <span aria-hidden className="text-base leading-none">⚠</span>
         <p className="m-0">
           <b className="font-semibold">“{name}” is a {det} LoRA</b>, but this is the {fam} Studio —
@@ -35,7 +35,7 @@ export default function StudioPreflightBanner({ missing, archMismatch, onDismiss
         </p>
         {onDismiss && (
           <button type="button" onClick={onDismiss} aria-label="Dismiss"
-            className="ml-auto px-1.5 leading-none text-amber-200/70 hover:text-amber-100">×</button>
+            className="ml-auto px-1.5 leading-none text-amber-700/70 hover:text-amber-100">×</button>
         )}
       </div>
     );
@@ -50,7 +50,7 @@ export default function StudioPreflightBanner({ missing, archMismatch, onDismiss
 
   return (
     <div role="alert"
-      className="rounded-lg border border-red-400/40 bg-red-500/10 px-3 py-2.5 text-sm text-red-200 flex flex-col gap-2">
+      className="rounded-lg border border-red-400/40 bg-red-50 px-3 py-2.5 text-sm text-red-700 flex flex-col gap-2">
       <div className="flex items-start gap-2">
         <span aria-hidden className="text-base leading-none">⚠</span>
         <p className="m-0 font-semibold">
@@ -59,13 +59,13 @@ export default function StudioPreflightBanner({ missing, archMismatch, onDismiss
         </p>
         {onDismiss && (
           <button type="button" onClick={onDismiss} aria-label="Dismiss"
-            className="ml-auto px-1.5 leading-none text-red-200/70 hover:text-red-100">×</button>
+            className="ml-auto px-1.5 leading-none text-red-700/70 hover:text-red-100">×</button>
         )}
       </div>
 
       {files.length > 0 && (
         <div className="flex flex-col gap-1">
-          <span className="text-red-200/80 text-[0.6875rem] uppercase tracking-wide">
+          <span className="text-red-700/80 text-[0.6875rem] uppercase tracking-wide">
             Missing model file{files.length > 1 ? 's' : ''} — place at
           </span>
           <ul className="m-0 flex flex-col gap-0.5">
@@ -73,14 +73,14 @@ export default function StudioPreflightBanner({ missing, archMismatch, onDismiss
               <li key={f.path} className="flex flex-col gap-0.5">
                 <span className="flex flex-wrap items-baseline gap-x-2">
                   <code className="text-red-100 text-[0.6875rem] break-all">{f.path}</code>
-                  <span className="text-red-200/60 text-[0.625rem]">({f.kind})</span>
+                  <span className="text-red-700/60 text-[0.625rem]">({f.kind})</span>
                 </span>
                 {/* `hint` = ce que le résolveur a réellement cherché (noms acceptés,
                     racines balayées). Sans lui, le chemin affiché se lit comme « ce
                     nom exact est obligatoire », alors qu'une douzaine d'orthographes
                     passent. (bobba84, GitHub #18) */}
                 {f.hint && (
-                  <span className="text-red-200/60 text-[0.625rem] leading-snug">{f.hint}</span>
+                  <span className="text-red-700/60 text-[0.625rem] leading-snug">{f.hint}</span>
                 )}
               </li>
             ))}
@@ -90,7 +90,7 @@ export default function StudioPreflightBanner({ missing, archMismatch, onDismiss
 
       {nodes.length > 0 && (
         <div className="flex flex-col gap-1">
-          <span className="text-red-200/80 text-[0.6875rem] uppercase tracking-wide">
+          <span className="text-red-700/80 text-[0.6875rem] uppercase tracking-wide">
             Missing custom node{nodes.length > 1 ? 's' : ''} — install into ComfyUI
           </span>
           <ul className="m-0 flex flex-col gap-1">
@@ -98,11 +98,11 @@ export default function StudioPreflightBanner({ missing, archMismatch, onDismiss
               const p = packFor(n);
               return (
                 <li key={n} className="flex flex-col gap-0.5">
-                  <code className="self-start px-1.5 py-0.5 rounded border border-red-400/40 bg-red-500/10 text-red-100 text-[0.6875rem]">
+                  <code className="self-start px-1.5 py-0.5 rounded border border-red-400/40 bg-red-50 text-red-100 text-[0.6875rem]">
                     {n}
                   </code>
                   {p && (
-                    <span className="text-red-200/70 text-[0.625rem]">
+                    <span className="text-red-700/70 text-[0.625rem]">
                       Install <b className="font-semibold">{p.pack}</b> via ComfyUI-Manager
                       {p.search ? <> (search “{p.search}”)</> : null} —{' '}
                       <a href={p.url} target="_blank" rel="noreferrer"

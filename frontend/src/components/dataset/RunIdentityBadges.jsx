@@ -21,8 +21,8 @@ export function RunIdChip({ source, id, className = '' }) {
       className={'inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 '
         + 'text-[0.625rem] font-semibold tabular-nums '
         + (cloud
-          ? 'border-sky-400/50 bg-sky-500/10 text-sky-200'
-          : 'border-violet-400/50 bg-violet-500/10 text-violet-200')
+          ? 'border-sky-400/50 bg-sky-50 text-sky-200'
+          : 'border-violet-400/50 bg-violet-50 text-violet-200')
         + (className ? ` ${className}` : '')}>
       <span aria-hidden>{cloud ? '☁' : '💻'}</span>#{id}
     </span>
@@ -43,7 +43,7 @@ export function BaseModelChip({ label, className = '' }) {
       className={'inline-flex min-w-0 max-w-[11rem] items-center gap-1 rounded border '
         + 'px-1.5 py-0.5 text-[0.625rem] '
         + (label.custom
-          ? 'border-amber-400/40 bg-amber-500/10 text-amber-200'
+          ? 'border-amber-200 bg-amber-50 text-amber-700'
           : 'border-border bg-surface-raised text-content-subtle')
         + (className ? ` ${className}` : '')}>
       <span aria-hidden>🧩</span>

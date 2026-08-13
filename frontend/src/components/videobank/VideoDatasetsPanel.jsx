@@ -67,7 +67,7 @@ export default function VideoDatasetsPanel() {
               </button>
               <button type="button" onClick={() => remove(d)}
                 aria-label={`Delete video dataset ${d.name}`}
-                className="px-1.5 text-content-subtle hover:text-rose-300">✕</button>
+                className="px-1.5 text-content-subtle hover:text-rose-700">✕</button>
             </div>
             <p className="text-xs text-content-muted">
               {d.clips} clip{d.clips === 1 ? '' : 's'} · {d.target_label}
@@ -77,12 +77,12 @@ export default function VideoDatasetsPanel() {
               {d.width && d.height ? ` · ${d.width}×${d.height}` : ' · source size'}
             </p>
             {!d.training_verified && (
-              <p className="rounded border border-amber-500/50 bg-amber-500/10 px-2 py-1 text-[0.6875rem] text-amber-100">
+              <p className="rounded border border-amber-500/50 bg-amber-50 px-2 py-1 text-[0.6875rem] text-amber-100">
                 ⚠ No LoRA trainer is known to exist for {d.target_label} yet.
               </p>
             )}
             {d.licence_note && (
-              <p className="rounded border border-rose-500/60 bg-rose-500/10 px-2 py-1 text-[0.6875rem] text-rose-100">
+              <p className="rounded border border-rose-300 bg-rose-50 px-2 py-1 text-[0.6875rem] text-rose-100">
                 ⚖ {d.licence_note}
               </p>
             )}
@@ -192,7 +192,7 @@ function VideoTrainingSection({ ds }) {
       <div className="flex flex-wrap items-center gap-1.5">
         {active ? (
           <button type="button" onClick={stop}
-            className="rounded border border-rose-500/60 bg-rose-500/10 px-2 py-1 text-[0.6875rem] font-semibold text-rose-100 hover:bg-rose-500/20">
+            className="rounded border border-rose-300 bg-rose-50 px-2 py-1 text-[0.6875rem] font-semibold text-rose-100 hover:bg-rose-500/20">
             ⏹ Stop training
           </button>
         ) : (
@@ -221,7 +221,7 @@ function VideoTrainingSection({ ds }) {
       {/* On the card, not only in the toast after launching: a warning that
           arrives once the run is up is a warning about a decision already made. */}
       {!active && progress?.resolution_note && (
-        <p className="rounded border border-amber-500/50 bg-amber-500/10 px-2 py-1 text-[0.6875rem] text-amber-100">
+        <p className="rounded border border-amber-500/50 bg-amber-50 px-2 py-1 text-[0.6875rem] text-amber-100">
           ⚠ {progress.resolution_note}
         </p>
       )}

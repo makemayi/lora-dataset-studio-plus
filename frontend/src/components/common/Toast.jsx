@@ -63,10 +63,10 @@ export function useToast() {
 // ── Renderer ──
 
 const TYPE_STYLES = {
-  info: 'border-blue-500/50 bg-blue-500/10 text-blue-300',
-  success: 'border-green-500/50 bg-green-500/10 text-green-300',
-  error: 'border-red-500/50 bg-red-500/10 text-red-300',
-  warning: 'border-yellow-500/50 bg-yellow-500/10 text-yellow-300',
+  info: 'border-blue-500/50 bg-blue-50 text-blue-700',
+  success: 'border-green-500/50 bg-green-50 text-green-700',
+  error: 'border-red-500/50 bg-red-50 text-red-600',
+  warning: 'border-yellow-500/50 bg-yellow-500/10 text-yellow-700',
 }
 
 const ICONS = {

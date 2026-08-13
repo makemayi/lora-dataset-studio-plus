@@ -21,7 +21,7 @@ export default function BlendSweepSummary({ configCount, count = 1, batchMult = 
     <p data-testid="blend-sweep-summary"
       className={'m-0 rounded-lg border px-2.5 py-1.5 text-[0.6875rem] '
         + (cost.warn
-          ? 'border-amber-400/40 bg-amber-500/10 text-amber-200'
+          ? 'border-amber-200 bg-amber-50 text-amber-700'
           : 'border-border bg-surface text-content-muted')}
       role={cost.warn ? 'status' : undefined}>
       <span aria-hidden>{cost.warn ? '⚠' : '🧮'}</span>{' '}

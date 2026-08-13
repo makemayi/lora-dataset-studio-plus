@@ -25,7 +25,7 @@ import {
 import WatermarkRegionEditor from '../dataset/WatermarkRegionEditor'
 import { applyMaskResponse, initialMask, maskPayload, maskStatus } from './bankWatermarkMask.js'
 
-const TONE_CLASS = { ok: 'text-emerald-300', info: 'text-white/70', warn: 'text-amber-300' }
+const TONE_CLASS = { ok: 'text-emerald-700', info: 'text-white/70', warn: 'text-amber-700' }
 
 export default function BankWatermarkMaskDialog({ bankId, image, onSaved, onClose }) {
   const start = initialMask(image)
@@ -146,7 +146,7 @@ export default function BankWatermarkMaskDialog({ bankId, image, onSaved, onClos
         <p className={`text-center text-xs ${TONE_CLASS[status.tone]}`}>{status.text}</p>
 
         {save.status === 'failed' && (
-          <div role="alert" className="flex flex-wrap items-center justify-center gap-2 text-xs text-rose-300">
+          <div role="alert" className="flex flex-wrap items-center justify-center gap-2 text-xs text-rose-700">
             <span>⚠ {save.error} — the mask on screen is NOT saved.</span>
             <button type="button" onClick={retry} className={btn}>Retry save</button>
           </div>
@@ -172,8 +172,8 @@ export default function BankWatermarkMaskDialog({ bankId, image, onSaved, onClos
             className={btn}>
             Reset to detected
           </button>
-          <span aria-live="polite" className={`text-xs font-semibold ${saving ? 'text-amber-200'
-            : save.status === 'failed' ? 'text-rose-300' : 'text-emerald-300'}`}>
+          <span aria-live="polite" className={`text-xs font-semibold ${saving ? 'text-amber-700'
+            : save.status === 'failed' ? 'text-rose-700' : 'text-emerald-700'}`}>
             {saving ? 'Saving…' : save.status === 'failed' ? '⚠ Save failed' : '✓ Saved'}
           </span>
         </div>

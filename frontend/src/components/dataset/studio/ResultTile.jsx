@@ -23,11 +23,11 @@ export default function ResultTile({ cell, row, strength, variant, datasetId, on
       {isStalled && (
         <div
           role="status" aria-live="polite" aria-atomic="true"
-          className="w-20 min-h-28 rounded-md border border-amber-500/50 bg-amber-500/10 flex flex-col gap-1 items-center justify-center px-1 py-1 text-center text-amber-200 text-[0.625rem]">
+          className="w-20 min-h-28 rounded-md border border-amber-500/50 bg-amber-50 flex flex-col gap-1 items-center justify-center px-1 py-1 text-center text-amber-700 text-[0.625rem]">
           <span aria-hidden className="text-sm">⏸</span>
           <span className="font-semibold">paused</span>
-          <p className="m-0 break-words leading-tight select-text text-amber-200/80">{stalledReason}</p>
-          <span className="leading-tight text-amber-200/90">Recover or restart ComfyUI, then cancel and resume.</span>
+          <p className="m-0 break-words leading-tight select-text text-amber-700/80">{stalledReason}</p>
+          <span className="leading-tight text-amber-700/90">Recover or restart ComfyUI, then cancel and resume.</span>
         </div>
       )}
       {cell.status === 'pending' && !isStalled && (
@@ -45,14 +45,14 @@ export default function ResultTile({ cell, row, strength, variant, datasetId, on
       {cell.status === 'failed' && (
         <div
           title={cell.error || 'Generation failed — see the 🪵 Server log in Settings for details.'}
-          className="w-20 h-28 overflow-hidden rounded-md border border-red-500/50 bg-red-500/10 flex flex-col items-center justify-center gap-0.5 text-red-300 text-[0.625rem] cursor-help px-1 text-center">
+          className="w-20 h-28 overflow-hidden rounded-md border border-red-500/50 bg-red-50 flex flex-col items-center justify-center gap-0.5 text-red-600 text-[0.625rem] cursor-help px-1 text-center">
           <span aria-hidden className="text-sm">⚠</span>
           <span>failed</span>
-          {cell.error && <span className="text-red-300/70 leading-tight line-clamp-3">{cell.error}</span>}
+          {cell.error && <span className="text-red-600/70 leading-tight line-clamp-3">{cell.error}</span>}
         </div>
       )}
       {cell.status === 'cancelled' && (
-        <div className="w-20 h-28 rounded-md border border-amber-500/40 bg-amber-500/10 flex flex-col items-center justify-center text-amber-300 text-[0.625rem] gap-0.5"><span aria-hidden>⏸</span> stopped</div>
+        <div className="w-20 h-28 rounded-md border border-amber-500/40 bg-amber-50 flex flex-col items-center justify-center text-amber-700 text-[0.625rem] gap-0.5"><span aria-hidden>⏸</span> stopped</div>
       )}
       {cell.status === 'done' && cell.filename && (
         <button type="button" onClick={() => onOpen(cell)}
@@ -68,17 +68,17 @@ export default function ResultTile({ cell, row, strength, variant, datasetId, on
       {cell.face_score != null && (
         <span title={`Face similarity vs the dataset reference: ${cell.face_score.toFixed(3)}`}
           className={`px-1 py-px rounded border text-[0.5625rem] font-semibold tabular-nums ${cell.face_score >= 0.50
-            ? 'border-emerald-400/50 bg-emerald-400/10 text-emerald-300'
+            ? 'border-emerald-400/50 bg-emerald-400/10 text-emerald-700'
             : cell.face_score >= 0.45
-              ? 'border-amber-400/50 bg-amber-400/10 text-amber-300'
-              : 'border-red-400/50 bg-red-400/10 text-red-300'}`}>
+              ? 'border-amber-200 bg-amber-400/10 text-amber-700'
+              : 'border-red-400/50 bg-red-400/10 text-red-600'}`}>
           🎯 {cell.face_score.toFixed(2)}
         </span>
       )}
       {/* Badge de l'axe ⚖ batch : distingue la cellule AVEC le LoRA testé de sa
           jumelle sans (même config, même seed). */}
       {cell.batch_lora && (
-        <span className="max-w-[5rem] truncate px-1 py-px rounded border border-amber-400/50 bg-amber-400/15 text-amber-300 text-[0.5625rem] font-semibold"
+        <span className="max-w-[5rem] truncate px-1 py-px rounded border border-amber-200 bg-amber-400/15 text-amber-700 text-[0.5625rem] font-semibold"
           title={`Batch axis: with ${cell.batch_lora}`}>
           + {cell.batch_lora}
         </span>
@@ -89,7 +89,7 @@ export default function ResultTile({ cell, row, strength, variant, datasetId, on
           tuile doit donc dire LAQUELLE elle est, poids de tête compris. Sans ça,
           neuf images d'un balayage sont neuf tuiles identiques au badge près. */}
       {Array.isArray(cell.combined_loras) && cell.combined_loras.length > 0 && (
-        <span className="max-w-[5rem] truncate px-1 py-px rounded border border-sky-400/50 bg-sky-400/15 text-sky-300 text-[0.5625rem] font-semibold tabular-nums"
+        <span className="max-w-[5rem] truncate px-1 py-px rounded border border-sky-400/50 bg-sky-400/15 text-sky-700 text-[0.5625rem] font-semibold tabular-nums"
           title={`Blend: ${[fmt(cell.strength), ...cell.combined_loras.map((e) => `${e.label} @ ${e.weight}`)].join(' × ')}`}>
           🧬 {fmt(cell.strength)}
           {cell.combined_loras.map((e) => ` × ${e.weight}`).join('')}

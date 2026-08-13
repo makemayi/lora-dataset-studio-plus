@@ -76,7 +76,7 @@ function PipelineSteps() {
             aria-hidden="true">{s.icon}</span>
           <span className="min-w-0">
             <span className="block text-content text-[0.75rem] font-semibold">
-              <span className="text-indigo-300 mr-1">{s.n}.</span>{s.title}
+              <span className="text-indigo-700 mr-1">{s.n}.</span>{s.title}
             </span>
             <span className="block text-content-subtle text-[0.6875rem] leading-snug">{s.text}</span>
           </span>
@@ -114,7 +114,7 @@ function EmptyState() {
         <div className="grid grid-cols-6 gap-1.5" aria-hidden="true">
           {shots.map((s, i) => (
             <ShotIllustration key={i} framing={s.framing} label={s.label}
-              className={`w-9 h-9 ${i === 0 ? 'text-indigo-300' : 'text-content-subtle'}`} />
+              className={`w-9 h-9 ${i === 0 ? 'text-indigo-700' : 'text-content-subtle'}`} />
           ))}
         </div>
         <p className="text-content-muted text-sm font-medium">No datasets yet</p>
@@ -133,10 +133,10 @@ function EmptyState() {
    border+bright-text weight they were the loudest thing on the page. The HUE
    still carries the family; it just stops shouting it. */
 const FAMILY_BADGE = {
-  zimage: ['Z-Image', 'bg-sky-500/15 text-sky-200/90'],
+  zimage: ['Z-Image', 'bg-sky-50 text-sky-200/90'],
   sdxl: ['SDXL', 'bg-violet-500/15 text-violet-200/90'],
-  krea: ['Krea', 'bg-amber-500/15 text-amber-200/90'],
-  flux: ['FLUX.1', 'bg-emerald-500/15 text-emerald-200/90'],
+  krea: ['Krea', 'bg-amber-50 text-amber-700/90'],
+  flux: ['FLUX.1', 'bg-emerald-50 text-emerald-700/90'],
   // rose: libre (fuchsia/cyan sont pris par les badges kind Concept/Style au-dessus
   // de la vignette — une couleur distincte évite de les confondre avec une famille).
   flux2klein: ['FLUX.2 Klein', 'bg-rose-500/15 text-rose-200/90'],
@@ -214,12 +214,12 @@ function DatasetTile({ d, onOpen, onDelete, onExportZip, onExportBackup, onSetti
             </span>
           )}
           {d.kind === 'concept' && (
-            <span className="absolute left-1.5 top-1.5 z-10 rounded border border-fuchsia-400/40 bg-black/50 px-1.5 py-px text-[0.5625rem] font-semibold uppercase text-fuchsia-300 backdrop-blur-sm">
+            <span className="absolute left-1.5 top-1.5 z-10 rounded border border-fuchsia-200 bg-black/50 px-1.5 py-px text-[0.5625rem] font-semibold uppercase text-fuchsia-700 backdrop-blur-sm">
               💡 Concept
             </span>
           )}
           {d.kind === 'style' && (
-            <span className="absolute left-1.5 top-1.5 z-10 rounded border border-cyan-400/40 bg-black/50 px-1.5 py-px text-[0.5625rem] font-semibold uppercase text-cyan-300 backdrop-blur-sm">
+            <span className="absolute left-1.5 top-1.5 z-10 rounded border border-cyan-400/40 bg-black/50 px-1.5 py-px text-[0.5625rem] font-semibold uppercase text-cyan-700 backdrop-blur-sm">
               🎨 Style
             </span>
           )}
@@ -237,7 +237,7 @@ function DatasetTile({ d, onOpen, onDelete, onExportZip, onExportBackup, onSetti
               );
             })}
           </span>
-          <span className={`truncate text-[0.6875rem] ${d.kind === 'style' ? 'text-cyan-300' : 'font-mono text-indigo-300'}`}>
+          <span className={`truncate text-[0.6875rem] ${d.kind === 'style' ? 'text-cyan-700' : 'font-mono text-indigo-700'}`}>
             {d.kind === 'style' ? 'always-on · no activation trigger' : (d.trigger_word || '—')}
           </span>
           <span className="text-[0.6875rem] text-content-subtle">{tileStats(d)}</span>
@@ -290,7 +290,7 @@ function DatasetTile({ d, onOpen, onDelete, onExportZip, onExportBackup, onSetti
                 if (window.confirm(`Permanently delete the dataset "${d.name}" and all its images? This cannot be undone.`)) onDelete(d.id);
               }}
               title="Delete this dataset" aria-label={`Delete the dataset ${d.name}`}
-              className={`${OVER_IMAGE_BUTTON} text-red-300 hover:bg-red-500/60`}>
+              className={`${OVER_IMAGE_BUTTON} text-red-600 hover:bg-red-500/60`}>
               <TrashIcon className="h-3.5 w-3.5" />
             </button>
           )}
@@ -343,7 +343,7 @@ function DatasetRow({ d, onOpen, onDelete, onExportZip, onExportBackup, onSettin
             })}
           </span>
           <span className="truncate text-[0.625rem] text-content-subtle">
-            <span className={kind === 'style' ? 'text-cyan-300' : 'font-mono text-indigo-300'}>
+            <span className={kind === 'style' ? 'text-cyan-700' : 'font-mono text-indigo-700'}>
               {kind === 'style' ? 'always-on' : (d.trigger_word || '—')}
             </span>
             {' · '}{tileStats(d)}
@@ -380,7 +380,7 @@ function DatasetRow({ d, onOpen, onDelete, onExportZip, onExportBackup, onSettin
               if (window.confirm(`Permanently delete the dataset "${d.name}" and all its images? This cannot be undone.`)) onDelete(d.id);
             }}
             title="Delete this dataset" aria-label={`Delete the dataset ${d.name}`}
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-red-500/15 text-xs text-red-300 transition-colors hover:bg-red-500/30">
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-red-50 text-xs text-red-600 transition-colors hover:bg-red-500/30">
             <TrashIcon className="h-3.5 w-3.5" />
           </button>
         )}
@@ -460,7 +460,7 @@ function NewDatasetForm({ onCreate, onClose }) {
                 model's existing vocabulary — the identity bleeds into that word
                 everywhere. A unique token (prefix/underscore/digits) binds cleanly. */}
             {trigger.trim() && /^[a-z]{1,7}$/i.test(trigger.trim()) && (
-              <span className="text-amber-300 text-[0.625rem]">
+              <span className="text-amber-700 text-[0.625rem]">
                 ⚠ “{trigger.trim()}” looks like a common word — the base model already has a meaning
                 for it. Prefer a unique token like <span className="font-mono">zchar_{trigger.trim().toLowerCase()}</span>.
               </span>
@@ -506,7 +506,7 @@ function NewDatasetForm({ onCreate, onClose }) {
           {concept} des prompts caption/raffinage/ban-list. Décrire l'ACTE, pas le sujet. */}
       {concept && (
         <label className="flex flex-col gap-1 text-[0.6875rem] text-content-muted">
-          What is the recurring concept? <span className="text-fuchsia-300">(required — it will be omitted from every caption)</span>
+          What is the recurring concept? <span className="text-fuchsia-700">(required — it will be omitted from every caption)</span>
           <textarea value={conceptDesc} onChange={(e) => setConceptDesc(e.target.value)} rows={2}
             placeholder="Describe the recurring act/effect itself, not the people — e.g. “a tongue licking an ice-cream cone”"
             className={`${FORM_FIELD} resize-y`} />
@@ -669,7 +669,7 @@ export default function DatasetListPanel({
                 title={showPreviews ? 'Hide image previews' : 'Show image previews'}
                 className={`flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[0.6875rem] font-semibold transition-colors ${
                   showPreviews
-                    ? 'bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30'
+                    ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-500/30'
                     : SEGMENT_OFF}`}>
                 <ImageIcon className="h-3.5 w-3.5 shrink-0" />
                 <span className="hidden sm:inline">

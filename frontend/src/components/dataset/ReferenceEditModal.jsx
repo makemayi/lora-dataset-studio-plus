@@ -171,14 +171,14 @@ export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
         </div>
 
         {liveNote && (
-          <p className="text-[0.6875rem] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-1.5">
+          <p className="text-[0.6875rem] text-amber-700 bg-amber-50 border border-amber-500/30 rounded-lg px-2.5 py-1.5">
             {liveNote}
           </p>
         )}
 
         {phase === 'running' ? (
           <div className="flex flex-col items-center gap-3 py-6">
-            <span className="inline-block w-8 h-8 border-2 border-indigo-400/40 border-t-indigo-400 rounded-full animate-spin" aria-hidden />
+            <span className="inline-block w-8 h-8 border-2 border-indigo-200 border-t-indigo-400 rounded-full animate-spin" aria-hidden />
             <p className="text-content text-sm">Editing the reference with the selected engines…</p>
             <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-2" aria-live="polite">
               {candidates.length ? candidates.map((candidate) => {
@@ -189,13 +189,13 @@ export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-content text-xs font-semibold">{label}</span>
                       <span className={`text-[0.6875rem] ${candidate.status === 'failed'
-                        ? 'text-red-300'
-                        : candidate.status === 'ready' ? 'text-emerald-300' : 'text-indigo-300'}`}>
+                        ? 'text-red-600'
+                        : candidate.status === 'ready' ? 'text-emerald-700' : 'text-indigo-700'}`}>
                         {candidate.status === 'ready' ? 'Ready' : candidate.status === 'failed' ? 'Failed' : 'Running'}
                       </span>
                     </div>
                     {candidate.error && (
-                      <p className="text-red-300 text-[0.6875rem] mt-1">{candidate.error}</p>
+                      <p className="text-red-600 text-[0.6875rem] mt-1">{candidate.error}</p>
                     )}
                   </div>
                 );
@@ -227,8 +227,8 @@ export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
                   <figure key={candidate.engine}
                     className="flex flex-col gap-2 rounded-lg p-2 bg-surface-raised">
                     <figcaption className="flex items-center justify-between gap-2 text-xs">
-                      <span className="text-sky-300">{label}</span>
-                      <span className="text-emerald-300">Ready</span>
+                      <span className="text-sky-700">{label}</span>
+                      <span className="text-emerald-700">Ready</span>
                     </figcaption>
                     <img src={afterUrl} alt={`edited candidate from ${label}`}
                       className="w-full rounded-lg bg-black object-contain max-h-[45vh]" />
@@ -249,12 +249,12 @@ export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
                   const label = ENGINE_LABELS[candidate.engine] || candidate.engine;
                   return (
                     <div key={candidate.engine}
-                      className="rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2">
+                      className="rounded-lg bg-red-50 border border-red-500/30 px-3 py-2">
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-content text-xs font-semibold">{label}</span>
-                        <span className="text-red-300 text-[0.6875rem]">Failed</span>
+                        <span className="text-red-600 text-[0.6875rem]">Failed</span>
                       </div>
-                      <p className="text-red-300 text-[0.6875rem] mt-1">
+                      <p className="text-red-600 text-[0.6875rem] mt-1">
                         {candidate.error || 'This engine did not produce a candidate.'}
                       </p>
                     </div>
@@ -322,7 +322,7 @@ export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
             </div>
             {engines.length === 0 && (
               <p role="alert"
-                className="text-[0.6875rem] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-1.5">
+                className="text-[0.6875rem] text-amber-700 bg-amber-50 border border-amber-500/30 rounded-lg px-2.5 py-1.5">
                 Select at least one engine.
               </p>
             )}
@@ -332,7 +332,7 @@ export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
                 it. Greying it out silently was the failure mode this replaces. */}
             {selectedBlocked.map((option) => (
               <p key={option.engine}
-                className="text-[0.6875rem] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-1.5">
+                className="text-[0.6875rem] text-amber-700 bg-amber-50 border border-amber-500/30 rounded-lg px-2.5 py-1.5">
                 {option.label}: {option.blocked}
               </p>
             ))}
@@ -344,7 +344,7 @@ export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
                 reads these bytes and another does not. Krea reads them now, so
                 the old blanket "API engines only" would have been false. */}
             {canAddRefs && selectedLocalEngines.some((e) => !acceptsExtraEditRefs(e)) && (
-              <p className="text-[0.6875rem] text-sky-300 bg-sky-500/10 border border-sky-500/30 rounded-lg px-2.5 py-1.5">
+              <p className="text-[0.6875rem] text-sky-700 bg-sky-50 border border-sky-500/30 rounded-lg px-2.5 py-1.5">
                 Images added below go to the engines that read them. The rest use the
                 reference support described above.
               </p>
@@ -379,18 +379,18 @@ export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
             )}
 
             {phase === 'failed' && (failedCandidates.length > 0 || referenceEdit?.error) && (
-              <div className="flex flex-col gap-2 text-[0.6875rem] bg-red-500/10 border border-red-500/30 rounded-lg px-2.5 py-1.5">
+              <div className="flex flex-col gap-2 text-[0.6875rem] bg-red-50 border border-red-500/30 rounded-lg px-2.5 py-1.5">
                 {failedCandidates.length > 0 ? failedCandidates.map((candidate) => {
                   const label = ENGINE_LABELS[candidate.engine] || candidate.engine;
                   return (
                     <div key={candidate.engine}>
                       <p className="text-content font-semibold">{label} — Failed</p>
-                      <p className="text-red-300">
+                      <p className="text-red-600">
                         {candidate.error || 'This engine did not produce a candidate.'}
                       </p>
                     </div>
                   );
-                }) : <p className="text-red-300">{referenceEdit.error}</p>}
+                }) : <p className="text-red-600">{referenceEdit.error}</p>}
               </div>
             )}
             <p className="text-[0.6875rem] text-content-muted">{editCostNote(engines)}</p>

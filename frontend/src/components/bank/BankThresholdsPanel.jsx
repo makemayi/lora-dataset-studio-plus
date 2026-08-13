@@ -74,7 +74,7 @@ function Group({ group, open, onToggle, customised, children }) {
         <span aria-hidden className="text-sm">{group.emoji}</span>
         <span className="text-sm font-medium text-content">{group.label}</span>
         {customised > 0 && (
-          <span className="rounded-full border border-indigo-400/50 bg-indigo-500/10 px-1.5 text-[10px] font-semibold text-indigo-200">
+          <span className="rounded-full border border-indigo-200 bg-indigo-50 px-1.5 text-[10px] font-semibold text-indigo-700">
             {customised} customised
           </span>
         )}
@@ -125,8 +125,8 @@ function RerunButton({ rerun, field, activity, offline, phase, outcome, onRun })
   const why = phase === 'running' ? `${busyLine({ activity, withDetail: false })}…`
     : phase === 'starting' ? null : state.reason
   const describedBy = [why && reasonId, outcome && outcomeId].filter(Boolean).join(' ')
-  const tone = outcome?.tone === 'error' ? 'text-rose-300'
-    : outcome?.tone === 'warn' ? 'text-amber-300' : 'text-emerald-300'
+  const tone = outcome?.tone === 'error' ? 'text-rose-700'
+    : outcome?.tone === 'warn' ? 'text-amber-700' : 'text-emerald-700'
   return (
     <div className="mt-1 space-y-1">
       {/* flex-wrap, and the explanation on its OWN line: at 400 px the label,
@@ -142,7 +142,7 @@ function RerunButton({ rerun, field, activity, offline, phase, outcome, onRun })
         </button>
         <span className="text-[11px] text-content-subtle">{rerun.note}</span>
       </div>
-      {why && <p id={reasonId} className="text-[11px] text-amber-300"><span aria-hidden>⏳ </span>{why}</p>}
+      {why && <p id={reasonId} className="text-[11px] text-amber-700"><span aria-hidden>⏳ </span>{why}</p>}
       {outcome && (
         <p id={outcomeId} role="status" className={`text-[11px] font-medium ${tone}`}>
           {outcome.text}
@@ -325,7 +325,7 @@ export default function BankThresholdsPanel({
   }, [dirty, edits, configDefaults, toast, onSaved])
 
   if (loadError) {
-    return <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-300">{loadError}</p>
+    return <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">{loadError}</p>
   }
   if (!saved) {
     return <p className="text-xs text-content-subtle">Loading thresholds…</p>
@@ -388,7 +388,7 @@ export default function BankThresholdsPanel({
                   <span className="block text-content-subtle">{t.hint}</span>
                   <span className="block text-content-subtle">{APPLIES[t.applies]}</span>
                   {invalid && (
-                    <span className="block text-rose-300">
+                    <span className="block text-rose-700">
                       Enter a number{t.min !== undefined && t.max !== undefined
                         ? ` between ${t.min} and ${t.max}` : ''}.
                     </span>
@@ -397,7 +397,7 @@ export default function BankThresholdsPanel({
                 {/* The effect readout. Visually a live number; for assistive tech
                     it is a stable sentence reachable from the input, so nudging a
                     value does not fire an announcement per keystroke. */}
-                <p className="mt-1 min-h-[1rem] text-xs font-medium text-indigo-200" aria-hidden="true">
+                <p className="mt-1 min-h-[1rem] text-xs font-medium text-indigo-700" aria-hidden="true">
                   {effect}
                 </p>
                 <span id={`bank-th-${t.field}-effect`} className="sr-only">

@@ -301,7 +301,7 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
             l'install qui n'a qu'une base est celle qui doit le lire. */}
         {baseNote && (
           <p className="m-0 rounded-lg border border-amber-400/30 bg-amber-400/5 px-3 py-2
-                        text-[0.6875rem] leading-snug text-amber-300/80 break-words">
+                        text-[0.6875rem] leading-snug text-amber-700/80 break-words">
             {baseNote}
           </p>
         )}
@@ -402,7 +402,7 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
         <StudioPreflightBanner missing={preflight} archMismatch={archMismatch}
           onDismiss={() => { setPreflight(null); setArchMismatch(null); }} />
         {data?.comfyui_recovery?.requires_comfyui_restart_confirmation && (
-          <div className="flex items-center gap-2 flex-wrap rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2" role="status">
+          <div className="flex items-center gap-2 flex-wrap rounded-lg border border-amber-200 bg-amber-400/10 px-3 py-2" role="status">
             <span aria-hidden>⚠</span>
             <span className="text-content text-sm">A ComfyUI submission has an unknown outcome. Restart ComfyUI first, then confirm it here; the paused cell will become resumable.</span>
             <button type="button" disabled={run.confirmingComfyuiRestart}
@@ -414,19 +414,19 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
         )}
 
         {data?.pending > 0 && (
-          <div className="flex items-center gap-2 rounded-lg border border-indigo-400/40 bg-indigo-500/10 px-3 py-2" role="status">
-            <span className="inline-block w-4 h-4 border-2 border-indigo-400/40 border-t-indigo-400 rounded-full animate-spin" aria-hidden />
+          <div className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2" role="status">
+            <span className="inline-block w-4 h-4 border-2 border-indigo-200 border-t-indigo-400 rounded-full animate-spin" aria-hidden />
             <span className="text-content text-sm">
               {data.generating ?? data.running ?? 0} generating · {data.queued ?? data.pending} queued
             </span>
             <button type="button" onClick={run.cancel}
-              className="ml-auto px-2.5 py-1 rounded-lg bg-red-600/80 text-white text-xs font-semibold">
+              className="ml-auto px-2.5 py-1 rounded-lg bg-red-600 text-white text-xs font-semibold">
               Stop (resumable)
             </button>
           </div>
         )}
         {!data?.pending && data?.resumable > 0 && (
-          <div className="flex items-center gap-2 rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2" role="status">
+          <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-400/10 px-3 py-2" role="status">
             <span aria-hidden>⏸</span>
             <span className="text-content text-sm">{data.resumable} stopped cell(s) — resumable with their settings</span>
             <button type="button" disabled={!!data?.gpu_busy} onClick={run.resume}

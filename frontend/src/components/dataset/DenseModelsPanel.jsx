@@ -27,14 +27,14 @@ import {
  * control that does it and no endpoint behind one.
  */
 const TONE = {
-  ok: 'border-emerald-400/40 bg-emerald-500/10 text-emerald-200',
-  info: 'border-sky-400/40 bg-sky-500/10 text-sky-200',
-  error: 'border-rose-400/45 bg-rose-500/10 text-rose-200',
+  ok: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  info: 'border-sky-200 bg-sky-50 text-sky-200',
+  error: 'border-rose-400/45 bg-rose-50 text-rose-200',
   muted: 'border-border text-content-subtle',
 };
 
 const LINE_TONE = {
-  ok: 'text-emerald-200',
+  ok: 'text-emerald-700',
   error: 'text-rose-200',
   muted: 'text-content-subtle',
 };
@@ -116,7 +116,7 @@ function SendPlan({ plan, busy, onSend, onCancel }) {
   if (!plan) return null;
   if (!plan.ok) {
     return (
-      <p className="m-0 mt-1 text-amber-200 text-[0.625rem] leading-snug" role="alert">
+      <p className="m-0 mt-1 text-amber-700 text-[0.625rem] leading-snug" role="alert">
         ⚠ {plan.error}
       </p>
     );
@@ -131,7 +131,7 @@ function SendPlan({ plan, busy, onSend, onCancel }) {
         <span className="break-all font-mono">{plan.destination_dir}</span>.
         {linked ? ' Same drive, so it takes no extra disk space and is instant.' : ''}
       </p>
-      <p className={`m-0 mt-0.5 ${plan.destination_dir_kind === 'comfyui' ? 'opacity-85' : 'text-amber-200'}`}>
+      <p className={`m-0 mt-0.5 ${plan.destination_dir_kind === 'comfyui' ? 'opacity-85' : 'text-amber-700'}`}>
         {plan.destination_dir_kind === 'comfyui'
           ? `✓ ${plan.destination_dir_note} — ComfyUI lists it after a refresh.`
           : `⚠ ${plan.destination_dir_note}.`}
@@ -279,7 +279,7 @@ export default function DenseModelsPanel({ datasetId, models = [], onChanged = n
               </div>
 
               {guidance && (
-                <p className="m-0 mt-1 rounded-md border border-amber-400/30 bg-amber-500/10 px-2 py-1 text-amber-100 text-[0.625rem] leading-snug">
+                <p className="m-0 mt-1 rounded-md border border-amber-400/30 bg-amber-50 px-2 py-1 text-amber-100 text-[0.625rem] leading-snug">
                   This is an undistilled model: sample it at <b>{guidance}</b>. The
                   family’s few-step Turbo defaults render mush on it.
                 </p>
@@ -327,7 +327,7 @@ export default function DenseModelsPanel({ datasetId, models = [], onChanged = n
               )}
 
               {actions.activeNote && (
-                <p className="m-0 mt-1 text-amber-200 text-[0.625rem]">{actions.activeNote}</p>
+                <p className="m-0 mt-1 text-amber-700 text-[0.625rem]">{actions.activeNote}</p>
               )}
 
               <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -368,7 +368,7 @@ export default function DenseModelsPanel({ datasetId, models = [], onChanged = n
               )}
 
               {mergeFor?.run_id === entry.run_id && (
-                <div className="mt-1.5 rounded-lg bg-sky-500/10 px-2 py-1.5">
+                <div className="mt-1.5 rounded-lg bg-sky-50 px-2 py-1.5">
                   <LoraMergeTool framed={false} family={entry.train_type}
                     base={entry.master.path}
                     baseLabel="this run’s full model" />
@@ -395,7 +395,7 @@ export default function DenseModelsPanel({ datasetId, models = [], onChanged = n
               )}
 
               {quantizeFor?.run_id === entry.run_id && (
-                <div className="mt-1.5 rounded-lg bg-sky-500/10 px-2 py-1.5">
+                <div className="mt-1.5 rounded-lg bg-sky-50 px-2 py-1.5">
                   <Fp8QuantizeTool framed={false} manualPath={false}
                     target={{
                       label: 'This run’s full model',
@@ -420,7 +420,7 @@ export default function DenseModelsPanel({ datasetId, models = [], onChanged = n
         </p>
       )}
       {job?.status === 'done' && (
-        <p className="m-0 mt-2 text-emerald-200 text-[0.625rem]" role="status">
+        <p className="m-0 mt-2 text-emerald-700 text-[0.625rem]" role="status">
           ✓ {job.filename} is in {job.destination_dir}
           {job.method === 'linked' ? ' (linked — no extra disk space used)' : ''}. ComfyUI
           lists it after a refresh.

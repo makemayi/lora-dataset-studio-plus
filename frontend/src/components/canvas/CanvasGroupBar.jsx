@@ -47,7 +47,7 @@ export default function CanvasGroupBar({ group, datasetId, boardScale = 1,
       style={{ position: 'absolute', left: group.x, top: group.y - barH,
         width: group.w, height: barH }}
       title="Drag this bar to move the whole group"
-      className="z-10 flex cursor-grab touch-none items-center gap-1 overflow-hidden rounded-t-md border border-b-0 border-indigo-400/40 bg-app/85 pl-1.5 backdrop-blur-sm">
+      className="z-10 flex cursor-grab touch-none items-center gap-1 overflow-hidden rounded-t-md border border-b-0 border-indigo-200 bg-app/85 pl-1.5 backdrop-blur-sm">
       <span style={{ fontSize: Math.max(9, barH * 0.42) }}
         className="min-w-0 flex-1 truncate font-semibold text-content-muted tabular-nums">
         <span aria-hidden>⠿</span> {count} images
@@ -59,7 +59,7 @@ export default function CanvasGroupBar({ group, datasetId, boardScale = 1,
         style={{ height: barH, fontSize: Math.max(9, barH * 0.36) }}
         title={`Export these ${count} images as a grid`}
         aria-label={`Export grid from these ${count} images`}
-        className="flex shrink-0 items-center gap-1 rounded px-1.5 font-semibold text-indigo-200 hover:bg-indigo-500/25 hover:text-white">
+        className="flex shrink-0 items-center gap-1 rounded px-1.5 font-semibold text-indigo-700 hover:bg-indigo-500/25 hover:text-white">
         <span aria-hidden>▦</span> Export grid
       </button>
       {/* ✕ on a GROUP closes N pictures at once, so it says N and says what

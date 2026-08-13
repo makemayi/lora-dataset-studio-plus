@@ -53,7 +53,7 @@ function Block({ title, subtitle, children }) {
  *  absent one twice on this screen. */
 function DisabledNote({ children }) {
   return (
-    <span className="mt-0.5 block text-[11px] leading-snug text-amber-300/90">{children}</span>
+    <span className="mt-0.5 block text-[11px] leading-snug text-amber-700/90">{children}</span>
   )
 }
 
@@ -212,7 +212,7 @@ export default function PassDialog({
 
             {binWarning && (
               <p role="note"
-                className="m-0 rounded-md border border-amber-400/40 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-snug text-amber-200">
+                className="m-0 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-700">
                 ⚠ {binWarning}
               </p>
             )}
@@ -228,7 +228,7 @@ export default function PassDialog({
           <Block title="Settings this pass reads"
             subtitle="Only what the CALCULATION uses. These are global — the same for every bank — unless a line says otherwise.">
             {wmRoute && (
-              <p className="m-0 rounded-md border border-indigo-400/40 bg-indigo-500/10 px-2 py-1.5 text-[11px] leading-snug text-content-muted">
+              <p className="m-0 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1.5 text-[11px] leading-snug text-content-muted">
                 {wmRoute.route}
               </p>
             )}
@@ -256,7 +256,7 @@ export default function PassDialog({
               {spec.notHere.map((n) => <li key={n}>{n}</li>)}
             </ul>
             {!!(spec.caveats || []).length && (
-              <ul className="m-0 list-disc space-y-1 pl-5 text-sm text-amber-200/90">
+              <ul className="m-0 list-disc space-y-1 pl-5 text-sm text-amber-700/90">
                 {spec.caveats.map((c) => <li key={c}>{c}</li>)}
               </ul>
             )}
@@ -266,8 +266,8 @@ export default function PassDialog({
         <div className="shrink-0 space-y-2 border-t border-border p-3">
           {error && (
             <div role="alert"
-              className="max-h-24 overflow-y-auto rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2">
-              <span className="block whitespace-pre-wrap break-words text-xs leading-relaxed text-red-200">
+              className="max-h-24 overflow-y-auto rounded-md border border-red-200 bg-red-50 px-3 py-2">
+              <span className="block whitespace-pre-wrap break-words text-xs leading-relaxed text-red-700">
                 {error}
               </span>
               <span className="mt-1 block text-[0.625rem] text-content-subtle">
@@ -276,7 +276,7 @@ export default function PassDialog({
             </div>
           )}
           {blocked && !error && (
-            <p className="m-0 text-[11px] leading-snug text-amber-300/90">{blocked}</p>
+            <p className="m-0 text-[11px] leading-snug text-amber-700/90">{blocked}</p>
           )}
           {typeof secondary === 'function'
             ? secondary({ scope, redo, busy, close: onClose, fail: setError })

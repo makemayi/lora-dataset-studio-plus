@@ -108,7 +108,7 @@ test('the engines, their labels and the Klein note are REUSED, not restated', ()
 test('the improve buttons sit beside Download and go full width on a phone', () => {
   const footer = lightbox.slice(lightbox.indexOf('lightbox-download'));
   assert.match(footer, /lightbox-download[^]{0,1000}<ImproveActions/);
-  assert.match(lightbox, /min-h-9 w-full rounded-lg border border-indigo-400\/50/);
+  assert.match(lightbox, /min-h-9 w-full rounded-lg border border-indigo-200/);
   assert.match(lightbox, /sm:w-auto/);
 });
 

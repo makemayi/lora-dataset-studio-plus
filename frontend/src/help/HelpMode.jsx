@@ -45,7 +45,7 @@ export function HelpBadge({ topic, className = '' }) {
       aria-label={`Help: ${t.title}`}
       title={`Help: ${t.title}`}
       onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigate(href) }}
-      className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-indigo-400/40 bg-indigo-500/15 align-middle text-[10px] font-bold leading-none text-indigo-300 transition-colors hover:bg-indigo-500/30 hover:text-indigo-200 ${className}`}
+      className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-indigo-200 bg-indigo-50 align-middle text-[10px] font-bold leading-none text-indigo-700 transition-colors hover:bg-indigo-500/30 hover:text-indigo-700 ${className}`}
     >
       ?
     </button>
@@ -80,14 +80,14 @@ export function TipHost() {
   if (!tip) return null
   return (
     <div role="status"
-      className="fixed bottom-4 right-4 z-50 max-w-xs rounded-xl border border-indigo-400/40 bg-surface-overlay/95 p-3 shadow-lg backdrop-blur">
+      className="fixed bottom-4 right-4 z-50 max-w-xs rounded-xl border border-indigo-200 bg-surface-overlay/95 p-3 shadow-lg backdrop-blur">
       <div className="flex items-start gap-2">
         <span aria-hidden className="text-base leading-none">💡</span>
         <div className="min-w-0 flex-1">
           <p className="m-0 text-xs leading-relaxed text-content">{tip.text}</p>
           <button type="button"
             onClick={() => { navigate(tip.href); dismiss() }}
-            className="mt-2 text-xs font-medium text-indigo-300 underline hover:text-indigo-200">
+            className="mt-2 text-xs font-medium text-indigo-700 underline hover:text-indigo-700">
             Learn more →
           </button>
         </div>

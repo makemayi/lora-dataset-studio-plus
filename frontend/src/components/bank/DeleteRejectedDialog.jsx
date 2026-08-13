@@ -61,9 +61,9 @@ export default function DeleteRejectedDialog({ bankId, count, sourcePath, onClos
   return (
     <div role="dialog" aria-modal="true" aria-label="Delete rejected from disk"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-xl border border-rose-500/60 bg-surface-overlay/85 backdrop-blur-md p-4 sm:p-5 shadow-2xl space-y-4">
-        <h2 className="text-base font-bold text-rose-300">🗑 Delete rejected from disk</h2>
-        <div className="rounded-md border border-rose-500/50 bg-rose-500/10 p-3 text-sm text-rose-200 space-y-2">
+      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-xl border border-rose-300 bg-surface-overlay/85 backdrop-blur-md p-4 sm:p-5 shadow-2xl space-y-4">
+        <h2 className="text-base font-bold text-rose-700">🗑 Delete rejected from disk</h2>
+        <div className="rounded-md border border-rose-500/50 bg-rose-50 p-3 text-sm text-rose-200 space-y-2">
           <p className="font-semibold">
             This removes {count} rejected file{count === 1 ? '' : 's'} from your disk.
           </p>
@@ -77,7 +77,7 @@ export default function DeleteRejectedDialog({ bankId, count, sourcePath, onClos
         </div>
         {!check.ready && (
           <div className={`rounded-md border p-3 text-sm space-y-1 ${check.state === 'failed'
-            ? 'border-amber-500/60 bg-amber-500/10 text-amber-200'
+            ? 'border-amber-500/60 bg-amber-50 text-amber-700'
             : 'border-border bg-surface-raised text-content-muted'}`}>
             <p className="font-semibold">{check.title}</p>
             <p className="text-xs">{check.text}</p>
@@ -90,12 +90,12 @@ export default function DeleteRejectedDialog({ bankId, count, sourcePath, onClos
           </div>
         )}
         {shared && (
-          <div className="rounded-md border border-amber-500/60 bg-amber-500/10 p-3 text-sm text-amber-200 space-y-1">
+          <div className="rounded-md border border-amber-500/60 bg-amber-50 p-3 text-sm text-amber-700 space-y-1">
             <p className="font-semibold">
               ⚠ Another bank uses these files
               {sharedCount ? ` (${sharedCount})` : ''}
             </p>
-            <p className="text-amber-200/90">{shared}</p>
+            <p className="text-amber-700/90">{shared}</p>
           </div>
         )}
         <p className="text-xs text-content-subtle">
@@ -104,7 +104,7 @@ export default function DeleteRejectedDialog({ bankId, count, sourcePath, onClos
         </p>
         <div className={block.blocked ? 'opacity-40 pointer-events-none' : undefined}>
           <label htmlFor="delete-rejected-confirm" className="block text-sm text-content">
-            Type <span className="font-mono font-bold text-rose-300">DELETE</span> to confirm
+            Type <span className="font-mono font-bold text-rose-700">DELETE</span> to confirm
           </label>
           <input id="delete-rejected-confirm" type="text" autoComplete="off"
             value={confirm} onChange={(e) => setConfirm(e.target.value)}

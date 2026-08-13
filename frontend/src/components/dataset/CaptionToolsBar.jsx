@@ -126,7 +126,7 @@ export default function CaptionToolsBar({ images, kind = 'character', mode = 'bo
             {onInclude && (
               <button type="button" onClick={() => submitFilter(onInclude)} disabled={!filterInput.trim()}
                 title="Show ONLY images that carry this tag (hide the rest)"
-                className="px-3 py-1 rounded-full bg-surface-raised text-content text-xs font-semibold transition-colors hover:bg-surface disabled:opacity-40 hover:bg-indigo-500/15 hover:border-indigo-400/50">
+                className="px-3 py-1 rounded-full bg-surface-raised text-content text-xs font-semibold transition-colors hover:bg-surface disabled:opacity-40 hover:bg-indigo-50 hover:border-indigo-200">
                 ◉ Only with
               </button>
             )}
@@ -140,7 +140,7 @@ export default function CaptionToolsBar({ images, kind = 'character', mode = 'bo
                 {categoryCopy.frequencyHelp}{' '}
                 Click a {categoryCopy.frequencyItem} to load it into Find
                 {mode === 'booru' ? ' (tag mode)' : ' (text mode)'}; leave Replace empty to strip it from every caption. The{' '}
-                <span className="text-rose-300 font-medium">⊘</span> hides every image whose caption contains it.
+                <span className="text-rose-700 font-medium">⊘</span> hides every image whose caption contains it.
               </p>
               <div className="flex flex-wrap gap-1" aria-label={`Most frequent caption ${categoryCopy.frequencyItem}s`}>
                 {freq.map(([tag, n]) => {

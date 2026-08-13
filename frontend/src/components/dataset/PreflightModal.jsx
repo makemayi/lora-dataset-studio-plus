@@ -38,9 +38,9 @@ export default function PreflightModal({ report, datasetId, ds, onResolve }) {
          promise the launch is awaiting — was invisible. */
       className="fixed inset-0 z-[9992] bg-black/80 flex items-center justify-center p-3"
       onClick={(e) => { if (e.target === e.currentTarget) onResolve(false); }}>
-      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl border border-amber-400/40 bg-app p-4 flex flex-col gap-3">
+      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl border border-amber-200 bg-app p-4 flex flex-col gap-3">
         <div className="flex items-start gap-2">
-          <span className="text-amber-300 font-semibold text-sm">
+          <span className="text-amber-700 font-semibold text-sm">
             <span aria-hidden>⚠️</span> Before training{inCloud ? ' in the cloud' : ''}
           </span>
           <button type="button" onClick={() => onResolve(false)}
@@ -64,7 +64,7 @@ export default function PreflightModal({ report, datasetId, ds, onResolve }) {
         {/* WHICH captions leak — edit in place (saves when you click away). */}
         {leaks.length > 0 && (
           <div className="rounded-lg border border-amber-400/30 bg-amber-500/5 p-2.5 flex flex-col gap-2">
-            <span className="text-amber-300 text-[0.8125rem] font-semibold">
+            <span className="text-amber-700 text-[0.8125rem] font-semibold">
               Captions describing the identity ({leaks.length}) — remove the face / hair words
             </span>
             {leaks.map((li) => (
@@ -83,7 +83,7 @@ export default function PreflightModal({ report, datasetId, ds, onResolve }) {
         {/* WHICH pairs are near-duplicate — reject one of each. */}
         {dups.length > 0 && (
           <div className="rounded-lg border border-amber-400/30 bg-amber-500/5 p-2.5 flex flex-col gap-2">
-            <span className="text-amber-300 text-[0.8125rem] font-semibold">
+            <span className="text-amber-700 text-[0.8125rem] font-semibold">
               Near-duplicate pairs ({dups.length}) — reject one of each
             </span>
             {dups.map((p, i) => {
@@ -95,7 +95,7 @@ export default function PreflightModal({ report, datasetId, ds, onResolve }) {
                       <img src={imgUrl(im.filename)} alt={`image ${im.id}`} loading="lazy"
                         className={`w-20 h-20 rounded object-cover bg-black ${rejected[im.id] ? 'ring-2 ring-red-500 grayscale' : ''}`} />
                       <button type="button" disabled={resolved} onClick={() => reject(im.id)}
-                        className="px-2 py-0.5 rounded bg-red-500/15 border border-red-500/40 text-red-300 text-[0.625rem] disabled:opacity-40">
+                        className="px-2 py-0.5 rounded bg-red-50 border border-red-200 text-red-600 text-[0.625rem] disabled:opacity-40">
                         {rejected[im.id] ? '✕ rejected' : 'Reject this'}
                       </button>
                     </div>

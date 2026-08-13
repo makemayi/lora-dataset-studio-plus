@@ -130,7 +130,7 @@ export function FolderBrowserModal({ initial, onPick, onClose }) {
           </button>
         </form>
 
-        {browseError && <p className="mt-2 text-xs text-amber-300">{browseError}</p>}
+        {browseError && <p className="mt-2 text-xs text-amber-700">{browseError}</p>}
 
         <ul className="mt-2 grow overflow-y-auto rounded-md bg-surface-raised">
           {loading ? (
@@ -153,8 +153,8 @@ export function FolderBrowserModal({ initial, onPick, onClose }) {
             cannot push "Use this folder" off a 400-px screen. */}
         {error && (
           <div role="alert"
-            className="mt-2 shrink-0 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 max-h-24 overflow-y-auto">
-            <span className="block whitespace-pre-wrap break-words text-xs leading-relaxed text-red-200">
+            className="mt-2 shrink-0 rounded-md border border-red-200 bg-red-50 px-3 py-2 max-h-24 overflow-y-auto">
+            <span className="block whitespace-pre-wrap break-words text-xs leading-relaxed text-red-700">
               {error}
             </span>
             <span className="mt-1 block text-[0.625rem] text-content-subtle">

@@ -167,7 +167,7 @@ export default function ServerSection({ config, setField, runtime, handleSave, c
         : 'Where the app listens. Host/port and LAN access need a restart to take effect — edit below, then use “Restart to apply”.'}>
       {bindManaged && (
         <div id="server-bind-managed-note" role="note"
-          className="rounded-lg border border-sky-400/30 bg-sky-500/10 px-3 py-2.5 text-sm text-content">
+          className="rounded-lg border border-sky-400/30 bg-sky-50 px-3 py-2.5 text-sm text-content">
           <p className="font-medium">Host and port are managed outside the app.</p>
           <p className="mt-1 text-xs text-content-muted">
             This process was started with <code className="text-content">LDS_HOST</code>/
@@ -251,7 +251,7 @@ export default function ServerSection({ config, setField, runtime, handleSave, c
               <div className="flex items-center justify-between">
                 <label htmlFor="server-token" className="block text-sm font-medium text-content">Access token</label>
                 <button type="button" onClick={regenerateToken}
-                  className="text-xs font-medium text-sky-300 underline hover:text-sky-200">
+                  className="text-xs font-medium text-sky-700 underline hover:text-sky-200">
                   Generate new token
                 </button>
               </div>
@@ -324,7 +324,7 @@ export default function ServerSection({ config, setField, runtime, handleSave, c
 
       {knownRuntime && (
         <div className={`flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2 text-xs ${
-          dirty ? 'border-amber-400/50 bg-amber-400/10' : 'border-border bg-surface-raised'}`}>
+          dirty ? 'border-amber-200 bg-amber-400/10' : 'border-border bg-surface-raised'}`}>
           {bindManaged ? (
             <span className="text-content-muted">
               Opened at: <span className="font-medium text-content">{access.origin}</span>
@@ -341,7 +341,7 @@ export default function ServerSection({ config, setField, runtime, handleSave, c
             </span>
           )}
           {bindManaged ? (
-            <span className="ml-auto text-sky-300">Externally managed bind</span>
+            <span className="ml-auto text-sky-700">Externally managed bind</span>
           ) : dirty ? (
             <button type="button" onClick={restart} disabled={restarting}
               className="ml-auto shrink-0 rounded-md bg-gradient-primary px-3 py-1 text-xs font-semibold text-white disabled:opacity-50">

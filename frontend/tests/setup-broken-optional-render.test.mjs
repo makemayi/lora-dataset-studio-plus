@@ -70,10 +70,10 @@ test('the optional row is amber, the required one red — a colour that means so
   // read as blocked. Assert the class actually rendered, per row.
   const optional = html([BROKEN('klein_lora', 'lora.safetensors')])
   assert.match(optional, /text-amber-400[^"]*">\s*⚠ On disk, unreadable — optional/)
-  assert.doesNotMatch(optional, /text-rose-300[^"]*">\s*⚠ On disk, unreadable</)
+  assert.doesNotMatch(optional, /text-rose-700[^"]*">\s*⚠ On disk, unreadable</)
 
   const required = html([BROKEN('klein_model', 'unet.safetensors')])
-  assert.match(required, /text-rose-300[^"]*">\s*⚠ On disk, unreadable</)
+  assert.match(required, /text-rose-700[^"]*">\s*⚠ On disk, unreadable</)
 })
 
 test('a required weight is still treated as the emergency it is', () => {

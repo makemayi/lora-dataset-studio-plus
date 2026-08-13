@@ -95,7 +95,7 @@ export default function VideoThresholdsPanel({ bankId, saved, totalClips, onAppl
         </div>
         {preview && (
           <p className={`text-sm ${preview.startsWith('⚠')
-            ? 'text-amber-300' : 'text-content'}`}>
+            ? 'text-amber-700' : 'text-content'}`}>
             {preview}
           </p>
         )}

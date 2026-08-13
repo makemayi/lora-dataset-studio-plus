@@ -24,14 +24,14 @@ function renderInline(text, keyBase = 'i') {
     const tok = m[0];
     const key = `${keyBase}-${k++}`;
     if (tok.startsWith('`')) {
-      out.push(<code key={key} className="px-1 py-0.5 rounded bg-surface-raised text-indigo-200 text-[0.8125em] font-mono">{tok.slice(1, -1)}</code>);
+      out.push(<code key={key} className="px-1 py-0.5 rounded bg-surface-raised text-indigo-700 text-[0.8125em] font-mono">{tok.slice(1, -1)}</code>);
     } else if (tok.startsWith('**')) {
       out.push(<strong key={key} className="text-content font-semibold">{tok.slice(2, -2)}</strong>);
     } else if (tok.startsWith('*')) {
       out.push(<em key={key}>{tok.slice(1, -1)}</em>);
     } else {
       const mm = tok.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-      out.push(<a key={key} href={mm[2]} target="_blank" rel="noreferrer" className="text-indigo-300 underline decoration-indigo-400/40 hover:decoration-indigo-300">{mm[1]}</a>);
+      out.push(<a key={key} href={mm[2]} target="_blank" rel="noreferrer" className="text-indigo-700 underline decoration-indigo-400/40 hover:decoration-indigo-300">{mm[1]}</a>);
     }
     last = m.index + tok.length;
   }
@@ -107,7 +107,7 @@ function renderBlock(b, idx, guide = false) {
           case 'h3': return <h3 key={key} className="m-0 mt-2 text-content font-semibold text-base">{renderInline(b.body, key)}</h3>;
           case 'hr': return <hr key={key} className="border-border my-2" />;
           case 'quote': return (
-            <blockquote key={key} className="m-0 rounded-lg border border-indigo-400/40 bg-indigo-500/10 px-4 py-3 text-content text-sm leading-relaxed">
+            <blockquote key={key} className="m-0 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-content text-sm leading-relaxed">
               {renderInline(b.body, key)}
             </blockquote>
           );
@@ -145,7 +145,7 @@ function renderBlock(b, idx, guide = false) {
                   if (task) {
                     return (
                       <li key={ii} className="list-none -ml-5 flex items-start gap-2">
-                        <span aria-hidden className={`mt-0.5 grid place-items-center w-4 h-4 shrink-0 rounded border text-[0.625rem] ${task[1] === ' ' ? 'border-border-strong text-transparent' : 'border-emerald-400/60 bg-emerald-500/15 text-emerald-300'}`}>✓</span>
+                        <span aria-hidden className={`mt-0.5 grid place-items-center w-4 h-4 shrink-0 rounded border text-[0.625rem] ${task[1] === ' ' ? 'border-border-strong text-transparent' : 'border-emerald-400/60 bg-emerald-50 text-emerald-700'}`}>✓</span>
                         <span>{renderInline(task[2], `${key}i${ii}`)}</span>
                       </li>
                     );
@@ -153,7 +153,7 @@ function renderBlock(b, idx, guide = false) {
                   if (guide && b.ordered) {
                     return (
                       <li key={ii} className="flex gap-3 rounded-lg bg-surface-raised px-3 py-3 leading-relaxed">
-                        <span aria-hidden className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-indigo-500/15 font-mono text-[0.6875rem] font-bold text-indigo-300">{String(ii + 1).padStart(2, '0')}</span>
+                        <span aria-hidden className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-indigo-50 font-mono text-[0.6875rem] font-bold text-indigo-700">{String(ii + 1).padStart(2, '0')}</span>
                         <span>{renderInline(it, `${key}i${ii}`)}</span>
                       </li>
                     );
@@ -184,7 +184,7 @@ export default function Markdown({ source, variant = 'default', sectionActions =
     return (
       <div className="flex max-w-none flex-col gap-4">
         {intro.length > 0 && (
-          <div className="flex flex-col gap-3 rounded-xl border border-indigo-400/20 bg-gradient-to-br from-indigo-500/10 via-surface to-surface px-4 py-4 sm:px-5">
+          <div className="flex flex-col gap-3 rounded-xl border border-indigo-100 bg-gradient-to-br from-indigo-500/10 via-surface to-surface px-4 py-4 sm:px-5">
             {intro.map(({ block, index }) => renderBlock(block, index, true))}
           </div>
         )}

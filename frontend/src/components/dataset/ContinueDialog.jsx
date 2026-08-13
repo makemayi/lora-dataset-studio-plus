@@ -220,9 +220,9 @@ export default function ContinueDialog({
       className="fixed inset-0 z-[9990] bg-black/80 flex items-center justify-center p-3"
       onClick={(e) => { if (e.target === e.currentTarget) dismiss(); }}>
       <div ref={cardRef}
-        className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl border border-indigo-400/40 bg-app p-4 flex flex-col gap-3">
+        className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl border border-indigo-200 bg-app p-4 flex flex-col gap-3">
         <div className="flex items-center gap-2">
-          <span className="text-indigo-300 font-semibold"><span aria-hidden>▶</span> Continue training</span>
+          <span className="text-indigo-700 font-semibold"><span aria-hidden>▶</span> Continue training</span>
           <HelpBadge topic="continue-training" />
           {context && <span className="text-content-subtle text-[0.75rem] truncate">{context}</span>}
           <button type="button" onClick={dismiss} disabled={busy}
@@ -249,7 +249,7 @@ export default function ContinueDialog({
                       title={off ? st.reason || undefined : `Continue on the ${id === 'cloud' ? 'rented cloud GPU' : 'local GPU'}`}
                       className={'px-2.5 py-1 rounded-md text-[0.75rem] font-semibold '
                         + (lane === id
-                          ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50 '
+                          ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-200 '
                           : 'text-content-muted hover:text-content border border-transparent ')
                         + (off ? 'opacity-40 cursor-not-allowed ' : '')}>
                       {label}
@@ -259,7 +259,7 @@ export default function ContinueDialog({
               </div>
             </div>
             {laneState(lane).reason && (
-              <span className="text-amber-300/90 text-[0.6875rem] leading-relaxed">
+              <span className="text-amber-700/90 text-[0.6875rem] leading-relaxed">
                 {laneState(lane).reason}
               </span>
             )}
@@ -288,7 +288,7 @@ export default function ContinueDialog({
                       title={off ? option.reason || undefined : undefined}
                       className={'px-2.5 py-1 rounded-md text-[0.75rem] font-semibold '
                         + (transport === id
-                          ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50 '
+                          ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-200 '
                           : 'text-content-muted hover:text-content border border-transparent ')
                         + (off ? 'opacity-40 cursor-not-allowed ' : '')}>
                       {TRANSPORT_LABELS[id]}
@@ -303,7 +303,7 @@ export default function ContinueDialog({
                 — which is the exact complaint this picker answers. */}
             {closedRoads(transportPlan).map(({ transport: id, label, reason }) => (
               <span key={id}
-                className="text-amber-300/90 text-[0.6875rem] leading-relaxed break-words">
+                className="text-amber-700/90 text-[0.6875rem] leading-relaxed break-words">
                 {label} is unavailable: {reason}
               </span>
             ))}
@@ -376,7 +376,7 @@ export default function ContinueDialog({
               <span><b>Weights only</b> — starts fresh optimizer/scheduler state</span>
             </label>
             {fullStateReason && (
-              <span className="text-amber-300/90 text-[0.6875rem] leading-relaxed">
+              <span className="text-amber-700/90 text-[0.6875rem] leading-relaxed">
                 {fullStateReason}
               </span>
             )}
@@ -396,7 +396,7 @@ export default function ContinueDialog({
             </span>
           </div>
           {isEarlier && (
-            <span className="text-amber-300/90 text-[0.6875rem] leading-relaxed">
+            <span className="text-amber-700/90 text-[0.6875rem] leading-relaxed">
               {lane === 'cloud'
                 ? `Restarts from step ${fromStep} on a fresh pod: this checkpoint is uploaded and`
                   + ' trained further — every save you have here stays exactly where it is.'
@@ -410,7 +410,7 @@ export default function ContinueDialog({
         {/* Optional, folded: the settings a resume can safely change. */}
         <div className="flex flex-col gap-1">
           <button type="button" onClick={() => setShowSettings((v) => !v)}
-            className="self-start text-indigo-300 hover:text-indigo-200 text-[0.75rem] font-medium">
+            className="self-start text-indigo-700 hover:text-indigo-700 text-[0.75rem] font-medium">
             {showSettings ? '▾' : '▸'} Adjust settings (optional)
           </button>
           {showSettings && (
@@ -515,7 +515,7 @@ export default function ContinueDialog({
             The blocked lane already prints its reason above; this covers the
             state that printed none at all. */}
         {blockedReason && (
-          <span className="text-amber-300/90 text-[0.6875rem] leading-relaxed">{blockedReason}</span>
+          <span className="text-amber-700/90 text-[0.6875rem] leading-relaxed">{blockedReason}</span>
         )}
 
         {/* The LAST attempt's refusal, right above the button that produced it —
@@ -529,8 +529,8 @@ export default function ContinueDialog({
             /* shrink-0: the card is a flex column with a max height, so a flex
                child is free to be SQUASHED — with the settings unfolded the
                message rendered as a 20-px sliver of clipped text (measured). */
-            className="shrink-0 rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-2 max-h-28 overflow-y-auto">
-            <span className="block text-red-200 text-[0.6875rem] leading-relaxed whitespace-pre-wrap break-words">
+            className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-2.5 py-2 max-h-28 overflow-y-auto">
+            <span className="block text-red-700 text-[0.6875rem] leading-relaxed whitespace-pre-wrap break-words">
               {error}
             </span>
             <span className="block text-content-subtle text-[0.625rem] mt-1">

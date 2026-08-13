@@ -85,8 +85,8 @@ function CanvasCheckpointRecap({ selection, onToggle, onClear }) {
                         : ' — on disk but not deployed yet; the launch deploys it first')}
                     className={'flex max-w-full items-center gap-1 rounded-md border px-1.5 py-0.5 text-[0.625rem] tabular-nums '
                       + (e.deployed
-                        ? 'border-indigo-400/60 bg-indigo-500/15 text-indigo-100 '
-                        : 'border-amber-400/50 bg-amber-500/10 text-amber-100 ')
+                        ? 'border-indigo-400/60 bg-indigo-50 text-indigo-100 '
+                        : 'border-amber-200 bg-amber-50 text-amber-100 ')
                       + DEPLOY_BAR_CLASS[e.deployed ? 'deployed' : 'on-disk'] + ' '}>
                     <span className="truncate">
                       #{e.recordId} · {e.step}

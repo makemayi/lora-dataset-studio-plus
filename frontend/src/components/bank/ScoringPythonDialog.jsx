@@ -22,8 +22,8 @@ import {
  * scoring into an import error.
  */
 const TONE = {
-  ok: 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300',
-  warn: 'border-amber-400/50 bg-amber-500/10 text-amber-300',
+  ok: 'border-emerald-500/50 bg-emerald-50 text-emerald-700',
+  warn: 'border-amber-200 bg-amber-50 text-amber-700',
   off: 'border-border bg-surface text-content-subtle',
 }
 
@@ -45,8 +45,8 @@ function DepChips({ deps }) {
       {deps.map((d) => (
         <li key={d.label}
           className={`rounded border px-1.5 py-0.5 text-[0.625rem] ${d.present
-            ? 'border-emerald-500/40 text-emerald-300/90'
-            : 'border-amber-400/50 text-amber-300'}`}>
+            ? 'border-emerald-500/40 text-emerald-700/90'
+            : 'border-amber-200 text-amber-700'}`}>
           {d.present ? '✓' : '✗'} {d.label}
         </li>
       ))}
@@ -123,11 +123,11 @@ export default function ScoringPythonDialog({ onClose, onChanged,
         </div>
 
         {failure && (
-          <div className="rounded-md border border-amber-500/60 bg-amber-500/10 p-3 text-sm text-amber-200 space-y-1">
+          <div className="rounded-md border border-amber-500/60 bg-amber-50 p-3 text-sm text-amber-700 space-y-1">
             <p className="font-semibold">⚠ {failure.title}</p>
-            <p className="text-xs text-amber-200/90">{failure.text}</p>
+            <p className="text-xs text-amber-700/90">{failure.text}</p>
             {failure.detail && (
-              <p className="break-all font-mono text-[0.625rem] text-amber-200/70">
+              <p className="break-all font-mono text-[0.625rem] text-amber-700/70">
                 {failure.detail}
               </p>
             )}
@@ -135,7 +135,7 @@ export default function ScoringPythonDialog({ onClose, onChanged,
         )}
 
         {error && (
-          <p className="rounded-md border border-red-500/50 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+          <p className="rounded-md border border-red-500/50 bg-red-50 px-3 py-2 text-xs text-red-600">
             {error}
           </p>
         )}
@@ -151,12 +151,12 @@ export default function ScoringPythonDialog({ onClose, onChanged,
               return (
                 <li key={r.path}
                   className={`rounded-lg border p-3 space-y-2 ${r.selected
-                    ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-border bg-surface'}`}>
+                    ? 'border-emerald-500/50 bg-emerald-50' : 'border-border bg-surface'}`}>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-semibold text-content">{r.label}</span>
                     <Badge status={r.status} />
                     {r.selected && (
-                      <span className="rounded border border-emerald-500/50 px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-emerald-300">
+                      <span className="rounded border border-emerald-500/50 px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-emerald-700">
                         In use
                       </span>
                     )}
@@ -172,7 +172,7 @@ export default function ScoringPythonDialog({ onClose, onChanged,
                   <DepChips deps={r.deps} />
                   {missing.length > 0 && r.install_command && (
                     <div className="space-y-1">
-                      <p className="text-xs text-amber-300">
+                      <p className="text-xs text-amber-700">
                         We will not install into an environment we did not create. To add
                         {` ${missing.join(', ')}`} yourself, run:
                       </p>
@@ -213,7 +213,7 @@ export default function ScoringPythonDialog({ onClose, onChanged,
           </div>
           {entered ? (
             <p className={`text-[0.6875rem] ${entered.tone === 'warn'
-              ? 'text-amber-300' : 'text-content-muted'}`}>
+              ? 'text-amber-700' : 'text-content-muted'}`}>
               {entered.text}
             </p>
           ) : (

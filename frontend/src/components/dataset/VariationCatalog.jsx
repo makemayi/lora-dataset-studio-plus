@@ -441,7 +441,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
     const cls = on
       ? 'bg-primary/20 border-primary/50 text-white ring-1 ring-primary/30'
       : done > 0
-        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-100/90 hover:bg-emerald-500/15'
+        ? 'border-emerald-500/40 bg-emerald-50 text-emerald-100/90 hover:bg-emerald-50'
         : 'border-transparent bg-surface-raised text-content-muted hover:bg-surface';
     return (
       <div key={c.id} className={`relative flex items-center gap-1.5 px-1.5 py-1 rounded-lg text-[0.625rem] border transition-colors ${cls} ${blocked ? 'opacity-40' : ''}`}>
@@ -454,8 +454,8 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
               a real name the user chose, and "Shiba, zo…" identifies nothing. */}
           <span className="min-w-0 leading-tight break-words">{c.label}</span>
           <span className="ml-auto shrink-0 flex items-center gap-1">
-            {done > 0 && <span className="text-emerald-300 font-semibold">✓×{done}</span>}
-            {on && <span className="text-indigo-300" aria-hidden="true">✓</span>}
+            {done > 0 && <span className="text-emerald-700 font-semibold">✓×{done}</span>}
+            {on && <span className="text-indigo-700" aria-hidden="true">✓</span>}
           </span>
         </button>
         <span className="shrink-0 flex flex-col items-stretch gap-0.5">
@@ -465,7 +465,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
             <button type="button" onClick={onKeep}
               aria-label={`Keep the shot ${c.label}`}
               title="Keep this shot for good — it moves to Imported and is saved with the app, so it survives clearing your browser and shows up on your other devices"
-              className="px-1 py-px rounded bg-black/40 text-content-subtle hover:text-emerald-300 text-[0.5625rem] leading-none">
+              className="px-1 py-px rounded bg-black/40 text-content-subtle hover:text-emerald-700 text-[0.5625rem] leading-none">
               Keep
             </button>
           )}
@@ -1053,7 +1053,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
           "why is this coming out realistic?" question arises. */}
       <p className="text-content-subtle text-[0.625rem] -mt-1">
         Not the look you wanted (a stylized reference coming out realistic)? Edit the generation prompt in{' '}
-        <a href="#/settings/engines" className="text-amber-300 underline decoration-amber-300/50">Settings › Image engines →</a>
+        <a href="#/settings/engines" className="text-amber-700 underline decoration-amber-300/50">Settings › Image engines →</a>
       </p>
       {/* Two facts about the Gemini engine that belong next to the choice, not in
           a support thread after the fact. Both are stated flat, with no verdict
@@ -1080,7 +1080,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
           title={<>Klein <span className="font-normal text-content-subtle">· local</span></>}
           tags={[
             // Green stays a statement about the PRICE, never a selection state.
-            <span key="free" className="px-1.5 py-px rounded-full bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 text-[0.625rem]">Free</span>,
+            <span key="free" className="px-1.5 py-px rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[0.625rem]">Free</span>,
             <span key="gpu" className="px-2 py-px rounded-full bg-surface-raised text-content-muted text-[0.625rem]">Your GPU</span>,
             <span key="nsfw" className="px-2 py-px rounded-full bg-surface-raised text-content-muted text-[0.625rem]">NSFW OK</span>,
           ]}
@@ -1095,7 +1095,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
             </span>
           ) : (
             <a href="#/setup" onClick={(e) => e.stopPropagation()}
-              className="text-amber-300 text-[0.625rem] underline decoration-amber-300/50">
+              className="text-amber-700 text-[0.625rem] underline decoration-amber-300/50">
               {kleinHint}
             </a>
           )} />
@@ -1107,7 +1107,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
           icon={<IdentityFrameIcon className={`w-9 h-9 shrink-0 ${isKrea ? ENGINE_ACCENTS.krea.icon : 'text-content-subtle'}`} />}
           title={<>Krea 2 Edit <span className="font-normal text-content-subtle">· local</span></>}
           tags={[
-            <span key="free" className="px-1.5 py-px rounded-full bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 text-[0.625rem]">Free</span>,
+            <span key="free" className="px-1.5 py-px rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[0.625rem]">Free</span>,
             <span key="gpu" className="px-2 py-px rounded-full bg-surface-raised text-content-muted text-[0.625rem]">Your GPU</span>,
             <span key="nsfw" className="px-2 py-px rounded-full bg-surface-raised text-content-muted text-[0.625rem]">NSFW OK</span>,
           ]}
@@ -1123,7 +1123,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
             </span>
           ) : (
             <a href="#/setup" onClick={(e) => e.stopPropagation()}
-              className="text-amber-300 text-[0.625rem] underline decoration-amber-300/50">
+              className="text-amber-700 text-[0.625rem] underline decoration-amber-300/50">
               {kreaHint}
             </a>
           )} />
@@ -1136,7 +1136,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
           icon={<IdentityFrameIcon className={`w-9 h-9 shrink-0 ${isH3 ? ENGINE_ACCENTS.minimax_h3.icon : 'text-content-subtle'}`} />}
           title={<>MiniMax H3 <span className="font-normal text-content-subtle">· local</span></>}
           tags={[
-            <span key="free" className="px-1.5 py-px rounded-full bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 text-[0.625rem]">Free</span>,
+            <span key="free" className="px-1.5 py-px rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[0.625rem]">Free</span>,
             <span key="gpu" className="px-2 py-px rounded-full bg-surface-raised text-content-muted text-[0.625rem]">Your GPU</span>,
             <span key="nsfw" className="px-2 py-px rounded-full bg-surface-raised text-content-muted text-[0.625rem]">NSFW OK</span>,
             <span key="slow" className="px-2 py-px rounded-full bg-surface-raised text-content-muted text-[0.625rem]">~40-80s/image</span>,
@@ -1147,7 +1147,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
               packet, with the best frame kept. Slower per image, and shots from the SAME
               card are much faster than the first one.
               {h3SpeedWarning && (
-                <> <span className="text-amber-300">{h3SpeedWarning}</span></>
+                <> <span className="text-amber-700">{h3SpeedWarning}</span></>
               )}
               {localQueuesBehindApi(engines) && (
                 <> <span className={ENGINE_ACCENTS.minimax_h3.text}>
@@ -1157,7 +1157,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
             </span>
           ) : (
             <a href="#/setup" onClick={(e) => e.stopPropagation()}
-              className="text-amber-300 text-[0.625rem] underline decoration-amber-300/50">
+              className="text-amber-700 text-[0.625rem] underline decoration-amber-300/50">
               {h3Hint}
             </a>
           )} />
@@ -1175,7 +1175,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
               Best face fidelity · {engineShare('nanobanana')} image(s) ≈ ${(engineShare('nanobanana') * 0.15).toFixed(2)}
             </span>
           ) : (
-            <span className="text-amber-300 text-[0.625rem]">⚠ Add GEMINI_API_KEY in Settings</span>
+            <span className="text-amber-700 text-[0.625rem]">⚠ Add GEMINI_API_KEY in Settings</span>
           )} />
         <EngineCard id="chatgpt" checked={isGPT} available={gptAvailable} generating={generating}
           onToggle={toggleEngine} share={engineShare('chatgpt')}
@@ -1201,7 +1201,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
                     {` · ${engineShare('chatgpt')} image(s) ≈ $${(engineShare('chatgpt') * 0.17).toFixed(2)}`}</>}
             </span>
           ) : (
-            <span className="text-amber-300 text-[0.625rem]">
+            <span className="text-amber-700 text-[0.625rem]">
               {/* Name the credential the SELECTED lane needs. On the ComfyUI
                   lane an OpenAI key would not be read at all, so asking for one
                   sends the user to set up the wrong thing. */}
@@ -1228,7 +1228,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
               {' · '}{engineShare('openrouter')} image(s), billed by OpenRouter at that model&rsquo;s rate
             </span>
           ) : (
-            <span className="text-amber-300 text-[0.625rem]">⚠ Add OPENROUTER_API_KEY in Settings</span>
+            <span className="text-amber-700 text-[0.625rem]">⚠ Add OPENROUTER_API_KEY in Settings</span>
           )} />
         <EngineCard id="qwen" checked={isQwen} available={qwenAvailable} generating={generating}
           onToggle={toggleEngine} share={engineShare('qwen')}
@@ -1245,7 +1245,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
               {' · '}{engineShare('qwen')} image(s), billed by Alibaba at $0.08/img
             </span>
           ) : (
-            <span className="text-amber-300 text-[0.625rem]">⚠ Add QWEN_API_KEY in Settings</span>
+            <span className="text-amber-700 text-[0.625rem]">⚠ Add QWEN_API_KEY in Settings</span>
           )} />
       </div>
 
@@ -1344,7 +1344,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
               {loraPresets.length === 0 && (
                 <p className="text-content-subtle text-[0.625rem]">
                   No presets yet — build combinations of your own LoRA files (texture, anatomy, style…) in{' '}
-                  <a href="#/settings/engines" className="text-amber-300 underline decoration-amber-300/50">
+                  <a href="#/settings/engines" className="text-amber-700 underline decoration-amber-300/50">
                     Settings › Image engines
                   </a>.
                 </p>
@@ -1417,7 +1417,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
             <div className="flex flex-col gap-2 pt-1 border-t border-white/10">
               {/* The target is the Krea CARD, not a field: the sentence promises
                   "the rest of the engine's knobs" — which is exactly that card. */}
-              <p className="text-amber-300/90 text-[0.625rem]">
+              <p className="text-amber-700/90 text-[0.625rem]">
                 ⚠ These four save straight to your settings: they apply to <b>every</b> Krea
                 run from now on, not just this batch — the same values every other Krea
                 surface reads, and the same ones{' '}
@@ -1514,7 +1514,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
               {kreaLoraPresets.length === 0 && (
                 <p className="text-content-subtle text-[0.625rem]">
                   No presets yet — build combinations of your own Krea 2 LoRA files in{' '}
-                  <a href="#/settings/engines" className="text-amber-300 underline decoration-amber-300/50">
+                  <a href="#/settings/engines" className="text-amber-700 underline decoration-amber-300/50">
                     Settings › Image engines
                   </a>.
                 </p>
@@ -1551,14 +1551,14 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
           <span className="text-content-muted text-[0.6875rem] uppercase">Presets</span>
           <button type="button" onClick={saveCurrentPreset} disabled={!selected.size}
             aria-label="Save the current shot selection as a custom preset"
-            className="rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-[0.625rem] font-semibold text-indigo-200 hover:bg-primary/20 disabled:opacity-40">
+            className="rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-[0.625rem] font-semibold text-indigo-700 hover:bg-primary/20 disabled:opacity-40">
             ＋ Save preset
           </button>
           <button type="button" onClick={() => setQuickGenOpen(true)}
             disabled={busy || !hasRef}
             title="Compose a random batch by count + ratio, no card-by-card picking"
             aria-label="Quick generate: compose a random batch by count and ratio"
-            className="rounded-md border border-indigo-400/50 bg-indigo-500/20 px-2 py-1 text-[0.625rem] font-semibold text-indigo-100 hover:bg-indigo-500/30 disabled:opacity-40">
+            className="rounded-md border border-indigo-200 bg-indigo-100 px-2 py-1 text-[0.625rem] font-semibold text-indigo-100 hover:bg-indigo-500/30 disabled:opacity-40">
             🎲 Quick generate
           </button>
           <span className="ml-auto flex items-center gap-2 flex-wrap text-[0.625rem] text-content-subtle" aria-hidden="true">
@@ -1612,7 +1612,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
                     className="grid h-5 w-5 place-items-center rounded text-[0.625rem] text-content-subtle hover:bg-white/10 hover:text-content">✎</button>
                   <button type="button" onClick={() => removeCustomPreset(preset)}
                     aria-label={`Delete custom preset ${preset.name}`} title="Delete preset"
-                    className="grid h-5 w-5 place-items-center rounded text-[0.625rem] text-content-subtle hover:bg-red-500/15 hover:text-red-300">✕</button>
+                    className="grid h-5 w-5 place-items-center rounded text-[0.625rem] text-content-subtle hover:bg-red-50 hover:text-red-600">✕</button>
                 </div>
               </div>
             );
@@ -1635,8 +1635,8 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
           selected — will be generated
         </span>
         <span className="flex items-center gap-1">
-          <span className="w-3 h-3 rounded border border-emerald-500/40 bg-emerald-500/10" />
-          <span className="text-emerald-300">✓×N</span> already in your dataset
+          <span className="w-3 h-3 rounded border border-emerald-500/40 bg-emerald-50" />
+          <span className="text-emerald-700">✓×N</span> already in your dataset
         </span>
         <span className="flex items-center gap-1">
           <span className="w-3 h-3 rounded bg-surface-raised" />
@@ -1656,8 +1656,8 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
               <div className="flex items-center gap-2 mb-1"
                 title={`Your dataset contains ${have} "${frLabel(fr)}" image(s). Target for balanced training: ${TARGET[fr]} (this quota does NOT affect the generation selection).`}>
                 <ShotIllustration framing={fr} label=""
-                  className={`w-5 h-5 ${missing ? 'text-amber-300' : 'text-content-subtle'}`} />
-                <span className={`text-[0.6875rem] uppercase font-semibold ${missing ? 'text-amber-300' : 'text-content-muted'}`}>
+                  className={`w-5 h-5 ${missing ? 'text-amber-700' : 'text-content-subtle'}`} />
+                <span className={`text-[0.6875rem] uppercase font-semibold ${missing ? 'text-amber-700' : 'text-content-muted'}`}>
                   {frLabel(fr)}
                 </span>
                 <span className="w-24 h-1.5 rounded-full bg-surface-raised overflow-hidden" aria-hidden="true">
@@ -1665,7 +1665,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
                     style={{ width: `${pct}%` }} />
                 </span>
                 {missing > 0 ? (
-                  <span className="px-1.5 py-px rounded-full bg-amber-400/15 border border-amber-400/40 text-amber-300 text-[0.625rem]">
+                  <span className="px-1.5 py-px rounded-full bg-amber-400/15 border border-amber-200 text-amber-700 text-[0.625rem]">
                     {have}/{TARGET[fr]} in the dataset · {missing} missing
                   </span>
                 ) : (
@@ -1687,7 +1687,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
                   const cls = on
                     ? 'bg-primary/20 border-primary/50 text-white ring-1 ring-primary/30'
                     : done > 0
-                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-100/90 hover:bg-emerald-500/15'
+                      ? 'border-emerald-500/40 bg-emerald-50 text-emerald-100/90 hover:bg-emerald-50'
                       : 'border-transparent bg-surface-raised text-content-muted hover:bg-surface';
                   return (
                     <button key={e.id} type="button" onClick={() => toggle(e.id)}
@@ -1701,11 +1701,11 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
                       </span>
                       <span className="ml-auto shrink-0 flex items-center gap-1">
                         {done > 0 && (
-                          <span className="text-emerald-300 font-semibold" aria-label={`${done} already in the dataset`}>
+                          <span className="text-emerald-700 font-semibold" aria-label={`${done} already in the dataset`}>
                             ✓×{done}
                           </span>
                         )}
-                        {on && <span className="text-indigo-300" aria-hidden="true">✓</span>}
+                        {on && <span className="text-indigo-700" aria-hidden="true">✓</span>}
                       </span>
                     </button>
                   );
@@ -1764,11 +1764,11 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
           🔞 catalog on a Krea-only run). */}
       {localOnlyRun && nsfwCatalog.length > 0 && (
         <div className={`rounded-lg border p-2 flex flex-col gap-2 ${nsfwMode
-          ? 'border-rose-500/40 bg-rose-500/10' : 'border-transparent bg-surface'}`}>
+          ? 'border-rose-500/40 bg-rose-50' : 'border-transparent bg-surface'}`}>
           <button type="button" onClick={() => setNsfwMode((v) => !v)} aria-pressed={nsfwMode}
             className="flex items-center gap-2 text-left">
             <span aria-hidden="true">🔞</span>
-            <span className={`text-[0.75rem] font-semibold ${nsfwMode ? 'text-rose-300' : 'text-content-muted'}`}>
+            <span className={`text-[0.75rem] font-semibold ${nsfwMode ? 'text-rose-700' : 'text-content-muted'}`}>
               NSFW mode {nsfwMode ? 'ON' : 'OFF'}
             </span>
             <span className="text-content-subtle text-[0.625rem]">
@@ -1788,7 +1788,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
                   const cls = on
                     ? 'bg-rose-500/20 border-rose-400/60 text-white ring-1 ring-rose-400/30'
                     : done > 0
-                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-100/90 hover:bg-emerald-500/15'
+                      ? 'border-emerald-500/40 bg-emerald-50 text-emerald-100/90 hover:bg-emerald-50'
                       : 'border-transparent bg-surface-raised text-content-muted hover:bg-surface';
                   return (
                     <button key={e.id} type="button" onClick={() => toggle(e.id)} aria-pressed={on}
@@ -1797,8 +1797,8 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
                       <ShotIllustration framing={e.framing} label={e.label} className="w-7 h-7 shrink-0" />
                       <span className="min-w-0 leading-tight">{displayLabel(e.label)}</span>
                       <span className="ml-auto shrink-0 flex items-center gap-1">
-                        {done > 0 && <span className="text-emerald-300 font-semibold">✓×{done}</span>}
-                        {on && <span className="text-rose-300" aria-hidden="true">✓</span>}
+                        {done > 0 && <span className="text-emerald-700 font-semibold">✓×{done}</span>}
+                        {on && <span className="text-rose-700" aria-hidden="true">✓</span>}
                       </span>
                     </button>
                   );
@@ -1890,17 +1890,17 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
                 <span className="text-[0.6875rem] font-semibold text-content truncate max-w-full">
                   {importReview.name}
                 </span>
-                <span className="text-[0.625rem] text-emerald-300">
+                <span className="text-[0.625rem] text-emerald-700">
                   {importReview.result.accepted.length} ready
                 </span>
                 {importReview.result.rejected.length > 0 && (
-                  <span className="text-[0.625rem] text-amber-300">
+                  <span className="text-[0.625rem] text-amber-700">
                     {importReview.result.rejected.length} rejected
                   </span>
                 )}
               </div>
               {importReview.result.rejected.length > 0 && (
-                <ul className="max-h-32 overflow-y-auto flex flex-col gap-0.5 text-[0.625rem] text-amber-200/90">
+                <ul className="max-h-32 overflow-y-auto flex flex-col gap-0.5 text-[0.625rem] text-amber-700/90">
                   {importReview.result.rejected.map((r) => (
                     <li key={`${r.index}-${r.code}`}>• {r.message}</li>
                   ))}
@@ -2023,7 +2023,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
           </select>
         </label>
         {!hasRef && (
-          <span className="text-amber-300 text-[0.6875rem]">Set a reference photo first</span>
+          <span className="text-amber-700 text-[0.6875rem]">Set a reference photo first</span>
         )}
         {/* The run's real price, next to the button that spends it — switching to
             "All engines" multiplies the bill, and that must be visible where the
@@ -2039,7 +2039,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
             selection or a run over the server's per-batch cap all SAY why the
             button is dead instead of just greying it out. */}
         {blockedReason && hasRef && (
-          <span className="text-amber-300 text-[0.6875rem]">{blockedReason}</span>
+          <span className="text-amber-700 text-[0.6875rem]">{blockedReason}</span>
         )}
         {/* Disabled for the WHOLE batch, not just the launch request: `busy` is the
             hook's busyLive (local flag OR any server-side activity, restored on

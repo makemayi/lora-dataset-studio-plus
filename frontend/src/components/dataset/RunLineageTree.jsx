@@ -62,7 +62,7 @@ function LineageNode({ row, onSelect, index }) {
         title={clickable ? 'Jump to this run' : undefined}
         className={'group my-1 flex min-w-0 flex-1 flex-col gap-1 rounded-lg border px-2.5 py-1.5 transition-colors '
           + (cur
-            ? 'border-indigo-400/70 bg-indigo-500/10 ring-1 ring-indigo-400/30 '
+            ? 'border-indigo-400/70 bg-indigo-50 ring-1 ring-indigo-400/30 '
             : dim
               ? 'border-border bg-app/30 '
               : 'border-border bg-app/50 ')
@@ -106,7 +106,7 @@ function LineageNode({ row, onSelect, index }) {
             </span>
           )}
           {node.has_superseded_tail && (
-            <span className="inline-flex items-center gap-0.5 text-amber-300/70"
+            <span className="inline-flex items-center gap-0.5 text-amber-700/70"
               title="A later run resumed from an earlier step of this one — its subsequent saves were set aside on disk (kept, never deleted)">
               <span aria-hidden>⋯</span>set-aside saves
             </span>
@@ -135,7 +135,7 @@ function ViewToggle({ view, onChange }) {
       aria-pressed={view === id} title={`${label} view`}
       className={'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.5625rem] font-semibold transition-colors '
         + (view === id
-          ? 'bg-indigo-500/20 text-indigo-100 '
+          ? 'bg-indigo-100 text-indigo-100 '
           : 'text-content-subtle hover:text-content')}>
       <span aria-hidden>{glyph}</span>{label}
     </button>
@@ -164,7 +164,7 @@ export default function RunLineageTree({ tree, loading, error, onSelect, onConti
       </div>
     );
   }
-  if (error) return <p className="m-0 text-rose-300/80 text-[0.6875rem]">{error}</p>;
+  if (error) return <p className="m-0 text-rose-700/80 text-[0.6875rem]">{error}</p>;
   const rows = buildLineageRows(tree);
   if (!rows.length) return null;
   return (
@@ -178,7 +178,7 @@ export default function RunLineageTree({ tree, loading, error, onSelect, onConti
         <div className="ml-auto flex items-center gap-2">
           <span className="hidden items-center gap-2 text-content-subtle text-[0.5rem] sm:flex">
             <span className="inline-flex items-center gap-1">
-              <span aria-hidden className="h-2 w-2 rounded-full border border-indigo-400/70 bg-indigo-500/20" />current
+              <span aria-hidden className="h-2 w-2 rounded-full border border-indigo-400/70 bg-indigo-100" />current
             </span>
             <span className="inline-flex items-center gap-1">
               <span aria-hidden>↳</span>continued from

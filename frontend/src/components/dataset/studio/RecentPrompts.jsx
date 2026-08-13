@@ -31,7 +31,7 @@ export default function RecentPrompts({
         {batchable && <HelpBadge topic="studio-prompt-batch" />}
         {batchable && picked.length > 0 && (
           <span className="flex items-center gap-1.5">
-            <span className="rounded bg-purple-500/20 px-1.5 py-0.5 text-[0.5625rem] font-semibold text-purple-200 tabular-nums">
+            <span className="rounded bg-purple-500/20 px-1.5 py-0.5 text-[0.5625rem] font-semibold text-purple-700 tabular-nums">
               {picked.length} selected
             </span>
             <button type="button" onClick={onClearBatch}
@@ -68,13 +68,13 @@ export default function RecentPrompts({
                   title={inBatch ? 'Remove this prompt from the batch' : 'Add this prompt to the batch'}
                   aria-label={inBatch ? 'Remove this prompt from the batch' : 'Add this prompt to the batch'}
                   className={`shrink-0 px-1.5 flex items-center border-r border-border ${
-                    inBatch ? 'text-purple-200' : 'text-content-subtle hover:text-content'}`}>
+                    inBatch ? 'text-purple-700' : 'text-content-subtle hover:text-content'}`}>
                   <span aria-hidden>{inBatch ? '☑' : '☐'}</span>
                 </button>
               )}
               <button type="button" onClick={() => onPick(pr.prompt)} title={pr.prompt}
                 className={`flex items-center gap-1.5 p-1 text-left min-w-0 ${
-                  sel ? 'text-purple-200' : 'text-content-muted'}`}>
+                  sel ? 'text-purple-700' : 'text-content-muted'}`}>
                 {pr.thumbnail
                   ? <img src={`/api/dataset/${pr.thumb_dataset_id ?? datasetId}/img/${encodeURIComponent(pr.thumbnail)}`}
                       alt="" loading="lazy"
@@ -93,7 +93,7 @@ export default function RecentPrompts({
                   }}
                   title="Delete this recent prompt (and its test images)"
                   aria-label="Delete this recent prompt"
-                  className="shrink-0 px-1.5 flex items-center border-l border-border text-red-300/70 hover:text-red-300 hover:bg-red-500/15">
+                  className="shrink-0 px-1.5 flex items-center border-l border-border text-red-600/70 hover:text-red-600 hover:bg-red-50">
                   🗑
                 </button>
               )}

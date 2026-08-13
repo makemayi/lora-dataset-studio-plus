@@ -23,10 +23,10 @@ export const STEP_LABEL = {
   framing: '📐 Classify framing', caption: '🏷️ Caption',
 }
 const STATUS_STYLE = {
-  done: { icon: '✅', cls: 'text-emerald-300' },
-  skipped: { icon: '⏭️', cls: 'text-amber-300' },
+  done: { icon: '✅', cls: 'text-emerald-700' },
+  skipped: { icon: '⏭️', cls: 'text-amber-700' },
   cancelled: { icon: '🛑', cls: 'text-content-subtle' },
-  error: { icon: '⚠️', cls: 'text-rose-300' },
+  error: { icon: '⚠️', cls: 'text-rose-700' },
 }
 
 function fmtWhen(ts) {

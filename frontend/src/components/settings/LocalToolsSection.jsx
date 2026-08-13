@@ -26,7 +26,7 @@ const HF_SECRET = {
       href="https://huggingface.co/settings/tokens/new?tokenType=read"
       target="_blank"
       rel="noreferrer"
-      className="mb-2 inline-block max-w-full text-xs font-medium text-sky-300 underline underline-offset-2 hover:text-sky-200"
+      className="mb-2 inline-block max-w-full text-xs font-medium text-sky-700 underline underline-offset-2 hover:text-sky-200"
     >
       Create a read token on Hugging Face ↗
     </a>
@@ -50,7 +50,7 @@ const HF_CLOUD_SECRET = {
         href="https://huggingface.co/settings/tokens/new?tokenType=fineGrained"
         target="_blank"
         rel="noreferrer"
-        className="inline-block max-w-full text-xs font-medium text-sky-300 underline underline-offset-2 hover:text-sky-200"
+        className="inline-block max-w-full text-xs font-medium text-sky-700 underline underline-offset-2 hover:text-sky-200"
       >
         Create a fine-grained token on Hugging Face ↗
       </a>
@@ -58,7 +58,7 @@ const HF_CLOUD_SECRET = {
         href="https://huggingface.co/settings/tokens/new?tokenType=write"
         target="_blank"
         rel="noreferrer"
-        className="inline-block max-w-full text-xs font-medium text-sky-300 underline underline-offset-2 hover:text-sky-200"
+        className="inline-block max-w-full text-xs font-medium text-sky-700 underline underline-offset-2 hover:text-sky-200"
       >
         Create a global write token on Hugging Face ↗
       </a>
@@ -104,7 +104,7 @@ function OllamaStatus({ caps, refreshCaps, toast }) {
   }
   if (o.installed) {
     return (
-      <div className="space-y-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
+      <div className="space-y-2 rounded-md border border-amber-500/30 bg-amber-50 p-3">
         <p className="text-sm text-content">
           <span aria-hidden="true">●</span> Installed but not running.
         </p>
@@ -127,7 +127,7 @@ function OllamaStatus({ caps, refreshCaps, toast }) {
     <HelpText className="text-xs text-content-muted">
       <span aria-hidden="true">✗</span> Not detected on this machine.{' '}
       <a href="https://ollama.com/download" target="_blank" rel="noreferrer"
-        className="text-sky-300 underline hover:text-sky-200">Download Ollama →</a>
+        className="text-sky-700 underline hover:text-sky-200">Download Ollama →</a>
     </HelpText>
   )
 }
@@ -222,12 +222,12 @@ function ComfyFolderRow({ comfy, setField, state, fieldKey, id }) {
       {suggestion && (
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
           <span className="min-w-0 break-all text-xs text-content-muted">
-            ComfyUI is running with <code className="text-sky-300">{suggestion}</code>
+            ComfyUI is running with <code className="text-sky-700">{suggestion}</code>
           </span>
           <button
             type="button"
             onClick={() => setField('comfyui', fieldKey, suggestion)}
-            className="shrink-0 rounded-md border border-sky-400/40 px-2 py-1 text-xs font-medium text-sky-300 hover:bg-sky-400/10"
+            className="shrink-0 rounded-md border border-sky-200 px-2 py-1 text-xs font-medium text-sky-700 hover:bg-sky-400/10"
           >
             Use this
           </button>

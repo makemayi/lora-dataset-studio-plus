@@ -103,7 +103,7 @@ export default function LineageDiffPanel({ a, b, onClose }) {
             {data?.a ? sideLabel(data.a) : `#${a.record_id}`}
           </div>
         </div>
-        <div className="rounded-md border border-indigo-400/40 bg-indigo-500/10 px-2 py-1.5">
+        <div className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1.5">
           <div className="text-[10px] font-semibold uppercase tracking-wide text-content-subtle">Run B</div>
           <div className="break-words font-mono text-content">
             {data?.b ? sideLabel(data.b) : `#${b.record_id}`}
@@ -142,7 +142,7 @@ export default function LineageDiffPanel({ a, b, onClose }) {
             <table className="mt-1.5 w-full border-collapse text-xs">
               <tbody>
                 {visible.map((r) => (
-                  <tr key={r.key} className={r.changed ? 'bg-amber-500/10' : 'opacity-60'}>
+                  <tr key={r.key} className={r.changed ? 'bg-amber-50' : 'opacity-60'}>
                     <td className="w-24 py-1 pl-1 pr-2 align-top text-content-subtle">{r.label}</td>
                     <td className="break-all py-1 pr-2 align-top tabular-nums">{cell(r.a, r.changed)}</td>
                     <td className="break-all py-1 pr-1 align-top tabular-nums">{cell(r.b, r.changed)}</td>
@@ -192,7 +192,7 @@ export default function LineageDiffPanel({ a, b, onClose }) {
                     className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
                       open === c.key
                         ? 'border-amber-400/60 bg-amber-500/20 text-amber-100'
-                        : 'border-border bg-app/50 text-content hover:border-amber-400/40'}`}>
+                        : 'border-border bg-app/50 text-content hover:border-amber-200'}`}>
                     {c.label}
                   </button>
                 ))}
@@ -212,7 +212,7 @@ export default function LineageDiffPanel({ a, b, onClose }) {
           <table className="mt-1.5 w-full border-collapse text-xs">
             <tbody>
               {envRows.map((r) => (
-                <tr key={r.key} className={r.changed ? 'bg-amber-500/10' : 'opacity-60'}>
+                <tr key={r.key} className={r.changed ? 'bg-amber-50' : 'opacity-60'}>
                   <td className="w-24 py-1 pl-1 pr-2 align-top text-content-subtle">{r.label}</td>
                   <td className="break-all py-1 pr-2 align-top">{cell(r.a, r.changed)}</td>
                   <td className="break-all py-1 pr-1 align-top">{cell(r.b, r.changed)}</td>
@@ -264,8 +264,8 @@ function ImageList({ kind, items, withheld }) {
                     {captionWordDiff(it.before, it.after).map((seg, i) => (
                       <span key={`${seg.type}-${i}`}
                         className={seg.type === 'removed'
-                          ? 'text-rose-300/90 line-through decoration-rose-400/60'
-                          : seg.type === 'added' ? 'font-medium text-emerald-300' : ''}>
+                          ? 'text-rose-700/90 line-through decoration-rose-400/60'
+                          : seg.type === 'added' ? 'font-medium text-emerald-700' : ''}>
                         {seg.text}{' '}
                       </span>
                     ))}

@@ -191,7 +191,7 @@ export default function KleinImproveNote({
         )}
       </p>
       {caution && (
-        <p className="text-amber-300 break-words">{caution}</p>
+        <p className="text-amber-700 break-words">{caution}</p>
       )}
       {/* WHICH model executes the instruction — the other half of the same
           question, and the half nothing on this screen ever answered. Named
@@ -208,7 +208,7 @@ export default function KleinImproveNote({
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
           disabled={!server.loaded}
-          className="underline text-indigo-300 hover:text-indigo-200 disabled:opacity-40"
+          className="underline text-indigo-700 hover:text-indigo-700 disabled:opacity-40"
         >
           <span aria-hidden="true">✎ </span>
           {open ? 'Close the instruction editor' : 'Edit this instruction here'}
@@ -225,10 +225,10 @@ export default function KleinImproveNote({
         // lightbox rail, the toolbar's width in the grid — and never wider. The
         // textarea inside PromptOverrideField is w-full, so it follows.
         <div data-testid="klein-improve-editor"
-          className="min-w-0 w-full rounded-lg border border-indigo-400/30 bg-indigo-500/[0.06] p-2 space-y-2">
+          className="min-w-0 w-full rounded-lg border border-indigo-100 bg-indigo-500/[0.06] p-2 space-y-2">
           {/* Stated first, unconditionally, and before the box it qualifies:
               this control sits in a dataset screen but does not belong to it. */}
-          <p className="text-amber-200/90 break-words">
+          <p className="text-amber-700/90 break-words">
             <span aria-hidden="true">⚠ </span>{IMPROVE_SCOPE_NOTE}
           </p>
           {/* "Turn off this instruction" was half of what the old Settings link

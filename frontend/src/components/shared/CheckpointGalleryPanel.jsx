@@ -282,7 +282,7 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
             title="📌 Pin to canvas — put this image on the board, beside the checkpoint that made it"
             className="absolute bottom-1 right-1 flex h-7 w-7 items-center justify-center rounded-full
                        border border-indigo-300/70 bg-black/60 text-[0.8125rem] text-indigo-100
-                       hover:bg-indigo-500/50 focus-visible:bg-indigo-500/50
+                       hover:bg-indigo-500 focus-visible:bg-indigo-500
                        sm:bottom-0.5 sm:right-0.5 sm:h-5 sm:w-5 sm:text-[0.625rem]">
             <span aria-hidden>📌</span>
           </button>
@@ -320,7 +320,7 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
             <p className="m-0 text-content-subtle text-[0.75rem]">Loading…</p>
           )}
           {state.status === 'error' && (
-            <p className="m-0 rounded-lg border border-amber-400/40 bg-amber-500/10 px-2 py-1.5 text-amber-100 text-[0.75rem]">
+            <p className="m-0 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-amber-100 text-[0.75rem]">
               {state.error}
             </p>
           )}
@@ -332,10 +332,10 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
             <p role={notice.kind === 'ok' ? undefined : 'alert'}
               className={`m-0 mb-2 rounded-lg border px-2 py-1.5 text-[0.6875rem] ${
                 notice.kind === 'error'
-                  ? 'border-rose-400/50 bg-rose-500/10 text-rose-100'
+                  ? 'border-rose-400/50 bg-rose-50 text-rose-100'
                   : notice.kind === 'warn'
-                    ? 'border-amber-400/40 bg-amber-500/10 text-amber-100'
-                    : 'border-emerald-400/40 bg-emerald-500/10 text-emerald-100'}`}>
+                    ? 'border-amber-200 bg-amber-50 text-amber-100'
+                    : 'border-emerald-200 bg-emerald-50 text-emerald-100'}`}>
               {notice.text}
             </p>
           )}
@@ -365,7 +365,7 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
                 </p>
                 <button type="button" data-testid="run-gallery-timeline"
                   onClick={() => setTimelineOpen(true)} aria-haspopup="dialog"
-                  className="shrink-0 rounded-md border border-indigo-400/60 bg-indigo-500/15 px-2 py-1.5 text-[0.6875rem] font-semibold text-indigo-100 hover:bg-indigo-500/25">
+                  className="shrink-0 rounded-md border border-indigo-400/60 bg-indigo-50 px-2 py-1.5 text-[0.6875rem] font-semibold text-indigo-100 hover:bg-indigo-500/25">
                   <span aria-hidden>🎞</span> Timeline
                 </button>
               </div>
@@ -468,7 +468,7 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
                   <button type="button" data-testid="run-gallery-details"
                     onClick={() => onDetails(node)}
                     title="Open the full run details, where the notes can be edited"
-                    className="mt-2 rounded-md border border-border px-2 py-1.5 text-content text-[0.625rem] hover:border-indigo-400/50">
+                    className="mt-2 rounded-md border border-border px-2 py-1.5 text-content text-[0.625rem] hover:border-indigo-200">
                     <span aria-hidden>ⓘ</span> Full details &amp; edit notes
                   </button>
                 )}
@@ -519,7 +519,7 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
               title={picking ? 'Leave selection mode' : 'Select images to delete'}
               className={`shrink-0 rounded-md border px-3 py-1.5 text-[0.75rem] font-semibold ${picking
                 ? 'border-indigo-300 bg-indigo-500/40 text-white'
-                : 'border-indigo-400/70 bg-indigo-500/15 text-indigo-200 hover:bg-indigo-500/25'}`}>
+                : 'border-indigo-400/70 bg-indigo-50 text-indigo-700 hover:bg-indigo-500/25'}`}>
               <span aria-hidden>{picking ? '✓' : '☑'}</span> {bar.toggleLabel}
             </button>
             {/* ⬇ ONE button, two meanings, taken from the mode already on
@@ -530,7 +530,7 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
             {zipBtn.shown && (
               <button type="button" data-testid="gallery-download-zip"
                 onClick={runZip} disabled={zipBtn.disabled} title={zipBtn.title}
-                className="shrink-0 rounded-md border border-border px-2.5 py-1.5 text-content-muted text-[0.75rem] hover:border-indigo-400/50 hover:text-content disabled:opacity-40">
+                className="shrink-0 rounded-md border border-border px-2.5 py-1.5 text-content-muted text-[0.75rem] hover:border-indigo-200 hover:text-content disabled:opacity-40">
                 {zipBtn.label}
               </button>
             )}
@@ -552,7 +552,7 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
                 <button type="button" data-testid="gallery-delete"
                   disabled={bar.deleteDisabled}
                   onClick={() => setConfirming(true)}
-                  className="ml-auto rounded-md border border-rose-500/50 px-3 py-1.5 text-[0.75rem] text-rose-300 disabled:opacity-40 hover:bg-rose-500/10">
+                  className="ml-auto rounded-md border border-rose-500/50 px-3 py-1.5 text-[0.75rem] text-rose-700 disabled:opacity-40 hover:bg-rose-50">
                   🗑 Delete{selected.size ? ` (${selected.size})` : ''}
                 </button>
               </>
@@ -573,7 +573,7 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
               {confirmation.lines.map((line) => <li key={line}>{line}</li>)}
             </ul>
             {confirmation.destructive && (
-              <p className="m-0 mb-3 rounded-lg border border-rose-400/40 bg-rose-500/10 px-2 py-1.5 text-rose-100 text-[0.6875rem]">
+              <p className="m-0 mb-3 rounded-lg border border-rose-400/40 bg-rose-50 px-2 py-1.5 text-rose-100 text-[0.6875rem]">
                 This cannot be undone.
               </p>
             )}
@@ -584,7 +584,7 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
               </button>
               <button type="button" data-testid="gallery-confirm-delete"
                 disabled={busy} onClick={runDelete}
-                className="rounded-md border border-rose-500/60 bg-rose-500/15 px-3 py-2 text-[0.75rem] text-rose-100 disabled:opacity-40 hover:bg-rose-500/25">
+                className="rounded-md border border-rose-300 bg-rose-500/15 px-3 py-2 text-[0.75rem] text-rose-100 disabled:opacity-40 hover:bg-rose-500/25">
                 {busy ? 'Deleting…' : `Delete ${selected.size}`}
               </button>
             </div>
@@ -615,7 +615,7 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
           <button type="button" data-testid="gallery-pin-image"
             onClick={() => { onPin(zoom); setZoom(null); }}
             title="Put this image on the board, beside the checkpoint that made it"
-            className="rounded-md border border-indigo-400/60 bg-indigo-500/20 px-3 py-1.5 text-[0.75rem] font-semibold text-indigo-100 hover:bg-indigo-500/30">
+            className="rounded-md border border-indigo-400/60 bg-indigo-100 px-3 py-1.5 text-[0.75rem] font-semibold text-indigo-100 hover:bg-indigo-500/30">
             <span aria-hidden>📌</span> Pin to canvas
           </button>
         ) : null} />

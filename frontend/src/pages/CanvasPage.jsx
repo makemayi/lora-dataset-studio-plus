@@ -393,7 +393,7 @@ export default function CanvasPage() {
         <PageHeader eyebrow="board" title="LoRA Canvas"
           badge={(
             <>
-              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-amber-300">Beta</span>
+              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-amber-700">Beta</span>
               <HelpBadge topic="page-canvas" />
             </>
           )}
@@ -406,7 +406,7 @@ export default function CanvasPage() {
       </div>
 
       {index.status === 'error' && (
-        <p className="mb-3 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-amber-100 text-[0.75rem]">
+        <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-100 text-[0.75rem]">
           {index.error}
         </p>
       )}

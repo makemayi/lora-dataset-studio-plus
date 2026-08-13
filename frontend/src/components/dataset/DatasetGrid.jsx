@@ -214,7 +214,7 @@ function AutoTriageBar({ images, datasetId, faceThresholds, onBatch, busy,
             : ''}
       </span>
       {applyFailure && (
-        <span role="alert" className="text-xs text-rose-300">
+        <span role="alert" className="text-xs text-rose-700">
           {autoTriageFailureMessage(applyFailure)}
         </span>
       )}
@@ -467,7 +467,7 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
           which pass, and a title is not readable on a touch screen at all. */}
       {busyReason && (
         <p role="status" aria-live="polite"
-          className="rounded-lg bg-amber-500/15 px-2.5 py-1.5 text-[11px] leading-snug text-amber-100/90">
+          className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] leading-snug text-amber-100/90">
           <span aria-hidden="true">🔒 </span>{READS_STAY_OPEN}
         </p>
       )}
@@ -494,18 +494,18 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
             </>
           ) : (
             <div role="toolbar" aria-label="Bulk actions on the selection"
-              className="flex items-center gap-2 flex-wrap rounded-lg bg-indigo-500/15 px-2.5 py-1.5 w-full">
+              className="flex items-center gap-2 flex-wrap rounded-lg bg-indigo-50 px-2.5 py-1.5 w-full">
               <span className="text-content font-semibold">{selected.size} selected</span>
               {bulkAction && (
                 <span role="status" aria-live="polite" aria-atomic="true"
-                  className="rounded-full bg-amber-500/15 px-2.5 py-1 text-amber-200">
+                  className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700">
                   {bulkActionMessage(bulkAction)}
                 </span>
               )}
               <button type="button" disabled={bulkBusy} onClick={() => act('keep')}
-                className={`${batchBtn} bg-green-600/80 text-white`}>✓ Keep</button>
+                className={`${batchBtn} bg-green-600 text-white`}>✓ Keep</button>
               <button type="button" disabled={bulkBusy} onClick={() => act('reject')}
-                className={`${batchBtn} bg-red-600/80 text-white`}>✕ Reject</button>
+                className={`${batchBtn} bg-red-600 text-white`}>✕ Reject</button>
               <button type="button" disabled={bulkBusy} onClick={() => act('pending')}
                 title="Back to undecided" className={batchQuiet}>↺ Undecide</button>
               <button type="button" disabled={bulkBusy} onClick={() => act('clear_caption')}
@@ -531,7 +531,7 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
                     title={blocked
                       ? `${blocked}${exclusionSummary ? ` ${exclusionSummary}.` : ''}`
                       : `${engine.summary} Runs in the background, a few at a time — survives a page reload.${exclusionSummary ? ` Excluded: ${exclusionSummary}.` : ''}`}
-                    className={`${batchBtn} border border-indigo-400/50 bg-indigo-500/20 text-indigo-100`}>
+                    className={`${batchBtn} border border-indigo-200 bg-indigo-100 text-indigo-100`}>
                     {improveLabel || `${engine.emoji} ${engine.action} (${improveSelection.eligible.length})`}
                   </button>
                 );
@@ -549,10 +549,10 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
                   would hide the note on installs where the pass runs fine. */}
               {onImproveBatch && improveSelection.eligible.length > 0 && (
                 <KleinImproveNote subjectType={subjectType} datasetId={datasetId}
-                  className="w-full border-t border-indigo-400/20 pt-1.5" />
+                  className="w-full border-t border-indigo-100 pt-1.5" />
               )}
               <button type="button" disabled={bulkBusy} onClick={() => act('delete')}
-                className={`${batchBtn} bg-red-500/15 border border-red-500/40 text-red-300`}>
+                className={`${batchBtn} bg-red-50 border border-red-200 text-red-600`}>
                 {bulkAction?.action === 'delete' ? bulkActionMessage(bulkAction) : '🗑 Delete'}
               </button>
               <span className="ml-auto flex gap-2">

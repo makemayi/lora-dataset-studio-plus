@@ -30,7 +30,7 @@ export function VideoBankCard({ bank, onOpen, onRemove }) {
         </button>
         <button type="button" onClick={onRemove}
           aria-label={`Remove video bank ${bank.name}`}
-          className="ml-auto grid h-7 w-7 shrink-0 place-items-center rounded-full text-content-subtle transition-colors hover:bg-surface hover:text-rose-300">
+          className="ml-auto grid h-7 w-7 shrink-0 place-items-center rounded-full text-content-subtle transition-colors hover:bg-surface hover:text-rose-700">
           <CloseIcon />
         </button>
       </div>

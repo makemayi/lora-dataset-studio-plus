@@ -217,7 +217,7 @@ const STEP_SHORT = {
    once, and a second live region would double every announcement. */
 function ProgressUnknown({ stale }) {
   return (
-    <p className="m-0 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-sm text-content-muted">
+    <p className="m-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-content-muted">
       <span aria-hidden>📡</span>{' '}
       {stale
         ? 'Lost contact — the progress above is the last thing we heard. The pass keeps running on the server.'
@@ -243,7 +243,7 @@ function UndoBar({ offer, busy, onUndo, onDismiss }) {
   if (!offer) return null
   return (
     <div role="status" aria-live="polite"
-      className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-sky-400/40 bg-sky-500/10 px-3 py-2 text-sm text-content">
+      className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-content">
       <p className="m-0 min-w-0 grow basis-full sm:basis-auto">
         <span aria-hidden>↩</span>{' '}
         <span className="font-semibold">{undoBannerText(offer)}</span>
@@ -252,7 +252,7 @@ function UndoBar({ offer, busy, onUndo, onDismiss }) {
         </span>
       </p>
       <button type="button" onClick={onUndo} disabled={busy}
-        className="rounded-full bg-sky-500/20 px-2.5 py-1 text-xs font-semibold hover:bg-sky-500/30 disabled:opacity-50">
+        className="rounded-full bg-sky-100 px-2.5 py-1 text-xs font-semibold hover:bg-sky-500/30 disabled:opacity-50">
         {busy ? 'Undoing…' : '↩ Undo'}
       </button>
       <button type="button" onClick={onDismiss} disabled={busy}
@@ -287,7 +287,7 @@ export function ProgressBar({ activity, onCancel, offline = false }) {
   const note = stopNote(activity, asked)
   const pipe = kind === 'pipeline' ? activity.pipeline : null
   return (
-    <div className="space-y-2 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-sm">
+    <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm">
       {/* flex-wrap: at 400 px the label, the bar and Stop cannot share one row —
           they used to squash the label to a sliver. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -341,8 +341,8 @@ export function ProgressBar({ activity, onCancel, offline = false }) {
         <ul className="flex flex-wrap gap-1.5 pl-6 text-xs">
           {pipe.results.map((r, i) => (
             <li key={`${r.step}-${i}`}
-              className={`rounded px-1.5 py-px ${r.status === 'done' ? 'bg-emerald-500/15 text-emerald-300'
-                : r.status === 'error' ? 'bg-rose-500/15 text-rose-300'
+              className={`rounded px-1.5 py-px ${r.status === 'done' ? 'bg-emerald-50 text-emerald-700'
+                : r.status === 'error' ? 'bg-rose-500/15 text-rose-700'
                 : 'bg-black/20 text-content-subtle'}`}
               title={r.reason || r.detail || ''}>
               {r.status === 'done' ? '✅' : r.status === 'error' ? '⚠️' : '⏭️'} {STEP_SHORT[r.step] || r.step}
@@ -358,7 +358,7 @@ function Chip({ active, onClick, children, title }) {
   return (
     <button type="button" onClick={onClick} title={title}
       className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${active
-        ? 'border-indigo-400/60 bg-indigo-500/20 text-indigo-200'
+        ? 'border-indigo-400/60 bg-indigo-100 text-indigo-700'
         : 'border-border bg-surface text-content-muted hover:text-content hover:bg-surface-raised'}`}>
       {children}
     </button>
@@ -368,7 +368,7 @@ function Chip({ active, onClick, children, title }) {
 // One header stat — a bold tabular figure with a subtle label. Kept/rejected/
 // promoted carry their status colour so the strip reads at a glance.
 function Stat({ label, value, tone }) {
-  const toneCls = { emerald: 'text-emerald-300', rose: 'text-rose-300', indigo: 'text-indigo-300' }[tone] || 'text-content'
+  const toneCls = { emerald: 'text-emerald-700', rose: 'text-rose-700', indigo: 'text-indigo-700' }[tone] || 'text-content'
   const n = typeof value === 'number' ? value.toLocaleString() : value
   return (
     <span className="inline-flex items-baseline gap-1">
@@ -402,7 +402,7 @@ function FilterGroup({ label, children }) {
 // xl, and as a sticky inspector beside the gallery on desktop.
 function SelectionTagsPanel({ tagRow, tagPicked, onToggle, onClear }) {
   return (
-    <div className="space-y-1.5 rounded-lg border border-emerald-400/30 bg-emerald-500/5 px-2.5 py-2">
+    <div className="space-y-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <GroupLabel>
           {tagRow.kind === 'image' ? `🏷️ Tags of ${tagRow.name}`
@@ -485,7 +485,7 @@ function ZoneSection({ zone, accented, children }) {
         <span aria-hidden className="text-base tabular-nums">{zone.emoji}</span>
         <span className="text-sm font-semibold text-content">{zone.label}</span>
         {accented && (
-          <span className="rounded-full border border-amber-400/50 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+          <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
             Next step
           </span>
         )}
@@ -530,8 +530,8 @@ function FramingBar({ framing }) {
 function VisualSpread({ visual, total, semanticEngine }) {
   const r = spreadReadout(visual, semanticEngine)
   if (!r) return null
-  const tone = r.tone === 'warn' ? 'border-amber-400/50 bg-amber-400/10 text-amber-200'
-    : r.tone === 'ok' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+  const tone = r.tone === 'warn' ? 'border-amber-200 bg-amber-400/10 text-amber-700'
+    : r.tone === 'ok' ? 'border-emerald-500/40 bg-emerald-50 text-emerald-700'
       : 'border-border bg-surface-raised text-content-subtle'
   const note = spreadCoverageNote(visual, total, semanticEngine)
   return (
@@ -550,9 +550,9 @@ function VisualSpread({ visual, total, semanticEngine }) {
 // uses (imported, not copied) so the two surfaces cannot drift apart.
 function VarietyAxes({ variety }) {
   if (!variety || !variety.captioned || !(variety.axes || []).length) return null
-  const chip = { ok: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
-    thin: 'border-amber-400/50 bg-amber-400/10 text-amber-300',
-    gap: 'border-rose-400/50 bg-rose-400/10 text-rose-300',
+  const chip = { ok: 'border-emerald-500/40 bg-emerald-50 text-emerald-700',
+    thin: 'border-amber-200 bg-amber-400/10 text-amber-700',
+    gap: 'border-rose-400/50 bg-rose-400/10 text-rose-700',
     none: 'border-border bg-surface-raised text-content-subtle' }
   return (
     <div className="flex flex-col gap-2 border-t border-border pt-2">
@@ -588,13 +588,13 @@ function CoveragePanel({ coverage, semanticEngine, semanticLabel,
   }
   const poolWord = coverage.pool === 'kept' ? 'kept' : 'candidate (nothing kept yet)'
   return (
-    <div className="space-y-3 rounded-lg border border-indigo-400/40 bg-indigo-500/5 px-3 py-2.5">
+    <div className="space-y-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5">
       <div className="flex items-center gap-2">
         <span className="text-sm font-semibold text-content">📊 Coverage advice</span>
         <span className="text-xs text-content-subtle">
           {coverage.total.toLocaleString()} {poolWord} image{coverage.total === 1 ? '' : 's'}
         </span>
-        <span className="ml-auto rounded border border-indigo-400/40 px-1.5 py-px text-[10px] uppercase tracking-wide text-indigo-300"
+        <span className="ml-auto rounded border border-indigo-200 px-1.5 py-px text-[10px] uppercase tracking-wide text-indigo-700"
           title="Community idea by @antonp">idea by @antonp</span>
         <button type="button" onClick={onClose} aria-label="Hide coverage advice"
           className="rounded-full bg-surface-raised px-2 py-0.5 text-xs text-content-subtle transition-colors hover:text-content">✕</button>
@@ -606,7 +606,7 @@ function CoveragePanel({ coverage, semanticEngine, semanticLabel,
         {coverage.advice.map((a, i) => (
           <li key={i} className="flex items-start gap-2">
             <span aria-hidden>{a.tone === 'warn' ? '⚠️' : '💡'}</span>
-            <span className={a.tone === 'warn' ? 'text-amber-200' : 'text-content-muted'}>{a.text}</span>
+            <span className={a.tone === 'warn' ? 'text-amber-700' : 'text-content-muted'}>{a.text}</span>
           </li>
         ))}
       </ul>
@@ -617,7 +617,7 @@ function CoveragePanel({ coverage, semanticEngine, semanticLabel,
           title={onBalance
             ? 'Select a set spread evenly over the framings, instead of the top of one ranking'
             : balanceReason}
-          className="rounded-md border border-emerald-400/40 bg-emerald-500/10 px-2 py-0.5 text-xs text-content disabled:opacity-50 hover:bg-emerald-500/20">
+          className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs text-content disabled:opacity-50 hover:bg-emerald-500/20">
           ⚖️ Pick a balanced set…
         </button>
         {!onBalance && balanceReason && (
@@ -689,7 +689,7 @@ function Tile({ img, bankId, selected, onToggle, onReview, onTags, size }) {
             tooltip and the review lightbox say where. */}
         {(img.promoted_dataset_id != null || img.promoted_bank_id != null)
           && badge('⬆', 'bg-indigo-500/80 text-white')}
-        {img.flags.map((f) => badge(FLAG_LABEL[f]?.slice(0, 2) || f, 'bg-black/60 text-amber-200', f))}
+        {img.flags.map((f) => badge(FLAG_LABEL[f]?.slice(0, 2) || f, 'bg-black/60 text-amber-700', f))}
         {img.face_cluster != null && badge(`👤${img.face_cluster}`, 'bg-black/60 text-sky-200')}
         {img.framing && badge(`📐${img.framing}`, 'bg-black/60 text-teal-200')}
         {/* A medium badge is stamped only when the classifier actually COMMITTED
@@ -697,11 +697,11 @@ function Tile({ img, bankId, selected, onToggle, onReview, onTags, size }) {
             a thumbnail, and NULL means the pass never reached this image. */}
         {img.medium && img.medium !== 'unsure'
           && badge(`🎨${img.medium}`, 'bg-black/60 text-lime-200')}
-        {angleBadge(img) && badge(angleBadge(img).text, 'bg-black/60 text-cyan-200')}
+        {angleBadge(img) && badge(angleBadge(img).text, 'bg-black/60 text-cyan-700')}
         {/* Only the PROVEN states get a badge. Stamping ❔ on the 80% of files
             whose metadata was stripped would be noise, not information. */}
         {img.origin === 'ai' && badge('🤖', 'bg-black/60 text-violet-200')}
-        {img.origin === 'camera' && badge('📷', 'bg-black/60 text-emerald-200')}
+        {img.origin === 'camera' && badge('📷', 'bg-black/60 text-emerald-700')}
         {img.style_cluster != null && badge(`🎨${img.style_cluster}`, 'bg-black/60 text-fuchsia-200')}
         {img.dup_group != null && badge(`≈${img.dup_group}`, 'bg-black/60 text-fuchsia-200')}
         {img.semantic_dup_group != null && badge(`✂${img.semantic_dup_group}`, 'bg-black/60 text-orange-200')}
@@ -730,7 +730,7 @@ function Tile({ img, bankId, selected, onToggle, onReview, onTags, size }) {
         <button type="button" onClick={onTags}
           title={`Filter the bank by this image's tags — ${img.caption}`}
           aria-label={`Use the tags of ${img.name} as a filter`}
-          className="absolute bottom-1 right-11 rounded bg-black/60 px-1 text-[11px] text-emerald-200 hover:bg-black/80">🏷️</button>
+          className="absolute bottom-1 right-11 rounded bg-black/60 px-1 text-[11px] text-emerald-700 hover:bg-black/80">🏷️</button>
       ) : (
         <span
           title={img.caption
@@ -2018,7 +2018,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
             {captionModelChoices.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
           {!ollamaPicksApply && (
-            <span className="mt-0.5 block text-[11px] leading-snug text-amber-300/90">
+            <span className="mt-0.5 block text-[11px] leading-snug text-amber-700/90">
               The engine you picked does not reach Ollama, so this choice would change
               nothing — disabled rather than quietly ignored.
             </span>
@@ -2047,9 +2047,9 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
         <div role="note" aria-label="What this run is about to caption"
           className={`space-y-1 rounded-md border px-2 py-1.5 ${
             captionNsfw.tone === 'warn'
-              ? 'border-amber-400/40 bg-amber-500/10' : 'border-sky-400/40 bg-sky-500/10'}`}>
+              ? 'border-amber-200 bg-amber-50' : 'border-sky-200 bg-sky-50'}`}>
           <p className={`m-0 text-[11px] font-semibold leading-snug ${
-            captionNsfw.tone === 'warn' ? 'text-amber-200' : 'text-sky-200'}`}>
+            captionNsfw.tone === 'warn' ? 'text-amber-700' : 'text-sky-200'}`}>
             {captionNsfw.tone === 'warn' ? '⚠ ' : 'ℹ ' }{captionNsfw.heading}
           </p>
           {captionNsfw.paragraphs.map((line) => (
@@ -2078,7 +2078,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
         <button type="button" onClick={startRecaption} disabled={!!recaptionInert}
           aria-label="Re-caption"
           title={recaptionInert || recaptionNote}
-          className="rounded-md border border-amber-400/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-200 disabled:opacity-40">
+          className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 disabled:opacity-40">
           {captionRecaptionLabel(counts, captionScope, recaptionInert,
                                  captionIncludeAsserted)}
         </button>
@@ -2093,7 +2093,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
         )}
       </div>
       {recaptionInert && (
-        <p className="m-0 text-[11px] leading-snug text-amber-300/90">{recaptionInert}</p>
+        <p className="m-0 text-[11px] leading-snug text-amber-700/90">{recaptionInert}</p>
       )}
       {recaptionNote && (
         <p className="m-0 text-[11px] leading-snug text-amber-400/90">{recaptionNote}</p>
@@ -2372,7 +2372,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
           <div>
             <button type="button" onClick={() => setPythonPickerFor('scoring')}
               className={`rounded-md border px-2 py-1 text-xs font-medium ${scoreGpuPresent
-                ? 'border-amber-400/50 text-amber-300 hover:bg-amber-500/10'
+                ? 'border-amber-200 text-amber-700 hover:bg-amber-50'
                 : 'border-border text-content-muted hover:bg-surface-raised hover:text-content'}`}>
               {openerLabel(scoreGpuPresent)}
             </button>
@@ -2816,7 +2816,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
             the tile click stays the bulk-selection gesture it has always been. */}
         <button type="button" onClick={() => openReview(null)} disabled={reviewLoading}
           title="Review the images of this filter one at a time, full size: ✓ Keep / ✕ Reject / ⏭ Skip (K/R/S) each move to the next. Optional random order."
-          className="rounded-md border border-indigo-400/60 bg-indigo-500/20 px-2.5 py-0.5 text-xs font-semibold text-indigo-200 disabled:opacity-50 hover:bg-indigo-500/30">
+          className="rounded-md border border-indigo-400/60 bg-indigo-100 px-2.5 py-0.5 text-xs font-semibold text-indigo-700 disabled:opacity-50 hover:bg-indigo-500/30">
           {reviewLoading ? '▶ Preparing…' : '▶ Review one by one'}
         </button>
         <span aria-hidden className="h-4 w-px bg-border" />
@@ -2854,7 +2854,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                     of them — and "0 blurry" would otherwise read as good news
                     when it means nothing was ever measured. */}
                 {autoRejectNotice && (
-                  <p className="m-0 rounded-md border border-amber-400/40 bg-amber-500/10 px-2 py-1 text-[0.6875rem] leading-snug text-amber-200">
+                  <p className="m-0 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[0.6875rem] leading-snug text-amber-700">
                     ⚠ {autoRejectNotice.text} {autoRejectNotice.action}
                     {autoRejectNotice.caveat ? ` ${autoRejectNotice.caveat}` : ''}
                   </p>
@@ -2886,7 +2886,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                         </span>
                       )}
                       {FLAG_HINT[f] && (
-                        <span className="mt-0.5 block pl-6 text-[0.6875rem] leading-snug text-amber-200/80">
+                        <span className="mt-0.5 block pl-6 text-[0.6875rem] leading-snug text-amber-700/80">
                           ⚠ {FLAG_HINT[f]}
                         </span>
                       )}
@@ -2898,7 +2898,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                     "nothing will happen" is visible rather than discovered. */}
                 {autoRejectPicked && (
                   <p className={`m-0 text-[0.6875rem] leading-snug ${
-                    autoRejectPicked.sum ? 'text-content-muted' : 'text-amber-200'}`}>
+                    autoRejectPicked.sum ? 'text-content-muted' : 'text-amber-700'}`}>
                     {autoRejectPicked.text}
                   </p>
                 )}
@@ -2917,7 +2917,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
               ? 'Back to the full grid with its filters'
               : 'Show only the selected images (as their own view), so a scattered curation/similarity result is visible in one place'}
             className={`rounded-md border px-2 py-0.5 text-xs font-medium ${showSelected
-              ? 'border-indigo-400/60 bg-indigo-500/20 text-indigo-200'
+              ? 'border-indigo-400/60 bg-indigo-100 text-indigo-700'
               : 'border-border text-content-muted hover:text-content hover:bg-surface-raised'}`}>
             {showSelected ? '↩ Show all' : `🔎 Show selected (${selected.size})`}
           </button>
@@ -2927,9 +2927,9 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
             <button type="button" onClick={() => { setSelected(new Set()); if (showSelected) { exitSelectionView(); setOffset(0); refreshImages(filter, 0, { on: false }) } }}
               className="rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content-muted transition-colors hover:text-content">Clear</button>
             <button type="button" onClick={() => batchStatus([...selected], 'keep')}
-              className="rounded-md border border-emerald-400/50 bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20">✓ Keep</button>
+              className="rounded-md border border-emerald-400/50 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-500/20">✓ Keep</button>
             <button type="button" onClick={() => batchStatus([...selected], 'reject')}
-              className="rounded-md border border-rose-400/50 bg-rose-500/10 px-2 py-0.5 text-xs font-semibold text-rose-200 hover:bg-rose-500/20">✕ Reject</button>
+              className="rounded-md border border-rose-400/50 bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-200 hover:bg-rose-500/20">✕ Reject</button>
             <button type="button" onClick={() => batchStatus([...selected], 'pending')}
               className="rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-content-muted transition-colors hover:text-content">↺ Undecided</button>
             {/* 🔄 Rotate the selection. Your own files are never rewritten: the
@@ -3153,14 +3153,14 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                     its own — a wrong guess acted on silently would be the same
                     class of bug. */}
                 {suggestPushDown(textQuery) && !textExclude.trim() && (
-                  <p className="text-xs text-amber-300/90">
+                  <p className="text-xs text-amber-700/90">
                     “without” is ignored by the search.{' '}
                     <button type="button"
                       onClick={() => {
                         setTextExclude(suggestPushDown(textQuery))
                         setTextQuery(withoutNegation(textQuery))
                       }}
-                      className="underline underline-offset-2 hover:text-amber-200">
+                      className="underline underline-offset-2 hover:text-amber-700">
                       Push “{suggestPushDown(textQuery)}” down instead?
                     </button>
                   </p>
@@ -3200,7 +3200,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                 <p className="text-xs text-content-subtle">
                   {readinessHint(textStatus, semanticState.engine)}
                 </p>
-                <p className="text-xs text-amber-300/80">
+                <p className="text-xs text-amber-700/80">
                   {limitsSentence(semanticState.engine)}
                 </p>
                 <button type="button" onClick={runTextSearch}
@@ -3230,7 +3230,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
           a screen reader hears the outcome — the grid change is silent. */}
       <div aria-live="polite">
         {textResult && (
-          <div className="mt-2 space-y-1 rounded-lg border border-indigo-400/40 bg-indigo-500/10 px-3 py-2 text-xs text-content">
+          <div className="mt-2 space-y-1 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-content">
             <div className="flex flex-wrap items-start gap-x-2 gap-y-1">
               <span aria-hidden>🔤</span>
               <span className="min-w-0 flex-1">
@@ -3253,7 +3253,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                 This phrase is now cached — searching it again is instant, even after a restart.
               </p>
             )}
-            <p className="text-amber-300/80">{limitsSentence(semanticState.engine)}</p>
+            <p className="text-amber-700/80">{limitsSentence(semanticState.engine)}</p>
           </div>
         )}
       </div>
@@ -3263,7 +3263,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
           numbers first — the bar is decoration over a list that reads out. */}
       <div aria-live="polite">
         {balanceResult && (
-          <div className="mt-2 space-y-2 rounded-lg border border-emerald-400/40 bg-emerald-500/10 px-3 py-2 text-xs text-content">
+          <div className="mt-2 space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-content">
             <div className="flex flex-wrap items-start gap-x-2 gap-y-1">
               <span aria-hidden>⚖️</span>
               <span className="min-w-0 flex-1">{summarizeBalance(balanceResult)}</span>
@@ -3274,7 +3274,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
             </div>
             <ul className="flex flex-wrap gap-x-4 gap-y-1 tabular-nums">
               {balanceRows(balanceResult).map((r) => (
-                <li key={r.key} className={r.short ? 'text-amber-200' : 'text-content-muted'}>
+                <li key={r.key} className={r.short ? 'text-amber-700' : 'text-content-muted'}>
                   <span className="text-content">{r.selected}</span> {r.label}
                   <span className="text-content-subtle"> of {r.available}</span>
                   {r.short && <span> · wanted {r.fairShare}</span>}
@@ -3282,7 +3282,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
               ))}
             </ul>
             {balanceNotes(balanceResult).map((note, i) => (
-              <p key={i} className={note.tone === 'warn' ? 'text-amber-300/90' : 'text-content-subtle'}>
+              <p key={i} className={note.tone === 'warn' ? 'text-amber-700/90' : 'text-content-subtle'}>
                 {note.tone === 'warn' ? '⚠️ ' : '💡 '}{note.text}
               </p>
             ))}
@@ -3322,7 +3322,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
             : (counts?.reject > 0)
               ? 'Delete the rejected images from your disk (OS trash when available). Irreversible — asks you to type DELETE first. Kept images are untouched.'
               : 'No rejected images to delete'}
-          className="rounded-md border border-rose-500/50 px-3 py-1.5 text-sm text-rose-300 disabled:opacity-40 hover:bg-rose-500/10">
+          className="rounded-md border border-rose-500/50 px-3 py-1.5 text-sm text-rose-700 disabled:opacity-40 hover:bg-rose-50">
           🗑 Delete rejected from disk{(counts?.reject > 0) ? ` (${counts.reject})` : ''}
         </button>
       </div>

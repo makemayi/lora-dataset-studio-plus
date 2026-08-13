@@ -24,7 +24,7 @@ export default function SeedControls({ seed, seedLocked, onReroll, onToggleLock,
       </button>
       <button type="button" onClick={onToggleLock}
         aria-pressed={seedLocked}
-        className={`px-2 py-0.5 rounded text-[0.6875rem] ${seedLocked ? 'bg-indigo-500/20 border border-indigo-400/40 text-indigo-200' : 'bg-surface text-content-muted'}`}
+        className={`px-2 py-0.5 rounded text-[0.6875rem] ${seedLocked ? 'bg-indigo-100 border border-indigo-200 text-indigo-700' : 'bg-surface text-content-muted'}`}
         title={seedLocked ? 'Seed locked: same seed on every test (repro)' : 'Auto seed: new seed on every "Run test"'}>
         {seedLocked ? '🔒 seed' : '🔓 auto'}
       </button>
@@ -47,8 +47,8 @@ export default function SeedControls({ seed, seedLocked, onReroll, onToggleLock,
             : 'Rough estimate — not enough finished generations yet to measure this machine',
         ].filter(Boolean).join(' · ')}>
         {cost.cells} image(s) ({cost.measured ? '' : '~'}{cost.label})
-        {batchMult > 1 && <span className="text-amber-300"> · ⚖ ×{batchMult}</span>}
-        {promptMult > 1 && <span className="text-purple-300"> · 📝 ×{promptMult}</span>}
+        {batchMult > 1 && <span className="text-amber-700"> · ⚖ ×{batchMult}</span>}
+        {promptMult > 1 && <span className="text-purple-700"> · 📝 ×{promptMult}</span>}
       </span>
     </div>
   );

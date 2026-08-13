@@ -108,7 +108,7 @@ export default function ResultLightbox({ img, items = [], datasetId, onRate, onN
           </button>
           <button type="button" aria-pressed={img.rating === -1}
             onClick={() => onRate(img.id, img.rating === -1 ? 0 : -1)}
-            className={`px-3 py-1 rounded-lg text-sm border ${img.rating === -1 ? 'border-red-400/60 bg-red-500/20 text-red-200' : 'border-border bg-surface text-content'}`}>
+            className={`px-3 py-1 rounded-lg text-sm border ${img.rating === -1 ? 'border-red-400/60 bg-red-500/20 text-red-700' : 'border-border bg-surface text-content'}`}>
             👎 {img.rating === -1 ? 'Not a fan ✓' : 'Not a fan'}
           </button>
         </div>

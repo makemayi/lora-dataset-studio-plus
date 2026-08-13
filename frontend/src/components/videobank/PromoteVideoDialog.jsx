@@ -190,7 +190,7 @@ export default function PromoteVideoDialog({
                 for a canvas-capped target, "keeping the source size is fine" is
                 exactly the sentence that would be false. */}
             {size?.hint ? (
-              <p className="mt-1 text-xs text-amber-300">⚠ {size.hint}</p>
+              <p className="mt-1 text-xs text-amber-700">⚠ {size.hint}</p>
             ) : (
               <p className="mt-1 text-xs text-content-muted">
                 Suggestions mirror the model’s own inference sizes — they are not training
@@ -209,7 +209,7 @@ export default function PromoteVideoDialog({
             placeholder="no cap"
             className="mt-1 w-full rounded-lg bg-surface-raised px-3 py-1.5 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary sm:w-40" />
           {capIssue ? (
-            <p className="mt-1 text-xs text-rose-300">⚠ {capIssue}</p>
+            <p className="mt-1 text-xs text-rose-700">⚠ {capIssue}</p>
           ) : (
             <p className="mt-1 text-xs text-content-muted">{capHint()}</p>
           )}
@@ -226,7 +226,7 @@ export default function PromoteVideoDialog({
             placeholder="0"
             className="mt-1 w-full rounded-lg bg-surface-raised px-3 py-1.5 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary sm:w-40" />
           {insetIssue ? (
-            <p className="mt-1 text-xs text-rose-300">⚠ {insetIssue}</p>
+            <p className="mt-1 text-xs text-rose-700">⚠ {insetIssue}</p>
           ) : (
             <p className="mt-1 text-xs text-content-muted">
               {insetHint(edgeInset)
@@ -238,7 +238,7 @@ export default function PromoteVideoDialog({
         </div>
 
         {error && (
-          <p role="alert" className="rounded-md border border-rose-500/60 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+          <p role="alert" className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-200">
             {error}
           </p>
         )}

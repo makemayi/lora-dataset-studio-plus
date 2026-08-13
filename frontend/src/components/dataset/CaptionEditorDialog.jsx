@@ -153,7 +153,7 @@ export default function CaptionEditorDialog({
               </p>
             )}
             {isLikelyTruncatedCaption(initialCaption) && (
-              <p className="m-0 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-[0.6875rem] leading-relaxed text-amber-200">
+              <p className="m-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[0.6875rem] leading-relaxed text-amber-700">
                 This caption is exactly 800 characters and ends mid-sentence — an earlier
                 version of the app capped captions there. The cut-off text can’t be recovered;
                 re-caption this image to regenerate the full description.
@@ -222,8 +222,8 @@ export default function CaptionEditorDialog({
                 it scrolls in its own box rather than pushing Save off screen. */}
             {error && (
               <div role="alert"
-                className="shrink-0 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 max-h-28 overflow-y-auto">
-                <span className="block whitespace-pre-wrap break-words text-[0.6875rem] leading-relaxed text-red-200">
+                className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-3 py-2 max-h-28 overflow-y-auto">
+                <span className="block whitespace-pre-wrap break-words text-[0.6875rem] leading-relaxed text-red-700">
                   {error}
                 </span>
                 <span className="mt-1 block text-[0.625rem] text-content-subtle">

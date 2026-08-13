@@ -66,7 +66,7 @@ export function LoraMergePlan({ plan, busy = false, disabled = false, onStart = 
       {/* Not a warning and not a boast: bytes we are about to copy without
           understanding them. One real community checkpoint hides ~75 MB of an
           image this way, under a perfectly legitimate prefix. */}
-      {carried && <p className="m-0 mt-1 text-amber-200">ⓘ {carried}</p>}
+      {carried && <p className="m-0 mt-1 text-amber-700">ⓘ {carried}</p>}
 
       {typeof plan.free_bytes === 'number' && (
         <p className="m-0 mt-1 opacity-75">
@@ -115,7 +115,7 @@ export function LoraMergeOutcome({ state }) {
   const result = state.result || null;
   if (state.status === 'done') {
     return (
-      <div className="mt-1.5 text-emerald-200 text-[0.6875rem] leading-relaxed" role="status">
+      <div className="mt-1.5 text-emerald-700 text-[0.6875rem] leading-relaxed" role="status">
         <p className="m-0">
           ✓ <span className="font-mono break-all">{state.destination_name}</span>
           {' '}({fmtGB(result?.bytes_after)}) is in
@@ -132,7 +132,7 @@ export function LoraMergeOutcome({ state }) {
   }
   if (state.status === 'cancelled') {
     return (
-      <p className="m-0 mt-1.5 text-amber-200 text-[0.6875rem] leading-relaxed" role="status">
+      <p className="m-0 mt-1.5 text-amber-700 text-[0.6875rem] leading-relaxed" role="status">
         ■ Stopped. The partial file was removed; the base and the LoRAs are untouched.
       </p>
     );
@@ -339,7 +339,7 @@ export default function LoraMergeTool({
       <p className="m-0 mt-1 text-sky-200/70 text-[0.625rem] leading-relaxed">{PRECISION_NOTE}</p>
 
       {plan && !plan.ok && !running && (
-        <p className="m-0 mt-1 text-amber-200 text-[0.6875rem]" role="alert">⚠ {plan.error}</p>
+        <p className="m-0 mt-1 text-amber-700 text-[0.6875rem]" role="alert">⚠ {plan.error}</p>
       )}
       {!running && (
         <LoraMergePlan plan={plan} busy={busy} disabled={disabled} onStart={start} />

@@ -51,7 +51,7 @@ function LevelCard({ index, title, blurb, state, onRun }) {
       </div>
       <p className="text-[0.6875rem] leading-snug text-content-subtle">{blurb}</p>
       <button type="button" onClick={onRun} disabled={state.disabled} title={state.reason || title}
-        className="rounded-lg border border-amber-400/40 bg-amber-500/15 px-3 py-1.5 text-sm font-semibold text-amber-200 disabled:opacity-40">
+        className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-700 disabled:opacity-40">
         {state.label}
       </button>
       <p className="text-[0.6875rem] text-content-subtle">
@@ -181,7 +181,7 @@ export default function BankWatermarkPanel({
         className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 p-3 text-left">
         <span className="text-sm font-semibold text-content">🚩 Watermarks</span>
         <span className="text-[0.6875rem] text-content-subtle">{headline}</span>
-        {note && <span aria-hidden className="text-[0.6875rem] text-amber-300/90">⚠️</span>}
+        {note && <span aria-hidden className="text-[0.6875rem] text-amber-700/90">⚠️</span>}
         <span aria-hidden className="ml-auto text-xs text-content-subtle">{open ? '▲' : '▼'}</span>
       </button>
       {open && (
@@ -194,7 +194,7 @@ export default function BankWatermarkPanel({
           rather than being truncated — the source is the actionable half of a
           flag the user disagrees with. */}
       {source && <p className="text-[0.6875rem] text-content-subtle">🔎 {source}</p>}
-      {note && <p className="text-xs text-amber-300/90">⚠️ {note}</p>}
+      {note && <p className="text-xs text-amber-700/90">⚠️ {note}</p>}
       {masks && <p className="text-xs text-content-subtle">🚩 {masks}</p>}
 
       <div className="flex flex-wrap gap-2">

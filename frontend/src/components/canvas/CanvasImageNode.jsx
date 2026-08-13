@@ -143,7 +143,7 @@ export default function CanvasImageNode({ node, datasetId, laneName, onGeometry,
           // inset ring on hover is what replaces it: it lights the picture you
           // are pointing at without ever drawing a rule between two of them.
           ? 'hover:ring-2 hover:ring-inset hover:ring-indigo-300/70 '
-          : 'rounded-lg border border-indigo-400/40 shadow-lg ')
+          : 'rounded-lg border border-indigo-200 shadow-lg ')
         + 'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-300'}>
       {/* ⚠️ A member's label is an OVERLAY, not a row. Left in the flex flow it
           still reserved its height while invisible, the picture below it was
@@ -233,7 +233,7 @@ export default function CanvasImageNode({ node, datasetId, laneName, onGeometry,
             transformOrigin: 'bottom left' }}
           title={`🧬 Blended image — ${blendNote}. Only the sources still on the `
             + 'board can be linked to it.'}
-          className="pointer-events-none absolute bottom-0 left-0 z-10 max-w-full truncate rounded-tr-md border-r border-t border-purple-400/50 bg-black/60 px-1 py-px text-[0.5rem] font-semibold leading-tight text-purple-200 backdrop-blur-sm">
+          className="pointer-events-none absolute bottom-0 left-0 z-10 max-w-full truncate rounded-tr-md border-r border-t border-purple-400/50 bg-black/60 px-1 py-px text-[0.5rem] font-semibold leading-tight text-purple-700 backdrop-blur-sm">
           <span aria-hidden>🧬</span> {blendNote}
         </span>
       )}
@@ -251,7 +251,7 @@ export default function CanvasImageNode({ node, datasetId, laneName, onGeometry,
         title="Drag to resize"
         style={{ position: 'absolute', right: 0, bottom: 0, width: 28, height: 28,
           transform: `scale(${k})`, transformOrigin: 'bottom right' }}
-        className="cursor-nwse-resize touch-none rounded-tl-md border-l border-t border-indigo-400/40 bg-app/80 text-content-subtle after:absolute after:bottom-1 after:right-1 after:text-[0.625rem] after:content-['◢']" />
+        className="cursor-nwse-resize touch-none rounded-tl-md border-l border-t border-indigo-200 bg-app/80 text-content-subtle after:absolute after:bottom-1 after:right-1 after:text-[0.625rem] after:content-['◢']" />
       )}
     </div>
   );

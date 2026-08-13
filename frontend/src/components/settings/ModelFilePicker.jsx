@@ -120,7 +120,7 @@ export default function ModelFilePicker({
           {pinnedMissing && (
             <div className="pointer-events-none absolute inset-y-0 right-2 flex items-center">
               <span title={PINNED_MISSING_TITLE}
-                className="shrink-0 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
+                className="shrink-0 rounded border border-amber-500/40 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
                 {PINNED_MISSING_BADGE}
               </span>
             </div>
@@ -150,7 +150,7 @@ export default function ModelFilePicker({
                     className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs text-content ${i === highlight ? 'bg-surface-raised' : 'hover:bg-surface-raised'}`}>
                     <span className="flex-1 truncate font-mono" title={o.name}>{o.name}</span>
                     {o.missing && (
-                      <span className="shrink-0 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
+                      <span className="shrink-0 rounded border border-amber-500/40 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
                         {PINNED_MISSING_BADGE}
                       </span>
                     )}

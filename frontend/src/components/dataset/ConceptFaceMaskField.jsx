@@ -85,7 +85,7 @@ function SamplePreview({ datasetId, sample, expand }) {
         ))}
         {!boxes.length && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <span className="rounded-lg bg-black/75 px-2 py-1 text-[0.6875rem] font-semibold text-amber-200">
+            <span className="rounded-lg bg-black/75 px-2 py-1 text-[0.6875rem] font-semibold text-amber-700">
               no face found
             </span>
           </div>
@@ -269,7 +269,7 @@ export default function ConceptFaceMaskField({
       </span>
 
       {conceptConflict && (
-        <span className="text-amber-300 text-[0.6875rem] leading-relaxed">
+        <span className="text-amber-700 text-[0.6875rem] leading-relaxed">
           ⚠️ Your concept description mentions the face, mouth or gaze. If the face is where your
           concept actually happens, masking it can erase the thing you are teaching. Preview it
           before you train — you know your dataset, so this is a heads-up, not a block.
@@ -288,7 +288,7 @@ export default function ConceptFaceMaskField({
             </button>
             {running && (
               <button type="button" onClick={stopPreview} disabled={Boolean(job && job.stopping)}
-                className="min-h-8 rounded-lg bg-surface px-2.5 text-[0.6875rem] font-semibold text-amber-200 hover:bg-surface-raised disabled:opacity-50">
+                className="min-h-8 rounded-lg bg-surface px-2.5 text-[0.6875rem] font-semibold text-amber-700 hover:bg-surface-raised disabled:opacity-50">
                 {previewStopLabel(job)}
               </button>
             )}
@@ -308,7 +308,7 @@ export default function ConceptFaceMaskField({
           )}
           {running && <PreviewProgress job={job} />}
           {err && !running && (
-            <p role="alert" className="mt-1 text-amber-300 text-[0.6875rem] leading-relaxed">
+            <p role="alert" className="mt-1 text-amber-700 text-[0.6875rem] leading-relaxed">
               ⚠️ {err}
             </p>
           )}
@@ -326,7 +326,7 @@ export default function ConceptFaceMaskField({
                   in the run. So it is kept visible and clearly labelled, never
                   quietly. */}
               {preview.stale && (
-                <p role="status" className="mb-1.5 rounded-md bg-amber-500/10 px-2 py-1 text-[0.6875rem] leading-relaxed text-amber-300">
+                <p role="status" className="mb-1.5 rounded-md bg-amber-50 px-2 py-1 text-[0.6875rem] leading-relaxed text-amber-700">
                   ⚠️ Your kept images changed since this preview ran, so it no longer
                   describes what would be trained. Refresh it.
                 </p>
@@ -337,7 +337,7 @@ export default function ConceptFaceMaskField({
                 </p>
               )}
               {cov && cov.total > 0 && (
-                <p className={`text-[0.6875rem] ${partial ? 'text-amber-300' : 'text-content-muted'}`}>
+                <p className={`text-[0.6875rem] ${partial ? 'text-amber-700' : 'text-content-muted'}`}>
                   {partial && '⚠️ '}
                   Masked on {cov.masked} of {cov.total} image{cov.total > 1 ? 's' : ''}
                   {cov.no_face > 0 && ` · ${cov.no_face} with no face found`}

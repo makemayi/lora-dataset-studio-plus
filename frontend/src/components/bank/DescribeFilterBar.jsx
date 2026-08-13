@@ -59,11 +59,11 @@ export default function DescribeFilterBar({ bankId, onApply, onFenceBlocked }) {
         </button>
       </div>
 
-      {error && <p className="mt-1 text-xs text-rose-300">{error}</p>}
+      {error && <p className="mt-1 text-xs text-rose-700">{error}</p>}
 
       {res && (
         <div className="mt-1 space-y-0.5 text-xs">
-          <p className={s.refused ? 'text-amber-300' : 'text-content-muted'}>{headline(res)}</p>
+          <p className={s.refused ? 'text-amber-700' : 'text-content-muted'}>{headline(res)}</p>
           {/* Three registers, never merged: what it did, what it could not, and
               what it reached for that this bank does not hold. A single blended
               paragraph is how a half-read request starts reading as a success. */}
@@ -71,7 +71,7 @@ export default function DescribeFilterBar({ bankId, onApply, onFenceBlocked }) {
             <p className="text-content-muted">Read as: {s.understood.join(' · ')}</p>
           )}
           {!!s.unsupported.length && (
-            <p className="text-amber-300">Not expressible here: {s.unsupported.join(' · ')}</p>
+            <p className="text-amber-700">Not expressible here: {s.unsupported.join(' · ')}</p>
           )}
           {!!s.dropped.length && (
             <p className="text-content-muted">Ignored: {s.dropped.join(' · ')}</p>

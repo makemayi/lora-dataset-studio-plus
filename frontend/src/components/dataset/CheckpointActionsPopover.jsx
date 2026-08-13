@@ -37,7 +37,7 @@ export default function CheckpointActionsPopover({
   if (!a) return null;
 
   return (
-    <div className="lds-ck-popover rounded-lg border border-indigo-400/40 bg-surface-overlay/85 backdrop-blur-md p-2 shadow-xl"
+    <div className="lds-ck-popover rounded-lg border border-indigo-200 bg-surface-overlay/85 backdrop-blur-md p-2 shadow-xl"
       role="dialog"
       aria-label={a.isRun ? 'Run actions' : `Checkpoint step ${a.step} actions`}
       onPointerDown={(e) => e.stopPropagation()}>
@@ -46,7 +46,7 @@ export default function CheckpointActionsPopover({
           {a.isRun ? (runLabel || 'This run') : `Step ${Number(a.step).toLocaleString()}`}
         </span>
         {a.final && (
-          <span className="shrink-0 rounded bg-emerald-500/15 px-1 py-px text-emerald-200 text-[0.5rem] font-semibold uppercase">final</span>
+          <span className="shrink-0 rounded bg-emerald-50 px-1 py-px text-emerald-700 text-[0.5rem] font-semibold uppercase">final</span>
         )}
         <button type="button" onClick={onClose}
           className="ml-auto shrink-0 text-content-subtle hover:text-content text-[0.75rem]"
@@ -65,7 +65,7 @@ export default function CheckpointActionsPopover({
 
         {a.continue && (a.continue.ok ? (
           <button type="button" onClick={() => { onContinue(node, pill); onClose?.(); }}
-            className={ROW + ' border-indigo-400/40 bg-indigo-500/15 text-indigo-100 hover:bg-indigo-500/25'}>
+            className={ROW + ' border-indigo-200 bg-indigo-50 text-indigo-100 hover:bg-indigo-500/25'}>
             <span aria-hidden>▶</span> Continue from here
           </button>
         ) : (
@@ -78,13 +78,13 @@ export default function CheckpointActionsPopover({
             undeploy buried in a row that reads as destruction. */}
         {a.deployed ? (
           <div className="flex items-center gap-1">
-            <span className={ROW + ' flex-1 border-emerald-500/40 bg-emerald-600/10 text-emerald-200'}>
+            <span className={ROW + ' flex-1 border-emerald-500/40 bg-emerald-600/10 text-emerald-700'}>
               <span aria-hidden>✓</span> Deployed
             </span>
             {a.undeploy && (
               <button type="button" disabled={deleting}
                 onClick={() => onDelete(node, pill)} title={a.undeploy.title}
-                className={ROW + ' border-emerald-500/40 bg-emerald-600/5 text-emerald-200/90 hover:bg-emerald-600/20 disabled:cursor-not-allowed disabled:opacity-50'}>
+                className={ROW + ' border-emerald-500/40 bg-emerald-600/5 text-emerald-700/90 hover:bg-emerald-600/20 disabled:cursor-not-allowed disabled:opacity-50'}>
                 <span aria-hidden>⏏</span> {deleting ? 'Undeploying…' : a.undeploy.label}
               </button>
             )}
@@ -106,7 +106,7 @@ export default function CheckpointActionsPopover({
         {typeof onDetails === 'function' && (
           <button type="button" onClick={() => { onDetails(node); onClose?.(); }}
             title="Open this run's configuration, notes and checkpoint notes"
-            className={ROW + ' border-border bg-app/60 text-content hover:border-indigo-400/50'}>
+            className={ROW + ' border-border bg-app/60 text-content hover:border-indigo-200'}>
             <span aria-hidden>ⓘ</span> Details
           </button>
         )}
@@ -118,7 +118,7 @@ export default function CheckpointActionsPopover({
         {a.del && (
           <button type="button" disabled={deleting}
             onClick={() => onDelete(node, pill)} title={a.del.title}
-            className="mt-1 flex items-center gap-1.5 border-t border-border px-2 pt-1.5 pb-0.5 text-left text-content-subtle text-[0.625rem] hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-50">
+            className="mt-1 flex items-center gap-1.5 border-t border-border px-2 pt-1.5 pb-0.5 text-left text-content-subtle text-[0.625rem] hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-50">
             <span aria-hidden>🗑</span> {deleting ? 'Deleting…' : a.del.label}
           </button>
         )}

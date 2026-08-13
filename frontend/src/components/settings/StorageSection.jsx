@@ -126,7 +126,7 @@ function LocationEditor({
       </div>
 
       {check && !check.ok && (
-        <p className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-2 text-xs text-rose-200">
+        <p className="rounded-lg border border-rose-500/40 bg-rose-50 p-2 text-xs text-rose-200">
           <span aria-hidden>⚠</span> {check.reason}
         </p>
       )}
@@ -252,7 +252,7 @@ function CloudRunHousekeeping({ toast, onChanged }) {
               <li key={o.name} className="break-all">
                 {o.name} — {formatSize(o.size_bytes)}
                 {o.checkpoints > 0 && (
-                  <span className="text-amber-300">
+                  <span className="text-amber-700">
                     {' '}· holds {o.checkpoints} checkpoint(s), which will be rescued
                   </span>
                 )}
@@ -260,7 +260,7 @@ function CloudRunHousekeeping({ toast, onChanged }) {
             ))}
           </ul>
           <button type="button" onClick={purge} disabled={!!busy}
-            className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-sm font-medium text-red-300 disabled:opacity-40">
+            className="rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-600 disabled:opacity-40">
             {busy === 'purge' ? 'Cleaning…' : 'Move them to the trash'}
           </button>
         </div>
@@ -317,7 +317,7 @@ function TrashCard({ reloadKey }) {
           {opening ? 'Opening…' : '📂 Open folder'}
         </button>
         <button type="button" onClick={empty} disabled={busy || !size}
-          className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-sm font-medium text-red-300 disabled:opacity-40">
+          className="rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-600 disabled:opacity-40">
           {busy ? 'Emptying…' : 'Empty trash'}
         </button>
       </div>
@@ -366,7 +366,7 @@ function RunArchiveCard() {
           <span className="text-xs text-content-subtle">Archiving is turned off.</span>
         )}
         <button type="button" onClick={clear} disabled={busy || !info?.size_bytes}
-          className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-sm font-medium text-red-300 disabled:opacity-40">
+          className="rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-600 disabled:opacity-40">
           {busy ? 'Clearing…' : 'Clear archive'}
         </button>
       </div>

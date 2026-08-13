@@ -295,10 +295,10 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
         {SOURCE_GROUPS.map((group) => (
           <div key={group.label}
             className={`rounded-lg border px-2.5 py-2 ${group.tone === 'emerald'
-              ? 'border-emerald-400/30 bg-emerald-500/5'
+              ? 'border-emerald-200 bg-emerald-50'
               : 'border-rose-400/30 bg-rose-500/5'}`}>
             <span className={`mr-2 text-[0.6875rem] font-bold ${group.tone === 'emerald'
-              ? 'text-emerald-300' : 'text-rose-300'}`}>{group.label}</span>
+              ? 'text-emerald-700' : 'text-rose-700'}`}>{group.label}</span>
             <span className="inline-flex flex-wrap gap-x-2 gap-y-1">
               {group.sources.map(([name, href]) => (
                 <a key={name} href={href} target="_blank" rel="noreferrer"
@@ -317,8 +317,8 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
           `yt_dlp` was absent got a warning that mentioned neither. It now quotes
           what the probe actually reported missing (caps.scrape_deps_detail). */}
       {caps.scrape_deps === false && (
-        <div className="rounded-lg border border-amber-400/40 bg-amber-500/10 p-2 flex flex-col gap-1.5">
-          <p className="text-amber-200 text-[0.6875rem]">
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 flex flex-col gap-1.5">
+          <p className="text-amber-700 text-[0.6875rem]">
             {scrapeDepsBanner(caps.scrape_deps_detail)} Install them for image previews,
             imports, the keyless web image search and video sources. Pexels uses its
             official API for listing, but still needs curl_cffi to fetch images.
@@ -395,7 +395,7 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
 
       {sourceMode === 'pexels' && (
         <div className="rounded-lg bg-surface-raised px-2.5 py-2 flex flex-col gap-2">
-          <div className="rounded-lg border border-amber-400/40 bg-amber-500/10 p-2 text-[0.6875rem] leading-relaxed text-amber-100">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-[0.6875rem] leading-relaxed text-amber-100">
             <p>
               <b>Pexels authorization required.</b> An API key alone does not authorize
               dataset or machine-learning use. Search only if Pexels explicitly authorized
@@ -506,7 +506,7 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
       {!toBank && (
       <label className={`flex items-start gap-2 rounded-lg border px-2.5 py-2 text-[0.75rem] ${
         rescueSmall
-          ? 'border-indigo-400/50 bg-indigo-500/10 text-content'
+          ? 'border-indigo-200 bg-indigo-50 text-content'
           : 'border-transparent bg-surface-raised text-content-muted'} ${
         caps.engines?.klein === false ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
         <input type="checkbox" checked={rescueSmall}

@@ -53,7 +53,7 @@ export default function BankOverview({ payload }) {
         <h2 id="bank-overview-title" className="min-w-0 text-sm font-semibold text-content">
           <button type="button" onClick={() => setOpen((value) => !value)}
             aria-expanded={open} aria-controls={contentId}
-            className="flex min-w-0 items-center gap-1.5 rounded text-left hover:text-indigo-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/70">
+            className="flex min-w-0 items-center gap-1.5 rounded text-left hover:text-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/70">
             <span aria-hidden="true" className="w-3 shrink-0 text-content-subtle">
               {open ? '▾' : '▸'}
             </span>
@@ -67,7 +67,7 @@ export default function BankOverview({ payload }) {
 
       <div id={contentId} hidden={!open} className="space-y-3">
         {!model.available ? (
-          <p role="status" className="text-xs text-amber-300/90">
+          <p role="status" className="text-xs text-amber-700/90">
             Overview unavailable — waiting for bank data.
           </p>
         ) : (
@@ -84,7 +84,7 @@ export default function BankOverview({ payload }) {
                 </div>
               ) : model.total === 0
                 ? <p className="text-xs text-content-subtle">No images to summarize.</p>
-                : <p className="text-xs text-amber-300/90">Curation totals unavailable.</p>}
+                : <p className="text-xs text-amber-700/90">Curation totals unavailable.</p>}
               <ul className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-content-muted">
                 {model.status.map((row) => (
                   <li key={row.id} className="tabular-nums">
@@ -101,7 +101,7 @@ export default function BankOverview({ payload }) {
                 {model.passes.map((pass) => (
                   <li key={pass.key} className="rounded-lg bg-surface-raised px-2 py-1.5">
                     <span className="block text-[11px] text-content-muted">{pass.label}</span>
-                    <span className={`block text-[10px] tabular-nums ${pass.value == null ? 'text-amber-300/90' : 'text-content'}`}>
+                    <span className={`block text-[10px] tabular-nums ${pass.value == null ? 'text-amber-700/90' : 'text-content'}`}>
                       {pass.text}
                     </span>
                     {pass.percent != null && (

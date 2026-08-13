@@ -142,7 +142,7 @@ export default function VideoClipTrimTools({
         <div className="flex flex-wrap gap-1.5">
           <button type="button" onClick={doSplit} disabled={!split.at || saving}
             title={split.why || `Split at ${split.at}s`}
-            className="rounded border border-amber-400/50 bg-amber-500/10 px-2.5 py-1 text-[0.6875rem] font-semibold text-amber-200 hover:bg-amber-500/20 disabled:opacity-30">
+            className="rounded border border-amber-200 bg-amber-50 px-2.5 py-1 text-[0.6875rem] font-semibold text-amber-700 hover:bg-amber-500/20 disabled:opacity-30">
             ✂ Split here
           </button>
           <button type="button" onClick={doCreate} disabled={!newShot || saving}

@@ -67,7 +67,7 @@ export default function LockableSlider({
             title={locked ? 'Unlock slider' : 'Lock slider'}
             className={`w-[22px] h-[22px] rounded-[5px] text-xs cursor-pointer flex items-center justify-center shrink-0 transition-all duration-150 ${
               locked
-                ? 'bg-indigo-500/20 border border-indigo-500/40 text-indigo-300'
+                ? 'bg-indigo-100 border border-indigo-500/40 text-indigo-700'
                 : 'bg-white/5 border border-white/10 text-content-muted'
             }`}
           >

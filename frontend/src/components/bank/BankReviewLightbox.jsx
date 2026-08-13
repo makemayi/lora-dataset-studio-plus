@@ -65,7 +65,7 @@ function Facts({ img }) {
       {origin && chip('origin', `${origin.icon} ${origin.label}`, ORIGIN_CLASS[origin.state],
         `${origin.detail}${hint ? ` ${hint}` : ''}`)}
       {img.aesthetic_score != null
-        && chip('aes', `✨ ${img.aesthetic_score.toFixed(1)}`, 'bg-white/10 text-amber-200')}
+        && chip('aes', `✨ ${img.aesthetic_score.toFixed(1)}`, 'bg-white/10 text-amber-700')}
       {img.nsfw_score != null
         && chip('nsfw', `🔞 ${Math.round(img.nsfw_score * 100)}%`, 'bg-white/10 text-rose-200')}
       {img.blur_score != null
@@ -82,16 +82,16 @@ function Facts({ img }) {
           ? `Zero-shot CLIP over the ✨ Score embedding — confidence gap ${img.medium_margin.toFixed(3)}.`
           : null)}
       {img.face_yaw != null && chip('yaw',
-        `⤢ ${Math.round(Math.abs(img.face_yaw))}°`, 'bg-white/10 text-cyan-200',
+        `⤢ ${Math.round(Math.abs(img.face_yaw))}°`, 'bg-white/10 text-cyan-700',
         'How far the head is turned, measured by the 🎭 Faces pass.')}
       {img.dup_group != null && chip('dup', `≈ dup #${img.dup_group}`, 'bg-white/10 text-fuchsia-200')}
       {img.semantic_dup_group != null
         && chip('sdup', `✂ same shot #${img.semantic_dup_group}`, 'bg-white/10 text-orange-200')}
-      {(img.flags || []).map((f) => chip(f, FLAG_TEXT[f] || f, 'bg-amber-500/20 text-amber-200'))}
-      {img.status === 'keep' && chip('st', '✓ already kept', 'bg-emerald-500/25 text-emerald-200')}
+      {(img.flags || []).map((f) => chip(f, FLAG_TEXT[f] || f, 'bg-amber-500/20 text-amber-700'))}
+      {img.status === 'keep' && chip('st', '✓ already kept', 'bg-emerald-500/25 text-emerald-700')}
       {img.status === 'reject' && chip('st', '✕ already rejected', 'bg-rose-500/25 text-rose-200')}
-      {img.promoted_dataset_id != null && chip('pr', '⬆ promoted to a dataset', 'bg-indigo-500/25 text-indigo-200')}
-      {img.promoted_bank_id != null && chip('prb', '⬆ promoted to another bank', 'bg-indigo-500/25 text-indigo-200')}
+      {img.promoted_dataset_id != null && chip('pr', '⬆ promoted to a dataset', 'bg-indigo-500/25 text-indigo-700')}
+      {img.promoted_bank_id != null && chip('prb', '⬆ promoted to another bank', 'bg-indigo-500/25 text-indigo-700')}
     </div>
   )
 }
@@ -289,7 +289,7 @@ export default function BankReviewLightbox({
       {!done && (
         <div className="shrink-0 space-y-2 bg-black/60 px-4 py-2.5">
           {error && (
-            <p role="alert" className="text-center text-sm text-rose-300">
+            <p role="alert" className="text-center text-sm text-rose-700">
               ⚠️ {error} — try again, or close and check the app.
             </p>
           )}

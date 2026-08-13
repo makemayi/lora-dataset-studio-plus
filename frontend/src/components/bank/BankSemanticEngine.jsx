@@ -28,7 +28,7 @@ export default function BankSemanticEngine({ state, disabled = false,
     && offersSemanticGpuPython(state, gpuPresent)
 
   return (
-    <fieldset className="rounded-lg border border-indigo-400/30 bg-indigo-500/5 p-3 space-y-2"
+    <fieldset className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 space-y-2"
       disabled={disabled || switching || live}>
       <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-content-muted">
         Semantic engine
@@ -53,8 +53,8 @@ export default function BankSemanticEngine({ state, disabled = false,
         <p className="m-0">{SEMANTIC_CACHE_SENTENCE}</p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-indigo-400/20 pt-2 text-xs">
-        <span className={ready ? 'text-emerald-300' : 'text-amber-300'}>
+      <div className="flex flex-wrap items-center gap-2 border-t border-indigo-100 pt-2 text-xs">
+        <span className={ready ? 'text-emerald-700' : 'text-amber-700'}>
           {ready ? '✓' : '○'} {state.label}:{' '}
           {state.engine === 'siglip2' && capsLoading ? 'checking the Quality tool…' : status}
         </span>
@@ -66,7 +66,7 @@ export default function BankSemanticEngine({ state, disabled = false,
             title={state.complete
               ? 'Rebuild only the SigLIP 2 cache. The CLIP/Score cache is preserved.'
               : 'Build or resume the whole-Bank SigLIP 2 semantic index.'}
-            className="rounded-md border border-indigo-400/40 bg-indigo-500/10 px-2 py-0.5 font-medium text-indigo-200 hover:bg-indigo-500/20 disabled:opacity-50">
+            className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">
             {action}
           </button>
         )}
@@ -74,7 +74,7 @@ export default function BankSemanticEngine({ state, disabled = false,
           <span className="text-content-subtle">
             {blocked}{' '}
             <a href="#/setup?step=quality"
-              className="font-medium text-sky-300 underline underline-offset-2 hover:text-sky-200">
+              className="font-medium text-sky-700 underline underline-offset-2 hover:text-sky-200">
               Open Setup ▸ Quality tools
             </a>
           </span>
@@ -83,7 +83,7 @@ export default function BankSemanticEngine({ state, disabled = false,
       </div>
 
       {deviceNote && (
-        <div className="space-y-2 border-t border-indigo-400/20 pt-2">
+        <div className="space-y-2 border-t border-indigo-100 pt-2">
           <p className={`m-0 text-xs ${deviceNote.tone === 'warn'
             ? 'text-amber-400/90' : 'text-content-subtle'}`}>
             {deviceNote.text}
@@ -92,7 +92,7 @@ export default function BankSemanticEngine({ state, disabled = false,
             <button type="button" onClick={onPickPython}
               disabled={disabled || switching || live}
               title="Check the Pythons on this machine and point the SigLIP 2 index at one that reaches your GPU. They are read, never changed."
-              className="rounded-md border border-amber-400/50 px-2 py-1 text-xs font-medium text-amber-300 hover:bg-amber-500/10 disabled:opacity-50">
+              className="rounded-md border border-amber-200 px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50">
               {openerLabel(gpuPresent)}
             </button>
           )}

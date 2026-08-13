@@ -31,16 +31,16 @@ export default function CanvasRunTracker({ run, targets, onStop, onResume, onOpe
 
   const working = s.phase === 'working';
   const tone = working
-    ? 'border-indigo-400/40 bg-indigo-500/10 '
+    ? 'border-indigo-200 bg-indigo-50 '
     : s.phase === 'stopped'
-      ? 'border-amber-400/40 bg-amber-500/10 '
-      : 'border-emerald-400/40 bg-emerald-500/10 ';
+      ? 'border-amber-200 bg-amber-50 '
+      : 'border-emerald-200 bg-emerald-50 ';
 
   return (
     <div data-testid="canvas-run-tracker" role="status"
       className={'mb-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-xl border px-2.5 py-1.5 text-[0.6875rem] ' + tone}>
       {working ? (
-        <span aria-hidden className="inline-block h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-indigo-400/40 border-t-indigo-400" />
+        <span aria-hidden className="inline-block h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-400" />
       ) : (
         <span aria-hidden className="shrink-0">{s.phase === 'stopped' ? '⏸' : '✓'}</span>
       )}
@@ -53,7 +53,7 @@ export default function CanvasRunTracker({ run, targets, onStop, onResume, onOpe
             Settings
           </button>
           <button type="button" onClick={onStop}
-            className="ml-auto rounded-md bg-red-600/80 px-2 py-0.5 font-semibold text-white">
+            className="ml-auto rounded-md bg-red-600 px-2 py-0.5 font-semibold text-white">
             Stop (resumable)
           </button>
         </>
@@ -81,7 +81,7 @@ export default function CanvasRunTracker({ run, targets, onStop, onResume, onOpe
               <button key={`${t.datasetId}:${t.recordId}:${t.step}`} type="button"
                 onClick={() => onOpenResult(t)}
                 title={`Open the images generated from run #${t.recordId} at step ${t.step}`}
-                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-emerald-100 tabular-nums hover:bg-emerald-500/25">
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-100 tabular-nums hover:bg-emerald-500/25">
                 <ImageIcon className="h-3 w-3 shrink-0" /> {canvasResultLabel(t)}
               </button>
             ))}

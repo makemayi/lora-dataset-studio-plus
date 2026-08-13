@@ -120,7 +120,7 @@ export default function DatasetSettingsModal({ d, busy, onSave, onClose }) {
         </div>
 
         {style ? (
-          <div className="rounded-lg border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-[0.75rem] text-cyan-100">
+          <div className="rounded-lg border border-cyan-400/30 bg-cyan-50 px-3 py-2 text-[0.75rem] text-cyan-100">
             <b>Always-on Style:</b> no activation trigger is written into captions or prompts.
             Control the effect with the LoRA weight; when combining with a character LoRA,
             tune the two weights independently.
@@ -190,8 +190,8 @@ export default function DatasetSettingsModal({ d, busy, onSave, onClose }) {
         {/* Honest confirmation: what a kind switch changes and what it keeps. Only
             shown once the pill actually differs from the stored kind. */}
         {switchSummary && (
-          <div className="rounded-lg border border-amber-400/40 bg-amber-500/5 px-3 py-2.5 flex flex-col gap-2 text-[0.75rem]">
-            <div className="text-amber-200 font-semibold flex items-center gap-1.5">
+          <div className="rounded-lg border border-amber-200 bg-amber-500/5 px-3 py-2.5 flex flex-col gap-2 text-[0.75rem]">
+            <div className="text-amber-700 font-semibold flex items-center gap-1.5">
               ⚠️ Changing kind: {KIND_LABELS[switchSummary.from]} → {KIND_LABELS[switchSummary.to]}
             </div>
             <div className="flex flex-col gap-1">
@@ -207,7 +207,7 @@ export default function DatasetSettingsModal({ d, busy, onSave, onClose }) {
               </ul>
             </div>
             {switchSummary.recaption && (
-              <div className="rounded border border-amber-400/30 bg-amber-500/10 px-2 py-1.5 text-amber-100">
+              <div className="rounded border border-amber-400/30 bg-amber-50 px-2 py-1.5 text-amber-100">
                 Existing captions were written for <b>{KIND_LABELS[switchSummary.from]}</b>. They
                 are <b>not</b> rewritten automatically — use <b>🔄 Re-caption</b> in the Captions
                 section to apply the new strategy.

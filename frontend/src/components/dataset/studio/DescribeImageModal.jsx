@@ -109,7 +109,7 @@ export default function DescribeImageModal({ open, onClose, onResult }) {
           }}
           disabled={busy}
           className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors ${
-            dragOver ? 'border-purple-400/70 bg-purple-500/10' : 'border-transparent bg-surface-raised'} disabled:opacity-60`}>
+            dragOver ? 'border-purple-400/70 bg-purple-50' : 'border-transparent bg-surface-raised'} disabled:opacity-60`}>
           {busy ? (
             <>
               <span className="inline-block w-6 h-6 border-2 border-purple-400/40 border-t-purple-400 rounded-full animate-spin" aria-hidden />
@@ -128,7 +128,7 @@ export default function DescribeImageModal({ open, onClose, onResult }) {
           onChange={(e) => { describe(e.target.files?.[0]); e.target.value = ''; }} />
 
         {error && (
-          <p className="m-0 rounded-lg border border-red-400/40 bg-red-500/10 px-3 py-2 text-red-300 text-[0.6875rem]" role="alert">
+          <p className="m-0 rounded-lg border border-red-400/40 bg-red-50 px-3 py-2 text-red-600 text-[0.6875rem]" role="alert">
             {error}
           </p>
         )}

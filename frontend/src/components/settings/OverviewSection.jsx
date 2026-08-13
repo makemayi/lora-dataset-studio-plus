@@ -26,7 +26,7 @@ export default function OverviewSection({ caps }) {
           <p className="font-medium">Let's get you set up.</p>
           <p className="mt-1 text-content-muted">
             Add at least one image API key to start, or let the{' '}
-            <Link to="/setup" className="font-medium text-sky-300 underline hover:text-sky-200">Setup wizard</Link>
+            <Link to="/setup" className="font-medium text-sky-700 underline hover:text-sky-200">Setup wizard</Link>
             {' '}scan your machine and walk you through it.
           </p>
         </div>
@@ -57,7 +57,7 @@ export default function OverviewSection({ caps }) {
                   <span className={`block truncate ${s.ok || s.pending ? 'text-content' : 'text-content-muted'}`}>
                     {s.label}
                   </span>
-                  {s.note && <span className="block truncate text-[11px] text-amber-300/80">{s.note}</span>}
+                  {s.note && <span className="block truncate text-[11px] text-amber-700/80">{s.note}</span>}
                 </span>
                 <span aria-hidden
                   className="shrink-0 text-content-subtle opacity-0 transition-opacity group-hover:opacity-100
@@ -68,7 +68,7 @@ export default function OverviewSection({ caps }) {
         </div>
         <p className="mt-4 border-t border-border pt-3 text-xs text-content-muted">
           Not sure where to start?{' '}
-          <Link to="/setup" className="font-medium text-sky-300 underline hover:text-sky-200">Run the Setup wizard</Link>
+          <Link to="/setup" className="font-medium text-sky-700 underline hover:text-sky-200">Run the Setup wizard</Link>
           {' '}— it scans your machine and installs what it can.
         </p>
       </section>

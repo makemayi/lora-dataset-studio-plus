@@ -247,13 +247,13 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
               )}
               {trainType === 'krea' && (
                 <section aria-labelledby="krea-caption-model-title"
-                  className="mt-2 rounded-lg border border-sky-400/30 bg-sky-500/10 p-3">
+                  className="mt-2 rounded-lg border border-sky-400/30 bg-sky-50 p-3">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0 flex-1">
                       <h4 id="krea-caption-model-title" className="text-sm font-semibold text-content">
                         Krea 2 companion preset
                       </h4>
-                      <p className="mt-0.5 break-all font-mono text-xs text-sky-300">
+                      <p className="mt-0.5 break-all font-mono text-xs text-sky-700">
                         {KREA_2_OLLAMA_MODEL}
                       </p>
                     </div>
@@ -262,7 +262,7 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
                       aria-describedby="krea-caption-model-note"
                       aria-pressed={kreaModelInstalled ? kreaModelSelected : undefined}
                       aria-busy={kreaModelPulling}
-                      className="w-full shrink-0 rounded-lg border border-sky-400/40 bg-sky-500/20 px-3 py-2 text-xs font-semibold text-sky-100 hover:bg-sky-500/30 disabled:opacity-40 sm:w-auto">
+                      className="w-full shrink-0 rounded-lg border border-sky-200 bg-sky-100 px-3 py-2 text-xs font-semibold text-sky-100 hover:bg-sky-500/30 disabled:opacity-40 sm:w-auto">
                       {kreaModelSelected ? 'Selected'
                         : kreaModelPulling ? 'Pulling…'
                         : kreaModelInstalled ? 'Use'

@@ -120,7 +120,7 @@ export default function RunSetupPanel({ d, studio, form, datasetId,
 
       {/* --- Garde-fous ------------------------------------------------- */}
       {d.gpu_busy && !d.comfyui_recovery?.requires_comfyui_restart_confirmation && (
-        <div className="m-0 flex flex-wrap items-center gap-2 rounded-lg border border-red-400/40 bg-red-500/10 px-3 py-2 text-red-300 text-sm" role="status">
+        <div className="m-0 flex flex-wrap items-center gap-2 rounded-lg border border-red-400/40 bg-red-50 px-3 py-2 text-red-600 text-sm" role="status">
           <span>{d.gpu_busy}</span>
           {d.comfyui_recovery_target?.dataset_id != null && (
             <button type="button"
@@ -140,7 +140,7 @@ export default function RunSetupPanel({ d, studio, form, datasetId,
 
       {/* --- Soumission ComfyUI inconnue : confirmation humaine requise ------ */}
       {d.comfyui_recovery?.requires_comfyui_restart_confirmation && (
-        <div className="flex items-center gap-2 flex-wrap rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2" role="status">
+        <div className="flex items-center gap-2 flex-wrap rounded-lg border border-amber-200 bg-amber-400/10 px-3 py-2" role="status">
           <span aria-hidden>⚠</span>
           <span className="text-content text-sm">ComfyUI could not confirm whether this image started. Restart ComfyUI, confirm it here, then click Resume test.</span>
           <button type="button" disabled={studio.confirmingComfyuiRestart || !studio.confirmComfyuiRestart}
@@ -153,13 +153,13 @@ export default function RunSetupPanel({ d, studio, form, datasetId,
 
       {/* --- Run en cours ------------------------------------------------ */}
       {d.pending > 0 && (
-        <div className="flex items-center gap-2 rounded-lg border border-indigo-400/40 bg-indigo-500/10 px-3 py-2" role="status">
-          <span className="inline-block w-4 h-4 border-2 border-indigo-400/40 border-t-indigo-400 rounded-full animate-spin" aria-hidden />
+        <div className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2" role="status">
+          <span className="inline-block w-4 h-4 border-2 border-indigo-200 border-t-indigo-400 rounded-full animate-spin" aria-hidden />
           <span className="text-content text-sm">
             {d.generating ?? d.running ?? 0} generating · {d.queued ?? d.pending} queued
           </span>
           <button type="button" onClick={studio.cancel}
-            className="ml-auto px-2.5 py-1 rounded-lg bg-red-600/80 text-white text-xs font-semibold">
+            className="ml-auto px-2.5 py-1 rounded-lg bg-red-600 text-white text-xs font-semibold">
             Stop (resumable)
           </button>
         </div>
@@ -167,7 +167,7 @@ export default function RunSetupPanel({ d, studio, form, datasetId,
 
       {/* --- Run stoppé → reprenable ------------------------------------- */}
       {!d.pending && d.resumable > 0 && (
-        <div className="flex items-center gap-2 rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2" role="status">
+        <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-400/10 px-3 py-2" role="status">
           <span aria-hidden>⏸</span>
           <span className="text-content text-sm">{d.resumable} stopped cell(s) — resumable with their settings</span>
           <button type="button" disabled={!!d.gpu_busy || studio.launching}
@@ -266,7 +266,7 @@ export default function RunSetupPanel({ d, studio, form, datasetId,
               canvas passes the real reason (mixed families, nothing picked) and
               it is shown right under the button, not only in a tooltip. */}
           {launchHint && (
-            <p className={'m-0 text-[0.6875rem] ' + (launchBlocked ? 'text-amber-200' : 'text-content-muted')}
+            <p className={'m-0 text-[0.6875rem] ' + (launchBlocked ? 'text-amber-700' : 'text-content-muted')}
               role={launchBlocked ? 'status' : undefined}>
               {launchHint}
             </p>
@@ -275,7 +275,7 @@ export default function RunSetupPanel({ d, studio, form, datasetId,
               au rythme mesuré, et le rappel qu'un Stop garde ce qui est fait. */}
           {cost.heavy && (
             <p data-testid="heavy-run-notice"
-              className="m-0 rounded-lg border border-amber-400/40 bg-amber-500/10 px-2.5 py-1.5 text-[0.6875rem] text-amber-200"
+              className="m-0 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[0.6875rem] text-amber-700"
               role="status">
               <span aria-hidden>⏱</span> {heavyRunNotice(cost)}
             </p>

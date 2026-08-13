@@ -169,7 +169,7 @@ export default function BankImportPanel({ datasetId, onImported, disabled = fals
             </select>
           </div>
           {current && (
-            <p className={`text-[0.6875rem] ${current.ready ? 'text-emerald-300' : 'text-amber-300'}`}>
+            <p className={`text-[0.6875rem] ${current.ready ? 'text-emerald-700' : 'text-amber-700'}`}>
               {current.hint}
               {!current.ready && current.reason !== 'loading' && (
                 <>

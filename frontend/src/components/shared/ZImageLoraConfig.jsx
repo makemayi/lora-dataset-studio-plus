@@ -138,7 +138,7 @@ export default function ZImageLoraConfig({ loras = [], onChange, zModel = '', is
                 aria-pressed={fav}
                 aria-label={fav ? `Remove ${l.displayName} from this model's favorites` : `Mark ${l.displayName} as favorite for this model`}
                 title={fav ? 'Favorite for this model — click to remove' : 'Mark as favorite for this model'}
-                className={`shrink-0 leading-none text-[0.95rem] ${fav ? 'text-amber-300' : 'text-content-muted/40 hover:text-amber-300'} ${zModel ? 'cursor-pointer' : 'opacity-40 cursor-not-allowed'}`}
+                className={`shrink-0 leading-none text-[0.95rem] ${fav ? 'text-amber-700' : 'text-content-muted/40 hover:text-amber-700'} ${zModel ? 'cursor-pointer' : 'opacity-40 cursor-not-allowed'}`}
               >
                 {fav ? '★' : '☆'}
               </button>
@@ -155,7 +155,7 @@ export default function ZImageLoraConfig({ loras = [], onChange, zModel = '', is
                   <button type="button" onClick={() => toggleLock(l.filename)}
                     aria-pressed={!!c.locked}
                     title={c.locked ? 'Strength locked — click to unlock' : 'Lock the strength (prevents accidental changes)'}
-                    className={`px-1 py-0.5 rounded text-[0.75rem] border leading-none ${c.locked ? 'border-amber-400/60 bg-amber-400/15 text-amber-300' : 'border-border bg-surface text-content-muted hover:text-content'}`}>
+                    className={`px-1 py-0.5 rounded text-[0.75rem] border leading-none ${c.locked ? 'border-amber-400/60 bg-amber-400/15 text-amber-700' : 'border-border bg-surface text-content-muted hover:text-content'}`}>
                     {c.locked ? '🔒' : '🔓'}
                   </button>
                 </>
@@ -186,7 +186,7 @@ export default function ZImageLoraConfig({ loras = [], onChange, zModel = '', is
                   }))}
                   aria-label={`Test ${l.displayName} as a batch axis (with/without)`}
                   className="accent-amber-400 w-3.5 h-3.5" />
-                <span className={c.batch ? 'text-amber-300 font-semibold' : ''}>
+                <span className={c.batch ? 'text-amber-700 font-semibold' : ''}>
                   ⚖ Batch axis (compare with / without)
                 </span>
               </label>
@@ -209,7 +209,7 @@ export default function ZImageLoraConfig({ loras = [], onChange, zModel = '', is
                 title={open ? 'Collapse this dataset' : 'Expand to pick a checkpoint'}
                 className="flex items-center gap-2 w-full px-2 py-1.5 text-left">
                 <span aria-hidden className="shrink-0 w-3 text-content-muted text-[0.7rem]">{open ? '▾' : '▸'}</span>
-                {anyFav && <span aria-hidden className="shrink-0 text-amber-300 text-[0.85rem] leading-none">★</span>}
+                {anyFav && <span aria-hidden className="shrink-0 text-amber-700 text-[0.85rem] leading-none">★</span>}
                 <span className="flex-1 min-w-0 truncate text-content text-[0.8125rem]">{key}</span>
                 {active ? (
                   <span className="shrink-0 whitespace-nowrap text-content-muted text-[0.6875rem]">

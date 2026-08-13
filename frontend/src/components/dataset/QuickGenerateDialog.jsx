@@ -223,9 +223,9 @@ export default function QuickGenerateDialog({
     <div role="dialog" aria-modal="true" aria-label="Quick generate"
       className="fixed inset-0 z-[9990] bg-black/80 flex items-center justify-center p-3"
       onClick={(e) => { if (e.target === e.currentTarget) dismiss(); }}>
-      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl border border-indigo-400/40 bg-app p-4 flex flex-col gap-3">
+      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl border border-indigo-200 bg-app p-4 flex flex-col gap-3">
         <div className="flex items-center gap-2">
-          <span className="text-indigo-300 font-semibold"><span aria-hidden>🎲</span> Quick generate</span>
+          <span className="text-indigo-700 font-semibold"><span aria-hidden>🎲</span> Quick generate</span>
           <button type="button" onClick={dismiss} disabled={submitting || busy}
             className="ml-auto text-content-subtle hover:text-content disabled:opacity-40" aria-label="Cancel">✕</button>
         </div>
@@ -292,7 +292,7 @@ export default function QuickGenerateDialog({
             ))}
           </fieldset>
           {noLocalEngineForNsfw && (
-            <span className="text-amber-300/90 text-[0.6875rem] leading-relaxed">
+            <span className="text-amber-700/90 text-[0.6875rem] leading-relaxed">
               {noLocalEngineAvailable
                 ? 'NSFW content needs a local engine (Klein or Krea 2 Edit) — neither is currently available.'
                 : 'Select at least one local engine (Klein or Krea 2 Edit) for NSFW content.'}

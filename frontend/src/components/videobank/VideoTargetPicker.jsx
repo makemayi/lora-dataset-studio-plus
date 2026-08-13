@@ -1,14 +1,14 @@
 import { targetWarnings, targetBadge } from './videoTargetChoice'
 
 const TONE = {
-  danger: 'border-rose-500/60 bg-rose-500/10 text-rose-100',
-  warning: 'border-amber-500/60 bg-amber-500/10 text-amber-100',
-  info: 'border-sky-500/50 bg-sky-500/10 text-sky-100',
+  danger: 'border-rose-300 bg-rose-50 text-rose-100',
+  warning: 'border-amber-500/60 bg-amber-50 text-amber-100',
+  info: 'border-sky-500/50 bg-sky-50 text-sky-100',
 }
 const BADGE_TONE = {
   danger: 'bg-rose-500/20 text-rose-200',
-  warning: 'bg-amber-500/20 text-amber-200',
-  ok: 'bg-emerald-500/20 text-emerald-200',
+  warning: 'bg-amber-500/20 text-amber-700',
+  ok: 'bg-emerald-500/20 text-emerald-700',
 }
 
 /** 🎬 The target list, with its verdicts ON the rows.

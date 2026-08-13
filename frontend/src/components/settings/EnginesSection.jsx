@@ -119,7 +119,7 @@ function LoraPresetCard({ preset, index, presets, save, loraScan,
           title="Duplicate this preset">
           Duplicate
         </button>
-        <button type="button" className={`${TEXT_BTN} hover:bg-red-500/15 hover:text-red-300`}
+        <button type="button" className={`${TEXT_BTN} hover:bg-red-50 hover:text-red-600`}
           onClick={() => save(presets.filter((_, j) => j !== index))}
           title="Delete this preset">
           Delete
@@ -164,7 +164,7 @@ function LoraPresetCard({ preset, index, presets, save, loraScan,
               aria-label={`Move LoRA ${i + 1} down in preset ${index + 1}`} title="Chain later" className={SMALL_BTN}>↓</button>
             <button type="button" onClick={() => patchPreset({ loras: rows.filter((_, j) => j !== i) })}
               aria-label={`Remove LoRA ${i + 1} from preset ${index + 1}`} title="Remove this LoRA"
-              className={`${SMALL_BTN} hover:bg-red-500/15 hover:text-red-300`}>✕</button>
+              className={`${SMALL_BTN} hover:bg-red-50 hover:text-red-600`}>✕</button>
             {/* w-full inside the WRAPPING flex row = its own line under the
                 controls, without re-nesting (and re-indenting) the whole row. */}
             {duplicate && (
@@ -306,7 +306,7 @@ function FaceSwapLorasCard({ config, setField, graphLoras = [] }) {
               className={SMALL_BTN}>↓</button>
             <button type="button" onClick={() => save(rows.filter((_, j) => j !== i))}
               aria-label={`Remove face swap LoRA ${i + 1}`} title="Remove this LoRA"
-              className={`${SMALL_BTN} hover:bg-red-500/15 hover:text-red-300`}>✕</button>
+              className={`${SMALL_BTN} hover:bg-red-50 hover:text-red-600`}>✕</button>
             {duplicate && (
               <p role="alert" className="w-full pl-6 text-[0.6875rem] text-amber-400">
                 The face swap graph already loads this LoRA — this row is skipped.
@@ -795,7 +795,7 @@ function MinimaxH3Card({ config, setField, configDefaults, caps }) {
       help="The third local engine, and the only one that reaches a still through a VIDEO model: it samples a short packet of frames from your reference photo and keeps the best single frame. Identity comes from that one photo with no character LoRA, like Krea. It needs the MinimaxH3-Image node pack plus five model files (~40 GB) — none of them auto-downloaded — and the engine card in the workspace names whatever is still missing."
     >
       {vramWarning && (
-        <p className="mb-3 rounded border border-amber-400/40 bg-amber-500/10 px-2 py-1.5 text-[0.6875rem] text-amber-200">
+        <p className="mb-3 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-[0.6875rem] text-amber-700">
           {vramWarning}
         </p>
       )}
@@ -1470,7 +1470,7 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
       title="SeedVR2 upscaling (local)"
       help="The fidelity half of ✨ Upscale & improve. Klein re-renders detail from a prompt — sharper, but skin and colour can shift; SeedVR2 resolves detail at a higher resolution and leaves the original look alone. Pick it per batch from the bulk actions in the dataset workspace, or make it the default for the single-image pass below. It needs the ComfyUI-SeedVR2_VideoUpscaler node pack in ComfyUI plus two model files — Setup ▸ ComfyUI downloads the models and says what is missing."
     >
-      <p className={ready ? 'text-[0.6875rem] text-emerald-300' : 'text-[0.6875rem] text-amber-300'}>
+      <p className={ready ? 'text-[0.6875rem] text-emerald-700' : 'text-[0.6875rem] text-amber-700'}>
         {ready
           ? 'Ready — SeedVR2 appears in the workspace bulk actions.'
           : 'Not ready yet. Setup ▸ ComfyUI lists what is missing and can download the weights; the node pack itself is installed from ComfyUI (search “SeedVR2” in ComfyUI-Manager), then restart ComfyUI.'}
@@ -1478,13 +1478,13 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
 
       <HelpText className="mt-1 text-xs text-content-muted">
         <a href="https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler" target="_blank"
-          rel="noreferrer" className="text-sky-300 underline hover:text-sky-200">Node pack →</a>
+          rel="noreferrer" className="text-sky-700 underline hover:text-sky-200">Node pack →</a>
         {' · '}
         <a href="https://huggingface.co/numz/SeedVR2_comfyUI" target="_blank"
-          rel="noreferrer" className="text-sky-300 underline hover:text-sky-200">Model weights →</a>
+          rel="noreferrer" className="text-sky-700 underline hover:text-sky-200">Model weights →</a>
         {' · '}
         <a href="https://github.com/ByteDance-Seed/SeedVR" target="_blank"
-          rel="noreferrer" className="text-sky-300 underline hover:text-sky-200">SeedVR2 by ByteDance-Seed →</a>
+          rel="noreferrer" className="text-sky-700 underline hover:text-sky-200">SeedVR2 by ByteDance-Seed →</a>
         {' — all Apache-2.0.'}
       </HelpText>
 
@@ -1595,7 +1595,7 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
           <b>never</b> if you ever see a seam.
         </p>
         {laneLine && (
-          <p className="mt-1 text-[0.6875rem] text-sky-300">{laneLine}</p>
+          <p className="mt-1 text-[0.6875rem] text-sky-700">{laneLine}</p>
         )}
         <ResetToDefault label="High-resolution tiling" section="seedvr2" field="tiling" {...reset} />
       </div>
@@ -1876,7 +1876,7 @@ function IdentityPromptsCard({ config, setField, promptDefaults, promptDefaultsB
                 aria-pressed={on}
                 onClick={() => setSubject(st)}
                 className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs ${
-                  on ? 'border-indigo-400/60 bg-indigo-500/15 text-indigo-200 font-semibold'
+                  on ? 'border-indigo-400/60 bg-indigo-50 text-indigo-700 font-semibold'
                      : 'border-border bg-surface text-content-muted hover:text-content'}`}
               >
                 {SUBJECT_TYPE_LABELS[st]}
@@ -1991,7 +1991,7 @@ function IdentityPromptsCard({ config, setField, promptDefaults, promptDefaultsB
         <p className="mb-2 text-xs text-content-subtle">
           The prompt below is <strong>not</strong> per subject type — it asks for texture and
           detail, which means the same thing for a person, a dog or a car.{' '}
-          <span className="text-amber-300">
+          <span className="text-amber-700">
             It does <strong>not</strong> mean the same thing for a drawing: the built-in text asks for
             photographic detail, so on an Anime dataset it pushes skin and fabric towards realism.
             Rewrite it below, or untick the box above to upscale with no prompt at all.
@@ -2153,7 +2153,7 @@ function ImageModelsCard({ config, setField, configDefaults }) {
         {/* Both hints stay mounted, `hidden` flips — see the ChatGPT Base URL
             field above for why a ternary here crashes a translated page. */}
         <span hidden={!config.engines?.nanobanana_base_url}>
-          {' '}<strong className="text-amber-300">
+          {' '}<strong className="text-amber-700">
             Your reference photos go to that operator, not to Google.
           </strong>{' '}
           This engine uploads your primary reference and every extra on each call, under that
@@ -2195,7 +2195,7 @@ function ImageModelsCard({ config, setField, configDefaults }) {
             an attribute touches no text node, so it survives translation.
             Reported 2026-08-09. Do not turn this back into a ternary. */}
         <span hidden={!config.engines?.chatgpt_base_url}>
-          {' '}<strong className="text-amber-300">
+          {' '}<strong className="text-amber-700">
             Your reference photos go to that operator, not to OpenAI.
           </strong>{' '}
           This engine uploads your reference images on every single call, and they will be

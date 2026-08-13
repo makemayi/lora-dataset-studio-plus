@@ -177,7 +177,7 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
           </div>
         </div>
         {inputUnlimited && (
-          <p className="mt-3 rounded border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-content">
+          <p className="mt-3 rounded border border-amber-500/40 bg-amber-50 p-2 text-xs text-content">
             <span className="font-medium">No limit is set.</span> {IMPORT_INPUT_UNLIMITED_NOTE}
           </p>
         )}

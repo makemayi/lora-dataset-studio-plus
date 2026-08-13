@@ -12,8 +12,8 @@
  * ⚠️ Rappel jandordoe : un epoch surentraîné peut scorer mieux en étant plus
  * moche (artefacts) — le score CLASSE, l'œil tranche.
  */
-const scoreCls = (avg) => (avg >= 0.50 ? 'text-emerald-300'
-  : avg >= 0.45 ? 'text-amber-300' : 'text-red-300');
+const scoreCls = (avg) => (avg >= 0.50 ? 'text-emerald-700'
+  : avg >= 0.45 ? 'text-amber-700' : 'text-red-600');
 
 export default function FaceRankingPanel({ ranking = [], onScore, scoring, hasCells }) {
   return (
@@ -36,7 +36,7 @@ export default function FaceRankingPanel({ ranking = [], onScore, scoring, hasCe
           {ranking.map((r, i) => (
             <li key={r.checkpoint}
               className={`flex items-center gap-2 rounded-md px-2 py-1 text-[0.75rem] ${i === 0
-                ? 'border border-amber-400/40 bg-amber-400/10'
+                ? 'border border-amber-200 bg-amber-400/10'
                 : 'bg-surface-raised'}`}>
               <span aria-hidden="true" className="shrink-0 w-5 text-center">
                 {i === 0 ? '🏆' : `${i + 1}.`}

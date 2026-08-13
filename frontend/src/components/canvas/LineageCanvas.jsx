@@ -183,7 +183,7 @@ function LaneHeader({ lane, onZoomRef }) {
         <span className="shrink-0 animate-pulse text-content-subtle text-[0.625rem]">loading…</span>
       )}
       {lane.status === 'error' && (
-        <span className="shrink-0 text-amber-300 text-[0.625rem]" title={lane.error || ''}>
+        <span className="shrink-0 text-amber-700 text-[0.625rem]" title={lane.error || ''}>
           could not load this dataset
         </span>
       )}
@@ -317,7 +317,7 @@ function LaneImages({ lane, layout, onGeometry, onClose, onOpen, onCloseGroup, o
         <div style={{ position: 'absolute', left: hint.box.x, top: hint.box.y,
           width: hint.box.w, height: hint.box.h }}
           data-testid="canvas-merge-hint"
-          className="pointer-events-none z-20 rounded-md border-2 border-dashed border-indigo-300 bg-indigo-500/15">
+          className="pointer-events-none z-20 rounded-md border-2 border-dashed border-indigo-300 bg-indigo-50">
           <span style={{ position: 'absolute', left: hint.caret - hint.box.x - 2, top: 0,
             width: 4, height: hint.box.h }}
             className="bg-indigo-300" aria-hidden />
@@ -1551,7 +1551,7 @@ export default function LineageCanvas({ entries, positions, imageNodes, allImage
             ? `${picks.length} checkpoint(s) picked — open the run settings`
             : 'Tick checkpoints on the board, then set the run up here'}
           className={picks.length
-            ? `${TOOL_BUTTON_BASE} bg-indigo-500/20 text-indigo-100 hover:bg-indigo-500/30`
+            ? `${TOOL_BUTTON_BASE} bg-indigo-100 text-indigo-100 hover:bg-indigo-500/30`
             : TOOL_BUTTON}>
           <PaletteIcon className="h-3.5 w-3.5 shrink-0" /> Generate
           {picks.length > 0 && (
@@ -1603,7 +1603,7 @@ export default function LineageCanvas({ entries, positions, imageNodes, allImage
         </details>
         {selectedForDiff.length > 0 && (
           <button type="button" onClick={() => setSelectedForDiff([])}
-            className="rounded-full bg-amber-500/15 px-2.5 py-1 text-amber-200 text-[0.625rem] hover:bg-amber-500/25">
+            className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700 text-[0.625rem] hover:bg-amber-500/25">
             Clear compare ({selectedForDiff.length})
           </button>
         )}
@@ -1831,8 +1831,8 @@ export default function LineageCanvas({ entries, positions, imageNodes, allImage
       {!panelOpen && picks.length > 0 && (
         <p className={'mt-2 rounded-lg border px-3 py-1.5 text-[0.6875rem] '
           + (launchVerdict.blocked
-            ? 'border-amber-400/40 bg-amber-500/10 text-amber-100 '
-            : 'border-indigo-400/40 bg-indigo-500/10 text-indigo-100 ')}>
+            ? 'border-amber-200 bg-amber-50 text-amber-100 '
+            : 'border-indigo-200 bg-indigo-50 text-indigo-100 ')}>
           {picks.length} checkpoint{picks.length > 1 ? 's' : ''} picked
           {launchVerdict.reason ? ` — ${launchVerdict.reason}` : ''}
         </p>

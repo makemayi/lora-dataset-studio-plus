@@ -171,7 +171,7 @@ test('an unconfigured ComfyUI says where the file really lands, and warns', () =
     },
   })
   assert.match(html, /⚠ ComfyUI is not configured in Settings/)
-  assert.match(html, /text-amber-200/)
+  assert.match(html, /text-amber-700/)
 })
 
 test('too little disk is a refusal with both numbers and a dead start button', () => {

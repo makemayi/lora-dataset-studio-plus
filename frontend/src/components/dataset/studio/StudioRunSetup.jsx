@@ -82,7 +82,7 @@ export default function StudioRunSetup({
   return (
     <div className="flex flex-col gap-3 rounded-lg bg-surface p-3">
       {gpuBusy && (
-        <p className="m-0 rounded-lg border border-red-400/40 bg-red-500/10 px-3 py-2 text-red-300 text-sm" role="status">
+        <p className="m-0 rounded-lg border border-red-400/40 bg-red-50 px-3 py-2 text-red-600 text-sm" role="status">
           {gpuBusy}
         </p>
       )}
@@ -156,8 +156,8 @@ export default function StudioRunSetup({
               </>
             )
             : <>{selectionCount} LoRA × {strengths.length} strength × {count}</>}
-          {batchMult > 1 && <span className="text-amber-300"> × {batchMult} ⚖</span>}
-          {axisTotal > 1 && <span className="text-purple-300"> × {axisTotal} 🎛</span>} ={' '}
+          {batchMult > 1 && <span className="text-amber-700"> × {batchMult} ⚖</span>}
+          {axisTotal > 1 && <span className="text-purple-700"> × {axisTotal} 🎛</span>} ={' '}
           <span className={`tabular-nums font-semibold ${cells > 0 ? 'text-content' : 'text-content-subtle'}`}>{cells}</span>{' '}
           cell(s) to generate
           {cells > 0 && (
@@ -174,16 +174,16 @@ export default function StudioRunSetup({
       </div>
       {cost.heavy && (
         <p data-testid="heavy-run-notice"
-          className="m-0 rounded-lg border border-amber-400/40 bg-amber-500/10 px-2.5 py-1.5 text-[0.6875rem] text-amber-200"
+          className="m-0 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[0.6875rem] text-amber-700"
           role="status">
           <span aria-hidden>⏱</span> {heavyRunNotice(cost)}
         </p>
       )}
       {selectionCount === 0 && (
-        <p className="m-0 text-amber-300 text-[0.6875rem]">Check at least one LoRA above.</p>
+        <p className="m-0 text-amber-700 text-[0.6875rem]">Check at least one LoRA above.</p>
       )}
       {combineBlocked && (
-        <p className="m-0 text-amber-300 text-[0.6875rem]" role="status">{combineBlocked}</p>
+        <p className="m-0 text-amber-700 text-[0.6875rem]" role="status">{combineBlocked}</p>
       )}
     </div>
   );

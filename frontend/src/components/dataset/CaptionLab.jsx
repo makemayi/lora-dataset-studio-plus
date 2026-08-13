@@ -126,7 +126,7 @@ export default function CaptionLab({ datasetId, imageId, currentCaption, onKeep 
         <div className="flex shrink-0 gap-2">
           {running ? (
             <button type="button" onClick={stop}
-              className="rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-200">
+              className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700">
               ■ Stop
             </button>
           ) : (
@@ -139,7 +139,7 @@ export default function CaptionLab({ datasetId, imageId, currentCaption, onKeep 
       </div>
 
       {!modelsReachable && (
-        <p className="m-0 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-1.5 text-[0.6875rem] text-amber-200">
+        <p className="m-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[0.6875rem] text-amber-700">
           Ollama isn’t reachable — start it from Settings to list vision models. Candidates can still run on JoyCaption.
         </p>
       )}
@@ -192,7 +192,7 @@ export default function CaptionLab({ datasetId, imageId, currentCaption, onKeep 
             <div className="flex min-h-[4rem] flex-1 flex-col rounded-lg bg-surface-raised p-2">
               {c.status === 'running' && <span className="text-xs text-content-subtle">Generating…</span>}
               {c.status === 'idle' && <span className="text-xs italic text-content-subtle">Not generated yet</span>}
-              {c.status === 'cancelled' && <span className="text-xs text-amber-300">Stopped before it finished</span>}
+              {c.status === 'cancelled' && <span className="text-xs text-amber-700">Stopped before it finished</span>}
               {c.status === 'error' && <span className="text-xs text-rose-400">{c.error}</span>}
               {c.status === 'done' && (
                 <>

@@ -188,7 +188,7 @@ export function SecretField({
             type="button"
             onClick={() => handleDeleteSecret(f.key, f.label)}
             title={`Remove the saved ${f.label}`}
-            className="shrink-0 rounded-md border border-rose-500/40 px-3 py-1.5 text-xs font-medium text-rose-300 hover:bg-rose-500/10"
+            className="shrink-0 rounded-md border border-rose-500/40 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50"
           >
             Remove
           </button>

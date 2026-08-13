@@ -29,8 +29,8 @@ function fmtSize(b) {
    button below downloads (3.9 GB — say where from), and the original project is
    the credit. Apache-2.0 throughout. */
 const TILING_TONE = {
-  ready: 'border-emerald-500/30 bg-emerald-500/10',
-  restart: 'border-amber-500/40 bg-amber-500/10',
+  ready: 'border-emerald-500/30 bg-emerald-50',
+  restart: 'border-amber-500/40 bg-amber-50',
   absent: 'border-border bg-surface-raised',
   unknown: 'border-border bg-surface-raised',
 }
@@ -155,11 +155,11 @@ export default function SeedVr2InstallCard({ caps, onDone }) {
         not by &ldquo;Install everything&rdquo;.
       </p>
       <p className="mt-1 text-xs text-content-subtle">
-        <a href={PACK_URL} target="_blank" rel="noreferrer" className="text-sky-300 underline hover:text-sky-200">Node pack →</a>
+        <a href={PACK_URL} target="_blank" rel="noreferrer" className="text-sky-700 underline hover:text-sky-200">Node pack →</a>
         {' · '}
-        <a href={WEIGHTS_URL} target="_blank" rel="noreferrer" className="text-sky-300 underline hover:text-sky-200">Model weights →</a>
+        <a href={WEIGHTS_URL} target="_blank" rel="noreferrer" className="text-sky-700 underline hover:text-sky-200">Model weights →</a>
         {' · '}
-        <a href={PROJECT_URL} target="_blank" rel="noreferrer" className="text-sky-300 underline hover:text-sky-200">SeedVR2 by ByteDance-Seed →</a>
+        <a href={PROJECT_URL} target="_blank" rel="noreferrer" className="text-sky-700 underline hover:text-sky-200">SeedVR2 by ByteDance-Seed →</a>
         {' — all Apache-2.0.'}
       </p>
 
@@ -173,11 +173,11 @@ export default function SeedVr2InstallCard({ caps, onDone }) {
         // installed outside this app, so the weights can all be there while the
         // capability stays dark. The real verdict comes from the backend.
         ready ? (
-          <p className="mt-3 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-content">
+          <p className="mt-3 rounded-md border border-emerald-500/30 bg-emerald-50 px-3 py-2 text-sm text-content">
             ✓ SeedVR2 is ready — it appears in the workspace bulk actions.
           </p>
         ) : (
-          <p className="mt-3 break-words rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-content">
+          <p className="mt-3 break-words rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2 text-sm text-content">
             ⚠ The weights are in place, but SeedVR2 cannot run yet — see the node pack note below.
           </p>
         )
@@ -233,7 +233,7 @@ export default function SeedVr2InstallCard({ caps, onDone }) {
         <p className="mt-1 text-content-muted">{tiling.text}</p>
         <p className="mt-1 text-xs text-content-subtle">
           <a href={TTP_URL} target="_blank" rel="noreferrer"
-            className="text-sky-300 underline hover:text-sky-200">{TTP_PACK} →</a>
+            className="text-sky-700 underline hover:text-sky-200">{TTP_PACK} →</a>
           {' — MIT. Tiling workflow contributed by SurpassHR (GitHub #32).'}
         </p>
       </div>
@@ -243,7 +243,7 @@ export default function SeedVr2InstallCard({ caps, onDone }) {
           dependencies have to land in ComfyUI's interpreter, which is exactly
           what ComfyUI-Manager does and what a bare clone does not. */}
       {needsRestart ? (
-        <p className="mt-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-content">
+        <p className="mt-3 rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2 text-sm text-content">
           ⚠ The SeedVR2 node pack is installed but ComfyUI has not loaded it yet.
           <span className="text-content-muted"> ComfyUI only registers custom nodes at
             startup — restart it, and this page turns green on its own. If it still does not,
@@ -251,13 +251,13 @@ export default function SeedVr2InstallCard({ caps, onDone }) {
             which one.</span>
         </p>
       ) : packMissing && (
-        <p className="mt-3 break-words rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-content">
+        <p className="mt-3 break-words rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2 text-sm text-content">
           ⚠ The SeedVR2 node pack is not installed in ComfyUI.
           <span className="text-content-muted"> Install it from ComfyUI itself — search
             &ldquo;SeedVR2&rdquo; in ComfyUI-Manager — then restart ComfyUI. The app does not
             install this one for you: it pulls thirteen Python packages that have to go into
             ComfyUI&rsquo;s own environment, and a plain copy of the folder would not work.{' '}
-            <a href={PACK_URL} target="_blank" rel="noreferrer" className="text-sky-300 underline hover:text-sky-200">
+            <a href={PACK_URL} target="_blank" rel="noreferrer" className="text-sky-700 underline hover:text-sky-200">
               Open the node pack on GitHub →</a></span>
         </p>
       )}

@@ -32,8 +32,8 @@ export function useKleinGenerationLoras(family = 'flux2klein') {
 
 // tone -> badge classes (theme tokens; the graphite+amber palette, no neon green).
 const BADGE_TONE = {
-  compatible: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
-  incompatible: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
+  compatible: 'border-emerald-500/40 bg-emerald-50 text-emerald-700',
+  incompatible: 'border-amber-500/40 bg-amber-50 text-amber-700',
   unknown: 'border-border-strong bg-surface-raised text-content-muted',
 }
 
@@ -151,7 +151,7 @@ export default function KleinLoraCombobox({
             {selected && <ArchBadge compatible={selected.compatible} label={selected.label} engineLabel={engineLabel} />}
             {notFound && (
               <span title="No file with this name was found under ComfyUI's models/loras — it may be renamed, not downloaded yet, or in a config the scan can't see. It's kept as typed."
-                className="shrink-0 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
+                className="shrink-0 rounded border border-amber-500/40 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
                 not on disk
               </span>
             )}
@@ -182,7 +182,7 @@ export default function KleinLoraCombobox({
             <ul role="listbox">
               {compatible.length > 0 && (
                 <>
-                  <li className="sticky top-0 bg-surface-overlay px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-300">
+                  <li className="sticky top-0 bg-surface-overlay px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
                     {engineLabel}-compatible
                   </li>
                   {compatible.map(renderRow)}

@@ -23,7 +23,7 @@ export default function FamilySelector({ families = [], active, onSelect }) {
             aria-pressed={on}
             title={`Test the ${FAMILY_LABELS[f.family] || f.family} training (${f.count} checkpoint${f.count > 1 ? 's' : ''})`}
             className={`px-2.5 py-1 rounded-lg border text-[0.75rem] leading-none transition-colors ${
-              on ? 'border-amber-400/60 bg-amber-400/15 text-amber-200 font-semibold'
+              on ? 'border-amber-400/60 bg-amber-400/15 text-amber-700 font-semibold'
                  : 'border-border bg-surface text-content-muted hover:text-content'}`}
           >
             {FAMILY_LABELS[f.family] || f.label || f.family}

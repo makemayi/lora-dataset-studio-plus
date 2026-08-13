@@ -117,7 +117,7 @@ function CheckUpdatesButton() {
     <button type="button" onClick={check} disabled={busy}
       title={available ? 'Update available — click to review' : 'Check for updates'}
       className={`${ICON_BUTTON_BASE} ${available
-        ? 'text-emerald-300 hover:text-emerald-200 hover:bg-surface'
+        ? 'text-emerald-700 hover:text-emerald-700 hover:bg-surface'
         : ICON_BUTTON_QUIET} disabled:opacity-50`}>
       {/* Both glyphs stay mounted and flip `hidden`: swapping them with a
           ternary is what Chrome's auto-translate turns into a removeChild
@@ -144,7 +144,7 @@ function HelpModeToggle({ onToggle }) {
         ? 'Help mode is on — click any ? badge to jump to the guide'
         : 'Turn on Help mode to reveal ? badges that link to the guide'}
       className={`flex w-full items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-left transition-colors ${enabled
-        ? 'bg-indigo-500/20 text-indigo-200 ring-1 ring-inset ring-indigo-400/50'
+        ? 'bg-indigo-100 text-indigo-700 ring-1 ring-inset ring-indigo-400/50'
         : 'text-content-muted hover:text-content hover:bg-surface'}`}>
       <span aria-hidden className="grid h-4 w-4 shrink-0 place-items-center rounded-full border border-current text-[10px] font-bold leading-none">?</span>
       <span>Help mode</span>
@@ -233,7 +233,7 @@ export function NavBar() {
               mobile panel — a vertical list with room to spare — because that
               is where this app is actually browsed, and a "beta" warning that
               disappears on the reader's own screen warns nobody. */}
-          <span className="px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 text-[0.5625rem] font-semibold uppercase tracking-wide leading-none md:hidden lg:inline">Beta</span>
+          <span className="px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[0.5625rem] font-semibold uppercase tracking-wide leading-none md:hidden lg:inline">Beta</span>
         </NavLink>
       )}
       {caps.studio_visible && (
@@ -416,7 +416,7 @@ function UpdateBanner() {
   return (
     <div className="mx-auto max-w-5xl px-4 pt-3">
       <div role="status"
-        className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-400/40 bg-emerald-500/10 px-3 py-2 text-sm">
+        className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm">
         <span aria-hidden>⬆</span>
         {applying ? (
           <span className="text-content">
@@ -447,13 +447,13 @@ function UpdateBanner() {
                     place via the button — a release ZIP would be the wrong artifact). */}
                 {!info.is_git && (
                   <a href={info.url} target="_blank" rel="noreferrer"
-                    className="text-emerald-300 underline">
+                    className="text-emerald-700 underline">
                     Download
                   </a>
                 )}
               </>
             )}
-            {error && <span className="text-rose-300">{error}</span>}
+            {error && <span className="text-rose-700">{error}</span>}
             <button type="button"
               onClick={() => { setInfo(null); sessionStorage.setItem('updateBannerDismissed', '1') }}
               aria-label="Dismiss update notice"

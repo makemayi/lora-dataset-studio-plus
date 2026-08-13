@@ -129,8 +129,8 @@ function SectionHeading({ id, eyebrow, title, description, badge }) {
    simple info. Jamais couleur seule : le sr-only épelle le sens. */
 function NavBadge({ badge }) {
   if (!badge) return null;
-  const cls = badge.tone === 'amber' ? 'border-amber-400/50 bg-amber-500/15 text-amber-200'
-    : badge.tone === 'indigo' ? 'border-indigo-400/50 bg-indigo-500/15 text-indigo-200'
+  const cls = badge.tone === 'amber' ? 'border-amber-200 bg-amber-50 text-amber-700'
+    : badge.tone === 'indigo' ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
     : 'border-border bg-surface-raised text-content-subtle';
   return (
     <span
@@ -157,7 +157,7 @@ function GridStatusFilter({ value, counts, onChange }) {
           <button key={f.id} type="button" onClick={() => onChange(f.id)}
             aria-pressed={on} title={f.title}
             className={`px-2 py-0.5 rounded-full border text-[0.6875rem] font-semibold tabular-nums ${
-              on ? 'border-indigo-400/60 bg-indigo-500/20 text-indigo-100'
+              on ? 'border-indigo-400/60 bg-indigo-100 text-indigo-100'
                 : 'border-border bg-surface text-content-muted hover:text-content'}`}>
             {f.label} ({counts[f.id] ?? 0})
           </button>
@@ -208,15 +208,15 @@ function GridFilterBar({
 }) {
   return (
     <div role="status"
-      className="flex items-center gap-2 flex-wrap rounded-lg border-2 border-amber-400/50 bg-amber-400/10 px-3 py-2">
-      <span className="text-amber-200 text-sm font-semibold shrink-0">🔎 Filtered view</span>
+      className="flex items-center gap-2 flex-wrap rounded-lg border-2 border-amber-200 bg-amber-400/10 px-3 py-2">
+      <span className="text-amber-700 text-sm font-semibold shrink-0">🔎 Filtered view</span>
       <span className="text-content-muted text-xs tabular-nums shrink-0">
         showing {shown} of {total}
       </span>
       <div className="flex items-center gap-1.5 flex-wrap">
         {statusLabel && (
           <span
-            className="inline-flex items-center gap-1 rounded-full border border-amber-400/50 bg-amber-500/15 pl-2 pr-1 py-0.5 text-[0.6875rem] text-amber-100">
+            className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 pl-2 pr-1 py-0.5 text-[0.6875rem] text-amber-100">
             <span aria-hidden>◧</span> {statusLabel} only
             <button type="button" onClick={onRemoveStatus}
               aria-label="Show images with any decision again"
@@ -234,7 +234,7 @@ function GridFilterBar({
         ))}
         {includes.map((t) => (
           <span key={`i-${t}`}
-            className="inline-flex items-center gap-1 rounded-full border border-indigo-400/50 bg-indigo-500/15 pl-2 pr-1 py-0.5 text-[0.6875rem] text-indigo-200">
+            className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 pl-2 pr-1 py-0.5 text-[0.6875rem] text-indigo-700">
             <span aria-hidden>◉</span> only {t}
             <button type="button" onClick={() => onRemoveInclude(t)}
               aria-label={`Stop isolating images tagged ${t}`}
@@ -888,11 +888,11 @@ export default function DatasetWorkspace({ ds, onBack }) {
     const className = chip
       ? `shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs ${
           isActive
-            ? 'border-indigo-400/60 bg-indigo-500/15 text-indigo-100'
+            ? 'border-indigo-400/60 bg-indigo-50 text-indigo-100'
             : 'border-border text-content-subtle hover:text-content'}`
       : `relative w-full rounded-md py-1.5 pl-8 pr-3 text-left text-xs ${
           isActive
-            ? 'bg-indigo-500/10 text-indigo-200'
+            ? 'bg-indigo-50 text-indigo-700'
             : 'text-content-subtle hover:bg-surface hover:text-content-muted'}`;
     return (
       <button type="button"
@@ -993,7 +993,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
         </div>
         {isStyle ? (
           <span title="This Style LoRA is always active when loaded; adjust its LoRA weight to control the effect."
-            className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-200 text-[0.6875rem]">
+            className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-cyan-50 text-cyan-700 text-[0.6875rem]">
             always-on style · no trigger
           </span>
         ) : (
@@ -1034,9 +1034,9 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   title={bodyFid
                     ? 'Body fidelity ON: captions also omit tattoos/scars/marks (they bind to the trigger), composition targets more bust/body shots, imports keep the full frame by default. Click to go back to face-only.'
                     : 'Face-only fidelity (default): the LoRA learns the face; body shape follows the prompt. Click for FULL-BODY fidelity (body shape & marks bind to the trigger too).'}
-                  className={`${MENU_ITEM} ${bodyFid ? 'text-emerald-300' : ''}`}>
+                  className={`${MENU_ITEM} ${bodyFid ? 'text-emerald-700' : ''}`}>
                   🧍 Body fidelity
-                  <span className={`ml-auto text-[0.625rem] ${bodyFid ? 'text-emerald-300 font-semibold' : 'text-content-subtle'}`}>
+                  <span className={`ml-auto text-[0.625rem] ${bodyFid ? 'text-emerald-700 font-semibold' : 'text-content-subtle'}`}>
                     {bodyFid ? '✓ on' : 'off'}
                   </span>
                 </button>
@@ -1132,8 +1132,8 @@ export default function DatasetWorkspace({ ds, onBack }) {
           )}
 
           {ds.busy && (
-            <div className="flex items-center gap-2 rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2">
-              <span className="inline-block w-4 h-4 border-2 border-amber-400/40 border-t-amber-400 rounded-full animate-spin" aria-hidden />
+            <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-400/10 px-3 py-2">
+              <span className="inline-block w-4 h-4 border-2 border-amber-200 border-t-amber-400 rounded-full animate-spin" aria-hidden />
               <span className="text-content text-sm">{activityBanner}</span>
               {(act?.kind === 'caption' || act?.kind === 'recaption') && (
                 <button type="button" onClick={ds.cancelCaption} disabled={!!act?.cancelling}
@@ -1159,7 +1159,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
               the queue, so the banner must stay reachable even between two waves
               (a moment when nothing is in flight). */}
           {(pending > 0 || act?.kind === 'improve') && (
-            <div className="flex items-center gap-3 rounded-lg border-2 border-indigo-400/60 bg-indigo-500/15 px-3 py-2.5">
+            <div className="flex items-center gap-3 rounded-lg border-2 border-indigo-400/60 bg-indigo-50 px-3 py-2.5">
               <span className="animate-pulse text-lg" aria-hidden>⏳</span>
               <div className="flex flex-col">
                 <span className="text-content text-sm font-semibold">
@@ -1193,7 +1193,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
               Collapsed by default — the count is the headline, the policy detail
               is one tap away and does not eat a 400 px screen. */}
           {refusalNote && (
-            <div className="rounded-lg border-2 border-amber-400/60 bg-amber-500/10 px-3 py-2.5">
+            <div className="rounded-lg border-2 border-amber-400/60 bg-amber-50 px-3 py-2.5">
               <div className="flex items-start gap-2">
                 <span className="text-base leading-none pt-0.5" aria-hidden>🚫</span>
                 <div className="min-w-0 flex flex-col gap-1">
@@ -1206,7 +1206,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                     </span>
                   )}
                   <details className="text-content-subtle text-[0.6875rem]">
-                    <summary className="cursor-pointer text-amber-300">
+                    <summary className="cursor-pointer text-amber-700">
                       Why, and what this does and does not mean
                     </summary>
                     <div className="mt-1 flex flex-col gap-1 break-words">
@@ -1243,9 +1243,9 @@ export default function DatasetWorkspace({ ds, onBack }) {
             {heading('images')}
             <p className="m-0 text-content-subtle text-[0.75rem] tabular-nums">
               {rescueGridImages.length} image(s) · {kept} kept
-              {triage > 0 ? <> · <span className="text-amber-300">{triage} awaiting ✓/✕</span></> : ''}
+              {triage > 0 ? <> · <span className="text-amber-700">{triage} awaiting ✓/✕</span></> : ''}
               {rescueReviewCount > 0
-                ? <> · <span className="text-indigo-300">{rescueReviewCount} Klein rescue pair(s) in Curation</span></>
+                ? <> · <span className="text-indigo-700">{rescueReviewCount} Klein rescue pair(s) in Curation</span></>
                 : ''}
               {kept > 0 ? ` · ${keptCaptioned}/${kept} captioned` : ''}
               {watermarkDetected > 0 ? ` · ${watermarkDetected} watermark(s) flagged` : ''}
@@ -1433,7 +1433,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                     When the reason is a missing install, the sentence is also the
                     way OUT: a link to the Setup step that installs it. */}
                 {!isConceptual && faceAnalysis.blocked && (
-                  <p className="m-0 basis-full text-sky-300/90 text-[0.6875rem]">
+                  <p className="m-0 basis-full text-sky-700/90 text-[0.6875rem]">
                     ℹ {faceAnalysis.reason}
                     {faceAnalysis.setupRoute && (
                       <> — <a href={faceAnalysis.setupRoute} className="underline">open Setup</a></>
@@ -1498,7 +1498,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                       : 'Auto-crop OFF: border watermarks are repainted (LaMa/Klein) instead of cropped. Click to allow cropping again. Saved as a preference.'}
                     className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold disabled:opacity-40 ${allowAutoCrop
                       ? 'border-border bg-surface text-content-subtle hover:text-content'
-                      : 'border-amber-400/50 bg-amber-500/10 text-amber-200'}`}>
+                      : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
                     {allowAutoCrop ? '✂ Auto-crop on' : '✂ Auto-crop off'}
                   </button>
                   <button type="button"
@@ -1513,7 +1513,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                         ? 'Removes them: border marks are cropped, small off-center marks are inpainted (LaMa), on-subject marks are flagged for manual review'
                         : 'Auto-crop off: border marks are repainted (LaMa) instead of cropped; large/on-subject marks are flagged for manual review')
                       : 'Removes border marks by cropping. Inpainting (LaMa) needs a one-time install — use ⬇ Install inpainting next to this button; off-center marks are skipped until then'}
-                    className="px-3 py-1.5 rounded-lg bg-amber-500/15 border border-amber-400/40 text-amber-200 text-sm font-semibold disabled:opacity-40">
+                    className="px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm font-semibold disabled:opacity-40">
                     🧽 Clean ({watermarkDetected})
                   </button>
                   </>
@@ -1552,7 +1552,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                         : '');
                     }}
                     title="The detector is a review flag, not a verdict — it does flag clean images sometimes, which is what 🔍 Review flagged is for. This rejects them all at once instead; rejected images stay on disk and can be brought back."
-                    className="px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-sm disabled:opacity-40 scroll-mt-20">
+                    className="px-3 py-1.5 rounded-lg bg-red-50 border border-red-500/30 text-red-600 text-sm disabled:opacity-40 scroll-mt-20">
                     ✕ Reject all flagged ({flagged.rejectable})
                   </button>
                 )}
@@ -1564,7 +1564,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   </p>
                 )}
                 {rejectFlaggedNote && (
-                  <p className="m-0 basis-full text-emerald-300/90 text-[0.6875rem]">
+                  <p className="m-0 basis-full text-emerald-700/90 text-[0.6875rem]">
                     {rejectFlaggedNote}
                   </p>
                 )}
@@ -1598,7 +1598,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   <button type="button" onClick={() => setInstallInpaintOpen((v) => !v)}
                     aria-expanded={installInpaintOpen}
                     title="Install the watermark-inpainting package (LaMa) so off-center marks can be repainted instead of only cropped. One-time download (~hundreds of MB)."
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-dashed border-amber-400/50 bg-amber-500/5 text-amber-200/90 text-sm hover:bg-amber-500/10">
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-dashed border-amber-200 bg-amber-500/5 text-amber-700/90 text-sm hover:bg-amber-50">
                     ⬇ Install inpainting
                     <span className="text-content-subtle text-[0.625rem] font-normal">one-time · ~hundreds of MB</span>
                     <span aria-hidden className="text-content-subtle text-xs">{installInpaintOpen ? '▴' : '▾'}</span>
@@ -1613,13 +1613,13 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   restart or the 600 s probe TTL (the backend drops the import cache on
                   success), and the affordance above unmounts on its own. */}
               {installInpaintOpen && !caps.watermark_inpaint && (
-                <div className="rounded-lg border border-amber-400/40 bg-amber-500/5 p-3 flex flex-col gap-2">
+                <div className="rounded-lg border border-amber-200 bg-amber-500/5 p-3 flex flex-col gap-2">
                   <div className="flex items-start gap-2">
                     <span aria-hidden className="text-lg leading-none">🧽</span>
                     <div className="flex flex-col">
-                      <span className="text-amber-200 text-sm font-semibold">Install watermark inpainting (LaMa)</span>
+                      <span className="text-amber-700 text-sm font-semibold">Install watermark inpainting (LaMa)</span>
                       <span className="text-content-subtle text-[0.6875rem]">
-                        Adds the <code className="text-amber-200/90">simple-lama-inpainting</code> package
+                        Adds the <code className="text-amber-700/90">simple-lama-inpainting</code> package
                         (pulls a CPU torch — one-time download, ~hundreds of MB). No restart, no GPU:
                         once done, ⬇ inpaints small off-center marks instead of skipping them.
                       </span>
@@ -1643,7 +1643,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                       if (window.confirm(`Permanently delete the ${unused} rejected/failed image(s) (files included)?`)) ds.purgeUnused();
                     }}
                     title="Permanently delete rejected and failed images"
-                    className="px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-sm disabled:opacity-40">
+                    className="px-3 py-1.5 rounded-lg bg-red-50 border border-red-500/30 text-red-600 text-sm disabled:opacity-40">
                     🧹 Purge rejected/failed ({unused})
                   </button>
                   <span className="text-content-subtle text-[0.6875rem]">
@@ -1715,7 +1715,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                     explainer panel; the count is spelled out ("N checked") so a green 0
                     reads as a REAL result, not a scan that never ran. */}
                 {isStyle ? (
-                  <span className={`ml-auto text-[0.8125rem] ${keptUncaptioned ? 'text-amber-300' : 'text-emerald-400'}`}
+                  <span className={`ml-auto text-[0.8125rem] ${keptUncaptioned ? 'text-amber-700' : 'text-emerald-400'}`}
                     title="Every Style image needs a content-only caption: describe subject, action and setting, but do not name the aesthetic, medium or artist. No activation trigger is added.">
                     {keptUncaptioned
                       ? `⚠ ${keptUncaptioned} missing · content-only captions required · no trigger`
@@ -1772,7 +1772,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                           that names <em>the concept itself</em> — the recurring element every image in
                           the set shares. On a concept LoRA these words must stay OUT of the captions:
                           they bind the concept to the text instead of to your trigger word{' '}
-                          <code className="text-indigo-300">{d.trigger_word || 'your trigger'}</code>.
+                          <code className="text-indigo-700">{d.trigger_word || 'your trigger'}</code>.
                           Describe the person and scene freely, but leave the concept
                           {d.concept_desc ? <> (<em className="text-content-muted">{d.concept_desc}</em>)</> : null}
                           {' '}unspoken so it binds to the trigger, not the caption.
@@ -1783,7 +1783,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                           that describes <em>who the person is</em> — hair, eye or skin colour, facial
                           features. On a character LoRA these words must stay OUT of the captions: they
                           dilute the identity into the text instead of binding it to your trigger word{' '}
-                          <code className="text-indigo-300">{d.trigger_word || 'your trigger'}</code>.
+                          <code className="text-indigo-700">{d.trigger_word || 'your trigger'}</code>.
                         </p>
                       )}
                     </div>
@@ -1794,7 +1794,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   {/* What was checked — the numbers behind the badge. */}
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-content-subtle tabular-nums">
                     <span><strong className="text-content-muted">{d.caption_leak?.captioned ?? 0}</strong> captions checked</span>
-                    <span className={d.caption_leak?.leaking ? 'text-amber-300' : 'text-emerald-400'}>
+                    <span className={d.caption_leak?.leaking ? 'text-amber-700' : 'text-emerald-400'}>
                       <strong>{d.caption_leak?.leaking ?? 0}</strong> leaking
                     </span>
                     <span className="text-content-subtle/70">re-scanned live on every caption change</span>
@@ -1840,7 +1840,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                           not a check that didn’t run.</>}
                     </p>
                   ) : (
-                    <div className="rounded-lg border border-amber-400/40 bg-amber-500/5 p-2.5 flex flex-col gap-2">
+                    <div className="rounded-lg border border-amber-200 bg-amber-500/5 p-2.5 flex flex-col gap-2">
                       {/* Targeted re-caption is scoped, so it stays disabled only while a
                           full batch/other vision pass is running (ds.captioning) or another
                           targeted row is in flight — the offending row shows its own spinner. */}
@@ -1848,7 +1848,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                         const recaptionLocked = ds.busy || ds.captioning || ds.recaptioningIds.size > 0;
                         return (
                           <div className="flex items-start justify-between gap-2 flex-wrap">
-                            <span className="text-amber-300 text-[0.8125rem] font-semibold">
+                            <span className="text-amber-700 text-[0.8125rem] font-semibold">
                               {isConcept
                                 ? <>Captions naming the concept ({d.caption_leak?.leaking}) — remove the concept words, or 🔄 Re-caption. Edits save when you click away.</>
                                 : <>Captions leaking identity ({d.caption_leak?.leaking}) — remove the highlighted words, or 🔄 Re-caption. Edits save when you click away.</>}
@@ -1861,7 +1861,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                                 title={isConcept
                                   ? 'Re-generate every leaking caption while keeping the concept unspoken'
                                   : 'Re-generate every leaking caption without describing identity (face/hair)'}
-                                className="shrink-0 px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-200 text-[0.75rem] font-semibold border border-amber-400/40 hover:bg-amber-500/25 disabled:opacity-40">
+                                className="shrink-0 px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700 text-[0.75rem] font-semibold border border-amber-200 hover:bg-amber-500/25 disabled:opacity-40">
                                 🔄 Re-caption all leaking ({leakingImages.length})
                               </button>
                             )}
@@ -1884,7 +1884,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                                 <p aria-hidden className="m-0 text-[0.6875rem] leading-relaxed text-content-subtle">
                                   {splitCaptionByLeakTerms(img.caption, img.leak_terms).map((run, idx) => (
                                     run.leak
-                                      ? <mark key={idx} className="bg-red-500/25 text-red-300 rounded px-0.5">{run.text}</mark>
+                                      ? <mark key={idx} className="bg-red-500/25 text-red-600 rounded px-0.5">{run.text}</mark>
                                       : <span key={idx}>{run.text}</span>
                                   ))}
                                 </p>
@@ -2112,11 +2112,11 @@ export default function DatasetWorkspace({ ds, onBack }) {
               {caps.studio_visible ? (
                 <button id="ds-studio-launcher" type="button" data-workspace-focus
                   onClick={() => navigate(`/studio?dataset=${d.id}`)}
-                  className="flex items-center gap-2 rounded-lg border border-purple-500/30 bg-purple-500/5 px-3 py-2.5 text-left hover:bg-purple-500/10 transition-colors scroll-mt-20">
+                  className="flex items-center gap-2 rounded-lg border border-purple-500/30 bg-purple-500/5 px-3 py-2.5 text-left hover:bg-purple-50 transition-colors scroll-mt-20">
                   <span aria-hidden>🎛️</span>
                   <span className="text-content font-semibold text-sm">LoRA testing studio</span>
                   {d.best_settings && (
-                    <span className="text-amber-300 text-[0.6875rem]" title="Saved winning settings">
+                    <span className="text-amber-700 text-[0.6875rem]" title="Saved winning settings">
                       ★ {fmt(d.best_settings.strength)}
                     </span>
                   )}

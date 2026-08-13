@@ -58,7 +58,7 @@ export default function StackVariantsGrid({
                 <th key={variantKey(v)} scope="col"
                   title={comboLabelText(v.weights)}
                   className={`px-1.5 py-1 text-[0.6875rem] font-semibold rounded ${v.active
-                    ? 'bg-sky-500/15 text-sky-200 border border-sky-400/50'
+                    ? 'bg-sky-50 text-sky-200 border border-sky-400/50'
                     : 'text-content border border-transparent'}`}>
                   <span className="tabular-nums">{weightVectorText(v.weights)}</span>
                   {v.active && <span className="ml-1 font-normal text-[0.625rem]">(shown)</span>}
@@ -79,7 +79,7 @@ export default function StackVariantsGrid({
                   return (
                     <td key={variantKey(v)}
                       className={`px-1.5 py-0.5 text-center text-[0.6875rem] tabular-nums rounded ${row.changed
-                        ? 'bg-amber-400/15 text-amber-200 font-semibold'
+                        ? 'bg-amber-400/15 text-amber-700 font-semibold'
                         : 'text-content-muted'}`}
                       title={row.changed
                         ? `${row.delta > 0 ? '+' : ''}${row.delta.toFixed(2)} vs the run shown`
@@ -124,8 +124,8 @@ export default function StackVariantsGrid({
                 const s = variantSummary(v);
                 return (
                   <td key={variantKey(v)} className="px-1.5 py-0.5 text-center text-[0.6875rem] tabular-nums">
-                    <span className="text-green-300">👍 {s.likes}</span>{' '}
-                    <span className="text-red-300">👎 {s.dislikes}</span>
+                    <span className="text-green-700">👍 {s.likes}</span>{' '}
+                    <span className="text-red-600">👎 {s.dislikes}</span>
                     <span className="ml-1 text-content-subtle"
                       title="Likes minus dislikes on this variant only">
                       net {s.net > 0 ? `+${s.net}` : s.net}
@@ -146,7 +146,7 @@ export default function StackVariantsGrid({
                     <button type="button"
                       onClick={() => onUseWeights?.(weightsIntoStackMap(members, v.weights))}
                       title="Load these weights back into the sliders, then run again"
-                      className="rounded border border-sky-400/40 bg-sky-400/10 px-1.5 py-0.5 text-[0.625rem] text-sky-200">
+                      className="rounded border border-sky-200 bg-sky-400/10 px-1.5 py-0.5 text-[0.625rem] text-sky-200">
                       Use these weights
                     </button>
                   </div>

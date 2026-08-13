@@ -4,8 +4,8 @@ import {
 import { firstShotBounds } from './videoClipEdit'
 
 const TONE = {
-  ok: 'bg-emerald-500/15 text-emerald-200',
-  info: 'bg-sky-500/15 text-sky-200',
+  ok: 'bg-emerald-50 text-emerald-700',
+  info: 'bg-sky-50 text-sky-200',
   idle: 'bg-surface-raised text-content-subtle',
   error: 'bg-rose-500/15 text-rose-200',
 }

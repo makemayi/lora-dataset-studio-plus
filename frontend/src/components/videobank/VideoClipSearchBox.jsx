@@ -84,7 +84,7 @@ export default function VideoClipSearchBox({
 
       {blocked ? (
         <div className="mt-2 space-y-2">
-          <p className="text-xs text-amber-300">⚠ {blocked}</p>
+          <p className="text-xs text-amber-700">⚠ {blocked}</p>
           {/* Only offered when a pass would actually help — an install that
               cannot run CLIP is not one click away from being able to. */}
           {status?.available !== false && (Number(counts?.clips) || 0) > 0 && (
@@ -120,14 +120,14 @@ export default function VideoClipSearchBox({
               "without" — it ignores it — so the results come back full and
               confident carrying exactly what was asked to be gone. */}
           {negated && (
-            <p className="text-xs text-amber-300">
+            <p className="text-xs text-amber-700">
               ⚠ “without/no” is ignored by the search. Type
               {' '}<code className="font-mono">-{negated.split(/\s+/).slice(-1)[0]}</code>{' '}
               instead to push it down the ranking.
             </p>
           )}
 
-          {error && <p className="text-xs text-rose-300">✕ {error}</p>}
+          {error && <p className="text-xs text-rose-700">✕ {error}</p>}
 
           {/* WHAT this bank's search can reach. CLIP finds what is visible;
               captions find what HAPPENS. Someone who does not know which halves
@@ -140,7 +140,7 @@ export default function VideoClipSearchBox({
               so the model has to be visible, not implied. */}
           {captionModelNote(captionModel) && (
             <p className={`text-xs ${captionModel?.cached === false
-              ? 'text-amber-300' : 'text-content-subtle'}`}>
+              ? 'text-amber-700' : 'text-content-subtle'}`}>
               {captionModelNote(captionModel)}
             </p>
           )}

@@ -12,12 +12,12 @@ import { HelpBadge } from '../../help/HelpMode';
    backend gate (ai-toolkit absent → 409). */
 
 const VERDICT = {
-  ready: { icon: '🟢', label: 'Ready to train', cls: 'border-emerald-400/40 bg-emerald-500/10' },
-  warnings: { icon: '🟡', label: 'Almost ready', cls: 'border-amber-400/40 bg-amber-500/10' },
-  blocked: { icon: '🔴', label: 'Not ready', cls: 'border-red-400/40 bg-red-500/10' },
+  ready: { icon: '🟢', label: 'Ready to train', cls: 'border-emerald-200 bg-emerald-50' },
+  warnings: { icon: '🟡', label: 'Almost ready', cls: 'border-amber-200 bg-amber-50' },
+  blocked: { icon: '🔴', label: 'Not ready', cls: 'border-red-400/40 bg-red-50' },
 };
 const ROW_ICON = { ok: '✓', warn: '⚠', fail: '✕' };
-const ROW_CLS = { ok: 'text-emerald-400', warn: 'text-amber-300', fail: 'text-red-300' };
+const ROW_CLS = { ok: 'text-emerald-400', warn: 'text-amber-700', fail: 'text-red-600' };
 
 export default function TrainingReadiness({ datasetId, trainType, variant, refreshKey, onJump,
                                             onOverrideChange }) {

@@ -124,7 +124,7 @@ export default function PersonPreflightDialog({
         </div>
 
         {phase !== 'choose' ? (
-          <div className="rounded-md border border-indigo-400/40 bg-indigo-500/10 p-3 text-sm space-y-1">
+          <div className="rounded-md border border-indigo-200 bg-indigo-50 p-3 text-sm space-y-1">
             <p className="font-semibold text-content">
               {phase === 'stopping' ? 'Stopping the check…' : 'Checking your folders…'}
             </p>
@@ -139,7 +139,7 @@ export default function PersonPreflightDialog({
         ) : (
           <>
             {headline ? (
-              <p className="rounded-md border border-emerald-400/40 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-200">
+              <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
                 {headline}
               </p>
             ) : (
@@ -152,8 +152,8 @@ export default function PersonPreflightDialog({
               <ul className="space-y-1.5">
                 {rows.map((r) => {
                   const on = picked.includes(r.subfolder)
-                  const tone = r.tone === 'ok' ? 'text-emerald-300'
-                    : r.tone === 'warn' ? 'text-amber-300' : 'text-content-subtle'
+                  const tone = r.tone === 'ok' ? 'text-emerald-700'
+                    : r.tone === 'warn' ? 'text-amber-700' : 'text-content-subtle'
                   return (
                     <li key={r.subfolder || '(root)'}>
                       <label className="flex items-start gap-2 rounded-lg bg-surface-raised p-2 text-sm">
@@ -179,7 +179,7 @@ export default function PersonPreflightDialog({
 
             {/* Every honest limit, in the order the user needs them. */}
             <div className="space-y-1 text-xs text-content-subtle">
-              {pickedSaving && <p className="text-emerald-300">{pickedSaving}</p>}
+              {pickedSaving && <p className="text-emerald-700">{pickedSaving}</p>}
               {notReached && <p>{notReached}</p>}
               <p>
                 A sample of {plan?.sample_size || 15} images cannot prove a folder
@@ -193,8 +193,8 @@ export default function PersonPreflightDialog({
 
         {error && (
           <div role="alert"
-            className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2">
-            <span className="block whitespace-pre-wrap break-words text-xs leading-relaxed text-red-200">
+            className="rounded-md border border-red-200 bg-red-50 px-3 py-2">
+            <span className="block whitespace-pre-wrap break-words text-xs leading-relaxed text-red-700">
               {error}
             </span>
           </div>

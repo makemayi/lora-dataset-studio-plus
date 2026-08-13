@@ -57,7 +57,7 @@ test('the dialog can show a refusal inside itself, next to the inputs that cause
   //  • the card is a flex column with max-h-[90vh], so the alert was SQUASHED to
   //    a 20-px sliver of clipped text once "Adjust settings" was unfolded;
   //  • it landed below the fold, because the card scrolls inside itself.
-  assert.match(dialog, /className="shrink-0 rounded-lg border border-red-500\/40/);
+  assert.match(dialog, /className="shrink-0 rounded-lg border border-red-200/);
   assert.match(dialog, /if \(error && card\) card\.scrollTop = card\.scrollHeight;/);
   // …and a long backend refusal scrolls inside its own box instead of pushing
   // ▶ Continue off the screen.

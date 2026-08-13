@@ -101,9 +101,9 @@ export default function PublishHfModal({ datasetId, onClose }) {
 
         {phase === 'done' ? (
           <div className="flex flex-col gap-2 py-2">
-            <p className="text-emerald-300 text-sm font-semibold">✓ Published{result?.count ? ` (${result.count} images)` : ''}</p>
+            <p className="text-emerald-700 text-sm font-semibold">✓ Published{result?.count ? ` (${result.count} images)` : ''}</p>
             <a href={result.repo_url} target="_blank" rel="noreferrer"
-              className="text-indigo-300 underline break-all text-sm">{result.repo_url}</a>
+              className="text-indigo-700 underline break-all text-sm">{result.repo_url}</a>
             <div className="flex justify-end pt-2">
               <button type="button" onClick={onClose}
                 className="px-3 py-1.5 rounded-lg bg-gradient-primary text-white text-sm font-semibold">Done</button>
@@ -124,7 +124,7 @@ export default function PublishHfModal({ datasetId, onClose }) {
                 {[['private', '🔒 Private'], ['public', '🌐 Public']].map(([v, lbl]) => (
                   <label key={v}
                     className={`flex-1 flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer text-sm ${
-                      visibility === v ? 'border-indigo-500 bg-indigo-500/10 text-content' : 'border-border text-content-muted'}`}>
+                      visibility === v ? 'border-indigo-500 bg-indigo-50 text-content' : 'border-border text-content-muted'}`}>
                     <input type="radio" name="hf-visibility" value={v} checked={visibility === v}
                       onChange={() => setVisibility(v)} disabled={busy} />
                     {lbl}
@@ -162,7 +162,7 @@ export default function PublishHfModal({ datasetId, onClose }) {
             </p>
 
             {phase === 'error' && (
-              <div className="rounded-lg border border-rose-400/50 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+              <div className="rounded-lg border border-rose-400/50 bg-rose-50 px-3 py-2 text-sm text-rose-200">
                 {result?.error || 'Publish failed.'}
                 {readOnly && (
                   <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noreferrer"

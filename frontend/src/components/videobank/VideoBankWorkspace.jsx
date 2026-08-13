@@ -340,7 +340,7 @@ export default function VideoBankWorkspace({ bankId, onBack, onGone }) {
 
       <p className="text-sm text-content-muted">{countsSummary(counts)}</p>
       {problems.map((p) => (
-        <p key={p} className="text-xs text-amber-300">⚠ {p}</p>
+        <p key={p} className="text-xs text-amber-700">⚠ {p}</p>
       ))}
 
       {/* What to do next, as ONE sentence. Four equal buttons and no order is
@@ -349,7 +349,7 @@ export default function VideoBankWorkspace({ bankId, onBack, onGone }) {
       <div className="rounded-lg bg-surface p-3 text-sm">
         <p className="text-content">{step.text}</p>
         {step.blocked && (
-          <p className="mt-1 text-xs text-amber-300">⚠ {step.blocked.why}</p>
+          <p className="mt-1 text-xs text-amber-700">⚠ {step.blocked.why}</p>
         )}
       </div>
 
@@ -376,19 +376,19 @@ export default function VideoBankWorkspace({ bankId, onBack, onGone }) {
         <button type="button" onClick={() => setPromoting(true)}
           disabled={busy || !counts.keep}
           title={!counts.keep ? 'Keep some shots first' : undefined}
-          className="rounded-md border border-indigo-500/60 bg-indigo-500/15 px-3 py-1.5 text-xs font-semibold text-indigo-200 hover:bg-indigo-500/25 disabled:opacity-40">
+          className="rounded-md border border-indigo-500/60 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-500/25 disabled:opacity-40">
           🎬 {PASS_LABELS.promote}
         </button>
         {busy && (
           <button type="button" onClick={cancel}
-            className="rounded-md border border-rose-500/60 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-200 hover:bg-rose-500/20">
+            className="rounded-md border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-200 hover:bg-rose-500/20">
             ⏹ Stop
           </button>
         )}
       </div>
 
       {busy && (
-        <div role="status" className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-2.5">
+        <div role="status" className="rounded-lg border border-amber-500/50 bg-amber-50 p-2.5">
           <p className="text-sm text-amber-100">⏳ {activityLine(activity, counts)}</p>
           <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-black/30">
             <div className={`h-full bg-amber-400 ${activityPercent(activity, counts) == null ? 'w-1/3 animate-pulse' : ''}`}
@@ -399,7 +399,7 @@ export default function VideoBankWorkspace({ bankId, onBack, onGone }) {
               117" while most of the bank is already cut. Saying what is kept is
               what makes stopping a one-hour pass feel allowed. */}
           {resumeSafetyNote(activity, counts) && (
-            <p className="mt-1.5 text-xs text-amber-200/80">
+            <p className="mt-1.5 text-xs text-amber-700/80">
               ↩ {resumeSafetyNote(activity, counts)}
             </p>
           )}
@@ -474,7 +474,7 @@ export default function VideoBankWorkspace({ bankId, onBack, onGone }) {
         ))}
         {sourceId && (
           <button type="button" onClick={() => setSourceId(null)}
-            className="rounded-full border border-indigo-500/60 bg-indigo-500/15 px-2.5 py-1 text-[0.6875rem] font-semibold text-indigo-200">
+            className="rounded-full border border-indigo-500/60 bg-indigo-50 px-2.5 py-1 text-[0.6875rem] font-semibold text-indigo-700">
             one file only ✕
           </button>
         )}

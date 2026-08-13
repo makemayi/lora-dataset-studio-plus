@@ -137,7 +137,7 @@ function UpdatesCard() {
             present after a git-aware "Check for updates" (force). */}
         {s && (s.compare_url || s.commits_url) && (
           <a href={s.compare_url || s.commits_url} target="_blank" rel="noreferrer"
-            className="text-xs font-medium text-sky-300 underline hover:text-sky-200">
+            className="text-xs font-medium text-sky-700 underline hover:text-sky-200">
             {s.compare_url ? 'See what’s in this update ↗' : 'Browse recent commits ↗'}
           </a>
         )}
@@ -191,7 +191,7 @@ function UpdatesCard() {
           ) : s.update_available ? (
             <p className="text-content">
               Update available{s.latest ? ` — v${s.latest}` : ''} —{' '}
-              <a href={s.url} target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline">
+              <a href={s.url} target="_blank" rel="noreferrer" className="font-semibold text-emerald-700 underline">
                 download the latest release
               </a>{' '}and replace the folder.
             </p>

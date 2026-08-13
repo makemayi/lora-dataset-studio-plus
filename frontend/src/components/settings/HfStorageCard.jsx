@@ -75,7 +75,7 @@ export default function HfStorageCard({ config, setField, configDefaults }) {
 
   const summary = data ? storageSummary(data) : null
   const caches = sortedCaches(data)
-  const toneClass = { ok: 'text-emerald-300', blocked: 'text-rose-300', unknown: 'text-amber-300' }
+  const toneClass = { ok: 'text-emerald-700', blocked: 'text-rose-700', unknown: 'text-amber-700' }
   return (
     <Card
       title="Hugging Face storage"
@@ -95,7 +95,7 @@ export default function HfStorageCard({ config, setField, configDefaults }) {
           href="https://huggingface.co/settings/storage"
           target="_blank"
           rel="noreferrer"
-          className="text-xs font-medium text-sky-300 underline hover:text-sky-200"
+          className="text-xs font-medium text-sky-700 underline hover:text-sky-200"
         >
           Open Hugging Face storage ↗
         </a>
@@ -121,7 +121,7 @@ export default function HfStorageCard({ config, setField, configDefaults }) {
                 type="button"
                 onClick={removeAll}
                 disabled={busy}
-                className="rounded-md border border-rose-500/40 px-3 py-1.5 text-xs font-medium text-rose-300 hover:bg-rose-500/10 disabled:opacity-50"
+                className="rounded-md border border-rose-500/40 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
               >
                 Delete all
               </button>
@@ -146,7 +146,7 @@ export default function HfStorageCard({ config, setField, configDefaults }) {
                       {formatBytes(cache.used_bytes)}
                       {cache.family ? ` · ${cache.family}` : ''}
                       {' · '}
-                      <span className={safety.level === 'safe' ? 'text-emerald-300' : 'text-amber-300'}>
+                      <span className={safety.level === 'safe' ? 'text-emerald-700' : 'text-amber-700'}>
                         {safety.label}
                       </span>
                     </HelpText>
@@ -160,7 +160,7 @@ export default function HfStorageCard({ config, setField, configDefaults }) {
                     type="button"
                     onClick={() => removeOne(cache)}
                     disabled={busy || pending === cache.name}
-                    className="shrink-0 self-start rounded-md border border-rose-500/40 px-3 py-1.5 text-xs font-medium text-rose-300 hover:bg-rose-500/10 disabled:opacity-50"
+                    className="shrink-0 self-start rounded-md border border-rose-500/40 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
                   >
                     {pending === cache.name ? 'Deleting…' : 'Delete'}
                   </button>

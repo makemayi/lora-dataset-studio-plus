@@ -79,14 +79,14 @@ export default function CanvasBlendPanel({
       {/* Mixed families: why the toggle is dead, in the panel and not only in a
           tooltip a touch screen never shows. */}
       {familyReason && (
-        <p className="m-0 rounded-lg border border-amber-400/40 bg-amber-500/10 px-2.5 py-1.5 text-amber-200 text-[0.6875rem]"
+        <p className="m-0 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-amber-700 text-[0.6875rem]"
           role="status">
           {familyReason}
         </p>
       )}
 
       {blend && blocker && !familyReason && (
-        <p className="m-0 rounded-lg border border-amber-400/40 bg-amber-500/10 px-2.5 py-1.5 text-amber-200 text-[0.6875rem]"
+        <p className="m-0 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-amber-700 text-[0.6875rem]"
           role="status">
           {blocker}
         </p>
@@ -119,11 +119,11 @@ export default function CanvasBlendPanel({
                   set={canvasStackWeightSet(sets, e)}
                   onToggleChip={(w) => onToggleChip?.(k, w)}
                   trigger={e.triggerWord ? (
-                    <code className="shrink-0 rounded border border-indigo-400/40 bg-indigo-500/10 px-1.5 py-0.5 text-[0.625rem] font-semibold text-indigo-300">
+                    <code className="shrink-0 rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[0.625rem] font-semibold text-indigo-700">
                       {e.triggerWord}
                     </code>
                   ) : (
-                    <span className="shrink-0 text-amber-300/80 text-[0.625rem]"
+                    <span className="shrink-0 text-amber-700/80 text-[0.625rem]"
                       title="This dataset has no trigger word — nothing of it is added to the prompt">
                       no trigger
                     </span>
@@ -146,7 +146,7 @@ export default function CanvasBlendPanel({
                   {triggers.map((t, i) => (
                     <span key={t}>
                       {i > 0 && ', '}
-                      <code className="rounded border border-indigo-400/40 bg-indigo-500/10 px-1 text-indigo-300">{t}</code>
+                      <code className="rounded border border-indigo-200 bg-indigo-50 px-1 text-indigo-700">{t}</code>
                     </span>
                   ))}
                 </>

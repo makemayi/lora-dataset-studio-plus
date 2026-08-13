@@ -73,8 +73,8 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
               // the modal it opens is where Keep and Discard live.
               <button type="button" onClick={onEditRef} disabled={busy}
                 title="Open the edit to compare it with the current reference, then Keep or Discard"
-                className="px-2 py-0.5 rounded-full border border-amber-500/40 bg-amber-500/10
-                           text-amber-300 text-[0.625rem] font-medium disabled:opacity-40">
+                className="px-2 py-0.5 rounded-full border border-amber-500/40 bg-amber-50
+                           text-amber-700 text-[0.625rem] font-medium disabled:opacity-40">
                 ✦ {waiting} →
               </button>
             )}

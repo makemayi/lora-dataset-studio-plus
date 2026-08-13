@@ -94,7 +94,7 @@ function BackupOverlay({ job, onDownload, onOpenFolder, onDismiss }) {
       )}
       {error && (
         <>
-          <p className="text-sm text-rose-300">{job.error || 'Something went wrong.'}</p>
+          <p className="text-sm text-rose-700">{job.error || 'Something went wrong.'}</p>
           <div className="flex justify-end pt-1">
             <button type="button" onClick={onDismiss}
               className="rounded-lg bg-surface px-3 py-1.5 text-sm text-content hover:bg-surface-raised">
@@ -127,7 +127,7 @@ function RestoreOverlay({ job, onDismiss }) {
         </>
       )}
       {done && <Notes notes={report.notes} />}
-      {error && <p className="text-sm text-rose-300">{job.error || 'Something went wrong.'}</p>}
+      {error && <p className="text-sm text-rose-700">{job.error || 'Something went wrong.'}</p>}
       {(done || error) && (
         <div className="flex justify-end pt-1">
           <button type="button" onClick={onDismiss}

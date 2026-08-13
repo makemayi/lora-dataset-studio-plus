@@ -51,7 +51,7 @@ function ComparePane({ label, url, alt, accent }) {
   return (
     <figure className="m-0 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-white/15">
       <figcaption className={`shrink-0 border-b border-white/10 bg-black/70 px-2 py-1 text-[11px] font-semibold ${
-        accent ? 'text-indigo-200' : 'text-white/80'}`}>
+        accent ? 'text-indigo-700' : 'text-white/80'}`}>
         {label}
       </figcaption>
       <div className="min-h-0 flex-1 p-1">
@@ -423,7 +423,7 @@ export default function DatasetLightbox({
               ? `Hide the original next to ${alt}`
               : `Show the original next to ${alt}`}
             title={COMPARE_HELP}
-            className="min-h-9 w-full sm:w-auto px-3 py-1.5 rounded-lg border border-indigo-400/50 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-100 text-xs font-semibold">
+            className="min-h-9 w-full sm:w-auto px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-100 hover:bg-indigo-500/30 text-indigo-100 text-xs font-semibold">
             {compareMode === 'derived' ? '⊟ Exit comparison' : '⧉ Compare with original'}
           </button>
         )}
@@ -440,13 +440,13 @@ export default function DatasetLightbox({
               ? `Hide the reference photo next to ${alt}`
               : `Show the reference photo next to ${alt}`}
             title={REFERENCE_COMPARE_HELP}
-            className="min-h-9 w-full sm:w-auto px-3 py-1.5 rounded-lg border border-sky-400/50 bg-sky-500/20 hover:bg-sky-500/30 text-sky-100 text-xs font-semibold">
+            className="min-h-9 w-full sm:w-auto px-3 py-1.5 rounded-lg border border-sky-400/50 bg-sky-100 hover:bg-sky-500/30 text-sky-100 text-xs font-semibold">
             {compareMode === 'reference' ? '⊟ Exit comparison' : '◐ Compare with reference'}
           </button>
         )}
         {refCompare && !refCompare.available && (
           <span role="note"
-            className="max-w-full break-words rounded-lg border border-amber-400/40 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-100">
+            className="max-w-full break-words rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-100">
             <span aria-hidden>⚠ </span>{refCompare.reason}
           </span>
         )}
@@ -455,7 +455,7 @@ export default function DatasetLightbox({
              "there is no compare button here" is otherwise indistinguishable
              from a bug. */
           <span role="note"
-            className="max-w-full break-words rounded-lg border border-amber-400/40 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-100">
+            className="max-w-full break-words rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-100">
             <span aria-hidden>⚠ </span>{compare.reason}
           </span>
         )}
@@ -509,7 +509,7 @@ export default function DatasetLightbox({
             <button type="button"
               onClick={improve(btn.id, btn.disabled)} disabled={btn.disabled}
               aria-busy={improvementActive} title={btn.title}
-              className="min-h-9 w-full sm:w-auto px-3 py-1.5 rounded-lg border border-indigo-400/50 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-100 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-45">
+              className="min-h-9 w-full sm:w-auto px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-100 hover:bg-indigo-500/30 text-indigo-100 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-45">
               {btn.label}
             </button>
             {/* Klein's note goes BETWEEN the two buttons in the rail, and only

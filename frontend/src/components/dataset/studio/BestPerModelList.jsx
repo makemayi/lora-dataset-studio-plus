@@ -34,7 +34,7 @@ export default function BestPerModelList({ items, breakdown, datasetId, onMemori
             <span className="text-content-subtle tabular-nums">👍{m.likes}/{m.voted}</span>
             <button type="button" onClick={() => onMemorize(m)}
               title="Save this setting as the dataset's best"
-              className="ml-auto px-2 py-0.5 rounded bg-amber-400/15 border border-amber-400/40 text-amber-200">★</button>
+              className="ml-auto px-2 py-0.5 rounded bg-amber-400/15 border border-amber-200 text-amber-700">★</button>
           </div>
           {byCheckpoint[m.checkpoint] && byCheckpoint[m.checkpoint].length > 0 && (
             <div className="flex flex-wrap gap-x-3 gap-y-0.5 pl-10 text-content-subtle text-[0.625rem]">

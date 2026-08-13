@@ -68,8 +68,8 @@ export default function PromptEditPopover({ initialPrompt = '', onSubmit, onClos
             otherwise be squashed to a clipped sliver. */}
         {error && (
           <div role="alert"
-            className="shrink-0 rounded border border-red-500/40 bg-red-500/10 px-2 py-1.5 max-h-24 overflow-y-auto">
-            <span className="block whitespace-pre-wrap break-words text-[11px] leading-relaxed text-red-200">
+            className="shrink-0 rounded border border-red-200 bg-red-50 px-2 py-1.5 max-h-24 overflow-y-auto">
+            <span className="block whitespace-pre-wrap break-words text-[11px] leading-relaxed text-red-700">
               {error}
             </span>
             <span className="mt-0.5 block text-[10px] text-content-subtle">

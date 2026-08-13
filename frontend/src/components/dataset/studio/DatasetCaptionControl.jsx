@@ -110,17 +110,17 @@ function DatasetCaptionDialog({ open, onClose, onChoose }) {
         )}
 
         {error && (
-          <div className="rounded-lg border border-red-400/40 bg-red-500/10 px-3 py-2 text-[0.75rem] text-red-200" role="alert">
+          <div className="rounded-lg border border-red-400/40 bg-red-50 px-3 py-2 text-[0.75rem] text-red-700" role="alert">
             <p className="m-0">{error}</p>
             <button type="button" onClick={loadDatasets}
-              className="mt-2 rounded border border-red-300/40 px-2 py-1 text-[0.6875rem] font-semibold hover:bg-red-500/10">
+              className="mt-2 rounded border border-red-300/40 px-2 py-1 text-[0.6875rem] font-semibold hover:bg-red-50">
               Try again
             </button>
           </div>
         )}
 
         {!loading && !error && datasets.length === 0 && (
-          <p className="m-0 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-[0.75rem] text-amber-200" role="status">
+          <p className="m-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[0.75rem] text-amber-700" role="status">
             No datasets yet. Create a dataset and add captions before using this shortcut.
           </p>
         )}
@@ -133,13 +133,13 @@ function DatasetCaptionDialog({ open, onClose, onChoose }) {
               const meta = datasetMeta(dataset);
               return (
                 <button type="button" key={choice.id} onClick={() => onChoose(choice)}
-                  className="flex min-w-0 items-center gap-3 rounded-xl bg-surface-raised px-3 py-2.5 text-left hover:border-purple-400/60 hover:bg-purple-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400">
+                  className="flex min-w-0 items-center gap-3 rounded-xl bg-surface-raised px-3 py-2.5 text-left hover:border-purple-400/60 hover:bg-purple-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400">
                   <span className="text-base" aria-hidden>🔒</span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-semibold text-content">{choice.name}</span>
                     {meta && <span className="block truncate text-[0.6875rem] text-content-subtle">{meta}</span>}
                   </span>
-                  <span className="shrink-0 text-[0.6875rem] font-semibold text-purple-200">Use &amp; draw</span>
+                  <span className="shrink-0 text-[0.6875rem] font-semibold text-purple-700">Use &amp; draw</span>
                 </button>
               );
             })}
@@ -251,7 +251,7 @@ export default function DatasetCaptionControl({ onCaption }) {
       </span>
 
       {lockedDataset && (
-        <span className="inline-flex max-w-full items-center gap-1 rounded border border-purple-400/30 bg-purple-500/10 px-1.5 py-0.5 text-[0.625rem] text-purple-100"
+        <span className="inline-flex max-w-full items-center gap-1 rounded border border-purple-400/30 bg-purple-50 px-1.5 py-0.5 text-[0.625rem] text-purple-100"
           title={'Caption dataset locked: ' + lockedDataset.name} aria-live="polite">
           <span aria-hidden>🔒</span>
           <span className="max-w-36 truncate">{lockedDataset.name}</span>
@@ -259,7 +259,7 @@ export default function DatasetCaptionControl({ onCaption }) {
       )}
 
       {error && (
-        <span className="basis-full rounded-lg border border-red-400/40 bg-red-500/10 px-2 py-1.5 text-[0.6875rem] leading-snug text-red-200" role="alert">
+        <span className="basis-full rounded-lg border border-red-400/40 bg-red-50 px-2 py-1.5 text-[0.6875rem] leading-snug text-red-700" role="alert">
           {error.message}{' '}
           <button type="button" onClick={retry}
             className="font-semibold underline underline-offset-2 hover:text-white">

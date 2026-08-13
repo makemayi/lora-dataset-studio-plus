@@ -108,7 +108,7 @@ function CachePending({ pending, active, hasStep }) {
   const gb = pending.bytes / (1024 ** 3);
   const size = gb >= 0.1 ? `${gb.toFixed(1)} GB` : `${Math.round(pending.bytes / (1024 ** 2))} MB`;
   return (
-    <p className="m-0 text-[0.625rem] text-amber-300">
+    <p className="m-0 text-[0.625rem] text-amber-700">
       Still fetching weights — {pending.files} partially downloaded file
       {pending.files === 1 ? '' : 's'} in the cache ({size} so far). A resumed
       download prints no progress of its own, so this phase can look stuck when
@@ -149,7 +149,7 @@ export default function TrainingProgress({ datasetId, base, trainType, variant,
   // mask pass crashed). Warn loudly — a multi-hour run training the wrong way is
   // exactly the kind of silent failure worth surfacing.
   const masksWarn = prog?.masks_skipped ? (
-    <p className="m-0 rounded-md border border-amber-400/40 bg-amber-500/10 px-2 py-1 text-amber-200 text-[0.625rem]">
+    <p className="m-0 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-amber-700 text-[0.625rem]">
       ⚠️ Training <b>UNMASKED</b> — masks were requested but couldn&apos;t be generated (rembg missing or the mask pass failed), so the background isn&apos;t down-weighted for this run. Install the ML extras from the Setup tab, then re-run to train masked.
     </p>
   ) : null;
@@ -167,7 +167,7 @@ export default function TrainingProgress({ datasetId, base, trainType, variant,
         {cloud && showLaunch && prog?.launch ? (
           <LaunchProgress launch={prog.launch} />
         ) : cloud && prog?.phase && prog.active !== false ? (
-          <p className="m-0 text-sky-300 text-[0.625rem]">
+          <p className="m-0 text-sky-700 text-[0.625rem]">
             ☁ {prog.phase}{prog.phase_detail ? ` — ${prog.phase_detail}` : ''}
           </p>
         ) : (!cloud || prog?.active !== false) ? (
@@ -184,7 +184,7 @@ export default function TrainingProgress({ datasetId, base, trainType, variant,
     <div className="flex flex-col gap-2 rounded-lg bg-surface px-3 py-2">
       {masksWarn}
       {cloud && showLaunch && prog.launch ? <LaunchProgress launch={prog.launch} /> : cloud && prog.phase && (
-        <p className="m-0 text-sky-300 text-[0.625rem]">{prog.phase}{prog.phase_detail ? ` — ${prog.phase_detail}` : ''}</p>
+        <p className="m-0 text-sky-700 text-[0.625rem]">{prog.phase}{prog.phase_detail ? ` — ${prog.phase_detail}` : ''}</p>
       )}
       <DownloadProgress download={prog.download} />
       <CachePending pending={prog.cache_pending} active={prog.active} hasStep={pct != null} />

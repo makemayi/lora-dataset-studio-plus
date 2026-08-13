@@ -69,7 +69,7 @@ const SCRAPE_SECRETS = [
         </a>
         {' '}— the free quota is 200 requests/hour and 20,000/month. Save it here and it
         takes effect immediately, without a restart.
-        <span className="mt-1 block text-amber-200">
+        <span className="mt-1 block text-amber-700">
           <strong>Authorization required:</strong>{' '}An API key alone does not authorize
           dataset or machine-learning use. Configure and use this integration only if Pexels
           has explicitly authorized this use case.{' '}

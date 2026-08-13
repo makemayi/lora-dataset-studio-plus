@@ -128,7 +128,7 @@ export default function ExportGridModal({ open, onClose, datasetId, family, run,
             {[512, 768].map((sz) => (
               <button key={sz} type="button" onClick={() => setCellSize(sz)}
                 className={`px-3 py-1.5 rounded-lg border text-[0.75rem] ${cellSize === sz
-                  ? 'border-indigo-400/60 bg-indigo-500/15 text-indigo-200'
+                  ? 'border-indigo-400/60 bg-indigo-50 text-indigo-700'
                   : 'border-border bg-app text-content-muted hover:text-content'}`}>
                 {sz}px
               </button>
@@ -143,7 +143,7 @@ export default function ExportGridModal({ open, onClose, datasetId, family, run,
             {[['jpeg', 'JPEG (small)'], ['png', 'PNG (large)']].map(([v, lbl]) => (
               <button key={v} type="button" onClick={() => setFileFormat(v)}
                 className={`px-3 py-1.5 rounded-lg border text-[0.75rem] ${fileFormat === v
-                  ? 'border-indigo-400/60 bg-indigo-500/15 text-indigo-200'
+                  ? 'border-indigo-400/60 bg-indigo-50 text-indigo-700'
                   : 'border-border bg-app text-content-muted hover:text-content'}`}>
                 {lbl}
               </button>
@@ -166,7 +166,7 @@ export default function ExportGridModal({ open, onClose, datasetId, family, run,
         </label>
 
         {willDownscale && (
-          <p className="text-amber-300/90 text-[0.625rem] rounded-lg border border-amber-400/30 bg-amber-500/10 px-2 py-1.5">
+          <p className="text-amber-700/90 text-[0.625rem] rounded-lg border border-amber-400/30 bg-amber-50 px-2 py-1.5">
             Large grid — the image will be downscaled to fit an {MAX_CANVAS_SIDE}px cap.
           </p>
         )}

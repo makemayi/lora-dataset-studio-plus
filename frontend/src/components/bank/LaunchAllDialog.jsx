@@ -169,7 +169,7 @@ export default function LaunchAllDialog({
                 <span className="min-w-0">
                   <span className="font-medium text-content">{s.label}</span>
                   {!ready[s.key] && (
-                    <span className="ml-1.5 rounded bg-amber-500/15 px-1.5 py-px text-[10px] font-semibold text-amber-300">
+                    <span className="ml-1.5 rounded bg-amber-50 px-1.5 py-px text-[10px] font-semibold text-amber-700">
                       {s.needs} not ready — will skip
                     </span>
                   )}
@@ -199,7 +199,7 @@ export default function LaunchAllDialog({
                     ))}
                   </div>
                   {rejectNote && (
-                    <p className="m-0 text-[0.6875rem] leading-snug text-amber-200">
+                    <p className="m-0 text-[0.6875rem] leading-snug text-amber-700">
                       ⚠ {rejectNote}
                     </p>
                   )}
@@ -214,7 +214,7 @@ export default function LaunchAllDialog({
           ))}
         </ul>
 
-        <div className="rounded-md border border-indigo-400/40 bg-indigo-500/10 p-3 text-sm">
+        <div className="rounded-md border border-indigo-200 bg-indigo-50 p-3 text-sm">
           <p className="font-semibold text-content">What will run</p>
           {nRun === 0 ? (
             <p className="text-content-muted">Nothing selected yet — pick at least one pass.</p>
@@ -230,7 +230,7 @@ export default function LaunchAllDialog({
                         : 'no flags'}{resolveDups ? ' + duplicates' : ''})
                     </span>
                   )}
-                  {s.willSkip && <span className="text-amber-300"> — skipped</span>}
+                  {s.willSkip && <span className="text-amber-700"> — skipped</span>}
                 </li>
               ))}
             </ol>
@@ -243,8 +243,8 @@ export default function LaunchAllDialog({
             off a 400-px screen. */}
         {error && (
           <div role="alert"
-            className="shrink-0 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 max-h-24 overflow-y-auto">
-            <span className="block whitespace-pre-wrap break-words text-xs leading-relaxed text-red-200">
+            className="shrink-0 rounded-md border border-red-200 bg-red-50 px-3 py-2 max-h-24 overflow-y-auto">
+            <span className="block whitespace-pre-wrap break-words text-xs leading-relaxed text-red-700">
               {error}
             </span>
             <span className="mt-1 block text-[0.625rem] text-content-subtle">

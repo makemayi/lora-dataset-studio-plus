@@ -29,7 +29,7 @@ export default function StrengthPicker({ choices, selected, onToggle, fmt,
       aria-pressed={selected.includes(s)}
       className={`px-2.5 py-1 rounded-lg border text-[0.75rem] tabular-nums transition-colors ${
         selected.includes(s)
-          ? 'border-purple-400/60 bg-purple-500/20 text-purple-200 font-semibold'
+          ? 'border-purple-400/60 bg-purple-500/20 text-purple-700 font-semibold'
           : 'border-border bg-surface text-content-muted'}`}>
       {fmt(s)}
     </button>
@@ -51,7 +51,7 @@ export default function StrengthPicker({ choices, selected, onToggle, fmt,
                 : 'Show negative strengths (down to -2.0) — pulls the LoRA the other way (slider LoRAs)'}
             className={`px-2.5 py-1 rounded-lg border text-[0.75rem] leading-none tabular-nums transition-colors disabled:opacity-60 ${
               negOpen
-                ? 'border-purple-400/40 bg-purple-500/10 text-purple-200'
+                ? 'border-purple-400/40 bg-purple-50 text-purple-700'
                 : 'border-border bg-surface text-content-muted'}`}>
             −
           </button>
@@ -68,7 +68,7 @@ export default function StrengthPicker({ choices, selected, onToggle, fmt,
               : open ? 'Hide strengths above 2.0' : 'Show strengths above 2.0 (up to 4.0)'}
             className={`px-2.5 py-1 rounded-lg border text-[0.75rem] leading-none tabular-nums transition-colors disabled:opacity-60 ${
               open
-                ? 'border-purple-400/40 bg-purple-500/10 text-purple-200'
+                ? 'border-purple-400/40 bg-purple-50 text-purple-700'
                 : 'border-border bg-surface text-content-muted'}`}>
             +
           </button>

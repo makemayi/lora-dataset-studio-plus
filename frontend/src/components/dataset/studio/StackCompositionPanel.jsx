@@ -22,7 +22,7 @@ export default function StackCompositionPanel({ members, onSaveBest, saving = fa
   const payload = bestStackPayload(members);
 
   return (
-    <div className="flex flex-col gap-1.5 rounded-lg border border-sky-400/40 bg-surface-raised px-3 py-2">
+    <div className="flex flex-col gap-1.5 rounded-lg border border-sky-200 bg-surface-raised px-3 py-2">
       <div className="flex items-center gap-2">
         <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
           className="flex items-center gap-2 text-left text-content-muted text-[0.625rem] uppercase">
@@ -56,7 +56,7 @@ export default function StackCompositionPanel({ members, onSaveBest, saving = fa
                     </span>
                   )}
                   {m.trigger ? (
-                    <code className="min-w-0 truncate rounded border border-indigo-400/40 bg-indigo-500/10 px-1.5 py-px text-[0.625rem] font-semibold text-indigo-300"
+                    <code className="min-w-0 truncate rounded border border-indigo-200 bg-indigo-50 px-1.5 py-px text-[0.625rem] font-semibold text-indigo-700"
                       title={`Trigger word injected into the prompt: ${m.trigger}`}>
                       {m.trigger}
                     </code>
@@ -79,7 +79,7 @@ export default function StackCompositionPanel({ members, onSaveBest, saving = fa
 
           {payload ? (
             <button type="button" onClick={() => onSaveBest?.(payload)} disabled={saving}
-              className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-2 py-1 text-[0.6875rem] font-semibold text-amber-200 disabled:opacity-40">
+              className="rounded-lg border border-amber-200 bg-amber-400/10 px-2 py-1 text-[0.6875rem] font-semibold text-amber-700 disabled:opacity-40">
               {saving ? 'Saving…' : '★ Save these weights as the best setting'}
             </button>
           ) : (
@@ -89,7 +89,7 @@ export default function StackCompositionPanel({ members, onSaveBest, saving = fa
             </p>
           )}
           {savedAt && (
-            <p className="m-0 text-emerald-300 text-[0.625rem]" role="status">
+            <p className="m-0 text-emerald-700 text-[0.625rem]" role="status">
               ★ Saved — this stack and its weights are now the best setting.
             </p>
           )}

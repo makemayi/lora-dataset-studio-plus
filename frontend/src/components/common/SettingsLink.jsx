@@ -27,7 +27,7 @@ import { settingsLinkHref } from './settingsLinkHref';
 
 const TONES = {
   subtle: 'text-content-subtle hover:text-content underline decoration-border',
-  warning: 'text-amber-300 underline decoration-amber-300/50',
+  warning: 'text-amber-700 underline decoration-amber-300/50',
 };
 
 export default function SettingsLink({ section, focus, children, tone = 'subtle', className = '' }) {

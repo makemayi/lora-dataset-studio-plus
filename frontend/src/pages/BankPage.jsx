@@ -77,7 +77,7 @@ function BankListSummary({ bank }) {
         </div>
       ) : summary.total === 0
         ? <p className="text-[11px] text-content-subtle">No images.</p>
-        : <p className="text-[11px] text-amber-300/90">Curation totals unavailable.</p>}
+        : <p className="text-[11px] text-amber-700/90">Curation totals unavailable.</p>}
       <ul className="flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-content-muted">
         {summary.status.map((row) => (
           <li key={row.id} className="tabular-nums">{row.label} <span className="text-content">{row.value ?? '—'}</span>
@@ -86,7 +86,7 @@ function BankListSummary({ bank }) {
       </ul>
       <div className="flex items-center gap-2 text-[11px]">
         <span className="text-content-muted">Quality</span>
-        <span className={summary.scanPercent == null ? 'text-amber-300/90' : 'text-content-subtle'}>
+        <span className={summary.scanPercent == null ? 'text-amber-700/90' : 'text-content-subtle'}>
           {summary.scanText}
         </span>
       </div>
@@ -107,7 +107,7 @@ export function BankCard({ bank, onOpen, onRelocate, onRemove }) {
           {b.name}
         </button>
         {b.activity && !b.activity.finished && (
-          <span className="inline-flex shrink-0 items-center gap-1 text-xs text-amber-300">
+          <span className="inline-flex shrink-0 items-center gap-1 text-xs text-amber-700">
             <SpinnerIcon className="h-3.5 w-3.5 shrink-0" />{b.activity.kind}…
           </span>
         )}
@@ -118,7 +118,7 @@ export function BankCard({ bank, onOpen, onRelocate, onRemove }) {
           <MoveIcon />
         </button>
         <button type="button" onClick={onRemove} aria-label={`Remove bank ${b.name}`}
-          className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-content-subtle transition-colors hover:bg-surface hover:text-rose-300">
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-content-subtle transition-colors hover:bg-surface hover:text-rose-700">
           <CloseIcon />
         </button>
       </div>

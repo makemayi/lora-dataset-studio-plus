@@ -34,7 +34,7 @@ export function ModeChip({ node }) {
   if (node?.training_mode !== 'full_transformer') return null;
   return (
     <span title="This run trained the whole model, not a LoRA adapter"
-      className="rounded bg-sky-500/20 px-1 py-px font-semibold text-sky-200">
+      className="rounded bg-sky-100 px-1 py-px font-semibold text-sky-200">
       full model
     </span>
   );
@@ -51,7 +51,7 @@ export function ModeChip({ node }) {
 export function SavesChip({ node }) {
   if (node.dense_artifact === 'hub') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-sky-400/40 bg-sky-500/10 px-1.5 py-0.5 text-sky-200 text-[0.5625rem] font-medium"
+      <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-sky-200 text-[0.5625rem] font-medium"
         title="The full model is in this run's private Hugging Face repository, not on this computer">
         <span aria-hidden>☁</span>on Hugging Face
       </span>
@@ -60,7 +60,7 @@ export function SavesChip({ node }) {
   if (node.dense_artifact === 'local') {
     const n = node.saves;
     return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/40 bg-emerald-500/10 px-1.5 py-0.5 text-emerald-200 text-[0.5625rem] font-medium"
+      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-emerald-700 text-[0.5625rem] font-medium"
         title={`The full model is on this computer${n > 1 ? ` (${n} files, master + fp8 twin)` : ''}`}>
         <span aria-hidden>💾</span>full model here
       </span>
@@ -69,7 +69,7 @@ export function SavesChip({ node }) {
   if (node.checkpoint_ready === true) {
     const n = node.saves;
     return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/40 bg-emerald-500/10 px-1.5 py-0.5 text-emerald-200 text-[0.5625rem] font-medium"
+      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-emerald-700 text-[0.5625rem] font-medium"
         title={n ? `${n} checkpoint${n > 1 ? 's' : ''} still on disk` : 'LoRA on disk'}>
         <span aria-hidden>💾</span>{n ? `${n} on disk` : 'on disk'}
       </span>

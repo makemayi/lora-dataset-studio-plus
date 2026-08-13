@@ -62,7 +62,7 @@ export default function GuidePage({ helpOnly = false }) {
       if (map[t.guide.anchor]) continue
       map[t.guide.anchor] = (
         <button type="button" onClick={() => navigate(routeWithFocus(t.app))}
-          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-indigo-500/15 px-3 py-1 text-xs font-medium text-indigo-200 transition-colors hover:bg-indigo-500/25">
+          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-500/25">
           Open this screen <ArrowRightIcon className="h-3.5 w-3.5 shrink-0" />
         </button>
       )
@@ -131,10 +131,10 @@ export default function GuidePage({ helpOnly = false }) {
 
       <main className={`min-w-0 max-w-4xl pb-10 ${helpOnly ? 'mx-auto' : 'mt-2 lg:mt-0'}`}>
         <header className={`relative mb-4 overflow-hidden px-5 py-5 sm:px-6 sm:py-6 ${CARD_SURFACE}`}>
-          <div aria-hidden className="absolute -right-16 -top-20 h-52 w-52 rounded-full bg-indigo-500/10 blur-3xl" />
+          <div aria-hidden className="absolute -right-16 -top-20 h-52 w-52 rounded-full bg-indigo-50 blur-3xl" />
           <div className="relative">
             <div className="mb-3 flex flex-wrap items-center gap-2 font-mono text-[0.6875rem] uppercase tracking-[0.14em] text-content-subtle">
-              <span className="rounded-full bg-indigo-500/15 px-2.5 py-1 text-indigo-300">
+              <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-indigo-700">
                 {helpOnly ? 'Support' : `Chapter ${chapter.num}`}
               </span>
               <span>{readingMinutes} min read</span>

@@ -31,7 +31,7 @@ export default function AxisPickers({
   return (
     <>
       {baseNote && (
-        <p className="m-0 text-[0.6875rem] leading-snug text-amber-300/80 break-words">
+        <p className="m-0 text-[0.6875rem] leading-snug text-amber-700/80 break-words">
           {baseNote}
         </p>
       )}
@@ -47,7 +47,7 @@ export default function AxisPickers({
                 aria-pressed={effectiveModels.includes(m.value)}
                 className={`px-2.5 py-1 rounded-lg border text-[0.75rem] transition-colors ${
                   effectiveModels.includes(m.value)
-                    ? 'border-purple-400/60 bg-purple-500/20 text-purple-200 font-semibold'
+                    ? 'border-purple-400/60 bg-purple-500/20 text-purple-700 font-semibold'
                     : 'border-border bg-surface text-content-muted'}`}>
                 {m.label}
               </button>
@@ -65,7 +65,7 @@ export default function AxisPickers({
                 aria-pressed={effectiveAspects.includes(a)}
                 className={`px-2.5 py-1 rounded-lg border text-[0.75rem] tabular-nums transition-colors ${
                   effectiveAspects.includes(a)
-                    ? 'border-purple-400/60 bg-purple-500/20 text-purple-200 font-semibold'
+                    ? 'border-purple-400/60 bg-purple-500/20 text-purple-700 font-semibold'
                     : 'border-border bg-surface text-content-muted'}`}>
                 {a}
               </button>
@@ -75,7 +75,7 @@ export default function AxisPickers({
       )}
 
       {mixedDefaults && (
-        <HelpText className="m-0 text-[0.625rem] leading-snug text-amber-300/80">
+        <HelpText className="m-0 text-[0.625rem] leading-snug text-amber-700/80">
           The selected base models want different sampler settings (a distilled
           “Turbo” build runs at CFG 1 / 8 steps; a non-distilled “Base” build needs
           higher guidance and far more steps). The CFG and steps axes below apply to
@@ -92,7 +92,7 @@ export default function AxisPickers({
                 aria-pressed={effectiveCfgs.includes(v)}
                 className={`px-2.5 py-1 rounded-lg border text-[0.75rem] tabular-nums transition-colors ${
                   effectiveCfgs.includes(v)
-                    ? 'border-purple-400/60 bg-purple-500/20 text-purple-200 font-semibold'
+                    ? 'border-purple-400/60 bg-purple-500/20 text-purple-700 font-semibold'
                     : 'border-border bg-surface text-content-muted'}`}>
                 {fmt(v)}
               </button>
@@ -112,7 +112,7 @@ export default function AxisPickers({
                 aria-pressed={effectiveSteps.includes(v)}
                 className={`px-2.5 py-1 rounded-lg border text-[0.75rem] tabular-nums transition-colors ${
                   effectiveSteps.includes(v)
-                    ? 'border-purple-400/60 bg-purple-500/20 text-purple-200 font-semibold'
+                    ? 'border-purple-400/60 bg-purple-500/20 text-purple-700 font-semibold'
                     : 'border-border bg-surface text-content-muted'}`}>
                 {v}
               </button>
@@ -132,7 +132,7 @@ export default function AxisPickers({
                 aria-pressed={effectiveSteps2.includes(v)}
                 className={`px-2.5 py-1 rounded-lg border text-[0.75rem] tabular-nums transition-colors ${
                   effectiveSteps2.includes(v)
-                    ? 'border-amber-400/60 bg-amber-500/20 text-amber-200 font-semibold'
+                    ? 'border-amber-400/60 bg-amber-500/20 text-amber-700 font-semibold'
                     : 'border-border bg-surface text-content-muted'}`}>
                 {v}
               </button>

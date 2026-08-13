@@ -71,7 +71,7 @@ export default function KleinModelSetting({ datasetId = null, className = '', on
     <div className={`min-w-0 space-y-1 text-[0.6875rem] leading-relaxed ${className}`}>
       {/* break-words: a model file name is arbitrary user content and this sits
           in flex rows that a single long word would widen past a 400 px screen. */}
-      <p className={`break-words ${line.tone === 'warn' ? 'text-amber-300' : 'text-content-subtle'}`}>
+      <p className={`break-words ${line.tone === 'warn' ? 'text-amber-700' : 'text-content-subtle'}`}>
         {line.text}
       </p>
       {canChoose && (

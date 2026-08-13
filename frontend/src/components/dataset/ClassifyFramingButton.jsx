@@ -13,12 +13,12 @@ export default function ClassifyFramingButton({
 
   return (
     <div id="ds-classify-framing" tabIndex={-1}
-      className="scroll-mt-20 flex flex-col gap-1 rounded-lg border border-amber-400/40 bg-amber-500/5 px-3 py-2">
+      className="scroll-mt-20 flex flex-col gap-1 rounded-lg border border-amber-200 bg-amber-500/5 px-3 py-2">
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" data-workspace-focus
           onClick={() => onClassify?.(s.count)}
           disabled={s.disabled} title={s.title}
-          className="px-3 py-1.5 rounded-lg bg-amber-500/15 border border-amber-400/40 text-amber-200 text-sm font-semibold disabled:opacity-40">
+          className="px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm font-semibold disabled:opacity-40">
           {s.label}
         </button>
         <HelpBadge topic="action-classify-framing" className="self-center" />
@@ -29,9 +29,9 @@ export default function ClassifyFramingButton({
         )}
       </div>
       {s.blocked && (
-        <p className="m-0 text-amber-300/90 text-[0.6875rem]">
+        <p className="m-0 text-amber-700/90 text-[0.6875rem]">
           ⚠ {s.blockedReason}{' '}
-          <Link to="/settings/local-tools" className="underline hover:text-amber-200">Open Local tools</Link>
+          <Link to="/settings/local-tools" className="underline hover:text-amber-700">Open Local tools</Link>
         </p>
       )}
     </div>

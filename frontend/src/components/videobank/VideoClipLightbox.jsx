@@ -147,7 +147,7 @@ export default function VideoClipLightbox({
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="font-mono text-white/90">{clipLabel(clip.start_s, clip.end_s)}</span>
           {clip.status !== 'pending' && (
-            <span className={clip.status === 'keep' ? 'text-emerald-300' : 'text-rose-300'}>
+            <span className={clip.status === 'keep' ? 'text-emerald-700' : 'text-rose-700'}>
               {clip.status === 'keep' ? '✓ Kept' : '✕ Rejected'}
             </span>
           )}

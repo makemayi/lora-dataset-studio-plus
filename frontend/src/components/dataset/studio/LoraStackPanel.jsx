@@ -62,7 +62,7 @@ export default function LoraStackPanel({ selection, mode, onMode, weights, onWei
       </p>
 
       {combine && blocker && (
-        <p className="m-0 rounded-lg border border-amber-400/40 bg-amber-500/10 px-2.5 py-1.5 text-amber-200 text-[0.6875rem]"
+        <p className="m-0 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-amber-700 text-[0.6875rem]"
           role="status">
           {blocker}
         </p>
@@ -81,7 +81,7 @@ export default function LoraStackPanel({ selection, mode, onMode, weights, onWei
                 set={stackWeightSet(sets, s)}
                 onToggleChip={(w) => onToggleChip?.(stackKey(s), w)}
                 trigger={s.trigger_word ? (
-                  <code className="shrink-0 rounded border border-indigo-400/40 bg-indigo-500/10 px-1.5 py-0.5 text-[0.625rem] font-semibold text-indigo-300">
+                  <code className="shrink-0 rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[0.625rem] font-semibold text-indigo-700">
                     {s.trigger_word}
                   </code>
                 ) : null}

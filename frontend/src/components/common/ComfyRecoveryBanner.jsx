@@ -112,8 +112,8 @@ export function RecoveryBannerBody({ model, busy = false, onConfirm, onOpenDatas
     <div className="mx-auto max-w-5xl px-4 pt-3">
       <div role="status"
         className={`rounded-lg border px-3 py-2 text-sm ${warning
-          ? 'border-amber-400/40 bg-amber-500/10'
-          : 'border-rose-400/40 bg-rose-500/10'}`}>
+          ? 'border-amber-200 bg-amber-50'
+          : 'border-rose-400/40 bg-rose-50'}`}>
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <span aria-hidden>{warning ? '⏸️' : '⚠️'}</span>
           {/* The headline can carry a URL, which has no spaces to wrap on: at
@@ -136,7 +136,7 @@ export function RecoveryBannerBody({ model, busy = false, onConfirm, onOpenDatas
         <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
           {model.canConfirm && (
             <button type="button" onClick={onConfirm} disabled={busy}
-              className="rounded-md border border-amber-400/50 bg-amber-500/20 px-3 py-1.5
+              className="rounded-md border border-amber-200 bg-amber-500/20 px-3 py-1.5
                          text-xs font-medium text-content hover:bg-amber-500/30
                          disabled:cursor-not-allowed disabled:opacity-60">
               {busy ? 'Clearing…' : model.actionLabel}

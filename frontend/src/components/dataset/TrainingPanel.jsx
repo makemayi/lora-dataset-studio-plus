@@ -156,10 +156,10 @@ const GROUP_FAMILY_LABEL = { zimage: 'Z-Image', krea: 'Krea 2', sdxl: 'SDXL', fl
 const groupFamLabel = (f) => GROUP_FAMILY_LABEL[f] || f || 'LoRA';
 
 const FULL_ARTIFACT_TONE = {
-  success: 'border-emerald-400/40 bg-emerald-500/10 text-emerald-100',
-  error: 'border-rose-400/45 bg-rose-500/10 text-rose-100',
-  warning: 'border-amber-400/45 bg-amber-500/10 text-amber-100',
-  info: 'border-sky-400/40 bg-sky-500/10 text-sky-100',
+  success: 'border-emerald-200 bg-emerald-50 text-emerald-100',
+  error: 'border-rose-400/45 bg-rose-50 text-rose-100',
+  warning: 'border-amber-400/45 bg-amber-50 text-amber-100',
+  info: 'border-sky-200 bg-sky-50 text-sky-100',
 };
 
 function FullTransformerArtifactNotice({ run }) {
@@ -284,7 +284,7 @@ export function FullTransformerAdvancedRecipe({
   baseSummary = 'official Krea 2 Raw',
 }) {
   const explicitSteps = String(stepsOverride || '').trim();
-  const factClass = 'rounded-lg bg-sky-500/10 px-2.5 py-2';
+  const factClass = 'rounded-lg bg-sky-50 px-2.5 py-2';
   const b = DENSE_BOUNDS_FALLBACK;
   const lr = adv?.dense_lr ?? b.lr;
   const lrMin = adv?.dense_lr_min ?? b.lrMin;
@@ -613,7 +613,7 @@ export function DenseBasePicker({
   // effect — the exact class of lie this lane is being corrected for.
   const customPicked = !!String(base || '').trim();
   return (
-    <div className="flex flex-col gap-1.5 rounded-lg bg-sky-500/10 px-3 py-2">
+    <div className="flex flex-col gap-1.5 rounded-lg bg-sky-50 px-3 py-2">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-content-muted text-[0.625rem] uppercase">
           Base to fine-tune
@@ -656,7 +656,7 @@ export function DenseBasePicker({
       )}
       {baseNote && (
         <span className={`text-[0.625rem] leading-relaxed ${
-          baseNote.level === 'error' ? 'text-red-300' : 'text-amber-300'}`}>
+          baseNote.level === 'error' ? 'text-red-600' : 'text-amber-700'}`}>
           {baseNote.level === 'error' ? '⛔' : '⚠️'} {baseNote.text}
         </span>
       )}
@@ -1960,14 +1960,14 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
     return (
       <span className="ml-auto flex items-center gap-1">
         <span title={`Already in ComfyUI's ${checkpointLorasLabel} folder${deployedName ? ` as “${deployedName}”` : ''}`}
-          className="px-2 py-0.5 rounded border border-emerald-500/40 bg-emerald-600/10 text-emerald-200">
+          className="px-2 py-0.5 rounded border border-emerald-500/40 bg-emerald-600/10 text-emerald-700">
           ✓ Deployed
         </span>
         {dep.undeploy && (
           <button type="button" onClick={() => undeployCheckpoint(dep)}
             disabled={undeploying === dep.undeploy.filename}
             title={dep.undeploy.title}
-            className="px-2 py-0.5 rounded border border-emerald-500/40 bg-emerald-600/5 text-emerald-200/90 hover:bg-emerald-600/20 disabled:opacity-50">
+            className="px-2 py-0.5 rounded border border-emerald-500/40 bg-emerald-600/5 text-emerald-700/90 hover:bg-emerald-600/20 disabled:opacity-50">
             {undeploying === dep.undeploy.filename ? '⏏ Undeploying…' : `⏏ ${dep.undeploy.label}`}
           </button>
         )}
@@ -2270,23 +2270,23 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-indigo-500/30 bg-indigo-500/5 p-3">
+    <div className="flex flex-col gap-2 rounded-lg border border-indigo-500/30 bg-indigo-50 p-3">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-content font-semibold text-sm">
           <span aria-hidden>🎓</span> {fullMode ? 'Full-model training' : 'LoRA Training'} ({typeLabel})
         </span>
         {!status.installed && (
-          <span className="text-amber-300 text-[0.6875rem]">ai-toolkit not ready — point to its Python (its venv/Scripts/python.exe) in Settings › Local tools</span>
+          <span className="text-amber-700 text-[0.6875rem]">ai-toolkit not ready — point to its Python (its venv/Scripts/python.exe) in Settings › Local tools</span>
         )}
         {status.in_progress
           ? <span className="ml-auto flex items-center gap-2">
-              <span aria-live="polite" className="text-indigo-300 text-[0.6875rem]">
+              <span aria-live="polite" className="text-indigo-700 text-[0.6875rem]">
                 <span aria-hidden>⏳</span> {status.current?.name ? `“${status.current.name}” running` : 'running'} — ComfyUI paused
               </span>
               {/* Full progress bar, loss curve and samples live on the Runs hub —
                   this panel's own TrainingProgress only covers THIS dataset. */}
               <Link to="/cloud" title="Open the Runs page — full progress, loss curve and samples"
-                className="px-1 py-0.5 text-indigo-300 hover:text-indigo-200 text-[0.6875rem] font-medium underline decoration-indigo-300/40">
+                className="px-1 py-0.5 text-indigo-700 hover:text-indigo-700 text-[0.6875rem] font-medium underline decoration-indigo-300/40">
                 View in Runs ↗
               </Link>
             </span>
@@ -2298,7 +2298,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
           which dataset's panel happens to be open. No action button: the
           recovery is manual (outside the app) and expiry-reaping is automatic. */}
       {cloudStatus.last?.status === 'error_pod_kept' && (
-        <p className="m-0 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-amber-300 text-[0.6875rem]">
+        <p className="m-0 rounded-lg border border-amber-500/40 bg-amber-50 px-3 py-1.5 text-amber-700 text-[0.6875rem]">
           ⚠ A previous cloud run kept its pod for manual recovery — it is still billing until reaped. {cloudStatus.last.error}
         </p>
       )}
@@ -2311,7 +2311,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
       {status.error && (!status.error.dataset_id || status.error.dataset_id === ds.currentId) && (() => {
         const view = failureView(status.error);
         return (
-        <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-red-200 text-[0.6875rem]">
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-700 text-[0.6875rem]">
           <div className="font-semibold">⚠ {view.title}</div>
           {/* WHICH Python ai-toolkit was run with. A path that exists and runs but
               has no torch passes every folder check, so the run dies on
@@ -2321,14 +2321,14 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               obvious in one second. `break-all` because these paths are long and
               the panel has to survive a 400 px phone. */}
           {view.interpreter && (
-            <div className="mt-1.5 rounded border border-amber-400/40 bg-amber-500/10 p-2 text-amber-100">
+            <div className="mt-1.5 rounded border border-amber-200 bg-amber-50 p-2 text-amber-100">
               <div className="font-semibold">{view.interpreter.title}</div>
-              <p className="m-0 mt-0.5 break-words text-amber-200/90">{view.interpreter.message}</p>
+              <p className="m-0 mt-0.5 break-words text-amber-700/90">{view.interpreter.message}</p>
               <div className="mt-1 break-all font-mono text-[0.625rem] text-amber-100">
                 {view.interpreter.python}
               </div>
               <a href="#/settings/local-tools?focus=aitoolkit-python"
-                className="mt-1 inline-block text-amber-300 underline decoration-amber-300/50">
+                className="mt-1 inline-block text-amber-700 underline decoration-amber-300/50">
                 Settings ▸ Local tools ▸ Python interpreter →
               </a>
             </div>
@@ -2337,20 +2337,20 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               like a network fault and is not one, and the app never sets that
               variable — reported by bobba84 (GitHub #18). */}
           {view.hfTransfer && (
-            <div className="mt-1.5 rounded border border-amber-400/40 bg-amber-500/10 p-2 text-amber-100">
+            <div className="mt-1.5 rounded border border-amber-200 bg-amber-50 p-2 text-amber-100">
               <div className="font-semibold">{view.hfTransfer.title}</div>
-              <p className="m-0 mt-0.5 break-words text-amber-200/90">{view.hfTransfer.message}</p>
+              <p className="m-0 mt-0.5 break-words text-amber-700/90">{view.hfTransfer.message}</p>
             </div>
           )}
           {/* The GPU-architecture verdict is a PROVEN cause read from the venv
               that trains — it goes first, above the log, with its remedy. */}
           {view.gpuArch && (
-            <div className="mt-1.5 rounded border border-amber-400/40 bg-amber-500/10 p-2 text-amber-100">
+            <div className="mt-1.5 rounded border border-amber-200 bg-amber-50 p-2 text-amber-100">
               <div className="font-semibold">This GPU needs a different PyTorch build</div>
-              <p className="m-0 mt-0.5 text-amber-200/90">{view.gpuArch.message}</p>
+              <p className="m-0 mt-0.5 text-amber-700/90">{view.gpuArch.message}</p>
               {view.gpuArch.command && (
                 <>
-                  <div className="mt-1 text-amber-200/80">Run this once, then Train again:</div>
+                  <div className="mt-1 text-amber-700/80">Run this once, then Train again:</div>
                   <pre className="mt-0.5 overflow-x-auto whitespace-pre-wrap break-all rounded bg-black/40 p-1.5 font-mono text-[0.625rem] text-amber-100">
                     {view.gpuArch.command}
                   </pre>
@@ -2363,19 +2363,19 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               fixes — reported by SurpassHR (GitHub) on Krea 2. Shown above the
               log with the remedy that matches the status code. */}
           {view.hfGated && (
-            <div className="mt-1.5 rounded border border-amber-400/40 bg-amber-500/10 p-2 text-amber-100">
+            <div className="mt-1.5 rounded border border-amber-200 bg-amber-50 p-2 text-amber-100">
               <div className="font-semibold">{view.hfGated.title}</div>
-              <p className="m-0 mt-0.5 break-words text-amber-200/90">{view.hfGated.message}</p>
+              <p className="m-0 mt-0.5 break-words text-amber-700/90">{view.hfGated.message}</p>
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
                 {view.hfGated.status === 401 && (
                   <a href="#/settings/local-tools"
-                    className="text-amber-300 underline decoration-amber-300/50">
+                    className="text-amber-700 underline decoration-amber-300/50">
                     Settings ▸ API keys →
                   </a>
                 )}
                 {view.hfGated.repo && (
                   <a href={view.hfGated.url} target="_blank" rel="noreferrer"
-                    className="min-w-0 break-all text-amber-300 underline decoration-amber-300/50">
+                    className="min-w-0 break-all text-amber-700 underline decoration-amber-300/50">
                     {view.hfGated.repo} on Hugging Face →
                   </a>
                 )}
@@ -2384,7 +2384,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
           )}
           {view.excerpt && (
             <pre className={`mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-black/30 p-1.5 font-mono text-[0.625rem] ${
-              view.tone === 'error' ? 'text-red-300/90' : 'text-content-muted'}`}>
+              view.tone === 'error' ? 'text-red-600/90' : 'text-content-muted'}`}>
               {view.excerpt}
             </pre>
           )}
@@ -2402,9 +2402,9 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               className="shrink-0 px-2 py-1 rounded-lg bg-red-500/20 border border-red-400/40 text-red-100 text-[0.6875rem] font-semibold">
               📂 Open run folder
             </button>
-            <span className="min-w-0 text-red-300/80">{view.note}</span>
+            <span className="min-w-0 text-red-600/80">{view.note}</span>
           </div>
-          {view.causes && <div className="mt-1 text-red-300/80">{view.causes}</div>}
+          {view.causes && <div className="mt-1 text-red-600/80">{view.causes}</div>}
         </div>
         );
       })()}
@@ -2431,10 +2431,10 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
             )}
             {/* Full progress bar, loss curve and samples live on the Runs hub. */}
             <Link to="/cloud" title="Open the Runs page — full progress, loss curve and samples"
-              className="ml-auto px-1 py-0.5 text-sky-300 hover:text-sky-200 font-medium underline decoration-sky-300/40">
+              className="ml-auto px-1 py-0.5 text-sky-700 hover:text-sky-200 font-medium underline decoration-sky-300/40">
               View in Runs ↗
             </Link>
-            <button type="button" className="px-2 py-0.5 rounded bg-red-600/80 text-white text-[0.6875rem] font-semibold"
+            <button type="button" className="px-2 py-0.5 rounded bg-red-600 text-white text-[0.6875rem] font-semibold"
               onClick={async () => {
                 if (normalizeTrainingMode(cloudActiveHere.training_mode) === TRAINING_MODE_FULL_TRANSFORMER
                     && !window.confirm('Stop this full-model training run?\n\nAI Toolkit uploads the full model to Hugging Face only after a clean finish. The latest checkpoint may be permanently lost if it has not been uploaded yet, even if an older checkpoint is already on the Hub.')) return;
@@ -2465,7 +2465,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
         && normalizeTrainingMode(cloudLastHere.training_mode) === TRAINING_MODE_LORA
         && cloudLastHere.checkpoint_ready && cloudLastHere.status === 'done' && (
         <a href={`/api/dataset/${ds.currentId}/train/cloud/checkpoint?train_type=${encodeURIComponent(trainType)}`}
-          className="text-sky-300 text-[0.6875rem] underline w-fit">
+          className="text-sky-700 text-[0.6875rem] underline w-fit">
           ⬇ Download the cloud-trained LoRA (.safetensors)
         </a>
       )}
@@ -2537,13 +2537,13 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
         </div>
         {!fullTransformerEligible && (
           <span id="full-transformer-disabled-reason"
-            className="basis-full text-amber-300 text-[0.6875rem] leading-relaxed">
+            className="basis-full text-amber-700 text-[0.6875rem] leading-relaxed">
             Full model unavailable: {fullTransformerReason}
           </span>
         )}
         {trainingModeError && (
           <span id="training-mode-save-error" role="alert"
-            className="basis-full text-rose-300 text-[0.6875rem] leading-relaxed">
+            className="basis-full text-rose-700 text-[0.6875rem] leading-relaxed">
             {trainingModeError}
           </span>
         )}
@@ -2603,7 +2603,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               setHfCloudTokenIssue(null);
               setCloudDialog(true);
             }}
-            className="px-3 py-1.5 rounded-lg border border-sky-500/50 bg-sky-500/10 text-sky-200 text-sm font-semibold disabled:opacity-40">
+            className="px-3 py-1.5 rounded-lg border border-sky-500/50 bg-sky-50 text-sky-200 text-sm font-semibold disabled:opacity-40">
             <span aria-hidden>☁️</span> {fullMode ? 'Start full-model training' : 'Train in cloud'}
           </button>
         )}
@@ -2626,7 +2626,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                 await ds.stopTraining();
                 refreshStatus();
               }}
-              className="px-3 py-1.5 rounded-lg bg-red-600/80 text-white text-sm font-semibold">
+              className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-sm font-semibold">
               ⏹ Stop training
             </button>
             <HelpBadge topic="action-training-stop" />
@@ -2637,7 +2637,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
             title={baseBlocksTrain
               ? baseBlockTitle
               : `Train THIS dataset on “${baseLabel}” once the current training finishes`}
-            className="px-3 py-1.5 rounded-lg bg-indigo-500/20 border border-indigo-400/40 text-indigo-200 text-sm font-semibold disabled:opacity-40">
+            className="px-3 py-1.5 rounded-lg bg-indigo-100 border border-indigo-200 text-indigo-700 text-sm font-semibold disabled:opacity-40">
             {queued ? '✓ Queued' : `➕ Add to queue (${baseLabel})`}
           </button>
         )}
@@ -2654,7 +2654,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
       </div>
 
       {fullMode && (
-        <div role="status" className="rounded-lg border border-sky-400/45 bg-sky-500/10 px-3 py-2 text-[0.75rem] leading-relaxed">
+        <div role="status" className="rounded-lg border border-sky-400/45 bg-sky-50 px-3 py-2 text-[0.75rem] leading-relaxed">
           <div className="font-semibold text-sky-100">Experimental · advanced cloud mode · not recommended by default</div>
           <p className="m-0 mt-1 text-sky-200/90">
             Krea officially recommends training a LoRA on Raw, then applying it to Turbo.
@@ -2689,7 +2689,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
           dataset (one shared column). The run ignores it — say so, once, rather
           than let the summary above advertise weights nobody will load. */}
       {baseInfo?.base_family_mismatch && (
-        <p className="m-0 mt-1 text-amber-300 text-[0.6875rem]">
+        <p className="m-0 mt-1 text-amber-700 text-[0.6875rem]">
           ⚠ {baseInfo.base_family_mismatch}
         </p>
       )}
@@ -2703,7 +2703,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
         sliderOn ? 'border-purple-400/50 bg-purple-500/5' : 'border-border bg-surface'}`}>
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-semibold text-content"><span aria-hidden>🎚</span> Slider LoRA</span>
-          <span className="px-1.5 py-0.5 rounded border border-amber-400/50 bg-amber-500/10 text-amber-300 text-[0.625rem] font-semibold uppercase tracking-wide">Beta</span>
+          <span className="px-1.5 py-0.5 rounded border border-amber-200 bg-amber-50 text-amber-700 text-[0.625rem] font-semibold uppercase tracking-wide">Beta</span>
           <button type="button" role="switch" aria-checked={sliderOn}
             disabled={sliderBusy || status.in_progress}
             onClick={toggleSliderMode}
@@ -2711,7 +2711,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               : sliderOn ? 'Turn slider mode off — back to normal LoRA training'
                 : 'Turn slider mode on for this dataset'}
             className={`ml-auto px-2.5 py-1 rounded-lg border text-[0.75rem] font-semibold transition-colors disabled:opacity-50 ${
-              sliderOn ? 'border-purple-400/60 bg-purple-500/20 text-purple-200'
+              sliderOn ? 'border-purple-400/60 bg-purple-500/20 text-purple-700'
                 : 'border-border bg-surface text-content-muted'}`}>
             {sliderOn ? 'ON' : 'OFF'}
           </button>
@@ -2790,7 +2790,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               </span>
             </div>
             {sliderPromptsMissing && (
-              <p className="m-0 text-amber-300 text-[0.6875rem]">
+              <p className="m-0 text-amber-700 text-[0.6875rem]">
                 ⚠ Both prompts are required — they define the two ends of the slider.
               </p>
             )}
@@ -2809,7 +2809,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
           launch failure. See animeFamilyNote.js — it also keeps quiet when this
           machine cannot run Anima at all. */}
       {animeNote && (
-        <p className="m-0 text-sky-300/90 text-[0.6875rem]">
+        <p className="m-0 text-sky-700/90 text-[0.6875rem]">
           ℹ {animeNote}
         </p>
       )}
@@ -2818,7 +2818,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
           button row — the tooltip alone was invisible until hovered, so a greyed
           SDXL cloud button read as an unexplained limit (owner-reported). */}
       {(caps.cloud_training || fullMode) && cloudDisabledReason && (
-        <p className="m-0 text-sky-300/90 text-[0.6875rem]">
+        <p className="m-0 text-sky-700/90 text-[0.6875rem]">
           ☁ Cloud training unavailable — {cloudDisabledReason}
         </p>
       )}
@@ -2832,7 +2832,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
       {/* Pointeur visible quand le bouton Train est bloqué par un réglage qui
           vit dans la section repliée — sinon la cause resterait cachée. */}
       {(baseBlocksTrain || sdxlNeedsBase) && (
-        <p className="m-0 text-amber-300 text-[0.6875rem]">
+        <p className="m-0 text-amber-700 text-[0.6875rem]">
           ⚠ {baseNotTrainable
             ? 'The selected base cannot be loaded for training — open Advanced options below to pick another one.'
             : sdxlNeedsBase
@@ -2958,7 +2958,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
             </button>
             <button type="button" onClick={deletePreset} disabled={!selPreset || selPreset.builtin || presetBusy}
               title={selPreset?.builtin ? 'Built-in presets ship with the app and cannot be deleted' : 'Delete the selected preset'}
-              className="px-2 py-1 rounded-lg bg-red-500/15 border border-red-500/40 text-red-300 text-[0.75rem] disabled:opacity-40">
+              className="px-2 py-1 rounded-lg bg-red-50 border border-red-200 text-red-600 text-[0.75rem] disabled:opacity-40">
               🗑
             </button>
             <input ref={presetFileRef} type="file" accept=".json,application/json" className="hidden"
@@ -3075,7 +3075,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                 className={`flex flex-col gap-1 rounded-md border px-2.5 py-2 text-[0.6875rem] leading-relaxed ${
                   baseNote.level === 'error'
                     ? 'border-rose-400/40 bg-rose-500/[0.08] text-rose-200'
-                    : 'border-amber-400/40 bg-amber-500/[0.08] text-amber-200'}`}>
+                    : 'border-amber-200 bg-amber-500/[0.08] text-amber-700'}`}>
                 <span className="font-semibold">
                   {baseNote.level === 'error'
                     ? '⛔ This base cannot be used for training'
@@ -3092,7 +3092,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                   <span className="text-content-subtle">·</span>
                   <span className="text-content">{zimageRecipe.variantLabel}</span>
                   <span className={`px-1.5 py-px rounded border ${zimageRecipe.adapterActive
-                    ? 'border-green-400/40 bg-green-400/10 text-green-300'
+                    ? 'border-green-400/40 bg-green-400/10 text-green-700'
                     : 'border-transparent bg-surface-raised text-content-muted'}`}>
                     {zimageRecipe.adapterActive ? 'Turbo adapter v2: ON' : 'Training adapter: OFF'}
                   </span>
@@ -3105,7 +3105,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                     : ' The server locks this official base/adapter pair before launch.'}
                 </span>
                 {zimageRecipe.customVerificationRequired && variant !== 'turbo' && (
-                  <span className="text-amber-300">
+                  <span className="text-amber-700">
                     ⚠ Confirm that this custom base is really {variant === 'deturbo' ? 'De-Turbo' : 'non-distilled Base'}; this cannot be detected automatically.
                   </span>
                 )}
@@ -3138,27 +3138,27 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                 à la base officielle et le dire vaut mieux que la laisser vide. */}
             {!comfyConfigured && trainType !== 'flux2klein' && trainType !== 'anima' && (
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-amber-300 text-[0.625rem]">
+                <span className="text-amber-700 text-[0.625rem]">
                   ⚠️ ComfyUI folder not set — training bases can't be listed{trainType === 'sdxl' ? '' : trainType === 'krea' ? ' (the official Krea 2 base still works)' : ' (the official Z-Image base still works)'}.
                 </span>
                 <a href="#/setup"
-                  className="px-2.5 py-1 rounded-lg bg-indigo-500/20 border border-indigo-400/40 text-indigo-200 text-[0.6875rem] font-semibold">
+                  className="px-2.5 py-1 rounded-lg bg-indigo-100 border border-indigo-200 text-indigo-700 text-[0.6875rem] font-semibold">
                   Point the app at ComfyUI →
                 </a>
               </div>
             )}
             {needsConversion && !baseConverted && !convertRunning && (
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-amber-300 text-[0.625rem]">⚠️ Base must be converted before training (~12 GB, a few min, one time only).</span>
+                <span className="text-amber-700 text-[0.625rem]">⚠️ Base must be converted before training (~12 GB, a few min, one time only).</span>
                 <button type="button" onClick={doPrepareBase}
-                  className="px-2.5 py-1 rounded-lg bg-indigo-500/20 border border-indigo-400/40 text-indigo-200 text-[0.6875rem] font-semibold">
+                  className="px-2.5 py-1 rounded-lg bg-indigo-100 border border-indigo-200 text-indigo-700 text-[0.6875rem] font-semibold">
                   ⚙️ Convert the base
                 </button>
               </div>
             )}
             {convertRunning && (
-              <span className="text-indigo-300 text-[0.625rem] flex items-center gap-1.5">
-                <span className="inline-block w-3 h-3 border-2 border-indigo-400/40 border-t-indigo-400 rounded-full animate-spin" aria-hidden />
+              <span className="text-indigo-700 text-[0.625rem] flex items-center gap-1.5">
+                <span className="inline-block w-3 h-3 border-2 border-indigo-200 border-t-indigo-400 rounded-full animate-spin" aria-hidden />
                 Converting the base… (~a few minutes)
               </span>
             )}
@@ -3166,7 +3166,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               <span className="text-green-400/80 text-[0.625rem]">✓ Base ready — training will produce a LoRA native to this model.</span>
             )}
             {convertError && (
-              <span className="text-red-300 text-[0.625rem] break-words">❌ Conversion failed: {convertError}</span>
+              <span className="text-red-600 text-[0.625rem] break-words">❌ Conversion failed: {convertError}</span>
             )}
             {/* SDXL-only: separate VAE / text-encoder overrides. SDXL is the one
                 family where ai-toolkit honours these top-level (every other family
@@ -3202,7 +3202,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
           {/* Model & training knobs — researched defaults (see the Research note),
               editable per dataset. Each carries a plain-English "why / how". */}
           <div className="flex flex-col rounded-lg bg-surface p-2.5 divide-y divide-white/[0.07] [&>*]:py-2.5 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">
-            <div className="flex items-center gap-1.5 text-indigo-300/80 text-[0.625rem] font-semibold uppercase tracking-wider">
+            <div className="flex items-center gap-1.5 text-indigo-700/80 text-[0.625rem] font-semibold uppercase tracking-wider">
               <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-indigo-400/60" /> Model &amp; training
             </div>
 
@@ -3246,7 +3246,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                 faster — on the 12B families (Krea 2, FLUX) it is your best shot on a GPU under
                 24 GB, at some cost in fine detail.
                 {sliderOn && (
-                  <span className="block mt-1 text-purple-200/90">
+                  <span className="block mt-1 text-purple-700/90">
                     <b className="font-medium">Slider default: 768 only</b> — the slider loss makes several passes per
                     step, so its VRAM peak is much higher than a normal run. Pick a resolution here to override.
                   </span>
@@ -3329,12 +3329,12 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
 
           {/* Expert — last-mile levers. Collapsed by default; every control defaults
               to the current behaviour, so a newcomer who never opens this is unaffected. */}
-          {!fullMode && (<details className="group rounded-lg border border-indigo-400/40 border-l-[3px] border-l-indigo-400 bg-indigo-500/[0.14] transition-colors hover:bg-indigo-500/20">
+          {!fullMode && (<details className="group rounded-lg border border-indigo-200 border-l-[3px] border-l-indigo-400 bg-indigo-500/[0.14] transition-colors hover:bg-indigo-100">
             <summary className="flex items-center gap-2 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden px-2.5 py-2.5 text-[0.6875rem] font-semibold uppercase tracking-wider text-indigo-100 hover:text-white">
-              <span aria-hidden className="text-indigo-300 transition-transform group-open:rotate-90">▸</span>
+              <span aria-hidden className="text-indigo-700 transition-transform group-open:rotate-90">▸</span>
               <span aria-hidden>🔬</span>
               <span>Expert — last-mile levers</span>
-              <span className="ml-auto hidden sm:inline normal-case font-normal tracking-normal text-indigo-300/50">network · alpha · memory{advTimestepSupported ? ' · timestep' : ''} · optimizer · schedule · EMA</span>
+              <span className="ml-auto hidden sm:inline normal-case font-normal tracking-normal text-indigo-700/50">network · alpha · memory{advTimestepSupported ? ' · timestep' : ''} · optimizer · schedule · EMA</span>
             </summary>
             <div className="flex flex-col px-2.5 pb-2.5 divide-y divide-indigo-400/10 [&>div]:py-2.5 [&>div:first-child]:pt-1 [&>div:last-child]:pb-0">
               {/* Network variant — LoRA (default) or LoKr. LoKr is arch-generic in
@@ -3349,7 +3349,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                     {advNetworkChoices.map((n) => <option key={n} value={n}>{n === 'lora' ? 'LoRA (default)' : 'LoKr'}</option>)}
                   </select>
                   {advNetworkType === 'lokr' && !advNetworkSupported && (
-                    <span className="text-amber-300 text-[0.625rem]" title={`LoKr isn't supported for ${trainType} — this run would fall back to LoRA.`}>⚠ not supported for {trainType}</span>
+                    <span className="text-amber-700 text-[0.625rem]" title={`LoKr isn't supported for ${trainType} — this run would fall back to LoRA.`}>⚠ not supported for {trainType}</span>
                   )}
                 </div>
                 {advNetworkType === 'lokr' && (
@@ -3382,7 +3382,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                     <span className="text-content text-[0.75rem] w-28 shrink-0 inline-flex items-center gap-1">
                       Krea community recipe<HelpBadge topic="training.krea_community_recipe" />
                     </span>
-                    <span className="text-amber-200 text-[0.6875rem] leading-relaxed">
+                    <span className="text-amber-700 text-[0.6875rem] leading-relaxed">
                       Community starting point, not a likeness promise — compare your own checkpoints.
                     </span>
                   </div>
@@ -3522,7 +3522,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                     400 px: no fixed width, no truncation. */}
                 {advMemRiskLine && (
                   <span className={`text-[0.6875rem] leading-relaxed ${
-                    adv?.memory_risk?.verdict === 'can_disable' ? 'text-content-muted' : 'text-amber-300'}`}>
+                    adv?.memory_risk?.verdict === 'can_disable' ? 'text-content-muted' : 'text-amber-700'}`}>
                     {adv?.memory_risk?.verdict === 'can_disable' ? '' : '⚠️ '}{advMemRiskLine}
                   </span>
                 )}
@@ -3669,19 +3669,19 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               onChange={(e) => setMasked(e.target.checked)}
               aria-label="Masked training (background at 10%)"
               className="accent-primary w-3.5 h-3.5 disabled:opacity-50" />
-            <span className={masked && !sliderOn && !maskedRembgMissing ? 'text-emerald-300' : ''}>🎭 Masked (bg 10%)</span>
+            <span className={masked && !sliderOn && !maskedRembgMissing ? 'text-emerald-700' : ''}>🎭 Masked (bg 10%)</span>
             {sliderOn && (
               <span className="text-content-subtle" title="The slider loss ignores masks — the server forces unmasked training in slider mode.">
                 off in slider mode
               </span>
             )}
             {isConceptual && masked && !sliderOn && (
-              <span className="text-amber-300" title={isStyle ? 'A person mask discards full-frame style information.' : 'A person mask can erase the concept.'}>
+              <span className="text-amber-700" title={isStyle ? 'A person mask discards full-frame style information.' : 'A person mask can erase the concept.'}>
                 ⚠️ off required for {isStyle ? 'styles' : 'concepts'}
               </span>
             )}
             {maskedRembgMissing && (
-              <span className="text-amber-300"
+              <span className="text-amber-700"
                 title="rembg isn't installed, so no person masks can be generated — this run will train UNMASKED (background at full weight), not masked. Install the ML extras from the Setup tab (requirements-ml.txt, Python 3.10–3.12) to enable masked training.">
                 ⚠️ rembg missing — will train unmasked
               </span>
@@ -3694,7 +3694,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               and dropping it silently would start paying for a mask pass nobody
               asked for. Neither happens: the user answers, once. */}
           {maskedCarryOver && (
-            <div className="rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2 flex flex-col gap-2 text-[0.6875rem]">
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 flex flex-col gap-2 text-[0.6875rem]">
               <span className="text-content leading-relaxed">
                 🎭 <b>Masked training is now a dataset setting</b>, shared across your
                 browsers and devices instead of living in this one. This browser had it
@@ -3706,7 +3706,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                   Turn it off for this dataset
                 </button>
                 <button type="button" onClick={() => answerMaskedCarryOver(true)}
-                  className="px-2 py-1 rounded border border-emerald-400/40 text-emerald-300 hover:bg-emerald-500/10">
+                  className="px-2 py-1 rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50">
                   Keep masking on
                 </button>
               </div>
@@ -3733,7 +3733,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
             </label>
           )}
           {zimageTurboLongRun && (
-            <p role="status" className="m-0 rounded-md border border-amber-400/35 bg-amber-400/[0.08] px-2 py-1.5 text-amber-200 text-[0.6875rem] leading-relaxed">
+            <p role="status" className="m-0 rounded-md border border-amber-200 bg-amber-400/[0.08] px-2 py-1.5 text-amber-700 text-[0.6875rem] leading-relaxed">
               ⚠ Turbo long-run warning — the effective target is {effectiveTargetSteps} steps
               (over {ZIMAGE_TURBO_LONG_RUN_STEPS}). Turbo is distilled and can degrade or overfit on a long run;
               this does not block launch, but a lower cap plus best-checkpoint selection is safer.
@@ -3747,7 +3747,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                 title={baseBlocksTrain
                   ? baseBlockTitle
                   : 'Schedule this training for a specific day and time — it will queue up if another training is running then'}
-                className="px-3 py-1.5 rounded-lg bg-amber-500/15 border border-amber-400/40 text-amber-200 text-sm font-semibold disabled:opacity-40">
+                className="px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm font-semibold disabled:opacity-40">
                 {queued ? '✓ Queued' : '⏰ Schedule'}
               </button>
               <span className="text-content-subtle text-[0.625rem]">
@@ -3782,23 +3782,23 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
 
       {Array.isArray(status.queue) && status.queue.length > 0 && (
         <div id="ds-training-queue" tabIndex={-1} data-workspace-focus
-          className="flex flex-col gap-1 rounded-lg border border-indigo-400/30 bg-indigo-500/5 px-3 py-2 scroll-mt-20">
+          className="flex flex-col gap-1 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 scroll-mt-20">
           <span className="text-content-muted text-[0.625rem] uppercase">Training queue ({status.queue.length})</span>
           {status.queue.map((q, i) => (
             <div key={q.dataset_id} className="flex items-center gap-2 text-[0.6875rem]">
               <span className="text-content-subtle tabular-nums">{i + 1}.</span>
               <span className="text-content">{q.name}</span>
-              {q.base_label ? <span className="text-indigo-300/80">· {q.base_label}</span> : null}
+              {q.base_label ? <span className="text-indigo-700/80">· {q.base_label}</span> : null}
               {q.extra_steps ? <span className="text-content-subtle">(+{q.extra_steps} steps)</span> : null}
               {q.steps ? <span className="text-content-subtle">→ {q.steps} steps</span> : null}
               {q.not_before ? (
-                <span className="px-1.5 py-px rounded border border-amber-400/40 bg-amber-400/10 text-amber-300"
+                <span className="px-1.5 py-px rounded border border-amber-200 bg-amber-400/10 text-amber-700"
                   title="Scheduled — starts at this time (or right after the training running then)">
                   ⏰ {String(q.not_before).replace('T', ' ')}
                 </span>
               ) : null}
               <button type="button" onClick={() => dequeue(q.dataset_id)}
-                className="ml-auto px-2 py-0.5 rounded bg-red-500/15 border border-red-500/40 text-red-300">
+                className="ml-auto px-2 py-0.5 rounded bg-red-50 border border-red-200 text-red-600">
                 Remove
               </button>
             </div>
@@ -3807,7 +3807,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
       )}
 
       {enqErr && (
-        <p className="m-0 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-red-300 text-[0.6875rem]">
+        <p className="m-0 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-red-600 text-[0.6875rem]">
           ⚠️ Enqueue refused: {enqErr}
         </p>
       )}
@@ -3892,7 +3892,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               changé depuis le dernier entraînement (les checkpoints listés ne
               reflètent alors PLUS l'état actuel). */}
           {datasetState?.registered && (datasetState.changed ? (
-            <p className="m-0 rounded-md border border-amber-400/40 bg-amber-500/10 px-2 py-1 text-amber-200 text-[0.6875rem]">
+            <p className="m-0 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-amber-700 text-[0.6875rem]">
               ⚠ The dataset has <b>changed since v{datasetState.version}</b>
               {datasetState.diff && (
                 <>
@@ -4005,7 +4005,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                   Building the graph…
                 </div>
               )}
-              {datasetGraph?.error && <p className="m-0 text-rose-300/80 text-[0.75rem]">{datasetGraph.error}</p>}
+              {datasetGraph?.error && <p className="m-0 text-rose-700/80 text-[0.75rem]">{datasetGraph.error}</p>}
               {datasetGraph?.tree && (
                 Array.isArray(datasetGraph.tree.nodes) && datasetGraph.tree.nodes.length
                   ? <RunLineageGraph tree={datasetGraph.tree}
@@ -4055,7 +4055,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                     {li && (
                       <Link to={`/cloud#${runRowDomId(li.source, li.id)}`}
                         title="Jump to this run on the Runs page"
-                        className="ml-auto px-1 py-0.5 text-violet-300 hover:text-violet-200 text-[0.6875rem] font-medium underline decoration-violet-300/40">
+                        className="ml-auto px-1 py-0.5 text-violet-700 hover:text-violet-200 text-[0.6875rem] font-medium underline decoration-violet-300/40">
                         View in Runs ↗
                       </Link>
                     )}
@@ -4069,7 +4069,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                 <button type="button" disabled={bestEpochBusy}
                   onClick={findBestEpoch}
                   title="Scores every training sample vs the reference photo (face similarity, CPU) and recommends the checkpoint that holds the identity best — needs the Quality tools (ML extras)."
-                  className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-400/40 text-amber-200 text-[0.6875rem] font-semibold disabled:opacity-40">
+                  className="px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-[0.6875rem] font-semibold disabled:opacity-40">
                   {bestEpochBusy ? '🏆 Scoring samples…' : '🏆 Find best epoch'}
                 </button>
                 {/* A local training in flight no longer locks this button: the
@@ -4084,7 +4084,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                     : status.in_progress
                       ? 'A training is running here — continue this run in the cloud instead'
                       : 'Resume from any of this run’s checkpoints — pick where it runs, the step count, the checkpoint, and the safe settings'}
-                  className="ml-auto px-2.5 py-1 rounded-lg bg-indigo-500/20 border border-indigo-400/40 text-indigo-200 text-[0.6875rem] font-semibold disabled:opacity-40">
+                  className="ml-auto px-2.5 py-1 rounded-lg bg-indigo-100 border border-indigo-200 text-indigo-700 text-[0.6875rem] font-semibold disabled:opacity-40">
                   ▶ Continue training…
                 </button>
               </div>
@@ -4092,7 +4092,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                   button: no hover, no reason, and the report is "it does nothing".
                   State it in the panel, like the Find-best-epoch lines just below. */}
               {!checkpointMatchesTraining && (
-                <p className="m-0 text-amber-300 text-[0.625rem]">
+                <p className="m-0 text-amber-700 text-[0.625rem]">
                   ▶ Continue is off: these checkpoints come from a different LoRA family,
                   base or variant than the one selected in Training above. Match them to
                   continue this run.
@@ -4100,16 +4100,16 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               )}
               {checkpointMatchesTraining && status.in_progress
                 && !continueLanes.cloud.available && (
-                <p className="m-0 text-amber-300 text-[0.625rem]">
+                <p className="m-0 text-amber-700 text-[0.625rem]">
                   ▶ Continue is off while a training runs on this machine.
                   {' '}{continueLanes.cloud.reason}
                 </p>
               )}
               {bestEpoch && !bestEpoch.available && (
-                <p className="m-0 text-amber-300 text-[0.625rem]">🏆 {bestEpoch.reason}</p>
+                <p className="m-0 text-amber-700 text-[0.625rem]">🏆 {bestEpoch.reason}</p>
               )}
               {bestEpoch?.available && (
-                <p className="m-0 text-amber-200 text-[0.625rem]">
+                <p className="m-0 text-amber-700 text-[0.625rem]">
                   🏆 Best identity at <span className="font-semibold">step {bestEpoch.best_step}</span>
                   {' '}({(bestEpoch.steps.find((s) => s.step === bestEpoch.best_step)?.mean_sim ?? 0).toFixed(2)} mean similarity)
                   {' '}— per step: {bestEpoch.steps.map((s) => `${s.step}:${s.mean_sim.toFixed(2)}`).join(' · ')}
@@ -4127,7 +4127,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                     </span>
                   )}
                   {bestEpoch?.available && bestEpoch.checkpoint === c.filename && (
-                    <span className="px-1.5 py-px rounded border border-amber-400/50 bg-amber-400/15 text-amber-200 font-semibold"
+                    <span className="px-1.5 py-px rounded border border-amber-200 bg-amber-400/15 text-amber-700 font-semibold"
                       title={`Closest checkpoint to the best-scoring step (${bestEpoch.best_step})`}>
                       🏆 recommended
                     </span>
@@ -4152,7 +4152,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                       loadCheckpoints(checkpointBase, checkpointTrainType, checkpointVariant);
                     }}
                     title="Move this checkpoint to the trash (recoverable until the trash is emptied in Settings)"
-                    className="px-2 py-0.5 rounded bg-red-500/15 border border-red-500/40 text-red-300">
+                    className="px-2 py-0.5 rounded bg-red-50 border border-red-200 text-red-600">
                     🗑
                   </button>
                 </div>
@@ -4177,7 +4177,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                     loadCheckpoints(checkpointBase, checkpointTrainType, checkpointVariant);
                   }}
                   title="Keep the final (+ the 🏆 best-epoch pick if scored) and move every other checkpoint of this run to the trash"
-                  className="px-2.5 py-1 rounded-lg bg-red-500/10 border border-red-500/30 text-red-200 text-[0.6875rem] font-semibold">
+                  className="px-2.5 py-1 rounded-lg bg-red-50 border border-red-500/30 text-red-700 text-[0.6875rem] font-semibold">
                   🧹 Clean up this run
                 </button>
                 <span className="text-content-subtle text-[0.625rem]">
@@ -4208,8 +4208,8 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                     <DatasetVersionChip version={g.version} />
                     {g.status && (
                       <span className={`rounded border px-1.5 py-0.5 text-[0.625rem] ${g.active
-                        ? 'text-sky-300 border-sky-400/40 bg-sky-500/10'
-                        : g.status === 'done' ? 'text-emerald-300 border-emerald-400/40 bg-emerald-500/10'
+                        ? 'text-sky-700 border-sky-200 bg-sky-50'
+                        : g.status === 'done' ? 'text-emerald-700 border-emerald-200 bg-emerald-50'
                         : 'text-content-muted border-border bg-surface'}`}>
                         {g.status}
                       </span>
@@ -4222,7 +4222,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                     {g.run_id != null && (
                       <Link to={`/cloud#${runRowDomId('cloud', g.run_id)}`}
                         title="Jump to this run on the Runs page"
-                        className="ml-auto px-1 py-0.5 text-sky-300 hover:text-sky-200 text-[0.6875rem] font-medium underline decoration-sky-300/40">
+                        className="ml-auto px-1 py-0.5 text-sky-700 hover:text-sky-200 text-[0.6875rem] font-medium underline decoration-sky-300/40">
                         View in Runs ↗
                       </Link>
                     )}
@@ -4233,7 +4233,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                         {c.final ? '✓ final (training complete)' : `step ${c.step}`}
                       </span>
                       {c.active && (
-                        <span className="text-sky-300/80 text-[0.625rem]">· run in progress</span>
+                        <span className="text-sky-700/80 text-[0.625rem]">· run in progress</span>
                       )}
                       {renderDeployControl(c, {
                         onImport: async () => {
@@ -4261,7 +4261,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                             loadCheckpoints(checkpointBase, checkpointTrainType, checkpointVariant);
                           }}
                           title="Move this cloud save to the trash"
-                          className="px-2 py-0.5 rounded bg-red-500/15 border border-red-500/40 text-red-300">
+                          className="px-2 py-0.5 rounded bg-red-50 border border-red-200 text-red-600">
                           🗑
                         </button>
                       )}
@@ -4307,7 +4307,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                   {c.arch_mismatch && (
                     <span
                       title={`This file is a ${c.arch_label || c.arch_mismatch} LoRA, not ${checkpointLorasLabel} — testing it here has NO effect (ComfyUI silently drops it). Delete it and re-import under the ${c.arch_label || c.arch_mismatch} family.`}
-                      className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/40 text-amber-300 whitespace-nowrap">
+                      className="px-1.5 py-0.5 rounded bg-amber-50 border border-amber-500/40 text-amber-700 whitespace-nowrap">
                       ⚠ {c.arch_label || c.arch_mismatch} LoRA
                     </span>
                   )}
@@ -4316,7 +4316,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                       destroy anything permanently. */}
                   <button type="button" onClick={() => removeImported(c.filename, c.label)}
                     title={`Move this LoRA out of ComfyUI's ${checkpointLorasLabel} folder (to the trash — recoverable until you empty it in Settings)`}
-                    className="ml-auto px-2 py-0.5 rounded border border-emerald-500/40 bg-emerald-600/5 text-emerald-200/90 hover:bg-emerald-600/20">
+                    className="ml-auto px-2 py-0.5 rounded border border-emerald-500/40 bg-emerald-600/5 text-emerald-700/90 hover:bg-emerald-600/20">
                     ⏏ Undeploy
                   </button>
                 </div>
@@ -4504,28 +4504,28 @@ function CustomBasePushSection({ datasetId, trainType, variant, base, onReadyCha
   if (view.kind === 'foreign') {
     // Another family's base: nothing to push, nothing to restore. Say what the
     // run will do instead of offering an upload that could only fail.
-    body = <p className="m-0 text-amber-300 text-[0.75rem]">⚠ {view.message}</p>;
+    body = <p className="m-0 text-amber-700 text-[0.75rem]">⚠ {view.message}</p>;
   } else if (checkError) {
-    body = <p className="m-0 text-red-300 text-[0.75rem]">⚠ {checkError}</p>;
+    body = <p className="m-0 text-red-600 text-[0.75rem]">⚠ {checkError}</p>;
   } else if (!state) {
     body = <p className="m-0 text-content-muted text-[0.75rem]">Checking your custom base on Hugging Face…</p>;
   } else if (ready) {
     body = (
-      <p className="m-0 text-emerald-300 text-[0.75rem]">
+      <p className="m-0 text-emerald-700 text-[0.75rem]">
         ✓ Custom base found in your private repo <span className="font-mono">{state.repo_id}</span> —
         the pod downloads it with your HF token. Nothing to upload again.
       </p>
     );
   } else if (state.reason === 'no_token') {
     body = (
-      <p className="m-0 text-amber-300 text-[0.75rem]">
+      <p className="m-0 text-amber-700 text-[0.75rem]">
         ⚠ Add your Hugging Face token (HF_TOKEN) in Settings ▸ API keys first — your custom
         base rides in a private repo on your account, and the pod needs the token to read it.
       </p>
     );
   } else if (state.reason === 'token_invalid') {
     body = (
-      <p className="m-0 text-amber-300 text-[0.75rem]">
+      <p className="m-0 text-amber-700 text-[0.75rem]">
         ⚠ Your Hugging Face token was rejected — paste a valid HF_TOKEN in Settings ▸ API keys.
       </p>
     );
@@ -4545,14 +4545,14 @@ function CustomBasePushSection({ datasetId, trainType, variant, base, onReadyCha
           on your Hugging Face account — one time; future cloud runs reuse it. It is never made public.
         </p>
         {view.warning && (
-          <p className="m-0 text-amber-300 text-[0.75rem]">⚠ {view.warning}</p>
+          <p className="m-0 text-amber-700 text-[0.75rem]">⚠ {view.warning}</p>
         )}
         {(pushError || job.state === 'error') && (
-          <p className="m-0 text-red-300 text-[0.75rem]">⚠ {pushError || job.error}</p>
+          <p className="m-0 text-red-600 text-[0.75rem]">⚠ {pushError || job.error}</p>
         )}
         <button type="button" onClick={() => startPush(false)}
           disabled={!view.canPush || pushBusy}
-          className="w-fit px-3 py-1.5 rounded-lg border border-sky-500/50 bg-sky-500/10 text-sky-200 text-sm font-semibold disabled:opacity-40">
+          className="w-fit px-3 py-1.5 rounded-lg border border-sky-500/50 bg-sky-50 text-sky-200 text-sm font-semibold disabled:opacity-40">
           ⬆ Push custom base to Hugging Face (one-time)
         </button>
       </div>
@@ -4580,13 +4580,13 @@ function CloudTierEstimate({ tier, fullMode, maxRuntimeMinutes }) {
             {estimate.cost != null ? ` · ≈ $${estimate.cost.toFixed(2)} total` : ''}
           </>
         ) : fullMode ? (
-          <span className="text-amber-200"> · full-model estimate unavailable — hourly price only</span>
+          <span className="text-amber-700"> · full-model estimate unavailable — hourly price only</span>
         ) : (
           <span> · duration and cost unavailable</span>
         )}
       </span>
       {estimate.exceedsCap && (
-        <span className="block text-amber-300 text-[0.6875rem]">
+        <span className="block text-amber-700 text-[0.6875rem]">
           ⚠ Longer than the {Math.round((maxRuntimeMinutes || 480) / 60)} h runtime cap — the run would be cut short{fullMode
             ? '; the latest full-model checkpoint may not have reached Hugging Face'
             : ' (saved LoRA checkpoints are rescued)'}. Pick a faster GPU or raise the cap in Settings.
@@ -4716,7 +4716,7 @@ function CloudLaunchDialog({
           hfTokenVerified ? (
             <p className={`m-0 rounded-lg border px-3 py-2 text-[0.75rem] leading-relaxed ${
               hfTokenBroad
-                ? 'border-amber-400/35 bg-amber-500/[0.08] text-amber-100'
+                ? 'border-amber-200 bg-amber-500/[0.08] text-amber-100'
                 : 'border-emerald-400/35 bg-emerald-500/[0.08] text-emerald-100'}`}>
               <span className="font-semibold">
                 {hfTokenBroad
@@ -4730,7 +4730,7 @@ function CloudLaunchDialog({
               {offerTokenStatus?.namespace ? ` Delivery namespace: ${offerTokenStatus.namespace}.` : ''}
             </p>
           ) : (
-            <p className="m-0 rounded-lg border border-amber-400/35 bg-amber-500/[0.08] px-3 py-2 text-amber-100 text-[0.75rem] leading-relaxed">
+            <p className="m-0 rounded-lg border border-amber-200 bg-amber-500/[0.08] px-3 py-2 text-amber-100 text-[0.75rem] leading-relaxed">
               This run requires an <code>HF_CLOUD_TOKEN</code> that can read the Krea 2 base it
               trains from ({denseBase}) and write the delivery repository. A tightly scoped fine-grained token is recommended. A global
               write token is also accepted with a warning. Configure it in{' '}
@@ -4742,7 +4742,7 @@ function CloudLaunchDialog({
 
         {hfTokenIssue && (
           <div role="alert"
-            className="rounded-lg border border-red-400/45 bg-red-500/10 px-3 py-2 text-red-100 text-[0.75rem] leading-relaxed">
+            className="rounded-lg border border-red-400/45 bg-red-50 px-3 py-2 text-red-100 text-[0.75rem] leading-relaxed">
             <span className="font-semibold">Hugging Face delivery blocked.</span>{' '}{hfTokenIssue}{' '}
             Fix <SettingsLink section="local-tools" focus="HF_CLOUD_TOKEN" tone="warning">HF_CLOUD_TOKEN in Settings ▸ Local tools</SettingsLink>,
             then reload the offers. Launch stays disabled to prevent renting a GPU without a delivery path.
@@ -4764,10 +4764,10 @@ function CloudLaunchDialog({
 
         {loading && <p className="m-0 text-content-muted text-sm">Loading live GPU offers…</p>}
         {error && (
-          <p className="m-0 text-red-300 text-sm">
+          <p className="m-0 text-red-600 text-sm">
             ⚠ {error}
             {fullMode && (
-              <span className="block mt-1 text-amber-200 text-[0.75rem]">
+              <span className="block mt-1 text-amber-700 text-[0.75rem]">
                 Also check the dedicated <code>HF_CLOUD_TOKEN</code> in Settings ▸ Local tools.
               </span>
             )}
@@ -4788,7 +4788,7 @@ function CloudLaunchDialog({
               <label key={t.gpu_name}
                 className={`flex items-center gap-3 rounded-lg border px-3 py-2 cursor-pointer transition-colors ${
                   selected === t.gpu_name
-                    ? 'border-sky-400/70 bg-sky-500/10'
+                    ? 'border-sky-400/70 bg-sky-50'
                     : 'border-border bg-surface hover:bg-surface-raised'}`}>
                 <input type="radio" name="gpu-tier" className="accent-sky-400"
                   checked={selected === t.gpu_name}

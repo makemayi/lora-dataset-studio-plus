@@ -62,7 +62,7 @@ import EmptyState from '../components/common/EmptyState';
 const ACCENT_CHIP_BASE =
   'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold transition-colors';
 const ACCENT_CHIP =
-  `${ACCENT_CHIP_BASE} bg-indigo-500/15 text-indigo-200 hover:bg-indigo-500/25`;
+  `${ACCENT_CHIP_BASE} bg-indigo-50 text-indigo-700 hover:bg-indigo-500/25`;
 
 /* Dedicated hub for cloud training runs across ALL datasets: watch the ones in
    progress (live progress + samples), stop them, and download finished LoRAs —
@@ -81,13 +81,13 @@ const RECENT_COLLAPSED_KEY = 'cloudRunsRecentCollapsed';
 const GROUPS_COLLAPSED_KEY = 'cloudRunsGroupsCollapsed';
 
 const STATUS_STYLE = {
-  done: 'text-emerald-300 border-emerald-400/40 bg-emerald-500/10',
-  error: 'text-rose-300 border-rose-400/40 bg-rose-500/10',
-  error_pod_kept: 'text-amber-200 border-amber-400/40 bg-amber-500/10',
+  done: 'text-emerald-700 border-emerald-200 bg-emerald-50',
+  error: 'text-rose-700 border-rose-400/40 bg-rose-50',
+  error_pod_kept: 'text-amber-700 border-amber-200 bg-amber-50',
   stopped: 'text-content-muted border-border bg-surface',
 };
 const statusStyle = (s) =>
-  STATUS_STYLE[s] || 'text-sky-300 border-sky-400/40 bg-sky-500/10';
+  STATUS_STYLE[s] || 'text-sky-700 border-sky-200 bg-sky-50';
 
 // Outcome words on the history cards (raw pipeline statuses read like logs).
 // Active phases (preparing/training/syncing…) pass through untranslated.
@@ -166,7 +166,7 @@ function RunThumb({ run, broken, onBroken }) {
 function PodKeptNote({ fullModel = false }) {
   return (
     <div role="alert"
-      className="w-full rounded-md border border-amber-400/40 bg-amber-500/10 px-2.5 py-2 text-amber-200 text-[0.6875rem] leading-relaxed">
+      className="w-full rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-amber-700 text-[0.6875rem] leading-relaxed">
       <span className="font-semibold">⚠ Pod kept for manual checkpoint recovery</span> — it keeps
       billing until reaped. {fullModel
         ? 'Verify or recover the full-model weights on Hugging Face before the recovery window expires.'
@@ -176,10 +176,10 @@ function PodKeptNote({ fullModel = false }) {
 }
 
 const FULL_ARTIFACT_TONE = {
-  success: 'border-emerald-400/40 bg-emerald-500/10 text-emerald-100',
-  error: 'border-rose-400/45 bg-rose-500/10 text-rose-100',
-  warning: 'border-amber-400/45 bg-amber-500/10 text-amber-100',
-  info: 'border-sky-400/40 bg-sky-500/10 text-sky-100',
+  success: 'border-emerald-200 bg-emerald-50 text-emerald-100',
+  error: 'border-rose-400/45 bg-rose-50 text-rose-100',
+  warning: 'border-amber-400/45 bg-amber-50 text-amber-100',
+  info: 'border-sky-200 bg-sky-50 text-sky-100',
 };
 
 /* The copy on THIS computer — the first-class delivery since the Hugging Face
@@ -287,7 +287,7 @@ function AutoRetryBadges({ run }) {
     <>
       {run.auto_retry_of != null && (
         <span
-          className="rounded-full bg-sky-500/15 px-2 py-0.5 text-sky-200 text-[0.625rem]"
+          className="rounded-full bg-sky-50 px-2 py-0.5 text-sky-200 text-[0.625rem]"
           title={`Automatic retry of cloud run #${run.auto_retry_of}`}>
           ↻ automatic retry {run.auto_retry_count || 1}/1
         </span>
@@ -308,7 +308,7 @@ function RecipeWarning({ run }) {
   const replayBlocked = isTrainingRecipeReplayBlocked(run);
   return (
     <div role="alert"
-      className="w-full rounded-md border border-amber-400/40 bg-amber-500/10 px-2.5 py-2 text-amber-200 text-[0.6875rem] leading-relaxed">
+      className="w-full rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-amber-700 text-[0.6875rem] leading-relaxed">
       <span className="font-semibold">⚠ Z-Image recipe warning:</span> {run.recipe_warning}
       {replayBlocked && (
         <span className="font-semibold"> Retry and Continue are disabled; start a fresh validated run.</span>
@@ -327,8 +327,8 @@ function SilenceWarning({ run }) {
   return (
     <div role="alert"
       className={`w-full rounded-md border px-2.5 py-2 text-[0.6875rem] leading-relaxed ${
-        critical ? 'border-red-400/50 bg-red-500/10 text-red-200'
-          : 'border-amber-400/40 bg-amber-500/10 text-amber-200'}`}>
+        critical ? 'border-red-400/50 bg-red-50 text-red-700'
+          : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
       <span className="font-semibold">{critical ? '⛔' : '⚠'} Silent run:</span> {warning.text}
     </div>
   );
@@ -949,7 +949,7 @@ export default function CloudRunsPage() {
             </button>
             <StatusBadge status={run.status} />
             {fullModel && (
-              <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-sky-100 text-[0.625rem] font-semibold uppercase">
+              <span className="rounded-full bg-sky-50 px-2 py-0.5 text-sky-100 text-[0.625rem] font-semibold uppercase">
                 full model · experimental
               </span>
             )}
@@ -1008,7 +1008,7 @@ export default function CloudRunsPage() {
               shows on a phone — where this was reported. Newlines are real, hence
               whitespace-pre-line; clamped so a stack trace cannot take over the page. */}
           {run.error && (run.status === 'error' || run.status === 'error_pod_kept') && (
-            <p className="m-0 whitespace-pre-line line-clamp-5 text-rose-300/90 text-[0.6875rem]"
+            <p className="m-0 whitespace-pre-line line-clamp-5 text-rose-700/90 text-[0.6875rem]"
               title={run.error}>
               {run.error}
             </p>
@@ -1022,9 +1022,9 @@ export default function CloudRunsPage() {
             // own error string), so the first one that answers is rendered.
             const failure = podBootFailureView(run) || uploadStallFailureView(run);
             return failure && (
-              <div className="rounded-lg bg-amber-500/15 px-2.5 py-1.5 text-amber-100 text-[0.6875rem] leading-snug">
+              <div className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-amber-100 text-[0.6875rem] leading-snug">
                 <div className="font-semibold">{failure.title}</div>
-                <p className="m-0 mt-0.5 break-words text-amber-200/90">{failure.message}</p>
+                <p className="m-0 mt-0.5 break-words text-amber-700/90">{failure.message}</p>
               </div>
             );
           })()}
@@ -1126,7 +1126,7 @@ export default function CloudRunsPage() {
               <button type="button" onClick={() => purgeRun(run)}
                 disabled={!!purgingRun[run.run_id]}
                 title={cleanup.title}
-                className={`inline-flex items-center gap-1.5 rounded-full bg-red-500/15 px-2.5 py-1 text-red-200 hover:bg-red-500/25 text-xs font-semibold disabled:opacity-40 ${run.share_key ? '' : 'ml-auto'}`}>
+                className={`inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-1 text-red-700 hover:bg-red-500/25 text-xs font-semibold disabled:opacity-40 ${run.share_key ? '' : 'ml-auto'}`}>
                 <span hidden={!purgingRun[run.run_id]}>Cleaning…</span>
                 <span hidden={!!purgingRun[run.run_id]}>Clean {cleanup.size}</span>
               </button>
@@ -1160,7 +1160,7 @@ export default function CloudRunsPage() {
            logs, manual destroy) when something looks off app-side. */
         actions={(
           <a href="https://cloud.vast.ai/instances/" target="_blank" rel="noreferrer"
-            className="text-xs font-medium text-sky-300 underline hover:text-sky-200">
+            className="text-xs font-medium text-sky-700 underline hover:text-sky-200">
             Open the vast.ai console ↗
           </a>
         )}
@@ -1177,7 +1177,7 @@ export default function CloudRunsPage() {
           {/* Land on the section that actually holds the key and the cloud
               guard-rails, not the Settings landing page. */}
           <button type="button" onClick={() => navigate('/settings/training')}
-            className="text-sky-300 underline hover:text-sky-200">Settings › Training</button>{' '}
+            className="text-sky-700 underline hover:text-sky-200">Settings › Training</button>{' '}
           to rent GPUs on demand.
         </div>
       )}
@@ -1205,7 +1205,7 @@ export default function CloudRunsPage() {
         {/* Live LOCAL training — its own card next to the cloud actives. */}
         {data?.local_active?.current && (
           <div id={runRowDomId('local', data.local_active.record_id)}
-            className={`flex flex-col gap-2 rounded-xl bg-violet-500/10 p-3 ${CARD_SHADOW}`}>
+            className={`flex flex-col gap-2 rounded-xl bg-violet-50 p-3 ${CARD_SHADOW}`}>
             <div className="flex flex-wrap items-center gap-2">
               {data.local_active.record_id != null
                 ? <RunIdChip source="local" id={data.local_active.record_id} />
@@ -1226,13 +1226,13 @@ export default function CloudRunsPage() {
                 variant: data.local_active.current.variant,
               })} />
               {data.local_active.error && (
-                <span className="text-rose-300 text-[0.625rem]">{data.local_active.error}</span>
+                <span className="text-rose-700 text-[0.625rem]">{data.local_active.error}</span>
               )}
               <span className="ml-auto flex items-center gap-2">
                 {canStopLocalRun(data.local_active) && (
                   <button type="button" onClick={stopLocal} disabled={stoppingLocal}
                     title="Stop this local training process; checkpoints already saved are kept"
-                    className="px-3 py-1 rounded-lg bg-red-600/80 text-white text-xs font-semibold disabled:opacity-40">
+                    className="px-3 py-1 rounded-lg bg-red-600 text-white text-xs font-semibold disabled:opacity-40">
                     {stoppingLocal ? 'Stopping…' : 'Stop run'}
                   </button>
                 )}
@@ -1250,7 +1250,7 @@ export default function CloudRunsPage() {
                 {data.local_active.current.dataset_id != null && (
                   <button type="button" onClick={() => openTestStudio(data.local_active.current.dataset_id)}
                     title="Open Test Studio with this run's dataset selected"
-                    className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-indigo-200 transition-colors hover:bg-indigo-500/15 hover:text-indigo-100 text-xs font-semibold">
+                    className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-indigo-700 transition-colors hover:bg-indigo-50 hover:text-indigo-100 text-xs font-semibold">
                     <StudioIcon className="h-3.5 w-3.5 shrink-0" /> Test in Studio
                   </button>
                 )}
@@ -1281,7 +1281,7 @@ export default function CloudRunsPage() {
         ) : (
           actives.map((run) => (
             <div key={run.run_id} id={runRowDomId('cloud', run.run_id)}
-              className={`flex flex-col gap-2 rounded-xl bg-sky-500/10 p-3 ${CARD_SHADOW}`}>
+              className={`flex flex-col gap-2 rounded-xl bg-sky-50 p-3 ${CARD_SHADOW}`}>
               <div className="flex flex-wrap items-center gap-2">
                 <RunIdChip source="cloud" id={run.run_id} />
                 <button type="button" onClick={() => openDataset(run.dataset_id)}
@@ -1298,7 +1298,7 @@ export default function CloudRunsPage() {
                 <DatasetVersionChip version={run.version} />
                 <StatusBadge status={run.status} />
                 {isFullTransformerRun(run) && (
-                  <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-sky-100 text-[0.625rem] font-semibold uppercase">
+                  <span className="rounded-full bg-sky-50 px-2 py-0.5 text-sky-100 text-[0.625rem] font-semibold uppercase">
                     full model · experimental
                   </span>
                 )}
@@ -1335,12 +1335,12 @@ export default function CloudRunsPage() {
                   title={stopButtonLabel(run.status) === 'Cancel launch'
                     ? 'Give up this launch and release the machine — nothing has been trained yet'
                     : 'Stop this run; checkpoints already synced are kept'}
-                  className="px-3 py-1.5 rounded-lg bg-red-600/80 text-white text-xs font-semibold disabled:opacity-40">
+                  className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-semibold disabled:opacity-40">
                   {stopping[run.run_id] ? 'Stopping…' : stopButtonLabel(run.status)}
                 </button>
                 {!isFullTransformerRun(run) && run.checkpoint_ready && (
                   <a href={checkpointHref(run)}
-                    className="px-3 py-1.5 rounded-full bg-emerald-500/15 text-emerald-200 text-xs font-semibold no-underline">
+                    className="px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold no-underline">
                     ⬇ Download the LoRA
                   </a>
                 )}
@@ -1359,7 +1359,7 @@ export default function CloudRunsPage() {
                     title={run.vast_instance_id
                       ? `vast.ai instance ${run.vast_instance_id} — provider console (billing, logs, manual destroy)`
                       : 'vast.ai console — billing, logs, manual destroy'}
-                    className="px-2 py-1 rounded-lg text-sky-300 hover:text-sky-200 text-xs no-underline">
+                    className="px-2 py-1 rounded-lg text-sky-700 hover:text-sky-200 text-xs no-underline">
                     vast.ai console ↗
                   </a>
                   <button type="button" onClick={() => openDataset(run.dataset_id)}
@@ -1369,7 +1369,7 @@ export default function CloudRunsPage() {
                   {!isFullTransformerRun(run) && run.dataset_id != null && (
                     <button type="button" onClick={() => openTestStudio(run.dataset_id)}
                       title="Open Test Studio with this run's dataset selected"
-                      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-indigo-200 transition-colors hover:bg-indigo-500/15 hover:text-indigo-100 text-xs font-semibold">
+                      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-indigo-700 transition-colors hover:bg-indigo-50 hover:text-indigo-100 text-xs font-semibold">
                       <StudioIcon className="h-3.5 w-3.5 shrink-0" /> Test in Studio
                     </button>
                   )}
@@ -1397,7 +1397,7 @@ export default function CloudRunsPage() {
             </h2>
             {/* the fold must not hide an active billing warning entirely */}
             {recentCollapsed && recent.some((r) => r.status === 'error_pod_kept') && (
-              <span className="text-amber-300 text-[0.6875rem]">
+              <span className="text-amber-700 text-[0.6875rem]">
                 ⚠ a kept pod is still billing — expand for details
               </span>
             )}
@@ -1422,7 +1422,7 @@ export default function CloudRunsPage() {
                   await loadStagingSizes();
                   poll();
                 }}
-                className="ml-auto px-2.5 py-1 rounded-lg bg-red-500/10 border border-red-500/30 text-red-200 text-xs font-semibold">
+                className="ml-auto px-2.5 py-1 rounded-lg bg-red-50 border border-red-500/30 text-red-700 text-xs font-semibold">
                 🧹 Clean finished runs
               </button>
             )}
@@ -1451,7 +1451,7 @@ export default function CloudRunsPage() {
                       </span>
                     </button>
                     {collapsed && group.runs.some((r) => r.status === 'error_pod_kept') && (
-                      <span className="whitespace-nowrap text-amber-300 text-[0.625rem]">⚠ kept pod billing</span>
+                      <span className="whitespace-nowrap text-amber-700 text-[0.625rem]">⚠ kept pod billing</span>
                     )}
                     <button type="button" onClick={() => openDataset(group.datasetId)}
                       className="ml-auto whitespace-nowrap rounded-lg px-2 py-0.5 text-content-muted hover:text-content text-[0.6875rem]">
@@ -1460,7 +1460,7 @@ export default function CloudRunsPage() {
                     {hasLoraRun && group.datasetId != null && (
                       <button type="button" onClick={() => openTestStudio(group.datasetId)}
                         title="Open Test Studio with this run's dataset selected"
-                        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-indigo-200 transition-colors hover:bg-indigo-500/15 hover:text-indigo-100 text-[0.6875rem] font-semibold">
+                        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-indigo-700 transition-colors hover:bg-indigo-50 hover:text-indigo-100 text-[0.6875rem] font-semibold">
                         <StudioIcon className="h-3 w-3 shrink-0" /> Test in Studio
                       </button>
                     )}

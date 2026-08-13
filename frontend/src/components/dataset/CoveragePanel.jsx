@@ -17,9 +17,9 @@ import { HelpText } from '../common/HelpText';
  * keyword scan will otherwise be trusted further than it deserves.
  */
 const STATE_STYLE = {
-  ok: 'border-green-500/40 bg-green-500/10 text-green-300',
-  thin: 'border-amber-400/50 bg-amber-400/10 text-amber-300',
-  gap: 'border-rose-400/50 bg-rose-400/10 text-rose-300',
+  ok: 'border-green-500/40 bg-green-50 text-green-700',
+  thin: 'border-amber-200 bg-amber-400/10 text-amber-700',
+  gap: 'border-rose-400/50 bg-rose-400/10 text-rose-700',
   none: 'border-border bg-surface-raised text-content-subtle',
 };
 
@@ -88,7 +88,7 @@ export default function CoveragePanel({ datasetId, refreshKey = 0 }) {
 
       {open && (
         <div className="flex flex-col gap-2">
-          {error && <p className="m-0 text-amber-300/90 text-[0.6875rem]">⚠ {error}</p>}
+          {error && <p className="m-0 text-amber-700/90 text-[0.6875rem]">⚠ {error}</p>}
           {!error && !readiness.ready && (
             <p className="m-0 text-content-subtle text-[0.6875rem]">{readiness.reason}</p>
           )}
@@ -96,12 +96,12 @@ export default function CoveragePanel({ datasetId, refreshKey = 0 }) {
             <>
               <p className="m-0 text-content-subtle text-[0.6875rem]">{coverageScope(coverage)}</p>
               {(coverage.advice || []).map((a, i) => (
-                <p key={i} className={`m-0 text-[0.6875rem] ${a.tone === 'warn' ? 'text-amber-300/90' : 'text-content-subtle'}`}>
+                <p key={i} className={`m-0 text-[0.6875rem] ${a.tone === 'warn' ? 'text-amber-700/90' : 'text-content-subtle'}`}>
                   {a.tone === 'warn' ? '⚠ ' : '· '}{a.text}
                 </p>
               ))}
               {hint && (
-                <p className="m-0 text-[0.6875rem] text-emerald-300/90">→ {hint}</p>
+                <p className="m-0 text-[0.6875rem] text-emerald-700/90">→ {hint}</p>
               )}
               <div className="flex flex-col gap-2 border-t border-border pt-2">
                 {(coverage.axes || []).map((axis) => <Axis key={axis.id} axis={axis} />)}

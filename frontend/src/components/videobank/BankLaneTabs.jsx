@@ -39,7 +39,7 @@ export default function BankLaneTabs({ className = '' }) {
         {/* The lane ships, works end to end, and is younger than everything
             around it — the badge says "expect rough edges", not "expect loss":
             triage data is the only thing at stake and sources are never written. */}
-        <span className="rounded-full bg-amber-500/15 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+        <span className="rounded-full bg-amber-50 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
           Beta
         </span>
       </NavLink>

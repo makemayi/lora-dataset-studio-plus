@@ -22,7 +22,7 @@ export default function FolderCheckLine({ banks, busy = false, onRescan }) {
   if (!note) return null
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-      <p className={`min-w-0 grow text-xs ${note.stale ? 'text-amber-300/90' : 'text-content-subtle'}`}>
+      <p className={`min-w-0 grow text-xs ${note.stale ? 'text-amber-700/90' : 'text-content-subtle'}`}>
         {note.text}
       </p>
       {/* Both labels mounted, one hidden — see CLAUDE.md ▸ UI changes. */}

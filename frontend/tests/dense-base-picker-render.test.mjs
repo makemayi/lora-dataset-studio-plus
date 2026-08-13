@@ -104,9 +104,9 @@ test('the mechanical refusal is stated where the base is chosen, not after payin
 test('a base advisory from the picker above is surfaced with its severity', () => {
   const err = render({ baseNote: { level: 'error', text: 'not a Krea 2 checkpoint' } })
   assert.match(err, /not a Krea 2 checkpoint/)
-  assert.match(err, /text-red-300/)
+  assert.match(err, /text-red-600/)
   const warn = render({ baseNote: { level: 'warn', text: 'heads up' } })
-  assert.match(warn, /text-amber-300/)
+  assert.match(warn, /text-amber-700/)
 })
 
 test('the panel still renders the picker inside its full-model arm', () => {

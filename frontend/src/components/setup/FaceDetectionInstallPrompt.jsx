@@ -40,7 +40,7 @@ export default function FaceDetectionInstallPrompt({ why, compact = false, onIns
       className={`mt-1 flex flex-col gap-1.5 rounded-lg border border-amber-500/40
         bg-amber-500/5 p-2 ${text} leading-relaxed text-content-muted`}
     >
-      <p className="font-semibold text-amber-200">⚠️ {state.headline}</p>
+      <p className="font-semibold text-amber-700">⚠️ {state.headline}</p>
       {why && <p>{why}</p>}
       <p>{state.detail}</p>
       {state.canInstall

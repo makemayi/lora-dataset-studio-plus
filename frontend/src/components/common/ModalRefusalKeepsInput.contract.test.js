@@ -78,7 +78,7 @@ for (const [who, src] of [
     // free to be SQUASHED to a sliver of clipped text; and a long backend
     // sentence must scroll in its own box instead of pushing the submit button
     // off the screen. Both were measured on ContinueDialog before this rule.
-    assert.match(src, /shrink-0[^"]*rounded[^"]*border-red-500\/40/,
+    assert.match(src, /shrink-0[^"]*rounded[^"]*border-red-200/,
       `${who}: the error box must be shrink-0 (measured: squashed to a 20-px sliver otherwise)`);
     assert.match(src, /max-h-\d+ overflow-y-auto/,
       `${who}: a long refusal must scroll inside its own box`);

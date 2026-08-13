@@ -37,10 +37,10 @@ import WatermarkRegionEditor from './WatermarkRegionEditor';
 
 // The action Clean WILL take, per backend route (watermark_route in the payload).
 const ROUTE_LABEL = {
-  crop: { icon: '✂', text: 'Crop the watermarked border', cls: 'text-sky-300' },
-  lama: { icon: '🖌', text: 'Inpaint the mark (LaMa)', cls: 'text-emerald-300' },
-  review: { icon: '👁', text: 'On the subject — needs manual review', cls: 'text-amber-300' },
-  klein: { icon: '🎨', text: 'Masked Klein inpaint (crop-and-stitch)', cls: 'text-emerald-300' },
+  crop: { icon: '✂', text: 'Crop the watermarked border', cls: 'text-sky-700' },
+  lama: { icon: '🖌', text: 'Inpaint the mark (LaMa)', cls: 'text-emerald-700' },
+  review: { icon: '👁', text: 'On the subject — needs manual review', cls: 'text-amber-700' },
+  klein: { icon: '🎨', text: 'Masked Klein inpaint (crop-and-stitch)', cls: 'text-emerald-700' },
 };
 
 // Per-image outcome after an action. Terminal ones leave the 'detected' set (badge
@@ -48,12 +48,12 @@ const ROUTE_LABEL = {
 // user can still reject. Of the terminal outcomes, only dismissed/rejected auto-advance
 // (see AUTO_ADVANCE below) — cleaned holds so the user can see the result.
 const OUTCOME = {
-  cleaned: { icon: '✨', text: 'Cleaned', cls: 'text-emerald-300', terminal: true },
+  cleaned: { icon: '✨', text: 'Cleaned', cls: 'text-emerald-700', terminal: true },
   dismissed: { icon: '⊘', text: 'Marked “not a watermark”', cls: 'text-content-subtle', terminal: true },
-  rejected: { icon: '✕', text: 'Rejected — removed from the set', cls: 'text-red-300', terminal: true },
-  review: { icon: '👁', text: 'Left for manual review', cls: 'text-amber-300', terminal: false },
-  skipped: { icon: '⬇', text: 'Skipped — inpainting not installed', cls: 'text-amber-300', terminal: false },
-  failed: { icon: '⚠', text: 'Clean failed', cls: 'text-red-300', terminal: false },
+  rejected: { icon: '✕', text: 'Rejected — removed from the set', cls: 'text-red-600', terminal: true },
+  review: { icon: '👁', text: 'Left for manual review', cls: 'text-amber-700', terminal: false },
+  skipped: { icon: '⬇', text: 'Skipped — inpainting not installed', cls: 'text-amber-700', terminal: false },
+  failed: { icon: '⚠', text: 'Clean failed', cls: 'text-red-600', terminal: false },
 };
 
 // Which terminal outcomes auto-advance to the next image. Cleaned is deliberately
@@ -436,14 +436,14 @@ export default function WatermarkReviewLightbox({ datasetId, queue, caps, nonces
   const kleinInpaintLabel = (n) => ({
     icon: '🎨',
     text: manual ? `Klein inpaint ${n} selected zone${n === 1 ? '' : 's'}` : ROUTE_LABEL.klein.text,
-    cls: 'text-emerald-300',
+    cls: 'text-emerald-700',
   });
   let route;
   if (manual) {
     route = kleinSelected
       ? kleinInpaintLabel(regions.length)
       : { icon: '🖌', text: `Inpaint ${regions.length} selected zone${regions.length === 1 ? '' : 's'}`,
-          cls: 'text-emerald-300' };
+          cls: 'text-emerald-700' };
   } else if (item) {
     // effectiveRoute already folds in the per-image crop/inpaint choice ('crop' when the
     // user keeps the crop, else the crop-disabled fallback). Crop needs no engine; every
@@ -478,8 +478,8 @@ export default function WatermarkReviewLightbox({ datasetId, queue, caps, nonces
     ? 'Saving…'
     : saveState.status === 'failed' ? 'Save failed' : 'Saved';
   const saveCls = saveState.status === 'saving'
-    ? 'text-amber-200'
-    : saveState.status === 'failed' ? 'text-red-300' : 'text-emerald-300';
+    ? 'text-amber-700'
+    : saveState.status === 'failed' ? 'text-red-600' : 'text-emerald-700';
 
   const btn = 'flex-1 min-w-[7rem] min-h-[3rem] px-3 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 disabled:opacity-40';
 
@@ -526,7 +526,7 @@ export default function WatermarkReviewLightbox({ datasetId, queue, caps, nonces
               <img src={url} alt={alt} className="block max-h-[min(70vh,calc(100cqh_-_1.5rem))] max-w-[min(92vw,100cqw)] select-none" />
               {(cleaning || restoring) && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-sm">
-                  <span className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black/75 text-amber-200 text-sm font-semibold">
+                  <span className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black/75 text-amber-700 text-sm font-semibold">
                     <span aria-hidden className="w-4 h-4 rounded-full border-2 border-amber-200/40 border-t-amber-200 animate-spin" />
                     {cleaning ? 'Cleaning…' : 'Restoring…'}
                   </span>
@@ -581,10 +581,10 @@ export default function WatermarkReviewLightbox({ datasetId, queue, caps, nonces
         </div>
 
         {saveState.status === 'failed' && (
-          <div role="alert" className="flex items-center justify-center gap-2 text-xs text-red-300 flex-wrap">
+          <div role="alert" className="flex items-center justify-center gap-2 text-xs text-red-600 flex-wrap">
             <span>{saveState.error || 'Could not save correction zones.'}</span>
             <button type="button" onClick={retrySave} disabled={working}
-              className="min-h-8 px-2.5 rounded-md border border-red-300/50 bg-red-500/15 text-red-100 hover:bg-red-500/25 disabled:opacity-40">
+              className="min-h-8 px-2.5 rounded-md border border-red-300/50 bg-red-50 text-red-100 hover:bg-red-500/25 disabled:opacity-40">
               Retry save
             </button>
             <span className="text-white/50">or reset detection</span>
@@ -599,24 +599,24 @@ export default function WatermarkReviewLightbox({ datasetId, queue, caps, nonces
             <span className="text-white/60">— unknown (missing box)</span>
           )}
           {manual && regions.length > 0 && (
-            <span className="text-emerald-200/70 text-xs">
+            <span className="text-emerald-700/70 text-xs">
               · {kleinSelected ? 'one Klein inpaint per zone' : 'one composite LaMa pass'}
             </span>
           )}
           {engineMissing && (
-            <span className="text-amber-300/90 text-xs">
+            <span className="text-amber-700/90 text-xs">
               {kleinSelected
                 ? '· Klein inpaint isn’t ready → start ComfyUI + install the Klein models (Setup ▸ ComfyUI)'
                 : '· LaMa inpainting isn’t installed → install it from the 🧽 tools before Clean'}
             </span>
           )}
           {automaticLamaMissing && (
-            <span className="text-amber-300/90 text-xs">· inpainting not installed → Clean will skip</span>
+            <span className="text-amber-700/90 text-xs">· inpainting not installed → Clean will skip</span>
           )}
         </div>
 
         {note && (
-          <p className={`text-center text-xs ${note.tone === 'err' ? 'text-red-300' : 'text-amber-300'}`}>
+          <p className={`text-center text-xs ${note.tone === 'err' ? 'text-red-600' : 'text-amber-700'}`}>
             {note.text}
           </p>
         )}
@@ -686,7 +686,7 @@ export default function WatermarkReviewLightbox({ datasetId, queue, caps, nonces
           {restorable ? (
             <button type="button" onClick={doRestore} disabled={working}
               title="Undo the clean — bring the watermarked original back so you can re-clean it (e.g. with the other engine) — shortcut r"
-              className={`${btn} bg-sky-500/20 border border-sky-400/50 text-sky-100 hover:bg-sky-500/30`}>
+              className={`${btn} bg-sky-100 border border-sky-400/50 text-sky-100 hover:bg-sky-500/30`}>
               {restoring ? '↩ Restoring…' : <>↩ Restore original <kbd className="text-[10px] text-white/50">r</kbd></>}
             </button>
           ) : (
@@ -702,14 +702,14 @@ export default function WatermarkReviewLightbox({ datasetId, queue, caps, nonces
                     : saveBlocked
                       ? 'Save correction zones before cleaning'
                 : "Apply this image's watermark removal now (crop / inpaint / manual review) — shortcut c"}
-              className={`${btn} bg-amber-500/20 border border-amber-400/50 text-amber-100 hover:bg-amber-500/30`}>
+              className={`${btn} bg-amber-500/20 border border-amber-200 text-amber-100 hover:bg-amber-500/30`}>
               {cleaning ? '🧽 Cleaning…' : <>🧽 Clean <kbd className="text-[10px] text-white/50">c</kbd></>}
             </button>
           )}
           <HelpBadge topic="action-watermark-restore" className="self-center" />
           <button type="button" onClick={doDismiss} disabled={actionBlocked}
             title="This is NOT a watermark (false positive) — clears the flag, future scans skip it — shortcut d"
-            className={`${btn} bg-emerald-600/20 border border-emerald-400/40 text-emerald-100 hover:bg-emerald-600/30`}>
+            className={`${btn} bg-emerald-600/20 border border-emerald-200 text-emerald-100 hover:bg-emerald-600/30`}>
             ✓ Not a watermark <kbd className="text-[10px] text-white/50">d</kbd>
           </button>
           <button type="button" onClick={doReject} disabled={actionBlocked}

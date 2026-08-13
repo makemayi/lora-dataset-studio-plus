@@ -43,11 +43,11 @@ export function GraphCard({ node, lit, annotated, compareRole, onSelect }) {
       style={{ height: CARD_H }}
       className={'lds-gcard flex w-full flex-col justify-center gap-1 rounded-xl border px-2.5 py-1.5 '
         + (cur
-          ? 'lds-gcard-current border-indigo-400/70 bg-indigo-500/10 ring-1 ring-indigo-400/30 '
+          ? 'lds-gcard-current border-indigo-400/70 bg-indigo-50 ring-1 ring-indigo-400/30 '
           : dim
             ? 'border-border bg-app/40 '
             : 'border-border bg-surface-raised ')
-        + (lit && !cur ? 'ring-1 ring-indigo-300/40 border-indigo-400/50 ' : '')
+        + (lit && !cur ? 'ring-1 ring-indigo-300/40 border-indigo-200 ' : '')
         + (compareRole ? 'ring-2 ring-amber-400/70 border-amber-400/60 ' : '')
         + (clickable ? 'cursor-pointer' : '')}>
       <div className="flex min-w-0 items-center gap-1.5">
@@ -75,7 +75,7 @@ export function GraphCard({ node, lit, annotated, compareRole, onSelect }) {
           </span>
         )}
         {annotated && (
-          <span aria-hidden title="Has notes" className="shrink-0 text-amber-300 text-[0.625rem] leading-none">●</span>
+          <span aria-hidden title="Has notes" className="shrink-0 text-amber-700 text-[0.625rem] leading-none">●</span>
         )}
         {compareRole && (
           <span title={`Selected for compare (${compareRole})`}
@@ -168,8 +168,8 @@ export function CheckpointPill({ pill, offX, offY, active, selected, preview, bi
     + (gone
       ? 'border-dashed border-border bg-transparent text-content-subtle '
       : pill.final
-        ? 'border-emerald-400/50 bg-emerald-500/10 text-emerald-200 '
-        : 'border-border bg-app/70 text-content-muted hover:border-indigo-400/50 hover:text-content ')
+        ? 'border-emerald-400/50 bg-emerald-50 text-emerald-700 '
+        : 'border-border bg-app/70 text-content-muted hover:border-indigo-200 hover:text-content ')
     + (pill.isResumeSource ? 'ring-1 ring-indigo-400/60 border-indigo-400/60 ' : '')
     + (selected ? 'ring-2 ring-indigo-400/80 border-indigo-400/70 ' : active ? 'ring-2 ring-indigo-400/80 ' : '');
   const openTitle = `Checkpoint at step ${pill.step}${pill.final ? ' — final' : ''}${pill.isResumeSource ? ' — a run continued from here' : ''}${count ? ` — ${count} image${count > 1 ? 's' : ''}` : ''}${st === 'pending' ? ' — an image is rendering' : ''}${deployTitleSuffix(pill)}`;
@@ -222,8 +222,8 @@ export function CheckpointPill({ pill, offX, offY, active, selected, preview, bi
                 className="h-full w-full cursor-zoom-in object-cover hover:opacity-90" />
             ) : (
               <div className="flex h-full w-full items-center justify-center text-base">
-                {st === 'pending' ? <span aria-hidden title="Generating preview…" className="animate-pulse text-indigo-300">◌</span>
-                  : st === 'failed' ? <span aria-hidden title="Preview failed" className="text-amber-300">⚠</span>
+                {st === 'pending' ? <span aria-hidden title="Generating preview…" className="animate-pulse text-indigo-700">◌</span>
+                  : st === 'failed' ? <span aria-hidden title="Preview failed" className="text-amber-700">⚠</span>
                   : <span aria-hidden className="opacity-50">💾</span>}
               </div>
             )}
@@ -234,7 +234,7 @@ export function CheckpointPill({ pill, offX, offY, active, selected, preview, bi
             )}
           </div>
           <span className="flex shrink-0 items-center justify-center gap-0.5 border-t border-border bg-black/20 py-0.5 leading-none">
-            {pill.final && <span aria-hidden className="text-emerald-300">✓</span>}
+            {pill.final && <span aria-hidden className="text-emerald-700">✓</span>}
             <span>{label}</span>
           </span>
         </button>
@@ -244,13 +244,13 @@ export function CheckpointPill({ pill, offX, offY, active, selected, preview, bi
           title={openTitle}
           style={{ width: pill.w, height: pill.h }}
           className={shellCls + deployCls + ' flex w-full items-center justify-center gap-0.5 overflow-hidden px-0.5 text-[0.5625rem] font-medium tabular-nums'}>
-          {pill.final && <span aria-hidden className="shrink-0 text-emerald-300">✓</span>}
+          {pill.final && <span aria-hidden className="shrink-0 text-emerald-700">✓</span>}
           <span className="min-w-0 truncate">{label}</span>
           {count > 0 ? resultsChip(true)
             : st === 'pending' ? (
-              <span aria-hidden title="Generating an image…" className="ml-0.5 shrink-0 animate-pulse text-indigo-300">◌</span>
+              <span aria-hidden title="Generating an image…" className="ml-0.5 shrink-0 animate-pulse text-indigo-700">◌</span>
             ) : st === 'failed' ? (
-              <span aria-hidden title="The generation failed" className="ml-0.5 shrink-0 text-amber-300">⚠</span>
+              <span aria-hidden title="The generation failed" className="ml-0.5 shrink-0 text-amber-700">⚠</span>
             ) : (
               <span aria-hidden className="shrink-0 opacity-70">💾</span>
             )}

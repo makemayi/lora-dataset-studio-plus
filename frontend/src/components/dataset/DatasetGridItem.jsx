@@ -31,7 +31,7 @@ const DERIVATION_LABEL = {
 const STATUS_CLS = {
   keep: 'border-green-500',
   reject: 'border-red-500/50 opacity-50',
-  pending: 'border-amber-400/40',
+  pending: 'border-amber-200',
   failed: 'border-red-600',
 };
 
@@ -48,15 +48,15 @@ const GREY_LABEL = { no_face: 'no face detected', low_det: 'low detection',
 function faceBadge(img, thresholds) {
   if (img.face_state == null) return null;
   if (img.face_state !== 'scorable' || img.face_score == null) {
-    return { border: 'border-2 border-dashed border-gray-500', icon: '👁', cls: 'text-gray-300',
+    return { border: 'border-2 border-dashed border-gray-500', icon: '👁', cls: 'text-gray-600',
       label: GREY_LABEL[img.face_state] || 'not scored' };
   }
   const green = thresholds?.green ?? DEFAULT_FACE_VALID;
   const orange = thresholds?.orange ?? DEFAULT_FACE_ORANGE;
   const s = img.face_score;
-  if (s >= green) return { border: 'border-2 border-green-500', icon: '✓', cls: 'text-green-300', label: s.toFixed(2) };
-  if (s >= orange) return { border: 'border-2 border-amber-500', icon: '~', cls: 'text-amber-300', label: `${s.toFixed(2)} to review` };
-  return { border: 'border-4 border-red-500', icon: '⚠', cls: 'text-red-300', label: `${s.toFixed(2)} low` };
+  if (s >= green) return { border: 'border-2 border-green-500', icon: '✓', cls: 'text-green-700', label: s.toFixed(2) };
+  if (s >= orange) return { border: 'border-2 border-amber-500', icon: '~', cls: 'text-amber-700', label: `${s.toFixed(2)} to review` };
+  return { border: 'border-4 border-red-500', icon: '⚠', cls: 'text-red-600', label: `${s.toFixed(2)} low` };
 }
 
 // Watermark V1 badge from watermark_state (🚩 detected / ⊘ dismissed / ✨ cleaned /
@@ -72,12 +72,12 @@ const WATERMARK_ROUTE_HINT = {
   review: 'Watermark on the subject — Clean flags it for manual review (auto crop/inpaint would damage the photo); reject or crop manually',
 };
 const WATERMARK_BADGE = {
-  detected: { icon: '🚩', cls: 'text-amber-300', text: 'watermark',
+  detected: { icon: '🚩', cls: 'text-amber-700', text: 'watermark',
     label: 'Overlaid watermark detected — Clean will crop the border, inpaint a small mark, or flag it for manual review (V2 handles on-subject watermarks)' },
   dismissed: { icon: '⊘', cls: 'text-content-subtle', text: 'not a watermark',
     label: 'You marked this “not a watermark” — future 🧽 Find passes skip it' },
-  cleaned: { icon: '✨', cls: 'text-emerald-300', text: 'watermark', label: 'Watermark removed (original kept as a .orig backup)' },
-  failed: { icon: '⚠', cls: 'text-red-300', text: 'watermark', label: 'Watermark removal failed' },
+  cleaned: { icon: '✨', cls: 'text-emerald-700', text: 'watermark', label: 'Watermark removed (original kept as a .orig backup)' },
+  failed: { icon: '⚠', cls: 'text-red-600', text: 'watermark', label: 'Watermark removal failed' },
 };
 
 /* READS ARE NOT WRITES.
@@ -195,7 +195,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             top-left is the one corner nothing else claims at rest. */}
         {img.is_locked && (
           <span
-            className="absolute top-1.5 left-1.5 z-20 grid place-items-center w-5 h-5 rounded-full bg-black/70 text-amber-300 text-[11px]"
+            className="absolute top-1.5 left-1.5 z-20 grid place-items-center w-5 h-5 rounded-full bg-black/70 text-amber-700 text-[11px]"
             title="Locked — cannot be deleted until unlocked" aria-label="Locked, cannot be deleted">
             🔒
           </span>
@@ -239,7 +239,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             title={img.status === 'failed' ? (img.fail_reason || 'generation failed') : undefined}>
             {img.status === 'failed' ? (
               <>
-                <span className="text-red-300 text-xs font-semibold">⚠ failed</span>
+                <span className="text-red-600 text-xs font-semibold">⚠ failed</span>
                 {img.fail_reason && (
                   <span className="text-content-subtle text-[0.5625rem] leading-tight line-clamp-4 break-words">
                     {img.fail_reason}
@@ -248,7 +248,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
                 <span className="text-content-subtle text-[0.5625rem]">🔄 to retry</span>
               </>
             ) : generating ? (
-              <span className="text-emerald-300 text-xs font-semibold animate-pulse">⚙ generating…</span>
+              <span className="text-emerald-700 text-xs font-semibold animate-pulse">⚙ generating…</span>
             ) : (
               <span className="text-content-subtle text-xs">…</span>
             )}
@@ -265,7 +265,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               lost. `fail_reason` on a row that has an image and is not `failed`
               is exactly that case, and only that case. */}
           {swapRestoredNote && (
-            <span className={`${WATERMARK_BADGE_CLASS} bg-black/70 text-amber-300`}
+            <span className={`${WATERMARK_BADGE_CLASS} bg-black/70 text-amber-700`}
               title={swapRestoredNote} aria-label={swapRestoredNote}>
               ↩ restored
             </span>
@@ -278,7 +278,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
           {improvementBadgeInfo && (
             <span className={`${WATERMARK_BADGE_CLASS} bg-black/70 ${
               improvementBadgeInfo.tone === 'ready'
-                ? 'text-indigo-200' : 'text-white/70'}`}
+                ? 'text-indigo-700' : 'text-white/70'}`}
               title={improvementBadgeInfo.title} aria-label={improvementBadgeInfo.title}>
               {improvementBadgeInfo.text}
             </span>
@@ -403,7 +403,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               title={img.is_locked ? 'Unlock (allow delete again)' : 'Lock (cannot be deleted)'}
               aria-label={img.is_locked ? 'Unlock this image' : 'Lock this image against deletion'}
               aria-pressed={!!img.is_locked}
-              className={`px-1.5 py-0.5 rounded text-[10px] ${img.is_locked ? 'bg-amber-500/80 text-black' : 'bg-black/60 text-white'}`}>
+              className={`px-1.5 py-0.5 rounded text-[10px] ${img.is_locked ? 'bg-amber-400 text-black' : 'bg-black/60 text-white'}`}>
               {img.is_locked ? '🔒' : '🔓'}
             </button>
           )}
@@ -417,7 +417,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy || img.is_locked}
               title={img.is_locked ? 'Locked — unlock to delete' : (refused || 'Delete permanently')}
               aria-label={img.is_locked ? 'Locked — unlock to delete' : (refused || 'Delete permanently')}
-              className="px-1.5 py-0.5 rounded bg-red-700/80 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">🗑</button>
+              className="px-1.5 py-0.5 rounded bg-red-600 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">🗑</button>
           )}
         </div>
         {editingPrompt && (
@@ -430,7 +430,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
       <SourceAttribution metadata={img.source_metadata}
         className="mx-1.5 mt-1 block text-[0.625rem] leading-tight text-content-subtle" />
       {isRescueDerived ? (
-        <p className="m-1.5 rounded border border-indigo-400/30 bg-indigo-500/10 px-2 py-1 text-center text-[0.625rem] text-indigo-200"
+        <p className="m-1.5 rounded border border-indigo-100 bg-indigo-50 px-2 py-1 text-center text-[0.625rem] text-indigo-700"
           title="This winner was chosen atomically with its provenance pair. Caption and crop remain available.">
           ✓ Chosen in Klein rescue review
         </p>
@@ -475,7 +475,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
                 disabled={busy}
                 title={refused || 'Delete this image’s caption (then “Caption” regenerates it via JoyCaption)'}
                 aria-label={refused || 'Delete this image’s caption'}
-                className="rounded border border-red-500/40 bg-red-500/15 px-1.5 py-0.5 text-[10px] text-red-300 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-45">
+                className="rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] text-red-600 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-45">
                 🗑 Caption
               </button>
             )}
@@ -495,7 +495,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               aria-label={captionOriginInfo(img.caption_origin).short}
               className={`block truncate text-[10px] leading-none ${
                 captionIsAsserted(img.caption_origin)
-                  ? 'text-emerald-300' : 'text-content-subtle'}`}>
+                  ? 'text-emerald-700' : 'text-content-subtle'}`}>
               {captionOriginInfo(img.caption_origin).chip}
             </span>
           )}

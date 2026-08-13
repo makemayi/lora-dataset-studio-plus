@@ -463,7 +463,7 @@ export default function SetupPage() {
           const gates = kleinAssetBlocks(action)
           return (
             <>
-              <p className={`break-words text-xs ${gates ? 'text-rose-300' : 'text-amber-400'}`}>
+              <p className={`break-words text-xs ${gates ? 'text-rose-700' : 'text-amber-400'}`}>
                 ⚠ On disk, unreadable — {bad.filename}.
                 {gates ? '' : ' Klein still generates without it.'} Downloading again replaces it.
               </p>
@@ -564,7 +564,7 @@ export default function SetupPage() {
               fields the answer, and "⚠ Configure ComfyUI in Settings" printed on
               the ComfyUI configuration screen is noise. */}
           {step.reachable && kleinReason && (
-            <p className="break-words text-xs text-rose-300">
+            <p className="break-words text-xs text-rose-700">
               {kleinReason}{' '}
               {(step.unsupportedEnums || []).filter((i) => i && i.url).map((i) => (
                 <a key={i.url} href={i.url} target="_blank" rel="noreferrer"
@@ -579,7 +579,7 @@ export default function SetupPage() {
               empty warning list read as one. */}
           {!step.reachable
             && step.kleinFilesReady && step.dirValid && (
-            <p className="break-words text-xs text-amber-300">
+            <p className="break-words text-xs text-amber-700">
               ⚠ Not checked — every Klein file is on disk and readable, but ComfyUI isn't
               answering, so the app could not verify that Klein actually runs here. Start
               ComfyUI and re-check.
@@ -588,7 +588,7 @@ export default function SetupPage() {
           {step.reachable && !step.hasKlein && (
             <div className="space-y-1 text-xs text-content-muted">
               {missingSummary && (
-                <p className="text-amber-300">
+                <p className="text-amber-700">
                   Klein still needs the <span className="text-content font-medium">{missingSummary}</span> — grab
                   {missingLabels.length > 1 ? ' them' : ' it'} below. Local generation is
                   <span className="text-content font-medium"> optional</span>: the API engines and your own photos work without it.
@@ -697,7 +697,7 @@ export default function SetupPage() {
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
-                <p className="mb-1 text-xs font-semibold text-amber-300">What you won't have</p>
+                <p className="mb-1 text-xs font-semibold text-amber-700">What you won't have</p>
                 <ul className="space-y-1 text-xs text-content-muted">
                   {COMFYUI_SKIP_LOST.map((t) => (
                     <li key={t} className="flex gap-1.5"><span aria-hidden="true" className="text-amber-400">✗</span><span>{t}</span></li>
@@ -754,7 +754,7 @@ export default function SetupPage() {
                 either confirms readiness or defers to the one shared reason line
                 below, which names the real gap. */}
             <div className={`rounded-md border px-3 py-2 text-sm text-content ${step.hasKlein
-              ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-amber-500/40 bg-amber-500/10'}`}>
+              ? 'border-emerald-500/30 bg-emerald-50' : 'border-amber-500/40 bg-amber-50'}`}>
               <span aria-hidden="true">{step.hasKlein ? '✓' : '⚠'}</span>{' '}
               ComfyUI is running at <span className="font-mono">{step.apiUrl || 'the configured URL'}</span>.
               {step.hasKlein
@@ -782,7 +782,7 @@ export default function SetupPage() {
       // the model isn't pulled, lead with the pull action (this is the required gate).
       const model = step.visionModel || DEFAULT_VISION_MODEL
       const pullBlock = step.reachable && !step.visionModelReady && (
-        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
+        <div className="rounded-md border border-amber-500/30 bg-amber-50 p-3">
           <p className="mb-1 text-sm font-medium text-content">
             Ollama is running, but the vision model isn't pulled yet — that's what powers captioning.
           </p>
@@ -812,7 +812,7 @@ export default function SetupPage() {
         return (
           <div className="space-y-4">
             {step.visionModelReady ? (
-              <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-content">
+              <div className="rounded-md border border-emerald-500/30 bg-emerald-50 px-3 py-2 text-sm text-content">
                 ✓ Ollama is running at <span className="font-mono">{step.url || 'the configured URL'}</span> and
                 the vision model <span className="font-mono">{step.visionModel}</span> is ready. Nothing to do here.
               </div>
@@ -824,7 +824,7 @@ export default function SetupPage() {
       if (step.deploymentState === 'misconfigured') {
         return (
           <div className="space-y-4">
-            <div className="rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-3">
+            <div className="rounded-md border border-rose-500/30 bg-rose-50 px-3 py-3">
               <p className="text-sm font-medium text-content">The configured Ollama URL is invalid.</p>
               <p className="mt-1 text-xs leading-relaxed text-content-muted">
                 Enter an absolute <span className="font-mono">http://</span> or
@@ -841,7 +841,7 @@ export default function SetupPage() {
       if (step.installed) {
         return (
           <div className="space-y-4">
-            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
+            <div className="rounded-md border border-amber-500/30 bg-amber-50 p-3">
               <p className="mb-1 text-sm font-medium text-content">
                 Ollama is installed{step.binaryPath && (
                   <> at <span className="font-mono">{step.binaryPath}</span></>
@@ -887,9 +887,9 @@ export default function SetupPage() {
             Use <span className="font-medium text-content">↻ Reinstall</span> to repair or update it.
           </p>
           {caps.python && !caps.python.ml_supported && (
-            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm text-content space-y-1">
+            <div className="rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2.5 text-sm text-content space-y-1">
               <p>
-                <span className="font-semibold text-amber-300">⚠ Python {caps.python.version} —</span>{' '}
+                <span className="font-semibold text-amber-700">⚠ Python {caps.python.version} —</span>{' '}
                 these extras need Python {caps.python.ml_range}. insightface / numpy&lt;2 / onnxruntime publish
                 no prebuilt packages for {caps.python.version}, so the installs below will try to compile them
                 and most likely fail.
@@ -953,7 +953,7 @@ export default function SetupPage() {
     if (step.valid) {
       return (
         <div className="space-y-4">
-          <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-content">
+          <div className="rounded-md border border-emerald-500/30 bg-emerald-50 px-3 py-2 text-sm text-content">
             ✓ ai-toolkit is set up at <span className="font-mono">{dir}</span>. Nothing to do here.
           </div>
           {fields}
@@ -986,7 +986,7 @@ export default function SetupPage() {
       const verdict = aitoolkitVerdict(step, dir)
       return (
         <div className="space-y-4">
-          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-sm text-content space-y-2">
+          <div className="rounded-md border border-amber-500/30 bg-amber-50 px-3 py-3 text-sm text-content space-y-2">
             <p className="font-medium break-words">{verdict.headline}</p>
             <p className="text-xs leading-relaxed text-content-muted">{verdict.body}</p>
             {verdict.candidates.map((p) => (
@@ -1431,7 +1431,7 @@ export default function SetupPage() {
       </section>
 
       {reason && (
-        <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+        <p className="rounded-md border border-amber-500/30 bg-amber-50 px-3 py-2 text-xs text-amber-700">
           🔒 {reason}
         </p>
       )}

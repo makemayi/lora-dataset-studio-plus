@@ -49,7 +49,7 @@ function InstallItem({ item, onDone }) {
   // and "✗ Not installed" would describe a file the user can see. Each badge is a
   // WORD, not just a colour — the glyph and the text carry the state, so it reads
   // the same to anyone who doesn't perceive the hue.
-  const badgeCls = state === 'broken' ? 'text-rose-300'
+  const badgeCls = state === 'broken' ? 'text-rose-700'
     : state === 'restart' || state === 'broken_optional' ? 'text-amber-400'
       : present ? 'text-emerald-400' : 'text-content-subtle'
   return (
@@ -63,7 +63,7 @@ function InstallItem({ item, onDone }) {
       {/* The fault and the fix, in the user's own file name. Wraps freely: it must
           stay readable at 400px. */}
       {brokenReason && (
-        <p className={`break-words text-xs ${state === 'broken' ? 'text-rose-300' : 'text-amber-400'}`}>
+        <p className={`break-words text-xs ${state === 'broken' ? 'text-rose-700' : 'text-amber-400'}`}>
           {brokenReason}
         </p>
       )}
@@ -190,7 +190,7 @@ export default function InstallEverything({ plan, caps, onDone }) {
         </div>
 
         {nothingToInstall ? (
-          <p className="mt-3 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-content">
+          <p className="mt-3 rounded-md border border-emerald-500/30 bg-emerald-50 px-3 py-2 text-sm text-content">
             ✓ Everything the app can install itself is already in place. Use the list below to
             reinstall or repair any component.
           </p>

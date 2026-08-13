@@ -142,7 +142,7 @@ export default function CanvasDatasetFilter({
             )}
           </div>
           {familySel.size === 0 && (
-            <p className="mt-2 text-amber-200/80 text-[0.6875rem]">
+            <p className="mt-2 text-amber-700/80 text-[0.6875rem]">
               No model selected — dataset choices are kept, but the board is empty.
             </p>
           )}

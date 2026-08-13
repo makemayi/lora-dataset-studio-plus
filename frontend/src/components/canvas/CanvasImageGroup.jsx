@@ -71,7 +71,7 @@ export default function CanvasImageGroup({ group, datasetId, laneName, boardScal
       aria-label={`Group of ${count} pinned images from ${laneName || 'this dataset'}`}
       style={{ position: 'absolute', left: group.x, top: group.y,
         width: group.w, height: group.h }}
-      className="lds-canvas-group rounded-md border border-indigo-400/40 bg-surface-overlay shadow-lg">
+      className="lds-canvas-group rounded-md border border-indigo-200 bg-surface-overlay shadow-lg">
 
       {/* The pictures. Edge to edge, gap zero — the strip is one band. */}
       {group.members.map((m) => (
@@ -91,7 +91,7 @@ export default function CanvasImageGroup({ group, datasetId, laneName, boardScal
         style={{ position: 'absolute', right: 0, bottom: 0, width: 28, height: 28,
           transform: `scale(${Math.max(1, 1 / Math.max(boardScale, 0.01))})`,
           transformOrigin: 'bottom right' }}
-        className="cursor-nwse-resize touch-none rounded-tl-md border-l border-t border-indigo-400/40 bg-app/80 text-content-subtle after:absolute after:bottom-1 after:right-1 after:text-[0.625rem] after:content-['◢']" />
+        className="cursor-nwse-resize touch-none rounded-tl-md border-l border-t border-indigo-200 bg-app/80 text-content-subtle after:absolute after:bottom-1 after:right-1 after:text-[0.625rem] after:content-['◢']" />
 
       {/* ⤢ While a picture is being dragged out, say so — and say it INSIDE the
           strip, where the finger is. Without it, letting go one pixel too early
@@ -99,7 +99,7 @@ export default function CanvasImageGroup({ group, datasetId, laneName, boardScal
       {dropHint === 'leaving' && (
         <div data-testid="canvas-group-drop-hint"
           style={{ position: 'absolute', left: 0, top: 0, width: group.w, height: group.h }}
-          className="pointer-events-none flex items-end justify-center rounded-md bg-indigo-500/10 ring-2 ring-inset ring-indigo-300/50">
+          className="pointer-events-none flex items-end justify-center rounded-md bg-indigo-50 ring-2 ring-inset ring-indigo-300/50">
           <span style={{ fontSize: Math.max(9, barH * 0.42), marginBottom: barH * 0.3 }}
             className="rounded bg-app/90 px-1.5 py-0.5 font-semibold text-indigo-100">
             Drag it off the group to take it out

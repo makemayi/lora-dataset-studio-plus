@@ -43,8 +43,8 @@ export default function PromptOverrideField({
           reason has to be readable at the moment of editing — including at
           400px, where `break-words` keeps a long sentence inside the card. */}
       {warn && (
-        <p className="mb-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5
-                      text-xs leading-relaxed text-amber-200 break-words">
+        <p className="mb-1 rounded-md border border-amber-500/40 bg-amber-50 px-2 py-1.5
+                      text-xs leading-relaxed text-amber-700 break-words">
           <span aria-hidden="true">⚠ </span>{warn}
         </p>
       )}

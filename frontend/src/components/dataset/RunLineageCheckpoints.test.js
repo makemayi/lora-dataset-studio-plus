@@ -315,7 +315,7 @@ test('the ◉ Graph button is the prominent (accent) view control', () => {
   // On the Runs hub the graph toggle wears the indigo accent, not a bare grey.
   // The accent is one constant since the restyle (the outline it used to carry
   // went with every other outline on that card).
-  assert.match(cloud, /const ACCENT_CHIP =\s*\n?\s*`\$\{ACCENT_CHIP_BASE\} bg-indigo-500\/15 text-indigo-200/);
+  assert.match(cloud, /const ACCENT_CHIP =\s*\n?\s*`\$\{ACCENT_CHIP_BASE\} bg-indigo-50 text-indigo-700/);
   assert.match(cloud, /className=\{lineageOpen\[run\.record_id\]\s*\n?\s*\? `\$\{ACCENT_CHIP_BASE\}[^`]*`\s*\n?\s*: ACCENT_CHIP\}/);
 });
 

@@ -97,7 +97,7 @@ export default function PromoteDialog({ bankId, selectedIds, onClose, onStarted 
     <button type="button" key={id} onClick={() => setDestination(id)}
       aria-pressed={destination === id}
       className={`flex-1 rounded-md border px-3 py-2 text-sm ${destination === id
-        ? 'border-indigo-400 bg-indigo-500/20 font-semibold text-content'
+        ? 'border-indigo-400 bg-indigo-100 font-semibold text-content'
         : 'border-border text-content-muted hover:bg-surface-raised'}`}>
       {label}
     </button>
@@ -161,7 +161,7 @@ export default function PromoteDialog({ bankId, selectedIds, onClose, onStarted 
               ))}
             </select>
             {datasets != null && datasets.length === 0 && (
-              <p className="mt-1 text-xs text-amber-300">
+              <p className="mt-1 text-xs text-amber-700">
                 No dataset yet — create one on the Datasets page first, or send this selection to a
                 new image bank instead.
               </p>

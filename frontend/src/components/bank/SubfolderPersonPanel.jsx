@@ -37,8 +37,8 @@ export default function SubfolderPersonPanel({
   const verdict = verdictLine(sample)
   const heads = toCheckNote(entry)
   const toneClass = tone === 'ok'
-    ? 'text-emerald-300'
-    : tone === 'warn' ? 'text-amber-300' : 'text-content-subtle'
+    ? 'text-emerald-700'
+    : tone === 'warn' ? 'text-amber-700' : 'text-content-subtle'
 
   if (!entry) {
     // An offer the app made about THIS folder replaces the generic pitch: it is
@@ -46,7 +46,7 @@ export default function SubfolderPersonPanel({
     // button below is the one thing that groups anything.
     const offered = suggestionLine(suggestion)
     const offeredTone = suggestionTone(suggestion) === 'ok'
-      ? 'text-emerald-300' : 'text-content-subtle'
+      ? 'text-emerald-700' : 'text-content-subtle'
     return (
       <div className="space-y-1.5">
         <div className="flex flex-wrap items-center gap-2 text-xs text-content-subtle">
@@ -55,7 +55,7 @@ export default function SubfolderPersonPanel({
               + 'with no face pass. Undoable at any time.'}
             className={`rounded-full px-2.5 py-1 font-semibold transition-colors disabled:opacity-50 ${
               suggestionTone(suggestion) === 'ok'
-                ? 'bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30'
+                ? 'bg-emerald-500/20 text-emerald-700 hover:bg-emerald-500/30'
                 : 'bg-surface-raised text-content hover:bg-surface'}`}>
             👤 Single person here
           </button>
@@ -74,7 +74,7 @@ export default function SubfolderPersonPanel({
   }
 
   return (
-    <div className="space-y-1.5 rounded-md border border-sky-400/40 bg-sky-500/10 px-2.5 py-2 text-xs">
+    <div className="space-y-1.5 rounded-md border border-sky-200 bg-sky-50 px-2.5 py-2 text-xs">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="font-semibold text-sky-200">👤 Single person here</span>
         <span className="text-content-subtle">{assertionSummary(entry)}</span>

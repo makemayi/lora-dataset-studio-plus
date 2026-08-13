@@ -10,7 +10,7 @@ const FAMILY_OPTIONS = ['zimage', 'sdxl', 'krea', 'flux', 'flux2klein', 'anima']
 /* First-time walkthrough for renting cloud GPUs — collapsed by default so the
    card stays compact for users who already have a key. */
 function VastKeyGuide() {
-  const link = 'font-medium text-sky-300 underline hover:text-sky-200'
+  const link = 'font-medium text-sky-700 underline hover:text-sky-200'
   return (
     <details className="mb-2 rounded-lg bg-surface px-3 py-2 open:pb-3">
       <summary className="cursor-pointer select-none text-xs font-medium text-content">

@@ -54,7 +54,7 @@ test('the note also shows above a picker that IS rendered', () => {
 
 test('nothing is rendered when there is nothing to say', () => {
   const html = render({ baseNote: null })
-  assert.equal(html.includes('text-amber-300/80'), false,
+  assert.equal(html.includes('text-amber-700/80'), false,
     'a null note must not leave an empty coloured paragraph behind')
 })
 

@@ -32,8 +32,8 @@ export default function LoraRankingPanel({ ranking }) {
                 <span className="text-content font-medium truncate max-w-[160px]" title={`${r.lora_label} — ${r.dataset_name || ''}`}>
                   {r.lora_label}
                 </span>
-                <span className="text-green-300 tabular-nums" aria-label={`${r.likes || 0} likes`}>👍 {r.likes || 0}</span>
-                <span className="text-red-300 tabular-nums" aria-label={`${r.dislikes || 0} dislikes`}>👎 {r.dislikes || 0}</span>
+                <span className="text-green-700 tabular-nums" aria-label={`${r.likes || 0} likes`}>👍 {r.likes || 0}</span>
+                <span className="text-red-600 tabular-nums" aria-label={`${r.dislikes || 0} dislikes`}>👎 {r.dislikes || 0}</span>
                 <span className="text-content-subtle tabular-nums" title="Likes minus dislikes">
                   net {net > 0 ? `+${net}` : net}
                 </span>

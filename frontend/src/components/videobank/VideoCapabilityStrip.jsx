@@ -15,7 +15,7 @@ export default function VideoCapabilityStrip({ capability, compact = false }) {
   if (!notice) return null
   return (
     <section aria-label="Video tools status"
-      className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-amber-100">
+      className="rounded-lg border border-amber-500/50 bg-amber-50 p-3 text-sm text-amber-100">
       <p className="font-semibold">
         <span aria-hidden>⚠</span> {notice.headline}
       </p>
@@ -29,7 +29,7 @@ export default function VideoCapabilityStrip({ capability, compact = false }) {
             <li key={p.key} className="flex flex-wrap gap-x-1.5 text-xs">
               <span className="font-semibold text-amber-50">✗ {p.label}</span>
               <span className="text-amber-100/80">{p.blurb}</span>
-              <span className="basis-full text-amber-200">→ {p.fix}</span>
+              <span className="basis-full text-amber-700">→ {p.fix}</span>
             </li>
           ))}
         </ul>
@@ -37,7 +37,7 @@ export default function VideoCapabilityStrip({ capability, compact = false }) {
       {!compact && notice.detail && (
         /* The server's own sentence, verbatim — it names the exact package, and
            a paraphrase is how someone pip-installs the wrong one. */
-        <p className="mt-2 font-mono text-[0.6875rem] text-amber-200/80 break-words">
+        <p className="mt-2 font-mono text-[0.6875rem] text-amber-700/80 break-words">
           {notice.detail}
         </p>
       )}

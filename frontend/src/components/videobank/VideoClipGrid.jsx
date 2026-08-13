@@ -95,7 +95,7 @@ export default function VideoClipGrid({
                 answer. Absent outside a search — this is not a permanent
                 property of a shot. */}
             {matchLines?.[clip.id] && (
-              <p className="truncate px-1.5 pb-1 text-[0.625rem] text-indigo-300"
+              <p className="truncate px-1.5 pb-1 text-[0.625rem] text-indigo-700"
                 title={matchLines[clip.id]}>
                 🔎 {matchLines[clip.id]}
               </p>

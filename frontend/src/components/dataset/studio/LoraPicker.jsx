@@ -30,9 +30,9 @@ const keyOf = (l) => `${l.dataset_id}:${famOf(l)}`;
 // compris Z-Image — sinon une ligne zimage d'un dataset multi-famille reste ambiguë).
 const FAMILY_BADGE_LABEL = { zimage: 'Z-Image', sdxl: 'SDXL', krea: 'Krea' };
 const familyBadgeClass = (fam) => ({
-  zimage: 'border-sky-400/40 bg-sky-500/10 text-sky-300',
-  sdxl: 'border-violet-400/40 bg-violet-500/10 text-violet-300',
-  krea: 'border-amber-400/40 bg-amber-500/10 text-amber-300',
+  zimage: 'border-sky-200 bg-sky-50 text-sky-700',
+  sdxl: 'border-violet-200 bg-violet-50 text-violet-700',
+  krea: 'border-amber-200 bg-amber-50 text-amber-700',
 }[fam] || 'bg-surface-raised text-content-muted');
 
 export default function LoraPicker({ preselectDataset, preselectFamily = null, onSelectionChange }) {
@@ -159,7 +159,7 @@ export default function LoraPicker({ preselectDataset, preselectFamily = null, o
             choisi juste en dessous (LoraStackPanel). On n'annonce plus que le FAIT
             d'avoir plusieurs LoRA, pas ce qu'on va en faire. */}
         {count >= 2 && (
-          <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-amber-400/15 border border-amber-400/40 text-amber-200">
+          <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-amber-400/15 border border-amber-200 text-amber-700">
             Multi-LoRA ({count})
           </span>
         )}
@@ -199,7 +199,7 @@ export default function LoraPicker({ preselectDataset, preselectFamily = null, o
                     {l.lora_label}
                   </span>
                   {l.trigger_word && (
-                    <code className="px-1.5 py-0.5 rounded border border-indigo-400/40 bg-indigo-500/10 text-indigo-300 text-[0.625rem] font-semibold">
+                    <code className="px-1.5 py-0.5 rounded border border-indigo-200 bg-indigo-50 text-indigo-700 text-[0.625rem] font-semibold">
                       {l.trigger_word}
                     </code>
                   )}

@@ -82,7 +82,7 @@ export default function DatasetToBankDialog({ datasetName, keptCount, onClose, o
             Both choices keep Dataset-owned metadata: captions, curation, framing, watermark and provenance.
           </p>
           <label className={`cursor-pointer rounded-lg border p-3 transition-colors ${preserveAnalysis
-            ? 'border-indigo-400/70 bg-indigo-500/10'
+            ? 'border-indigo-400/70 bg-indigo-50'
             : 'border-border bg-surface-raised hover:bg-surface'}`}>
             <span className="flex items-start gap-2.5">
               <input type="radio" name="dataset-to-bank-analysis" checked={preserveAnalysis}
@@ -97,7 +97,7 @@ export default function DatasetToBankDialog({ datasetName, keptCount, onClose, o
             </span>
           </label>
           <label className={`cursor-pointer rounded-lg border p-3 transition-colors ${!preserveAnalysis
-            ? 'border-amber-400/70 bg-amber-500/10'
+            ? 'border-amber-400/70 bg-amber-50'
             : 'border-border bg-surface-raised hover:bg-surface'}`}>
             <span className="flex items-start gap-2.5">
               <input type="radio" name="dataset-to-bank-analysis" checked={!preserveAnalysis}
@@ -114,7 +114,7 @@ export default function DatasetToBankDialog({ datasetName, keptCount, onClose, o
         </fieldset>
 
         {error && (
-          <div role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+          <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             {error}
             <span className="mt-1 block text-[0.6875rem] text-content-subtle">
               Your name and choice are kept — adjust them and try again.

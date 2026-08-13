@@ -9,20 +9,20 @@ export default function BestPresetCard({ preset, onMemorize, fmt }) {
       <div className="flex items-center gap-2 flex-wrap">
         <span aria-hidden>🏆</span>
         <span className="text-content text-sm font-semibold">Best setting (based on your votes)</span>
-        <span className="text-emerald-300 text-[0.6875rem] tabular-nums"
+        <span className="text-emerald-700 text-[0.6875rem] tabular-nums"
           title={`+${preset.likes} / −${preset.dislikes} on ${preset.images} image(s)`}>
           score +{preset.score} (👍{preset.likes} 👎{preset.dislikes})
           {preset.like_rate != null ? ` · ${Math.round(preset.like_rate * 100)}% 👍 on ${preset.voted} vote(s)` : ''}
         </span>
         {preset.low_confidence && (
-          <span className="text-amber-300 text-[0.625rem] inline-flex items-center gap-1"
+          <span className="text-amber-700 text-[0.625rem] inline-flex items-center gap-1"
             title="Recommendation based on few votes — keep voting to make it more reliable">
             ⚠ low sample
           </span>
         )}
         <button type="button" onClick={() => onMemorize(preset)}
           title="Save this config as the dataset's best setting"
-          className="ml-auto px-3 py-1.5 rounded-lg border border-amber-400/50 bg-amber-400/10 text-amber-200 text-xs font-semibold">
+          className="ml-auto px-3 py-1.5 rounded-lg border border-amber-200 bg-amber-400/10 text-amber-700 text-xs font-semibold">
           ★ Save
         </button>
       </div>

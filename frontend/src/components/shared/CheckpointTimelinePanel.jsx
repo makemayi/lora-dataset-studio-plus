@@ -560,7 +560,7 @@ export default function CheckpointTimelinePanel({ recordId, onClose }) {
 
           {state.status === 'error' && (
             <div className="mx-auto flex min-h-64 max-w-lg flex-col items-center justify-center text-center">
-              <p role="alert" className="m-0 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+              <p role="alert" className="m-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-100">
                 {state.error}
               </p>
               <p className="m-0 mt-2 text-[0.75rem] text-content-subtle">
@@ -584,7 +584,7 @@ export default function CheckpointTimelinePanel({ recordId, onClose }) {
           )}
 
           {state.status === 'ready' && state.limitMessage && (
-            <p role="status" className="mx-auto mb-3 max-w-4xl rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-[0.6875rem] text-amber-100">
+            <p role="status" className="mx-auto mb-3 max-w-4xl rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[0.6875rem] text-amber-100">
               Timeline safety limit: {state.limitMessage}
             </p>
           )}
@@ -611,7 +611,7 @@ export default function CheckpointTimelinePanel({ recordId, onClose }) {
               </div>
 
               {selectedSeries.truncated && (
-                <p role="status" className="m-0 mb-3 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-[0.6875rem] text-amber-100">
+                <p role="status" className="m-0 mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[0.6875rem] text-amber-100">
                   Showing {frames.length} of {selectedSeries.frame_count} frames. The server capped this series;
                   the player and exports use only the frames listed here.
                 </p>
@@ -638,7 +638,7 @@ export default function CheckpointTimelinePanel({ recordId, onClose }) {
                         className={`absolute inset-0 h-full w-full object-contain transition-opacity duration-500 ease-linear motion-reduce:transition-none ${previousFrame && !fadeReady ? 'opacity-0' : 'opacity-100'}`} />
                     )}
                     {currentBroken && (
-                      <p role="alert" className="relative z-10 rounded-lg border border-amber-400/40 bg-black/80 px-3 py-2 text-sm text-amber-100">
+                      <p role="alert" className="relative z-10 rounded-lg border border-amber-200 bg-black/80 px-3 py-2 text-sm text-amber-100">
                         This frame could not be loaded. Use the controls to continue to another checkpoint.
                       </p>
                     )}
@@ -679,7 +679,7 @@ export default function CheckpointTimelinePanel({ recordId, onClose }) {
                         className="rounded-md border border-border px-3 py-2 text-content hover:border-indigo-400/60">◀</button>
                       <button type="button" onClick={() => setPlaying((value) => !value)}
                         aria-label={playing ? 'Pause timeline' : 'Play timeline'} aria-pressed={playing}
-                        className="min-w-20 rounded-md border border-indigo-400/60 bg-indigo-500/15 px-3 py-2 text-[0.75rem] font-semibold text-indigo-100 hover:bg-indigo-500/25">
+                        className="min-w-20 rounded-md border border-indigo-400/60 bg-indigo-50 px-3 py-2 text-[0.75rem] font-semibold text-indigo-100 hover:bg-indigo-500/25">
                         {playing ? '❚❚ Pause' : '▶ Play'}
                       </button>
                       <button type="button" onClick={() => move(1)} aria-label="Next frame"
@@ -734,7 +734,7 @@ export default function CheckpointTimelinePanel({ recordId, onClose }) {
                     </p>
                   )}
                   {exportState.error && (
-                    <p role="alert" className="m-0 mt-2 rounded-md border border-rose-400/40 bg-rose-500/10 px-2 py-1.5 text-right text-[0.6875rem] text-rose-100">
+                    <p role="alert" className="m-0 mt-2 rounded-md border border-rose-400/40 bg-rose-50 px-2 py-1.5 text-right text-[0.6875rem] text-rose-100">
                       {exportState.error}
                     </p>
                   )}
