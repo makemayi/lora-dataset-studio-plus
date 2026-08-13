@@ -470,7 +470,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             disabled={busy}
             title={refused || 'Reject (offers a regeneration)'} aria-label={refused || 'Reject'}
             aria-pressed={img.status === 'reject'}
-            className={`flex-1 py-1.5 rounded-lg text-[11px] disabled:cursor-not-allowed disabled:opacity-45 ${img.status === 'reject' ? 'bg-red-600 text-white' : 'bg-white/10 text-white/70'}`}>✕</button>
+            className="flex-1 py-1.5 rounded-full text-[11px] bg-white/10 backdrop-blur-[10px] text-white/70 disabled:cursor-not-allowed disabled:opacity-45">✕</button>
         </div>
       )}
       {img.status === 'keep' && (
