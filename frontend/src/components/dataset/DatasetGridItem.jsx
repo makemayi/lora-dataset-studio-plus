@@ -175,8 +175,8 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
     <div tabIndex={0} aria-label={`${displayLabel(img.variation_label) || 'Dataset image'} card`}
       /* The tile keeps `borderCls`: that edge is the decision (kept / rejected /
          undecided), not decoration. Only the fill moves onto the token. */
-      className={`dataset-grid-item rounded-2xl ${borderCls} ${selected ? 'ring-2 ring-indigo-400' : ''} bg-surface overflow-hidden flex flex-col ${FLOAT_HOVER}`}>
-      <div className="relative aspect-square bg-black">
+      className={`dataset-grid-item rounded-[28px] ${borderCls} ${selected ? 'ring-2 ring-indigo-400' : ''} bg-surface overflow-hidden flex flex-col ${FLOAT_HOVER}`}>
+      <div className="relative aspect-square bg-black rounded-[22px] overflow-hidden m-2">
         {/* Fresh content nobody has looked at yet — a first-time generation
             OR a regenerate, not yet opened (unlike the in-progress emerald
             glow above, this one is meant to survive being buried back among
@@ -435,11 +435,16 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             onSubmit={(prompt) => onRegenerate?.(img.id, undefined, prompt, { silent: true })}
             onClose={() => setEditingPrompt(false)} />
         )}
+        {/* Frosted fade: the photo's bottom edge blurs and darkens into the
+            base below, so the image and its caption read as one continuous
+            surface rather than two stacked boxes. */}
+        <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 backdrop-blur-[2px] bg-gradient-to-t from-[#14171c] via-[#14171c]/55 to-transparent" />
       </div>
+      <div className="flex flex-1 flex-col rounded-b-[28px] bg-[#14171c]">
       <SourceAttribution metadata={img.source_metadata}
-        className="mx-1.5 mt-1 block text-[0.625rem] leading-tight text-content-subtle" />
+        className="mx-2.5 mt-2 block text-[0.625rem] leading-tight text-white/60" />
       {isRescueDerived ? (
-        <p className="m-1.5 rounded border border-indigo-100 bg-indigo-50 px-2 py-1 text-center text-[0.625rem] text-indigo-700"
+        <p className="m-2 rounded-lg border border-indigo-400/40 bg-indigo-500/20 px-2 py-1 text-center text-[0.625rem] text-indigo-200"
           title="This winner was chosen atomically with its provenance pair. Caption and crop remain available.">
           ✓ Chosen in Klein rescue review
         </p>
@@ -449,7 +454,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             disabled={busy}
             title={refused || 'Keep'} aria-label={refused || 'Keep'}
             aria-pressed={img.status === 'keep'}
-            className={`flex-1 py-1.5 rounded-lg text-[11px] disabled:cursor-not-allowed disabled:opacity-45 ${img.status === 'keep' ? 'bg-green-600 text-white' : 'bg-surface-raised text-content-muted'}`}>✓</button>
+            className={`flex-1 py-1.5 rounded-lg text-[11px] disabled:cursor-not-allowed disabled:opacity-45 ${img.status === 'keep' ? 'bg-green-600 text-white' : 'bg-white/10 text-white/70'}`}>✓</button>
           <button type="button"
             onClick={() => {
               // Rejecting a GENERATED image offers an immediate retry of the same
@@ -465,7 +470,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             disabled={busy}
             title={refused || 'Reject (offers a regeneration)'} aria-label={refused || 'Reject'}
             aria-pressed={img.status === 'reject'}
-            className={`flex-1 py-1.5 rounded-lg text-[11px] disabled:cursor-not-allowed disabled:opacity-45 ${img.status === 'reject' ? 'bg-red-600 text-white' : 'bg-surface-raised text-content-muted'}`}>✕</button>
+            className={`flex-1 py-1.5 rounded-lg text-[11px] disabled:cursor-not-allowed disabled:opacity-45 ${img.status === 'reject' ? 'bg-red-600 text-white' : 'bg-white/10 text-white/70'}`}>✕</button>
         </div>
       )}
       {img.status === 'keep' && (
@@ -475,7 +480,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy}
               title={refused || 'Open a larger caption editor'}
               aria-label={refused || 'Expand caption editor'}
-              className="rounded-full bg-surface-raised px-2 py-0.5 text-[10px] text-content-muted hover:text-content disabled:cursor-not-allowed disabled:opacity-45">
+              className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-white/70 hover:text-white disabled:cursor-not-allowed disabled:opacity-45">
               ⛶ Expand
             </button>
             {cap && (
@@ -504,7 +509,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               aria-label={captionOriginInfo(img.caption_origin).short}
               className={`block truncate text-[10px] leading-none ${
                 captionIsAsserted(img.caption_origin)
-                  ? 'text-emerald-700' : 'text-content-subtle'}`}>
+                  ? 'text-emerald-300' : 'text-white/50'}`}>
               {captionOriginInfo(img.caption_origin).chip}
             </span>
           )}
@@ -521,9 +526,10 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               : datasetKind === 'concept'
                 ? 'caption without naming the concept…'
                 : 'caption (without the face)…'} aria-label="Image caption"
-            className="text-[11px] rounded-xl bg-surface-raised p-2 text-content resize-none focus:outline-none focus:ring-1 focus:ring-primary" />
+            className="text-[11px] rounded-xl bg-white/10 p-2 text-white placeholder:text-white/40 resize-none focus:outline-none focus:ring-1 focus:ring-primary" />
         </div>
       )}
+      </div>
       {captionEditorOpen && (
         <CaptionEditorDialog initialCaption={cap} imageUrl={url}
           datasetId={datasetId} imageId={img.id}

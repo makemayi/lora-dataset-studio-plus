@@ -10,7 +10,7 @@ const item = fs.readFileSync(path.join(frontend, 'src/components/dataset/Dataset
 const css = fs.readFileSync(path.join(frontend, 'src/index.css'), 'utf8')
 
 test('all image-card control groups share the hover-action contract', () => {
-  assert.match(item, /dataset-grid-item rounded-2xl/)
+  assert.match(item, /dataset-grid-item rounded-\[28px\]/)
   assert.ok((item.match(/dataset-grid-item__actions/g) || []).length >= 4)
 })
 
