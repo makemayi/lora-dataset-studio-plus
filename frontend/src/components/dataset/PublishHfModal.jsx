@@ -93,7 +93,7 @@ export default function PublishHfModal({ datasetId, onClose }) {
     <div role="dialog" aria-modal="true" aria-label="Publish to Hugging Face"
       className="fixed inset-0 z-[9990] bg-black/80 flex items-center justify-center p-3"
       onClick={busy ? undefined : onClose}>
-      <div className="w-full max-w-lg rounded-xl bg-surface-overlay p-4 flex flex-col gap-3 max-h-[92vh] overflow-y-auto"
+      <div className="w-full max-w-lg rounded-xl bg-surface-overlay/85 backdrop-blur-md p-4 flex flex-col gap-3 max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}>
         <h2 className="text-content font-semibold flex items-center gap-1.5">
           🤗 Publish to Hugging Face

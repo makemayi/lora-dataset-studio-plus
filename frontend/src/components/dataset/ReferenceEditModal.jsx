@@ -163,7 +163,7 @@ export default function ReferenceEditModal({ datasetId, refFilename, nonce = 0,
           the one every other modal here uses. (Regressed once when this file was
           rewritten; kept explicit so it survives the next rewrite.) */}
       <div className="w-full max-w-3xl mx-auto my-auto flex flex-col gap-3
-                      bg-surface-overlay rounded-2xl shadow-2xl p-4 sm:p-5">
+                      bg-surface-overlay/85 backdrop-blur-md rounded-2xl shadow-2xl p-4 sm:p-5">
         <div className="flex items-center justify-between">
           <h2 className="text-content text-base font-semibold">✦ Edit reference</h2>
           <button type="button" onClick={onClose} disabled={busy}

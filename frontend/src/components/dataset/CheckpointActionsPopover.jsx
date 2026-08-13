@@ -37,7 +37,7 @@ export default function CheckpointActionsPopover({
   if (!a) return null;
 
   return (
-    <div className="lds-ck-popover rounded-lg border border-indigo-400/40 bg-surface-overlay p-2 shadow-xl"
+    <div className="lds-ck-popover rounded-lg border border-indigo-400/40 bg-surface-overlay/85 backdrop-blur-md p-2 shadow-xl"
       role="dialog"
       aria-label={a.isRun ? 'Run actions' : `Checkpoint step ${a.step} actions`}
       onPointerDown={(e) => e.stopPropagation()}>

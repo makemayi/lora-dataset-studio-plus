@@ -52,6 +52,16 @@ const OVERLAY_FILES = [
   'src/components/bank/PromoteDialog.jsx',
   'src/components/bank/RelocateBankDialog.jsx',
   'src/components/bank/ScoringPythonDialog.jsx',
+  'src/components/dataset/DatasetSettingsModal.jsx',
+  'src/components/dataset/DatasetToBankDialog.jsx',
+  'src/components/dataset/PublishHfModal.jsx',
+  'src/components/dataset/ReferenceEditModal.jsx',
+  'src/components/dataset/PromptEditPopover.jsx',
+  'src/components/dataset/CaptionOptionsPopover.jsx',
+  'src/components/dataset/CheckpointActionsPopover.jsx',
+  'src/components/dataset/DatasetGrid.jsx',
+  'src/components/dataset/DatasetWorkspace.jsx',
+  'src/components/dataset/FullBackupControls.jsx',
 ]
 
 test('floating overlays use the glass recipe', () => {

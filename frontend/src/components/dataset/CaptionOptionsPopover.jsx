@@ -208,7 +208,7 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
       onClick={(e) => { e.stopPropagation(); onClose(); }}
       onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } }}>
       <div role="dialog" aria-modal="true" aria-label="Caption method options"
-        className="w-full max-w-md max-h-[92vh] overflow-y-auto rounded-xl bg-surface-overlay p-4 shadow-2xl flex flex-col gap-4"
+        className="w-full max-w-md max-h-[92vh] overflow-y-auto rounded-xl bg-surface-overlay/85 backdrop-blur-md p-4 shadow-2xl flex flex-col gap-4"
         onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="text-content font-semibold text-sm">⚙️ Caption method — this dataset</h3>

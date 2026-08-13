@@ -170,7 +170,7 @@ export default function FullBackupControls({ backup, onRestore }) {
           </span>
           <span aria-hidden className="text-content-subtle">⋯</span>
         </summary>
-        <div className="absolute right-0 top-full mt-2 z-20 w-80 rounded-xl bg-surface-overlay shadow-2xl p-1.5 flex flex-col gap-0.5">
+        <div className="absolute right-0 top-full mt-2 z-20 w-80 rounded-xl bg-surface-overlay/85 backdrop-blur-md shadow-2xl p-1.5 flex flex-col gap-0.5">
           {backup && (
             <>
               <button type="button" disabled={running}

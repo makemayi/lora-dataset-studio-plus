@@ -1015,7 +1015,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
               className="flex cursor-pointer select-none items-center gap-1 px-3 py-1.5 rounded-full bg-surface-raised text-content-muted transition-colors hover:bg-surface hover:text-content text-sm">
               ⋯ More
             </summary>
-            <div className="absolute right-0 top-full mt-1 z-20 w-72 rounded-xl bg-surface-overlay shadow-2xl p-1.5 flex flex-col gap-0.5">
+            <div className="absolute right-0 top-full mt-1 z-20 w-72 rounded-xl bg-surface-overlay/85 backdrop-blur-md shadow-2xl p-1.5 flex flex-col gap-0.5">
               <button type="button" onClick={() => setSettingsOpen(true)}
                 title={isStyle ? 'Edit the Style dataset name and review its always-on behavior.' : 'Edit the dataset name, trigger word, and (for concept datasets) the concept description that drives the caption avoid-list.'}
                 className={MENU_ITEM}>

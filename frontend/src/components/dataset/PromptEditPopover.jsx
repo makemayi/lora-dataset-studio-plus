@@ -53,7 +53,7 @@ export default function PromptEditPopover({ initialPrompt = '', onSubmit, onClos
           image; over the page it was see-through (measured at 400 px — the grid
           headings showed straight through the refusal). */}
       <div role="dialog" aria-modal="true" aria-label="Edit prompt & regenerate"
-        className="w-full max-w-[20rem] max-h-[85vh] overflow-y-auto rounded-lg bg-surface-overlay p-3 shadow-2xl flex flex-col gap-2"
+        className="w-full max-w-[20rem] max-h-[85vh] overflow-y-auto rounded-lg bg-surface-overlay/85 backdrop-blur-md p-3 shadow-2xl flex flex-col gap-2"
         onClick={(e) => e.stopPropagation()}>
         <span className="text-[0.625rem] uppercase text-content-muted">Edit prompt &amp; regenerate</span>
         <textarea ref={areaRef} value={text} onChange={(e) => setText(e.target.value)}

@@ -53,7 +53,7 @@ export default function DatasetToBankDialog({ datasetName, keptCount, onClose, o
       <form ref={dialogRef} role="dialog" aria-modal="true"
         aria-labelledby="dataset-to-bank-title" aria-describedby="dataset-to-bank-copy-note"
         onSubmit={submit}
-        className="flex w-full max-w-md max-h-[90vh] flex-col gap-4 overflow-y-auto rounded-xl bg-surface-overlay p-4 shadow-2xl sm:p-5">
+        className="flex w-full max-w-md max-h-[90vh] flex-col gap-4 overflow-y-auto rounded-xl bg-surface-overlay/85 backdrop-blur-md p-4 shadow-2xl sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 id="dataset-to-bank-title" className="m-0 text-base font-bold text-content">
