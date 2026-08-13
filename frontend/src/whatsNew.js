@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-13-ambient-glass-theme',
+    date: '2026-08-13',
+    title: 'A softer room to work in — ambient light and glass panels',
+    blurb: 'The studio now sits in a softly lit room instead of a flat grey slab: a faint indigo glow warms the page corners, cards catch a light edge, and dialogs float as frosted glass over your work. Photos stay the brightest thing on screen — the light lives in the margins.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-11-tighter-library-cards',
     date: '2026-08-11',
     title: 'Shorter dataset cards — four actions in one place',
