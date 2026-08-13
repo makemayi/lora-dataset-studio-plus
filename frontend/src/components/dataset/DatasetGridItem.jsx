@@ -39,7 +39,6 @@ const STATUS_CLS = {
 
 // Seuils calibres antelopev2 (test3) — face_score brut persiste -> ajustables dans
 // Settings (face_scoring.green/orange) ; ces valeurs ne servent que de repli.
-const DEFAULT_FACE_VALID = 0.50, DEFAULT_FACE_ORANGE = 0.45;
 const GREY_LABEL = { no_face: 'no face detected', low_det: 'low detection',
   too_small: 'face too small', extreme_pose: 'profile — not scored',
   unreadable: 'unreadable', error: 'error' };
@@ -47,18 +46,18 @@ const GREY_LABEL = { no_face: 'no face detected', low_det: 'low detection',
 // Retourne {border, icon, cls, label} d'apres face_state/face_score, ou null si pas analysé.
 // La bordure encode la largeur ET le style (plein=jugé / pointillé=non-jugeable) pour
 // ne PAS dépendre de la couleur seule (WCAG 1.4.1).
-function faceBadge(img, thresholds) {
+// Score → letter grade: ≥0.9 A, ≥0.8 B, ≥0.7 C, <0.7 D.
+function faceBadge(img) {
   if (img.face_state == null) return null;
   if (img.face_state !== 'scorable' || img.face_score == null) {
     return { border: 'border-2 border-dashed border-gray-500', icon: '👁', cls: 'text-gray-600',
       label: GREY_LABEL[img.face_state] || 'not scored' };
   }
-  const green = thresholds?.green ?? DEFAULT_FACE_VALID;
-  const orange = thresholds?.orange ?? DEFAULT_FACE_ORANGE;
   const s = img.face_score;
-  if (s >= green) return { border: 'border-2 border-green-500', icon: '✓', cls: 'text-green-700', label: s.toFixed(2) };
-  if (s >= orange) return { border: 'border-2 border-amber-500', icon: '~', cls: 'text-amber-700', label: `${s.toFixed(2)} to review` };
-  return { border: 'border-4 border-red-500', icon: '⚠', cls: 'text-red-600', label: `${s.toFixed(2)} low` };
+  if (s >= 0.9) return { border: 'border-2 border-green-500', icon: '✓', cls: 'text-green-700', label: 'A' };
+  if (s >= 0.8) return { border: 'border-2 border-emerald-500', icon: '✓', cls: 'text-emerald-700', label: 'B' };
+  if (s >= 0.7) return { border: 'border-2 border-amber-500', icon: '~', cls: 'text-amber-700', label: 'C' };
+  return { border: 'border-2 border-red-500', icon: '⚠', cls: 'text-red-600', label: 'D' };
 }
 
 // Watermark V1 badge from watermark_state (🚩 detected / ⊘ dismissed / ✨ cleaned /
@@ -141,7 +140,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
   // Every refused write says WHICH pass holds it; idle, each keeps its own words.
   const refused = busy ? busyReason : null;
 
-  const fb = faceBadge(img, faceThresholds);
+  const fb = faceBadge(img);
   const wb = WATERMARK_BADGE[img.watermark_state];
   // A big batch leaves every not-yet-done tile on the same amber "pending"
   // border, with no way to tell which one a worker has actually claimed from
