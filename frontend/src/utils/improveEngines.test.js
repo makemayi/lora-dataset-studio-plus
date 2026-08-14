@@ -17,7 +17,12 @@ test('every engine states what it does to the ORIGINAL, not just that it improve
   // "sharper" on both would leave the user picking blind, which is the bug.
   const klein = improveEngine('klein')
   const seedvr2 = improveEngine('seedvr2')
-  assert.match(klein.summary, /shift|change/i)
+  // The 'klein' lane used to be pinned on the word "shift", because it WAS the
+  // engine that shifted skin and colour. It is Krea 2 + SeedVR2 now, and its
+  // ColorTransfer stage exists to put the original's tone back — so the
+  // invariant is not that word, it is that each summary says what happens to
+  // the ORIGINAL rather than only promising "sharper".
+  assert.match(klein.summary, /colour|recolour|original/i)
   assert.match(seedvr2.summary, /keeps the original/i)
   assert.notEqual(klein.summary, seedvr2.summary)
   for (const engine of IMPROVE_ENGINES) {
@@ -62,16 +67,19 @@ test('the confirm carries the engine trade-off and the skip count', () => {
   assert.match(msg, /3 selected image\(s\) will be skipped: already improved/)
   assert.match(msg, /Original images stay unchanged/)
   const klein = improveConfirmMessage('klein', { eligibleCount: 1 })
-  assert.match(klein, /Klein/)
+  // Named by what it RUNS. The id behind it is still 'klein' (stored in rows),
+  // but a confirm dialog naming an engine this lane stopped using is how the
+  // user who wrote the pipeline failed to find it in their own app.
+  assert.match(klein, /Krea 2 \+ SeedVR2/)
   assert.doesNotMatch(klein, /will be skipped/)
 })
 
 test('the launch toast names the engine the SERVER ran, not the button pressed', () => {
   assert.match(describeImproveLaunch({ queued: 4, engine: 'seedvr2' }), /^SeedVR2: processing 4/)
   assert.match(describeImproveLaunch({ queued: 4, skipped: 2, engine: 'klein' }),
-    /^Klein: processing 4 image\(s\) in the background · 2 not eligible/)
+    /^Krea 2 \+ SeedVR2: processing 4 image\(s\) in the background · 2 not eligible/)
   // A server that echoes nothing still produces a sentence, not "undefined".
-  assert.match(describeImproveLaunch({ queued: 1 }), /^Klein: processing 1/)
+  assert.match(describeImproveLaunch({ queued: 1 }), /^Krea 2 \+ SeedVR2: processing 1/)
 })
 
 test('the progress label reads the running batch engine', () => {
@@ -79,8 +87,10 @@ test('the progress label reads the running batch engine', () => {
   assert.equal(improveBatchLabel({ kind: 'caption', total: 4, done: 1 }), null)
   assert.equal(improveBatchLabel({ kind: 'improve', engine: 'seedvr2', total: 9, done: 2 }),
     '🔍 SeedVR2 2/9')
+  // The stored engine id is still 'klein'; what it RENDERS is the pipeline's
+  // real name, which is the whole point of the relabel.
   assert.equal(improveBatchLabel({ kind: 'improve', engine: 'klein', total: 0, done: 0 }),
-    '✨ Klein…')
+    '✨ Krea 2 + SeedVR2…')
   assert.equal(improveBatchLabel({ kind: 'improve', engine: 'seedvr2', cancelling: true }),
     '🔍 Stopping…')
 })
@@ -120,9 +130,12 @@ test('each button carries its own trade-off sentence, never the other one', () =
   const byId = Object.fromEntries(
     lightboxImproveButtons({ caps: READY, engines: { klein: true } })
       .map((b) => [b.id, b]))
-  assert.match(byId.klein.title, /shift/i)
+  // Each button carries ITS OWN sentence and never the other engine's — the
+  // point of the test, unchanged by the pipeline swap behind the 'klein' id.
+  assert.match(byId.klein.title, /Krea 2/i)
   assert.match(byId.seedvr2.title, /keeps the original/i)
-  assert.doesNotMatch(byId.seedvr2.title, /shift/i)
+  assert.doesNotMatch(byId.seedvr2.title, /Krea 2/i)
+  assert.notEqual(byId.klein.title, byId.seedvr2.title)
 })
 
 test('an engine that cannot run is disabled and SAYS why, per engine', () => {
@@ -155,5 +168,6 @@ test('image-level state blocks every engine, and says so before the engine name'
 test('the idle labels name the engine, matching the selection toolbar', () => {
   const labels = lightboxImproveButtons({ caps: READY, engines: { klein: true } })
     .map((b) => b.label)
-  assert.deepEqual(labels, ['✨ Improve via Klein', '🔍 Upscale via SeedVR2'])
+  assert.deepEqual(labels,
+    ['✨ Improve via Krea 2 + SeedVR2', '🔍 Upscale via SeedVR2'])
 })

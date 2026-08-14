@@ -13,14 +13,31 @@
 
 export const IMPROVE_ENGINES = [
   {
+    /* The id stays 'klein' FOREVER: it is written into derivation_kind and
+       improve_engine on rows already in people's databases (CLAUDE.md ▸ never
+       rename a stored key without an alias path). Everything the user READS
+       changed, because the pipeline behind it did.
+
+       It has not run Flux.2 Klein 9B since the Krea2-Ostris swap. It is now
+       Krea 2 Ostris Edit (a small tone/sharpness pass) -> ColorTransfer (the
+       edit recoloured back to the ORIGINAL) -> SeedVR2 tiled restore — see
+       backend/app/services/krea_hq_helper.py.
+
+       The old copy said "skin and colour can shift", which was true of Klein
+       and is precisely the defect this pipeline was built to remove: the
+       ColorTransfer stage exists to put the original's tone back. So the label
+       named a thing that no longer runs and warned about a fault that had been
+       fixed — which is why the user, who wrote the workflow, could not find
+       their own pipeline in the app. */
     id: 'klein',
-    label: 'Klein',
+    label: 'Krea 2 + SeedVR2',
     emoji: '✨',
-    action: 'Improve via Klein',
-    /* Deliberately says what it CHANGES, not just what it improves — that
-       sentence is the whole reason the second engine exists. */
-    summary: 'Re-renders detail and texture. Sharper, but skin and colour can shift.',
-    confirm: 'Create a separate 2 MP Klein improvement candidate',
+    action: 'Improve via Krea 2 + SeedVR2',
+    /* Says what it CHANGES and what it PROTECTS — the second half is the whole
+       reason this pipeline replaced the Klein one. */
+    summary: 'A small Krea 2 tone pass, recoloured back to the original, then '
+      + 'SeedVR2 restores the detail. Sharper without the colour drift.',
+    confirm: 'Create a separate Krea 2 + SeedVR2 improvement candidate',
   },
   {
     id: 'seedvr2',

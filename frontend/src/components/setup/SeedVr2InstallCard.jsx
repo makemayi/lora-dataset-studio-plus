@@ -148,9 +148,9 @@ export default function SeedVr2InstallCard({ caps, onDone }) {
         )}
       </div>
       <p className="mt-1 text-sm text-content-muted">
-        The second way to run ✨ Upscale &amp; improve. Klein re-renders detail from a prompt —
-        sharper, but skin and colour can shift; SeedVR2 resolves detail at a higher resolution
-        and leaves the original look alone. It needs a community node pack plus two model files
+        The second way to run ✨ Upscale &amp; improve. The other engine runs a small Krea 2
+        tone pass and recolours it back to the original before SeedVR2 restores the detail;
+        this one is SeedVR2 alone — no edit pass at all, so nothing is re-rendered. It needs a community node pack plus two model files
         (<span className="whitespace-nowrap">~3.9 GB</span>), so it is installed on request,
         not by &ldquo;Install everything&rdquo;.
       </p>

@@ -25,7 +25,7 @@ export const GRID_STATUS_FILTERS = [
   { id: 'undecided', label: 'Undecided', title: 'Imported/generated images still awaiting ✓/✕' },
   { id: 'kept', label: 'Kept', title: 'Images you marked ✓ Keep' },
   { id: 'rejected', label: 'Rejected', title: 'Images you marked ✕ Reject (and failed generations)' },
-  { id: 'improve', label: 'Improve candidates', title: 'Klein improvement candidates awaiting review' },
+  { id: 'improve', label: 'Improve candidates', title: 'Improvement candidates awaiting review' },
 ];
 
 export const DEFAULT_GRID_STATUS_FILTER = 'all';

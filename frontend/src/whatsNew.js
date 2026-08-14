@@ -50,6 +50,18 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-14-improve-lane-named-for-what-it-runs',
+    date: '2026-08-14',
+    title: 'The improve pass now says it is Krea 2 + SeedVR2, because that is what it runs',
+    blurb: 'That lane stopped running Flux.2 Klein 9B when it was rebuilt as a '
+      + 'small Krea 2 tone pass, recoloured back to the original, then SeedVR2 '
+      + 'restoring the detail — but every label still said "Klein", and still '
+      + 'warned that skin and colour can shift. That warning described the exact '
+      + 'fault the rebuild removed. The setting keeps its stored id so nothing '
+      + 'in your database changes; only what you read does.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-14-local-and-api-run-together',
     date: '2026-08-14',
     title: 'A ComfyUI batch no longer blocks ChatGPT (or the other way round)',

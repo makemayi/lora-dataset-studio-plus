@@ -1662,8 +1662,8 @@ judging one pair, not walking a list.
 Two things in the app never overwrite an image — they add a **candidate** next
 to it, and leave the choice to you:
 
-- **✨ Upscale & improve** in the dataset lightbox (a manual Klein pass, 2 MP by
-  default);
+- **✨ Upscale & improve** in the dataset lightbox (a manual Krea 2 + SeedVR2
+  pass by default);
 - the automatic **small-image rescue** of scraped images under 768 px.
 
 Open that candidate full screen and it now carries **⧉ Compare with original**.
@@ -2967,9 +2967,16 @@ improvement is delivered, so it is where the gesture costs the fewest clicks:
 you are already comparing a checkpoint's renders when you decide one of them
 deserves a bigger pass. Both surfaces are the same action on the same picture:
 
-- **✨ Improve via Klein** re-renders detail and texture. Sharper, but skin and
-  colour can shift. The note under the button quotes the exact instruction it is
-  about to send and links to where you can edit it or switch it off.
+- **✨ Improve via Krea 2 + SeedVR2** runs a small Krea 2 tone/sharpness pass,
+  **recolours it back to the original** and then lets SeedVR2 restore the
+  detail. Sharper without the colour drift. The note under the button quotes the
+  exact instruction it is about to send and links to where you can edit it or
+  switch it off.
+
+  *Its engine id is still `klein`* — it is written into rows in your database
+  and cannot be renamed — and this lane did run Flux.2 Klein 9B until the
+  Krea 2 Ostris swap. Everything you see now names what actually runs; if you
+  are looking for "the Krea high-resolution workflow", this is it.
 - **🔍 Upscale via SeedVR2** resolves detail at a higher resolution and keeps the
   original look. It appears once SeedVR2 is installed; until then Setup ▸ ComfyUI
   can download it for you, and pressing ✨ before that answers with the same

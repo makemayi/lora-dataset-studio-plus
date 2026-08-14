@@ -1779,7 +1779,7 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
     <Card
       id="seedvr2-engine"
       title="SeedVR2 upscaling (local)"
-      help="The fidelity half of ✨ Upscale & improve. Klein re-renders detail from a prompt — sharper, but skin and colour can shift; SeedVR2 resolves detail at a higher resolution and leaves the original look alone. Pick it per batch from the bulk actions in the dataset workspace, or make it the default for the single-image pass below. It needs the ComfyUI-SeedVR2_VideoUpscaler node pack in ComfyUI plus two model files — Setup ▸ ComfyUI downloads the models and says what is missing."
+      help="The fidelity half of ✨ Upscale & improve. The other engine (Krea 2 + SeedVR2) runs a small tone pass and recolours it back to the original; SeedVR2 alone resolves detail at a higher resolution and leaves the original look alone. Pick it per batch from the bulk actions in the dataset workspace, or make it the default for the single-image pass below. It needs the ComfyUI-SeedVR2_VideoUpscaler node pack in ComfyUI plus two model files — Setup ▸ ComfyUI downloads the models and says what is missing."
     >
       <p className={ready ? 'text-[0.6875rem] text-emerald-700' : 'text-[0.6875rem] text-amber-700'}>
         {ready
@@ -1809,7 +1809,10 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
           onChange={(e) => setField('improve', 'engine', e.target.value)}
           className={INPUT_CLASS}
         >
-          <option value="klein">Klein — re-renders detail (can shift skin and colour)</option>
+          {/* The value stays 'klein' — it is written into rows in people's
+              databases. The LABEL is what the pipeline actually is: this lane
+              stopped running Flux.2 Klein 9B at the Krea2-Ostris swap. */}
+          <option value="klein">Krea 2 + SeedVR2 — tone pass, recoloured back, then detail restored</option>
           <option value="seedvr2">SeedVR2 — resolves detail, keeps the original look</option>
         </select>
         <HelpText className="mt-1 text-xs text-content-muted">
