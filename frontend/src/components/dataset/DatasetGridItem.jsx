@@ -178,7 +178,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
       /* The tile keeps `borderCls`: that edge is the decision (kept / rejected /
          undecided), not decoration. Only the fill moves onto the token. */
       className={`dataset-grid-item rounded-[28px] ${borderCls} ${selected ? 'ring-2 ring-indigo-400' : ''} bg-white/60 backdrop-blur-xl overflow-hidden flex flex-col shadow-[0_0_0_1px_rgba(255,255,255,0.4),0_12px_40px_rgba(0,0,0,0.12),0_4px_12px_rgba(0,0,0,0.05)] ${FLOAT_HOVER}`}>
-      <div className="relative aspect-square bg-black rounded-t-[22px] overflow-hidden mx-2 mt-2">
+      <div className="relative aspect-square bg-black rounded-[22px] overflow-hidden m-2">
         {/* Fresh content nobody has looked at yet — a first-time generation
             OR a regenerate, not yet opened (unlike the in-progress emerald
             glow above, this one is meant to survive being buried back among
@@ -454,14 +454,13 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             onClose={() => setEditingPrompt(false)} />
         )}
         {/* Caption — a frosted-glass overlay ON the photo, revealed on hover
-            like the toolbar. Read-only here: it opens the editor on click, and
-            the in-place textarea below is gone (the ⛶ dialog owns editing). */}
+            like the toolbar. Read-only here: it opens the editor on click. */}
         {(cap || '').trim() && img.status === 'keep' && (
           <button type="button"
             onClick={(e) => { e.stopPropagation(); if (!busy) setCaptionEditorOpen(true); }}
             title={busy ? (refused || 'Wait for the running pass to finish') : 'Click to edit the caption'}
             aria-label="Edit the caption"
-            className="dataset-grid-item__actions absolute inset-x-2 bottom-2 z-20 flex flex-col items-start gap-0.5 rounded-xl bg-black/40 backdrop-blur-md border border-white/10 px-2.5 py-1.5 text-left">
+            className="dataset-grid-item__actions absolute inset-x-2 bottom-14 z-20 flex flex-col items-start gap-0.5 rounded-xl bg-black/40 backdrop-blur-md border border-white/10 px-2.5 py-1.5 text-left">
             <span className="text-white text-[11px] leading-snug line-clamp-3 break-words">{cap}</span>
             {captionOriginInfo(img.caption_origin).known && (
               <span className={`text-[9px] leading-none ${captionIsAsserted(img.caption_origin) ? 'text-emerald-300' : 'text-white/50'}`}>
@@ -470,51 +469,41 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             )}
           </button>
         )}
-      </div>
-      <div className="relative mx-2 mb-2 flex flex-1 flex-col overflow-hidden rounded-b-[22px] bg-[#0a0b0d]">
-        {/* Water reflection of the photo — the same image flipped and faded, so
-            the caption surface is a mirror pond instead of a hard black slab. */}
-        {url && (
-          <img src={url} alt="" aria-hidden loading="lazy"
-            className="dataset-tile-reflection" />
-        )}
-        {/* Frosted-glass caption surface: translucent so the reflection reads
-            through it, and white text stays legible on the dark pond. */}
-        <div className="relative z-10 flex flex-1 flex-col rounded-b-[22px] bg-black/15 px-3 py-3 backdrop-blur-[2px]">
+        {/* Source credit — ALWAYS visible (it is a legal attribution), a tiny
+            frosted pill just above the keep/reject row. */}
         <SourceAttribution metadata={img.source_metadata}
-        className="mx-0.5 mb-1.5 block text-[0.625rem] leading-relaxed text-white/70" />
-      {isRescueDerived ? (
-        <p className="m-2 rounded-lg border border-indigo-400/40 bg-indigo-500/20 px-2 py-1 text-center text-[0.625rem] text-indigo-200"
-          title="This winner was chosen atomically with its provenance pair. Caption and crop remain available.">
-          ✓ Chosen in Klein rescue review
-        </p>
-      ) : (
-        <div className="dataset-grid-item__actions flex gap-1 p-1.5">
-          <button type="button" onClick={() => onStatus(img.id, img.status === 'keep' ? 'pending' : 'keep')}
-            disabled={busy}
-            title={refused || 'Keep'} aria-label={refused || 'Keep'}
-            aria-pressed={img.status === 'keep'}
-            className={`flex-1 py-1.5 rounded-full text-[11px] disabled:cursor-not-allowed disabled:opacity-45 ${img.status === 'keep' ? 'bg-gradient-to-b from-green-400 to-green-700 text-white shadow-[0_2px_6px_rgba(22,163,74,0.35)]' : 'bg-white/10 text-white/70'}`}>✓</button>
-          <button type="button"
-            onClick={() => {
-              // Rejecting a GENERATED image offers an immediate retry of the same
-              // variation (in place, new seed) so the composition stays on target.
-              if (!isImageImproveCandidate && img.status !== 'reject'
-                  && img.source === 'generated' && img.filename && onRegenerate
-                  && window.confirm('Photo rejected — regenerate a new attempt of this variation?\n(OK = replace with a new attempt · Cancel = reject only)')) {
-                onRegenerate(img.id);
-                return;
-              }
-              onStatus(img.id, img.status === 'reject' ? 'pending' : 'reject');
-            }}
-            disabled={busy}
-            title={refused || 'Reject (offers a regeneration)'} aria-label={refused || 'Reject'}
-            aria-pressed={img.status === 'reject'}
-            className="flex-1 py-1.5 rounded-full text-[11px] bg-white/10 backdrop-blur-[10px] text-white/70 disabled:cursor-not-allowed disabled:opacity-45">✕</button>
-        </div>
-      )}
-
-        </div>
+          className="absolute bottom-9 left-2 z-20 max-w-[calc(100%_-_1rem)] rounded-full bg-black/50 px-1.5 py-0.5 text-[0.5625rem] leading-relaxed text-white/80 backdrop-blur-sm" />
+        {/* Keep / reject — now ON the photo, below the caption, flatter pills. */}
+        {isRescueDerived ? (
+          <span className="absolute inset-x-2 bottom-2 z-20 rounded-full border border-indigo-400/40 bg-indigo-500/30 px-2 py-1 text-center text-[0.625rem] text-indigo-100 backdrop-blur-md"
+            title="This winner was chosen atomically with its provenance pair. Caption and crop remain available.">
+            ✓ Chosen in Klein rescue review
+          </span>
+        ) : (
+          <div className="dataset-grid-item__actions absolute inset-x-2 bottom-2 z-20 flex gap-1.5">
+            <button type="button" onClick={() => onStatus(img.id, img.status === 'keep' ? 'pending' : 'keep')}
+              disabled={busy}
+              title={refused || 'Keep'} aria-label={refused || 'Keep'}
+              aria-pressed={img.status === 'keep'}
+              className={`flex-1 py-1 rounded-full text-[11px] disabled:cursor-not-allowed disabled:opacity-45 ${img.status === 'keep' ? 'bg-gradient-to-b from-green-400 to-green-700 text-white shadow-[0_2px_6px_rgba(22,163,74,0.35)]' : 'bg-black/40 backdrop-blur-md text-white/70'}`}>✓</button>
+            <button type="button"
+              onClick={() => {
+                // Rejecting a GENERATED image offers an immediate retry of the same
+                // variation (in place, new seed) so the composition stays on target.
+                if (!isImageImproveCandidate && img.status !== 'reject'
+                    && img.source === 'generated' && img.filename && onRegenerate
+                    && window.confirm('Photo rejected — regenerate a new attempt of this variation?\n(OK = replace with a new attempt · Cancel = reject only)')) {
+                  onRegenerate(img.id);
+                  return;
+                }
+                onStatus(img.id, img.status === 'reject' ? 'pending' : 'reject');
+              }}
+              disabled={busy}
+              title={refused || 'Reject (offers a regeneration)'} aria-label={refused || 'Reject'}
+              aria-pressed={img.status === 'reject'}
+              className="flex-1 py-1 rounded-full text-[11px] bg-black/40 backdrop-blur-md text-white/70 disabled:cursor-not-allowed disabled:opacity-45">✕</button>
+          </div>
+        )}
       </div>
       {captionEditorOpen && (
         <CaptionEditorDialog initialCaption={cap} imageUrl={url}
