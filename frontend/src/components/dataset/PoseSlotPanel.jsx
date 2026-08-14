@@ -83,7 +83,7 @@ export default function PoseSlotPanel({ datasetId, poseSlots = {}, busy, importB
               title={`Hover and press Ctrl+V to paste the ${POSE_LABELS[poseKey]} reference`}>
               {slot.filename
                 ? <img src={imgUrl(slot.filename)} alt={`${POSE_LABELS[poseKey]} reference`}
-                    className="w-full h-full object-cover" />
+                    className="w-full h-full object-cover object-top" />
                 : <button type="button" onClick={() => inputs.current[poseKey]?.click()}
                     disabled={importBusy}
                     aria-label={`Add a ${POSE_LABELS[poseKey]} reference photo`}

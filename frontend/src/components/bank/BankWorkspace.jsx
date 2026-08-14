@@ -676,7 +676,7 @@ function Tile({ img, bankId, selected, onToggle, onReview, onTags, size }) {
             its old orientation for an hour and read as "the button did nothing". */}
         <img src={`/api/bank/${bankId}/thumb/${img.id}${img.rotation ? `?r=${img.rotation}` : ''}`}
           alt={img.rotation ? `${img.name} (rotated ${img.rotation}°)` : img.name} loading="lazy"
-          className={`w-full object-cover ${size === 'S' ? 'h-24' : 'h-36'}`} />
+          className={`w-full object-cover object-top ${size === 'S' ? 'h-24' : 'h-36'}`} />
       </button>
       {selected && (
         <span aria-hidden className="absolute inset-0 bg-indigo-500/30 ring-2 ring-indigo-400 rounded-lg pointer-events-none" />
@@ -2426,7 +2426,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                     ? 'border-indigo-400 ring-2 ring-indigo-400' : 'border-border'}`}>
                   {c.cover_image_id != null && (
                     <img src={`/api/bank/${bankId}/thumb/${c.cover_image_id}`} alt={`Person ${c.id}`}
-                      loading="lazy" className="h-16 w-16 object-cover" />
+                      loading="lazy" className="h-16 w-16 object-cover object-top" />
                   )}
                   <span className="absolute bottom-0 inset-x-0 bg-black/60 text-center text-[10px] font-semibold text-white">
                     #{c.id} · {c.size}
@@ -2453,7 +2453,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                     ? 'border-fuchsia-400 ring-2 ring-fuchsia-400' : 'border-border'}`}>
                   {c.cover_image_id != null && (
                     <img src={`/api/bank/${bankId}/thumb/${c.cover_image_id}`} alt={`Style ${c.id}`}
-                      loading="lazy" className="h-16 w-16 object-cover" />
+                      loading="lazy" className="h-16 w-16 object-cover object-top" />
                   )}
                   <span className="absolute bottom-0 inset-x-0 bg-black/60 text-center text-[10px] font-semibold text-white">
                     🎨{c.id} · {c.size}

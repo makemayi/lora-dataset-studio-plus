@@ -157,7 +157,9 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
   // need to see (is this shot portrait or landscape?). So L switches to
   // object-contain (letterboxed on the existing black tile background); S/M
   // stay object-cover so the dense overview grid reads as a clean tiled wall.
-  const imgFitCls = tileSize === 'L' ? 'object-contain' : 'object-cover';
+  // object-top keeps the top of the frame — where the face is — instead of
+  // centering the crop and taking a bite out of the forehead.
+  const imgFitCls = tileSize === 'L' ? 'object-contain' : 'object-cover object-top';
   // Provenance badge text. Kept as data (not inline JSX) so the SAME wording
   // can go into title/aria-label — the badge is clamped to two lines at the
   // bottom of a narrow tile, and a truncated engine name must stay readable

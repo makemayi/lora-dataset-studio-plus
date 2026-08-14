@@ -123,7 +123,7 @@ export default function DupGroupsPanel({ bankId, live, onChanged, kind = 'exact'
                     className={`relative block w-full overflow-hidden rounded-lg border ${img.id === g.best_id
                       ? 'border-emerald-400 ring-1 ring-emerald-400' : 'border-border'} ${img.status === 'reject' ? 'opacity-50' : ''}`}>
                     <img src={`/api/bank/${bankId}/thumb/${img.id}`} alt={img.name}
-                      loading="lazy" className="h-24 w-full object-cover" />
+                      loading="lazy" className="h-24 w-full object-cover object-top" />
                     {img.id === g.best_id && (
                       <span className="absolute left-1 top-1 rounded bg-emerald-500/90 px-1 text-[10px] font-bold text-white">BEST</span>
                     )}

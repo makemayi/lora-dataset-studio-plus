@@ -78,7 +78,7 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
             onMouseEnter={() => { refHover.current = true; }} onMouseLeave={() => { refHover.current = false; }}
             title="Hover and press Ctrl+V to paste an image here">
             {refFilename
-              ? <img src={imgUrl(refFilename)} alt="ref" className="w-full h-full object-cover" />
+              ? <img src={imgUrl(refFilename)} alt="ref" className="w-full h-full object-cover object-top" />
               : <span className="text-content-subtle text-xs">none</span>}
             {waiting && (
               /* A button, not a label: the whole point is to lead somewhere, and
@@ -137,7 +137,7 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
           <span className="text-content-subtle text-[0.6875rem]">额外</span>
           {extraRefs.map((fn) => (
             <div key={fn} className="relative w-12 h-12 rounded-xl overflow-hidden bg-black shrink-0 shadow-[0_1px_2px_rgba(0,0,0,0.16),0_4px_8px_rgba(0,0,0,0.12)] transition-shadow hover:shadow-[0_2px_4px_rgba(0,0,0,0.22),0_8px_16px_rgba(0,0,0,0.14)]">
-              <img src={imgUrl(fn)} alt="extra reference" className="w-full h-full object-cover" />
+              <img src={imgUrl(fn)} alt="extra reference" className="w-full h-full object-cover object-top" />
               <button type="button" onClick={() => onRemoveExtraRef?.(fn)} disabled={busy}
                 aria-label="Remove this extra reference"
                 title="Remove this extra reference"

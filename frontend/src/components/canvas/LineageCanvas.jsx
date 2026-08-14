@@ -170,7 +170,7 @@ function LaneHeader({ lane, onZoomRef }) {
           className="shrink-0 overflow-hidden rounded-md bg-surface-raised ring-indigo-400/60 hover:ring-2"
           style={{ width: LANE_HEADER_H - 4, height: LANE_HEADER_H - 4 }}>
           <img src={refUrl} alt="" loading="lazy" draggable={false}
-            className="h-full w-full object-cover" />
+            className="h-full w-full object-cover object-top" />
         </button>
       )}
       <span className="truncate text-[0.8125rem] font-semibold text-content" title={lane.name}>
