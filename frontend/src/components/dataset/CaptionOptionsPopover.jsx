@@ -262,7 +262,7 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
                       aria-describedby="krea-caption-model-note"
                       aria-pressed={kreaModelInstalled ? kreaModelSelected : undefined}
                       aria-busy={kreaModelPulling}
-                      className="w-full shrink-0 rounded-lg border border-sky-200 bg-sky-100 px-3 py-2 text-xs font-semibold text-sky-100 hover:bg-sky-500/30 disabled:opacity-40 sm:w-auto">
+                      className="w-full shrink-0 rounded-lg border border-sky-200 bg-sky-100 px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-500/30 disabled:opacity-40 sm:w-auto">
                       {kreaModelSelected ? 'Selected'
                         : kreaModelPulling ? 'Pulling…'
                         : kreaModelInstalled ? 'Use'

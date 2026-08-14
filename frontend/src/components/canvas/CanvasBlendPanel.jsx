@@ -20,6 +20,7 @@
  * learned: side by side, a 400-px screen truncated the checkpoint to "#1…".
  */
 import { HelpBadge } from '../../help/HelpMode';
+import { FLOAT_SHADOW } from '../common/surfaces'
 import BlendWeightRow from '../dataset/studio/BlendWeightRow';
 import BlendSweepSummary from '../dataset/studio/BlendSweepSummary';
 import {
@@ -79,14 +80,14 @@ export default function CanvasBlendPanel({
       {/* Mixed families: why the toggle is dead, in the panel and not only in a
           tooltip a touch screen never shows. */}
       {familyReason && (
-        <p className="m-0 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-amber-700 text-[0.6875rem]"
+        <p className={`m-0 rounded-lg ${FLOAT_SHADOW} border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-amber-700 text-[0.6875rem]`}
           role="status">
           {familyReason}
         </p>
       )}
 
       {blend && blocker && !familyReason && (
-        <p className="m-0 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-amber-700 text-[0.6875rem]"
+        <p className={`m-0 rounded-lg ${FLOAT_SHADOW} border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-amber-700 text-[0.6875rem]`}
           role="status">
           {blocker}
         </p>

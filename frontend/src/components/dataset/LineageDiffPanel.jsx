@@ -69,7 +69,7 @@ export default function LineageDiffPanel({ a, b, onClose }) {
   const cell = (v, changed) => (
     v === null
       ? <span className="italic text-content-subtle">—</span>
-      : <span className={changed ? 'font-semibold text-amber-100' : 'text-content'}>{v}</span>
+      : <span className={changed ? 'font-semibold text-amber-700' : 'text-content'}>{v}</span>
   );
 
   const listFor = (key) => {
@@ -113,7 +113,7 @@ export default function LineageDiffPanel({ a, b, onClose }) {
 
       {/* --- what this comparison cannot know ----------------------------- */}
       {(data?.notes || []).length > 0 && (
-        <ul className="mt-3 space-y-1 rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-[11px] leading-snug text-amber-100/90">
+        <ul className="mt-3 space-y-1 rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-[11px] leading-snug text-amber-700/90">
           {data.notes.map((n) => <li key={n}>{n}</li>)}
         </ul>
       )}
@@ -191,7 +191,7 @@ export default function LineageDiffPanel({ a, b, onClose }) {
                     aria-expanded={open === c.key}
                     className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
                       open === c.key
-                        ? 'border-amber-400/60 bg-amber-500/20 text-amber-100'
+                        ? 'border-amber-400/60 bg-amber-500/20 text-amber-700'
                         : 'border-border bg-app/50 text-content hover:border-amber-200'}`}>
                     {c.label}
                   </button>

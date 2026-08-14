@@ -56,7 +56,7 @@ export default function CheckpointActionsPopover({
       <div className="flex flex-col gap-1">
         {a.download && (a.download.url ? (
           <a href={a.download.url} download onClick={onClose}
-            className={ROW + ' border-emerald-500/40 bg-emerald-600/15 text-emerald-100 no-underline hover:bg-emerald-600/25'}>
+            className={ROW + ' border-emerald-500/40 bg-emerald-600/15 text-emerald-700 no-underline hover:bg-emerald-600/25'}>
             <span aria-hidden>⬇</span> Download
           </a>
         ) : (
@@ -65,7 +65,7 @@ export default function CheckpointActionsPopover({
 
         {a.continue && (a.continue.ok ? (
           <button type="button" onClick={() => { onContinue(node, pill); onClose?.(); }}
-            className={ROW + ' border-indigo-200 bg-indigo-50 text-indigo-100 hover:bg-indigo-500/25'}>
+            className={ROW + ' border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-500/25'}>
             <span aria-hidden>▶</span> Continue from here
           </button>
         ) : (

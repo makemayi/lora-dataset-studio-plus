@@ -14,6 +14,7 @@
  * s'OUVRE avant que la vue n'y scrolle, sinon on atterrit sur un en-tête plié.
  */
 import { useEffect, useState } from 'react';
+import { FLOAT_SHADOW } from '../../common/surfaces'
 
 export default function StudioSection({ title, defaultOpen = true, storageKey, anchorId, children }) {
   const [open, setOpen] = useState(() => {
@@ -43,7 +44,7 @@ export default function StudioSection({ title, defaultOpen = true, storageKey, a
   const bodyId = `studio-section-${String(storageKey || title).replace(/\W+/g, '-')}`;
 
   return (
-    <div id={anchorId} className="rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-3 py-2 scroll-mt-16">
+    <div id={anchorId} className={`rounded-lg bg-surface ${FLOAT_SHADOW} px-3 py-2 scroll-mt-16`}>
       <button
         type="button"
         onClick={toggle}

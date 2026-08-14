@@ -101,7 +101,7 @@ export default function CanvasImageGroup({ group, datasetId, laneName, boardScal
           style={{ position: 'absolute', left: 0, top: 0, width: group.w, height: group.h }}
           className="pointer-events-none flex items-end justify-center rounded-md bg-indigo-50 ring-2 ring-inset ring-indigo-300/50">
           <span style={{ fontSize: Math.max(9, barH * 0.42), marginBottom: barH * 0.3 }}
-            className="rounded bg-app/90 px-1.5 py-0.5 font-semibold text-indigo-100">
+            className="rounded bg-app/90 px-1.5 py-0.5 font-semibold text-indigo-700">
             Drag it off the group to take it out
           </span>
         </div>

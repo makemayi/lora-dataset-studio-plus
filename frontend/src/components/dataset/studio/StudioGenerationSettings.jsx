@@ -28,6 +28,7 @@
  *   onChange        (settings) => void  (idéalement un setState stable du parent)
  */
 import { useEffect, useMemo, useState } from 'react';
+import { FLOAT_SHADOW } from '../../common/surfaces'
 import ResolutionSelector from '../../shared/ResolutionSelector';
 import LockableSlider from '../../shared/LockableSlider';
 import ZImageLoraConfig from '../../shared/ZImageLoraConfig';
@@ -240,7 +241,7 @@ export default function StudioGenerationSettings({ family = 'zimage', storagePre
                 value={sampler}
                 onChange={(e) => setSampler(e.target.value)}
                 aria-label="Krea sampler"
-                className="w-full rounded-lg bg-surface-raised shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-2 py-1.5 text-content text-[0.8125rem] focus:ring-1 focus:ring-primary focus:outline-none normal-case tracking-normal"
+                className={`w-full rounded-lg bg-surface-raised ${FLOAT_SHADOW} px-2 py-1.5 text-content text-[0.8125rem] focus:ring-1 focus:ring-primary focus:outline-none normal-case tracking-normal`}
               >
                 <option value="">Auto (er_sde)</option>
                 {kreaSamplers.map((s) => (<option key={s} value={s}>{s}</option>))}
@@ -252,7 +253,7 @@ export default function StudioGenerationSettings({ family = 'zimage', storagePre
                 value={scheduler}
                 onChange={(e) => setScheduler(e.target.value)}
                 aria-label="Krea scheduler"
-                className="w-full rounded-lg bg-surface-raised shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-2 py-1.5 text-content text-[0.8125rem] focus:ring-1 focus:ring-primary focus:outline-none normal-case tracking-normal"
+                className={`w-full rounded-lg bg-surface-raised ${FLOAT_SHADOW} px-2 py-1.5 text-content text-[0.8125rem] focus:ring-1 focus:ring-primary focus:outline-none normal-case tracking-normal`}
               >
                 <option value="">Auto (simple)</option>
                 {kreaSchedulers.map((s) => (<option key={s} value={s}>{s}</option>))}
@@ -343,7 +344,7 @@ export default function StudioGenerationSettings({ family = 'zimage', storagePre
                 value={weightDtype}
                 onChange={(e) => setWeightDtype(e.target.value)}
                 aria-label="Krea loader precision (weight dtype)"
-                className="w-full rounded-lg bg-surface-raised shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-2 py-1.5 text-content text-[0.8125rem] focus:ring-1 focus:ring-primary focus:outline-none normal-case tracking-normal"
+                className={`w-full rounded-lg bg-surface-raised ${FLOAT_SHADOW} px-2 py-1.5 text-content text-[0.8125rem] focus:ring-1 focus:ring-primary focus:outline-none normal-case tracking-normal`}
               >
                 <option value="default">ComfyUI default (auto · dtype varies)</option>
                 <option value="fp8_e4m3fn">FP8 e4m3fn (recommended)</option>
@@ -385,7 +386,7 @@ export default function StudioGenerationSettings({ family = 'zimage', storagePre
               rows={3}
               placeholder="Leave empty for the pipeline default…"
               aria-label="Negative prompt"
-              className="rounded-lg bg-surface-raised shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-2.5 py-1.5 text-content text-sm resize-y min-h-[4rem] focus:outline-none focus:ring-1 focus:ring-primary"
+              className={`rounded-lg bg-surface-raised ${FLOAT_SHADOW} px-2.5 py-1.5 text-content text-sm resize-y min-h-[4rem] focus:outline-none focus:ring-1 focus:ring-primary`}
             />
           </label>
         </StudioSection>

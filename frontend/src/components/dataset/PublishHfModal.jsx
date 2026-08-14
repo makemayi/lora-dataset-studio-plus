@@ -162,7 +162,7 @@ export default function PublishHfModal({ datasetId, onClose }) {
             </p>
 
             {phase === 'error' && (
-              <div className="rounded-lg border border-rose-400/50 bg-rose-50 px-3 py-2 text-sm text-rose-200">
+              <div className="rounded-lg border border-rose-400/50 bg-rose-50 px-3 py-2 text-sm text-rose-600">
                 {result?.error || 'Publish failed.'}
                 {readOnly && (
                   <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noreferrer"

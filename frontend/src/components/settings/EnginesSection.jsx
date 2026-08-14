@@ -1684,13 +1684,13 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
 
       <HelpText className="mt-1 text-xs text-content-muted">
         <a href="https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler" target="_blank"
-          rel="noreferrer" className="text-sky-700 underline hover:text-sky-200">Node pack →</a>
+          rel="noreferrer" className="text-sky-700 underline hover:text-sky-600">Node pack →</a>
         {' · '}
         <a href="https://huggingface.co/numz/SeedVR2_comfyUI" target="_blank"
-          rel="noreferrer" className="text-sky-700 underline hover:text-sky-200">Model weights →</a>
+          rel="noreferrer" className="text-sky-700 underline hover:text-sky-600">Model weights →</a>
         {' · '}
         <a href="https://github.com/ByteDance-Seed/SeedVR" target="_blank"
-          rel="noreferrer" className="text-sky-700 underline hover:text-sky-200">SeedVR2 by ByteDance-Seed →</a>
+          rel="noreferrer" className="text-sky-700 underline hover:text-sky-600">SeedVR2 by ByteDance-Seed →</a>
         {' — all Apache-2.0.'}
       </HelpText>
 

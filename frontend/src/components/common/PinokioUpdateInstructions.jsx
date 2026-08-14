@@ -26,7 +26,7 @@ export default function PinokioUpdateInstructions() {
         Pinokio&rsquo;s Update runs the same fast-forward pull as this app, then reinstalls changed
         requirements; your datasets, config and Image Bank stay in place.{' '}
         <a href={PINOKIO_UPDATE_GUIDE_URL} target="_blank" rel="noreferrer"
-          className="font-medium text-sky-700 underline hover:text-sky-200">
+          className="font-medium text-sky-700 underline hover:text-sky-600">
           Pinokio install guide ↗
         </a>
       </p>

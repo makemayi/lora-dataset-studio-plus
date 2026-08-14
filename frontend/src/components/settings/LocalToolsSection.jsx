@@ -26,7 +26,7 @@ const HF_SECRET = {
       href="https://huggingface.co/settings/tokens/new?tokenType=read"
       target="_blank"
       rel="noreferrer"
-      className="mb-2 inline-block max-w-full text-xs font-medium text-sky-700 underline underline-offset-2 hover:text-sky-200"
+      className="mb-2 inline-block max-w-full text-xs font-medium text-sky-700 underline underline-offset-2 hover:text-sky-600"
     >
       Create a read token on Hugging Face ↗
     </a>
@@ -50,7 +50,7 @@ const HF_CLOUD_SECRET = {
         href="https://huggingface.co/settings/tokens/new?tokenType=fineGrained"
         target="_blank"
         rel="noreferrer"
-        className="inline-block max-w-full text-xs font-medium text-sky-700 underline underline-offset-2 hover:text-sky-200"
+        className="inline-block max-w-full text-xs font-medium text-sky-700 underline underline-offset-2 hover:text-sky-600"
       >
         Create a fine-grained token on Hugging Face ↗
       </a>
@@ -58,7 +58,7 @@ const HF_CLOUD_SECRET = {
         href="https://huggingface.co/settings/tokens/new?tokenType=write"
         target="_blank"
         rel="noreferrer"
-        className="inline-block max-w-full text-xs font-medium text-sky-700 underline underline-offset-2 hover:text-sky-200"
+        className="inline-block max-w-full text-xs font-medium text-sky-700 underline underline-offset-2 hover:text-sky-600"
       >
         Create a global write token on Hugging Face ↗
       </a>
@@ -127,7 +127,7 @@ function OllamaStatus({ caps, refreshCaps, toast }) {
     <HelpText className="text-xs text-content-muted">
       <span aria-hidden="true">✗</span> Not detected on this machine.{' '}
       <a href="https://ollama.com/download" target="_blank" rel="noreferrer"
-        className="text-sky-700 underline hover:text-sky-200">Download Ollama →</a>
+        className="text-sky-700 underline hover:text-sky-600">Download Ollama →</a>
     </HelpText>
   )
 }

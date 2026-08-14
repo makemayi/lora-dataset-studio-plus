@@ -200,7 +200,7 @@ function GridStatusFilter({ value, counts, onChange }) {
           <button key={f.id} type="button" onClick={() => onChange(f.id)}
             aria-pressed={on} title={f.title}
             className={`px-2 py-0.5 rounded-full border text-[0.6875rem] font-semibold tabular-nums ${
-              on ? 'border-indigo-400/60 bg-indigo-100 text-indigo-100'
+              on ? 'border-indigo-400/60 bg-indigo-100 text-indigo-700'
                 : 'border-border bg-surface text-content-muted hover:text-content'}`}>
             {f.label} ({counts[f.id] ?? 0})
           </button>
@@ -259,7 +259,7 @@ function GridFilterBar({
       <div className="flex items-center gap-1.5 flex-wrap">
         {statusLabel && (
           <span
-            className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 pl-2 pr-1 py-0.5 text-[0.6875rem] text-amber-100">
+            className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 pl-2 pr-1 py-0.5 text-[0.6875rem] text-amber-700">
             <span aria-hidden>◧</span> {statusLabel} only
             <button type="button" onClick={onRemoveStatus}
               aria-label="Show images with any decision again"

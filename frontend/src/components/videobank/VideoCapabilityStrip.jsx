@@ -1,4 +1,5 @@
 import { videoCapabilityNotice } from './videoCapability'
+import { FLOAT_SHADOW } from '../common/surfaces'
 
 /** 🎬 What the video extra is missing — piece by piece, with what still works.
  *
@@ -15,20 +16,20 @@ export default function VideoCapabilityStrip({ capability, compact = false }) {
   if (!notice) return null
   return (
     <section aria-label="Video tools status"
-      className="rounded-lg border border-amber-500/50 bg-amber-50 p-3 text-sm text-amber-100">
+      className={`rounded-2xl border border-amber-500/50 bg-amber-50 p-3 text-sm text-amber-700 ${FLOAT_SHADOW}`}>
       <p className="font-semibold">
         <span aria-hidden>⚠</span> {notice.headline}
       </p>
       {/* The half that keeps the bank usable. Deliberately above the fix list:
           "you can still do X" outranks "install Y" for someone who just wants
           to get on with triaging. */}
-      <p className="mt-1 text-amber-100/90">{notice.stillWorks}</p>
+      <p className="mt-1 text-amber-700/90">{notice.stillWorks}</p>
       {!compact && (
         <ul className="mt-2 space-y-1.5">
           {notice.pieces.map((p) => (
             <li key={p.key} className="flex flex-wrap gap-x-1.5 text-xs">
-              <span className="font-semibold text-amber-50">✗ {p.label}</span>
-              <span className="text-amber-100/80">{p.blurb}</span>
+              <span className="font-semibold text-amber-800">✗ {p.label}</span>
+              <span className="text-amber-700/80">{p.blurb}</span>
               <span className="basis-full text-amber-700">→ {p.fix}</span>
             </li>
           ))}

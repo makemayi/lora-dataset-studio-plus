@@ -16,6 +16,7 @@
  * is never touched by any of this: a bank cleans into its own working copy.
  */
 import { useCallback, useRef, useState } from 'react'
+import { FLOAT_SHADOW } from '../common/surfaces'
 import { putJson } from '../../api/fetchClient'
 import { useFocusTrap } from '../../hooks/useFocusTrap'
 import { HelpBadge } from '../../help/HelpMode'
@@ -98,7 +99,7 @@ export default function BankWatermarkMaskDialog({ bankId, image, onSaved, onClos
   const hasSelection = Number.isInteger(selected) && selected >= 0 && selected < regions.length
   // min-h-11 = 44 px: the whole dialog is usable with a thumb at 400 px wide,
   // which is where drawing a rectangle by hand is actually hard.
-  const btn = 'min-h-11 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-white/20 bg-white/10 px-3 text-xs '
+  const btn = `min-h-11 rounded-lg ${FLOAT_SHADOW} border border-white/20 bg-white/10 px-3 text-xs `
     + 'font-semibold text-white hover:bg-white/20 disabled:opacity-40'
 
   return (
@@ -158,7 +159,7 @@ export default function BankWatermarkMaskDialog({ bankId, image, onSaved, onClos
             title={atLimit ? `Maximum of ${MAX_WATERMARK_REGIONS} zones reached`
               : 'Then drag on the image to draw a zone over the watermark'}
             className={addMode
-              ? 'min-h-11 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-sky-300 bg-sky-500/25 px-3 text-xs font-semibold text-sky-100'
+              ? `min-h-11 rounded-lg ${FLOAT_SHADOW} border border-sky-300 bg-sky-500/25 px-3 text-xs font-semibold text-sky-100`
               : btn}>
             + Add zone
           </button>

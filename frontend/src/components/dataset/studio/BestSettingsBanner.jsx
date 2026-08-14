@@ -1,10 +1,11 @@
+import { FLOAT_SHADOW } from '../../common/surfaces'
 // Bandeau « Réglages gagnants » : réglage persisté (best_settings).
 // Extrait behavior-preserving de LoraTestStudio.jsx (bloc `{bs && (...)}`).
 // `best` = d.best_settings ; `onClear` fourni par le parent (StudioShell).
 export default function BestSettingsBanner({ best, onClear, fmt }) {
   if (!best) return null;
   return (
-    <div className="flex items-center gap-2 flex-wrap rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-amber-200 bg-amber-400/10 px-3 py-2">
+    <div className={`flex items-center gap-2 flex-wrap rounded-lg ${FLOAT_SHADOW} border border-amber-200 bg-amber-400/10 px-3 py-2`}>
       <span aria-hidden>★</span>
       <span className="text-content text-sm">
         Best setting: <code className="text-amber-700">{best.lora_filename.split('\\').pop()}</code>

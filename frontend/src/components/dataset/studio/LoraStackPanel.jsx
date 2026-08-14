@@ -17,6 +17,7 @@
  * ./loraStack.js — testée sous `node --test`, que le JSX rend inaccessible ici.
  */
 import { HelpBadge } from '../../../help/HelpMode';
+import { FLOAT_SHADOW } from '../../common/surfaces'
 import BlendWeightRow from './BlendWeightRow';
 import BlendSweepSummary from './BlendSweepSummary';
 import {
@@ -30,7 +31,7 @@ export default function LoraStackPanel({ selection, mode, onMode, weights, onWei
   const configCount = blendConfigCount(selection, { weights, sets });
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] p-3">
+    <div className={`flex flex-col gap-2 rounded-lg bg-surface ${FLOAT_SHADOW} p-3`}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-content-muted text-[0.6875rem] uppercase">
           How to use the {selection.length} LoRAs
@@ -62,7 +63,7 @@ export default function LoraStackPanel({ selection, mode, onMode, weights, onWei
       </p>
 
       {combine && blocker && (
-        <p className="m-0 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-amber-700 text-[0.6875rem]"
+        <p className={`m-0 rounded-lg ${FLOAT_SHADOW} border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-amber-700 text-[0.6875rem]`}
           role="status">
           {blocker}
         </p>

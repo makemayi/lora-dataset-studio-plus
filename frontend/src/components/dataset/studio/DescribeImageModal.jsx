@@ -4,6 +4,7 @@
 // `onResult`, which decides whether to overwrite a non-empty field. The model may be
 // cold (a few seconds) so the busy state uses a generous server timeout.
 import { useRef, useState } from 'react';
+import { FLOAT_SHADOW } from '../../common/surfaces'
 import { useFocusTrap } from '../../../hooks/useFocusTrap';
 import { fetchWithCsrfRetry, getCsrfToken } from '../../../api/fetchClient';
 import useOllamaFence from '../../../hooks/useOllamaFence';
@@ -91,7 +92,7 @@ export default function DescribeImageModal({ open, onClose, onResult }) {
             <span aria-hidden>🔎</span> Describe an image
           </h2>
           <button type="button" onClick={onClose} disabled={busy} aria-label="Close"
-            className="w-8 h-8 rounded-full bg-surface-raised text-content-muted shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content disabled:opacity-40">×</button>
+            className={`w-8 h-8 rounded-full bg-surface-raised text-content-muted ${FLOAT_SHADOW} transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content disabled:opacity-40`}>×</button>
         </div>
         <p className="text-content-subtle text-[0.6875rem] leading-snug">
           The vision model turns the image into a test prompt (scene, pose, framing, outfit).
@@ -128,7 +129,7 @@ export default function DescribeImageModal({ open, onClose, onResult }) {
           onChange={(e) => { describe(e.target.files?.[0]); e.target.value = ''; }} />
 
         {error && (
-          <p className="m-0 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-red-400/40 bg-red-50 px-3 py-2 text-red-600 text-[0.6875rem]" role="alert">
+          <p className={`m-0 rounded-lg ${FLOAT_SHADOW} border border-red-400/40 bg-red-50 px-3 py-2 text-red-600 text-[0.6875rem]`} role="alert">
             {error}
           </p>
         )}
@@ -137,7 +138,7 @@ export default function DescribeImageModal({ open, onClose, onResult }) {
 
         <div className="flex items-center justify-end pt-1">
           <button type="button" onClick={onClose} disabled={busy}
-            className="px-3 py-1.5 rounded-full bg-surface-raised text-content-muted text-[0.75rem] shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content disabled:opacity-40">
+            className={`px-3 py-1.5 rounded-full bg-surface-raised text-content-muted text-[0.75rem] ${FLOAT_SHADOW} transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content disabled:opacity-40`}>
             Cancel
           </button>
         </div>

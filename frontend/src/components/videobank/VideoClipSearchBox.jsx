@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { apiFetch } from '../../api/fetchClient'
 import { HelpBadge } from '../../help/HelpMode'
 import { videoSearchUrl } from './videoBankApi'
+import { CARD_SURFACE, INPUT_CLASS, PRIMARY_BUTTON, QUIET_BUTTON } from '../common/surfaces'
 import {
   searchUnavailableReason, summarize, readinessHint, pendingLabel,
   suggestPushDown, limitsSentence, VIDEO_CLIP_LIMITS, searchBasisNote,
@@ -73,7 +74,7 @@ export default function VideoClipSearchBox({
   }
 
   return (
-    <section className="rounded-lg bg-surface p-3">
+    <section className={`${CARD_SURFACE} p-3`}>
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-sm font-semibold text-content">🔎 Find scenes</h2>
         <HelpBadge topic="video-bank-search" />
@@ -89,7 +90,7 @@ export default function VideoClipSearchBox({
               cannot run CLIP is not one click away from being able to. */}
           {status?.available !== false && (Number(counts?.clips) || 0) > 0 && (
             <button type="button" onClick={onRunPass} disabled={busy}
-              className="rounded-md bg-gradient-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
+              className={`${PRIMARY_BUTTON} px-3 py-1.5 text-xs disabled:opacity-40`}>
               🔎 Find scenes
             </button>
           )}
@@ -103,14 +104,14 @@ export default function VideoClipSearchBox({
               onChange={(e) => setQuery(e.target.value)}
               placeholder="a woman walking on a beach"
               aria-label="Describe the scene to look for"
-              className="min-w-[12rem] flex-1 rounded-md bg-surface-raised px-2.5 py-1.5 text-sm text-content placeholder:text-content-subtle" />
+              className={`${INPUT_CLASS} mt-0 min-w-[12rem] flex-1`} />
             <button type="submit" disabled={searching || !query.trim()}
-              className="rounded-md bg-gradient-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
+              className={`${PRIMARY_BUTTON} px-3 py-1.5 text-xs disabled:opacity-40`}>
               {searching ? pendingLabel(status) : 'Search'}
             </button>
             {result && (
               <button type="button" onClick={clear}
-                className="rounded-md bg-surface-raised px-2.5 py-1.5 text-xs font-semibold text-content hover:bg-surface">
+                className={QUIET_BUTTON}>
                 Clear
               </button>
             )}

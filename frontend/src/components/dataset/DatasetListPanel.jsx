@@ -133,7 +133,7 @@ function EmptyState() {
    border+bright-text weight they were the loudest thing on the page. The HUE
    still carries the family; it just stops shouting it. */
 const FAMILY_BADGE = {
-  zimage: ['Z-Image', 'bg-sky-50 text-sky-200/90'],
+  zimage: ['Z-Image', 'bg-sky-50 text-sky-600/90'],
   sdxl: ['SDXL', 'bg-violet-500/15 text-violet-200/90'],
   krea: ['Krea', 'bg-amber-50 text-amber-700/90'],
   flux: ['FLUX.1', 'bg-emerald-50 text-emerald-700/90'],

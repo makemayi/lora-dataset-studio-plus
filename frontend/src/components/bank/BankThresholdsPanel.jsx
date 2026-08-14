@@ -38,6 +38,7 @@
    to default" across the app, and its value comes from the server's
    `config_defaults`, never from a number typed into the frontend. */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FLOAT_SHADOW } from '../common/surfaces'
 import { apiFetch, postJson, putJson } from '../../api/fetchClient'
 import { useToast } from '../common/Toast'
 import ResetToDefault from '../settings/ResetToDefault.jsx'
@@ -60,7 +61,7 @@ const INPUT = 'mt-1 w-full rounded-lg bg-surface-raised px-2 py-1 ' +
   'text-sm text-content tabular-nums focus:outline-none focus:ring-1 focus:ring-indigo-400'
 
 const SMALL_BTN = 'rounded-full bg-surface-raised px-2.5 py-1 text-xs text-content-muted ' +
-  'shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content disabled:opacity-50'
+  `${FLOAT_SHADOW} transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content disabled:opacity-50`
 
 /** One collapsible group of thresholds. A folded group still advertises how
     many of its fields you have moved off the default — otherwise folding it
@@ -345,7 +346,7 @@ export default function BankThresholdsPanel({
         </p>
         {canResetAll && (
           <button type="button" onClick={() => setEdits(resetAll)}
-            className="rounded-full bg-surface-raised px-2.5 py-1 text-xs font-medium text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5">
+            className={`rounded-full bg-surface-raised px-2.5 py-1 text-xs font-medium text-content ${FLOAT_SHADOW} transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5`}>
             <span aria-hidden>↺ </span>Reset all to defaults
           </button>
         )}

@@ -12,6 +12,7 @@
  * only (no ComfyUI), so it works offline.
  */
 import { useMemo, useRef, useState } from 'react';
+import { FLOAT_SHADOW } from '../../common/surfaces'
 import { useToast } from '../../common/Toast';
 import { useFocusTrap } from '../../../hooks/useFocusTrap';
 import { fetchWithCsrfRetry, getCsrfToken } from '../../../api/fetchClient';
@@ -103,7 +104,7 @@ export default function ExportGridModal({ open, onClose, datasetId, family, run,
             <span aria-hidden>🖼</span> Export grid
           </h2>
           <button type="button" onClick={onClose} disabled={busy} aria-label="Close"
-            className="w-8 h-8 rounded-full bg-surface-raised text-content-muted shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content disabled:opacity-40">×</button>
+            className={`w-8 h-8 rounded-full bg-surface-raised text-content-muted ${FLOAT_SHADOW} transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content disabled:opacity-40`}>×</button>
         </div>
         <p className="text-content-subtle text-[0.6875rem] leading-snug">
           {canvasMode
@@ -115,7 +116,7 @@ export default function ExportGridModal({ open, onClose, datasetId, family, run,
         {!canvasMode && <label className="flex flex-col gap-1">
           <span className="text-content-muted text-[0.625rem] uppercase">Format block</span>
           <select value={aspect} onChange={(e) => setAspect(e.target.value)}
-            className="rounded-lg bg-surface-raised shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-2 py-1.5 text-[0.75rem] text-content">
+            className={`rounded-lg bg-surface-raised ${FLOAT_SHADOW} px-2 py-1.5 text-[0.75rem] text-content`}>
             <option value="all">All formats (stacked)</option>
             {(aspects || []).map((a) => <option key={a} value={a}>{a}</option>)}
           </select>
@@ -166,14 +167,14 @@ export default function ExportGridModal({ open, onClose, datasetId, family, run,
         </label>
 
         {willDownscale && (
-          <p className="text-amber-700/90 text-[0.625rem] rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-amber-400/30 bg-amber-50 px-2 py-1.5">
+          <p className={`text-amber-700/90 text-[0.625rem] rounded-lg ${FLOAT_SHADOW} border border-amber-400/30 bg-amber-50 px-2 py-1.5`}>
             Large grid — the image will be downscaled to fit an {MAX_CANVAS_SIDE}px cap.
           </p>
         )}
 
         <div className="flex items-center justify-end gap-2 pt-1">
           <button type="button" onClick={onClose} disabled={busy}
-            className="px-3 py-1.5 rounded-full bg-surface-raised text-content-muted text-[0.75rem] shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content disabled:opacity-40">
+            className={`px-3 py-1.5 rounded-full bg-surface-raised text-content-muted text-[0.75rem] ${FLOAT_SHADOW} transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content disabled:opacity-40`}>
             Cancel
           </button>
           <button type="button" onClick={doExport} disabled={busy}

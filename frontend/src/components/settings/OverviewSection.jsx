@@ -26,7 +26,7 @@ export default function OverviewSection({ caps }) {
           <p className="font-medium">Let's get you set up.</p>
           <p className="mt-1 text-content-muted">
             Add at least one image API key to start, or let the{' '}
-            <Link to="/setup" className="font-medium text-sky-700 underline hover:text-sky-200">Setup wizard</Link>
+            <Link to="/setup" className="font-medium text-sky-700 underline hover:text-sky-600">Setup wizard</Link>
             {' '}scan your machine and walk you through it.
           </p>
         </div>
@@ -68,7 +68,7 @@ export default function OverviewSection({ caps }) {
         </div>
         <p className="mt-4 border-t border-border pt-3 text-xs text-content-muted">
           Not sure where to start?{' '}
-          <Link to="/setup" className="font-medium text-sky-700 underline hover:text-sky-200">Run the Setup wizard</Link>
+          <Link to="/setup" className="font-medium text-sky-700 underline hover:text-sky-600">Run the Setup wizard</Link>
           {' '}— it scans your machine and installs what it can.
         </p>
       </section>

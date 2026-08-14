@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { apiFetch, postJson } from '../../api/fetchClient'
 import { useToast } from '../common/Toast'
+import { INPUT_CLASS, PRIMARY_BUTTON } from '../common/surfaces'
 import {
   frameOptions, defaultFrames, needsManualFrames, sizeOptions,
   promoteProblem, promotePayload, promoteScopeLabel,
@@ -122,7 +123,7 @@ export default function PromoteVideoDialog({
     <div role="dialog" aria-modal="true" aria-label="Build a video training set"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-3 sm:p-4">
       <form onSubmit={submit}
-        className="w-full max-w-lg max-h-[90vh] space-y-4 overflow-y-auto rounded-xl bg-surface-overlay/85 backdrop-blur-md p-4 shadow-2xl sm:p-5">
+        className="w-full max-w-lg max-h-[90vh] space-y-4 overflow-y-auto rounded-2xl bg-surface-overlay/85 backdrop-blur-md p-4 shadow-2xl sm:p-5">
         <h2 className="text-base font-bold text-content">🎬 Build a video training set</h2>
         <p className="text-sm text-content-muted">
           Encodes {promoteScopeLabel((selectedIds || []).length, keepCount)} into a flat
@@ -134,7 +135,7 @@ export default function PromoteVideoDialog({
           <label htmlFor="video-ds-name" className="block text-sm font-medium text-content">Name</label>
           <input id="video-ds-name" value={name} onChange={(e) => setName(e.target.value)}
             placeholder="wan 14b — city rushes" required
-            className="mt-1 w-full rounded-lg bg-surface-raised px-3 py-1.5 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary" />
+            className={INPUT_CLASS} />
         </div>
 
         <fieldset>
@@ -154,7 +155,7 @@ export default function PromoteVideoDialog({
               <>
                 <input id="video-ds-frames" type="number" min="1" step="1"
                   value={frames ?? ''} onChange={(e) => setFrames(Number(e.target.value) || null)}
-                  className="mt-1 w-full rounded-lg bg-surface-raised px-3 py-1.5 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary" />
+                  className={INPUT_CLASS} />
                 {/* "No presets", never "any length is fine": we have no verified
                     lengths for this target, which is not the same claim. */}
                 <p className="mt-1 text-xs text-content-muted">
@@ -166,7 +167,7 @@ export default function PromoteVideoDialog({
               <>
                 <select id="video-ds-frames" value={frames ?? ''}
                   onChange={(e) => setFrames(Number(e.target.value) || null)}
-                  className="mt-1 w-full rounded-lg bg-surface-raised px-3 py-1.5 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary">
+                  className={INPUT_CLASS}>
                   {options.map((o) => (
                     <option key={o.frames} value={o.frames}>{o.label}</option>
                   ))}
@@ -183,7 +184,7 @@ export default function PromoteVideoDialog({
               Size
             </label>
             <select id="video-ds-size" value={sizeKey} onChange={(e) => setSizeKey(e.target.value)}
-              className="mt-1 w-full rounded-lg bg-surface-raised px-3 py-1.5 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary">
+              className={INPUT_CLASS}>
               {sizes.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
             </select>
             {/* The chosen option's own caveat wins over the generic reassurance:
@@ -207,7 +208,7 @@ export default function PromoteVideoDialog({
           <input id="video-ds-cap" type="number" min="1" step="1"
             value={maxPerSource} onChange={(e) => setMaxPerSource(e.target.value)}
             placeholder="no cap"
-            className="mt-1 w-full rounded-lg bg-surface-raised px-3 py-1.5 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary sm:w-40" />
+            className={`${INPUT_CLASS} sm:w-40`} />
           {capIssue ? (
             <p className="mt-1 text-xs text-rose-700">⚠ {capIssue}</p>
           ) : (
@@ -224,7 +225,7 @@ export default function PromoteVideoDialog({
           <input id="video-ds-inset" type="number" min="0" step="0.05"
             value={edgeInset} onChange={(e) => setEdgeInset(e.target.value)}
             placeholder="0"
-            className="mt-1 w-full rounded-lg bg-surface-raised px-3 py-1.5 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary sm:w-40" />
+            className={`${INPUT_CLASS} sm:w-40`} />
           {insetIssue ? (
             <p className="mt-1 text-xs text-rose-700">⚠ {insetIssue}</p>
           ) : (
@@ -238,7 +239,7 @@ export default function PromoteVideoDialog({
         </div>
 
         {error && (
-          <p role="alert" className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-200">
+          <p role="alert" className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-600">
             {error}
           </p>
         )}
@@ -249,7 +250,7 @@ export default function PromoteVideoDialog({
             Cancel
           </button>
           <button type="submit" disabled={busy || !!problem} title={problem || undefined}
-            className="rounded-md bg-gradient-primary px-4 py-1.5 text-sm font-semibold text-white disabled:opacity-40">
+            className={`${PRIMARY_BUTTON} disabled:opacity-40`}>
             {busy ? 'Starting…' : `🎬 Encode ${promoteScopeLabel((selectedIds || []).length, keepCount)}`}
           </button>
         </div>

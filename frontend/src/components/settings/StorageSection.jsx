@@ -126,7 +126,7 @@ function LocationEditor({
       </div>
 
       {check && !check.ok && (
-        <p className="rounded-lg border border-rose-500/40 bg-rose-50 p-2 text-xs text-rose-200">
+        <p className="rounded-lg border border-rose-500/40 bg-rose-50 p-2 text-xs text-rose-600">
           <span aria-hidden>⚠</span> {check.reason}
         </p>
       )}

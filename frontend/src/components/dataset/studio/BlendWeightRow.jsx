@@ -11,6 +11,7 @@
  * Deux lignes plutôt qu'une, comme le reste de ce panneau : à 400 px, le nom et
  * le curseur côte à côte écrasaient le nom en « l… ».
  */
+import { FLOAT_SHADOW } from '../../common/surfaces'
 import {
   BLEND_WEIGHT_CHIPS, COMBINE_MAX_WEIGHT, COMBINE_MIN_WEIGHT,
 } from './loraStack';
@@ -21,7 +22,7 @@ export default function BlendWeightRow({
   const sweeping = set.length > 0;
 
   return (
-    <li className="flex flex-col gap-1 rounded-lg bg-surface-raised shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-2.5 py-1.5">
+    <li className={`flex flex-col gap-1 rounded-lg bg-surface-raised ${FLOAT_SHADOW} px-2.5 py-1.5`}>
       <div className="flex min-w-0 items-center gap-2">
         <span className="shrink-0 text-content-subtle text-[0.625rem] tabular-nums">{index}.</span>
         <span className="min-w-0 flex-1 truncate text-content text-[0.8125rem]" title={title || label}>

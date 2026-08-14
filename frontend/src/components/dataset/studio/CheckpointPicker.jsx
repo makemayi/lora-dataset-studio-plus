@@ -1,3 +1,4 @@
+import { FLOAT_SHADOW } from '../../common/surfaces'
 // Sélecteur des checkpoints à tester (cases à cocher multi-sélection).
 // Extrait behavior-preserving de LoraTestStudio.jsx (bloc « Checkpoints à tester »).
 export default function CheckpointPicker({ checkpoints, chosen, onToggle }) {
@@ -6,7 +7,7 @@ export default function CheckpointPicker({ checkpoints, chosen, onToggle }) {
       <span className="text-content-muted text-[0.625rem] uppercase">Checkpoints to test</span>
       <div className="flex gap-2 flex-wrap">
         {checkpoints.map((c) => (
-          <label key={c.filename} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] cursor-pointer text-[0.75rem] text-content">
+          <label key={c.filename} className={`flex items-center gap-1.5 px-2 py-1 rounded-lg bg-surface ${FLOAT_SHADOW} cursor-pointer text-[0.75rem] text-content`}>
             <input type="checkbox" checked={chosen.includes(c.filename)}
               onChange={() => onToggle(c.filename)} aria-label={`Test ${c.label}`} />
             {c.label}

@@ -139,7 +139,7 @@ function ImproveActions({ img, onImprove, improvePending, improveReady, busy,
           /* Full width under `sm`: this column is 22rem at its widest, so two
              engine buttons beside a Download would each be a 5rem stub on a
              400 px phone. Same class the dataset lightbox uses. */
-          className="min-h-9 w-full rounded-lg border border-indigo-200 bg-indigo-100 px-3 py-1.5 text-[0.75rem] font-semibold text-indigo-100 hover:bg-indigo-500/30 disabled:cursor-not-allowed disabled:opacity-45 sm:w-auto">
+          className="min-h-9 w-full rounded-lg border border-indigo-200 bg-indigo-100 px-3 py-1.5 text-[0.75rem] font-semibold text-indigo-700 hover:bg-indigo-500/30 disabled:cursor-not-allowed disabled:opacity-45 sm:w-auto">
           {btn.label}
         </button>
       ))}
@@ -291,7 +291,7 @@ export default function GeneratedImageLightbox({ img, alt, actions = null,
           </div>
           {dl.error && (
             <p role="alert" data-testid="lightbox-download-error"
-              className="m-0 mt-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[0.6875rem] text-amber-100">
+              className="m-0 mt-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[0.6875rem] text-amber-700">
               {dl.error}
             </p>
           )}

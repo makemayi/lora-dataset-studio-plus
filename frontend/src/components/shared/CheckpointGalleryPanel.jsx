@@ -320,7 +320,7 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
             <p className="m-0 text-content-subtle text-[0.75rem]">Loading…</p>
           )}
           {state.status === 'error' && (
-            <p className="m-0 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-amber-100 text-[0.75rem]">
+            <p className="m-0 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-amber-700 text-[0.75rem]">
               {state.error}
             </p>
           )}
@@ -332,10 +332,10 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
             <p role={notice.kind === 'ok' ? undefined : 'alert'}
               className={`m-0 mb-2 rounded-lg border px-2 py-1.5 text-[0.6875rem] ${
                 notice.kind === 'error'
-                  ? 'border-rose-400/50 bg-rose-50 text-rose-100'
+                  ? 'border-rose-400/50 bg-rose-50 text-rose-700'
                   : notice.kind === 'warn'
-                    ? 'border-amber-200 bg-amber-50 text-amber-100'
-                    : 'border-emerald-200 bg-emerald-50 text-emerald-100'}`}>
+                    ? 'border-amber-200 bg-amber-50 text-amber-700'
+                    : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
               {notice.text}
             </p>
           )}
@@ -365,7 +365,7 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
                 </p>
                 <button type="button" data-testid="run-gallery-timeline"
                   onClick={() => setTimelineOpen(true)} aria-haspopup="dialog"
-                  className="shrink-0 rounded-md border border-indigo-400/60 bg-indigo-50 px-2 py-1.5 text-[0.6875rem] font-semibold text-indigo-100 hover:bg-indigo-500/25">
+                  className="shrink-0 rounded-md border border-indigo-400/60 bg-indigo-50 px-2 py-1.5 text-[0.6875rem] font-semibold text-indigo-700 hover:bg-indigo-500/25">
                   <span aria-hidden>🎞</span> Timeline
                 </button>
               </div>
@@ -573,7 +573,7 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
               {confirmation.lines.map((line) => <li key={line}>{line}</li>)}
             </ul>
             {confirmation.destructive && (
-              <p className="m-0 mb-3 rounded-lg border border-rose-400/40 bg-rose-50 px-2 py-1.5 text-rose-100 text-[0.6875rem]">
+              <p className="m-0 mb-3 rounded-lg border border-rose-400/40 bg-rose-50 px-2 py-1.5 text-rose-700 text-[0.6875rem]">
                 This cannot be undone.
               </p>
             )}
@@ -615,7 +615,7 @@ export default function CheckpointGalleryPanel({ target, onClose, onDeleted, onD
           <button type="button" data-testid="gallery-pin-image"
             onClick={() => { onPin(zoom); setZoom(null); }}
             title="Put this image on the board, beside the checkpoint that made it"
-            className="rounded-md border border-indigo-400/60 bg-indigo-100 px-3 py-1.5 text-[0.75rem] font-semibold text-indigo-100 hover:bg-indigo-500/30">
+            className="rounded-md border border-indigo-400/60 bg-indigo-100 px-3 py-1.5 text-[0.75rem] font-semibold text-indigo-700 hover:bg-indigo-500/30">
             <span aria-hidden>📌</span> Pin to canvas
           </button>
         ) : null} />

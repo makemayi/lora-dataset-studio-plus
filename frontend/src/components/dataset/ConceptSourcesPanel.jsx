@@ -395,7 +395,7 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
 
       {sourceMode === 'pexels' && (
         <div className="rounded-lg bg-surface-raised px-2.5 py-2 flex flex-col gap-2">
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-[0.6875rem] leading-relaxed text-amber-100">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-[0.6875rem] leading-relaxed text-amber-700">
             <p>
               <b>Pexels authorization required.</b> An API key alone does not authorize
               dataset or machine-learning use. Search only if Pexels explicitly authorized

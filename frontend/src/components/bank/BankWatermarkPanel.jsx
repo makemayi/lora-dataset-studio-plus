@@ -25,6 +25,7 @@
  * `bankWatermark.js` so `node --test` covers it; this file is the shell.
  */
 import { useCallback, useEffect, useState } from 'react'
+import { FLOAT_SHADOW } from '../common/surfaces'
 import { apiFetch, postJson } from '../../api/fetchClient'
 import PassDialog from './PassDialog.jsx'
 import KleinModelSetting from '../shared/KleinModelSetting'
@@ -51,7 +52,7 @@ function LevelCard({ index, title, blurb, state, onRun }) {
       </div>
       <p className="text-[0.6875rem] leading-snug text-content-subtle">{blurb}</p>
       <button type="button" onClick={onRun} disabled={state.disabled} title={state.reason || title}
-        className="rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-700 disabled:opacity-40">
+        className={`rounded-lg ${FLOAT_SHADOW} border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-700 disabled:opacity-40`}>
         {state.label}
       </button>
       <p className="text-[0.6875rem] text-content-subtle">
@@ -217,7 +218,7 @@ export default function BankWatermarkPanel({
           <button type="button" aria-pressed={method !== 'klein'} onClick={() => setMethod('auto')}
             title="LaMa: fast, non-generative repaint of small off-centre marks. Marks on the subject stay flagged."
             className={`rounded-md px-2.5 py-1 font-semibold ${method !== 'klein'
-              ? 'bg-amber-500/25 text-amber-100' : 'text-content-subtle hover:text-content'}`}>
+              ? 'bg-amber-500/25 text-amber-700' : 'text-content-subtle hover:text-content'}`}>
             LaMa <span className="font-normal opacity-70">fast</span>
           </button>
           <button type="button" aria-pressed={method === 'klein'} onClick={() => setMethod('klein')}
@@ -226,7 +227,7 @@ export default function BankWatermarkPanel({
               ? 'Klein: masked Flux.2 inpaint through ComfyUI. Slower, and the only engine that clears a mark ON the subject.'
               : (kleinReason || 'Klein inpainting needs ComfyUI running + the Klein models (Setup ▸ ComfyUI).')}
             className={`rounded-md px-2.5 py-1 font-semibold disabled:opacity-40 ${method === 'klein'
-              ? 'bg-amber-500/25 text-amber-100' : 'text-content-subtle hover:text-content'}`}>
+              ? 'bg-amber-500/25 text-amber-700' : 'text-content-subtle hover:text-content'}`}>
             Klein <span className="font-normal opacity-70">quality</span>
           </button>
         </div>

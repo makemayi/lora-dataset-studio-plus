@@ -117,7 +117,7 @@ export default function VideoDatasetCloudPanel({ dataset }) {
       </div>
 
       {blocked && (
-        <p className="rounded border border-amber-500/50 bg-amber-50 px-2 py-1 text-[0.6875rem] text-amber-100">
+        <p className="rounded border border-amber-500/50 bg-amber-50 px-2 py-1 text-[0.6875rem] text-amber-700">
           {blocked}
         </p>
       )}
@@ -129,7 +129,7 @@ export default function VideoDatasetCloudPanel({ dataset }) {
         </p>
       )}
       {run?.error && (
-        <p className="rounded border border-rose-300 bg-rose-50 px-2 py-1 text-[0.6875rem] text-rose-100">
+        <p className="rounded border border-rose-300 bg-rose-50 px-2 py-1 text-[0.6875rem] text-rose-700">
           {run.error}
         </p>
       )}

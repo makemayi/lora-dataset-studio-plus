@@ -28,14 +28,14 @@ import {
  */
 const TONE = {
   ok: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  info: 'border-sky-200 bg-sky-50 text-sky-200',
-  error: 'border-rose-400/45 bg-rose-50 text-rose-200',
+  info: 'border-sky-200 bg-sky-50 text-sky-600',
+  error: 'border-rose-400/45 bg-rose-50 text-rose-600',
   muted: 'border-border text-content-subtle',
 };
 
 const LINE_TONE = {
   ok: 'text-emerald-700',
-  error: 'text-rose-200',
+  error: 'text-rose-600',
   muted: 'text-content-subtle',
 };
 
@@ -137,7 +137,7 @@ function SendPlan({ plan, busy, onSend, onCancel }) {
           : `⚠ ${plan.destination_dir_note}.`}
       </p>
       {plan.enough_space === false && (
-        <p className="m-0 mt-0.5 text-rose-200" role="alert">
+        <p className="m-0 mt-0.5 text-rose-600" role="alert">
           ✗ Not enough space: {fmtBytes(plan.free_bytes)} free, {fmtBytes(plan.required_bytes)} needed.
         </p>
       )}
@@ -279,7 +279,7 @@ export default function DenseModelsPanel({ datasetId, models = [], onChanged = n
               </div>
 
               {guidance && (
-                <p className="m-0 mt-1 rounded-md border border-amber-400/30 bg-amber-50 px-2 py-1 text-amber-100 text-[0.625rem] leading-snug">
+                <p className="m-0 mt-1 rounded-md border border-amber-400/30 bg-amber-50 px-2 py-1 text-amber-700 text-[0.625rem] leading-snug">
                   This is an undistilled model: sample it at <b>{guidance}</b>. The
                   family’s few-step Turbo defaults render mush on it.
                 </p>
@@ -341,7 +341,7 @@ export default function DenseModelsPanel({ datasetId, models = [], onChanged = n
                     // fail, and the reason belongs here, before the click.
                     disabled={busy || !actions.quantize.enabled}
                     title={actions.quantize.reason || undefined}
-                    className="rounded-md border border-sky-300/40 bg-sky-400/15 px-2.5 py-1 text-[0.6875rem] font-semibold text-sky-50 hover:bg-sky-400/25 disabled:opacity-40">
+                    className="rounded-md border border-sky-300/40 bg-sky-400/15 px-2.5 py-1 text-[0.6875rem] font-semibold text-sky-800 hover:bg-sky-400/25 disabled:opacity-40">
                     {quantizeFor?.run_id === entry.run_id ? 'Hide' : actions.quantize.label}
                   </button>
                 )}
@@ -355,7 +355,7 @@ export default function DenseModelsPanel({ datasetId, models = [], onChanged = n
                       mergeFor?.run_id === entry.run_id ? null : entry)}
                     disabled={busy}
                     title="Fold a LoRA into this model's weights and write a new full model"
-                    className="rounded-md border border-sky-300/40 bg-sky-400/15 px-2.5 py-1 text-[0.6875rem] font-semibold text-sky-50 hover:bg-sky-400/25 disabled:opacity-40">
+                    className="rounded-md border border-sky-300/40 bg-sky-400/15 px-2.5 py-1 text-[0.6875rem] font-semibold text-sky-800 hover:bg-sky-400/25 disabled:opacity-40">
                     {mergeFor?.run_id === entry.run_id ? 'Hide' : '🧬 Merge a LoRA in'}
                   </button>
                 )}
@@ -427,7 +427,7 @@ export default function DenseModelsPanel({ datasetId, models = [], onChanged = n
         </p>
       )}
       {job?.status === 'error' && (
-        <p className="m-0 mt-2 text-rose-200 text-[0.625rem]" role="alert">✗ {job.error}</p>
+        <p className="m-0 mt-2 text-rose-600 text-[0.625rem]" role="alert">✗ {job.error}</p>
       )}
     </section>
   );

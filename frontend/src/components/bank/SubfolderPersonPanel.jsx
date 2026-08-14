@@ -1,3 +1,4 @@
+import { FLOAT_SHADOW } from '../common/surfaces'
 import {
   SAMPLE_SIZE, assertionSummary, checkCostNote, folderLabel, revokeNote,
   scanOffer, suggestionLine, suggestionTone, toCheckNote, verdictLine,
@@ -25,7 +26,7 @@ export default function SubfolderPersonPanel({
   const scan = offer && onScan ? (
     <div className="flex flex-wrap items-center gap-2 text-xs text-content-subtle">
       <button type="button" onClick={onScan} disabled={busy} title={offer.note}
-        className="rounded-full bg-surface-raised px-2.5 py-1 font-semibold text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 disabled:opacity-50">
+        className={`rounded-full bg-surface-raised px-2.5 py-1 font-semibold text-content ${FLOAT_SHADOW} transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 disabled:opacity-50`}>
         {offer.label}
       </button>
       <span>{offer.note}</span>
@@ -76,7 +77,7 @@ export default function SubfolderPersonPanel({
   return (
     <div className="space-y-1.5 rounded-md border border-sky-200 bg-sky-50 px-2.5 py-2 text-xs">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="font-semibold text-sky-200">👤 Single person here</span>
+        <span className="font-semibold text-sky-600">👤 Single person here</span>
         <span className="text-content-subtle">{assertionSummary(entry)}</span>
       </div>
       {verdict && <p className={toneClass}>{verdict}</p>}
@@ -84,12 +85,12 @@ export default function SubfolderPersonPanel({
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" onClick={onCheck} disabled={busy}
           title={checkCostNote(entry)}
-          className="rounded-full bg-surface-raised px-2.5 py-0.5 font-semibold text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 disabled:opacity-50">
+          className={`rounded-full bg-surface-raised px-2.5 py-0.5 font-semibold text-content ${FLOAT_SHADOW} transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 disabled:opacity-50`}>
           🔍 {sample ? 'Check the sample again' : `Check a sample (${SAMPLE_SIZE} images)`}
         </button>
         <button type="button" onClick={onRevoke} disabled={busy}
           title={revokeNote(subfolder)}
-          className="rounded-full bg-surface-raised px-2.5 py-0.5 text-content-subtle shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 disabled:opacity-50">
+          className={`rounded-full bg-surface-raised px-2.5 py-0.5 text-content-subtle ${FLOAT_SHADOW} transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 disabled:opacity-50`}>
           ↩ Not one person after all
         </button>
       </div>

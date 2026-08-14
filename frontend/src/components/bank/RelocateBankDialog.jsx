@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { FLOAT_SHADOW } from '../common/surfaces'
 import { postJson } from '../../api/fetchClient'
 import { useToast } from '../common/Toast'
 import FolderPickerField from '../common/FolderPicker'
@@ -77,7 +78,7 @@ export default function RelocateBankDialog({ bankId, bankName, sourcePath, onClo
   const tone = {
     ok: 'border-emerald-500/50 bg-emerald-50 text-emerald-700',
     warn: 'border-amber-500/60 bg-amber-50 text-amber-700',
-    error: 'border-rose-300 bg-rose-50 text-rose-200',
+    error: 'border-rose-300 bg-rose-50 text-rose-600',
   }[summary?.tone] || ''
 
   return (
@@ -100,7 +101,7 @@ export default function RelocateBankDialog({ bankId, bankName, sourcePath, onClo
           hint="The folder that CONTAINS the images — the one you moved, not its parent. Quotes around a pasted path are fine." />
 
         {error && (
-          <p className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-200">
+          <p className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-600">
             {error}
           </p>
         )}
@@ -123,7 +124,7 @@ export default function RelocateBankDialog({ bankId, bankName, sourcePath, onClo
 
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button type="button" onClick={onClose} autoFocus
-            className="rounded-full bg-surface-raised px-3 py-1.5 text-sm text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5">
+            className={`rounded-full bg-surface-raised px-3 py-1.5 text-sm text-content ${FLOAT_SHADOW} transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5`}>
             Cancel
           </button>
           <button type="button" onClick={check} disabled={busy || !folder.trim()}

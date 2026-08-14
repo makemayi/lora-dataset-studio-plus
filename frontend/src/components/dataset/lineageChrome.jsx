@@ -34,7 +34,7 @@ export function ModeChip({ node }) {
   if (node?.training_mode !== 'full_transformer') return null;
   return (
     <span title="This run trained the whole model, not a LoRA adapter"
-      className="rounded bg-sky-100 px-1 py-px font-semibold text-sky-200">
+      className="rounded bg-sky-100 px-1 py-px font-semibold text-sky-600">
       full model
     </span>
   );
@@ -51,7 +51,7 @@ export function ModeChip({ node }) {
 export function SavesChip({ node }) {
   if (node.dense_artifact === 'hub') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-sky-200 text-[0.5625rem] font-medium"
+      <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-sky-600 text-[0.5625rem] font-medium"
         title="The full model is in this run's private Hugging Face repository, not on this computer">
         <span aria-hidden>☁</span>on Hugging Face
       </span>

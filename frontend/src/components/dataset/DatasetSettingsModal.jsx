@@ -120,7 +120,7 @@ export default function DatasetSettingsModal({ d, busy, onSave, onClose }) {
         </div>
 
         {style ? (
-          <div className="rounded-lg border border-cyan-400/30 bg-cyan-50 px-3 py-2 text-[0.75rem] text-cyan-100">
+          <div className="rounded-lg border border-cyan-400/30 bg-cyan-50 px-3 py-2 text-[0.75rem] text-cyan-700">
             <b>Always-on Style:</b> no activation trigger is written into captions or prompts.
             Control the effect with the LoRA weight; when combining with a character LoRA,
             tune the two weights independently.
@@ -207,7 +207,7 @@ export default function DatasetSettingsModal({ d, busy, onSave, onClose }) {
               </ul>
             </div>
             {switchSummary.recaption && (
-              <div className="rounded border border-amber-400/30 bg-amber-50 px-2 py-1.5 text-amber-100">
+              <div className="rounded border border-amber-400/30 bg-amber-50 px-2 py-1.5 text-amber-700">
                 Existing captions were written for <b>{KIND_LABELS[switchSummary.from]}</b>. They
                 are <b>not</b> rewritten automatically — use <b>🔄 Re-caption</b> in the Captions
                 section to apply the new strategy.

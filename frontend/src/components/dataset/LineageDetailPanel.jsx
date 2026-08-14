@@ -186,7 +186,7 @@ export default function LineageDetailPanel({ node, onClose, onNodeChanged, onNod
       {deletable && (
         <section className="mt-auto pt-4">
           <button type="button" onClick={deleteRun} disabled={deleting}
-            className="w-full rounded-md border border-rose-500/40 bg-rose-600/10 px-2 py-1.5 text-xs font-medium text-rose-200 hover:bg-rose-600/20 disabled:opacity-50">
+            className="w-full rounded-md border border-rose-500/40 bg-rose-600/10 px-2 py-1.5 text-xs font-medium text-rose-600 hover:bg-rose-600/20 disabled:opacity-50">
             {deleting ? 'Removing…' : 'Remove this run'}
           </button>
           <p className="mt-1 text-[0.625rem] leading-snug text-content-subtle">

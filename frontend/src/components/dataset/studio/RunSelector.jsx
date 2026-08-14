@@ -1,3 +1,4 @@
+import { FLOAT_SHADOW } from '../../common/surfaces'
 // react-frontend/src/components/dataset/studio/RunSelector.jsx
 /**
  * En-tête de la zone résultats : toggle « 📊 Résultats » (repli), bouton
@@ -36,7 +37,7 @@ export default function RunSelector({
       {greenCount > 0 && (
         <button type="button" onClick={onStartReVote}
           title="2nd pass: re-vote ONLY the 👍 to narrow down (👎 = remove, 👍 = reconfirm, skip = unchanged)"
-          className="px-2.5 py-1 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-green-400/60 bg-green-500/15 text-green-200 text-[0.6875rem] font-semibold">
+          className={`px-2.5 py-1 rounded-lg ${FLOAT_SHADOW} border border-green-400/60 bg-green-500/15 text-green-600 text-[0.6875rem] font-semibold`}>
           ♻️ Re-vote 👍 ({greenCount})
         </button>
       )}
@@ -48,7 +49,7 @@ export default function RunSelector({
       {runs.length > 1 && (
         <select value={activeRunKey || ''} onChange={(e) => onSelect(e.target.value)}
           aria-label="Choose the test run to display"
-          className="ml-auto rounded-lg bg-surface-raised shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-2 py-1 text-[0.6875rem] text-content max-w-[280px]">
+          className={`ml-auto rounded-lg bg-surface-raised ${FLOAT_SHADOW} px-2 py-1 text-[0.6875rem] text-content max-w-[280px]`}>
           {runs.map((r, i) => {
             // Taux de 👍 parmi les votes du run (likes / votés), comme le « % 👍 »
             // affiché par cellule. Caché si aucun vote (division par zéro).

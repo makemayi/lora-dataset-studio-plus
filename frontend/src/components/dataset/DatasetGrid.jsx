@@ -467,7 +467,7 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
           which pass, and a title is not readable on a touch screen at all. */}
       {busyReason && (
         <p role="status" aria-live="polite"
-          className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] leading-snug text-amber-100/90">
+          className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] leading-snug text-amber-700/90">
           <span aria-hidden="true">🔒 </span>{READS_STAY_OPEN}
         </p>
       )}
@@ -531,7 +531,7 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
                     title={blocked
                       ? `${blocked}${exclusionSummary ? ` ${exclusionSummary}.` : ''}`
                       : `${engine.summary} Runs in the background, a few at a time — survives a page reload.${exclusionSummary ? ` Excluded: ${exclusionSummary}.` : ''}`}
-                    className={`${batchBtn} border border-indigo-200 bg-indigo-100 text-indigo-100`}>
+                    className={`${batchBtn} border border-indigo-200 bg-indigo-100 text-indigo-700`}>
                     {improveLabel || `${engine.emoji} ${engine.action} (${improveSelection.eligible.length})`}
                   </button>
                 );

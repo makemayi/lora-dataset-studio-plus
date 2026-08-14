@@ -9,7 +9,10 @@
  * Gated on `caps.studio_visible` (ComfyUI reachable): the nav link already
  * hides the entry, but this guards direct URL access too.
  */
-import { useParams, useSearchParams } from 'react-router';
+import { Link, useParams, useSearchParams } from 'react-router';
+import EmptyState from '../components/common/EmptyState';
+import { StudioIcon } from '../components/common/icons';
+import { PRIMARY_BUTTON } from '../components/common/surfaces';
 import { useCapabilities } from '../context/CapabilitiesContext';
 import StudioShell from '../components/dataset/studio/StudioShell';
 
@@ -28,14 +31,23 @@ export default function StudioPage() {
   // family's few-step defaults render mush on one.
   const preselectBase = sp.get('base') || null;
 
+  // Not a page header: this is the page having nothing to show, which is what
+  // EmptyState is for. It also stops the fallback claiming an <h1> that the
+  // real page never renders — two different documents answering to one route.
   if (!caps.studio_visible) {
     return (
-      <div className="rounded-xl bg-surface p-8 text-center">
-        <h1 className="text-lg font-semibold text-content">Test Studio</h1>
-        <p className="mt-2 text-sm text-content-muted">
-          Test Studio requires ComfyUI — configure it in Settings.
-        </p>
-      </div>
+      <EmptyState
+        icon={<StudioIcon className="h-5 w-5" />}
+        title="Test Studio needs ComfyUI"
+        action={(
+          <Link to="/settings/local-tools?focus=comfyui-api-url" className={PRIMARY_BUTTON}>
+            Open Settings
+          </Link>
+        )}
+      >
+        The Studio renders every test on your own ComfyUI. Point the app at it in
+        Settings and this page fills in.
+      </EmptyState>
     );
   }
 

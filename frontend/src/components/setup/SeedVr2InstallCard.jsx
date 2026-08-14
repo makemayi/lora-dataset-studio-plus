@@ -155,11 +155,11 @@ export default function SeedVr2InstallCard({ caps, onDone }) {
         not by &ldquo;Install everything&rdquo;.
       </p>
       <p className="mt-1 text-xs text-content-subtle">
-        <a href={PACK_URL} target="_blank" rel="noreferrer" className="text-sky-700 underline hover:text-sky-200">Node pack →</a>
+        <a href={PACK_URL} target="_blank" rel="noreferrer" className="text-sky-700 underline hover:text-sky-600">Node pack →</a>
         {' · '}
-        <a href={WEIGHTS_URL} target="_blank" rel="noreferrer" className="text-sky-700 underline hover:text-sky-200">Model weights →</a>
+        <a href={WEIGHTS_URL} target="_blank" rel="noreferrer" className="text-sky-700 underline hover:text-sky-600">Model weights →</a>
         {' · '}
-        <a href={PROJECT_URL} target="_blank" rel="noreferrer" className="text-sky-700 underline hover:text-sky-200">SeedVR2 by ByteDance-Seed →</a>
+        <a href={PROJECT_URL} target="_blank" rel="noreferrer" className="text-sky-700 underline hover:text-sky-600">SeedVR2 by ByteDance-Seed →</a>
         {' — all Apache-2.0.'}
       </p>
 
@@ -233,7 +233,7 @@ export default function SeedVr2InstallCard({ caps, onDone }) {
         <p className="mt-1 text-content-muted">{tiling.text}</p>
         <p className="mt-1 text-xs text-content-subtle">
           <a href={TTP_URL} target="_blank" rel="noreferrer"
-            className="text-sky-700 underline hover:text-sky-200">{TTP_PACK} →</a>
+            className="text-sky-700 underline hover:text-sky-600">{TTP_PACK} →</a>
           {' — MIT. Tiling workflow contributed by SurpassHR (GitHub #32).'}
         </p>
       </div>
@@ -257,7 +257,7 @@ export default function SeedVr2InstallCard({ caps, onDone }) {
             &ldquo;SeedVR2&rdquo; in ComfyUI-Manager — then restart ComfyUI. The app does not
             install this one for you: it pulls thirteen Python packages that have to go into
             ComfyUI&rsquo;s own environment, and a plain copy of the folder would not work.{' '}
-            <a href={PACK_URL} target="_blank" rel="noreferrer" className="text-sky-700 underline hover:text-sky-200">
+            <a href={PACK_URL} target="_blank" rel="noreferrer" className="text-sky-700 underline hover:text-sky-600">
               Open the node pack on GitHub →</a></span>
         </p>
       )}

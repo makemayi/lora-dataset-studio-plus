@@ -95,7 +95,7 @@ export default function HfStorageCard({ config, setField, configDefaults }) {
           href="https://huggingface.co/settings/storage"
           target="_blank"
           rel="noreferrer"
-          className="text-xs font-medium text-sky-700 underline hover:text-sky-200"
+          className="text-xs font-medium text-sky-700 underline hover:text-sky-600"
         >
           Open Hugging Face storage ↗
         </a>

@@ -12,6 +12,7 @@
  * maintainers edit each wave). This file is presentation only.
  */
 import { useEffect, useRef, useState } from 'react';
+import EmptyState from './EmptyState'
 import { useNavigate } from 'react-router';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { GiftIcon, ICON_BUTTON_BASE, ICON_BUTTON_QUIET } from './icons';
@@ -157,7 +158,9 @@ export function WhatsNewModal() {
 
         <div className="max-h-[70vh] overflow-y-auto px-5">
           {entries.length === 0 ? (
-            <p className="py-8 text-center text-sm text-content-muted">Nothing new yet — check back after the next update.</p>
+            <EmptyState icon={<GiftIcon className="h-5 w-5" />} title="Nothing new yet">
+              Check back after the next update.
+            </EmptyState>
           ) : (
             <ol className="divide-y divide-border">
               {entries.map((e) => (

@@ -1,3 +1,4 @@
+import { FLOAT_SHADOW } from '../../common/surfaces'
 // react-frontend/src/components/dataset/studio/StudioPreflightBanner.jsx
 /**
  * Bandeau « le pipeline de test ne peut pas tourner » — affiché quand le lancement
@@ -26,7 +27,7 @@ export default function StudioPreflightBanner({ missing, archMismatch, onDismiss
     const name = (archMismatch.checkpoint || '').replace(/\\/g, '/').split('/').pop();
     return (
       <div role="alert"
-        className="rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-amber-200 bg-amber-400/10 px-3 py-2.5 text-sm text-amber-700 flex items-start gap-2">
+        className={`rounded-lg ${FLOAT_SHADOW} border border-amber-200 bg-amber-400/10 px-3 py-2.5 text-sm text-amber-700 flex items-start gap-2`}>
         <span aria-hidden className="text-base leading-none">⚠</span>
         <p className="m-0">
           <b className="font-semibold">“{name}” is a {det} LoRA</b>, but this is the {fam} Studio —
@@ -35,7 +36,7 @@ export default function StudioPreflightBanner({ missing, archMismatch, onDismiss
         </p>
         {onDismiss && (
           <button type="button" onClick={onDismiss} aria-label="Dismiss"
-            className="ml-auto px-1.5 leading-none text-amber-700/70 hover:text-amber-100">×</button>
+            className="ml-auto px-1.5 leading-none text-amber-700/70 hover:text-amber-700">×</button>
         )}
       </div>
     );
@@ -50,7 +51,7 @@ export default function StudioPreflightBanner({ missing, archMismatch, onDismiss
 
   return (
     <div role="alert"
-      className="rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-red-400/40 bg-red-50 px-3 py-2.5 text-sm text-red-700 flex flex-col gap-2">
+      className={`rounded-lg ${FLOAT_SHADOW} border border-red-400/40 bg-red-50 px-3 py-2.5 text-sm text-red-700 flex flex-col gap-2`}>
       <div className="flex items-start gap-2">
         <span aria-hidden className="text-base leading-none">⚠</span>
         <p className="m-0 font-semibold">
@@ -59,7 +60,7 @@ export default function StudioPreflightBanner({ missing, archMismatch, onDismiss
         </p>
         {onDismiss && (
           <button type="button" onClick={onDismiss} aria-label="Dismiss"
-            className="ml-auto px-1.5 leading-none text-red-700/70 hover:text-red-100">×</button>
+            className="ml-auto px-1.5 leading-none text-red-700/70 hover:text-red-700">×</button>
         )}
       </div>
 
@@ -72,7 +73,7 @@ export default function StudioPreflightBanner({ missing, archMismatch, onDismiss
             {files.map((f) => (
               <li key={f.path} className="flex flex-col gap-0.5">
                 <span className="flex flex-wrap items-baseline gap-x-2">
-                  <code className="text-red-100 text-[0.6875rem] break-all">{f.path}</code>
+                  <code className="text-red-700 text-[0.6875rem] break-all">{f.path}</code>
                   <span className="text-red-700/60 text-[0.625rem]">({f.kind})</span>
                 </span>
                 {/* `hint` = ce que le résolveur a réellement cherché (noms acceptés,
@@ -98,7 +99,7 @@ export default function StudioPreflightBanner({ missing, archMismatch, onDismiss
               const p = packFor(n);
               return (
                 <li key={n} className="flex flex-col gap-0.5">
-                  <code className="self-start px-1.5 py-0.5 rounded border border-red-400/40 bg-red-50 text-red-100 text-[0.6875rem]">
+                  <code className="self-start px-1.5 py-0.5 rounded border border-red-400/40 bg-red-50 text-red-700 text-[0.6875rem]">
                     {n}
                   </code>
                   {p && (
@@ -106,7 +107,7 @@ export default function StudioPreflightBanner({ missing, archMismatch, onDismiss
                       Install <b className="font-semibold">{p.pack}</b> via ComfyUI-Manager
                       {p.search ? <> (search “{p.search}”)</> : null} —{' '}
                       <a href={p.url} target="_blank" rel="noreferrer"
-                        className="underline break-all hover:text-red-100">{p.url}</a>
+                        className="underline break-all hover:text-red-700">{p.url}</a>
                       , then restart ComfyUI.
                     </span>
                   )}

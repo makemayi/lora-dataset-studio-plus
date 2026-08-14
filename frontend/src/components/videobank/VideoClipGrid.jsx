@@ -1,3 +1,6 @@
+import { FLOAT_SHADOW, FLOAT_HOVER_SHADOW } from '../common/surfaces'
+import { FilmIcon } from '../common/icons'
+import EmptyState from '../common/EmptyState'
 import { videoClipThumbUrl } from './videoBankApi'
 import { clipLabel } from './videoClipFragment'
 import { FLAG_LABELS } from './videoMetricsFilter'
@@ -22,9 +25,9 @@ export default function VideoClipGrid({
 }) {
   if (!clips.length) {
     return (
-      <p className="rounded-xl border border-dashed border-border bg-app/30 px-4 py-8 text-center text-sm text-content-muted">
+      <EmptyState icon={<FilmIcon className="h-5 w-5" />} title="No shots to show">
         {emptyMessage}
-      </p>
+      </EmptyState>
     )
   }
   const chosen = new Set(selected)
@@ -34,10 +37,14 @@ export default function VideoClipGrid({
     <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
       {clips.map((clip) => {
         const isChosen = chosen.has(clip.id)
+        /* Elevation separates the tiles; the ring is reserved for the one thing
+           an edge is allowed to mean here — this clip is selected. It replaces
+           "selected owns a border, the rest own a different border", which read
+           as a grid of boxes with one of them recoloured. */
         return (
           <li key={clip.id}
-            className={`relative flex min-w-0 flex-col overflow-hidden rounded-lg border bg-surface transition-colors ${
-              isChosen ? 'border-primary ring-1 ring-inset ring-primary/60' : 'border-border'}`}>
+            className={`relative flex min-w-0 flex-col overflow-hidden rounded-2xl bg-surface ${FLOAT_SHADOW} ${FLOAT_HOVER_SHADOW} transition-[box-shadow,transform] duration-200 ${
+              isChosen ? 'ring-2 ring-inset ring-primary' : ''}`}>
             <button type="button" onClick={(e) => onOpen(clip, e)}
               aria-label={`Play the shot at ${clipLabel(clip.start_s, clip.end_s)} of ${clip.relpath}`}
               className="relative block aspect-video w-full bg-surface-raised">

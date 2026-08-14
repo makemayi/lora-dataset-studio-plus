@@ -131,7 +131,7 @@ export default function RunDeleteSection({ recordId, datasetId, onDeleted, onClo
           + 'continued from it are kept.'}
       </p>
       {error && (
-        <p className="m-0 mt-1 break-words rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-amber-100 text-[0.625rem]">
+        <p className="m-0 mt-1 break-words rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-amber-700 text-[0.625rem]">
           {error}
         </p>
       )}
@@ -163,12 +163,12 @@ export default function RunDeleteSection({ recordId, datasetId, onDeleted, onClo
             <ul className="m-0 mb-3 list-disc space-y-1 pl-4 text-content-muted text-[0.75rem]">
               {confirmation.keeps.map((l) => <li key={l}>{l}</li>)}
             </ul>
-            <p className="m-0 mb-3 rounded-lg border border-rose-400/40 bg-rose-50 px-2 py-1.5 text-rose-100 text-[0.6875rem]">
+            <p className="m-0 mb-3 rounded-lg border border-rose-400/40 bg-rose-50 px-2 py-1.5 text-rose-700 text-[0.6875rem]">
               Files go to the recycle bin / the app Trash. The run itself cannot be
               brought back.
             </p>
             {error && (
-              <p className="m-0 mb-3 break-words rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-amber-100 text-[0.6875rem]">
+              <p className="m-0 mb-3 break-words rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-amber-700 text-[0.6875rem]">
                 {error}
               </p>
             )}
@@ -180,7 +180,7 @@ export default function RunDeleteSection({ recordId, datasetId, onDeleted, onClo
               </button>
               <button type="button" data-testid="run-delete-confirm-go"
                 disabled={busy} onClick={doDelete}
-                className="rounded-md border border-rose-300 bg-rose-500/15 px-3 py-2 text-[0.75rem] text-rose-100 disabled:opacity-40 hover:bg-rose-500/25">
+                className="rounded-md border border-rose-300 bg-rose-500/15 px-3 py-2 text-[0.75rem] text-rose-700 disabled:opacity-40 hover:bg-rose-500/25">
                 {busy ? 'Deleting…' : 'Delete run'}
               </button>
             </div>

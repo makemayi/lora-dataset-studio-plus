@@ -302,7 +302,7 @@ export default function RunLineageGraph({ tree, onSelect, onContinueCheckpoint,
         title={bigPreviews ? 'Back to compact pills' : 'Enlarge the generated previews to compare checkpoints at a glance'}
         className={'mr-auto rounded-md border px-2 py-0.5 text-[0.625rem] font-semibold transition-colors '
           + (bigPreviews
-            ? 'border-indigo-400/60 bg-indigo-100 text-indigo-100 '
+            ? 'border-indigo-400/60 bg-indigo-100 text-indigo-700 '
             : 'border-border bg-app/60 text-content-muted hover:text-content ')}>
         🔍 Big previews
       </button>

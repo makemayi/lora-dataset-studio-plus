@@ -8,6 +8,7 @@
  * le delta net porte un signe explicite (+/−).
  */
 import { useState } from 'react';
+import { FLOAT_SHADOW } from '../../common/surfaces'
 import { HelpText } from '../../common/HelpText';
 
 export default function LoraRankingPanel({ ranking }) {
@@ -15,7 +16,7 @@ export default function LoraRankingPanel({ ranking }) {
   if (!Array.isArray(ranking) || ranking.length === 0) return null;
 
   return (
-    <div className="flex flex-col gap-1.5 rounded-lg bg-surface-raised shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-3 py-2">
+    <div className={`flex flex-col gap-1.5 rounded-lg bg-surface-raised ${FLOAT_SHADOW} px-3 py-2`}>
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
         className="flex items-center gap-2 text-left text-content-muted text-[0.625rem] uppercase">
         <span aria-hidden>{open ? '▾' : '▸'}</span>
@@ -58,7 +59,7 @@ export default function LoraRankingPanel({ ranking }) {
 export function HowVotingWorks() {
   const [open, setOpen] = useState(false);
   return (
-    <details className="mt-1 rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]"
+    <details className={`mt-1 rounded-lg bg-surface ${FLOAT_SHADOW}`}
       open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary className="cursor-pointer select-none px-2 py-1 text-[0.625rem] text-content-subtle hover:text-content">
         How does the ranking work?

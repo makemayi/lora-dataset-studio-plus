@@ -1,5 +1,6 @@
 /** Variation catalog: presets + per-entry toggles + multiplier + Klein picker. */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { FLOAT_SHADOW } from '../common/surfaces'
 import KleinModelSetting from '../shared/KleinModelSetting';
 import { useToast } from '../common/Toast';
 import SettingsLink from '../common/SettingsLink';
@@ -485,10 +486,10 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
     const done = doneByLabel.get(c.label) || 0;
     const blocked = c.nsfw && !localOnlyRun;   // 🔞 card while an API engine is in the run
     const cls = on
-      ? 'bg-primary/20 backdrop-blur-md text-indigo-800 ring-1 ring-primary/40 shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(79,70,229,0.22),0_10px_20px_rgba(79,70,229,0.18)]'
+      ? `bg-primary/20 backdrop-blur-md text-indigo-800 ring-1 ring-primary/40 ${FLOAT_SHADOW} hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(79,70,229,0.22),0_10px_20px_rgba(79,70,229,0.18)]`
       : done > 0
-        ? 'bg-emerald-50/80 backdrop-blur-md text-emerald-800 ring-1 ring-emerald-500/40 shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(16,185,129,0.22),0_10px_20px_rgba(16,185,129,0.18)]'
-        : 'bg-white/60 backdrop-blur-md text-content-muted shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:bg-white/80 hover:shadow-[0_2px_4px_rgba(0,0,0,0.18),0_10px_20px_rgba(0,0,0,0.16)]';
+        ? `bg-emerald-50/80 backdrop-blur-md text-emerald-800 ring-1 ring-emerald-500/40 ${FLOAT_SHADOW} hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(16,185,129,0.22),0_10px_20px_rgba(16,185,129,0.18)]`
+        : `bg-white/60 backdrop-blur-md text-content-muted ${FLOAT_SHADOW} hover:-translate-y-0.5 hover:bg-white/80 hover:shadow-[0_2px_4px_rgba(0,0,0,0.18),0_10px_20px_rgba(0,0,0,0.16)]`;
     return (
       <div key={c.id} className={`relative flex items-center gap-1.5 px-2 py-1 rounded-full text-[0.625rem] transition-[box-shadow,transform,background-color] duration-200 ${cls} ${blocked ? 'opacity-40' : ''}`}>
         <button type="button" onClick={() => !blocked && toggle(c.id)} aria-pressed={on}
@@ -1563,7 +1564,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
             disabled={busy || !hasRef}
             title="Compose a random batch by count + ratio, no card-by-card picking"
             aria-label="Quick generate: compose a random batch by count and ratio"
-            className="rounded-md border border-indigo-200 bg-indigo-100 px-2 py-1 text-[0.625rem] font-semibold text-indigo-100 hover:bg-indigo-500/30 disabled:opacity-40">
+            className="rounded-md border border-indigo-200 bg-indigo-100 px-2 py-1 text-[0.625rem] font-semibold text-indigo-700 hover:bg-indigo-500/30 disabled:opacity-40">
             🎲 Quick generate
           </button>
           <span className="ml-auto flex items-center gap-2 flex-wrap text-[0.625rem] text-content-subtle" aria-hidden="true">
@@ -1582,8 +1583,8 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
               <button key={key} type="button" onClick={() => applyPreset(key)} title={hint}
                 aria-pressed={active} disabled={!st?.total}
                 className={`flex flex-col gap-1.5 rounded-full px-3 py-1.5 text-left transition-[box-shadow,transform,background-color] duration-200 disabled:opacity-40 ${active
-                  ? 'bg-primary/20 backdrop-blur-md ring-1 ring-primary/40 shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]'
-                  : 'bg-white/60 backdrop-blur-md shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:bg-white/80 hover:shadow-[0_2px_4px_rgba(0,0,0,0.18),0_10px_20px_rgba(0,0,0,0.16)]'}`}>
+                  ? `bg-primary/20 backdrop-blur-md ring-1 ring-primary/40 ${FLOAT_SHADOW}`
+                  : `bg-white/60 backdrop-blur-md ${FLOAT_SHADOW} hover:-translate-y-0.5 hover:bg-white/80 hover:shadow-[0_2px_4px_rgba(0,0,0,0.18),0_10px_20px_rgba(0,0,0,0.16)]`}`}>
                 <span className="flex items-center gap-1.5 min-w-0">
                   <StackIcon className={`w-3.5 h-3.5 shrink-0 ${active ? 'text-indigo-700' : 'text-content-subtle'}`} />
                   <span className={`text-[0.6875rem] font-semibold truncate ${active ? 'text-indigo-800' : 'text-content'}`}>{name}</span>
@@ -1599,8 +1600,8 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
             return (
               <div key={preset.id}
                 className={`relative min-w-0 rounded-full transition-[box-shadow,transform,background-color] duration-200 ${active
-                  ? 'bg-primary/20 backdrop-blur-md ring-1 ring-primary/40 shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]'
-                  : 'bg-white/60 backdrop-blur-md shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:bg-white/80 hover:shadow-[0_2px_4px_rgba(0,0,0,0.18),0_10px_20px_rgba(0,0,0,0.16)]'}`}>
+                  ? `bg-primary/20 backdrop-blur-md ring-1 ring-primary/40 ${FLOAT_SHADOW}`
+                  : `bg-white/60 backdrop-blur-md ${FLOAT_SHADOW} hover:-translate-y-0.5 hover:bg-white/80 hover:shadow-[0_2px_4px_rgba(0,0,0,0.18),0_10px_20px_rgba(0,0,0,0.16)]`}`}>
                 <button type="button" onClick={() => applyCustomPreset(preset)} aria-pressed={active}
                   aria-label={`Apply custom preset ${preset.name}`}
                   className="flex w-full min-w-0 flex-col gap-1.5 px-3 py-1.5 pr-12 text-left">
@@ -1692,10 +1693,10 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
                   // The old amber "deficit" glow on unselected cards read as a
                   // selection — the quota cue now lives only in the group header.
                   const cls = on
-                    ? 'bg-primary/20 backdrop-blur-md text-indigo-800 ring-1 ring-primary/40 shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(79,70,229,0.22),0_10px_20px_rgba(79,70,229,0.18)]'
+                    ? `bg-primary/20 backdrop-blur-md text-indigo-800 ring-1 ring-primary/40 ${FLOAT_SHADOW} hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(79,70,229,0.22),0_10px_20px_rgba(79,70,229,0.18)]`
                     : done > 0
-                      ? 'bg-emerald-50/80 backdrop-blur-md text-emerald-800 ring-1 ring-emerald-500/40 shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(16,185,129,0.22),0_10px_20px_rgba(16,185,129,0.18)]'
-                      : 'bg-white/60 backdrop-blur-md text-content-muted shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:bg-white/80 hover:shadow-[0_2px_4px_rgba(0,0,0,0.18),0_10px_20px_rgba(0,0,0,0.16)]';
+                      ? `bg-emerald-50/80 backdrop-blur-md text-emerald-800 ring-1 ring-emerald-500/40 ${FLOAT_SHADOW} hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(16,185,129,0.22),0_10px_20px_rgba(16,185,129,0.18)]`
+                      : `bg-white/60 backdrop-blur-md text-content-muted ${FLOAT_SHADOW} hover:-translate-y-0.5 hover:bg-white/80 hover:shadow-[0_2px_4px_rgba(0,0,0,0.18),0_10px_20px_rgba(0,0,0,0.16)]`;
                   return (
                     <button key={e.id} type="button" onClick={() => toggle(e.id)}
                       aria-pressed={on}
@@ -1793,10 +1794,10 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
                   const on = selected.has(e.id);
                   const done = doneByLabel.get(e.label) || 0;
                   const cls = on
-                    ? 'bg-rose-500/20 backdrop-blur-md text-rose-800 ring-1 ring-rose-400/40 shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(244,63,94,0.22),0_10px_20px_rgba(244,63,94,0.18)]'
+                    ? `bg-rose-500/20 backdrop-blur-md text-rose-800 ring-1 ring-rose-400/40 ${FLOAT_SHADOW} hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(244,63,94,0.22),0_10px_20px_rgba(244,63,94,0.18)]`
                     : done > 0
-                      ? 'bg-emerald-50/80 backdrop-blur-md text-emerald-800 ring-1 ring-emerald-500/40 shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(16,185,129,0.22),0_10px_20px_rgba(16,185,129,0.18)]'
-                      : 'bg-white/60 backdrop-blur-md text-content-muted shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 hover:bg-white/80 hover:shadow-[0_2px_4px_rgba(0,0,0,0.18),0_10px_20px_rgba(0,0,0,0.16)]';
+                      ? `bg-emerald-50/80 backdrop-blur-md text-emerald-800 ring-1 ring-emerald-500/40 ${FLOAT_SHADOW} hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(16,185,129,0.22),0_10px_20px_rgba(16,185,129,0.18)]`
+                      : `bg-white/60 backdrop-blur-md text-content-muted ${FLOAT_SHADOW} hover:-translate-y-0.5 hover:bg-white/80 hover:shadow-[0_2px_4px_rgba(0,0,0,0.18),0_10px_20px_rgba(0,0,0,0.16)]`;
                   return (
                     <button key={e.id} type="button" onClick={() => toggle(e.id)} aria-pressed={on}
                       title={done > 0 ? `${done} image(s) of this shot already in the dataset` : e.prompt}

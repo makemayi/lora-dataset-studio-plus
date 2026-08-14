@@ -165,8 +165,8 @@ export default function CaptionToolsBar({ images, kind = 'character', mode = 'bo
                             ? `Hiding images tagged "${tag}" — click to show them again`
                             : `Hide images already tagged "${tag}" from the grid`}
                           className={`px-1.5 border-l text-[0.6875rem] ${
-                            isExcluded ? 'bg-rose-500/25 border-rose-400/50 text-rose-200'
-                              : 'bg-surface-raised border-transparent text-content-subtle hover:text-rose-200 hover:bg-rose-500/15'}`}>
+                            isExcluded ? 'bg-rose-500/25 border-rose-400/50 text-rose-600'
+                              : 'bg-surface-raised border-transparent text-content-subtle hover:text-rose-600 hover:bg-rose-500/15'}`}>
                           ⊘
                         </button>
                       )}

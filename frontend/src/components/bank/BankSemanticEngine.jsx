@@ -1,3 +1,4 @@
+import { FLOAT_SHADOW } from '../common/surfaces'
 import {
   offersSemanticGpuPython, SCORE_STAYS_CLIP_SENTENCE, SEMANTIC_CACHE_SENTENCE,
   SEMANTIC_ENGINE_OPTIONS, semanticDeviceNote, semanticIndexActionLabel,
@@ -28,7 +29,7 @@ export default function BankSemanticEngine({ state, disabled = false,
     && offersSemanticGpuPython(state, gpuPresent)
 
   return (
-    <fieldset className="rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-indigo-100 bg-indigo-50 p-3 space-y-2"
+    <fieldset className={`rounded-lg ${FLOAT_SHADOW} border border-indigo-100 bg-indigo-50 p-3 space-y-2`}
       disabled={disabled || switching || live}>
       <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-content-muted">
         Semantic engine
@@ -74,7 +75,7 @@ export default function BankSemanticEngine({ state, disabled = false,
           <span className="text-content-subtle">
             {blocked}{' '}
             <a href="#/setup?step=quality"
-              className="font-medium text-sky-700 underline underline-offset-2 hover:text-sky-200">
+              className="font-medium text-sky-700 underline underline-offset-2 hover:text-sky-600">
               Open Setup ▸ Quality tools
             </a>
           </span>

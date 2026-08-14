@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FLOAT_SHADOW } from '../common/surfaces'
 import { buildLineageGraph, CARD_W } from '../../utils/lineageGraph';
 import {
   LANE_HEADER_H, MAX_SCALE, MIN_SCALE,
@@ -78,7 +79,7 @@ const TOOL_BUTTON =
   `${TOOL_BUTTON_BASE} bg-surface-raised text-content-muted hover:bg-surface hover:text-content`;
 const TOOL_ICON =
   'flex items-center justify-center rounded-full bg-surface-raised text-content-muted '
-  + 'shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content disabled:opacity-40';
+  + `${FLOAT_SHADOW} transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content disabled:opacity-40`;
 
 /* ◉ The LoRA Canvas surface — every selected dataset's genealogy on ONE board,
    with zoom and pan.
@@ -1551,7 +1552,7 @@ export default function LineageCanvas({ entries, positions, imageNodes, allImage
             ? `${picks.length} checkpoint(s) picked — open the run settings`
             : 'Tick checkpoints on the board, then set the run up here'}
           className={picks.length
-            ? `${TOOL_BUTTON_BASE} bg-indigo-100 text-indigo-100 hover:bg-indigo-500/30`
+            ? `${TOOL_BUTTON_BASE} bg-indigo-100 text-indigo-700 hover:bg-indigo-500/30`
             : TOOL_BUTTON}>
           <PaletteIcon className="h-3.5 w-3.5 shrink-0" /> Generate
           {picks.length > 0 && (
@@ -1831,8 +1832,8 @@ export default function LineageCanvas({ entries, positions, imageNodes, allImage
       {!panelOpen && picks.length > 0 && (
         <p className={'mt-2 rounded-lg border px-3 py-1.5 text-[0.6875rem] '
           + (launchVerdict.blocked
-            ? 'border-amber-200 bg-amber-50 text-amber-100 '
-            : 'border-indigo-200 bg-indigo-50 text-indigo-100 ')}>
+            ? 'border-amber-200 bg-amber-50 text-amber-700 '
+            : 'border-indigo-200 bg-indigo-50 text-indigo-700 ')}>
           {picks.length} checkpoint{picks.length > 1 ? 's' : ''} picked
           {launchVerdict.reason ? ` — ${launchVerdict.reason}` : ''}
         </p>

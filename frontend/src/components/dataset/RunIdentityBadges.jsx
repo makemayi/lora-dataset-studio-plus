@@ -21,8 +21,8 @@ export function RunIdChip({ source, id, className = '' }) {
       className={'inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 '
         + 'text-[0.625rem] font-semibold tabular-nums '
         + (cloud
-          ? 'border-sky-400/50 bg-sky-50 text-sky-200'
-          : 'border-violet-400/50 bg-violet-50 text-violet-200')
+          ? 'border-sky-400/50 bg-sky-50 text-sky-600'
+          : 'border-violet-400/50 bg-violet-50 text-violet-600')
         + (className ? ` ${className}` : '')}>
       <span aria-hidden>{cloud ? '☁' : '💻'}</span>#{id}
     </span>

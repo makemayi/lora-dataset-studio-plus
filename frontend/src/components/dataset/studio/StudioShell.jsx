@@ -23,6 +23,9 @@
  * riche identique à avant (et le LoRA est pré-coché dans le picker).
  */
 import { useCallback, useEffect, useState } from 'react';
+import EmptyState from '../../common/EmptyState'
+import { StudioIcon } from '../../common/icons'
+import { FLOAT_SHADOW } from '../../common/surfaces'
 import { HelpBadge } from '../../../help/HelpMode';
 import LoraPicker from './LoraPicker';
 import LegacyDatasetStudio from './LegacyDatasetStudio';
@@ -87,7 +90,7 @@ export default function StudioShell({ preselectDataset = null, preselectFamily =
       <header className="flex items-center gap-2 flex-wrap sticky top-0 z-10 bg-app/80 backdrop-blur py-2">
         <h1 className="text-content font-bold flex items-center gap-2">🧪 Test Studio<HelpBadge topic="page-studio" /></h1>
         {comparison && (
-          <span className="px-2 py-0.5 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-amber-200 bg-amber-400/10 text-amber-700 text-[0.6875rem] font-semibold">
+          <span className={`px-2 py-0.5 rounded-lg ${FLOAT_SHADOW} border border-amber-200 bg-amber-400/10 text-amber-700 text-[0.6875rem] font-semibold`}>
             {/* Neutre : le mode réel (⚖ Compare / 🧬 Blend) est choisi et affiché
                 juste en dessous par LoraStackPanel — annoncer « Comparing » ici
                 mentirait dès que la pile est active. */}
@@ -112,9 +115,9 @@ export default function StudioShell({ preselectDataset = null, preselectFamily =
           datasetId={String(soloDatasetId)} initialFamily={soloFamily}
           initialBase={preselectBase} />
       ) : (
-        <p className="text-content-subtle text-sm rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-3 py-6 text-center">
+        <EmptyState icon={<StudioIcon className="h-5 w-5" />} title="Nothing to test yet">
           Check a LoRA above to tune and test it. Check ≥2 to compare them side by side.
-        </p>
+        </EmptyState>
       )}
     </div>
   );

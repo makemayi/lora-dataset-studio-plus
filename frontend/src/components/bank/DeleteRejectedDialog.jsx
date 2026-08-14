@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { FLOAT_SHADOW } from '../common/surfaces'
 import { apiFetch, postJson } from '../../api/fetchClient'
 import { useToast } from '../common/Toast'
 import {
@@ -63,11 +64,11 @@ export default function DeleteRejectedDialog({ bankId, count, sourcePath, onClos
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
       <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-xl border border-rose-300 bg-surface-overlay/85 backdrop-blur-md p-4 sm:p-5 shadow-2xl space-y-4">
         <h2 className="text-base font-bold text-rose-700">🗑 Delete rejected from disk</h2>
-        <div className="rounded-md border border-rose-500/50 bg-rose-50 p-3 text-sm text-rose-200 space-y-2">
+        <div className="rounded-md border border-rose-500/50 bg-rose-50 p-3 text-sm text-rose-600 space-y-2">
           <p className="font-semibold">
             This removes {count} rejected file{count === 1 ? '' : 's'} from your disk.
           </p>
-          <p className="text-rose-200/90">
+          <p className="text-rose-600/90">
             Every image currently marked ✕ rejected leaves its source folder{' '}
             {check.ready
               ? <>for <span className="font-semibold">{destination}</span></>
@@ -84,9 +85,9 @@ export default function DeleteRejectedDialog({ bankId, count, sourcePath, onClos
           </div>
         )}
         {block.blocked && (
-          <div className="rounded-md border border-rose-500/70 bg-rose-500/15 p-3 text-sm text-rose-100 space-y-1">
+          <div className="rounded-md border border-rose-500/70 bg-rose-500/15 p-3 text-sm text-rose-700 space-y-1">
             <p className="font-semibold">{block.title}</p>
-            <p className="text-rose-100/90">{block.text}</p>
+            <p className="text-rose-700/90">{block.text}</p>
           </div>
         )}
         {shared && (
@@ -112,7 +113,7 @@ export default function DeleteRejectedDialog({ bankId, count, sourcePath, onClos
         </div>
         <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
           <button type="button" onClick={onClose} autoFocus
-            className="rounded-full bg-surface-raised px-3 py-1.5 text-sm text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5">
+            className={`rounded-full bg-surface-raised px-3 py-1.5 text-sm text-content ${FLOAT_SHADOW} transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5`}>
             Cancel
           </button>
           <button type="button" onClick={run}

@@ -156,10 +156,10 @@ const GROUP_FAMILY_LABEL = { zimage: 'Z-Image', krea: 'Krea 2', sdxl: 'SDXL', fl
 const groupFamLabel = (f) => GROUP_FAMILY_LABEL[f] || f || 'LoRA';
 
 const FULL_ARTIFACT_TONE = {
-  success: 'border-emerald-200 bg-emerald-50 text-emerald-100',
-  error: 'border-rose-400/45 bg-rose-50 text-rose-100',
-  warning: 'border-amber-400/45 bg-amber-50 text-amber-100',
-  info: 'border-sky-200 bg-sky-50 text-sky-100',
+  success: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  error: 'border-rose-400/45 bg-rose-50 text-rose-700',
+  warning: 'border-amber-400/45 bg-amber-50 text-amber-700',
+  info: 'border-sky-200 bg-sky-50 text-sky-700',
 };
 
 function FullTransformerArtifactNotice({ run }) {
@@ -2321,7 +2321,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               obvious in one second. `break-all` because these paths are long and
               the panel has to survive a 400 px phone. */}
           {view.interpreter && (
-            <div className="mt-1.5 rounded border border-amber-200 bg-amber-50 p-2 text-amber-100">
+            <div className="mt-1.5 rounded border border-amber-200 bg-amber-50 p-2 text-amber-700">
               <div className="font-semibold">{view.interpreter.title}</div>
               <p className="m-0 mt-0.5 break-words text-amber-700/90">{view.interpreter.message}</p>
               <div className="mt-1 break-all font-mono text-[0.625rem] text-amber-100">
@@ -2337,7 +2337,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               like a network fault and is not one, and the app never sets that
               variable — reported by bobba84 (GitHub #18). */}
           {view.hfTransfer && (
-            <div className="mt-1.5 rounded border border-amber-200 bg-amber-50 p-2 text-amber-100">
+            <div className="mt-1.5 rounded border border-amber-200 bg-amber-50 p-2 text-amber-700">
               <div className="font-semibold">{view.hfTransfer.title}</div>
               <p className="m-0 mt-0.5 break-words text-amber-700/90">{view.hfTransfer.message}</p>
             </div>
@@ -2345,7 +2345,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
           {/* The GPU-architecture verdict is a PROVEN cause read from the venv
               that trains — it goes first, above the log, with its remedy. */}
           {view.gpuArch && (
-            <div className="mt-1.5 rounded border border-amber-200 bg-amber-50 p-2 text-amber-100">
+            <div className="mt-1.5 rounded border border-amber-200 bg-amber-50 p-2 text-amber-700">
               <div className="font-semibold">This GPU needs a different PyTorch build</div>
               <p className="m-0 mt-0.5 text-amber-700/90">{view.gpuArch.message}</p>
               {view.gpuArch.command && (
@@ -2363,7 +2363,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               fixes — reported by SurpassHR (GitHub) on Krea 2. Shown above the
               log with the remedy that matches the status code. */}
           {view.hfGated && (
-            <div className="mt-1.5 rounded border border-amber-200 bg-amber-50 p-2 text-amber-100">
+            <div className="mt-1.5 rounded border border-amber-200 bg-amber-50 p-2 text-amber-700">
               <div className="font-semibold">{view.hfGated.title}</div>
               <p className="m-0 mt-0.5 break-words text-amber-700/90">{view.hfGated.message}</p>
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -2603,7 +2603,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               setHfCloudTokenIssue(null);
               setCloudDialog(true);
             }}
-            className="px-3 py-1.5 rounded-lg border border-sky-500/50 bg-sky-50 text-sky-200 text-sm font-semibold disabled:opacity-40">
+            className="px-3 py-1.5 rounded-lg border border-sky-500/50 bg-sky-50 text-sky-600 text-sm font-semibold disabled:opacity-40">
             <span aria-hidden>☁️</span> {fullMode ? 'Start full-model training' : 'Train in cloud'}
           </button>
         )}
@@ -4552,7 +4552,7 @@ function CustomBasePushSection({ datasetId, trainType, variant, base, onReadyCha
         )}
         <button type="button" onClick={() => startPush(false)}
           disabled={!view.canPush || pushBusy}
-          className="w-fit px-3 py-1.5 rounded-lg border border-sky-500/50 bg-sky-50 text-sky-200 text-sm font-semibold disabled:opacity-40">
+          className="w-fit px-3 py-1.5 rounded-lg border border-sky-500/50 bg-sky-50 text-sky-600 text-sm font-semibold disabled:opacity-40">
           ⬆ Push custom base to Hugging Face (one-time)
         </button>
       </div>
@@ -4742,7 +4742,7 @@ function CloudLaunchDialog({
 
         {hfTokenIssue && (
           <div role="alert"
-            className="rounded-lg border border-red-400/45 bg-red-50 px-3 py-2 text-red-100 text-[0.75rem] leading-relaxed">
+            className="rounded-lg border border-red-400/45 bg-red-50 px-3 py-2 text-red-700 text-[0.75rem] leading-relaxed">
             <span className="font-semibold">Hugging Face delivery blocked.</span>{' '}{hfTokenIssue}{' '}
             Fix <SettingsLink section="local-tools" focus="HF_CLOUD_TOKEN" tone="warning">HF_CLOUD_TOKEN in Settings ▸ Local tools</SettingsLink>,
             then reload the offers. Launch stays disabled to prevent renting a GPU without a delivery path.

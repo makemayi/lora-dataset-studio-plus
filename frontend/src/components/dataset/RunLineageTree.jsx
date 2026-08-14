@@ -83,7 +83,7 @@ function LineageNode({ row, onSelect, index }) {
             {famLabel(node.train_type)}{node.variant ? <span className="font-normal text-content-muted"> · {node.variant}</span> : null}
           </span>
           {cur && (
-            <span className="shrink-0 rounded-full bg-indigo-500/25 px-1.5 py-0.5 text-indigo-100 text-[0.5rem] font-bold uppercase tracking-wider">
+            <span className="shrink-0 rounded-full bg-indigo-500/25 px-1.5 py-0.5 text-indigo-700 text-[0.5rem] font-bold uppercase tracking-wider">
               this run
             </span>
           )}
@@ -135,7 +135,7 @@ function ViewToggle({ view, onChange }) {
       aria-pressed={view === id} title={`${label} view`}
       className={'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.5625rem] font-semibold transition-colors '
         + (view === id
-          ? 'bg-indigo-100 text-indigo-100 '
+          ? 'bg-indigo-100 text-indigo-700 '
           : 'text-content-subtle hover:text-content')}>
       <span aria-hidden>{glyph}</span>{label}
     </button>

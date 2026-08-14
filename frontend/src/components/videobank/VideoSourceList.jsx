@@ -1,3 +1,4 @@
+import { FLOAT_SHADOW } from '../common/surfaces'
 import {
   formatDuration, formatFileSize, sourceGeometry, sourceState,
 } from './videoBankStatus'
@@ -5,9 +6,9 @@ import { firstShotBounds } from './videoClipEdit'
 
 const TONE = {
   ok: 'bg-emerald-50 text-emerald-700',
-  info: 'bg-sky-50 text-sky-200',
+  info: 'bg-sky-50 text-sky-600',
   idle: 'bg-surface-raised text-content-subtle',
-  error: 'bg-rose-500/15 text-rose-200',
+  error: 'bg-rose-500/15 text-rose-600',
 }
 
 /** 🎬 The per-FILE view: what each rush is, and how far it got.
@@ -39,10 +40,13 @@ export default function VideoSourceList({ sources, activeSourceId, onFilter, onC
       {sources.map((s) => {
         const state = sourceState(s)
         const active = activeSourceId === s.id
+        /* Filtered-to = a filled pill's logic at card scale: the active row keeps
+           the accent tint, the rest separate by elevation rather than by a
+           second, differently coloured outline. */
         return (
           <li key={s.id}
-            className={`flex min-w-0 flex-col gap-1 rounded-lg border p-2.5 ${
-              active ? 'border-primary/60 bg-primary/10' : 'border-border bg-surface'}`}>
+            className={`flex min-w-0 flex-col gap-1 rounded-2xl p-2.5 ${FLOAT_SHADOW} ${
+              active ? 'bg-primary/10 ring-2 ring-inset ring-primary/60' : 'bg-surface'}`}>
             <div className="flex min-w-0 items-center gap-2">
               {/* min-w-0 + truncate: the relpath is the one string here that has
                   no break opportunity, and it is what stretched the grid past

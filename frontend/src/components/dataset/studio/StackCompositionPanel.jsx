@@ -13,6 +13,7 @@
  * écrase un nom de LoRA mis côte à côte avec le reste (même leçon que LoraStackPanel).
  */
 import { useState } from 'react';
+import { FLOAT_SHADOW } from '../../common/surfaces'
 import { HelpBadge } from '../../../help/HelpMode';
 import { bestStackPayload, fmtWeight } from './stackResults';
 
@@ -22,7 +23,7 @@ export default function StackCompositionPanel({ members, onSaveBest, saving = fa
   const payload = bestStackPayload(members);
 
   return (
-    <div className="flex flex-col gap-1.5 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-sky-200 bg-surface-raised px-3 py-2">
+    <div className={`flex flex-col gap-1.5 rounded-lg ${FLOAT_SHADOW} border border-sky-200 bg-surface-raised px-3 py-2`}>
       <div className="flex items-center gap-2">
         <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
           className="flex items-center gap-2 text-left text-content-muted text-[0.625rem] uppercase">
@@ -37,13 +38,13 @@ export default function StackCompositionPanel({ members, onSaveBest, saving = fa
           <ol className="m-0 flex list-none flex-col gap-1 p-0">
             {members.map((m, i) => (
               <li key={`${m.dataset_id}:${m.filename}`}
-                className="flex flex-col gap-0.5 rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-1.5 py-1 text-[0.6875rem]">
+                className={`flex flex-col gap-0.5 rounded-lg bg-surface ${FLOAT_SHADOW} px-1.5 py-1 text-[0.6875rem]`}>
                 <div className="flex min-w-0 items-center gap-1.5">
                   <span className="w-4 shrink-0 text-right text-content-subtle tabular-nums">{i + 1}.</span>
                   <span className="min-w-0 flex-1 truncate text-content font-medium" title={m.label}>
                     {m.label}
                   </span>
-                  <span className="shrink-0 rounded border border-sky-400/50 bg-sky-400/15 px-1.5 py-px font-semibold tabular-nums text-sky-200"
+                  <span className="shrink-0 rounded border border-sky-400/50 bg-sky-400/15 px-1.5 py-px font-semibold tabular-nums text-sky-600"
                     title={`Weight of ${m.label} in this stack`}>
                     {fmtWeight(m.weight)}
                   </span>
@@ -79,7 +80,7 @@ export default function StackCompositionPanel({ members, onSaveBest, saving = fa
 
           {payload ? (
             <button type="button" onClick={() => onSaveBest?.(payload)} disabled={saving}
-              className="rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-amber-200 bg-amber-400/10 px-2 py-1 text-[0.6875rem] font-semibold text-amber-700 disabled:opacity-40">
+              className={`rounded-lg ${FLOAT_SHADOW} border border-amber-200 bg-amber-400/10 px-2 py-1 text-[0.6875rem] font-semibold text-amber-700 disabled:opacity-40`}>
               {saving ? 'Saving…' : '★ Save these weights as the best setting'}
             </button>
           ) : (

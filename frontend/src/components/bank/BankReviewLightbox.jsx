@@ -17,6 +17,7 @@
  * cursor with the error visible, so a decision is never silently dropped.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FLOAT_SHADOW } from '../common/surfaces'
 import { apiFetch, postJson } from '../../api/fetchClient'
 import { useFocusTrap } from '../../hooks/useFocusTrap'
 import {
@@ -264,7 +265,7 @@ export default function BankReviewLightbox({
           <div className="flex flex-wrap items-center justify-center gap-2">
             {p.total > 0 && (
               <button type="button" onClick={goBack}
-                className="rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-white/25 px-4 py-2 text-sm text-white hover:bg-white/10">
+                className={`rounded-lg ${FLOAT_SHADOW} border border-white/25 px-4 py-2 text-sm text-white hover:bg-white/10`}>
                 ← Back to the last image
               </button>
             )}
@@ -297,41 +298,41 @@ export default function BankReviewLightbox({
           <div className="flex flex-wrap items-center justify-center gap-2">
             <button type="button" onClick={goBack} disabled={session.pos === 0}
               title="Previous image (←) — navigation only, decides nothing"
-              className="rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-white/20 px-3 py-2 text-sm text-white disabled:opacity-35 hover:bg-white/10">
+              className={`rounded-lg ${FLOAT_SHADOW} border border-white/20 px-3 py-2 text-sm text-white disabled:opacity-35 hover:bg-white/10`}>
               ←
             </button>
             <button type="button" onClick={() => rotateCurrent(-90)} disabled={busy}
               aria-label="Rotate this image 90 degrees left"
               title="Rotate 90° left ([) — decides nothing. Your own file is never modified: the turn is stored and applied to what you see and to what gets promoted."
-              className="rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-white/20 px-3 py-2 text-sm text-white disabled:opacity-35 hover:bg-white/10">
+              className={`rounded-lg ${FLOAT_SHADOW} border border-white/20 px-3 py-2 text-sm text-white disabled:opacity-35 hover:bg-white/10`}>
               <span aria-hidden="true">↺</span><span className="sr-only">Rotate left</span>
             </button>
             <button type="button" onClick={() => rotateCurrent(90)} disabled={busy}
               aria-label="Rotate this image 90 degrees right"
               title="Rotate 90° right (]) — decides nothing. Your own file is never modified: the turn is stored and applied to what you see and to what gets promoted."
-              className="rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-white/20 px-3 py-2 text-sm text-white disabled:opacity-35 hover:bg-white/10">
+              className={`rounded-lg ${FLOAT_SHADOW} border border-white/20 px-3 py-2 text-sm text-white disabled:opacity-35 hover:bg-white/10`}>
               <span aria-hidden="true">↻</span><span className="sr-only">Rotate right</span>
             </button>
             {canEditMask(img) && (
               <button type="button" onClick={() => setMaskId(id)} disabled={busy}
                 title="Fix the watermark zones on this image (M) — decides nothing. 🧽 Inpaint then repaints exactly what you draw."
-                className="rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-amber-400/60 bg-amber-500/20 px-4 py-2 text-sm font-semibold text-amber-100 disabled:opacity-50 hover:bg-amber-500/30">
+                className={`rounded-lg ${FLOAT_SHADOW} border border-amber-400/60 bg-amber-500/20 px-4 py-2 text-sm font-semibold text-amber-100 disabled:opacity-50 hover:bg-amber-500/30`}>
                 🚩 Edit mask{shortcut('M')}
               </button>
             )}
             <button type="button" onClick={() => sendDecision('keep')} disabled={busy}
               title="Keep this image and move on (K)"
-              className="rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-emerald-400/60 bg-emerald-500/20 px-5 py-2 text-sm font-semibold text-emerald-100 disabled:opacity-50 hover:bg-emerald-500/30">
+              className={`rounded-lg ${FLOAT_SHADOW} border border-emerald-400/60 bg-emerald-500/20 px-5 py-2 text-sm font-semibold text-emerald-100 disabled:opacity-50 hover:bg-emerald-500/30`}>
               ✓ Keep{shortcut('K')}
             </button>
             <button type="button" onClick={() => sendDecision('reject')} disabled={busy}
               title="Reject this image and move on (R) — reversible, nothing is deleted from disk"
-              className="rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-rose-400/60 bg-rose-500/20 px-5 py-2 text-sm font-semibold text-rose-100 disabled:opacity-50 hover:bg-rose-500/30">
+              className={`rounded-lg ${FLOAT_SHADOW} border border-rose-400/60 bg-rose-500/20 px-5 py-2 text-sm font-semibold text-rose-100 disabled:opacity-50 hover:bg-rose-500/30`}>
               ✕ Reject{shortcut('R')}
             </button>
             <button type="button" onClick={doSkip}
               title="Decide later (S) — stays undecided and is not shown again in this review"
-              className="rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-white/25 px-5 py-2 text-sm font-semibold text-white disabled:opacity-50 hover:bg-white/10">
+              className={`rounded-lg ${FLOAT_SHADOW} border border-white/25 px-5 py-2 text-sm font-semibold text-white disabled:opacity-50 hover:bg-white/10`}>
               ⏭ Skip{shortcut('S')}
             </button>
           </div>

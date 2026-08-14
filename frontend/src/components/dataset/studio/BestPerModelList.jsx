@@ -3,6 +3,7 @@
 // corrigée : un modificateur d'opacité à 60 % sur `bg-surface` rendait un panneau
 // BLANC (surface = blanc) → on utilise `bg-surface-raised` (surface sombre surélevée).
 import { useState } from 'react';
+import { FLOAT_SHADOW } from '../../common/surfaces'
 
 export default function BestPerModelList({ items, breakdown, datasetId, onMemorize, fmt }) {
   const [open, setOpen] = useState(false); // replié par défaut (dépliable au besoin)
@@ -14,7 +15,7 @@ export default function BestPerModelList({ items, breakdown, datasetId, onMemori
   (breakdown || []).forEach((b) => { (byCheckpoint[b.checkpoint] ||= []).push(b); });
 
   return (
-    <div className="flex flex-col gap-1.5 rounded-lg bg-surface-raised shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-3 py-2">
+    <div className={`flex flex-col gap-1.5 rounded-lg bg-surface-raised ${FLOAT_SHADOW} px-3 py-2`}>
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
         className="flex items-center gap-2 text-left text-content-muted text-[0.625rem] uppercase">
         <span aria-hidden>{open ? '▾' : '▸'}</span>

@@ -141,7 +141,7 @@ export default function SmallImageRescueReview({
                 <button type="button" disabled={controlsDisabled || phase !== 'ready'}
                   title={phase === 'ready' ? 'Keep the Klein result and reject the original' : 'Wait for a completed Klein candidate'}
                   onClick={() => resolve(candidate.id, 'klein')}
-                  className="min-h-9 min-w-0 rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1.5 text-xs font-semibold text-indigo-100 hover:bg-indigo-500/25 disabled:opacity-40">
+                  className="min-h-9 min-w-0 rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-500/25 disabled:opacity-40">
                   Use Klein
                 </button>
                 <button type="button" disabled={controlsDisabled}

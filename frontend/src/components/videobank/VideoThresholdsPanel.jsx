@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { postJson, putJson } from '../../api/fetchClient'
 import { useToast } from '../common/Toast'
+import { CARD_SURFACE, INPUT_CLASS, PRIMARY_BUTTON, QUIET_BUTTON } from '../common/surfaces'
 import {
   cutSummary, draftThresholds, editThreshold, payloadFromDraft, thresholdFields,
 } from './videoMetricsFilter'
@@ -55,7 +56,7 @@ export default function VideoThresholdsPanel({ bankId, saved, totalClips, onAppl
   }
 
   return (
-    <details className="rounded-lg bg-surface">
+    <details className={CARD_SURFACE}>
       <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-content">
         🎚 Quality cuts
       </summary>
@@ -75,7 +76,7 @@ export default function VideoThresholdsPanel({ bankId, saved, totalClips, onAppl
                 value={draft[f.key] ?? ''}
                 onChange={(e) => setDraft(editThreshold(draft, f.key, e.target.value))}
                 placeholder="off"
-                className="mt-0.5 w-full rounded-md bg-surface-raised px-2 py-1 text-sm text-content"
+                className={`${INPUT_CLASS} mt-0.5 max-w-none`}
               />
               <span className="mt-0.5 block text-[0.7rem] leading-tight text-content-subtle">
                 {f.hint}
@@ -85,11 +86,11 @@ export default function VideoThresholdsPanel({ bankId, saved, totalClips, onAppl
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={dryRun} disabled={working}
-            className="rounded-md bg-surface-raised px-3 py-1.5 text-xs font-semibold text-content hover:bg-surface disabled:opacity-40">
+            className={`${QUIET_BUTTON} disabled:opacity-40`}>
             👁 Preview what these cuts would flag
           </button>
           <button type="button" onClick={apply} disabled={working}
-            className="rounded-md bg-gradient-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
+            className={`${PRIMARY_BUTTON} px-3 py-1.5 text-xs disabled:opacity-40`}>
             Apply cuts
           </button>
         </div>

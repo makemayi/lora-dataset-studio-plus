@@ -584,7 +584,7 @@ export default function WatermarkReviewLightbox({ datasetId, queue, caps, nonces
           <div role="alert" className="flex items-center justify-center gap-2 text-xs text-red-600 flex-wrap">
             <span>{saveState.error || 'Could not save correction zones.'}</span>
             <button type="button" onClick={retrySave} disabled={working}
-              className="min-h-8 px-2.5 rounded-md border border-red-300/50 bg-red-50 text-red-100 hover:bg-red-500/25 disabled:opacity-40">
+              className="min-h-8 px-2.5 rounded-md border border-red-300/50 bg-red-50 text-red-700 hover:bg-red-500/25 disabled:opacity-40">
               Retry save
             </button>
             <span className="text-white/50">or reset detection</span>
@@ -686,7 +686,7 @@ export default function WatermarkReviewLightbox({ datasetId, queue, caps, nonces
           {restorable ? (
             <button type="button" onClick={doRestore} disabled={working}
               title="Undo the clean — bring the watermarked original back so you can re-clean it (e.g. with the other engine) — shortcut r"
-              className={`${btn} bg-sky-100 border border-sky-400/50 text-sky-100 hover:bg-sky-500/30`}>
+              className={`${btn} bg-sky-100 border border-sky-400/50 text-sky-700 hover:bg-sky-500/30`}>
               {restoring ? '↩ Restoring…' : <>↩ Restore original <kbd className="text-[10px] text-white/50">r</kbd></>}
             </button>
           ) : (

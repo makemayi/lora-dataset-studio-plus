@@ -1,4 +1,5 @@
 import { runCost } from './runCost';
+import { FLOAT_SHADOW } from '../../common/surfaces'
 
 // Contrôles de seed : affichage seed + 🎲 re-roll + 🔒/🔓 verrou + ×N gén/config + compteur.
 // Extrait behavior-preserving de LoraTestStudio.jsx (barre seed/lock/×N/compteur).
@@ -32,7 +33,7 @@ export default function SeedControls({ seed, seedLocked, onReroll, onToggleLock,
         title="Number of images generated per config (different seeds) — batch">
         ×
         <select value={genCount} onChange={(e) => onGenCount(Number(e.target.value))}
-          className="px-1.5 py-0.5 rounded-lg bg-surface-raised shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] text-content text-[0.6875rem]">
+          className={`px-1.5 py-0.5 rounded-lg bg-surface-raised ${FLOAT_SHADOW} text-content text-[0.6875rem]`}>
           {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}
         </select>
         gen/config

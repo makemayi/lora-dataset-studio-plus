@@ -88,3 +88,27 @@ test('the toast layer sits clear of every other overlay', () => {
   assert.ok(ceiling > highestOther,
     `toast layer z-[${ceiling}] does not clear the next overlay z-[${highestOther}]`)
 })
+
+/* The four tones are one system or they are noise. `warning` drifted out of it:
+   the other three filled with a solid `-50`, warning with `bg-yellow-500/10` —
+   ten percent of a mid yellow over a pale gradient with colour blooms behind it,
+   which is to say nothing at all. The one type that means "look at this" was the
+   only one you could not see, and no test could tell because each tone was
+   independently plausible.
+
+   The invariant is the SHAPE, not the hue: every tone fills with a solid `-50`
+   and writes at `-700`. A future tone that reaches for an alpha fill fails
+   here. */
+test('every toast tone uses the same fill and text weights', () => {
+  const src = readFileSync(TOAST, 'utf8')
+  const table = src.slice(src.indexOf('const TYPE_STYLES'), src.indexOf('const ICONS'))
+  const tones = [...table.matchAll(/^\s*(\w+):\s*'([^']+)',/gm)]
+
+  assert.deepEqual(tones.map((m) => m[1]), ['info', 'success', 'error', 'warning'])
+  for (const [, tone, classes] of tones) {
+    assert.match(classes, /\bbg-[a-z]+-50\b/, `${tone} must fill with a solid -50: ${classes}`)
+    assert.match(classes, /\btext-[a-z]+-700\b/, `${tone} must write at -700: ${classes}`)
+    assert.doesNotMatch(classes, /bg-[a-z]+-\d00\/\d+/,
+      `${tone} uses an alpha fill, which disappears on this ground: ${classes}`)
+  }
+})

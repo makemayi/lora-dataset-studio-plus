@@ -137,7 +137,7 @@ function UpdatesCard() {
             present after a git-aware "Check for updates" (force). */}
         {s && (s.compare_url || s.commits_url) && (
           <a href={s.compare_url || s.commits_url} target="_blank" rel="noreferrer"
-            className="text-xs font-medium text-sky-700 underline hover:text-sky-200">
+            className="text-xs font-medium text-sky-700 underline hover:text-sky-600">
             {s.compare_url ? 'See what’s in this update ↗' : 'Browse recent commits ↗'}
           </a>
         )}

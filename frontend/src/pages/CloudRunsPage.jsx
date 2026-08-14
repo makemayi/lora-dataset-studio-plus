@@ -176,10 +176,10 @@ function PodKeptNote({ fullModel = false }) {
 }
 
 const FULL_ARTIFACT_TONE = {
-  success: 'border-emerald-200 bg-emerald-50 text-emerald-100',
-  error: 'border-rose-400/45 bg-rose-50 text-rose-100',
-  warning: 'border-amber-400/45 bg-amber-50 text-amber-100',
-  info: 'border-sky-200 bg-sky-50 text-sky-100',
+  success: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  error: 'border-rose-400/45 bg-rose-50 text-rose-700',
+  warning: 'border-amber-400/45 bg-amber-50 text-amber-700',
+  info: 'border-sky-200 bg-sky-50 text-sky-700',
 };
 
 /* The copy on THIS computer — the first-class delivery since the Hugging Face
@@ -287,7 +287,7 @@ function AutoRetryBadges({ run }) {
     <>
       {run.auto_retry_of != null && (
         <span
-          className="rounded-full bg-sky-50 px-2 py-0.5 text-sky-200 text-[0.625rem]"
+          className="rounded-full bg-sky-50 px-2 py-0.5 text-sky-600 text-[0.625rem]"
           title={`Automatic retry of cloud run #${run.auto_retry_of}`}>
           ↻ automatic retry {run.auto_retry_count || 1}/1
         </span>
@@ -949,7 +949,7 @@ export default function CloudRunsPage() {
             </button>
             <StatusBadge status={run.status} />
             {fullModel && (
-              <span className="rounded-full bg-sky-50 px-2 py-0.5 text-sky-100 text-[0.625rem] font-semibold uppercase">
+              <span className="rounded-full bg-sky-50 px-2 py-0.5 text-sky-700 text-[0.625rem] font-semibold uppercase">
                 full model · experimental
               </span>
             )}
@@ -1022,7 +1022,7 @@ export default function CloudRunsPage() {
             // own error string), so the first one that answers is rendered.
             const failure = podBootFailureView(run) || uploadStallFailureView(run);
             return failure && (
-              <div className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-amber-100 text-[0.6875rem] leading-snug">
+              <div className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-amber-700 text-[0.6875rem] leading-snug">
                 <div className="font-semibold">{failure.title}</div>
                 <p className="m-0 mt-0.5 break-words text-amber-700/90">{failure.message}</p>
               </div>
@@ -1250,7 +1250,7 @@ export default function CloudRunsPage() {
                 {data.local_active.current.dataset_id != null && (
                   <button type="button" onClick={() => openTestStudio(data.local_active.current.dataset_id)}
                     title="Open Test Studio with this run's dataset selected"
-                    className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-indigo-700 transition-colors hover:bg-indigo-50 hover:text-indigo-100 text-xs font-semibold">
+                    className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-indigo-700 transition-colors hover:bg-indigo-50 hover:text-indigo-700 text-xs font-semibold">
                     <StudioIcon className="h-3.5 w-3.5 shrink-0" /> Test in Studio
                   </button>
                 )}
@@ -1298,7 +1298,7 @@ export default function CloudRunsPage() {
                 <DatasetVersionChip version={run.version} />
                 <StatusBadge status={run.status} />
                 {isFullTransformerRun(run) && (
-                  <span className="rounded-full bg-sky-50 px-2 py-0.5 text-sky-100 text-[0.625rem] font-semibold uppercase">
+                  <span className="rounded-full bg-sky-50 px-2 py-0.5 text-sky-700 text-[0.625rem] font-semibold uppercase">
                     full model · experimental
                   </span>
                 )}
@@ -1369,7 +1369,7 @@ export default function CloudRunsPage() {
                   {!isFullTransformerRun(run) && run.dataset_id != null && (
                     <button type="button" onClick={() => openTestStudio(run.dataset_id)}
                       title="Open Test Studio with this run's dataset selected"
-                      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-indigo-700 transition-colors hover:bg-indigo-50 hover:text-indigo-100 text-xs font-semibold">
+                      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-indigo-700 transition-colors hover:bg-indigo-50 hover:text-indigo-700 text-xs font-semibold">
                       <StudioIcon className="h-3.5 w-3.5 shrink-0" /> Test in Studio
                     </button>
                   )}
@@ -1460,7 +1460,7 @@ export default function CloudRunsPage() {
                     {hasLoraRun && group.datasetId != null && (
                       <button type="button" onClick={() => openTestStudio(group.datasetId)}
                         title="Open Test Studio with this run's dataset selected"
-                        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-indigo-700 transition-colors hover:bg-indigo-50 hover:text-indigo-100 text-[0.6875rem] font-semibold">
+                        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-indigo-700 transition-colors hover:bg-indigo-50 hover:text-indigo-700 text-[0.6875rem] font-semibold">
                         <StudioIcon className="h-3 w-3 shrink-0" /> Test in Studio
                       </button>
                     )}

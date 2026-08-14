@@ -1,4 +1,5 @@
 import { canvasResultLabel, describeCanvasRun } from '../../utils/canvasRunResults';
+import { FLOAT_SHADOW } from '../common/surfaces'
 import { pinBatchLabel } from '../../utils/canvasPinBatch';
 import { ImageIcon } from '../common/icons';
 
@@ -49,7 +50,7 @@ export default function CanvasRunTracker({ run, targets, onStop, onResume, onOpe
       {working && (
         <>
           <button type="button" onClick={onOpenPanel}
-            className="rounded-full bg-surface-raised px-2.5 py-0.5 text-content-muted shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content">
+            className={`rounded-full bg-surface-raised px-2.5 py-0.5 text-content-muted ${FLOAT_SHADOW} transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content`}>
             Settings
           </button>
           <button type="button" onClick={onStop}
@@ -81,7 +82,7 @@ export default function CanvasRunTracker({ run, targets, onStop, onResume, onOpe
               <button key={`${t.datasetId}:${t.recordId}:${t.step}`} type="button"
                 onClick={() => onOpenResult(t)}
                 title={`Open the images generated from run #${t.recordId} at step ${t.step}`}
-                className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-100 tabular-nums hover:bg-emerald-500/25">
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700 tabular-nums hover:bg-emerald-500/25">
                 <ImageIcon className="h-3 w-3 shrink-0" /> {canvasResultLabel(t)}
               </button>
             ))}
@@ -95,7 +96,7 @@ export default function CanvasRunTracker({ run, targets, onStop, onResume, onOpe
             <button type="button" onClick={onPinAll} disabled={pinBusy}
               data-testid="canvas-pin-all"
               title="Put every image this run produced on the board, each under the checkpoint that made it"
-              className="shrink-0 rounded-full bg-emerald-500/25 px-2.5 py-0.5 font-semibold text-emerald-50 hover:bg-emerald-500/40 disabled:opacity-50">
+              className="shrink-0 rounded-full bg-emerald-500/25 px-2.5 py-0.5 font-semibold text-emerald-800 hover:bg-emerald-500/40 disabled:opacity-50">
               {/* Both labels mounted, one hidden — a ternary on button text is
                   the Chrome-translate removeChild crash. */}
               <span hidden={!pinBusy}>Pinning…</span>
@@ -106,7 +107,7 @@ export default function CanvasRunTracker({ run, targets, onStop, onResume, onOpe
             <button type="button" onClick={onUndoPinAll}
               data-testid="canvas-pin-all-undo"
               title="Take those images back off the board"
-              className="shrink-0 rounded-full bg-surface-raised px-2.5 py-0.5 text-content-muted shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content">
+              className={`shrink-0 rounded-full bg-surface-raised px-2.5 py-0.5 text-content-muted ${FLOAT_SHADOW} transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-content`}>
               ↩ Undo
             </button>
           )}

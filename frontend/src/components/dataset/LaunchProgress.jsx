@@ -15,7 +15,7 @@ export default function LaunchProgress({ launch }) {
   if (!view) return null;
   return (
     <div className="flex flex-col gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/5 px-2.5 py-2">
-      <p className="m-0 text-sky-200 text-[0.6875rem] font-semibold">☁ {view.headline}</p>
+      <p className="m-0 text-sky-600 text-[0.6875rem] font-semibold">☁ {view.headline}</p>
       <ol className="m-0 list-none p-0 flex flex-col gap-0.5">
         {view.steps.map((s) => (
           <li key={s.key}

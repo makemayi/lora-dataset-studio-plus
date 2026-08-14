@@ -18,6 +18,7 @@
  * il défile horizontalement au lieu de faire déborder la page.
  */
 import { fmt } from '../../../utils/studioFormat';
+import { FLOAT_SHADOW } from '../../common/surfaces'
 import { HelpBadge } from '../../../help/HelpMode';
 import ResultTile from './ResultTile';
 import { alignWeights, comboLabelText, variantKey, variantSummary, weightVectorText, weightsIntoStackMap } from './stackResults';
@@ -58,7 +59,7 @@ export default function StackVariantsGrid({
                 <th key={variantKey(v)} scope="col"
                   title={comboLabelText(v.weights)}
                   className={`px-1.5 py-1 text-[0.6875rem] font-semibold rounded ${v.active
-                    ? 'bg-sky-50 text-sky-200 border border-sky-400/50'
+                    ? 'bg-sky-50 text-sky-600 border border-sky-400/50'
                     : 'text-content border border-transparent'}`}>
                   <span className="tabular-nums">{weightVectorText(v.weights)}</span>
                   {v.active && <span className="ml-1 font-normal text-[0.625rem]">(shown)</span>}
@@ -140,13 +141,13 @@ export default function StackVariantsGrid({
                 <td key={variantKey(v)} className="px-1 py-1">
                   <div className="flex flex-col gap-1">
                     <button type="button" disabled={v.active} onClick={() => onSelectRun?.(v.run_id)}
-                      className="rounded-full bg-surface-raised px-2 py-0.5 text-[0.625rem] text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 disabled:opacity-40">
+                      className={`rounded-full bg-surface-raised px-2 py-0.5 text-[0.625rem] text-content ${FLOAT_SHADOW} transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 disabled:opacity-40`}>
                       {v.active ? 'Shown' : 'Open this run'}
                     </button>
                     <button type="button"
                       onClick={() => onUseWeights?.(weightsIntoStackMap(members, v.weights))}
                       title="Load these weights back into the sliders, then run again"
-                      className="rounded border border-sky-200 bg-sky-400/10 px-1.5 py-0.5 text-[0.625rem] text-sky-200">
+                      className="rounded border border-sky-200 bg-sky-400/10 px-1.5 py-0.5 text-[0.625rem] text-sky-600">
                       Use these weights
                     </button>
                   </div>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, createContext, useContext } from 'react'
+import { FLOAT_SHADOW } from './surfaces'
 import { pushToast, dropToast, sweepToasts, toastLabel } from '../../utils/toastQueue'
 
 // ── Context ──
@@ -62,11 +63,23 @@ export function useToast() {
 
 // ── Renderer ──
 
+/* One shape for all four, which was not true before: `warning` alone filled with
+   `bg-yellow-500/10` while the others used a solid `-50`. Ten percent of a mid
+   yellow over this app's ground (a pale gradient with colour blooms behind it)
+   is not a tint, it is nothing — the one toast type that means "look at this"
+   was the one that disappeared. `error` also sat a step lighter than its
+   siblings at `-600`.
+
+   Amber, not yellow: every other warning surface in the app is amber, and two
+   yellows one shade apart read as two different meanings.
+
+   The tinted border stays. A semantic alert is the documented exception to
+   "separate by elevation" — the colour IS the message here. */
 const TYPE_STYLES = {
   info: 'border-blue-500/50 bg-blue-50 text-blue-700',
   success: 'border-green-500/50 bg-green-50 text-green-700',
-  error: 'border-red-500/50 bg-red-50 text-red-600',
-  warning: 'border-yellow-500/50 bg-yellow-500/10 text-yellow-700',
+  error: 'border-red-500/50 bg-red-50 text-red-700',
+  warning: 'border-amber-500/50 bg-amber-50 text-amber-700',
 }
 
 const ICONS = {
@@ -102,7 +115,7 @@ function ToastContainer({ toasts, onRemove }) {
           aria-live={t.type === 'error' ? 'assertive' : 'polite'}
           aria-atomic="true"
           title={toastLabel(t)}
-          className={`flex items-start gap-2 border rounded-lg px-4 py-3 shadow-lg backdrop-blur-sm animate-slideIn ${
+          className={`flex items-start gap-2 border rounded-2xl px-4 py-3 ${FLOAT_SHADOW} backdrop-blur-sm animate-slideIn ${
             TYPE_STYLES[t.type] || TYPE_STYLES.info
           }`}
         >
@@ -115,8 +128,14 @@ function ToastContainer({ toasts, onRemove }) {
               see "(12×)", assistive tech hears the sentence once. */}
           <span className="text-sm flex-1 break-words">{t.message}</span>
           {(t.count || 1) > 1 && (
+            /* `bg-black/25` was a dark-theme leftover: a quarter-black pill under
+               text that INHERITS the toast's tint (blue-700, amber-700) is a
+               muddy chip on a pale card. 10% reads as a light grey chip and lets
+               the inherited colour carry the meaning.
+               NOT `bg-current/10` — Tailwind 3 cannot put an alpha on
+               `currentColor`, so that compiles to nothing at all. */
             <span aria-hidden="true"
-              className="flex-shrink-0 self-start rounded-full bg-black/25 px-1.5 py-px text-[0.6875rem] font-semibold tabular-nums">
+              className="flex-shrink-0 self-start rounded-full bg-black/10 px-1.5 py-px text-[0.6875rem] font-semibold tabular-nums">
               {t.count}×
             </span>
           )}
@@ -124,7 +143,10 @@ function ToastContainer({ toasts, onRemove }) {
             type="button"
             onClick={() => onRemove(t.id)}
             aria-label="Close notification"
-            className="flex-shrink-0 text-content-muted hover:text-content ml-2"
+            /* Inherits the toast's own tint rather than the neutral content
+               token: a grey × on an amber card reads as a different control
+               that wandered in. Opacity carries the quiet/hover step. */
+            className="flex-shrink-0 opacity-60 hover:opacity-100 ml-2"
           >
             <span aria-hidden="true">&times;</span>
           </button>

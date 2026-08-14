@@ -249,7 +249,7 @@ export default function ContinueDialog({
                       title={off ? st.reason || undefined : `Continue on the ${id === 'cloud' ? 'rented cloud GPU' : 'local GPU'}`}
                       className={'px-2.5 py-1 rounded-md text-[0.75rem] font-semibold '
                         + (lane === id
-                          ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-200 '
+                          ? 'bg-indigo-500/25 text-indigo-700 border border-indigo-200 '
                           : 'text-content-muted hover:text-content border border-transparent ')
                         + (off ? 'opacity-40 cursor-not-allowed ' : '')}>
                       {label}
@@ -288,7 +288,7 @@ export default function ContinueDialog({
                       title={off ? option.reason || undefined : undefined}
                       className={'px-2.5 py-1 rounded-md text-[0.75rem] font-semibold '
                         + (transport === id
-                          ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-200 '
+                          ? 'bg-indigo-500/25 text-indigo-700 border border-indigo-200 '
                           : 'text-content-muted hover:text-content border border-transparent ')
                         + (off ? 'opacity-40 cursor-not-allowed ' : '')}>
                       {TRANSPORT_LABELS[id]}

@@ -20,6 +20,7 @@
  * c'est le parent (StudioShell) qui met à jour `img` ensuite.
  */
 import { useEffect, useRef } from 'react';
+import { FLOAT_SHADOW } from '../../common/surfaces'
 import { useFocusTrap } from '../../../hooks/useFocusTrap';
 
 export default function ResultLightbox({ img, items = [], datasetId, onRate, onNavigate, onClose, fmt }) {
@@ -94,7 +95,7 @@ export default function ResultLightbox({ img, items = [], datasetId, onRate, onN
         onClick={(e) => e.stopPropagation()}
         onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
         <img src={`/api/dataset/${datasetId}/img/${encodeURIComponent(img.filename)}`}
-          alt={img.label} className="max-w-[92vw] max-h-[80vh] object-contain rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)] border border-white/15" />
+          alt={img.label} className={`max-w-[92vw] max-h-[80vh] object-contain rounded-lg ${FLOAT_SHADOW} border border-white/15`} />
         <div className="text-content-muted text-xs tabular-nums text-center">
           {hasNav && <span className="text-content-subtle">{idx + 1} / {items.length} · </span>}
           {img.label} · strength {fmt(img.strength)}{img.aspect ? ` · ${img.aspect}` : ''}

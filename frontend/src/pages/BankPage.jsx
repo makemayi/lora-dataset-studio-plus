@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { FLOAT_SHADOW } from '../components/common/surfaces'
 import { apiFetch, del, postJson } from '../api/fetchClient'
 import { useToast } from '../components/common/Toast'
 import { HelpBadge } from '../help/HelpMode'
@@ -118,7 +119,7 @@ export function BankCard({ bank, onOpen, onRelocate, onRemove }) {
           <MoveIcon />
         </button>
         <button type="button" onClick={onRemove} aria-label={`Remove bank ${b.name}`}
-          className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-content-subtle shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-rose-700">
+          className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-content-subtle ${FLOAT_SHADOW} transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 hover:text-rose-700`}>
           <CloseIcon />
         </button>
       </div>
@@ -287,7 +288,7 @@ export default function BankPage() {
             never squeezes the fields — including at 400 px. */}
         {folderNotice && (
           <p role="alert"
-            className="basis-full rounded-md border border-rose-500/70 bg-rose-500/15 p-3 text-sm text-rose-100">
+            className="basis-full rounded-md border border-rose-500/70 bg-rose-500/15 p-3 text-sm text-rose-700">
             ⛔ {folderNotice.text}
           </p>
         )}

@@ -251,7 +251,7 @@ export default function ServerSection({ config, setField, runtime, handleSave, c
               <div className="flex items-center justify-between">
                 <label htmlFor="server-token" className="block text-sm font-medium text-content">Access token</label>
                 <button type="button" onClick={regenerateToken}
-                  className="text-xs font-medium text-sky-700 underline hover:text-sky-200">
+                  className="text-xs font-medium text-sky-700 underline hover:text-sky-600">
                   Generate new token
                 </button>
               </div>

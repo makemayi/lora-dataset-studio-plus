@@ -30,6 +30,7 @@
  * off exactly those — the bar moves the ANCHOR, whose box IS the strip's.
  */
 import { groupBarHeight } from '../../utils/canvasNodeChrome';
+import { FLOAT_SHADOW } from '../common/surfaces'
 
 export default function CanvasGroupBar({ group, datasetId, boardScale = 1,
   onCloseGroup, onExportGrid }) {
@@ -47,7 +48,7 @@ export default function CanvasGroupBar({ group, datasetId, boardScale = 1,
       style={{ position: 'absolute', left: group.x, top: group.y - barH,
         width: group.w, height: barH }}
       title="Drag this bar to move the whole group"
-      className="z-10 flex cursor-grab touch-none items-center gap-1 overflow-hidden rounded-t-md border border-b-0 border-indigo-200 bg-app/85 pl-1.5 backdrop-blur-sm shadow-[0_1px_2px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.06)]">
+      className={`z-10 flex cursor-grab touch-none items-center gap-1 overflow-hidden rounded-t-md border border-b-0 border-indigo-200 bg-app/85 pl-1.5 backdrop-blur-sm ${FLOAT_SHADOW}`}>
       <span style={{ fontSize: Math.max(9, barH * 0.42) }}
         className="min-w-0 flex-1 truncate font-semibold text-content-muted tabular-nums">
         <span aria-hidden>⠿</span> {count} images

@@ -17,7 +17,7 @@ export default function FolderSyncNote({ sync, onRelocate }) {
   const note = folderSyncNote(sync)
   if (!note) return null
   const tone = note.tone === 'error'
-    ? 'border-rose-400/40 bg-rose-50 text-rose-200'
+    ? 'border-rose-400/40 bg-rose-50 text-rose-600'
     : 'border-amber-200 bg-amber-50 text-amber-700'
   return (
     <div className={`rounded-md border px-2 py-1 text-xs ${tone}`}>

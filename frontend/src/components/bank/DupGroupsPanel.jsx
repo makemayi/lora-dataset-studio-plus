@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { FLOAT_SHADOW } from '../common/surfaces'
 import { apiFetch, postJson } from '../../api/fetchClient'
 import { useToast } from '../common/Toast'
 
@@ -104,12 +105,12 @@ export default function DupGroupsPanel({ bankId, live, onChanged, kind = 'exact'
               <span className="ml-auto" />
               <button type="button" disabled={busy || live}
                 onClick={() => resolve({ strategy: 'best', group: g.group })}
-                className="rounded-full bg-surface-raised px-2.5 py-0.5 text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 disabled:opacity-50">
+                className={`rounded-full bg-surface-raised px-2.5 py-0.5 text-content ${FLOAT_SHADOW} transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 disabled:opacity-50`}>
                 Keep best
               </button>
               <button type="button" disabled={busy || live}
                 onClick={() => resolve({ strategy: 'first', group: g.group })}
-                className="rounded-full bg-surface-raised px-2.5 py-0.5 text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 disabled:opacity-50">
+                className={`rounded-full bg-surface-raised px-2.5 py-0.5 text-content ${FLOAT_SHADOW} transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5 disabled:opacity-50`}>
                 Keep first
               </button>
             </div>
