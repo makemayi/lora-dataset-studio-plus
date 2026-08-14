@@ -88,9 +88,10 @@ the only direction that cannot invent wiring nobody measured.
                     that whole section was answered from nothing.
 
                 Running it here fixes all four: the app's URL and model apply,
-                failure is refused before anything is queued, the call is pinned
-                to the CPU (`num_gpu=0`) so the card is untouched, and the
-                prompt now asks only for what the model is actually shown.
+                failure is refused before anything is queued, the call finishes
+                and unloads BEFORE the render is queued (so the card holds one
+                model at a time instead of two), and the prompt now asks only
+                for what the model is actually shown.
 
 Switching `ollama` ON disables the pose hint (`face_swap.h3_pose_hint`) for this
 job. Both describe the same thing — how this particular head is turned — but
@@ -139,6 +140,11 @@ NODE_AUDIO_VAE = '925:926'       # required by the node even for a still
 NODE_MASK_OVERLAY = '983:1002'   # AILab_MaskOverlay — optional, off by default
 NODE_KLEIN_POSITIVE = '983:964'  # CLIPTextEncode — what the Klein pass is told to do
 NODE_KLEIN_NEGATIVE = '983:965'  # CLIPTextEncode — shipped empty by the maintainer
+# The far end of H3's model chain. Whatever feeds THIS node's `model` is the
+# tail extra LoRAs chain onto — found, never hardcoded, so the speed patches
+# above it can be dropped without moving the insertion point.
+NODE_H3_MODEL_SINK = '128'       # BasicGuider — first consumer of the H3 model
+NODE_H3_STEPS = '126'            # BasicScheduler — the graph ships 25 steps
 NODE_KLEIN_DECODE = '983:973'    # VAEDecode — the head-removed target
 NODE_KLEIN_UNET = '983:962'      # OTUNetLoaderW8A8 (may degrade to UNETLoader)
 NODE_KLEIN_CLIP = '983:963'
@@ -161,7 +167,8 @@ _REQUIRED_NODES = (NODE_TARGET_IMAGE, NODE_REF_IMAGE, NODE_TARGET_RESIZE,
                    NODE_VIDEO_VAE, NODE_AUDIO_VAE, NODE_MASK_OVERLAY,
                    NODE_KLEIN_DECODE, NODE_KLEIN_UNET, NODE_KLEIN_CLIP,
                    NODE_KLEIN_VAE, NODE_KLEIN_SAMPLER, NODE_SAVE,
-                   NODE_KLEIN_POSITIVE, NODE_KLEIN_NEGATIVE)
+                   NODE_KLEIN_POSITIVE, NODE_KLEIN_NEGATIVE,
+                   NODE_H3_MODEL_SINK, NODE_H3_STEPS)
 
 # stage -> (tail node, what its consumers read when the stage is off).
 # Both fallbacks are the node's OWN pass-through input, i.e. exactly what
@@ -314,6 +321,39 @@ def swap_ollama_model():
     chosen = cfg.get('face_swap.h3_new_ollama_model')
     chosen = chosen.strip() if isinstance(chosen, str) else ''
     return chosen or get_vision_model()
+
+
+MAX_H3_SWAP_LORAS = 4
+
+
+def configured_h3_swap_loras():
+    """Sanitized `minimax_h3.swap_loras`: ordered [{file, strength}], blank rows
+    dropped, strengths clamped to [0, 1.5] (junk -> 1.0), capped.
+
+    Its reason for existing is speed: H3 samples a packet of frames through a
+    40 GB stack, and the accelerator LoRAs that make that bearable are files
+    nobody can ship — they are re-quantisations and community distills that
+    differ per install. So the graph carries no LoRA of its own and this is the
+    only place one can come from.
+
+    Deliberately NOT capped at 1 despite being called an "accelerator" slot: a
+    step-distill and a subject LoRA stack legitimately, and a list that refuses
+    the second one just moves the problem into a text field somewhere else."""
+    raw = cfg.get('minimax_h3.swap_loras')
+    rows = []
+    for entry in (raw if isinstance(raw, list) else []):
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get('file')
+        name = name.strip() if isinstance(name, str) else ''
+        if not name:
+            continue
+        strength = entry.get('strength')
+        strength = float(strength) if isinstance(strength, (int, float)) else 1.0
+        rows.append({'file': name, 'strength': max(0.0, min(1.5, strength))})
+        if len(rows) >= MAX_H3_SWAP_LORAS:
+            break
+    return rows
 
 
 def analyse_head(target_path):
@@ -505,6 +545,35 @@ def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None
         if not isinstance(text, str) or not text.strip():
             text = cfg.defaults()['face_swap'][key.split('.', 1)[1]]
         workflow[node_id]['inputs']['text'] = text.strip()
+
+    # Extra LoRAs on H3's model, chained onto whatever currently feeds the
+    # guider — AFTER the speed patches, so switching `use_speed_nodes` off does
+    # not move where they land. Borrowed from the Klein swap engine rather than
+    # reimplemented: every rule it enforces (a file that is not on disk is
+    # SKIPPED rather than failing the whole batch at ComfyUI's validator, a
+    # strength of 0 means the row is off, and a LoRA the graph already loads is
+    # refused because chaining it twice sums both deltas into visible
+    # macro-blocking) was paid for once already.
+    # Sampler steps. The graph ships 25, which is right for the stock model and
+    # wrong for every reason someone adds a LoRA above: an accelerator is a
+    # step-distill, and running a 4-step distill for 25 steps is both slower
+    # than the stock model and visibly worse. The two settings travel together
+    # for that reason — the picker only offers this field once a LoRA is there.
+    # 0 keeps whatever the graph carries, so an untouched install is untouched.
+    steps = cfg.get('minimax_h3.swap_steps')
+    steps = int(steps) if isinstance(steps, (int, float)) else 0
+    if steps > 0:
+        workflow[NODE_H3_STEPS]['inputs']['steps'] = max(1, min(100, steps))
+
+    lora_rows = configured_h3_swap_loras()
+    if lora_rows:
+        from .face_swap_helper import append_model_loras
+        added = append_model_loras(
+            workflow, lora_rows,
+            sink_node=NODE_H3_MODEL_SINK, prefix='h3swap_lora_',
+            title='H3 LoRA {i} (Settings)')
+        if added:
+            logger.info('h3 swap (new): %d extra LoRA(s) on the H3 model', len(added))
 
     # Everything a switched-off stage or accelerator left behind goes now, so
     # the node probe below asks about the job that will actually run.

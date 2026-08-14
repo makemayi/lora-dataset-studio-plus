@@ -490,6 +490,20 @@ Which engine the 🎭↔ button on a tile runs. All three take the same two pict
 
 Whichever is selected, a missing weight or node pack is named in one message **before** anything is queued — the tile is not consumed by a swap that cannot run.
 
+#### MiniMax H3 (new) — extra LoRAs on the swap, and the steps they need
+
+→ `minimax_h3.swap_loras` (up to 4) and `minimax_h3.swap_steps`. **`minimax_h3` (new) only.**
+
+The swap graph ships **no LoRA of its own**, and that is not an oversight: the accelerators that make an H3 swap bearable are community distills and re-quantisations that differ per install, so there is nothing to ship. This is the only place one can come from. Rows are chained onto H3's model **after** the optional speed patches, so switching `minimax_h3.use_speed_nodes` off does not move where they land.
+
+**The steps field is next to them because the pairing is the whole point.** The graph samples **25 steps**. If the LoRA you added is a step-distill — and it usually is — leaving the steps at 25 is the expensive mistake: it is *slower than the stock model* and visibly worse, and nothing in the app or the log attributes it to the LoRA. Set the number the LoRA's model card names. `0` keeps the graph's 25; the value is clamped to 1–100.
+
+Same discipline as the Klein face-swap LoRA list, and for the same reasons:
+
+- a row naming a file **that is not on disk is skipped** with a server-log line, not failed — ComfyUI answers a validation 400 for the *whole* job on a bad `lora_name`, and losing every tile of a batch to one stale settings row is the worse trade;
+- **strength 0** means the row is off;
+- a LoRA the graph **already loads** is refused, because chaining it twice sums both deltas well past what the file was trained for and shows up as visible macro-blocking.
+
 #### MiniMax H3 (new) — what the Klein pass is told to do
 
 → `face_swap.h3_head_removal_prompt` and `face_swap.h3_head_removal_negative`. **`minimax_h3` (new) only.**
@@ -1800,6 +1814,8 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `face_swap.h3_lama_model` | Which inpainting model the `lama` stage runs (default `lama`). The shipped graph asked for `zits`, which crashes on this lane: it pads to a multiple of 32 and drives a 256→512 structure upsampler, while the inpaint crop is an arbitrary size. Also accepts `ldm`, `mat`, `fcf`, `manga`, `spread`. |
 | `face_swap.h3_stages` | Three booleans for the OLD H3 swap graph (`minimax_h3_old`), all `false`: `hair_removal` (a Klein pass strips the hair first — makes the Klein models required too), `lama` (LaMa wipes the masked region), `face_detail` (Z-Image detailer on eyes and mouth; the ONLY stage whose model filenames are not re-resolved for your install). |
 | `minimax_h3.swap_prompt` | Overrides the instruction the H3 head-swap graph sends. **Both H3 engines read this one key, and they ship different instructions** — one wording rarely suits both. Blank (default) = whatever that graph carries. On `minimax_h3_old` the shipped prompt is subject-neutral English, explicit about keeping the reference's identity, repainting nothing outside the white mask, matching the shot's head angle and lighting and leaving no seam; there `<Picture 1>` is your reference photo and `<Picture 2>` is the **masked crop**, not the whole tile. On `minimax_h3` the shipped text is a Chinese head-transplant instruction and `<Picture 2>` is the whole head-removed photo. Set it to A/B a wording without editing a workflow file an update replaces. |
+| `minimax_h3.swap_loras` | **`minimax_h3` (new) only.** Up to 4 extra LoRAs on H3's swap model, `[{file, strength}]`, empty by default. The graph ships none — accelerator distills differ per install. Chained after the optional speed patches; a file that is not on disk is skipped rather than failing the job. |
+| `minimax_h3.swap_steps` | **`minimax_h3` (new) only.** Sampler steps for the swap, `0` = the graph's own 25 (clamped 1–100). Paired with `swap_loras`: running a 4-step distill for 25 steps is slower than the stock model AND worse, and nothing reports it. |
 | `klein.default_generation_lora_preset` | Which of `klein.generation_lora_presets` the 🖥️ Klein tuning panel STARTS on. Default `''` = *None*, the behaviour before this key existed. A starting point only — the run panel still offers None and every other preset for that run, and picking there does not rewrite this. Fail-closed: a name matching no preset behaves as *None*. |
 | `krea.default_generation_lora_preset` | The same, for `krea.generation_lora_presets` and the 🧬 Krea 2 Edit tuning panel. A SEPARATE key on purpose: the two preset lists are independent and one name can designate two different chains. Default `''`. |
 | `identity_prompts.markings_lock` | Krea's “hold the skin” order — forbids inventing or redrawing marks. Blank = shipped default. Naming a body feature here summons it. |

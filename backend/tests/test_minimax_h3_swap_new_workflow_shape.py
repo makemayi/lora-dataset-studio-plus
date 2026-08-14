@@ -32,7 +32,11 @@ _REQUIRED_NODES = (NODE_TARGET_IMAGE, NODE_REF_IMAGE, '928', '957', '170',
                    '983:973', '983:962', '983:963', '983:966', '983:969', '165',
                    # The Klein pass's own instruction and its negative: the
                    # helper writes both from config on every job.
-                   '983:964', '983:965')
+                   '983:964', '983:965',
+                   # BasicGuider — the anchor extra LoRAs chain onto; and
+                   # BasicScheduler, whose 25 steps an accelerator LoRA has to
+                   # be able to override.
+                   '128', '126')
 _STAGE_TAILS = ('983:1002', '991')
 
 

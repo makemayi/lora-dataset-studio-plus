@@ -1160,7 +1160,112 @@ function MinimaxH3Card({ config, setField, configDefaults, caps }) {
         </HelpText>
         <ResetToDefault label="Ref2VA model" section="minimax_h3" field="base_model" {...reset} />
       </div>
+
+      <H3SwapLorasField config={config} setField={setField}
+        configDefaults={configDefaults} />
     </Card>
+  )
+}
+
+const MAX_H3_SWAP_LORAS = 4   // mirrors minimax_h3_swap_new_helper.MAX_H3_SWAP_LORAS
+
+/* Extra LoRAs on the H3 SWAP model, plus the step count they exist to change.
+   The two live together because separating them is the whole trap: the reason
+   to add a LoRA here is almost always a step-distill, and a 4-step distill run
+   for the graph's 25 steps is BOTH slower than the stock model and worse. The
+   step field is therefore revealed by the first LoRA row rather than sitting
+   somewhere else on the page. */
+function H3SwapLorasField({ config, setField, configDefaults }) {
+  const h3 = config.minimax_h3 || {}
+  const rows = Array.isArray(h3.swap_loras) ? h3.swap_loras : []
+  const save = (next) => setField('minimax_h3', 'swap_loras', next)
+  const loraScan = useKleinGenerationLoras()
+  const stepsDefault = defaultValueAt(configDefaults, 'minimax_h3', 'swap_steps')
+  const steps = Number(h3.swap_steps ?? stepsDefault)
+  const patchRow = (i, patch) =>
+    save(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  return (
+    <div className="mt-3" id="minimax-h3-swap-loras">
+      <p className="text-xs font-medium text-content">
+        Extra LoRAs on the swap (MiniMax H3 new)
+      </p>
+      <HelpText className="mt-1 text-xs text-content-muted">
+        Chained onto H3&apos;s model after the optional speed patches, so turning
+        those off does not move where these land. The graph ships none of its
+        own: the accelerators that make an H3 swap bearable are community
+        distills and re-quantisations that differ per install, which is why this
+        field exists at all. A row naming a file that is not on disk is skipped
+        with a line in the server log rather than failing the batch, so a stale
+        entry costs you that LoRA and nothing else. Max {MAX_H3_SWAP_LORAS}.
+      </HelpText>
+      {rows.map((row, i) => {
+        const strength = Number.isFinite(Number(row?.strength)) ? Number(row.strength) : 1.0
+        return (
+          <div key={i} className="mt-2 flex flex-wrap items-center gap-2">
+            <span className="w-4 shrink-0 text-xs text-content-muted" aria-hidden="true">{i + 1}.</span>
+            <KleinLoraCombobox
+              ariaLabel={`H3 swap LoRA file ${i + 1}`}
+              value={row?.file || ''}
+              onChange={(next) => patchRow(i, { file: next })}
+              engineLabel="MiniMax H3"
+              {...loraScan}
+            />
+            <label className="flex items-center gap-1.5 text-xs text-content-muted">
+              <span className="whitespace-nowrap">{strength.toFixed(2)}</span>
+              <input
+                type="range" min={0} max={1.5} step={0.05} value={strength}
+                aria-label={`H3 swap LoRA ${i + 1} strength`}
+                onChange={(e) => patchRow(i, { strength: Number(e.target.value) })}
+                className="w-28 accent-indigo-500"
+              />
+            </label>
+            <button type="button" onClick={() => save(rows.filter((_, j) => j !== i))}
+              aria-label={`Remove H3 swap LoRA ${i + 1}`} title="Remove this LoRA"
+              className={`${SMALL_BTN} hover:bg-red-50 hover:text-red-600`}>✕</button>
+          </div>
+        )
+      })}
+      <div className="mt-2 flex items-center gap-3">
+        <button type="button" className={TEXT_BTN}
+          onClick={() => save([...rows, { file: '', strength: 1.0 }])}
+          disabled={rows.length >= MAX_H3_SWAP_LORAS}>
+          ＋ Add LoRA
+        </button>
+        <span className="text-xs text-content-muted">
+          {rows.length}/{MAX_H3_SWAP_LORAS} in the chain
+        </span>
+      </div>
+
+      {/* Mounted either way, revealed by the first row — both halves stay in the
+          DOM because Chrome auto-translate rewrites text nodes and an unmounted
+          branch throws (CLAUDE.md ▸ UI changes). */}
+      <div className="mt-3 sm:max-w-md" hidden={rows.length === 0}>
+        <label htmlFor="h3-swap-steps" className="block text-xs font-medium text-content">
+          Sampler steps for the swap
+        </label>
+        <input
+          id="h3-swap-steps"
+          type="number" min={0} max={100} step={1}
+          value={h3.swap_steps ?? stepsDefault}
+          onChange={(e) => setField('minimax_h3', 'swap_steps', Number(e.target.value) || 0)}
+          className={INPUT_CLASS}
+        />
+        <HelpText className="mt-1 text-xs text-content-muted">
+          <span hidden={steps > 0}>
+            0 — the swap runs the graph&apos;s own 25 steps. If the LoRA above is
+            a step-distill, leaving this at 0 is the expensive mistake: 25 steps
+            on a 4-step distill is slower than the stock model AND worse, and
+            nothing reports it.
+          </span>
+          <span hidden={!(steps > 0)}>
+            {steps} steps instead of the graph&apos;s 25. Match this to what the
+            LoRA was distilled for — its model card names the number.
+          </span>
+        </HelpText>
+        <ResetToDefault label="H3 swap steps" section="minimax_h3" field="swap_steps"
+          config={config} configDefaults={configDefaults} setField={setField} />
+      </div>
+    </div>
   )
 }
 

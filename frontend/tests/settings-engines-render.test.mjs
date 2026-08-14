@@ -427,3 +427,41 @@ test('a checked H3 stage renders checked', () => {
   assert.match(html, /id="face-swap-h3-lama"[^>]*checked/)
   assert.doesNotMatch(html, /id="face-swap-h3-hair-removal"[^>]*checked/)
 })
+
+/* The accelerator-LoRA slot and the step count it exists to change. They are
+   one control in two parts: adding a 4-step distill and leaving the graph's 25
+   steps is slower than the stock model AND worse, and nothing anywhere reports
+   it — so the step field is revealed by the first LoRA row rather than living
+   somewhere else on the page. */
+const renderH3 = (minimax_h3) => renderToStaticMarkup(createElement(EnginesSection, {
+  config: { ...CONFIG, minimax_h3 },
+  // The rail matches this entry by prefix ('h3-' / 'minimax-h3-'),
+  // so a deep link to the field itself is what opens the card.
+  focusId: 'h3-swap-steps',
+  configDefaults: { ...CONFIG, minimax_h3: { swap_steps: 0, swap_loras: [] } },
+  setField: () => {}, toggleEngine: () => {}, caps: {}, refreshCaps: () => {},
+  toast: { error: () => {}, success: () => {} },
+  secretsPresence: {}, secretInputs: {}, setSecretInputs: () => {},
+  testResults: {}, recordTestResult: () => {}, saveSecretIfPending: () => {},
+  handleDeleteSecret: () => {},
+}))
+
+test('the H3 swap step field is mounted either way, and only hidden moves', () => {
+  const none = renderH3({})
+  const one = renderH3({ swap_loras: [{ file: 'turbo.safetensors', strength: 1 }] })
+  for (const html of [none, one]) {
+    assert.match(html, /id="h3-swap-steps"/)
+    assert.match(html, /Sampler steps for the swap/)
+  }
+  // Hidden until a LoRA is there, shown once one is.
+  assert.match(none, /hidden=""[^>]*>\s*<label for="h3-swap-steps"/)
+  assert.doesNotMatch(one, /hidden=""[^>]*>\s*<label for="h3-swap-steps"/)
+})
+
+test('the step help names the trap at 0 and the value once set', () => {
+  const html = renderH3({ swap_loras: [{ file: 'turbo.safetensors', strength: 1 }],
+                          swap_steps: 4 })
+  // Both sentences stay in the DOM; only `hidden` picks between them.
+  assert.match(html, /25 steps on a 4-step distill is slower/)
+  assert.match(html, /4 steps instead of the graph/)
+})

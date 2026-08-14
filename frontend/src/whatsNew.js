@@ -50,6 +50,18 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-14-h3-swap-accelerator-lora',
+    date: '2026-08-14',
+    title: 'Put your own accelerator LoRA on the H3 head swap — and set its step count',
+    blurb: 'The swap graph carries no LoRA of its own, because the distills that '
+      + 'make it bearable differ per install. You can now chain up to four onto '
+      + 'H3’s model from Settings. The step count comes with them in the same '
+      + 'place, deliberately: the graph ships 25 steps, and running a 4-step '
+      + 'distill for 25 is both slower than the stock model and worse — with '
+      + 'nothing anywhere to tell you that is what happened.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-14-swap-prompt-knows-the-mannequin',
     date: '2026-08-14',
     title: 'The swap instruction now knows what the grey head in the picture is',

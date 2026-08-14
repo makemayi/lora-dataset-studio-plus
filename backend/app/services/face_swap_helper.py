@@ -200,12 +200,19 @@ def configured_face_swap_loras():
     return rows
 
 
-def append_model_loras(workflow, rows):
+def append_model_loras(workflow, rows, *, sink_node=None, prefix=None,
+                       title='Extra LoRA {i} (Settings)'):
     """Chain extra LoraLoaderModelOnly nodes onto the END of the model chain,
     after the swap LoRA and the optional style LoRA. Returns the ids added.
 
+    `sink_node` / `prefix` / `title` exist so the NEW H3 swap graph can borrow
+    this instead of growing a second copy: every rule below (missing file,
+    strength 0, already-loaded double-stacking) was learned once and is worth
+    exactly as much on that graph. Defaults keep this engine's own call
+    unchanged.
+
     The tail is FOUND, not hardcoded: it is whatever currently feeds
-    NODE_MODEL_SINK's `model`, so this keeps working when the style LoRA was
+    the sink's `model`, so this keeps working when the style LoRA was
     dropped for being absent — and would keep working if the graph gains
     another patch node before the sink.
 
@@ -224,7 +231,9 @@ def append_model_loras(workflow, rows):
       itself the moment someone picked it. Comparison is normcase+normpath, so
       a '/' vs '\\' or a case difference cannot dodge it.
     """
-    sink = workflow.get(NODE_MODEL_SINK, {}).get('inputs', {}).get('model')
+    sink_node = sink_node or NODE_MODEL_SINK
+    prefix = prefix or _LORA_NODE_PREFIX
+    sink = workflow.get(sink_node, {}).get('inputs', {}).get('model')
     if not (rows and isinstance(sink, list) and len(sink) == 2):
         return []
     already = {os.path.normcase(os.path.normpath(n['inputs']['lora_name']))
@@ -253,13 +262,13 @@ def append_model_loras(workflow, rows):
     anchor = list(sink)
     added, new_nodes = [], {}
     for i, row in enumerate(usable, 1):
-        nid = f'{_LORA_NODE_PREFIX}{i}'
+        nid = f'{prefix}{i}'
         new_nodes[nid] = {
             'class_type': 'LoraLoaderModelOnly',
             'inputs': {'lora_name': row['file'],
                        'strength_model': row['strength'],
                        'model': anchor},
-            '_meta': {'title': f'Extra LoRA {i} (Settings)'},
+            '_meta': {'title': title.format(i=i)},
         }
         anchor = [nid, 0]
         added.append(nid)

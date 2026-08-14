@@ -810,6 +810,34 @@ DEFAULTS = {
         # replaces. NOTE <Picture 2> is the masked inpaint CROP, not the tile,
         # and the white area is the HEAD (face + hair).
         'swap_prompt': '',
+        # Extra LoRAs chained onto H3's model for the SWAP graph
+        # (`minimax_h3` — the new engine). [{file, strength}], empty by default.
+        #
+        # It exists because the accelerator LoRAs that make an H3 swap bearable
+        # cannot be shipped: they are community distills and re-quantisations
+        # that differ per install, so the graph carries none and this is the
+        # only place one can come from. `file` is a path relative to a ComfyUI
+        # loras root, exactly as the picker writes it.
+        #
+        # Chained onto whatever feeds the guider, i.e. AFTER the optional speed
+        # patches — switching `use_speed_nodes` off must not move where these
+        # land. A row whose file is not on disk is SKIPPED with a log line
+        # rather than failing the job: losing every tile of a batch to one
+        # stale filename in a settings list is the worse trade.
+        'swap_loras': [],
+        # Sampler steps for the SWAP graph. 0 = whatever the graph carries (25).
+        #
+        # Paired with `swap_loras` on purpose, in the config and in the UI: the
+        # reason to add a LoRA up there is almost always a step-distill, and a
+        # 4-step distill run for 25 steps is BOTH slower than the stock model
+        # and visibly worse. Someone who adds the LoRA and not the steps has
+        # bought nothing and lost quality, which is the sort of thing nobody
+        # attributes to the right setting.
+        #
+        # Clamped to 1..100 at write time. It applies to `minimax_h3` (the new
+        # swap engine) only — the generation lane's own `steps` is a separate
+        # key because the two graphs are sampled differently.
+        'swap_steps': 0,
     },
     # Which engine the 🎭↔ face/head swap runs on. Its own namespace, exactly
     # like `improve` above and for the same reason: the action is no longer

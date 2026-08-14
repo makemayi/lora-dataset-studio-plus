@@ -452,3 +452,90 @@ def test_all_three_engines_share_one_enqueue_contract(swap):
                minimax_h3_swap_helper.enqueue_h3_swap,
                sh.enqueue_h3_swap_new):
         assert list(inspect.signature(fn).parameters) == expected
+
+
+# --- extra LoRAs on the H3 model ---------------------------------------------
+
+def _lora_on_disk(base, rel):
+    return _write(base / 'models' / 'loras' / rel)
+
+
+def test_no_lora_rows_means_no_lora_nodes(swap):
+    """The graph ships none of its own: an untouched install must queue exactly
+    what it queued before this setting existed."""
+    sh, _mh, _base, _config = swap
+    wf, _ = _build(sh)
+    assert not [n for n in wf.values() if n['class_type'] == 'LoraLoaderModelOnly']
+
+
+def test_a_configured_lora_lands_after_the_speed_patches(swap):
+    """Chained onto whatever feeds the guider, so switching `use_speed_nodes`
+    off cannot move where it lands — that toggle drops the two patch nodes
+    between the loader and this point."""
+    sh, _mh, base, config = swap
+    _lora_on_disk(base, 'h3_turbo.safetensors')
+    from app.services import comfy_model_paths
+    comfy_model_paths.clear_cache()
+    _set(config, 'minimax_h3', swap_loras=[{'file': 'h3_turbo.safetensors', 'strength': 0.8}])
+    wf, _ = _build(sh)
+    loras = {nid: n for nid, n in wf.items() if n['class_type'] == 'LoraLoaderModelOnly'}
+    assert len(loras) == 1, loras
+    nid, node = next(iter(loras.items()))
+    assert node['inputs']['lora_name'] == 'h3_turbo.safetensors'
+    assert node['inputs']['strength_model'] == 0.8
+    # The guider now reads the LoRA, and the LoRA reads what the guider used to.
+    assert wf['128']['inputs']['model'] == [nid, 0]
+    # ...and the scheduler, which reads the SAME tail, came with it. Repointing
+    # only the node used to find the tail would silently schedule one model and
+    # sample another.
+    assert wf['126']['inputs']['model'] == [nid, 0]
+
+
+def test_a_lora_that_is_not_on_disk_is_skipped_not_fatal(swap):
+    """ComfyUI answers a validation 400 for the WHOLE job on a bad lora_name.
+    Losing every tile of a batch to one stale row in a settings list is the
+    worse trade — the row is dropped and logged instead."""
+    sh, _mh, _base, config = swap
+    _set(config, 'minimax_h3', swap_loras=[{'file': 'gone.safetensors', 'strength': 1.0}])
+    wf, _ = _build(sh)
+    assert not [n for n in wf.values() if n['class_type'] == 'LoraLoaderModelOnly']
+    assert wf['128']['inputs']['model'] == ['925:315', 0]
+
+
+def test_the_rows_are_sanitised_the_same_way_the_klein_swap_sanitises_its_own(swap):
+    sh, _mh, _base, config = swap
+    _set(config, 'minimax_h3', swap_loras=[
+        {'file': '  spaced.safetensors  ', 'strength': 9},     # clamped to 1.5
+        {'file': '', 'strength': 1},                            # blank -> dropped
+        {'file': 'junk.safetensors', 'strength': 'x'},          # junk -> 1.0
+        'not-a-dict',
+    ])
+    rows = sh.configured_h3_swap_loras()
+    assert rows == [{'file': 'spaced.safetensors', 'strength': 1.5},
+                    {'file': 'junk.safetensors', 'strength': 1.0}]
+
+
+def test_the_list_is_capped(swap):
+    sh, _mh, _base, config = swap
+    _set(config, 'minimax_h3', swap_loras=[
+        {'file': f'l{i}.safetensors', 'strength': 1} for i in range(20)])
+    assert len(sh.configured_h3_swap_loras()) == sh.MAX_H3_SWAP_LORAS
+
+
+def test_the_graph_ships_25_steps_and_nothing_changes_it_by_default(swap):
+    """An accelerator LoRA without this is the trap: a 4-step distill run for
+    25 steps is slower than the stock model AND worse."""
+    sh, _mh, _base, _config = swap
+    wf, _ = _build(sh)
+    assert wf['126']['inputs']['steps'] == 25
+
+
+def test_swap_steps_overrides_and_is_clamped(swap):
+    sh, _mh, _base, config = swap
+    _set(config, 'minimax_h3', swap_steps=4)
+    wf, _ = _build(sh)
+    assert wf['126']['inputs']['steps'] == 4
+    for value, expected in ((0, 25), (-3, 25), (9999, 100)):
+        _set(config, 'minimax_h3', swap_steps=value)
+        wf, _ = _build(sh)
+        assert wf['126']['inputs']['steps'] == expected, value
