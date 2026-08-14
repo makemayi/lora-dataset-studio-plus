@@ -20,7 +20,11 @@ export default {
           rose: '#d48ec2',
         },
         // ── Semantic theme tokens (backed by CSS vars in index.css) ──────────
-        // App is dark-only. The *-alpha-baked tokens (surface, surface-raised,
+        // App is LIGHT-only since the Vision-Pro glass pass (2026-08-13/14):
+        // index.html carries data-theme="light" and index.css defines only
+        // `:root, [data-theme="light"]`. `darkMode` below is vestigial — there
+        // is no dark block for it to select, so a `dark:` variant never
+        // matches. The *-alpha-baked tokens (surface, surface-raised,
         // border, border-strong) carry CSS-var-controlled default opacity.
         // Use the *-solid variants when you need to set your own alpha via
         // Tailwind's /NN modifier.

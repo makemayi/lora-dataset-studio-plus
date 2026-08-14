@@ -3,20 +3,22 @@
  *
  * These started life inside `components/settings/primitives.jsx` during the
  * Settings redesign, which is where the reference came from (Chrome's own
- * Settings, dark): a card is a raised surface with a soft shadow, not a boxed-in
+ * Settings): a card is a raised surface with a soft shadow, not a boxed-in
  * outline, and it lifts slightly on hover. Two reasons that reads better than a
  * hairline here:
  *
- *   · the tokens are ALREADY an elevation system — `surface` is white at 4% and
- *     `surface-raised` at 9% — so `border border-border` on top of one meant two
- *     separation mechanisms doing the same job, and a page of them turned into a
- *     grid of boxes;
- *   · on a near-black ground a hairline reads as a hard edge, while a shadow
- *     reads as depth, which is what the hierarchy actually is.
+ *   · the tokens are ALREADY an elevation system, so `border border-border` on
+ *     top of one meant two separation mechanisms doing the same job, and a page
+ *     of them turned into a grid of boxes;
+ *   · a hairline reads as a hard edge, while a shadow reads as depth, which is
+ *     what the hierarchy actually is.
  *
- * The shadow is deliberately heavier than a light-theme card's: at these
- * background values a subtle one is invisible. Hover is a lift, not a colour
- * change, so it never competes with the accent.
+ * The APP WAS DARK when these were written and is LIGHT since the Vision-Pro
+ * glass pass (2026-08-13/14) — the recipes below were re-tuned for it and the
+ * numbers moved in the opposite direction to the intuition: a light ground
+ * needs a HEAVIER shadow, because the 0.05-alpha ones that read fine on
+ * near-black were invisible on `#F5F7FA`. Hover is a lift, not a colour change,
+ * so it never competes with the accent.
  *
  * Padding and radius-breaking layout stay with the caller — these strings are
  * the SURFACE, not the box.

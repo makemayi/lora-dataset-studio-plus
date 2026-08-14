@@ -62,10 +62,21 @@ them was learned by breaking something.
 
 0. **Take the shape from `components/common/surfaces.js` and the glyph from
    `components/common/icons.jsx`.** `CARD_SURFACE` / `CARD_SURFACE_INTERACTIVE`
-   / `CARD_SHADOW` / `INPUT_CLASS` / `QUIET_BUTTON` / `PRIMARY_BUTTON`, and one
-   drawn inline-SVG set (every glyph carries `data-icon="<name>"` so a test can
-   name it). Three grammar rules came out of the 2026-08-10 pass and hold
-   everywhere:
+   / `CARD_SHADOW` / `FLOAT_SHADOW` / `FLOAT_HOVER` / `FLOAT_HOVER_SHADOW` /
+   `GLASS_PILL` / `SELECTED_PILL` / `INPUT_CLASS` / `QUIET_BUTTON` /
+   `PRIMARY_BUTTON`, and one drawn inline-SVG set (every glyph carries
+   `data-icon="<name>"` so a test can name it).
+
+   **This is the rule the codebase is currently WORST at, and it is measured:**
+   59 files hand-write a `shadow-[…]` and 44 hand-write the glass recipe
+   (`bg-white/NN` + `backdrop-blur-…`), against 13 that import `surfaces.js`.
+   The cost is not tidiness — it is that every global adjustment (glass opacity,
+   shadow strength, hover lift) becomes another 59-file sweep, and the last such
+   sweep shipped 19 broken class strings (`bg-surface shadow-[…]-raised`, a dead
+   class Tailwind never generated). Reuse the token; if the recipe you need is
+   not there, ADD it there.
+
+   Three grammar rules came out of the 2026-08-10 pass and hold everywhere:
    - **A panel separates by ELEVATION, not by an outline.** The tokens are
      already an elevation system, so `border border-border` on a filled surface
      is two mechanisms doing one job — and a page of them is a grid of boxes.
@@ -82,6 +93,14 @@ them was learned by breaking something.
    `bg-app`, `bg-surface`, `surface-raised`, `surface-overlay`, `border`,
    `border-strong`, `text-content`, `content-muted`, `content-subtle`. A raw hex,
    a new CSS variable or a second scale is a rejected change, not a preference.
+
+   **`bg-white/NN` is the one sanctioned exception, and only through a token.**
+   The glass language (translucent white + `backdrop-blur`) cannot be expressed
+   as an alpha-baked semantic token, so it lives in `surfaces.js` as
+   `CARD_SURFACE` / `GLASS_PILL` / `FLOAT_SHADOW`. Writing the recipe inline is
+   what rule 0 is about; the colour is fine, the copy-paste is not. Controls on
+   top of a photograph are the second case and take the DARK scrim instead
+   (`bg-black/40`), because they must read over arbitrary image content.
 2. **Never `/NN` opacity on `bg-surface`, `bg-surface-raised`, `border-border`
    or `border-border-strong`.** Those tokens already bake their alpha into
    `tailwind.config.js`; adding a modifier replaces it and turns a dark surface
@@ -90,8 +109,10 @@ them was learned by breaking something.
 3. **Green is taken.** It means "kept / already in the dataset / free"
    everywhere. Do not use it for "selected", "active" or "primary". The engine
    accents (indigo / amber / sky) were chosen to stay distinguishable in the
-   dark theme AND in deuteranopia, which green+amber does not — see
-   `components/dataset/engineSelection.js`.
+   app's own theme AND in deuteranopia, which green+amber does not — see
+   `components/dataset/engineSelection.js`. Indigo `#4F46E5` is ALSO the brand
+   colour now; it was picked over the emerald the reference art used precisely
+   because green was already spoken for.
 4. **Spell Tailwind class strings out in full.** Tailwind scans source text, so
    a class built by concatenation or interpolation is silently absent from the
    build. No `` `text-${tone}-400` ``.
@@ -110,12 +131,19 @@ them was learned by breaking something.
 6. **Mount every new branch in a test.** `frontend/tests/support/mountJsx.mjs`.
    A source-text test cannot tell a removed branch from a broken one — a
    white-screened Settings page shipped behind a green suite once already.
-7. **The app is dark-only** — `data-theme="dark"` is always on `<html>`
-   (`src/index.css`), and `darkMode` resolves through that selector. There is
-   no toggle, so a light-mode variant added "for completeness" is dead code
-   nobody can reach. Native controls are the exception the CSS already handles:
-   `<option>` and friends fall back to the OS light palette, which is why
-   `color-scheme` is pinned there.
+7. **The app is LIGHT-only.** `index.html` carries `data-theme="light"`, and
+   `src/index.css` defines exactly one palette block (`:root, [data-theme="light"]`).
+   `darkMode: ['selector', '[data-theme="dark"]']` survives in
+   `tailwind.config.js` but selects a block that no longer exists, so a `dark:`
+   variant matches nothing — there are zero of them in `src/`, and one added
+   "for completeness" is dead code nobody can reach. This inverted on
+   2026-08-13/14; anything you read that says "dark-only" predates that.
+
+   Two things that did NOT change with the flip, because they were never about
+   the page palette: `color-scheme` is still pinned for `<option>` and friends,
+   and a control painted ON a photograph still sits on a DARK scrim
+   (`bg-black/40` + `border-white/15`) — arbitrary image content is what that
+   treatment is for, not the page behind it.
 
 ## Releases
 
