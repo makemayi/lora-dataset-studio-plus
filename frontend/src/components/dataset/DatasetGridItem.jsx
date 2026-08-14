@@ -453,6 +453,23 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             onSubmit={(prompt) => onRegenerate?.(img.id, undefined, prompt, { silent: true })}
             onClose={() => setEditingPrompt(false)} />
         )}
+        {/* Caption — a frosted-glass overlay ON the photo, revealed on hover
+            like the toolbar. Read-only here: it opens the editor on click, and
+            the in-place textarea below is gone (the ⛶ dialog owns editing). */}
+        {(cap || '').trim() && img.status === 'keep' && (
+          <button type="button"
+            onClick={(e) => { e.stopPropagation(); if (!busy) setCaptionEditorOpen(true); }}
+            title={busy ? (refused || 'Wait for the running pass to finish') : 'Click to edit the caption'}
+            aria-label="Edit the caption"
+            className="dataset-grid-item__actions absolute inset-x-2 bottom-2 z-20 flex flex-col items-start gap-0.5 rounded-xl bg-black/40 backdrop-blur-md border border-white/10 px-2.5 py-1.5 text-left">
+            <span className="text-white text-[11px] leading-snug line-clamp-3 break-words">{cap}</span>
+            {captionOriginInfo(img.caption_origin).known && (
+              <span className={`text-[9px] leading-none ${captionIsAsserted(img.caption_origin) ? 'text-emerald-300' : 'text-white/50'}`}>
+                {captionOriginInfo(img.caption_origin).chip}
+              </span>
+            )}
+          </button>
+        )}
       </div>
       <div className="relative mx-2 mb-2 flex flex-1 flex-col overflow-hidden rounded-b-[22px] bg-[#0a0b0d]">
         {/* Water reflection of the photo — the same image flipped and faded, so
@@ -496,42 +513,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             className="flex-1 py-1.5 rounded-full text-[11px] bg-white/10 backdrop-blur-[10px] text-white/70 disabled:cursor-not-allowed disabled:opacity-45">✕</button>
         </div>
       )}
-      {img.status === 'keep' && (
-        <div className="m-1.5 mt-0 flex flex-col gap-1">
-          {/* WHO WROTE THE TEXT IN THE BOX BELOW.
-              ITS OWN LINE: the ⛶ / 🗑 caption actions now live in the hover
-              toolbar, so the chip stays beside the textarea as a readout rather
-              than a third control that clipped at the tile's left edge.
-              ALWAYS VISIBLE, unlike those hover actions: this is a readout, not an action, and
-              a provenance you have to hover to discover is one nobody discovers.
-              Only when there IS a caption and its author was recorded — stamping
-              "author not recorded" on every legacy tile would be a grid of identical
-              chips, which is noise; the expanded editor has room to say it and does. */}
-          {(cap || '').trim() && captionOriginInfo(img.caption_origin).known && (
-            <span title={captionOriginInfo(img.caption_origin).title}
-              aria-label={captionOriginInfo(img.caption_origin).short}
-              className={`block truncate text-[10px] leading-none ${
-                captionIsAsserted(img.caption_origin)
-                  ? 'text-emerald-300' : 'text-white/50'}`}>
-              {captionOriginInfo(img.caption_origin).chip}
-            </span>
-          )}
-          <textarea value={cap} onChange={(e) => setCap(e.target.value)}
-            disabled={busy} title={refused || undefined}
-            onFocus={() => { editingRef.current = true; }}
-            onBlur={() => {
-              editingRef.current = false;
-              if (!busy && cap !== (img.caption || '')) onCaption(img.id, cap);
-            }}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.currentTarget.blur(); } }}
-            rows={2} placeholder={datasetKind === 'style'
-              ? 'required: content only, no aesthetic or trigger…'
-              : datasetKind === 'concept'
-                ? 'caption without naming the concept…'
-                : 'caption (without the face)…'} aria-label="Image caption"
-            className="text-[11px] leading-relaxed rounded-xl bg-white/10 p-2.5 text-white placeholder:text-white/40 resize-none focus:outline-none focus:ring-1 focus:ring-primary" />
-        </div>
-      )}
+
         </div>
       </div>
       {captionEditorOpen && (
