@@ -332,6 +332,17 @@ export function useDataset() {
   const currentActivity = (data && String(data.id) === String(currentId))
     ? (data.activity || null)
     : null;
+  /* EVERY live batch, not just the headline. A local batch and an API batch are
+     independent on the server (ComfyUI's single worker vs the API lane's own
+     thread pool), so both can be in flight — and `activity` alone reports one of
+     them, which is what made the second launch look like it had killed the
+     first. Falls back to wrapping the headline so a payload from a server that
+     predates `activities` still drives the lane rules. */
+  const currentActivities = (data && String(data.id) === String(currentId))
+    ? (Array.isArray(data.activities) && data.activities.length
+        ? data.activities
+        : (data.activity ? [data.activity] : []))
+    : [];
   const hasActivity = !!currentActivity;
   useEffect(() => {
     if (!hasActivity || !currentId) return undefined;
@@ -1828,6 +1839,7 @@ export function useDataset() {
   return { datasets, currentId, data, busy: busyLive, localBusy: busy, captioning: captioningLive,
            lastCaptionRun,
            analyzing: analyzingLive, watermarking: watermarkingLive, activity,
+           activities: currentActivities,
            nonces, mirroringIds, swappingIds, refNonce, scoringFaceIds, recaptioningIds, create, open,
           deleteDataset, updateSettings, updateSettingsFor, fetchList, setCurrentId,
           setRef, addExtraRef, removeExtraRef, setPoseSlot, cropPoseSlot, mirrorPoseSlot,

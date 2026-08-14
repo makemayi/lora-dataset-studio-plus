@@ -45,6 +45,7 @@ import {
   defaultValueAt, isAtDefault, resetAriaLabel, RESET_TO_DEFAULT_TEXT,
 } from '../settings/settingDefaults.js';
 import { minimaxH3UnavailableReason, minimaxH3SpeedWarning } from '../../utils/minimaxH3Engine.js';
+import { launchBlockedReason, engineCardLocked } from './generationLanes.js';
 import { kleinUnavailableReason } from '../../utils/localEngineReason.js';
 import {
   SUBJECT_TYPES, SUBJECT_TYPE_LABELS, SUBJECT_TYPE_HINTS,
@@ -212,14 +213,14 @@ const MODE_CHOICES = [
 /** One engine CHECKBOX card. A checkbox, not a radio: engines combine. Each
  *  carries its own accent (see ENGINE_ACCENTS) so a mixed run is readable —
  *  green is deliberately not one of them, it already means "kept / free". */
-function EngineCard({ id, checked, available, generating, onToggle, icon, title, tags, hint }) {
+function EngineCard({ id, checked, available, generating, laneBusy = false, onToggle, icon, title, tags, hint }) {
   const accent = ENGINE_ACCENTS[id];
   return (
     <button type="button" role="checkbox" aria-checked={checked}
       aria-label={ENGINE_LABELS[id]}
       onClick={() => onToggle(id)}
-      disabled={!available || !!generating}
-      title={generating ? 'A generation batch is running — wait for it to finish before changing engines' : undefined}
+      disabled={!available || laneBusy}
+      title={laneBusy ? 'A batch is running in this engine’s lane — wait for it to finish before changing the selection' : undefined}
       className={`relative flex h-full flex-col items-center justify-center gap-2 rounded-[28px] p-4 text-center transition-[box-shadow,transform] duration-200 ${
         checked
           ? `${accent.card} ${accent.ring} ring-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_4px_8px_rgba(0,0,0,0.12),0_10px_20px_rgba(0,0,0,0.12)] -translate-y-0.5`
@@ -280,7 +281,52 @@ export function KreaDial({ id, label, topic, value, min, max, step, description,
   );
 }
 
-export default function VariationCatalog({ datasetId = null, onGenerate, busy, generating = null, hasRef, composition, images = [], bodyFidelity = false, promptSuffix = '', promptSuffixes = null, onSaveSuffixes = null, subjectType = 'human', onSaveSubjectType = null, quickGenerateCompose = null,
+/* One row per live generation batch.
+ *
+ * The button used to carry the progress ("Generating… 12/40"), which worked only
+ * while exactly one batch could exist. Two can now — a local one and an API one
+ * — and a single label would have shown one of them and silently dropped the
+ * other, which is a worse failure than the block it replaced: the user launched
+ * something and the screen says nothing about it.
+ *
+ * Rows, not a merged total: the two lanes finish at completely different rates,
+ * and one bar averaging a 40-image GPU batch with a 4-image API call describes
+ * neither. */
+export function GenerationActivityRows({ activities }) {
+  const rows = (Array.isArray(activities) ? activities : [])
+    .filter((entry) => entry && entry.kind === 'generate');
+  if (!rows.length) return null;
+  return (
+    <div className="mt-2 flex flex-col gap-1">
+      {rows.map((entry, i) => {
+        const label = ENGINE_LABELS[entry.engine] || entry.engine || 'Generating';
+        const total = Number(entry.total) || 0;
+        const done = Number(entry.done) || 0;
+        const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : null;
+        return (
+          <div key={`${entry.engine || 'batch'}-${entry.started_at || i}`}
+            className="flex items-center gap-2 text-[0.6875rem] text-content-muted">
+            <span className="font-medium text-content">{label}</span>
+            {/* Both labels mounted — Chrome auto-translate rewrites text nodes
+                and a ternary swap throws (CLAUDE.md ▸ UI changes). */}
+            <span hidden={!entry.cancelling}>stopping…</span>
+            <span hidden={!!entry.cancelling}>
+              {total > 0 ? `${done}/${total}` : 'running'}
+            </span>
+            {pct !== null && (
+              <span className="h-1 w-24 overflow-hidden rounded-full bg-surface-raised">
+                <span className="block h-full rounded-full bg-gradient-primary"
+                  style={{ width: `${pct}%` }} />
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export default function VariationCatalog({ datasetId = null, onGenerate, busy, activities = [], generating = null, hasRef, composition, images = [], bodyFidelity = false, promptSuffix = '', promptSuffixes = null, onSaveSuffixes = null, subjectType = 'human', onSaveSubjectType = null, quickGenerateCompose = null,
   quickGenerateComponents = null, saveQuickGenerateCustomComponents = null }) {
   const toast = useToast();
   const { caps } = useCapabilities();
@@ -748,6 +794,12 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
     engines, shotCount: selected.size, mode: engineMode, multiplier,
     maxFanout: Number(caps.max_fanout) || 0,
   });
+  /* ...and separately, whether the LANES this selection needs are free. A local
+     batch and an API batch are independent on the server, so a ComfyUI run must
+     not grey out ChatGPT — that used to cost the whole duration of a 40-image
+     batch on a lane the machine was never using. Kept apart from
+     `blockedReason` because it is temporary: this one clears by itself. */
+  const laneBlockedReason = launchBlockedReason(engines, activities);
   // Klein unavailable has FOUR distinct causes and the hint must name the right
   // one — a reachable ComfyUI with no Klein model used to show "Configure
   // ComfyUI", sending the user to re-check a step that was already green; and the
@@ -1100,7 +1152,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
           with. One column on a phone (nothing is clipped at 400 px), two from sm. */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 auto-rows-fr">
         {enabledEngines.includes('klein') && (
-        <EngineCard id="klein" checked={isKlein} available={klAvailable} generating={generating}
+        <EngineCard id="klein" checked={isKlein} available={klAvailable} generating={generating} laneBusy={engineCardLocked('klein', activities)}
           onToggle={toggleEngine} share={engineShare('klein')}
           icon={<GpuIcon className={`w-9 h-9 shrink-0 ${isKlein ? ENGINE_ACCENTS.klein.icon : 'text-content-subtle'}`} />}
           title={<>Klein <span className="font-normal text-content-subtle">· local</span></>}
@@ -1121,7 +1173,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
             from the reference photo ALONE (no character LoRA needed), which is
             exactly the bootstrap case: a character that has no LoRA yet. */}
         {enabledEngines.includes('krea') && (
-        <EngineCard id="krea" checked={isKrea} available={krAvailable} generating={generating}
+        <EngineCard id="krea" checked={isKrea} available={krAvailable} generating={generating} laneBusy={engineCardLocked('krea', activities)}
           onToggle={toggleEngine} share={engineShare('krea')}
           icon={<IdentityFrameIcon className={`w-9 h-9 shrink-0 ${isKrea ? ENGINE_ACCENTS.krea.icon : 'text-content-subtle'}`} />}
           title={<>Krea 2 Edit <span className="font-normal text-content-subtle">· local</span></>}
@@ -1142,7 +1194,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
             keeps the best single frame. Slowest of the three, and the only
             engine whose speed depends on how ComfyUI was LAUNCHED. */}
         {enabledEngines.includes('minimax_h3') && (
-        <EngineCard id="minimax_h3" checked={isH3} available={h3Available} generating={generating}
+        <EngineCard id="minimax_h3" checked={isH3} available={h3Available} generating={generating} laneBusy={engineCardLocked('minimax_h3', activities)}
           onToggle={toggleEngine} share={engineShare('minimax_h3')}
           icon={<VideoFrameIcon className={`w-9 h-9 shrink-0 ${isH3 ? ENGINE_ACCENTS.minimax_h3.icon : 'text-content-subtle'}`} />}
           title={<>MiniMax H3 <span className="font-normal text-content-subtle">· local</span></>}
@@ -1160,7 +1212,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
           )} />
         )}
         {enabledEngines.includes('nanobanana') && (
-        <EngineCard id="nanobanana" checked={isNB} available={nbAvailable} generating={generating}
+        <EngineCard id="nanobanana" checked={isNB} available={nbAvailable} generating={generating} laneBusy={engineCardLocked('nanobanana', activities)}
           onToggle={toggleEngine} share={engineShare('nanobanana')}
           icon={<BananaIcon className={`w-9 h-9 shrink-0 ${isNB ? ENGINE_ACCENTS.nanobanana.icon : 'text-content-subtle'}`} />}
           title={<>Nano Banana Pro <span className="font-normal text-content-subtle">· API</span></>}
@@ -1178,7 +1230,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
           )} />
         )}
         {enabledEngines.includes('chatgpt') && (
-        <EngineCard id="chatgpt" checked={isGPT} available={gptAvailable} generating={generating}
+        <EngineCard id="chatgpt" checked={isGPT} available={gptAvailable} generating={generating} laneBusy={engineCardLocked('chatgpt', activities)}
           onToggle={toggleEngine} share={engineShare('chatgpt')}
           icon={<ChatGptIcon className={`w-9 h-9 shrink-0 ${isGPT ? ENGINE_ACCENTS.chatgpt.icon : 'text-content-subtle'}`} />}
           title={<>ChatGPT <span className="font-normal text-content-subtle">
@@ -1213,7 +1265,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
           )} />
         )}
         {enabledEngines.includes('openrouter') && (
-        <EngineCard id="openrouter" checked={isOR} available={orAvailable} generating={generating}
+        <EngineCard id="openrouter" checked={isOR} available={orAvailable} generating={generating} laneBusy={engineCardLocked('openrouter', activities)}
           onToggle={toggleEngine} share={engineShare('openrouter')}
           icon={<RouterIcon className={`w-9 h-9 shrink-0 ${isOR ? ENGINE_ACCENTS.openrouter.icon : 'text-content-subtle'}`} />}
           title={<>OpenRouter <span className="font-normal text-content-subtle">· API</span></>}
@@ -1235,7 +1287,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
           )} />
         )}
         {enabledEngines.includes('qwen') && (
-        <EngineCard id="qwen" checked={isQwen} available={qwenAvailable} generating={generating}
+        <EngineCard id="qwen" checked={isQwen} available={qwenAvailable} generating={generating} laneBusy={engineCardLocked('qwen', activities)}
           onToggle={toggleEngine} share={engineShare('qwen')}
           icon={<span className={`w-9 h-9 flex items-center justify-center shrink-0 text-lg font-bold ${isQwen ? ENGINE_ACCENTS.qwen.icon : 'text-content-subtle'}`}>🌟</span>}
           title={<>Qwen Image <span className="font-normal text-content-subtle">· API</span></>}
@@ -2055,20 +2107,28 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
         {blockedReason && hasRef && (
           <span className="text-amber-700 text-[0.6875rem]">{blockedReason}</span>
         )}
-        {/* Disabled for the WHOLE batch, not just the launch request: `busy` is the
-            hook's busyLive (local flag OR any server-side activity, restored on
-            reload), so a generation already in flight — Nano Banana / ChatGPT /
-            Klein alike — keeps this locked with a visible reason. */}
-        <button type="button" onClick={go} disabled={busy || !hasRef || !!blockedReason}
-          title={generating ? 'A generation batch is already running' : (blockedReason || undefined)}
+        {/* The lane message is separate and quieter: it is not a mistake to fix,
+            it is a wait that ends on its own. */}
+        {!blockedReason && laneBlockedReason && hasRef && (
+          <span className="text-content-muted text-[0.6875rem]">{laneBlockedReason}</span>
+        )}
+        {/* Disabled while THIS launch is in flight (`busy` is the hook's local
+            flag) or while a lane this selection needs is taken. It is no longer
+            "any activity anywhere": that locked the API lane for the whole of a
+            local batch the machine was never using it for. */}
+        <button type="button" onClick={go}
+          disabled={busy || !hasRef || !!blockedReason || !!laneBlockedReason}
+          title={laneBlockedReason || blockedReason || undefined}
           className="ml-auto px-4 py-1.5 rounded-lg bg-gradient-primary text-white text-sm font-semibold disabled:opacity-40">
           {busy
-            ? (generating
-                ? `Generating…${generating.total ? ` ${generating.done}/${generating.total}` : ''}`
-                : '…')
+            ? '…'
             : `⚡ Generate (${totalImages(selected.size, engines, engineMode, multiplier)})`}
         </button>
       </div>
+
+      {/* Progress lives here, not on the button: two batches can be live and a
+          single label would show one and silently drop the other. */}
+      <GenerationActivityRows activities={activities} />
 
       {quickGenOpen && (
         <QuickGenerateDialog

@@ -1392,7 +1392,14 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   <ClassifyFramingButton images={images} ollama={caps.ollama} capsLoading={capsLoading}
                     busy={ds.busy} activity={act} onClassify={(n) => ds.classify(n)} />
                   <div id="ds-add-generate" tabIndex={-1} className="scroll-mt-20">
-                    <VariationCatalog key={`vc-${d.id}-${bodyFid}`} datasetId={d.id} busy={ds.busy}
+                    {/* `busy` stays the LOCAL flag only: a batch already in
+                        flight no longer locks the whole panel, because a local
+                        batch and an API batch are independent on the server.
+                        Which lanes are actually taken comes from `activities`,
+                        and the panel decides per engine — see
+                        dataset/generationLanes.js. */}
+                    <VariationCatalog key={`vc-${d.id}-${bodyFid}`} datasetId={d.id} busy={ds.localBusy}
+                      activities={ds.activities}
                       generating={act && act.kind === 'generate' ? act : null}
                       onGenerate={(...args) => {
                         // Guard-rail: a batch is already in flight — launching another one

@@ -343,3 +343,33 @@ def test_caption_kind_is_recaption_when_forced(app, monkeypatch):
         svc.caption_images(LOCAL_USER, ds.id, force=False)
         assert kinds and kinds[0] == 'caption'
         assert da.get(ds.id) is None
+
+
+def test_list_all_reports_every_batch_and_get_is_its_head():
+    """A LOCAL batch and an API batch are independent on the server — ComfyUI's
+    single worker and the API lane's own thread pool share nothing — so both can
+    be live at once. `get()` reports the headline; with only that to read, the UI
+    showed one batch and silently dropped the other."""
+    from app.services import dataset_activity as da
+    da.reset()
+    local = da.begin(7, 'generate', total=40, engine='klein')
+    time.sleep(0.01)
+    api = da.begin(7, 'generate', total=4, engine='chatgpt')
+
+    rows = da.list_all(7)
+    assert [r['engine'] for r in rows] == ['chatgpt', 'klein']
+    assert [r['total'] for r in rows] == [4, 40]
+    # The two must never disagree about which batch is the principal one.
+    assert da.get(7) == rows[0]
+
+    da.end(api)
+    assert [r['engine'] for r in da.list_all(7)] == ['klein']
+    da.end(local)
+    assert da.list_all(7) == []
+    assert da.get(7) is None
+
+
+def test_list_all_is_empty_rather_than_none_for_an_idle_dataset():
+    from app.services import dataset_activity as da
+    da.reset()
+    assert da.list_all(99) == []

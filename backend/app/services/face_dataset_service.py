@@ -3479,6 +3479,14 @@ def dataset_payload(user_id, dataset_id):
         # empty after a server restart, so a batch killed with the process leaves no
         # phantom indicator.
         'activity': dataset_activity.get(dataset_id),
+        # EVERY live batch, newest first — `activity` above is this list's first
+        # element and stays for every caller that only needs the headline.
+        #
+        # The list exists because a LOCAL batch and an API batch are independent
+        # (ComfyUI's single-worker queue and the API lane's own thread pool share
+        # nothing), so both can be in flight at once. With only the headline to
+        # read, launching the second made the first vanish from the screen.
+        'activities': dataset_activity.list_all(dataset_id),
         # Pending reference EDIT (server background job) as {status, engine, prompt,
         # candidate_filename, error, started_at} — or None. The modal RESTORES its
         # Before/After from this after a tab sleep or reload; the 'edit_reference'

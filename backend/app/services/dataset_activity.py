@@ -311,6 +311,48 @@ def get(dataset_id):
         return result
 
 
+def list_all(dataset_id):
+    """EVERY live batch on ``dataset_id``, newest first, as a list of the same
+    dicts ``get()`` returns.
+
+    `get()` picks ONE winner because the header can only show one line, and for
+    years that was harmless: the batches that overlapped were a real handle plus
+    its own `sync_pending` reconstruction, i.e. two views of one thing.
+
+    It stopped being harmless when the UI learned that a LOCAL batch and an API
+    batch are independent. Those are two genuinely different jobs — ComfyUI's
+    single-worker queue and the API lane's own thread pool share nothing — and
+    with only `get()` to look at, starting the second one made the first one's
+    progress disappear from the screen. Reporting one and running two is worse
+    than refusing the second, which is what the UI used to do.
+
+    Same ordering rule as `get()` so the two never disagree about which is the
+    principal batch: a worker-owned entry outranks a `sync_pending`
+    reconstruction, then the most recently started wins. `get()` is exactly this
+    list's first element, and a test pins that."""
+    dataset_id = normalize_dataset_id(dataset_id)
+    now = time.time()
+    with _lock:
+        bucket = _purge_stale_locked(dataset_id, now)
+        if not bucket:
+            return []
+        ordered = sorted(bucket.values(),
+                         key=lambda e: (0 if e.get('_synced') else 1, e['started_at']),
+                         reverse=True)
+        out = []
+        for entry in ordered:
+            item = {'kind': entry['kind'], 'done': entry['done'],
+                    'total': entry['total'], 'started_at': entry['started_at']}
+            if entry.get('detail'):
+                item['detail'] = entry['detail']
+            if entry.get('engine'):
+                item['engine'] = entry['engine']
+            if entry['kind'] in (_cancel.get(dataset_id) or ()):
+                item['cancelling'] = True
+            out.append(item)
+        return out
+
+
 def running(dataset_id, kinds):
     """True when a batch of one of ``kinds`` is live on ``dataset_id``. Used to refuse
     a second ✨ improve batch (-> 409) instead of racing two workers on one cap."""

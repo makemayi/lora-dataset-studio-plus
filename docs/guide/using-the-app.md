@@ -407,6 +407,34 @@ card (remove it and add it again) and press **Keep** once more.
 
 *Feature requested by ashish.sinha (Discord).*
 
+## Two batches at once: one local, one API
+
+A local batch and an API batch run **at the same time**, and always could on the
+server side — ComfyUI work goes through one queue, the API engines fan out on
+their own threads, and neither waits for the other. Until 2026-08-14 the panel
+did not know that: a single flag greyed out every engine card and the Generate
+button whenever *any* batch was live, so a 40-image Klein run made the paid API
+lane unclickable for twenty minutes the GPU was never going to use.
+
+Now a running batch blocks **its own lane only**:
+
+| Running | Blocked | Free |
+| --- | --- | --- |
+| Klein / Krea / MiniMax H3 | the other local engines | ChatGPT, Nano Banana, OpenRouter, Qwen |
+| ChatGPT / Nano Banana / … | the other API engines | Klein, Krea, MiniMax H3 |
+
+**Local engines still queue behind each other.** That is not a UI decision — you
+have one GPU, and ComfyUI runs one job at a time. The API lane is limited by the
+provider instead, which is why it does not have to wait for your card.
+
+A caption pass, a watermark sweep or an ✨ improve run counts as **local**: those
+drive ComfyUI or the local ML environments too.
+
+Each live batch gets its own progress row under the Generate button, with the
+engine named. There is deliberately no combined total — a 40-image GPU batch and
+a 4-image API call finish at completely different rates, and one bar averaging
+them describes neither.
+
 ## Generate a random batch by count and ratio
 
 Next to the variation catalog's preset buttons is **🎲 Quick generate** —

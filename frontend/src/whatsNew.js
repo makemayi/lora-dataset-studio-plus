@@ -50,6 +50,19 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-14-local-and-api-run-together',
+    date: '2026-08-14',
+    title: 'A ComfyUI batch no longer blocks ChatGPT (or the other way round)',
+    blurb: 'The server was always happy to run both — local renders go through '
+      + 'ComfyUI’s queue and the API engines fan out on their own threads, '
+      + 'sharing nothing. The panel was the thing saying no: one flag greyed out '
+      + 'every engine whenever any batch was live, so a 40-image local run made '
+      + 'the paid API lane unclickable for its whole duration. Now a batch blocks '
+      + 'only its own lane, and both runs show their own progress instead of one '
+      + 'label that could show only one of them.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-14-h3-swap-accelerator-lora',
     date: '2026-08-14',
     title: 'Put your own accelerator LoRA on the H3 head swap — and set its step count',
