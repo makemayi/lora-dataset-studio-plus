@@ -266,17 +266,27 @@ test('an unknown focus id falls back instead of blanking the page', () => {
 /* The 🎭↔ swap engine card. Both branches of its help line mount — the H3 one
    and the "these do nothing on Klein" one — because a `hidden` pair that only
    ever renders on one branch is a branch nobody has seen. */
-test('the face swap engine card offers both engines and all three H3 stages', () => {
+test('the face swap engine card offers all three engines and every H3 stage', () => {
   const html = render({ engines: {}, focusId: KLEIN })
   assert.match(html, /Face \/ head swap engine/)
   assert.match(html, /value="klein"/)
   assert.match(html, /value="minimax_h3"/)
-  assert.match(html, /How much of the shot MiniMax H3 sees \(3\.0×\)/)
+  // Two H3 GRAPHS, not two versions of one — the new one re-renders the whole
+  // frame, the old one composites a crop back. Losing the old id would silently
+  // drop everyone who is set to it back to Klein.
+  assert.match(html, /value="minimax_h3_old"/)
+  assert.match(html, /MiniMax H3 \(new\)/)
+  assert.match(html, /MiniMax H3 \(old\)/)
+  assert.match(html, /id="face-swap-h3-new-mask-overlay"/)
+  assert.match(html, /id="face-swap-h3-new-ollama"/)
+  assert.match(html, /Blue mask overlay/)
+  assert.match(html, /Ollama head analysis/)
+  assert.match(html, /How much of the shot MiniMax H3 \(old\) sees \(3\.0×\)/)
   assert.match(html, /id="face-swap-h3-context"/)
   assert.match(html, /How solidly the head is painted out \(1\.00\)/)
   assert.match(html, /id="face-swap-h3-mask-opacity"/)
   assert.match(html, /id="face-swap-h3-blend"/)
-  assert.match(html, /How far the head is blended back into the photo \(40 px\)/)
+  assert.match(html, /How far the head is blended back into the photo, MiniMax H3 \(old\) \(40 px\)/)
   assert.match(html, /id="face-swap-h3-mask-source"/)
   assert.match(html, /id="face-swap-h3-mask-prompt"/)
   assert.match(html, /SAM 3 — you can name any region/)
@@ -300,13 +310,39 @@ test('the stage help says which engine it applies to, without swapping a text no
   }))
   const klein = withEngine('klein')
   const h3 = withEngine('minimax_h3')
-  // Both sentences are always in the markup; only `hidden` moves. Chrome
+  const h3old = withEngine('minimax_h3_old')
+  // Every sentence is always in the markup; only `hidden` moves. Chrome
   // auto-translate rewrites text nodes, and a ternary swap throws there.
-  for (const html of [klein, h3]) {
-    assert.match(html, /Three extra passes the swap graph can run/)
-    assert.match(html, /do nothing while the\s+swap runs on Klein/)
+  for (const html of [klein, h3, h3old]) {
+    assert.match(html, /Three extra passes the old swap graph can run/)
+    assert.match(html, /MiniMax H3 \(old\) engine only/)
+    assert.match(html, /Two nodes the new graph carries switched off/)
+    assert.match(html, /MiniMax H3 \(new\) engine only/)
+    // ...including the two crop/stitch dials saying they are inert on the new
+    // graph, which is the whole reason the old engine was kept.
+    assert.match(html, /this slider does nothing until\s+you switch to \(old\)/)
+    assert.match(html, /Old H3 graph only — it is that graph(&#x27;|'|’)s stitch\./)
   }
   assert.notEqual(klein, h3)
+  assert.notEqual(h3, h3old)
+})
+
+test('the new H3 stages render checked from their own config key', () => {
+  const html = renderToStaticMarkup(createElement(EnginesSection, {
+    config: { ...CONFIG, face_swap: { engine: 'minimax_h3',
+                                      h3_new_stages: { ollama: true } } },
+    focusId: KLEIN,
+    configDefaults: { ...CONFIG, face_swap: { engine: 'klein' } },
+    setField: () => {}, toggleEngine: () => {}, caps: {}, refreshCaps: () => {},
+    toast: { error: () => {}, success: () => {} },
+    secretsPresence: {}, secretInputs: {}, setSecretInputs: () => {},
+    testResults: {}, recordTestResult: () => {}, saveSecretIfPending: () => {},
+    handleDeleteSecret: () => {},
+  }))
+  assert.match(html, /id="face-swap-h3-new-ollama"[^>]*checked/)
+  assert.doesNotMatch(html, /id="face-swap-h3-new-mask-overlay"[^>]*checked/)
+  // The OLD graph's stages read a different key and must not follow.
+  assert.doesNotMatch(html, /id="face-swap-h3-lama"[^>]*checked/)
 })
 
 test('a checked H3 stage renders checked', () => {

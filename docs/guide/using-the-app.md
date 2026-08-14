@@ -1847,9 +1847,14 @@ it stays hidden rather than showing a button that would fail on click.
 This runs one fixed ComfyUI workflow per engine — not a general "run any
 workflow" tool, and not configurable per-tile. Which engine runs is a setting
 (**Settings ▸ Image engines ▸ Klein ▸ Face / head swap engine**): **Klein**
-(Flux.2 9B plus a dedicated character-swap LoRA, fast) or **MiniMax H3** (masks
-the head out and re-stages your reference into it — no swap LoRA, but the whole
-H3 stack and much slower). Whichever is selected, a missing weight or node pack
+(Flux.2 9B plus a dedicated character-swap LoRA, fast), **MiniMax H3 (new)** (a
+Klein pass erases the head, then H3 re-renders the shot around your reference —
+no swap LoRA, but both model families and much slower) or **MiniMax H3 (old)**
+(masks the head, sends only a crop through H3 and composites it back). The
+difference between the two H3 entries is worth knowing before you pick: the new
+one re-renders the **whole frame**, so body, clothing and background come back
+re-drawn rather than preserved, while the old one only ever repaints inside the
+mask. Whichever is selected, a missing weight or node pack
 is named before anything is queued. The Klein swap LoRA is a separate file from
 the Klein model Setup already installs; if it isn't on disk the error names the
 exact path to place it at.

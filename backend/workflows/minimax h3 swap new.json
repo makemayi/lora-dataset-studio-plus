@@ -1,0 +1,729 @@
+{
+  "114": {
+    "inputs": {
+      "image": "reference.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "脸图"
+    }
+  },
+  "124": {
+    "inputs": {
+      "samples": [
+        "127",
+        0
+      ],
+      "vae": [
+        "925:921",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "126": {
+    "inputs": {
+      "scheduler": "simple",
+      "steps": 25,
+      "denoise": 1,
+      "model": [
+        "925:315",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "基本调度器"
+    }
+  },
+  "127": {
+    "inputs": {
+      "noise": [
+        "131",
+        0
+      ],
+      "guider": [
+        "128",
+        0
+      ],
+      "sampler": [
+        "191",
+        0
+      ],
+      "sigmas": [
+        "126",
+        0
+      ],
+      "latent_image": [
+        "170",
+        1
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "自定义采样器（高级）"
+    }
+  },
+  "128": {
+    "inputs": {
+      "model": [
+        "925:315",
+        0
+      ],
+      "conditioning": [
+        "170",
+        0
+      ]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "基本引导器"
+    }
+  },
+  "131": {
+    "inputs": {
+      "noise_seed": 0
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "随机噪波"
+    }
+  },
+  "139": {
+    "inputs": {
+      "value": 5
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Frame Length"
+    }
+  },
+  "165": {
+    "inputs": {
+      "filename_prefix": "MinimaxH3SwapNew",
+      "images": [
+        "309",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Output Image"
+    }
+  },
+  "170": {
+    "inputs": {
+      "prompt": [
+        "991",
+        0
+      ],
+      "width": [
+        "959",
+        0
+      ],
+      "height": [
+        "959",
+        1
+      ],
+      "length": [
+        "139",
+        0
+      ],
+      "ref_image_size": "max",
+      "clip": [
+        "925:922",
+        0
+      ],
+      "vae": [
+        "925:921",
+        0
+      ],
+      "audio_vae": [
+        "925:926",
+        0
+      ],
+      "ref_images.ref_image_0": [
+        "311",
+        0
+      ],
+      "ref_images.ref_image_1": [
+        "983:1002",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3ReferenceToVideo",
+    "_meta": {
+      "title": "MiniMax H3 Reference to Video"
+    }
+  },
+  "191": {
+    "inputs": {
+      "sampler_name": "res_multistep"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "K采样器选择"
+    }
+  },
+  "304": {
+    "inputs": {
+      "select_count": 1,
+      "weight_sharpness": 1,
+      "weight_exposure": 0.5,
+      "weight_reference": 1,
+      "target_brightness": 0.5,
+      "brightness_tolerance": 0.25,
+      "min_score": 0,
+      "dedup_threshold": 0.98,
+      "images": [
+        "124",
+        0
+      ],
+      "reference": [
+        "311",
+        0
+      ],
+      "clip_vision": [
+        "305",
+        0
+      ]
+    },
+    "class_type": "H3FrameSelect",
+    "_meta": {
+      "title": "H3 Frame Select"
+    }
+  },
+  "305": {
+    "inputs": {
+      "clip_name": "CLIP-ViT-H-fp16.safetensors"
+    },
+    "class_type": "CLIPVisionLoader",
+    "_meta": {
+      "title": "加载CLIP视觉"
+    }
+  },
+  "309": {
+    "inputs": {
+      "resize_type": "scale by multiplier",
+      "resize_type.scale": 2,
+      "quality": "ULTRA",
+      "images": [
+        "304",
+        0
+      ]
+    },
+    "class_type": "RTXVideoSuperResolution",
+    "_meta": {
+      "title": "RTX Video Super Resolution"
+    }
+  },
+  "311": {
+    "inputs": {
+      "longer_edge": 1024,
+      "images": [
+        "114",
+        0
+      ]
+    },
+    "class_type": "ResizeImagesByLongerEdge",
+    "_meta": {
+      "title": "缩放图像（长边）"
+    }
+  },
+  "928": {
+    "inputs": {
+      "longer_edge": 1024,
+      "images": [
+        "1003",
+        0
+      ]
+    },
+    "class_type": "ResizeImagesByLongerEdge",
+    "_meta": {
+      "title": "缩放图像（长边）"
+    }
+  },
+  "957": {
+    "inputs": {
+      "background_color": "#222222",
+      "Hat": false,
+      "Hair": true,
+      "Face": true,
+      "Sunglasses": false,
+      "Upper-clothes": false,
+      "Skirt": false,
+      "Dress": false,
+      "Belt": false,
+      "Pants": false,
+      "Left-arm": false,
+      "Right-arm": false,
+      "Left-leg": false,
+      "Right-leg": false,
+      "Bag": false,
+      "Scarf": false,
+      "Left-shoe": false,
+      "Right-shoe": false,
+      "Background": false,
+      "process_res": 1024,
+      "mask_blur": 0,
+      "mask_offset": 0,
+      "invert_output": false,
+      "background": "Alpha",
+      "images": [
+        "928",
+        0
+      ]
+    },
+    "class_type": "ClothesSegment",
+    "_meta": {
+      "title": "衣物分割 (RMBG)"
+    }
+  },
+  "959": {
+    "inputs": {
+      "aspect_ratio": "source image",
+      "resolution_profile": "native detail | 0.98 MP",
+      "custom_megapixels": 2,
+      "limit_to_native_area": false,
+      "source_image": [
+        "928",
+        0
+      ]
+    },
+    "class_type": "H3ImageResolutionPreset",
+    "_meta": {
+      "title": "MiniMax H3 Image • Resolution Preset"
+    }
+  },
+  "988": {
+    "inputs": {
+      "prompt": "你是一个专业的图像头部分析专家，只负责精准描述图片中人物的头部信息，用于后续换头操作。\n\n请同时参考提供的RGB图片和深度图，严格按照以下要求输出，不要描述身体、服装、背景、发型、五官细节或任何其他内容：\n\n输出必须以「图片中头部位于」作为开头。\n\n1. 头部位置：在画面中的大致位置（左上/中上/右上/左中/正中/右中/左下/中下/右下），以及占画面的大致比例。\n2. 头部朝向：正面、左侧脸（角度）、右侧脸（角度）、微侧、仰视、俯视、低头等，尽量给出具体角度。\n3. 头部姿态与动作：是否歪头、转头、抬头、低头、点头等，描述自然动作。\n4. 表情：详细描述眉毛、眼睛、嘴部状态和整体情绪（中性、微笑、严肃、惊讶、愤怒等）。\n5. 光照与阴影：头部受光方向、脸部明暗分布，是否有硬阴影或柔光。\n6. 深度相关信息（重点参考深度图）：\n   - 头部在深度上的前后位置\n   - 脖子与肩膀的深度衔接关系\n   - 头部是否存在明显遮挡\n   - 头部的大致体积感与透视关系\n7. 自身部位相对位置：描述头部与自身其他部位（如肩膀、脖子、躯干）的相对位置关系。\n8. 与画面最醒目部位的相对位置：描述头部与图片中最醒目/最突出部位之间的相对位置关系。\n9. 脸部遮挡情况：如果脸部存在遮挡，必须明确说明被遮挡的具体部位（如眼睛、鼻子、嘴巴、半边脸等），以及被什么物体遮挡（如手、头发、口罩、物体、另一人等）。\n10. 其他影响换头的关键细节：眼镜、帽子、耳环、面部遮挡物、等。\n\n输出要求：\n- 必须以「图片中头部位于」开头\n- 只输出头部相关信息\n- 语言简洁精准，适合直接用于换头提示词参考\n- 如果图片中有多个人，分别编号描述\n- 不确定的地方标注“不确定”\n\n请参考下面的范例：\n图片中头部位于中上偏右区域，占画面比例约8%。\n\n* **朝向与姿态**：右侧脸微侧（约45度），呈趴卧低头、向后下方窥视的姿态。\n* **表情**：眼神向下注视，带有中性、慵懒情绪，嘴部及下半脸不可见。\n* **光照**：整体为柔和散射光，面部受光均匀，无强硬阴影。\n* **深度与相对位置**：处于画面最远端，与前景呈极强透视对比；位于自身肩膀后方，处于画面最醒目部位（臀部）的右上方远端。\n* **脸部遮挡**：脸部下半部分（鼻子下方、嘴巴、下巴）被自身身体及臀部线条完全遮挡，仅露出额头、左眼及部分左脸颊。\n* **关键细节**：左耳戴有一颗小耳环，换头时需严格处理下脸部被身体遮挡的边缘。",
+      "input_type": "image",
+      "ollama_model": "satgeze/gemma4-12b-uncensored-1.5m:latest",
+      "keep_alive": "off",
+      "stream": true,
+      "think": true,
+      "structure_output": false,
+      "prompt_structure": "Custom",
+      "structure_format": "你是一个专业的图像头部分析专家，只负责精准描述图片中人物的头部信息，用于后续换头操作。\n\n请同时参考提供的RGB图片和深度图，严格按照以下要求输出，不要描述身体、服装、背景、发型、五官细节或任何其他内容：\n\n输出必须以「图片中头部位于」作为开头。\n\n1. 头部位置：在画面中的大致位置（左上/中上/右上/左中/正中/右中/左下/中下/右下），以及占画面的大致比例。\n2. 头部朝向：正面、左侧脸（角度）、右侧脸（角度）、微侧、仰视、俯视、低头等，尽量给出具体角度。\n3. 头部姿态与动作：是否歪头、转头、抬头、低头、点头等，描述自然动作。\n4. 表情：详细描述眉毛、眼睛、嘴部状态和整体情绪（中性、微笑、严肃、惊讶、愤怒等）。\n5. 光照与阴影：头部受光方向、脸部明暗分布，是否有硬阴影或柔光。\n6. 深度相关信息（重点参考深度图）：\n   - 头部在深度上的前后位置\n   - 脖子与肩膀的深度衔接关系\n   - 头部是否存在明显遮挡\n   - 头部的大致体积感与透视关系\n7. 自身部位相对位置：描述头部与自身其他部位（如肩膀、脖子、躯干）的相对位置关系。\n8. 与画面最醒目部位的相对位置：描述头部与图片中最醒目/最突出部位之间的相对位置关系。\n9. 脸部遮挡情况：如果脸部存在遮挡，必须明确说明被遮挡的具体部位（如眼睛、鼻子、嘴巴、半边脸等），以及被什么物体遮挡（如手、头发、口罩、物体、另一人等）。\n10. 其他影响换头的关键细节：眼镜、帽子、耳环、面部遮挡物等。\n\n输出要求：\n- 必须以「图片中头部位于」开头\n- 只输出头部相关信息\n- 语言简洁精准，适合直接用于换头提示词参考\n- 如果图片中有多个人，分别编号描述\n- 不确定的地方标注“不确定”\n\n请参考下面的范例：\n图片中头部位于中上偏右区域，占画面比例约8%。\n\n* **朝向与姿态**：右侧脸微侧（约45度），呈趴卧低头、向后下方窥视的姿态。\n* **表情**：眼神向下注视，带有中性、慵懒情绪，嘴部及下半脸不可见。\n* **光照**：整体为柔和散射光，面部受光均匀，无强硬阴影。\n* **深度与相对位置**：处于画面最远端，与前景呈极强透视对比；位于自身肩膀后方，处于画面最醒目部位（臀部）的右上方远端。\n* **脸部遮挡**：脸部下半部分（鼻子下方、嘴巴、下巴）被自身身体及臀部线条完全遮挡，仅露出额头、左眼及部分左脸颊。\n* **关键细节**：左耳戴有一颗小耳环，换头时需严格处理下脸部被身体遮挡的边缘。",
+      "output_format": "raw_text",
+      "seed": 0,
+      "image1": [
+        "928",
+        0
+      ]
+    },
+    "class_type": "OllamaAPI",
+    "_meta": {
+      "title": "Ollama API"
+    }
+  },
+  "990": {
+    "inputs": {
+      "text": "精确换头：把 <Picture 1> 的头部完美融合到 <Picture 2> 的身体上。\n头部大小严格匹配 <Picture 2> 的脖子宽度和肩膀比例，既不过大也不过小。\n头部位置精确居中对齐脖子，下巴自然衔接锁骨位置。\n皮肤色调、光线、阴影完全统一，脖子过渡自然无痕迹。\n严格保留图1的脸部特征和发型，严格保留图2的身体、服装与背景。\n高清、真实、比例正确。下面是图片头部的相关信息，请严格按照下面的说明进行。\n\n"
+    },
+    "class_type": "Text Multiline",
+    "_meta": {
+      "title": "Text Multiline"
+    }
+  },
+  "991": {
+    "inputs": {
+      "delimiter": ", ",
+      "clean_whitespace": "true",
+      "text_a": [
+        "990",
+        0
+      ],
+      "text_b": [
+        "988",
+        0
+      ]
+    },
+    "class_type": "Text Concatenate",
+    "_meta": {
+      "title": "Text Concatenate"
+    }
+  },
+  "1003": {
+    "inputs": {
+      "image": "target.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "目标图"
+    }
+  },
+  "925:315": {
+    "inputs": {
+      "sage_attention": "auto",
+      "allow_compile": false,
+      "model": [
+        "925:428",
+        0
+      ]
+    },
+    "class_type": "PathchSageAttentionKJ",
+    "_meta": {
+      "title": "Patch Sage Attention KJ"
+    }
+  },
+  "925:428": {
+    "inputs": {
+      "model": [
+        "925:427",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3MemoryEfficientSageAttentionPatch",
+    "_meta": {
+      "title": "MiniMax H3 Mem Eff Sage Attention Patch"
+    }
+  },
+  "925:427": {
+    "inputs": {
+      "base_model": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+      "overlay_model": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "overlay_preset": "block_range_adaln",
+      "block_range_start": 30,
+      "block_range_end": 49,
+      "final_adaln_from_overlay": false,
+      "custom_overlays": "",
+      "custom_base": "",
+      "weight_dtype": "default"
+    },
+    "class_type": "MiniMaxH3HybridLoader",
+    "_meta": {
+      "title": "MiniMax H3 Hybrid Loader"
+    }
+  },
+  "925:921": {
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "925:922": {
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "type": "minimax",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "925:926": {
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "983:962": {
+    "inputs": {
+      "unet_name": "flux-2-klein-9b-int8.safetensors",
+      "weight_dtype": "default",
+      "model_type": "flux2",
+      "on_the_fly_quantization": false,
+      "enable_convrot": true,
+      "lora_mode": "None"
+    },
+    "class_type": "OTUNetLoaderW8A8",
+    "_meta": {
+      "title": "Load Diffusion Model INT8 (W8A8)"
+    }
+  },
+  "983:963": {
+    "inputs": {
+      "clip_name": "qwen_3_8b_fp8mixed.safetensors",
+      "type": "flux2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "983:964": {
+    "inputs": {
+      "text": "移除整个头部,从画面中抹除人物的头部包括头发，脸部，脸部配饰，头部配饰，保留颈部。将消除的头部转换为脸部深度图显示\n",
+      "clip": [
+        "983:963",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "983:966": {
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "983:967": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "megapixels": 1,
+      "resolution_steps": 1,
+      "image": [
+        "928",
+        0
+      ]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "缩放图像（像素）"
+    }
+  },
+  "983:970:974": {
+    "inputs": {
+      "conditioning": [
+        "983:965",
+        0
+      ],
+      "latent": [
+        "983:970:975",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "参考Latent"
+    }
+  },
+  "983:970:975": {
+    "inputs": {
+      "pixels": [
+        "983:967",
+        0
+      ],
+      "vae": [
+        "983:966",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE编码"
+    }
+  },
+  "983:970:976": {
+    "inputs": {
+      "conditioning": [
+        "983:964",
+        0
+      ],
+      "latent": [
+        "983:970:975",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "参考Latent"
+    }
+  },
+  "983:969": {
+    "inputs": {
+      "seed": 0,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "LanPaint_NumSteps": 2,
+      "LanPaint_PromptMode": "Image First",
+      "LanPaint_Info": "LanPaint KSampler.",
+      "Inpainting_mode": "🖼️ Image Inpainting",
+      "More Info, Bug Report, Star on GitHub ⭐": "lanpaint_star_button",
+      "model": [
+        "983:962",
+        0
+      ],
+      "positive": [
+        "983:970:976",
+        0
+      ],
+      "negative": [
+        "983:970:974",
+        0
+      ],
+      "latent_image": [
+        "983:972:977",
+        0
+      ]
+    },
+    "class_type": "LanPaint_KSampler",
+    "_meta": {
+      "title": "LanPaint KSampler"
+    }
+  },
+  "983:965": {
+    "inputs": {
+      "text": "",
+      "clip": [
+        "983:963",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Negative Prompt)"
+    }
+  },
+  "983:973": {
+    "inputs": {
+      "samples": [
+        "983:969",
+        0
+      ],
+      "vae": [
+        "983:966",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "983:972:977": {
+    "inputs": {
+      "samples": [
+        "983:972:978",
+        0
+      ],
+      "mask": [
+        "983:972:982",
+        0
+      ]
+    },
+    "class_type": "SetLatentNoiseMask",
+    "_meta": {
+      "title": "设置Latent噪波遮罩"
+    }
+  },
+  "983:972:978": {
+    "inputs": {
+      "pixels": [
+        "983:967",
+        0
+      ],
+      "vae": [
+        "983:966",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE编码"
+    }
+  },
+  "983:972:979": {
+    "inputs": {
+      "image": [
+        "983:967",
+        0
+      ]
+    },
+    "class_type": "GetImageSize",
+    "_meta": {
+      "title": "获取图像尺寸"
+    }
+  },
+  "983:972:980": {
+    "inputs": {
+      "mask": [
+        "983:971",
+        0
+      ]
+    },
+    "class_type": "MaskToImage",
+    "_meta": {
+      "title": "遮罩转换为图像"
+    }
+  },
+  "983:972:981": {
+    "inputs": {
+      "upscale_method": "nearest-exact",
+      "width": [
+        "983:972:979",
+        0
+      ],
+      "height": [
+        "983:972:979",
+        1
+      ],
+      "crop": "center",
+      "image": [
+        "983:972:980",
+        0
+      ]
+    },
+    "class_type": "ImageScale",
+    "_meta": {
+      "title": "缩放图像"
+    }
+  },
+  "983:972:982": {
+    "inputs": {
+      "channel": "red",
+      "image": [
+        "983:972:981",
+        0
+      ]
+    },
+    "class_type": "ImageToMask",
+    "_meta": {
+      "title": "图像转换为遮罩"
+    }
+  },
+  "983:971": {
+    "inputs": {
+      "expand": 20,
+      "tapered_corners": true,
+      "mask": [
+        "957",
+        1
+      ]
+    },
+    "class_type": "GrowMask",
+    "_meta": {
+      "title": "扩展遮罩"
+    }
+  },
+  "983:1002": {
+    "inputs": {
+      "mask_color": "#0000FF",
+      "mask_opacity": 1,
+      "image": [
+        "983:973",
+        0
+      ],
+      "mask": [
+        "983:971",
+        0
+      ]
+    },
+    "class_type": "AILab_MaskOverlay",
+    "_meta": {
+      "title": "Mask Overlay (RMBG) 🖼️🎭"
+    }
+  }
+}

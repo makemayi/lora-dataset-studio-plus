@@ -794,7 +794,14 @@ DEFAULTS = {
         # Measured at 1 MP. Larger canvases are untested here and cost five
         # times more than they look, because the model samples a packet.
         'max_output_mp': 1.0,
-        # The instruction the H3 HEAD-SWAP graph sends (minimax_h3_swap_helper).
+        # The instruction the H3 HEAD-SWAP graph sends — BOTH graphs read this
+        # key, but they carry different instructions and different pictures, so
+        # one wording rarely suits both. On 'minimax_h3_old' it replaces the
+        # English prompt on the H3 node; on 'minimax_h3' it replaces the text
+        # node the graph concatenates from (the H3 node's own prompt is a link
+        # there, so writing to it would be discarded), and the shipped text is
+        # the maintainer's Chinese head-transplant instruction, not the wording
+        # described below.
         # Blank = the prompt the shipped graph carries: subject-neutral, and
         # explicit about the four things that fail silently (keep <Picture 1>'s
         # identity, repaint nothing outside the white mask, match <Picture 2>'s
@@ -806,14 +813,51 @@ DEFAULTS = {
     },
     # Which engine the 🎭↔ face/head swap runs on. Its own namespace, exactly
     # like `improve` above and for the same reason: the action is no longer
-    # Klein-only. 'klein' repaints the head with a swap LoRA (fast, one graph,
-    # needs Klein2-9B-SmartCharacterSwap on disk); 'minimax_h3' masks the head
-    # out and lets the H3 video model re-stage the identity into the hole (no
-    # LoRA, ~40 GB of H3 weights, slower). 'klein' is the default because it is
-    # what every swap did before this setting existed.
+    # Klein-only.
+    #   'klein'           repaints the head with a swap LoRA (fast, one graph,
+    #                     needs Klein2-9B-SmartCharacterSwap on disk).
+    #   'minimax_h3'      the CURRENT H3 graph (2026-08-14 redesign): a Klein
+    #                     pass erases the head and renders a depth map of where
+    #                     it was, then H3 re-renders the whole frame around the
+    #                     new head. No crop and no stitch — the body, clothing
+    #                     and background are re-rendered too, which is why the
+    #                     older graph is kept rather than retired.
+    #   'minimax_h3_old'  the ORIGINAL H3 graph: mask the head, crop around it,
+    #                     send only that crop through H3, composite it back, so
+    #                     every pixel outside the mask survives untouched.
+    # 'klein' is the default because it is what every swap did before this
+    # setting existed. The redesign kept the id 'minimax_h3' so that anyone who
+    # had already picked H3 gets it without touching a setting.
+    #
+    # WHICH KEYS BELOW APPLY TO WHICH ENGINE:
+    #   both H3 graphs  h3_mask_source, h3_mask_prompt, h3_mask_opacity,
+    #                   h3_pose_hint
+    #   'minimax_h3'    h3_new_stages
+    #   'minimax_h3_old' h3_stages, h3_context_factor, h3_blend_pixels,
+    #                   h3_lama_model — all four are crop/stitch or stage
+    #                   parameters that the new graph has no node for.
     'face_swap': {
         'engine': 'klein',
-        # Three optional stages of the H3 swap graph, each a step the graph
+        # The two nodes the NEW H3 graph ships bypassed, each a step the graph
+        # carries WIRED and this switch removes when off (the helper only ever
+        # subtracts — the fallback wiring is what ComfyUI's own bypass does to
+        # that node, read off the maintainer's export):
+        #   mask_overlay  paints the head region a flat blue over the
+        #                 head-removed image before H3 sees it. Off, H3 gets the
+        #                 Klein output as it is — the head gone, a depth map of
+        #                 where it was — which is the point of that pass.
+        #                 `h3_mask_opacity` applies to this node when it is on.
+        #   ollama        an Ollama vision call describes how the head sits in
+        #                 THIS photo (angle, occlusion, lighting) and appends it
+        #                 to the instruction. Runs on `ollama.vision_model`, not
+        #                 on the tag the graph carries. It costs a second model
+        #                 on the same GPU as 40 GB of H3, and it makes
+        #                 `h3_pose_hint` redundant — with this on the hint is not
+        #                 sent, because the two describe the same thing and only
+        #                 one of them is looking at the actual picture.
+        'h3_new_stages': {'mask_overlay': False, 'ollama': False},
+        # Three optional stages of the OLD H3 swap graph ('minimax_h3_old'),
+        # each a step the graph
         # ships WIRED and this switch removes when off (minimax_h3_swap_helper
         # only ever subtracts — the fallback wiring is read off the maintainer's
         # own bypassed export, never reconstructed). All three cost a second
@@ -835,6 +879,7 @@ DEFAULTS = {
         #                 ComfyUI without those exact files it answers a
         #                 validation error naming the file.
         'h3_stages': {'hair_removal': False, 'lama': False, 'face_detail': False},
+        # OLD ENGINE ONLY ('minimax_h3_old' — the new graph has no crop node).
         # How much of the shot around the head the H3 swap actually looks at —
         # InpaintCropImproved's `context_from_mask_extend_factor` on the swap
         # graph. The node grows the crop from the MASK box, then clamps it to
@@ -856,7 +901,9 @@ DEFAULTS = {
         # body — InpaintStitchImproved composites only the masked region back.
         'h3_context_factor': 3.0,
         # How solidly the head is painted out before H3 is asked to redraw it —
-        # AILab_MaskOverlay's `mask_opacity` on the swap graph.
+        # AILab_MaskOverlay's `mask_opacity`. On the old graph that node is
+        # always in the job; on the new one it is the `mask_overlay` stage, so
+        # this dial does nothing there until that stage is switched on.
         #
         # At 1.0 (the shipped graph's value) the head becomes a flat white slab
         # with no structure at all, and a generative model asked to fill a flat
@@ -875,10 +922,11 @@ DEFAULTS = {
         # masked region, and at opacity 1.0 the overlay paints straight over its
         # work, so that stage cannot change a single pixel until this is lowered.
         'h3_mask_opacity': 1.0,
-        # WHERE the head mask comes from:
-        #   'graph' — LayerMask: PersonMaskUltra inside the workflow (the
-        #             shipped behaviour; needs ComfyUI_LayerStyle, and the app
-        #             never sees the mask it is about to repaint through);
+        # WHERE the head mask comes from (BOTH H3 engines):
+        #   'graph' — the segmenter inside the workflow (PersonMaskUltra on the
+        #             old graph, which needs ComfyUI_LayerStyle; ClothesSegment
+        #             from ComfyUI-RMBG on the new one). Either way the app
+        #             never sees the mask it is about to repaint through;
         #   'app'   — services/auto_mask (SAM 3 in the app's own interpreter),
         #             which makes the mask visible, cacheable and testable here,
         #             and drops the LayerStyle dependency with it.
@@ -896,6 +944,8 @@ DEFAULTS = {
         # once for all of them) and adds nothing to the mask.
         'h3_mask_prompt': 'head, glasses, sunglasses, hat, headband, earrings',
         'h3_lama_model': 'lama',
+        # OLD ENGINE ONLY ('minimax_h3_old' — the new graph has no stitch node,
+        # because it re-renders the whole frame instead of compositing a crop).
         # How wide the band is over which the swapped head is blended back into
         # the untouched photo — InpaintStitchImproved's `mask_blend_pixels`, 0-64.
         #

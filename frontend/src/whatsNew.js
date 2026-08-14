@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-14-h3-swap-redesign',
+    date: '2026-08-14',
+    title: 'A rebuilt MiniMax H3 head swap — and the old one is still there',
+    blurb: 'The H3 swap now erases the head with a Klein pass (leaving a depth map of where it was) and lets H3 re-render the shot around your reference, instead of masking a crop and pasting it back. Fewer seams, and the head can change angle. It re-renders the whole frame, though, so the previous graph stays available as "MiniMax H3 (old)" when you need everything outside the head kept pixel for pixel. Two switches ship off: a blue mask overlay, and an Ollama pass that reads the actual photo and tells the model how that head sits.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-14-prompt-composer',
     date: '2026-08-14',
     title: 'Prompt boxes became one composer, with a round send button',

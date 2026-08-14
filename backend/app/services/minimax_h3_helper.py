@@ -224,6 +224,30 @@ def resolve_h3_unet(selected=None):
         ('ref2va',), exclude=H3_WRONG_TASK_TOKENS)
 
 
+# The Fl2VA sibling, as an asset in its own right. Everything above treats
+# 'fl2va' as the file you must NOT pick — for the generation lane and for the
+# original swap graph that is exactly right, because there it would load and
+# then do a different job. `MiniMaxH3HybridLoader` (the new swap graph) is the
+# one node that wants BOTH: Fl2VA as the base and Ref2VA laid over its last
+# blocks. So this is a separate resolver rather than a relaxation of
+# H3_WRONG_TASK_TOKENS — the exclusion still holds everywhere else, and only a
+# caller that asks for Fl2VA by name can get it.
+H3_FL2VA_ASSET = {
+    'kind': 'MiniMax H3 Fl2VA model — base half of the hybrid loader '
+            '(the new head-swap graph only)',
+    'path': 'models/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors',
+    'source': f'{_H3_REPO}/tree/main/diffusion_models',
+}
+
+
+def resolve_h3_fl2va():
+    """The Fl2VA diffusion model, or None. Not part of H3_REQUIRED: the
+    generation engine and the old swap must not start demanding a file they
+    never load."""
+    return _find_model_file(
+        'diffusion_models', H3_FL2VA_ASSET['path'].rsplit('/', 1)[-1], ('fl2va',))
+
+
 def resolve_h3_text_encoder():
     """The 32B Qwen3-VL H3 encoder — NOT any of the other qwen3vl files a stock
     install carries for Krea/Qwen, which load and then produce garbage."""
@@ -326,10 +350,16 @@ def h3_node_hints(nodes):
 
 def missing_file_entries(missing):
     """[{path, kind, source}] for each missing asset key — again the Studio
-    `files` shape, so one banner covers every engine."""
+    `files` shape, so one banner covers every engine.
+
+    `h3_fl2va` is looked up here even though it is NOT in H3_REQUIRED: only the
+    new swap graph loads it, but when that graph reports it missing the banner
+    still has to name a file. A key with no entry would render an error with
+    nothing to act on."""
+    known = {**H3_ASSETS, 'h3_fl2va': H3_FL2VA_ASSET}
     out = []
     for key in missing or []:
-        meta = H3_ASSETS.get(key)
+        meta = known.get(key)
         if meta:
             out.append({'path': meta['path'], 'kind': meta['kind'],
                         'source': meta['source']})

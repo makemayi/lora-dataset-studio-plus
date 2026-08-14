@@ -1304,13 +1304,24 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
 
 
 # --- Which engine runs the 🎭↔ swap ------------------------------------------
-# Two engines, one button. Klein REPAINTS the head with a swap LoRA on a Flux.2
-# graph; MiniMax H3 masks the head out and lets a VIDEO model re-stage the
-# identity into the hole, then stitches the crop back. They need different
-# weights (Klein 9B + the swap LoRA vs ~40 GB of H3), take different times, and
-# fail differently — so it is a choice, not a default anyone can pick for
-# everyone. APPEND-ONLY: the ids are stored in config, never renamed.
-FACE_SWAP_ENGINES = ('klein', 'minimax_h3')
+# Three engines, one button. Klein REPAINTS the head with a swap LoRA on a
+# Flux.2 graph; both MiniMax H3 engines remove the head and let a VIDEO model
+# re-stage the identity into the hole. They need different weights (Klein 9B +
+# the swap LoRA vs ~40 GB of H3), take different times, and fail differently —
+# so it is a choice, not a default anyone can pick for everyone.
+#
+# The two H3 ids are two DIFFERENT GRAPHS, not two versions of one:
+#   'minimax_h3'      the 2026-08-14 redesign (minimax_h3_swap_new_helper).
+#                     Klein erases the head and renders a depth map of where it
+#                     was, H3 re-renders the WHOLE frame around the new head.
+#   'minimax_h3_old'  the original (minimax_h3_swap_helper): mask the head, crop
+#                     around it, send only that crop through H3, composite it
+#                     back — every pixel outside the mask survives untouched.
+# The new graph keeps the id that was already in people's config, so the
+# redesign reaches everyone who had picked H3 without them changing a setting;
+# the old one gets the new id. APPEND-ONLY: ids are stored in config, never
+# renamed.
+FACE_SWAP_ENGINES = ('klein', 'minimax_h3', 'minimax_h3_old')
 
 # What a 🎭↔ swap snapshots before it overwrites a tile, into
 # `FaceDatasetImage.swap_restore`. Exactly the columns the swap itself clears —
@@ -1576,7 +1587,10 @@ def _face_swap_image_claimed(user_id, img, ds, engine):
     image_id = img.id
     target_path = os.path.join(_dataset_path(img.dataset_id), img.filename)
     ref_path = os.path.join(_dataset_path(ds.id), ds.ref_filename)
-    if resolve_face_swap_engine(engine) == 'minimax_h3':
+    swap_engine = resolve_face_swap_engine(engine)
+    if swap_engine == 'minimax_h3':
+        from .minimax_h3_swap_new_helper import enqueue_h3_swap_new as enqueue_face_swap
+    elif swap_engine == 'minimax_h3_old':
         from .minimax_h3_swap_helper import enqueue_h3_swap as enqueue_face_swap
     else:
         from .face_swap_helper import enqueue_face_swap

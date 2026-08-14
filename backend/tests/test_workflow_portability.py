@@ -197,6 +197,21 @@ DECLARED_THIRD_PARTY_NODES = {
                               'minimax_h3.use_speed_nodes off runs without it',
     'ZImageTurboLoraLoader': 'unknown pack — only the optional Z-Image '
                              'face-detail stage needs it',
+    # 'minimax h3 swap new.json' — the 2026-08-14 redesign of that swap
+    # (minimax_h3_swap_new_helper), gated by the same generic probe against the
+    # PRUNED graph. Attributions below are INFERRED (pack family / node naming),
+    # not measured off a live /object_info like the block above.
+    'ClothesSegment': 'ComfyUI-RMBG (inferred: same pack family as FaceSegment '
+                      'and AILab_MaskOverlay above)',
+    'Text Concatenate': 'was-node-suite-comfyui (inferred: same pack as '
+                        'Text Multiline above)',
+    'MiniMaxH3HybridLoader': 'MinimaxH3-Image (inferred: same pack as '
+                             'H3FrameSelect above)',
+    'MiniMaxH3MemoryEfficientSageAttentionPatch':
+        'unknown pack — an optional speed node; minimax_h3.use_speed_nodes off '
+        'runs without it',
+    'OllamaAPI': 'unknown pack — only the optional Ollama head-analysis stage '
+                 'needs it; that stage is off by default',
     # Core as of ComfyUI 0.30.0 (MiniMax H3 support) and core-ish for longer, but
     # newer than this repo's v0.28.3 floor — declared rather than allowlisted so
     # an older install gets a named message instead of ComfyUI's raw 400.

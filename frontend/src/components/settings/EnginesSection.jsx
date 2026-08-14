@@ -338,7 +338,14 @@ function FaceSwapLorasCard({ config, setField, graphLoras = [] }) {
 function FaceSwapEngineCard({ config, setField, configDefaults }) {
   const fs = config.face_swap || {}
   const stages = fs.h3_stages || {}
-  const isH3 = (fs.engine ?? defaultValueAt(configDefaults, 'face_swap', 'engine')) === 'minimax_h3'
+  const newStages = fs.h3_new_stages || {}
+  const engine = fs.engine ?? defaultValueAt(configDefaults, 'face_swap', 'engine')
+  // Two H3 GRAPHS, not two versions of one — see the config comment. The new one
+  // re-renders the whole frame, the old one composites a crop back, so the
+  // crop/stitch dials below belong to the old one alone.
+  const isNewH3 = engine === 'minimax_h3'
+  const isOldH3 = engine === 'minimax_h3_old'
+  const isH3 = isNewH3 || isOldH3
   const contextFactor = Number(
     fs.h3_context_factor ?? defaultValueAt(configDefaults, 'face_swap', 'h3_context_factor') ?? 3)
   const maskOpacity = Number(
@@ -346,11 +353,13 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
   const blendPixels = Number(
     fs.h3_blend_pixels ?? defaultValueAt(configDefaults, 'face_swap', 'h3_blend_pixels') ?? 40)
   const setStage = (key, on) => setField('face_swap', 'h3_stages', { ...stages, [key]: on })
+  const setNewStage = (key, on) =>
+    setField('face_swap', 'h3_new_stages', { ...newStages, [key]: on })
   return (
     <Card
       id="face-swap-engine"
       title="Face / head swap engine"
-      help="Which engine the 🎭↔ button on a tile runs. Klein repaints the head with a swap LoRA — one graph, fast, and it needs Klein2-9B-SmartCharacterSwap on disk. MiniMax H3 masks the head out and lets the video model re-stage your reference into the hole, then stitches the crop back: no swap LoRA, but it loads the whole ~40 GB H3 stack and takes considerably longer. Both take the tile as the target and the dataset's reference photo as the identity."
+      help="Which engine the 🎭↔ button on a tile runs. Klein repaints the head with a swap LoRA — one graph, fast, and it needs Klein2-9B-SmartCharacterSwap on disk. The two MiniMax H3 entries are two different graphs: (new) erases the head with a Klein pass and lets H3 re-render the whole picture around your reference, while (old) masks the head, sends only a crop through H3 and composites it back so everything outside the head survives untouched. Both H3 graphs load the ~40 GB H3 stack and take considerably longer than Klein, and (new) needs the Klein models too. All three take the tile as the target and the dataset's reference photo as the identity."
     >
       <div className="sm:max-w-md">
         <label htmlFor="face-swap-engine-select" className="block text-xs font-medium text-content">
@@ -363,7 +372,8 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
           className={INPUT_CLASS}
         >
           <option value="klein">Klein — swap LoRA repaints the head (fast)</option>
-          <option value="minimax_h3">MiniMax H3 — masks the head, re-stages it from the reference (slow)</option>
+          <option value="minimax_h3">MiniMax H3 (new) — erases the head, re-renders the shot around your reference (slow, needs Klein too)</option>
+          <option value="minimax_h3_old">MiniMax H3 (old) — masks the head and composites a crop back, leaving the rest of the photo untouched (slow)</option>
         </select>
         <HelpText className="mt-1 text-xs text-content-muted">
           Each engine reports its own missing files: switching to one you have not
@@ -375,8 +385,19 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
 
       <div className="mt-3 sm:max-w-md">
         <label htmlFor="face-swap-h3-context" className="block text-xs font-medium text-content">
-          How much of the shot MiniMax H3 sees ({contextFactor.toFixed(1)}×)
+          How much of the shot MiniMax H3 (old) sees ({contextFactor.toFixed(1)}×)
         </label>
+        <HelpText className="mt-1 text-xs text-amber-400">
+          <span hidden={!isNewH3}>
+            The engine selected above is MiniMax H3 (new), which sends the whole
+            picture through H3 instead of a crop — this slider does nothing until
+            you switch to (old).
+          </span>
+          <span hidden={isNewH3}>
+            Old H3 graph only: it is that graph&apos;s crop, and neither Klein nor
+            the new H3 graph has a crop node.
+          </span>
+        </HelpText>
         <input
           id="face-swap-h3-context"
           type="range" min={1} max={8} step={0.1}
@@ -439,8 +460,18 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
 
       <div className="mt-3 sm:max-w-md">
         <label htmlFor="face-swap-h3-blend" className="block text-xs font-medium text-content">
-          How far the head is blended back into the photo ({blendPixels} px)
+          How far the head is blended back into the photo, MiniMax H3 (old) ({blendPixels} px)
         </label>
+        <HelpText className="mt-1 text-xs text-amber-400">
+          <span hidden={!isNewH3}>
+            The engine selected above is MiniMax H3 (new): it re-renders the whole
+            frame rather than compositing a crop back, so there is no join to
+            feather and this slider does nothing.
+          </span>
+          <span hidden={isNewH3}>
+            Old H3 graph only — it is that graph&apos;s stitch.
+          </span>
+        </HelpText>
         <input
           id="face-swap-h3-blend"
           type="range" min={0} max={64} step={4}
@@ -486,19 +517,60 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
           config={config} configDefaults={configDefaults} setField={setField} />
       </div>
 
-      <fieldset className="mt-3" id="face-swap-h3-stages">
+      <fieldset className="mt-3" id="face-swap-h3-new-stages">
         <legend className="text-xs font-medium text-content">
-          MiniMax H3 — optional stages
+          MiniMax H3 (new) — optional stages
         </legend>
         <HelpText className="mt-1 text-xs text-content-muted">
-          <span hidden={!isH3}>
-            Three extra passes the swap graph can run. Each adds a second model
-            family to a job that already loads 40 GB, so they are off until you
-            want them.
+          <span hidden={!isNewH3}>
+            Two nodes the new graph carries switched off. Each costs something on
+            a job that already loads 40 GB, so neither is on until you ask.
           </span>
-          <span hidden={isH3}>
-            These apply to the MiniMax H3 engine only — they do nothing while the
-            swap runs on Klein.
+          <span hidden={isNewH3}>
+            These apply to the MiniMax H3 (new) engine only — they do nothing
+            while the swap runs on Klein or on the old H3 graph.
+          </span>
+        </HelpText>
+        <label className="mt-2 flex items-center gap-2 text-xs text-content">
+          <input
+            id="face-swap-h3-new-mask-overlay"
+            type="checkbox"
+            checked={Boolean(newStages.mask_overlay)}
+            onChange={(e) => setNewStage('mask_overlay', e.target.checked)}
+          />
+          Blue mask overlay — paints the head area flat blue before H3 sees it (off: H3 gets the erased head and its depth map)
+        </label>
+        <label className="mt-2 flex items-center gap-2 text-xs text-content">
+          <input
+            id="face-swap-h3-new-ollama"
+            type="checkbox"
+            checked={Boolean(newStages.ollama)}
+            onChange={(e) => setNewStage('ollama', e.target.checked)}
+          />
+          Ollama head analysis — a vision model describes how the head sits in this photo and that goes into the instruction
+        </label>
+        <HelpText className="mt-1 text-[0.6875rem] text-amber-400">
+          The Ollama stage runs on the vision model configured under Local tools,
+          not on whatever tag the graph was exported with — but it does load that
+          model onto the same GPU as H3. It also replaces the pose hint below:
+          both describe how the head sits, and only one of them is looking at the
+          actual picture, so the hint is not sent while this is on.
+        </HelpText>
+      </fieldset>
+
+      <fieldset className="mt-3" id="face-swap-h3-stages">
+        <legend className="text-xs font-medium text-content">
+          MiniMax H3 (old) — optional stages
+        </legend>
+        <HelpText className="mt-1 text-xs text-content-muted">
+          <span hidden={!isOldH3}>
+            Three extra passes the old swap graph can run. Each adds a second
+            model family to a job that already loads 40 GB, so they are off until
+            you want them.
+          </span>
+          <span hidden={isOldH3}>
+            These apply to the MiniMax H3 (old) engine only — the new graph has
+            no node for any of them, and Klein ignores them entirely.
           </span>
         </HelpText>
         <label className="mt-2 flex items-center gap-2 text-xs text-content">
