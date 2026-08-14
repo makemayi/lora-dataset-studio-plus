@@ -65,12 +65,32 @@ the only direction that cannot invent wiring nobody measured.
                 Klein output as it is: the head gone and a depth map of where it
                 was, which is the point of that pass. `h3_mask_opacity` applies
                 to this node when it is on.
-  ollama        an `OllamaAPI` call analyses the target and writes a paragraph
-                about how the head sits (position, angle, occlusion, lighting),
-                appended to the fixed instruction. The MODEL is the app's own
-                configured vision model, never the graph's — a graph naming one
-                specific Ollama tag fails on any machine that does not have it.
-                The instruction text stays as the maintainer tuned it.
+  ollama        a vision model analyses the target and writes a paragraph about
+                how the head sits (position, angle, occlusion, lighting), which
+                is appended to the fixed instruction.
+
+                THIS ONE NO LONGER RUNS IN THE GRAPH. The `OllamaAPI` node is
+                subtracted like a switched-off stage even when the stage is ON;
+                the app makes the call itself and writes the answer into the
+                text node. Four things were wrong with letting the node do it,
+                and all four are structural rather than bad luck:
+
+                  * it talks to `127.0.0.1:11434` and takes no URL input, so
+                    `ollama.url` could not reach it and a remote Ollama was
+                    simply unusable;
+                  * a stopped Ollama failed INSIDE ComfyUI, after the 40 GB H3
+                    stack had loaded, consuming the tile for nothing;
+                  * it bypassed this app's Ollama GPU fence entirely, so the
+                    vision model landed on the same card as H3 — on a 24 GB card
+                    that is the difference between a render and an OOM;
+                  * its prompt asked the model to "重点参考深度图" while the node
+                    was wired to ONE image input carrying the plain target, so
+                    that whole section was answered from nothing.
+
+                Running it here fixes all four: the app's URL and model apply,
+                failure is refused before anything is queued, the call is pinned
+                to the CPU (`num_gpu=0`) so the card is untouched, and the
+                prompt now asks only for what the model is actually shown.
 
 Switching `ollama` ON disables the pose hint (`face_swap.h3_pose_hint`) for this
 job. Both describe the same thing — how this particular head is turned — but
@@ -117,6 +137,8 @@ NODE_H3_CLIP = '925:922'
 NODE_VIDEO_VAE = '925:921'
 NODE_AUDIO_VAE = '925:926'       # required by the node even for a still
 NODE_MASK_OVERLAY = '983:1002'   # AILab_MaskOverlay — optional, off by default
+NODE_KLEIN_POSITIVE = '983:964'  # CLIPTextEncode — what the Klein pass is told to do
+NODE_KLEIN_NEGATIVE = '983:965'  # CLIPTextEncode — shipped empty by the maintainer
 NODE_KLEIN_DECODE = '983:973'    # VAEDecode — the head-removed target
 NODE_KLEIN_UNET = '983:962'      # OTUNetLoaderW8A8 (may degrade to UNETLoader)
 NODE_KLEIN_CLIP = '983:963'
@@ -138,7 +160,8 @@ _REQUIRED_NODES = (NODE_TARGET_IMAGE, NODE_REF_IMAGE, NODE_TARGET_RESIZE,
                    NODE_CLIP_VISION, NODE_H3_HYBRID, NODE_H3_CLIP,
                    NODE_VIDEO_VAE, NODE_AUDIO_VAE, NODE_MASK_OVERLAY,
                    NODE_KLEIN_DECODE, NODE_KLEIN_UNET, NODE_KLEIN_CLIP,
-                   NODE_KLEIN_VAE, NODE_KLEIN_SAMPLER, NODE_SAVE)
+                   NODE_KLEIN_VAE, NODE_KLEIN_SAMPLER, NODE_SAVE,
+                   NODE_KLEIN_POSITIVE, NODE_KLEIN_NEGATIVE)
 
 # stage -> (tail node, what its consumers read when the stage is off).
 # Both fallbacks are the node's OWN pass-through input, i.e. exactly what
@@ -152,6 +175,75 @@ STAGE_LABELS = {
     'mask_overlay': 'Blue mask overlay',
     'ollama': 'Ollama head analysis',
 }
+
+# Stages the APP performs. Their node is subtracted from the graph whether the
+# stage is on or off — being "kept" here means the app runs it, not that the
+# graph does. Everything else about a kept stage is unchanged: it still
+# suppresses the pose hint, still reports itself in the job log.
+APP_SIDE_STAGES = frozenset({'ollama'})
+
+# Appended to the swap instruction when the `mask_overlay` stage is on, and only
+# then. Written in the same language as the shipped instruction (990) so the two
+# do not read as two voices to the text encoder.
+MASK_OVERLAY_PROMPT_NOTE = (
+    '图2中的纯蓝色区域标示头部的大致范围（该范围经过外扩，比实际头部略大）。\n'
+    '头部的真实尺寸以蓝色下方的灰色素模头为准，不要为了填满蓝色而放大头部。')
+
+# The sentence that introduces the head analysis. It used to be the last line of
+# the shipped instruction (990), where it was sent on EVERY swap — including the
+# default one, with the stage off and nothing following it. "严格按照下面的说明
+# 进行" pointing at an empty tail is not a harmless leftover: it tells the model
+# to obey instructions it cannot see. It now travels WITH the analysis, so it
+# exists exactly when the thing it introduces does.
+HEAD_ANALYSIS_LEAD_IN = '下面是图片头部的相关信息，请严格按照下面的说明进行。'
+
+# The instruction the head analysis runs on. It came off the maintainer's
+# `OllamaAPI` node and is kept almost verbatim — it is tuned, and the shape of
+# its answer is what the swap prompt was written to receive. TWO deliberate
+# edits, both because the node's own wiring never matched what the text claimed:
+#   * "请同时参考提供的RGB图片和深度图" -> the node had ONE image input, fed the
+#     plain target. No depth map was ever sent, so asking for depth-derived
+#     findings invited the model to invent them.
+#   * item 6 kept the two questions that survive without a depth map (occlusion,
+#     volume/perspective) and dropped the two that do not (front-to-back
+#     position, the neck/shoulder depth join).
+# It lives here rather than in the JSON because this is where it now runs; a
+# prompt stored on a node that is always subtracted would read as live wiring.
+HEAD_ANALYSIS_PROMPT = '''你是一个专业的图像头部分析专家，只负责精准描述图片中人物的头部信息，用于后续换头操作。
+
+请仔细观察提供的图片，严格按照以下要求输出，不要描述身体、服装、背景、发型、五官细节或任何其他内容：
+
+输出必须以「图片中头部位于」作为开头。
+
+1. 头部位置：在画面中的大致位置（左上/中上/右上/左中/正中/右中/左下/中下/右下），以及占画面的大致比例。
+2. 头部朝向：正面、左侧脸（角度）、右侧脸（角度）、微侧、仰视、俯视、低头等，尽量给出具体角度。
+3. 头部姿态与动作：是否歪头、转头、抬头、低头、点头等，描述自然动作。
+4. 表情：详细描述眉毛、眼睛、嘴部状态和整体情绪（中性、微笑、严肃、惊讶、愤怒等）。
+5. 光照与阴影：头部受光方向、脸部明暗分布，是否有硬阴影或柔光。
+6. 空间关系与透视：
+   - 头部是否存在明显遮挡
+   - 头部的大致体积感与透视关系
+7. 自身部位相对位置：描述头部与自身其他部位（如肩膀、脖子、躯干）的相对位置关系。
+8. 与画面最醒目部位的相对位置：描述头部与图片中最醒目/最突出部位之间的相对位置关系。
+9. 脸部遮挡情况：如果脸部存在遮挡，必须明确说明被遮挡的具体部位（如眼睛、鼻子、嘴巴、半边脸等），以及被什么物体遮挡（如手、头发、口罩、物体、另一人等）。
+10. 其他影响换头的关键细节：眼镜、帽子、耳环、面部遮挡物、等。
+
+输出要求：
+- 必须以「图片中头部位于」开头
+- 只输出头部相关信息
+- 语言简洁精准，适合直接用于换头提示词参考
+- 如果图片中有多个人，分别编号描述
+- 不确定的地方标注“不确定”
+
+请参考下面的范例：
+图片中头部位于中上偏右区域，占画面比例约8%。
+
+* **朝向与姿态**：右侧脸微侧（约45度），呈趴卧低头、向后下方窥视的姿态。
+* **表情**：眼神向下注视，带有中性、慵懒情绪，嘴部及下半脸不可见。
+* **光照**：整体为柔和散射光，面部受光均匀，无强硬阴影。
+* **空间与相对位置**：处于画面最远端，与前景呈极强透视对比；位于自身肩膀后方，处于画面最醒目部位（臀部）的右上方远端。
+* **脸部遮挡**：脸部下半部分（鼻子下方、嘴巴、下巴）被自身身体及臀部线条完全遮挡，仅露出额头、左眼及部分左脸颊。
+* **关键细节**：左耳戴有一颗小耳环，换头时需严格处理下脸部被身体遮挡的边缘。'''
 
 # Packs for the classes THIS graph adds on top of the ones the old swap already
 # names. Same {pack, url, search} shape, so the preflight banner renders them
@@ -174,10 +266,9 @@ H3_SWAP_NEW_NODE_PACKS.update({
         'pack': 'was-node-suite-comfyui',
         'url': 'https://github.com/WASasquatch/was-node-suite-comfyui',
         'search': 'WAS Node Suite'},
-    'OllamaAPI': {
-        'pack': 'unknown pack — only the optional Ollama stage needs it; '
-                'switch that stage off to run without it',
-        'url': None, 'search': 'OllamaAPI'},
+    # No OllamaAPI entry: the head analysis runs in the app now, so that node is
+    # subtracted from every job and can never reach the node probe. Installing a
+    # pack for it would buy nothing — which is the whole point of moving the call.
     'MiniMaxH3HybridLoader': dict(mh.H3_FRAME_SELECT_PACK),
     'MiniMaxH3MemoryEfficientSageAttentionPatch': {
         'pack': 'unknown pack — optional speed node; switch off '
@@ -212,14 +303,87 @@ def enabled_stages():
     return {name: bool(raw.get(name)) for name in STAGES}
 
 
+def swap_ollama_model():
+    """The Ollama tag the head-analysis stage runs on.
+
+    `face_swap.h3_new_ollama_model` when the user picked one in Settings, else
+    the app's captioning vision model — which is what this stage ran on before
+    the key existed, so an untouched install sees no change. Never the tag the
+    graph was exported with: that names the maintainer's own pulled models."""
+    from .vision_ollama import get_vision_model
+    chosen = cfg.get('face_swap.h3_new_ollama_model')
+    chosen = chosen.strip() if isinstance(chosen, str) else ''
+    return chosen or get_vision_model()
+
+
+def analyse_head(target_path):
+    """Describe how the head sits in `target_path`, for the swap instruction.
+
+    Raises ValueError — refusing the whole swap — rather than returning empty on
+    failure. An empty description would silently produce a DIFFERENT render from
+    the one the user switched this stage on for, and the tile is overwritten in
+    place, so "it ran but without the analysis" is not a recoverable outcome.
+
+    Runs on the GPU, like every other vision call here. It does NOT overlap with
+    the render: this happens before the job is queued and `keep_alive=0` drops
+    the model as soon as it answers, so the card holds one model at a time. That
+    ordering is the whole benefit of moving the call out of the graph — inside
+    it, the node fired while H3 was resident. Pinning this to the CPU was tried
+    and reverted: a 9B vision model on 8 cores is a minute or more per tile,
+    which is not a trade worth making for a card the call no longer shares."""
+    from .vision_ollama import describe_image_ollama
+    model = swap_ollama_model()
+    try:
+        with open(target_path, 'rb') as fh:
+            image_bytes = fh.read()
+    except OSError as e:
+        raise ValueError(f'could not read the tile for the head analysis: {e}') from e
+    try:
+        text = describe_image_ollama(
+            image_bytes, HEAD_ANALYSIS_PROMPT,
+            model=model,
+            # Enough for the ten numbered findings; a thinking trace does not
+            # fit, which is deliberate — see the empty-answer message below.
+            num_predict=1200,
+            think=False,           # asked, not guaranteed — some checkpoints ignore it
+            keep_alive=0,          # off the card before the render is queued
+            auto_start_local=True,  # start a stopped LOCAL server, then raise if it fails
+            # A CPU-bound vision pass on a ~1 MP image is minutes, not seconds.
+            timeout=(10, 600))
+    except RuntimeError as e:
+        # describe_image_ollama already words the cause (unreachable, refused,
+        # model missing). Name the STAGE in front of it: the same sentence
+        # reaches the user from captioning too, and "which of my features just
+        # failed" is not answerable from Ollama's half alone.
+        raise ValueError(
+            f'The H3 swap\'s head-analysis stage could not run: {e} '
+            'Turn the stage off in Settings ▸ Engines ▸ Face / head swap engine '
+            'to swap without it.') from e
+    text = (text or '').strip()
+    if not text:
+        raise ValueError(
+            f'The H3 swap\'s head analysis returned nothing from "{model}". A model that '
+            'emits a reasoning trace instead of an answer is the usual cause — pick a '
+            'non-thinking vision model in Settings ▸ Engines ▸ Face / head swap engine, '
+            'or turn the stage off.')
+    return text
+
+
 def apply_stages(workflow, stages):
-    """Subtract every stage that is off by repointing its consumers at the
-    stage's own bypass fallback. Returns the stage names left in place."""
+    """Subtract every stage the GRAPH will not run, by repointing its consumers
+    at the stage's own bypass fallback. Returns the stage names left in place.
+
+    An APP_SIDE_STAGES entry is subtracted from the graph even when it is on —
+    the app performs it — but it still counts as kept, because everything else
+    that keys off a kept stage (the pose-hint suppression, the job log) is about
+    whether the stage HAPPENS, not about where."""
     kept = []
     for name, (tail, fallback) in STAGES.items():
-        if stages.get(name):
+        on = bool(stages.get(name))
+        if on:
             kept.append(name)
-            continue
+            if name not in APP_SIDE_STAGES:
+                continue
         if tail in workflow and not old.repoint(workflow, tail, fallback):
             logger.debug('h3 swap (new): stage %s has no consumers to repoint', name)
     return kept
@@ -261,7 +425,7 @@ def missing_nodes(workflow):
 
 
 def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None,
-                        mask_image=None, pose_hint=None):
+                        mask_image=None, pose_hint=None, head_analysis=None):
     """Load the shipped graph, subtract the optional stages, resolve every loader
     against what is actually installed, and return (workflow, stages_kept).
 
@@ -328,12 +492,19 @@ def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None
     workflow[NODE_KLEIN_VAE]['inputs']['vae_name'] = resolve_klein_vae()
     workflow[NODE_KLEIN_SAMPLER]['inputs']['seed'] = random.randint(0, 2 ** 64 - 1)
 
-    # The Ollama stage runs on the model the APP is configured with, not the tag
-    # the graph carries: a hard-coded Ollama tag is a file nobody else has.
-    if 'ollama' in kept and NODE_OLLAMA in workflow:
-        from .vision_ollama import get_vision_model
-        workflow[NODE_OLLAMA]['inputs']['ollama_model'] = get_vision_model()
-        workflow[NODE_OLLAMA]['inputs']['seed'] = random.randint(0, 2 ** 64 - 1)
+    # What Klein is TOLD to do decides whether the swap comes back in
+    # proportion: it replaces the head with a grey mannequin, and that stand-in
+    # is the only thing left saying how big the head was and which way it faced.
+    # Config is authoritative (the graph's own text is kept in sync for anyone
+    # opening it in ComfyUI, and a test pins the two together); a blank or
+    # whitespace-only override falls back to the shipped default rather than
+    # sending Klein an empty instruction, which would erase nothing at all.
+    for node_id, key in ((NODE_KLEIN_POSITIVE, 'face_swap.h3_head_removal_prompt'),
+                         (NODE_KLEIN_NEGATIVE, 'face_swap.h3_head_removal_negative')):
+        text = cfg.get(key)
+        if not isinstance(text, str) or not text.strip():
+            text = cfg.defaults()['face_swap'][key.split('.', 1)[1]]
+        workflow[node_id]['inputs']['text'] = text.strip()
 
     # Everything a switched-off stage or accelerator left behind goes now, so
     # the node probe below asks about the job that will actually run.
@@ -360,12 +531,38 @@ def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None
     prompt_override = cfg.get('minimax_h3.swap_prompt')
     if isinstance(prompt_override, str) and prompt_override.strip():
         workflow[NODE_PROMPT_TEXT]['inputs']['text'] = prompt_override.strip()
+    # With the overlay ON, what H3 receives is a picture with a blue slab over
+    # the head area — and nothing in the shipped instruction says so, which
+    # leaves a model to paint the head beside the slab and leave the blue in
+    # shot. Appended for this stage only: with the overlay off there is no blue,
+    # and the sentence would describe a colour that is not in the picture.
+    #
+    # It tells the model NOT to fill the blue, which is the opposite of what the
+    # first version of this sentence said. The overlay's mask is the head mask
+    # grown by 20 px (GrowMask), so the blue is deliberately LARGER than the
+    # head — "fill it completely" is an instruction to oversize, i.e. the
+    # doll-head this whole pass exists to avoid. The size authority is the grey
+    # mannequin underneath, which is why `h3_mask_opacity` below 1.0 (letting it
+    # show through) is worth more here than a solid marker.
+    if 'mask_overlay' in kept:
+        workflow[NODE_PROMPT_TEXT]['inputs']['text'] = (
+            workflow[NODE_PROMPT_TEXT]['inputs']['text'].rstrip()
+            + '\n' + MASK_OVERLAY_PROMPT_NOTE)
     # The pose hint is APPENDED, never substituted — and never sent at all when
     # Ollama is analysing the same picture (see the module docstring).
     if pose_hint and 'ollama' not in kept:
         workflow[NODE_PROMPT_TEXT]['inputs']['text'] = (
             workflow[NODE_PROMPT_TEXT]['inputs']['text'].rstrip()
             + ' ' + pose_hint.strip())
+    # The head analysis lands in the SAME node, for the same reason: the H3
+    # node's `prompt` is a link. `Text Concatenate` used to join the two — with
+    # the call moved app-side there is one string and one writer, and the concat
+    # node leaves with the rest of the stage's branch.
+    if head_analysis and 'ollama' in kept:
+        workflow[NODE_PROMPT_TEXT]['inputs']['text'] = (
+            workflow[NODE_PROMPT_TEXT]['inputs']['text'].rstrip()
+            + '\n' + HEAD_ANALYSIS_LEAD_IN
+            + '\n\n' + str(head_analysis).strip())
     ref_size = cfg.get('minimax_h3.ref_image_size')
     if ref_size:
         workflow[NODE_H3]['inputs']['ref_image_size'] = ref_size
@@ -415,12 +612,21 @@ def enqueue_h3_swap_new(user_id, target_path, ref_path, extra_metadata=None):
         meta = extra_metadata or {}
         hint = _pose_hint(meta.get('variation_prompt'), meta.get('framing'),
                           meta.get('variation_label'))
+    # The stages are read ONCE here and handed down, because the head analysis
+    # has to run before the workflow is built and both must agree about whether
+    # the stage is on. It reads the tile from DISK, not the staged copy — same
+    # bytes, and it keeps the analysis independent of ComfyUI being usable.
+    stages = enabled_stages()
+    analysis = analyse_head(target_path) if stages.get('ollama') else None
     workflow, kept = build_swap_workflow(
         staged_inputs[0], staged_inputs[1],
         filename_prefix=f'{user_id}_H3SwapNew_{uid}', mask_image=staged_mask,
-        pose_hint=hint)
+        stages=stages, pose_hint=hint, head_analysis=analysis)
     if hint and 'ollama' not in kept:
         logger.info('h3 swap (new): pose hint — %s', hint)
+    if analysis:
+        logger.info('h3 swap (new): head analysis (%s, CPU) — %s',
+                    swap_ollama_model(), analysis.replace('\n', ' ')[:300])
     if kept:
         logger.info('h3 swap (new): optional stages on — %s',
                     ', '.join(STAGE_LABELS[k] for k in kept))

@@ -50,6 +50,90 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-14-swap-prompt-knows-the-mannequin',
+    date: '2026-08-14',
+    title: 'The swap instruction now knows what the grey head in the picture is',
+    blurb: 'With the Klein pass leaving a grey mannequin where the head was, the '
+      + 'instruction had to say so — otherwise the model treats it as real scene '
+      + 'content and paints around it, or leaves some of the grey in the result. '
+      + 'It now says to replace the mannequin and inherit its size and angle. The '
+      + 'blue-overlay line changed with it: it used to say "fill the blue '
+      + 'completely", but the blue is grown 20px past the head, so that was an '
+      + 'instruction to oversize.',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-14-klein-head-removal-prompt',
+    date: '2026-08-14',
+    title: 'Fewer doll-sized heads from the H3 swap — and the instruction behind it is now yours to edit',
+    blurb: 'The Klein pass that clears the way for the new head used to be told '
+      + 'to remove it, three times over, with "leave a stand-in behind" tacked on '
+      + 'at the end — so it usually just erased. That left nothing saying how big '
+      + 'the head had been, and H3 guessed. It now replaces the head with a grey '
+      + 'mannequin that keeps the original size, angle and perspective, and both '
+      + 'that instruction and its negative are editable in Settings so you can '
+      + 'tune them without a rebuild.',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-14-swap-prompt-no-dangling-line',
+    date: '2026-08-14',
+    title: 'Every H3 swap stopped telling the model to follow instructions that were not there',
+    blurb: 'The shipped instruction ended with "the head information follows, '
+      + 'obey it exactly" — a line written for the optional Ollama analysis, but '
+      + 'sent on every swap, including the default one where nothing followed it. '
+      + 'It now travels with the analysis, so it exists only when the thing it '
+      + 'introduces does.',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-14-blue-overlay-names-the-blue',
+    date: '2026-08-14',
+    title: 'The blue mask overlay now says out loud that the blue is the head',
+    blurb: 'Switching that stage on hands the model a picture with a flat blue '
+      + 'slab where the head used to be — but nothing in the instruction ever '
+      + 'mentioned blue, so it was being asked to fill a region it had not been '
+      + 'told about, and would sometimes paint the head beside the slab and leave '
+      + 'the blue in shot. The instruction now names it.',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-14-automask-one-at-a-time',
+    date: '2026-08-14',
+    title: 'A batch of head swaps no longer stacks five copies of SAM 3 on your card',
+    blurb: 'When the head mask comes from the app, every tile started its own '
+      + 'masking process — and each one loaded its own 3.4 GB checkpoint. A batch '
+      + 'ran five at once on a 24 GB card and left about 400 MB for the render '
+      + 'they were masking for. They queue now, one at a time. Nothing is slower '
+      + 'in practice: they were already fighting over one GPU.',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-14-h3-swap-ollama-app-side',
+    date: '2026-08-14',
+    title: 'The H3 swap\'s head analysis no longer competes for your VRAM',
+    blurb: 'That step used to run as a node inside the workflow: it loaded a '
+      + 'vision model onto the same card as 40 GB of H3, ignored your Ollama URL, '
+      + 'and when Ollama was stopped it failed deep inside ComfyUI after the '
+      + 'render had already started — consuming the tile. The app now makes the '
+      + 'call itself, before anything is queued, and unloads the model as soon as '
+      + 'it answers, so the card holds one model at a time instead of two. A '
+      + 'stopped Ollama says so up front, and the OllamaAPI node pack is no longer '
+      + 'needed.',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-14-h3-swap-ollama-model',
+    date: '2026-08-14',
+    title: 'Pick which Ollama model reads the photo during a head swap',
+    blurb: 'The new H3 swap can have an Ollama vision model describe how the head '
+      + 'sits before it re-renders. That pass used to be locked to your captioning '
+      + 'model; now a dropdown under the checkbox lists everything Ollama has '
+      + 'pulled, so you can give this one job a heavier model without slowing down '
+      + 'captioning a whole dataset. Leave it blank to keep the old behaviour.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-14-h3-swap-redesign',
     date: '2026-08-14',
     title: 'A rebuilt MiniMax H3 head swap — and the old one is still there',

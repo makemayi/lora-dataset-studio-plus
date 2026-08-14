@@ -490,16 +490,56 @@ Which engine the 🎭↔ button on a tile runs. All three take the same two pict
 
 Whichever is selected, a missing weight or node pack is named in one message **before** anything is queued — the tile is not consumed by a swap that cannot run.
 
+#### MiniMax H3 (new) — what the Klein pass is told to do
+
+→ `face_swap.h3_head_removal_prompt` and `face_swap.h3_head_removal_negative`. **`minimax_h3` (new) only.**
+
+This is the setting that decides whether the swap comes back **in proportion**. Klein does not delete the head — it **replaces** it with a featureless grey mannequin head, and that stand-in is the only thing left in the frame telling H3 how big the head was, where it sat and which way it faced. Delete instead of replace and H3 is guessing, which is where a doll-sized head comes from.
+
+Three things earn their place in the instruction, and losing any one of them shows up as bad proportions:
+
+1. **The first verb is 替换 (replace), never 移除 (remove).** The shipped text before 2026-08-14 led with three deletion verbs and hung the stand-in off the end, phrased as a transform of the head it had just told the model to erase. An edit model follows the dominant, repeated intent — it erased and stopped.
+2. **The geometry is named out loud**: size, position, orientation, tilt, perspective. That is what the rest of the graph reads.
+3. **Removing the identity is a constraint, not the instruction** — "no facial features, no hair, no identity", after the replacement has been stated.
+
+**A mannequin rather than a depth map**, deliberately. A mannequin head is an object the model has seen; a depth render is a stylised output that edit models routinely botch. The mannequin also carries shading, so it says *more* about the head's volume than a flat depth pass would.
+
+Clearing either box restores the shipped text — a blank instruction would tell Klein to do nothing at all, leaving the head in place for H3 to paint a second one over.
+
 #### MiniMax H3 (new) — optional stages
 
 → `face_swap.h3_new_stages`, two booleans, both **off** by default. Each switches on a node the new graph ships wired but bypassed:
 
 | Stage | Key | What it adds |
 | --- | --- | --- |
-| Blue mask overlay | `mask_overlay` | Paints the head area a flat blue over the erased head before H3 sees it. Off, H3 receives the Klein output as it is — head gone, depth map in its place. `face_swap.h3_mask_opacity` applies to this node, and only while this stage is on. |
-| Ollama head analysis | `ollama` | An Ollama vision call describes how the head sits in *this* photo (angle, occlusion, lighting) and that paragraph is appended to the instruction. It runs on `ollama.vision_model` — never the tag the graph was exported with — and loads that model onto the same GPU as H3. |
+| Blue mask overlay | `mask_overlay` | Paints the head area a flat blue over the erased head before H3 sees it. Off, H3 receives the Klein output as it is — head gone, depth map in its place. `face_swap.h3_mask_opacity` applies to this node, and only while this stage is on. **With this on, the instruction gains a sentence naming the blue** — that it marks the head's approximate area, and that the true size is the grey mannequin showing through beneath it. It deliberately does **not** say "fill the blue": that mask is the head mask grown by 20 px, so filling it edge to edge is an instruction to oversize the head. The sentence is added for this stage only; with the overlay off there is no blue to talk about. Keep `face_swap.h3_mask_opacity` below 1.0 so the mannequin — the only thing carrying the original size and angle — is not hidden behind a solid marker. |
+| Ollama head analysis | `ollama` | An Ollama vision call describes how the head sits in *this* photo (angle, occlusion, lighting) and that paragraph is appended to the instruction. It runs on the model named below. |
+
+**This one runs in the app, not in the graph.** The workflow ships an `OllamaAPI` node for it; that node is subtracted from every job and the app makes the call itself before anything is queued. Four things came with the move:
+
+- **Your `ollama.url` applies.** The node talked to `127.0.0.1:11434` and had no URL input, so a remote Ollama could not be used at all.
+- **It no longer shares the card with the render.** The call happens before the job is queued and the model is dropped the moment it answers (`keep_alive=0`), so the GPU holds one model at a time instead of a vision model landing on top of 40 GB of H3. It still runs on the GPU: pinning it to the CPU was tried and reverted — a 9B vision model on eight cores is a minute or more per tile, which is not worth paying for a card the call already stopped sharing.
+- **Failure refuses the swap up front**, naming the cause, instead of dying inside ComfyUI after the H3 stack has loaded and the tile has been consumed.
+- **The prompt no longer asks for what it cannot see.** It demanded findings "重点参考深度图" while the node had a single image input carrying the plain target — no depth map was ever sent, so that section was answered from nothing. The two depth-only questions are gone; occlusion and volume/perspective, which survive without one, stayed.
+
+No node pack is needed for `OllamaAPI` any more.
 
 **Switching `ollama` on turns the pose hint off for that job.** Both describe how the head sits; only one of them is looking at the actual picture, and sending two descriptions that can disagree makes the model split the difference.
+
+**The line that introduces the analysis is sent only with it.** The shipped instruction used to end with 「下面是图片头部的相关信息，请严格按照下面的说明进行。」 — written for this stage, but part of the fixed text, so every swap sent it, including the default one where the stage is off and nothing follows. That is not a harmless leftover: it tells the model to obey instructions it cannot see. It now travels with the analysis.
+
+#### MiniMax H3 (new) — which Ollama model analyses the head
+
+→ `face_swap.h3_new_ollama_model`, **blank** by default. The picker appears under the stage's checkbox once that stage is on, and lists the tags Ollama has actually pulled (`/api/ollama/models`, the same list the captioning popover shows).
+
+Blank means `ollama.vision_model` — the captioning model, which is what this stage ran on before the setting existed, so an untouched install behaves exactly as it did.
+
+**Why it is not simply `ollama.vision_model`.** The two jobs pull opposite ways. Captioning runs across an entire dataset, so it wants the small 8B. This stage runs once per swap, next to 40 GB of H3 already resident, and the paragraph it writes goes straight into the instruction that decides the head — so on a 24 GB card a heavier model can be worth its load time here and completely wrong there. One key for both would make one of the two choices wrong.
+
+**Two limits worth knowing before you pick:**
+
+- Ollama does not report which of its models can see, so **every** pulled tag is listed, vision or not. A text-only model answers happily and describes nothing it was shown; the swap does not detect this, it just gets a worse instruction.
+- A tag you saved and later removed from Ollama stays selected and stays visible in the list. It is not silently replaced by the default — the swap fails at the Ollama call instead, naming the model.
 
 #### MiniMax H3 (old) — how much of the shot it sees
 
@@ -521,8 +561,10 @@ Lower means more pixels on the face; higher gives the model the shoulders it nee
 
 → `face_swap.h3_mask_source` (`graph` | `app`, default **`graph`**) and `face_swap.h3_mask_prompt` (default **`head`**).
 
-- **`graph`** — `LayerMask: PersonMaskUltra` inside the workflow. What shipped; needs the **ComfyUI_LayerStyle** node pack, and the app never sees the mask it is about to repaint through.
-- **`app`** — the app's own masker (`services/auto_mask`, SAM 3), which runs in its own environment on the `sam3.pt` your ComfyUI already has. The mask becomes something this app can see, cache and reuse, and **LayerStyle leaves the job with it** (unless the LaMa stage is on). It needs the automatic-masking environment; without it the swap says so rather than failing obscurely.
+- **`graph`** — the workflow's own segmenter, and **which node that is depends on the engine**: `minimax_h3` (new) uses `ClothesSegment` from **ComfyUI-RMBG**, `minimax_h3_old` uses `LayerMask: PersonMaskUltra` from **ComfyUI_LayerStyle**. Either way the app never sees the mask it is about to repaint through.
+- **`app`** — the app's own masker (`services/auto_mask`, SAM 3), which runs in its own environment on the `sam3.pt` your ComfyUI already has. The mask becomes something this app can see, cache and reuse, and **the segmenter's node pack leaves the job with it** (unless the old engine's LaMa stage is on). It needs the automatic-masking environment; without it the swap says so rather than failing obscurely.
+
+**One mask at a time.** Every masking child loads its own 3.4 GB SAM 3, and a batch of swaps used to spawn one per tile at once — five of them, on a 24 GB card, left about 400 MB for the render they were masking for. They are serialised now, so a batch queues instead. Nothing gets slower in practice: they were already competing for one GPU.
 
 `h3_mask_prompt` is what the app lane masks — open-vocabulary, so this is the setting that decides **what actually gets replaced**. It is a comma-separated LIST for one reason: a head is not one object to a segmenter. Asked for as `head` alone, the mask comes back with a hole exactly where the glasses are, and the swap then paints a new face around the old pair — measured on a real tile, 10 444 pixels of frame and temples left behind. So the default is `head, glasses, sunglasses, hat, headband, earrings`: everything worn on the head, unioned.
 
@@ -556,11 +598,15 @@ Two things to try before reaching further: the **crop factor** above (more surro
 
 #### MiniMax H3 — how solidly the head is painted out
 
-→ `face_swap.h3_mask_opacity` (0.0–1.0, default **1.00**).
+→ `face_swap.h3_mask_opacity` (0.0–1.0, default **1.00**). **The two engines want opposite values here**, because what lies under the paint is not the same picture.
+
+**`minimax_h3` (new)** — this is the opacity of the blue overlay, and it does nothing unless that stage is on. Underneath it is the grey **mannequin** the Klein pass left behind: the one thing in the frame carrying the head's original size, angle and perspective. At 1.00 the blue hides it, and H3 is left sizing the head against a flat marker that is 20 px larger than the head ever was. **Roughly 0.4–0.75 is the useful range** — the blue says *here*, the mannequin showing through says *this big, at this angle*.
+
+**`minimax_h3_old`** — the rest of this section is about that graph, where the paint goes straight over the ORIGINAL head and the dial means something else entirely.
 
 Before H3 redraws the head, the masked region is painted over with a flat colour. This is how opaque that paint is — and it is the dial for **blank white faces**: at 1.00 the model is handed a slab with no structure in it at all, and a model asked to fill a slab sometimes fills it by drawing the slab back.
 
-- **Lowering it does not work, and this was measured.** At 0.75 the swap returned the *original* face: the ghost showing through is the very face being replaced, so the model reconstructs it instead of your reference. There is no useful middle — the structure a partial mask leaks *is* the identity.
+- **Lowering it does not work on the old graph, and this was measured.** At 0.75 the swap returned the *original* face: the ghost showing through is the very face being replaced, so the model reconstructs it instead of your reference. There is no useful middle *there* — the structure a partial mask leaks *is* the identity. On the new graph the ghost is a mannequin with no identity in it at all, which is why the same number is good advice on one engine and bad on the other.
 - What to reach for instead: the **LaMa** stage below, which replaces the masked region with plausible non-*face* content rather than a slab. Note that the stage can only do that at an opacity below 1.00 — at 1.00 the paint goes straight over LaMa's work — so the two are used together or not at all.
 - The setting stays because it is the dial the failure was diagnosed with, not because 0.75 is a value worth shipping.
 
@@ -1737,15 +1783,18 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `klein.generation_lora_presets` | Named generation-LoRA stacks (default empty) picked per run in Klein tuning; each has a name and up to 8 `{file, strength}` rows. Managed in Settings → Image engines. |
 | `klein.face_swap_loras` | Flat `{file, strength}` list (default empty, max 8) chained onto the 🔀 face swap graph after its own LoRAs. Always on — no per-run picker. A row whose file is missing is skipped, not fatal. Managed in Settings → Image engines. |
 | `face_swap.engine` | Which engine the 🎭↔ swap runs: `klein` (default, swap LoRA repaints the head), `minimax_h3` (the current H3 graph — a Klein pass erases the head, then H3 re-renders the whole shot around your reference; needs both model families) or `minimax_h3_old` (the previous H3 graph — masks the head, sends only a crop through H3 and composites it back, so everything outside the head is untouched). |
-| `face_swap.h3_new_stages` | Two booleans for the NEW H3 graph, both `false`: `mask_overlay` (paints the erased head area flat blue before H3 sees it) and `ollama` (an Ollama vision call describes how the head sits in this photo and that goes into the instruction — runs on `ollama.vision_model`, and suppresses `h3_pose_hint` while on). |
+| `face_swap.h3_head_removal_prompt` | **`minimax_h3` (new) only.** What the Klein pass is told to do: replace the head with a featureless grey mannequin, keeping size/position/orientation/perspective. That stand-in is what H3 sizes the new head against. Blank restores the shipped text. |
+| `face_swap.h3_head_removal_negative` | The Klein pass's negative — the failure modes of the instruction above (a hole, a headless body, the background showing through) plus the identity that must not survive. Blank restores the shipped text. |
+| `face_swap.h3_new_stages` | Two booleans for the NEW H3 graph, both `false`: `mask_overlay` (paints the erased head area flat blue before H3 sees it) and `ollama` (an Ollama vision call describes how the head sits in this photo and that goes into the instruction — runs on `face_swap.h3_new_ollama_model`, and suppresses `h3_pose_hint` while on). |
+| `face_swap.h3_new_ollama_model` | The Ollama tag the head-analysis stage runs on. Blank (default) = `ollama.vision_model`, the captioning model. Picked from the tags Ollama has pulled; every tag is listed because Ollama does not say which can see. The call is made by the app, before the render is queued, and the model is unloaded as soon as it answers. |
 | `face_swap.h3_context_factor` | **`minimax_h3_old` only.** How far the H3 swap's crop reaches around the head (1.0–8.0, default `3.0`). A factor of the head, clamped to the photo — so 3.0 crops a full-body shot to head and chest and leaves a portrait uncropped. Lower = more pixels on the face; higher = the shoulders the model sizes the head against. |
-| `face_swap.h3_mask_source` | Where the H3 swap's head mask comes from: `graph` (PersonMaskUltra in the workflow, needs ComfyUI_LayerStyle) or `app` (services/auto_mask — SAM 3 in the app's own environment, on the sam3.pt ComfyUI already has). Default `graph`. |
+| `face_swap.h3_mask_source` | Where the H3 swap's head mask comes from: `graph` (the workflow's own segmenter — ClothesSegment/ComfyUI-RMBG on the new engine, PersonMaskUltra/ComfyUI_LayerStyle on the old one) or `app` (services/auto_mask — SAM 3 in the app's own environment, on the sam3.pt ComfyUI already has; one child at a time). Default `graph`. |
 | `face_swap.h3_mask_prompt` | What the app lane masks, comma-separated (default `head, glasses, sunglasses, hat, headband, earrings`). Open-vocabulary, so it decides what actually gets replaced — and a list because `head` alone leaves the glasses behind. Phrases that match nothing add nothing. |
 | `auto_mask.python` | The app-managed interpreter for automatic masking (data/envs/automask). Blank = not installed. |
 | `auto_mask.checkpoint` | Meta's `sam3.pt`, borrowed from a ComfyUI install. Blank = resolve it (models/sam3 first, extra_model_paths.yaml roots included). An absolute path anywhere is honoured. NOT the Comfy-Org `sam3.1_multiplex_fp16.safetensors`, which is remapped for ComfyUI's own loader. |
 | `auto_mask.device` | Blank = CUDA when torch sees a card, else CPU. Pin `cpu` to leave the GPU to a running generation; expect it to be slow. |
 | `auto_mask.threshold` | Detection confidence for automatic masking (default `0.5`). |
-| `face_swap.h3_mask_opacity` | How opaque the placeholder painted over the head is (0–1, default `1.0`). Below 1.0 a ghost of the head shows through — and that ghost is the face being REPLACED, so 0.75 measurably returns the original face. Keep 1.0. It is also why the `lama` stage cannot change anything at 1.0. |
+| `face_swap.h3_mask_opacity` | How opaque the placeholder painted over the head is (0–1, default `1.0`). **The engines want opposite values.** `minimax_h3_old`: below 1.0 a ghost of the ORIGINAL head shows through, so 0.75 measurably returns the original face — keep 1.0 (and it is why the `lama` stage cannot change anything at 1.0). `minimax_h3` (new): it is the blue overlay's opacity, and what shows through is the grey mannequin carrying the head's size and angle — 0.4–0.75 keeps that visible; 1.0 hides it. |
 | `face_swap.h3_pose_hint` | Append one sentence to the H3 swap instruction describing how the head sits and what the face is doing, read from the catalog prompt that generated the tile (default `true`; ~82% of tiles yield one). A row that says nothing usable gets nothing rather than a guess. |
 | `face_swap.h3_blend_pixels` | **`minimax_h3_old` only.** How wide the feather is when the swapped head is composited back (0–64, default `40`). The mechanical half of "it does not blend" — the prompt matches light, colour and grain, this matches the edge. Past ~48 px an old hairline can ghost. |
 | `face_swap.h3_lama_model` | Which inpainting model the `lama` stage runs (default `lama`). The shipped graph asked for `zits`, which crashes on this lane: it pads to a multiple of 32 and drives a 256→512 structure upsampler, while the inpaint crop is an arbitrary size. Also accepts `ldm`, `mat`, `fcf`, `manga`, `spread`. |

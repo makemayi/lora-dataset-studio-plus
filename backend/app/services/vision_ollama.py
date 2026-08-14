@@ -180,6 +180,8 @@ def describe_image_ollama(image_bytes: bytes, prompt: str, *,
                           prefer_json: bool = False,
                           fmt: str | None = None,
                           keep_alive: str | int = 0,
+                          num_gpu: int | None = None,
+                          think: bool | None = None,
                           auto_start_local: bool = False,
                           timeout: tuple[float, float] | float = (10, 120)) -> str:
     """Describe an image via Ollama vision. Returns the caption text, or "" on
@@ -205,6 +207,17 @@ def describe_image_ollama(image_bytes: bytes, prompt: str, *,
     bon pour les appels isolés) ; un batch (caption/classify de N images) doit
     passer une durée (ex. '5m') pour garder le modèle chaud entre les images, PUIS
     appeler unload_vision_model() en fin de batch pour rendre la VRAM à ComfyUI.
+
+    `num_gpu=0` pins the model to the CPU (zero layers offloaded). The card is
+    the scarce resource here, not the cores: a caller that runs BESIDE a local
+    render — the H3 swap's head analysis is the case this was added for — would
+    otherwise take VRAM from a job already at the ceiling, while the CPU sits
+    idle because the render is GPU-bound. Slower per call, and free.
+
+    `think=False` suppresses the reasoning trace on a thinking-capable model.
+    Not every checkpoint honours it (several ignore both `think:false` and
+    `/no_think`), which is why the empty-`response` fallback below still exists —
+    this asks, it does not guarantee. None leaves Ollama's own default alone.
     """
     prepared = _ensure_ollama_decodable(image_bytes)
     if prepared is None:
@@ -230,6 +243,10 @@ def describe_image_ollama(image_bytes: bytes, prompt: str, *,
                         'repeat_penalty': float(repeat_penalty)},
             'keep_alive': keep_alive,
         }
+        if num_gpu is not None:
+            payload['options']['num_gpu'] = int(num_gpu)
+        if think is not None:
+            payload['think'] = bool(think)
         # `format='json'` constrains the response to valid JSON (Ollama grammar) —
         # stops the abliterated model from rambling prose instead of the object.
         if fmt:
@@ -291,7 +308,8 @@ def describe_image_ollama(image_bytes: bytes, prompt: str, *,
                 image_bytes, prompt, ollama_url=ollama_url, model=model,
                 num_predict=num_predict, num_ctx=num_ctx,
                 repeat_penalty=repeat_penalty, prefer_json=prefer_json, fmt=fmt,
-                keep_alive=keep_alive, auto_start_local=False, timeout=timeout)
+                keep_alive=keep_alive, num_gpu=num_gpu, think=think,
+                auto_start_local=False, timeout=timeout)
             if not retried:
                 raise RuntimeError(
                     'Ollama did not return a caption after restart — check the configured '

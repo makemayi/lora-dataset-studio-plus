@@ -152,6 +152,53 @@ def test_mask_overlay_on_sits_between_klein_and_h3(swap):
     assert wf['983:1002']['inputs']['mask_opacity'] == 1.0
 
 
+def test_the_klein_instruction_is_editable_without_touching_the_graph(swap):
+    """It is the dial that decides whether the swap comes back in proportion,
+    and getting it right takes several tries — so it is a setting, not a string
+    in a JSON file behind a rebuild."""
+    sh, _mh, _base, config = swap
+    _set(config, 'face_swap',
+         h3_head_removal_prompt='把头替换为一个灰色球体。',
+         h3_head_removal_negative='人脸')
+    wf, _ = _build(sh)
+    assert wf['983:964']['inputs']['text'] == '把头替换为一个灰色球体。'
+    assert wf['983:965']['inputs']['text'] == '人脸'
+
+
+def test_a_blank_klein_instruction_falls_back_to_the_shipped_one(swap):
+    """An empty positive tells Klein to do NOTHING, so the head survives and H3
+    paints a second one over it. Blank has to mean the default, not silence."""
+    sh, _mh, _base, config = swap
+    from app.config import DEFAULTS
+    shipped = DEFAULTS['face_swap']['h3_head_removal_prompt']
+    for blank in ('', '   \n  '):
+        _set(config, 'face_swap', h3_head_removal_prompt=blank)
+        wf, _ = _build(sh)
+        assert wf['983:964']['inputs']['text'] == shipped
+
+
+def test_the_overlay_stage_tells_the_prompt_what_the_blue_is(swap):
+    """The overlay hands H3 a picture with a flat blue slab where the head was.
+    Nothing in the shipped instruction mentions blue, so the model was being
+    asked to fill a region it had not been told about."""
+    sh, _mh, _base, config = swap
+    _set(config, 'minimax_h3', swap_prompt='精确换头。')
+    wf, _ = _build(sh, stages={'mask_overlay': True, 'ollama': False})
+    text = wf['990']['inputs']['text']
+    assert text.startswith('精确换头。')
+    assert '蓝色' in text
+    # It must NOT tell the model to fill the blue: that mask is the head mask
+    # grown by 20 px, so filling it edge to edge oversizes the head — the exact
+    # failure this pass exists to avoid. The mannequin under it is the size
+    # authority, and the sentence has to say so.
+    assert '不要为了填满蓝色而放大头部' in text
+    assert '灰色素模头' in text
+    # OFF: there is no blue in the picture, so an instruction about it would be
+    # about a colour that is not there.
+    wf, _ = _build(sh, stages={'mask_overlay': False, 'ollama': False})
+    assert '蓝色' not in wf['990']['inputs']['text']
+
+
 def test_mask_opacity_only_applies_while_the_overlay_stage_is_on(swap):
     sh, _mh, _base, config = swap
     _set(config, 'face_swap', h3_mask_opacity=0.5)
@@ -163,17 +210,109 @@ def test_mask_opacity_only_applies_while_the_overlay_stage_is_on(swap):
     assert '983:1002' not in wf
 
 
-def test_ollama_on_uses_the_app_model_not_the_graph_tag(swap, monkeypatch):
-    """A graph naming one Ollama tag fails on every machine that lacks it."""
+def test_the_ollama_node_leaves_the_job_even_when_the_stage_is_ON(swap):
+    """The call moved into the app, so the graph never carries it. Kept, but
+    subtracted: the node reached 127.0.0.1 on its own, failed inside ComfyUI
+    after 40 GB had loaded, and took VRAM from the render that follows it."""
+    sh, _mh, _base, _config = swap
+    wf, kept = _build(sh, stages={'mask_overlay': False, 'ollama': True},
+                      head_analysis='图片中头部位于正中区域。')
+    assert kept == ['ollama']                  # still "on" — the app runs it
+    assert '988' not in wf and '991' not in wf  # ...but its branch is gone
+    assert 'OllamaAPI' not in _classes(wf)
+    # With the concatenation gone the H3 node reads the text node directly.
+    assert wf['170']['inputs']['prompt'] == ['990', 0]
+
+
+def test_the_head_analysis_is_appended_to_the_text_node(swap):
+    """Same destination as the pose hint, and for the same reason: the H3 node's
+    own `prompt` is a link, so anything written there is discarded."""
     sh, _mh, _base, config = swap
-    _set(config, 'ollama', vision_model='my/own-vlm:latest')
+    _set(config, 'minimax_h3', swap_prompt='Swap the head.')
+    wf, _ = _build(sh, stages={'mask_overlay': False, 'ollama': True},
+                   head_analysis='  图片中头部位于中上偏右区域。  ')
+    text = wf['990']['inputs']['text']
+    assert text.startswith('Swap the head.')
+    assert text.endswith('图片中头部位于中上偏右区域。')
+    # The sentence that introduces it travels WITH it. It used to be the last
+    # line of the shipped instruction, sent on every swap — telling the model to
+    # follow instructions that were not there whenever the stage was off.
+    assert sh.HEAD_ANALYSIS_LEAD_IN in text
+    assert text.index(sh.HEAD_ANALYSIS_LEAD_IN) < text.index('图片中头部位于')
+    # An analysis without the stage is not smuggled in — the two must agree, or
+    # a stale value from a previous build could reach a job that switched it off.
+    wf, _ = _build(sh, stages={'mask_overlay': False, 'ollama': False},
+                   head_analysis='图片中头部位于正中区域。')
+    assert '图片中头部' not in wf['990']['inputs']['text']
+    # ...and the lead-in goes with it, rather than dangling over nothing. The
+    # DEFAULT swap (both stages off) is the case this was wrong in.
+    assert sh.HEAD_ANALYSIS_LEAD_IN not in wf['990']['inputs']['text']
+    wf, _ = _build(sh)
+    assert sh.HEAD_ANALYSIS_LEAD_IN not in wf['990']['inputs']['text']
+
+
+def test_the_analysis_runs_on_the_stage_model_and_leaves_the_card(swap, monkeypatch):
+    """It shares the card with H3 in TIME, not at the same moment: the call
+    happens before the job is queued and `keep_alive=0` drops the model as soon
+    as it answers. And the stage has its OWN model key — captioning runs across
+    a dataset and wants the small model, this runs once."""
+    sh, _mh, _base, config = swap
+    _set(config, 'ollama', vision_model='small/captioner:8b')
+    _set(config, 'face_swap', h3_new_ollama_model='big/looker:34b')
     monkeypatch.delenv('VISION_OLLAMA_MODEL', raising=False)
-    wf, kept = _build(sh, stages={'mask_overlay': False, 'ollama': True})
-    assert kept == ['ollama']
-    assert wf['988']['inputs']['ollama_model'] == 'my/own-vlm:latest'
-    assert wf['988']['inputs']['seed'] != 0
-    assert wf['170']['inputs']['prompt'] == ['991', 0]
-    assert wf['991']['inputs']['text_b'] == ['988', 0]
+    seen = {}
+    from app.services import vision_ollama
+
+    def fake_describe(image_bytes, prompt, **kw):
+        seen.update(kw)
+        seen['prompt'] = prompt
+        return '图片中头部位于正中区域。'
+    monkeypatch.setattr(vision_ollama, 'describe_image_ollama', fake_describe)
+
+    target = _write(_base / 'tile.png', b'\x89PNG\r\n\x1a\n')
+    assert sh.analyse_head(str(target)) == '图片中头部位于正中区域。'
+    assert seen['model'] == 'big/looker:34b'
+    assert seen['think'] is False        # asked; some checkpoints ignore it
+    assert seen['keep_alive'] == 0       # off the card before the render starts
+    # NOT pinned to the CPU: that was tried and reverted — a 9B vision model on
+    # 8 cores is a minute per tile, and the call no longer shares the card.
+    assert 'num_gpu' not in seen
+    # The prompt no longer asks for findings the model is not shown: the node
+    # had ONE image input and demanded "重点参考深度图".
+    assert '深度图' not in seen['prompt']
+    assert seen['prompt'].startswith('你是一个专业的图像头部分析专家')
+
+    # Blank falls back to the captioning model — the pre-key behaviour.
+    _set(config, 'face_swap', h3_new_ollama_model='')
+    sh.analyse_head(str(target))
+    assert seen['model'] == 'small/captioner:8b'
+
+
+def test_an_unusable_ollama_refuses_before_anything_is_queued(swap, monkeypatch):
+    """Both failure shapes refuse, and both name the stage AND the way out. The
+    tile is overwritten in place, so "it ran, just without the analysis" is not
+    a recoverable outcome — it is a different render, silently."""
+    sh, _mh, base, _config = swap
+    from app.services import vision_ollama
+    target = _write(base / 'tile.png', b'\x89PNG\r\n\x1a\n')
+
+    monkeypatch.setattr(vision_ollama, 'describe_image_ollama',
+                        lambda *a, **kw: (_ for _ in ()).throw(
+                            RuntimeError('Ollama could not start.')))
+    with pytest.raises(ValueError) as excinfo:
+        sh.analyse_head(str(target))
+    assert 'Ollama could not start.' in str(excinfo.value)
+    assert 'Turn the stage off' in str(excinfo.value)
+
+    # An empty answer is the thinking-model failure, and it is NOT a silent pass.
+    monkeypatch.setattr(vision_ollama, 'describe_image_ollama', lambda *a, **kw: '   ')
+    with pytest.raises(ValueError) as excinfo:
+        sh.analyse_head(str(target))
+    assert 'non-thinking' in str(excinfo.value)
+
+    # ...and none of it blocks a swap with the stage switched off.
+    wf, kept = _build(sh, stages={'mask_overlay': True, 'ollama': False})
+    assert kept == ['mask_overlay'] and '988' not in wf
 
 
 # --- the prompt --------------------------------------------------------------

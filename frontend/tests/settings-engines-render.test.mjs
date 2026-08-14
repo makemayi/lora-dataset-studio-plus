@@ -345,6 +345,73 @@ test('the new H3 stages render checked from their own config key', () => {
   assert.doesNotMatch(html, /id="face-swap-h3-lama"[^>]*checked/)
 })
 
+/* The head-analysis model picker. It is MOUNTED whatever the checkbox says and
+   only `hidden` moves — same reason as every other conditional line in this
+   card: Chrome auto-translate rewrites text nodes, and a branch that unmounts
+   under it throws inside the section rather than in a test. */
+const renderFaceSwap = (faceSwap, extra = {}) => renderToStaticMarkup(
+  createElement(EnginesSection, {
+    config: { ...CONFIG, face_swap: faceSwap, ...extra },
+    focusId: KLEIN,
+    configDefaults: { ...CONFIG, face_swap: { engine: 'klein' } },
+    setField: () => {}, toggleEngine: () => {}, caps: {}, refreshCaps: () => {},
+    toast: { error: () => {}, success: () => {} },
+    secretsPresence: {}, secretInputs: {}, setSecretInputs: () => {},
+    testResults: {}, recordTestResult: () => {}, saveSecretIfPending: () => {},
+    handleDeleteSecret: () => {},
+  }))
+
+test('the Klein instruction renders, editable, with the shipped text in the box', () => {
+  const shipped = '把人物的头部替换为一个无五官的灰色素模头（假人头模）。'
+  const html = renderToStaticMarkup(createElement(EnginesSection, {
+    config: { ...CONFIG, face_swap: { engine: 'minimax_h3' } },
+    focusId: KLEIN,
+    configDefaults: { ...CONFIG, face_swap: { engine: 'klein',
+                                              h3_head_removal_prompt: shipped,
+                                              h3_head_removal_negative: '人脸' } },
+    setField: () => {}, toggleEngine: () => {}, caps: {}, refreshCaps: () => {},
+    toast: { error: () => {}, success: () => {} },
+    secretsPresence: {}, secretInputs: {}, setSecretInputs: () => {},
+    testResults: {}, recordTestResult: () => {}, saveSecretIfPending: () => {},
+    handleDeleteSecret: () => {},
+  }))
+  assert.match(html, /id="face-swap-h3-head-removal-prompt"/)
+  assert.match(html, /id="face-swap-h3-head-removal-negative"/)
+  // The box shows what is ACTUALLY in use — the shipped default when nothing
+  // overrides it — so a user editing it starts from the real text.
+  assert.ok(html.includes('灰色素模头'), 'the shipped instruction is not in the box')
+})
+
+test('the Ollama model picker is mounted either way, and only hidden moves', () => {
+  const off = renderFaceSwap({ engine: 'minimax_h3', h3_new_stages: {} })
+  const on = renderFaceSwap({ engine: 'minimax_h3',
+                              h3_new_stages: { ollama: true } })
+  for (const html of [off, on]) {
+    assert.match(html, /id="face-swap-h3-new-ollama-model"/)
+    assert.match(html, /Which Ollama model analyses the head/)
+  }
+  // The wrapper carries `hidden` while the stage is off, and loses it when on.
+  assert.match(off, /hidden=""[^>]*>\s*<label for="face-swap-h3-new-ollama-model"/)
+  assert.doesNotMatch(on, /hidden=""[^>]*>\s*<label for="face-swap-h3-new-ollama-model"/)
+})
+
+test('a blank model selects the captioning model, and names it', () => {
+  const html = renderFaceSwap({ engine: 'minimax_h3',
+                                h3_new_stages: { ollama: true } },
+                              { ollama: { vision_model: 'qwen3-vl:8b-instruct' } })
+  assert.match(html, /The captioning model from Local tools \(qwen3-vl:8b-instruct\)/)
+})
+
+test('a saved tag Ollama no longer lists stays selected instead of silently defaulting', () => {
+  // No models are fetched during a static render, so this is exactly the case
+  // the choices guard exists for: a value absent from its options would render
+  // as the FIRST option — "the captioning model" — while config says otherwise.
+  const html = renderFaceSwap({ engine: 'minimax_h3',
+                                h3_new_stages: { ollama: true },
+                                h3_new_ollama_model: 'llava:34b' })
+  assert.match(html, /<option value="llava:34b"[^>]*selected[^>]*>llava:34b<\/option>/)
+})
+
 test('a checked H3 stage renders checked', () => {
   const html = renderToStaticMarkup(createElement(EnginesSection, {
     config: { ...CONFIG, face_swap: { engine: 'minimax_h3',

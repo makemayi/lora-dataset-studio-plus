@@ -328,6 +328,32 @@ function FaceSwapLorasCard({ config, setField, graphLoras = [] }) {
   )
 }
 
+/* The tags Ollama has actually PULLED, for the head-analysis stage's picker.
+   Same source as the captioning popover's list (/api/ollama/models), so the two
+   places that name an Ollama model never disagree about what exists.
+
+   An unreachable Ollama answers `reachable: false` rather than throwing, which
+   is the difference between "you have no models" and "nothing asked yet" — the
+   picker says which, instead of rendering an empty dropdown that reads as the
+   former. */
+function useOllamaModels() {
+  const [state, setState] = useState({ models: [], reachable: null })
+  useEffect(() => {
+    let live = true
+    apiFetch('/api/ollama/models')
+      .then((r) => {
+        if (!live) return
+        setState({
+          models: Array.isArray(r?.models) ? r.models : [],
+          reachable: Boolean(r?.reachable),
+        })
+      })
+      .catch(() => { if (live) setState({ models: [], reachable: false }) })
+    return () => { live = false }
+  }, [])
+  return state
+}
+
 /* Which engine the 🎭↔ swap button runs, and the three optional stages of the
    H3 graph.
 
@@ -355,6 +381,15 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
   const setStage = (key, on) => setField('face_swap', 'h3_stages', { ...stages, [key]: on })
   const setNewStage = (key, on) =>
     setField('face_swap', 'h3_new_stages', { ...newStages, [key]: on })
+  // The head-analysis picker. A saved tag that Ollama no longer lists is kept at
+  // the head of the choices rather than dropped: a select whose value is absent
+  // from its options renders as the FIRST option, which would silently show
+  // "the captioning model" while the config still says otherwise.
+  const ollama = useOllamaModels()
+  const visionModel = config.ollama?.vision_model || ''
+  const ollamaModel = fs.h3_new_ollama_model ?? ''
+  const ollamaModelChoices = ollamaModel && !ollama.models.includes(ollamaModel)
+    ? [ollamaModel, ...ollama.models] : ollama.models
   return (
     <Card
       id="face-swap-engine"
@@ -428,15 +463,24 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
           onChange={(e) => setField('face_swap', 'h3_mask_source', e.target.value)}
           className={INPUT_CLASS}
         >
-          <option value="graph">The workflow (PersonMaskUltra, needs ComfyUI_LayerStyle)</option>
+          <option value="graph">The workflow&apos;s own segmenter</option>
           <option value="app">The app (SAM 3 — you can name any region)</option>
         </select>
         <HelpText className="mt-1 text-xs text-content-muted">
-          The app lane runs SAM 3 in its own environment on the SAM 3 checkpoint
-          your ComfyUI already has, which makes the mask something this app can
-          see, cache and reuse — and drops the LayerStyle node pack from the job.
-          It needs the automatic-masking environment from Setup; without it the
-          swap says so instead of failing.
+          <span hidden={!isNewH3}>
+            MiniMax H3 (new) segments with ClothesSegment, from ComfyUI-RMBG.
+          </span>
+          <span hidden={isNewH3}>
+            MiniMax H3 (old) segments with PersonMaskUltra, from ComfyUI_LayerStyle.
+          </span>
+          {' '}
+          The app lane instead runs SAM 3 in its own environment, on the SAM 3
+          checkpoint your ComfyUI already has — which makes the mask something
+          this app can see, cache and reuse, and drops that node pack from the
+          job. It needs the automatic-masking environment from Setup; without it
+          the swap says so instead of failing. Masks are produced one at a time,
+          so a batch queues rather than putting several copies of SAM 3 on the
+          card at once.
         </HelpText>
         <label htmlFor="face-swap-h3-mask-prompt" className="mt-2 block text-xs font-medium text-content">
           What to mask
@@ -503,18 +547,68 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
           className="mt-1 w-full accent-indigo-500"
         />
         <HelpText className="mt-1 text-xs text-content-muted">
-          Before H3 redraws the head it is painted over. At 1.00 what is left is a
-          flat slab with no structure, which is where a blank white face comes from
-          — a model filling a slab by drawing the slab back. Lowering it is
-          <strong> not</strong> the answer though: at 0.75 the swap came back with the
-          ORIGINAL face, because the ghost showing through is the very face you are
-          replacing. There is no useful middle here. Leave it at 1.00 and use the
-          LaMa stage below, which fills the hole with plausible non-face content
-          instead — and note that this is also what makes that stage able to change
-          anything at all, since at 1.00 the paint covers its work.
+          <span hidden={!isNewH3}>
+            <strong>MiniMax H3 (new):</strong> this is the opacity of the blue
+            overlay, and it only does anything while that stage is on. What lies
+            underneath it is the grey mannequin the Klein pass left in place of
+            the head — the one thing telling H3 how big the head was — so 1.00
+            hides the size authority behind a flat marker. Around 0.4&ndash;0.75
+            keeps both: the blue says <em>here</em>, the mannequin showing
+            through says <em>this big, at this angle</em>.
+          </span>
+          <span hidden={isNewH3}>
+            <strong>MiniMax H3 (old):</strong> before H3 redraws the head it is
+            painted over. At 1.00 what is left is a flat slab with no structure,
+            which is where a blank white face comes from — a model filling a slab
+            by drawing the slab back. Lowering it is <strong>not</strong> the
+            answer on this graph though: at 0.75 the swap came back with the
+            ORIGINAL face, because the ghost showing through is the very face you
+            are replacing. There is no useful middle here. Leave it at 1.00 and
+            use the LaMa stage below, which fills the hole with plausible
+            non-face content instead — and note that this is also what makes
+            that stage able to change anything at all, since at 1.00 the paint
+            covers its work.
+          </span>
         </HelpText>
         <ResetToDefault label="H3 swap mask opacity" section="face_swap" field="h3_mask_opacity"
           config={config} configDefaults={configDefaults} setField={setField} />
+      </div>
+
+      {/* The Klein pass's own instruction. It is on this card rather than in a
+          config file because it is the dial that decides whether the swap comes
+          back in proportion, and landing it takes several tries. */}
+      <div className="mt-3" id="face-swap-h3-head-removal">
+        <PromptOverrideField
+          id="face-swap-h3-head-removal-prompt"
+          label="What the Klein pass is told to do (MiniMax H3 new)"
+          desc="Klein does not delete the head, it replaces it with a featureless grey mannequin — and that stand-in is the only thing left telling H3 how big the head was, where it sat and which way it faced."
+          warn={isNewH3 ? null : 'The engine selected above is not MiniMax H3 (new), which is the only one with this pass — this box does nothing until you switch to it.'}
+          value={fs.h3_head_removal_prompt ?? ''}
+          defaultText={defaultValueAt(configDefaults, 'face_swap', 'h3_head_removal_prompt') || ''}
+          onChange={(v) => setField('face_swap', 'h3_head_removal_prompt', v)}
+          rows={5}
+        />
+        <HelpText className="mt-1 text-xs text-content-muted">
+          Three things earn their place in it, and a doll-sized head is what
+          happens when one goes missing: the first verb is <strong>replace</strong>,
+          never remove — an edit model follows a repeated deletion intent and
+          stops after erasing; the geometry is named out loud (size, position,
+          orientation, tilt, perspective), because that is what the rest of the
+          graph reads; and removing the identity is written as a constraint
+          rather than as the instruction. A mannequin, not a depth map: the model
+          has seen mannequins, and their shading says more about the volume than
+          a flat depth pass would. Clearing the box restores this text.
+        </HelpText>
+        <PromptOverrideField
+          className="mt-3"
+          id="face-swap-h3-head-removal-negative"
+          label="…and what it must avoid"
+          desc="The failure modes of the instruction above — a hole, a headless body, the background showing through — plus the identity that must not survive."
+          value={fs.h3_head_removal_negative ?? ''}
+          defaultText={defaultValueAt(configDefaults, 'face_swap', 'h3_head_removal_negative') || ''}
+          onChange={(v) => setField('face_swap', 'h3_head_removal_negative', v)}
+          rows={3}
+        />
       </div>
 
       <fieldset className="mt-3" id="face-swap-h3-new-stages">
@@ -538,7 +632,7 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
             checked={Boolean(newStages.mask_overlay)}
             onChange={(e) => setNewStage('mask_overlay', e.target.checked)}
           />
-          Blue mask overlay — paints the head area flat blue before H3 sees it (off: H3 gets the erased head and its depth map)
+          Blue mask overlay — paints the head area flat blue before H3 sees it, and tells the instruction that the blue is the region to fill (off: H3 gets the erased head and its depth map)
         </label>
         <label className="mt-2 flex items-center gap-2 text-xs text-content">
           <input
@@ -547,14 +641,54 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
             checked={Boolean(newStages.ollama)}
             onChange={(e) => setNewStage('ollama', e.target.checked)}
           />
-          Ollama head analysis — a vision model describes how the head sits in this photo and that goes into the instruction
+          Ollama head analysis — a vision model describes how the head sits in this photo and that goes into the instruction (runs before the render, not during it)
         </label>
+        <div className="mt-2 sm:max-w-md" hidden={!newStages.ollama}>
+          <label htmlFor="face-swap-h3-new-ollama-model"
+            className="block text-xs font-medium text-content">
+            Which Ollama model analyses the head
+          </label>
+          <select
+            id="face-swap-h3-new-ollama-model"
+            value={ollamaModel}
+            onChange={(e) => setField('face_swap', 'h3_new_ollama_model', e.target.value)}
+            className={INPUT_CLASS}
+          >
+            <option value="">
+              The captioning model from Local tools{visionModel ? ` (${visionModel})` : ''}
+            </option>
+            {ollamaModelChoices.map((tag) => (
+              <option key={tag} value={tag}>{tag}</option>
+            ))}
+          </select>
+          <HelpText className="mt-1 text-xs text-content-muted">
+            <span hidden={ollama.reachable !== false}>
+              Ollama isn&apos;t reachable, so this is the model you saved earlier
+              rather than a list of what is pulled. Start it from Settings ▸ Local
+              tools to pick from the models on this machine.
+            </span>
+            <span hidden={!(ollama.reachable && !ollama.models.length)}>
+              Ollama is running but has no models pulled yet. Pull a VISION model
+              (a text-only one answers about nothing it can see) and it appears here.
+            </span>
+            <span hidden={!(ollama.reachable && ollama.models.length)}>
+              Every tag Ollama has pulled is listed, vision or not — Ollama does not
+              say which is which. A text-only model will answer, and its answer will
+              describe nothing, so pick one you know can see.
+            </span>
+          </HelpText>
+          <ResetToDefault label="H3 swap head-analysis model" section="face_swap"
+            field="h3_new_ollama_model"
+            config={config} configDefaults={configDefaults} setField={setField} />
+        </div>
         <HelpText className="mt-1 text-[0.6875rem] text-amber-400">
-          The Ollama stage runs on the vision model configured under Local tools,
-          not on whatever tag the graph was exported with — but it does load that
-          model onto the same GPU as H3. It also replaces the pose hint below:
-          both describe how the head sits, and only one of them is looking at the
-          actual picture, so the hint is not sent while this is on.
+          The app makes this call itself, before the render is queued, and unloads
+          the model as soon as it answers — so the card holds one model at a time
+          instead of this one landing on top of H3, and a stopped Ollama refuses
+          the swap instead of failing mid-render. It also
+          replaces the pose hint below: both describe how the head sits, and only
+          one of them is looking at the actual picture, so the hint is not sent
+          while this is on.
         </HelpText>
       </fieldset>
 

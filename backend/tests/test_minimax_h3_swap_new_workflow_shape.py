@@ -29,7 +29,10 @@ NODE_REF_IMAGE = '114'
 _REQUIRED_NODES = (NODE_TARGET_IMAGE, NODE_REF_IMAGE, '928', '957', '170',
                    '990', '991', '988', '131', '139', '304', '305',
                    '925:427', '925:922', '925:921', '925:926', '983:1002',
-                   '983:973', '983:962', '983:963', '983:966', '983:969', '165')
+                   '983:973', '983:962', '983:963', '983:966', '983:969', '165',
+                   # The Klein pass's own instruction and its negative: the
+                   # helper writes both from config on every job.
+                   '983:964', '983:965')
 _STAGE_TAILS = ('983:1002', '991')
 
 
@@ -190,3 +193,52 @@ def test_the_hybrid_loader_takes_two_models():
     loader = _load()['925:427']
     assert loader['class_type'] == 'MiniMaxH3HybridLoader'
     assert 'base_model' in loader['inputs'] and 'overlay_model' in loader['inputs']
+
+
+def test_the_klein_instruction_matches_the_config_default():
+    """Two copies of one string, deliberately: the config value is what RUNS
+    (the helper writes it on every job), the node's own text is what someone
+    sees when they open the graph in ComfyUI. This pins them together so the
+    file cannot start describing a pass it no longer performs."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from app.config import DEFAULTS
+    wf = _load()
+    fs = DEFAULTS['face_swap']
+    assert wf['983:964']['inputs']['text'] == fs['h3_head_removal_prompt']
+    assert wf['983:965']['inputs']['text'] == fs['h3_head_removal_negative']
+
+
+def test_the_klein_instruction_replaces_the_head_rather_than_deleting_it():
+    """The stand-in Klein leaves behind is the ONLY thing telling H3 how big the
+    head was and which way it faced — delete instead of replace and the swap is
+    guessing, which is where a doll-sized head comes from.
+
+    The maintainer's original led with three deletion verbs and hung the
+    stand-in off the end as a transform of the head it had just erased; the
+    model followed the repeated intent and stopped after erasing."""
+    text = _load()['983:964']['inputs']['text']
+    head, _, rest = text.partition('\n')
+    # The FIRST clause is the replacement, and no deletion verb precedes it.
+    assert '替换' in head
+    assert head.index('替换') < min([head.index(v) for v in ('移除', '抹除', '消除')
+                                     if v in head] or [len(head)])
+    # The geometry is pinned by name: it is what the rest of the graph reads.
+    for word in ('大小', '位置', '朝向', '透视'):
+        assert word in text, word
+    # ...and the removal is a CONSTRAINT, not the instruction.
+    assert '没有任何身份特征' in rest
+
+
+def test_the_swap_instruction_knows_the_head_is_a_mannequin_now():
+    """The Klein pass no longer erases the head, it leaves a grey mannequin. An
+    instruction that does not mention it lets H3 treat the grey head as real
+    scene content — painting around it, or leaving part of it in the result."""
+    text = _load()['990']['inputs']['text']
+    assert '灰色素模头' in text
+    assert '不得残留任何灰色素模' in text
+    # ...and it must carry the geometry over from the stand-in, which is the
+    # whole reason the stand-in exists.
+    for word in ('大小', '位置', '朝向', '透视'):
+        assert word in text, word

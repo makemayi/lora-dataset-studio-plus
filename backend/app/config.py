@@ -849,13 +849,67 @@ DEFAULTS = {
         #                 `h3_mask_opacity` applies to this node when it is on.
         #   ollama        an Ollama vision call describes how the head sits in
         #                 THIS photo (angle, occlusion, lighting) and appends it
-        #                 to the instruction. Runs on `ollama.vision_model`, not
-        #                 on the tag the graph carries. It costs a second model
+        #                 to the instruction. Runs on `h3_new_ollama_model`, or
+        #                 on `ollama.vision_model` when that is blank — never on
+        #                 the tag the graph carries. It costs a second model
         #                 on the same GPU as 40 GB of H3, and it makes
         #                 `h3_pose_hint` redundant — with this on the hint is not
         #                 sent, because the two describe the same thing and only
         #                 one of them is looking at the actual picture.
         'h3_new_stages': {'mask_overlay': False, 'ollama': False},
+        # THE KLEIN PASS'S OWN INSTRUCTION — `minimax_h3` (new) only.
+        #
+        # This is the step that decides whether the swap comes back in
+        # proportion. Klein does not merely delete the head: it replaces it with
+        # a featureless grey MANNEQUIN head, and that stand-in is the only thing
+        # left in the frame telling H3 how big the head was, where it sat and
+        # which way it faced. Delete instead of replace and H3 is guessing —
+        # which is where a doll-sized head comes from.
+        #
+        # The shipped text was rewritten on 2026-08-14. The maintainer's
+        # original led with three deletion verbs (移除 / 抹除 / 消除) and hung
+        # "转换为脸部深度图" off the end, phrased as a transform of the head it
+        # had just said to erase; an edit model follows the dominant, repeated
+        # intent and stops after erasing. Three rules came out of that:
+        #   * the FIRST verb is 替换 (replace), never 移除;
+        #   * the geometry is pinned explicitly (size, position, orientation,
+        #     tilt, perspective) — it is what the rest of the graph reads;
+        #   * removal is written as a CONSTRAINT ("no identity features"), not
+        #     as the instruction.
+        # A mannequin rather than a depth map on purpose: a mannequin head is an
+        # object the model has seen, a depth render is a stylised output edit
+        # models routinely botch — and the mannequin carries shading, so it says
+        # MORE about the volume than a flat depth pass would.
+        #
+        # Kept in sync with the shipped graph's own node text by
+        # test_minimax_h3_swap_new_workflow_shape, so the workflow still opens
+        # sensibly in ComfyUI. The value here is the one that runs.
+        'h3_head_removal_prompt':
+            '把人物的头部替换为一个无五官的灰色素模头（假人头模）。\n'
+            '头部的大小、位置、朝向、倾斜角度与透视关系必须与原图完全一致，'
+            '只保留头部的立体形状。\n'
+            '表面为均匀的哑光浅灰色，有自然的明暗起伏体现立体感，'
+            '没有五官、没有头发、没有任何配饰、没有任何身份特征。\n'
+            '颈部、肩膀、身体、服装、背景与画面光照完全保持不变。',
+        # The Klein pass's negative. Shipped EMPTY by the maintainer; the three
+        # entries that matter are the failure modes of the instruction above —
+        # a hole, a headless body, a background showing through — plus the
+        # identity features that must not survive the replacement.
+        'h3_head_removal_negative':
+            '原本的脸, 五官, 头发, 眼睛, 鼻子, 嘴, 皮肤纹理, '
+            '空洞, 无头, 头部消失, 背景穿透',
+        # Which pulled Ollama model the stage above runs on. Blank = whatever
+        # `ollama.vision_model` is set to, which is the captioning model and the
+        # only behaviour that existed before this key.
+        #
+        # It is a SEPARATE key rather than a reuse of `ollama.vision_model`
+        # because the two jobs pull in opposite directions: captioning runs on
+        # every image in a dataset, so it wants the small 8B; this stage runs
+        # once per swap next to 40 GB of H3 already on the card, and the answer
+        # it writes goes straight into the instruction — so on a big card a
+        # heavier model is worth it here and ruinous there. Tying them together
+        # would make one of the two choices wrong.
+        'h3_new_ollama_model': '',
         # Three optional stages of the OLD H3 swap graph ('minimax_h3_old'),
         # each a step the graph
         # ships WIRED and this switch removes when off (minimax_h3_swap_helper

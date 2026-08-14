@@ -210,8 +210,10 @@ DECLARED_THIRD_PARTY_NODES = {
     'MiniMaxH3MemoryEfficientSageAttentionPatch':
         'unknown pack — an optional speed node; minimax_h3.use_speed_nodes off '
         'runs without it',
-    'OllamaAPI': 'unknown pack — only the optional Ollama head-analysis stage '
-                 'needs it; that stage is off by default',
+    'OllamaAPI': 'no pack needed — the head analysis runs in the APP now, so '
+                 'this node is subtracted from every job and never reaches a '
+                 'ComfyUI. It stays in the shipped graph as the maintainer '
+                 'exported it',
     # Core as of ComfyUI 0.30.0 (MiniMax H3 support) and core-ish for longer, but
     # newer than this repo's v0.28.3 floor — declared rather than allowlisted so
     # an older install gets a named message instead of ComfyUI's raw 400.
