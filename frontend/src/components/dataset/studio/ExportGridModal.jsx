@@ -115,7 +115,7 @@ export default function ExportGridModal({ open, onClose, datasetId, family, run,
         {!canvasMode && <label className="flex flex-col gap-1">
           <span className="text-content-muted text-[0.625rem] uppercase">Format block</span>
           <select value={aspect} onChange={(e) => setAspect(e.target.value)}
-            className="rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]-raised px-2 py-1.5 text-[0.75rem] text-content">
+            className="rounded-lg bg-surface-raised shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-2 py-1.5 text-[0.75rem] text-content">
             <option value="all">All formats (stacked)</option>
             {(aspects || []).map((a) => <option key={a} value={a}>{a}</option>)}
           </select>

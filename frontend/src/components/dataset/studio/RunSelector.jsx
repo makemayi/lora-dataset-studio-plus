@@ -48,7 +48,7 @@ export default function RunSelector({
       {runs.length > 1 && (
         <select value={activeRunKey || ''} onChange={(e) => onSelect(e.target.value)}
           aria-label="Choose the test run to display"
-          className="ml-auto rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]-raised px-2 py-1 text-[0.6875rem] text-content max-w-[280px]">
+          className="ml-auto rounded-lg bg-surface-raised shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-2 py-1 text-[0.6875rem] text-content max-w-[280px]">
           {runs.map((r, i) => {
             // Taux de 👍 parmi les votes du run (likes / votés), comme le « % 👍 »
             // affiché par cellule. Caché si aucun vote (division par zéro).

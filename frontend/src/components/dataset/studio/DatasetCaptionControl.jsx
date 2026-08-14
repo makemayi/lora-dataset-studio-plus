@@ -103,7 +103,7 @@ function DatasetCaptionDialog({ open, onClose, onChoose }) {
         </div>
 
         {loading && (
-          <p className="m-0 flex items-center gap-2 rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]-raised px-3 py-2 text-[0.75rem] text-content-muted" role="status">
+          <p className="m-0 flex items-center gap-2 rounded-lg bg-surface-raised shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-3 py-2 text-[0.75rem] text-content-muted" role="status">
             <span className="inline-block h-4 w-4 rounded-full border-2 border-purple-400/40 border-t-purple-400 animate-spin" aria-hidden />
             Loading datasets…
           </p>
@@ -133,7 +133,7 @@ function DatasetCaptionDialog({ open, onClose, onChoose }) {
               const meta = datasetMeta(dataset);
               return (
                 <button type="button" key={choice.id} onClick={() => onChoose(choice)}
-                  className="flex min-w-0 items-center gap-3 rounded-xl bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]-raised px-3 py-2.5 text-left hover:border-purple-400/60 hover:bg-purple-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400">
+                  className="flex min-w-0 items-center gap-3 rounded-xl bg-surface-raised shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-3 py-2.5 text-left hover:border-purple-400/60 hover:bg-purple-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400">
                   <span className="text-base" aria-hidden>🔒</span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-semibold text-content">{choice.name}</span>

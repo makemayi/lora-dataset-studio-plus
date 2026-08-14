@@ -222,6 +222,17 @@ export function ArrowRightIcon(props) {
   );
 }
 
+/** The prompt composer's send button — a paper plane, drawn in the same 24-box
+ *  as the rest so it sits at the icon set's weight inside the round button. */
+export function SendIcon(props) {
+  return (
+    <Glyph name="send" {...props}>
+      <path d="M4.4 11.6L20 4.5l-7.1 15.6-2-6.4-6.5-2.1z" />
+      <path d="M10.9 13.7L20 4.5" />
+    </Glyph>
+  );
+}
+
 export function RefreshIcon(props) {
   return (
     <Glyph name="refresh" {...props}>

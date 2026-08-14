@@ -317,7 +317,7 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
               value={selectedBase}
               onChange={(e) => setSelectedBase(e.target.value)}
               aria-label="Base model for this run"
-              className="rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]-raised px-1.5 py-1 text-content text-sm"
+              className="rounded-lg bg-surface-raised shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-1.5 py-1 text-content text-sm"
             >
               {baseModels.map((m) => (
                 <option key={m.filename} value={m.filename}>{m.label}</option>

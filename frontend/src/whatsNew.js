@@ -50,6 +50,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-14-prompt-composer',
+    date: '2026-08-14',
+    title: 'Prompt boxes became one composer, with a round send button',
+    blurb: 'Writing a Custom shot, a test prompt or a comparison prompt now happens in the same frosted pane: the box lifts when you focus it, its tools (Enhance, Describe, a caption draw, the framing picker) sit inside it instead of floating above, and where there is something to send — the Custom shot — a round gradient button does it. Ctrl/⌘+Enter sends too; plain Enter still starts a new line.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-14-glass-redesign',
     date: '2026-08-14',
     title: 'A lighter, floatier studio — frosted glass, pills, and a split Recent rail',

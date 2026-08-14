@@ -393,8 +393,9 @@ they survive a cache wipe, show up on your phone and ride along in the backup.
 ### Keeping a shot you wrote by hand
 
 The **✨ Custom shot** box below the grid is the quick way to add one shot: type a
-prompt, pick a framing, Add. Those cards are stored **in your browser**, so
-clearing its data takes them with it.
+prompt, pick a framing, then press the round send button (or Ctrl/⌘+Enter — a
+plain Enter still starts a new line). Those cards are stored **in your browser**,
+so clearing its data takes them with it.
 
 Any card you want to keep, press **Keep** on it. It moves into the 📥 Imported
 group and is saved with the app, exactly like an imported shot — surviving a

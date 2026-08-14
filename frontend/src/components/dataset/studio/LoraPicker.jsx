@@ -219,7 +219,7 @@ export default function LoraPicker({ preselectDataset, preselectFamily = null, o
                     <select value={picked[k] || ''}
                       onChange={(e) => setCheckpoint(k, e.target.value)}
                       aria-label={`Checkpoint for ${l.lora_label}`}
-                      className="flex-1 min-w-0 rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]-raised px-1.5 py-0.5 text-content">
+                      className="flex-1 min-w-0 rounded-lg bg-surface-raised shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-1.5 py-0.5 text-content">
                       {l.checkpoints.map((c) => (
                         <option key={c.filename} value={c.filename}>{c.label}</option>
                       ))}

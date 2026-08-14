@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import PromptComposer from '../../common/PromptComposer.jsx';
 import RecentPrompts from './RecentPrompts';
 import DescribeImageModal from './DescribeImageModal';
 import DatasetCaptionControl from './DatasetCaptionControl';
@@ -29,25 +30,28 @@ export default function PromptField({ value, placeholder, onChange, onReset, isC
   };
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-content-muted text-[0.625rem] uppercase">Test prompt</span>
-        <div className="flex max-w-full flex-wrap items-center justify-end gap-1">
-          <DatasetCaptionControl onCaption={applyCaption} />
-          <EnhancePromptButton prompt={value} onResult={onChange} />
-          <button type="button" onClick={() => setDescribeOpen(true)}
-            title="Describe an image into a test prompt (vision model)"
-            className="px-2 py-0.5 rounded-full bg-surface-raised text-content-subtle text-[0.625rem] transition-colors hover:text-content">
-            🔎 Describe
-          </button>
-        </div>
-      </div>
-      <textarea
+      <span className="text-content-muted text-[0.625rem] uppercase">Test prompt</span>
+      {/* The prompt tools live INSIDE the composer's footer rather than above it:
+          they act on the text in the pane, so they belong to it. No send button —
+          a run is launched from the panel below, past the cost line. */}
+      <PromptComposer
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={onChange}
         rows={5}
         placeholder={placeholder}
-        aria-label="LoRA test prompt"
-        className="w-full rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]-raised px-2 py-1.5 text-[0.75rem] text-content focus:outline-none focus:ring-1 focus:ring-primary resize-y focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
+        ariaLabel="LoRA test prompt"
+        textareaClassName="text-[0.75rem]"
+        tools={(
+          <>
+            <DatasetCaptionControl onCaption={applyCaption} />
+            <EnhancePromptButton prompt={value} onResult={onChange} />
+            <button type="button" onClick={() => setDescribeOpen(true)}
+              title="Describe an image into a test prompt (vision model)"
+              className="px-2 py-0.5 rounded-full bg-surface-raised text-content-subtle text-[0.625rem] transition-colors hover:text-content">
+              🔎 Describe
+            </button>
+          </>
+        )}
       />
       {isCustom && (
         <button type="button" onClick={onReset}

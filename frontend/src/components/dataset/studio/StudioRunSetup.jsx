@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { STRENGTH_CHOICES } from './constants';
 import { fmt } from '../../../utils/studioFormat';
 import { postJson } from '../../../api/fetchClient';
+import PromptComposer from '../../common/PromptComposer.jsx';
 import StrengthPicker from './StrengthPicker';
 import RecentPrompts from './RecentPrompts';
 import DescribeImageModal from './DescribeImageModal';
@@ -97,23 +98,31 @@ export default function StudioRunSetup({
       {axisSlot}
 
       <div className="flex flex-col gap-1">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <label htmlFor="studio-run-prompt" className="text-content-muted text-[0.625rem] uppercase">
-            Prompt (optional)
-          </label>
-          <div className="flex max-w-full flex-wrap items-center justify-end gap-1">
-            <DatasetCaptionControl onCaption={applyCaption} />
-            <EnhancePromptButton prompt={prompt} onResult={onPrompt} />
-          <button type="button" onClick={() => setDescribeOpen(true)}
-            title="Describe an image into a test prompt (vision model)"
-            className="px-2 py-0.5 rounded-full bg-surface-raised text-content-subtle text-[0.625rem] transition-colors hover:text-content">
-            🔎 Describe
-          </button>
-          </div>
-        </div>
-        <textarea id="studio-run-prompt" value={prompt} onChange={(e) => onPrompt(e.target.value)} rows={5}
+        <label htmlFor="studio-run-prompt" className="text-content-muted text-[0.625rem] uppercase">
+          Prompt (optional)
+        </label>
+        {/* Same composer as the Test studio's PromptField — tools in the footer,
+            no send button: this run is launched from the button under the cost
+            line, which is where the count of cells is readable. */}
+        <PromptComposer
+          id="studio-run-prompt"
+          value={prompt}
+          onChange={onPrompt}
+          rows={5}
           placeholder="Leave empty for the LoRA's default prompt…"
-          className="rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]-raised px-2.5 py-1.5 text-content text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-y min-h-[7rem]" />
+          textareaClassName="text-sm min-h-[7rem]"
+          tools={(
+            <>
+              <DatasetCaptionControl onCaption={applyCaption} />
+              <EnhancePromptButton prompt={prompt} onResult={onPrompt} />
+              <button type="button" onClick={() => setDescribeOpen(true)}
+                title="Describe an image into a test prompt (vision model)"
+                className="px-2 py-0.5 rounded-full bg-surface-raised text-content-subtle text-[0.625rem] transition-colors hover:text-content">
+                🔎 Describe
+              </button>
+            </>
+          )}
+        />
       </div>
       <DescribeImageModal open={describeOpen} onClose={() => setDescribeOpen(false)}
         onResult={applyDescription} />
@@ -126,7 +135,7 @@ export default function StudioRunSetup({
       <div className="flex items-center gap-2 flex-wrap">
         <label className="flex items-center gap-1.5 text-content-muted text-[0.6875rem]">
           <span className="uppercase">Seed</span>
-          <span className="tabular-nums text-content px-2 py-0.5 rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]-raised">{seed}</span>
+          <span className="tabular-nums text-content px-2 py-0.5 rounded-lg bg-surface-raised shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]">{seed}</span>
           <button type="button" onClick={onReroll} aria-label="New random seed"
             title="New random seed"
             className="px-2 py-0.5 rounded-full bg-surface-raised text-content shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] transition-[box-shadow,transform,background-color] duration-200 hover:bg-surface hover:-translate-y-0.5">🎲</button>
@@ -136,7 +145,7 @@ export default function StudioRunSetup({
           <span className="uppercase">Images / config</span>
           <select value={count} onChange={(e) => onCount(Number(e.target.value))}
             aria-label="Number of images per configuration"
-            className="rounded-lg bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]-raised px-1.5 py-0.5 text-content">
+            className="rounded-lg bg-surface-raised shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)] px-1.5 py-0.5 text-content">
             {[1, 2, 3, 4].map((n) => <option key={n} value={n}>×{n}</option>)}
           </select>
         </label>

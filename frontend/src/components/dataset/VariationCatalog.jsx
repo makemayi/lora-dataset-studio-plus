@@ -6,6 +6,7 @@ import SettingsLink from '../common/SettingsLink';
 import { useCapabilities } from '../../context/CapabilitiesContext';
 import { apiFetch, putJson } from '../../api/fetchClient';
 import ShotIllustration, { contextEmoji } from './ShotIllustration';
+import PromptComposer from '../common/PromptComposer.jsx';
 import QuickGenerateDialog from './QuickGenerateDialog.jsx';
 import QuickGenerateComponentsEditor from './QuickGenerateComponentsEditor.jsx';
 import { displayLabel } from '../../utils/labels';
@@ -1835,23 +1836,29 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, g
           <label className="text-content-muted text-[0.6875rem]" htmlFor="custom-shot-prompt">
             Describe outfit, pose and setting, pick a framing, then Add.
           </label>
-          <div className="flex gap-1.5 items-start">
-            <textarea id="custom-shot-prompt" value={customPrompt} rows={2}
-              onChange={(e) => setCustomPrompt(e.target.value)}
-              placeholder="e.g. full body shot, sitting on a vintage motorbike in a garage, leather jacket, warm light"
-              className="flex-1 rounded-lg bg-surface-raised px-2 py-1 text-[0.6875rem] text-content resize-y focus:outline-none focus:ring-1 focus:ring-primary" />
-            <select value={customFraming} onChange={(e) => setCustomFraming(e.target.value)}
-              aria-label="Custom shot framing"
-              className="rounded-lg bg-surface-raised px-1.5 py-1 text-[0.6875rem] text-content focus:outline-none focus:ring-1 focus:ring-primary">
-              {['face', 'bust', 'body', 'back'].map((fr) => (
-                <option key={fr} value={fr}>{FRAMING_LABEL[fr]}</option>
-              ))}
-            </select>
-            <button type="button" onClick={addCustomShot} disabled={!customPrompt.trim()}
-              className="px-2.5 py-1 rounded-lg bg-gradient-primary text-white text-[0.6875rem] font-semibold disabled:opacity-40">
-              ＋ Add
-            </button>
-          </div>
+          {/* The composer: the framing picker rides in its tools row and the old
+              square "＋ Add" is the round gradient send button. Same action, same
+              disabled rule — only the shape moved. */}
+          <PromptComposer
+            id="custom-shot-prompt"
+            value={customPrompt}
+            onChange={setCustomPrompt}
+            rows={2}
+            placeholder="e.g. full body shot, sitting on a vintage motorbike in a garage, leather jacket, warm light"
+            textareaClassName="text-[0.6875rem]"
+            onSend={addCustomShot}
+            sendDisabled={!customPrompt.trim()}
+            sendLabel="Add this shot to the Custom group"
+            tools={(
+              <select value={customFraming} onChange={(e) => setCustomFraming(e.target.value)}
+                aria-label="Custom shot framing"
+                className="rounded-full bg-surface-raised px-2.5 py-1 text-[0.6875rem] text-content focus:outline-none focus:ring-1 focus:ring-primary">
+                {['face', 'bust', 'body', 'back'].map((fr) => (
+                  <option key={fr} value={fr}>{FRAMING_LABEL[fr]}</option>
+                ))}
+              </select>
+            )}
+          />
         </div>
       </details>
 
