@@ -7,9 +7,14 @@ Tout est mocké (`_build_loader`, `instaloader.Profile`/`Post`) : aucun réseau.
 import time
 from types import SimpleNamespace
 
-import instaloader
+import pytest
 
-from app.scrape.sources import instagram
+# instaloader is an OPTIONAL scrape dependency (the ⬇ scrape extras install it),
+# so a checkout without it must SKIP this file rather than fail collection for
+# the whole suite — which is what a bare `import instaloader` did.
+instaloader = pytest.importorskip('instaloader')
+
+from app.scrape.sources import instagram  # noqa: E402
 from app.scrape.validators import URLType
 
 
