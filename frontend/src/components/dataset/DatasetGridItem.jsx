@@ -313,7 +313,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             {fb.graded ? fb.label : fb.icon}
           </span>
         )}
-        <div className="dataset-grid-item__actions absolute top-1.5 right-1.5 z-10 flex max-w-[calc(100%_-_1rem)] flex-wrap justify-end gap-1 rounded-full bg-black/40 backdrop-blur-md border border-white/10 p-1">
+        <div className="dataset-grid-item__actions absolute top-1.5 right-1.5 z-10 flex max-w-[calc(100%_-_1rem)] flex-wrap justify-end gap-0.5 rounded-full bg-black/40 backdrop-blur-md border border-white/10 p-0.5">
           {fb && (
             <span className={`flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${fb.cls}`}
               title={`Resemblance to the reference face — ${fb.label}`}>
@@ -326,7 +326,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy || faceScoringBusy || !!faceScoringBlocked || scoreFaceBusy}
               aria-busy={scoreFaceBusy}
               title={scoreFaceTitle} aria-label={scoreFaceTitle}
-              className="grid min-h-6 min-w-6 place-items-center rounded-full hover:bg-white/20 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-45">
+              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-white/20 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-45">
               <span aria-hidden="true" className={scoreFaceBusy ? 'animate-pulse' : ''}>{scoreFaceBusy ? '…' : '🎭'}</span>
             </button>
           )}
@@ -336,7 +336,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy}
               title={refused || 'Regenerate this variation (new seed)'}
               aria-label={refused || 'Regenerate this variation (new seed)'}
-              className="grid min-h-6 min-w-6 place-items-center rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">🔄</button>
+              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">🔄</button>
           )}
           {canRegenerate && (
             <button type="button"
@@ -344,7 +344,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy}
               title={refused || 'Edit the prompt, then regenerate this variation'}
               aria-label={refused || 'Edit the prompt, then regenerate this variation'}
-              className="grid min-h-6 min-w-6 place-items-center rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">✏️</button>
+              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">✏️</button>
           )}
           {canFaceSwap && onFaceSwap && (
             /* Disabled WHILE THE REQUEST IS OUT, not merely while the row is
@@ -360,7 +360,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
                 : "Swap this tile's face with the reference image"}
               aria-label={swapBusy ? 'Preparing the face swap…'
                 : "Swap this tile's face with the reference image"}
-              className="grid min-h-6 min-w-6 place-items-center rounded-full hover:bg-white/20 text-white disabled:cursor-not-allowed disabled:opacity-45">
+              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-white/20 text-white disabled:cursor-not-allowed disabled:opacity-45">
               <span hidden={swapBusy}><FaceSwapIcon className="h-3.5 w-3.5" /></span>
               <span hidden={!swapBusy} className="animate-pulse text-[10px]">…</span>
             </button>
@@ -374,7 +374,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy || swapBusy}
               title="Undo the face swap — bring back the image it replaced"
               aria-label="Undo the face swap — bring back the image it replaced"
-              className="grid min-h-6 min-w-6 place-items-center rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">↩🎭</button>
+              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">↩🎭</button>
           )}
           {rerunImprove && (
             <button type="button"
@@ -382,7 +382,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy || !rerunImprove.enabled}
               title={refused || rerunImprove.title}
               aria-label={refused || rerunImprove.title}
-              className="grid min-h-6 min-w-6 place-items-center rounded-full hover:bg-white/20 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-45">
+              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-white/20 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-45">
               <span aria-hidden="true">🔄✨</span>
             </button>
           )}
@@ -396,7 +396,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
                 : `Mirror ${displayLabel(img.variation_label) || 'this image'} horizontally`)}
               title={refused
                 || (mirrorBusy ? 'Mirroring horizontally…' : 'Mirror horizontally (flip left and right)')}
-              className="grid min-h-6 min-w-6 place-items-center rounded-full hover:bg-white/20 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-45">
+              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-white/20 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-45">
               <span aria-hidden="true">{mirrorBusy ? '…' : '⇆'}</span>
             </button>
           )}
@@ -404,7 +404,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             <button type="button" onClick={(e) => { e.stopPropagation(); onCrop(img); }}
               disabled={busy}
               title={refused || 'Crop'} aria-label={refused || 'Crop'}
-              className="grid min-h-6 min-w-6 place-items-center rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">✂</button>
+              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">✂</button>
           )}
           {img.status === 'keep' && (
             <button type="button"
@@ -412,7 +412,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy}
               title={refused || 'Open a larger caption editor'}
               aria-label={refused || 'Expand caption editor'}
-              className="grid min-h-6 min-w-6 place-items-center rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">⛶</button>
+              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">⛶</button>
           )}
           {img.status === 'keep' && cap && (
             <button type="button"
@@ -420,7 +420,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy}
               title={refused || 'Delete this image’s caption (then “Caption” regenerates it via JoyCaption)'}
               aria-label={refused || 'Delete this image’s caption'}
-              className="grid min-h-6 min-w-6 place-items-center rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">🗑</button>
+              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">🗑</button>
           )}
           {onLockToggle && (
             <button type="button"
@@ -428,7 +428,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               title={img.is_locked ? 'Unlock (allow delete again)' : 'Lock (cannot be deleted)'}
               aria-label={img.is_locked ? 'Unlock this image' : 'Lock this image against deletion'}
               aria-pressed={!!img.is_locked}
-              className={`grid min-h-6 min-w-6 place-items-center rounded-full text-[10px] ${img.is_locked ? 'bg-amber-400 text-black' : 'text-white hover:bg-white/20'}`}>
+              className={`grid min-h-5 min-w-5 place-items-center rounded-full text-[10px] ${img.is_locked ? 'bg-amber-400 text-black' : 'text-white hover:bg-white/20'}`}>
               {img.is_locked ? '🔒' : '🔓'}
             </button>
           )}
@@ -442,7 +442,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy || img.is_locked}
               title={img.is_locked ? 'Locked — unlock to delete' : (refused || 'Delete permanently')}
               aria-label={img.is_locked ? 'Locked — unlock to delete' : (refused || 'Delete permanently')}
-              className="grid min-h-6 min-w-6 place-items-center rounded-full text-red-300 hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-45">
+              className="grid min-h-5 min-w-5 place-items-center rounded-full text-red-300 hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-45">
               <TrashIcon className="h-3.5 w-3.5" />
             </button>
           )}
@@ -460,7 +460,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             onClick={(e) => { e.stopPropagation(); if (!busy) setCaptionEditorOpen(true); }}
             title={busy ? (refused || 'Wait for the running pass to finish') : 'Click to edit the caption'}
             aria-label="Edit the caption"
-            className="dataset-grid-item__actions absolute inset-x-2 bottom-14 z-20 flex flex-col items-start gap-0.5 rounded-xl bg-black/40 backdrop-blur-md border border-white/10 px-2.5 py-1.5 text-left">
+            className="dataset-grid-item__actions absolute inset-x-2 top-1/2 z-20 flex flex-col items-start gap-0.5 rounded-xl bg-black/40 backdrop-blur-md border border-white/10 px-2.5 py-1.5 text-left">
             <span className="text-white text-[11px] leading-snug line-clamp-3 break-words">{cap}</span>
             {captionOriginInfo(img.caption_origin).known && (
               <span className={`text-[9px] leading-none ${captionIsAsserted(img.caption_origin) ? 'text-emerald-300' : 'text-white/50'}`}>
