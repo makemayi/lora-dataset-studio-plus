@@ -67,6 +67,7 @@ import re
 import shutil
 import sys
 import tempfile
+import threading
 
 from .. import config as cfg
 from . import comfy_model_paths
@@ -75,6 +76,26 @@ from .infer_stream import run_infer_script, stderr_tail
 logger = logging.getLogger(__name__)
 
 _SCRIPT = str(cfg.BACKEND_DIR / 'infer' / 'sam3_mask_infer.py')
+
+# ONE masking child at a time, process-wide.
+#
+# Every caller here is a request thread, so a batch of N head swaps calls
+# `mask_for` N times CONCURRENTLY — and each call spawns a child that loads its
+# own 3.4 GB SAM 3 onto the same card. Measured on a 24 GB card on 2026-08-14:
+# five children four seconds apart, 21 GB resident, the GPU at 96% utilisation
+# while drawing 125 W — the shape of memory contention, not of work. The render
+# those masks were for then had ~400 MB to start in.
+#
+# Serialising costs nothing real: the children were competing for one GPU, so
+# they were never parallel in the way that matters. It does mean a long
+# `mask_images` batch makes a single-image caller wait, which is the correct
+# order of harm — waiting finishes, an OOM does not.
+#
+# This is a per-process lock, so it does NOT protect against a second backend
+# (or ComfyUI itself) reaching for the card at the same time. Nothing here can:
+# the card has no admission control. It removes the one source of pile-up this
+# app creates on its own.
+_INFER_LOCK = threading.Lock()
 
 # Meta's own checkpoint, as fetched by any ComfyUI segmentation pack from
 # facebook/sam3. NOT the Comfy-Org repackaged `sam3.1_multiplex_fp16.safetensors`:
@@ -308,10 +329,19 @@ def mask_images(image_paths, prompt, *, threshold=DEFAULT_THRESHOLD,
             if record:
                 on_progress(record)
 
-    stdout, stderr_lines, rc, timed_out = run_infer_script(
-        python, _SCRIPT, payload, timeout, on_line=_line,
-        should_stop=should_stop,
-        on_stop=lambda: open(cancel_file, 'w').close())
+    # Held across the whole child, not just its launch: two SAM 3 processes
+    # overlapping for one second is already two checkpoints on the card.
+    if not _INFER_LOCK.acquire(blocking=False):
+        logger.info('auto_mask: waiting for the running masking child (%d image%s queued)',
+                    len(paths), '' if len(paths) == 1 else 's')
+        _INFER_LOCK.acquire()
+    try:
+        stdout, stderr_lines, rc, timed_out = run_infer_script(
+            python, _SCRIPT, payload, timeout, on_line=_line,
+            should_stop=should_stop,
+            on_stop=lambda: open(cancel_file, 'w').close())
+    finally:
+        _INFER_LOCK.release()
     if timed_out:
         raise AutoMaskUnavailable(
             f'the masking run did not finish within {timeout}s')

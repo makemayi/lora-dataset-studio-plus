@@ -290,3 +290,50 @@ def test_every_phrase_reaches_the_child_as_a_list(am, monkeypatch, tmp_path):
     auto_mask.mask_images([image], 'head, glasses, hat')
     assert sent['prompts'] == ['head', 'glasses', 'hat']
     assert 'prompt' not in sent
+
+
+def test_only_one_masking_child_runs_at_a_time(am, monkeypatch, tmp_path):
+    """Each child loads its OWN 3.4 GB SAM 3. Callers here are request threads,
+    so a batch of head swaps used to spawn one per tile CONCURRENTLY — measured
+    on 2026-08-14 as five children, 21 GB resident, and ~400 MB left for the
+    render they were masking for."""
+    import threading
+    auto_mask, _base, config, _tmp = am
+    image = str(_write(tmp_path / 'tile.png', b'PIXELS'))
+    _write(tmp_path / 'ckpt' / 'sam3.pt')
+    config.save_config({'auto_mask': {
+        'python': str(_write(tmp_path / 'py' / 'python.exe')),
+        'checkpoint': str(tmp_path / 'ckpt' / 'sam3.pt')}})
+
+    live = 0
+    peak = 0
+    seen = threading.Lock()
+    first_inside = threading.Event()
+    release_first = threading.Event()
+
+    def _fake_run(python, script, payload, timeout, **kw):
+        nonlocal live, peak
+        with seen:
+            live += 1
+            peak = max(peak, live)
+        # The first caller parks INSIDE the child, which is exactly the window
+        # the old code let a second checkpoint into.
+        if not first_inside.is_set():
+            first_inside.set()
+            release_first.wait(5)
+        with seen:
+            live -= 1
+        return ('{"ok": true, "written": 0, "cancelled": false, "results": {}}',
+                [], 0, False)
+
+    monkeypatch.setattr(auto_mask, 'run_infer_script', _fake_run)
+    threads = [threading.Thread(target=auto_mask.mask_images, args=([image], 'head'))
+               for _ in range(3)]
+    for t in threads:
+        t.start()
+    assert first_inside.wait(5), 'no masking child started'
+    release_first.set()
+    for t in threads:
+        t.join(10)
+        assert not t.is_alive()
+    assert peak == 1, f'{peak} masking children overlapped'
