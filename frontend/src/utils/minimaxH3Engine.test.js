@@ -66,4 +66,8 @@ test('the dials describe what they cost, not just their value', () => {
   assert.match(packetLengthDescription(5), /floor/);
   assert.match(packetLengthDescription(22), /22 frames/);
   assert.match(packetLengthDescription(22), /slower/);
+  // A single frame is the default now, and the sentence has to carry the one
+  // fact that turns it from a saving into a batch of dead tiles.
+  assert.match(packetLengthDescription(1), /1 frame\b/);
+  assert.match(packetLengthDescription(1), /patch/);
 });

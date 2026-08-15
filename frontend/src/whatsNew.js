@@ -64,6 +64,21 @@ export const WHATS_NEW = [
     to: '/datasets',
   },
   {
+    id: '2026-08-15-h3-stops-paying-for-frames-it-throws-away',
+    date: '2026-08-15',
+    title: 'MiniMax H3 no longer samples four frames it never looks at',
+    blurb: 'H3 reaches a still through a video model, and it was sampling a '
+      + 'packet of five frames at full cost to keep exactly one. "Frames per '
+      + 'shot" (Settings ▸ Image engines ▸ MiniMax H3) now defaults to a single '
+      + 'frame, for both generation and the face swap. Read the caveat before '
+      + 'you rely on it: a single frame needs a patched '
+      + 'comfy_extras/nodes_minimax_h3.py, because stock ComfyUI declares that '
+      + 'input as minimum 5 and rejects 1 at queue time — which fails a whole '
+      + 'batch, not one image — and a ComfyUI update quietly reverts the patch. '
+      + 'If tiles suddenly stop queueing, set the slider back to 5.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-15-h3-swap-keeps-its-best-likeness',
     date: '2026-08-15',
     title: 'The H3 face swap finally runs the reference pipeline it ships with',

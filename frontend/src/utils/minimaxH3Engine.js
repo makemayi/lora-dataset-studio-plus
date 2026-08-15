@@ -89,6 +89,9 @@ export function refImageSizeDescription(mode) {
  *  ever adding candidates for the selector to choose between. */
 export function packetLengthDescription(length) {
   const n = Number(length);
-  if (!Number.isFinite(n) || n <= 5) return '5 frames · the node floor, fastest (measured default)';
+  if (!Number.isFinite(n) || n <= 1) {
+    return '1 frame · nothing sampled that is then thrown away (default, needs the ComfyUI patch)';
+  }
+  if (n <= 5) return '5 frames · the stock node floor, four of them discarded';
   return `${n} frames · more candidates to pick from, proportionally slower`;
 }

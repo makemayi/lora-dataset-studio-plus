@@ -425,12 +425,21 @@ def test_an_unusable_card_ratio_keeps_the_reference_geometry(h3):
 
 
 def test_packet_length_is_clamped_to_what_the_node_accepts(h3):
-    """`length` is min 5, step 17 on the node. An out-of-step value is a
-    validation error at queue time, i.e. a whole batch of failed tiles."""
+    """`length` has TWO legal shapes, not one range: a single frame (1, on a
+    patched node) or the packet grid 5 + 17n. An off-grid value is a validation
+    error at queue time, i.e. a whole batch of failed tiles."""
     mh, _base, _cfg = h3
-    assert mh.clamp_length(1) == 5
+    assert mh.clamp_length(1) == 1
     assert mh.clamp_length(5) == 5
     assert mh.clamp_length(22) == 22
     assert mh.clamp_length(20) in (5, 22)
     assert (mh.clamp_length(20) - 5) % 17 == 0
     assert (mh.clamp_length(999) - 5) % 17 == 0
+    # Below the grid floor there is exactly one legal value, and nothing may
+    # fall through to an off-grid number.
+    for below in (0, -3, 2, 4):
+        assert mh.clamp_length(below) == 1
+    assert mh.clamp_length('nonsense') == 1
+    for n in range(1, 130):
+        got = mh.clamp_length(n)
+        assert got == 1 or (got - 5) % 17 == 0

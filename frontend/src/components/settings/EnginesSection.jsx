@@ -1016,13 +1016,26 @@ const SEEDVR2_TILE_ABOVE_FACTOR = 1.5
 // seedvr2_helper.COLOR_CORRECTIONS — the node's own enum, in its own order.
 const SEEDVR2_COLOR_MODES = ['lab', 'wavelet', 'wavelet_adaptive', 'hsv', 'adain', 'none']
 
-// minimax_h3_helper's own grid: the node accepts length = 5 + 17n only, so an
-// off-step value is a ComfyUI validation error, i.e. a whole batch of failed
-// tiles. The SERVER re-clamps; this only stops the input offering a bad number.
-const H3_LENGTH_MIN = 5
-const H3_LENGTH_STEP = 17
-const H3_LENGTH_MAX = 124
+// minimax_h3_helper's own grid, and it is NOT a plain range: the node accepts a
+// single frame (1) or the packet grid 5 + 17n. An off-grid value is a ComfyUI
+// validation error, i.e. a whole batch of failed tiles, so the slider walks this
+// list by index rather than offering arithmetic the node would reject. The
+// SERVER re-clamps regardless; this only stops the input offering a bad number.
+// (1 needs a patched `comfy_extras/nodes_minimax_h3.py` — see the help text.)
+const H3_LENGTHS = [1, 5, 22, 39, 56, 73, 90, 107, 124]
 const H3_STEPS_MAX = 60
+
+/** Index of the nearest legal packet length — a config written by hand, or by an
+ *  older build, does not have to sit on the list. */
+function h3LengthIndex(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return 0
+  let best = 0
+  for (let i = 1; i < H3_LENGTHS.length; i += 1) {
+    if (Math.abs(H3_LENGTHS[i] - n) < Math.abs(H3_LENGTHS[best] - n)) best = i
+  }
+  return best
+}
 
 function MinimaxH3Card({ config, setField, configDefaults, caps }) {
   const h3 = config.minimax_h3 || {}
@@ -1070,16 +1083,25 @@ function MinimaxH3Card({ config, setField, configDefaults, caps }) {
         <input
           id="h3-length"
           type="range"
-          min={H3_LENGTH_MIN}
-          max={H3_LENGTH_MAX}
-          step={H3_LENGTH_STEP}
-          value={length}
-          onChange={(e) => setField('minimax_h3', 'length', Number(e.target.value))}
+          min={0}
+          max={H3_LENGTHS.length - 1}
+          step={1}
+          value={h3LengthIndex(length)}
+          onChange={(e) => setField('minimax_h3', 'length', H3_LENGTHS[Number(e.target.value)])}
           className="mt-1 w-full accent-purple-500"
         />
         <HelpText className="mt-1 text-xs text-content-muted">
           {packetLengthDescription(length)}. One frame is kept either way — more frames
           only give the selector more to choose between, at full sampling cost each.
+          <span hidden={length !== 1}>
+            {' '}A single frame needs a patched <code>comfy_extras/nodes_minimax_h3.py</code>;
+            stock ComfyUI rejects it at queue time and a ComfyUI update undoes the patch.
+            If tiles suddenly fail to queue, come back here and pick 5.
+          </span>
+          <span hidden={length === 1}>
+            {' '}Pulling one frame out of a packet can also leave grid artefacts with the
+            single-image VAE, which a length of 1 avoids.
+          </span>
         </HelpText>
         <ResetToDefault label="Frames per shot" section="minimax_h3" field="length" {...reset} />
       </div>

@@ -421,21 +421,39 @@ MAX_CANVAS_PIXELS = 768 * 1344    # nodes_minimax_h3.MAX_PIXELS
 MAX_OUTPUT_MP = MAX_CANVAS_PIXELS / 1_000_000
 _SIZE_MULTIPLE = 32          # the node's own step for width/height
 
-# `length` is min 5, step 17 on the node — an off-step value is a validation
-# error at queue time, which means a whole batch of failed tiles.
-LENGTH_MIN = 5
+# `length` is step 17 on the node — an off-grid value is a validation error at
+# queue time, which means a whole batch of failed tiles.
+#
+# TWO legal shapes, not one range. The packet grid starts at 5 (5, 22, 39 ...),
+# and 1 is the single-frame path: stock ComfyUI refuses it (`min=5`), a PATCHED
+# `comfy_extras/nodes_minimax_h3.py` accepts it. We keep one frame anyway, so a
+# packet of 5 samples four frames nobody reads — 1 is the cheap shape, and it
+# also avoids the grid artefacts that pulling frame 0 out of a packet produces
+# with the single-image VAE.
+#
+# THE PATCH IS THE PRECONDITION. On an unpatched ComfyUI `length=1` fails
+# validation and takes the whole batch with it, and a ComfyUI update silently
+# reverts the patch. That is why `caps` reports the H3 assets: if tiles start
+# dying at queue time after an update, re-apply the patch or set length to 5.
+LENGTH_MIN = 1               # the patched single-frame path
+LENGTH_GRID_MIN = 5          # the packet grid's own floor
 LENGTH_STEP = 17
 LENGTH_MAX = 124             # our ceiling, not the node's (3600): stills, not film
 
 
 def clamp_length(value):
-    """Snap a requested packet length onto the node's own min/step grid."""
+    """Snap a requested packet length onto one of the node's two legal shapes."""
     try:
         n = int(value)
     except (TypeError, ValueError):
         n = LENGTH_MIN
     n = max(LENGTH_MIN, min(LENGTH_MAX, n))
-    return LENGTH_MIN + ((n - LENGTH_MIN) // LENGTH_STEP) * LENGTH_STEP
+    if n < LENGTH_GRID_MIN:
+        # Below the packet grid there is exactly one legal value, and rounding
+        # DOWN keeps the old flooring behaviour rather than buying frames the
+        # caller did not ask for.
+        return LENGTH_MIN
+    return LENGTH_GRID_MIN + ((n - LENGTH_GRID_MIN) // LENGTH_STEP) * LENGTH_STEP
 
 
 def _aspect_ratio(requested_aspect):

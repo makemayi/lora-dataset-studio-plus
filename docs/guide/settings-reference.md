@@ -325,10 +325,16 @@ card together and pays that cost once per card, not once per image.
   read this key — it has its own, `face_swap.h3_ref_image_size`, which defaulted
   to keeping the swap graph's own value (`max` on the new engine) precisely so
   this generation dial could not silently lower swap likeness.
-- **Frames per shot** → `minimax_h3.length`. Default **`5`**, the model's own
-  minimum; it only accepts 5, 22, 39 … (5 + 17n). One frame is kept whatever you
-  choose, so a higher value buys the selector more candidates at full sampling
-  cost each.
+- **Frames per shot** → `minimax_h3.length`. Default **`1`**. Two legal shapes,
+  not one range: a single frame, or the packet grid 5, 22, 39 … (5 + 17n). One
+  frame is kept whatever you choose, so a packet pays full sampling cost for
+  frames nobody reads; a higher value only buys the selector more candidates.
+  **A length of 1 needs a patched `comfy_extras/nodes_minimax_h3.py`** — stock
+  ComfyUI declares this input as `min=5` and rejects 1 at queue time, which
+  fails the whole batch rather than one image, and a ComfyUI update reverts the
+  patch silently. If tiles suddenly stop queueing, set this back to `5`. Pulling
+  frame 0 out of a packet can also leave grid artefacts with the single-image
+  VAE, which a length of 1 sidesteps.
 - **Frame pick: likeness weight** → `minimax_h3.frame_weight_reference`. Default
   **`1.0`**, range 0–5. How much "looks like the reference" counts against
   sharpness and exposure when choosing which frame to keep; 0 ignores likeness.
@@ -627,7 +633,7 @@ Before H3 redraws the head, the masked region is painted over with a flat colour
 - What to reach for instead: the **LaMa** stage below, which replaces the masked region with plausible non-*face* content rather than a slab. Note that the stage can only do that at an opacity below 1.00 — at 1.00 the paint goes straight over LaMa's work — so the two are used together or not at all.
 - The setting stays because it is the dial the failure was diagnosed with, not because 0.75 is a value worth shipping.
 
-Two other levers on the same failure, both under `minimax_h3`: **`frame_weight_reference`** (how much "looks like the reference" counts when the best frame of the packet is picked — the swap now honours the same setting the generation engine does, instead of the 0 the graph shipped with) and **`length`** (5 by default; at 22 the selector has real candidates to choose between, at roughly four times the sampling cost).
+Two other levers on the same failure, both under `minimax_h3`: **`frame_weight_reference`** (how much "looks like the reference" counts when the best frame of the packet is picked — the swap now honours the same setting the generation engine does, instead of the 0 the graph shipped with) and **`length`** (1 by default — a packet of 5 sampled four frames that were then discarded; at 22 the selector has real candidates to choose between, at roughly twenty times the single-frame sampling cost).
 
 #### MiniMax H3 (old) — optional stages
 

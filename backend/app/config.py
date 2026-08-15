@@ -763,11 +763,18 @@ DEFAULTS = {
         # (any quantisation). The fl2va sibling is excluded by name: it loads and
         # then does a different job. Set a filename to pin one build.
         'base_model': '',
-        # Frames sampled per shot. The node's own minimum is 5 and its step is
-        # 17 (5, 22, 39 ...); we run the FLOOR because we want stills, and every
-        # extra frame is sampled at full cost. More frames = more candidates for
-        # the selector, which is the only reason to raise it.
-        'length': 5,
+        # Frames sampled per shot. Two legal shapes, not one range: 1 (a single
+        # frame) or the packet grid 5, 22, 39 ... We keep ONE frame either way,
+        # so a packet of 5 pays full sampling cost for four frames nobody reads;
+        # more frames only give the frame selector more candidates, which is the
+        # only reason to raise it.
+        #
+        # 1 REQUIRES A PATCHED ComfyUI. Stock `comfy_extras/nodes_minimax_h3.py`
+        # declares `length` as min=5, and an off-grid value is a validation error
+        # at queue time — i.e. a whole batch of dead tiles, not one bad image.
+        # A ComfyUI update reverts the patch silently. If tiles start failing to
+        # queue after an update, re-apply it or set this back to 5.
+        'length': 1,
         'steps': 25,
         # THE identity <-> speed dial, H3's answer to krea.grounding_px:
         # 'match' scales the reference to the generation's pixel area, 'max' uses
