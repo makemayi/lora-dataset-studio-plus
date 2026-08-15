@@ -56,19 +56,39 @@ def main() -> int:
 
     import numpy as np, cv2
     from insightface.app import FaceAnalysis
-    _repair_nested_antelopev2(models_root)
-    try:
-        kwargs = {'name': 'antelopev2', 'providers': ['CPUExecutionProvider']}
-        if models_root:
-            kwargs['root'] = models_root
+    kwargs = {'name': 'antelopev2', 'providers': ['CPUExecutionProvider']}
+    if models_root:
+        kwargs['root'] = models_root
+
+    def _load():
         app = FaceAnalysis(**kwargs)
         app.prepare(ctx_id=-1, det_size=(640, 640))
-    except Exception as e:
-        # Un crash de chargement (modeles absents/corrompus) doit sortir en JSON
-        # propre — pas en traceback muet que le parent resume en « pas de JSON ».
-        print(json.dumps({"ref_ok": False, "results": {},
-                          "error": f"model load failed: {type(e).__name__}: {e}"}))
-        return 1
+        return app
+
+    # DEUX reparations, et la seconde est celle qui compte sur une install
+    # NEUVE. Le telechargement d'antelopev2 se fait DANS FaceAnalysis(), donc au
+    # premier lancement la reparation d'avant tourne sur un dossier vide, ne fait
+    # rien, et l'auto-download recree exactement la disposition imbriquee que
+    # cette fonction existe pour aplatir -> AssertionError. Reparer APRES l'echec
+    # puis reessayer une fois est le seul ordre qui couvre le premier lancement.
+    _repair_nested_antelopev2(models_root)
+    try:
+        app = _load()
+    except Exception as first:
+        _repair_nested_antelopev2(models_root)
+        try:
+            app = _load()
+        except Exception as e:
+            # Un crash de chargement (modeles absents/corrompus) doit sortir en
+            # JSON propre — pas en traceback muet que le parent resume en « pas
+            # de JSON ». On rapporte la PREMIERE erreur quand la seconde est le
+            # meme symptome, sinon les deux.
+            detail = f"{type(e).__name__}: {e}"
+            if type(e) is not type(first) or str(e) != str(first):
+                detail += f" (first attempt: {type(first).__name__}: {first})"
+            print(json.dumps({"ref_ok": False, "results": {},
+                              "error": f"model load failed: {detail}"}))
+            return 1
     import onnxruntime as ort
     _log(f"[face] providers: {ort.get_available_providers()}")
 
