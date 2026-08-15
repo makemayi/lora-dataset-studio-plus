@@ -632,7 +632,13 @@ def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None
             workflow[NODE_PROMPT_TEXT]['inputs']['text'].rstrip()
             + '\n' + HEAD_ANALYSIS_LEAD_IN
             + '\n\n' + str(head_analysis).strip())
-    ref_size = cfg.get('minimax_h3.ref_image_size')
+    # Which reference pipeline the H3 node runs on. Its OWN key
+    # (`face_swap.h3_ref_image_size`, blank = the shipped graph's value — 'max'
+    # on this graph, 'match' on the old): the swap used to inherit the
+    # generation lane's `minimax_h3.ref_image_size`, whose default 'match'
+    # silently overwrote this graph's shipped 'max', i.e. the lower-likeness
+    # pipeline on the one job where likeness is the product.
+    ref_size = old.swap_ref_image_size()
     if ref_size:
         workflow[NODE_H3]['inputs']['ref_image_size'] = ref_size
     # UNIQUE prefix per job — a shared one makes ComfyUI's counter re-issue the

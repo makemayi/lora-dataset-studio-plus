@@ -50,6 +50,19 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-15-h3-swap-keeps-its-best-likeness',
+    date: '2026-08-15',
+    title: 'The H3 face swap finally runs the reference pipeline it ships with',
+    blurb: 'The new MiniMax H3 swap graph is tuned for likeness — its reference '
+      + 'photo rides through every step at 2048px. The app was silently overriding '
+      + 'that with the generation engine\'s "match" setting on every swap, so the '
+      + 'face came back less like your reference than the graph could manage. The '
+      + 'swap now has its own reference dial (Settings ▸ Image engines ▸ Face / '
+      + 'head swap), defaults to the graph\'s best-likeness pipeline, and tuning '
+      + 'generation likeness no longer drags the swap along with it.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-15-regenerate-one-tile-frees-the-rest',
     date: '2026-08-15',
     title: 'Regenerating one image no longer freezes every other tile',

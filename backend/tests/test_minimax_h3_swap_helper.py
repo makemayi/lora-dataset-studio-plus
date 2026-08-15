@@ -503,3 +503,24 @@ def test_no_hint_leaves_the_instruction_untouched(swap):
     sh, _mh, _base, _config = swap
     assert _build(sh)[0]['426:170']['inputs']['prompt'] == \
         _build(sh, pose_hint=None)[0]['426:170']['inputs']['prompt']
+
+
+def test_the_old_graph_keeps_its_own_ref_pipeline_by_default(swap):
+    """The fix that stopped the NEW graph's shipped 'max' being clobbered must
+    not drag the old engine to 'max' as a side effect — this graph ships and
+    was tuned with 'match', and the swap's ref key defaults to "leave the graph
+    alone" for exactly that reason."""
+    sh, _mh, _base, config = swap
+    wf, _ = _build(sh)
+    assert wf['426:170']['inputs']['ref_image_size'] == 'match'
+    # The GENERATION dial must not leak in either direction here either.
+    _set(config, 'minimax_h3', ref_image_size='max')
+    wf, _ = _build(sh)
+    assert wf['426:170']['inputs']['ref_image_size'] == 'match'
+
+
+def test_the_old_graph_takes_the_swap_ref_dial(swap):
+    sh, _mh, _base, config = swap
+    _set(config, 'face_swap', h3_ref_image_size='max')
+    wf, _ = _build(sh)
+    assert wf['426:170']['inputs']['ref_image_size'] == 'max'

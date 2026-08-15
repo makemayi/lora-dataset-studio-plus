@@ -396,6 +396,29 @@ def mask_prompt():
     return value or DEFAULT_MASK_PROMPT
 
 
+def swap_ref_image_size():
+    """The reference pipeline the swap's H3 node runs on: 'match' or 'max'.
+
+    Read from `face_swap.h3_ref_image_size` — its OWN key, NOT the generation
+    lane's `minimax_h3.ref_image_size`. The swap inherited that key once, and
+    the inheritance clobbered the new graph's shipped 'max' (best likeness,
+    2048px reference, several times slower) with the generation default
+    'match' on every default install, silently: a swap is the one job where
+    likeness IS the product.
+
+    '' (the default) means "leave the shipped graph's value alone" — 'max' on
+    the new graph, 'match' on the old — the same contract as `swap_steps`' 0.
+    Anything that is not a value the node accepts is ignored the same way: junk
+    must not be able to make a job invalid."""
+    value = cfg.get('face_swap.h3_ref_image_size')
+    value = value.strip().lower() if isinstance(value, str) else ''
+    if value not in ('match', 'max'):
+        if value:
+            logger.warning('unknown h3 ref_image_size %r — using the graph\'s own', value)
+        return ''
+    return value
+
+
 def attach_app_mask(workflow, mask_image):
     """Feed an app-produced mask PNG into the graph in place of PersonMaskUltra.
 
@@ -687,7 +710,7 @@ def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None
     if pose_hint:
         workflow[NODE_H3]['inputs']['prompt'] = (
             workflow[NODE_H3]['inputs']['prompt'].rstrip() + ' ' + pose_hint.strip())
-    ref_size = cfg.get('minimax_h3.ref_image_size')
+    ref_size = swap_ref_image_size()
     if ref_size:
         workflow[NODE_H3]['inputs']['ref_image_size'] = ref_size
     # UNIQUE prefix per job: SaveImage numbers from what is in the output folder

@@ -60,6 +60,14 @@ Thumbs.db
 # internal planning artifacts (local machine paths) — keep local, never publish
 docs/superpowers/
 
+# Cross-agent memory: a junction to Claude Code's per-project memory store, plus
+# the pointer file the other agents (Codex, Cursor, Gemini CLI) read at startup.
+# The memory notes are full of machine paths, so both stay untracked — publishing
+# them is exactly what test_no_personal_data.py exists to stop.
+.agent-memory
+/AGENTS.md
+/GEMINI.md
+
 # Hand-debugged ComfyUI graphs dropped at the repo root while wiring an engine.
 # They are references, never deliverables: the app builds its graphs in code, and
 # an exported workflow carries the author's own prompts and filenames. Ignored so

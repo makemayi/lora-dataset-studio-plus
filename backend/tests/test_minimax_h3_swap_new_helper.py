@@ -530,6 +530,35 @@ def test_the_graph_ships_25_steps_and_nothing_changes_it_by_default(swap):
     assert wf['126']['inputs']['steps'] == 25
 
 
+def test_the_swap_keeps_the_graphs_own_ref_pipeline_by_default(swap):
+    """The shipped new graph runs 'max' — the node's own "best likeness"
+    pipeline. The swap must NOT inherit the generation lane's
+    `minimax_h3.ref_image_size` (default 'match') and clobber it, either at the
+    default or when the user tunes generation: a swap is the one job where
+    likeness is the product."""
+    sh, _mh, _base, config = swap
+    wf, _ = _build(sh)
+    assert wf['170']['inputs']['ref_image_size'] == 'max'
+    _set(config, 'minimax_h3', ref_image_size='match')
+    wf, _ = _build(sh)
+    assert wf['170']['inputs']['ref_image_size'] == 'max'
+
+
+def test_swap_ref_pipeline_is_its_own_dial(swap):
+    """`face_swap.h3_ref_image_size` overrides both ways, and junk is ignored
+    rather than making the job invalid."""
+    sh, _mh, _base, config = swap
+    _set(config, 'face_swap', h3_ref_image_size='match')
+    wf, _ = _build(sh)
+    assert wf['170']['inputs']['ref_image_size'] == 'match'
+    _set(config, 'face_swap', h3_ref_image_size='MAX')
+    wf, _ = _build(sh)
+    assert wf['170']['inputs']['ref_image_size'] == 'max'
+    _set(config, 'face_swap', h3_ref_image_size='bogus')
+    wf, _ = _build(sh)
+    assert wf['170']['inputs']['ref_image_size'] == 'max'
+
+
 def test_swap_steps_overrides_and_is_clamped(swap):
     sh, _mh, _base, config = swap
     _set(config, 'minimax_h3', swap_steps=4)

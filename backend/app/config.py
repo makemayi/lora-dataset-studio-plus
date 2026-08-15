@@ -1051,6 +1051,21 @@ DEFAULTS = {
         # the generic "match the shoulders" wording rather than being given a
         # guess. False turns it off.
         'h3_pose_hint': True,
+        # Which reference pipeline the H3 SWAP runs its H3 node on (BOTH H3
+        # engines). Deliberately SEPARATE from `minimax_h3.ref_image_size`, which
+        # is the GENERATION lane's dial: the swap used to inherit that key, and
+        # the inheritance was a silent defect — the generation default is 'match',
+        # so every swap overwrote the new graph's shipped 'max' (the node's own
+        # "best likeness" pipeline, 2048px reference, several times slower) and
+        # identity fidelity was quietly the LOWER one. A swap is the one job
+        # where likeness IS the product.
+        #
+        # Blank = leave whatever the shipped graph carries ('max' on the new
+        # graph, 'match' on the old), the same contract as `swap_steps`' 0 — an
+        # untouched install keeps the maintainer's tuning for its engine. Set it
+        # to 'match' or 'max' to take the decision away from the graph. Anything
+        # else is ignored the same way.
+        'h3_ref_image_size': '',
         # Which inpainting model the `lama` stage runs. The maintainer's graph
         # asked for 'zits', and on this lane that CRASHES: ZITS pads to a
         # multiple of 32 and drives a 256->512 structure upsampler, while the

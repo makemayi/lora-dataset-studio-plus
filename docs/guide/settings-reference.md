@@ -321,7 +321,10 @@ card together and pays that cost once per card, not once per image.
   **The** likeness dial of this engine: `match` scales your reference to the
   output's pixel area, `max` uses the model's 2048px reference pipeline for the
   best identity and is, by the model's own documentation, several times slower —
-  reference tokens ride through every sampling step.
+  reference tokens ride through every sampling step. The 🎭↔ swap does **not**
+  read this key — it has its own, `face_swap.h3_ref_image_size`, which defaulted
+  to keeping the swap graph's own value (`max` on the new engine) precisely so
+  this generation dial could not silently lower swap likeness.
 - **Frames per shot** → `minimax_h3.length`. Default **`5`**, the model's own
   minimum; it only accepts 5, 22, 39 … (5 + 17n). One frame is kept whatever you
   choose, so a higher value buys the selector more candidates at full sampling
@@ -1801,6 +1804,7 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `face_swap.h3_head_removal_negative` | The Klein pass's negative — the failure modes of the instruction above (a hole, a headless body, the background showing through) plus the identity that must not survive. Blank restores the shipped text. |
 | `face_swap.h3_new_stages` | Two booleans for the NEW H3 graph, both `false`: `mask_overlay` (paints the erased head area flat blue before H3 sees it) and `ollama` (an Ollama vision call describes how the head sits in this photo and that goes into the instruction — runs on `face_swap.h3_new_ollama_model`, and suppresses `h3_pose_hint` while on). |
 | `face_swap.h3_new_ollama_model` | The Ollama tag the head-analysis stage runs on. Blank (default) = `ollama.vision_model`, the captioning model. Picked from the tags Ollama has pulled; every tag is listed because Ollama does not say which can see. The call is made by the app, before the render is queued, and the model is unloaded as soon as it answers. |
+| `face_swap.h3_ref_image_size` | Which reference pipeline the swap's H3 node runs on: `match` or `max`. Blank (default) = whatever that graph ships with — `max` (the node's best-likeness pipeline, 2048px reference, several times slower) on the new engine, `match` on the old. Its own key, deliberately separate from `minimax_h3.ref_image_size`: the swap used to inherit that generation dial, whose `match` default silently clobbered the new graph's shipped `max` on every default install. Anything else is ignored. |
 | `face_swap.h3_context_factor` | **`minimax_h3_old` only.** How far the H3 swap's crop reaches around the head (1.0–8.0, default `3.0`). A factor of the head, clamped to the photo — so 3.0 crops a full-body shot to head and chest and leaves a portrait uncropped. Lower = more pixels on the face; higher = the shoulders the model sizes the head against. |
 | `face_swap.h3_mask_source` | Where the H3 swap's head mask comes from: `graph` (the workflow's own segmenter — ClothesSegment/ComfyUI-RMBG on the new engine, PersonMaskUltra/ComfyUI_LayerStyle on the old one) or `app` (services/auto_mask — SAM 3 in the app's own environment, on the sam3.pt ComfyUI already has; one child at a time). Default `graph`. |
 | `face_swap.h3_mask_prompt` | What the app lane masks, comma-separated (default `head, glasses, sunglasses, hat, headband, earrings`). Open-vocabulary, so it decides what actually gets replaced — and a list because `head` alone leaves the glasses behind. Phrases that match nothing add nothing. |

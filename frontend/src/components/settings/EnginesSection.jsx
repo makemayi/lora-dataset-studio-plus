@@ -419,6 +419,43 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
       </div>
 
       <div className="mt-3 sm:max-w-md">
+        <label htmlFor="face-swap-h3-ref-size" className="block text-xs font-medium text-content">
+          H3 swap reference pipeline
+        </label>
+        <select
+          id="face-swap-h3-ref-size"
+          value={fs.h3_ref_image_size ?? ''}
+          onChange={(e) => setField('face_swap', 'h3_ref_image_size', e.target.value)}
+          className={INPUT_CLASS}
+        >
+          <option value="">The graph&apos;s own choice (new: max · old: match)</option>
+          <option value="max">max — 2048px reference, best likeness, several times slower</option>
+          <option value="match">match — reference scaled to the output size (fast)</option>
+        </select>
+        <HelpText className="mt-1 text-xs text-amber-400">
+          <span hidden={!isH3}>
+            The swap&apos;s own dial, separate from the MiniMax H3 generation card&apos;s
+            reference-size setting — changing one no longer drags the other along.
+          </span>
+          <span hidden={isH3}>
+            This applies to the two MiniMax H3 engines only — it does nothing while
+            the swap runs on Klein.
+          </span>
+        </HelpText>
+        <HelpText className="mt-1 text-xs text-content-muted">
+          Blank keeps the graph&apos;s own value: the new H3 graph ships on&nbsp;
+          <strong>max</strong> (the node&apos;s best-likeness pipeline, 2048px reference
+          tokens riding through every step — slower), the old one on&nbsp;
+          <strong>match</strong>. This dial used to be borrowed from the generation
+          lane, whose default is match, so every swap silently ran the lower-fidelity
+          pipeline no matter what the graph shipped with.
+        </HelpText>
+        <ResetToDefault label="H3 swap reference pipeline" section="face_swap"
+          field="h3_ref_image_size"
+          config={config} configDefaults={configDefaults} setField={setField} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
         <label htmlFor="face-swap-h3-context" className="block text-xs font-medium text-content">
           How much of the shot MiniMax H3 (old) sees ({contextFactor.toFixed(1)}×)
         </label>
