@@ -74,7 +74,7 @@ const DISABLED_ATTR = / disabled=""/
 
 /* The tiles' write buttons, each found by something that does NOT move when
    the refusal takes over its title and aria-label. */
-const DELETE_BTN = 'text-red-300'
+const DELETE_BTN = 'text-red-700'
 const CROP_BTN = '✂'
 const MIRROR_BTN = '⇆'
 

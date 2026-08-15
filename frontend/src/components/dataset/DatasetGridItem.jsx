@@ -1,6 +1,7 @@
 /** One curation tile: image + keep/reject + source/framing badges + caption + crop. */
 import { improvementBadge } from './improveCandidates.js';
-import { FLOAT_HOVER } from '../common/surfaces.js';
+import { FLOAT_HOVER, GLASS_CAPSULE_LIGHT, SCRIM_BOTTOM,
+  TILE_SELECTED_GLOW, TILE_SHADOW, TILE_SURFACE } from '../common/surfaces.js';
 import { TrashIcon } from '../common/icons.jsx';
 import { FaceSwapIcon } from '../common/icons.jsx';
 import { useEffect, useRef, useState } from 'react';
@@ -30,11 +31,16 @@ const DERIVATION_LABEL = {
   klein_image_improve: 'upscale candidate',
 };
 
-const STATUS_CLS = {
-  keep: 'border-green-500',
-  reject: 'border-red-500/50 opacity-50',
-  pending: 'border-amber-200',
-  failed: 'border-red-600',
+/* The kept/rejected/pending state lives in a corner DOT (top-left, always
+   visible), not a border — the tile's edge used to carry a status border AND
+   a selection ring at once, two mechanisms competing for the same line, and
+   the photo was already boxed inside a white card. The dot pairs colour with
+   an accessible name (never colour alone, same rule as faceBadge below). */
+const STATUS_DOT = {
+  keep: { cls: 'bg-green-500', label: 'Kept' },
+  reject: { cls: 'bg-red-500', label: 'Rejected' },
+  pending: { cls: 'bg-amber-400', label: 'Undecided' },
+  failed: { cls: 'bg-red-600', label: 'Failed' },
 };
 
 // Seuils calibres antelopev2 (test3) — face_score brut persiste -> ajustables dans
@@ -43,21 +49,21 @@ const GREY_LABEL = { no_face: 'no face detected', low_det: 'low detection',
   too_small: 'face too small', extreme_pose: 'profile — not scored',
   unreadable: 'unreadable', error: 'error' };
 
-// Retourne {border, icon, cls, label} d'apres face_state/face_score, ou null si pas analysé.
-// La bordure encode la largeur ET le style (plein=jugé / pointillé=non-jugeable) pour
-// ne PAS dépendre de la couleur seule (WCAG 1.4.1).
+// Retourne {icon, cls, label} d'apres face_state/face_score, ou null si pas analysé.
+// La couleur accompagne un GLYPHE (✓/~ /⚠ ou 👁) — jamais la couleur seule (WCAG 1.4.1) —
+// et le grade en lettre (A/B/C/D) reste le label accessible.
 // Score → letter grade: ≥0.9 A, ≥0.8 B, ≥0.7 C, <0.7 D.
 function faceBadge(img) {
   if (img.face_state == null) return null;
   if (img.face_state !== 'scorable' || img.face_score == null) {
-    return { border: 'border-2 border-dashed border-gray-500', icon: '👁', cls: 'text-gray-600', graded: false,
+    return { icon: '👁', cls: 'text-gray-600', graded: false,
       label: GREY_LABEL[img.face_state] || 'not scored' };
   }
   const s = img.face_score;
-  if (s >= 0.9) return { border: 'border-2 border-green-500', icon: '✓', cls: 'text-green-700', graded: true, label: 'A' };
-  if (s >= 0.8) return { border: 'border-2 border-emerald-500', icon: '✓', cls: 'text-emerald-700', graded: true, label: 'B' };
-  if (s >= 0.7) return { border: 'border-2 border-amber-500', icon: '~', cls: 'text-amber-700', graded: true, label: 'C' };
-  return { border: 'border-2 border-red-500', icon: '⚠', cls: 'text-red-600', graded: true, label: 'D' };
+  if (s >= 0.9) return { icon: '✓', cls: 'text-green-700', graded: true, label: 'A' };
+  if (s >= 0.8) return { icon: '✓', cls: 'text-emerald-700', graded: true, label: 'B' };
+  if (s >= 0.7) return { icon: '~', cls: 'text-amber-700', graded: true, label: 'C' };
+  return { icon: '⚠', cls: 'text-red-600', graded: true, label: 'D' };
 }
 
 // Watermark V1 badge from watermark_state (🚩 detected / ⊘ dismissed / ✨ cleaned /
@@ -143,14 +149,16 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
   const fb = faceBadge(img);
   const wb = WATERMARK_BADGE[img.watermark_state];
   // A big batch leaves every not-yet-done tile on the same amber "pending"
-  // border, with no way to tell which one a worker has actually claimed from
-  // the ones still merely queued behind it. is_generating (see dataset_payload)
-  // is true for ONLY that tile — border colour AND a pulse (never colour
-  // alone, same rule faceBadge follows below) so it reads even without colour.
+  // dot, with no way to tell which one a worker has actually claimed from the
+  // ones still merely queued behind it. is_generating (see dataset_payload) is
+  // true for ONLY that tile — the dot PULSES then (never colour alone, same
+  // rule faceBadge follows below) so it reads even without colour.
   const generating = img.status === 'pending' && img.is_generating;
-  const borderCls = fb ? fb.border
-    : generating ? 'border-2 border-emerald-400 animate-pulse'
-    : `border-2 ${STATUS_CLS[img.status] || 'border-border'}`;
+  const statusDot = STATUS_DOT[img.status] || STATUS_DOT.pending;
+  // A rejected tile recedes (and its dot with it): the grid reads "rejects"
+  // at a glance without needing to land on each one. The dot stays mounted —
+  // the whole tile just steps back.
+  const rejected = img.status === 'reject';
   // The tile stays a square (crop decisions need a stable grid), but at the L
   // size — fewer, bigger tiles, the whole point being to judge a composition
   // before deciding — a hard object-cover square crop hides exactly what you'd
@@ -175,10 +183,13 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
 
   return (
     <div tabIndex={0} aria-label={`${displayLabel(img.variation_label) || 'Dataset image'} card`}
-      /* The tile keeps `borderCls`: that edge is the decision (kept / rejected /
-         undecided), not decoration. Only the fill moves onto the token. */
-      className={`dataset-grid-item rounded-[28px] ${borderCls} ${selected ? 'ring-2 ring-indigo-400' : ''} bg-white/60 backdrop-blur-xl overflow-hidden flex flex-col shadow-[0_0_0_1px_rgba(255,255,255,0.4),0_12px_40px_rgba(0,0,0,0.12),0_4px_12px_rgba(0,0,0,0.05)] ${FLOAT_HOVER}`}>
-      <div className="relative aspect-square bg-black rounded-[22px] overflow-hidden m-2">
+      /* The photo IS the tile: no white card, no inner margin, no status border
+         (the state is the corner dot below) and no selection ring (the state is
+         the outward glow). TILE_SURFACE carries the radius + clip; the resting
+         shadow is swapped for the glow while selected. */
+      data-selected={selected || undefined}
+      className={`dataset-grid-item ${TILE_SURFACE} ${selected ? TILE_SELECTED_GLOW : TILE_SHADOW} ${FLOAT_HOVER} ${rejected ? 'opacity-50' : ''}`}>
+      <div className="relative aspect-square bg-black">
         {/* Fresh content nobody has looked at yet — a first-time generation
             OR a regenerate, not yet opened (unlike the in-progress emerald
             glow above, this one is meant to survive being buried back among
@@ -188,20 +199,26 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             is the one spot nothing else occupies at rest. Always visible,
             not hover-gated: cleared server-side the moment the tile is
             opened (see onView below). */}
+        {/* State DOT + lock, one row at the top-left, both always visible. The
+            dot is the kept/rejected/undecided decision (mounted, data-status
+            so a test can name it); the lock badge sits beside it — top-left is
+            the corner nothing else claims at rest, same rule as the unseen dot
+            top-right. */}
+        <span data-status={img.status} role="img"
+          title={generating ? 'Generating…' : statusDot.label}
+          aria-label={generating ? 'Generating…' : statusDot.label}
+          className={`absolute top-1.5 left-1.5 z-20 h-2.5 w-2.5 rounded-full ring-2 ring-black/25 ${statusDot.cls} ${generating ? 'animate-pulse' : ''}`} />
+        {img.is_locked && (
+          <span
+            className="absolute top-1.5 left-5 z-20 grid place-items-center w-5 h-5 rounded-full bg-black/70 text-amber-700 text-[11px]"
+            title="Locked — cannot be deleted until unlocked" aria-label="Locked, cannot be deleted">
+            🔒
+          </span>
+        )}
         {img.unseen && (
           <span
             className="absolute top-1.5 right-1.5 z-20 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-black/60"
             title="New — not yet viewed" aria-label="New, not yet viewed" />
-        )}
-        {/* Locked state, always visible (not hover-gated) so it reads at a
-            glance while browsing the grid, same rule as the unseen dot above —
-            top-left is the one corner nothing else claims at rest. */}
-        {img.is_locked && (
-          <span
-            className="absolute top-1.5 left-1.5 z-20 grid place-items-center w-5 h-5 rounded-full bg-black/70 text-amber-700 text-[11px]"
-            title="Locked — cannot be deleted until unlocked" aria-label="Locked, cannot be deleted">
-            🔒
-          </span>
         )}
         {onToggleSelect && img.filename && (
           <label
@@ -313,7 +330,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             {fb.graded ? fb.label : fb.icon}
           </span>
         )}
-        <div className="dataset-grid-item__actions absolute top-1.5 right-1.5 z-10 flex max-w-[calc(100%_-_1rem)] flex-wrap justify-end gap-0.5 rounded-full bg-black/40 backdrop-blur-md border border-white/10 p-0.5">
+        <div className={`dataset-grid-item__actions absolute top-1.5 right-1.5 z-10 flex max-w-[calc(100%_-_1rem)] flex-wrap justify-end gap-0.5 ${GLASS_CAPSULE_LIGHT} p-0.5`}>
           {fb && (
             <span className={`flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${fb.cls}`}
               title={`Resemblance to the reference face — ${fb.label}`}>
@@ -326,7 +343,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy || faceScoringBusy || !!faceScoringBlocked || scoreFaceBusy}
               aria-busy={scoreFaceBusy}
               title={scoreFaceTitle} aria-label={scoreFaceTitle}
-              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-white/20 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-45">
+              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-black/10 text-[10px] text-content disabled:cursor-not-allowed disabled:opacity-45">
               <span aria-hidden="true" className={scoreFaceBusy ? 'animate-pulse' : ''}>{scoreFaceBusy ? '…' : '🎭'}</span>
             </button>
           )}
@@ -336,7 +353,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy}
               title={refused || 'Regenerate this variation (new seed)'}
               aria-label={refused || 'Regenerate this variation (new seed)'}
-              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">🔄</button>
+              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-black/10 text-content text-[10px] disabled:cursor-not-allowed disabled:opacity-45">🔄</button>
           )}
           {canRegenerate && (
             <button type="button"
@@ -344,7 +361,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy}
               title={refused || 'Edit the prompt, then regenerate this variation'}
               aria-label={refused || 'Edit the prompt, then regenerate this variation'}
-              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">✏️</button>
+              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-black/10 text-content text-[10px] disabled:cursor-not-allowed disabled:opacity-45">✏️</button>
           )}
           {canFaceSwap && onFaceSwap && (
             /* Disabled WHILE THE REQUEST IS OUT, not merely while the row is
@@ -360,7 +377,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
                 : "Swap this tile's face with the reference image"}
               aria-label={swapBusy ? 'Preparing the face swap…'
                 : "Swap this tile's face with the reference image"}
-              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-white/20 text-white disabled:cursor-not-allowed disabled:opacity-45">
+              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-black/10 text-content disabled:cursor-not-allowed disabled:opacity-45">
               <span hidden={swapBusy}><FaceSwapIcon className="h-3.5 w-3.5" /></span>
               <span hidden={!swapBusy} className="animate-pulse text-[10px]">…</span>
             </button>
@@ -374,7 +391,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy || swapBusy}
               title="Undo the face swap — bring back the image it replaced"
               aria-label="Undo the face swap — bring back the image it replaced"
-              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">↩🎭</button>
+              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-black/10 text-content text-[10px] disabled:cursor-not-allowed disabled:opacity-45">↩🎭</button>
           )}
           {rerunImprove && (
             <button type="button"
@@ -382,7 +399,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy || !rerunImprove.enabled}
               title={refused || rerunImprove.title}
               aria-label={refused || rerunImprove.title}
-              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-white/20 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-45">
+              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-black/10 text-[10px] text-content disabled:cursor-not-allowed disabled:opacity-45">
               <span aria-hidden="true">🔄✨</span>
             </button>
           )}
@@ -396,7 +413,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
                 : `Mirror ${displayLabel(img.variation_label) || 'this image'} horizontally`)}
               title={refused
                 || (mirrorBusy ? 'Mirroring horizontally…' : 'Mirror horizontally (flip left and right)')}
-              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-white/20 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-45">
+              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-black/10 text-[10px] text-content disabled:cursor-not-allowed disabled:opacity-45">
               <span aria-hidden="true">{mirrorBusy ? '…' : '⇆'}</span>
             </button>
           )}
@@ -404,7 +421,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             <button type="button" onClick={(e) => { e.stopPropagation(); onCrop(img); }}
               disabled={busy}
               title={refused || 'Crop'} aria-label={refused || 'Crop'}
-              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">✂</button>
+              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-black/10 text-content text-[10px] disabled:cursor-not-allowed disabled:opacity-45">✂</button>
           )}
           {img.status === 'keep' && (
             <button type="button"
@@ -412,7 +429,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy}
               title={refused || 'Open a larger caption editor'}
               aria-label={refused || 'Expand caption editor'}
-              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">⛶</button>
+              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-black/10 text-content text-[10px] disabled:cursor-not-allowed disabled:opacity-45">⛶</button>
           )}
           {img.status === 'keep' && cap && (
             <button type="button"
@@ -420,7 +437,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy}
               title={refused || 'Delete this image’s caption (then “Caption” regenerates it via JoyCaption)'}
               aria-label={refused || 'Delete this image’s caption'}
-              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-white/20 text-white text-[10px] disabled:cursor-not-allowed disabled:opacity-45">🗑</button>
+              className="grid min-h-5 min-w-5 place-items-center rounded-full hover:bg-black/10 text-content text-[10px] disabled:cursor-not-allowed disabled:opacity-45">🗑</button>
           )}
           {onLockToggle && (
             <button type="button"
@@ -428,7 +445,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               title={img.is_locked ? 'Unlock (allow delete again)' : 'Lock (cannot be deleted)'}
               aria-label={img.is_locked ? 'Unlock this image' : 'Lock this image against deletion'}
               aria-pressed={!!img.is_locked}
-              className={`grid min-h-5 min-w-5 place-items-center rounded-full text-[10px] ${img.is_locked ? 'bg-amber-400 text-black' : 'text-white hover:bg-white/20'}`}>
+              className={`grid min-h-5 min-w-5 place-items-center rounded-full text-[10px] ${img.is_locked ? 'bg-amber-400 text-black' : 'text-content hover:bg-black/10'}`}>
               {img.is_locked ? '🔒' : '🔓'}
             </button>
           )}
@@ -442,7 +459,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
               disabled={busy || img.is_locked}
               title={img.is_locked ? 'Locked — unlock to delete' : (refused || 'Delete permanently')}
               aria-label={img.is_locked ? 'Locked — unlock to delete' : (refused || 'Delete permanently')}
-              className="grid min-h-5 min-w-5 place-items-center rounded-full text-red-300 hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-45">
+              className="grid min-h-5 min-w-5 place-items-center rounded-full text-red-700 hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-45">
               <TrashIcon className="h-3.5 w-3.5" />
             </button>
           )}
@@ -453,34 +470,43 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
             onSubmit={(prompt) => onRegenerate?.(img.id, undefined, prompt, { silent: true })}
             onClose={() => setEditingPrompt(false)} />
         )}
-        {/* Caption — a frosted-glass overlay ON the photo, revealed on hover
-            like the toolbar. Read-only here: it opens the editor on click. */}
+        {/* Caption — a THIN LIGHT GLASS capsule on the photo, revealed on hover
+            like the toolbar. One line, truncated; the full caption lives in the
+            Lightbox, not on the tile. Read-only here: it opens the editor on
+            click. SCRIM_BOTTOM sits behind it so the dark text keeps a quiet
+            ground over ANY photo. Mounted, never unloaded — hover show/hide is
+            the CSS opacity gate on `.dataset-grid-item__actions`, because
+            Chrome auto-translate rewrites text nodes and a React removal would
+            crash (CLAUDE.md ▸ UI changes 5). */}
         {(cap || '').trim() && img.status === 'keep' && (
-          <button type="button"
-            onClick={(e) => { e.stopPropagation(); if (!busy) setCaptionEditorOpen(true); }}
-            title={busy ? (refused || 'Wait for the running pass to finish') : 'Click to edit the caption'}
-            aria-label="Edit the caption"
-            className="dataset-grid-item__actions absolute inset-x-2 top-1/2 z-20 flex flex-col items-start gap-0.5 rounded-xl bg-black/40 backdrop-blur-md border border-white/10 px-2.5 py-1.5 text-left">
-            <span className="text-white text-[11px] leading-snug line-clamp-3 break-words">{cap}</span>
-            {captionOriginInfo(img.caption_origin).known && (
-              <span className={`text-[9px] leading-none ${captionIsAsserted(img.caption_origin) ? 'text-emerald-300' : 'text-white/50'}`}>
-                {captionOriginInfo(img.caption_origin).chip}
-              </span>
-            )}
-          </button>
+          <div className="dataset-grid-item__actions absolute inset-x-0 bottom-0 z-20 pointer-events-none">
+            <div aria-hidden="true" className={`${SCRIM_BOTTOM} absolute inset-x-0 bottom-0 h-16`} />
+            <button type="button"
+              onClick={(e) => { e.stopPropagation(); if (!busy) setCaptionEditorOpen(true); }}
+              title={busy ? (refused || 'Wait for the running pass to finish') : 'Click to edit the caption'}
+              aria-label="Edit the caption"
+              className={`pointer-events-auto absolute inset-x-2 bottom-2 flex items-center gap-1.5 ${GLASS_CAPSULE_LIGHT} px-2.5 py-1 text-left`}>
+              <span className="min-w-0 flex-1 truncate text-[11px] leading-snug text-content">{cap}</span>
+              {captionOriginInfo(img.caption_origin).known && (
+                <span className={`shrink-0 text-[9px] leading-none ${captionIsAsserted(img.caption_origin) ? 'text-emerald-700' : 'text-content-subtle'}`}>
+                  {captionOriginInfo(img.caption_origin).chip}
+                </span>
+              )}
+            </button>
+          </div>
         )}
         {/* Source credit — ALWAYS visible (it is a legal attribution), a tiny
             frosted pill just above the keep/reject row. */}
         <SourceAttribution metadata={img.source_metadata}
           className="absolute bottom-9 left-2 z-20 max-w-[calc(100%_-_1rem)] rounded-full bg-black/50 px-1.5 py-0.5 text-[0.5625rem] leading-relaxed text-white/80 backdrop-blur-sm" />
-        {/* Keep / reject — now ON the photo, below the caption, flatter pills. */}
+        {/* Keep / reject — now ON the photo, above the caption capsule, flatter pills. */}
         {isRescueDerived ? (
-          <span className="absolute inset-x-2 bottom-2 z-20 rounded-full border border-indigo-400/40 bg-indigo-500/30 px-2 py-1 text-center text-[0.625rem] text-indigo-100 backdrop-blur-md"
+          <span className="dataset-grid-item__actions absolute inset-x-2 bottom-12 z-20 rounded-full border border-indigo-400/40 bg-indigo-500/30 px-2 py-1 text-center text-[0.625rem] text-indigo-100 backdrop-blur-md"
             title="This winner was chosen atomically with its provenance pair. Caption and crop remain available.">
             ✓ Chosen in Klein rescue review
           </span>
         ) : (
-          <div className="dataset-grid-item__actions absolute inset-x-2 bottom-2 z-20 flex gap-1.5">
+          <div className="dataset-grid-item__actions absolute inset-x-2 bottom-12 z-20 flex gap-1.5">
             <button type="button" onClick={() => onStatus(img.id, img.status === 'keep' ? 'pending' : 'keep')}
               disabled={busy}
               title={refused || 'Keep'} aria-label={refused || 'Keep'}

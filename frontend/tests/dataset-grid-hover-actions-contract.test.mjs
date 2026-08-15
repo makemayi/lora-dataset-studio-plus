@@ -10,10 +10,15 @@ const item = fs.readFileSync(path.join(frontend, 'src/components/dataset/Dataset
 const css = fs.readFileSync(path.join(frontend, 'src/index.css'), 'utf8')
 
 test('all image-card control groups share the hover-action contract', () => {
-  assert.match(item, /dataset-grid-item rounded-\[28px\]/)
-  // Three groups: bulk-select tick, the hover toolbar (which now also holds
-  // the ⛶/🗑 caption actions), and the keep/reject row.
-  assert.ok((item.match(/dataset-grid-item__actions/g) || []).length >= 3)
+  // The tile is now the photo itself: the surface token carries radius+clip,
+  // and the resting shadow is swapped for the selection glow (no ring).
+  assert.match(item, /dataset-grid-item \$\{TILE_SURFACE\}/)
+  assert.doesNotMatch(item, /rounded-\[28px\]/)
+  assert.doesNotMatch(item, /bg-white\/60/)
+  // Four groups: bulk-select tick, the hover toolbar, the caption capsule
+  // (mounted, hover-gated by the same CSS opacity — never unmounted), and
+  // the keep/reject row.
+  assert.ok((item.match(/dataset-grid-item__actions/g) || []).length >= 4)
 })
 
 test('fine pointers hide controls without reflow and hover or focus reveals them', () => {
