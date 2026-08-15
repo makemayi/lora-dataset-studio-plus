@@ -78,7 +78,7 @@ def test_a_frame_with_no_sharpness_reading_is_not_treated_as_zero():
 
 
 def test_a_tiny_face_is_refused_even_when_it_is_the_sharpest_frame():
-    frames = [frame(0.0, 900, face=good_face(bbox_frac=0.05)),
+    frames = [frame(0.0, 900, face=good_face(bbox_frac=0.005)),
               frame(5.0, 10, face=good_face())]
     out = vfs.select_frames(frames, limit=2)
     assert [f['t'] for f in out['picked']] == [5.0]
@@ -99,11 +99,14 @@ def test_low_detection_confidence_is_refused():
     assert out['rejected']['low_det'] == 1
 
 
-def test_the_size_floor_is_stricter_than_the_scorers_presence_floor():
-    """A face big enough to SCORE is not automatically big enough to TRAIN on."""
-    from importlib import util
-    assert vfs.FACE_BBOX_MIN > 0.06
-    assert util  # keep the import meaningful if the file is read in isolation
+def test_a_full_body_shot_is_not_thrown_away_for_having_a_small_face():
+    """The first draft floored this at 0.12 on the theory that a small face
+    carries no identity. Measured on dataset 4 (2026-08-16), faces at 2-5 % of
+    the photo score 0.48-0.89 — the same distribution as rows already called
+    scorable — and those are the full-body shots a set needs for variety."""
+    out = vfs.select_frames([frame(0.0, 50, face=good_face(bbox_frac=0.03))],
+                            limit=1)
+    assert len(out['picked']) == 1
 
 
 def test_a_missing_face_reading_is_not_a_rejection():
@@ -207,6 +210,4 @@ def test_the_face_gates_stay_equal_to_the_scorers_own(tmp_path):
     det, bbox, yaw = (float(x) for x in m.groups())
     assert vfs.DET_MIN == det
     assert vfs.YAW_MAX == yaw
-    # The SIZE floor is the one deliberate divergence: the scorer asks "is there
-    # a face", a training crop asks "is there an identity".
-    assert vfs.FACE_BBOX_MIN > bbox
+    assert vfs.FACE_BBOX_MIN == bbox

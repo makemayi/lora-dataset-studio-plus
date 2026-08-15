@@ -66,7 +66,7 @@ def test_a_tiny_face_on_the_sharpest_frame_hands_the_slot_to_the_next():
         # The LAST timestamp is the sharpest frame in this fixture.
         worst = max(f['t'] for f in frames)
         return [{'ok': True, 'det': 0.9, 'yaw': 2.0,
-                 'bbox_frac': 0.02 if f['t'] == worst else 0.3} for f in frames]
+                 'bbox_frac': 0.005 if f['t'] == worst else 0.3} for f in frames]
 
     out = run(limit=1, face_scores=faces)
     assert len(out) == 1

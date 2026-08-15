@@ -48,11 +48,15 @@ from .video_metrics import _LUMA_SANE_HIGH, _LUMA_SANE_LOW
 # are admissible, and the sharpness ranking decides whether they win a slot.
 DET_MIN = 0.50
 YAW_MAX = 70.0
-# ...but the SIZE floor is deliberately higher than the scorer's 0.06. That one
-# answers "is there a face here at all"; a training crop has to answer "is there
-# an identity here", and a face occupying 6 % of the frame's short edge carries
-# almost no identity signal once it is resized for training.
-FACE_BBOX_MIN = 0.12
+# The SIZE floor mirrors the scorer too, and a first draft here got it wrong.
+# It shipped at 0.12 on the argument that a small face "carries almost no
+# identity signal once it is resized for training". Measured on dataset 4
+# (2026-08-16) that argument is false: faces at 2-5 % of the photo — full-body
+# shots, which is exactly what a LoRA set holds — scored 0.48-0.89, the same
+# distribution as the rows already called scorable. A 0.12 floor would have
+# thrown away most of the full-body variety a set needs, for a reason that does
+# not survive measurement. Callers who want a stricter crop pass `face_bbox_min`.
+FACE_BBOX_MIN = 0.02
 
 MIN_GAP_S = 0.75          # frames closer than this are the same picture
 DEDUP_MAX_COSINE = 0.92   # above this, two frames are the same shot

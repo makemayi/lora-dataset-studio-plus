@@ -2557,6 +2557,41 @@ Deleting a video dataset deletes the encoded clips and nothing else: the bank
 keeps every shot and every decision, so you can re-cut at another length or for
 another target without triaging again.
 
+### 🖼 Or extract still frames instead, as an image dataset
+
+The same kept clips, read for **stills** rather than encoded as video. Each clip
+contributes its sharpest usable frames, and the result lands in your library as
+an ordinary image dataset — captionable, croppable, trainable like any other.
+
+**"Frames per clip" is a ceiling, not a promise.** A clip whose every frame is
+over- or under-exposed contributes nothing, and neither does one that never
+shows a usable face while the face filter is on. Nothing is padded to reach the
+number, so asking for 3 frames from 40 clips and receiving 61 images is the
+filter working, not a fault.
+
+**Why it is not simply "the sharpest frames".** Sharpness runs in streaks: the
+sharpest frame's neighbours are usually the second, third and fourth sharpest,
+so a plain top-N gives you the same picture several times. Three things prevent
+that — a **minimum gap in time** between two kept frames, a **duplicate check**
+on what the frames look like (which catches a locked-off shot where nobody
+moves, and a cut back to the same framing a minute later), and the **per-source
+cap**, which stops one long video from supplying the whole set.
+
+**The face filter needs a dataset to compare against.** Turn it on and pick the
+dataset whose reference photo shows the person; frames with no detectable face are dropped
+even when they are the sharpest thing in the clip. A small face is not a
+reason on its own — a full-body shot is exactly the variety a set needs. Only datasets that HAVE a reference photo are
+offered — an empty list means none of yours has one yet, not that you have no
+datasets.
+
+**With the filter off**, frames are chosen on sharpness and exposure alone. That
+is the right choice for a style or location set, and a trap for a character one:
+the images will be sharp, and some of them will be of somebody else.
+
+Every extracted image remembers where it came from — the source clip and the
+timestamp inside it — so you can go back to the moment a picture was taken from.
+
+
 ## Stopping Score, and what a relaunch costs
 
 **✨ Score** always covers the whole bank — but it only *computes* what it does
