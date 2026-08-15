@@ -26,6 +26,7 @@ import VideoClipSearchBox from './VideoClipSearchBox'
 import { matchLine, captionStyleLabel } from './videoClipSearch'
 import { filterByFlag, flagChips, flagFilterNote } from './videoMetricsFilter'
 import PromoteVideoDialog from './PromoteVideoDialog'
+import PromoteFramesDialog from './PromoteFramesDialog'
 import { CARD_SURFACE, FLOAT_SHADOW, QUIET_BUTTON } from '../common/surfaces'
 
 const PAGE = 120
@@ -53,6 +54,10 @@ export default function VideoBankWorkspace({ bankId, onBack, onGone }) {
   const [anchor, setAnchor] = useState(null)
   const [openIndex, setOpenIndex] = useState(null)
   const [promoting, setPromoting] = useState(false)
+  // The SECOND promotion target: the same kept clips, read for still
+  // frames instead of encoded as video. Its own flag rather than a mode
+  // on the first, because the two dialogs share no field.
+  const [promotingFrames, setPromotingFrames] = useState(false)
   const [loadingClips, setLoadingClips] = useState(false)
   // A retouch ADDED a shot (a split, or a hand-made cut). The gallery is reloaded
   // when the player closes rather than under it: `openIndex` addresses the list by
@@ -380,6 +385,13 @@ export default function VideoBankWorkspace({ bankId, onBack, onGone }) {
           className="rounded-md border border-indigo-500/60 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-500/25 disabled:opacity-40">
           🎬 {PASS_LABELS.promote}
         </button>
+        <button type="button" onClick={() => setPromotingFrames(true)}
+          disabled={busy || !counts.keep}
+          title={!counts.keep ? 'Keep some shots first'
+            : 'Keep the sharpest still frames of each clip as an image dataset'}
+          className="rounded-md border border-indigo-500/60 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-500/25 disabled:opacity-40">
+          🖼 Extract frames
+        </button>
         {busy && (
           <button type="button" onClick={cancel}
             className="rounded-md border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-500/20">
@@ -590,6 +602,13 @@ export default function VideoBankWorkspace({ bankId, onBack, onGone }) {
         <PromoteVideoDialog bankId={bankId} capability={capability}
           keepCount={counts.keep || 0} selectedIds={selected}
           onClose={() => setPromoting(false)}
+          onDone={() => { setSelected([]); loadBank(false) }} />
+      )}
+
+      {promotingFrames && (
+        <PromoteFramesDialog bankId={bankId}
+          keepCount={counts.keep || 0} selectedIds={selected} refs={[]}
+          onClose={() => setPromotingFrames(false)}
           onDone={() => { setSelected([]); loadBank(false) }} />
       )}
     </div>

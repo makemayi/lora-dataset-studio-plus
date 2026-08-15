@@ -50,6 +50,23 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-16-video-frames-become-an-image-dataset',
+    date: '2026-08-16',
+    title: 'Turn the shots you kept into an image dataset, not just a video one',
+    blurb: 'The video bank has a second promotion target: 🖼 Extract frames. '
+      + 'The same kept clips, read for their sharpest usable stills, landing in '
+      + 'your library as an ordinary image dataset — captionable and trainable '
+      + 'like any other. It is not "the N sharpest frames": sharpness runs in '
+      + 'streaks, so a minimum gap in time, a duplicate check on what the frames '
+      + 'look like, and the per-source cap keep you from collecting the same '
+      + 'picture five times. Turn the face filter on and pick the dataset whose '
+      + 'reference photo shows the person, and frames with no usable face are '
+      + 'dropped even when they are the sharpest in the clip. Frames per clip is '
+      + 'a ceiling, never a promise — clips with nothing usable contribute '
+      + 'nothing, and nothing is padded to reach a number.',
+    to: '/video-bank',
+  },
+  {
     id: '2026-08-15-face-scoring-sees-profiles-and-small-faces',
     date: '2026-08-15',
     title: 'Face scoring sees profiles and small faces now',

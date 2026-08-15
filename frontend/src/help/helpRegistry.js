@@ -859,6 +859,19 @@ const TOPICS = [
      'licence', 'license', 'territory', 'eu', 'uk', 'south korea', 'usa',
      'outputs', 'can i publish', 'am i allowed', 'keeps audio', 'audio'],
     '/video-bank', 'using-the-app', 'video-training-sets-and-the-two-things-to-check-before-you-cut-one'),
+  // Two symptoms bring people here and neither says "frame extraction": a set
+  // that came back with far fewer images than clips x frames, and a set full of
+  // sharp pictures of the wrong person (the face filter was off, or its
+  // reference dataset had no reference photo).
+  action('video-promote-frames', 'Extract still frames as an image dataset',
+    ['extract frames', 'frames from video', 'stills', 'still frames',
+     'video to images', 'video to image dataset', 'image dataset from video',
+     'screenshots', 'grab frames', 'sharpest frame', 'sharpness', 'blur',
+     'frames per clip', 'fewer images than expected', 'too few images',
+     'face filter', 'usable face', 'wrong person', 'reference dataset',
+     'compare against', 'min gap', 'duplicate frames', 'same picture twice'],
+    '/video-bank', 'using-the-app',
+    'video-training-sets-and-the-two-things-to-check-before-you-cut-one'),
   action('video-cloud-training', 'Train a video dataset in the cloud',
     ['cloud video training', 'train video in the cloud', 'video lora cloud',
      'train in the cloud', 'rent a gpu for video', 'video pod', 'wan lora cloud',
