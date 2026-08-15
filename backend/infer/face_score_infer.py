@@ -12,13 +12,18 @@ YAW_MAX porte a 70° (2026-08-15): a 40° un profil 3/4 etait rejete alors qu'an
 extrait encore une embedding discriminante jusqu'a ~70° (la valeur absolue baisse, mais
 « ressemble a la ref » reste separable). Les profils restent HORS auto-triage (le
 front ne trie que face_state == 'scorable') mais recoivent un score affichable.
-det_size passe a 1024 : a 640, une tete dans une photo pleine-corps 1024px tombait
-a ~40px d'entree et le detecteur la ratait — beaucoup de « too_small » etaient des
-non-detections, pas des visages reellement minuscules."""
+
+BBOX_MIN 0.06 -> 0.02 (2026-08-16, mesure dataset 4) : 0.06 classait « too_small » des
+visages de 2-5% de la photo — des plans pleine-corps, exactement ce qu'un set LoRA
+contient — et 22/25 de ces images donnaient en fait un score utile (sim 0.48-0.89, la
+meme distribution que les scorable). En dessous de 0.02 le visage est vraiment trop
+petit pour une embedding fiable. det_size RESTE a 640 : a 1024, SCRFD rate les gros
+plans pleine cadre (mesure dataset 20 : 0 direct / 5), et la reference EST un gros
+plan — ne pas y retoucher."""
 from __future__ import annotations
 import json, sys
 
-DET_MIN, BBOX_MIN, YAW_MAX = 0.50, 0.06, 70.0
+DET_MIN, BBOX_MIN, YAW_MAX = 0.50, 0.02, 70.0
 
 
 def _log(m): print(m, file=sys.stderr, flush=True)
@@ -69,7 +74,7 @@ def main() -> int:
 
     def _load():
         app = FaceAnalysis(**kwargs)
-        app.prepare(ctx_id=-1, det_size=(1024, 1024))
+        app.prepare(ctx_id=-1, det_size=(640, 640))
         return app
 
     # DEUX reparations, et la seconde est celle qui compte sur une install
