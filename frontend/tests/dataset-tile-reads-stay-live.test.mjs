@@ -33,6 +33,15 @@ const IMG = {
   caption: 'a caption', variation_label: 'portrait',
 }
 
+/* A DATASET-WIDE pass: it walks every row and writes as it goes, so a second
+   writer really would race it. This used to be `kind: 'generate'`, and that was
+   the bug — a generate activity is a COUNT of in-flight rows, so regenerating
+   one tile greyed out every other tile. See dataset/activityScope.js. */
+const CAPTIONING = {
+  kind: 'caption', done: 12, total: 64, started_at: 0,
+}
+
+/* ...and the per-image counterpart, which must NOT lock the grid. */
 const GENERATING = {
   kind: 'generate', done: 12, total: 64, started_at: 0,
 }
@@ -158,7 +167,7 @@ const gridHtml = (props) => renderToStaticMarkup(
       }))))
 
 test('a dataset pass leaves the grid inspectable and tickable', () => {
-  const html = gridHtml({ busy: true, activity: GENERATING })
+  const html = gridHtml({ busy: true, activity: CAPTIONING, activities: [CAPTIONING] })
   assert.match(html, /Inspect portrait full screen/)
   assert.doesNotMatch(tagAround(html, 'Inspect portrait full screen'), DISABLED_ATTR)
   // The tick box is RENDERED at all — the grid used to withhold onToggleSelect,
@@ -167,15 +176,36 @@ test('a dataset pass leaves the grid inspectable and tickable', () => {
   assert.doesNotMatch(tagAround(html, 'Select portrait for bulk actions'), DISABLED_ATTR)
   // And the writes are still refused, named.
   assert.match(tagAround(html, DELETE_BTN), DISABLED_ATTR)
-  assert.match(tagAround(html, DELETE_BTN), /Variation generation is running/)
+  assert.match(tagAround(html, DELETE_BTN), /Captioning is running/)
 })
 
 test('what the pass blocks is said in words, not only in a tooltip', () => {
   // A title is unreadable on a touch screen, which is where "nothing works"
   // was reported. One visible line, above the grid.
-  const html = gridHtml({ busy: true, activity: GENERATING })
+  const html = gridHtml({ busy: true, activity: CAPTIONING, activities: [CAPTIONING] })
   assert.match(html, /Edits, captions and deletes wait for the pass above to finish/)
   assert.match(html, /inspecting an image and ticking a selection still work/)
   // It appears only while something is actually holding the dataset.
   assert.doesNotMatch(gridHtml({}), /Edits, captions and deletes wait/)
+})
+
+test('regenerating one tile leaves the OTHER tiles fully usable', () => {
+  /* The reported bug: 点击了一个图片重新生成后，其他的都不能点了.
+     A `generate` activity is a COUNT of in-flight rows, not a claim on the
+     dataset — and the row it owns renders its own "⚙ generating…" placeholder
+     with no toolbar at all, which is the correctly-scoped lock. A second local
+     regenerate queues on job_queue's single worker; an API one does not even
+     queue. Nothing here needed a new task list — only this flag. */
+  const html = gridHtml({ busy: true, activity: GENERATING, activities: [GENERATING] })
+  assert.doesNotMatch(tagAround(html, DELETE_BTN), DISABLED_ATTR)
+  assert.doesNotMatch(html, /Edits, captions and deletes wait/)
+})
+
+test('a dataset-wide pass still locks the grid while a generate runs beside it', () => {
+  // Both live at once. The one to blame is the pass that owns every row.
+  const html = gridHtml({
+    busy: true, activity: GENERATING, activities: [GENERATING, CAPTIONING],
+  })
+  assert.match(tagAround(html, DELETE_BTN), DISABLED_ATTR)
+  assert.match(tagAround(html, DELETE_BTN), /Captioning is running/)
 })

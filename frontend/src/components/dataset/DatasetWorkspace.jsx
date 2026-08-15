@@ -1335,6 +1335,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   onBatch={ds.batchImages} busy={ds.busy}
                   onBulkBusyChange={setGridBulkBusy}
                   onImproveBatch={ds.improveBatch} activity={act}
+                  activities={ds.activities}
                           subjectType={d.subject_type || 'human'}
                   eligibilityImages={images}
                   nonces={ds.nonces} faceThresholds={d.face_thresholds} datasetKind={d.kind || 'character'}

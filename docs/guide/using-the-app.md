@@ -407,6 +407,30 @@ card (remove it and add it again) and press **Keep** once more.
 
 *Feature requested by ashish.sinha (Discord).*
 
+## What a running pass actually blocks
+
+Two different things used to be one flag, and the smaller one was the problem.
+
+**A dataset-wide pass locks the grid.** Captioning, re-captioning, framing
+classification, face analysis, a watermark scan — each walks every row and writes
+as it goes, so a second writer would race it. While one runs, edits, captions and
+deletes are refused and the grid says which pass is holding them. Inspecting an
+image and ticking a selection still work; those write nothing.
+
+**A per-image job does not.** Regenerating one tile, or improving one, owns
+exactly one row — and that row already shows its own **⚙ generating…** state with
+no toolbar on it. Until 2026-08-15 the grid could not tell the two apart, so
+clicking ↻ on a single tile greyed out every other tile until it finished.
+
+So you can now click ↻ on as many tiles as you like:
+
+- **two local ones** queue on your GPU — ComfyUI runs one job at a time, and the
+  indicator counts what is in flight rather than tracking a batch;
+- **a local one and an API one** do not even queue, because they are different
+  schedulers (see the section above).
+
+There was never a task list to build for this: the queue already existed.
+
 ## Two batches at once: one local, one API
 
 A local batch and an API batch run **at the same time**, and always could on the

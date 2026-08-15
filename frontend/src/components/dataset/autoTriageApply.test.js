@@ -212,7 +212,10 @@ test('DatasetGrid invalidates by dataset and lets only the active run publish or
   assert.match(apply, /shouldContinue: \(\) => runGate\.isCurrent\(token\)/)
   assert.match(apply, /runGate\.commit\(token, \(\) => \{/)
   assert.match(apply, /onApplyingChange\(token\.datasetId, token, false\)/)
-  assert.match(source, /const bulkBusy = busy \|\| launchingImprove \|\| !!bulkAction \|\| autoTriageApplying/)
+  // `busy` became `!!blocking` — a DATASET-WIDE pass, not "anything is
+  // running". What this assertion is really protecting is that an
+  // auto-triage apply still participates in the shared lock.
+  assert.match(source, /const bulkBusy = !!blocking \|\| launchingImprove \|\| !!bulkAction \|\| autoTriageApplying/)
   assert.match(source, /role="status" aria-live="polite" aria-atomic="true"/)
 })
 

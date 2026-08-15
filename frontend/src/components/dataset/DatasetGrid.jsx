@@ -16,6 +16,7 @@ import {
 import { useCapabilities } from '../../context/CapabilitiesContext';
 import { useToast } from '../common/Toast';
 import { autoTriageAvailable } from './faceScoringGate.js';
+import { blockingActivity } from './activityScope.js';
 import { bulkActionMessage, createBulkActionGate } from './bulkActionGate.js';
 import { READS_STAY_OPEN, datasetBusyReason } from './datasetBusyReason.js';
 import {
@@ -264,6 +265,9 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
                                       // trusted. Existing scores are NOT deleted.
                                       faceScoringBlocked = null,
                                       activity = null,
+                                      // Every live batch. `activity` is only the headline;
+                                      // scope is decided per batch — see activityScope.js.
+                                      activities = [],
                                       // Which image the lightbox is currently on
                                       // (null when it is closed).
                                       viewingImageId = null,
@@ -297,16 +301,25 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
   const improvementStates = useMemo(
     () => improvementStateByParent(images), [images]);
   const autoTriageApplying = autoTriageRuns.has(datasetId);
-  const bulkBusy = busy || launchingImprove || !!bulkAction || autoTriageApplying;
+  /* Which running pass, if any, actually owns this whole dataset. NOT "is
+     anything running": a `generate` activity is a COUNT of in-flight rows, so
+     regenerating one tile used to grey out every other tile in the grid —
+     reported as 点击了一个图片重新生成后，其他的都不能点了. Those rows already
+     show their own in-progress state, which is the correctly-scoped lock; the
+     second local job simply queues on job_queue's single worker, and an API job
+     does not even queue. See dataset/activityScope.js. */
+  const blocking = blockingActivity(activities);
+  const bulkBusy = !!blocking || launchingImprove || !!bulkAction || autoTriageApplying;
   /* WHAT BLOCKS WHAT — three answers, not one.
-     `bulkBusy` blocks WRITES: a running pass owns the pixels, the statuses and
-     the files, and a second writer would race it. That has never been in doubt.
+     `bulkBusy` blocks WRITES: a DATASET-WIDE pass owns the pixels, the statuses
+     and the files, and a second writer would race it. That has never been in
+     doubt — what changed is that a per-image job is no longer mistaken for one.
      `selectionLocked` blocks the TICK BOXES, and only for the actions that are
      spending the selection right now (a bulk keep/reject/delete, an improve
      launch, an auto-triage apply) — each of those snapshots the ids at click
      time and CLEARS the selection when it returns, so a selection made while
-     one is in flight would be silently thrown away. A dataset pass
-     (`busy`: generation, captioning, watermark scan…) is deliberately NOT in
+     one is in flight would be silently thrown away. A dataset-wide pass
+     (captioning, watermark scan, face analysis…) is deliberately NOT in
      that list: it was handed its own list of images when it started and cannot
      be shifted by anything ticked afterwards.
      READS are in neither list — inspecting an image writes nothing. */
@@ -314,7 +327,7 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
   // The sentence a refused write shows, instead of going quietly grey. `activity`
   // is the server's snapshot (name, progress, time left); a purely local lock
   // has none and still gets an honest generic line.
-  const busyReason = bulkBusy ? datasetBusyReason(busy ? activity : null) : null;
+  const busyReason = bulkBusy ? datasetBusyReason(blocking) : null;
   useEffect(() => {
     onBulkBusyChange?.(bulkBusy);
     return () => onBulkBusyChange?.(false);

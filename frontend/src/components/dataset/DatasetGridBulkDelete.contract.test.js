@@ -25,7 +25,10 @@ test('selection remains until the request returns and failures stay retryable', 
 test('the in-flight delete is announced and every bulk action is disabled', () => {
   assert.match(grid, /role="status" aria-live="polite" aria-atomic="true"/)
   assert.match(grid, /bulkActionMessage\(bulkAction\)/)
-  assert.match(grid, /const bulkBusy = busy \|\| launchingImprove \|\| !!bulkAction/)
+  assert.match(grid, // `busy` became `!!blocking`: a DATASET-WIDE pass, not "anything running".
+    // What matters here is unchanged — an in-flight bulk delete (`bulkAction`)
+    // still feeds the shared lock.
+    /const bulkBusy = !!blocking \|\| launchingImprove \|\| !!bulkAction/)
   assert.match(grid, /disabled=\{bulkBusy\}/)
   // The tick boxes are withheld while an action is SPENDING the selection —
   // each of those snapshots the ids at click time and clears the selection on

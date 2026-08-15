@@ -50,6 +50,19 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-15-regenerate-one-tile-frees-the-rest',
+    date: '2026-08-15',
+    title: 'Regenerating one image no longer freezes every other tile',
+    blurb: 'Clicking ↻ on a single tile greyed out the buttons on all of them, '
+      + 'because the grid treated "something is generating" the same as a caption '
+      + 'or watermark pass that really does own every row. It does not: that job '
+      + 'owns one row, and that row already shows its own ⚙ generating… state. '
+      + 'Click as many as you like — local ones queue on your GPU, an API one '
+      + 'runs alongside them, and dataset-wide passes still lock the grid because '
+      + 'those genuinely would race you.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-14-improve-lane-named-for-what-it-runs',
     date: '2026-08-14',
     title: 'The improve pass now says it is Krea 2 + SeedVR2, because that is what it runs',
