@@ -61,9 +61,42 @@ FACE_BBOX_MIN = 0.02
 MIN_GAP_S = 0.75          # frames closer than this are the same picture
 DEDUP_MAX_COSINE = 0.92   # above this, two frames are the same shot
 
+# ── The character gates ──────────────────────────────────────────────────────
+# Off by default; a CHARACTER dataset turns them on, because that is the one
+# kind where a frame that is technically fine and shows the wrong face — or a
+# face too small to hold detail — is worse than no frame at all.
+#
+# FACE PIXELS, NOT A FRACTION. `bbox_frac` is an AREA fraction, so the same 3 %
+# is a ~100 px face in a 4K frame and a ~20 px face at 720p. One trains, the
+# other is a smudge the model learns as this person's face. The fraction gates
+# presence; only the pixel count gates usability, and it needs the frame's own
+# dimensions to be computed at all.
+MIN_FACE_PX = 96.0
+# "Somebody is here" vs "THIS person is here". Only applied when a reference
+# exists — with none, there is nothing to be similar to and the gate would
+# silently reject everything.
+MIN_SIM = 0.35
 
-def _face_reason(face):
-    """Why this face reading disqualifies the frame, or None."""
+
+def face_pixels(frame):
+    """The face's approximate edge in PIXELS, or None when it cannot be known.
+
+    `bbox_frac` is an area fraction of the whole picture, so the edge is its
+    square root scaled by the frame's own size. Without the frame dimensions the
+    answer is None and the caller must not guess one — a fabricated pixel count
+    is worse than an ungated frame, because it looks like a measurement.
+    """
+    face = frame.get('face') or {}
+    bbox = face.get('bbox_frac')
+    w, h = frame.get('w'), frame.get('h')
+    if not bbox or not w or not h:
+        return None
+    return (float(bbox) * float(w) * float(h)) ** 0.5
+
+
+def _face_reason(frame, *, face_bbox_min=None, min_face_px=None, min_sim=None):
+    """Why this frame's face reading disqualifies it, or None."""
+    face = frame.get('face')
     if face is None:
         return None                     # the pass did not run — see select_frames
     if not face.get('ok', True):
@@ -72,11 +105,27 @@ def _face_reason(face):
     if det is None or det < DET_MIN:
         return 'low_det'
     bbox = face.get('bbox_frac')
-    if bbox is None or bbox < FACE_BBOX_MIN:
+    if bbox is None or bbox < (FACE_BBOX_MIN if face_bbox_min is None
+                               else face_bbox_min):
         return 'face_too_small'
     yaw = face.get('yaw')
     if yaw is not None and abs(yaw) > YAW_MAX:
         return 'extreme_profile'
+    if min_face_px:
+        px = face_pixels(frame)
+        # Unknown is NOT a pass: a character set asked for a measured floor, and
+        # letting an unmeasurable frame through would quietly disable the gate
+        # for exactly the decoder that forgot to report its own size.
+        if px is None:
+            return 'face_px_unknown'
+        if px < min_face_px:
+            return 'face_too_few_pixels'
+    if min_sim is not None:
+        sim = face.get('sim')
+        # Only meaningful when the scorer had a reference. `sim` absent means it
+        # did not compute one, which is not the same as "does not resemble".
+        if sim is not None and sim < min_sim:
+            return 'wrong_person'
     return None
 
 
@@ -92,7 +141,7 @@ def _cosine(a, b):
 def select_frames(frames, *, limit, min_gap_s=MIN_GAP_S,
                   face_bbox_min=FACE_BBOX_MIN,
                   dedup_max_cosine=DEDUP_MAX_COSINE,
-                  require_face=True):
+                  require_face=True, min_face_px=None, min_sim=None):
     """Pick at most ``limit`` frames out of one clip's readings.
 
     ``frames`` is a list of dicts in decode order:
@@ -134,7 +183,8 @@ def select_frames(frames, *, limit, min_gap_s=MIN_GAP_S,
             drop('unmeasured')
             continue
         if require_face:
-            reason = _face_reason(f.get('face'))
+            reason = _face_reason(f, face_bbox_min=face_bbox_min,
+                                  min_face_px=min_face_px, min_sim=min_sim)
             if reason:
                 drop(reason)
                 continue

@@ -61,11 +61,14 @@ def test_the_face_gate_without_an_interpreter_is_refused_not_degraded(monkeypatc
         call(require_face=True, ref_dataset_id=5)
 
 
-def test_the_face_gate_without_a_reference_is_refused(monkeypatch):
-    monkeypatch.setattr(vtid.cfg, 'get',
-                        lambda key, *a: 'py.exe' if 'python' in key else '')
-    with pytest.raises(ValueError, match='reference'):
-        call(require_face=True, ref_dataset_id=None)
+def test_asking_for_the_face_filter_with_nothing_to_compare_extracts_anyway():
+    """There is no third answer. Refusing would block a perfectly reasonable
+    run — a location set, or a fresh dataset whose reference comes later — and
+    claiming it filtered would be a lie about the pictures. So it runs, OFF, and
+    the caller is told (composition.face_filter_skipped)."""
+    assert vtid.face_filter_decision(True, []) is False
+    assert vtid.face_filter_decision(True, ['/a.png']) is True
+    assert vtid.face_filter_decision(False, ['/a.png']) is False
 
 
 def test_no_face_gate_needs_neither_interpreter_nor_reference(monkeypatch):
@@ -130,3 +133,27 @@ def test_a_reference_dataset_with_no_photo_says_which_one(monkeypatch):
                         lambda ds: [])
     with pytest.raises(ValueError, match='ada'):
         vtid.resolve_refs('u', 4)
+
+
+# ── which gates a CHARACTER dataset turns on ─────────────────────────────────
+
+def test_a_character_set_gets_the_pixel_gate_and_a_style_set_does_not():
+    """A style or location set wants the variety a passer-by's face brings."""
+    px, _ = vtid.character_gates('character', False)
+    assert px == vtid.video_frame_select.MIN_FACE_PX
+    assert vtid.character_gates('style', True) == (None, None)
+    assert vtid.character_gates('concept', True) == (None, None)
+
+
+def test_an_unset_kind_is_treated_as_character():
+    """`create_dataset` defaults to character, and the stricter reading is the
+    safe one when the answer is unknown."""
+    assert vtid.character_gates(None, False)[0] is not None
+    assert vtid.character_gates('', False)[0] is not None
+
+
+def test_the_identity_gate_needs_something_to_be_similar_to():
+    """Without the face filter there is no `sim` at all, and a gate on it would
+    reject every frame for a reason the user never chose."""
+    assert vtid.character_gates('character', False)[1] is None
+    assert vtid.character_gates('character', True)[1] == vtid.video_frame_select.MIN_SIM

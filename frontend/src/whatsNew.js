@@ -50,6 +50,20 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-15-video-frame-character-gates',
+    date: '2026-08-15',
+    title: 'Frames pulled from video are now judged on whether the face is usable',
+    blurb: 'A character dataset built from video frames drops shots where the '
+      + 'face is too few PIXELS to hold any detail, or belongs to somebody else. '
+      + 'Pixels, not a percentage — the same 3% of the picture is a decent '
+      + 'face at 4K and a smudge at 720p, and the smudge is what a LoRA learns as '
+      + 'your subject. Style and location sets are left alone, because a '
+      + 'passer’s face is variety there. If you asked for the face filter but '
+      + 'the dataset has no reference photo yet, it says so instead of quietly '
+      + 'filtering nothing.',
+    to: '/video-bank',
+  },
+  {
     id: '2026-08-16-video-frames-become-an-image-dataset',
     date: '2026-08-16',
     title: 'Turn the shots you kept into an image dataset, not just a video one',

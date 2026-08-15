@@ -525,6 +525,7 @@ def video_bank_promote_frames(bank_id):
         out = frames_svc.start_promote_to_images(
             _app(), LOCAL_USER, bank_id,
             name=data.get('name'), ids=data.get('ids'),
+            dataset_id=data.get('dataset_id'),
             frames_per_clip=data.get('frames_per_clip', 3),
             total_limit=data.get('total_limit'),
             max_per_source=data.get('max_per_source'),

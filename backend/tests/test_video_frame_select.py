@@ -211,3 +211,69 @@ def test_the_face_gates_stay_equal_to_the_scorers_own(tmp_path):
     assert vfs.DET_MIN == det
     assert vfs.YAW_MAX == yaw
     assert vfs.FACE_BBOX_MIN == bbox
+
+
+# ── the character gates ──────────────────────────────────────────────────────
+# Off unless a CHARACTER dataset asks for them: that is the one kind where a
+# technically fine frame showing the wrong face, or a face too small to hold
+# detail, is worse than no frame at all.
+
+def test_face_pixels_needs_the_frames_own_size_and_refuses_to_guess():
+    """A fabricated pixel count is worse than an ungated frame — it looks like
+    a measurement."""
+    assert vfs.face_pixels({'face': {'bbox_frac': 0.04}}) is None
+    assert vfs.face_pixels({'face': {'bbox_frac': 0.04}, 'w': 1920}) is None
+    assert vfs.face_pixels({'w': 1920, 'h': 1080}) is None
+
+
+def test_the_same_fraction_is_a_usable_face_at_4k_and_a_smudge_at_720p():
+    """The whole reason the gate counts pixels and not the fraction."""
+    big = {'face': {'bbox_frac': 0.02}, 'w': 3840, 'h': 2160}
+    small = {'face': {'bbox_frac': 0.02}, 'w': 640, 'h': 360}
+    assert vfs.face_pixels(big) > vfs.MIN_FACE_PX
+    assert vfs.face_pixels(small) < vfs.MIN_FACE_PX
+
+
+def test_a_character_set_refuses_a_face_too_small_in_pixels():
+    # The SAME 2 % of the picture: a ~67 px face at 640x360, ~407 px at 4K.
+    f = frame(0.0, 900, face=good_face(bbox_frac=0.02), w=640, h=360)
+    assert vfs.select_frames([f], limit=1)['picked'], 'ungated, it is admissible'
+    out = vfs.select_frames([f], limit=1, min_face_px=vfs.MIN_FACE_PX)
+    assert out['picked'] == []
+    assert out['rejected']['face_too_few_pixels'] == 1
+
+
+def test_the_same_face_at_4k_passes_the_pixel_gate():
+    f = frame(0.0, 900, face=good_face(bbox_frac=0.02), w=3840, h=2160)
+    out = vfs.select_frames([f], limit=1, min_face_px=vfs.MIN_FACE_PX)
+    assert len(out['picked']) == 1
+
+
+def test_an_unmeasurable_frame_does_not_silently_disable_the_pixel_gate():
+    """A decoder that forgot to report its own size must not become the one
+    input for which a character set's floor does not apply."""
+    f = frame(0.0, 900, face=good_face(bbox_frac=0.02))     # no w/h
+    out = vfs.select_frames([f], limit=1, min_face_px=vfs.MIN_FACE_PX)
+    assert out['picked'] == []
+    assert out['rejected']['face_px_unknown'] == 1
+
+
+def test_a_sharp_frame_of_the_wrong_person_is_refused():
+    frames = [frame(0.0, 900, face=good_face(sim=0.10)),
+              frame(5.0, 10, face=good_face(sim=0.80))]
+    out = vfs.select_frames(frames, limit=2, min_sim=vfs.MIN_SIM)
+    assert [f['t'] for f in out['picked']] == [5.0]
+    assert out['rejected']['wrong_person'] == 1
+
+
+def test_no_similarity_reading_is_not_read_as_a_mismatch():
+    """`sim` absent means the scorer had no reference, which is not the same
+    claim as "does not resemble"."""
+    out = vfs.select_frames([frame(0.0, 10, face=good_face())], limit=1,
+                            min_sim=vfs.MIN_SIM)
+    assert len(out['picked']) == 1
+
+
+def test_the_character_gates_are_off_unless_asked_for():
+    f = frame(0.0, 10, face=good_face(bbox_frac=0.02, sim=0.01), w=640, h=360)
+    assert len(vfs.select_frames([f], limit=1)['picked']) == 1

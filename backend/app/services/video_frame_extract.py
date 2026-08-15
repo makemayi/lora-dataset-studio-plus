@@ -86,9 +86,13 @@ def decode_at(path, times, *, image_format='PNG'):
                 continue
             t, frame = got
             buf = io.BytesIO()
-            Image.fromarray(frame.to_ndarray(format='rgb24')).save(
-                buf, format=image_format)
-            out.append({'t': t, 'bytes': buf.getvalue()})
+            im = Image.fromarray(frame.to_ndarray(format='rgb24'))
+            im.save(buf, format=image_format)
+            # The size travels with the frame: the character pixel gate turns an
+            # area FRACTION into a face's edge in pixels, and without these it
+            # refuses rather than guesses.
+            out.append({'t': t, 'bytes': buf.getvalue(),
+                        'w': im.width, 'h': im.height})
     return out
 
 
@@ -134,6 +138,7 @@ def extract_from_clip(*, path, start_s, end_s, fps, limit,
                       min_gap_s=vfs.MIN_GAP_S,
                       face_bbox_min=vfs.FACE_BBOX_MIN,
                       dedup_max_cosine=vfs.DEDUP_MAX_COSINE,
+                      min_face_px=None, min_sim=None,
                       read_frames=None, decode=None, face_scores=None,
                       clip_id=None, source_id=None):
     """The two passes, wired. Returns [{'bytes', 'provenance'}].
@@ -180,6 +185,8 @@ def extract_from_clip(*, path, start_s, end_s, fps, limit,
         entry = dict(base)
         entry['t'] = frame['t']
         entry['bytes'] = frame['bytes']
+        if frame.get('w'):
+            entry['w'], entry['h'] = frame['w'], frame['h']
         if faces is not None:
             entry['face'] = faces[i] if i < len(faces) else {'ok': False}
         candidates.append(entry)
@@ -187,6 +194,7 @@ def extract_from_clip(*, path, start_s, end_s, fps, limit,
     final = vfs.select_frames(candidates, limit=limit, min_gap_s=min_gap_s,
                               face_bbox_min=face_bbox_min,
                               dedup_max_cosine=dedup_max_cosine,
+                              min_face_px=min_face_px, min_sim=min_sim,
                               require_face=faces is not None)
 
     out = []
@@ -203,6 +211,8 @@ def extract_from_clip(*, path, start_s, end_s, fps, limit,
                 'sharpness': f.get('sharp'),
                 'luma': f.get('luma'),
                 'face': f.get('face'),
+                'face_px': (round(vfs.face_pixels(f), 1)
+                            if vfs.face_pixels(f) else None),
             },
         })
     return out

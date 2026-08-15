@@ -46,31 +46,77 @@ def job_key(bank_id):
     return vbs.job_key(bank_id)
 
 
-def resolve_refs(user_id, ref_dataset_id):
-    """Every reference photo of one image dataset, as absolute paths.
+def dataset_refs(ds):
+    """Every reference photo a dataset holds, as absolute paths (possibly none).
 
     THE CLIENT NEVER SENDS PATHS. It names a dataset it owns and the paths are
     built here — a request body that could hand arbitrary absolute paths to a
     subprocess is a file-read primitive, and "it is only the face scorer" is not
     a boundary anything enforces.
     """
-    if not ref_dataset_id:
-        return []
-    from .face_dataset_service import _ref_path, get_dataset
-    from .reference_photos_service import _extra_ref_paths
-    ds = get_dataset(user_id, int(ref_dataset_id))
     if ds is None:
-        raise ValueError('that reference dataset does not exist')
+        return []
+    from .face_dataset_service import _ref_path
+    from .reference_photos_service import _extra_ref_paths
     out = []
     if getattr(ds, 'ref_filename', None):
         primary = _ref_path(ds)
         if os.path.isfile(primary):
             out.append(primary)
     out.extend(_extra_ref_paths(ds))
+    return out
+
+
+def resolve_refs(user_id, ref_dataset_id):
+    """The references of ONE named dataset, refusing a dataset that has none.
+
+    Used for BORROWING a reference from a dataset other than the target — the
+    ordinary case reads the target's own, through `dataset_refs`.
+    """
+    if not ref_dataset_id:
+        return []
+    from .face_dataset_service import get_dataset
+    ds = get_dataset(user_id, int(ref_dataset_id))
+    if ds is None:
+        raise ValueError('that reference dataset does not exist')
+    out = dataset_refs(ds)
     if not out:
         raise ValueError(f'“{ds.name}” has no reference photo to compare against '
                          '— set one on that dataset, or turn the face filter off.')
     return out
+
+
+def face_filter_decision(require_face, refs):
+    """Whether the face filter actually runs, given what there is to compare to.
+
+    Asked for + a reference exists  -> ON.
+    Asked for + nothing to compare  -> OFF, and the caller must SAY so. There is
+        no third answer: refusing would block a perfectly reasonable run (a
+        location or style set, or a fresh dataset whose reference comes later),
+        and pretending it filtered would be a lie about the pictures.
+    Not asked for                   -> OFF.
+    """
+    return bool(require_face and refs)
+
+
+def character_gates(kind, face_filter):
+    """(min_face_px, min_sim) for a dataset of this kind, or (None, None).
+
+    A STYLE or LOCATION set wants the variety that a passer-by's face brings; a
+    CHARACTER set is the one kind where a technically fine frame of somebody
+    else, or a face too small to hold any detail, is worse than one frame fewer.
+
+    The identity gate needs something to be similar TO, so it only comes on when
+    the face filter actually runs — otherwise it would reject every frame for a
+    reason the user never chose. An unset kind counts as character: that is what
+    `create_dataset` defaults to, and the stricter reading is the safe one when
+    the answer is unknown.
+    """
+    is_character = str(kind or 'character').lower() in ('', 'character')
+    if not is_character:
+        return None, None
+    return (video_frame_select.MIN_FACE_PX,
+            video_frame_select.MIN_SIM if face_filter else None)
 
 
 def _face_pass_or_raise(refs, require_face):
@@ -95,7 +141,8 @@ def _face_pass_or_raise(refs, require_face):
     return python, script, (cfg.get('face_scoring.models_root') or '').strip() or None
 
 
-def start_promote_to_images(app, user_id, bank_id, *, name, ids=None,
+def start_promote_to_images(app, user_id, bank_id, *, name=None, ids=None,
+                            dataset_id=None,
                             frames_per_clip=3, total_limit=None,
                             max_per_source=None,
                             min_gap_s=video_frame_select.MIN_GAP_S,
@@ -111,9 +158,19 @@ def start_promote_to_images(app, user_id, bank_id, *, name, ids=None,
     that quietly overfits.
     """
     bank = vbs._require_free_bank(user_id, bank_id)
-    name = (name or '').strip()
-    if not name:
-        raise ValueError('name is required')
+    from .face_dataset_service import create_dataset, get_dataset
+
+    # EXISTING dataset or a new one — the frames land the same way either way,
+    # so the only difference is who owns the row.
+    target = None
+    if dataset_id:
+        target = get_dataset(user_id, int(dataset_id))
+        if target is None:
+            raise ValueError('that dataset does not exist')
+    else:
+        name = (name or '').strip()
+        if not name:
+            raise ValueError('name is required')
     try:
         frames_per_clip = int(frames_per_clip)
     except (TypeError, ValueError):
@@ -121,8 +178,22 @@ def start_promote_to_images(app, user_id, bank_id, *, name, ids=None,
     if not 1 <= frames_per_clip <= FRAMES_PER_CLIP_MAX:
         raise ValueError(f'frames per clip must be between 1 and '
                          f'{FRAMES_PER_CLIP_MAX}')
-    refs = resolve_refs(user_id, ref_dataset_id) if require_face else []
-    face_cfg = _face_pass_or_raise(refs, require_face)
+    # WHERE THE REFERENCE COMES FROM, in one rule rather than three:
+    # `ref_dataset_id` BORROWS from a named dataset; otherwise the target's own
+    # references are used. A dataset created for this run with a reference photo
+    # uploaded onto it therefore needs no special case — by the time we look, the
+    # photo IS the target's reference. And a target with none simply has no face
+    # filter, which is the honest reading of "nothing to compare against".
+    refs = []
+    if require_face:
+        refs = (resolve_refs(user_id, ref_dataset_id) if ref_dataset_id
+                else dataset_refs(target))
+    face_filter = face_filter_decision(require_face, refs)
+    face_cfg = _face_pass_or_raise(refs, face_filter)
+
+    kind_now = (getattr(target, 'kind', None) or kind)
+    min_face_px, min_sim = character_gates(kind_now, face_filter)
+    is_character = min_face_px is not None
 
     q = VideoClip.query.filter_by(bank_id=bank_id, status='keep')
     if ids:
@@ -154,10 +225,15 @@ def start_promote_to_images(app, user_id, bank_id, *, name, ids=None,
         # nothing, and the job never pads to reach a number.
         'total_limit': int(total_limit) if total_limit else None,
         'face_filtered': face_cfg is not None,
+        # Said out loud because it is invisible in the result: the face filter
+        # was ASKED for and there was nothing to compare against.
+        'face_filter_skipped': bool(require_face and not refs),
+        'character_gates': is_character,
+        'into_existing': target is not None,
     }
 
-    from .face_dataset_service import create_dataset
-    dataset = create_dataset(user_id, name, trigger_word or '', kind=kind)
+    dataset = target or create_dataset(user_id, name, trigger_word or '',
+                                       kind=kind)
 
     clip_ids = [c.id for c in rows]
     bank_jobs.start(app, job_key(bank_id), 'promote_images',
@@ -165,6 +241,7 @@ def start_promote_to_images(app, user_id, bank_id, *, name, ids=None,
                                  frames_per_clip=frames_per_clip,
                                  total_limit=total_limit, min_gap_s=min_gap_s,
                                  face_bbox_min=face_bbox_min,
+                                 min_face_px=min_face_px, min_sim=min_sim,
                                  face_cfg=face_cfg, refs=list(refs or [])),
                     total=len(clip_ids))
     return {'id': dataset.id, 'name': dataset.name,
@@ -172,7 +249,8 @@ def start_promote_to_images(app, user_id, bank_id, *, name, ids=None,
 
 
 def _extract_job(bank_id, dataset_id, user_id, clip_ids, *, frames_per_clip,
-                 total_limit, min_gap_s, face_bbox_min, face_cfg, refs):
+                 total_limit, min_gap_s, face_bbox_min, face_cfg, refs,
+                 min_face_px=None, min_sim=None):
     """Decode clip by clip, import each clip's frames as it finishes.
 
     IMPORTED PER CLIP, not once at the end. A four-hour bank would otherwise
@@ -248,7 +326,8 @@ def _extract_job(bank_id, dataset_id, user_id, clip_ids, *, frames_per_clip,
             got = video_frame_extract.extract_from_clip(
                 path=path, start_s=clip.start_s, end_s=clip.end_s,
                 fps=None, limit=budget, min_gap_s=min_gap_s,
-                face_bbox_min=face_bbox_min, face_scores=_score_faces,
+                face_bbox_min=face_bbox_min, min_face_px=min_face_px,
+                min_sim=min_sim, face_scores=_score_faces,
                 clip_id=clip.id, source_id=clip.source_id)
             if not got:
                 skipped += 1
