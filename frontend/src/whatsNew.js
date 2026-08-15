@@ -50,6 +50,20 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-15-dataset-tile-photo-is-the-card',
+    date: '2026-08-15',
+    title: 'Dataset tiles are now the photo — no white frame, no status border',
+    blurb: 'Each tile used to be a white card with the photo boxed inside, and '
+      + 'the kept/rejected/undecided state was painted on the tile\'s edge — '
+      + 'next to the selection ring competing for the same line. The photo now '
+      + 'fills the tile itself, the state is a corner dot (green = kept, red = '
+      + 'rejected, amber = undecided), selection is an outward indigo glow, '
+      + 'and the caption appears on hover as a thin light-glass capsule. '
+      + 'Nothing moved — the same actions live on the same tile, just without '
+      + 'the card around them.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-15-h3-swap-keeps-its-best-likeness',
     date: '2026-08-15',
     title: 'The H3 face swap finally runs the reference pipeline it ships with',
