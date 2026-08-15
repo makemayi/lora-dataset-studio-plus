@@ -79,3 +79,22 @@ docs/superpowers/
 # find in tracked files. Kept OUT of the repo — writing them down here would
 # publish exactly what they forbid.
 .privacy-names
+
+# Scratch that lands at the repo root while working: reference art, generated
+# samples, logo drafts, pasted articles, and the in-progress design notes that
+# a redesign wave leaves behind. None of it is a deliverable, and `git add .`
+# would publish every one of them. The images are ignored by extension because
+# they arrive named after their hash and no pattern can anticipate that.
+/*.jpg
+/*.jpeg
+/*.png
+!/icon.png
+/*.zip
+/*.html
+/LoRA_Dataset_Studio_Selected_Logos/
+/UI_REDESIGN_PROGRESS.md
+/deepseek_markdown_*.md
+
+# Per-machine debugging monitors: they hard-code a PID and a local log path, so
+# they are worthless on any other machine and stale on this one an hour later.
+/monitor_*.ps1
