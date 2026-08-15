@@ -70,6 +70,45 @@ export const SELECTED_PILL =
   'rounded-full bg-surface-raised text-content ' +
   'shadow-[0_1px_2px_rgba(0,0,0,0.14),0_0_0_1px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.10)]';
 
+/* ── 2026-08-15 wave — the dataset tile restyle: the photo IS the card. ──
+   Four tokens, added before the component was touched so the tile can stop
+   hand-writing recipes. The tile used to be a white glass card with a photo
+   boxed inside it (`rounded-[28px]` + `m-2 rounded-[22px]`); now the photo
+   fills the tile and the card is the photo. The kept/rejected/pending state
+   left the border for a corner dot, and selection left the `ring` for an
+   outward glow — both were competing for the same edge. */
+
+/** The photo block itself: the full-bleed tile. Rounded corners + the clip
+ *  that makes the photo respect them. The tile's own shadow is separate
+ *  (TILE_SHADOW / TILE_SELECTED_GLOW) because selection SWAPS it. */
+export const TILE_SURFACE = 'relative overflow-hidden rounded-2xl';
+
+/** A dataset tile at rest: a soft definition + diffuse shadow, no outline.
+ *  Lighter than the Settings cards — a grid of photos reads as a wall, not
+ *  a pile, and the photo supplies the contrast. */
+export const TILE_SHADOW =
+  'shadow-[0_1px_2px_rgba(0,0,0,0.12),0_4px_10px_rgba(0,0,0,0.10)]';
+
+/** Selected = a spread of brand indigo around the tile, REPLACING the resting
+ *  shadow (the two are the same visual channel — the outer edge). A hairline
+ *  ring around a full-bleed photo reads as a frame; a glow reads as "this one". */
+export const TILE_SELECTED_GLOW =
+  'shadow-[0_0_0_3px_rgba(79,70,229,0.55),0_0_0_8px_rgba(79,70,229,0.18),0_8px_24px_rgba(79,70,229,0.30)]';
+
+/** An ultra-thin light glass capsule laid ON a photo — the tile's caption and
+ *  hover toolbar. Light ground + dark text, so it can wash out on a bright
+ *  photo: pair with SCRIM_BOTTOM behind it. The `white/70` (not /60) is the
+ *  deliberate knob: opaque enough to stay readable, thin enough to stay glass. */
+export const GLASS_CAPSULE_LIGHT =
+  'rounded-full bg-white/70 backdrop-blur-md ' +
+  'shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]';
+
+/** A very faint bottom fade on the photo, so the light capsule's dark text
+ *  keeps a quiet ground under it on ANY image. Deliberately faint — the tile
+ *  used to carry a dark plate across its bottom, and this must NOT become one. */
+export const SCRIM_BOTTOM =
+  'bg-gradient-to-t from-black/25 via-black/5 to-transparent';
+
 /* `max-w-xl` is the tidy-up from the same wave: the settings shell went
    full-width on 2026-08-09 and every `w-full` control went with it, so a text
    input stretched ~1400px across while the sliders beside it stayed 112px. A
