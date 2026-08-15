@@ -87,8 +87,16 @@ them was learned by breaking something.
    - **Three exceptions keep their edge, on purpose:** a control painted ON an
      image (`border-white/15` over a dark scrim is what makes it visible over
      arbitrary content); an edge that carries MEANING (a run card's status rule,
-     an image tile's kept/rejected border, the canvas viewport frame); and
-     Settings' own `border-border-strong` buttons, settled in its redesign.
+     the canvas viewport frame); and Settings' own `border-border-strong`
+     buttons, settled in its redesign.
+   - **The dataset tile is NOT one of them any more (2026-08-15).** Its
+     kept/rejected state is a corner DOT, not a border, and its selected state
+     is an outward glow, not a `ring`. Both changed together for one reason: a
+     tile had a status border and a selection ring competing for the same edge,
+     and the photo was already boxed inside a white card. If you are about to
+     "restore" the coloured border on `DatasetGridItem.jsx` because the rule
+     above says edges carry meaning — don't. The meaning moved to the dot on
+     purpose; put it back only by changing this line too.
 1. **Use the existing semantic tokens. Never introduce a parallel palette.**
    `bg-app`, `bg-surface`, `surface-raised`, `surface-overlay`, `border`,
    `border-strong`, `text-content`, `content-muted`, `content-subtle`. A raw hex,
