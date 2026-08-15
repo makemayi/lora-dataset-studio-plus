@@ -246,6 +246,11 @@ _SCHEMA_ADDITIONS = (
     # database that never gains these columns simply keeps the old behaviour.
     ('face_dataset_image', 'content_sig', 'VARCHAR(24)'),
     ('face_dataset_image', 'content_sig_stat', 'VARCHAR(40)'),
+    # Face-similarity pass: the head's yaw in degrees, kept so the tile can say
+    # « profile 55° · 0.61 » — before this the scorer computed yaw and threw it
+    # away, and a 3/4 profile read as a silent « not scored ». Additive: rows
+    # scored before this column existed simply carry NULL.
+    ('face_dataset_image', 'face_yaw', 'REAL'),
     # Versioned, byte-fingerprinted Bank analysis used by the durable Bank <-> Dataset
     # transfer path. Legacy Dataset rows simply have no snapshot to restore.
     ('face_dataset_image', 'bank_analysis_snapshot', 'TEXT'),

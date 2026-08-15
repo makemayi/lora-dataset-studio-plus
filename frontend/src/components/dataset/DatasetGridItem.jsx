@@ -46,8 +46,7 @@ const STATUS_DOT = {
 // Seuils calibres antelopev2 (test3) — face_score brut persiste -> ajustables dans
 // Settings (face_scoring.green/orange) ; ces valeurs ne servent que de repli.
 const GREY_LABEL = { no_face: 'no face detected', low_det: 'low detection',
-  too_small: 'face too small', extreme_pose: 'profile — not scored',
-  unreadable: 'unreadable', error: 'error' };
+  too_small: 'face too small', unreadable: 'unreadable', error: 'error' };
 
 // Retourne {icon, cls, label} d'apres face_state/face_score, ou null si pas analysé.
 // La couleur accompagne un GLYPHE (✓/~ /⚠ ou 👁) — jamais la couleur seule (WCAG 1.4.1) —
@@ -55,6 +54,19 @@ const GREY_LABEL = { no_face: 'no face detected', low_det: 'low detection',
 // Score → letter grade: ≥0.9 A, ≥0.8 B, ≥0.7 C, <0.7 D.
 function faceBadge(img) {
   if (img.face_state == null) return null;
+  // A 3/4 profile (extreme_pose) gets a SCORE since 2026-08-15 — the embedding
+  // still separates identities up to ~70° yaw, it just runs lower. Shown as a
+  // number with the angle, not a letter grade (grades are calibrated on
+  // front-facing scores) and kept OUT of auto-triage, which only looks at
+  // face_state === 'scorable'.
+  if (img.face_state === 'extreme_pose') {
+    if (img.face_score != null) {
+      const angle = img.face_yaw != null ? ` · ${Math.round(Math.abs(img.face_yaw))}°` : '';
+      return { icon: '↻', cls: 'text-gray-600', graded: false,
+        label: `profile${angle} · ${img.face_score.toFixed(2)}` };
+    }
+    return { icon: '↻', cls: 'text-gray-600', graded: false, label: 'profile' };
+  }
   if (img.face_state !== 'scorable' || img.face_score == null) {
     return { icon: '👁', cls: 'text-gray-600', graded: false,
       label: GREY_LABEL[img.face_state] || 'not scored' };

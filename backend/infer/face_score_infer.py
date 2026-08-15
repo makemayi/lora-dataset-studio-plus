@@ -7,11 +7,18 @@ UNE ligne JSON {"ref_ok": bool, "results": {path: {state, sim?, det, bbox_frac, 
 l'algo ne privilegie sa position) : chaque candidat est compare a CHAQUE ref utilisable,
 `sim` est le MAX — « ressemble a AU MOINS une des photos de confiance ».
 Logs -> stderr.
-Gating 3-etats + padding rescue (valide empiriquement sur test3)."""
+Gating 3-etats + padding rescue (valide empiriquement sur test3).
+YAW_MAX porte a 70° (2026-08-15): a 40° un profil 3/4 etait rejete alors qu'antelopev2
+extrait encore une embedding discriminante jusqu'a ~70° (la valeur absolue baisse, mais
+« ressemble a la ref » reste separable). Les profils restent HORS auto-triage (le
+front ne trie que face_state == 'scorable') mais recoivent un score affichable.
+det_size passe a 1024 : a 640, une tete dans une photo pleine-corps 1024px tombait
+a ~40px d'entree et le detecteur la ratait — beaucoup de « too_small » etaient des
+non-detections, pas des visages reellement minuscules."""
 from __future__ import annotations
 import json, sys
 
-DET_MIN, BBOX_MIN, YAW_MAX = 0.50, 0.06, 40.0
+DET_MIN, BBOX_MIN, YAW_MAX = 0.50, 0.06, 70.0
 
 
 def _log(m): print(m, file=sys.stderr, flush=True)
@@ -62,7 +69,7 @@ def main() -> int:
 
     def _load():
         app = FaceAnalysis(**kwargs)
-        app.prepare(ctx_id=-1, det_size=(640, 640))
+        app.prepare(ctx_id=-1, det_size=(1024, 1024))
         return app
 
     # DEUX reparations, et la seconde est celle qui compte sur une install
@@ -143,7 +150,7 @@ def main() -> int:
     for i, p in enumerate(images, 1):
         try:
             r = analyze(p); emb = r.pop("_emb", None)
-            if r["state"] == "scorable" and emb is not None:
+            if r["state"] in ("scorable", "extreme_pose") and emb is not None:
                 sims = [float(np.dot(ref_emb, emb)) for ref_emb in ref_embs]
                 r["sim"] = round(max(sims), 4)
             results[p] = r

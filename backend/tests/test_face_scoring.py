@@ -716,7 +716,7 @@ def test_analyze_image_face_scores_only_requested_path_and_persists(app, monkeyp
 
         assert calls == [(svc._ref_path(ds), [image_path])]
         assert result == {'image_id': img.id, 'face_state': 'scorable',
-                          'face_score': 0.64, 'scoring_error': None}
+                          'face_score': 0.64, 'face_yaw': None, 'scoring_error': None}
         svc.db.session.expire_all()
         row = svc.db.session.get(FaceDatasetImage, img.id)
         untouched = svc.db.session.get(FaceDatasetImage, other.id)
@@ -825,7 +825,7 @@ def test_analyze_image_face_route_returns_stable_payload_and_hides_foreign_rows(
     assert response.status_code == 200
     assert response.get_json() == {
         'ok': True, 'image_id': image_id, 'face_state': 'scorable',
-        'face_score': 0.63, 'scoring_error': None,
+        'face_score': 0.63, 'face_yaw': None, 'scoring_error': None,
     }
     assert client.post(f'/api/dataset/image/{foreign_id}/analyze-face').status_code == 404
 
@@ -976,6 +976,7 @@ def test_analyze_image_face_route_reports_busy_without_spawning_scorer(
         'image_id': image_id,
         'face_state': None,
         'face_score': None,
+        'face_yaw': None,
         'scoring_error': {
             'kind': 'busy',
             'detail': 'face scoring is already running; try again shortly',
@@ -1035,6 +1036,7 @@ def test_analyze_image_face_never_persists_after_pixel_edit(
             'image_id': image_id,
             'face_state': None,
             'face_score': None,
+            'face_yaw': None,
             'scoring_error': None,
             'stale': True,
         }

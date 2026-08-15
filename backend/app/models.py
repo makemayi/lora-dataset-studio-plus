@@ -187,8 +187,11 @@ class FaceDatasetImage(db.Model):
     # Ressemblance faciale vs la reference (face analyzer Lot A). face_score = cosinus
     # ArcFace brut (NULL si non note) ; face_state = scorable|no_face|low_det|too_small|
     # extreme_pose|unreadable|error. Score brut persiste -> seuils recalibrables cote UI.
+    # face_yaw (2026-08-15) = rotation de la tete en degres, persiste pour que la tuile
+    # puisse dire « profil 55° · 0.61 » au lieu d'un « not scored » muet. Additive.
     face_score = db.Column(Float, nullable=True)
     face_state = db.Column(String(16), nullable=True)
+    face_yaw = db.Column(Float, nullable=True)
     # Pourquoi status='failed' : message d'erreur du moteur (API/sauvegarde/queue),
     # affiché sur la tuile — sinon l'échec est muet et l'utilisateur relance à
     # l'aveugle. Nettoyé au regenerate. Colonne additive (migration create_app).

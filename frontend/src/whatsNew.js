@@ -50,6 +50,20 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-15-face-scoring-sees-profiles-and-small-faces',
+    date: '2026-08-15',
+    title: 'Face scoring sees profiles and small faces now',
+    blurb: 'Two doors that used to be closed: a 3/4 profile no longer reads as '
+      + 'a mute “not scored” — the scorer now returns a score with the angle '
+      + '(“profile · 55° · 0.61”), kept out of Auto-triage because profile '
+      + 'scores run systematically lower than front-facing ones. And the '
+      + 'detector now looks at the photo at higher resolution, so a face in a '
+      + 'full-body shot is actually seen instead of being called “too small” '
+      + 'because it was never detected. Re-run face analysis to score the '
+      + 'profiles and small faces already in your dataset.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-15-dataset-tile-photo-is-the-card',
     date: '2026-08-15',
     title: 'Dataset tiles are now the photo — no white frame, no status border',

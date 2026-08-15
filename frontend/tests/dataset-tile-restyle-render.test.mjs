@@ -110,6 +110,23 @@ test('a scored tile mounts the face badge with its letter grade', () => {
   assert.match(html, /Resemblance to the reference face — A/)
 })
 
+test('a 3/4 profile shows its angle AND its score, not a silent not-scored', () => {
+  // 2026-08-15: extreme_pose is scored (embedding stays discriminative to
+  // ~70° yaw), shown as a number — never a letter grade, which is calibrated
+  // on front-facing scores — and kept out of auto-triage (that filter only
+  // reads face_state === 'scorable').
+  const html = tile({ img: { ...IMG, face_state: 'extreme_pose',
+    face_score: 0.61, face_yaw: 55 } })
+  assert.match(html, /profile · 55° · 0\.61/, 'the tile names the angle and the score')
+  assert.doesNotMatch(html, /profile — not scored/, 'the mute not-scored is gone')
+})
+
+test('a profile with no score still reads as profile, not a grade', () => {
+  const html = tile({ img: { ...IMG, face_state: 'extreme_pose' } })
+  assert.match(html, /profile/)
+  assert.doesNotMatch(html, /Resemblance to the reference face — [A-D]/)
+})
+
 test('an unscored tile mounts no face badge', () => {
   assert.doesNotMatch(tile({}), /Resemblance to the reference face/)
 })
