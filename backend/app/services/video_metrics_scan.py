@@ -102,7 +102,12 @@ def _read_clip_frames(path, start_s, end_s, fps):
                 motion = (float(np.abs(arr - prev_small).mean()) / 255.0
                           if prev_small is not None else 0.0)
             prev_small = arr
-            frames.append({'luma': luma, 'sharp': sharp, 'motion': motion})
+            # `t` is carried so a second consumer can seek BACK to a frame it
+            # liked. `summarise` reads only the three metrics and ignores it —
+            # frame EXTRACTION needs the timestamp, and re-deriving it would mean
+            # a second decode of the same segment purely to count frames again.
+            # Seconds, never an index: this material is routinely VFR.
+            frames.append({'t': t, 'luma': luma, 'sharp': sharp, 'motion': motion})
     return frames
 
 

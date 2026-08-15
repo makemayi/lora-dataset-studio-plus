@@ -20,6 +20,7 @@ from flask import Blueprint, current_app, jsonify, request, send_file
 from ..config import LOCAL_USER
 from ..services import bank_jobs
 from ..services import video_bank_service as svc
+from ..services import video_to_image_dataset as frames_svc
 from ..services import video_metrics
 
 logger = logging.getLogger(__name__)
@@ -496,6 +497,51 @@ def video_bank_cancel(bank_id):
     if svc.get_bank(LOCAL_USER, bank_id) is None:
         return _missing(bank_id)
     return jsonify({'ok': True, 'cancelled': svc.cancel(bank_id)})
+
+
+@bp.post('/video-bank/<int:bank_id>/promote-frames')
+def video_bank_promote_frames(bank_id):
+    """Extract still FRAMES from the KEPT clips into a new IMAGE dataset.
+
+    The second promotion target. Body {name, frames_per_clip?, total_limit?,
+    ids?, max_per_source?, min_gap_s?, face_bbox_min?, require_face?,
+    ref_dataset_id?,
+    trigger_word?, kind?}.
+
+    `frames_per_clip` is a CEILING, never a promise: a clip whose every frame is
+    over-exposed, or holds no usable face, contributes nothing, and the job does
+    not pad to reach a number. `require_face` (default on) refuses rather than
+    degrades when the face interpreter is unset — a request that asked for
+    "frames with a usable face" must not silently return an unfiltered dataset.
+
+    202 {'ok', 'id', 'name', 'clips', 'composition'} — the id rides back so the
+    UI can navigate to the dataset while it fills. 400 names what was wrong;
+    409 means a pass is already running on this bank.
+    """
+    if svc.get_bank(LOCAL_USER, bank_id) is None:
+        return _missing(bank_id)
+    data = request.get_json(silent=True) or {}
+    try:
+        out = frames_svc.start_promote_to_images(
+            _app(), LOCAL_USER, bank_id,
+            name=data.get('name'), ids=data.get('ids'),
+            frames_per_clip=data.get('frames_per_clip', 3),
+            total_limit=data.get('total_limit'),
+            max_per_source=data.get('max_per_source'),
+            **({'min_gap_s': data['min_gap_s']} if data.get('min_gap_s') else {}),
+            **({'face_bbox_min': data['face_bbox_min']}
+               if data.get('face_bbox_min') else {}),
+            require_face=bool(data.get('require_face', True)),
+            ref_dataset_id=data.get('ref_dataset_id'),
+            trigger_word=data.get('trigger_word'),
+            kind=data.get('kind'))
+    except bank_jobs.BankJobBusy as e:
+        return _busy(e)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 503
+    return jsonify({'ok': True, **out}), 202
 
 
 @bp.post('/video-bank/<int:bank_id>/promote')
