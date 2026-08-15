@@ -15,10 +15,12 @@ test('all image-card control groups share the hover-action contract', () => {
   assert.match(item, /dataset-grid-item \$\{TILE_SURFACE\}/)
   assert.doesNotMatch(item, /rounded-\[28px\]/)
   assert.doesNotMatch(item, /bg-white\/60/)
-  // Four groups: bulk-select tick, the hover toolbar, the caption capsule
-  // (mounted, hover-gated by the same CSS opacity — never unmounted), and
-  // the keep/reject row.
-  assert.ok((item.match(/dataset-grid-item__actions/g) || []).length >= 4)
+  // Three groups: bulk-select tick, the hover toolbar, and the keep/reject
+  // row. The caption is deliberately NOT here — it gates through its own
+  // .dataset-grid-item__caption class so a touch screen does not resurrect
+  // the always-on bottom plate (see index.css).
+  assert.ok((item.match(/dataset-grid-item__actions/g) || []).length >= 3)
+  assert.match(item, /dataset-grid-item__caption[^"']*absolute inset-x-2 bottom-14/)
 })
 
 test('fine pointers hide controls without reflow and hover or focus reveals them', () => {

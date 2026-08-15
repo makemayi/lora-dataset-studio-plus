@@ -71,12 +71,16 @@ export const SELECTED_PILL =
   'shadow-[0_1px_2px_rgba(0,0,0,0.14),0_0_0_1px_rgba(0,0,0,0.08),0_4px_10px_rgba(0,0,0,0.10)]';
 
 /* ── 2026-08-15 wave — the dataset tile restyle: the photo IS the card. ──
-   Four tokens, added before the component was touched so the tile can stop
-   hand-writing recipes. The tile used to be a white glass card with a photo
-   boxed inside it (`rounded-[28px]` + `m-2 rounded-[22px]`); now the photo
-   fills the tile and the card is the photo. The kept/rejected/pending state
-   left the border for a corner dot, and selection left the `ring` for an
-   outward glow — both were competing for the same edge. */
+   The tile used to be a white glass card with a photo boxed inside it
+   (`rounded-[28px]` + `m-2 rounded-[22px]`); now the photo fills the tile and
+   the card is the photo. The kept/rejected/pending state left the border for a
+   corner dot, and selection left the `ring` for an outward glow — both were
+   competing for the same edge.
+
+   One glass language, reviewed 2026-08-15: everything laid ON the photo is
+   DARK glass (GLASS_CAPSULE_DARK). The first pass shipped a light capsule for
+   the caption and toolbar, and the review killed it — a tile cannot carry
+   half light glass, half dark. */
 
 /** The photo block itself: the full-bleed tile. Rounded corners + the clip
  *  that makes the photo respect them. The tile's own shadow is separate
@@ -91,23 +95,26 @@ export const TILE_SHADOW =
 
 /** Selected = a spread of brand indigo around the tile, REPLACING the resting
  *  shadow (the two are the same visual channel — the outer edge). A hairline
- *  ring around a full-bleed photo reads as a frame; a glow reads as "this one". */
+ *  ring around a full-bleed photo reads as a frame; a glow reads as "this one".
+ *  The colour lives ONCE in tailwind.config.js (BRAND → boxShadow); this class
+ *  only names it. The hover twin keeps the glow through the lift — selection
+ *  is the state, and FLOAT_HOVER's own hover shadow must not replace it. */
 export const TILE_SELECTED_GLOW =
-  'shadow-[0_0_0_3px_rgba(79,70,229,0.55),0_0_0_8px_rgba(79,70,229,0.18),0_8px_24px_rgba(79,70,229,0.30)]';
+  'shadow-tile-selected transition-[box-shadow,transform] duration-200 ' +
+  'hover:-translate-y-1 hover:shadow-tile-selected-hover';
 
-/** An ultra-thin light glass capsule laid ON a photo — the tile's caption and
- *  hover toolbar. Light ground + dark text, so it can wash out on a bright
- *  photo: pair with SCRIM_BOTTOM behind it. The `white/70` (not /60) is the
- *  deliberate knob: opaque enough to stay readable, thin enough to stay glass. */
-export const GLASS_CAPSULE_LIGHT =
-  'rounded-full bg-white/70 backdrop-blur-md ' +
+/** The dark glass capsule every control laid ON a photo wears — toolbar,
+ *  caption, keep/reject, the source credit, the rescue banner. Dark ground +
+ *  light text reads over arbitrary pixels (CLAUDE.md ▸ UI changes: a control
+ *  painted on a photograph sits on a dark scrim). One recipe, four call sites
+ *  used to hand-write it. */
+export const GLASS_CAPSULE_DARK =
+  'rounded-full bg-black/40 backdrop-blur-md border border-white/15 ' +
   'shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_10px_rgba(0,0,0,0.12)]';
 
-/** A very faint bottom fade on the photo, so the light capsule's dark text
- *  keeps a quiet ground under it on ANY image. Deliberately faint — the tile
- *  used to carry a dark plate across its bottom, and this must NOT become one. */
-export const SCRIM_BOTTOM =
-  'bg-gradient-to-t from-black/25 via-black/5 to-transparent';
+/** Hover feedback for a control painted ON a photograph: a light veil so the
+ *  hit target reads as interactive without adding a frame. */
+export const ON_PHOTO_HOVER = 'hover:bg-white/20';
 
 /* `max-w-xl` is the tidy-up from the same wave: the settings shell went
    full-width on 2026-08-09 and every `w-full` control went with it, so a text

@@ -154,6 +154,27 @@
   }
 }
 
+/* The caption capsule is NOT an action: on a touch screen the toolbar,
+   keep/reject and the tick must stay visible (they are how a touch user
+   operates), but a caption permanently visible there would resurrect the
+   always-on bottom plate this restyle removed. It hides on every platform
+   until hover/focus — a touch user reads the full caption in the Lightbox. */
+.dataset-grid-item__caption {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 160ms ease, transform 160ms ease, visibility 160ms ease;
+  transform: translateY(3px);
+}
+
+.dataset-grid-item:hover .dataset-grid-item__caption,
+.dataset-grid-item:focus-within .dataset-grid-item__caption {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
 /* ── Dataset tile badges ────────────────────────────────────────────────────
    The provenance badge ("generated · face · Nano Banana Pro") and the action
    buttons both want the top row. On a narrow tile they collided and the engine
@@ -257,9 +278,12 @@
    width reserved so the badge can never slide under it again. Threshold and
    reserve mirror TILE_BADGE_TOP_MIN_WIDTH_REM / TILE_BADGE_ACTIONS_RESERVE_REM. */
 @container (min-width: 21rem) {
+  /* The state DOT owns the top-left corner (top-1.5 left-1.5), so the
+     provenance badge drops below it instead of colliding with its first
+     characters; the face badge follows under the provenance badge. */
   .dataset-tile-badge--provenance {
     position: absolute;
-    top: 0;
+    top: 2rem;
     left: 0;
     max-width: calc(100% - 10.25rem);
     display: block;
@@ -268,7 +292,7 @@
   }
 
   .dataset-tile-badge--face {
-    top: 1.5rem;
+    top: 3rem;
   }
 }
 
