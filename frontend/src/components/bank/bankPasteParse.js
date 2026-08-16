@@ -78,9 +78,18 @@ export function parsePastedItems(text) {
       }
     }
   } else {
-    // Plain text: one URL per line. Commas are tolerated because a copied JS
-    // array minus its brackets is a very common way to arrive here.
-    source = raw.split(/[\r\n,]+/)
+    /* Plain text: pull every http(s) URL OUT of whatever this is, rather than
+       demanding that each line be nothing but a URL.
+       The strict form rejected the shapes people actually arrive with — a
+       collector that exports Markdown (`![](https://…)`), a copied HTML
+       fragment, a CSV column, a JS array with its brackets lost. All of them
+       carry perfectly good links wrapped in punctuation, and refusing them
+       taught nobody anything. Trailing markup is trimmed below, since a URL
+       swallowed `)` or `",` would 404 in a way that looks like an expired link.
+       Note this is why de-duplication matters even more here: Markdown often
+       lists the same image as both a link and an embed. */
+    source = (raw.match(/https?:\/\/[^\s<>"'`\\]+/gi) || [])
+      .map((u) => u.replace(/[)\]}>,.;:!?'"]+$/, ''))
   }
 
   const seen = new Set()

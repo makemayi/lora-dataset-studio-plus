@@ -41,12 +41,38 @@ test('the same image under two signatures is ONE item', () => {
   assert.equal(dropped, 1)
 })
 
-test('one bad line does not cost you the whole list', () => {
-  const { items, dropped, error } = parsePastedItems(
+test('prose and non-http links around the URLs cost nothing', () => {
+  // The links are EXTRACTED from whatever surrounds them rather than each line
+  // having to be a bare URL, so junk is not "dropped" — it was never an entry.
+  const { items, error } = parsePastedItems(
     `${SIGNED(1)}\n\nnot a url\nftp://nope/x.jpg\n${SIGNED(2)},`)
   assert.equal(error, null)
-  assert.equal(items.length, 2)
-  assert.ok(dropped >= 2)
+  assert.deepEqual(items.map((i) => i.url), [SIGNED(1), SIGNED(2)])
+})
+
+test('a Markdown export is a usable paste', () => {
+  // What a collector that writes .md actually produces: embeds, links, and the
+  // same image appearing as both. Requiring bare URLs per line rejected all of
+  // it, which is the shape people arrive with.
+  const md = [
+    '# 小晓夏',
+    '',
+    `![](${SIGNED(1)})`,
+    `[原图](${SIGNED(2)})`,
+    `<img src="${SIGNED(3)}">`,
+    `see ${SIGNED(1)} again`,     // duplicate, collapses
+  ].join('\n')
+  const { items, error, dropped } = parsePastedItems(md)
+  assert.equal(error, null)
+  assert.deepEqual(items.map((i) => i.url), [SIGNED(1), SIGNED(2), SIGNED(3)])
+  assert.equal(dropped, 1, 'the repeated image counts once')
+})
+
+test('trailing markup never rides along into the URL', () => {
+  // A URL that swallowed `)` or `",` 404s in a way that reads as an expired
+  // link, which is the most expensive kind of wrong here.
+  const { items } = parsePastedItems(`![](${SIGNED(4)}) and "${SIGNED(5)}",`)
+  assert.deepEqual(items.map((i) => i.url), [SIGNED(4), SIGNED(5)])
 })
 
 test('an empty or unusable paste says which of the two it is', () => {
