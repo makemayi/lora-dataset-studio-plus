@@ -49,6 +49,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from functools import wraps
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from PIL import Image, ImageOps
 from sqlalchemy import and_, case, func, or_, text
@@ -9781,6 +9782,44 @@ def scrape_import_to_bank(user_id, items, bank_id=None, name=None, *,
             skipped['errors'] = skipped.get('errors', 0) + 1
             continue
         saved += 1
+
+    # WHY THIS IS LOGGED AT ALL: the route answers 200 whether 60 images landed
+    # or none did — "saved" is a number in the body, not a status code. So an
+    # import that stored nothing looks exactly like one that worked, and the
+    # only account of WHY lived in a toast that fades in a few seconds. A user
+    # reporting "the bank is empty" then has nothing to hand over, and the
+    # server has no record it ever happened.
+    #
+    # Paste-safe on purpose (CLAUDE.md ▸ diagnostics): a signed CDN link carries
+    # its signature in the query string, so only host + path is recorded. That
+    # is enough to tell "this was not an image" from "this host refused us",
+    # which is the fork every one of these reports turns on. Capped, because a
+    # 700-item paste failing wholesale must not bury the log.
+    if skipped:
+        detail = []
+        for item, (reason, _raw) in downloaded:
+            if reason == 'ok':
+                continue
+            url = (item or {}).get('url') or ''
+            try:
+                parts = urlsplit(url)
+                where = f'{parts.netloc}{parts.path}'
+            except ValueError:
+                where = '<unparseable url>'
+            detail.append(f'{reason}: {where}')
+            if len(detail) >= 5:
+                break
+        summary = ', '.join(f'{k}={v}' for k, v in sorted(skipped.items()))
+        more = f' (+{sum(skipped.values()) - len(detail)} more)' if sum(skipped.values()) > len(detail) else ''
+        if not saved:
+            # Nothing at all landed: the failure that reads as success.
+            logger.warning(
+                'bank scrape import stored NOTHING into %r — %d item(s) skipped [%s]. First: %s%s',
+                bank.name, sum(skipped.values()), summary, ' | '.join(detail), more)
+        else:
+            logger.info(
+                'bank scrape import into %r: %d saved, %d skipped [%s]. First: %s%s',
+                bank.name, saved, sum(skipped.values()), summary, ' | '.join(detail), more)
 
     # ONE inventory path for every bank: the same walk that picks up files the
     # user drops in the folder by hand picks these up too. No third insert path.
