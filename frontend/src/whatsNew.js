@@ -50,6 +50,19 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-16-seedvr2-in-place-2x',
+    date: '2026-08-16',
+    title: 'SeedVR2 upscales in place now — 2x, from the tile toolbar, with no second model download',
+    blurb: 'A 🔍 button on every tile (and in the lightbox) sends the current image '
+      + 'through SeedVR2 and REPLACES the tile with the 2x result — the original '
+      + 'is kept for undo. The lane now runs the same pipeline the ✨ improve '
+      + 'pass uses, so it reads the same 7B Sharp int8 DiT and VAE from the same '
+      + 'folders: no pack-private model folder, no second download. The old TTP '
+      + 'tiling pack and its settings are gone — the pipeline tiles with '
+      + 'ComfyUI core.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-16-h3-swap-follows-the-new-graph',
     date: '2026-08-16',
     title: 'The head swap now runs the maintainer\u2019s current MiniMax H3 graph',

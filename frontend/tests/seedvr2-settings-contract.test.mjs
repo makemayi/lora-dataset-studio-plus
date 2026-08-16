@@ -6,6 +6,13 @@
  * undocumented; one with no help topic cannot be found by search. This test
  * pins the four surfaces together so the next dial cannot ship half-wired.
  *
+ * The dial set shrank on 2026-08-16 when the lane moved to the shipped manual
+ * workflow: the model/VAE pins, the TTP tiling trio and blocks-to-swap have no
+ * node to feed any more (the pipeline reads `diffusion_models`/`vae` through
+ * core loaders and tiles with the core tiled VAE), so they are gone from all
+ * four surfaces — only `resolution` (now an upscale MULTIPLIER, 2x by default)
+ * and `color_correction` remain as settings.
+ *
  * node --test parses no JSX, so the card is read as TEXT — which is exactly the
  * granularity that matters here: the ids, the config keys and the reset targets.
  */
@@ -19,18 +26,12 @@ const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8')
 const CARD = read('../src/components/settings/EnginesSection.jsx')
 const GUIDE = read('../../docs/guide/settings-reference.md')
 const DEFAULTS = read('../../backend/app/config.py')
+const HELPER = read('../../backend/app/services/seedvr2_helper.py')
 
 // field → the DOM id of its control in the card.
 const FIELDS = {
-  model: 'seedvr2-model',
-  vae: 'seedvr2-vae',
   resolution: 'seedvr2-resolution',
-  max_resolution: 'seedvr2-max-resolution',
   color_correction: 'seedvr2-color',
-  tiling: 'seedvr2-tiling',
-  tile_px: 'seedvr2-tile-px',
-  tile_threshold: 'seedvr2-tile-threshold',
-  blocks_to_swap: 'seedvr2-swap',
 }
 
 test('every seedvr2 setting has a labelled control and a reset in the card', () => {
@@ -52,26 +53,38 @@ test('the config defaults carry every field the card writes', () => {
   }
 })
 
-test('the new dials are documented and findable in Help', () => {
-  // The three this wave added. The older ones predate the contract and are
-  // covered by the guide check below on their config key alone.
+test('the settings are documented and findable in Help', () => {
   const topics = new Set(helpTopics.map((t) => t.id))
-  for (const id of ['seedvr2.vae', 'seedvr2.tile_px', 'seedvr2.tile_threshold']) {
-    assert.ok(topics.has(id), `${id}: no help topic — Help search cannot find it`)
-  }
+  assert.ok(topics.has('seedvr2.resolution'), 'no help topic for the multiplier')
+  assert.ok(topics.has('seedvr2.files'), 'no help topic for the model files')
   for (const field of Object.keys(FIELDS)) {
     assert.ok(GUIDE.includes(`\`seedvr2.${field}\``),
       `seedvr2.${field}: absent from docs/guide/settings-reference.md`)
   }
 })
 
-test('the tile bounds mirrored in the card match the backend clamps', () => {
-  const helper = read('../../backend/app/services/seedvr2_helper.py')
-  assert.match(helper, /TILE_PX_MIN, TILE_PX_MAX = 512, 2048/)
-  assert.match(helper, /TILE_ABOVE_FACTOR = 1\.5/)
-  assert.match(CARD, /const SEEDVR2_TILE_MIN = 512/)
-  assert.match(CARD, /const SEEDVR2_TILE_MAX = 2048/)
-  assert.match(CARD, /const SEEDVR2_TILE_ABOVE_FACTOR = 1\.5/)
+test('the dead dials are gone from every surface, not half-removed', () => {
+  // The TTP tiling trio, the pins and blocks-to-swap have no node to feed.
+  for (const key of ['model', 'vae', 'max_resolution', 'tiling', 'tile_px',
+                     'tile_threshold', 'blocks_to_swap']) {
+    assert.doesNotMatch(DEFAULTS, new RegExp(`'seedvr2'[\\s\\S]{0,400}'${key}':`),
+      `seedvr2.${key} still in backend defaults`)
+  }
+  for (const id of ['seedvr2-model', 'seedvr2-vae', 'seedvr2-tiling',
+                    'seedvr2-tile-px', 'seedvr2-tile-threshold',
+                    'seedvr2-max-resolution', 'seedvr2-swap']) {
+    assert.ok(!CARD.includes(`id="${id}"`), `dead control id="${id}" still in the card`)
+  }
+  assert.doesNotMatch(HELPER, /TTP_NODE_CLASSES|tile_plan|choose_lane|full_frame_ceiling_mp/,
+    'TTP lane machinery still in the helper')
+})
+
+test('the multiplier mirrors the backend clamps and the shipped workflow value', () => {
+  assert.match(HELPER, /RESOLUTION_MIN, RESOLUTION_MAX = 1\.0, 4\.0/)
+  assert.match(CARD, /const SEEDVR2_RESOLUTION_MIN = 1\.0/)
+  assert.match(CARD, /const SEEDVR2_RESOLUTION_MAX = 4\.0/)
+  // 2x is the value of the user's verified workflow, not a guess.
+  assert.match(DEFAULTS, /'resolution': 2\.0/)
 })
 
 test('the batch-size refusal is still stated, not silently dropped', () => {
