@@ -416,11 +416,14 @@ Three limits worth knowing before you build a dataset with it:
 
 *Requested by SurpassHR ([GitHub #32](https://github.com/perfectgf/lora-dataset-studio/issues/32)).*
 
-The **fidelity** half of ✨ Upscale & improve. The two engine choices are not "Klein vs SeedVR2" any more — the `klein` engine id itself now RUNS a small Krea 2 edit pass followed by SeedVR2 restoration (colour-corrected back to your original between the two stages), because a pure Klein repaint shifted skin tone and micro-detail along with the fix it was making. The standalone `seedvr2` engine below stays the simpler, edit-free path:
+The **fidelity** half of ✨ Upscale & improve. The split is REWRITE vs RESTORE, not "good vs better". Two of the three engines re-render detail from your ✨ instruction — they fix a soft frame and they change it; SeedVR2 resolves what is already there and leaves the look alone.
+
+Note the naming trap: the `klein` engine id no longer runs Flux.2 Klein 9B. It has run a small Krea 2 edit pass followed by SeedVR2 restoration since that swap (colour-corrected back to your original between the two stages), because a pure Klein repaint shifted skin tone and micro-detail along with the fix it was making. The id stays because it is stored in every existing candidate row. Klein 9B itself is `klein_hq`, added 2026-08-16 — until then it had no entrance to this lane at all:
 
 | | what it does | when you want it |
 | --- | --- | --- |
 | **`klein`** (Krea 2 edit + SeedVR2 restore) | a small edit pass for sharpness/clarity, colour-matched back to your original, then SeedVR2 for the actual detail restoration | the default — closer to the source than the old pure-Klein repaint, still adds a touch of directed sharpening |
+| **`klein_hq`** (Flux.2 Klein 9B) | re-renders skin and micro-detail from the ✨ instruction — a full repaint, not a touch-up | the frame is too soft for a restore to help: restoration has nothing to sharpen when the detail was never captured. Expect the shot to CHANGE, not just sharpen |
 | **`seedvr2`** (standalone) | resolves detail at a higher resolution, content untouched, no edit pass at all | the frame is right and you want the most conservative pass possible — the exact skin tone, grain and colour are part of what you are training |
 
 Both are **non-destructive**: they create a separate candidate and never touch the source file.
@@ -434,7 +437,7 @@ Both are **non-destructive**: they create a separate candidate and never touch t
 
 Settings:
 
-- **Default engine for ✨ Upscale & improve** → `improve.engine`. One of `klein`, `seedvr2`. Default **`klein`** — what every improve did before this setting existed. It governs the ✨ button on a single tile and ↻ Re-improve. **Bulk runs are never decided by it**: the selection toolbar shows one button per available engine and each states its trade-off, so a batch always says which pass it is about to run.
+- **Default engine for ✨ Upscale & improve** → `improve.engine`. One of `klein`, `klein_hq`, `seedvr2`. Default **`klein`** — what every improve did before this setting existed. It governs the ✨ button on a single tile and ↻ Re-improve. **Bulk runs are never decided by it**: the selection toolbar shows one button per available engine and each states its trade-off, so a batch always says which pass it is about to run.
 - **Upscale multiplier** → `seedvr2.resolution`. Range `1.0`–`4.0`, default **`2.0`** — the value of the user's verified workflow. The input is scaled by this before the one-step restore, so 2.0 doubles the short edge: a 1024px photo comes back at 2048px. The tiled VAE cuts the enlarged frame into 512px tiles, so a big multiplier never has to fit the card in one piece — it just takes proportionally longer. *(Since 2026-08-16 this key is a MULTIPLIER; it used to be a short-edge pixel target for the old one-box upscaler, and a stored old-style value clamps to the top of the range.)*
 - **Colour correction** → `seedvr2.color_correction`. One of `lab`, `wavelet`, `wavelet_adaptive`, `hsv`, `adain`, `none`. Default **`lab`** — the model's own default and the most conservative. `wavelet` holds broad tone better on heavily degraded sources; `none` shows the raw output. Colour fidelity is the reason this engine exists, so it is worth trying two modes on one image before a long batch.
 

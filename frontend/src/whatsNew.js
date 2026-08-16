@@ -50,6 +50,16 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-16-klein-9b-improve',
+    date: '2026-08-16',
+    title: 'A third ✨ Upscale & improve engine, for frames a restore cannot save',
+    blurb: 'Flux.2 Klein 9B is now its own choice next to Krea 2 + SeedVR2 and '
+      + 'SeedVR2. It re-renders skin and micro-detail from your ✨ instruction, '
+      + 'so it reaches soft frames where restoring has nothing to sharpen — and '
+      + 'says up front that it changes the shot rather than preserving it.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-16-seedvr2-in-place-2x',
     date: '2026-08-16',
     title: 'SeedVR2 upscales in place now — 2x, from the tile toolbar, with no second model download',
