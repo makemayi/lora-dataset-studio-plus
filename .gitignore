@@ -98,3 +98,11 @@ docs/superpowers/
 # Per-machine debugging monitors: they hard-code a PID and a local log path, so
 # they are worthless on any other machine and stale on this one an hour later.
 /monitor_*.ps1
+
+# Local-only helpers that drive a THIRD-PARTY site from the operator's own
+# logged-in browser (e.g. the Douyin account walker). They are pinned to one
+# site's DOM, they break when that site reskins, and shipping them would make
+# this repo look like it maintains a scraper for a platform it does not.
+# The app side of that flow (paste → bank) IS tracked; only the page-side
+# snippets live here.
+/local/

@@ -3,6 +3,7 @@ import { postJson } from '../../api/fetchClient'
 import { useToast } from '../common/Toast'
 import { HelpBadge } from '../../help/HelpMode'
 import ConceptSourcesPanel from '../dataset/ConceptSourcesPanel'
+import BankPasteImport from './BankPasteImport'
 import { CARD_SURFACE } from '../common/surfaces'
 import {
   bankScrapeDestination,
@@ -140,6 +141,13 @@ export default function BankScrapePanel({ banks, onDone }) {
 
           <ConceptSourcesPanel destination="bank" stateKey="bank"
             onImport={handleImport} busy={busy} />
+
+          {/* The manual intake, for sites a server cannot enumerate: their
+              listings are drawn by JavaScript behind a signed API, so the image
+              URLs only exist in the clear inside a logged-in browser. Same
+              destination, same batching, same toasts — only the collecting
+              happens elsewhere. */}
+          <BankPasteImport onImport={handleImport} busy={busy} />
         </div>
       )}
     </section>
