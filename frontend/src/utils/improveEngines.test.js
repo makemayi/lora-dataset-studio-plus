@@ -35,12 +35,16 @@ test('an unknown engine id falls back to Klein rather than blowing up a label', 
   assert.equal(improveEngine(undefined).id, 'klein')
 })
 
-test('SeedVR2 only appears once it is ready; Klein always does', () => {
+test('SeedVR2 only appears once it is ready; both rewrites always do', () => {
   const ids = (caps) => availableImproveEngines(caps).map((e) => e.id)
-  assert.deepEqual(ids(undefined), ['klein'])
-  assert.deepEqual(ids({ comfyui: {} }), ['klein'])
-  assert.deepEqual(ids({ comfyui: { seedvr2_ready: false } }), ['klein'])
-  assert.deepEqual(ids({ comfyui: { seedvr2_ready: true } }), ['klein', 'seedvr2'])
+  // Both REWRITE engines are always listed: when one cannot run its button
+  // carries the reason, and an engine that vanishes teaches nobody why. Only
+  // SeedVR2 is gated, because until it is installed it is a setup task.
+  assert.deepEqual(ids(undefined), ['klein', 'klein_hq'])
+  assert.deepEqual(ids({ comfyui: {} }), ['klein', 'klein_hq'])
+  assert.deepEqual(ids({ comfyui: { seedvr2_ready: false } }), ['klein', 'klein_hq'])
+  assert.deepEqual(ids({ comfyui: { seedvr2_ready: true } }),
+    ['klein', 'klein_hq', 'seedvr2'])
 })
 
 test('a blocked engine says WHY, and points at where the fix lives', () => {
@@ -103,16 +107,16 @@ test('the progress label reads the running batch engine', () => {
 
 const READY = { comfyui: { seedvr2_ready: true } }
 
-test('the lightbox offers BOTH engines once SeedVR2 is installed', () => {
+test('the lightbox offers EVERY engine once SeedVR2 is installed', () => {
   const ids = lightboxImproveButtons({ caps: READY, engines: { klein: true } })
     .map((b) => b.id)
-  assert.deepEqual(ids, ['klein', 'seedvr2'])
+  assert.deepEqual(ids, ['klein', 'klein_hq', 'seedvr2'])
 })
 
 test('SeedVR2 absent from the lightbox until it is installed', () => {
   const ids = lightboxImproveButtons({ caps: { comfyui: {} }, engines: { klein: true } })
     .map((b) => b.id)
-  assert.deepEqual(ids, ['klein'])
+  assert.deepEqual(ids, ['klein', 'klein_hq'])
 })
 
 test('the amber anime warning belongs to Klein ALONE', () => {
@@ -169,5 +173,6 @@ test('the idle labels name the engine, matching the selection toolbar', () => {
   const labels = lightboxImproveButtons({ caps: READY, engines: { klein: true } })
     .map((b) => b.label)
   assert.deepEqual(labels,
-    ['✨ Improve via Krea 2 + SeedVR2', '🔍 Upscale via SeedVR2'])
+    ['✨ Improve via Krea 2 + SeedVR2', '🩹 Improve via Flux.2 Klein 9B',
+     '🔍 Upscale via SeedVR2'])
 })

@@ -1890,12 +1890,18 @@ function SeedVr2Card({ config, setField, configDefaults, caps }) {
               databases. The LABEL is what the pipeline actually is: this lane
               stopped running Flux.2 Klein 9B at the Krea2-Ostris swap. */}
           <option value="klein">Krea 2 + SeedVR2 — tone pass, recoloured back, then detail restored</option>
+          <option value="klein_hq">Flux.2 Klein 9B — rewrites skin and micro-detail from the instruction</option>
           <option value="seedvr2">SeedVR2 — resolves detail, keeps the original look</option>
         </select>
         <HelpText className="mt-1 text-xs text-content-muted">
           Used by the ✨ button on a single tile and by ↻ Re-improve. Bulk runs always
           state their engine on the button you press, so this never decides a batch
-          behind your back.
+          behind your back. Two of the three REWRITE (they re-render detail from
+          the ✨ instruction, so they fix a soft frame and also change it) and
+          SeedVR2 RESTORES (it resolves what is already there and leaves the look
+          alone). Reach for Klein 9B when a frame is soft in a way restoring
+          cannot fix — restoration has nothing to sharpen if the detail was never
+          captured.
         </HelpText>
         <ResetToDefault label="Default improve engine" section="improve" field="engine"
           config={config} configDefaults={configDefaults} setField={setField} />

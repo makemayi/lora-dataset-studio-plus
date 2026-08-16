@@ -40,6 +40,25 @@ export const IMPROVE_ENGINES = [
     confirm: 'Create a separate Krea 2 + SeedVR2 improvement candidate',
   },
   {
+    /* Added 2026-08-16. The Krea2-Ostris swap above took the 'klein' id with it,
+       which left the app with no entrance to Flux.2 Klein 9B on this lane at
+       all — the two remaining choices were one restorer and one Krea 2 rewrite.
+       That is the gap this fills, and it is why the id is `klein_hq` rather
+       than a reclaimed 'klein': the old id is spoken for by rows already in
+       people's databases and can never mean something else. */
+    id: 'klein_hq',
+    label: 'Klein 9B',
+    emoji: '🩹',
+    action: 'Improve via Flux.2 Klein 9B',
+    /* Names the trade in the same shape as the other two: what it CHANGES,
+       and what that buys. A restorer cannot sharpen detail that was never
+       captured; a rewrite can invent it, at the cost of no longer being the
+       same pixels. */
+    summary: 'Re-renders skin and micro-detail from the ✨ instruction. Reaches '
+      + 'frames too soft for a restore to fix, and changes them in the process.',
+    confirm: 'Create a separate Flux.2 Klein 9B improvement candidate',
+  },
+  {
     id: 'seedvr2',
     label: 'SeedVR2',
     emoji: '🔍',
@@ -72,6 +91,13 @@ export function improveEngineBlockedReason(engineId, { caps, engines, eligibleCo
   const engine = improveEngine(engineId)
   if (engineId === 'klein' && engines && engines.klein === false) {
     return 'Klein is not available in this setup'
+  }
+  /* `klein_hq` is the one that genuinely runs Flux.2 Klein 9B, so it is the one
+     the Klein availability flag really describes. The check above is kept as-is
+     rather than moved: 'klein' still needs SOME gate, and re-pointing it at the
+     Krea 2 flag is a separate change with its own way of being wrong. */
+  if (engineId === 'klein_hq' && engines && engines.klein === false) {
+    return 'Flux.2 Klein 9B is not available in this setup'
   }
   if (engineId === 'seedvr2' && !((caps && caps.comfyui) || {}).seedvr2_ready) {
     return 'SeedVR2 is not installed yet — Setup ▸ ComfyUI can download it'
