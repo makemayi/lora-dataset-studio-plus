@@ -65,11 +65,21 @@ test('Pexels key and attribution markup stay wired without nested controls', () 
   assert.match(attributionSource, /Photo by\{' '\}[\s\S]*\{' · '\}[\s\S]*Pexels/);
   assert.match(attributionSource, /rel="noopener noreferrer"/);
 
-  const selectionButton = panelSource.match(
-    /<button type="button" onClick=\{\(\) => toggle\(it\.url\)\}[\s\S]*?<\/button>/);
+  // The tile markup moved to the shared ScrapePickGrid when the paste intake
+  // needed the same grid, so the invariant is pinned THERE now. It matters more
+  // after the move, not less: the button and the credit that must sit beside it
+  // are in two different files, and nesting one in the other is now something
+  // nobody would see while editing either.
+  const pickGridSource = readFileSync(
+    new URL('../shared/ScrapePickGrid.jsx', import.meta.url), 'utf8');
+  const selectionButton = pickGridSource.match(
+    /<button type="button" onClick=\{\(\) => onToggle\?\.\(it\.url\)\}[\s\S]*?<\/button>/);
   assert.ok(selectionButton, 'selection button markup must remain present');
   assert.doesNotMatch(selectionButton[0], /<a\b/i,
     'Pexels credit links must remain siblings of the selection button');
+  // ...and the caption the panel supplies is rendered AFTER that button closes,
+  // which is what keeps the credit a sibling rather than a child.
+  assert.match(pickGridSource, /<\/button>[\s\S]*?renderCaption \? renderCaption\(it\) : null/);
 });
 
 test('Vast offer filter terms find Training', () => {

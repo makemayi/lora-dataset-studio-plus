@@ -19,6 +19,7 @@ import InstallRunner from '../setup/InstallRunner';
 import { clearScraperScanState, loadScraperScanState, saveScraperScanState } from './scraperState';
 import { HelpBadge } from '../../help/HelpMode';
 import PexelsAttribution from './PexelsAttribution';
+import ScrapePickGrid from '../shared/ScrapePickGrid.jsx';
 import SettingsLink from '../common/SettingsLink';
 import KleinModelSetting from '../shared/KleinModelSetting';
 import { localEngineUnavailableReason } from '../../utils/localEngineReason';
@@ -36,8 +37,7 @@ import {
 } from './scraperSourceSearch';
 import { HelpText } from '../common/HelpText';
 
-const thumbFor = (it) =>
-  `/api/scrape/thumb?url=${encodeURIComponent(it.thumbnail || it.url)}`;
+// `thumbFor` moved into ScrapePickGrid with the tiles that were its only caller.
 
 const SOURCE_GROUPS = [
   { label: 'SFW', tone: 'emerald', sources: [
@@ -597,35 +597,25 @@ export default function ConceptSourcesPanel({ datasetId, onImport, busy,
             </a>
           )}
 
-          <div className="grid gap-1.5 overflow-y-auto max-h-[34rem] pr-1"
-            style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${tile}px, 1fr))` }}>
-            {liveItems.map((it) => {
-              const on = selected.has(it.url);
-              const imageLabel = it.title
-                || (it.platform === 'pexels' && it.photographer
-                  ? `Pexels photo by ${it.photographer}` : 'scraped image');
-              return (
-                <div key={it.url} className="min-w-0">
-                  <button type="button" onClick={() => toggle(it.url)}
-                    aria-pressed={on}
-                    aria-label={`${on ? 'Deselect' : 'Select'} ${imageLabel}`}
-                    title={imageLabel}
-                    className={`relative aspect-square w-full rounded-lg overflow-hidden border-2 transition-all
-                      ${on ? 'border-indigo-400' : 'border-transparent hover:border-border-strong'}`}>
-                    <img src={thumbFor(it)} alt="" loading="lazy" onError={() => markBroken(it.url)}
-                      className="w-full h-full object-cover" />
-                    <span aria-hidden
-                      className={`absolute top-1 right-1 w-4 h-4 rounded-full text-[0.625rem] leading-4 text-center font-bold
-                        ${on ? 'bg-indigo-500 text-white' : 'bg-black/50 text-white/70'}`}>
-                      {on ? '✓' : ''}
-                    </span>
-                  </button>
-                  <PexelsAttribution metadata={it}
-                    className="mt-1 block px-0.5 text-[0.625rem] leading-tight text-content-subtle" />
-                </div>
-              );
-            })}
-          </div>
+          {/* The tile markup moved to ScrapePickGrid so the paste intake shows
+              the SAME grid instead of a second copy of it. What stays here is
+              what is specific to a SCAN: the selection that survives a reload,
+              the dead-item filtering that feeds paging, and Pexels' required
+              attribution. */}
+          <ScrapePickGrid
+            items={liveItems}
+            selected={selected}
+            onToggle={toggle}
+            onBroken={markBroken}
+            tile={tile}
+            labelFor={(it) => it.title
+              || (it.platform === 'pexels' && it.photographer
+                ? `Pexels photo by ${it.photographer}` : 'scraped image')}
+            renderCaption={(it) => (
+              <PexelsAttribution metadata={it}
+                className="mt-1 block px-0.5 text-[0.625rem] leading-tight text-content-subtle" />
+            )}
+          />
 
           {partial && (
             // Backend `partial` now covers at least four causes (time budget,
