@@ -404,7 +404,42 @@ DEFAULTS = {
              # bars_max: fraction of the frame allowed to be flat black letterbox
              #   before the 'bars' flag. 0.04 ~ a thin band; it caught ~4% of the
              #   reference bank (screenshots of videos, padded stills).
-             'bars_max': 0.04},
+             'bars_max': 0.04,
+             # LOCAL COLLECTORS — commands you configure, run by 🕸 Scrape into
+             # a bank, for galleries no server can enumerate: drawn by
+             # JavaScript behind a signed API, so the image links exist in the
+             # clear only inside a browser that is already logged in and
+             # looking at them. A program on THIS machine can reach them; the
+             # app runs it and imports what it prints.
+             #
+             # SHIPPED EMPTY, AND THAT IS THE DEFAULT STATE, NOT AN OVERSIGHT.
+             # A collector is pinned to one site's markup and breaks when that
+             # site reskins; shipping one would make this repo a maintainer of
+             # scrapers for platforms it has nothing to do with. Empty, the UI
+             # says the feature is not set up and offers nothing to press.
+             #
+             # A LIST inside this section rather than a top-level key: the
+             # settings API requires every top-level config section to be an
+             # object, and a bare list there fails every full-config save (the
+             # nested `minimax_h3.swap_loras` is the same shape for the same
+             # reason).
+             #
+             # Shape: [{'name': 'shown in the picker',
+             #          'command': ['node', 'local/x.mjs', '--json', '{url}']}]
+             # `command` is an ARGUMENT LIST, never a string: it runs directly
+             # with no shell, and `{url}` becomes a single argument — so a URL
+             # cannot turn into a second command whatever it contains. Paths
+             # resolve from the repository root.
+             #
+             # The command prints ONE JSON document on stdout —
+             #   {"items": [{"url", "title"}], "suggested_name": "optional"}
+             # — keeping progress on stderr, which is captured and shown when a
+             # run fails.
+             #
+             # THIS RUNS WHAT YOU PUT HERE. It is not reachable from a page or
+             # an API payload: a request may only NAME a collector already
+             # configured in this file.
+             'collectors': []},
     'masks': {'python': ''},
     # Bank ✨ Score pass interpreter (CLIP aesthetic/NSFW stack). Auto-provisioned
     # by the bank_scoring installer into its own venv — declared here so a
