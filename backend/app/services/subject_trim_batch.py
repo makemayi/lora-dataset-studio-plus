@@ -71,40 +71,54 @@ def _write_json(path, payload):
         json.dump(payload, fh, ensure_ascii=False)
 
 
-def build_preview(ds_dir, rows, progress=None):
+def build_preview(ds_dir, rows, progress=None, should_stop=None):
     """Mask every row and return ``{'items': [...]}`` without writing pixels.
 
     One item per row, ALWAYS — a skipped image keeps its entry and its reason
     so the review screen can show what was passed over and why. `frame` is
     ``None`` only when no frame could be computed at all.
+
+    All the masking happens in ONE child process (`auto_mask.masks_for`); the
+    per-row loop that follows is arithmetic. `progress` therefore reports the
+    MASKING, which is where the seconds are, not the loop.
     """
-    items = []
+    paths = [os.path.join(ds_dir, row.filename) for row in rows]
     total = len(rows)
-    for i, row in enumerate(rows, start=1):
-        path = os.path.join(ds_dir, row.filename)
+
+    def _on_mask_progress(record):
+        if progress and record.get('phase') == 'masking':
+            progress(int(record.get('done') or 0), int(record.get('total') or total))
+
+    masks = auto_mask.masks_for(paths, MASK_PROMPT,
+                                on_progress=_on_mask_progress,
+                                should_stop=should_stop)
+    items = []
+    for row, path in zip(rows, paths):
         item = {'image_id': row.image_id, 'filename': row.filename,
                  'image': None, 'frame': None, 'out': None, 'skip': None}
-        try:
-            mask_path = auto_mask.mask_for(path, MASK_PROMPT)
-            with Image.open(mask_path) as mask:
-                iw, ih = mask.width, mask.height
-                bbox = largest_bbox(mask)
-            item['image'] = [iw, ih]
-            if bbox is None:
-                item['skip'] = 'no-subject-found'
-            else:
-                frame = trim_frame(iw, ih, bbox)
-                item['frame'] = list(frame)
-                item['out'] = list(output_size(frame[2], frame[3]))
-                item['skip'] = skip_reason(iw, ih, frame)
-        except auto_mask.NoMatch:
-            item['skip'] = 'no-subject-found'
-        except Exception:                       # noqa: BLE001
-            logger.exception('subject trim preview: image %s failed', row.image_id)
-            item['skip'] = 'failed'
+        mask_path, reason = masks.get(path, (None, 'failed'))
+        if reason:
+            # 'no-match' is the user-facing case and gets the manifest's own
+            # vocabulary; anything else is an engine problem and says so.
+            item['skip'] = 'no-subject-found' if reason == 'no-match' else 'failed'
+        else:
+            try:
+                with Image.open(mask_path) as mask:
+                    iw, ih = mask.width, mask.height
+                    bbox = largest_bbox(mask)
+                item['image'] = [iw, ih]
+                if bbox is None:
+                    item['skip'] = 'no-subject-found'
+                else:
+                    frame = trim_frame(iw, ih, bbox)
+                    item['frame'] = list(frame)
+                    item['out'] = list(output_size(frame[2], frame[3]))
+                    item['skip'] = skip_reason(iw, ih, frame)
+            except Exception:                   # noqa: BLE001
+                logger.exception('subject trim preview: image %s failed', row.image_id)
+                item['skip'] = 'failed'
         items.append(item)
-        if progress:
-            progress(i, total)
+    progress and progress(total, total)
     return {'items': items}
 
 
@@ -147,9 +161,9 @@ def start_preview(app, user_id, dataset_id, image_ids):
     total = len(rows)
     if not total:
         raise ValueError('no images selected')
-    clear_preview(dataset_id)
     token = dataset_activity.begin(dataset_id, 'trim', total=total,
                                     detail=f'Measuring crops… 0/{total}')
+    clear_preview(dataset_id)
 
     def _run():
         try:
@@ -158,10 +172,15 @@ def start_preview(app, user_id, dataset_id, image_ids):
                 manifest = build_preview(
                     ds_dir, rows,
                     progress=lambda done, tot: dataset_activity.progress(
-                        token, done=done, detail=f'Measuring crops… {done}/{tot}'))
+                        token, done=done, detail=f'Measuring crops… {done}/{tot}'),
+                    should_stop=lambda: dataset_activity.cancel_requested(
+                        dataset_id, TRIM_KINDS))
                 _write_json(_preview_path(dataset_id), manifest)
         except Exception:   # noqa: BLE001 — a crash here must not strand the banner
             logger.exception('trim preview failed on dataset %s', dataset_id)
+            _write_json(_preview_path(dataset_id),
+                        {'items': [], 'error': 'The crop preview failed. See the '
+                                               'server log for the details.'})
         finally:
             dataset_activity.end(token)
             dataset_activity.clear_cancel(dataset_id, TRIM_KINDS)

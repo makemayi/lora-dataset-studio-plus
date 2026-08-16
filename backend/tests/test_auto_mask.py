@@ -212,6 +212,86 @@ def test_a_good_mask_lands_in_the_cache(am, monkeypatch, tmp_path):
     assert auto_mask.mask_for(image, 'head') == out
 
 
+# --- the batched twin ---------------------------------------------------------
+
+def test_masks_for_pays_the_child_once_for_many_images(am, monkeypatch, tmp_path):
+    """The whole reason `masks_for` exists: one call to `mask_images`, not one
+    per image."""
+    auto_mask, _base, _config, _tmp = am
+    a = str(_write(tmp_path / 'a.png', b'PIXELS-A'))
+    b = str(_write(tmp_path / 'b.png', b'PIXELS-B'))
+    calls = []
+
+    def _fake(images, prompt, *, out_dir, **kw):
+        calls.append(list(images))
+        os.makedirs(out_dir, exist_ok=True)
+        for path in images:
+            name = os.path.splitext(os.path.basename(path))[0] + '.png'
+            with open(os.path.join(out_dir, name), 'wb') as fh:
+                fh.write(b'MASKBYTES')
+        return {'ok': True, 'written': len(images), 'cancelled': False,
+                'out_dir': out_dir,
+                'results': {p: {'state': 'ok', 'coverage': 0.2} for p in images}}
+
+    monkeypatch.setattr(auto_mask, 'mask_images', _fake)
+    out = auto_mask.masks_for([a, b], 'person')
+    assert len(calls) == 1, 'both images must ride in ONE child process'
+    assert set(calls[0]) == {a, b}
+    assert out[a][1] is None and os.path.isfile(out[a][0])
+    assert out[b][1] is None and os.path.isfile(out[b][0])
+    # ...and it fills the same cache mask_for reads.
+    key_a = auto_mask.cache_key(b'PIXELS-A', 'person', threshold=0.5)
+    assert out[a][0] == str(auto_mask.cache_dir() / f'{key_a}.png')
+
+
+def test_masks_for_reports_no_match_and_missing_and_engine_failure(am, monkeypatch, tmp_path):
+    auto_mask, _base, _config, _tmp = am
+    ok = str(_write(tmp_path / 'ok.png', b'OK'))
+    nomatch = str(_write(tmp_path / 'nomatch.png', b'NOMATCH'))
+    whole = str(_write(tmp_path / 'whole.png', b'WHOLE'))
+    broken = str(_write(tmp_path / 'broken.png', b'BROKEN'))
+    missing = str(tmp_path / 'gone.png')
+
+    def _fake(images, prompt, *, out_dir, **kw):
+        os.makedirs(out_dir, exist_ok=True)
+        for path in images:
+            if path == broken:
+                continue                    # child never wrote its file
+            name = os.path.splitext(os.path.basename(path))[0] + '.png'
+            with open(os.path.join(out_dir, name), 'wb') as fh:
+                fh.write(b'MASKBYTES')
+        return {'ok': True, 'written': 3, 'cancelled': False, 'out_dir': out_dir,
+                'results': {
+                    ok: {'state': 'ok', 'coverage': 0.2},
+                    nomatch: {'state': 'no_match', 'coverage': 0.0},
+                    whole: {'state': 'ok', 'coverage': 0.97},
+                    broken: {'state': 'ok', 'coverage': 0.1},
+                }}
+
+    monkeypatch.setattr(auto_mask, 'mask_images', _fake)
+    out = auto_mask.masks_for([ok, nomatch, whole, broken, missing], 'person')
+    assert out[ok][1] is None
+    assert out[nomatch] == (None, 'no-match')
+    assert out[whole] == (None, 'no-match'), 'covering the whole frame is also no-match'
+    assert out[broken] == (None, 'failed')
+    assert out[missing] == (None, 'missing')
+
+
+def test_masks_for_skips_the_child_entirely_on_an_all_cache_hit(am, monkeypatch, tmp_path):
+    auto_mask, _base, _config, _tmp = am
+    image = str(_write(tmp_path / 'tile.png', b'PIXELS'))
+    key = auto_mask.cache_key(b'PIXELS', 'head', threshold=0.5)
+    cached = auto_mask.cache_dir() / f'{key}.png'
+    cached.write_bytes(b'MASK')
+
+    def _never(*a, **k):
+        raise AssertionError('a cached mask must not start a run')
+
+    monkeypatch.setattr(auto_mask, 'mask_images', _never)
+    out = auto_mask.masks_for([image], 'head')
+    assert out[image] == (str(cached), None)
+
+
 # --- progress ----------------------------------------------------------------
 
 def test_progress_lines_parse_into_phase_and_count(am):

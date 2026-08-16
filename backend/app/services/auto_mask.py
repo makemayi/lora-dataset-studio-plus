@@ -413,6 +413,82 @@ def mask_for(image_path, prompt, *, threshold=DEFAULT_THRESHOLD, use_cache=True,
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
+def masks_for(image_paths, prompt, *, threshold=DEFAULT_THRESHOLD, use_cache=True,
+              on_progress=None, should_stop=None):
+    """Masks for MANY images in ONE child process:
+    ``{image_path: (mask_path, None)}`` for each image that produced a region,
+    ``{image_path: (None, reason)}`` for each one that did not.
+
+    The batched twin of `mask_for`, and the reason it exists: `mask_for` pays a
+    3.4 GB checkpoint load per call, so a loop over N images pays it N times.
+    Same cache, same "matched nothing / matched everything" rules, one process.
+    Cache hits never reach the child, so a re-run over the same selection costs
+    nothing.
+
+    `reason` is 'no-match' (nothing matched, or the phrase covered the whole
+    frame — both are answers that would silently do nothing downstream),
+    'missing' (no such file), 'cancelled', or a short state string from the
+    child.
+
+    The paths must have DISTINCT basenames: the child names each mask after its
+    source's stem, so two files called `a.png` from different folders would
+    collide. Every current caller passes one dataset folder, where names are
+    unique by construction.
+    """
+    prompts = normalize_prompts(prompt)
+    if not prompts:
+        raise ValueError('a phrase naming the region is required')
+    out = {}
+    todo = []
+    keys = {}
+    for path in (image_paths or []):
+        if not path or not os.path.isfile(path):
+            out[path] = (None, 'missing')
+            continue
+        with open(path, 'rb') as fh:
+            raw = fh.read()
+        key = cache_key(raw, prompt, threshold=threshold)
+        keys[path] = key
+        hit = cached_path(key) if use_cache else None
+        if hit:
+            out[path] = (hit, None)
+        else:
+            todo.append(path)
+    if not todo:
+        return out
+    work_dir = tempfile.mkdtemp(prefix='lds-masks-')
+    try:
+        result = mask_images(todo, prompt, threshold=threshold, out_dir=work_dir,
+                             on_progress=on_progress, should_stop=should_stop)
+        results = result.get('results') or {}
+        cancelled = bool(result.get('cancelled'))
+        for path in todo:
+            info = results.get(path) or {}
+            state = info.get('state')
+            if state != 'ok':
+                out[path] = (None, 'no-match' if state == 'no_match'
+                             else (state or ('cancelled' if cancelled else 'failed')))
+                continue
+            if float(info.get('coverage') or 0.0) >= MAX_COVERAGE:
+                out[path] = (None, 'no-match')
+                continue
+            produced = os.path.join(
+                work_dir, os.path.splitext(os.path.basename(path))[0] + '.png')
+            if not os.path.isfile(produced):
+                out[path] = (None, 'failed')
+                continue
+            # Populate the same cache `mask_for` fills, so the two entry points
+            # share one store and a later single-image call is free.
+            target = cache_dir() / f'{keys[path]}.png'
+            tmp = target.with_suffix('.png.tmp')
+            shutil.copyfile(produced, tmp)
+            os.replace(tmp, target)
+            out[path] = (str(target), None)
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+    return out
+
+
 def env_python_default() -> str:
     """Where Setup builds the automask interpreter. Kept here so the service and
     the installer cannot disagree about it."""

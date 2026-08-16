@@ -126,7 +126,8 @@ def test_preview_writes_a_manifest_and_touches_no_pixels(app, tmp_path, monkeypa
     mask_file = tmp_path / 'mask.png'
     _FakeMask((2000, 3000), (800, 200, 500, 2000)).write(mask_file)
     monkeypatch.setattr(stb.auto_mask, 'is_available', lambda: True)
-    monkeypatch.setattr(stb.auto_mask, 'mask_for', lambda p, prompt: str(mask_file))
+    monkeypatch.setattr(stb.auto_mask, 'masks_for',
+                        lambda paths, prompt, **kw: {str(photo): (str(mask_file), None)})
 
     rows = [stb.PreviewRow(image_id=1, filename='a.png')]
     manifest = stb.build_preview(str(ds_dir), rows, progress=None)
@@ -142,11 +143,13 @@ def test_preview_records_the_skip_reason_instead_of_dropping_the_row(app, tmp_pa
     # wave only counted skips, so nobody could see WHICH images it passed over.
     ds_dir = tmp_path / 'ds'
     ds_dir.mkdir()
-    Image.new('RGB', (1000, 1000), 'white').save(ds_dir / 'b.png')
+    photo = ds_dir / 'b.png'
+    Image.new('RGB', (1000, 1000), 'white').save(photo)
     mask_file = tmp_path / 'mask2.png'
     _FakeMask((1000, 1000), (10, 10, 980, 980)).write(mask_file)
     monkeypatch.setattr(stb.auto_mask, 'is_available', lambda: True)
-    monkeypatch.setattr(stb.auto_mask, 'mask_for', lambda p, prompt: str(mask_file))
+    monkeypatch.setattr(stb.auto_mask, 'masks_for',
+                        lambda paths, prompt, **kw: {str(photo): (str(mask_file), None)})
 
     manifest = stb.build_preview(str(ds_dir), [stb.PreviewRow(2, 'b.png')], progress=None)
     assert manifest['items'][0]['skip'] == 'nothing-much-to-remove'
@@ -156,14 +159,106 @@ def test_preview_records_the_skip_reason_instead_of_dropping_the_row(app, tmp_pa
 def test_preview_records_a_mask_failure_as_its_own_reason(app, tmp_path, monkeypatch):
     ds_dir = tmp_path / 'ds'
     ds_dir.mkdir()
-    Image.new('RGB', (1000, 1000), 'white').save(ds_dir / 'c.png')
-
-    def _boom(path, prompt):
-        raise stb.auto_mask.NoMatch('no person here')
+    photo = ds_dir / 'c.png'
+    Image.new('RGB', (1000, 1000), 'white').save(photo)
 
     monkeypatch.setattr(stb.auto_mask, 'is_available', lambda: True)
-    monkeypatch.setattr(stb.auto_mask, 'mask_for', _boom)
+    monkeypatch.setattr(stb.auto_mask, 'masks_for',
+                        lambda paths, prompt, **kw: {str(photo): (None, 'no-match')})
 
     manifest = stb.build_preview(str(ds_dir), [stb.PreviewRow(3, 'c.png')], progress=None)
     assert manifest['items'][0]['skip'] == 'no-subject-found'
     assert manifest['items'][0]['frame'] is None
+
+
+def test_preview_records_an_engine_failure_as_failed_not_no_subject(app, tmp_path, monkeypatch):
+    # Finding 6: a 'no-match' is the honest "nothing there"; anything else
+    # coming back from masks_for is an engine problem and must say so.
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    photo = ds_dir / 'd.png'
+    Image.new('RGB', (1000, 1000), 'white').save(photo)
+
+    monkeypatch.setattr(stb.auto_mask, 'is_available', lambda: True)
+    monkeypatch.setattr(stb.auto_mask, 'masks_for',
+                        lambda paths, prompt, **kw: {str(photo): (None, 'boom')})
+
+    manifest = stb.build_preview(str(ds_dir), [stb.PreviewRow(4, 'd.png')], progress=None)
+    assert manifest['items'][0]['skip'] == 'failed'
+    assert manifest['items'][0]['frame'] is None
+
+
+# --- start_preview -----------------------------------------------------------
+
+from app.config import LOCAL_USER
+from app.models import FaceDatasetImage
+from app.services import dataset_activity as da
+from app.services import face_dataset_service as fds
+
+
+def _dataset_with_photos(app, count=1):
+    with app.app_context():
+        da.reset()
+        ds = fds.create_dataset(LOCAL_USER, 'Trim me', 'trim')
+        ds_dir = fds._dataset_path(ds.id)
+        os.makedirs(ds_dir, exist_ok=True)
+        ids = []
+        for i in range(count):
+            filename = f'p{i}.png'
+            Image.new('RGB', (500, 500), 'white').save(os.path.join(ds_dir, filename))
+            img = FaceDatasetImage(dataset_id=ds.id, filename=filename,
+                                   source='import', status='keep')
+            fds.db.session.add(img)
+            fds.db.session.commit()
+            ids.append(img.id)
+        return ds.id, ids
+
+
+def test_start_preview_refuses_a_second_run(app, monkeypatch):
+    dataset_id, ids = _dataset_with_photos(app)
+    with app.app_context():
+        monkeypatch.setattr(stb.auto_mask, 'is_available', lambda: True)
+        token = da.begin(dataset_id, 'trim', total=1)
+        with pytest.raises(RuntimeError):
+            stb.start_preview(app, LOCAL_USER, dataset_id, ids)
+        da.end(token)
+        da.reset()
+
+
+def test_start_preview_refuses_an_unknown_dataset(app):
+    with app.app_context():
+        da.reset()
+        with pytest.raises(ValueError):
+            stb.start_preview(app, LOCAL_USER, 999999, [1])
+
+
+def test_start_preview_refuses_an_empty_selection(app, monkeypatch):
+    dataset_id, _ids = _dataset_with_photos(app)
+    with app.app_context():
+        monkeypatch.setattr(stb.auto_mask, 'is_available', lambda: True)
+        with pytest.raises(ValueError):
+            stb.start_preview(app, LOCAL_USER, dataset_id, [])
+
+
+def test_start_preview_refuses_when_masking_is_unavailable_without_starting_activity(app, monkeypatch):
+    dataset_id, ids = _dataset_with_photos(app)
+    with app.app_context():
+        monkeypatch.setattr(stb.auto_mask, 'is_available', lambda: False)
+        with pytest.raises(stb.auto_mask.AutoMaskUnavailable):
+            stb.start_preview(app, LOCAL_USER, dataset_id, ids)
+        assert da.get(dataset_id) is None, 'no activity token may be begun before the refusal'
+
+
+def test_start_preview_runs_inline_under_testing_and_leaves_a_readable_manifest(app, monkeypatch):
+    dataset_id, ids = _dataset_with_photos(app)
+    with app.app_context():
+        monkeypatch.setattr(stb.auto_mask, 'is_available', lambda: True)
+        monkeypatch.setattr(
+            stb.auto_mask, 'masks_for',
+            lambda paths, prompt, **kw: {p: (None, 'no-match') for p in paths})
+        result = stb.start_preview(app, LOCAL_USER, dataset_id, ids)
+        assert result == {'queued': len(ids)}
+        report = stb.preview_report(dataset_id)
+        assert report is not None
+        assert len(report['items']) == len(ids)
+        da.reset()
