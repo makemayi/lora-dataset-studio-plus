@@ -615,3 +615,145 @@ def test_a_retry_over_the_leftover_rows_keeps_the_first_pass_undo(app, tmp_path,
     assert sorted(e['filename'] for e in report['entries']) == ['a.png', 'b.png']
     assert report['counts']['trimmed'] == 2, 'the count describes the entries'
     assert stb.preview_report(28) is None, 'nothing left to apply'
+
+
+def test_a_manifest_row_with_no_image_size_and_no_skip_is_refused(app, tmp_path, monkeypatch):
+    # C2: the size guard that catches a file changed since the preview only
+    # fires `if item.get('image')` — a hand-edited manifest that drops the
+    # `image` key bypassed it entirely and cropped blind. `build_preview`
+    # never writes a row like this; only hand-editing does, and the module
+    # already hardens against that everywhere else (`_row_id`, `_read_json`).
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    Image.new('RGB', (2000, 3000), 'white').save(ds_dir / 'a.png')
+    _seed_preview(ds_dir, 32, [
+        {'image_id': 1, 'filename': 'a.png',
+         'frame': [500, 100, 900, 1600], 'out': [576, 1024], 'skip': None},
+    ], monkeypatch)
+
+    counts = stb.apply_preview(1, 32, [1])
+    assert counts == {'trimmed': 0, 'refused': 1, 'failed': 0}
+    with Image.open(ds_dir / 'a.png') as im:
+        assert im.size == (2000, 3000), 'a row with no recorded size must not be cropped'
+
+
+def test_a_dispose_write_failure_never_escapes_apply_and_still_frees_the_claim(
+        app, tmp_path, monkeypatch, caplog):
+    # Critical: `_dispose()`'s own `_record()`/`_write_json` calls were
+    # unprotected. A persistent disk-full (or a manifest locked by the same
+    # antivirus-scan class of failure `trash.py` already documents as
+    # `TrashLockError`) escaping there used to escape `apply_preview` entirely:
+    # the claim was never removed (so the preview stops being readable under
+    # its own name — the opposite of what `_dispose` promises) and an original
+    # already trashed earlier in the same loop got no undo entry naming it.
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    Image.new('RGB', (2000, 3000), 'white').save(ds_dir / 'a.png')
+    _seed_preview(ds_dir, 33, [
+        {'image_id': 1, 'filename': 'a.png', 'image': [2000, 3000],
+         'frame': [500, 100, 900, 1600], 'out': [576, 1024], 'skip': None},
+    ], monkeypatch)
+    monkeypatch.setattr(stb.trash, 'send_to_trash', _real_trash(tmp_path))
+
+    # Let the in-loop `_record()` (right after the crop) succeed as normal, but
+    # fail the SECOND write to trim-undo.json — `_dispose()`'s own final flush —
+    # to isolate the exact failure point this finding is about.
+    real_write_json = stb._write_json
+    undo_path = stb._undo_path(33)
+    calls = {'n': 0}
+
+    def _flaky(path, payload):
+        if path == undo_path:
+            calls['n'] += 1
+            if calls['n'] > 1:
+                raise OSError('disk full')
+        return real_write_json(path, payload)
+
+    monkeypatch.setattr(stb, '_write_json', _flaky)
+
+    with caplog.at_level('ERROR'):
+        counts = stb.apply_preview(1, 33, [1])   # must not raise
+
+    assert counts['trimmed'] == 1, 'the crop itself already succeeded before the flush failed'
+    claim = stb._preview_path(33) + '.applying'
+    assert not os.path.exists(claim), 'the claim must never be left stranded'
+    assert 'could not persist the undo/preview state' in caplog.text
+    assert 'dataset 33' in caplog.text or '33' in caplog.text
+    assert '[1]' in caplog.text, 'the log must name the image ids at risk'
+
+
+def test_a_fresh_preview_after_a_partial_apply_drops_the_earlier_undo_entry(
+        app, tmp_path, monkeypatch):
+    # Sequence 3 (deliberate — "undo is one batch deep", see `trim_report`):
+    # apply(A, B) where A succeeds and B fails, then a genuinely FRESH preview
+    # (no `batch` key — a brand new masking run, not the leftover-rows retry
+    # the other test covers) is applied for B. The fresh manifest mints a new
+    # batch id, so `entries` starts empty and B's record OVERWRITES
+    # trim-undo.json: A's original is still safely in Trash, but nothing in
+    # the app names it any more. Do NOT "fix" this by accident — it is the
+    # documented one-batch-deep limitation, not a bug.
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    Image.new('RGB', (2000, 3000), 'white').save(ds_dir / 'a.png')
+    _seed_preview(ds_dir, 34, [
+        {'image_id': 1, 'filename': 'a.png', 'image': [2000, 3000],
+         'frame': [500, 100, 900, 1600], 'out': [576, 1024], 'skip': None},
+        {'image_id': 2, 'filename': 'missing.png', 'image': [2000, 3000],
+         'frame': [500, 100, 900, 1600], 'out': [576, 1024], 'skip': None},
+    ], monkeypatch)
+    monkeypatch.setattr(stb.trash, 'send_to_trash', _real_trash(tmp_path))
+
+    counts = stb.apply_preview(1, 34, [1, 2])
+    assert counts == {'trimmed': 1, 'refused': 0, 'failed': 1}
+    first_pass_entries = stb.trim_report(34)['entries']
+    assert [e['image_id'] for e in first_pass_entries] == [1]
+
+    # A genuinely fresh preview for image 2 — a brand new masking run, no
+    # `batch` stamp — as opposed to the leftover rows an ordinary retry reuses.
+    Image.new('RGB', (2000, 3000), 'white').save(ds_dir / 'missing.png')
+    stb._write_json(stb._preview_path(34), {'items': [
+        {'image_id': 2, 'filename': 'missing.png', 'image': [2000, 3000],
+         'frame': [500, 100, 900, 1600], 'out': [576, 1024], 'skip': None},
+    ]})
+
+    assert stb.apply_preview(1, 34, [2])['trimmed'] == 1
+    report = stb.trim_report(34)
+    assert [e['image_id'] for e in report['entries']] == [2], \
+        'a fresh batch overwrites the undo — A stays trashed but no longer named'
+
+
+def test_a_crop_on_an_already_cropped_photo_undoes_only_to_the_last_crop(
+        app, tmp_path, monkeypatch):
+    # Sequence 4 (deliberate — ordinary chained-edit undo semantics):
+    # apply(A, B) both succeed, then a fresh preview crops A again. The new
+    # undo entry must name whatever stood at the path immediately before THIS
+    # batch — the first crop, not the untouched original — because that is
+    # what this batch actually replaced. Undo only ever reverses the last edit.
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    Image.new('RGB', (2000, 3000), 'white').save(ds_dir / 'a.png')
+    Image.new('RGB', (2000, 3000), 'white').save(ds_dir / 'b.png')
+    _seed_preview(ds_dir, 35, [
+        {'image_id': 1, 'filename': 'a.png', 'image': [2000, 3000],
+         'frame': [500, 100, 900, 1600], 'out': [576, 1024], 'skip': None},
+        {'image_id': 2, 'filename': 'b.png', 'image': [2000, 3000],
+         'frame': [500, 100, 900, 1600], 'out': [576, 1024], 'skip': None},
+    ], monkeypatch)
+    monkeypatch.setattr(stb.trash, 'send_to_trash', _real_trash(tmp_path))
+
+    assert stb.apply_preview(1, 35, [1, 2]) == {'trimmed': 2, 'refused': 0, 'failed': 0}
+    first_crop_bytes = (ds_dir / 'a.png').read_bytes()
+
+    # A fresh preview (a new masking run measured against the now-cropped a.png).
+    stb._write_json(stb._preview_path(35), {'items': [
+        {'image_id': 1, 'filename': 'a.png', 'image': [576, 1024],
+         'frame': [50, 50, 400, 800], 'out': [400, 800], 'skip': None},
+    ]})
+
+    assert stb.apply_preview(1, 35, [1])['trimmed'] == 1
+    report = stb.trim_report(35)
+    assert [e['image_id'] for e in report['entries']] == [1]
+    trashed_path = report['entries'][0]['trashed']
+    with open(trashed_path, 'rb') as fh:
+        assert fh.read() == first_crop_bytes, \
+            'undo must restore the LAST crop, not the untouched original'

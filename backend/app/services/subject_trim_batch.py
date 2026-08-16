@@ -297,7 +297,13 @@ def apply_preview(user_id, dataset_id, image_ids):
     The preview is CLAIMED for the duration and handed back holding whatever
     was not trimmed, so two overlapping applies cannot both act on the same
     rows and a pass in which most rows failed does not cost a masking run.
-    Raises ValueError when there is no preview to claim.
+
+    Registers on `dataset_activity` under the same TRIM_KINDS `start_preview`
+    uses, so a fresh preview build or a whole-batch restore cannot run
+    concurrently with this call and step on `trim-undo.json` or publish a
+    preview this call's `_dispose()` is about to overwrite. Raises ValueError
+    when there is no preview to claim, RuntimeError (409) when another trim
+    operation is already running.
     """
     ds = get_dataset(user_id, dataset_id)
     if not ds:
@@ -305,165 +311,203 @@ def apply_preview(user_id, dataset_id, image_ids):
     # The caller's own input is parsed BEFORE the claim below. Anything that
     # can be refused without touching disk state should be.
     wanted = {int(i) for i in (image_ids or [])}
-    # CLAIM the manifest before reading a single row. `apply_preview` has no
-    # activity guard, so a double-clicked Apply or a retried POST used to run
-    # twice over the same rows: A trashes the original and writes crop₁, B
-    # trashes CROP₁ and writes crop₂, and the undo pointer ends up naming the
-    # intermediate while the true original sits in a timestamped Trash folder
-    # nothing references. `os.replace` is atomic on both platforms, so exactly
-    # one of the two gets the rows and the loser is told there is no preview.
-    claim = _preview_path(dataset_id) + '.applying'
+    if dataset_activity.running(dataset_id, TRIM_KINDS):
+        raise RuntimeError('a trim pass is already running on this dataset')
+    token = dataset_activity.begin(dataset_id, 'trim', total=len(wanted),
+                                    detail=f'Applying {len(wanted)} crop(s)…')
     try:
-        os.replace(_preview_path(dataset_id), claim)
-    except OSError:
-        raise ValueError('no crop preview to apply — run the preview first')
-    manifest = _read_json(claim)
-    items = (manifest or {}).get('items') or []
-    if not items:
-        # Nothing to apply — but the claim must not swallow what the review
-        # screen is still showing (a failed preview keeps an `error` manifest).
+        # CLAIM the manifest before reading a single row. The dataset_activity
+        # guard above is cross-OPERATION (it stops a fresh start_preview or a
+        # restore racing an in-flight apply) but it is not atomic between two
+        # near-simultaneous applies of its own kind — `running()` then `begin()`
+        # is a check-then-act, and both could pass it before either finishes.
+        # Without this claim a double-clicked Apply or a retried POST used to
+        # run twice over the same rows: A trashes the original and writes
+        # crop₁, B trashes CROP₁ and writes crop₂, and the undo pointer ends
+        # up naming the intermediate while the true original sits in a
+        # timestamped Trash folder nothing references. `os.replace` is atomic
+        # on both platforms, so exactly one of the two gets the rows and the
+        # loser is told there is no preview.
+        claim = _preview_path(dataset_id) + '.applying'
         try:
-            os.replace(claim, _preview_path(dataset_id))
+            os.replace(_preview_path(dataset_id), claim)
         except OSError:
-            logger.exception('subject trim: could not release the preview claim')
-        raise ValueError('no crop preview to apply — run the preview first')
-    by_id = {_row_id(it): it for it in items if _row_id(it) is not None}
-    ds_dir = _dataset_path(dataset_id)
-    counts = {'trimmed': 0, 'refused': 0, 'failed': 0}
-    # A retry over what a partial apply left behind CONTINUES the same undo
-    # batch. The preview now keeps its untrimmed rows (below), so a second
-    # Apply is an ordinary thing to click — and without this stamp it would
-    # write a fresh undo manifest over the first pass's, leaving those
-    # originals in Trash with nothing in the app pointing at them. A preview
-    # built by `build_preview` carries no stamp, so it opens a new batch and
-    # the undo stays one batch deep, exactly as `trim_report` describes.
-    batch = manifest.get('batch') or uuid.uuid4().hex
-    previous = trim_report(dataset_id) or {}
-    carried = previous.get('entries')
-    entries = (list(carried)
-               if previous.get('batch') == batch and isinstance(carried, list)
-               else [])
-
-    def _record():
-        # The undo manifest lands after EVERY image, not once at the end. The
-        # originals are already in Trash by then; a restart or an OOM halfway
-        # through a lossless batch used to leave them there with no manifest at
-        # all, and the trash folders are named by timestamp, not by filename,
-        # so putting them back meant opening every one by hand. One small JSON
-        # write per image is noise next to a LANCZOS resize plus that encode.
-        # `counts` is this CALL's tally; the manifest's `trimmed` describes the
-        # manifest, so it counts the entries in it — the two differ only after
-        # a continuation, and neither may ever disagree with what it names.
-        _write_json(_undo_path(dataset_id),
-                    {'batch': batch, 'entries': entries,
-                     'counts': dict(counts, trimmed=len(entries))})
-
-    def _dispose():
-        """Hand the preview back and drop the claim. Runs on EVERY exit.
-
-        The preview keeps every row that was NOT trimmed instead of being
-        binned wholesale: confirming 40 rows and having 1 succeed used to throw
-        away a manifest that cost a full 3.4 GB-checkpoint masking run. It also
-        closes the retry hole from the other side — a second Apply structurally
-        cannot re-crop a row that is no longer in the preview. And because it
-        is a `finally`, an unexpected escape leaves the preview readable under
-        its own name rather than stranded under the claim, minus whatever the
-        batch already did.
-        """
-        if entries:
-            _record()           # once more, with the final counts
-        done = {e.get('image_id') for e in entries}
-        remaining = [it for it in items if _row_id(it) not in done]
-        if remaining:
-            _write_json(_preview_path(dataset_id),
-                        dict(manifest, items=remaining, batch=batch))
-        try:
-            os.remove(claim)
-        except OSError:
-            pass
-
-    # Sorted, not set order: the undo manifest is a record of what happened to
-    # a user's files, and a record whose order changes run to run is one nobody
-    # can diff against the screen they clicked.
-    try:
-        for image_id in sorted(wanted):
-            item = by_id.get(image_id)
-            if not item or item.get('skip') or not item.get('frame'):
-                counts['refused'] += 1
-                continue
+            raise ValueError('no crop preview to apply — run the preview first')
+        manifest = _read_json(claim)
+        items = (manifest or {}).get('items') or []
+        if not items:
+            # Nothing to apply — but the claim must not swallow what the review
+            # screen is still showing (a failed preview keeps an `error` manifest).
             try:
-                # Inside the try, all of it. Unpacking a frame with the wrong arity
-                # or a non-numeric value used to raise straight out of the loop —
-                # after the previous images had already been trashed. The manifest
-                # is server-written today, but it is disk state that survives
-                # upgrades and can be hand-edited. `basename` for the same reason:
-                # a `..` component would otherwise aim send_to_trash at a file
-                # outside the dataset folder.
-                filename = os.path.basename(item['filename'])
-                path = os.path.join(ds_dir, filename)
-                fx, fy, fw, fh = (int(v) for v in item['frame'])
-                with Image.open(path) as opened:
-                    # The frame describes the picture as it was MEASURED. Anything
-                    # that rewrites the same file in between — mirror, rotate, a
-                    # manual crop, a watermark inpaint — leaves coordinates that no
-                    # longer describe it, and the clamp below would turn that into
-                    # a plausible-looking wrong crop instead of a refusal.
-                    if item.get('image') and list(opened.size) != list(item['image']):
-                        raise ValueError(
-                            f'{filename} changed since the crop was measured')
-                    # The file keeps its own format — a `.png` must not come back
-                    # holding WEBP bytes — and its colour profile.
-                    fmt = image_encoding.format_for_path(path, opened)
-                    opened.load()
-                    icc = _valid_icc_profile(opened.info.get('icc_profile'))
-                    # The frame is in RAW RASTER space: the mask children
-                    # (infer/sam3_mask_infer.py, infer/mask_infer.py) open the file
-                    # and convert, they never exif_transpose. Cutting the raw
-                    # buffer and THEN baking the orientation into the cut is the
-                    # same picture — `Image.crop` carries `info['exif']` through,
-                    # so the two commute — and it is the only order that lands on
-                    # the region the mask actually measured. Cropping the oriented
-                    # image instead put an ordinary portrait phone photo
-                    # (orientation 6, raw 4:3 landscape) somewhere else entirely,
-                    # and the clamp absorbed the overflow so nothing raised.
-                    box = (max(0, fx), max(0, fy),
-                           min(opened.width, fx + fw), min(opened.height, fy + fh))
-                    if box[2] <= box[0] or box[3] <= box[1]:
-                        raise ValueError(f'empty crop box {item["frame"]}')
-                    oriented = ImageOps.exif_transpose(opened.crop(box))
-                    # Narrow the mode BEFORE resampling: Pillow silently drops to
-                    # nearest-neighbour on paletted images.
-                    crop = oriented.convert(image_encoding.resample_mode(oriented))
-                out_w, out_h = output_size(crop.width, crop.height, LONG_EDGE)
-                if (out_w, out_h) != crop.size:
-                    crop = crop.resize((out_w, out_h), Image.LANCZOS)
-                buf = io.BytesIO()
-                image_encoding.save_edit(crop, buf, fmt, image_encoding.LOSSLESS,
-                                         icc_profile=icc)
-                # ENCODE, then move the original, then publish. Everything that can
-                # fail for a reason other than the disk has already failed by this
-                # line, with the original still in its folder; and the entry is on
-                # DISK before the write, so even a write that dies mid-way leaves
-                # an undo that can put the original back.
-                trashed = trash.send_to_trash(
-                    path, context=f'dataset-{dataset_id}-trim-{image_id}')
-                entries[:] = [e for e in entries if e.get('image_id') != image_id]
-                entries.append({'image_id': image_id, 'filename': filename,
-                                'trashed': trashed})
-                # Counted here, with the entry, so `trimmed` and the entry list can
-                # never disagree. A publish that fails after this point is logged
-                # and stays counted: its original is in Trash with an undo entry
-                # naming it, which is the state the count has to describe.
-                counts['trimmed'] += 1
-                _record()
-                write_image_atomic(path, buf.getvalue())
+                os.replace(claim, _preview_path(dataset_id))
+            except OSError:
+                logger.exception('subject trim: could not release the preview claim')
+            raise ValueError('no crop preview to apply — run the preview first')
+        by_id = {_row_id(it): it for it in items if _row_id(it) is not None}
+        ds_dir = _dataset_path(dataset_id)
+        counts = {'trimmed': 0, 'refused': 0, 'failed': 0}
+        # A retry over what a partial apply left behind CONTINUES the same undo
+        # batch. The preview now keeps its untrimmed rows (below), so a second
+        # Apply is an ordinary thing to click — and without this stamp it would
+        # write a fresh undo manifest over the first pass's, leaving those
+        # originals in Trash with nothing in the app pointing at them. A preview
+        # built by `build_preview` carries no stamp, so it opens a new batch and
+        # the undo stays one batch deep, exactly as `trim_report` describes.
+        batch = manifest.get('batch') or uuid.uuid4().hex
+        previous = trim_report(dataset_id) or {}
+        carried = previous.get('entries')
+        entries = (list(carried)
+                   if previous.get('batch') == batch and isinstance(carried, list)
+                   else [])
+
+        def _record():
+            # The undo manifest lands after EVERY image, not once at the end. The
+            # originals are already in Trash by then; a restart or an OOM halfway
+            # through a lossless batch used to leave them there with no manifest at
+            # all, and the trash folders are named by timestamp, not by filename,
+            # so putting them back meant opening every one by hand. One small JSON
+            # write per image is noise next to a LANCZOS resize plus that encode.
+            # `counts` is this CALL's tally; the manifest's `trimmed` describes the
+            # manifest, so it counts the entries in it — the two differ only after
+            # a continuation, and neither may ever disagree with what it names.
+            _write_json(_undo_path(dataset_id),
+                        {'batch': batch, 'entries': entries,
+                         'counts': dict(counts, trimmed=len(entries))})
+
+        def _dispose():
+            """Hand the preview back and drop the claim. Runs on EVERY exit.
+
+            The preview keeps every row that was NOT trimmed instead of being
+            binned wholesale: confirming 40 rows and having 1 succeed used to throw
+            away a manifest that cost a full 3.4 GB-checkpoint masking run. It also
+            closes the retry hole from the other side — a second Apply structurally
+            cannot re-crop a row that is no longer in the preview.
+
+            The manifest writes below can themselves fail — a persistent disk-full,
+            or a manifest locked by the same antivirus-scan class of failure
+            `trash.py` already documents as `TrashLockError` — and that failure must
+            never be allowed to suppress the claim cleanup in the `finally` below.
+            An escaped exception here used to leave the claim stuck (so the preview
+            is not readable under its own name, the opposite of what this used to
+            promise) AND leave any originals already trashed earlier in this same
+            loop with no undo entry naming them — recoverable only by an operator
+            opening every `data/trash/dataset-<id>-trim-<image_id>-*/` directory by
+            hand. So this is the one failure that is always logged, by image id,
+            even though nothing here may raise.
+            """
+            try:
+                if entries:
+                    _record()           # once more, with the final counts
+                done = {e.get('image_id') for e in entries}
+                remaining = [it for it in items if _row_id(it) not in done]
+                if remaining:
+                    _write_json(_preview_path(dataset_id),
+                                dict(manifest, items=remaining, batch=batch))
             except Exception:                       # noqa: BLE001
-                logger.exception('subject trim: image %s failed', image_id)
-                if not (entries and entries[-1].get('image_id') == image_id):
-                    counts['failed'] += 1
+                logger.exception(
+                    'subject trim: could not persist the undo/preview state for '
+                    'dataset %s (batch %s); trashed originals for image_ids %s '
+                    'may have no undo entry', dataset_id, batch,
+                    [e.get('image_id') for e in entries])
+            finally:
+                try:
+                    os.remove(claim)
+                except OSError:
+                    pass
+
+        # Sorted, not set order: the undo manifest is a record of what happened to
+        # a user's files, and a record whose order changes run to run is one nobody
+        # can diff against the screen they clicked.
+        try:
+            for image_id in sorted(wanted):
+                item = by_id.get(image_id)
+                # A row with no `image` recorded and no `skip` reason is not one
+                # `build_preview` ever writes — only a hand-edited manifest can
+                # produce it — and it must be REFUSED here, not cropped blind: the
+                # size-guard below only fires `if item.get('image')`, so dropping
+                # that key was otherwise a way to bypass it entirely.
+                if (not item or item.get('skip') or not item.get('frame')
+                        or not item.get('image')):
+                    counts['refused'] += 1
+                    continue
+                try:
+                    # Inside the try, all of it. Unpacking a frame with the wrong arity
+                    # or a non-numeric value used to raise straight out of the loop —
+                    # after the previous images had already been trashed. The manifest
+                    # is server-written today, but it is disk state that survives
+                    # upgrades and can be hand-edited. `basename` for the same reason:
+                    # a `..` component would otherwise aim send_to_trash at a file
+                    # outside the dataset folder.
+                    filename = os.path.basename(item['filename'])
+                    path = os.path.join(ds_dir, filename)
+                    fx, fy, fw, fh = (int(v) for v in item['frame'])
+                    with Image.open(path) as opened:
+                        # The frame describes the picture as it was MEASURED. Anything
+                        # that rewrites the same file in between — mirror, rotate, a
+                        # manual crop, a watermark inpaint — leaves coordinates that no
+                        # longer describe it, and the clamp below would turn that into
+                        # a plausible-looking wrong crop instead of a refusal. `item['image']`
+                        # is guaranteed here — the refusal check above already turned a row
+                        # missing it away before this line is ever reached.
+                        if list(opened.size) != list(item['image']):
+                            raise ValueError(
+                                f'{filename} changed since the crop was measured')
+                        # The file keeps its own format — a `.png` must not come back
+                        # holding WEBP bytes — and its colour profile.
+                        fmt = image_encoding.format_for_path(path, opened)
+                        opened.load()
+                        icc = _valid_icc_profile(opened.info.get('icc_profile'))
+                        # The frame is in RAW RASTER space: the mask children
+                        # (infer/sam3_mask_infer.py, infer/mask_infer.py) open the file
+                        # and convert, they never exif_transpose. Cutting the raw
+                        # buffer and THEN baking the orientation into the cut is the
+                        # same picture — `Image.crop` carries `info['exif']` through,
+                        # so the two commute — and it is the only order that lands on
+                        # the region the mask actually measured. Cropping the oriented
+                        # image instead put an ordinary portrait phone photo
+                        # (orientation 6, raw 4:3 landscape) somewhere else entirely,
+                        # and the clamp absorbed the overflow so nothing raised.
+                        box = (max(0, fx), max(0, fy),
+                               min(opened.width, fx + fw), min(opened.height, fy + fh))
+                        if box[2] <= box[0] or box[3] <= box[1]:
+                            raise ValueError(f'empty crop box {item["frame"]}')
+                        oriented = ImageOps.exif_transpose(opened.crop(box))
+                        # Narrow the mode BEFORE resampling: Pillow silently drops to
+                        # nearest-neighbour on paletted images.
+                        crop = oriented.convert(image_encoding.resample_mode(oriented))
+                    out_w, out_h = output_size(crop.width, crop.height, LONG_EDGE)
+                    if (out_w, out_h) != crop.size:
+                        crop = crop.resize((out_w, out_h), Image.LANCZOS)
+                    buf = io.BytesIO()
+                    image_encoding.save_edit(crop, buf, fmt, image_encoding.LOSSLESS,
+                                             icc_profile=icc)
+                    # ENCODE, then move the original, then publish. Everything that can
+                    # fail for a reason other than the disk has already failed by this
+                    # line, with the original still in its folder; and the entry is on
+                    # DISK before the write, so even a write that dies mid-way leaves
+                    # an undo that can put the original back.
+                    trashed = trash.send_to_trash(
+                        path, context=f'dataset-{dataset_id}-trim-{image_id}')
+                    entries[:] = [e for e in entries if e.get('image_id') != image_id]
+                    entries.append({'image_id': image_id, 'filename': filename,
+                                    'trashed': trashed})
+                    # Counted here, with the entry, so `trimmed` and the entry list can
+                    # never disagree. A publish that fails after this point is logged
+                    # and stays counted: its original is in Trash with an undo entry
+                    # naming it, which is the state the count has to describe.
+                    counts['trimmed'] += 1
+                    _record()
+                    write_image_atomic(path, buf.getvalue())
+                except Exception:                       # noqa: BLE001
+                    logger.exception('subject trim: image %s failed', image_id)
+                    if not (entries and entries[-1].get('image_id') == image_id):
+                        counts['failed'] += 1
+        finally:
+            _dispose()
+        return counts
     finally:
-        _dispose()
-    return counts
+        dataset_activity.end(token)
+        dataset_activity.clear_cancel(dataset_id, TRIM_KINDS)
 
 
 def restore_trim_batch(user_id, dataset_id):
@@ -483,6 +527,12 @@ def restore_trim_batch(user_id, dataset_id):
     rewritten with the survivors. Deleting the manifest in that case is how the
     only remaining copy of a photo stops being reachable from the app; a retry
     is all that is needed instead.
+
+    Registers on `dataset_activity` under the same TRIM_KINDS `apply_preview`
+    and `start_preview` use, once there is actually something to restore —
+    nothing stopped this from racing an in-flight apply over `trim-undo.json`
+    otherwise. Raises RuntimeError (409) when another trim operation is
+    already running.
     """
     ds = get_dataset(user_id, dataset_id)
     if not ds:
@@ -490,48 +540,59 @@ def restore_trim_batch(user_id, dataset_id):
     manifest = trim_report(dataset_id)
     if not manifest or not manifest.get('entries'):
         return {'restored': 0, 'gone': 0, 'failed': 0}
-    ds_dir = _dataset_path(dataset_id)
-    restored = gone = failed = 0
-    survivors = []
-    for e in manifest['entries']:
-        original = e.get('trashed')
-        # basename, as on the way in: the destination of an undo is a file in
-        # this dataset's folder and nowhere else.
-        filename = os.path.basename(e.get('filename') or '')
-        target = os.path.join(ds_dir, filename) if filename else None
-        # No filename is no destination, so such an entry counts as gone rather
-        # than being retried forever: the copy in Trash is the only one left,
-        # and deleting it is the one outcome an undo may never produce.
-        if not (original and target and os.path.exists(original)):
-            gone += 1
-            continue
-        try:
-            if os.path.exists(target):
-                trash.send_to_trash(
-                    target, context=f'dataset-{dataset_id}-trim-restore')
-            # shutil.move, not os.replace: the dataset folder is relocatable
-            # (`paths.dataset_images_root`), so it and the trash can live on
-            # different drives — where a rename raises and an original
-            # sitting safely in Trash would be reported gone.
-            shutil.move(original, target)
-            restored += 1
-        except Exception:                       # noqa: BLE001
-            # Only the basename: a log line naming a user's machine layout is
-            # one they cannot paste into a bug report.
-            logger.exception('subject trim restore: %s', filename)
-            failed += 1
-            survivors.append(e)
-    if survivors:
-        # `dict(manifest, ...)`, not a fresh one: the batch stamp has to survive
-        # a partial restore, or a later apply on the same batch would count this
-        # manifest as somebody else's and write over the entries still in it.
-        _write_json(_undo_path(dataset_id),
-                    dict(manifest, entries=survivors,
-                         counts=dict(manifest.get('counts') or {},
-                                     trimmed=len(survivors))))
-    else:
-        try:
-            os.remove(_undo_path(dataset_id))
-        except OSError:
-            pass
-    return {'restored': restored, 'gone': gone, 'failed': failed}
+    # Same TRIM_KINDS guard as apply_preview/start_preview: nothing else
+    # stopped this whole-batch restore from rewriting trim-undo.json while an
+    # apply was still appending to it, or from racing a fresh start_preview.
+    if dataset_activity.running(dataset_id, TRIM_KINDS):
+        raise RuntimeError('a trim pass is already running on this dataset')
+    token = dataset_activity.begin(dataset_id, 'trim', total=len(manifest['entries']),
+                                    detail='Restoring the originals…')
+    try:
+        ds_dir = _dataset_path(dataset_id)
+        restored = gone = failed = 0
+        survivors = []
+        for e in manifest['entries']:
+            original = e.get('trashed')
+            # basename, as on the way in: the destination of an undo is a file in
+            # this dataset's folder and nowhere else.
+            filename = os.path.basename(e.get('filename') or '')
+            target = os.path.join(ds_dir, filename) if filename else None
+            # No filename is no destination, so such an entry counts as gone rather
+            # than being retried forever: the copy in Trash is the only one left,
+            # and deleting it is the one outcome an undo may never produce.
+            if not (original and target and os.path.exists(original)):
+                gone += 1
+                continue
+            try:
+                if os.path.exists(target):
+                    trash.send_to_trash(
+                        target, context=f'dataset-{dataset_id}-trim-restore')
+                # shutil.move, not os.replace: the dataset folder is relocatable
+                # (`paths.dataset_images_root`), so it and the trash can live on
+                # different drives — where a rename raises and an original
+                # sitting safely in Trash would be reported gone.
+                shutil.move(original, target)
+                restored += 1
+            except Exception:                       # noqa: BLE001
+                # Only the basename: a log line naming a user's machine layout is
+                # one they cannot paste into a bug report.
+                logger.exception('subject trim restore: %s', filename)
+                failed += 1
+                survivors.append(e)
+        if survivors:
+            # `dict(manifest, ...)`, not a fresh one: the batch stamp has to survive
+            # a partial restore, or a later apply on the same batch would count this
+            # manifest as somebody else's and write over the entries still in it.
+            _write_json(_undo_path(dataset_id),
+                        dict(manifest, entries=survivors,
+                             counts=dict(manifest.get('counts') or {},
+                                         trimmed=len(survivors))))
+        else:
+            try:
+                os.remove(_undo_path(dataset_id))
+            except OSError:
+                pass
+        return {'restored': restored, 'gone': gone, 'failed': failed}
+    finally:
+        dataset_activity.end(token)
+        dataset_activity.clear_cancel(dataset_id, TRIM_KINDS)
