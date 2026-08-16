@@ -12,6 +12,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import KleinImproveNote from './KleinImproveNote';
 import { lightboxImproveButtons } from '../../utils/improveEngines';
 import { useCapabilities } from '../../context/CapabilitiesContext';
+import { UpscaleIcon } from '../common/icons.jsx';
 import {
   decideActionPlacement, rememberImageRatio, readImageRatio,
 } from './lightboxActionPlacement';
@@ -109,6 +110,7 @@ export default function DatasetLightbox({
   onMirror,
   onRotate,
   onImprove,
+  onSeedvr2Replace,
   busy = false,
   // The sentence a refused write shows (which pass holds this dataset, where it
   // is, what to do). Opening, zooming and comparing never consult it: they read
@@ -308,6 +310,21 @@ export default function DatasetLightbox({
     await onMirror(img.id);
   };
 
+  /* SeedVR2 upscale IN PLACE: the image OPEN HERE goes through the shipped
+     SeedVR2 workflow (2x) and the result replaces it — original kept for
+     undo, unlike the ✨ improve lane which creates a candidate. Shares the
+     `improving` stamp so the two never double-fire. */
+  const replaceInPlace = async (event) => {
+    event.stopPropagation();
+    if (!onSeedvr2Replace || busy) return;
+    patchImageState({ improving: true });
+    try {
+      await onSeedvr2Replace(img.id);
+    } finally {
+      patchImageState({ improving: false });
+    }
+  };
+
   // 🔄 Quarter turns (idea by 1Tomber, GitHub #17). `mirrorBusy` is the shared
   // "a pixel edit is running on this image" flag — both actions rewrite the same
   // file, so neither may start while the other is in flight.
@@ -503,6 +520,15 @@ export default function DatasetLightbox({
               <span aria-hidden="true">↻</span> Rotate right
             </button>
           </div>
+        )}
+        {onSeedvr2Replace && (
+          <button type="button" onClick={replaceInPlace} disabled={busy}
+            aria-busy={improvementActive}
+            title={refused || 'SeedVR2 upscale this image in place — the result replaces the tile (original kept for undo)'}
+            className="min-h-9 flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-45">
+            <UpscaleIcon className="h-3.5 w-3.5" />
+            <span>SeedVR2 2x</span>
+          </button>
         )}
         {improveButtons.map((btn) => (
           <Fragment key={btn.id}>

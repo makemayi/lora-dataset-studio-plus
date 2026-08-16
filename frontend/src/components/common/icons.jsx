@@ -335,6 +335,21 @@ export function FaceSwapIcon(props) {
   );
 }
 
+/* SeedVR2 in-place upscale: a magnifier over the picture (the restore looks
+   at the actual pixels), a spark inside the lens (the detail it recovers),
+   and the ↗ in its corner (the 2x). Designed for the tile toolbar, drawn in
+   the same stroke style as FaceSwapIcon. */
+export function UpscaleIcon(props) {
+  return (
+    <Glyph name="upscale" {...props}>
+      <circle cx="10.5" cy="11" r="6.2" />
+      <path d="M14.8 15.4 20.6 21.2" />
+      <path d="M8.3 10.2 10.6 12.4M10.6 12.4l2.3-2.2M10.6 12.4V9.9" />
+      <path d="M18.4 2.9h3.2M18.4 2.9l2.3 2.3M18.4 2.9l-2.3 2.3" />
+    </Glyph>
+  );
+}
+
 /**
  * The round icon-button shell, shared by every utility control in the header
  * (What's new, update check, the ? and gear menus, the mobile hamburger) and by

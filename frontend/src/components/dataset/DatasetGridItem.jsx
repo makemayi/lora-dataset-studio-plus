@@ -3,7 +3,7 @@ import { improvementBadge } from './improveCandidates.js';
 import { FLOAT_HOVER, GLASS_CAPSULE_DARK, ON_PHOTO_HOVER,
   TILE_SELECTED_GLOW, TILE_SHADOW, TILE_SURFACE } from '../common/surfaces.js';
 import { TrashIcon } from '../common/icons.jsx';
-import { FaceSwapIcon } from '../common/icons.jsx';
+import { FaceSwapIcon, UpscaleIcon } from '../common/icons.jsx';
 import { useEffect, useRef, useState } from 'react';
 import { displayLabel } from '../../utils/labels';
 // WHO wrote this tile's caption — the per-image half of the provenance the pass
@@ -114,6 +114,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
                                          busyReason = null,
                                           onScoreFace, scoreFaceBusy = false, faceScoringBusy = false, faceScoringBlocked = null,
                                           onRegenerate, onReimprove, onFaceSwap, onUndoFaceSwap, swapBusy = false, hasRef = false, onView, nonce = 0, faceThresholds,
+                                          onSeedvr2Replace,
                                           selected = false, onToggleSelect, tileSize = 'M',
                                           datasetKind = 'character', dualCaptions = false,
                                           improvementState = undefined }) {
@@ -399,6 +400,21 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
           {/* ↩ Undo a swap that already landed. Offered only while the server
               says the picture it replaced is still in the Trash, so the button
               never promises something emptying the Trash has taken away. */}
+          {url && onSeedvr2Replace && (
+            /* SeedVR2 upscale IN PLACE: the tile's current image goes through
+               the shipped SeedVR2 workflow (2x by default) and the result
+               REPLACES the tile — original kept for undo, same contract as the
+               face swap. Distinct from the ✨ improve lane, which creates a
+               candidate and never touches the source. */
+            <button type="button"
+              onClick={(e) => { e.stopPropagation(); onSeedvr2Replace(img.id); }}
+              disabled={busy}
+              title={refused || 'SeedVR2 upscale this image in place (2x — replaces the tile, original kept for undo)'}
+              aria-label={refused || 'SeedVR2 upscale this image in place (2x)'}
+              className={`grid min-h-5 min-w-5 place-items-center rounded-full ${ON_PHOTO_HOVER} text-white disabled:cursor-not-allowed disabled:opacity-45`}>
+              <UpscaleIcon className="h-3.5 w-3.5" />
+            </button>
+          )}
           {img.can_undo_swap && onUndoFaceSwap && (
             <button type="button"
               onClick={(e) => { e.stopPropagation(); onUndoFaceSwap(img.id); }}

@@ -1410,6 +1410,29 @@ export function useDataset() {
      swap replaced is in the Trash and the server moves it back. Shares the
      swapping ref-guard so a double click cannot race the restore against
      itself. */
+  const seedvr2ReplaceImage = useCallback(async (imageId) => {
+    if (swappingRef.current.has(imageId)) return { ok: false, error: 'already running' };
+    swappingRef.current.add(imageId);
+    setSwappingIds((previous) => new Set(previous).add(imageId));
+    try {
+      const d = await postJson(`/api/dataset/image/${imageId}/seedvr2-replace`, {});
+      if (d.ok) {
+        toast.success('SeedVR2 upscale started — the tile is replaced when it lands');
+        await refresh();
+        return { ok: true };
+      }
+      toast.error(d.error || 'Unexpected error');
+      return { ok: false, error: d.error };
+    } finally {
+      swappingRef.current.delete(imageId);
+      setSwappingIds((previous) => {
+        const next = new Set(previous);
+        next.delete(imageId);
+        return next;
+      });
+    }
+  }, [refresh, toast]);
+
   const undoFaceSwap = useCallback(async (imageId) => {
     if (swappingRef.current.has(imageId)) return { ok: false, error: 'busy' };
     swappingRef.current.add(imageId);
@@ -1856,6 +1879,7 @@ export function useDataset() {
           discardEditedReference, setDatasetTrainType, setDatasetFidelity, deleteImage,
           lockImage, batchImages, replaceCaptions, writeCaptionFiles, openDatasetFolder,
           cancelPending, cancelCaption, regenerate, faceSwapImage, undoFaceSwap, analyzeFaces, scoreFace,
+          seedvr2ReplaceImage,
           findWatermarks, cleanWatermarks, cleanWatermarkImages, restoreWatermarkImage,
           dismissWatermarks, saveWatermarkRegions, cancelWatermarkScan,
           purgeUnused, exportZip, exportBackup, exportZipFor, exportBackupFor, importBackup, importDatasetZip, importDatasetFolder,

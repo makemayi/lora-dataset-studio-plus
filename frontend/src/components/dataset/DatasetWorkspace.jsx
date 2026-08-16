@@ -1321,6 +1321,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   onScoreFace={ds.scoreFace} scoringFaceIds={ds.scoringFaceIds}
                   onRegenerate={(id, loraStrength, prompt, opts) => ds.regenerate(id, loraStrength, prompt, opts)}
                   onFaceSwap={ds.faceSwapImage} onUndoFaceSwap={ds.undoFaceSwap}
+                  onSeedvr2Replace={ds.seedvr2ReplaceImage}
                   swappingIds={ds.swappingIds}
                   hasRef={!!d.ref_filename}
                   onReimprove={ds.reimproveImage}
@@ -2256,6 +2257,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
           onImprove={canImproveViewImg
             ? ((imageId, engine) => ds.improveImage(imageId, { engine }))
             : undefined}
+          onSeedvr2Replace={canImproveViewImg ? ds.seedvr2ReplaceImage : undefined}
           /* ⟨ / ⟩ walk `gridImages` — the filtered, sorted list the grid shows,
              the SAME array it is handed below. Not `images` (the raw payload):
              ⟩ would then land on a picture the current filters hide, behind an
