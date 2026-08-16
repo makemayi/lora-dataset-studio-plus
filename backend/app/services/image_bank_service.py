@@ -9868,6 +9868,17 @@ def collect_into_bank(app, user_id, collector, url, *, bank_id=None, name=None) 
     target_id, target_name, folder = bank.id, bank.name, bank.source_path
 
     def _run(job):
+        try:
+            _collect(job)
+        except Exception:
+            # bank_jobs stores a crash in job['error'] and NOWHERE ELSE, and the
+            # job snapshot expires on a TTL. So the first failed run left an
+            # empty bank, no log line, and — by the time anyone looked — no job
+            # either. Whatever else happens, the reason lands in the log.
+            logger.exception('collector %r failed for bank %s', collector, target_id)
+            raise
+
+    def _collect(job):
         def _progress(done, total, detail):
             bank_jobs.progress(job, done=done or None, total=total or None,
                                detail=detail or None)
@@ -9875,15 +9886,38 @@ def collect_into_bank(app, user_id, collector, url, *, bank_id=None, name=None) 
             collector, url, on_progress=_progress)
         bank_jobs.progress(job, done=0, total=len(items),
                            detail=f'downloading {len(items)} image(s)…')
-        # The SAME import every other intake uses. `_bank_lease` is this job's
-        # own capability: without it the import would see a live job on this
-        # bank — its own — and refuse itself with BankJobBusy.
-        out = scrape_import_to_bank(
-            user_id, items, bank_id=target_id,
-            _bank_lease=_job_bank_capability(job), _created=created)
-        job['result'] = out
+
+        # IN BATCHES OF SCRAPE_IMPORT_MAX. The importer caps ONE call, and a
+        # collector walking a whole account routinely returns more: the first
+        # real run collected 79 and the single call was refused outright with
+        # "max 60 images per import" — inside a background job, where the
+        # ValueError became job['error'], expired with the job, and left an
+        # empty bank with nothing anywhere saying why. Every other intake
+        # already chunks (the paste panel in bankScrapeImport.js, the CLI in
+        # its own loop); this path simply had not.
+        totals = {'bank_id': target_id, 'name': target_name, 'created': created,
+                  'saved': 0, 'already_there': 0, 'added': 0, 'skipped': {}}
+        capability = _job_bank_capability(job)
+        for start in range(0, len(items), SCRAPE_IMPORT_MAX):
+            if bank_jobs.cancelled(job):
+                break
+            chunk = items[start:start + SCRAPE_IMPORT_MAX]
+            # The SAME import every other intake uses. `_bank_lease` is this
+            # job's own capability: without it the import would see a live job
+            # on this bank — its own — and refuse itself with BankJobBusy.
+            out = scrape_import_to_bank(
+                user_id, chunk, bank_id=target_id, _bank_lease=capability)
+            totals['saved'] += out.get('saved', 0)
+            totals['already_there'] += out.get('already_there', 0)
+            totals['added'] += out.get('added', 0)
+            for reason, n in (out.get('skipped') or {}).items():
+                totals['skipped'][reason] = totals['skipped'].get(reason, 0) + n
+            done = min(start + len(chunk), len(items))
+            bank_jobs.progress(job, done=done, total=len(items),
+                               detail=f'{totals["saved"]} of {len(items)} downloaded')
+        job['result'] = totals
         bank_jobs.progress(job, done=len(items), total=len(items),
-                           detail=f'{out.get("saved", 0)} downloaded')
+                           detail=f'{totals["saved"]} downloaded')
 
     try:
         job = bank_jobs.start(app, target_id, 'collect', _run)
