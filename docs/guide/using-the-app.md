@@ -572,6 +572,28 @@ touching the folder itself:
      lands on the same name instead of piling up copies; that is file identity,
      not a duplicate verdict (the bank's own passes own that word).
 
+   **Paste image links** sits at the bottom of the same panel, for galleries the
+   scanner cannot reach at all. Some sites draw their listings in JavaScript
+   behind a signed API: no server can enumerate them, and the image links only
+   exist in the clear inside a browser that is already logged in and already
+   looking at the page. For those, you collect the links yourself — by hand, or
+   with a snippet you run in your own browser — and drop the result here. One
+   URL per line, or JSON of the shape `{"items":[{"url","title"}]}`.
+
+   Three things it will not do, so you are not left waiting for them:
+
+   - **It does not crawl.** It imports exactly what you paste, once. It does not
+     follow an account, and it fetches nothing later.
+   - **It does not repair trimmed links.** Signed CDN links carry their
+     signature in the query string; cut it off and the server answers 403, so
+     paste them whole.
+   - **It does not silently skip your mistakes.** Duplicates and unusable lines
+     are counted under the box before you commit, and the same image arriving
+     under two different signatures counts once.
+
+   Everything after that is shared with a scan: the same destination, the same
+   batching, and the same "nothing is filtered on the way in" rule above.
+
    The rest of the funnel is unchanged: scan, cull, promote into a dataset.
 2. **🔎 Scan quality** — a background pass (CPU only, a few minutes even on
    thousands of images) scores every file: sharpness, noise, flat/empty

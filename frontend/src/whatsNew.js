@@ -50,6 +50,20 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-16-paste-links-into-a-bank',
+    date: '2026-08-16',
+    title: 'Bring images from sites the scanner cannot reach',
+    blurb: 'Some galleries cannot be scanned from here at all — they are drawn '
+      + 'by JavaScript behind a signed API, so the image links only exist inside '
+      + 'a browser that is already logged in and looking at them. 🕸 Scrape into '
+      + 'a bank now takes a paste: drop in a list of image links (one per line, '
+      + 'or JSON from a collector snippet) and they download into the bank like '
+      + 'any scan, batched, de-duplicated and with their signatures intact. It '
+      + 'imports exactly what you paste — it does not follow an account or fetch '
+      + 'more later.',
+    to: '/bank',
+  },
+  {
     id: '2026-08-16-klein-9b-improve',
     date: '2026-08-16',
     title: 'A third ✨ Upscale & improve engine, for frames a restore cannot save',
