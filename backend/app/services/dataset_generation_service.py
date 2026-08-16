@@ -390,6 +390,11 @@ def _improve_prompt() -> str:
 
 
 _IMPROVE_LABELS = {
+    # Reads "Klein 9B" rather than "Klein" on purpose: the entry below is a
+    # historical name that no longer describes what it runs (Krea 2 + SeedVR2),
+    # and two rows both saying "Klein upscale & improve" would be unreadable in
+    # a grid where the label IS how you tell the passes apart.
+    'klein_hq': 'Klein 9B upscale & improve',
     'klein': 'Klein upscale & improve',   # NEVER change: stored in user databases
     'seedvr2': 'SeedVR2 upscale',
 }
