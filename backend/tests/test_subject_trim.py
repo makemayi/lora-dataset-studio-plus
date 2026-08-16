@@ -288,3 +288,89 @@ def test_start_preview_runs_inline_under_testing_and_leaves_a_readable_manifest(
         assert report is not None
         assert len(report['items']) == len(ids)
         da.reset()
+
+
+# --- apply and undo --------------------------------------------------------
+
+def _seed_preview(ds_dir, dataset_id, items, monkeypatch):
+    # Both names were imported INTO subject_trim_batch, so patching the module
+    # attribute is what the code under test actually reads. `get_dataset` is
+    # stubbed because these tests are about crop mechanics, not ownership —
+    # ownership is the routes' concern and has its own tests.
+    monkeypatch.setattr(stb, '_dataset_path', lambda _id: str(ds_dir))
+    monkeypatch.setattr(stb, 'get_dataset', lambda user_id, dataset_id: object())
+    stb._write_json(stb._preview_path(dataset_id), {'items': items})
+
+
+def test_apply_crops_only_the_confirmed_rows(app, tmp_path, monkeypatch):
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    for name in ('a.png', 'b.png'):
+        Image.new('RGB', (2000, 3000), 'white').save(ds_dir / name)
+    _seed_preview(ds_dir, 7, [
+        {'image_id': 1, 'filename': 'a.png', 'image': [2000, 3000],
+         'frame': [500, 100, 900, 1600], 'out': [576, 1024], 'skip': None},
+        {'image_id': 2, 'filename': 'b.png', 'image': [2000, 3000],
+         'frame': [500, 100, 900, 1600], 'out': [576, 1024], 'skip': None},
+    ], monkeypatch)
+    monkeypatch.setattr(stb.trash, 'send_to_trash',
+                        lambda path, context='': str(tmp_path / os.path.basename(path)))
+
+    counts = stb.apply_preview(1, 7, [1])
+    assert counts['trimmed'] == 1
+    with Image.open(ds_dir / 'a.png') as im:
+        assert im.size == (576, 1024)
+    with Image.open(ds_dir / 'b.png') as im:
+        assert im.size == (2000, 3000), 'an unconfirmed row is untouched'
+
+
+def test_apply_refuses_a_row_the_manifest_marked_as_skipped(app, tmp_path, monkeypatch):
+    # The client sends ids, not coordinates, and a skipped row has no crop worth
+    # applying — accepting one would let a stale UI crop something the rule
+    # already rejected.
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    Image.new('RGB', (1000, 1000), 'white').save(ds_dir / 'c.png')
+    _seed_preview(ds_dir, 8, [
+        {'image_id': 5, 'filename': 'c.png', 'image': [1000, 1000],
+         'frame': [0, 0, 950, 950], 'out': [950, 950],
+         'skip': 'nothing-much-to-remove'},
+    ], monkeypatch)
+    counts = stb.apply_preview(1, 8, [5])
+    assert counts['trimmed'] == 0
+    assert counts['refused'] == 1
+
+
+def test_undo_restores_every_original_and_clears_the_manifest(app, tmp_path, monkeypatch):
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    trashed = tmp_path / 'trashed-a.png'
+    Image.new('RGB', (2000, 3000), 'white').save(trashed)
+    Image.new('RGB', (576, 1024), 'black').save(ds_dir / 'a.png')
+    monkeypatch.setattr(stb, '_dataset_path', lambda _id: str(ds_dir))
+    monkeypatch.setattr(stb, 'get_dataset', lambda user_id, dataset_id: object())
+    stb._write_json(stb._undo_path(9), {
+        'entries': [{'image_id': 1, 'filename': 'a.png', 'trashed': str(trashed)}],
+        'counts': {'trimmed': 1, 'refused': 0, 'failed': 0},
+    })
+    monkeypatch.setattr(stb.trash, 'send_to_trash',
+                        lambda path, context='': str(tmp_path / 'second.png'))
+
+    result = stb.restore_trim_batch(1, 9)
+    assert result == {'restored': 1, 'gone': 0}
+    with Image.open(ds_dir / 'a.png') as im:
+        assert im.size == (2000, 3000)
+    assert stb.trim_report(9) is None
+
+
+def test_undo_counts_a_missing_original_as_gone_rather_than_failing(app, tmp_path, monkeypatch):
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    monkeypatch.setattr(stb, '_dataset_path', lambda _id: str(ds_dir))
+    monkeypatch.setattr(stb, 'get_dataset', lambda user_id, dataset_id: object())
+    stb._write_json(stb._undo_path(10), {
+        'entries': [{'image_id': 1, 'filename': 'a.png',
+                     'trashed': str(tmp_path / 'never-existed.png')}],
+        'counts': {},
+    })
+    assert stb.restore_trim_batch(1, 10) == {'restored': 0, 'gone': 1}
