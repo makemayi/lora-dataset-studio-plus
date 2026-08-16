@@ -150,3 +150,20 @@ test('the caption capsule sits above the tick, never covering it', () => {
   assert.ok(tick >= 0 && caption >= 0, 'both the tick and the caption render')
   assert.match(html, /dataset-grid-item__caption[^"]*bottom-14/)
 })
+
+/* The bottom Keep/Reject row must never cover the selection checkbox again.
+   The row is z-20 and the checkbox z-10, both pinned to the bottom-left; when
+   they overlapped the row's green ✓ rendered ON TOP of the checkbox, which
+   looked like the checkbox was a green tick (reported 2026-08-16). The row now
+   starts at left-8, past the checkbox's left-1 + w-6 zone. */
+test('the bottom action row clears the selection checkbox zone', () => {
+  const html = render(DatasetGridItem, { img: IMG, datasetId: 3,
+    onStatus: () => {}, onCaption: () => {}, onCrop: () => {}, onDelete: () => {},
+    onView: () => {}, onToggleSelect: () => {}, onMirror: () => {},
+    onSeedvr2Replace: () => {} })
+  assert.match(html, /type="checkbox"[^>]*class="w-4 h-4 accent-indigo-500[^"]*"/)
+  // checkbox label zone: bottom-1 left-1
+  assert.match(html, /absolute bottom-1 left-1 z-10[^>]*Select for bulk actions/)
+  // the Keep/Reject row starts right of that zone
+  assert.match(html, /absolute bottom-2 left-8 right-2 z-20 flex gap-1\.5/)
+})

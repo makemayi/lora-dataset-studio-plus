@@ -530,12 +530,12 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
           className={`absolute bottom-9 left-2 z-20 max-w-[calc(100%_-_1rem)] ${GLASS_CAPSULE_DARK} px-1.5 py-0.5 text-[0.5625rem] leading-relaxed text-white/80`} />
         {/* Keep / reject — now ON the photo, above the caption capsule, flatter pills. */}
         {isRescueDerived ? (
-          <span className={`absolute inset-x-2 bottom-2 z-20 rounded-full ${GLASS_CAPSULE_DARK} px-2 py-1 text-center text-[0.625rem] text-white/90`}
+          <span className={`absolute bottom-2 left-8 right-2 z-20 rounded-full ${GLASS_CAPSULE_DARK} px-2 py-1 text-center text-[0.625rem] text-white/90`}
             title="This winner was chosen atomically with its provenance pair. Caption and crop remain available.">
             ✓ Chosen in Klein rescue review
           </span>
         ) : (
-          <div className="dataset-grid-item__actions absolute inset-x-2 bottom-2 z-20 flex gap-1.5">
+          <div className="dataset-grid-item__actions absolute bottom-2 left-8 right-2 z-20 flex gap-1.5">
             <button type="button" onClick={() => onStatus(img.id, img.status === 'keep' ? 'pending' : 'keep')}
               disabled={busy}
               title={refused || 'Keep'} aria-label={refused || 'Keep'}
