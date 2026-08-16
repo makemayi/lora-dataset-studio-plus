@@ -505,7 +505,10 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
         </select>
         <HelpText className="mt-1 text-xs text-content-muted">
           <span hidden={!isNewH3}>
-            MiniMax H3 (new) segments with ClothesSegment, from ComfyUI-RMBG.
+            MiniMax H3 (new) always masks in the app — this dial steers the OLD
+            graph only. The graph&apos;s own segmenter is SAM3, the same model the
+            app already runs, so that branch is dropped from every job instead
+            of asking you to install ComfyUI-SAM3 and a second checkpoint.
           </span>
           <span hidden={isNewH3}>
             MiniMax H3 (old) segments with PersonMaskUltra, from ComfyUI_LayerStyle.
@@ -585,13 +588,11 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
         />
         <HelpText className="mt-1 text-xs text-content-muted">
           <span hidden={!isNewH3}>
-            <strong>MiniMax H3 (new):</strong> this is the opacity of the blue
-            overlay, and it only does anything while that stage is on. What lies
-            underneath it is the grey mannequin the Klein pass left in place of
-            the head — the one thing telling H3 how big the head was — so 1.00
-            hides the size authority behind a flat marker. Around 0.4&ndash;0.75
-            keeps both: the blue says <em>here</em>, the mannequin showing
-            through says <em>this big, at this angle</em>.
+            <strong>MiniMax H3 (new):</strong> this does nothing on this engine.
+            It set the opacity of the blue overlay, and the 2026-08-16 graph has
+            no node that paints one — the head area now goes to H3 as the grey
+            skull stand-in the Klein pass leaves, with nothing on top of it. The
+            dial is still here because the OLD H3 engine below uses it.
           </span>
           <span hidden={isNewH3}>
             <strong>MiniMax H3 (old):</strong> before H3 redraws the head it is
@@ -650,27 +651,18 @@ function FaceSwapEngineCard({ config, setField, configDefaults }) {
 
       <fieldset className="mt-3" id="face-swap-h3-new-stages">
         <legend className="text-xs font-medium text-content">
-          MiniMax H3 (new) — optional stages
+          MiniMax H3 (new) — optional stage
         </legend>
         <HelpText className="mt-1 text-xs text-content-muted">
           <span hidden={!isNewH3}>
-            Two nodes the new graph carries switched off. Each costs something on
-            a job that already loads 40 GB, so neither is on until you ask.
+            A step the new graph carries switched off. It costs something on a
+            job that already loads 40 GB, so it is not on until you ask.
           </span>
           <span hidden={isNewH3}>
-            These apply to the MiniMax H3 (new) engine only — they do nothing
+            This applies to the MiniMax H3 (new) engine only — it does nothing
             while the swap runs on Klein or on the old H3 graph.
           </span>
         </HelpText>
-        <label className="mt-2 flex items-center gap-2 text-xs text-content">
-          <input
-            id="face-swap-h3-new-mask-overlay"
-            type="checkbox"
-            checked={Boolean(newStages.mask_overlay)}
-            onChange={(e) => setNewStage('mask_overlay', e.target.checked)}
-          />
-          Blue mask overlay — paints the head area flat blue before H3 sees it, and tells the instruction that the blue is the region to fill (off: H3 gets the erased head and its depth map)
-        </label>
         <label className="mt-2 flex items-center gap-2 text-xs text-content">
           <input
             id="face-swap-h3-new-ollama"
@@ -1220,40 +1212,85 @@ function MinimaxH3Card({ config, setField, configDefaults, caps }) {
         <ResetToDefault label="Ref2VA model" section="minimax_h3" field="base_model" {...reset} />
       </div>
 
-      <H3SwapLorasField config={config} setField={setField}
-        configDefaults={configDefaults} />
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="h3-vae" className="block text-xs font-medium text-content">
+          VAE file (blank = auto)
+        </label>
+        <input
+          id="h3-vae"
+          type="text"
+          value={h3.vae ?? ''}
+          onChange={(e) => setField('minimax_h3', 'vae', e.target.value)}
+          placeholder="minimax_h3_t1_image_vae_step1597.safetensors"
+          className={INPUT_CLASS}
+        />
+        <HelpText className="mt-1 text-xs text-content-muted">
+          Used by BOTH H3 lanes — generation and the new head swap — so the two
+          can never decode through different VAEs. Blank prefers the T1 image
+          VAE and falls back to the video one, which is what every install had
+          before that file existed. Both lanes sample a one-frame packet and
+          then decode a still, and a VAE trained for stills is cleaner on skin
+          and hair at that job. A filename no longer on disk falls back to auto
+          rather than failing.
+        </HelpText>
+        <ResetToDefault label="H3 VAE" section="minimax_h3" field="vae" {...reset} />
+      </div>
+
+      <H3LorasField config={config} setField={setField}
+        configDefaults={configDefaults} field="loras" stepsField={null}
+        domId="minimax-h3-loras" title="Extra LoRAs on generation (MiniMax H3)"
+        lead={'Chained onto H3’s model after the optional speed patches. '
+          + 'The graph ships none of its own: the maintainer’s export loads a '
+          + '4-step turbo distill and a realism LoRA by filename from a folder '
+          + 'that exists on one disk, so those are dropped and this is where a '
+          + 'replacement goes. Adding a step-distill here means lowering the '
+          + 'sampler steps field above to match it.'} />
+
+      <H3LorasField config={config} setField={setField}
+        configDefaults={configDefaults} field="swap_loras" stepsField="swap_steps"
+        domId="minimax-h3-swap-loras" title="Extra LoRAs on the swap (MiniMax H3 new)"
+        lead={'Chained onto H3’s model after the optional speed patches, so '
+          + 'turning those off does not move where these land. The graph ships '
+          + 'none of its own: the accelerators that make an H3 swap bearable '
+          + 'are community distills and re-quantisations that differ per '
+          + 'install, which is why this field exists at all.'} />
     </Card>
   )
 }
 
-const MAX_H3_SWAP_LORAS = 4   // mirrors minimax_h3_swap_new_helper.MAX_H3_SWAP_LORAS
+const MAX_H3_SWAP_LORAS = 4   // mirrors minimax_h3_helper.MAX_H3_LORAS
 
-/* Extra LoRAs on the H3 SWAP model, plus the step count they exist to change.
-   The two live together because separating them is the whole trap: the reason
-   to add a LoRA here is almost always a step-distill, and a 4-step distill run
-   for the graph's 25 steps is BOTH slower than the stock model and worse. The
-   step field is therefore revealed by the first LoRA row rather than sitting
-   somewhere else on the page. */
-function H3SwapLorasField({ config, setField, configDefaults }) {
+/* Extra LoRAs on an H3 model, plus (for the swap) the step count they exist to
+   change. The two live together because separating them is the whole trap: the
+   reason to add a LoRA here is almost always a step-distill, and a 4-step
+   distill run for the graph's own step count is BOTH slower than the stock
+   model and worse. The step field is therefore revealed by the first LoRA row
+   rather than sitting somewhere else on the page.
+
+   One component, two lists: the swap has always had this, and the GENERATION
+   lane grew the same field on 2026-08-16 when the maintainer's graph arrived
+   with two accelerator LoRAs baked in by filename. Those filenames name a
+   folder on one disk, so they are dropped and this is where a replacement goes.
+   `stepsField` is null for the generation lane, whose step count is a plain
+   field further up the same card. */
+function H3LorasField({ config, setField, configDefaults, field, stepsField,
+                       domId, title, lead }) {
   const h3 = config.minimax_h3 || {}
-  const rows = Array.isArray(h3.swap_loras) ? h3.swap_loras : []
-  const save = (next) => setField('minimax_h3', 'swap_loras', next)
+  const rows = Array.isArray(h3[field]) ? h3[field] : []
+  const save = (next) => setField('minimax_h3', field, next)
   const loraScan = useKleinGenerationLoras()
-  const stepsDefault = defaultValueAt(configDefaults, 'minimax_h3', 'swap_steps')
-  const steps = Number(h3.swap_steps ?? stepsDefault)
+  const stepsDefault = stepsField
+    ? defaultValueAt(configDefaults, 'minimax_h3', stepsField) : 0
+  const steps = Number((stepsField ? h3[stepsField] : 0) ?? stepsDefault)
   const patchRow = (i, patch) =>
     save(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
   return (
-    <div className="mt-3" id="minimax-h3-swap-loras">
+    <div className="mt-3" id={domId}>
       <p className="text-xs font-medium text-content">
-        Extra LoRAs on the swap (MiniMax H3 new)
+        {title}
       </p>
       <HelpText className="mt-1 text-xs text-content-muted">
-        Chained onto H3&apos;s model after the optional speed patches, so turning
-        those off does not move where these land. The graph ships none of its
-        own: the accelerators that make an H3 swap bearable are community
-        distills and re-quantisations that differ per install, which is why this
-        field exists at all. A row naming a file that is not on disk is skipped
+        {lead} A row naming a file that is not on disk is skipped
         with a line in the server log rather than failing the batch, so a stale
         entry costs you that LoRA and nothing else. Max {MAX_H3_SWAP_LORAS}.
       </HelpText>
@@ -1295,9 +1332,14 @@ function H3SwapLorasField({ config, setField, configDefaults }) {
         </span>
       </div>
 
-      {/* Mounted either way, revealed by the first row — both halves stay in the
-          DOM because Chrome auto-translate rewrites text nodes and an unmounted
-          branch throws (CLAUDE.md ▸ UI changes). */}
+      {/* Mounted either way, revealed by the first row — both HELP halves stay
+          in the DOM because Chrome auto-translate rewrites text nodes and an
+          unmounted branch throws (CLAUDE.md ▸ UI changes).
+          The block itself is conditional, and that is not the same rule: the
+          generation lane has no step field of its own here (its step count is a
+          plain field further up the card), and rendering a hidden second copy
+          would put a DUPLICATE `id="h3-swap-steps"` in the document. */}
+      {stepsField ? (
       <div className="mt-3 sm:max-w-md" hidden={rows.length === 0}>
         <label htmlFor="h3-swap-steps" className="block text-xs font-medium text-content">
           Sampler steps for the swap
@@ -1305,25 +1347,27 @@ function H3SwapLorasField({ config, setField, configDefaults }) {
         <input
           id="h3-swap-steps"
           type="number" min={0} max={100} step={1}
-          value={h3.swap_steps ?? stepsDefault}
-          onChange={(e) => setField('minimax_h3', 'swap_steps', Number(e.target.value) || 0)}
+          value={(stepsField ? h3[stepsField] : 0) ?? stepsDefault}
+          onChange={(e) => stepsField
+            && setField('minimax_h3', stepsField, Number(e.target.value) || 0)}
           className={INPUT_CLASS}
         />
         <HelpText className="mt-1 text-xs text-content-muted">
           <span hidden={steps > 0}>
-            0 — the swap runs the graph&apos;s own 25 steps. If the LoRA above is
-            a step-distill, leaving this at 0 is the expensive mistake: 25 steps
-            on a 4-step distill is slower than the stock model AND worse, and
-            nothing reports it.
+            0 — the swap runs the graph&apos;s own 8 steps. If the LoRA above is
+            a step-distill tuned for a different number, leaving this at 0 is the
+            quiet mistake: the wrong step count for a distill is slower than the
+            stock model AND worse, and nothing reports it.
           </span>
           <span hidden={!(steps > 0)}>
-            {steps} steps instead of the graph&apos;s 25. Match this to what the
+            {steps} steps instead of the graph&apos;s 8. Match this to what the
             LoRA was distilled for — its model card names the number.
           </span>
         </HelpText>
         <ResetToDefault label="H3 swap steps" section="minimax_h3" field="swap_steps"
           config={config} configDefaults={configDefaults} setField={setField} />
       </div>
+      ) : null}
     </div>
   )
 }

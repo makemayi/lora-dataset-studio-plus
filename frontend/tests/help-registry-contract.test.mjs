@@ -87,6 +87,10 @@ const settingsDomIds = () => {
   const ids = new Set()
   for (const m of src.matchAll(/id="([^"]+)"/g)) ids.add(m[1])
   for (const m of src.matchAll(/\bkey:\s*'([^']+)'/g)) ids.add(m[1])
+  // Components that render one shared block twice (H3LorasField) take the id
+  // as a `domId` prop — same contract as SecretField keys: the literal is the
+  // id, and a ?focus= must still resolve to a real DOM id.
+  for (const m of src.matchAll(/\bdomId="([^"]+)"/g)) ids.add(m[1])
   return ids
 }
 

@@ -763,6 +763,36 @@ DEFAULTS = {
         # (any quantisation). The fl2va sibling is excluded by name: it loads and
         # then does a different job. Set a filename to pin one build.
         'base_model': '',
+        # Which VAE both H3 lanes — generation AND the new head swap — decode
+        # through. Blank auto-resolves in one order:
+        # `minimax_h3_t1_image_vae_step1597.safetensors` if it is on disk, else
+        # the video VAE.
+        #
+        # The T1 IMAGE VAE is the one the maintainer's 2026-08-16 graphs use.
+        # Both lanes sample a one-frame packet and then decode a still, and a
+        # VAE trained for stills is visibly cleaner on skin and hair at that job
+        # than the video one, which spends capacity on temporal consistency
+        # nothing here uses. It is preferred rather than required because the
+        # video VAE decodes the same latents perfectly well, and every install
+        # that predates the file has only that one.
+        #
+        # A filename that is no longer on disk falls back to the auto order
+        # instead of failing the job, the same way `base_model` does.
+        'vae': '',
+        # Accelerator / subject LoRAs on the GENERATION lane's H3 model, as
+        # [{file, strength}] — the twin of `swap_loras` below, sharing its
+        # sanitizer and its 4-row cap.
+        #
+        # It exists because no graph here can ship one. The maintainer's own
+        # export loads a 4-step turbo distill and a realism LoRA by name from a
+        # `minimax H3\` folder that exists on their disk and nowhere else, so
+        # those nodes are dropped and this list is the only way a LoRA reaches
+        # the model.
+        #
+        # It travels with `steps`: an accelerator IS a step-distill, and the
+        # 25 steps below are right for the stock model and wrong for a 4-step
+        # LoRA — slower AND visibly worse. Add one, lower the other.
+        'loras': [],
         # Frames sampled per shot. Two legal shapes, not one range: 1 (a single
         # frame) or the packet grid 5, 22, 39 ... We keep ONE frame either way,
         # so a packet of 5 pays full sampling cost for four frames nobody reads;
@@ -832,11 +862,12 @@ DEFAULTS = {
         # rather than failing the job: losing every tile of a batch to one
         # stale filename in a settings list is the worse trade.
         'swap_loras': [],
-        # Sampler steps for the SWAP graph. 0 = whatever the graph carries (25).
+        # Sampler steps for the SWAP graph. 0 = whatever the graph carries (8,
+        # the maintainer runs a turbo distill).
         #
         # Paired with `swap_loras` on purpose, in the config and in the UI: the
         # reason to add a LoRA up there is almost always a step-distill, and a
-        # 4-step distill run for 25 steps is BOTH slower than the stock model
+        # 4-step distill run for 8 steps is BOTH slower than the stock model
         # and visibly worse. Someone who adds the LoRA and not the steps has
         # bought nothing and lost quality, which is the sort of thing nobody
         # attributes to the right setting.
@@ -873,15 +904,10 @@ DEFAULTS = {
     #                   parameters that the new graph has no node for.
     'face_swap': {
         'engine': 'klein',
-        # The two nodes the NEW H3 graph ships bypassed, each a step the graph
-        # carries WIRED and this switch removes when off (the helper only ever
-        # subtracts — the fallback wiring is what ComfyUI's own bypass does to
-        # that node, read off the maintainer's export):
-        #   mask_overlay  paints the head region a flat blue over the
-        #                 head-removed image before H3 sees it. Off, H3 gets the
-        #                 Klein output as it is — the head gone, a depth map of
-        #                 where it was — which is the point of that pass.
-        #                 `h3_mask_opacity` applies to this node when it is on.
+        # The optional step the NEW H3 graph ships bypassed — carried WIRED and
+        # removed by this switch when off (the helper only ever subtracts; the
+        # fallback wiring is what ComfyUI's own bypass does to that node, read
+        # off the maintainer's export):
         #   ollama        an Ollama vision call describes how the head sits in
         #                 THIS photo (angle, occlusion, lighting) and appends it
         #                 to the instruction. Runs on `h3_new_ollama_model`, or
@@ -891,7 +917,12 @@ DEFAULTS = {
         #                 `h3_pose_hint` redundant — with this on the hint is not
         #                 sent, because the two describe the same thing and only
         #                 one of them is looking at the actual picture.
-        'h3_new_stages': {'mask_overlay': False, 'ollama': False},
+        #
+        # `mask_overlay` was the second entry and left with the 2026-08-16 graph,
+        # which has no AILab_MaskOverlay node to paint the blue slab. A value
+        # stored in an existing config is IGNORED rather than rejected — the
+        # helper reads only the keys it still has stages for.
+        'h3_new_stages': {'ollama': False},
         # THE KLEIN PASS'S OWN INSTRUCTION — `minimax_h3` (new) only.
         #
         # This is the step that decides whether the swap comes back in
@@ -1005,9 +1036,9 @@ DEFAULTS = {
         # body — InpaintStitchImproved composites only the masked region back.
         'h3_context_factor': 3.0,
         # How solidly the head is painted out before H3 is asked to redraw it —
-        # AILab_MaskOverlay's `mask_opacity`. On the old graph that node is
-        # always in the job; on the new one it is the `mask_overlay` stage, so
-        # this dial does nothing there until that stage is switched on.
+        # AILab_MaskOverlay's `mask_opacity`. OLD ENGINE ONLY: that node is
+        # always in the old graph's job, and the 2026-08-16 new graph has no
+        # overlay node at all, so this dial does nothing on the new engine.
         #
         # At 1.0 (the shipped graph's value) the head becomes a flat white slab
         # with no structure at all, and a generative model asked to fill a flat
@@ -1026,11 +1057,13 @@ DEFAULTS = {
         # masked region, and at opacity 1.0 the overlay paints straight over its
         # work, so that stage cannot change a single pixel until this is lowered.
         'h3_mask_opacity': 1.0,
-        # WHERE the head mask comes from (BOTH H3 engines):
-        #   'graph' — the segmenter inside the workflow (PersonMaskUltra on the
-        #             old graph, which needs ComfyUI_LayerStyle; ClothesSegment
-        #             from ComfyUI-RMBG on the new one). Either way the app
-        #             never sees the mask it is about to repaint through;
+        # WHERE the head mask comes from. OLD ENGINE ONLY — the new graph
+        # (2026-08-16) always masks in the app: its own segmenter is SAM3, the
+        # same model `services/auto_mask` already runs, so the in-graph branch
+        # is substituted away from every job and this key never reaches it.
+        #   'graph' — the segmenter inside the OLD workflow (PersonMaskUltra,
+        #             which needs ComfyUI_LayerStyle). The app never sees the
+        #             mask it is about to repaint through;
         #   'app'   — services/auto_mask (SAM 3 in the app's own interpreter),
         #             which makes the mask visible, cacheable and testable here,
         #             and drops the LayerStyle dependency with it.

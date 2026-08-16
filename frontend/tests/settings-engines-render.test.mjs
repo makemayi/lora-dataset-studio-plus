@@ -277,9 +277,12 @@ test('the face swap engine card offers all three engines and every H3 stage', ()
   assert.match(html, /value="minimax_h3_old"/)
   assert.match(html, /MiniMax H3 \(new\)/)
   assert.match(html, /MiniMax H3 \(old\)/)
-  assert.match(html, /id="face-swap-h3-new-mask-overlay"/)
+  // The 2026-08-16 graph has no AILab_MaskOverlay node, so the blue overlay
+  // stage was REMOVED rather than kept as a switch that silently did nothing.
+  // Pinned as absent so a dead checkbox cannot quietly come back.
+  assert.doesNotMatch(html, /face-swap-h3-new-mask-overlay/)
+  assert.doesNotMatch(html, /Blue mask overlay/)
   assert.match(html, /id="face-swap-h3-new-ollama"/)
-  assert.match(html, /Blue mask overlay/)
   assert.match(html, /Ollama head analysis/)
   assert.match(html, /How much of the shot MiniMax H3 \(old\) sees \(3\.0×\)/)
   assert.match(html, /id="face-swap-h3-context"/)
@@ -316,7 +319,7 @@ test('the stage help says which engine it applies to, without swapping a text no
   for (const html of [klein, h3, h3old]) {
     assert.match(html, /Three extra passes the old swap graph can run/)
     assert.match(html, /MiniMax H3 \(old\) engine only/)
-    assert.match(html, /Two nodes the new graph carries switched off/)
+    assert.match(html, /A step the new graph carries switched off/)
     assert.match(html, /MiniMax H3 \(new\) engine only/)
     // ...including the two crop/stitch dials saying they are inert on the new
     // graph, which is the whole reason the old engine was kept.
@@ -462,6 +465,6 @@ test('the step help names the trap at 0 and the value once set', () => {
   const html = renderH3({ swap_loras: [{ file: 'turbo.safetensors', strength: 1 }],
                           swap_steps: 4 })
   // Both sentences stay in the DOM; only `hidden` picks between them.
-  assert.match(html, /25 steps on a 4-step distill is slower/)
+  assert.match(html, /the swap runs the graph(&#x27;|'|’)s own 8 steps/)
   assert.match(html, /4 steps instead of the graph/)
 })

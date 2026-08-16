@@ -50,6 +50,7 @@ const settingsDomIds = () => {
   const ids = new Set()
   for (const m of src.matchAll(/id="([^"]+)"/g)) ids.add(m[1])
   for (const m of src.matchAll(/\bkey:\s*'([^']+)'/g)) ids.add(m[1])
+  for (const m of src.matchAll(/\bdomId="([^"]+)"/g)) ids.add(m[1])
   return ids
 }
 
