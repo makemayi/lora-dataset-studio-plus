@@ -188,6 +188,32 @@ def test_preview_records_an_engine_failure_as_failed_not_no_subject(app, tmp_pat
     assert manifest['items'][0]['frame'] is None
 
 
+def test_preview_tells_a_stop_apart_from_an_engine_failure(app, tmp_path, monkeypatch):
+    # Finding 1: 'cancelled' (the user pressed Stop) must not collapse into
+    # the same 'failed' bucket as a genuine engine crash — the point being
+    # tested is that they are DISTINGUISHABLE, not any particular string.
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    stopped = ds_dir / 'e.png'
+    crashed = ds_dir / 'f.png'
+    Image.new('RGB', (1000, 1000), 'white').save(stopped)
+    Image.new('RGB', (1000, 1000), 'white').save(crashed)
+
+    monkeypatch.setattr(stb.auto_mask, 'is_available', lambda: True)
+    monkeypatch.setattr(
+        stb.auto_mask, 'masks_for',
+        lambda paths, prompt, **kw: {str(stopped): (None, 'cancelled'),
+                                     str(crashed): (None, 'boom')})
+
+    rows = [stb.PreviewRow(5, 'e.png'), stb.PreviewRow(6, 'f.png')]
+    manifest = stb.build_preview(str(ds_dir), rows, progress=None)
+    stopped_skip = manifest['items'][0]['skip']
+    crashed_skip = manifest['items'][1]['skip']
+    assert stopped_skip == 'stopped'
+    assert stopped_skip != crashed_skip, \
+        'a Stop must not read as the same thing as an engine crash'
+
+
 # --- start_preview -----------------------------------------------------------
 
 from app.config import LOCAL_USER

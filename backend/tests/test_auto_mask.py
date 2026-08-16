@@ -277,6 +277,31 @@ def test_masks_for_reports_no_match_and_missing_and_engine_failure(am, monkeypat
     assert out[missing] == (None, 'missing')
 
 
+def test_masks_for_marks_the_unfinished_rows_cancelled_on_a_stop(am, monkeypatch, tmp_path):
+    """Stop ends `mask_images` mid-run: it returns `cancelled=True` and a
+    `results` entry only for the images it actually got to. Every path with no
+    entry must come back as its own 'cancelled' reason, not 'failed' — a Stop
+    is not an engine crash."""
+    auto_mask, _base, _config, _tmp = am
+    a = str(_write(tmp_path / 'a.png', b'PIXELS-A'))
+    b = str(_write(tmp_path / 'b.png', b'PIXELS-B'))
+    c = str(_write(tmp_path / 'c.png', b'PIXELS-C'))
+
+    def _fake(images, prompt, *, out_dir, **kw):
+        os.makedirs(out_dir, exist_ok=True)
+        name = os.path.splitext(os.path.basename(a))[0] + '.png'
+        with open(os.path.join(out_dir, name), 'wb') as fh:
+            fh.write(b'MASKBYTES')
+        return {'ok': True, 'written': 1, 'cancelled': True, 'out_dir': out_dir,
+                'results': {a: {'state': 'ok', 'coverage': 0.2}}}
+
+    monkeypatch.setattr(auto_mask, 'mask_images', _fake)
+    out = auto_mask.masks_for([a, b, c], 'person', should_stop=lambda: True)
+    assert out[a][1] is None and os.path.isfile(out[a][0])
+    assert out[b] == (None, 'cancelled')
+    assert out[c] == (None, 'cancelled')
+
+
 def test_masks_for_skips_the_child_entirely_on_an_all_cache_hit(am, monkeypatch, tmp_path):
     auto_mask, _base, _config, _tmp = am
     image = str(_write(tmp_path / 'tile.png', b'PIXELS'))

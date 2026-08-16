@@ -37,7 +37,8 @@ import time
 # disabled for the WHOLE batch, not just the launch request.
 KINDS = ('watermark_detect', 'watermark_clean', 'caption', 'recaption',
          'analyze_faces', 'classify', 'generate', 'improve', 'edit_reference',
-         'bank_export', 'bank_import', 'training_export', 'backup')
+         'bank_export', 'bank_import', 'training_export', 'backup',
+         'trim')  # the subject-trim crop preview
 
 # Kinds a user can gracefully STOP mid-batch (the ▶ Stop button). Only the
 # per-image captioning passes qualify: the worker checks the cancel flag at each
@@ -62,7 +63,13 @@ IMPROVE_KINDS = ('improve',)
 # make one screen's Stop reach into another screen's pass.
 WATERMARK_KINDS = ('watermark_detect',)
 
-STOPPABLE_KINDS = CANCELLABLE_KINDS + IMPROVE_KINDS + WATERMARK_KINDS
+# The subject-trim crop preview pass. Cooperatively stoppable exactly like
+# captioning and watermark detection — masking runs image-by-image and keeps
+# every mask already produced when Stop lands — but it gets its OWN arming
+# scope for the same reason 'improve' and 'watermark_detect' do.
+TRIM_KINDS = ('trim',)
+
+STOPPABLE_KINDS = CANCELLABLE_KINDS + IMPROVE_KINDS + WATERMARK_KINDS + TRIM_KINDS
 
 # Safety TTL: an entry not touched for this long is purged on read even if end()
 # never ran (process alive but the batch thread died without unwinding). 30 min is

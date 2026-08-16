@@ -79,15 +79,28 @@ def build_preview(ds_dir, rows, progress=None, should_stop=None):
     ``None`` only when no frame could be computed at all.
 
     All the masking happens in ONE child process (`auto_mask.masks_for`); the
-    per-row loop that follows is arithmetic. `progress` therefore reports the
-    MASKING, which is where the seconds are, not the loop.
+    per-row loop that follows is arithmetic. `progress(done, total, phase=None)`
+    is called throughout: with a `phase` other than 'masking' while the child
+    is still starting up or loading its checkpoint (no `done` to report yet),
+    then with the running count once masking itself starts.
     """
     paths = [os.path.join(ds_dir, row.filename) for row in rows]
     total = len(rows)
 
     def _on_mask_progress(record):
-        if progress and record.get('phase') == 'masking':
-            progress(int(record.get('done') or 0), int(record.get('total') or total))
+        if not progress:
+            return
+        phase = record.get('phase')
+        if phase == 'masking':
+            done = int(record.get('done') or 0)
+            # The child only ever sees the cache MISSES, so its total is short
+            # by however many were already cached — those are done before it
+            # starts. Report against the selection the user actually picked.
+            child_total = int(record.get('total') or total) or total
+            already = max(0, total - child_total)
+            progress(min(total, already + done), total, 'masking')
+        else:
+            progress(0, total, phase)
 
     masks = auto_mask.masks_for(paths, MASK_PROMPT,
                                 on_progress=_on_mask_progress,
@@ -98,9 +111,12 @@ def build_preview(ds_dir, rows, progress=None, should_stop=None):
                  'image': None, 'frame': None, 'out': None, 'skip': None}
         mask_path, reason = masks.get(path, (None, 'failed'))
         if reason:
-            # 'no-match' is the user-facing case and gets the manifest's own
-            # vocabulary; anything else is an engine problem and says so.
-            item['skip'] = 'no-subject-found' if reason == 'no-match' else 'failed'
+            # Three different answers, three different words. 'no-match' is
+            # about the picture, 'stopped' is about the user, 'failed' is about
+            # the engine — folding the middle one into the last is how a Stop
+            # comes back looking like a crash.
+            item['skip'] = {'no-match': 'no-subject-found',
+                            'cancelled': 'stopped'}.get(reason, 'failed')
         else:
             try:
                 with Image.open(mask_path) as mask:
@@ -171,8 +187,11 @@ def start_preview(app, user_id, dataset_id, image_ids):
                 ds_dir = _dataset_path(dataset_id)
                 manifest = build_preview(
                     ds_dir, rows,
-                    progress=lambda done, tot: dataset_activity.progress(
-                        token, done=done, detail=f'Measuring crops… {done}/{tot}'),
+                    progress=lambda done, tot, phase=None: dataset_activity.progress(
+                        token, done=done,
+                        detail=('Loading the masking model…'
+                                if phase and phase != 'masking'
+                                else f'Measuring crops… {done}/{tot}')),
                     should_stop=lambda: dataset_activity.cancel_requested(
                         dataset_id, TRIM_KINDS))
                 _write_json(_preview_path(dataset_id), manifest)
