@@ -1806,6 +1806,69 @@ def dataset_image_seedvr2_replace(image_id):
     return jsonify({'ok': True, 'job_id': result})
 
 
+@bp.post('/dataset/<int:dataset_id>/trim-preview')
+def dataset_trim_preview_start(dataset_id):
+    """Measure a subject-aware crop for each selected image. Writes NO pixels —
+    the result is a manifest the review screen reads. A missing mask
+    environment answers 409 pointing at Setup, like every other local pass."""
+    from ..services import subject_trim_batch as batch
+    data = request.get_json(silent=True) or {}
+    try:
+        result = batch.start_preview(
+            current_app._get_current_object(), LOCAL_USER, dataset_id,
+            data.get('image_ids') or [])
+    except batch.auto_mask.AutoMaskUnavailable as e:
+        return jsonify({'ok': False,
+                        'error': f"Automatic masking isn't ready: {e} — set it up "
+                                 'in Setup ▸ ComfyUI (it is what detects the '
+                                 'subject).'}), 409
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, **result})
+
+
+@bp.get('/dataset/<int:dataset_id>/trim-preview')
+def dataset_trim_preview_read(dataset_id):
+    """The pending crop preview and the last applied batch's undo manifest.
+    Both may be null; the UI polls this while the trim banner is up."""
+    from ..services import subject_trim_batch as batch
+    return jsonify({'preview': batch.preview_report(dataset_id),
+                    'undo': batch.trim_report(dataset_id)})
+
+
+@bp.post('/dataset/<int:dataset_id>/trim-apply')
+def dataset_trim_apply(dataset_id):
+    """Crop the confirmed rows. Coordinates come from the server's own preview
+    manifest — the body carries ids only."""
+    from ..services import subject_trim_batch as batch
+    data = request.get_json(silent=True) or {}
+    try:
+        result = batch.apply_preview(LOCAL_USER, dataset_id,
+                                     data.get('image_ids') or [])
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, **result})
+
+
+@bp.post('/dataset/<int:dataset_id>/trim-undo')
+def dataset_trim_undo(dataset_id):
+    """Whole-batch undo: restores every original the last applied trim trashed."""
+    from ..services import subject_trim_batch as batch
+    try:
+        result = batch.restore_trim_batch(LOCAL_USER, dataset_id)
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, **result})
+
+
+@bp.delete('/dataset/<int:dataset_id>/trim-preview')
+def dataset_trim_preview_discard(dataset_id):
+    """Throw the pending preview away — the review screen's Cancel."""
+    from ..services import subject_trim_batch as batch
+    batch.clear_preview(dataset_id)
+    return jsonify({'ok': True})
+
+
 @bp.post('/dataset/image/<int:image_id>/improve')
 def dataset_image_improve(image_id):
     """Create an upscaled candidate without touching the source.
