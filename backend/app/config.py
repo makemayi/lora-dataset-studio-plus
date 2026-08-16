@@ -919,9 +919,24 @@ DEFAULTS = {
         # Kept in sync with the shipped graph's own node text by
         # test_minimax_h3_swap_new_workflow_shape, so the workflow still opens
         # sensibly in ComfyUI. The value here is the one that runs.
+        # 2026-08-16: the stand-in now models the SKULL, not the silhouette.
+        # Removing the hair and shrinking the head by a fifth are one change with
+        # one purpose — hair thickness is not part of the head, and a stand-in
+        # sized to the hairline makes H3 grow a skull to fill it and then put
+        # hair on TOP of that, which is where the doll head came from.
+        #
+        # So "identical to the original" had to stop covering SIZE: the stand-in
+        # is deliberately smaller, and saying both in one instruction asks for
+        # two different heads. Size is still pinned — to the skull — and the swap
+        # instruction (node 990) states the other half of the same contract:
+        # hair grows outside the stand-in, so the finished outline is larger.
+        # Change one, read the other.
         'h3_head_removal_prompt':
-            '把人物的头部替换为一个无五官的灰色素模头（假人头模）。\n'
-            '头部的大小、位置、朝向、倾斜角度与透视关系必须与原图完全一致，'
+            '移除人物的头发，然后把人物的头部替换为一个无五官的灰白色素模头'
+            '（假人头模）。\n'
+            '素模头表示的是去掉头发厚度之后的颅骨，因此比原图中带头发的头部'
+            '小约五分之一；不要把头发的体积算进素模头。\n'
+            '头部的位置、朝向、倾斜角度与透视关系必须与原图完全一致，'
             '只保留头部的立体形状。\n'
             '表面为均匀的哑光浅灰色，有自然的明暗起伏体现立体感，'
             '没有五官、没有头发、没有任何配饰、没有任何身份特征。\n'

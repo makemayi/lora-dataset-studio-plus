@@ -22,19 +22,26 @@ old engine is kept rather than retired.
 
 The pipeline:
 
-    1003 target -> Resize(longer edge 1024)
-        |-> ClothesSegment (RMBG, Hair+Face)  -> head mask -> GrowMask(20)
+Re-pointed at the maintainer's 2026-08-16 export. Same shape, four changes that
+matter to anything reading this file: the H3 loader group moved from the `925:*`
+subgraph to `1009:*`, the head is masked by SAM3 rather than RMBG's
+ClothesSegment, `H3FrameSelect` became a plain `ImageFromBatch`, and the graph
+now ships 8 steps rather than 25 because the maintainer runs a turbo distill.
+
+    1010 target -> Resize(longer edge 1024)
+        |-> [SAM3_Detect: hair+face] -> head mask -> GrowMask(26)
+        |     ALWAYS substituted: the app runs the same model, so this branch is
+        |     repointed at the app's mask and prunes away. See `attach_app_mask`.
         |-> ImageScaleToTotalPixels(1 MP) -> Klein 9B + LanPaint KSampler
-        |     "remove the whole head, keep the neck, render what was removed
-        |      as a face depth map" -> VAEDecode
-        |     -> [Mask Overlay (RMBG), blue]            <- optional stage
+        |     "strip the hair, replace the head with a grey SKULL stand-in a
+        |      fifth smaller than the haired head" -> VAEDecode
         |-> H3ImageResolutionPreset (native detail)
-        |-> [Ollama API: describe how this head sits]   <- optional stage
+        |-> [Ollama, in the APP: describe how this head sits]  <- optional stage
               -> Text Concatenate(fixed instruction + description)
     114 reference -> Resize(1024)
         -> MiniMaxH3ReferenceToVideo(ref_image_0 = identity,
            ref_image_1 = the head-removed target, prompt = the text above)
-        -> SamplerCustomAdvanced -> VAEDecode -> H3FrameSelect(1)
+        -> SamplerCustomAdvanced -> VAEDecode -> ImageFromBatch(0, 1)
         -> RTXVideoSuperResolution -> SaveImage
 
 Three consequences worth naming before anyone debugs this graph:
@@ -54,17 +61,17 @@ Three consequences worth naming before anyone debugs this graph:
   resolved through `resolve_h3_fl2va`, which is the only caller allowed to ask
   for it by name.
 
-THE TWO OPTIONAL STAGES (`face_swap.h3_new_stages`, both OFF by default)
------------------------------------------------------------------------
-These are the two nodes the maintainer runs BYPASSED in the source graph. They
-ship wired and each switch SUBTRACTS, exactly like the old engine's stages —
+THE OPTIONAL STAGE (`face_swap.h3_new_stages`, OFF by default)
+--------------------------------------------------------------
+It ships wired and the switch SUBTRACTS, exactly like the old engine's stages —
 the only direction that cannot invent wiring nobody measured.
 
-  mask_overlay  `Mask Overlay (RMBG)` paints the head region a flat blue over
-                the head-removed image before H3 sees it. Off, H3 receives the
-                Klein output as it is: the head gone and a depth map of where it
-                was, which is the point of that pass. `h3_mask_opacity` applies
-                to this node when it is on.
+`mask_overlay` was the second one and is GONE, not disabled: the 2026-08-16
+graph has no AILab_MaskOverlay node, so the blue slab it painted cannot be
+produced at all. A Settings switch that silently does nothing is worse than one
+that is absent, so the key left with the node. `face_swap.h3_mask_opacity` was
+its only parameter here and now applies to the old engine alone.
+
   ollama        a vision model analyses the target and writes a paragraph about
                 how the head sits (position, angle, occlusion, lighting), which
                 is appended to the fixed instruction.
@@ -120,31 +127,32 @@ WORKFLOW_H3_SWAP_NEW_PATH = cfg.BACKEND_DIR / 'workflows' / 'minimax h3 swap new
 # ID, so a graph swap nobody notices does not crash — it silently produces the
 # wrong picture. Every one of these is asserted present before anything is
 # written.
-NODE_TARGET_IMAGE = '1003'       # LoadImage — the tile being repainted
+NODE_TARGET_IMAGE = '1010'       # LoadImage — the tile being repainted
 NODE_REF_IMAGE = '114'           # LoadImage — the identity to graft on
 NODE_TARGET_RESIZE = '928'       # ResizeImagesByLongerEdge — what the mask must match
 NODE_REF_RESIZE = '311'          # ResizeImagesByLongerEdge — the identity photo
-NODE_SEGMENT = '957'             # ClothesSegment (RMBG) — the in-graph head masker
+# SAM3_Detect. Kept as a constant because it is the ANCHOR the app's own mask is
+# repointed onto — never because the job runs it. This engine always masks in the
+# app (see `attach_app_mask`), so the node, its CheckpointLoaderSimple and its
+# CLIPTextEncode are left unwired and leave in `prune_to_outputs`. That is what
+# spares an install the ComfyUI-SAM3 pack and the sam3.1 checkpoint entirely.
+NODE_SEGMENT = '1001:75'
 NODE_H3 = '170'                  # MiniMaxH3ReferenceToVideo
 NODE_PROMPT_TEXT = '990'         # Text Multiline — THE prompt lives here
 NODE_PROMPT_CONCAT = '991'       # Text Concatenate — instruction + description
-NODE_OLLAMA = '988'              # OllamaAPI — optional, off by default
 NODE_SEED = '131'                # RandomNoise -> 'noise_seed'
-NODE_LENGTH = '139'              # PrimitiveInt -> frame packet length
-NODE_FRAME_SELECT = '304'        # H3FrameSelect — which frame wins
-NODE_CLIP_VISION = '305'
-NODE_H3_HYBRID = '925:427'       # MiniMaxH3HybridLoader — base + overlay
-NODE_H3_CLIP = '925:922'
-NODE_VIDEO_VAE = '925:921'
-NODE_AUDIO_VAE = '925:926'       # required by the node even for a still
-NODE_MASK_OVERLAY = '983:1002'   # AILab_MaskOverlay — optional, off by default
+NODE_FRAME_SELECT = '999'        # ImageFromBatch — which frame wins
+NODE_H3_HYBRID = '1009:1005'     # MiniMaxH3HybridLoader — base + overlay
+NODE_H3_CLIP = '1009:1002'
+NODE_VIDEO_VAE = '1009:1008'
+NODE_AUDIO_VAE = '1009:1007'     # required by the node even for a still
 NODE_KLEIN_POSITIVE = '983:964'  # CLIPTextEncode — what the Klein pass is told to do
 NODE_KLEIN_NEGATIVE = '983:965'  # CLIPTextEncode — shipped empty by the maintainer
 # The far end of H3's model chain. Whatever feeds THIS node's `model` is the
 # tail extra LoRAs chain onto — found, never hardcoded, so the speed patches
 # above it can be dropped without moving the insertion point.
 NODE_H3_MODEL_SINK = '128'       # BasicGuider — first consumer of the H3 model
-NODE_H3_STEPS = '126'            # BasicScheduler — the graph ships 25 steps
+NODE_H3_STEPS = '126'            # BasicScheduler — the graph ships 8 steps
 NODE_KLEIN_DECODE = '983:973'    # VAEDecode — the head-removed target
 NODE_KLEIN_UNET = '983:962'      # OTUNetLoaderW8A8 (may degrade to UNETLoader)
 NODE_KLEIN_CLIP = '983:963'
@@ -153,33 +161,47 @@ NODE_KLEIN_SAMPLER = '983:969'   # LanPaint_KSampler -> 'seed'
 NODE_SAVE = '165'
 
 # Optional accelerators: (node id, the input carrying its pass-through).
-NODE_SPEED_SAGE = '925:315'      # PathchSageAttentionKJ                  -> 'model'
-NODE_SPEED_MEMEFF = '925:428'    # MiniMaxH3MemEffSageAttentionPatch      -> 'model'
+NODE_SPEED_SAGE = '1009:1004'    # PathchSageAttentionKJ                  -> 'model'
+NODE_SPEED_MEMEFF = '1009:1003'  # MiniMaxH3MemEffSageAttentionPatch      -> 'model'
+# New in the 2026-08-16 graph, and grouped with the speed patches for the same
+# reason: it is a backend switch on a model that runs without it. It sits BELOW
+# the two patches in the chain, so dropping it does not move where they attach.
+NODE_ATTENTION_BACKEND = '1009:937'  # ModelAttentionBackend              -> 'model'
 NODE_UPSCALE_OUT = '309'         # RTXVideoSuperResolution                -> 'images'
 
-_SPEED_NODES = ((NODE_SPEED_SAGE, 'model'), (NODE_SPEED_MEMEFF, 'model'))
+# The two accelerator LoRAs the maintainer's export carries baked in. They are
+# named for files on that disk (`minimax H3\...`), which is the exact class of
+# breakage this helper exists to prevent, so they are never sent as shipped —
+# `minimax_h3.swap_loras` fills them, or they leave the graph entirely.
+NODE_GRAPH_LORAS = ('1009:938', '1009:939')
+
+_SPEED_NODES = ((NODE_SPEED_SAGE, 'model'), (NODE_SPEED_MEMEFF, 'model'),
+                (NODE_ATTENTION_BACKEND, 'model'))
 _UPSCALE_NODES = ((NODE_UPSCALE_OUT, 'images'),)
 
 _REQUIRED_NODES = (NODE_TARGET_IMAGE, NODE_REF_IMAGE, NODE_TARGET_RESIZE,
-                   NODE_SEGMENT, NODE_H3, NODE_PROMPT_TEXT, NODE_PROMPT_CONCAT,
-                   NODE_OLLAMA, NODE_SEED, NODE_LENGTH, NODE_FRAME_SELECT,
-                   NODE_CLIP_VISION, NODE_H3_HYBRID, NODE_H3_CLIP,
-                   NODE_VIDEO_VAE, NODE_AUDIO_VAE, NODE_MASK_OVERLAY,
+                   NODE_SEGMENT,
+                   NODE_H3, NODE_PROMPT_TEXT, NODE_PROMPT_CONCAT,
+                   NODE_SEED, NODE_FRAME_SELECT,
+                   NODE_H3_HYBRID, NODE_H3_CLIP,
+                   NODE_VIDEO_VAE, NODE_AUDIO_VAE,
                    NODE_KLEIN_DECODE, NODE_KLEIN_UNET, NODE_KLEIN_CLIP,
                    NODE_KLEIN_VAE, NODE_KLEIN_SAMPLER, NODE_SAVE,
                    NODE_KLEIN_POSITIVE, NODE_KLEIN_NEGATIVE,
                    NODE_H3_MODEL_SINK, NODE_H3_STEPS)
 
 # stage -> (tail node, what its consumers read when the stage is off).
-# Both fallbacks are the node's OWN pass-through input, i.e. exactly what
-# ComfyUI does to a bypassed node — read off the maintainer's export, not
-# reconstructed.
+# The fallback is the node's OWN pass-through input, i.e. exactly what ComfyUI
+# does to a bypassed node — read off the maintainer's export, not reconstructed.
+#
+# `mask_overlay` left with the 2026-08-16 graph: that redesign has no
+# AILab_MaskOverlay node, so the blue slab it painted cannot be produced at all.
+# The stage is gone rather than kept-but-inert, because a Settings switch that
+# does nothing is worse than one that is absent.
 STAGES = {
-    'mask_overlay': (NODE_MASK_OVERLAY, [NODE_KLEIN_DECODE, 0]),
     'ollama': (NODE_PROMPT_CONCAT, [NODE_PROMPT_TEXT, 0]),
 }
 STAGE_LABELS = {
-    'mask_overlay': 'Blue mask overlay',
     'ollama': 'Ollama head analysis',
 }
 
@@ -188,13 +210,6 @@ STAGE_LABELS = {
 # graph does. Everything else about a kept stage is unchanged: it still
 # suppresses the pose hint, still reports itself in the job log.
 APP_SIDE_STAGES = frozenset({'ollama'})
-
-# Appended to the swap instruction when the `mask_overlay` stage is on, and only
-# then. Written in the same language as the shipped instruction (990) so the two
-# do not read as two voices to the text encoder.
-MASK_OVERLAY_PROMPT_NOTE = (
-    '图2中的纯蓝色区域标示头部的大致范围（该范围经过外扩，比实际头部略大）。\n'
-    '头部的真实尺寸以蓝色下方的灰色素模头为准，不要为了填满蓝色而放大头部。')
 
 # The sentence that introduces the head analysis. It used to be the last line of
 # the shipped instruction (990), where it was sent on EVERY swap — including the
@@ -257,10 +272,11 @@ HEAD_ANALYSIS_PROMPT = '''你是一个专业的图像头部分析专家，只负
 # with no second code path.
 H3_SWAP_NEW_NODE_PACKS = dict(old.H3_SWAP_NODE_PACKS)
 H3_SWAP_NEW_NODE_PACKS.update({
-    'ClothesSegment': {
-        'pack': 'ComfyUI-RMBG',
-        'url': 'https://github.com/1038lab/ComfyUI-RMBG',
-        'search': 'RMBG'},
+    # No SAM3_Detect entry, for the same reason there is no OllamaAPI one: the
+    # 2026-08-16 graph masks with SAM3, but this engine always substitutes the
+    # app's own mask, so that node never survives to reach the probe. Naming a
+    # pack for it would send users to install ComfyUI-SAM3 and a 3 GB checkpoint
+    # for a node no job runs.
     'LanPaint_KSampler': {
         # No URL on purpose: the pack NAME is what the ComfyUI Manager search
         # box takes, and a link guessed from a node name is worse than none.
@@ -281,6 +297,10 @@ H3_SWAP_NEW_NODE_PACKS.update({
         'pack': 'unknown pack — optional speed node; switch off '
                 'minimax_h3.use_speed_nodes to run without it',
         'url': None, 'search': 'MiniMaxH3MemoryEfficientSageAttentionPatch'},
+    'ModelAttentionBackend': {
+        'pack': 'unknown pack — optional speed node; switch off '
+                'minimax_h3.use_speed_nodes to run without it',
+        'url': None, 'search': 'ModelAttentionBackend'},
 })
 
 
@@ -323,7 +343,7 @@ def swap_ollama_model():
     return chosen or get_vision_model()
 
 
-MAX_H3_SWAP_LORAS = 4
+MAX_H3_SWAP_LORAS = mh.MAX_H3_LORAS
 
 
 def configured_h3_swap_loras():
@@ -333,27 +353,14 @@ def configured_h3_swap_loras():
     Its reason for existing is speed: H3 samples a packet of frames through a
     40 GB stack, and the accelerator LoRAs that make that bearable are files
     nobody can ship — they are re-quantisations and community distills that
-    differ per install. So the graph carries no LoRA of its own and this is the
-    only place one can come from.
+    differ per install. So no graph here carries a LoRA of its own (the
+    2026-08-16 export arrived with two, and this helper drops both) and this is
+    the only place one can come from.
 
-    Deliberately NOT capped at 1 despite being called an "accelerator" slot: a
-    step-distill and a subject LoRA stack legitimately, and a list that refuses
-    the second one just moves the problem into a text field somewhere else."""
-    raw = cfg.get('minimax_h3.swap_loras')
-    rows = []
-    for entry in (raw if isinstance(raw, list) else []):
-        if not isinstance(entry, dict):
-            continue
-        name = entry.get('file')
-        name = name.strip() if isinstance(name, str) else ''
-        if not name:
-            continue
-        strength = entry.get('strength')
-        strength = float(strength) if isinstance(strength, (int, float)) else 1.0
-        rows.append({'file': name, 'strength': max(0.0, min(1.5, strength))})
-        if len(rows) >= MAX_H3_SWAP_LORAS:
-            break
-    return rows
+    The rules live in `mh.sanitize_lora_rows` since the generation lane grew the
+    same list — one sanitizer, so a value one lane accepts cannot be a value the
+    other silently rejects."""
+    return mh.sanitize_lora_rows(cfg.get('minimax_h3.swap_loras'))
 
 
 def analyse_head(target_path):
@@ -482,10 +489,23 @@ def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None
 
     stages = enabled_stages() if stages is None else dict(stages)
     kept = apply_stages(workflow, stages)
-    # An app-produced mask replaces ClothesSegment BEFORE the node probe, so an
-    # install is never told to install a pack for a node this job dropped.
-    if mask_image:
-        attach_app_mask(workflow, mask_image)
+    # The app's mask is REQUIRED here, not one of two sources: the graph's own
+    # SAM3 branch is always substituted away, so there is nothing left to mask
+    # with if it is absent. It is attached BEFORE the node probe, so an install
+    # is never told to fetch a pack for a node this job just dropped.
+    if not mask_image:
+        raise ValueError(
+            'the new MiniMax H3 swap masks in the app — no mask was supplied')
+    attach_app_mask(workflow, mask_image)
+
+    # The export ships two accelerator LoRAs loaded by name off the maintainer's
+    # disk (`minimax H3\...`). Those paths are exactly what this helper exists to
+    # keep out of a job, and the app already has ONE place a LoRA may come from
+    # (`minimax_h3.swap_loras`, appended below). So both nodes always leave —
+    # never "kept if the file happens to exist", which would make the render
+    # depend on a folder layout nobody else has.
+    for node_id in NODE_GRAPH_LORAS:
+        old.drop_passthrough(workflow, node_id, 'model')
 
     # Config asks; /object_info decides. A user who leaves an accelerator on
     # without the pack installed gets the image, not a validation 400.
@@ -500,7 +520,9 @@ def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None
     # H3's assets, through the generation lane's own resolvers — an install that
     # can generate with H3 can swap with it. PLUS Fl2VA, which only this graph
     # loads: the hybrid loader takes it as the base and lays Ref2VA over it.
-    missing = mh.h3_missing_assets()
+    # No vision tower on this graph: `ImageFromBatch` takes frame 0, so nothing
+    # scores a packet and CLIP-ViT-H is never loaded.
+    missing = mh.h3_missing_assets(need_clip_vision=False)
     if missing:
         raise mh.MinimaxH3ModelsMissing(missing)
     fl2va = mh.resolve_h3_fl2va()
@@ -510,9 +532,17 @@ def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None
     workflow[NODE_H3_HYBRID]['inputs']['overlay_model'] = mh.resolve_h3_unet(
         cfg.get('minimax_h3.base_model'))
     workflow[NODE_H3_CLIP]['inputs']['clip_name'] = mh.resolve_h3_text_encoder()
-    workflow[NODE_VIDEO_VAE]['inputs']['vae_name'] = mh.resolve_h3_video_vae()
+    # `minimax_h3.vae` if it is set and on disk, else the T1 image VAE, else the
+    # video VAE — see `mh.resolve_h3_image_vae`. One key for both lanes: this
+    # node feeds BOTH the H3 node and the final decode, so nothing here can
+    # disagree with the generation lane about which VAE made the latents.
+    workflow[NODE_VIDEO_VAE]['inputs']['vae_name'] = mh.resolve_h3_image_vae(
+        cfg.get('minimax_h3.vae'))
     workflow[NODE_AUDIO_VAE]['inputs']['vae_name'] = mh.resolve_h3_audio_vae()
-    workflow[NODE_CLIP_VISION]['inputs']['clip_name'] = mh.resolve_h3_clip_vision()
+    # No CLIPVisionLoader line any more: the 2026-08-16 graph still carries the
+    # node but nothing reads it, so it leaves in `prune_to_outputs`. Resolving a
+    # loader that is about to be pruned would only make an install without that
+    # file look broken for a node the job never runs.
 
     # Klein removes the head, so its assets are REQUIRED here — resolved the way
     # every other Klein call site resolves them, never from the graph's own
@@ -584,15 +614,19 @@ def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None
 
     workflow[NODE_TARGET_IMAGE]['inputs']['image'] = target_image
     workflow[NODE_REF_IMAGE]['inputs']['image'] = ref_image
-    # Only meaningful with the overlay stage on — with it off the node is gone.
-    if NODE_MASK_OVERLAY in workflow:
-        workflow[NODE_MASK_OVERLAY]['inputs']['mask_opacity'] = old.mask_opacity()
-    workflow[NODE_FRAME_SELECT]['inputs']['weight_reference'] = old._cfg_float(
-        'minimax_h3.frame_weight_reference', mh.DEFAULT_FRAME_WEIGHT_REFERENCE)
+    # The frame packet length used to live on its own PrimitiveInt; the
+    # 2026-08-16 graph writes it straight onto the H3 node. Same setting, same
+    # clamp — only the address changed.
     length = cfg.get('minimax_h3.length')
     if length is None:
-        length = workflow[NODE_LENGTH]['inputs'].get('value', mh.LENGTH_MIN)
-    workflow[NODE_LENGTH]['inputs']['value'] = mh.clamp_length(length)
+        length = workflow[NODE_H3]['inputs'].get('length', mh.LENGTH_MIN)
+    workflow[NODE_H3]['inputs']['length'] = mh.clamp_length(length)
+    # `ImageFromBatch` takes the frame at an INDEX; `H3FrameSelect` scored the
+    # packet and picked a winner. With length pinned to 1 for a still there is
+    # one frame to take, so index 0 is the whole choice and
+    # `minimax_h3.frame_weight_reference` has nothing left to weigh here.
+    workflow[NODE_FRAME_SELECT]['inputs']['batch_index'] = 0
+    workflow[NODE_FRAME_SELECT]['inputs']['length'] = 1
     workflow[NODE_SEED]['inputs']['noise_seed'] = random.randint(0, 2 ** 64 - 1)
 
     # THE PROMPT LIVES IN THE TEXT NODE. On this graph the H3 node's `prompt` is
@@ -600,23 +634,6 @@ def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None
     prompt_override = cfg.get('minimax_h3.swap_prompt')
     if isinstance(prompt_override, str) and prompt_override.strip():
         workflow[NODE_PROMPT_TEXT]['inputs']['text'] = prompt_override.strip()
-    # With the overlay ON, what H3 receives is a picture with a blue slab over
-    # the head area — and nothing in the shipped instruction says so, which
-    # leaves a model to paint the head beside the slab and leave the blue in
-    # shot. Appended for this stage only: with the overlay off there is no blue,
-    # and the sentence would describe a colour that is not in the picture.
-    #
-    # It tells the model NOT to fill the blue, which is the opposite of what the
-    # first version of this sentence said. The overlay's mask is the head mask
-    # grown by 20 px (GrowMask), so the blue is deliberately LARGER than the
-    # head — "fill it completely" is an instruction to oversize, i.e. the
-    # doll-head this whole pass exists to avoid. The size authority is the grey
-    # mannequin underneath, which is why `h3_mask_opacity` below 1.0 (letting it
-    # show through) is worth more here than a solid marker.
-    if 'mask_overlay' in kept:
-        workflow[NODE_PROMPT_TEXT]['inputs']['text'] = (
-            workflow[NODE_PROMPT_TEXT]['inputs']['text'].rstrip()
-            + '\n' + MASK_OVERLAY_PROMPT_NOTE)
     # The pose hint is APPENDED, never substituted — and never sent at all when
     # Ollama is analysing the same picture (see the module docstring).
     if pose_hint and 'ollama' not in kept:
@@ -661,10 +678,15 @@ def enqueue_h3_swap_new(user_id, target_path, ref_path, extra_metadata=None):
 
     # The mask is computed FIRST, on the tile as it is on disk: it is the one
     # step that can still refuse the whole job for a reason the user can act on.
-    mask_path = None
-    if old.mask_source() == 'app':
-        from . import auto_mask
-        mask_path = auto_mask.mask_for(target_path, old.mask_prompt())
+    #
+    # Unconditional since the 2026-08-16 graph. `face_swap.h3_mask_source` used
+    # to choose between this and a segmenter inside the workflow; that graph's
+    # segmenter is SAM3, which is the SAME model the app already runs, so the
+    # in-graph one only added a node pack and a checkpoint to install. The key
+    # still steers the OLD engine, where the in-graph masker is a different
+    # model (PersonMaskUltra) rather than a second copy of this one.
+    from . import auto_mask
+    mask_path = auto_mask.mask_for(target_path, old.mask_prompt())
 
     comfy_input_dir = comfy_fs.ensure_input_usable(old._comfy_input_dir())
     uid = uuid.uuid4().hex[:8]
@@ -675,11 +697,9 @@ def enqueue_h3_swap_new(user_id, target_path, ref_path, extra_metadata=None):
     staged_ref = comfy_fs.stage_input_image(
         ref_path, f'h3swapnew_ref_{uid}_{ref_stem}.png', comfy_input_dir)
     staged_inputs = [os.path.basename(staged_target), os.path.basename(staged_ref)]
-    staged_mask = None
-    if mask_path:
-        staged_mask = os.path.basename(comfy_fs.stage_input_image(
-            mask_path, f'h3swapnew_mask_{uid}_{target_stem}.png', comfy_input_dir))
-        staged_inputs.append(staged_mask)
+    staged_mask = os.path.basename(comfy_fs.stage_input_image(
+        mask_path, f'h3swapnew_mask_{uid}_{target_stem}.png', comfy_input_dir))
+    staged_inputs.append(staged_mask)
 
     hint = None
     if cfg.get('face_swap.h3_pose_hint') is not False:

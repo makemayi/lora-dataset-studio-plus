@@ -15,7 +15,7 @@
         0
       ],
       "vae": [
-        "925:921",
+        "1009:1008",
         0
       ]
     },
@@ -26,11 +26,11 @@
   },
   "126": {
     "inputs": {
-      "scheduler": "simple",
-      "steps": 25,
+      "scheduler": "beta",
+      "steps": 8,
       "denoise": 1,
       "model": [
-        "925:315",
+        "1009:1004",
         0
       ]
     },
@@ -70,7 +70,7 @@
   "128": {
     "inputs": {
       "model": [
-        "925:315",
+        "1009:1004",
         0
       ],
       "conditioning": [
@@ -92,18 +92,9 @@
       "title": "随机噪波"
     }
   },
-  "139": {
-    "inputs": {
-      "value": 5
-    },
-    "class_type": "PrimitiveInt",
-    "_meta": {
-      "title": "Frame Length"
-    }
-  },
   "165": {
     "inputs": {
-      "filename_prefix": "MinimaxH3SwapNew",
+      "filename_prefix": "LDS/H3SwapNew",
       "images": [
         "309",
         0
@@ -128,21 +119,18 @@
         "959",
         1
       ],
-      "length": [
-        "139",
-        0
-      ],
+      "length": 1,
       "ref_image_size": "max",
       "clip": [
-        "925:922",
+        "1009:1002",
         0
       ],
       "vae": [
-        "925:921",
+        "1009:1008",
         0
       ],
       "audio_vae": [
-        "925:926",
+        "1009:1007",
         0
       ],
       "ref_images.ref_image_0": [
@@ -150,7 +138,7 @@
         0
       ],
       "ref_images.ref_image_1": [
-        "983:1002",
+        "983:973",
         0
       ]
     },
@@ -161,48 +149,11 @@
   },
   "191": {
     "inputs": {
-      "sampler_name": "res_multistep"
+      "sampler_name": "dpmpp_2s_ancestral"
     },
     "class_type": "KSamplerSelect",
     "_meta": {
       "title": "K采样器选择"
-    }
-  },
-  "304": {
-    "inputs": {
-      "select_count": 1,
-      "weight_sharpness": 1,
-      "weight_exposure": 0.5,
-      "weight_reference": 1,
-      "target_brightness": 0.5,
-      "brightness_tolerance": 0.25,
-      "min_score": 0,
-      "dedup_threshold": 0.98,
-      "images": [
-        "124",
-        0
-      ],
-      "reference": [
-        "311",
-        0
-      ],
-      "clip_vision": [
-        "305",
-        0
-      ]
-    },
-    "class_type": "H3FrameSelect",
-    "_meta": {
-      "title": "H3 Frame Select"
-    }
-  },
-  "305": {
-    "inputs": {
-      "clip_name": "CLIP-ViT-H-fp16.safetensors"
-    },
-    "class_type": "CLIPVisionLoader",
-    "_meta": {
-      "title": "加载CLIP视觉"
     }
   },
   "309": {
@@ -211,7 +162,7 @@
       "resize_type.scale": 2,
       "quality": "ULTRA",
       "images": [
-        "304",
+        "999",
         0
       ]
     },
@@ -237,49 +188,13 @@
     "inputs": {
       "longer_edge": 1024,
       "images": [
-        "1003",
+        "1010",
         0
       ]
     },
     "class_type": "ResizeImagesByLongerEdge",
     "_meta": {
       "title": "缩放图像（长边）"
-    }
-  },
-  "957": {
-    "inputs": {
-      "background_color": "#222222",
-      "Hat": false,
-      "Hair": true,
-      "Face": true,
-      "Sunglasses": false,
-      "Upper-clothes": false,
-      "Skirt": false,
-      "Dress": false,
-      "Belt": false,
-      "Pants": false,
-      "Left-arm": false,
-      "Right-arm": false,
-      "Left-leg": false,
-      "Right-leg": false,
-      "Bag": false,
-      "Scarf": false,
-      "Left-shoe": false,
-      "Right-shoe": false,
-      "Background": false,
-      "process_res": 1024,
-      "mask_blur": 0,
-      "mask_offset": 0,
-      "invert_output": false,
-      "background": "Alpha",
-      "images": [
-        "928",
-        0
-      ]
-    },
-    "class_type": "ClothesSegment",
-    "_meta": {
-      "title": "衣物分割 (RMBG)"
     }
   },
   "959": {
@@ -298,32 +213,9 @@
       "title": "MiniMax H3 Image • Resolution Preset"
     }
   },
-  "988": {
-    "inputs": {
-      "prompt": "你是一个专业的图像头部分析专家，只负责精准描述图片中人物的头部信息，用于后续换头操作。\n\n请同时参考提供的RGB图片和深度图，严格按照以下要求输出，不要描述身体、服装、背景、发型、五官细节或任何其他内容：\n\n输出必须以「图片中头部位于」作为开头。\n\n1. 头部位置：在画面中的大致位置（左上/中上/右上/左中/正中/右中/左下/中下/右下），以及占画面的大致比例。\n2. 头部朝向：正面、左侧脸（角度）、右侧脸（角度）、微侧、仰视、俯视、低头等，尽量给出具体角度。\n3. 头部姿态与动作：是否歪头、转头、抬头、低头、点头等，描述自然动作。\n4. 表情：详细描述眉毛、眼睛、嘴部状态和整体情绪（中性、微笑、严肃、惊讶、愤怒等）。\n5. 光照与阴影：头部受光方向、脸部明暗分布，是否有硬阴影或柔光。\n6. 深度相关信息（重点参考深度图）：\n   - 头部在深度上的前后位置\n   - 脖子与肩膀的深度衔接关系\n   - 头部是否存在明显遮挡\n   - 头部的大致体积感与透视关系\n7. 自身部位相对位置：描述头部与自身其他部位（如肩膀、脖子、躯干）的相对位置关系。\n8. 与画面最醒目部位的相对位置：描述头部与图片中最醒目/最突出部位之间的相对位置关系。\n9. 脸部遮挡情况：如果脸部存在遮挡，必须明确说明被遮挡的具体部位（如眼睛、鼻子、嘴巴、半边脸等），以及被什么物体遮挡（如手、头发、口罩、物体、另一人等）。\n10. 其他影响换头的关键细节：眼镜、帽子、耳环、面部遮挡物、等。\n\n输出要求：\n- 必须以「图片中头部位于」开头\n- 只输出头部相关信息\n- 语言简洁精准，适合直接用于换头提示词参考\n- 如果图片中有多个人，分别编号描述\n- 不确定的地方标注“不确定”\n\n请参考下面的范例：\n图片中头部位于中上偏右区域，占画面比例约8%。\n\n* **朝向与姿态**：右侧脸微侧（约45度），呈趴卧低头、向后下方窥视的姿态。\n* **表情**：眼神向下注视，带有中性、慵懒情绪，嘴部及下半脸不可见。\n* **光照**：整体为柔和散射光，面部受光均匀，无强硬阴影。\n* **深度与相对位置**：处于画面最远端，与前景呈极强透视对比；位于自身肩膀后方，处于画面最醒目部位（臀部）的右上方远端。\n* **脸部遮挡**：脸部下半部分（鼻子下方、嘴巴、下巴）被自身身体及臀部线条完全遮挡，仅露出额头、左眼及部分左脸颊。\n* **关键细节**：左耳戴有一颗小耳环，换头时需严格处理下脸部被身体遮挡的边缘。",
-      "input_type": "image",
-      "ollama_model": "satgeze/gemma4-12b-uncensored-1.5m:latest",
-      "keep_alive": "off",
-      "stream": true,
-      "think": true,
-      "structure_output": false,
-      "prompt_structure": "Custom",
-      "structure_format": "你是一个专业的图像头部分析专家，只负责精准描述图片中人物的头部信息，用于后续换头操作。\n\n请同时参考提供的RGB图片和深度图，严格按照以下要求输出，不要描述身体、服装、背景、发型、五官细节或任何其他内容：\n\n输出必须以「图片中头部位于」作为开头。\n\n1. 头部位置：在画面中的大致位置（左上/中上/右上/左中/正中/右中/左下/中下/右下），以及占画面的大致比例。\n2. 头部朝向：正面、左侧脸（角度）、右侧脸（角度）、微侧、仰视、俯视、低头等，尽量给出具体角度。\n3. 头部姿态与动作：是否歪头、转头、抬头、低头、点头等，描述自然动作。\n4. 表情：详细描述眉毛、眼睛、嘴部状态和整体情绪（中性、微笑、严肃、惊讶、愤怒等）。\n5. 光照与阴影：头部受光方向、脸部明暗分布，是否有硬阴影或柔光。\n6. 深度相关信息（重点参考深度图）：\n   - 头部在深度上的前后位置\n   - 脖子与肩膀的深度衔接关系\n   - 头部是否存在明显遮挡\n   - 头部的大致体积感与透视关系\n7. 自身部位相对位置：描述头部与自身其他部位（如肩膀、脖子、躯干）的相对位置关系。\n8. 与画面最醒目部位的相对位置：描述头部与图片中最醒目/最突出部位之间的相对位置关系。\n9. 脸部遮挡情况：如果脸部存在遮挡，必须明确说明被遮挡的具体部位（如眼睛、鼻子、嘴巴、半边脸等），以及被什么物体遮挡（如手、头发、口罩、物体、另一人等）。\n10. 其他影响换头的关键细节：眼镜、帽子、耳环、面部遮挡物等。\n\n输出要求：\n- 必须以「图片中头部位于」开头\n- 只输出头部相关信息\n- 语言简洁精准，适合直接用于换头提示词参考\n- 如果图片中有多个人，分别编号描述\n- 不确定的地方标注“不确定”\n\n请参考下面的范例：\n图片中头部位于中上偏右区域，占画面比例约8%。\n\n* **朝向与姿态**：右侧脸微侧（约45度），呈趴卧低头、向后下方窥视的姿态。\n* **表情**：眼神向下注视，带有中性、慵懒情绪，嘴部及下半脸不可见。\n* **光照**：整体为柔和散射光，面部受光均匀，无强硬阴影。\n* **深度与相对位置**：处于画面最远端，与前景呈极强透视对比；位于自身肩膀后方，处于画面最醒目部位（臀部）的右上方远端。\n* **脸部遮挡**：脸部下半部分（鼻子下方、嘴巴、下巴）被自身身体及臀部线条完全遮挡，仅露出额头、左眼及部分左脸颊。\n* **关键细节**：左耳戴有一颗小耳环，换头时需严格处理下脸部被身体遮挡的边缘。",
-      "output_format": "raw_text",
-      "seed": 0,
-      "image1": [
-        "928",
-        0
-      ]
-    },
-    "class_type": "OllamaAPI",
-    "_meta": {
-      "title": "Ollama API"
-    }
-  },
   "990": {
     "inputs": {
-      "text": "精确换头：把 <Picture 1> 的头部完美融合到 <Picture 2> 的身体上。\n头部大小严格匹配 <Picture 2> 的脖子宽度和肩膀比例，既不过大也不过小。\n头部位置精确居中对齐脖子，下巴自然衔接锁骨位置。\n皮肤色调、光线、阴影完全统一，脖子过渡自然无痕迹。\n严格保留图1的脸部特征和发型，严格保留图2的身体、服装与背景。\n高清、真实、比例正确。\n图2中头部位置是一个灰色素模头，它只用来标示头部应有的大小、位置、朝向与透视，不是画面的真实内容。\n请用图1的头部替换这个素模头，严格沿用它的大小、位置、朝向与透视关系，成品中不得残留任何灰色素模。\n\n"
+      "text": "精确换头：把 <Picture 1> 的头部完美融合到 <Picture 2> 的身体上。\n头部大小严格匹配 <Picture 2> 的脖子宽度和肩膀比例，既不过大也不过小。\n头部位置精确居中对齐脖子，下巴自然衔接锁骨位置。\n皮肤色调、光线、阴影完全统一，脖子过渡自然无痕迹。头身比保持在1:7到1:8之间，身材比例协调自然。\n严格保留图1的脸部特征和发型，严格保留图2的身体、服装与背景。\n高清、真实、比例正确。\n图2中头部位置是一个灰白色素模头，它标示的是去掉头发厚度之后的颅骨，用来确定头部的位置、朝向、透视关系与颅骨大小，不是画面的真实内容。\n请用图1的头部替换这个素模头：颅骨严格对齐素模头的大小与位置，头发生长在颅骨之外，所以成品中带头发的头部轮廓会略大于素模头。\n不要为了填满素模头而放大颅骨，也不要把头发的厚度再算进颅骨一次。成品中不得残留任何灰白色素模。"
     },
     "class_type": "Text Multiline",
     "_meta": {
@@ -337,10 +229,6 @@
       "text_a": [
         "990",
         0
-      ],
-      "text_b": [
-        "988",
-        0
       ]
     },
     "class_type": "Text Concatenate",
@@ -348,7 +236,21 @@
       "title": "Text Concatenate"
     }
   },
-  "1003": {
+  "999": {
+    "inputs": {
+      "batch_index": 0,
+      "length": 1,
+      "image": [
+        "124",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "Get Image from Batch"
+    }
+  },
+  "1010": {
     "inputs": {
       "image": "target.png"
     },
@@ -357,24 +259,21 @@
       "title": "目标图"
     }
   },
-  "925:315": {
+  "1009:1002": {
     "inputs": {
-      "sage_attention": "auto",
-      "allow_compile": false,
-      "model": [
-        "925:428",
-        0
-      ]
+      "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "type": "minimax",
+      "device": "default"
     },
-    "class_type": "PathchSageAttentionKJ",
+    "class_type": "CLIPLoader",
     "_meta": {
-      "title": "Patch Sage Attention KJ"
+      "title": "加载CLIP"
     }
   },
-  "925:428": {
+  "1009:1003": {
     "inputs": {
       "model": [
-        "925:427",
+        "1009:937",
         0
       ]
     },
@@ -383,7 +282,34 @@
       "title": "MiniMax H3 Mem Eff Sage Attention Patch"
     }
   },
-  "925:427": {
+  "1009:1004": {
+    "inputs": {
+      "sage_attention": "auto",
+      "allow_compile": false,
+      "model": [
+        "1009:1003",
+        0
+      ]
+    },
+    "class_type": "PathchSageAttentionKJ",
+    "_meta": {
+      "title": "Patch Sage Attention KJ"
+    }
+  },
+  "1009:937": {
+    "inputs": {
+      "attention": "comfy kitchen attention",
+      "model": [
+        "1009:938",
+        0
+      ]
+    },
+    "class_type": "ModelAttentionBackend",
+    "_meta": {
+      "title": "ModelAttentionBackend"
+    }
+  },
+  "1009:1005": {
     "inputs": {
       "base_model": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
       "overlay_model": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
@@ -400,33 +326,95 @@
       "title": "MiniMax H3 Hybrid Loader"
     }
   },
-  "925:921": {
+  "1009:938": {
     "inputs": {
-      "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+      "lora_name": "",
+      "strength_model": 1,
+      "model": [
+        "1009:939",
+        0
+      ]
     },
-    "class_type": "VAELoader",
+    "class_type": "LoraLoaderModelOnly",
     "_meta": {
-      "title": "加载VAE"
+      "title": "LoRA加载器（仅模型）"
     }
   },
-  "925:922": {
+  "1009:939": {
     "inputs": {
-      "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
-      "type": "minimax",
-      "device": "default"
+      "lora_name": "",
+      "strength_model": 1,
+      "model": [
+        "1009:1005",
+        0
+      ]
     },
-    "class_type": "CLIPLoader",
+    "class_type": "LoraLoaderModelOnly",
     "_meta": {
-      "title": "加载CLIP"
+      "title": "LoRA加载器（仅模型）"
     }
   },
-  "925:926": {
+  "1009:1007": {
     "inputs": {
       "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
     },
     "class_type": "VAELoader",
     "_meta": {
       "title": "加载VAE"
+    }
+  },
+  "1009:1008": {
+    "inputs": {
+      "vae_name": "minimax_h3_t1_image_vae_step1597.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "1001:75": {
+    "inputs": {
+      "threshold": 0.5,
+      "refine_iterations": 2,
+      "individual_masks": false,
+      "model": [
+        "1001:77",
+        0
+      ],
+      "image": [
+        "928",
+        0
+      ],
+      "conditioning": [
+        "1001:78",
+        0
+      ]
+    },
+    "class_type": "SAM3_Detect",
+    "_meta": {
+      "title": "SAM3 检测"
+    }
+  },
+  "1001:77": {
+    "inputs": {
+      "ckpt_name": "sam3.1_multiplex_fp16.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Checkpoint加载器（简易）"
+    }
+  },
+  "1001:78": {
+    "inputs": {
+      "text": "hair,face",
+      "clip": [
+        "1001:77",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
     }
   },
   "983:962": {
@@ -456,7 +444,7 @@
   },
   "983:964": {
     "inputs": {
-      "text": "把人物的头部替换为一个无五官的灰色素模头（假人头模）。\n头部的大小、位置、朝向、倾斜角度与透视关系必须与原图完全一致，只保留头部的立体形状。\n表面为均匀的哑光浅灰色，有自然的明暗起伏体现立体感，没有五官、没有头发、没有任何配饰、没有任何身份特征。\n颈部、肩膀、身体、服装、背景与画面光照完全保持不变。",
+      "text": "移除人物的头发，然后把人物的头部替换为一个无五官的灰白色素模头（假人头模）。\n素模头表示的是去掉头发厚度之后的颅骨，因此比原图中带头发的头部小约五分之一；不要把头发的体积算进素模头。\n头部的位置、朝向、倾斜角度与透视关系必须与原图完全一致，只保留头部的立体形状。\n表面为均匀的哑光浅灰色，有自然的明暗起伏体现立体感，没有五官、没有头发、没有任何配饰、没有任何身份特征。\n颈部、肩膀、身体、服装、背景与画面光照完全保持不变。",
       "clip": [
         "983:963",
         0
@@ -539,68 +527,18 @@
       "title": "参考Latent"
     }
   },
-  "983:969": {
+  "983:971": {
     "inputs": {
-      "seed": 0,
-      "steps": 4,
-      "cfg": 1,
-      "sampler_name": "euler",
-      "scheduler": "simple",
-      "denoise": 1,
-      "LanPaint_NumSteps": 2,
-      "LanPaint_PromptMode": "Image First",
-      "LanPaint_Info": "LanPaint KSampler.",
-      "Inpainting_mode": "🖼️ Image Inpainting",
-      "More Info, Bug Report, Star on GitHub ⭐": "lanpaint_star_button",
-      "model": [
-        "983:962",
-        0
-      ],
-      "positive": [
-        "983:970:976",
-        0
-      ],
-      "negative": [
-        "983:970:974",
-        0
-      ],
-      "latent_image": [
-        "983:972:977",
+      "expand": 26,
+      "tapered_corners": true,
+      "mask": [
+        "1001:75",
         0
       ]
     },
-    "class_type": "LanPaint_KSampler",
+    "class_type": "GrowMask",
     "_meta": {
-      "title": "LanPaint KSampler"
-    }
-  },
-  "983:965": {
-    "inputs": {
-      "text": "原本的脸, 五官, 头发, 眼睛, 鼻子, 嘴, 皮肤纹理, 空洞, 无头, 头部消失, 背景穿透",
-      "clip": [
-        "983:963",
-        0
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "CLIP Text Encode (Negative Prompt)"
-    }
-  },
-  "983:973": {
-    "inputs": {
-      "samples": [
-        "983:969",
-        0
-      ],
-      "vae": [
-        "983:966",
-        0
-      ]
-    },
-    "class_type": "VAEDecode",
-    "_meta": {
-      "title": "VAE解码"
+      "title": "扩展遮罩"
     }
   },
   "983:972:977": {
@@ -694,36 +632,68 @@
       "title": "图像转换为遮罩"
     }
   },
-  "983:971": {
+  "983:973": {
     "inputs": {
-      "expand": 20,
-      "tapered_corners": true,
-      "mask": [
-        "957",
-        1
-      ]
-    },
-    "class_type": "GrowMask",
-    "_meta": {
-      "title": "扩展遮罩"
-    }
-  },
-  "983:1002": {
-    "inputs": {
-      "mask_color": "#0000FF",
-      "mask_opacity": 1,
-      "image": [
-        "983:973",
+      "samples": [
+        "983:969",
         0
       ],
-      "mask": [
-        "983:971",
+      "vae": [
+        "983:966",
         0
       ]
     },
-    "class_type": "AILab_MaskOverlay",
+    "class_type": "VAEDecode",
     "_meta": {
-      "title": "Mask Overlay (RMBG) 🖼️🎭"
+      "title": "VAE解码"
+    }
+  },
+  "983:969": {
+    "inputs": {
+      "seed": 0,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "LanPaint_NumSteps": 2,
+      "LanPaint_PromptMode": "Image First",
+      "LanPaint_Info": "LanPaint KSampler.",
+      "Inpainting_mode": "🖼️ Image Inpainting",
+      "More Info, Bug Report, Star on GitHub ⭐": "lanpaint_star_button",
+      "model": [
+        "983:962",
+        0
+      ],
+      "positive": [
+        "983:970:976",
+        0
+      ],
+      "negative": [
+        "983:970:974",
+        0
+      ],
+      "latent_image": [
+        "983:972:977",
+        0
+      ]
+    },
+    "class_type": "LanPaint_KSampler",
+    "_meta": {
+      "title": "LanPaint KSampler"
+    }
+  },
+  "983:965": {
+    "inputs": {
+      "text": "原本的脸, 五官, 头发, 眼睛, 鼻子, 嘴, 皮肤纹理, 空洞, 无头, 头部消失, 背景穿透",
+      "clip": [
+        "983:963",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Negative Prompt)"
     }
   }
 }

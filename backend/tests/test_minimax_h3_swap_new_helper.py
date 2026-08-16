@@ -101,6 +101,11 @@ def _set(config, section, **values):
 
 def _build(sh, **kw):
     kw.setdefault('filename_prefix', 'local_H3SwapNew_abcd1234')
+    # The app's mask is not optional on this engine any more: the 2026-08-16
+    # graph masks with SAM3, which is the same model the app already runs, so
+    # the in-graph branch is always substituted away rather than offered as a
+    # second source. Every build therefore arrives with one.
+    kw.setdefault('mask_image', 'mask.png')
     return sh.build_swap_workflow('t.png', 'r.png', **kw)
 
 
@@ -110,9 +115,11 @@ def _classes(wf):
 
 # --- the two optional stages -------------------------------------------------
 
-def test_both_stages_off_by_default(swap):
+def test_the_stage_is_off_by_default(swap):
+    """`mask_overlay` left with the 2026-08-16 graph — it has no
+    AILab_MaskOverlay node, so the blue slab cannot be produced at all."""
     sh, _mh, _base, _config = swap
-    assert sh.enabled_stages() == {'mask_overlay': False, 'ollama': False}
+    assert sh.enabled_stages() == {'ollama': False}
 
 
 def test_stages_off_removes_their_whole_branch(swap):
@@ -143,14 +150,6 @@ def test_a_stage_that_is_off_hands_its_consumers_the_right_fallback(swap):
     assert wf['170']['inputs']['prompt'] == ['990', 0]
 
 
-def test_mask_overlay_on_sits_between_klein_and_h3(swap):
-    sh, _mh, _base, _config = swap
-    wf, kept = _build(sh, stages={'mask_overlay': True, 'ollama': False})
-    assert kept == ['mask_overlay']
-    assert wf['983:1002']['inputs']['image'] == ['983:973', 0]
-    assert wf['170']['inputs']['ref_images.ref_image_1'] == ['983:1002', 0]
-    assert wf['983:1002']['inputs']['mask_opacity'] == 1.0
-
 
 def test_the_klein_instruction_is_editable_without_touching_the_graph(swap):
     """It is the dial that decides whether the swap comes back in proportion,
@@ -177,37 +176,6 @@ def test_a_blank_klein_instruction_falls_back_to_the_shipped_one(swap):
         assert wf['983:964']['inputs']['text'] == shipped
 
 
-def test_the_overlay_stage_tells_the_prompt_what_the_blue_is(swap):
-    """The overlay hands H3 a picture with a flat blue slab where the head was.
-    Nothing in the shipped instruction mentions blue, so the model was being
-    asked to fill a region it had not been told about."""
-    sh, _mh, _base, config = swap
-    _set(config, 'minimax_h3', swap_prompt='精确换头。')
-    wf, _ = _build(sh, stages={'mask_overlay': True, 'ollama': False})
-    text = wf['990']['inputs']['text']
-    assert text.startswith('精确换头。')
-    assert '蓝色' in text
-    # It must NOT tell the model to fill the blue: that mask is the head mask
-    # grown by 20 px, so filling it edge to edge oversizes the head — the exact
-    # failure this pass exists to avoid. The mannequin under it is the size
-    # authority, and the sentence has to say so.
-    assert '不要为了填满蓝色而放大头部' in text
-    assert '灰色素模头' in text
-    # OFF: there is no blue in the picture, so an instruction about it would be
-    # about a colour that is not there.
-    wf, _ = _build(sh, stages={'mask_overlay': False, 'ollama': False})
-    assert '蓝色' not in wf['990']['inputs']['text']
-
-
-def test_mask_opacity_only_applies_while_the_overlay_stage_is_on(swap):
-    sh, _mh, _base, config = swap
-    _set(config, 'face_swap', h3_mask_opacity=0.5)
-    wf, _ = _build(sh, stages={'mask_overlay': True, 'ollama': False})
-    assert wf['983:1002']['inputs']['mask_opacity'] == 0.5
-    # With the stage off the node is not in the job at all — the setting is not
-    # ignored quietly, there is nothing left to ignore it.
-    wf, _ = _build(sh)
-    assert '983:1002' not in wf
 
 
 def test_the_ollama_node_leaves_the_job_even_when_the_stage_is_ON(swap):
@@ -311,8 +279,8 @@ def test_an_unusable_ollama_refuses_before_anything_is_queued(swap, monkeypatch)
     assert 'non-thinking' in str(excinfo.value)
 
     # ...and none of it blocks a swap with the stage switched off.
-    wf, kept = _build(sh, stages={'mask_overlay': True, 'ollama': False})
-    assert kept == ['mask_overlay'] and '988' not in wf
+    wf, kept = _build(sh, stages={'ollama': False})
+    assert kept == [] and '988' not in wf
 
 
 # --- the prompt --------------------------------------------------------------
@@ -350,7 +318,7 @@ def test_the_pose_hint_stands_down_when_ollama_is_looking(swap):
 def test_the_hybrid_loader_gets_fl2va_as_the_base_and_ref2va_over_it(swap):
     sh, _mh, _base, _config = swap
     wf, _ = _build(sh)
-    loader = wf['925:427']['inputs']
+    loader = wf['1009:1005']['inputs']
     assert 'fl2va' in loader['base_model'].lower()
     assert 'ref2va' in loader['overlay_model'].lower()
 
@@ -499,7 +467,7 @@ def test_a_lora_that_is_not_on_disk_is_skipped_not_fatal(swap):
     _set(config, 'minimax_h3', swap_loras=[{'file': 'gone.safetensors', 'strength': 1.0}])
     wf, _ = _build(sh)
     assert not [n for n in wf.values() if n['class_type'] == 'LoraLoaderModelOnly']
-    assert wf['128']['inputs']['model'] == ['925:315', 0]
+    assert wf['128']['inputs']['model'] == ['1009:1004', 0]
 
 
 def test_the_rows_are_sanitised_the_same_way_the_klein_swap_sanitises_its_own(swap):
@@ -522,12 +490,16 @@ def test_the_list_is_capped(swap):
     assert len(sh.configured_h3_swap_loras()) == sh.MAX_H3_SWAP_LORAS
 
 
-def test_the_graph_ships_25_steps_and_nothing_changes_it_by_default(swap):
+def test_the_graph_ships_8_steps_and_nothing_changes_it_by_default(swap):
     """An accelerator LoRA without this is the trap: a 4-step distill run for
-    25 steps is slower than the stock model AND worse."""
+    the graph's step count is slower than the stock model AND worse.
+
+    8 since the 2026-08-16 graph, down from 25: the maintainer's export runs a
+    turbo distill, and this is the number an override has to be measured
+    against — `swap_steps=0` must land here, not on the old default."""
     sh, _mh, _base, _config = swap
     wf, _ = _build(sh)
-    assert wf['126']['inputs']['steps'] == 25
+    assert wf['126']['inputs']['steps'] == 8
 
 
 def test_the_swap_keeps_the_graphs_own_ref_pipeline_by_default(swap):
@@ -564,7 +536,7 @@ def test_swap_steps_overrides_and_is_clamped(swap):
     _set(config, 'minimax_h3', swap_steps=4)
     wf, _ = _build(sh)
     assert wf['126']['inputs']['steps'] == 4
-    for value, expected in ((0, 25), (-3, 25), (9999, 100)):
+    for value, expected in ((0, 8), (-3, 8), (9999, 100)):
         _set(config, 'minimax_h3', swap_steps=value)
         wf, _ = _build(sh)
         assert wf['126']['inputs']['steps'] == expected, value
