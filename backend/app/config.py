@@ -1166,51 +1166,28 @@ DEFAULTS = {
     # content alone, which is the opposite trade from Klein's ✨ improve. Same
     # discipline as every other engine block: blank means "find it yourself",
     # never a machine path.
+    #
+    # Since 2026-08-16 this lane runs the SAME manual pipeline as the ✨ improve
+    # 'klein' engine's SeedVR2 half (core UNETLoader/VAELoader + manual SeedVR2
+    # nodes + tiled VAE), so the weights resolve from the folders THAT lane uses
+    # — `diffusion_models` for the DiT (canonical 7B Sharp int8 convrot) and
+    # `vae` for ema_vae_fp16. One install serves both lanes; there is no
+    # pack-private SEEDVR2 folder, no model/VAE pin and no tiling setting (the
+    # tiled VAE is always on).
     'seedvr2': {
-        # Blank = auto-resolve: the canonical 3B FP8 build when present, else the
-        # first build in the SEEDVR2 folder. Set it to a filename to pin one (a
-        # 7B build you dropped in yourself resolves exactly the same way).
-        'model': '',
-        # Same contract for the VAE: blank = the canonical ema_vae_fp16, else the
-        # first file in the folder whose name says VAE. Set it to a filename when
-        # yours is named something the heuristic cannot recognise — a pin is
-        # honoured against the whole folder, which is the only reason it exists.
-        'vae': '',
-        # Target for the SHORT edge in pixels; the long edge follows the source
-        # aspect. 1080 is the node's own default and a sane dataset target — LoRA
-        # training buckets rarely exceed it, so going higher mostly costs VRAM.
-        'resolution': 1080,
-        # Hard cap on the LONG edge, 0 = none. The VRAM safety valve on a wide
-        # panorama, where a 1080 short edge can mean 4000+ px across.
-        'max_resolution': 0,
+        # The UPSIZE MULTIPLIER: the input is scaled by this before the one-step
+        # restore, so 2.0 doubles the short edge (the value of the user's
+        # verified workflow). Range 1.0-4.0. NOTE the semantic change on
+        # 2026-08-16: this key used to be a SHORT-EDGE pixel target for the old
+        # one-box upscaler; the manual pipeline has no equivalent, so the key now
+        # carries the multiplier, and a stored old-style pixel value clamps to
+        # the top of the range.
+        'resolution': 2.0,
         # How the result is graded back onto the source's colours. 'lab' is the
         # node's default and the most conservative; 'wavelet' preserves broad
         # tone better on heavily degraded sources. Colour fidelity is the whole
         # reason this engine exists, so this is deliberately exposed.
         'color_correction': 'lab',
-        # How the high-resolution (tiled) lane is chosen, when the TTP node pack
-        # is installed. 'auto' (default) tiles when tiling helps — past the size
-        # the model is comfortable at, or when the frame would not fit. Tiling
-        # preserves high-frequency detail, not just VRAM (SurpassHR's
-        # side-by-side, GitHub #32); the old VRAM-only rule meant the bigger
-        # your card the less often you got the better picture, and it is gone.
-        # 'always' tiles whenever there is more than one tile to make; 'never'
-        # stays full-frame. Without the pack this has no effect.
-        'tiling': 'auto',
-        # Side of one tile, in pixels — THE VRAM lever of this engine. 1024 is
-        # the contributed value and a good one on a big card; on 8 GB, 768 or
-        # 512 is the difference between a 4K upscale and an out-of-memory, at
-        # the cost of more seams. It also sizes the VAE's tiled encode/decode,
-        # so it helps on the full-frame lane too, tiling pack or not.
-        'tile_px': 1024,
-        # Output short edge past which 'auto' tiles. 0 (default) = derive it from
-        # the tile size (1.5x = the shipped 1536 at a 1024 tile) so the crossover
-        # follows the tile. A positive value places it by hand.
-        'tile_threshold': 0,
-        # Transformer blocks offloaded to system RAM during inference. 0 = none
-        # (fastest). Raise it to fit a bigger build on a smaller card; it trades
-        # speed for VRAM headroom, it does not change the result.
-        'blocks_to_swap': 0,
     },
     # Z-Image pipeline — the two loader refs the shipped Test Studio workflow used
     # to hardcode from the developer's own ComfyUI (reported by bobba84, GitHub #18).

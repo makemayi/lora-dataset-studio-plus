@@ -178,12 +178,14 @@ _KREA_DOWNLOADS = {
     },
 }
 
-# SeedVR2 — the fidelity upscaler (issue #32, SurpassHR). Two files only, and
-# the small one is the DEFAULT on purpose: the 3B FP8 build is 3.4 GB and the
-# pack's own guidance puts it at 8-12 GB of VRAM, which is the card most people
-# have. Someone with more drops a 7B build in the same folder and points
-# `seedvr2.model` at it — seedvr2_helper.resolve_seedvr2_dit picks up anything
-# present, so the bigger builds need no second install action.
+# SeedVR2 — the fidelity upscaler (issue #32, SurpassHR). ONE download: the
+# VAE, because since 2026-08-16 this lane loads the DiT through a core
+# UNETLoader from `diffusion_models` (the same 7B Sharp int8 build the ✨
+# improve 'klein' engine requires) and that build has no public URL — it is a
+# community re-quantisation the user already has if either lane works. So the
+# model is named with its exact path and placed by hand, like the improve lane's;
+# only the VAE is fetchable, and it must land in `models/vae` for the same core
+# VAELoader.
 #
 # URL survey 2026-08-02 (anonymous HTTP HEAD, no token): `numz/SeedVR2_comfyUI`
 # answers 200 with the full content-length on every file, API `gated=false`,
@@ -192,19 +194,11 @@ _KREA_DOWNLOADS = {
 # photograph of one moment, and a future re-gating must degrade into actionable
 # steps rather than a bare error.
 #
-# `dest[0]` is 'SEEDVR2' — the folder the node pack itself registers under
-# ComfyUI's models dir (SEEDVR2_FOLDER_NAME in its constants.py), and the same
-# string seedvr2_helper.MODEL_FOLDER searches.
+# `dest[0]` is 'vae' — the folder a core VAELoader reads (comfy-loader-folder-rule).
 _SEEDVR2_DOWNLOADS = {
-    'seedvr2_model': {
-        'url': 'https://huggingface.co/numz/SeedVR2_comfyUI/resolve/main/seedvr2_ema_3b_fp8_e4m3fn.safetensors',
-        'dest': ('SEEDVR2', 'seedvr2_ema_3b_fp8_e4m3fn.safetensors'),
-        'min_free_gb': 5, 'gated': False, 'min_bytes': 512 * 1024 ** 2,
-        'license_url': 'https://huggingface.co/numz/SeedVR2_comfyUI',
-    },
     'seedvr2_vae': {
         'url': 'https://huggingface.co/numz/SeedVR2_comfyUI/resolve/main/ema_vae_fp16.safetensors',
-        'dest': ('SEEDVR2', 'ema_vae_fp16.safetensors'),
+        'dest': ('vae', 'ema_vae_fp16.safetensors'),
         'min_free_gb': 1, 'gated': False, 'min_bytes': 32 * 1024 ** 2,
         'license_url': 'https://huggingface.co/numz/SeedVR2_comfyUI',
     },
@@ -945,12 +939,12 @@ def start_all(caps) -> dict:
 # SeedVR2 has NO pack action: its node pack declares thirteen pip dependencies
 # that belong in ComfyUI's interpreter, which this app does not own and must
 # never pip into (see seedvr2_helper's module docstring). Cloning it alone would
-# land a pack that fails to import, so the pack is explained and only the two
-# weights are installed here.
+# land a pack that fails to import, so the pack is explained and only the VAE is
+# installed here (the DiT has no public URL — see _SEEDVR2_DOWNLOADS).
 _INSTALL_GROUPS = {
     'krea': ('krea_nodes', 'krea_model', 'krea_text_encoder', 'krea_vae',
              'krea_identity_lora'),
-    'seedvr2': ('seedvr2_model', 'seedvr2_vae'),
+    'seedvr2': ('seedvr2_vae',),
 }
 
 # Which capabilities keys hold each group's gaps, and which member (if any) is

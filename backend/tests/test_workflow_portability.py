@@ -367,4 +367,11 @@ VANILLA_NODE_ALLOWLIST = frozenset({
     'ReferenceLatent', 'SamplerCustomAdvanced',
     'SaveImage', 'SetLatentNoiseMask', 'UNETLoader', 'VAEDecode', 'VAEEncode',
     'VAELoader',
+    # Added with the 2026-08-16 wave (H3 swap graph + the SeedVR2 manual
+    # pipeline). Core confirmed by /object_info's python_module on a live
+    # install, not by reputation: comfy_extras.nodes_images (ImageFromBatch),
+    # nodes_model_advanced (ModelAttentionBackend), nodes_sam3 (SAM3_Detect),
+    # nodes_compositing (JoinImageWithAlpha), nodes_image_compare (ImageCompare).
+    'ImageFromBatch', 'ModelAttentionBackend', 'SAM3_Detect',
+    'JoinImageWithAlpha', 'ImageCompare',
 })

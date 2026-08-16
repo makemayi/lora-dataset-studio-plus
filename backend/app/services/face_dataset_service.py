@@ -3604,7 +3604,8 @@ def link_completed_dataset_image(job_id, filename, failed=False, reason=None):
         # picture, and the swap was overwriting it. Put that picture back rather
         # than leaving an empty ⚠ tile whose original only exists in the trash.
         from .dataset_generation_service import restore_swapped_original
-        swap_reason = 'The face swap failed and the original image was restored.'
+        swap_reason = ('The in-place replacement failed (face swap or SeedVR2 '
+                       'upscale) and the original image was restored.')
         if restore_swapped_original(
                 img, reason=f'{swap_reason} {reason}'.strip() if reason else swap_reason):
             db.session.commit()
@@ -3664,8 +3665,9 @@ def link_completed_dataset_image(job_id, filename, failed=False, reason=None):
                 # the restored status is the one the tile had before the swap.
                 from .dataset_generation_service import restore_swapped_original
                 restored = restore_swapped_original(
-                    img, reason='The face swap result could not be retrieved from '
-                                'ComfyUI — the original image was restored.')
+                    img, reason='The in-place replacement result could not be '
+                                'retrieved from ComfyUI — the original image '
+                                'was restored.')
                 if not restored:
                     img.status = 'failed'
                     img.fail_reason = ('The finished image could not be retrieved from ComfyUI '
@@ -3787,6 +3789,7 @@ from .dataset_generation_service import (
     generate_variations, generate_variations_krea, generate_variations_nanobanana,
     generate_variations_minimax_h3,
     regenerate_image, face_swap_image, resolve_improve_engine,
+    seedvr2_upscale_replace,
     FACE_SWAP_ENGINES, resolve_face_swap_engine, SWAP_RESTORE_FIELDS,
     restore_swapped_original, finish_swapped_original, swap_restore_filename,
     undo_face_swap, can_undo_swap, swap_undo_state,

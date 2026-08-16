@@ -1786,6 +1786,26 @@ def dataset_klein_model_set(dataset_id):
     return jsonify({'ok': True, **_klein_model_state(svc.get_dataset(LOCAL_USER, dataset_id))})
 
 
+@bp.post('/dataset/image/<int:image_id>/seedvr2-replace')
+def dataset_image_seedvr2_replace(image_id):
+    """SeedVR2-upscale this tile IN PLACE — the result REPLACES the tile, with
+    the original kept for undo, unlike the ✨ improve lane which creates a
+    candidate. Uses the same 409 vocabulary as the swap/improve routes."""
+    gate = _require_no_stalled_comfyui() or _require_gpu_not_fenced()
+    if gate:
+        return gate
+    try:
+        result = svc.seedvr2_upscale_replace(LOCAL_USER, image_id)
+    except Exception as e:
+        engine_error = _improve_engine_error(e)
+        if engine_error:
+            return engine_error
+        return _map_error(e)
+    if result is None:
+        return jsonify({'error': 'not found'}), 404
+    return jsonify({'ok': True, 'job_id': result})
+
+
 @bp.post('/dataset/image/<int:image_id>/improve')
 def dataset_image_improve(image_id):
     """Create an upscaled candidate without touching the source.

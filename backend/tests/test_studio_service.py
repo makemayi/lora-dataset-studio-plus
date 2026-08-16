@@ -1587,14 +1587,36 @@ def test_embedded_workflow_model_refs_are_all_layout_independent():
             ('Z image\\qwen_3_4b.safetensors', 'RESOLVED'),
         ('ZImage_bigLove_ZT3_optimal.json', '3', 'vae_name'):
             ('z ae.safetensors', 'RESOLVED'),
-        ('face swap.json', '165:102', 'vae_name'):
+        ('face swap.json', '424:104', 'vae_name'):
             ('flux2-vae.safetensors', 'RESOLVED'),
-        ('face swap.json', '165:126', 'unet_name'):
-            ('flux-2-klein-9b.safetensors', 'RESOLVED'),
-        ('face swap.json', '165:146', 'clip_name'):
+        ('face swap.json', '424:175', 'clip_name'):
             ('qwen_3_8b_fp8mixed.safetensors', 'RESOLVED'),
-        ('face swap.json', '165:161', 'lora_name'):
+        ('face swap.json', '424:246', 'lora_name'):
             (os.path.join('klein', 'Klein2-9B-SmartCharacterSwap.safetensors'), 'PREFLIGHT'),
+        ('face swap.json', '424:253', 'lora_name'):
+            (os.path.join('flux', 'klein_snofs_v1_3.safetensors'), 'BYPASSED'),
+        # 'minimax h3 swap.json' — the OLD H3 swap graph (minimax_h3_swap_helper).
+        # The H3 chain's loaders are resolved like the new graph's; the
+        # hair-removal Klein loaders are resolved when that stage is kept; the
+        # face-detail Z-Image files are deliberately NOT resolved (documented
+        # in the module docstring — the stage answers a validation error naming
+        # the file on an install that lacks them).
+        ('minimax h3 swap.json', '426:121', 'vae_name'):
+            ('minimax_h3_video_vae_fp16.safetensors', 'RESOLVED'),
+        ('minimax h3 swap.json', '426:130', 'clip_name'):
+            ('qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', 'RESOLVED'),
+        ('minimax h3 swap.json', '426:172', 'vae_name'):
+            ('minimax_h3_audio_vae_fp32.safetensors', 'RESOLVED'),
+        ('minimax h3 swap.json', '426:423:71', 'clip_name'):
+            ('qwen_3_8b_fp8mixed.safetensors', 'RESOLVED'),
+        ('minimax h3 swap.json', '426:423:72', 'vae_name'):
+            ('flux2-vae.safetensors', 'RESOLVED'),
+        ('minimax h3 swap.json', '426:396:366:2', 'clip_name'):
+            ('qwen_3_4b_heretic.safetensors', 'PREFLIGHT_DOCUMENTED'),
+        ('minimax h3 swap.json', '426:396:366:362', 'unet_name'):
+            ('z_image_turbo_bf16.safetensors', 'PREFLIGHT_DOCUMENTED'),
+        ('minimax h3 swap.json', '426:396:366:365', 'vae_name'):
+            (os.path.join('FLUX1', 'ae.sft'), 'PREFLIGHT_DOCUMENTED'),
         ('image_real_HQ.json', '1', 'ckpt_name'):
             ('Biglove\\mopMixtureOfPervertsDMD_v40.safetensors', 'OVERRIDDEN'),
         ('image_real_HQ.json', '10', 'lora_name'):
@@ -1634,6 +1656,30 @@ def test_embedded_workflow_model_refs_are_all_layout_independent():
             ('seedvr2_7b_sharp_int8_convrot.safetensors', 'RESOLVED'),
         ('krea2 high resolution.json', '41770:41761', 'vae_name'):
             ('ema_vae_fp16.safetensors', 'RESOLVED'),
+        # 'seedvr2 7b int8 upscale.json' — the standalone SeedVR2 lane
+        # (seedvr2_helper). The SAME two files, overwritten by the same
+        # resolvers before every enqueue; a miss raises SeedVR2ModelsMissing.
+        ('seedvr2 7b int8 upscale.json', '66:52', 'unet_name'):
+            ('seedvr2_7b_sharp_int8_convrot.safetensors', 'RESOLVED'),
+        ('seedvr2 7b int8 upscale.json', '66:51', 'vae_name'):
+            ('ema_vae_fp16.safetensors', 'RESOLVED'),
+        # 'minimax h3 swap new.json' — the 2026-08-16 H3 head swap. The five
+        # loader values are overwritten with the app's resolvers before every
+        # enqueue; the SAM3 checkpoint is ALWAYS pruned (attach_app_mask
+        # substitutes the app's own mask and removes the branch), so it never
+        # reaches ComfyUI either way.
+        ('minimax h3 swap new.json', '1009:1002', 'clip_name'):
+            ('qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', 'RESOLVED'),
+        ('minimax h3 swap new.json', '1009:1007', 'vae_name'):
+            ('minimax_h3_audio_vae_fp32.safetensors', 'RESOLVED'),
+        ('minimax h3 swap new.json', '1009:1008', 'vae_name'):
+            ('minimax_h3_t1_image_vae_step1597.safetensors', 'RESOLVED'),
+        ('minimax h3 swap new.json', '983:963', 'clip_name'):
+            ('qwen_3_8b_fp8mixed.safetensors', 'RESOLVED'),
+        ('minimax h3 swap new.json', '983:966', 'vae_name'):
+            ('flux2-vae.safetensors', 'RESOLVED'),
+        ('minimax h3 swap new.json', '1001:77', 'ckpt_name'):
+            ('sam3.1_multiplex_fp16.safetensors', 'BYPASSED'),
         ('krea2_turbo.json', '20', 'unet_name'):
             ('Krea\\krea2_turbo_fp8.safetensors', 'OVERRIDDEN'),
         ('krea2_turbo.json', '21', 'clip_name'):

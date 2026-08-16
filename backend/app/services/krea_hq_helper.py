@@ -23,12 +23,12 @@ models under the `SEEDVR2` folder type) — it is a lower-level tiled pipeline
 (`SeedVR2Preprocess` / `SeedVR2Conditioning` / `SeedVR2PostProcessing` +
 plain `UNETLoader`/`VAELoader` + core `VAEEncodeTiled`/`VAEDecodeTiled`).
 It shares the same VAE FILENAME (`ema_vae_fp16.safetensors`) as that pack,
-but NOT its folder: seedvr2_helper's own nodes load from the pack-private
-`SEEDVR2` folder, while a core `UNETLoader`/`VAELoader` can only see
-`models/diffusion_models` and `models/vae` — so this module's two SeedVR2
-resolvers scan THOSE folders (measured against /object_info's UNETLoader
-list), not `seedvr2_helper.MODEL_FOLDER`. The three `SeedVR2Xxx` node classes
-here are INFERRED to ship in the same `ComfyUI-SeedVR2_VideoUpscaler` pack
+but NOT its folder: since 2026-08-16 the standalone `seedvr2_helper` runs the
+SAME shape this module does — core `UNETLoader`/`VAELoader` from
+`models/diffusion_models` and `models/vae` — so the two lanes resolve the same
+files (this module measured that against /object_info's UNETLoader list). The
+three `SeedVR2Xxx` node classes here are INFERRED to ship in the same
+`ComfyUI-SeedVR2_VideoUpscaler` pack
 (same author ecosystem, same folder convention) — not measured live against
 that pack's current /object_info, unlike the rest of this app's node-pack
 hints. `FluxKontextImageScale` / `FluxKontextMultiReferenceLatentMethod` /

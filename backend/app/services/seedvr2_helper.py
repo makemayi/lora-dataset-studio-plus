@@ -15,53 +15,45 @@ leaves the content where it was. Neither pass replaces the other, and the UI
 says which is which in one line rather than leaving people to discover it on a
 ruined batch.
 
-THE ECOSYSTEM (measured 2026-08-02, not quoted from a README)
---------------------------------------------------------------
-  * Node pack: `ComfyUI-SeedVR2_VideoUpscaler` (numz / adrientoupet),
-    Apache-2.0. Node ids are `SeedVR2LoadDiTModel`, `SeedVR2LoadVAEModel` and
-    `SeedVR2VideoUpscaler` — read from the pack's own `define_schema`, NOT from
-    its README, whose prose names differ (`SeedVR2_VideoUpscaler`) and would
-    have made every preflight report a missing node on a correct install.
-  * Weights: `numz/SeedVR2_comfyUI` on Hugging Face — anonymous HTTP 200, API
-    `gated=false`, Apache-2.0, same licence as ByteDance's originals
-    (`ByteDance-Seed/SeedVR2-3B` / `-7B`). Sizes measured from content-length:
-    3B fp8 3.39 GB, 3B fp16 6.78 GB, 7B fp8 8.24 GB, 7B fp16 16.48 GB, VAE
-    501 MB — all in that one repo. GGUF quantisations live in
-    `AInVFX/SeedVR2_comfyUI`.
-  * Licence check is the point of that paragraph: the repo is MIT and has
-    refused an AGPL dependency before (ultralytics, for watermark detection).
-    Apache-2.0 on BOTH the code and the weights is clean.
+HOW THIS ENGINE RUNS (2026-08-16: rebuilt on the same manual pipeline the
+✨ improve 'klein' lane ships)
+----------------------------------------------
+This lane used to run the pack's ONE-BOX nodes (`SeedVR2LoadDiTModel` +
+`SeedVR2VideoUpscaler`), which load a standard fp8 build from the pack-private
+`SEEDVR2` folder and cannot read the community convrot/INT8 quantisations. The
+improve lane's SeedVR2 half (krea_hq_helper) always ran the OTHER shape: core
+`UNETLoader`/`VAELoader` + `SeedVR2Preprocess`/`SeedVR2Conditioning`/
+`SeedVR2PostProcessing` + core `VAEEncodeTiled`/`VAEDecodeTiled` + core
+`KSampler` (one step). That shape reads ANY build a core loader can read —
+which is the build most installs already have, because the improve lane
+requires it in `models/diffusion_models` (`seedvr2_7b_sharp_int8_convrot`).
 
-WHY THE NODE PACK IS NOT AUTO-INSTALLED (unlike comfyui-krea2edit)
--------------------------------------------------------------------
-The Krea pack declares `dependencies = []`, so installing it is a clone and the
-app does it. This one declares thirteen — diffusers, peft, omegaconf, einops,
-rotary_embedding_torch, gguf, opencv-python… — and they belong in ComfyUI's
-interpreter, which this app does not own and must never pip into. A clone alone
-would land a pack that fails to import, and the user would read "install the
-pack" about a pack that is already there. So the pack is DETECTED and explained
-(install it through ComfyUI-Manager, restart ComfyUI), and only the WEIGHTS —
-which are just files in a folder — are one-click downloadable from Setup.
+The two lanes now share that shape, so:
+  * the DiT resolves from `diffusion_models` (canonical 7B Sharp int8 first,
+    then a narrow token match) — the same folder and the same file the improve
+    lane uses, no second download;
+  * the VAE resolves from `vae` (canonical ema_vae_fp16);
+  * tiling is the CORE `VAEEncodeTiled`/`VAEDecodeTiled`, always on — no
+    `Comfyui_TTP_Toolset`, no lane choice, no VRAM ceiling: a big frame is cut
+    by the tiled VAE instead of being refused;
+  * the node pack is still `seedvr2_videoupscaler` — it provides the three
+    manual SeedVR2 nodes — but the heavy ONE-BOX loaders are gone.
 
-WHY WE ONLY EVER SUBMIT A MODEL THAT IS ALREADY ON DISK
---------------------------------------------------------
-Both loader nodes are "(Down)Load" nodes: their `model` combo lists every known
-build and the node downloads it on first use. Handing them a name we have not
-verified would start a multi-gigabyte download inside ComfyUI, from a button
-that promised an upscale — exactly the "nothing downloads without a click" rule
-this app keeps everywhere else. So the resolvers below list what is ON DISK and
-`preflight()` refuses when nothing is.
+WEIGHTS ARE NOT AUTO-DOWNLOADED
+-------------------------------
+The 7B Sharp int8 build has NO verified public URL (it is a community
+re-quantisation, same as the improve lane's — see krea_hq_helper), so this
+lane adds no download action. The VAE's canonical file is `ema_vae_fp16`,
+which the improve lane already needs in `models/vae`; missing assets are named
+with their exact path and the user places them, exactly like the improve lane.
 
 ONE IMAGE PER JOB — and why there is no batch-size setting
 ------------------------------------------------------------
-The node's `batch_size` is a VIDEO window: the frames in one batch share
-temporal attention, which is what keeps a clip coherent. Feeding it five
-unrelated dataset photos would let them bleed into each other. The requested
-"batch size" therefore has no honest meaning for a photo set, and shipping the
-knob anyway would ship a way to corrupt a batch. Images go one per job
-(`batch_size=1`, which is also the node's required 4n+1 shape), the dataset
-batch gets its throughput from the existing MAX_FANOUT queue, and the Settings
-card says so instead of leaving a dead dial.
+SeedVR2 is a video model: frames in one batch share temporal attention, which
+is what keeps a clip coherent. Feeding it five unrelated dataset photos would
+let them bleed into each other. Images go one per job, and the dataset batch
+gets its throughput from the existing MAX_FANOUT queue. The Settings card says
+so instead of leaving a dead dial.
 """
 from __future__ import annotations
 import logging
@@ -72,6 +64,7 @@ import uuid
 from .. import config as cfg
 from . import comfy_model_paths
 from ..utils import comfy_fs
+from ..utils.comfyui import load_workflow_local
 from ..job_queue import queue_manager
 
 logger = logging.getLogger(__name__)
@@ -79,21 +72,27 @@ logger = logging.getLogger(__name__)
 ENGINE_ID = 'seedvr2'
 ENGINE_LABEL = 'SeedVR2'
 
-# ComfyUI folder type. The pack registers `models/SEEDVR2` under the model type
-# 'seedvr2' but the FOLDER on disk is 'SEEDVR2', and comfy_model_paths falls
-# back to `<models>/<type>` for a type it has no default mapping for — so this
-# name is both the folder and the search-root key, and an extra_model_paths.yaml
-# entry for it works like any other.
-MODEL_FOLDER = 'SEEDVR2'
+# The shipped workflow — the user's own verified `utility_seedvr2_7b_int8_upscale_image.json`
+# (7B Sharp int8, one-step restore), kept AS-IS except for the values this lane
+# fills. Same contract as every other shipped workflow: loader values are
+# re-resolved against what is actually installed, never left as the author's.
+WORKFLOW_PATH = cfg.BACKEND_DIR / 'workflows' / 'seedvr2 7b int8 upscale.json'
 
-# Loadable here, deliberately NOT comfy_model_paths.is_loadable_model: that
-# predicate excludes .gguf because the app's OTHER loaders cannot read one. This
-# pack ships its own GGUF loader (utils/gguf), so a quantised build IS loadable
-# through it — for someone on 8 GB of VRAM it is the only build that fits.
+# Where the DiT and VAE resolve from. NOT the pack-private `SEEDVR2` folder:
+# this graph loads them through core `UNETLoader`/`VAELoader`, whose widget
+# lists come from `diffusion_models` and `vae` — the same folders the Klein
+# improve lane reads, so one install serves both lanes
+# (comfy-loader-folder-rule).
+DIT_FOLDER = 'diffusion_models'
+VAE_FOLDER = 'vae'
+
 _MODEL_SUFFIXES = ('.safetensors', '.gguf')
 
-SEEDVR2_NODE_CLASSES = ('SeedVR2LoadDiTModel', 'SeedVR2LoadVAEModel',
-                        'SeedVR2VideoUpscaler')
+# The three MANUAL pipeline nodes this graph uses, all from the
+# seedvr2_videoupscaler pack. The ONE-BOX nodes (SeedVR2LoadDiTModel /
+# SeedVR2LoadVAEModel / SeedVR2VideoUpscaler) are NOT required any more.
+SEEDVR2_NODE_CLASSES = ('SeedVR2Preprocess', 'SeedVR2Conditioning',
+                        'SeedVR2PostProcessing')
 SEEDVR2_NODE_PACK = {
     'pack': 'ComfyUI-SeedVR2_VideoUpscaler',
     'url': 'https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler',
@@ -105,198 +104,51 @@ SEEDVR2_NODE_PACK = {
 # so an extra_model_paths.yaml root works exactly the same.
 SEEDVR2_ASSETS = {
     'seedvr2_model': {
-        'kind': 'SeedVR2 DiT model (3B or 7B)',
-        'path': 'models/SEEDVR2/seedvr2_ema_3b_fp8_e4m3fn.safetensors',
-        'source': 'https://huggingface.co/numz/SeedVR2_comfyUI',
+        'kind': 'SeedVR2 DiT model (7B Sharp int8 build)',
+        'path': 'models/diffusion_models/seedvr2_7b_sharp_int8_convrot.safetensors',
+        'source': 'no public URL — the same community build the ✨ improve '
+                  "'klein' engine loads; see krea_hq_helper",
     },
     'seedvr2_vae': {
         'kind': 'SeedVR2 VAE',
-        'path': 'models/SEEDVR2/ema_vae_fp16.safetensors',
+        'path': 'models/vae/ema_vae_fp16.safetensors',
         'source': 'https://huggingface.co/numz/SeedVR2_comfyUI',
     },
 }
 SEEDVR2_REQUIRED = tuple(SEEDVR2_ASSETS)
 
-CANONICAL_DIT = 'seedvr2_ema_3b_fp8_e4m3fn.safetensors'
-CANONICAL_VAE = 'ema_vae_fp16.safetensors'
+# The builds this lane loads, canonical first then a narrow token match — the
+# same discipline as krea_hq_helper.resolve_seedvr2_unet, so both lanes agree
+# on the file. The canonical is the 7B Sharp int8 the improve lane requires.
+SEEDVR2_UNET_CANONICAL = 'seedvr2_7b_sharp_int8_convrot.safetensors'
+SEEDVR2_UNET_TOKENS = ('7b_sharp', 'sharp_int8')
+SEEDVR2_VAE_CANONICAL = 'ema_vae_fp16.safetensors'
+SEEDVR2_VAE_TOKENS = ('ema_vae',)
 
-# The builds the app knows how to talk about, smallest first. `vram_gb` is the
-# pack's own published guidance, not a measurement of ours — it is shown as
-# guidance and never used to gate anything, because real usage moves with
-# resolution and block swapping.
-DIT_VARIANTS = (
-    {'file': 'seedvr2_ema_3b_fp8_e4m3fn.safetensors', 'label': '3B FP8',
-     'size_gb': 3.4, 'vram_gb': '8-12', 'recommended': True},
-    {'file': 'seedvr2_ema_3b_fp16.safetensors', 'label': '3B FP16',
-     'size_gb': 6.8, 'vram_gb': '12-16', 'recommended': False},
-    {'file': 'seedvr2_ema_7b_fp8_e4m3fn.safetensors', 'label': '7B FP8',
-     'size_gb': 8.2, 'vram_gb': '16-20', 'recommended': False},
-    {'file': 'seedvr2_ema_7b_fp16.safetensors', 'label': '7B FP16',
-     'size_gb': 16.5, 'vram_gb': '24+', 'recommended': False},
-    {'file': 'seedvr2_ema_7b_sharp_fp8_e4m3fn.safetensors', 'label': '7B Sharp FP8',
-     'size_gb': 8.2, 'vram_gb': '16-20', 'recommended': False},
-)
+# The model's working short edge, in pixels — what the input is scaled to
+# before the one-step restore (the value the shipped Klein improve graph pins
+# on ResizeImageMaskNode). Exposed as `seedvr2.resolution`, same clamp range as
+# before. A bigger number restores at higher resolution at more VRAM/time.
+RESOLUTION_MIN, RESOLUTION_MAX = 1.0, 4.0
 
+# color-correction enums the node accepts (its own order).
+COLOR_CORRECTIONS = ('lab', 'wavelet', 'wavelet_adaptive', 'hsv', 'adain', 'none')
 
-# --- The HIGH-RESOLUTION lane (tiling) --------------------------------------
-# Idea, workflow and the measurement behind it: SurpassHR (GitHub #32), who hit
-# a real CUDA OOM upscaling full-frame on an 11.6 GB card and shipped a tiled
-# graph on his fork that reaches >4K on the same machine.
-#
-# WHAT WE PORTED, AND WHAT WE DID NOT. His graph chains three node packs: TTP
-# (MIT) for the tiling itself, ComfyUI_essentials (MIT) and ComfyUI-Easy-Use
-# (GPL-3.0) for what is, in the end, arithmetic — normalising a pixel count,
-# dividing by 1024 to count tiles, resizing at the end. This repo is MIT and has
-# refused a dependency over its licence before, and none of that arithmetic
-# needs to happen inside a graph: it happens here, in Python, where it is also
-# testable without a ComfyUI. So the lane depends on TTP alone, two classes.
-#
-# Node names read from the pack's CODE (TTP_toolsets.py NODE_CLASS_MAPPINGS),
-# never its README — in this very pack `TTP_Tile_image_size` maps to a class
-# named `Tile_imageSize`, so the two do not even match.
-TTP_NODE_CLASSES = ('TTP_Image_Tile_Batch', 'TTP_Image_Assy')
-TTP_NODE_PACK = {
-    'pack': 'Comfyui_TTP_Toolset',
-    'url': 'https://github.com/TTPlanetPig/Comfyui_TTP_Toolset',
-    'search': 'TTP Toolset',
-    'license': 'MIT',
-}
+# Tiled VAE geometry, from the user's verified `utility_seedvr2_7b_int8_upscale_image.json`
+# — measured values, not ours.
+VAE_TILE_SIZE = 512
+VAE_TILE_OVERLAP = 128
+VAE_TEMPORAL_SIZE = 4096
+VAE_TEMPORAL_OVERLAP = 8
 
-# Tiles are square and this is their side. 1024 is what SurpassHR's graph uses
-# and what the SeedVR2 VAE's own tiled encode/decode is sized for. It is the
-# DEFAULT of `seedvr2.tile_px`, not a constant any more: the side is the single
-# biggest VRAM lever on the tiled lane, and 1024 was chosen on a card that is
-# not everyone's (see `tile_size`).
-TILE_PX = 1024
-# Bounds for that setting. Below 512 a tile carries too little context for the
-# model to restore anything convincingly and the seam count explodes; above 2048
-# a tile is no longer a tile and the lane loses its reason to exist.
-TILE_PX_MIN, TILE_PX_MAX = 512, 2048
-# Fraction of a tile shared with its neighbour. TTP_Image_Assy blends the seam
-# across that band, so too little shows a grid and too much wastes GPU time on
-# pixels computed twice. 0.1 is his value.
-TILE_OVERLAP_RATE = 0.1
-
-# How many megapixels the FULL-FRAME lane can hold, per GB of VRAM on the card.
-# Deliberately conservative and deliberately a single number: this exists to say
-# "past here you want tiles" BEFORE a run dies, not to predict VRAM use, which
-# moves with the build, the batch and block swapping. Calibrated on the report
-# that opened this: full-frame OOM at ~4K (8.3 MP) on 11.6 GB.
-#
-# KNOWN TO BE FALSELY PESSIMISTIC, and left that way ON PURPOSE. That OOM was
-# measured BEFORE this lane gained the two memory savings taken from the same
-# contribution — the DiT offloading to system RAM between phases and the tiled
-# VAE encode/decode, both of which now apply to the full-frame lane too. The
-# real headroom is therefore higher than 0.55 MP/GB implies, and this number
-# will warn about frames that would in fact have fitted. Raising it would need a
-# measurement nobody has taken; inventing a better-looking constant would trade
-# a documented, harmless pessimism for an undocumented, harmful optimism. The
-# failure mode of being too cautious is an unnecessary suggestion to install a
-# node pack; the failure mode of being too bold is the CUDA out-of-memory this
-# exists to prevent. Measure before you touch it.
-MP_PER_VRAM_GB = 0.55
-# Below this we never claim a ceiling at all — an unknown or tiny card gets the
-# honest "we cannot tell", not a made-up number.
-MIN_CEILING_MP = 1.0
-# With no ceiling to compare against (unknown card), tile only past this. A frame
-# under it fits essentially anywhere, and tiling it would spend seam-blending on
-# a picture that never needed it.
-TILE_WORTH_IT_MP = 6.0
-# Above this OUTPUT SHORT EDGE, 'always' tiles. The mechanism decides the shape
-# of this rule: SeedVR2's `resolution` is the size the model actually works at,
-# so tiling helps exactly when full-frame would push it well past the tile size
-# it is comfortable with. At a 1080 target the model runs at 1080 either way —
-# tiling would buy nothing and still pay for seams and a second pass; at 2160 it
-# runs at 2160 full-frame versus 1024 per tile, which is the gap SurpassHR's
-# side-by-side shows (GitHub #32).
-# The 1.5x factor itself is a JUDGEMENT, not a measurement: it is placed so the
-# shipped 1080 default keeps its single fast pass while 4K work tiles. If anyone
-# measures the crossover properly, this is the number to move.
-#
-# It is a FACTOR of the tile side rather than a bare pixel count because the two
-# move together: the crossover exists where full-frame starts working well past
-# the size a tile is upscaled at, so halving the tile side must halve the
-# crossover too. `seedvr2.tile_threshold` overrides it with a literal number for
-# whoever wants to place the crossover by hand (see `tile_threshold`).
-TILE_ABOVE_FACTOR = 1.5
-TILE_ABOVE_SHORT_EDGE = int(TILE_PX * TILE_ABOVE_FACTOR)
-
-
-_PROBE_VRAM = object()   # "not supplied" — distinct from an explicit unknown
-
-
-def full_frame_ceiling_mp(vram_gb=_PROBE_VRAM):
-    """Megapixels the full-frame lane is willing to promise on this machine, or
-    None when the VRAM is unknown (no nvidia-smi, CPU-only, a remote ComfyUI).
-
-    None means "say nothing", never "no limit": a number invented for a card we
-    cannot see would be exactly the false promise this function exists to
-    replace. Note the sentinel — passing None explicitly means "I looked and
-    could not tell", and must NOT be mistaken for "go and probe"."""
-    if vram_gb is _PROBE_VRAM:
-        from .. import capabilities
-        vram_gb = capabilities.gpu_vram_gb()
-    try:
-        vram = float(vram_gb)
-    except (TypeError, ValueError):
-        return None
-    if not (vram > 0):
-        return None
-    ceiling = vram * MP_PER_VRAM_GB
-    return round(ceiling, 1) if ceiling >= MIN_CEILING_MP else None
-
-
-def output_megapixels(width, height, short_edge):
-    """MP the upscaler will actually produce for a source of `width`x`height`
-    asked to reach `short_edge` on its short side, aspect ratio preserved."""
-    try:
-        w, h, target = float(width), float(height), float(short_edge)
-    except (TypeError, ValueError):
-        return 0.0
-    if not (w > 0 and h > 0 and target > 0):
-        return 0.0
-    scale = target / min(w, h)
-    return (w * scale) * (h * scale) / 1_000_000
-
-
-def tile_plan(width, height, short_edge, tile_px=TILE_PX,
-              overlap_rate=TILE_OVERLAP_RATE):
-    """The tiling this source needs to reach `short_edge`, or None when one tile
-    already covers it (there is nothing to gain from tiling a small image, and
-    a 1x1 grid pays the seam-blending cost for nothing).
-
-    Returns ``{tile_width, tile_height, columns, rows, tiles, output_width,
-    output_height}``. Pure arithmetic — this is the part SurpassHR's graph did
-    with three extra node packs.
-
-    It answers "what WOULD the grid be", never "is tiling worth it": that second
-    question needs the card's ceiling, so it lives in `choose_lane`. Keeping them
-    apart is what stopped a 0.8 MP thumbnail being cut into two tiles merely
-    because the tile side is 1024."""
-    try:
-        w, h, target = int(width), int(height), int(short_edge)
-    except (TypeError, ValueError):
-        return None
-    if w <= 0 or h <= 0 or target <= 0:
-        return None
-    scale = target / min(w, h)
-    out_w, out_h = max(1, round(w * scale)), max(1, round(h * scale))
-    side = max(64, int(tile_px))
-    # The overlap is shared between neighbours, so the NEW ground each tile
-    # covers is a step, not the full side. Columns are counted on that step.
-    try:
-        rate = min(0.45, max(0.0, float(overlap_rate)))
-    except (TypeError, ValueError):
-        rate = TILE_OVERLAP_RATE
-    step = max(1, int(round(side * (1 - rate))))
-    columns = max(1, -(-max(0, out_w - side) // step) + 1)
-    rows = max(1, -(-max(0, out_h - side) // step) + 1)
-    if columns * rows <= 1:
-        return None
-    return {'tile_width': side, 'tile_height': side,
-            'columns': columns, 'rows': rows, 'tiles': columns * rows,
-            'output_width': out_w, 'output_height': out_h}
-
+# The one-step sampler this graph runs: SeedVR2 is a single-step distill, so
+# steps=1 / cfg=1 / euler / simple is the shipped pipeline, not a guess.
+SAMPLE_STEPS = 1
+SAMPLE_CFG = 1.0
+SAMPLE_SAMPLER = 'euler'
+SAMPLE_SCHEDULER = 'simple'
+SAMPLE_DENOISE = 1.0
+SAMPLE_SEED = 42   # fixed: a restoration must come back identical on re-run
 
 class SeedVR2ModelsMissing(Exception):
     """A SeedVR2 asset is not on disk and/or the custom-node pack is absent, so
@@ -316,125 +168,58 @@ class SeedVR2ModelsMissing(Exception):
 
 # --- Resolution -------------------------------------------------------------
 
-def _listings():
-    out = []
-    for folder in comfy_model_paths.search_roots(MODEL_FOLDER):
-        try:
-            out.append((folder, sorted(n for n in os.listdir(folder)
-                                       if n.lower().endswith(_MODEL_SUFFIXES))))
-        except OSError:
-            continue
-    return out
+# `(rel_name, abs_path)` per loadable file across the search roots of a folder
+# type — the faithful mirror of what the loader node's widget lists, exactly
+# like krea_hq_helper's SeedVR2 resolvers. DiT from `diffusion_models`, VAE from
+# `vae`: the same folders the improve lane reads.
+
+def _resolve_in_folder(folder, canonical, tokens):
+    """`(rel_name, abs_path)` of `canonical` under any search root of `folder`,
+    else the first loadable file whose basename carries one of `tokens`, else
+    (None, None). Relative — WITH its subfolder prefix, which is exactly what
+    the loader widget lists. Never a blind first-file guess: a WRONG file is
+    worse than a missing one (different parameter count for the DiT; a
+    non-SeedVR2 VAE fails deep inside the node), and `vae` in particular is
+    full of unrelated VAEs."""
+    listings = [(rel, ab) for rel, ab
+                in sorted(comfy_model_paths.list_models(folder))
+                if comfy_model_paths.is_loadable_model(os.path.basename(rel))]
+    canon = [item for item in listings
+             if os.path.basename(item[0]).lower() == canonical.lower()]
+    if canon:
+        return canon[0]
+    for rel, ab in listings:
+        low = os.path.basename(rel).lower()
+        if any(tok in low for tok in tokens):
+            return rel, ab
+    return None, None
 
 
-def installed_dit_models():
-    """Bare filenames of every SeedVR2 DiT build present in any SEEDVR2 search
-    root, de-duplicated, sorted. The VAE lives in the same folder and is NOT a
-    DiT, so it is filtered out — offering it in the model picker would produce a
-    job that dies at load time."""
-    seen, out = set(), []
-    for _root, names in _listings():
-        for n in names:
-            if n == CANONICAL_VAE or _is_vae_name(n):
-                continue
-            if n not in seen:
-                seen.add(n)
-                out.append(n)
-    return sorted(out)
+def resolve_seedvr2_dit():
+    """The `unet_name` for this graph's core UNETLoader — ComfyUI-relative, from
+    the `diffusion_models` folder, or None when no SeedVR2 DiT build is on disk.
+
+    Canonical 7B Sharp int8 first, else a narrow token match — the same
+    discipline and the same file as krea_hq_helper.resolve_seedvr2_unet, so the
+    two lanes can never disagree about which build is "the" SeedVR2 model."""
+    rel, _ab = _resolve_in_folder(DIT_FOLDER, SEEDVR2_UNET_CANONICAL,
+                                  SEEDVR2_UNET_TOKENS)
+    return rel
 
 
-def _is_vae_name(name):
-    return 'vae' in (name or '').lower()
-
-
-def resolve_seedvr2_dit(selected=None):
-    """The `model` value for SeedVR2LoadDiTModel, or None when no DiT build is on
-    disk.
-
-    Preference: the explicit pick (`selected`, or the `seedvr2.model` setting,
-    matched on its BASENAME so a value copied from a listing still resolves),
-    then the canonical 3B FP8, then the first installed build in name order.
-    Deterministic — the same install always resolves the same file, which is what
-    makes a re-run reproduce its result."""
-    installed = installed_dit_models()
-    if not installed:
-        return None
-    pick = selected or cfg.get('seedvr2.model') or ''
-    bare = os.path.basename(str(pick).replace('/', os.sep).replace('\\', os.sep))
-    if bare:
-        if bare in installed:
-            return bare
-        logger.warning('seedvr2.model %r is not in the SEEDVR2 folder — '
-                       'falling back to automatic resolution', pick)
-    if CANONICAL_DIT in installed:
-        return CANONICAL_DIT
-    return installed[0]
-
-
-def installed_files():
-    """Every loadable file present in any SEEDVR2 search root, de-duplicated and
-    sorted — DiT builds and VAEs together. The raw material of the pins."""
-    seen, out = set(), []
-    for _root, names in _listings():
-        for n in names:
-            if n not in seen:
-                seen.add(n)
-                out.append(n)
-    return sorted(out)
-
-
-def vae_choices():
-    """What the VAE pin may point at: ``[{file, likely_vae}]`` over everything in
-    the folder, sorted, VAE-named files first.
-
-    Both halves matter. The heuristic ('vae' in the name) is what makes the
-    dropdown safe to use blind — handing the DiT weights to the VAE loader dies
-    deep inside the node with an unreadable error. The rest of the folder is
-    still offered, flagged, because the pin exists precisely for the person
-    whose VAE is called something the heuristic cannot see; hiding those files
-    would leave that person with a picker that cannot express their install."""
-    files = installed_files()
-    likely = [f for f in files if _is_vae_name(f)]
-    others = [f for f in files if not _is_vae_name(f)]
-    return ([{'file': f, 'likely_vae': True} for f in likely]
-            + [{'file': f, 'likely_vae': False} for f in others])
-
-
-def resolve_seedvr2_vae(selected=None):
-    """The `model` value for SeedVR2LoadVAEModel, or None when no VAE is on disk.
-
-    Preference: the explicit pick (`selected`, or the `seedvr2.vae` setting,
-    matched on its BASENAME like the DiT pin), then the canonical
-    ema_vae_fp16.safetensors, then the first file in the folder whose name says
-    VAE. Never a blind first-file guess: handing the DiT weights to the VAE
-    loader fails deep inside the node with an unreadable error.
-
-    A PIN IS HONOURED AGAINST THE WHOLE FOLDER, not only against VAE-named
-    files. That is the entire point of having one: the automatic path already
-    covers every install where the file is named like a VAE, so the only person
-    who needs the setting is the person whose file is not — and re-applying the
-    heuristic to their explicit choice would silently ignore it."""
-    listings = _listings()
-    pick = selected or cfg.get('seedvr2.vae') or ''
-    bare = os.path.basename(str(pick).replace('/', os.sep).replace('\\', os.sep))
-    if bare:
-        if any(bare in names for _root, names in listings):
-            return bare
-        logger.warning('seedvr2.vae %r is not in the SEEDVR2 folder — '
-                       'falling back to automatic resolution', pick)
-    if any(CANONICAL_VAE in names for _root, names in listings):
-        return CANONICAL_VAE
-    for _root, names in listings:
-        for n in names:
-            if _is_vae_name(n):
-                return n
-    return None
+def resolve_seedvr2_vae():
+    """The `vae_name` for this graph's core VAELoader — ComfyUI-relative, from
+    the `vae` folder, or None when no VAE is on disk. Canonical ema_vae_fp16
+    first, else a narrow token match."""
+    rel, _ab = _resolve_in_folder(VAE_FOLDER, SEEDVR2_VAE_CANONICAL,
+                                  SEEDVR2_VAE_TOKENS)
+    return rel
 
 
 def _abs_under_roots(rel_name):
     if not rel_name:
         return None
-    for root in comfy_model_paths.search_roots(MODEL_FOLDER):
+    for root in comfy_model_paths.search_roots(DIT_FOLDER):
         cand = os.path.join(root, rel_name)
         if os.path.exists(cand):
             return cand
@@ -495,56 +280,35 @@ def seedvr2_invalid_assets():
 # must never block a pass.
 _NODES_OK_TTL_S = 300
 _nodes_ok_until = 0.0
-_ttp_ok_until = 0.0
+
+
+def _workflow_class_types(workflow):
+    return {n.get('class_type') for n in (workflow or {}).values()
+            if isinstance(n, dict) and n.get('class_type')}
 
 
 def seedvr2_missing_nodes():
-    """[class_type] of the SeedVR2 nodes the target ComfyUI does not expose.
-    [] when they are all present OR when /object_info is unreachable."""
+    """[class_type] of the nodes the SHIPPED WORKFLOW needs that the target
+    ComfyUI does not expose. [] when they are all present OR when /object_info
+    is unreachable — FAIL-OPEN, same contract as every sibling helper."""
     global _nodes_ok_until
     if time.time() < _nodes_ok_until:
         return []
+    workflow = load_workflow_local(str(WORKFLOW_PATH)) or {}
     from ..utils.comfyui import fetch_object_info_classes
     available = fetch_object_info_classes()
     if available is None:
         return []
-    out = sorted(c for c in SEEDVR2_NODE_CLASSES if c not in available)
+    out = sorted(_workflow_class_types(workflow) - available)
     if not out:
         _nodes_ok_until = time.time() + _NODES_OK_TTL_S
     return out
 
 
-def ttp_missing_nodes():
-    """[class_type] of the TTP tiling nodes this ComfyUI does not expose.
-
-    Same contract as seedvr2_missing_nodes and for the same reasons — success
-    cached, misses never, FAIL-OPEN on an unreachable ComfyUI. One difference
-    that matters: an absent TTP pack is NOT an error. The high-resolution lane
-    is optional; without it the default lane still works, it is only capped."""
-    global _ttp_ok_until
-    if time.time() < _ttp_ok_until:
-        return []
-    from ..utils.comfyui import fetch_object_info_classes
-    available = fetch_object_info_classes()
-    if available is None:
-        return []
-    out = sorted(c for c in TTP_NODE_CLASSES if c not in available)
-    if not out:
-        _ttp_ok_until = time.time() + _NODES_OK_TTL_S
-    return out
-
-
-def tiling_available(comfy_ok=True):
-    """Can the high-resolution lane run here? Requires a reachable ComfyUI (the
-    probe cannot fail open into a promise) AND both TTP classes."""
-    return bool(comfy_ok) and not ttp_missing_nodes()
-
-
 def clear_nodes_cache():
     """Drop the success TTL so the next probe re-asks /object_info."""
-    global _nodes_ok_until, _ttp_ok_until
+    global _nodes_ok_until
     _nodes_ok_until = 0.0
-    _ttp_ok_until = 0.0
 
 
 def seedvr2_node_pack_installed():
@@ -572,8 +336,17 @@ def seedvr2_node_pack_installed():
 
 def seedvr2_node_hints(nodes):
     """[{class_type, pack, url, search}] for each missing node — the shape the
-    preflight banner already renders."""
-    return [{'class_type': ct, **SEEDVR2_NODE_PACK} for ct in (nodes or [])]
+    preflight banner already renders. The three manual SeedVR2 nodes map to the
+    numz pack; anything else the workflow needs (ResizeImageMaskNode,
+    JoinImageWithAlpha) is named WITHOUT a guessed pack, same as krea_hq_helper."""
+    out = []
+    for ct in (nodes or []):
+        if ct in SEEDVR2_NODE_CLASSES:
+            out.append({'class_type': ct, **SEEDVR2_NODE_PACK})
+        else:
+            out.append({'class_type': ct, 'pack': None, 'url': None,
+                        'search': ct})
+    return out
 
 
 def missing_file_entries(missing):
@@ -614,10 +387,7 @@ def preflight():
 
 # --- Settings ----------------------------------------------------------------
 
-RESOLUTION_MIN, RESOLUTION_MAX = 256, 4096
-MAX_RESOLUTION_MAX = 8192
 COLOR_CORRECTIONS = ('lab', 'wavelet', 'wavelet_adaptive', 'hsv', 'adain', 'none')
-BLOCKS_TO_SWAP_MAX = 36
 
 
 def _clamp_int(value, lo, hi, default):
@@ -627,86 +397,24 @@ def _clamp_int(value, lo, hi, default):
         return default
 
 
-TILING_MODES = ('auto', 'always', 'never')
-
-
-def tiling_mode(requested=None):
-    """`seedvr2.tiling`, clamped to a value the lane understands.
-
-    'auto' is the DEFAULT and the recommended one: tile when tiling actually
-    buys something — past the size the model is comfortable at, or when the
-    frame would not fit at all. Tiling is a QUALITY decision before it is a
-    memory one (SurpassHR's A/B, GitHub #32), but below the crossover the model
-    already works at a good size and a grid would only add seams.
-
-    'always' is the literal reading: cut whenever there is more than one tile to
-    make, whatever the size. For whoever wants tiling unconditionally.
-
-    'never' stays full-frame whatever the geometry, for whoever sees a seam and
-    prefers the softer image. The VRAM warning still applies there.
-
-    The pre-#32 rule — tile ONLY when the frame would not fit — is deliberately
-    gone: it was the default SurpassHR's side-by-side refuted, and keeping it
-    under a name would just be nostalgia for a setting that made the biggest
-    cards get the worst pictures.
-
-    Unknown values fall back to the default rather than raising: a stale tab or
-    a typo in config must degrade to the recommended behaviour, never refuse a
-    batch."""
-    for candidate in (requested, cfg.get('seedvr2.tiling')):
-        name = str(candidate or '').strip().lower()
-        if name in TILING_MODES:
-            return name
-        if name:
-            logger.warning('unknown seedvr2.tiling %r — using auto', candidate)
-    return 'auto'
-
-
-def tile_size():
-    """Side of one tile, in pixels — `seedvr2.tile_px`, clamped and snapped to a
-    multiple of 64 (the VAE's own stride; an odd side just gets padded).
-
-    THE VRAM LEVER OF THIS ENGINE, and the reason it is a setting at all. 1024
-    is SurpassHR's value and it is a good one on the cards this was built on,
-    but the tile is what a run has to hold: on 8 GB, 768 or 512 is the
-    difference between a 4K upscale and an out-of-memory, at the cost of more
-    seams and more passes. Bigger tiles on a 24 GB card go the other way — fewer
-    seams, more context per tile, more VRAM.
-
-    It also sizes the VAE's tiled encode/decode, which applies on the FULL-FRAME
-    lane too, so lowering it helps even without the tiling node pack."""
-    v = _clamp_int(cfg.get('seedvr2.tile_px'), TILE_PX_MIN, TILE_PX_MAX, TILE_PX)
-    return v - (v % 64)
-
-
-def tile_threshold(tile_px=None):
-    """Output short edge above which 'auto' tiles — `seedvr2.tile_threshold`.
-
-    0 (the default) means DERIVED: `TILE_ABOVE_FACTOR` x the tile side, which is
-    the shipped 1536 at the default 1024 tile and keeps following the tile size
-    when that is changed. A positive value places the crossover by hand, for
-    whoever measures their own — the constant it replaces is a judgement, not a
-    measurement, and says so."""
-    side = tile_size() if tile_px is None else max(64, int(tile_px))
-    v = _clamp_int(cfg.get('seedvr2.tile_threshold'), 0, MAX_RESOLUTION_MAX, 0)
-    if v <= 0:
-        return int(side * TILE_ABOVE_FACTOR)
-    return max(RESOLUTION_MIN, v)
-
-
 def target_resolution():
-    """Short-edge target in pixels. The node scales the SHORT edge to this and
-    keeps the aspect ratio, so 1080 on a 3:2 photo gives 1620x1080. Snapped to an
-    even number — the node requires it."""
-    v = _clamp_int(cfg.get('seedvr2.resolution'), RESOLUTION_MIN, RESOLUTION_MAX, 1080)
-    return v - (v % 2)
+    """The UPSIZE MULTIPLIER — `seedvr2.resolution`. 2.0 (the default, and the
+    value of the user's verified workflow) doubles the short edge: a 1024px
+    photo is restored at 2048px. Clamped to 1.0-4.0. The tiled VAE cuts the
+    scaled frame into 512 px tiles, so any size runs on a small card; a bigger
+    multiplier means the model restores at proportionally more pixels, at more
+    VRAM and time per tile.
 
-
-def max_resolution():
-    """Hard cap on the LONG edge, 0 = no cap. This is the VRAM safety valve on a
-    panorama: without it a 4:1 crop at 1080 short edge becomes 4320 px wide."""
-    v = _clamp_int(cfg.get('seedvr2.max_resolution'), 0, MAX_RESOLUTION_MAX, 0)
-    return v - (v % 2)
+    NOTE the semantic change on 2026-08-16: this key used to be a SHORT-EDGE
+    pixel target for the one-box upscaler; the manual pipeline's ResizeImageMaskNode
+    has no equivalent, so the key now carries the multiplier. A stored old-style
+    value (e.g. 1080) clamps to the top of the range rather than being read as
+    pixels."""
+    try:
+        v = float(cfg.get('seedvr2.resolution') or 2.0)
+    except (TypeError, ValueError):
+        v = 2.0
+    return round(max(RESOLUTION_MIN, min(RESOLUTION_MAX, v)), 2)
 
 
 def color_correction():
@@ -717,252 +425,56 @@ def color_correction():
     return v if v in COLOR_CORRECTIONS else 'lab'
 
 
-def blocks_to_swap():
-    """Transformer blocks offloaded to system RAM during inference. 0 = none
-    (fastest); higher trades speed for VRAM headroom, which is what lets the 7B
-    builds run on a card that cannot hold them."""
-    return _clamp_int(cfg.get('seedvr2.blocks_to_swap'), 0, BLOCKS_TO_SWAP_MAX, 0)
-
-
 # --- Graph -------------------------------------------------------------------
 
-def _dit_loader(dit, swap_blocks):
-    """The DiT loader node, shared by both lanes.
-
-    `offload_device: cpu` (SurpassHR's value, GitHub #32) parks the model in
-    system RAM between phases instead of holding it on the card — a free VRAM
-    win the full-frame lane was leaving on the table."""
-    return {'class_type': 'SeedVR2LoadDiTModel',
-            'inputs': {'model': dit, 'device': 'cuda:0',
-                       'offload_device': 'cpu', 'cache_model': False,
-                       'blocks_to_swap': int(swap_blocks),
-                       'swap_io_components': False,
-                       'attention_mode': 'sdpa'},
-            '_meta': {'title': 'SeedVR2 DiT model'}}
-
-
-def _vae_loader(vae, tiled, tile_px=TILE_PX):
-    """The VAE loader node. `tiled` runs encode AND decode in `tile_px` tiles
-    with a 1/8th overlap (128 px at the default 1024) — the other half of
-    SurpassHR's VRAM saving, and the reason the tiled lane can assemble a >4K
-    frame at all. The size follows `seedvr2.tile_px` so ONE setting moves the
-    whole engine's memory appetite, on both lanes."""
-    side = max(64, int(tile_px))
-    inputs = {'model': vae, 'device': 'cuda:0',
-              'offload_device': 'cpu', 'cache_model': False,
-              'encode_tiled': bool(tiled), 'decode_tiled': bool(tiled)}
-    if tiled:
-        overlap = max(8, side // 8)
-        inputs.update({'encode_tile_size': side, 'encode_tile_overlap': overlap,
-                       'decode_tile_size': side, 'decode_tile_overlap': overlap})
-    return {'class_type': 'SeedVR2LoadVAEModel', 'inputs': inputs,
-            '_meta': {'title': 'SeedVR2 VAE'}}
+# The workflow's node ids, read from the shipped file (user's own
+# `utility_seedvr2_7b_int8_upscale_image.json`). Kept as constants so a
+# re-export that renumbers nodes fails the shape test loudly instead of
+# silently filling the wrong node.
+NODE_LOAD_IMAGE = '1'
+NODE_VAE = '66:51'
+NODE_UNET = '66:52'
+NODE_SAMPLER = '66:54'
+NODE_RESIZE = '66:57'
+NODE_POST = '66:59'
+NODE_SAVE = '9'
+NODE_IMAGE_COMPARE = '65'   # the debug before/after viewer — dropped from jobs
 
 
-def build_workflow(source_image, *, dit, vae, seed, resolution=1080,
-                   max_res=0, color_correct='lab', swap_blocks=0,
-                   tiled_vae=False, vae_tile_px=TILE_PX,
-                   filename_prefix='seedvr2_upscale'):
-    """The ComfyUI API-format graph. Pure function of its arguments — no config
-    read, no disk access — so a test can assert the exact wiring without a
-    ComfyUI, and every loader value is one a resolver produced.
+def build_workflow(source_image, *, dit, vae, seed=SAMPLE_SEED, resolution=2.0,
+                   color_correct='lab', filename_prefix='seedvr2_upscale'):
+    """Load the shipped SeedVR2 workflow (the user's verified
+    `utility_seedvr2_7b_int8_upscale_image.json` — 7B Sharp int8, one-step
+    restore) and fill the values this job owns. Everything else stays exactly
+    as the author validated it.
 
-    `batch_size` is pinned to 1: see the module docstring — it is a video frame
-    window, and one dataset image is one job.
+    `resolution` is the UPSIZE MULTIPLIER (2.0 doubles the short edge): the
+    input is scaled by it before the one-step restore, so a 1024px photo
+    becomes a 2048px restoration. The core tiled VAE (512 px tiles, temporal
+    4096) cuts the scaled frame, so a big upscale never has to fit the card in
+    one piece.
 
-    `cache_model` stays False on both loaders. Caching would keep several GB
-    resident in ComfyUI between jobs, which on a single-GPU machine is exactly
-    the memory the next generation (or a training run) needs; the app already
-    treats the GPU as a contended resource everywhere else."""
-    return {
-        '1': _dit_loader(dit, swap_blocks),
-        '2': _vae_loader(vae, tiled_vae, vae_tile_px),
-        '3': {'class_type': 'LoadImage', 'inputs': {'image': source_image}},
-        '4': {'class_type': 'SeedVR2VideoUpscaler',
-              'inputs': {'image': ['3', 0], 'dit': ['1', 0], 'vae': ['2', 0],
-                         'seed': int(seed), 'resolution': int(resolution),
-                         'max_resolution': int(max_res), 'batch_size': 1,
-                         'uniform_batch_size': False, 'temporal_overlap': 0,
-                         'prepend_frames': 0,
-                         'color_correction': color_correct,
-                         'input_noise_scale': 0.0, 'latent_noise_scale': 0.0,
-                         'offload_device': 'cpu', 'enable_debug': False},
-              '_meta': {'title': 'SeedVR2 upscale'}},
-        '5': {'class_type': 'SaveImage',
-              'inputs': {'filename_prefix': filename_prefix, 'images': ['4', 0]}},
-    }
-
-
-def build_tiled_workflow(source_image, *, dit, vae, seed, plan,
-                         resolution=1080, color_correct='lab', swap_blocks=0,
-                         padding=64, filename_prefix='seedvr2_upscale'):
-    """The HIGH-RESOLUTION graph: cut the source into overlapping tiles, upscale
-    each, blend them back. Pure, like its full-frame sibling.
-
-    PORTED FROM SurpassHR's fork (GitHub #32) — and deliberately NOT identical
-    to it, so here is the difference in one place rather than in a chat log. His
-    graph chains three node packs: TTP for the tiling, plus ComfyUI_essentials
-    (MIT) and ComfyUI-Easy-Use (GPL-3.0) for arithmetic — normalising a pixel
-    count, dividing by 1024 to count tiles, resizing at the end. This repo is MIT
-    and has refused a dependency over its licence before, and that arithmetic
-    does not need to run inside a graph, so `tile_plan` does it in Python and
-    hands the result in as `plan`. Net effect: one node pack instead of three,
-    MIT instead of GPL-3.0, two classes to probe instead of six, and geometry
-    that a test can check without a ComfyUI at all.
-
-    The upscaler runs on the tile BATCH: `TTP_Image_Tile_Batch` emits every tile
-    as one image batch, so a single SeedVR2 pass covers them all and never holds
-    more than one tile's worth of activations. `batch_size` stays 1 for the same
-    reason it does full-frame — it is a temporal window, and tiles of one still
-    image are not frames of a video.
-
-    `resolution` is the SHORT EDGE OF A TILE, not of the picture: each tile is
-    already `plan['tile_width']` px of source, and asking for the frame's target
-    here would upscale every tile to the whole frame's size."""
-    return {
-        '1': _dit_loader(dit, swap_blocks),
-        # The VAE tiles at the SAME side as the picture: the plan's tile is what
-        # a pass actually holds, so a second, different size here would undo the
-        # memory decision the user made in Settings.
-        '2': _vae_loader(vae, True, plan['tile_width']),
-        '3': {'class_type': 'LoadImage', 'inputs': {'image': source_image}},
-        # Scale the SOURCE to the target frame size first, then cut: tiling a
-        # small image and enlarging each tile would ask the model to invent the
-        # same detail with less context each time.
-        '4': {'class_type': 'ImageScale',
-              'inputs': {'image': ['3', 0], 'upscale_method': 'lanczos',
-                         'width': int(plan['output_width']),
-                         'height': int(plan['output_height']), 'crop': 'disabled'},
-              '_meta': {'title': 'Target frame size'}},
-        '5': {'class_type': 'TTP_Image_Tile_Batch',
-              'inputs': {'image': ['4', 0],
-                         'tile_width': int(plan['tile_width']),
-                         'tile_height': int(plan['tile_height'])},
-              '_meta': {'title': f"Cut into {plan['tiles']} tiles"}},
-        '6': {'class_type': 'SeedVR2VideoUpscaler',
-              'inputs': {'image': ['5', 0], 'dit': ['1', 0], 'vae': ['2', 0],
-                         'seed': int(seed), 'resolution': int(resolution),
-                         'max_resolution': 0, 'batch_size': 1,
-                         'uniform_batch_size': False, 'temporal_overlap': 0,
-                         'prepend_frames': 0,
-                         'color_correction': color_correct,
-                         'input_noise_scale': 0.0, 'latent_noise_scale': 0.0,
-                         'offload_device': 'cpu', 'enable_debug': False},
-              '_meta': {'title': 'SeedVR2 upscale (per tile)'}},
-        '7': {'class_type': 'TTP_Image_Assy',
-              'inputs': {'tiles': ['6', 0], 'positions': ['5', 1],
-                         'original_size': ['5', 2], 'grid_size': ['5', 3],
-                         'padding': int(padding)},
-              '_meta': {'title': 'Blend the seams back together'}},
-        '8': {'class_type': 'SaveImage',
-              'inputs': {'filename_prefix': filename_prefix, 'images': ['7', 0]}},
-    }
-
-
-def _source_size(path):
-    """(width, height) of the staged source, or a neutral square when it cannot
-    be measured — an unreadable header must pick a lane, not crash the enqueue."""
-    try:
-        from PIL import Image
-        from . import image_encoding
-        with Image.open(path) as im:
-            return image_encoding.visual_size_from_header(im)
-    except Exception:
-        return (1024, 1024)
-
-
-def choose_lane(width, height, *, short_edge, tiling_ok, ceiling_mp=None,
-               tile_px=TILE_PX, overlap_rate=TILE_OVERLAP_RATE, mode=None,
-               tile_above=None):
-    """Which lane runs, and what the user must be told BEFORE the GPU starts.
-
-    Returns ``{lane, plan, output_mp, ceiling_mp, capped, notice}``:
-      * ``lane`` — 'tiled' when tiling is available AND worth it, else 'full'.
-      * ``plan`` — the tile geometry for the tiled lane, None otherwise.
-      * ``capped`` — True when the request exceeds what full-frame can promise
-        on this card and no tiled lane will run (pack absent, or 'never').
-
-    ``mode`` is `seedvr2.tiling`: 'auto' (default — tile when it helps: past the
-    model's comfortable size, or when the frame would not fit), 'always' (tile
-    whenever there is more than one tile to make) or 'never' (full-frame always;
-    the ceiling still warns). The caller still runs (the
-        ceiling is guidance, not a gate — see below), but ``notice`` says so.
-
-    ``tile_px`` is the tile side (`seedvr2.tile_px`) and ``tile_above`` the
-    'auto' crossover (`seedvr2.tile_threshold`); left None the crossover follows
-    the tile side, which is the shipped 1536 at the default 1024 tile.
-
-    WHY THE CEILING NEVER REFUSES. It is arithmetic over a single constant, on a
-    card whose real headroom moves with the build, block swapping and whatever
-    else holds VRAM. Turning that into a hard stop would refuse runs that would
-    have worked. What it must not do is stay SILENT: the report that opened this
-    (SurpassHR, GitHub #32) is someone discovering the limit as a CUDA OOM in a
-    log. So the honest contract is: always run, always say."""
-    mode = tiling_mode(mode)
-    # The crossover follows the tile side unless a caller places it by hand
-    # (`seedvr2.tile_threshold`): a smaller tile has to start tiling sooner.
-    crossover = int(tile_above) if tile_above else int(
-        max(64, int(tile_px)) * TILE_ABOVE_FACTOR)
-    out_mp = output_megapixels(width, height, short_edge)
-    # WHY TILING IS NOT JUST A VRAM WORKAROUND — the comment that used to sit
-    # here said "a picture this card can hold whole must stay whole", and it was
-    # WRONG. SurpassHR posted a side-by-side on his own hardware (GitHub #32):
-    # the full-frame result lost detail and gained artifacts, the tiled one did
-    # not. The reason is in SeedVR2's `resolution` argument — it sets the size
-    # the model actually works at, so a whole 4K frame spreads the model's
-    # capacity across four times the surface, while a tile is upscaled in the
-    # range the model is good at. Tiling therefore preserves HIGH-FREQUENCY
-    # DETAIL, and framing it as a memory trick had a perverse consequence: the
-    # threshold scaled with VRAM, so the bigger the card, the less often anyone
-    # got the better picture. Someone on 24 GB essentially never did.
-    #
-    # So the lane is now a CHOICE (seedvr2.tiling), defaulting to 'auto', which
-    # tiles whenever tiling helps rather than only when memory forces it. The
-    # VRAM ceiling keeps its one honest job — warning when the pack is absent
-    # and a frame will not fit.
-    budget = ceiling_mp if ceiling_mp else TILE_WORTH_IT_MP
-    over_budget = out_mp > budget
-    if mode == 'never':
-        wants_tiles = False
-    elif mode == 'always':
-        # Literal: cut whenever there is a grid to make. `tile_plan` still
-        # returns None for anything that fits in a single tile, so this cannot
-        # "cut" a picture into one piece.
-        wants_tiles = True
-    else:                              # 'auto' — the default
-        # Tile when it actually buys something: past the size the model is
-        # comfortable at, or when the frame would not fit at all. Below that,
-        # the model already runs at a good size and a grid is pure cost.
-        #
-        # THE COMPARISON IS STRICT, AND THAT IS A DECISION. A target sitting
-        # EXACTLY on the crossover runs full-frame — 1536 px at the default 1024
-        # tile, 768 px at a 512 one. That is not an edge case: the crossover is
-        # derived (1.5x the tile side) and both grids are round numbers, so they
-        # collide on values people really type, and someone who asks for exactly
-        # 1536 gets no tiles. It stays strict because 'above' is what the
-        # `seedvr2.tile_threshold` setting says and what an already-stored value
-        # means; moving it to >= would silently redefine numbers users have saved.
-        # What was wrong was the SILENCE around it, and that is fixed where the
-        # number is chosen: Settings ▸ Engines now names the lane the configured
-        # target will take (`laneForTarget`). Reported by SurpassHR (GitHub #32).
-        wants_tiles = short_edge > crossover or over_budget
-    plan = (tile_plan(width, height, short_edge, tile_px, overlap_rate)
-            if (tiling_ok and wants_tiles) else None)
-    if plan:
-        return {'lane': 'tiled', 'plan': plan, 'output_mp': round(out_mp, 1),
-                'ceiling_mp': ceiling_mp, 'capped': False,
-                'notice': (f"Tiling this one: {plan['columns']}x{plan['rows']} tiles "
-                           f"blended back together, so the card never holds the whole "
-                           f"{round(out_mp, 1)} MP frame at once.")}
-    over = bool(ceiling_mp) and out_mp > ceiling_mp
-    notice = None
-    if over:
-        notice = (f"This asks for about {round(out_mp, 1)} MP in one pass, and this "
-                  f"GPU is only good for roughly {ceiling_mp} MP full-frame — it may "
-                  f"run out of memory. Install the {TTP_NODE_PACK['pack']} node pack "
-                  f"to upscale it in tiles instead, or lower the target resolution.")
-    return {'lane': 'full', 'plan': None, 'output_mp': round(out_mp, 1),
-            'ceiling_mp': ceiling_mp, 'capped': over, 'notice': notice}
+    The debug `ImageCompare` node (original vs output) is DROPPED from jobs:
+    it is a front-end viewer with a socketless `__value__` input, not a pass
+    this engine ships."""
+    raw = load_workflow_local(str(WORKFLOW_PATH))
+    if not raw:
+        raise ValueError('failed to load the SeedVR2 upscale workflow')
+    workflow = dict(raw)
+    for node in (NODE_LOAD_IMAGE, NODE_VAE, NODE_UNET, NODE_SAMPLER,
+                 NODE_RESIZE, NODE_POST, NODE_SAVE):
+        if node not in workflow:
+            raise ValueError(f'workflow node {node} missing — '
+                             'seedvr2 7b int8 upscale.json has changed')
+    workflow[NODE_LOAD_IMAGE]['inputs']['image'] = source_image
+    workflow[NODE_UNET]['inputs']['unet_name'] = dit
+    workflow[NODE_VAE]['inputs']['vae_name'] = vae
+    workflow[NODE_RESIZE]['inputs']['resize_type.multiplier'] = float(resolution)
+    workflow[NODE_POST]['inputs']['color_correction_method'] = color_correct
+    workflow[NODE_SAMPLER]['inputs']['seed'] = int(seed)
+    workflow[NODE_SAVE]['inputs']['filename_prefix'] = filename_prefix
+    workflow.pop(NODE_IMAGE_COMPARE, None)
+    return workflow
 
 
 def _comfy_input_dir() -> str:
@@ -973,7 +485,7 @@ def _comfy_input_dir() -> str:
 
 
 def enqueue_seedvr2_upscale(user_id, source_filename, source_path=None,
-                            extra_metadata=None, model=None, seed=42):
+                            extra_metadata=None, seed=SAMPLE_SEED):
     """Copy the source into ComfyUI's input folder, build the SeedVR2 graph
     against what is ACTUALLY installed, and enqueue it. Returns the app job_id.
 
@@ -995,7 +507,7 @@ def enqueue_seedvr2_upscale(user_id, source_filename, source_path=None,
         raise ValueError(f'source image not found: {source_filename}')
 
     preflight()
-    dit = resolve_seedvr2_dit(model)
+    dit = resolve_seedvr2_dit()
     vae = resolve_seedvr2_vae()
 
     comfy_input_dir = comfy_fs.ensure_input_usable(_comfy_input_dir())
@@ -1009,30 +521,14 @@ def enqueue_seedvr2_upscale(user_id, source_filename, source_path=None,
     # output folder and the app moves each result out right after completion,
     # so a shared prefix makes the counter re-issue the same name.
     prefix = f'{user_id}_DatasetSeedVR2_{uid}'
-    short_edge = target_resolution()
-    side = tile_size()
-    src_w, src_h = _source_size(staged_source)
-    lane = choose_lane(src_w, src_h, short_edge=short_edge,
-                       tiling_ok=tiling_available(), ceiling_mp=full_frame_ceiling_mp(),
-                       mode=tiling_mode(), tile_px=side,
-                       tile_above=tile_threshold(side))
-    if lane['notice']:
-        logger.info('seedvr2: %s', lane['notice'])
-    if lane['lane'] == 'tiled':
-        workflow = build_tiled_workflow(
-            comfy_input, dit=dit, vae=vae, seed=seed, plan=lane['plan'],
-            resolution=min(short_edge, lane['plan']['tile_width']),
-            color_correct=color_correction(), swap_blocks=blocks_to_swap(),
-            filename_prefix=prefix)
-    else:
-        workflow = build_workflow(
-            comfy_input, dit=dit, vae=vae, seed=seed,
-            resolution=short_edge, max_res=max_resolution(),
-            color_correct=color_correction(), swap_blocks=blocks_to_swap(),
-            tiled_vae=True, vae_tile_px=side, filename_prefix=prefix)
+    workflow = build_workflow(
+        comfy_input, dit=dit, vae=vae, seed=seed,
+        resolution=target_resolution(),
+        color_correct=color_correction(),
+        filename_prefix=prefix)
 
     job_id = str(uuid.uuid4())
-    meta = {'model_name': 'seedvr2_upscale', 'seedvr2_lane': lane['lane']}
+    meta = {'model_name': 'seedvr2_upscale'}
     if extra_metadata:
         meta.update(extra_metadata)
     meta['staged_inputs'] = [comfy_input]   # dropped again when the job ends

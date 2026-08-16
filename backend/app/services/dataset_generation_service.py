@@ -1582,6 +1582,64 @@ def face_swap_image(user_id, image_id, engine=None):
         _release_swap(img.id)
 
 
+def seedvr2_upscale_replace(user_id, image_id):
+    """SeedVR2-upscale this tile IN PLACE: its CURRENT image goes through the
+    shipped SeedVR2 workflow (2x by default) and the result REPLACES the tile —
+    the same snapshot / pending / trash shape as a face swap, so the original
+    stays undoable and a failure restores it.
+
+    Unlike the ✨ improve lane (which creates a candidate and never touches the
+    source), this is the destructive route: the row is set pending with
+    `swap_restore` holding the previous state, and the job-queue completion
+    link does the rest (attach the output, trash the original, record undo).
+
+    Returns the new job_id, or None if the image is not owned / has no current
+    file. Raises SeedVR2ModelsMissing when the engine cannot run."""
+    img = _owned_image(user_id, image_id)
+    if not img or not img.filename:
+        return None
+    from . import seedvr2_helper
+    seedvr2_helper.preflight()          # raises SeedVR2ModelsMissing
+    source_path = os.path.join(_dataset_path(img.dataset_id), img.filename)
+    # Claimed like a swap: the same reason — a double click must not queue two
+    # in-place jobs on one tile while the row still looks idle.
+    if not _claim_swap(img.id):
+        raise RuntimeError('a replacement is already being prepared for this image')
+    try:
+        from ..job_queue import queue_manager
+        old_state = {field: getattr(img, field) for field in SWAP_RESTORE_FIELDS}
+        new_job_id = seedvr2_helper.enqueue_seedvr2_upscale(
+            user_id=str(user_id), source_filename=img.filename,
+            source_path=source_path,
+            extra_metadata={'is_dataset': True,
+                            'dataset_id': img.dataset_id,
+                            'replace_kind': 'seedvr2_upscale'})
+        # Persist the replacement state, carrying the snapshot that puts it back.
+        # The old FILE stays on disk until the result has landed (see
+        # finish_swapped_original) — trashing it here destroyed the tile on
+        # Stop or failure, exactly as it did for the swap before the reorder.
+        try:
+            _clear_watermark_metadata(img)
+            img.filename = None
+            img.status = 'pending'
+            img.job_id = new_job_id
+            img.fail_reason = None
+            img.fail_kind = None
+            img.swap_restore = json.dumps(old_state)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            try:
+                queue_manager.cancel_job(new_job_id, str(user_id), 'image')
+            except Exception:
+                logger.exception('seedvr2: failed to cancel unlinked job %s',
+                                 new_job_id)
+            raise
+        return new_job_id
+    finally:
+        _release_swap(img.id)
+
+
 def _face_swap_image_claimed(user_id, img, ds, engine):
     """The body of face_swap_image, with this image's swap claim already held."""
     image_id = img.id

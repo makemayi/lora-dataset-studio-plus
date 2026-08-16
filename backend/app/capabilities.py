@@ -1784,14 +1784,6 @@ def probe(force=False) -> dict:
     seedvr2_ready = _svr.engine_ready(comfy['ok'], missing=seedvr2_missing,
                                       invalid=seedvr2_invalid,
                                       nodes_missing=seedvr2_nodes_missing)
-    # The OPTIONAL high-resolution lane (tiling), contributed by SurpassHR
-    # (GitHub #32). Its absence is not a fault: without it the default lane
-    # still upscales, it is only capped by what this card can hold in one pass.
-    # The ceiling is published so the UI can say that BEFORE a run dies — the
-    # report behind this feature is someone meeting the limit as a CUDA OOM.
-    seedvr2_tiling_nodes_missing = _svr.ttp_missing_nodes() if comfy['ok'] else []
-    seedvr2_tiling_ready = _svr.tiling_available(comfy['ok'])
-    seedvr2_ceiling_mp = _svr.full_frame_ceiling_mp()
     base_dir = cfg.get('comfyui.base_dir') or ''
     from .services import comfyui_control
     comfy_launcher = comfyui_control.launcher_status()
@@ -1900,12 +1892,6 @@ def probe(force=False) -> dict:
             # Setup step, the improve engine picker) so none of them re-derives
             # readiness from a different subset of the four gaps above.
             'seedvr2_ready': seedvr2_ready,
-            # Optional tiled lane: ready / which TTP classes are absent / the
-            # full-frame megapixel ceiling this GPU is good for (None = unknown
-            # card, and then the UI says nothing rather than inventing a number).
-            'seedvr2_tiling_ready': seedvr2_tiling_ready,
-            'seedvr2_tiling_nodes_missing': seedvr2_tiling_nodes_missing,
-            'seedvr2_ceiling_mp': seedvr2_ceiling_mp,
             # Klein assets PRESENT on disk but not real, loadable weights:
             # [{asset, filename, verdict, blocking, reason}]. Distinct from
             # klein_missing (the file exists, it just can't load) — drives the Setup
