@@ -38,7 +38,11 @@ from .subject_trim import (
 
 logger = logging.getLogger(__name__)
 
-TRIM_KINDS = ('trim',)
+# Owned by dataset_activity, which composes STOPPABLE_KINDS out of it — the same
+# way dataset_generation_service reads IMPROVE_KINDS rather than restating it. A
+# second copy here could not disagree in value, but it could disagree in SCOPE
+# the day the arming scope changes, and only one of the two would be found.
+TRIM_KINDS = dataset_activity.TRIM_KINDS
 PREVIEW_FILE = 'trim-preview.json'
 UNDO_FILE = 'trim-undo.json'
 MASK_PROMPT = 'person'
