@@ -90,3 +90,80 @@ def test_output_size_caps_the_long_edge_and_never_upscales():
 def test_an_empty_bbox_is_refused_rather_than_producing_a_zero_frame():
     with pytest.raises(ValueError):
         st.trim_frame(1000, 1000, (10, 10, 0, 500))
+
+
+# --- the preview job -------------------------------------------------------
+import json
+import os
+
+from PIL import Image
+
+from app.services import subject_trim_batch as stb
+
+
+class _FakeMask:
+    """Stands in for auto_mask: a white rectangle at a known place."""
+
+    def __init__(self, size, rect):
+        self.size = size
+        self.rect = rect
+
+    def write(self, path):
+        im = Image.new('L', self.size, 0)
+        x, y, w, h = self.rect
+        im.paste(255, (x, y, x + w, y + h))
+        im.save(path)
+        return path
+
+
+def test_preview_writes_a_manifest_and_touches_no_pixels(app, tmp_path, monkeypatch):
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    photo = ds_dir / 'a.png'
+    Image.new('RGB', (2000, 3000), 'white').save(photo)
+    before = photo.read_bytes()
+
+    mask_file = tmp_path / 'mask.png'
+    _FakeMask((2000, 3000), (800, 200, 500, 2000)).write(mask_file)
+    monkeypatch.setattr(stb.auto_mask, 'is_available', lambda: True)
+    monkeypatch.setattr(stb.auto_mask, 'mask_for', lambda p, prompt: str(mask_file))
+
+    rows = [stb.PreviewRow(image_id=1, filename='a.png')]
+    manifest = stb.build_preview(str(ds_dir), rows, progress=None)
+
+    assert manifest['items'][0]['skip'] is None
+    assert manifest['items'][0]['image'] == [2000, 3000]
+    assert manifest['items'][0]['frame'][2] > 500, 'widened to the floor'
+    assert photo.read_bytes() == before, 'preview must not write pixels'
+
+
+def test_preview_records_the_skip_reason_instead_of_dropping_the_row(app, tmp_path, monkeypatch):
+    # A dropped row is invisible; a recorded reason is reviewable. The first
+    # wave only counted skips, so nobody could see WHICH images it passed over.
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    Image.new('RGB', (1000, 1000), 'white').save(ds_dir / 'b.png')
+    mask_file = tmp_path / 'mask2.png'
+    _FakeMask((1000, 1000), (10, 10, 980, 980)).write(mask_file)
+    monkeypatch.setattr(stb.auto_mask, 'is_available', lambda: True)
+    monkeypatch.setattr(stb.auto_mask, 'mask_for', lambda p, prompt: str(mask_file))
+
+    manifest = stb.build_preview(str(ds_dir), [stb.PreviewRow(2, 'b.png')], progress=None)
+    assert manifest['items'][0]['skip'] == 'nothing-much-to-remove'
+    assert manifest['items'][0]['frame'] is not None, 'the frame is still shown'
+
+
+def test_preview_records_a_mask_failure_as_its_own_reason(app, tmp_path, monkeypatch):
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    Image.new('RGB', (1000, 1000), 'white').save(ds_dir / 'c.png')
+
+    def _boom(path, prompt):
+        raise stb.auto_mask.NoMatch('no person here')
+
+    monkeypatch.setattr(stb.auto_mask, 'is_available', lambda: True)
+    monkeypatch.setattr(stb.auto_mask, 'mask_for', _boom)
+
+    manifest = stb.build_preview(str(ds_dir), [stb.PreviewRow(3, 'c.png')], progress=None)
+    assert manifest['items'][0]['skip'] == 'no-subject-found'
+    assert manifest['items'][0]['frame'] is None
