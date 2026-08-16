@@ -423,14 +423,31 @@ def _improve_extra_metadata(source, label, engine='klein') -> dict:
 
 
 # --- Which engine runs the ✨ improve pass ------------------------------------
-# Two passes, one lane. Klein REWRITES (a diffusion edit that re-renders skin
-# and micro-detail from a prompt: it fixes a soft photo and it changes it);
-# SeedVR2 RESTORES (one-step diffusion super-resolution that leaves the content
-# where it was). Which one you want depends on whether the frame's exact look is
-# the thing you are training on — so it is a choice, not a default we can pick
-# for everyone. Requested in issue #32 by SurpassHR, whose complaint was exactly
-# that Klein "tends to change the detail and color of the original image".
-IMPROVE_ENGINES = ('klein', 'seedvr2')
+# Three passes, one lane, and the split is REWRITE vs RESTORE:
+#
+#   klein     REWRITES. Historical id, and a lie by now — as of the Krea2 Ostris
+#             Edit + SeedVR2 swap this runs krea_hq_helper, not Flux.2 Klein 9B.
+#             The id stays because it is stored in `derivation_kind` /
+#             `improve_engine` on every existing row (CLAUDE.md ▸ never rename a
+#             stored id without an alias path).
+#   seedvr2   RESTORES. One-step diffusion super-resolution that leaves the
+#             content where it was. Requested in issue #32 by SurpassHR, whose
+#             complaint was exactly that the rewrite pass "tends to change the
+#             detail and color of the original image".
+#   klein_hq  REWRITES, on Flux.2 Klein 9B (klein_edit_helper + the shipped
+#             'improve skin.json'). Added 2026-08-16 because that engine had NO
+#             entrance to this lane at all once the swap above took its name:
+#             the two choices left were one restorer and one Krea2 rewrite, and
+#             a soft frame that neither fixes had nowhere else to go.
+#
+# Which one you want depends on whether the frame's exact look is the thing you
+# are training on — so it is a choice, not a default we can pick for everyone.
+IMPROVE_ENGINES = ('klein', 'seedvr2', 'klein_hq')
+
+#: The engines whose pass is driven by the editable `klein_improve` instruction.
+#: A restoration has no prompt, and storing one on its candidate would put a
+#: sentence on screen that had no effect on the image.
+PROMPTED_IMPROVE_ENGINES = ('klein', 'klein_hq')
 
 
 def resolve_improve_engine(requested=None):
@@ -462,6 +479,19 @@ def _improve_preflight(engine):
     if engine == 'seedvr2':
         from . import seedvr2_helper
         seedvr2_helper.preflight()
+        return
+    if engine == 'klein_hq':
+        # The real Klein 9B pass. Assets AND nodes, in that order and both
+        # before any row exists, matching every other Klein call site: a missing
+        # weight and a missing node pack are different answers, and the routes
+        # already turn each into its own actionable 409.
+        from . import klein_edit_helper as _kleh
+        _missing = _kleh.klein_missing_assets()
+        if any(a in _missing for a in _kleh.KLEIN_REQUIRED):
+            raise _kleh.KleinModelsMissing(_missing)
+        _nodes = _kleh.klein_missing_nodes()
+        if _nodes:
+            raise KleinNodesMissing(_missing, _nodes)
         return
     # 'klein' engine id kept as-is (stored in derivation_kind/improve_engine on
     # existing rows — never renamed, see CLAUDE.md), but as of the Krea2 Ostris
@@ -500,6 +530,18 @@ def _enqueue_improve(engine, *, user_id, source, source_path, prompt, label,
         return seedvr2_helper.enqueue_seedvr2_upscale(
             user_id=str(user_id), source_filename=source.filename,
             source_path=source_path, extra_metadata=meta)
+    if engine == 'klein_hq':
+        # Flux.2 Klein 9B through the shipped 'improve skin.json'. It takes the
+        # SAME editable klein_improve prompt as the other rewrite pass, so the
+        # two are comparable on one instruction rather than each carrying its
+        # own. Everything else stays at the helper's defaults on purpose: the
+        # model pick, the consistency-LoRA strength and the step count are the
+        # Klein settings a user has already tuned, and a second set of dials
+        # reachable only from this lane is how two of them drift apart.
+        from . import klein_edit_helper as _kleh
+        return _kleh.enqueue_klein_edit(
+            user_id=str(user_id), source_filename=source.filename,
+            edit_prompt=prompt, source_path=source_path, extra_metadata=meta)
     from . import krea_hq_helper as khh
     return khh.enqueue_krea_hq_improve(
         user_id=str(user_id), source_filename=source.filename,
@@ -575,7 +617,7 @@ def _improve_existing_image_locked(user_id, image_id, engine=None):
     # no prompt at all — it is a restoration — so storing the Klein improve
     # prompt on one would put a sentence on screen that had no effect on the
     # image. The honest value is the pass that ran.
-    stored_prompt = (prompt[:500] if engine == 'klein'
+    stored_prompt = (prompt[:500] if engine in PROMPTED_IMPROVE_ENGINES
                      else 'SeedVR2 upscale (no prompt — restoration pass)')
     label = _improve_candidate_label(img, engine)
     candidate = FaceDatasetImage(

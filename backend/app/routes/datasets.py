@@ -1810,8 +1810,9 @@ def dataset_image_seedvr2_replace(image_id):
 def dataset_image_improve(image_id):
     """Create an upscaled candidate without touching the source.
 
-    `engine` (optional): 'klein' (rewrites detail) or 'seedvr2' (restores it).
-    Absent = the improve.engine setting, which defaults to the historical Klein."""
+    `engine` (optional): 'klein' (Krea2 rewrite), 'klein_hq' (Flux.2 Klein 9B
+    rewrite) or 'seedvr2' (restores rather than rewrites). Absent = the
+    improve.engine setting, which defaults to the historical Klein."""
     gate = _require_no_stalled_comfyui() or _require_gpu_not_fenced()
     if gate:
         return gate
@@ -1890,9 +1891,9 @@ def dataset_improve_batch(dataset_id):
     dataset's `activity` (kind 'improve'), so it survives a reload, and ⏹ Stop
     generation stops it. The browser no longer loops one request per image.
 
-    `engine` (optional): 'klein' or 'seedvr2' — absent = the improve.engine
-    setting. The choice is made ONCE for the whole batch, so a mixed selection
-    can never come back half-rewritten and half-restored."""
+    `engine` (optional): 'klein', 'klein_hq' or 'seedvr2' — absent = the
+    improve.engine setting. The choice is made ONCE for the whole batch, so a
+    mixed selection can never come back half-rewritten and half-restored."""
     data = request.get_json(silent=True) or {}
     ids = data.get('image_ids')
     if not isinstance(ids, list):

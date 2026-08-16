@@ -3779,7 +3779,8 @@ from .reference_edit_service import (
 # dataset_import_service needs `_sync_generate_activity` from here and imports
 # it from that module directly, so these blocks stay order-independent.
 from .dataset_generation_service import (
-    IMPROVE_ENGINES, API_ENGINES, LOCAL_ENGINES, KNOWN_ENGINES, KREA_ENGINE,
+    IMPROVE_ENGINES, PROMPTED_IMPROVE_ENGINES,
+    API_ENGINES, LOCAL_ENGINES, KNOWN_ENGINES, KREA_ENGINE,
     MINIMAX_H3_ENGINE, GENERATE_ONLY_ENGINES,
     LOCAL_ENGINE_LABELS, API_ENGINE_LABELS, _ENGINE_FILE_TAG,
     REIMPROVE_PARENT_GONE, REIMPROVE_SOURCE_FILE_GONE, REIMPROVE_IN_FLIGHT,

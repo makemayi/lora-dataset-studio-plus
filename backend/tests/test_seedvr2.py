@@ -381,9 +381,50 @@ def test_improve_engine_resolution_falls_back_instead_of_raising(app):
     with app.app_context():
         assert svc.resolve_improve_engine() == 'klein'
         assert svc.resolve_improve_engine('seedvr2') == 'seedvr2'
+        assert svc.resolve_improve_engine('klein_hq') == 'klein_hq'
         assert svc.resolve_improve_engine('nonsense') == 'klein'
         config.save_config({'improve': {'engine': 'seedvr2'}})
         assert svc.resolve_improve_engine() == 'seedvr2'
+
+
+def test_klein_hq_is_a_third_engine_and_not_a_rename_of_klein(app):
+    """The lane has THREE passes and two of them rewrite.
+
+    `klein` stopped running Flux.2 Klein 9B at the Krea2-Ostris swap but kept
+    its id (it is stored on every existing candidate row), which left the real
+    Klein 9B pass with no entrance at all. `klein_hq` is that entrance — a new
+    id, never a reclaimed one, because the old id can only ever mean what the
+    rows already carrying it meant."""
+    from app.services import face_dataset_service as svc
+    assert svc.resolve_improve_engine('klein_hq') == 'klein_hq'
+    assert set(svc.IMPROVE_ENGINES) == {'klein', 'seedvr2', 'klein_hq'}
+    # Both rewrites carry the editable instruction; the restore does not, or a
+    # sentence that changed nothing would show under the candidate.
+    assert set(svc.PROMPTED_IMPROVE_ENGINES) == {'klein', 'klein_hq'}
+    # Distinct labels: the label IS how the passes are told apart in the grid.
+    # Read from the owning module — `_IMPROVE_LABELS` is private and is not part
+    # of what face_dataset_service re-exports.
+    from app.services import dataset_generation_service as dgs
+    labels = {dgs._IMPROVE_LABELS[e] for e in svc.IMPROVE_ENGINES}
+    assert len(labels) == len(svc.IMPROVE_ENGINES)
+
+
+def test_klein_hq_preflights_klein_assets_before_any_row_exists(app, monkeypatch):
+    """A missing weight must surface once per batch, named, before candidates
+    are created — the same contract every other engine in this lane keeps."""
+    from app.services import face_dataset_service as svc
+    from app.services import klein_edit_helper as kleh
+    with app.app_context():
+        monkeypatch.setattr(kleh, 'klein_missing_assets',
+                            lambda: list(kleh.KLEIN_REQUIRED)[:1])
+        with pytest.raises(kleh.KleinModelsMissing):
+            svc._improve_preflight('klein_hq')
+        # Assets present, node pack absent -> the OTHER exception, because
+        # "place the weights" and "install the pack" are different answers.
+        monkeypatch.setattr(kleh, 'klein_missing_assets', lambda: [])
+        monkeypatch.setattr(kleh, 'klein_missing_nodes', lambda: ['SomeNode'])
+        with pytest.raises(svc.KleinNodesMissing):
+            svc._improve_preflight('klein_hq')
 
 
 def test_the_candidates_stored_ids_do_not_move_with_the_engine(app):
