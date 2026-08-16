@@ -357,10 +357,50 @@ def test_undo_restores_every_original_and_clears_the_manifest(app, tmp_path, mon
                         lambda path, context='': str(tmp_path / 'second.png'))
 
     result = stb.restore_trim_batch(1, 9)
-    assert result == {'restored': 1, 'gone': 0}
+    assert result == {'restored': 1, 'gone': 0, 'failed': 0}
     with Image.open(ds_dir / 'a.png') as im:
         assert im.size == (2000, 3000)
     assert stb.trim_report(9) is None
+
+
+def _oriented_jpeg(path, raw_size, red_rect, orientation=6):
+    """A JPEG whose RAW raster is `raw_size` with `red_rect` painted red, and
+    which carries an EXIF orientation tag. Returns nothing; writes the file."""
+    im = Image.new('RGB', raw_size, 'white')
+    x, y, w, h = red_rect
+    im.paste((255, 0, 0), (x, y, x + w, y + h))
+    exif = im.getexif()
+    exif[274] = orientation
+    im.save(path, 'JPEG', quality=95, subsampling=0, exif=exif.tobytes())
+
+
+def test_apply_crops_the_region_the_frame_names_on_an_exif_rotated_photo(
+        app, tmp_path, monkeypatch):
+    # The ordinary portrait phone photo. The mask children (infer/*_mask_infer)
+    # open the file and convert — they never exif_transpose — so the frame is in
+    # RAW RASTER space. Cropping the ORIENTED image with it lands on a different
+    # region entirely, and the clamp hides the overflow: nothing raises, the
+    # original is trashed, and the wrong picture is published.
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    _oriented_jpeg(ds_dir / 'rot.jpg', (400, 300), (240, 40, 100, 120))
+    _seed_preview(ds_dir, 20, [
+        {'image_id': 1, 'filename': 'rot.jpg', 'image': [400, 300],
+         'frame': [240, 40, 100, 120], 'out': [100, 120], 'skip': None},
+    ], monkeypatch)
+    monkeypatch.setattr(stb.trash, 'send_to_trash',
+                        lambda path, context='': str(tmp_path / os.path.basename(path)))
+
+    counts = stb.apply_preview(1, 20, [1])
+    assert counts['trimmed'] == 1
+    with Image.open(ds_dir / 'rot.jpg') as im:
+        # Orientation 6 rotates the cut, so a 100x120 raw box lands as 120x100.
+        assert im.size == (120, 100)
+        px = im.convert('RGB').load()
+        for point in ((2, 2), (60, 50), (117, 97)):
+            r, g, b = px[point]
+            assert r > 200 and g < 60 and b < 60, \
+                f'{point} is not the region the frame named'
 
 
 def test_undo_counts_a_missing_original_as_gone_rather_than_failing(app, tmp_path, monkeypatch):
@@ -373,4 +413,205 @@ def test_undo_counts_a_missing_original_as_gone_rather_than_failing(app, tmp_pat
                      'trashed': str(tmp_path / 'never-existed.png')}],
         'counts': {},
     })
-    assert stb.restore_trim_batch(1, 10) == {'restored': 0, 'gone': 1}
+    assert stb.restore_trim_batch(1, 10) == {'restored': 0, 'gone': 1,
+                                             'failed': 0}
+
+
+# --- apply -> undo, end to end ---------------------------------------------
+
+import shutil
+
+
+def _real_trash(store):
+    """A `send_to_trash` that actually MOVES the file, the way the real one
+    does. The stub the first tests use returns a path it never creates, so
+    apply→undo was never exercised end to end: renaming the `trashed` key
+    would have left them green and the feature dead."""
+    def _send(path, context=''):
+        dest = os.path.join(str(store), f'{context or "trash"}-{os.path.basename(path)}')
+        shutil.move(path, dest)
+        return dest
+    return _send
+
+
+def test_apply_then_undo_returns_the_original_bytes_untouched(app, tmp_path, monkeypatch):
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    store = tmp_path / 'trash'
+    store.mkdir()
+    photo = ds_dir / 'a.png'
+    Image.new('RGB', (2000, 3000), 'white').save(photo)
+    before = photo.read_bytes()
+    _seed_preview(ds_dir, 21, [
+        {'image_id': 1, 'filename': 'a.png', 'image': [2000, 3000],
+         'frame': [500, 100, 900, 1600], 'out': [576, 1024], 'skip': None},
+    ], monkeypatch)
+    monkeypatch.setattr(stb.trash, 'send_to_trash', _real_trash(store))
+
+    assert stb.apply_preview(1, 21, [1])['trimmed'] == 1
+    assert photo.read_bytes() != before, 'the crop replaced the original'
+
+    result = stb.restore_trim_batch(1, 21)
+    assert result['restored'] == 1 and result['failed'] == 0
+    assert photo.read_bytes() == before, 'the undo must return the same bytes'
+    assert stb.trim_report(21) is None
+
+
+def test_apply_keeps_each_file_in_its_own_format(app, tmp_path, monkeypatch):
+    # A `.jpg` must not come back holding WEBP bytes, and vice versa.
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    Image.new('RGB', (2000, 3000), 'white').save(ds_dir / 'a.jpg')
+    Image.new('RGB', (2000, 3000), 'white').save(ds_dir / 'b.webp')
+    _seed_preview(ds_dir, 22, [
+        {'image_id': 1, 'filename': 'a.jpg', 'image': [2000, 3000],
+         'frame': [500, 100, 900, 1600], 'out': [576, 1024], 'skip': None},
+        {'image_id': 2, 'filename': 'b.webp', 'image': [2000, 3000],
+         'frame': [500, 100, 900, 1600], 'out': [576, 1024], 'skip': None},
+    ], monkeypatch)
+    monkeypatch.setattr(stb.trash, 'send_to_trash', _real_trash(tmp_path))
+
+    assert stb.apply_preview(1, 22, [1, 2])['trimmed'] == 2
+    for name, fmt in (('a.jpg', 'JPEG'), ('b.webp', 'WEBP')):
+        with Image.open(ds_dir / name) as im:
+            assert im.format == fmt
+            assert im.size == (576, 1024)
+
+
+def test_a_publish_failure_still_leaves_an_undo_entry_for_the_original(
+        app, tmp_path, monkeypatch):
+    # The original is in Trash by the time the publish runs. If that write dies
+    # the photo is out of the dataset folder, so the entry naming it is the
+    # only way back — it must be on DISK, not in a list the crash discards.
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    store = tmp_path / 'trash'
+    store.mkdir()
+    Image.new('RGB', (2000, 3000), 'white').save(ds_dir / 'a.png')
+    _seed_preview(ds_dir, 23, [
+        {'image_id': 1, 'filename': 'a.png', 'image': [2000, 3000],
+         'frame': [500, 100, 900, 1600], 'out': [576, 1024], 'skip': None},
+    ], monkeypatch)
+    monkeypatch.setattr(stb.trash, 'send_to_trash', _real_trash(store))
+    monkeypatch.setattr(stb, 'write_image_atomic',
+                        lambda path, data: (_ for _ in ()).throw(OSError('disk full')))
+
+    stb.apply_preview(1, 23, [1])
+    report = stb.trim_report(23)
+    assert report is not None
+    assert [e['filename'] for e in report['entries']] == ['a.png']
+    assert os.path.exists(report['entries'][0]['trashed'])
+    # And the undo puts it back where the crop never landed.
+    assert stb.restore_trim_batch(1, 23)['restored'] == 1
+    with Image.open(ds_dir / 'a.png') as im:
+        assert im.size == (2000, 3000)
+
+
+def test_a_pass_that_trims_nothing_leaves_the_preview_alone(app, tmp_path, monkeypatch):
+    # Rebuilding a preview costs a full masking run. Every row refused must not
+    # be able to bin one.
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    Image.new('RGB', (1000, 1000), 'white').save(ds_dir / 'c.png')
+    _seed_preview(ds_dir, 24, [
+        {'image_id': 5, 'filename': 'c.png', 'image': [1000, 1000],
+         'frame': [0, 0, 950, 950], 'out': [950, 950],
+         'skip': 'nothing-much-to-remove'},
+    ], monkeypatch)
+
+    counts = stb.apply_preview(1, 24, [5])
+    assert counts == {'trimmed': 0, 'refused': 1, 'failed': 0}
+    assert stb.preview_report(24) is not None, 'a refused pass keeps the preview'
+    assert stb.preview_report(24)['items'][0]['image_id'] == 5
+
+
+def test_a_partial_failure_keeps_the_rows_that_were_not_trimmed(app, tmp_path, monkeypatch):
+    # One row succeeds, one is missing from disk. The preview must come back
+    # holding exactly the row that still needs doing — not be thrown away, and
+    # not still offer the one that is done.
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    Image.new('RGB', (2000, 3000), 'white').save(ds_dir / 'a.png')
+    _seed_preview(ds_dir, 25, [
+        {'image_id': 1, 'filename': 'a.png', 'image': [2000, 3000],
+         'frame': [500, 100, 900, 1600], 'out': [576, 1024], 'skip': None},
+        {'image_id': 2, 'filename': 'missing.png', 'image': [2000, 3000],
+         'frame': [500, 100, 900, 1600], 'out': [576, 1024], 'skip': None},
+    ], monkeypatch)
+    monkeypatch.setattr(stb.trash, 'send_to_trash', _real_trash(tmp_path))
+
+    counts = stb.apply_preview(1, 25, [1, 2])
+    assert counts == {'trimmed': 1, 'refused': 0, 'failed': 1}
+    left = stb.preview_report(25)
+    assert [it['image_id'] for it in left['items']] == [2]
+
+
+def test_a_file_edited_since_the_preview_is_refused_rather_than_miscropped(
+        app, tmp_path, monkeypatch):
+    # A mirror, a rotate or a manual crop between preview and apply rewrites
+    # the same file. The recorded frame no longer describes it, and the clamp
+    # would turn that into a plausible-looking wrong crop.
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    photo = ds_dir / 'a.png'
+    Image.new('RGB', (1200, 800), 'white').save(photo)     # rotated since
+    before = photo.read_bytes()
+    _seed_preview(ds_dir, 26, [
+        {'image_id': 1, 'filename': 'a.png', 'image': [800, 1200],
+         'frame': [100, 100, 500, 900], 'out': [500, 900], 'skip': None},
+    ], monkeypatch)
+    monkeypatch.setattr(stb.trash, 'send_to_trash', _real_trash(tmp_path))
+
+    counts = stb.apply_preview(1, 26, [1])
+    assert counts['failed'] == 1 and counts['trimmed'] == 0
+    assert photo.read_bytes() == before, 'the file must not be touched at all'
+    assert stb.trim_report(26) is None, 'nothing was trashed, so there is no undo'
+
+
+def test_a_second_overlapping_apply_finds_no_preview_to_claim(app, tmp_path, monkeypatch):
+    # A double-clicked Apply used to run twice over the same rows: the second
+    # pass trashed the FIRST pass's crop and the undo ended up naming that
+    # intermediate, stranding the true original.
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    Image.new('RGB', (2000, 3000), 'white').save(ds_dir / 'a.png')
+    _seed_preview(ds_dir, 27, [
+        {'image_id': 1, 'filename': 'a.png', 'image': [2000, 3000],
+         'frame': [500, 100, 900, 1600], 'out': [576, 1024], 'skip': None},
+    ], monkeypatch)
+    monkeypatch.setattr(stb.trash, 'send_to_trash', _real_trash(tmp_path))
+
+    assert stb.apply_preview(1, 27, [1])['trimmed'] == 1
+    with pytest.raises(ValueError):
+        stb.apply_preview(1, 27, [1])
+    entries = stb.trim_report(27)['entries']
+    assert len(entries) == 1, 'the undo still names the one true original'
+    with Image.open(entries[0]['trashed']) as im:
+        assert im.size == (2000, 3000)
+
+
+def test_a_retry_over_the_leftover_rows_keeps_the_first_pass_undo(app, tmp_path, monkeypatch):
+    # The preview keeps its untrimmed rows so they can be applied again. That
+    # retry must EXTEND the undo batch: overwriting it would leave the first
+    # pass's original in Trash with nothing in the app pointing at it.
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    Image.new('RGB', (2000, 3000), 'white').save(ds_dir / 'a.png')
+    _seed_preview(ds_dir, 28, [
+        {'image_id': 1, 'filename': 'a.png', 'image': [2000, 3000],
+         'frame': [500, 100, 900, 1600], 'out': [576, 1024], 'skip': None},
+        {'image_id': 2, 'filename': 'b.png', 'image': [2000, 3000],
+         'frame': [500, 100, 900, 1600], 'out': [576, 1024], 'skip': None},
+    ], monkeypatch)
+    monkeypatch.setattr(stb.trash, 'send_to_trash', _real_trash(tmp_path))
+
+    assert stb.apply_preview(1, 28, [1, 2]) == {'trimmed': 1, 'refused': 0,
+                                                'failed': 1}
+    # b.png shows up (the retry the user would do after fixing whatever it was).
+    Image.new('RGB', (2000, 3000), 'white').save(ds_dir / 'b.png')
+    assert stb.apply_preview(1, 28, [2])['trimmed'] == 1
+
+    report = stb.trim_report(28)
+    assert sorted(e['filename'] for e in report['entries']) == ['a.png', 'b.png']
+    assert report['counts']['trimmed'] == 2, 'the count describes the entries'
+    assert stb.preview_report(28) is None, 'nothing left to apply'
