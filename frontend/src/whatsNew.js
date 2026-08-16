@@ -50,6 +50,61 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-16-h3-swap-follows-the-new-graph',
+    date: '2026-08-16',
+    title: 'The head swap now runs the maintainer\u2019s current MiniMax H3 graph',
+    blurb: 'MiniMax H3 (new) is rebuilt around the 2026-08-16 export: the head is '
+      + 'replaced by a grey skull-shaped stand-in — hair removed, sized to the '
+      + 'skull rather than the silhouette — and H3 re-renders the shot around it. '
+      + 'Masking moved into the app on the same SAM 3 your ComfyUI already runs, '
+      + 'so the new graph needs no extra node pack and no second checkpoint. One '
+      + 'optional stage remains (Ollama head analysis); the blue mask overlay is '
+      + 'gone because the graph has no node that paints one.',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-16-h3-generation-hybrid-loader',
+    date: '2026-08-16',
+    title: 'MiniMax H3 generation matches the new graph, and drops the vision tower at the default',
+    blurb: 'Generation now runs the same hybrid model the maintainer\u2019s graphs '
+      + 'use (Ref2VA over Fl2VA) whenever Fl2VA is on disk, and still works on '
+      + 'plain Ref2VA when it is not — no 66 GB download is forced. At the '
+      + 'default single frame per shot the frame is taken by a core node, so the '
+      + 'CLIP-ViT-H vision tower is no longer required until you raise Frames per '
+      + 'shot above 1.',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-16-h3-one-vae-for-both-lanes',
+    date: '2026-08-16',
+    title: 'One VAE setting now covers both MiniMax H3 lanes',
+    blurb: 'Generation and the new head swap decode through the same VAE, so the '
+      + 'two can never disagree. Blank prefers the T1 image VAE — visibly '
+      + 'cleaner on skin and hair when decoding a still — and falls back to the '
+      + 'video VAE on installs that predate the file.',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-16-h3-loras-on-generation',
+    date: '2026-08-16',
+    title: 'MiniMax H3 generation takes its own LoRAs now',
+    blurb: 'The same accelerator LoRA chain the swap had is now available on '
+      + 'generation. The graph ships none of its own — the maintainer\u2019s '
+      + 'export loads two by filename from a folder that exists on one disk — so '
+      + 'this list is the only way a LoRA reaches the model. A step-distill here '
+      + 'means lowering Sampler steps to match it.',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-08-16-h3-blue-overlay-gone',
+    date: '2026-08-16',
+    title: 'The blue mask overlay stage is gone from the new head swap',
+    blurb: 'The 2026-08-16 MiniMax H3 graph has no node that paints one, so the '
+      + 'switch would have silently done nothing. Stored values are ignored, and '
+      + 'the mask-opacity dial now applies to the old H3 engine only.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-15-video-frame-character-gates',
     date: '2026-08-15',
     title: 'Frames pulled from video are now judged on whether the face is usable',

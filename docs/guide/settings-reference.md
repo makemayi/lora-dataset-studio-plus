@@ -368,13 +368,32 @@ card together and pays that cost once per card, not once per image.
 - **Optional accelerators** → `minimax_h3.use_speed_nodes`,
   `minimax_h3.use_rtx_upscale`. Both default **on**, and both are used only when
   your ComfyUI actually exposes the nodes, so leaving them on costs nothing on an
-  install that lacks them. The speed nodes (Spectrum step forecasting + Sage
-  attention) do not change the image. The RTX 2× upscale is NVIDIA RTX only —
-  without it you lose the upscale, not the engine.
+  install that lacks them. The speed nodes (attention backend + memory-efficient
+  Sage attention patch) do not change the image. The RTX 2× upscale is NVIDIA
+  RTX only — without it you lose the upscale, not the engine.
 - **Ref2VA model file** → `minimax_h3.base_model`. Blank (default) finds any
-  Ref2VA build on its own — int8, int4 or mixed. The `fl2va` sibling is never
-  picked: it loads and then does a different job. A filename that is no longer on
-  disk falls back to auto rather than failing.
+  Ref2VA build on its own — int8, int4 or mixed. A filename that is no longer on
+  disk falls back to auto rather than failing. Since 2026-08-16 the graph also
+  takes the `fl2va` sibling when it is present: the generation lane then runs
+  the maintainer's hybrid loader (Ref2VA laid over Fl2VA's last twenty blocks),
+  and falls back to a plain Ref2VA load when it is not — Fl2VA is a 66 GB
+  download, and no install is forced to fetch it.
+- **VAE file** → `minimax_h3.vae`. Blank (default) resolves in one order: the
+  T1 **image** VAE (`minimax_h3_t1_image_vae_step1597.safetensors`) when it is
+  on disk, else the video VAE. **One key for both H3 lanes** — generation and
+  the new head swap decode through the same VAE, so the two can never disagree.
+  The image VAE is the one the maintainer's 2026-08-16 graphs decode with, and
+  both lanes sample a one-frame packet then decode a still, where a VAE trained
+  for stills is visibly cleaner on skin and hair than the video one. A filename
+  that is no longer on disk falls back to the auto order rather than failing.
+- **Extra LoRAs on generation** → `minimax_h3.loras` (up to 4 rows of
+  `{file, strength}`), the generation twin of the swap's list. It exists for
+  the same reason: no graph here can ship one, because the maintainer's export
+  loads a 4-step turbo distill and a realism LoRA by name from a folder that
+  exists on one disk. Rows chain onto the model after the optional speed
+  patches; a row whose file is not on disk is skipped with a server-log line,
+  not failed. A step-distill LoRA here means lowering **Sampler steps** above to
+  the number its model card names.
 
 Three limits worth knowing before you build a dataset with it:
 
@@ -382,7 +401,10 @@ Three limits worth knowing before you build a dataset with it:
   H3's five files are ~40 GB, several of them community re-quantisations, and
   none of them is wired into the installer. The engine card names each missing
   file and where it goes. The `MinimaxH3-Image` custom-node pack is required and
-  is likewise a manual install (then restart ComfyUI).
+  is likewise a manual install (then restart ComfyUI). One file is conditional:
+  the CLIP-ViT-H vision tower only enters the job when **Frames per shot** is
+  above 1 — at the default single frame the still is taken by a core node, so an
+  install without the vision tower generates fine until a packet is sampled.
 - **It generates; it does not edit your reference photo.** The ✦ Edit reference
   modal offers Klein, Krea and the API engines, not H3.
 - **H3 copies what the reference carries.** A reference cropped from a broadcast
@@ -492,7 +514,7 @@ How presets are used matters:
 Which engine the 🎭↔ button on a tile runs. All three take the same two pictures — the tile is the target, the dataset's reference photo is the identity — and all three overwrite the tile in place.
 
 - **`klein`** repaints the head with a swap LoRA on a Flux.2 Klein graph. One model family, markedly faster, and it requires `klein/Klein2-9B-SmartCharacterSwap.safetensors` on disk (never auto-downloaded).
-- **`minimax_h3`** — the current H3 graph. A Klein pass **erases the head** (and renders a depth map of where it was), then H3 gets that picture plus your reference and re-renders the shot with the new head. **No swap LoRA** — but it loads the whole MiniMax H3 stack (~40 GB across five files, plus a second H3 file: the hybrid loader takes Fl2VA as its base with Ref2VA laid over it) **and** the Klein models, so it is much slower and wants ComfyUI started with `--disable-dynamic-vram`. Custom nodes: RMBG, LanPaint, WAS Node Suite, MinimaxH3-Image (and NVIDIA RTX nodes for the optional 2× upscale).
+- **`minimax_h3`** — the current H3 graph. A Klein pass **erases the head** and leaves a grey skull-shaped mannequin of where it was (hair removed, sized to the skull — not the silhouette), then H3 gets that picture plus your reference and re-renders the shot with the new head. **No swap LoRA** — but it loads the whole MiniMax H3 stack (~40 GB across five files, plus a second H3 file: the hybrid loader takes Fl2VA as its base with Ref2VA laid over it) **and** the Klein models, so it is much slower and wants ComfyUI started with `--disable-dynamic-vram`. The head mask comes from the app (SAM 3), so no ComfyUI-SAM3 pack is needed; custom nodes are LanPaint, WAS Node Suite and MinimaxH3-Image (and NVIDIA RTX nodes for the optional 2× upscale).
 - **`minimax_h3_old`** — the previous H3 graph, kept because it is not the same trade. It masks the head, crops around it, sends **only that crop** through H3, and composites the head back, so every pixel outside the mask survives untouched. Node packs: LayerStyle, Inpaint-CropAndStitch, KJNodes, RMBG.
 
 **The one difference that decides between the two H3 entries:** `minimax_h3` re-renders the **whole frame**, so the body, clothing and background come back re-drawn rather than preserved. `minimax_h3_old` only ever repaints inside the mask. Neither is strictly better — one has no seam to hide, the other keeps the rest of the photograph.
@@ -505,7 +527,7 @@ Whichever is selected, a missing weight or node pack is named in one message **b
 
 The swap graph ships **no LoRA of its own**, and that is not an oversight: the accelerators that make an H3 swap bearable are community distills and re-quantisations that differ per install, so there is nothing to ship. This is the only place one can come from. Rows are chained onto H3's model **after** the optional speed patches, so switching `minimax_h3.use_speed_nodes` off does not move where they land.
 
-**The steps field is next to them because the pairing is the whole point.** The graph samples **25 steps**. If the LoRA you added is a step-distill — and it usually is — leaving the steps at 25 is the expensive mistake: it is *slower than the stock model* and visibly worse, and nothing in the app or the log attributes it to the LoRA. Set the number the LoRA's model card names. `0` keeps the graph's 25; the value is clamped to 1–100.
+**The steps field is next to them because the pairing is the whole point.** The graph samples **8 steps** — the maintainer runs a turbo distill. If the LoRA you added is a step-distill — and it usually is — leaving the steps at 0 is the expensive mistake: a 4-step distill run for 8 steps is *slower than the stock model* and visibly worse, and nothing in the app or the log attributes it to the LoRA. Set the number the LoRA's model card names. `0` keeps the graph's 8; the value is clamped to 1–100.
 
 Same discipline as the Klein face-swap LoRA list, and for the same reasons:
 
@@ -521,8 +543,8 @@ This is the setting that decides whether the swap comes back **in proportion**. 
 
 Three things earn their place in the instruction, and losing any one of them shows up as bad proportions:
 
-1. **The first verb is 替换 (replace), never 移除 (remove).** The shipped text before 2026-08-14 led with three deletion verbs and hung the stand-in off the end, phrased as a transform of the head it had just told the model to erase. An edit model follows the dominant, repeated intent — it erased and stopped.
-2. **The geometry is named out loud**: size, position, orientation, tilt, perspective. That is what the rest of the graph reads.
+1. **The replacement leads; every deletion is targeted and explained.** The shipped text before 2026-08-14 led with three deletion verbs and hung the stand-in off the end, phrased as a transform of the head it had just told the model to erase. An edit model follows the dominant, repeated intent — it erased and stopped. The 2026-08-16 text adds exactly ONE deletion before the replacement, on purpose: `移除人物的头发` (remove the hair) — because hair thickness is not part of the head, and a stand-in sized to the hairline makes H3 grow a skull to fill it and then put hair on top of that, which is where the doll head came from. The removal is stated with its reason so the model does not stop after erasing.
+2. **The geometry is named out loud**: size, position, orientation, tilt, perspective. That is what the rest of the graph reads. **Size is pinned to the skull, not the silhouette**: the stand-in is deliberately about a fifth smaller than the head-with-hair it replaces, and the old "identical to the original" clause had to go — saying both in one instruction asks for two different heads. The swap instruction carries the other half of the contract: hair grows outside the stand-in, so the finished outline is larger than it.
 3. **Removing the identity is a constraint, not the instruction** — "no facial features, no hair, no identity", after the replacement has been stated.
 
 **A mannequin rather than a depth map**, deliberately. A mannequin head is an object the model has seen; a depth render is a stylised output that edit models routinely botch. The mannequin also carries shading, so it says *more* about the head's volume than a flat depth pass would.
@@ -531,11 +553,12 @@ Clearing either box restores the shipped text — a blank instruction would tell
 
 #### MiniMax H3 (new) — optional stages
 
-→ `face_swap.h3_new_stages`, two booleans, both **off** by default. Each switches on a node the new graph ships wired but bypassed:
+→ `face_swap.h3_new_stages`, one boolean, **off** by default. It switches on a node the new graph ships wired but bypassed:
+
+Only one stage remains — the 2026-08-16 export has no `AILab_MaskOverlay` node, so the **blue mask overlay** left with it. A switch that silently did nothing would be worse than the absent one: stored `mask_overlay` values are ignored, not rejected, and `face_swap.h3_mask_opacity` now does nothing on the new engine (the old engine's overlay is always in its job, so the dial stays for it).
 
 | Stage | Key | What it adds |
 | --- | --- | --- |
-| Blue mask overlay | `mask_overlay` | Paints the head area a flat blue over the erased head before H3 sees it. Off, H3 receives the Klein output as it is — head gone, depth map in its place. `face_swap.h3_mask_opacity` applies to this node, and only while this stage is on. **With this on, the instruction gains a sentence naming the blue** — that it marks the head's approximate area, and that the true size is the grey mannequin showing through beneath it. It deliberately does **not** say "fill the blue": that mask is the head mask grown by 20 px, so filling it edge to edge is an instruction to oversize the head. The sentence is added for this stage only; with the overlay off there is no blue to talk about. Keep `face_swap.h3_mask_opacity` below 1.0 so the mannequin — the only thing carrying the original size and angle — is not hidden behind a solid marker. |
 | Ollama head analysis | `ollama` | An Ollama vision call describes how the head sits in *this* photo (angle, occlusion, lighting) and that paragraph is appended to the instruction. It runs on the model named below. |
 
 **This one runs in the app, not in the graph.** The workflow ships an `OllamaAPI` node for it; that node is subtracted from every job and the app makes the call itself before anything is queued. Four things came with the move:
@@ -582,10 +605,23 @@ Lower means more pixels on the face; higher gives the model the shoulders it nee
 
 #### MiniMax H3 — where the head mask comes from
 
-→ `face_swap.h3_mask_source` (`graph` | `app`, default **`graph`**) and `face_swap.h3_mask_prompt` (default **`head`**).
+→ `face_swap.h3_mask_source` (`graph` | `app`, default **`graph`**) and
+`face_swap.h3_mask_prompt` (default **`head, glasses, sunglasses, hat, headband,
+earrings`**).
 
-- **`graph`** — the workflow's own segmenter, and **which node that is depends on the engine**: `minimax_h3` (new) uses `ClothesSegment` from **ComfyUI-RMBG**, `minimax_h3_old` uses `LayerMask: PersonMaskUltra` from **ComfyUI_LayerStyle**. Either way the app never sees the mask it is about to repaint through.
-- **`app`** — the app's own masker (`services/auto_mask`, SAM 3), which runs in its own environment on the `sam3.pt` your ComfyUI already has. The mask becomes something this app can see, cache and reuse, and **the segmenter's node pack leaves the job with it** (unless the old engine's LaMa stage is on). It needs the automatic-masking environment; without it the swap says so rather than failing obscurely.
+- **`graph`** — the workflow's own segmenter: `minimax_h3_old` uses
+  `LayerMask: PersonMaskUltra` from **ComfyUI_LayerStyle**, and the app never
+  sees the mask it is about to repaint through. **The new engine ignores this
+  key**: its in-graph segmenter is SAM3 — the same model the app already runs —
+  so that branch is substituted away from every job and the mask always comes
+  from `app`.
+- **`app`** — the app's own masker (`services/auto_mask`, SAM 3), which runs in
+  its own environment on the `sam3.pt` your ComfyUI already has. The mask
+  becomes something this app can see, cache and reuse, and **the segmenter's
+  node pack leaves the job with it** (unless the old engine's LaMa stage is on).
+  It needs the automatic-masking environment; without it the swap says so rather
+  than failing obscurely. On the new engine this is not a choice, it is the only
+  behaviour.
 
 **One mask at a time.** Every masking child loads its own 3.4 GB SAM 3, and a batch of swaps used to spawn one per tile at once — five of them, on a 24 GB card, left about 400 MB for the render they were masking for. They are serialised now, so a batch queues instead. Nothing gets slower in practice: they were already competing for one GPU.
 
@@ -623,7 +659,11 @@ Two things to try before reaching further: the **crop factor** above (more surro
 
 → `face_swap.h3_mask_opacity` (0.0–1.0, default **1.00**). **The two engines want opposite values here**, because what lies under the paint is not the same picture.
 
-**`minimax_h3` (new)** — this is the opacity of the blue overlay, and it does nothing unless that stage is on. Underneath it is the grey **mannequin** the Klein pass left behind: the one thing in the frame carrying the head's original size, angle and perspective. At 1.00 the blue hides it, and H3 is left sizing the head against a flat marker that is 20 px larger than the head ever was. **Roughly 0.4–0.75 is the useful range** — the blue says *here*, the mannequin showing through says *this big, at this angle*.
+**`minimax_h3` (new) — this dial does nothing on this engine.** It set the
+opacity of the blue overlay, and the 2026-08-16 graph has no node that paints
+one. The head now reaches H3 as the grey skull-shaped mannequin the Klein pass
+leaves, with nothing on top of it. The dial stays because the OLD engine below
+uses it.
 
 **`minimax_h3_old`** — the rest of this section is about that graph, where the paint goes straight over the ORIGINAL head and the dial means something else entirely.
 
@@ -633,7 +673,14 @@ Before H3 redraws the head, the masked region is painted over with a flat colour
 - What to reach for instead: the **LaMa** stage below, which replaces the masked region with plausible non-*face* content rather than a slab. Note that the stage can only do that at an opacity below 1.00 — at 1.00 the paint goes straight over LaMa's work — so the two are used together or not at all.
 - The setting stays because it is the dial the failure was diagnosed with, not because 0.75 is a value worth shipping.
 
-Two other levers on the same failure, both under `minimax_h3`: **`frame_weight_reference`** (how much "looks like the reference" counts when the best frame of the packet is picked — the swap now honours the same setting the generation engine does, instead of the 0 the graph shipped with) and **`length`** (1 by default — a packet of 5 sampled four frames that were then discarded; at 22 the selector has real candidates to choose between, at roughly twenty times the single-frame sampling cost).
+Two other levers on the same failure, both under `minimax_h3`:
+**`frame_weight_reference`** (how much "looks like the reference" counts when
+ the best frame of the packet is picked — used by the generation lane and by
+ the OLD swap, which scores its packet; the new swap takes frame 0 with a plain
+ `ImageFromBatch` and has nothing left to weigh) and **`length`** (1 by default
+ — a packet of 5 sampled four frames that were then discarded; at 22 the
+ selector has real candidates to choose between, at roughly twenty times the
+ single-frame sampling cost).
 
 #### MiniMax H3 (old) — optional stages
 
@@ -1808,24 +1855,24 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `face_swap.engine` | Which engine the 🎭↔ swap runs: `klein` (default, swap LoRA repaints the head), `minimax_h3` (the current H3 graph — a Klein pass erases the head, then H3 re-renders the whole shot around your reference; needs both model families) or `minimax_h3_old` (the previous H3 graph — masks the head, sends only a crop through H3 and composites it back, so everything outside the head is untouched). |
 | `face_swap.h3_head_removal_prompt` | **`minimax_h3` (new) only.** What the Klein pass is told to do: replace the head with a featureless grey mannequin, keeping size/position/orientation/perspective. That stand-in is what H3 sizes the new head against. Blank restores the shipped text. |
 | `face_swap.h3_head_removal_negative` | The Klein pass's negative — the failure modes of the instruction above (a hole, a headless body, the background showing through) plus the identity that must not survive. Blank restores the shipped text. |
-| `face_swap.h3_new_stages` | Two booleans for the NEW H3 graph, both `false`: `mask_overlay` (paints the erased head area flat blue before H3 sees it) and `ollama` (an Ollama vision call describes how the head sits in this photo and that goes into the instruction — runs on `face_swap.h3_new_ollama_model`, and suppresses `h3_pose_hint` while on). |
+| `face_swap.h3_new_stages` | One boolean for the NEW H3 graph, `false` by default: `ollama` (an Ollama vision call describes how the head sits in this photo and that goes into the instruction — runs on `face_swap.h3_new_ollama_model`, and suppresses `h3_pose_hint` while on). The old `mask_overlay` entry left with the 2026-08-16 graph, which has no AILab_MaskOverlay node; a stored value is ignored, not rejected. |
 | `face_swap.h3_new_ollama_model` | The Ollama tag the head-analysis stage runs on. Blank (default) = `ollama.vision_model`, the captioning model. Picked from the tags Ollama has pulled; every tag is listed because Ollama does not say which can see. The call is made by the app, before the render is queued, and the model is unloaded as soon as it answers. |
 | `face_swap.h3_ref_image_size` | Which reference pipeline the swap's H3 node runs on: `match` or `max`. Blank (default) = whatever that graph ships with — `max` (the node's best-likeness pipeline, 2048px reference, several times slower) on the new engine, `match` on the old. Its own key, deliberately separate from `minimax_h3.ref_image_size`: the swap used to inherit that generation dial, whose `match` default silently clobbered the new graph's shipped `max` on every default install. Anything else is ignored. |
 | `face_swap.h3_context_factor` | **`minimax_h3_old` only.** How far the H3 swap's crop reaches around the head (1.0–8.0, default `3.0`). A factor of the head, clamped to the photo — so 3.0 crops a full-body shot to head and chest and leaves a portrait uncropped. Lower = more pixels on the face; higher = the shoulders the model sizes the head against. |
-| `face_swap.h3_mask_source` | Where the H3 swap's head mask comes from: `graph` (the workflow's own segmenter — ClothesSegment/ComfyUI-RMBG on the new engine, PersonMaskUltra/ComfyUI_LayerStyle on the old one) or `app` (services/auto_mask — SAM 3 in the app's own environment, on the sam3.pt ComfyUI already has; one child at a time). Default `graph`. |
+| `face_swap.h3_mask_source` | Where the OLD H3 swap's head mask comes from (`minimax_h3_old` only — the new graph always masks in the app): `graph` (the workflow's own segmenter, PersonMaskUltra/ComfyUI_LayerStyle) or `app` (services/auto_mask — SAM 3 in the app's own environment, on the sam3.pt ComfyUI already has; one child at a time). Default `graph`. |
 | `face_swap.h3_mask_prompt` | What the app lane masks, comma-separated (default `head, glasses, sunglasses, hat, headband, earrings`). Open-vocabulary, so it decides what actually gets replaced — and a list because `head` alone leaves the glasses behind. Phrases that match nothing add nothing. |
 | `auto_mask.python` | The app-managed interpreter for automatic masking (data/envs/automask). Blank = not installed. |
 | `auto_mask.checkpoint` | Meta's `sam3.pt`, borrowed from a ComfyUI install. Blank = resolve it (models/sam3 first, extra_model_paths.yaml roots included). An absolute path anywhere is honoured. NOT the Comfy-Org `sam3.1_multiplex_fp16.safetensors`, which is remapped for ComfyUI's own loader. |
 | `auto_mask.device` | Blank = CUDA when torch sees a card, else CPU. Pin `cpu` to leave the GPU to a running generation; expect it to be slow. |
 | `auto_mask.threshold` | Detection confidence for automatic masking (default `0.5`). |
-| `face_swap.h3_mask_opacity` | How opaque the placeholder painted over the head is (0–1, default `1.0`). **The engines want opposite values.** `minimax_h3_old`: below 1.0 a ghost of the ORIGINAL head shows through, so 0.75 measurably returns the original face — keep 1.0 (and it is why the `lama` stage cannot change anything at 1.0). `minimax_h3` (new): it is the blue overlay's opacity, and what shows through is the grey mannequin carrying the head's size and angle — 0.4–0.75 keeps that visible; 1.0 hides it. |
+| `face_swap.h3_mask_opacity` | **`minimax_h3_old` only.** How opaque the placeholder painted over the head is (0–1, default `1.0`). Below 1.0 a ghost of the ORIGINAL head shows through, so 0.75 measurably returns the original face — keep 1.0 (and it is why the `lama` stage cannot change anything at 1.0). On the new engine it does nothing: the 2026-08-16 graph has no overlay node, and the head reaches H3 as the grey skull stand-in with nothing on top of it. |
 | `face_swap.h3_pose_hint` | Append one sentence to the H3 swap instruction describing how the head sits and what the face is doing, read from the catalog prompt that generated the tile (default `true`; ~82% of tiles yield one). A row that says nothing usable gets nothing rather than a guess. |
 | `face_swap.h3_blend_pixels` | **`minimax_h3_old` only.** How wide the feather is when the swapped head is composited back (0–64, default `40`). The mechanical half of "it does not blend" — the prompt matches light, colour and grain, this matches the edge. Past ~48 px an old hairline can ghost. |
 | `face_swap.h3_lama_model` | Which inpainting model the `lama` stage runs (default `lama`). The shipped graph asked for `zits`, which crashes on this lane: it pads to a multiple of 32 and drives a 256→512 structure upsampler, while the inpaint crop is an arbitrary size. Also accepts `ldm`, `mat`, `fcf`, `manga`, `spread`. |
 | `face_swap.h3_stages` | Three booleans for the OLD H3 swap graph (`minimax_h3_old`), all `false`: `hair_removal` (a Klein pass strips the hair first — makes the Klein models required too), `lama` (LaMa wipes the masked region), `face_detail` (Z-Image detailer on eyes and mouth; the ONLY stage whose model filenames are not re-resolved for your install). |
 | `minimax_h3.swap_prompt` | Overrides the instruction the H3 head-swap graph sends. **Both H3 engines read this one key, and they ship different instructions** — one wording rarely suits both. Blank (default) = whatever that graph carries. On `minimax_h3_old` the shipped prompt is subject-neutral English, explicit about keeping the reference's identity, repainting nothing outside the white mask, matching the shot's head angle and lighting and leaving no seam; there `<Picture 1>` is your reference photo and `<Picture 2>` is the **masked crop**, not the whole tile. On `minimax_h3` the shipped text is a Chinese head-transplant instruction and `<Picture 2>` is the whole head-removed photo. Set it to A/B a wording without editing a workflow file an update replaces. |
 | `minimax_h3.swap_loras` | **`minimax_h3` (new) only.** Up to 4 extra LoRAs on H3's swap model, `[{file, strength}]`, empty by default. The graph ships none — accelerator distills differ per install. Chained after the optional speed patches; a file that is not on disk is skipped rather than failing the job. |
-| `minimax_h3.swap_steps` | **`minimax_h3` (new) only.** Sampler steps for the swap, `0` = the graph's own 25 (clamped 1–100). Paired with `swap_loras`: running a 4-step distill for 25 steps is slower than the stock model AND worse, and nothing reports it. |
+| `minimax_h3.swap_steps` | **`minimax_h3` (new) only.** Sampler steps for the swap, `0` = the graph's own 8 (clamped 1–100). Paired with `swap_loras`: running a 4-step distill for 8 steps is slower than the stock model AND worse, and nothing reports it. |
 | `klein.default_generation_lora_preset` | Which of `klein.generation_lora_presets` the 🖥️ Klein tuning panel STARTS on. Default `''` = *None*, the behaviour before this key existed. A starting point only — the run panel still offers None and every other preset for that run, and picking there does not rewrite this. Fail-closed: a name matching no preset behaves as *None*. |
 | `krea.default_generation_lora_preset` | The same, for `krea.generation_lora_presets` and the 🧬 Krea 2 Edit tuning panel. A SEPARATE key on purpose: the two preset lists are independent and one name can designate two different chains. Default `''`. |
 | `identity_prompts.markings_lock` | Krea's “hold the skin” order — forbids inventing or redrawing marks. Blank = shipped default. Naming a body feature here summons it. |
