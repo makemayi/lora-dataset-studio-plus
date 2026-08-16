@@ -155,7 +155,10 @@ def test_preflight_names_assets_and_nodes_and_stays_actionable(h3, monkeypatch):
     with pytest.raises(mh.MinimaxH3ModelsMissing) as e:
         mh.preflight()
     assert e.value.missing_nodes == ['H3FrameSelect']
-    assert set(e.value.missing) == set(mh.H3_REQUIRED)
+    # `h3_clip_vision` is absent from the list at the default `length` of 1:
+    # nothing scores a one-frame packet, so the vision tower is never loaded and
+    # naming it would send a default install after a download it cannot use.
+    assert set(e.value.missing) == set(mh.H3_REQUIRED) - {'h3_clip_vision'}
     for entry in mh.missing_file_entries(e.value.missing):
         assert entry['path'] and entry['kind'] and entry['source']
 
@@ -189,17 +192,31 @@ def test_only_the_frame_selector_is_mandatory(h3, monkeypatch):
 
 def test_the_graph_harvests_a_still_from_a_video_packet(h3):
     """The whole engine is this chain. Losing any link silently turns it into
-    something else: no frame select = a five-frame packet saved as five tiles."""
+    something else: no frame take = a five-frame packet saved as five tiles.
+
+    ONE frame leaves this graph by two routes. A packet IS a choice and gets
+    scored (`H3FrameSelect` + the vision tower); a single frame is not a choice
+    and is taken with a core `ImageFromBatch` — which is why the default install
+    needs neither the MinimaxH3-Image pack nor a CLIP-ViT-H download."""
     mh, _base, _cfg = h3
-    g = _graph(mh)
     for cls in ('MiniMaxH3ReferenceToVideo', 'SamplerCustomAdvanced', 'VAEDecode',
-                'H3FrameSelect', 'SaveImage', 'CLIPVisionLoader'):
-        assert _by_class(g, cls), f'{cls} missing from the graph'
-    sel = _by_class(g, 'H3FrameSelect')[0]
-    assert sel['inputs']['select_count'] == 1
-    save = _by_class(g, 'SaveImage')[0]
-    assert save['inputs']['images'][0] != _find_id(g, 'VAEDecode'), \
-        'SaveImage must take the SELECTED frame, never the raw decode'
+                'SaveImage'):
+        assert _by_class(_graph(mh), cls), f'{cls} missing from the graph'
+
+    packet = _graph(mh, length=5)
+    assert _by_class(packet, 'H3FrameSelect') and _by_class(packet, 'CLIPVisionLoader')
+    assert _by_class(packet, 'H3FrameSelect')[0]['inputs']['select_count'] == 1
+
+    single = _graph(mh, length=1)
+    assert not _by_class(single, 'H3FrameSelect')
+    assert not _by_class(single, 'CLIPVisionLoader')
+    take = _by_class(single, 'ImageFromBatch')[0]
+    assert take['inputs']['batch_index'] == 0 and take['inputs']['length'] == 1
+
+    for g in (packet, single):
+        save = _by_class(g, 'SaveImage')[0]
+        assert save['inputs']['images'][0] != _find_id(g, 'VAEDecode'), \
+            'SaveImage must take the SELECTED frame, never the raw decode'
 
 
 def _find_id(graph, class_type):
@@ -251,19 +268,26 @@ def test_the_speed_nodes_are_optional_and_the_model_chain_survives_without_them(
     mh, _base, _cfg = h3
     on = _graph(mh, use_speed_nodes=True)
     off = _graph(mh, use_speed_nodes=False)
-    assert _by_class(on, 'SpectrumApplyMiniMaxH3') and _by_class(on, 'PathchSageAttentionKJ')
-    assert not _by_class(off, 'SpectrumApplyMiniMaxH3')
-    assert not _by_class(off, 'PathchSageAttentionKJ')
+    # `SpectrumApplyMiniMaxH3` left this chain on 2026-08-16; the attention
+    # backend and the memory-efficient patch took its place, matching both of
+    # the maintainer's graphs and the swap lane.
+    for cls in mh.H3_SPEED_NODE_CLASSES:
+        assert _by_class(on, cls), cls
+        assert not _by_class(off, cls), cls
+    assert not _by_class(on, 'SpectrumApplyMiniMaxH3')
     for g in (on, off):
         guider = _by_class(g, 'BasicGuider')[0]
         assert _find_id(g, 'UNETLoader') in _upstream_ids(g, _find_id(g, 'BasicGuider'))
         assert guider['inputs']['model']
 
 
-def test_spectrum_never_ships_with_debug_on(h3):
+def test_the_attention_backend_is_named_not_left_to_the_default(h3):
+    """It replaced Spectrum in the speed chain. The backend is a named choice —
+    `comfy kitchen attention` is what both of the maintainer's graphs run, and
+    an empty value here silently means whatever that install defaults to."""
     mh, _base, _cfg = h3
-    spectrum = _by_class(_graph(mh, use_speed_nodes=True), 'SpectrumApplyMiniMaxH3')[0]
-    assert spectrum['inputs']['debug'] is False
+    backend = _by_class(_graph(mh, use_speed_nodes=True), 'ModelAttentionBackend')[0]
+    assert backend['inputs']['attention'] == 'comfy kitchen attention'
 
 
 def test_the_rtx_upscale_can_be_dropped_without_breaking_the_save(h3):
@@ -275,14 +299,14 @@ def test_the_rtx_upscale_can_be_dropped_without_breaking_the_save(h3):
     assert _by_class(with_sr, 'RTXVideoSuperResolution')
     assert not _by_class(without, 'RTXVideoSuperResolution')
     saved_from = _by_class(without, 'SaveImage')[0]['inputs']['images'][0]
-    assert saved_from == _find_id(without, 'H3FrameSelect')
+    assert saved_from == _find_id(without, 'ImageFromBatch')
 
 
 def test_frame_selection_scores_on_identity_by_default(h3):
     """The debugged graph had weight_reference at 0 by accident. For a dataset
     the point is the frame that looks most like the reference."""
     mh, _base, _cfg = h3
-    sel = _by_class(_graph(mh), 'H3FrameSelect')[0]
+    sel = _by_class(_graph(mh, length=5), 'H3FrameSelect')[0]
     assert sel['inputs']['weight_reference'] > 0
     assert sel['inputs']['clip_vision'], 'reference scoring needs the CLIP-Vision tower'
 

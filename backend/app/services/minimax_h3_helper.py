@@ -107,8 +107,14 @@ H3_FRAME_SELECT_PACK = {
 }
 
 # Attached when present, skipped when absent. NONE of these changes the image:
-# Spectrum forecasts sampler steps, SageAttention swaps the attention kernel.
-H3_SPEED_NODE_CLASSES = ('SpectrumApplyMiniMaxH3', 'PathchSageAttentionKJ')
+# they swap the attention kernel and how much of it is held at once.
+#
+# `SpectrumApplyMiniMaxH3` was here until 2026-08-16 and forecast sampler steps
+# instead. It left with the maintainer's graph redesign: its wins came from the
+# middle of a long schedule, and both graphs now run a short one.
+H3_SPEED_NODE_CLASSES = ('ModelAttentionBackend',
+                         'MiniMaxH3MemoryEfficientSageAttentionPatch',
+                         'PathchSageAttentionKJ')
 # NVIDIA-only 2x upscale. Default ON, but a non-RTX card loses the 2x, not the
 # engine — the graph drops the node and saves the selected frame directly.
 H3_UPSCALE_NODE_CLASS = 'RTXVideoSuperResolution'
@@ -262,6 +268,39 @@ def resolve_h3_video_vae():
         ('h3_video_vae', 'h3-video-vae'))
 
 
+#: The T1 image VAE the 2026-08-16 swap graph decodes through. NOT in
+#: `H3_ASSETS`, on purpose: that dict IS `H3_REQUIRED`, so listing it there
+#: would refuse H3 outright on every install that has only the video VAE — which
+#: is every install that predates this file existing.
+H3_IMAGE_VAE_FILE = 'minimax_h3_t1_image_vae_step1597.safetensors'
+
+
+def resolve_h3_image_vae(selected=None):
+    """The VAE both H3 lanes decode through: `selected` if it is still on disk,
+    else the T1 image VAE, else the video VAE.
+
+    Three levels because the three answers have different lifetimes. A picked
+    file is a decision and wins. Absent one, the T1 IMAGE VAE is preferred —
+    the maintainer's 2026-08-16 graphs decode a one-frame packet through it
+    rather than the video VAE, which is a quality choice and not a rename. And
+    the video VAE is the floor, because it is what every earlier graph used and
+    it decodes the same latents: making the new file mandatory would turn an
+    upgrade into a 409 for everyone who has not downloaded it.
+
+    A STALE pick degrades to auto rather than failing, matching
+    `resolve_h3_unet` — a filename that left the disk is a settings value gone
+    out of date, not a reason to refuse the job."""
+    if selected:
+        picked = _find_model_file('vae', str(selected), ())
+        if picked:
+            return picked
+        logger.warning('configured H3 VAE %r is not on disk — auto-resolving',
+                       selected)
+    return _find_model_file(
+        'vae', H3_IMAGE_VAE_FILE, ('h3_t1_image_vae', 'h3-t1-image-vae'),
+        exclude=('video', 'audio')) or resolve_h3_video_vae()
+
+
 def resolve_h3_audio_vae():
     """The node REQUIRES an audio VAE even for a still. Handing it the video VAE
     twice loads fine and dies at sample time on a shape mismatch."""
@@ -285,10 +324,21 @@ _RESOLVERS = {
 }
 
 
-def h3_missing_assets():
+def h3_missing_assets(*, need_clip_vision=True):
     """Asset keys that do not resolve. Every gap at once — an install with
-    nothing must produce a complete shopping list, not the first failure."""
-    return [key for key in H3_REQUIRED if not _RESOLVERS[key]()]
+    nothing must produce a complete shopping list, not the first failure.
+
+    `need_clip_vision` is the CALLER's answer, not a config read, because the
+    three H3 graphs disagree about it and only the caller knows which one it is
+    about to build. The vision tower exists to score a frame packet against the
+    reference: the old swap always scores, the generation lane scores only when
+    `length` > 1, and the 2026-08-16 swap takes frame 0 with a plain
+    `ImageFromBatch` and never loads it. Reading `minimax_h3.length` here
+    instead would have let a generation setting excuse an asset the OLD swap
+    still needs — which is exactly the bug this parameter replaced."""
+    keys = H3_REQUIRED if need_clip_vision else tuple(
+        k for k in H3_REQUIRED if k != 'h3_clip_vision')
+    return [key for key in keys if not _RESOLVERS[key]()]
 
 
 # --- Nodes ------------------------------------------------------------------
@@ -388,8 +438,12 @@ def dynamic_vram_warning():
 
 def preflight():
     """Raise MinimaxH3ModelsMissing when the engine cannot run. No auto-download:
-    the honest answer is a named gap, not a fake installer."""
-    missing = h3_missing_assets()
+    the honest answer is a named gap, not a fake installer.
+
+    The vision tower is only asked for when this lane is about to build a frame
+    selector, i.e. when a packet is sampled — see `h3_missing_assets`."""
+    packet = clamp_length(_cfg_int('minimax_h3.length', LENGTH_MIN)) > 1
+    missing = h3_missing_assets(need_clip_vision=packet)
     nodes = h3_missing_nodes()
     if missing or nodes:
         raise MinimaxH3ModelsMissing(missing, nodes)
@@ -569,6 +623,53 @@ DEFAULT_REF_LONGER_EDGE = 1024
 DEFAULT_FRAME_WEIGHT_REFERENCE = 1.0
 DEFAULT_RTX_SCALE = 2
 
+#: Both H3 lanes cap their LoRA list here. Not a technical limit — a stack that
+#: deep is already unreadable, and the picker has to end somewhere.
+MAX_H3_LORAS = 4
+
+
+def sanitize_lora_rows(raw):
+    """Ordered [{file, strength}] from a settings list: blank rows dropped,
+    strengths clamped to [0, 1.5] (junk -> 1.0), capped at `MAX_H3_LORAS`.
+
+    Shared by the generation lane and the swap so one list cannot accept a value
+    the other rejects. Deliberately NOT capped at one row despite being called
+    an "accelerator" slot: a step-distill and a subject LoRA stack legitimately,
+    and a list that refuses the second one just moves the problem into a text
+    field somewhere else."""
+    rows = []
+    for entry in (raw if isinstance(raw, list) else []):
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get('file')
+        name = name.strip() if isinstance(name, str) else ''
+        if not name:
+            continue
+        strength = entry.get('strength')
+        strength = float(strength) if isinstance(strength, (int, float)) else 1.0
+        rows.append({'file': name, 'strength': max(0.0, min(1.5, strength))})
+        if len(rows) >= MAX_H3_LORAS:
+            break
+    return rows
+
+
+def configured_h3_loras():
+    """`minimax_h3.loras`, sanitized, with rows whose file is not on disk DROPPED.
+
+    ComfyUI answers a validation 400 for the WHOLE job on one bad `lora_name`,
+    so a stale row in a settings list would cost every tile of a batch. Skipping
+    it costs that row's effect and says so in the log — the same trade the swap
+    lane already made."""
+    rows = []
+    for row in sanitize_lora_rows(cfg.get('minimax_h3.loras')):
+        found = _find_model_file('loras', row['file'], ())
+        if not found:
+            logger.warning('minimax_h3: LoRA %r is not on disk — skipping it',
+                           row['file'])
+            continue
+        rows.append({'file': found, 'strength': row['strength']})
+    return rows
+
 
 def build_workflow(source_image, prompt, *, unet, clip, video_vae, audio_vae,
                    clip_vision, width, height, seed, length=LENGTH_MIN,
@@ -578,7 +679,7 @@ def build_workflow(source_image, prompt, *, unet, clip, video_vae, audio_vae,
                    ref_longer_edge=DEFAULT_REF_LONGER_EDGE,
                    frame_weight_reference=DEFAULT_FRAME_WEIGHT_REFERENCE,
                    use_speed_nodes=True, use_rtx_upscale=True,
-                   rtx_scale=DEFAULT_RTX_SCALE,
+                   rtx_scale=DEFAULT_RTX_SCALE, fl2va=None, loras=(),
                    filename_prefix='minimax_h3'):
     """The ComfyUI API-format graph. Pure function of its arguments — no config
     read, no disk access — so a test can assert the exact wiring without a
@@ -588,15 +689,41 @@ def build_workflow(source_image, prompt, *, unet, clip, video_vae, audio_vae,
     False removes the node and rewires around it, so the same call produces a
     valid graph on an install that lacks the pack.
 
+    `fl2va` selects the LOADER. With it, the graph runs the hybrid loader the
+    maintainer's 2026-08-16 graphs use — Ref2VA laid over Fl2VA's last twenty
+    blocks — which is a different model, not a faster one. Without it the plain
+    `UNETLoader` path is built, because Fl2VA is a 66 GB download and an install
+    that has only Ref2VA still generates perfectly well; making it mandatory
+    would take the engine away from everyone who has not fetched it.
+
+    `loras` is [{file, strength}] chained AFTER the speed patches, same rule and
+    the same reason as the swap lane: the accelerator LoRAs this graph wants are
+    community re-quantisations that differ per install, so no graph here can
+    ship one and this is the only place one may come from.
+
     The seed reaches `RandomNoise` and nothing else. That is load-bearing:
     `MiniMaxH3ReferenceToVideo` is then identical across a card's copies and
     ComfyUI serves the 40-second encode from cache."""
     length = clamp_length(length)
     steps = max(1, int(steps))
+    if fl2va:
+        loader = {'class_type': 'MiniMaxH3HybridLoader',
+                  'inputs': {'base_model': fl2va, 'overlay_model': unet,
+                             # The maintainer's own preset. The block range is
+                             # the last 20 of 50: earlier ranges were measured
+                             # to drift identity, later ones to do nothing.
+                             'overlay_preset': 'block_range_adaln',
+                             'block_range_start': 30, 'block_range_end': 49,
+                             'final_adaln_from_overlay': False,
+                             'custom_overlays': '', 'custom_base': '',
+                             'weight_dtype': 'default'},
+                  '_meta': {'title': 'MiniMax H3 hybrid (Ref2VA over Fl2VA)'}}
+    else:
+        loader = {'class_type': 'UNETLoader',
+                  'inputs': {'unet_name': unet, 'weight_dtype': 'default'},
+                  '_meta': {'title': 'MiniMax H3 Ref2VA'}}
     g = {
-        '1': {'class_type': 'UNETLoader',
-              'inputs': {'unet_name': unet, 'weight_dtype': 'default'},
-              '_meta': {'title': 'MiniMax H3 Ref2VA'}},
+        '1': loader,
         '2': {'class_type': 'CLIPLoader',
               'inputs': {'clip_name': clip, 'type': 'minimax', 'device': 'default'},
               '_meta': {'title': 'Qwen3-VL 32B (H3)'}},
@@ -612,24 +739,46 @@ def build_workflow(source_image, prompt, *, unet, clip, video_vae, audio_vae,
 
     # Model chain. Each accelerator is a pass-through patch, so dropping one only
     # shortens the chain — the sampler still sees a model either way.
+    #
+    # 2026-08-16: `SpectrumApplyMiniMaxH3` left this chain and the attention
+    # backend + memory-efficient patch took its place, matching both of the
+    # maintainer's graphs and the swap lane, which had already moved. Spectrum
+    # forecast SAMPLER STEPS; these two change the attention kernel. Running the
+    # forecaster on top of an 8-step distill predicts a curve that is nearly all
+    # warmup, which is where its wins came from.
     model_out = ['1', 0]
     if use_speed_nodes:
-        g['7'] = {'class_type': 'SpectrumApplyMiniMaxH3',
-                  'inputs': {'enabled': True, 'blend_weight': 0.5, 'degree': 1,
-                             'ridge_lambda': 0.1, 'window_size': 2,
-                             'flex_window': 0.75, 'warmup_steps': 1,
-                             'tail_actual_steps': 1, 'max_history': 8,
-                             # debug prints a summary per run; never ship it on.
-                             'debug': False, 'history_storage': 'system_ram',
-                             'bootstrap_first_forecast': True,
+        g['7'] = {'class_type': 'ModelAttentionBackend',
+                  'inputs': {'attention': 'comfy kitchen attention',
                              'model': model_out},
-                  '_meta': {'title': 'Spectrum step forecasting (optional)'}}
+                  '_meta': {'title': 'Attention backend (optional)'}}
         model_out = ['7', 0]
-        g['8'] = {'class_type': 'PathchSageAttentionKJ',
-                  'inputs': {'sage_attention': 'auto', 'allow_compile': False,
-                             'model': model_out},
-                  '_meta': {'title': 'Sage attention (optional)'}}
+        g['8'] = {'class_type': 'MiniMaxH3MemoryEfficientSageAttentionPatch',
+                  'inputs': {'model': model_out},
+                  '_meta': {'title': 'H3 memory-efficient attention (optional)'}}
         model_out = ['8', 0]
+        g['20'] = {'class_type': 'PathchSageAttentionKJ',
+                   'inputs': {'sage_attention': 'auto', 'allow_compile': False,
+                              'model': model_out},
+                   '_meta': {'title': 'Sage attention (optional)'}}
+        model_out = ['20', 0]
+
+    # Accelerator / subject LoRAs, after the patches so switching `use_speed_nodes`
+    # off does not move where they attach. A blank file or a zero strength is a
+    # row that is off, and it is skipped rather than sent as an empty lora_name —
+    # ComfyUI answers a validation 400 for the WHOLE job on one of those.
+    for i, row in enumerate(loras or ()):
+        name = (row.get('file') or '').strip() if isinstance(row, dict) else ''
+        strength = row.get('strength', 1.0) if isinstance(row, dict) else 0
+        if not name or not strength:
+            continue
+        node_id = f'lora_{i}'
+        g[node_id] = {'class_type': 'LoraLoaderModelOnly',
+                      'inputs': {'lora_name': name,
+                                 'strength_model': float(strength),
+                                 'model': model_out},
+                      '_meta': {'title': f'H3 LoRA {i + 1} (Settings)'}}
+        model_out = [node_id, 0]
 
     g['9'] = {'class_type': 'MiniMaxH3ReferenceToVideo',
               'inputs': {'prompt': prompt,
@@ -654,25 +803,41 @@ def build_workflow(source_image, prompt, *, unet, clip, video_vae, audio_vae,
                           'latent_image': ['9', 1]}}
     g['15'] = {'class_type': 'VAEDecode',
                'inputs': {'samples': ['14', 0], 'vae': ['3', 0]}}
-    g['16'] = {'class_type': 'CLIPVisionLoader', 'inputs': {'clip_name': clip_vision}}
-    g['17'] = {'class_type': 'H3FrameSelect',
-               'inputs': {'images': ['15', 0],
-                          'select_count': 1,
-                          'weight_sharpness': 1.0,
-                          'weight_exposure': 0.5,
-                          # Non-zero on purpose: a dataset wants the frame that
-                          # looks most like the reference, not merely the
-                          # sharpest one. See the module docstring - UNVERIFIED.
-                          'weight_reference': float(frame_weight_reference),
-                          'target_brightness': 0.5,
-                          'brightness_tolerance': 0.25,
-                          'min_score': 0.0,
-                          'dedup_threshold': 0.98,
-                          # Scored against the ORIGINAL reference, not the
-                          # downscaled copy the encoder saw.
-                          'reference': ['5', 0],
-                          'clip_vision': ['16', 0]},
-               '_meta': {'title': 'Keep the best single frame'}}
+    # ONE frame comes back either way, but by two different routes, and which
+    # one is right is decided by how many frames there are to choose between.
+    #
+    # A packet (`length` > 1) is a choice, and `H3FrameSelect` scores it against
+    # the reference. A single frame is not a choice: scoring it costs the
+    # MinimaxH3-Image pack, a CLIP-ViT-H download and a vision pass to rank a
+    # list of one. `length` defaults to 1, so the common install now needs
+    # neither — which is what the maintainer's 2026-08-16 graph does too.
+    if length > 1:
+        g['16'] = {'class_type': 'CLIPVisionLoader',
+                   'inputs': {'clip_name': clip_vision}}
+        g['17'] = {'class_type': 'H3FrameSelect',
+                   'inputs': {'images': ['15', 0],
+                              'select_count': 1,
+                              'weight_sharpness': 1.0,
+                              'weight_exposure': 0.5,
+                              # Non-zero on purpose: a dataset wants the frame
+                              # that looks most like the reference, not merely
+                              # the sharpest one. See the module docstring -
+                              # UNVERIFIED.
+                              'weight_reference': float(frame_weight_reference),
+                              'target_brightness': 0.5,
+                              'brightness_tolerance': 0.25,
+                              'min_score': 0.0,
+                              'dedup_threshold': 0.98,
+                              # Scored against the ORIGINAL reference, not the
+                              # downscaled copy the encoder saw.
+                              'reference': ['5', 0],
+                              'clip_vision': ['16', 0]},
+                   '_meta': {'title': 'Keep the best single frame'}}
+    else:
+        g['17'] = {'class_type': 'ImageFromBatch',
+                   'inputs': {'batch_index': 0, 'length': 1,
+                              'image': ['15', 0]},
+                   '_meta': {'title': 'The single frame'}}
 
     images_out = ['17', 0]
     if use_rtx_upscale:
@@ -740,7 +905,11 @@ def enqueue_minimax_h3(user_id, source_filename, edit_prompt, source_path=None,
     preflight()
     unet = resolve_h3_unet(h3_model or cfg.get('minimax_h3.base_model'))
     clip = resolve_h3_text_encoder()
-    video_vae = resolve_h3_video_vae()
+    # `minimax_h3.vae`: blank auto-resolves (T1 image VAE if present, else the
+    # video VAE). The generation lane samples a one-frame packet exactly like
+    # the swap does, so both go through the same picker rather than one lane
+    # quietly decoding through a different VAE than the other.
+    video_vae = resolve_h3_image_vae(cfg.get('minimax_h3.vae'))
     audio_vae = resolve_h3_audio_vae()
     clip_vision = resolve_h3_clip_vision()
 
@@ -778,6 +947,11 @@ def enqueue_minimax_h3(user_id, source_filename, edit_prompt, source_path=None,
         # without the pack installed gets the image, not a validation error.
         use_speed_nodes=bool(cfg.get('minimax_h3.use_speed_nodes')) and optional['speed'],
         use_rtx_upscale=bool(cfg.get('minimax_h3.use_rtx_upscale')) and optional['upscale'],
+        # The hybrid loader when Fl2VA is on disk, the plain UNETLoader when it
+        # is not — see `build_workflow`. Resolved here rather than inside it so
+        # the builder stays a pure function of its arguments.
+        fl2va=resolve_h3_fl2va(),
+        loras=configured_h3_loras(),
         # UNIQUE prefix per job: SaveImage numbers from what is currently in the
         # output folder and the app moves each result out right after completion,
         # so a shared prefix makes the counter re-issue the same name.
