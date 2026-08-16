@@ -192,6 +192,52 @@ def bank_scrape_import():
     return jsonify({'ok': True, **res})
 
 
+@bp.get('/bank/collectors')
+def bank_collectors():
+    """🧲 The local collectors this install has configured — NAMES ONLY.
+
+    Never the commands. The picker needs to know what it may run, not how; and
+    a command line is the one field here that could carry an absolute path off
+    this machine into a screenshot. An empty list is the shipped state and the
+    UI says so: no collector is a configuration this app has, not an error."""
+    from ..services import local_collector
+    return jsonify({'collectors': [c['name'] for c in local_collector.configured_collectors()]})
+
+
+@bp.post('/bank/collect')
+def bank_collect():
+    """🧲 Run a configured local collector and import what it finds.
+
+    Body: {collector, url, bank_id?|name?}. Answers 202 the moment the job is
+    launched — a collector that drives a browser through a whole account runs
+    for minutes, and the progress rides on the bank's own job (the same one the
+    scan and the passes use), so the page can be closed and reopened.
+
+    `collector` NAMES an entry in `bank.collectors`; it never carries a command.
+    Nothing in this payload decides what is executed."""
+    data = request.get_json(silent=True) or {}
+    raw_bank_id = data.get('bank_id')
+    bank_id = None
+    if raw_bank_id is not None:
+        try:
+            bank_id = int(raw_bank_id)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'bank_id must be a number'}), 400
+    try:
+        res = banks.collect_into_bank(
+            _app(), LOCAL_USER, str(data.get('collector') or ''),
+            str(data.get('url') or ''), bank_id=bank_id, name=data.get('name'))
+    except bank_jobs.BankJobBusy as e:
+        return _busy(e)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 503
+    # The id rides back so the UI can open the bank while it is still filling.
+    return jsonify({'ok': True, 'bank_id': res['bank_id'],
+                    'name': res['name'], 'created': res['created']}), 202
+
+
 @bp.get('/bank/<int:bank_id>')
 def bank_get(bank_id):
     """The workspace payload. The source folder is re-walked first so images

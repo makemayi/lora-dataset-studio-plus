@@ -9831,6 +9831,69 @@ def scrape_import_to_bank(user_id, items, bank_id=None, name=None, *,
             'added': sync.get('added', 0), 'skipped': skipped}
 
 
+def collect_into_bank(app, user_id, collector, url, *, bank_id=None, name=None) -> dict:
+    """🧲 Run a configured local collector against `url`, import what it finds.
+
+    An ordinary bank job, for the same reason ``delete_rejected`` became one: a
+    browser-driving collector on a full account takes MINUTES, and a request
+    held open that long is indistinguishable from a hang. The job carries the
+    collector's own progress (see `local_collector.PROGRESS_PREFIX`), so the
+    grid load shows as indeterminate work and the per-post walk as a bar.
+
+    THE DESTINATION IS CREATED FIRST, before the collector runs. `bank_jobs`
+    keys one live job per bank id, so there has to BE an id to register under —
+    and it means an empty bank appears immediately and fills as the run goes,
+    rather than nothing at all existing until the last minute. If the launch
+    itself fails, a bank created here is discarded again.
+
+    Returns {'bank_id', 'name', 'created', 'job'}; ``job['result']`` holds the
+    import outcome once it finishes.
+    """
+    from . import local_collector
+
+    if local_collector.find_collector(collector) is None:
+        raise ValueError(f'no collector named {collector!r} is configured')
+
+    created = False
+    if bank_id is not None:
+        bank = get_bank(user_id, bank_id)
+        if bank is None:
+            raise ValueError('bank not found')
+    else:
+        wanted = (name or '').strip()
+        if not wanted:
+            raise ValueError('name the bank that will receive the images')
+        bank = _create_import_bank(user_id, wanted)
+        created = True
+    target_id, target_name, folder = bank.id, bank.name, bank.source_path
+
+    def _run(job):
+        def _progress(done, total, detail):
+            bank_jobs.progress(job, done=done or None, total=total or None,
+                               detail=detail or None)
+        items, _suggested = local_collector.run_collector(
+            collector, url, on_progress=_progress)
+        bank_jobs.progress(job, done=0, total=len(items),
+                           detail=f'downloading {len(items)} image(s)…')
+        # The SAME import every other intake uses. `_bank_lease` is this job's
+        # own capability: without it the import would see a live job on this
+        # bank — its own — and refuse itself with BankJobBusy.
+        out = scrape_import_to_bank(
+            user_id, items, bank_id=target_id,
+            _bank_lease=_job_bank_capability(job), _created=created)
+        job['result'] = out
+        bank_jobs.progress(job, done=len(items), total=len(items),
+                           detail=f'{out.get("saved", 0)} downloaded')
+
+    try:
+        job = bank_jobs.start(app, target_id, 'collect', _run)
+    except Exception:
+        if created:
+            _discard_unlaunched_import_bank(user_id, target_id, folder)
+        raise
+    return {'bank_id': target_id, 'name': target_name, 'created': created, 'job': job}
+
+
 _BANK_TRANSFER_WATERMARK_STATES = frozenset(
     ('none', 'detected', 'dismissed', 'cleaned', 'failed', 'error'))
 _BANK_TRANSFER_FRAMINGS = frozenset(('face', 'bust', 'body', 'back', 'unknown'))

@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+import threading
 import time
 
 from .. import config as cfg
@@ -52,6 +53,10 @@ COLLECTOR_TIMEOUT_S = 30 * 60
 MAX_OUTPUT_BYTES = 8 * 1024 * 1024
 #: What one run may hand to the importer, mirroring the paste intake's own cap.
 MAX_ITEMS = 2000
+#: Lines on stderr starting with this carry `{done, total, detail}` for the
+#: progress bar. Everything else on stderr is a human message and is kept for
+#: the error report. A collector that emits none simply shows no percentage.
+PROGRESS_PREFIX = '@progress'
 
 
 class CollectorError(Exception):
@@ -70,10 +75,12 @@ def configured_collectors():
     A row missing a name or an argument list is dropped rather than reported:
     the settings file is hand-written, and a half-typed entry should not take
     the working ones down with it."""
-    # `bank.collectors`, not a top-level `collectors`: the settings API requires
-    # every top-level section to be an object, and a bare list there fails every
-    # full-config save — caught by test_settings_api the first time it was tried.
-    raw = cfg.get('bank.collectors')
+    # `collectors.entries`, and both halves of that path were forced by a test.
+    # A top-level LIST fails every full-config save (the settings API requires
+    # sections to be objects, per test_settings_api), and living inside `bank`
+    # breaks the assertion that that section holds exactly the twelve thresholds
+    # the Bank panel exposes — which this is not, and must not become.
+    raw = cfg.get('collectors.entries')
     out = []
     for entry in (raw if isinstance(raw, list) else []):
         if not isinstance(entry, dict):
@@ -145,24 +152,53 @@ def run_collector(name, url, *, on_progress=None):
         argv = argv + [target]      # no {url} token: hand it over as the last argument
 
     if on_progress:
-        on_progress(f'running “{collector["name"]}” …')
+        on_progress(0, 0, f'running “{collector["name"]}” …')
     started = time.time()
     try:
-        proc = subprocess.run(argv, capture_output=True, timeout=COLLECTOR_TIMEOUT_S,
-                              shell=False, cwd=str(cfg.BACKEND_DIR.parent))
+        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                shell=False, cwd=str(cfg.BACKEND_DIR.parent))
     except FileNotFoundError as e:
         raise CollectorError(f'collector command not found: {argv[0]}') from e
-    except subprocess.TimeoutExpired as e:
-        raise CollectorError(
-            f'the collector did not finish within {COLLECTOR_TIMEOUT_S // 60} minutes') from e
     except OSError as e:
         raise CollectorError(f'the collector could not be started: {e}') from e
 
-    stderr = (proc.stderr or b'').decode('utf-8', 'replace')
+    # stderr is drained by a THREAD while stdout is read here. Both must be
+    # consumed concurrently: a collector that fills one pipe's buffer while the
+    # reader waits on the other deadlocks, and this one writes a progress line
+    # per post for minutes. The tail is kept for the error message.
+    tail: list[str] = []
+
+    def _drain():
+        for raw_line in proc.stderr:
+            line = raw_line.decode('utf-8', 'replace').rstrip('\r\n')
+            if line.startswith(PROGRESS_PREFIX):
+                if on_progress:
+                    try:
+                        p = json.loads(line[len(PROGRESS_PREFIX):].strip())
+                        on_progress(int(p.get('done') or 0), int(p.get('total') or 0),
+                                    str(p.get('detail') or '')[:200])
+                    except (ValueError, TypeError):
+                        pass          # a malformed progress line is not a failure
+                continue
+            tail.append(line)
+            del tail[:-40]
+
+    reader = threading.Thread(target=_drain, daemon=True, name='collector-stderr')
+    reader.start()
+    try:
+        raw = proc.stdout.read()
+        proc.wait(timeout=COLLECTOR_TIMEOUT_S)
+    except subprocess.TimeoutExpired as e:
+        proc.kill()
+        raise CollectorError(
+            f'the collector did not finish within {COLLECTOR_TIMEOUT_S // 60} minutes') from e
+    finally:
+        reader.join(timeout=5)
+
+    stderr = '\n'.join(tail)
     if proc.returncode != 0:
         raise CollectorError(
             f'the collector exited with code {proc.returncode}', stderr)
-    raw = proc.stdout or b''
     if len(raw) > MAX_OUTPUT_BYTES:
         raise CollectorError('the collector printed more than this can read')
     try:

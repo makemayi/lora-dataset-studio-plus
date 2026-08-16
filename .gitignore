@@ -106,3 +106,9 @@ docs/superpowers/
 # The app side of that flow (paste → bank) IS tracked; only the page-side
 # snippets live here.
 /local/
+
+# Timestamped config backups. `/*.json` above does not cover them (the suffix
+# moves the extension), and a config backup holds every key and token the real
+# one does — this is the one file in the tree that must never be committed by
+# accident.
+/config.json.bak-*
