@@ -4,6 +4,7 @@ import { useToast } from '../common/Toast'
 import { HelpBadge } from '../../help/HelpMode'
 import ConceptSourcesPanel from '../dataset/ConceptSourcesPanel'
 import BankPasteImport from './BankPasteImport'
+import BankCollectorRun from './BankCollectorRun'
 import { CARD_SURFACE } from '../common/surfaces'
 import {
   bankScrapeDestination,
@@ -148,6 +149,24 @@ export default function BankScrapePanel({ banks, onDone }) {
               destination, same batching, same toasts — only the collecting
               happens elsewhere. */}
           <BankPasteImport onImport={handleImport} busy={busy} />
+
+          {/* The third intake, for sites no scan reaches: a command on THIS
+              machine visits the page and reports what it finds. It shares the
+              destination block above — a collected run lands exactly where a
+              scanned or pasted one would. */}
+          <BankCollectorRun
+            destinationOf={() => bankScrapeDestination({ mode, name, bankId })}
+            post={(url, body) => postJson(url, body)}
+            busy={busy}
+            onDone={async (res) => {
+              if (res?.bank_id) {
+                toast.success(`${res.created ? 'Bank created — ' : ''}collector started; the bank fills as it runs.`)
+                // Resume the SAME bank next time instead of making another.
+                setMode('existing'); setBankId(String(res.bank_id))
+              }
+              await onDone?.()
+            }}
+          />
         </div>
       )}
     </section>
