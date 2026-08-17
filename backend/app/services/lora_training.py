@@ -3532,6 +3532,20 @@ def update_train_settings(user_id, dataset_id, patch: dict, *, _settings=None) -
             cur['learning_rate'] = float(v)
         else:
             raise ValueError('learning_rate must be a positive number (or auto)')
+    # OneTrainer's own vocabulary — see TRAIN_SETTING_KEYS. Bounded rather than
+    # merely positive: an epoch count in the thousands or a batch that cannot
+    # fit any consumer card is a typo, and a typo that reaches a trainer costs
+    # hours before it announces itself.
+    for _otk, _othi in (('epochs', 1000), ('batch_size', 64)):
+        if _otk in patch:
+            v = patch[_otk]
+            if v in (None, 'auto', ''):
+                cur.pop(_otk, None)
+            elif (isinstance(v, int) and not isinstance(v, bool)
+                  and 1 <= v <= _othi):
+                cur[_otk] = int(v)
+            else:
+                raise ValueError(f'{_otk} must be a whole number between 1 and {_othi} (or auto)')
     if 'weight_decay' in patch:
         v = patch['weight_decay']
         if v in (None, 'auto', '', 'off'):
@@ -3648,6 +3662,11 @@ TRAIN_SETTING_KEYS = ('rank', 'resolution', 'save_every', 'max_step_saves',
                       'layer_offloading_transformer_percent',
                       'layer_offloading_text_encoder_percent',
                       'cache_text_embeddings', 'save_dtype',
+                      # OneTrainer's own vocabulary. Stored here because a
+                      # dataset has ONE settings dict, but read only by the
+                      # OneTrainer lane — the ai-toolkit lane thinks in steps
+                      # and never looks at them.
+                      'epochs', 'batch_size',
                       'preset_steps_per_image', 'preset_steps_min',
                       'preset_steps_max', 'preset_steps_fixed',
                       # The unlocked half of the dense recipe. Present here so a

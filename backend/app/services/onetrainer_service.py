@@ -140,10 +140,15 @@ SETTING_PINNED = 'pinned'
 SETTING_PRESET = 'preset'
 
 ONETRAINER_SETTING_STATUS = {
-    # --- the three that are real ---
+    # --- the ones that are real ---
     'learning_rate': (SETTING_APPLIES, ''),
     'resolution': (SETTING_APPLIES, ''),
     'dual_captions': (SETTING_APPLIES, ''),
+    # OneTrainer's OWN vocabulary. The panel asks for these in it on this lane
+    # rather than deriving them from a step count — the derivation was a
+    # documented approximation and it silently assumed batch 1.
+    'epochs': (SETTING_APPLIES, ''),
+    'batch_size': (SETTING_APPLIES, ''),
 
     # --- set here, ignored there ---
     'rank': (SETTING_PINNED,
@@ -217,20 +222,28 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
                      steps: int, num_images: int, rank: int,
                      peft_type: str = PEFT_TYPE_LORA,
                      learning_rate: float | None = None,
-                     resolution: int | None = None) -> dict:
+                     resolution: int | None = None,
+                     epochs: int | None = None,
+                     batch_size: int | None = None) -> dict:
     """The OVERRIDE config this app writes to --config-path, merged by
     OneTrainer OVER its own shipped Krea 2 preset (--preset-path). Contains
     ONLY the fields this app's own UI/dataset state actually owns — never a
     field the shipped preset already decided (see the ownership-boundary
     test above).
 
-    `epochs` is an approximation: OneTrainer trains by epoch count, this
-    app's UI/recommended_steps() thinks in step count. One epoch here means
-    "one pass over the dataset at batch_size 1" — a documented approximation
-    (see spec's Open Questions), not a verified equivalence. `batch_size` is
-    therefore pinned to 1 here too: leaving it at the shipped preset's own
-    value would silently change how many optimizer steps `epochs` actually
-    buys, without this function's epoch math ever knowing.
+    `epochs` and `batch_size` are the caller's when it has an opinion, and
+    derived when it does not. OneTrainer trains by EPOCH; this app's UI and
+    recommended_steps() think in STEPS, and for a long time the gap was papered
+    over by deriving `epochs = ceil(steps / images)` and pinning `batch_size`
+    to 1 so that arithmetic held. The panel now asks for epochs and batch
+    directly on this lane and shows the resulting step count as a label, so the
+    approximation is gone wherever the UI is involved.
+
+    The derivation survives for callers with no opinion, and it is now correct
+    for a batch above 1: one epoch is `images / batch` optimizer steps, so
+    `epochs = ceil(steps * batch / images)`. The old form silently assumed
+    batch 1 and would have bought a third of the training it promised at
+    batch 3.
 
     `lora_alpha` is pinned to equal `rank` (scale factor 1.0, the standard
     "no-op" LoRA convention) for the same reason `lora_rank` is owned here:
@@ -245,7 +258,9 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
     here rather than left to the shipped preset for the same reason: it is a
     user choice this app's own UI now exposes, not a preset-tuning decision.
     An unrecognised value degrades to LORA."""
-    epochs = max(1, math.ceil(steps / max(1, num_images)))
+    batch = max(1, int(batch_size)) if batch_size else 1
+    epochs_eff = (max(1, int(epochs)) if epochs
+                  else max(1, math.ceil(steps * batch / max(1, num_images))))
     training_folder = Path(training_folder)
     if peft_type not in PEFT_TYPES:
         peft_type = PEFT_TYPE_LORA
@@ -253,10 +268,10 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
         'workspace_dir': str(training_folder),
         'cache_dir': str(training_folder / 'cache'),
         'output_model_destination': str(training_folder / f'{trigger}.safetensors'),
-        'epochs': epochs,
+        'epochs': epochs_eff,
         'lora_rank': int(rank),
         'lora_alpha': float(rank),
-        'batch_size': 1,
+        'batch_size': batch,
         # OneTrainer takes resolution as a STRING (its shipped preset says
         # "512"), unlike ai-toolkit's list of ints. Passing an int here is not a
         # type nit — it is how the two lanes end up training the same dataset at
@@ -293,7 +308,9 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
           steps: int, num_images: int, rank: int,
           peft_type: str = PEFT_TYPE_LORA,
           learning_rate: float | None = None,
-          resolution: int | None = None) -> dict:
+          resolution: int | None = None,
+          epochs: int | None = None,
+          batch_size: int | None = None) -> dict:
     """Write concepts.json + config.json under `training_folder` and spawn
     `scripts/train.py --preset-path <shipped Krea 2 preset> --config-path
     <our config.json>`. Returns {'pid': int, 'config_path': str,
@@ -311,7 +328,8 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
     config = build_job_config(trigger=trigger, dataset_folder=dataset_folder,
                               training_folder=training_folder, steps=steps,
                               num_images=num_images, rank=rank, peft_type=peft_type,
-                              learning_rate=learning_rate, resolution=resolution)
+                              learning_rate=learning_rate, resolution=resolution,
+                              epochs=epochs, batch_size=batch_size)
     concepts = build_concepts(trigger=trigger, dataset_folder=dataset_folder)
 
     concepts_path = training_folder_p / 'concepts.json'
@@ -447,10 +465,19 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
         logger.exception('onetrainer: could not resolve the resolution; '
                          'falling back to the module default')
         resolution = None
+    # Epochs and batch are OneTrainer's OWN vocabulary and the panel now asks
+    # for them in it, so they come straight from the dataset's settings. Unset
+    # means "no opinion" and build_job_config derives them from `steps`, which
+    # is how a run launched from anywhere but that panel still works.
+    from .lora_training import _train_settings
+    _s = _train_settings(ds) or {}
+    ot_epochs = _s.get('epochs')
+    ot_batch = _s.get('batch_size')
     launched = launch(trigger=trigger, dataset_folder=dataset_folder,
                       training_folder=str(training_folder), steps=steps,
                       num_images=max(1, num_images), rank=32, peft_type=peft_type,
-                      learning_rate=lr, resolution=resolution)
+                      learning_rate=lr, resolution=resolution,
+                      epochs=ot_epochs, batch_size=ot_batch)
 
     from . import checkpoint_registry
     checkpoint_registry.register_launch(

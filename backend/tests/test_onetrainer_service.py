@@ -512,12 +512,15 @@ def test_the_pinned_rank_is_the_rank_the_launch_actually_passes(
 
 
 def test_a_pinned_or_preset_setting_carries_no_promise_of_applying(onetrainer):
-    """Only three settings may claim to apply. The count is asserted on purpose:
-    growing it is a decision, not something that should happen by accident."""
+    """The applying set is asserted by NAME, on purpose: growing it is a
+    decision, not something that should happen by accident. It went from three
+    to five when the panel started asking for epochs and batch in OneTrainer's
+    own vocabulary instead of deriving them from a step count."""
     ots, _cfg = onetrainer
     applying = sorted(k for k, v in ots.ONETRAINER_SETTING_STATUS.items()
                       if v[0] == ots.SETTING_APPLIES)
-    assert applying == ['dual_captions', 'learning_rate', 'resolution']
+    assert applying == ['batch_size', 'dual_captions', 'epochs',
+                        'learning_rate', 'resolution']
 
 
 def test_every_pinned_setting_says_why(onetrainer):
@@ -547,3 +550,58 @@ def test_the_settings_status_route_answers_without_onetrainer_installed(client):
     assert body['rank']['state'] == 'pinned'
     assert body['rank']['why'], 'a greyed control with no reason teaches nothing'
     assert body['optimizer']['state'] == 'preset'
+
+
+# --- epochs and batch, in OneTrainer's own vocabulary ------------------------
+
+def test_the_caller_epochs_and_batch_win_over_the_step_derivation(onetrainer, tmp_path):
+    """The panel asks for these in OneTrainer's vocabulary, so what it asks for
+    is what runs — no approximation in between."""
+    ots, _cfg = onetrainer
+    c = ots.build_job_config(
+        trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
+        steps=4000, num_images=1200, rank=32, epochs=10, batch_size=3)
+    assert c['epochs'] == 10
+    assert c['batch_size'] == 3
+
+
+def test_the_derivation_survives_for_callers_with_no_opinion_and_now_counts_batch(
+        onetrainer, tmp_path):
+    """A run launched from anywhere but that panel still works — and the old
+    form silently assumed batch 1, so at batch 3 it bought a THIRD of the
+    training it promised. One epoch is images/batch optimizer steps."""
+    ots, _cfg = onetrainer
+    at_one = ots.build_job_config(
+        trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
+        steps=2000, num_images=25, rank=32)
+    assert at_one['epochs'] == 80          # ceil(2000 * 1 / 25) — unchanged
+    assert at_one['batch_size'] == 1
+
+    at_three = ots.build_job_config(
+        trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
+        steps=2000, num_images=25, rank=32, batch_size=3)
+    assert at_three['epochs'] == 240       # ceil(2000 * 3 / 25)
+    assert at_three['batch_size'] == 3
+
+
+def test_epochs_and_batch_are_refused_when_they_are_a_typo(app):
+    """Bounded, not merely positive: a four-digit epoch count or a batch no
+    consumer card can hold is a typo, and a typo that reaches a trainer costs
+    hours before it says so."""
+    import pytest as _pytest
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as lt
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'ot-bounds', 'ztrig')
+        for bad in ({'epochs': 0}, {'epochs': 5000}, {'epochs': 2.5},
+                    {'batch_size': 0}, {'batch_size': 999}, {'batch_size': True}):
+            with _pytest.raises(ValueError):
+                lt.update_train_settings(LOCAL_USER, ds.id, bad)
+        eff = lt.update_train_settings(LOCAL_USER, ds.id, {'epochs': 10, 'batch_size': 3})
+        assert eff is not None
+        stored = lt._train_settings(svc.get_dataset(LOCAL_USER, ds.id))
+        assert stored['epochs'] == 10 and stored['batch_size'] == 3
+        # 'auto' clears it, the same three-way contract every other key uses.
+        lt.update_train_settings(LOCAL_USER, ds.id, {'epochs': 'auto'})
+        assert 'epochs' not in lt._train_settings(svc.get_dataset(LOCAL_USER, ds.id))
