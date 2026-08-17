@@ -617,6 +617,54 @@ export default function DatasetWorkspace({ ds, onBack }) {
     try { await ds.cancelPending(); } finally { setStoppingGeneration(false); }
   }, [ds]);
 
+  /* Subject trim: the pending crop preview and the last applied batch's undo
+     manifest. ABOVE THE EARLY RETURN, for the same hook-count reason as
+     everything else up here — the first render has no `d`, so hooks placed
+     below would appear only on the second one and React throws "rendered more
+     hooks than during the previous render". The error boundary eats the whole
+     page when it does, which is what "an unexpected error occurred" looks
+     like. The withdrawn version of this feature shipped exactly this bug.
+
+     Polled while the trim banner is up AND once after it clears: the manifest
+     is written at the very END of the measuring job, so a poll that stopped
+     with the banner would miss the thing it was waiting for. Keying the effect
+     on the activity kind is what restarts it when the pass ends. */
+  const trimActivityKind = ds.activity?.kind;
+  const [trimState, setTrimState] = useState({ preview: null, undo: null });
+  const [trimBusy, setTrimBusy] = useState(false);
+  useEffect(() => {
+    if (!d?.id) { setTrimState({ preview: null, undo: null }); return undefined; }
+    let live = true;
+    const load = () => fetch(`/api/dataset/${d.id}/trim-preview`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s) => { if (live && s) setTrimState(s); })
+      .catch(() => { /* offline / poll race — the next tick retries */ });
+    load();
+    const iv = window.setInterval(load, 3000);
+    return () => { live = false; window.clearInterval(iv); };
+  }, [d?.id, trimActivityKind]);
+
+  const startTrim = useCallback(async (imageIds) => {
+    if (!d?.id || !imageIds?.length) return;
+    setTrimBusy(true);
+    try { await ds.trimPreview(d.id, imageIds); } finally { setTrimBusy(false); }
+  }, [d?.id, ds]);
+
+  const applyTrim = useCallback(async (imageIds) => {
+    if (!d?.id) return;
+    setTrimBusy(true);
+    try {
+      await ds.trimApply(d.id, imageIds);
+      setTrimState((s) => ({ ...s, preview: null }));
+    } finally { setTrimBusy(false); }
+  }, [d?.id, ds]);
+
+  const discardTrim = useCallback(async () => {
+    if (!d?.id) return;
+    await ds.trimDiscard(d.id);
+    setTrimState((s) => ({ ...s, preview: null }));
+  }, [d?.id, ds]);
+
   if (!d) return <p className="text-content-subtle text-sm">Loading…</p>;
 
   const images = d.images || [];
@@ -839,46 +887,6 @@ export default function DatasetWorkspace({ ds, onBack }) {
   // e.g. "Scanning for watermarks… 12/64". CPU passes (face analysis, watermark
   // clean) don't pause ComfyUI, so their note omits that claim.
   const act = ds.activity;
-  /* Subject trim: the pending crop preview and the last applied batch's undo
-     manifest. Polled while the trim banner is up AND once after it clears —
-     the manifest is written at the very END of the measuring job, so a poll
-     that stopped with the banner would miss the thing it was waiting for.
-     Keying the effect on act?.kind is what restarts it after the pass ends. */
-  const [trimState, setTrimState] = useState({ preview: null, undo: null });
-  const [trimBusy, setTrimBusy] = useState(false);
-  useEffect(() => {
-    if (!d?.id) { setTrimState({ preview: null, undo: null }); return undefined; }
-    let live = true;
-    const load = () => fetch(`/api/dataset/${d.id}/trim-preview`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((s) => { if (live && s) setTrimState(s); })
-      .catch(() => { /* offline / poll race — the next tick retries */ });
-    load();
-    const iv = window.setInterval(load, 3000);
-    return () => { live = false; window.clearInterval(iv); };
-  }, [d?.id, act?.kind]);
-
-  const startTrim = useCallback(async (imageIds) => {
-    if (!d?.id || !imageIds?.length) return;
-    setTrimBusy(true);
-    try { await ds.trimPreview(d.id, imageIds); } finally { setTrimBusy(false); }
-  }, [d?.id, ds]);
-
-  const applyTrim = useCallback(async (imageIds) => {
-    if (!d?.id) return;
-    setTrimBusy(true);
-    try {
-      await ds.trimApply(d.id, imageIds);
-      setTrimState((s) => ({ ...s, preview: null }));
-    } finally { setTrimBusy(false); }
-  }, [d?.id, ds]);
-
-  const discardTrim = useCallback(async () => {
-    if (!d?.id) return;
-    await ds.trimDiscard(d.id);
-    setTrimState((s) => ({ ...s, preview: null }));
-  }, [d?.id, ds]);
-
   const importBusy = isDatasetImportBlocked({ localBusy: ds.localBusy, activity: act });
   // Unknown / legacy engine values fail safe as local: only these two API
   // engines are guaranteed not to share ComfyUI VRAM with vision auto-crop.
