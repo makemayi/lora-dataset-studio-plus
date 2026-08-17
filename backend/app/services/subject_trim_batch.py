@@ -34,8 +34,10 @@ from PIL import Image, ImageOps
 
 from ..models import FaceDatasetImage
 from . import auto_mask, dataset_activity, image_encoding, trash
+from ..extensions import db
 from .face_dataset_service import (
-    get_dataset, write_image_atomic, _dataset_path, _valid_icc_profile,
+    get_dataset, write_image_atomic, _clear_watermark_metadata, _dataset_path,
+    _invalidate_image_content_analysis, _valid_icc_profile,
 )
 from .subject_trim import (
     LONG_EDGE, largest_bbox, output_size, skip_reason, trim_frame,
@@ -279,6 +281,41 @@ def trim_report(dataset_id):
     return _read_json(_undo_path(dataset_id))
 
 
+def _invalidate_row(dataset_id, image_id, scale):
+    """Drop what the crop made stale on one row, the way the manual ✂ does.
+
+    `crop_image` clears the watermark metadata, stores the resample ratio and
+    voids the derived content and face analysis. A trim that invalidated LESS
+    would leave a face score describing a photo that no longer exists — and a
+    stale score is worse than no score, because nothing reports it as stale.
+
+    A missing row is NOT an error. The manifest is disk state that outlives the
+    database: an image deleted between the preview and the apply still has a
+    file to crop, and refusing the pixels over a missing row would be the wrong
+    trade. Nor is a DB failure allowed to fail the image: the pixels are already
+    published by this point, so the honest outcome is a logged warning, not a
+    row counted as failed after its file was successfully cropped.
+    """
+    try:
+        row = FaceDatasetImage.query.filter_by(
+            id=image_id, dataset_id=dataset_id).first()
+        if not row:
+            return
+        _clear_watermark_metadata(row)
+        row.upscale_ratio = scale
+        _invalidate_image_content_analysis(row)
+        db.session.commit()
+    except Exception:                           # noqa: BLE001
+        logger.exception(
+            'subject trim: image %s was cropped but its row could not be '
+            'updated; its face score and composition warning now describe the '
+            'photo it used to be', image_id)
+        try:
+            db.session.rollback()
+        except Exception:                       # noqa: BLE001
+            pass
+
+
 def apply_preview(user_id, dataset_id, image_ids):
     """Crop the confirmed rows in place and return
     ``{'trimmed', 'refused', 'failed'}``.
@@ -476,6 +513,9 @@ def apply_preview(user_id, dataset_id, image_ids):
                         # nearest-neighbour on paletted images.
                         crop = oriented.convert(image_encoding.resample_mode(oriented))
                     out_w, out_h = output_size(crop.width, crop.height, LONG_EDGE)
+                    # Captured BEFORE the resize below rebinds `crop`: this is the
+                    # ratio the row's composition warning reads.
+                    scale = max(out_w, out_h) / float(max(crop.width, crop.height))
                     if (out_w, out_h) != crop.size:
                         crop = crop.resize((out_w, out_h), Image.LANCZOS)
                     buf = io.BytesIO()
@@ -498,6 +538,7 @@ def apply_preview(user_id, dataset_id, image_ids):
                     counts['trimmed'] += 1
                     _record()
                     write_image_atomic(path, buf.getvalue())
+                    _invalidate_row(dataset_id, image_id, scale)
                 except Exception:                       # noqa: BLE001
                     logger.exception('subject trim: image %s failed', image_id)
                     if not (entries and entries[-1].get('image_id') == image_id):
@@ -573,6 +614,13 @@ def restore_trim_batch(user_id, dataset_id):
                 # sitting safely in Trash would be reported gone.
                 shutil.move(original, target)
                 restored += 1
+                # The pixels changed again, so the row is stale again. The
+                # original's OWN analysis is not recoverable — the crop voided
+                # it and nothing kept a copy — so this marks the row UNKNOWN
+                # rather than pretending to restore a score. `upscale_ratio`
+                # goes to None for the same reason: the pre-trim ratio is not
+                # something this manifest ever knew.
+                _invalidate_row(dataset_id, e.get('image_id'), None)
             except Exception:                       # noqa: BLE001
                 # Only the basename: a log line naming a user's machine layout is
                 # one they cannot paste into a bug report.

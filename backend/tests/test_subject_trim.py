@@ -757,3 +757,74 @@ def test_a_crop_on_an_already_cropped_photo_undoes_only_to_the_last_crop(
     with open(trashed_path, 'rb') as fh:
         assert fh.read() == first_crop_bytes, \
             'undo must restore the LAST crop, not the untouched original'
+
+
+# --- what the crop makes stale ---------------------------------------------
+
+def test_a_cropped_row_loses_the_analysis_of_the_photo_it_used_to_be(app, monkeypatch):
+    """A trim invalidates exactly what the manual ✂ crop invalidates.
+
+    Not a stub in sight: a real dataset, a real row, the real service. The
+    reason this test exists at all is that a stale face score is worse than no
+    score — nothing reports it as stale, so it silently ranks a photo that no
+    longer exists.
+    """
+    from app.models import FaceDatasetImage
+    from app.services import face_dataset_service as svc
+
+    with app.app_context():
+        _cropped_row_body(app, monkeypatch, svc, FaceDatasetImage)
+
+
+def _cropped_row_body(app, monkeypatch, svc, FaceDatasetImage):
+    ds = svc.create_dataset(1, 'trim-invalidation', 'ztrig')
+    ds_dir = svc._dataset_dir(ds.id)
+    os.makedirs(ds_dir, exist_ok=True)
+    Image.new('RGB', (2000, 3000), 'white').save(os.path.join(ds_dir, 'a.png'))
+    row = FaceDatasetImage(dataset_id=ds.id, source='import', status='keep',
+                           filename='a.png')
+    row.face_score = 0.87
+    row.face_state = 'scored'
+    row.content_sig = 'stale-signature'
+    row.upscale_ratio = 1.0
+    svc.db.session.add(row)
+    svc.db.session.commit()
+
+    stb._write_json(stb._preview_path(ds.id), {'items': [
+        {'image_id': row.id, 'filename': 'a.png', 'image': [2000, 3000],
+         'frame': [500, 100, 900, 1600], 'out': [576, 1024], 'skip': None},
+    ]})
+    monkeypatch.setattr(stb.trash, 'send_to_trash',
+                        lambda path, context='': shutil.move(
+                            path, os.path.join(ds_dir, os.path.basename(path) + '.trashed')))
+
+    counts = stb.apply_preview(1, ds.id, [row.id])
+    assert counts['trimmed'] == 1
+
+    fresh = svc.db.session.get(FaceDatasetImage, row.id)
+    assert fresh.face_score is None, 'the score described the uncropped photo'
+    assert fresh.face_state is None
+    assert fresh.content_sig is None
+    # 1600 -> 1024 is a downscale, so the stored ratio is below 1.
+    assert fresh.upscale_ratio == pytest.approx(1024 / 1600, abs=1e-6)
+
+
+def test_a_missing_row_does_not_stop_the_crop(app, tmp_path, monkeypatch):
+    """The manifest is disk state that outlives the database.
+
+    An image deleted between the preview and the apply still has a file to
+    crop, and refusing the pixels over a missing row would be the wrong trade —
+    so `_invalidate_row` returns quietly rather than raising.
+    """
+    ds_dir = tmp_path / 'ds'
+    ds_dir.mkdir()
+    Image.new('RGB', (2000, 3000), 'white').save(ds_dir / 'a.png')
+    _seed_preview(ds_dir, 77, [
+        {'image_id': 999999, 'filename': 'a.png', 'image': [2000, 3000],
+         'frame': [500, 100, 900, 1600], 'out': [576, 1024], 'skip': None},
+    ], monkeypatch)
+    monkeypatch.setattr(stb.trash, 'send_to_trash',
+                        lambda path, context='': str(tmp_path / os.path.basename(path)))
+
+    counts = stb.apply_preview(1, 77, [999999])
+    assert counts['trimmed'] == 1, 'no row is not a reason to leave the file uncropped'
