@@ -50,6 +50,20 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-17-onetrainer-honours-its-own-preset',
+    date: '2026-08-17',
+    title: 'OneTrainer runs now use the recipe OneTrainer tuned, and you can reach more of it',
+    blurb: 'Until today every OneTrainer run this app launched quietly wrote its own learning '
+      + 'rate and batch size over the ones OneTrainer ships for Krea 2 — 1e-4 and 1 instead of '
+      + '3e-4 and 2. It leaves them alone now unless you set a value, so a run with the panel '
+      + 'empty is the recipe its maintainers tuned. The panel also reaches further into that '
+      + 'lane: epochs and batch size in OneTrainer’s own units (with the step count shown as '
+      + 'the result), separate learning rates for the two text encoders, the LR schedule, and '
+      + 'Min-SNR gamma on both engines. If you have trained here before, your next run will '
+      + 'differ — that is the fix, not a regression.',
+    to: '/datasets?section=training',
+  },
+  {
     id: '2026-08-17-advanced-options-grouped-by-lane',
     date: '2026-08-17',
     title: 'Advanced options are now grouped by which lane actually reads them',

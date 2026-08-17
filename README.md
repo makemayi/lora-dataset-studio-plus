@@ -375,7 +375,8 @@ Left in, a site logo is something the LoRA learns. Find → Review → Clean, on
 | **18 built-in training starters** | A Character and Concept recipe per family (plus Style for five of the six), plus a scoped Krea 2 Raw · LoKr likeness community starting point; each says where its choices come from and why |
 | **Adaptive step policies** | Character ≈120 steps/image, Concept `475 × √images`, Style 50 steps/image inside a safe envelope |
 | **Readiness & launch guards** | Image counts, untriaged rows, suspicious captions, duplicates, VRAM, disk and family compatibility, re-checked at launch |
-| **⚙ Advanced controls** | Rank/alpha, resolution, LoRA or LoKr, dropout, timestep weighting, optimizer, scheduler, EMA, save/sample cadence |
+| **⚙ Advanced controls** | Rank/alpha, resolution, LoRA or LoKr, dropout, timestep weighting, optimizer, scheduler, EMA, learning rate, Min-SNR gamma, save/sample cadence — **grouped by which engine reads them**: shared first, then the engine you picked, with the other engine's block kept and collapsed. A setting the current engine ignores is greyed with the reason, not silently accepted |
+| **Two local engines** | **ai-toolkit** (default) or **OneTrainer**. They do not read the same settings: OneTrainer trains by **epoch**, so it gets epochs, batch size and separate text-encoder rates, while rank/alpha and the network type are fixed on that lane. It also keeps its own shipped Krea 2 recipe — the app overrides nothing there until you set a value, so an empty panel is that recipe, not this app's defaults |
 | **Training queue** | Runs line up instead of colliding on the GPU, with a protected **⏹ Stop training** |
 | **☁️ Cloud training** | Rent a vast.ai GPU (~$1–2/run, no local GPU), same exact config, pod terminated automatically |
 | **Custom base weights** | Train on your own compatible base locally — or in the cloud via a one-time push to a private HF repo |

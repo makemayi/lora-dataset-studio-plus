@@ -183,6 +183,36 @@ That panel also has a **Presets** row: apply a shipped ★ recipe (*Krea
 character*, *Concept*, *Style*), or save your tuned settings as a named preset to
 reuse across datasets and share (import/export as JSON).
 
+### Two trainers, and which settings each one reads
+
+Local training runs on one of two engines, picked from the dropdown on the
+training panel: **ai-toolkit** (the default) or **OneTrainer**. They are not
+interchangeable, and they do not read the same settings — so the Expert block
+groups itself around the one you picked:
+
+- **Shared** — read by both: learning rate, resolution, dual captions, LR
+  schedule and warmup, Min-SNR gamma.
+- **This engine** — what only the current one reads. ai-toolkit owns the
+  optimiser, rank/alpha, dropout, EMA and the memory levers; OneTrainer owns
+  **epochs**, **batch size** and the two **text-encoder rates**, because it
+  trains by epoch where ai-toolkit trains by step.
+- **The other engine** — kept, collapsed and disabled, so you can see what
+  switching would give you rather than watching half the panel vanish.
+
+Three of them are **greyed on OneTrainer with a reason**: rank and alpha are
+fixed at 32 on that lane, and the network type comes from Settings ▸ OneTrainer
+▸ PEFT type rather than from the panel.
+
+Two things worth knowing before you compare results between the engines:
+
+- **OneTrainer ships its own tuned preset for Krea 2**, and the app now leaves
+  it alone unless you set a value. Its learning rate is **3e-4** and its batch
+  size is **2** — so a OneTrainer run with the panel left empty is not the same
+  run as an ai-toolkit one at the app's 1e-4 default.
+- **The same idea can be spelled differently on each side.** Min-SNR gamma is
+  one field on ai-toolkit and a pair of fields on OneTrainer; the app translates
+  it. You set one number.
+
 | Setting | Z-Image | SDXL | Krea 2 | FLUX.1 | FLUX.2 Klein | Why |
 |---|---|---|---|---|---|---|
 | **LoRA rank / alpha** | 16 / 16 | 32 / 16 | 32 / 32 | 16 / 16 | 16 / 16 | Capacity to memorize the identity. SDXL's alpha = rank ÷ 2 is that family's half-strength convention. |
