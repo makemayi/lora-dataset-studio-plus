@@ -692,7 +692,12 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                                         // app (App.jsx never passes them), so production behaviour
                                         // is unchanged: ai-toolkit by default, status fetched live.
                                         trainerOverride = null,
-                                        otSettingStatusInitial = null }) {
+                                        otSettingStatusInitial = null,
+                                        // Test-only, same contract as the two above: seeds `adv`
+                                        // so a static render can reach a state the panel would
+                                        // otherwise only enter through a fetch. Never passed by
+                                        // the app.
+                                        advOverride = null }) {
   const isConcept = kind === 'concept';
   const isStyle = kind === 'style';
   const isConceptual = isConcept || isStyle;
@@ -805,7 +810,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   // Réglages ai-toolkit avancés éditables (rank / resolution / save_every /
   // sample_every / sample_prompts), chargés depuis base-info ; persistés par POST
   // /train/settings via ds.setTrainSettings.
-  const [adv, setAdv] = useState(null);
+  const [adv, setAdv] = useState(advOverride);
   // Slider LoRA mode (Beta) : état serveur (colonne dédiée train_slider) + brouillon
   // local des champs texte (édition libre, sauvés au blur comme les sample prompts).
   const [slider, setSlider] = useState(null);
@@ -818,6 +823,8 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   // number input cannot be edited naturally if every partial keystroke writes
   // through to the server ("" / "3." are not valid saved scales).
   const [differentialGuidanceScaleDraft, setDifferentialGuidanceScaleDraft] = useState('3');
+  const [learningRateDraft, setLearningRateDraft] = useState('');
+  const [learningRateError, setLearningRateError] = useState('');
   // Presets de réglages avancés : snapshots nommés, partageables (fichier JSON).
   // Stockés bruts côté serveur ; la validation se fait à l'APPLICATION (clés
   // inconnues ignorées, valeurs invalides signalées) → tolérant aux versions.
@@ -1154,6 +1161,10 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   const advTimestepSupported = adv ? adv.timestep_type_supported !== false : trainType !== 'sdxl';
   const advTimestepChoices = adv?.timestep_type_choices ?? ['sigmoid', 'linear', 'weighted', 'shift'];
   const advOptimizer = adv?.optimizer ?? 'adamw8bit';
+  // Prodigy and the automagic family tune the rate themselves — the backend's
+  // _lr_from_settings returns the lr≈1.0 convention for prodigy no matter what
+  // is stored, so an editable field here would be a lie.
+  const advAdaptiveLr = /^(prodigy|automagic)/.test(String(advOptimizer));
   const advOptimizerChoices = adv?.optimizer_choices ?? ['adamw8bit', 'adafactor', 'automagic', 'automagic2', 'prodigy'];
   const advLrSched = adv?.lr_scheduler ?? 'constant';
   const advLrSchedChoices = adv?.lr_scheduler_choices ?? ['constant', 'linear', 'cosine', 'cosine_with_restarts', 'constant_with_warmup'];
@@ -1225,6 +1236,28 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   useEffect(() => {
     setDifferentialGuidanceScaleDraft(String(adv?.differential_guidance_scale ?? 3));
   }, [adv?.differential_guidance_scale]);
+  /* Learning rate: a text field rather than a number input, because the value
+     people actually type is `3e-4` and a number input's spinner/step semantics
+     fight scientific notation. Saved on blur, like the prompts box. */
+  useEffect(() => {
+    setLearningRateDraft(adv?.learning_rate == null ? '' : String(adv.learning_rate));
+    setLearningRateError('');
+  }, [adv?.learning_rate]);
+  const saveLearningRate = () => {
+    const raw = learningRateDraft.trim();
+    const stored = adv?.learning_rate == null ? '' : String(adv.learning_rate);
+    if (raw === stored) return;                       // no-op → skip the round-trip
+    if (raw === '') { setLearningRateError(''); saveAdv({ learning_rate: null }); return; }
+    const n = Number(raw);
+    // The server refuses anything non-positive; say so HERE rather than letting
+    // a 400 surface as a toast with the field silently keeping a bad value.
+    if (!Number.isFinite(n) || n <= 0) {
+      setLearningRateError('must be a positive number, e.g. 3e-4');
+      return;
+    }
+    setLearningRateError('');
+    saveAdv({ learning_rate: n });
+  };
   const saveSamplePrompts = () => {
     const stored = (adv?.sample_prompts ?? []).join('\n');
     if (samplePromptsText === stored) return;      // no-op → skip the round-trip
@@ -3666,6 +3699,43 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                   LR of 1e-4. <i>prodigy</i> also auto-tunes the LR and is popular for tiny sets — but may need
                   <code className="text-content-muted">pip install prodigyopt</code> in the ai-toolkit venv. Picking an
                   adaptive optimiser is the &quot;push further without cranking the LR&quot; move.
+                </span>
+              </div>
+              {/* Learning rate. The one setting that BOTH lanes honour and
+                  neither exposed: without a control here the rate is the
+                  family-fixed 1e-4 unless a preset happens to carry one, so a
+                  dataset trained at 3e-4 by hand could not be reproduced in the
+                  app at all. Blank/auto removes the override and returns to the
+                  default — the same three-way contract update_train_settings
+                  already enforces. Adaptive optimisers drive the rate
+                  themselves, so the field stands down rather than pretending to
+                  matter. */}
+              <div className="flex flex-col gap-0.5"
+                title={inertOnLane('learning_rate') || undefined}>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-content text-[0.75rem] w-28 shrink-0">Learning rate</span>
+                  <input type="text" inputMode="decimal"
+                    value={learningRateDraft}
+                    onChange={(e) => setLearningRateDraft(e.target.value)}
+                    onBlur={saveLearningRate}
+                    placeholder={advAdaptiveLr ? 'set by the optimiser' : 'auto (1e-4)'}
+                    aria-label="Learning rate"
+                    disabled={advAdaptiveLr || !!inertOnLane('learning_rate')}
+                    title={inertOnLane('learning_rate')
+                      || (advAdaptiveLr
+                        ? 'This optimiser tunes the learning rate itself — a fixed rate would be ignored.'
+                        : 'Blank = the family default (1e-4). Example: 3e-4')}
+                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] w-32 focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50" />
+                  <span className="text-content-subtle text-[0.6875rem]" hidden={!learningRateError}>
+                    {learningRateError}
+                  </span>
+                </div>
+                <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
+                  <b className="text-content-muted font-medium">Why:</b> how far each step moves the weights. Too high
+                  bakes the source&apos;s look in; too low never converges.
+                  <b className="text-content-muted font-medium"> How:</b> leave it blank for the family default
+                  (<i>1e-4</i>) unless you have a reason. Adaptive optimisers (<i>prodigy</i>, <i>automagic</i>) set it
+                  themselves and this field is disabled for them.
                 </span>
               </div>
               {/* LR schedule (+ warmup, only for the warmup schedule) */}

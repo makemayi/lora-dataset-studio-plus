@@ -155,3 +155,51 @@ test('an unknown key fails safe as preset-owned', () => {
   assert.match(emaMatch[0], /disabled=""/, 'a key the endpoint never mentions must fail safe to preset (disabled)')
   assert.match(emaMatch[0], new RegExp(escapeRe(PRESET_SENTENCE)))
 })
+
+/* --- the learning-rate control ------------------------------------------
+ *
+ * It is the ONE setting both lanes honour and neither exposed: without it the
+ * rate is the family-fixed 1e-4 unless a preset happens to carry one, so a
+ * dataset trained at 3e-4 by hand could not be reproduced in the app at all.
+ * These pin that it exists, that it is NOT greyed on the OneTrainer lane (it
+ * is one of the three that apply), and that it stands down for the optimisers
+ * that set the rate themselves.
+ */
+
+test('the learning rate has a control at all', () => {
+  const html = renderPanel()
+  assert.match(html, /aria-label="Learning rate"/,
+    'the rate reaches every run; a panel without this field cannot reproduce a hand-set one')
+})
+
+test('the learning rate is NOT greyed on the OneTrainer lane', () => {
+  // It is declared 'applies'. Greying it would be the opposite error to the one
+  // this file exists to catch: hiding a control that genuinely works.
+  const html = renderPanel({ trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS })
+  const field = html.slice(html.indexOf('aria-label="Learning rate"') - 400,
+                           html.indexOf('aria-label="Learning rate"') + 200)
+  assert.doesNotMatch(decode(field), new RegExp(PRESET_SENTENCE.slice(0, 30)),
+    'learning_rate applies on this lane and must not carry the preset-owned reason')
+})
+
+const lrField = (html) => {
+  const at = html.indexOf('aria-label="Learning rate"')
+  assert.notEqual(at, -1, 'the learning-rate field is gone')
+  // Back to the opening `<input`, forward to its close: the class string carries
+  // Tailwind's `disabled:` VARIANTS, so a naive /disabled/ over a window around
+  // the field matches whether or not the control is actually disabled. That is
+  // how the first version of this test passed against a field that was enabled.
+  return html.slice(html.lastIndexOf('<input', at), html.indexOf('/>', at) + 2)
+}
+
+test('an adaptive optimiser disables the field instead of pretending it matters', () => {
+  // prodigy drives the LR itself — _lr_from_settings returns the lr≈1.0
+  // convention whatever is stored, so an editable box would be a lie.
+  const off = lrField(renderPanel({ advOverride: { optimizer: 'prodigy' } }))
+  assert.match(off, /\sdisabled=""/, 'prodigy ignores a fixed rate; the control must stand down')
+
+  const on = lrField(renderPanel({ advOverride: { optimizer: 'adamw8bit' } }))
+  assert.doesNotMatch(on, /\sdisabled=""/,
+    'and it must be editable for the optimisers that DO read it — without this '
+    + 'half the assertion above passes against a field that is always disabled')
+})
