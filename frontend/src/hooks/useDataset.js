@@ -1433,6 +1433,49 @@ export function useDataset() {
     }
   }, [refresh, toast]);
 
+  /* Subject trim, two phases. `trimPreview` only MEASURES — it writes no
+     pixels, so it needs no confirmation. `trimApply` is the destructive half
+     and takes the ids the review screen confirmed; the server holds the
+     coordinates. */
+  const trimPreview = useCallback(async (dataset, imageIds) => {
+    const d = await postJson(`/api/dataset/${dataset}/trim-preview`,
+      { image_ids: imageIds });
+    if (d.ok) { toast.success(`Measuring crops for ${d.queued} image(s)…`); await refresh(); }
+    else toast.error(d.error || 'Unexpected error');
+    return d;
+  }, [refresh, toast]);
+
+  const trimApply = useCallback(async (dataset, imageIds) => {
+    const d = await postJson(`/api/dataset/${dataset}/trim-apply`,
+      { image_ids: imageIds });
+    if (d.ok) {
+      const refused = d.refused ? `, ${d.refused} refused` : '';
+      const failed = d.failed ? `, ${d.failed} failed` : '';
+      toast.success(`Cropped ${d.trimmed ?? 0} image(s)${refused}${failed}`);
+    } else toast.error(d.error || 'Unexpected error');
+    await refresh();
+    return d;
+  }, [refresh, toast]);
+
+  const trimDiscard = useCallback(async (dataset) => {
+    // fetchWithCsrfRetry + getCsrfToken are what this file's own `post` helper
+    // uses; a bare fetch would 400 on the CSRF check.
+    await fetchWithCsrfRetry(`/api/dataset/${dataset}/trim-preview`, {
+      method: 'DELETE', headers: { 'X-CSRFToken': getCsrfToken() },
+    }).catch(() => { /* the next preview overwrites it anyway */ });
+  }, []);
+
+  const trimUndo = useCallback(async (dataset) => {
+    const d = await postJson(`/api/dataset/${dataset}/trim-undo`, {});
+    if (d.ok) {
+      const gone = d.gone ? `, ${d.gone} no longer in the Trash` : '';
+      const failed = d.failed ? `, ${d.failed} could not be put back` : '';
+      toast.success(`Trim undone — ${d.restored ?? 0} original(s) restored${gone}${failed}`);
+    } else toast.error(d.error || 'Unexpected error');
+    await refresh();
+    return d;
+  }, [refresh, toast]);
+
   const undoFaceSwap = useCallback(async (imageId) => {
     if (swappingRef.current.has(imageId)) return { ok: false, error: 'busy' };
     swappingRef.current.add(imageId);
@@ -1880,6 +1923,7 @@ export function useDataset() {
           lockImage, batchImages, replaceCaptions, writeCaptionFiles, openDatasetFolder,
           cancelPending, cancelCaption, regenerate, faceSwapImage, undoFaceSwap, analyzeFaces, scoreFace,
           seedvr2ReplaceImage,
+          trimPreview, trimApply, trimDiscard, trimUndo,
           findWatermarks, cleanWatermarks, cleanWatermarkImages, restoreWatermarkImage,
           dismissWatermarks, saveWatermarkRegions, cancelWatermarkScan,
           purgeUnused, exportZip, exportBackup, exportZipFor, exportBackupFor, importBackup, importDatasetZip, importDatasetFolder,

@@ -350,6 +350,20 @@ export function UpscaleIcon(props) {
   );
 }
 
+/* Subject trim: crop marks (the two open corner brackets) around the person
+   they're framing — a face and shoulders, drawn in the same stroke style as
+   FaceSwapIcon/UpscaleIcon. */
+export function SubjectTrimIcon(props) {
+  return (
+    <Glyph name="subject-trim" {...props}>
+      <path d="M6 2v16h16" />
+      <path d="M2 6h16v16" />
+      <circle cx="12" cy="9.5" r="1.9" />
+      <path d="M9 15.5c0-1.7 1.3-3 3-3s3 1.3 3 3" />
+    </Glyph>
+  );
+}
+
 /**
  * The round icon-button shell, shared by every utility control in the header
  * (What's new, update check, the ? and gear menus, the mobile hamburger) and by
