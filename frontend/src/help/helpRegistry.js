@@ -119,6 +119,17 @@ const TOPICS = [
       'convert', 'caption strategy', 'trigger'],
     guide: { chapter: 'settings-reference', anchor: 'per-dataset-settings' },
     app: { route: '/datasets' } },
+  // The ✂ bulk action. Its three numbers (a 9:16 aspect floor, the 85% "nothing
+  // to remove" rule, the 256px minimum) are module constants, not settings, so
+  // this topic points at the guide rather than at a Settings anchor. Keywords
+  // carry "auto crop" on purpose: that phrase already means the WATERMARK
+  // border-band crop in this app, and someone searching it for this feature
+  // should still land here.
+  { id: 'subject-trim', kind: 'setting', title: 'Subject trim (crop a batch around the person)',
+    keywords: ['crop', 'trim', 'subject', 'background', 'batch crop', 'auto crop',
+      'person', 'mask', 'aspect', '9:16', 'undo'],
+    guide: { chapter: 'using-the-app', anchor: 'crop-a-batch-around-its-subject' },
+    app: { route: '/datasets' } },
   // Same suffixes, second surface: the generation panel exposes them inline so
   // they can be tuned per batch. Listed AFTER dataset-settings-modal so the modal
   // keeps the anchor's "Open this screen →" button.

@@ -1908,6 +1908,48 @@ One caveat worth stating: the analysis passes (👤 Subject, ✨ Score, 📐 Fra
 still read the original file, so turning an image does **not** re-run them. Turn
 first, then run the passes if you want them to see it upright.
 
+## Crop a batch around its subject
+
+Tick some images in the grid, then press **✂ Subject trim** in the bulk toolbar.
+The app finds the person in each one and measures a crop that removes background
+around them.
+
+Nothing is written yet. A review panel opens above the grid showing every
+proposed crop — the original with the frame drawn on it, the result beside it,
+and how much would be removed. Untick anything that looks wrong and press
+**Crop N images**. The originals go to the Trash, and **↩ Undo trim** brings the
+whole batch back.
+
+Measuring runs a mask pass on the GPU, so it **pauses ComfyUI** while it works —
+the same trade as the auto head-crop on import. This is a different crop from
+the two the app already had: the bank's ✂ auto-crop removes watermark border
+bands, and the import-time head crop makes square head shots. Subject trim is
+the one for bust and full-body photos.
+
+**What the crop does, and what it will not do.** The whole person stays in
+frame — it never cuts into them. Background is removed until the frame would be
+narrower than **9:16**, and then it stops. A standing figure is roughly 1:4, so
+a full-body shot **keeps background at its sides on purpose**: the alternative
+is a sliver you cannot train on. A subject already wider than 9:16 gets no
+background at all.
+
+**What it leaves alone**, with the reason shown per image:
+
+- the subject already fills the frame (the crop would keep 85% or more of it) —
+  there is nothing to remove;
+- the crop would be under 256 px on its short edge — too little subject to train
+  on;
+- no person was found;
+- you stopped the pass before it reached that image.
+
+**Several people in one photo:** the crop follows the **largest** person, and
+someone standing beside them can end up cut by the frame. For a character
+dataset that is usually what you want; when it is not, untick that row in the
+review.
+
+The crop is capped at 1024 px on its long side and is never upscaled — cropping
+in cannot create detail, so it does not pretend to.
+
 ## Face-swap a tile with the reference photo
 
 Every tile that has a current image can run a fixed face-swap

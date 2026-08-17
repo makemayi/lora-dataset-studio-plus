@@ -297,7 +297,8 @@ A grid built for real curation work, not a file explorer — with a numeric answ
 
 | Sub-feature | What it gets you |
 | :-- | :-- |
-| **Grid actions** | Resize, zoom, crop, mirror or rotate a tile — losslessly, in the file's own format — then multi-select to Keep / Reject / Undecide, clear captions, delete, or upscale via Klein (re-renders detail, sharper but skin/colour can shift) or SeedVR2 (resolves detail, leaves the original look alone) |
+| **Grid actions** | Resize, zoom, crop, mirror or rotate a tile — losslessly, in the file's own format — then multi-select to Keep / Reject / Undecide, clear captions, delete, subject-trim (below), or upscale via Klein (re-renders detail, sharper but skin/colour can shift) or SeedVR2 (resolves detail, leaves the original look alone) |
+| **✂ Subject trim** | Crops a whole selection around the person in each shot, after you review every proposed crop side by side — nothing is written until you confirm, and the whole batch can be undone. Keeps the subject intact and stops removing background at a 9:16 floor, so a full-body shot keeps some at its sides on purpose. Images whose subject already fills the frame are left alone and say why. Follows the **largest** person only, so a bystander can be cut by the frame. Measuring runs a mask pass on the GPU and pauses ComfyUI |
 | **🔒 Lock a tile** | Marks it undeletable — single delete, batch delete and 🧹 purge all skip it; reject/regenerate/face-swap/crop stay available. A dataset with any locked photo refuses a whole-dataset delete instead of quietly deleting the rest |
 | **👤 Face-similarity scoring** | InsightFace scores every image against your reference and badges it green (strong) or orange (borderline) |
 | **Auto-triage** | Applies a score threshold to undecided, scorable images — re-appliable, and a manual status change wins |

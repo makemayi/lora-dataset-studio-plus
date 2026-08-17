@@ -50,6 +50,19 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-17-subject-trim',
+    date: '2026-08-17',
+    title: 'Crop a batch around the person, and see every crop before it lands',
+    blurb: 'Tick some images, press ✂ Subject trim, and the app measures a crop that keeps the '
+      + 'WHOLE person and removes the background around them. Nothing is written yet: a review '
+      + 'panel shows every proposed crop side by side with how much it would remove, and you '
+      + 'untick what looks wrong before confirming. Afterwards ↩ Undo trim takes the whole batch '
+      + 'back. Images whose subject already fills the frame are left alone and say so, and a '
+      + 'full-body shot keeps some background at its sides on purpose — the alternative is an '
+      + 'unusable sliver.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-16-paste-links-into-a-bank',
     date: '2026-08-16',
     title: 'Bring images from sites the scanner cannot reach',
