@@ -258,6 +258,10 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
                                       onSeedvr2Replace,
                                       mirroringIds, faceThresholds, datasetKind = 'character',
                                       onImproveBatch,
+                                      // Subject trim MEASURES first: this opens a review of the
+                                      // proposed crops, it does not crop. The destructive half
+                                      // lives behind the review's own confirm.
+                                      onTrimBatch,
                                       eligibilityImages, dualCaptions = false,
                                       subjectType = '',
                                       // Server's reason why face scoring can't run here
@@ -525,6 +529,15 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
               <button type="button" disabled={bulkBusy} onClick={() => act('clear_caption')}
                 title="Delete the selected images' captions (the Caption button then regenerates them)"
                 className={batchQuiet}>🧹 Clear captions</button>
+              {/* Measures; does not crop. The wording matters: the last version
+                  of this feature cropped on the click and was rejected on
+                  sight, so the button says what it actually does. */}
+              {onTrimBatch && (
+                <button type="button" disabled={bulkBusy}
+                  onClick={() => onTrimBatch([...selected])}
+                  title="Measure a crop around the person in each selected image — you review every proposed crop before anything is written. Runs a mask pass on the GPU and pauses ComfyUI while it does."
+                  className={batchQuiet}>✂ Subject trim</button>
+              )}
               {/* One button per engine that can actually run, because the two
                   passes are a CHOICE, not two qualities of the same thing:
                   Klein re-renders detail (and can move skin and colour),

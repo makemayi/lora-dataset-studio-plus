@@ -18,6 +18,7 @@ import DatasetGrid from './DatasetGrid';
 import { datasetBusyReason } from './datasetBusyReason.js';
 import KleinModelSetting from '../shared/KleinModelSetting';
 import SmallImageRescueReview from './SmallImageRescueReview';
+import SubjectTrimReview from './SubjectTrimReview';
 import CaptionToolsBar from './CaptionToolsBar';
 import CaptionOptionsPopover from './CaptionOptionsPopover';
 import { recaptionConfirmation } from './captionCategory';
@@ -838,6 +839,46 @@ export default function DatasetWorkspace({ ds, onBack }) {
   // e.g. "Scanning for watermarks… 12/64". CPU passes (face analysis, watermark
   // clean) don't pause ComfyUI, so their note omits that claim.
   const act = ds.activity;
+  /* Subject trim: the pending crop preview and the last applied batch's undo
+     manifest. Polled while the trim banner is up AND once after it clears —
+     the manifest is written at the very END of the measuring job, so a poll
+     that stopped with the banner would miss the thing it was waiting for.
+     Keying the effect on act?.kind is what restarts it after the pass ends. */
+  const [trimState, setTrimState] = useState({ preview: null, undo: null });
+  const [trimBusy, setTrimBusy] = useState(false);
+  useEffect(() => {
+    if (!d?.id) { setTrimState({ preview: null, undo: null }); return undefined; }
+    let live = true;
+    const load = () => fetch(`/api/dataset/${d.id}/trim-preview`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s) => { if (live && s) setTrimState(s); })
+      .catch(() => { /* offline / poll race — the next tick retries */ });
+    load();
+    const iv = window.setInterval(load, 3000);
+    return () => { live = false; window.clearInterval(iv); };
+  }, [d?.id, act?.kind]);
+
+  const startTrim = useCallback(async (imageIds) => {
+    if (!d?.id || !imageIds?.length) return;
+    setTrimBusy(true);
+    try { await ds.trimPreview(d.id, imageIds); } finally { setTrimBusy(false); }
+  }, [d?.id, ds]);
+
+  const applyTrim = useCallback(async (imageIds) => {
+    if (!d?.id) return;
+    setTrimBusy(true);
+    try {
+      await ds.trimApply(d.id, imageIds);
+      setTrimState((s) => ({ ...s, preview: null }));
+    } finally { setTrimBusy(false); }
+  }, [d?.id, ds]);
+
+  const discardTrim = useCallback(async () => {
+    if (!d?.id) return;
+    await ds.trimDiscard(d.id);
+    setTrimState((s) => ({ ...s, preview: null }));
+  }, [d?.id, ds]);
+
   const importBusy = isDatasetImportBlocked({ localBusy: ds.localBusy, activity: act });
   // Unknown / legacy engine values fail safe as local: only these two API
   // engines are guaranteed not to share ComfyUI VRAM with vision auto-crop.
@@ -1046,6 +1087,16 @@ export default function DatasetWorkspace({ ds, onBack }) {
           </button>
         )}
         <div className="ml-auto flex items-center gap-2">
+          {/* Only there while there is something to take back. The review
+              catches "this one should not be cropped"; this catches "it looked
+              right and was not". */}
+          {trimState.undo?.entries?.length > 0 && (
+            <button type="button" onClick={() => ds.trimUndo(d.id)}
+              title="Restore every original the last subject trim replaced (from the Trash)"
+              className="flex items-center gap-1 rounded-full bg-surface-raised px-3 py-1.5 text-sm text-content-muted transition-colors hover:bg-surface hover:text-content">
+              ↩ Undo trim
+            </button>
+          )}
           <button type="button" disabled={!kept} onClick={exportZipGuarded}
             className="px-5 py-2 rounded-full bg-gradient-primary text-white text-sm font-semibold transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(79,70,229,0.35),0_2px_6px_rgba(0,0,0,0.10)] disabled:opacity-40">
             ⬇ Export ZIP ({kept})
@@ -1335,7 +1386,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   viewingImageId={viewImg?.id ?? null}
                   onBatch={ds.batchImages} busy={ds.busy}
                   onBulkBusyChange={setGridBulkBusy}
-                  onImproveBatch={ds.improveBatch} activity={act}
+                  onImproveBatch={ds.improveBatch} onTrimBatch={startTrim} activity={act}
                   activities={ds.activities}
                           subjectType={d.subject_type || 'human'}
                   eligibilityImages={images}
@@ -1460,6 +1511,13 @@ export default function DatasetWorkspace({ ds, onBack }) {
                 onResolve={ds.resolveSmallImageRescue}
                 onPreview={(image) => setViewImg({ ...image, _rescueReviewPreview: true })}
                 nonces={ds.nonces} />
+              {/* Sits beside the rescue review on purpose: both are "decide
+                  something before it lands" surfaces, and a user who learns
+                  where one is has learned where the other is. */}
+              {trimState.preview && (
+                <SubjectTrimReview datasetId={d.id} preview={trimState.preview}
+                  onApply={applyTrim} onDiscard={discardTrim} busy={trimBusy} />
+              )}
               <div className="flex items-center gap-2 flex-wrap rounded-lg bg-surface px-3 py-2">
                 {!isConceptual && (
                   <button id="ds-curation-face-analysis" type="button" data-workspace-focus
