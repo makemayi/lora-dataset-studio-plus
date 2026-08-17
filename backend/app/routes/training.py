@@ -253,6 +253,25 @@ def dataset_train_status():
     return jsonify(lt.training_status(LOCAL_USER))
 
 
+@bp.get('/train/onetrainer/settings-status')
+def onetrainer_settings_status():
+    """Which Advanced-options settings actually reach a OneTrainer run.
+
+    The panel was built for the ai-toolkit lane and shows around forty
+    settings; three of them survive the trip. This is what lets the panel say
+    so instead of accepting a value and discarding it. Served from the service
+    that WRITES the job config, never from a list kept on the client — a
+    hand-kept copy would drift the first time a field moved, which is the same
+    bug this endpoint exists to end.
+
+    Always 200, and never gated on OneTrainer being installed: the panel needs
+    the answer to render its greyed-out state, including on a machine where
+    OneTrainer is only being considered.
+    """
+    from ..services import onetrainer_service as ots
+    return jsonify({'settings': ots.settings_status()})
+
+
 @bp.post('/dataset/<int:dataset_id>/train/enqueue')
 def dataset_train_enqueue(dataset_id):
     d = request.get_json(silent=True) or {}

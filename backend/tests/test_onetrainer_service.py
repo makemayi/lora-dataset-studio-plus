@@ -441,3 +441,109 @@ def test_launch_training_forwards_the_datasets_lr_and_resolution(
         written = _json.loads(open(result['config_path'], encoding='utf-8').read())
     assert written['learning_rate'] == 0.00012
     assert written['resolution'] == '1024', 'the largest of the resolution list'
+
+
+# --- what the Advanced-options panel is worth on this lane -------------------
+#
+# The declaration these tests guard exists because the panel showed ~40 settings
+# and three of them reached OneTrainer, with nothing on screen saying so. A
+# hand-written list would drift from `build_job_config` the first time a field
+# moved — which is the same bug wearing a different hat — so the list is held to
+# the code here.
+
+def test_every_job_config_key_is_declared(onetrainer, tmp_path):
+    """A field added to the job config without a status entry fails HERE.
+
+    `build_job_config`'s output is the ground truth for what this lane sends.
+    Anything in it that maps to a panel setting must be declared, or the panel
+    goes on greying out something it now honours.
+    """
+    ots, _cfg = onetrainer
+    written = ots.build_job_config(
+        trigger='ztrig', dataset_folder=str(tmp_path / 'ds'),
+        training_folder=str(tmp_path / 'run'), steps=100, num_images=10,
+        rank=32, learning_rate=0.0001, resolution=768)
+    for setting, config_key in ots.JOB_CONFIG_SETTING_KEYS.items():
+        assert config_key in written, (
+            f'{setting} is declared as reaching the job config under '
+            f'{config_key!r}, and it is not there')
+        assert ots.setting_status(setting)[0] == ots.SETTING_APPLIES, (
+            f'{setting} reaches the job config but is not declared as applying')
+
+
+def test_the_pinned_rank_is_the_rank_the_launch_actually_passes(
+        onetrainer, monkeypatch, app, tmp_path):
+    """The 'rank is pinned' claim is checked against the CALL, not a comment.
+
+    `launch_training` hardcodes the rank. If someone later wires the panel's
+    rank through, this test fails and the declaration has to stop saying the
+    control does nothing — which is exactly the direction the drift should
+    travel.
+    """
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as lt
+    ots, cfg = onetrainer
+    _installed_onetrainer(cfg, tmp_path)
+    monkeypatch.setattr(lt, '_lr_eff', lambda _ds: 0.0001)
+    monkeypatch.setattr(lt, '_effective_resolution', lambda _ds: [1024])
+
+    # The real launch path, with only the process faked: a stubbed `launch`
+    # would only prove what the stub was handed, and the claim is about what
+    # ends up in the job OneTrainer reads.
+    class FakeProc:
+        pid = 889
+
+        def poll(self):
+            return None
+
+    import json as _j
+    monkeypatch.setattr(ots.subprocess, 'Popen', lambda *a, **k: FakeProc())
+    with app.app_context():
+        ds = _trainable_krea_dataset(svc, LOCAL_USER, 'OT pinned rank')
+        result = ots.launch_training(LOCAL_USER, ds.id, steps=100,
+                                     check_captions=False)
+        written = _j.loads(open(result['config_path'], encoding='utf-8').read())
+
+    assert written['lora_rank'] == ots.PINNED_RANK
+    assert written['lora_alpha'] == float(ots.PINNED_RANK), 'alpha follows the rank'
+    assert ots.setting_status('rank')[0] == ots.SETTING_PINNED
+    assert ots.setting_status('alpha')[0] == ots.SETTING_PINNED
+
+
+def test_a_pinned_or_preset_setting_carries_no_promise_of_applying(onetrainer):
+    """Only three settings may claim to apply. The count is asserted on purpose:
+    growing it is a decision, not something that should happen by accident."""
+    ots, _cfg = onetrainer
+    applying = sorted(k for k, v in ots.ONETRAINER_SETTING_STATUS.items()
+                      if v[0] == ots.SETTING_APPLIES)
+    assert applying == ['dual_captions', 'learning_rate', 'resolution']
+
+
+def test_every_pinned_setting_says_why(onetrainer):
+    """A greyed control with no reason teaches nothing — the user is left to
+    guess whether it is broken or deliberate."""
+    ots, _cfg = onetrainer
+    for key, (state, why) in ots.ONETRAINER_SETTING_STATUS.items():
+        if state == ots.SETTING_PINNED:
+            assert why.strip(), f'{key} is pinned and does not say why'
+
+
+def test_an_unknown_setting_is_reported_as_preset_owned(onetrainer):
+    """Failing safe: a setting this module never heard of is certainly not one
+    it sends, so it must not be shown as live."""
+    ots, _cfg = onetrainer
+    assert ots.setting_status('something_invented_later')[0] == ots.SETTING_PRESET
+
+
+def test_the_settings_status_route_answers_without_onetrainer_installed(client):
+    """The panel needs this to render its greyed state on a machine that has
+    not installed OneTrainer yet — gating it would leave those users looking at
+    controls that silently do nothing, which is the state being fixed."""
+    r = client.get('/api/train/onetrainer/settings-status')
+    assert r.status_code == 200
+    body = r.get_json()['settings']
+    assert body['learning_rate']['state'] == 'applies'
+    assert body['rank']['state'] == 'pinned'
+    assert body['rank']['why'], 'a greyed control with no reason teaches nothing'
+    assert body['optimizer']['state'] == 'preset'

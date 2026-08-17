@@ -112,6 +112,106 @@ def is_installed() -> bool:
 # install's shipped preset file (which a reinstall/preset update would lose).
 KREA2_RESOLUTION = 1024
 
+# --- What the Advanced-options panel is actually worth on THIS lane ----------
+#
+# The panel was built for the ai-toolkit lane and shows around forty settings.
+# THREE of them reach OneTrainer. The rest are read by nobody on this path, and
+# until this declaration existed nothing said so: a user could set a rank, an
+# optimiser and a scheduler, watch the run start, and get a job that used none
+# of them. That is worse than not offering them, because the run looks like it
+# obeyed.
+#
+# Three states, because there are three different truths and collapsing them
+# would put the lie back:
+#
+#   'applies'  the panel's value is what runs.
+#   'pinned'   this lane forces a value of its own; the panel's is ignored.
+#   'preset'   OneTrainer's own shipped Krea 2 preset decides it, and this app
+#              deliberately does not override it (see the ownership boundary
+#              above `build_job_config`).
+#
+# `test_onetrainer_service.py` holds this to the code: the 'pinned' claims are
+# checked against what `launch_training` actually passes, and every key
+# `build_job_config` writes must be declared here. Adding a field to the config
+# without declaring it fails the suite rather than quietly making this list
+# wrong — the drift being the entire bug this declaration exists to end.
+SETTING_APPLIES = 'applies'
+SETTING_PINNED = 'pinned'
+SETTING_PRESET = 'preset'
+
+ONETRAINER_SETTING_STATUS = {
+    # --- the three that are real ---
+    'learning_rate': (SETTING_APPLIES, ''),
+    'resolution': (SETTING_APPLIES, ''),
+    'dual_captions': (SETTING_APPLIES, ''),
+
+    # --- set here, ignored there ---
+    'rank': (SETTING_PINNED,
+             'OneTrainer runs at rank 32 on this lane. The rank chosen here is '
+             'used by ai-toolkit only.'),
+    'alpha': (SETTING_PINNED,
+              'Pinned to equal the rank (scale 1.0). A LoRA trained at the '
+              'preset’s own alpha against this app’s rank came out ~1/32 of '
+              'its intended strength.'),
+    'network_type': (SETTING_PINNED,
+                     'This lane reads Settings ▸ OneTrainer ▸ PEFT type, not '
+                     'this control.'),
+
+    # --- OneTrainer's own Krea 2 preset owns these ---
+    'optimizer': (SETTING_PRESET, ''),
+    'lr_scheduler': (SETTING_PRESET, ''),
+    'warmup': (SETTING_PRESET, ''),
+    'grad_accum': (SETTING_PRESET, ''),
+    'dropout': (SETTING_PRESET, ''),
+    'timestep_type': (SETTING_PRESET, ''),
+    'ema': (SETTING_PRESET, ''),
+    'weight_decay': (SETTING_PRESET, ''),
+    'loss_type': (SETTING_PRESET, ''),
+    'content_or_style': (SETTING_PRESET, ''),
+    'do_differential_guidance': (SETTING_PRESET, ''),
+    'differential_guidance_scale': (SETTING_PRESET, ''),
+    'lokr_factor': (SETTING_PRESET, ''),
+    'lokr_full_rank': (SETTING_PRESET, ''),
+    'conv': (SETTING_PRESET, ''),
+    'conv_alpha': (SETTING_PRESET, ''),
+    'quantize': (SETTING_PRESET, ''),
+    'quantize_te': (SETTING_PRESET, ''),
+    'low_vram': (SETTING_PRESET, ''),
+    'qtype': (SETTING_PRESET, ''),
+    'qtype_te': (SETTING_PRESET, ''),
+    'layer_offloading': (SETTING_PRESET, ''),
+    'layer_offloading_transformer_percent': (SETTING_PRESET, ''),
+    'layer_offloading_text_encoder_percent': (SETTING_PRESET, ''),
+    'cache_text_embeddings': (SETTING_PRESET, ''),
+    'save_dtype': (SETTING_PRESET, ''),
+}
+
+# The rank `launch_training` passes, named so the contract test can check the
+# 'pinned' claim above against the call rather than against a comment.
+PINNED_RANK = 32
+
+# Which `build_job_config` keys correspond to which panel setting. Only these
+# three are user-owned; the others in that config are paths, the derived epoch
+# count, and the two pins.
+JOB_CONFIG_SETTING_KEYS = {
+    'learning_rate': 'learning_rate',
+    'resolution': 'resolution',
+}
+
+
+def setting_status(setting_key):
+    """``(state, why)`` for one Advanced-options setting on the OneTrainer
+    lane. An unknown key is reported as preset-owned rather than as applying:
+    a setting this module has never heard of is certainly not one it sends."""
+    return ONETRAINER_SETTING_STATUS.get(
+        setting_key, (SETTING_PRESET, ''))
+
+
+def settings_status():
+    """The whole declaration, shaped for the UI: ``{key: {state, why}}``."""
+    return {k: {'state': v[0], 'why': v[1]}
+            for k, v in ONETRAINER_SETTING_STATUS.items()}
+
 
 def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
                      steps: int, num_images: int, rank: int,
