@@ -203,3 +203,50 @@ test('an adaptive optimiser disables the field instead of pretending it matters'
     'and it must be editable for the optimisers that DO read it — without this '
     + 'half the assertion above passes against a field that is always disabled')
 })
+
+/* --- epochs and batch, in OneTrainer's own vocabulary --------------------
+ *
+ * OneTrainer counts EPOCHS. The app used to hide that behind
+ * `epochs = ceil(steps / images)` with the batch pinned to 1 so the arithmetic
+ * held — an approximation, and one that made a hand-set batch inexpressible.
+ * These pin that the panel now asks in OneTrainer's words on that lane, and
+ * asks in nobody's words on the other one.
+ */
+
+test('the epoch and batch fields exist only on the OneTrainer lane', () => {
+  const ot = renderPanel({ trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS })
+  assert.match(ot, /aria-label="OneTrainer epochs"/)
+  assert.match(ot, /aria-label="OneTrainer batch size"/)
+
+  // ai-toolkit thinks in steps and never reads these; showing them there would
+  // be the same lie in the other direction.
+  const ai = renderPanel()
+  assert.doesNotMatch(ai, /aria-label="OneTrainer epochs"/)
+  assert.doesNotMatch(ai, /aria-label="OneTrainer batch size"/)
+})
+
+test('the derived step count is shown, and counts the batch', () => {
+  // 10 epochs over 15 kept images at batch 3 = ceil(10*15/3) = 50 steps. The
+  // old derivation ignored the batch entirely; a label that did the same would
+  // be worse than none, because it would look authoritative.
+  const html = renderPanel({
+    trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS,
+    advOverride: { epochs: 10, batch_size: 3 },
+  })
+  assert.match(html, /≈ 50 optimizer steps/)
+})
+
+test('with no epochs set the panel says the count comes from steps', () => {
+  // Showing a step count back while the server is deriving epochs FROM steps
+  // would be circular.
+  const html = renderPanel({ trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS })
+  assert.match(decode(html), /epochs derived from the step count above/)
+})
+
+test('a batch larger than the dataset is called out', () => {
+  const html = renderPanel({
+    trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS,
+    advOverride: { epochs: 5, batch_size: 40 },
+  })
+  assert.match(decode(html), /larger than the 15 images/)
+})

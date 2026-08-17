@@ -825,6 +825,8 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   const [differentialGuidanceScaleDraft, setDifferentialGuidanceScaleDraft] = useState('3');
   const [learningRateDraft, setLearningRateDraft] = useState('');
   const [learningRateError, setLearningRateError] = useState('');
+  const [otEpochsDraft, setOtEpochsDraft] = useState('');
+  const [otBatchDraft, setOtBatchDraft] = useState('');
   // Presets de réglages avancés : snapshots nommés, partageables (fichier JSON).
   // Stockés bruts côté serveur ; la validation se fait à l'APPLICATION (clés
   // inconnues ignorées, valeurs invalides signalées) → tolérant aux versions.
@@ -1243,6 +1245,42 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
     setLearningRateDraft(adv?.learning_rate == null ? '' : String(adv.learning_rate));
     setLearningRateError('');
   }, [adv?.learning_rate]);
+  /* OneTrainer's epochs/batch. Same blur-to-save, same three-way contract as
+     every other setting: empty clears the override and the server goes back to
+     deriving from the step count. */
+  useEffect(() => {
+    setOtEpochsDraft(adv?.epochs == null ? '' : String(adv.epochs));
+    setOtBatchDraft(adv?.batch_size == null ? '' : String(adv.batch_size));
+  }, [adv?.epochs, adv?.batch_size]);
+  const saveOtNumber = (key, draft) => {
+    const raw = String(draft).trim();
+    const stored = adv?.[key] == null ? '' : String(adv[key]);
+    if (raw === stored) return;
+    if (raw === '') { saveAdv({ [key]: null }); return; }
+    const n = Number(raw);
+    // Mirrors update_train_settings' bounds so a typo is refused HERE rather
+    // than coming back as a toast with the field still holding the bad value.
+    const hi = key === 'epochs' ? 1000 : 64;
+    if (!Number.isInteger(n) || n < 1 || n > hi) return;
+    saveAdv({ [key]: n });
+  };
+  /* The derived step count, shown so the two vocabularies are never guessed at:
+     one epoch is `images / batch` optimizer steps. Only meaningful once epochs
+     is set — with it empty the server derives epochs FROM steps and showing a
+     step count back would be circular. */
+  // The draft while you are typing, the SAVED value otherwise. Reading the
+  // draft alone would leave the label blank on first paint (the draft is seeded
+  // by an effect) and blank again for anyone who never touches the field.
+  const otEpochsN = Number(otEpochsDraft !== '' ? otEpochsDraft : (adv?.epochs ?? ''));
+  const otBatchN = Number(otBatchDraft !== '' ? otBatchDraft : (adv?.batch_size ?? '')) || 1;
+  const otDerivedSteps = (Number.isInteger(otEpochsN) && otEpochsN >= 1 && keptCount > 0)
+    ? Math.ceil((otEpochsN * keptCount) / otBatchN)
+    : 0;
+  // A batch bigger than the dataset means some steps see the same image twice
+  // in one pass, which is not what anyone means by "batch 64 on 30 images".
+  const otBatchWarning = (otBatchN > keptCount && keptCount > 0)
+    ? `Batch ${otBatchN} is larger than the ${keptCount} images in this dataset — every step would see the whole set.`
+    : '';
   const saveLearningRate = () => {
     const raw = learningRateDraft.trim();
     const stored = adv?.learning_rate == null ? '' : String(adv.learning_rate);
@@ -3863,6 +3901,51 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                   ? `≈ ${stepsInfo.steps} · ${stepsRecipeFamily} / ${stepsRecipeVariant} (${keptCount} img)`
                   : `adaptive · ${typeLabel} / ${checkpointVariantLabel(trainType, variant)} (${keptCount} img)`}</span>
             </label>
+          )}
+          {/* OneTrainer counts EPOCHS, not steps. For a long time this app hid
+              that behind `epochs = ceil(steps / images)` with the batch pinned
+              to 1 so the arithmetic held — an approximation its own docstring
+              admitted to, and one that made a hand-set batch inexpressible.
+              On this lane the panel now asks in OneTrainer's words and shows
+              the STEP count as the derived label, which is the direction that
+              matches what actually runs. */}
+          {trainer === 'onetrainer' && !status.in_progress && keptCount >= 10 && (
+            <div className="flex items-center gap-3 flex-wrap text-content-subtle text-[0.6875rem]">
+              <label className="flex items-center gap-1.5"
+                title="How many times the whole dataset is seen. OneTrainer's own unit — leave empty to derive it from the step count above.">
+                <span className="uppercase text-content-muted text-[0.625rem]">Epochs</span>
+                <input type="number" min={1} max={1000} step={1}
+                  value={otEpochsDraft}
+                  onChange={(e) => setOtEpochsDraft(e.target.value)}
+                  onBlur={() => saveOtNumber('epochs', otEpochsDraft)}
+                  placeholder="from steps"
+                  aria-label="OneTrainer epochs"
+                  className="w-[4.5rem] rounded-lg bg-surface-raised px-1.5 py-0.5 text-content tabular-nums text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary" />
+              </label>
+              <label className="flex items-center gap-1.5"
+                title="How many images each optimizer step learns from. Bigger is steadier and needs more VRAM.">
+                <span className="uppercase text-content-muted text-[0.625rem]">Batch</span>
+                <input type="number" min={1} max={64} step={1}
+                  value={otBatchDraft}
+                  onChange={(e) => setOtBatchDraft(e.target.value)}
+                  onBlur={() => saveOtNumber('batch_size', otBatchDraft)}
+                  placeholder="1"
+                  aria-label="OneTrainer batch size"
+                  className="w-[4rem] rounded-lg bg-surface-raised px-1.5 py-0.5 text-content tabular-nums text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary" />
+              </label>
+              {/* The derived number, so the two vocabularies are never guessed
+                  at. Both variants stay mounted — Chrome auto-translate
+                  rewrites text nodes and a ternary swap throws. */}
+              <span hidden={!otDerivedSteps}>
+                ≈ {otDerivedSteps} optimizer steps · {keptCount} images
+              </span>
+              <span hidden={!!otDerivedSteps}>
+                epochs derived from the step count above
+              </span>
+              <span className="basis-full text-content-subtle" hidden={!otBatchWarning}>
+                {otBatchWarning}
+              </span>
+            </div>
           )}
           {zimageTurboLongRun && (
             <p role="status" className="m-0 rounded-md border border-amber-200 bg-amber-400/[0.08] px-2 py-1.5 text-amber-700 text-[0.6875rem] leading-relaxed">
