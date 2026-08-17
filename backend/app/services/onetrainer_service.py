@@ -173,6 +173,10 @@ ONETRAINER_SETTING_STATUS = {
     # documented approximation and it silently assumed batch 1.
     'epochs': (SETTING_APPLIES, ''),
     'batch_size': (SETTING_APPLIES, ''),
+    # One setting, two shapes: ai-toolkit takes a bare `min_snr_gamma`, this
+    # lane takes loss_weight_fn + loss_weight_strength. The panel shows one
+    # number and each lane translates it.
+    'min_snr_gamma': (SETTING_APPLIES, ''),
     # The text encoders. Nested in OneTrainer's schema and frozen by the
     # shipped Krea 2 preset, so setting a rate here also flips `train` — a rate
     # on a component that never learns is stored and inert.
@@ -259,7 +263,8 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
                      te1_lr: float | None = None,
                      te2_lr: float | None = None,
                      lr_scheduler: str | None = None,
-                     warmup_steps: int | None = None) -> dict:
+                     warmup_steps: int | None = None,
+                     min_snr_gamma: float | None = None) -> dict:
     """The OVERRIDE config this app writes to --config-path, merged by
     OneTrainer OVER its own shipped Krea 2 preset (--preset-path). Contains
     ONLY the fields this app's own UI/dataset state actually owns — never a
@@ -344,6 +349,15 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
         # schedule would hand OneTrainer a warmup the user never asked for.
         **({'learning_rate_warmup_steps': float(warmup_steps)}
            if (lr_scheduler in _SCHEDULER_NEEDS_WARMUP and warmup_steps) else {}),
+        # Min-SNR gamma, in OneTrainer's MODERN shape. Writing the field called
+        # `min_snr_gamma` would be silently ignored on this path: over there it
+        # is a legacy name that __migration_2 rewrites into the pair below, and
+        # migrations only run when `migrate=True` — which train.py sets to
+        # `preset_path is None`, and this app always passes a preset. Right
+        # name, right value, no effect.
+        **({'loss_weight_fn': 'MIN_SNR_GAMMA',
+            'loss_weight_strength': float(min_snr_gamma)}
+           if min_snr_gamma else {}),
         # The app owns the learning rate: it is a per-dataset setting the UI
         # exposes and the ai-toolkit lane already honours. Left unset, this run
         # silently used the shipped preset's 0.0003 while the SAME dataset
@@ -380,7 +394,8 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
           te1_lr: float | None = None,
           te2_lr: float | None = None,
           lr_scheduler: str | None = None,
-          warmup_steps: int | None = None) -> dict:
+          warmup_steps: int | None = None,
+          min_snr_gamma: float | None = None) -> dict:
     """Write concepts.json + config.json under `training_folder` and spawn
     `scripts/train.py --preset-path <shipped Krea 2 preset> --config-path
     <our config.json>`. Returns {'pid': int, 'config_path': str,
@@ -401,7 +416,8 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
                               learning_rate=learning_rate, resolution=resolution,
                               epochs=epochs, batch_size=batch_size,
                               te1_lr=te1_lr, te2_lr=te2_lr,
-                              lr_scheduler=lr_scheduler, warmup_steps=warmup_steps)
+                              lr_scheduler=lr_scheduler, warmup_steps=warmup_steps,
+                              min_snr_gamma=min_snr_gamma)
     concepts = build_concepts(trigger=trigger, dataset_folder=dataset_folder)
 
     concepts_path = training_folder_p / 'concepts.json'
@@ -559,7 +575,8 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
                       epochs=ot_epochs, batch_size=ot_batch,
                       te1_lr=_s.get('te1_lr'), te2_lr=_s.get('te2_lr'),
                       lr_scheduler=_s.get('lr_scheduler'),
-                      warmup_steps=_s.get('warmup'))
+                      warmup_steps=_s.get('warmup'),
+                      min_snr_gamma=_s.get('min_snr_gamma'))
 
     from . import checkpoint_registry
     checkpoint_registry.register_launch(

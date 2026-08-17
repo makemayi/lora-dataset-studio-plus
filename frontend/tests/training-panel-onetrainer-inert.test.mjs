@@ -285,3 +285,26 @@ test('a text-encoder rate at or above the main rate is called out', () => {
   assert.doesNotMatch(quiet, /at or above the main/,
     'a sane fraction must not warn — a warning that always fires teaches nothing')
 })
+
+/* --- the schedule, once the backend started honouring it ------------------
+ *
+ * lr_scheduler and warmup moved from 'preset' to 'applies' when
+ * build_job_config learned to map this app's vocabulary into OneTrainer's enum.
+ * The panel must follow the declaration, not a memory of it — that is the whole
+ * point of serving the status from the module that writes the config.
+ */
+
+test('a control follows the declaration when a setting stops being preset-owned', () => {
+  const nowApplies = { ...OT_STATUS, lr_scheduler: { state: 'applies', why: '' } }
+  const html = renderPanel({ trainerOverride: 'onetrainer', otSettingStatusInitial: nowApplies })
+  const sched = html.match(/<select[^>]*aria-label="Learning-rate schedule"[^>]*>/)
+  assert.ok(sched, 'the schedule select is gone')
+  assert.doesNotMatch(sched[0], /disabled=""/,
+    'the server now says this applies; a panel that kept greying it would be '
+    + 'the same drift the declaration exists to end, pointing the other way')
+
+  // And the converse, so this is not a test that passes on any input.
+  const stillPreset = renderPanel({ trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS })
+  const greyed = stillPreset.match(/<select[^>]*aria-label="Learning-rate schedule"[^>]*>/)
+  assert.match(greyed[0], /disabled=""/)
+})

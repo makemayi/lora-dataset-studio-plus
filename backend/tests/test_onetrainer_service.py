@@ -528,8 +528,8 @@ def test_a_pinned_or_preset_setting_carries_no_promise_of_applying(onetrainer):
     applying = sorted(k for k, v in ots.ONETRAINER_SETTING_STATUS.items()
                       if v[0] == ots.SETTING_APPLIES)
     assert applying == ['batch_size', 'dual_captions', 'epochs',
-                        'learning_rate', 'lr_scheduler', 'resolution',
-                        'te1_lr', 'te2_lr', 'warmup']
+                        'learning_rate', 'lr_scheduler', 'min_snr_gamma',
+                        'resolution', 'te1_lr', 'te2_lr', 'warmup']
 
 
 def test_every_pinned_setting_says_why(onetrainer):
@@ -777,3 +777,26 @@ def test_an_unknown_scheduler_name_writes_nothing(onetrainer, tmp_path):
         trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
         steps=100, num_images=10, rank=32, lr_scheduler='rex_but_misspelled')
     assert 'learning_rate_scheduler' not in c
+
+
+def test_min_snr_gamma_is_written_in_onetrainers_MODERN_shape(onetrainer, tmp_path):
+    """The field named `min_snr_gamma` would be silently ignored on this path.
+
+    Over there it is a LEGACY name that __migration_2 rewrites into
+    loss_weight_fn + loss_weight_strength, and migrations only run when
+    `migrate=True` — which train.py sets to `preset_path is None`, and this app
+    always passes a preset. Right name, right value, no effect: exactly the
+    class of mistake that copying a field list from elsewhere produces.
+    """
+    ots, _cfg = onetrainer
+    c = ots.build_job_config(
+        trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
+        steps=100, num_images=10, rank=32, min_snr_gamma=5)
+    assert c['loss_weight_fn'] == 'MIN_SNR_GAMMA'
+    assert c['loss_weight_strength'] == 5.0
+    assert 'min_snr_gamma' not in c, 'the legacy name never reaches this config'
+
+    off = ots.build_job_config(
+        trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
+        steps=100, num_images=10, rank=32)
+    assert 'loss_weight_fn' not in off and 'loss_weight_strength' not in off

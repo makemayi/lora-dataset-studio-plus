@@ -2232,6 +2232,28 @@ def _ema_fields(ds) -> dict:
     return {'ema_config': {'use_ema': True, 'ema_decay': v}}
 
 
+def _min_snr_fields(ds) -> dict:
+    """{} by default → merged into the `train` block. Otherwise
+    {min_snr_gamma: v}: ai-toolkit weights the loss by the signal-to-noise
+    ratio, which mostly helps a high-resolution run converge.
+
+    Key VERIFIED against the installed ai-toolkit rather than a blog post:
+    `TrainConfig.min_snr_gamma` (toolkit/config_modules.py) and the branch that
+    reads it in jobs/process/BaseSDTrainProcess.py, which requires it to be
+    greater than ~1e-6 before applying anything — so a stored 0 is the same as
+    absent and is not written.
+
+    The OneTrainer lane expresses the SAME idea with a different pair of fields
+    (loss_weight_fn + loss_weight_strength); see onetrainer_service. One
+    setting, two translations, which is why this lives behind a helper on each
+    side instead of being passed through.
+    """
+    v = _train_settings(ds).get('min_snr_gamma')
+    if not isinstance(v, (int, float)) or isinstance(v, bool) or v <= 0:
+        return {}
+    return {'min_snr_gamma': float(v)}
+
+
 def _content_or_style_eff(ds) -> str:
     """Krea's ai-toolkit `train.content_or_style`, defaulting to balanced."""
     v = _train_settings(ds).get('content_or_style')
@@ -3550,6 +3572,15 @@ def update_train_settings(user_id, dataset_id, patch: dict, *, _settings=None) -
                 cur[_tek] = float(v)
             else:
                 raise ValueError(f'{_tek} must be a positive number up to 0.01 (or auto)')
+    if 'min_snr_gamma' in patch:
+        v = patch['min_snr_gamma']
+        if v in (None, 'auto', '', 0, 0.0):
+            cur.pop('min_snr_gamma', None)
+        elif (isinstance(v, (int, float)) and not isinstance(v, bool)
+              and 0 < float(v) <= 20):
+            cur['min_snr_gamma'] = float(v)
+        else:
+            raise ValueError('min_snr_gamma must be a positive number up to 20 (or auto)')
     for _otk, _othi in (('epochs', 1000), ('batch_size', 64)):
         if _otk in patch:
             v = patch[_otk]
@@ -3681,6 +3712,7 @@ TRAIN_SETTING_KEYS = ('rank', 'resolution', 'save_every', 'max_step_saves',
                       # OneTrainer lane — the ai-toolkit lane thinks in steps
                       # and never looks at them.
                       'epochs', 'batch_size', 'te1_lr', 'te2_lr',
+                      'min_snr_gamma',
                       'preset_steps_per_image', 'preset_steps_min',
                       'preset_steps_max', 'preset_steps_fixed',
                       # The unlocked half of the dense recipe. Present here so a
@@ -5503,6 +5535,7 @@ def _build_job_config_krea(ds, dataset_folder: str, steps: int, training_folder=
                     **_train_serializer_fields(ds),
                     **_lr_sched_fields(ds),
                     **_ema_fields(ds),
+                    **_min_snr_fields(ds),
                     **_krea_recipe_fields(ds),
                 },
                 'model': model,
