@@ -3536,6 +3536,20 @@ def update_train_settings(user_id, dataset_id, patch: dict, *, _settings=None) -
     # merely positive: an epoch count in the thousands or a batch that cannot
     # fit any consumer card is a typo, and a typo that reaches a trainer costs
     # hours before it announces itself.
+    # Text-encoder rates: a POSITIVE rate means "train this encoder at it".
+    # There is no "train at 0" — that is what leaving it empty means, and
+    # collapsing the two would make "frozen" and "training at nothing"
+    # indistinguishable in the stored settings.
+    for _tek in ('te1_lr', 'te2_lr'):
+        if _tek in patch:
+            v = patch[_tek]
+            if v in (None, 'auto', '', 0, 0.0):
+                cur.pop(_tek, None)
+            elif (isinstance(v, (int, float)) and not isinstance(v, bool)
+                  and 0 < float(v) <= 0.01):
+                cur[_tek] = float(v)
+            else:
+                raise ValueError(f'{_tek} must be a positive number up to 0.01 (or auto)')
     for _otk, _othi in (('epochs', 1000), ('batch_size', 64)):
         if _otk in patch:
             v = patch[_otk]
@@ -3666,7 +3680,7 @@ TRAIN_SETTING_KEYS = ('rank', 'resolution', 'save_every', 'max_step_saves',
                       # dataset has ONE settings dict, but read only by the
                       # OneTrainer lane — the ai-toolkit lane thinks in steps
                       # and never looks at them.
-                      'epochs', 'batch_size',
+                      'epochs', 'batch_size', 'te1_lr', 'te2_lr',
                       'preset_steps_per_image', 'preset_steps_min',
                       'preset_steps_max', 'preset_steps_fixed',
                       # The unlocked half of the dense recipe. Present here so a

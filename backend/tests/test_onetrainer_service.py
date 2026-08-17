@@ -418,15 +418,21 @@ def test_resolution_is_a_string_and_overridable(onetrainer):
 
 def test_launch_training_forwards_the_datasets_lr_and_resolution(
         onetrainer, tmp_path, monkeypatch, app):
-    """Both come from the SAME resolvers the ai-toolkit lane uses, so the two
-    lanes cannot drift apart on the values the app owns."""
+    """The dataset's own values reach the config, so the two lanes cannot drift
+    apart on what the app owns.
+
+    The rate is now read from the STORED setting rather than through `_lr_eff`:
+    that resolver falls back to a family default and never returns None, so
+    calling it wrote a learning rate on every run and silently overrode the
+    shipped preset's own. This test used to patch the resolver, which is why it
+    could not see that.
+    """
     import json as _json
     from app.config import LOCAL_USER
     from app.services import face_dataset_service as svc
     from app.services import lora_training as lt
     ots, cfg = onetrainer
     _installed_onetrainer(cfg, tmp_path)
-    monkeypatch.setattr(lt, '_lr_eff', lambda _ds: 0.00012)
     monkeypatch.setattr(lt, '_effective_resolution', lambda _ds: [768, 1024])
 
     class FakeProc:
@@ -437,6 +443,7 @@ def test_launch_training_forwards_the_datasets_lr_and_resolution(
 
     with app.app_context():
         ds = _trainable_krea_dataset(svc, LOCAL_USER, 'OT cfg')
+        lt.update_train_settings(LOCAL_USER, ds.id, {'learning_rate': 0.00012})
         result = ots.launch_training(LOCAL_USER, ds.id, steps=100, check_captions=False)
         written = _json.loads(open(result['config_path'], encoding='utf-8').read())
     assert written['learning_rate'] == 0.00012
@@ -520,7 +527,7 @@ def test_a_pinned_or_preset_setting_carries_no_promise_of_applying(onetrainer):
     applying = sorted(k for k, v in ots.ONETRAINER_SETTING_STATUS.items()
                       if v[0] == ots.SETTING_APPLIES)
     assert applying == ['batch_size', 'dual_captions', 'epochs',
-                        'learning_rate', 'resolution']
+                        'learning_rate', 'resolution', 'te1_lr', 'te2_lr']
 
 
 def test_every_pinned_setting_says_why(onetrainer):
@@ -605,3 +612,80 @@ def test_epochs_and_batch_are_refused_when_they_are_a_typo(app):
         # 'auto' clears it, the same three-way contract every other key uses.
         lt.update_train_settings(LOCAL_USER, ds.id, {'epochs': 'auto'})
         assert 'epochs' not in lt._train_settings(svc.get_dataset(LOCAL_USER, ds.id))
+
+
+# --- the text encoders ------------------------------------------------------
+
+def test_a_text_encoder_rate_also_unfreezes_the_encoder(onetrainer, tmp_path):
+    """The shipped Krea 2 preset ships `"text_encoder": {"train": false}`, so a
+    learning rate on its own is a number attached to a component that never
+    learns — stored, and inert."""
+    ots, _cfg = onetrainer
+    c = ots.build_job_config(
+        trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
+        steps=100, num_images=10, rank=32, te1_lr=1e-5, te2_lr=5e-6)
+    assert c['text_encoder'] == {'train': True, 'learning_rate': 1e-5}
+    assert c['text_encoder_2'] == {'train': True, 'learning_rate': 5e-6}
+
+
+def test_the_text_encoder_keys_are_spelled_the_way_onetrainer_reads_them(
+        onetrainer, tmp_path):
+    """OneTrainer's BaseConfig.from_dict PRINTS on an unknown key and carries on
+    — a misspelling is not an error there, it is a line in a log and a run that
+    quietly ignores the setting. So the names are pinned here, where a typo
+    fails loudly."""
+    ots, _cfg = onetrainer
+    c = ots.build_job_config(
+        trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
+        steps=100, num_images=10, rank=32, te1_lr=1e-5)
+    assert 'text_encoder' in c, 'OneTrainer names the first one text_encoder'
+    assert set(c['text_encoder']) == {'train', 'learning_rate'}, (
+        'only these two — a partial nested dict merges, and naming anything '
+        'else here would overwrite what the preset tuned')
+
+
+def test_no_text_encoder_key_at_all_when_the_user_set_no_rate(onetrainer, tmp_path):
+    """Silence is the ownership boundary: without a rate the preset's own
+    text-encoder block must arrive untouched."""
+    ots, _cfg = onetrainer
+    c = ots.build_job_config(
+        trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
+        steps=100, num_images=10, rank=32)
+    assert 'text_encoder' not in c
+    assert 'text_encoder_2' not in c
+
+
+def test_the_learning_rate_is_left_to_the_preset_unless_the_user_chose_one(
+        onetrainer, monkeypatch, app, tmp_path):
+    """MEASURED: the shipped Krea 2 preset asks for 0.0003 and every run this
+    app launched wrote 0.0001 over it, because the resolver it called falls back
+    to a family default rather than returning None. Three times off, chosen by
+    OneTrainer's maintainers for this model, replaced by a number picked for a
+    different trainer, with nothing on screen saying so."""
+    import json as _j
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as lt
+    ots, cfg = onetrainer
+    _installed_onetrainer(cfg, tmp_path)
+    monkeypatch.setattr(lt, '_effective_resolution', lambda _ds: [1024])
+
+    class FakeProc:
+        pid = 991
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(ots.subprocess, 'Popen', lambda *a, **k: FakeProc())
+    with app.app_context():
+        ds = _trainable_krea_dataset(svc, LOCAL_USER, 'OT lr silence')
+        r = ots.launch_training(LOCAL_USER, ds.id, steps=100, check_captions=False)
+        written = _j.loads(open(r['config_path'], encoding='utf-8').read())
+        assert 'learning_rate' not in written, (
+            'no stored rate = the preset decides, which is what the ownership '
+            'rule at the top of build_job_config always said')
+
+        lt.update_train_settings(LOCAL_USER, ds.id, {'learning_rate': 3e-4})
+        r2 = ots.launch_training(LOCAL_USER, ds.id, steps=100, check_captions=False)
+        written2 = _j.loads(open(r2['config_path'], encoding='utf-8').read())
+        assert written2['learning_rate'] == 3e-4

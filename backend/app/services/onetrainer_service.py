@@ -149,6 +149,11 @@ ONETRAINER_SETTING_STATUS = {
     # documented approximation and it silently assumed batch 1.
     'epochs': (SETTING_APPLIES, ''),
     'batch_size': (SETTING_APPLIES, ''),
+    # The text encoders. Nested in OneTrainer's schema and frozen by the
+    # shipped Krea 2 preset, so setting a rate here also flips `train` — a rate
+    # on a component that never learns is stored and inert.
+    'te1_lr': (SETTING_APPLIES, ''),
+    'te2_lr': (SETTING_APPLIES, ''),
 
     # --- set here, ignored there ---
     'rank': (SETTING_PINNED,
@@ -224,7 +229,9 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
                      learning_rate: float | None = None,
                      resolution: int | None = None,
                      epochs: int | None = None,
-                     batch_size: int | None = None) -> dict:
+                     batch_size: int | None = None,
+                     te1_lr: float | None = None,
+                     te2_lr: float | None = None) -> dict:
     """The OVERRIDE config this app writes to --config-path, merged by
     OneTrainer OVER its own shipped Krea 2 preset (--preset-path). Contains
     ONLY the fields this app's own UI/dataset state actually owns — never a
@@ -278,6 +285,25 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
         # different sizes without anything on screen saying so.
         'resolution': str(int(resolution or KREA2_RESOLUTION)),
         'peft_type': peft_type,
+        # The text encoders are NESTED in OneTrainer's schema, and a partial
+        # nested dict is safe: BaseConfig.from_dict walks its OWN field table
+        # and skips what the incoming dict does not mention (verified in
+        # OneTrainer's modules/util/config/BaseConfig.py — the miss lands in an
+        # `except` whose else-branch is a bare `pass`). So `train` and the rate
+        # arrive without disturbing the preset's weight_dtype or dropout.
+        #
+        # `train` is written WITH the rate on purpose: the shipped Krea 2 preset
+        # freezes the first text encoder (`"text_encoder": {"train": false}`),
+        # so a learning rate on its own would be a number attached to a
+        # component that never learns — set, stored, and inert.
+        #
+        # That same `except` is why the KEY NAMES here are pinned by a test: a
+        # misspelling is not an error in OneTrainer, it is a line in its log and
+        # a run that quietly ignores the setting.
+        **({'text_encoder': {'train': True, 'learning_rate': float(te1_lr)}}
+           if te1_lr else {}),
+        **({'text_encoder_2': {'train': True, 'learning_rate': float(te2_lr)}}
+           if te2_lr else {}),
         # The app owns the learning rate: it is a per-dataset setting the UI
         # exposes and the ai-toolkit lane already honours. Left unset, this run
         # silently used the shipped preset's 0.0003 while the SAME dataset
@@ -310,7 +336,9 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
           learning_rate: float | None = None,
           resolution: int | None = None,
           epochs: int | None = None,
-          batch_size: int | None = None) -> dict:
+          batch_size: int | None = None,
+          te1_lr: float | None = None,
+          te2_lr: float | None = None) -> dict:
     """Write concepts.json + config.json under `training_folder` and spawn
     `scripts/train.py --preset-path <shipped Krea 2 preset> --config-path
     <our config.json>`. Returns {'pid': int, 'config_path': str,
@@ -329,7 +357,8 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
                               training_folder=training_folder, steps=steps,
                               num_images=num_images, rank=rank, peft_type=peft_type,
                               learning_rate=learning_rate, resolution=resolution,
-                              epochs=epochs, batch_size=batch_size)
+                              epochs=epochs, batch_size=batch_size,
+                              te1_lr=te1_lr, te2_lr=te2_lr)
     concepts = build_concepts(trigger=trigger, dataset_folder=dataset_folder)
 
     concepts_path = training_folder_p / 'concepts.json'
@@ -451,9 +480,18 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
     # constant that can drift. Without this, the same dataset trained at
     # lr 0.0003 / 1024 here and lr 0.0001 / 768 there, with nothing on screen
     # saying the two lanes disagreed.
-    from .lora_training import _effective_resolution, _lr_eff
+    from .lora_training import _effective_resolution, _train_settings
+    _s = _train_settings(ds) or {}
+    # ONLY when the user chose one. `_lr_eff` never returns None — it falls back
+    # to the family-fixed 1e-4 — so calling it here wrote `learning_rate` on
+    # EVERY run and silently overrode the shipped preset's own 0.0003. Three
+    # times off, chosen by OneTrainer's maintainers for this model, replaced by
+    # a default this app picked for a different trainer, with nothing on screen
+    # saying so. The ownership rule at the top of build_job_config already said
+    # not to touch a field the preset decided; this is that rule applied.
     try:
-        lr = _lr_eff(ds)
+        lr = _s.get('learning_rate')
+        lr = float(lr) if isinstance(lr, (int, float)) and lr > 0 else None
     except Exception:                                    # noqa: BLE001
         logger.exception('onetrainer: could not resolve the learning rate; '
                          'leaving it to the shipped preset')
@@ -469,15 +507,14 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
     # for them in it, so they come straight from the dataset's settings. Unset
     # means "no opinion" and build_job_config derives them from `steps`, which
     # is how a run launched from anywhere but that panel still works.
-    from .lora_training import _train_settings
-    _s = _train_settings(ds) or {}
     ot_epochs = _s.get('epochs')
     ot_batch = _s.get('batch_size')
     launched = launch(trigger=trigger, dataset_folder=dataset_folder,
                       training_folder=str(training_folder), steps=steps,
                       num_images=max(1, num_images), rank=32, peft_type=peft_type,
                       learning_rate=lr, resolution=resolution,
-                      epochs=ot_epochs, batch_size=ot_batch)
+                      epochs=ot_epochs, batch_size=ot_batch,
+                      te1_lr=_s.get('te1_lr'), te2_lr=_s.get('te2_lr'))
 
     from . import checkpoint_registry
     checkpoint_registry.register_launch(
