@@ -481,3 +481,43 @@ test('the Krea community recipe card renders when the family supports it', () =>
   }))
   assert.match(fieldAround(ot, 'Krea content or style balance'), /\sdisabled=""/)
 })
+
+test('the panel follows the SERVED declaration, not one of its own', () => {
+  /* The property the whole two-sided map exists for, and the one the other
+     tests here cannot prove: they feed the map's REAL values, so a panel that
+     hard-coded the same classification and ignored the server would pass every
+     one of them.
+     
+     So this feeds a deliberately WRONG map — optimizer declared as applying on
+     OneTrainer, dual_captions declared absent on ai-toolkit — and asserts the
+     panel obeys it. A client-side copy of the truth fails here and nowhere
+     else. */
+  const inverted = {
+    groups: GROUPS,
+    lanes: {
+      ai_toolkit: {
+        ...SETTINGS_MAP.lanes.ai_toolkit,
+        dual_captions: { state: 'absent', why: '', group: 'core' },
+      },
+      onetrainer: {
+        ...SETTINGS_MAP.lanes.onetrainer,
+        optimizer: { state: 'applies', why: '', group: 'optimisation' },
+      },
+    },
+  }
+
+  // Declared to apply on OneTrainer → must be enabled there, however unlikely
+  // that is in the real map.
+  const ot = decode(renderPanel({ trainerOverride: 'onetrainer', settingsMapInitial: inverted }))
+  assert.doesNotMatch(fieldAround(ot, 'Optimizer'), /\sdisabled=""/,
+    'the served map says optimizer applies here; a panel with its own opinion ignored it')
+
+  // Declared absent on ai-toolkit → it belongs to the other lane's block, so it
+  // must NOT be sitting in the shared section any more.
+  const ai = decode(renderPanel({ trainerOverride: 'ai_toolkit', settingsMapInitial: inverted }))
+  const sharedAt = ai.indexOf('>Shared<')
+  const dualAt = ai.indexOf('aria-label="Dual long + short captions"')
+  const otherAt = ai.search(/OneTrainer settings|does not read these/)
+  assert.ok(dualAt === -1 || otherAt === -1 || dualAt > otherAt,
+    'the served map says dual captions is absent on this lane; it must not stay in Shared')
+})
