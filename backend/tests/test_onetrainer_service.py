@@ -459,26 +459,6 @@ def test_launch_training_forwards_the_datasets_lr_and_resolution(
 # moved — which is the same bug wearing a different hat — so the list is held to
 # the code here.
 
-def test_every_job_config_key_is_declared(onetrainer, tmp_path):
-    """A field added to the job config without a status entry fails HERE.
-
-    `build_job_config`'s output is the ground truth for what this lane sends.
-    Anything in it that maps to a panel setting must be declared, or the panel
-    goes on greying out something it now honours.
-    """
-    ots, _cfg = onetrainer
-    written = ots.build_job_config(
-        trigger='ztrig', dataset_folder=str(tmp_path / 'ds'),
-        training_folder=str(tmp_path / 'run'), steps=100, num_images=10,
-        rank=32, learning_rate=0.0001, resolution=768)
-    for setting, config_key in ots.JOB_CONFIG_SETTING_KEYS.items():
-        assert config_key in written, (
-            f'{setting} is declared as reaching the job config under '
-            f'{config_key!r}, and it is not there')
-        assert ots.setting_status(setting)[0] == ots.SETTING_APPLIES, (
-            f'{setting} reaches the job config but is not declared as applying')
-
-
 def test_the_pinned_rank_is_the_rank_the_launch_actually_passes(
         onetrainer, monkeypatch, app, tmp_path):
     """The 'rank is pinned' claim is checked against the CALL, not a comment.
@@ -519,26 +499,17 @@ def test_the_pinned_rank_is_the_rank_the_launch_actually_passes(
     assert ots.setting_status('alpha')[0] == ots.SETTING_PINNED
 
 
-def test_a_pinned_or_preset_setting_carries_no_promise_of_applying(onetrainer):
-    """The applying set is asserted by NAME, on purpose: growing it is a
-    decision, not something that should happen by accident. It went from three
-    to five when the panel started asking for epochs and batch in OneTrainer's
-    own vocabulary instead of deriving them from a step count."""
+def test_the_lane_view_names_exactly_what_this_lane_honours(onetrainer):
+    """Asserted by NAME on purpose: growing this set is a decision, not
+    something that should happen by accident. The declaration itself now lives
+    in training_settings_map and is checked against a real job config there —
+    this pins the SLICE this lane exposes."""
     ots, _cfg = onetrainer
-    applying = sorted(k for k, v in ots.ONETRAINER_SETTING_STATUS.items()
-                      if v[0] == ots.SETTING_APPLIES)
+    view = ots.settings_status()
+    applying = sorted(k for k, v in view.items() if v['state'] == ots.SETTING_APPLIES)
     assert applying == ['batch_size', 'dual_captions', 'epochs',
                         'learning_rate', 'lr_scheduler', 'min_snr_gamma',
                         'resolution', 'te1_lr', 'te2_lr', 'warmup']
-
-
-def test_every_pinned_setting_says_why(onetrainer):
-    """A greyed control with no reason teaches nothing — the user is left to
-    guess whether it is broken or deliberate."""
-    ots, _cfg = onetrainer
-    for key, (state, why) in ots.ONETRAINER_SETTING_STATUS.items():
-        if state == ots.SETTING_PINNED:
-            assert why.strip(), f'{key} is pinned and does not say why'
 
 
 def test_an_unknown_setting_is_reported_as_preset_owned(onetrainer):
@@ -558,7 +529,7 @@ def test_the_settings_status_route_answers_without_onetrainer_installed(client):
     assert body['learning_rate']['state'] == 'applies'
     assert body['rank']['state'] == 'pinned'
     assert body['rank']['why'], 'a greyed control with no reason teaches nothing'
-    assert body['optimizer']['state'] == 'preset'
+    assert body['optimizer']['state'] == 'absent'
 
 
 # --- epochs and batch, in OneTrainer's own vocabulary ------------------------

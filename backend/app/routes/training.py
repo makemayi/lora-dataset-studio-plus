@@ -253,6 +253,26 @@ def dataset_train_status():
     return jsonify(lt.training_status(LOCAL_USER))
 
 
+@bp.get('/train/settings-map')
+def train_settings_map():
+    """Which Advanced-options setting reaches which trainer, for BOTH lanes.
+
+    The panel groups itself from this: shared settings, then the block belonging
+    to the lane in use. Served from the module the two job builders are checked
+    against, never from a list kept on the client — a hand-kept copy drifts the
+    first time a field moves, and a drifted copy is the same bug as none.
+
+    Always 200 and never gated on either trainer being installed: the panel
+    needs the answer to render at all, including on a machine still deciding
+    which trainer to set up.
+    """
+    from ..services import training_settings_map as tsm
+    return jsonify({
+        'lanes': {lane: tsm.for_lane(lane) for lane in tsm.LANES},
+        'groups': [{'key': k, 'label': label} for k, label in tsm.GROUPS],
+    })
+
+
 @bp.get('/train/onetrainer/settings-status')
 def onetrainer_settings_status():
     """Which Advanced-options settings actually reach a OneTrainer run.
