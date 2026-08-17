@@ -308,3 +308,18 @@ test('a control follows the declaration when a setting stops being preset-owned'
   const greyed = stillPreset.match(/<select[^>]*aria-label="Learning-rate schedule"[^>]*>/)
   assert.match(greyed[0], /disabled=""/)
 })
+
+test('min-SNR gamma is a SHARED control, present on both lanes', () => {
+  // Both trainers read it, each in its own shape, so it belongs with the
+  // cross-lane settings rather than inside either lane's block. A control that
+  // appeared on only one lane would misdescribe a setting that reaches both.
+  assert.match(renderPanel(), /aria-label="Min-SNR gamma"/)
+  const ot = renderPanel({
+    trainerOverride: 'onetrainer',
+    otSettingStatusInitial: { ...OT_STATUS, min_snr_gamma: { state: 'applies', why: '' } },
+  })
+  const field = ot.slice(ot.lastIndexOf('<input', ot.indexOf('aria-label="Min-SNR gamma"')),
+                         ot.indexOf('/>', ot.indexOf('aria-label="Min-SNR gamma"')) + 2)
+  assert.doesNotMatch(field, /\sdisabled=""/, 'it applies on OneTrainer too')
+  assert.match(field, /placeholder="off"/, 'empty reads as off, not as zero')
+})

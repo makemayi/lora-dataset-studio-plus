@@ -829,6 +829,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   const [otBatchDraft, setOtBatchDraft] = useState('');
   const [otTe1Draft, setOtTe1Draft] = useState('');
   const [otTe2Draft, setOtTe2Draft] = useState('');
+  const [minSnrDraft, setMinSnrDraft] = useState('');
   // Presets de réglages avancés : snapshots nommés, partageables (fichier JSON).
   // Stockés bruts côté serveur ; la validation se fait à l'APPLICATION (clés
   // inconnues ignorées, valeurs invalides signalées) → tolérant aux versions.
@@ -1256,6 +1257,21 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
     setOtTe1Draft(adv?.te1_lr == null ? '' : String(adv.te1_lr));
     setOtTe2Draft(adv?.te2_lr == null ? '' : String(adv.te2_lr));
   }, [adv?.epochs, adv?.batch_size, adv?.te1_lr, adv?.te2_lr]);
+  /* Min-SNR gamma is SHARED — both lanes read it, each in its own shape — so it
+     lives with the other cross-lane settings rather than in either lane's
+     block. Empty means off, which is what both trainers already do with a 0. */
+  useEffect(() => {
+    setMinSnrDraft(adv?.min_snr_gamma == null ? '' : String(adv.min_snr_gamma));
+  }, [adv?.min_snr_gamma]);
+  const saveMinSnr = () => {
+    const raw = minSnrDraft.trim();
+    const stored = adv?.min_snr_gamma == null ? '' : String(adv.min_snr_gamma);
+    if (raw === stored) return;
+    if (raw === '' || Number(raw) === 0) { saveAdv({ min_snr_gamma: null }); return; }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0 || n > 20) return;   // mirrors the server bounds
+    saveAdv({ min_snr_gamma: n });
+  };
   const saveOtRate = (key, draft) => {
     const raw = String(draft).trim();
     const stored = adv?.[key] == null ? '' : String(adv[key]);
@@ -3802,6 +3818,34 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                   <b className="text-content-muted font-medium"> How:</b> leave it blank for the family default
                   (<i>1e-4</i>) unless you have a reason. Adaptive optimisers (<i>prodigy</i>, <i>automagic</i>) set it
                   themselves and this field is disabled for them.
+                </span>
+              </div>
+              {/* Min-SNR gamma — SHARED, and each lane spells it differently:
+                  ai-toolkit takes `min_snr_gamma`, OneTrainer takes
+                  loss_weight_fn + loss_weight_strength. One number here, two
+                  translations in the services. Empty = off, which is what both
+                  trainers do with a zero anyway. */}
+              <div className="flex flex-col gap-0.5"
+                title={inertOnLane('min_snr_gamma') || undefined}>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-content text-[0.75rem] w-28 shrink-0">Min-SNR gamma</span>
+                  <input type="number" min={0} max={20} step={1}
+                    value={minSnrDraft}
+                    onChange={(e) => setMinSnrDraft(e.target.value)}
+                    onBlur={saveMinSnr}
+                    placeholder="off"
+                    aria-label="Min-SNR gamma"
+                    disabled={!!inertOnLane('min_snr_gamma')}
+                    title={inertOnLane('min_snr_gamma')
+                      || 'Empty = off. 5 is the usual value; both trainers ignore a 0.'}
+                    className="w-24 rounded-lg bg-surface-raised px-2 py-1 text-content tabular-nums text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50" />
+                </div>
+                <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
+                  <b className="text-content-muted font-medium">Why:</b> weights the loss by how much signal each
+                  noise level carries, which mostly helps a high-resolution run converge instead of spending its
+                  early steps on the noisiest timesteps.
+                  <b className="text-content-muted font-medium"> How:</b> leave it empty unless a run is converging
+                  slowly at 1024; <i>5</i> is the value most recipes use.
                 </span>
               </div>
               {/* LR schedule (+ warmup, only for the warmup schedule) */}
