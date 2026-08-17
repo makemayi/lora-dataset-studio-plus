@@ -827,6 +827,8 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   const [learningRateError, setLearningRateError] = useState('');
   const [otEpochsDraft, setOtEpochsDraft] = useState('');
   const [otBatchDraft, setOtBatchDraft] = useState('');
+  const [otTe1Draft, setOtTe1Draft] = useState('');
+  const [otTe2Draft, setOtTe2Draft] = useState('');
   // Presets de réglages avancés : snapshots nommés, partageables (fichier JSON).
   // Stockés bruts côté serveur ; la validation se fait à l'APPLICATION (clés
   // inconnues ignorées, valeurs invalides signalées) → tolérant aux versions.
@@ -1251,7 +1253,20 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   useEffect(() => {
     setOtEpochsDraft(adv?.epochs == null ? '' : String(adv.epochs));
     setOtBatchDraft(adv?.batch_size == null ? '' : String(adv.batch_size));
-  }, [adv?.epochs, adv?.batch_size]);
+    setOtTe1Draft(adv?.te1_lr == null ? '' : String(adv.te1_lr));
+    setOtTe2Draft(adv?.te2_lr == null ? '' : String(adv.te2_lr));
+  }, [adv?.epochs, adv?.batch_size, adv?.te1_lr, adv?.te2_lr]);
+  const saveOtRate = (key, draft) => {
+    const raw = String(draft).trim();
+    const stored = adv?.[key] == null ? '' : String(adv[key]);
+    if (raw === stored) return;
+    // Empty means FROZEN, which is the same thing the server stores as "no
+    // value" — there is deliberately no "train at 0".
+    if (raw === '') { saveAdv({ [key]: null }); return; }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0 || n > 0.01) return;   // mirrors the server bounds
+    saveAdv({ [key]: n });
+  };
   const saveOtNumber = (key, draft) => {
     const raw = String(draft).trim();
     const stored = adv?.[key] == null ? '' : String(adv[key]);
@@ -1280,6 +1295,19 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   // in one pass, which is not what anyone means by "batch 64 on 30 images".
   const otBatchWarning = (otBatchN > keptCount && keptCount > 0)
     ? `Batch ${otBatchN} is larger than the ${keptCount} images in this dataset — every step would see the whole set.`
+    : '';
+  /* A text encoder trained at or above the main rate is the ordinary way a
+     character LoRA ends up welded to the words in its captions. Said here, at
+     the moment of setting it, rather than in a doc nobody opens. The main rate
+     is only known when the user set one — otherwise the preset's own decides
+     and this app does not get to claim a number. */
+  const otMainLr = Number(adv?.learning_rate) || 0;
+  const otTeHighest = Math.max(
+    Number(otTe1Draft !== '' ? otTe1Draft : (adv?.te1_lr ?? 0)) || 0,
+    Number(otTe2Draft !== '' ? otTe2Draft : (adv?.te2_lr ?? 0)) || 0,
+  );
+  const otTeWarning = (otMainLr > 0 && otTeHighest >= otMainLr)
+    ? `A text-encoder rate at or above the main ${otMainLr} overfits the captions fast — a fraction of it is the usual choice.`
     : '';
   const saveLearningRate = () => {
     const raw = learningRateDraft.trim();
@@ -3944,6 +3972,38 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               </span>
               <span className="basis-full text-content-subtle" hidden={!otBatchWarning}>
                 {otBatchWarning}
+              </span>
+              {/* Text encoders. OneTrainer's shipped Krea 2 preset FREEZES the
+                  first one, so a rate here also unfreezes it — the backend
+                  writes the train flag with the rate, because a rate on a
+                  component that never learns is stored and inert. Empty means
+                  frozen, which is why there is no separate on/off: "training at
+                  zero" and "not training" would otherwise be two ways to say
+                  the same thing and only one of them would be true. */}
+              <label className="flex items-center gap-1.5"
+                title="Leave empty to keep the text encoder frozen, as OneTrainer's own Krea 2 preset does. A rate here trains it — usually a fraction of the main rate.">
+                <span className="uppercase text-content-muted text-[0.625rem]">TE1 lr</span>
+                <input type="text" inputMode="decimal"
+                  value={otTe1Draft}
+                  onChange={(e) => setOtTe1Draft(e.target.value)}
+                  onBlur={() => saveOtRate('te1_lr', otTe1Draft)}
+                  placeholder="frozen"
+                  aria-label="OneTrainer text encoder 1 learning rate"
+                  className="w-[5rem] rounded-lg bg-surface-raised px-1.5 py-0.5 text-content tabular-nums text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary" />
+              </label>
+              <label className="flex items-center gap-1.5"
+                title="The second text encoder. Overfits easily — if you train it at all, train it well below the main rate.">
+                <span className="uppercase text-content-muted text-[0.625rem]">TE2 lr</span>
+                <input type="text" inputMode="decimal"
+                  value={otTe2Draft}
+                  onChange={(e) => setOtTe2Draft(e.target.value)}
+                  onBlur={() => saveOtRate('te2_lr', otTe2Draft)}
+                  placeholder="frozen"
+                  aria-label="OneTrainer text encoder 2 learning rate"
+                  className="w-[5rem] rounded-lg bg-surface-raised px-1.5 py-0.5 text-content tabular-nums text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary" />
+              </label>
+              <span className="basis-full text-content-subtle" hidden={!otTeWarning}>
+                {otTeWarning}
               </span>
             </div>
           )}

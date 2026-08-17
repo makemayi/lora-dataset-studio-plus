@@ -250,3 +250,38 @@ test('a batch larger than the dataset is called out', () => {
   })
   assert.match(decode(html), /larger than the 15 images/)
 })
+
+/* --- the text encoders --------------------------------------------------- */
+
+test('the text-encoder rates appear only on the OneTrainer lane', () => {
+  const ot = renderPanel({ trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS })
+  assert.match(ot, /aria-label="OneTrainer text encoder 1 learning rate"/)
+  assert.match(ot, /aria-label="OneTrainer text encoder 2 learning rate"/)
+  assert.doesNotMatch(renderPanel(), /OneTrainer text encoder/)
+})
+
+test('an empty text-encoder rate reads as frozen, not as zero', () => {
+  // "Training at 0" and "not training" would otherwise be two ways to say the
+  // same thing, and only one of them would be true.
+  const html = renderPanel({ trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS })
+  const te1 = html.slice(html.lastIndexOf('<input', html.indexOf('text encoder 1')),
+                         html.indexOf('/>', html.indexOf('text encoder 1')) + 2)
+  assert.match(te1, /placeholder="frozen"/)
+})
+
+test('a text-encoder rate at or above the main rate is called out', () => {
+  // The ordinary way a character LoRA ends up welded to the words in its
+  // captions. Said at the moment of setting it, not in a doc nobody opens.
+  const html = decode(renderPanel({
+    trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS,
+    advOverride: { learning_rate: 0.0003, te2_lr: 0.0003 },
+  }))
+  assert.match(html, /at or above the main 0\.0003/)
+
+  const quiet = decode(renderPanel({
+    trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS,
+    advOverride: { learning_rate: 0.0003, te2_lr: 0.00001 },
+  }))
+  assert.doesNotMatch(quiet, /at or above the main/,
+    'a sane fraction must not warn — a warning that always fires teaches nothing')
+})
