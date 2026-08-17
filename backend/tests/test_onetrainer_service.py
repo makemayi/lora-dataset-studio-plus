@@ -71,12 +71,13 @@ def test_build_job_config_overrides_only_what_this_app_owns(onetrainer, tmp_path
     assert config['output_model_destination'] == str(Path(training_folder) / 'lola.safetensors')
     assert config['lora_rank'] == 32
     assert config['lora_alpha'] == 32.0     # scale factor 1.0 — MUST track rank
-    assert config['batch_size'] == 1        # matches the epochs approximation
+    # No batch chosen = the preset's own survives, so this app writes nothing.
+    assert 'batch_size' not in config
     # A STRING, matching OneTrainer's own schema — its shipped Krea 2 preset
     # writes "512", not 512. This assertion used to demand the int, which was
     # never checked against the preset.
     assert config['resolution'] == '1024'
-    assert config['epochs'] == 80          # ceil(2000 / 25)
+    assert config['epochs'] == 160         # ceil(2000 * 2 / 25) — the preset's batch
     assert config['peft_type'] == 'LORA'   # default when the caller doesn't pass one
     # Ownership boundary: everything else stays whatever OneTrainer's own
     # shipped preset says — this function must NOT invent values for them.
@@ -527,7 +528,8 @@ def test_a_pinned_or_preset_setting_carries_no_promise_of_applying(onetrainer):
     applying = sorted(k for k, v in ots.ONETRAINER_SETTING_STATUS.items()
                       if v[0] == ots.SETTING_APPLIES)
     assert applying == ['batch_size', 'dual_captions', 'epochs',
-                        'learning_rate', 'resolution', 'te1_lr', 'te2_lr']
+                        'learning_rate', 'lr_scheduler', 'resolution',
+                        'te1_lr', 'te2_lr', 'warmup']
 
 
 def test_every_pinned_setting_says_why(onetrainer):
@@ -578,11 +580,13 @@ def test_the_derivation_survives_for_callers_with_no_opinion_and_now_counts_batc
     form silently assumed batch 1, so at batch 3 it bought a THIRD of the
     training it promised. One epoch is images/batch optimizer steps."""
     ots, _cfg = onetrainer
-    at_one = ots.build_job_config(
+    at_default = ots.build_job_config(
         trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
         steps=2000, num_images=25, rank=32)
-    assert at_one['epochs'] == 80          # ceil(2000 * 1 / 25) — unchanged
-    assert at_one['batch_size'] == 1
+    # No batch chosen: the arithmetic assumes the PRESET's batch, because that
+    # is what will actually run once this app stops writing a 1 over it.
+    assert at_default['epochs'] == 160     # ceil(2000 * 2 / 25)
+    assert 'batch_size' not in at_default
 
     at_three = ots.build_job_config(
         trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
@@ -689,3 +693,87 @@ def test_the_learning_rate_is_left_to_the_preset_unless_the_user_chose_one(
         r2 = ots.launch_training(LOCAL_USER, ds.id, steps=100, check_captions=False)
         written2 = _j.loads(open(r2['config_path'], encoding='utf-8').read())
         assert written2['learning_rate'] == 3e-4
+
+
+# --- the schedule, and the batch the preset asked for -----------------------
+
+def test_the_shipped_preset_really_does_ask_for_that_batch(onetrainer):
+    """KREA2_PRESET_BATCH_SIZE is a constant so the epoch arithmetic has a
+    number even when the install is not reachable. Checked against the real
+    file when it IS, so the constant cannot drift into a comfortable fiction."""
+    import json as _j
+    import os as _os
+    root = _os.environ.get('LDS_ONETRAINER_DIR') or r'E:\OneTrainer'
+    ots, _cfg = onetrainer
+    for rel in (ots.KREA2_PRESET_RELATIVE_PATH, ots.KREA2_PRESET_24GB_RELATIVE_PATH):
+        path = _os.path.join(root, rel)
+        if not _os.path.isfile(path):
+            import pytest as _p
+            _p.skip(f'OneTrainer preset not installed here: {rel}')
+        with open(path, encoding='utf-8') as fh:
+            assert _j.load(fh).get('batch_size') == ots.KREA2_PRESET_BATCH_SIZE
+
+
+def test_no_batch_chosen_leaves_the_presets_own_alone(onetrainer, tmp_path):
+    """MEASURED: the shipped preset asks for batch 2 and this app wrote 1 over
+    it on every run — silently halving the throughput the preset was tuned
+    around, the same way it silently overrode the learning rate."""
+    ots, _cfg = onetrainer
+    c = ots.build_job_config(
+        trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
+        steps=100, num_images=10, rank=32)
+    assert 'batch_size' not in c
+    chosen = ots.build_job_config(
+        trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
+        steps=100, num_images=10, rank=32, batch_size=3)
+    assert chosen['batch_size'] == 3
+
+
+def test_the_scheduler_is_mapped_into_onetrainers_own_vocabulary(onetrainer, tmp_path):
+    """The two vocabularies are NOT the same list. An unmapped string is not an
+    error in OneTrainer — it is a printed line and a run that keeps its
+    default — so the mapping is asserted rather than trusted."""
+    ots, _cfg = onetrainer
+
+    def sched(name, **kw):
+        return ots.build_job_config(
+            trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
+            steps=100, num_images=10, rank=32, lr_scheduler=name, **kw)
+
+    assert sched('cosine')['learning_rate_scheduler'] == 'COSINE'
+    assert sched('cosine_with_restarts')['learning_rate_scheduler'] == 'COSINE_WITH_RESTARTS'
+    assert sched('linear')['learning_rate_scheduler'] == 'LINEAR'
+    # Every mapped name must be a real member of OneTrainer's enum.
+    assert set(ots._SCHEDULER_TO_ONETRAINER.values()) <= {
+        'CONSTANT', 'LINEAR', 'COSINE', 'COSINE_WITH_RESTARTS',
+        'COSINE_WITH_HARD_RESTARTS', 'REX', 'ADAFACTOR', 'CUSTOM'}
+
+
+def test_warmup_rides_only_with_the_schedule_that_means_warmup(onetrainer, tmp_path):
+    """OneTrainer has no constant_with_warmup member: it says CONSTANT and
+    carries the warmup in its own field. Attaching that field to every schedule
+    would hand it a warmup nobody asked for."""
+    ots, _cfg = onetrainer
+
+    def sched(name, warmup):
+        return ots.build_job_config(
+            trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
+            steps=100, num_images=10, rank=32, lr_scheduler=name, warmup_steps=warmup)
+
+    withw = sched('constant_with_warmup', 200)
+    assert withw['learning_rate_scheduler'] == 'CONSTANT'
+    assert withw['learning_rate_warmup_steps'] == 200.0
+
+    without = sched('cosine', 200)
+    assert without['learning_rate_scheduler'] == 'COSINE'
+    assert 'learning_rate_warmup_steps' not in without
+
+
+def test_an_unknown_scheduler_name_writes_nothing(onetrainer, tmp_path):
+    """Failing safe: a value this map has never heard of leaves OneTrainer's own
+    default in place rather than handing it a string it will only print about."""
+    ots, _cfg = onetrainer
+    c = ots.build_job_config(
+        trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
+        steps=100, num_images=10, rank=32, lr_scheduler='rex_but_misspelled')
+    assert 'learning_rate_scheduler' not in c
