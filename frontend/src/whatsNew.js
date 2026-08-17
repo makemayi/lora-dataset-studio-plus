@@ -50,6 +50,18 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-17-onetrainer-inert-advanced-options',
+    date: '2026-08-17',
+    title: 'OneTrainer now greys out the Advanced options it never reads',
+    blurb: 'Switch a Krea 2 dataset to the OneTrainer lane and most of ⚙️ Advanced options used to '
+      + 'stay clickable while quietly doing nothing — pick a rank, an optimiser, a schedule, start '
+      + 'the run, and none of it reached the job. Now those controls grey out and hovering says '
+      + 'why: some are pinned to a fixed value this lane needs, the rest are owned by OneTrainer’s '
+      + 'own shipped Krea 2 preset. Learning rate, resolution and dual captions are the three that '
+      + 'still apply, and stay fully live.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-17-subject-trim',
     date: '2026-08-17',
     title: 'Crop a batch around the person, and see every crop before it lands',

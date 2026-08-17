@@ -1,5 +1,5 @@
 // react-frontend/src/components/dataset/TrainingPanel.jsx
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router';
 import { apiFetch, getCsrfToken } from '../../api/fetchClient';
@@ -683,7 +683,16 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                                         // « Continue anyway » ack from the readiness pastille: a
                                         // bypassable quality blocker was acknowledged → relax the
                                         // image-floor gate and carry allow_not_ready into the launch.
-                                        allowNotReady = false }) {
+                                        allowNotReady = false,
+                                        // Test-only overrides. `renderToStaticMarkup` never runs
+                                        // effects, so neither the local-trainer pick nor the
+                                        // settings-status fetch below can ever happen inside a
+                                        // mount test — both states would otherwise be permanently
+                                        // stuck at their production defaults. Unset in the real
+                                        // app (App.jsx never passes them), so production behaviour
+                                        // is unchanged: ai-toolkit by default, status fetched live.
+                                        trainerOverride = null,
+                                        otSettingStatusInitial = null }) {
   const isConcept = kind === 'concept';
   const isStyle = kind === 'style';
   const isConceptual = isConcept || isStyle;
@@ -758,7 +767,28 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   // Local trainer for THIS run — 'ai_toolkit' (default) or 'onetrainer'. Krea 2
   // only in this slice; reset to 'ai_toolkit' whenever trainType leaves 'krea'
   // so a stale OneTrainer pick can never silently apply to an unsupported family.
-  const [trainer, setTrainer] = useState('ai_toolkit');
+  const [trainer, setTrainer] = useState(trainerOverride || 'ai_toolkit');
+  // Which Advanced options a OneTrainer run actually reads. Served by the module
+  // that WRITES the job config, never kept here: a hand-kept copy would drift the
+  // first time a field moved, which is the bug this whole wave exists to end.
+  const [otSettingStatus, setOtSettingStatus] = useState(otSettingStatusInitial);
+  useEffect(() => {
+    let live = true;
+    fetch('/api/train/onetrainer/settings-status')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (live && d?.settings) setOtSettingStatus(d.settings); })
+      .catch(() => { /* the panel just stays un-greyed */ });
+    return () => { live = false; };
+  }, []);
+  // The shared sentence for a control OneTrainer's own shipped preset owns —
+  // repeated nowhere else, so the wording can only drift in one place.
+  const OT_PRESET_SENTENCE = "Decided by OneTrainer's own Krea 2 preset — this app deliberately does not override it.";
+  const inertOnLane = useCallback((key) => {
+    if (trainer !== 'onetrainer' || !otSettingStatus) return null;
+    const s = otSettingStatus[key] || { state: 'preset', why: '' };
+    if (s.state === 'applies') return null;
+    return s.why || OT_PRESET_SENTENCE;
+  }, [trainer, otSettingStatus]);
   const [trainingMode, setTrainingMode] = useState(TRAINING_MODE_LORA);
   const [trainingModeBusy, setTrainingModeBusy] = useState(false);
   const [trainingModeError, setTrainingModeError] = useState('');
@@ -3206,13 +3236,15 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-indigo-400/60" /> Model &amp; training
             </div>
 
-            {!fullMode && (<div className="flex flex-col gap-0.5">
+            {!fullMode && (<div className="flex flex-col gap-0.5" title={inertOnLane('rank') || undefined}>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-content text-[0.75rem] w-28 shrink-0">LoRA rank</span>
                 <select value={String(advRankChoice)}
                   onChange={(e) => saveAdv({ rank: e.target.value === 'auto' ? 'auto' : Number(e.target.value) })}
                   aria-label="LoRA rank"
-                  className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary">
+                  disabled={!!inertOnLane('rank')}
+                  title={inertOnLane('rank') || undefined}
+                  className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
                   <option value="auto">Auto ({advDefaultRank})</option>
                   <option value="8">8</option><option value="16">16</option><option value="24">24</option>
                   <option value="32">32</option><option value="48">48</option><option value="64">64</option>
@@ -3340,12 +3372,14 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               {/* Network variant — LoRA (default) or LoKr. LoKr is arch-generic in
                   ai-toolkit, so it's offered on every family; the *_supported guard
                   mirrors the timestep pattern for a future family that can't run it. */}
-              <div className="flex flex-col gap-0.5">
+              <div className="flex flex-col gap-0.5" title={inertOnLane('network_type') || undefined}>
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-content text-[0.75rem] w-28 shrink-0">Network</span>
                   <select value={advNetworkType} onChange={(e) => saveAdv({ network_type: e.target.value })}
                     aria-label="Network type"
-                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary">
+                    disabled={!!inertOnLane('network_type')}
+                    title={inertOnLane('network_type') || undefined}
+                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
                     {advNetworkChoices.map((n) => <option key={n} value={n}>{n === 'lora' ? 'LoRA (default)' : 'LoKr'}</option>)}
                   </select>
                   {advNetworkType === 'lokr' && !advNetworkSupported && (
@@ -3353,14 +3387,16 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                   )}
                 </div>
                 {advNetworkType === 'lokr' && (
-                  <div className="flex items-center gap-2 flex-wrap mt-1">
+                  <div className="flex items-center gap-2 flex-wrap mt-1" title={inertOnLane('lokr_factor') || undefined}>
                     <span className="text-content text-[0.75rem] w-28 shrink-0 inline-flex items-center gap-1">
                       LoKr factor<HelpBadge topic="training.lokr_factor" />
                     </span>
                     <select value={advLokrFactor == null ? 'auto' : String(advLokrFactor)}
                       onChange={(e) => saveAdv({ lokr_factor: e.target.value === 'auto' ? 'auto' : Number(e.target.value) })}
                       aria-label="LoKr decomposition factor"
-                      className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary">
+                      disabled={!!inertOnLane('lokr_factor')}
+                      title={inertOnLane('lokr_factor') || undefined}
+                      className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
                       <option value="auto">Auto (ai-toolkit)</option>
                       {advLokrFactorChoices.map((factor) => <option key={factor} value={String(factor)}>{factor}</option>)}
                     </select>
@@ -3386,17 +3422,19 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                       Community starting point, not a likeness promise — compare your own checkpoints.
                     </span>
                   </div>
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap" title={inertOnLane('content_or_style') || undefined}>
                     <span className="text-content text-[0.75rem] w-28 shrink-0">Content / style</span>
                     <select value={advContentOrStyle ?? 'auto'}
                       onChange={(e) => saveAdv({ content_or_style: e.target.value === 'auto' ? 'auto' : e.target.value })}
                       aria-label="Krea content or style balance"
-                      className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary">
+                      disabled={!!inertOnLane('content_or_style')}
+                      title={inertOnLane('content_or_style') || undefined}
+                      className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
                       <option value="auto">Auto ({advContentOrStyleDefault})</option>
                       {advContentOrStyleChoices.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
                     </select>
                   </div>
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap" title={inertOnLane('do_differential_guidance') || undefined}>
                     <label className="flex items-center gap-2 flex-wrap cursor-pointer">
                       <span className="text-content text-[0.75rem] w-28 shrink-0 inline-flex items-center gap-1">
                         Differential guidance<HelpBadge topic="training.krea_community_recipe" />
@@ -3404,18 +3442,21 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                       <input type="checkbox" checked={advDifferentialGuidance}
                         onChange={(e) => saveAdv({ do_differential_guidance: e.target.checked })}
                         aria-label="Enable Krea differential guidance"
-                        className="h-4 w-4 rounded border-border bg-surface accent-indigo-500" />
+                        disabled={!!inertOnLane('do_differential_guidance')}
+                        title={inertOnLane('do_differential_guidance') || undefined}
+                        className="h-4 w-4 rounded border-border bg-surface accent-indigo-500 disabled:cursor-not-allowed disabled:opacity-50" />
                       <span className="text-content-muted text-[0.75rem]">enable</span>
                     </label>
-                    <label className="flex items-center gap-2">
+                    <label className="flex items-center gap-2" title={inertOnLane('differential_guidance_scale') || undefined}>
                       <span className="text-content-muted text-[0.6875rem]">scale</span>
                       <input type="number" min="0.1" max="10" step="0.1"
                         value={differentialGuidanceScaleDraft}
-                        disabled={!advDifferentialGuidance}
+                        disabled={!advDifferentialGuidance || !!inertOnLane('differential_guidance_scale')}
                         onChange={(e) => setDifferentialGuidanceScaleDraft(e.target.value)}
                         onBlur={saveDifferentialGuidanceScale}
                         onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                         aria-label="Krea differential guidance scale"
+                        title={inertOnLane('differential_guidance_scale') || undefined}
                         className="w-16 px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50" />
                     </label>
                   </div>
@@ -3427,13 +3468,15 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                 </div>
               )}
               {/* EMA — exponential moving average of the weights */}
-              <div className="flex flex-col gap-0.5">
+              <div className="flex flex-col gap-0.5" title={inertOnLane('ema') || undefined}>
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-content text-[0.75rem] w-28 shrink-0">EMA</span>
                   <select value={String(advEma)}
                     onChange={(e) => saveAdv({ ema: e.target.value === '0' ? 'off' : Number(e.target.value) })}
                     aria-label="EMA (exponential moving average)"
-                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary">
+                    disabled={!!inertOnLane('ema')}
+                    title={inertOnLane('ema') || undefined}
+                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
                     <option value="0">Off (default)</option>
                     {advEmaChoices.map((d) => <option key={d} value={String(d)}>{d}</option>)}
                   </select>
@@ -3506,15 +3549,20 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                   )}
                 </div>
                 <div className="flex flex-col gap-1 sm:flex-row sm:flex-wrap sm:gap-x-4">
-                  {MEMORY_KEYS.map((k) => (
-                    <label key={k} className="flex items-center gap-2 cursor-pointer min-w-0">
-                      <input type="checkbox" checked={Boolean(advMemEff[k])}
-                        onChange={(e) => saveAdv(memoryPatchFor(k, e.target.checked, advMemDefault))}
-                        aria-label={MEMORY_LABELS[k]}
-                        className="h-4 w-4 shrink-0 rounded border-border bg-surface accent-indigo-500" />
-                      <span className="text-content-muted text-[0.75rem] truncate">{MEMORY_LABELS[k]}</span>
-                    </label>
-                  ))}
+                  {MEMORY_KEYS.map((k) => {
+                    const memInert = inertOnLane(k);
+                    return (
+                      <label key={k} className="flex items-center gap-2 cursor-pointer min-w-0" title={memInert || undefined}>
+                        <input type="checkbox" checked={Boolean(advMemEff[k])}
+                          onChange={(e) => saveAdv(memoryPatchFor(k, e.target.checked, advMemDefault))}
+                          aria-label={MEMORY_LABELS[k]}
+                          disabled={!!memInert}
+                          title={memInert || undefined}
+                          className="h-4 w-4 shrink-0 rounded border-border bg-surface accent-indigo-500 disabled:cursor-not-allowed disabled:opacity-50" />
+                        <span className="text-content-muted text-[0.75rem] truncate">{MEMORY_LABELS[k]}</span>
+                      </label>
+                    );
+                  })}
                 </div>
                 {/* A saver this family's recipe relies on is off — most often
                     because it was switched off on a 2B family (Anima/SDXL, where
@@ -3534,13 +3582,15 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                 </span>
               </div>
               {/* Decoupled alpha */}
-              <div className="flex flex-col gap-0.5">
+              <div className="flex flex-col gap-0.5" title={inertOnLane('alpha') || undefined}>
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-content text-[0.75rem] w-28 shrink-0">Alpha</span>
                   <select value={String(advAlphaChoice)}
                     onChange={(e) => saveAdv({ alpha: e.target.value === 'auto' ? 'auto' : Number(e.target.value) })}
                     aria-label="LoRA alpha"
-                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary">
+                    disabled={!!inertOnLane('alpha')}
+                    title={inertOnLane('alpha') || undefined}
+                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
                     <option value="auto">Auto (= {advDefaultAlpha})</option>
                     {advAlphaChoices.map((a) => <option key={a} value={String(a)}>{a}</option>)}
                   </select>
@@ -3554,13 +3604,15 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                 </span>
               </div>
               {/* Network dropout */}
-              <div className="flex flex-col gap-0.5">
+              <div className="flex flex-col gap-0.5" title={inertOnLane('dropout') || undefined}>
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-content text-[0.75rem] w-28 shrink-0">Network dropout</span>
                   <select value={String(advDropout)}
                     onChange={(e) => saveAdv({ dropout: e.target.value === '0' ? 'off' : Number(e.target.value) })}
                     aria-label="Network dropout"
-                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary">
+                    disabled={!!inertOnLane('dropout')}
+                    title={inertOnLane('dropout') || undefined}
+                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
                     <option value="0">Off</option>
                     {advDropoutChoices.map((d) => <option key={d} value={String(d)}>{d}</option>)}
                   </select>
@@ -3574,12 +3626,14 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               </div>
               {/* Timestep weighting — flowmatch families only (SDXL disables it) */}
               {advTimestepSupported && (
-                <div className="flex flex-col gap-0.5">
+                <div className="flex flex-col gap-0.5" title={inertOnLane('timestep_type') || undefined}>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-content text-[0.75rem] w-28 shrink-0">Timestep weighting</span>
                     <select value={advTimestep} onChange={(e) => saveAdv({ timestep_type: e.target.value })}
                       aria-label="Timestep weighting"
-                      className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary">
+                      disabled={!!inertOnLane('timestep_type')}
+                      title={inertOnLane('timestep_type') || undefined}
+                      className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
                       <option value="auto">Auto ({advTimestepDefault})</option>
                       {advTimestepChoices.map((t) => <option key={t} value={t}>{t}</option>)}
                     </select>
@@ -3593,12 +3647,14 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                 </div>
               )}
               {/* Optimizer */}
-              <div className="flex flex-col gap-0.5">
+              <div className="flex flex-col gap-0.5" title={inertOnLane('optimizer') || undefined}>
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-content text-[0.75rem] w-28 shrink-0">Optimizer</span>
                   <select value={advOptimizer} onChange={(e) => saveAdv({ optimizer: e.target.value })}
                     aria-label="Optimizer"
-                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary">
+                    disabled={!!inertOnLane('optimizer')}
+                    title={inertOnLane('optimizer') || undefined}
+                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
                     {advOptimizerChoices.map((o) => <option key={o} value={o}>{o}{o === 'adamw8bit' ? ' (default)' : ''}</option>)}
                   </select>
                 </div>
@@ -3613,18 +3669,22 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                 </span>
               </div>
               {/* LR schedule (+ warmup, only for the warmup schedule) */}
-              <div className="flex flex-col gap-0.5">
+              <div className="flex flex-col gap-0.5" title={inertOnLane('lr_scheduler') || undefined}>
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-content text-[0.75rem] w-28 shrink-0">LR schedule</span>
                   <select value={advLrSched} onChange={(e) => saveAdv({ lr_scheduler: e.target.value })}
                     aria-label="Learning-rate schedule"
-                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary">
+                    disabled={!!inertOnLane('lr_scheduler')}
+                    title={inertOnLane('lr_scheduler') || undefined}
+                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
                     {advLrSchedChoices.map((s) => <option key={s} value={s}>{LR_SCHED_LABELS[s] || s}</option>)}
                   </select>
                   {advLrSched === 'constant_with_warmup' && (
                     <select value={String(advWarmup || 100)} onChange={(e) => saveAdv({ warmup: Number(e.target.value) })}
                       aria-label="Warmup steps"
-                      className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary">
+                      disabled={!!inertOnLane('warmup')}
+                      title={inertOnLane('warmup') || undefined}
+                      className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
                       {advWarmupChoices.map((w) => <option key={w} value={String(w)}>{w} warmup</option>)}
                     </select>
                   )}
@@ -3638,12 +3698,14 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                 </span>
               </div>
               {/* Gradient accumulation (effective batch) */}
-              <div className="flex flex-col gap-0.5">
+              <div className="flex flex-col gap-0.5" title={inertOnLane('grad_accum') || undefined}>
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-content text-[0.75rem] w-28 shrink-0">Effective batch</span>
                   <select value={String(advGradAccum)} onChange={(e) => saveAdv({ grad_accum: Number(e.target.value) })}
                     aria-label="Gradient accumulation"
-                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary">
+                    disabled={!!inertOnLane('grad_accum')}
+                    title={inertOnLane('grad_accum') || undefined}
+                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
                     {advGradAccumChoices.map((g) => <option key={g} value={String(g)}>{g === 1 ? '1 (default)' : `${g} × accum`}</option>)}
                   </select>
                 </div>
