@@ -50,6 +50,16 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-17-advanced-options-grouped-by-lane',
+    date: '2026-08-17',
+    title: 'Advanced options are now grouped by which lane actually reads them',
+    blurb: '🔬 Expert — last-mile levers no longer greys out roughly half its own controls and leaves '
+      + 'you guessing why. Open it now and it is sorted into Shared (both lanes honour it), the '
+      + 'current lane’s own settings, and — folded shut, one click away — the other lane’s settings, '
+      + 'labelled so a control never just vanishes when you switch trainers.',
+    to: '/datasets',
+  },
+  {
     id: '2026-08-17-onetrainer-inert-advanced-options',
     date: '2026-08-17',
     title: 'OneTrainer now greys out the Advanced options it never reads',

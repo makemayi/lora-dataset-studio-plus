@@ -8,13 +8,12 @@ import { postJson } from '../../hooks/useDataset';
 import useHubPresence from '../../hooks/useHubPresence';
 import { animeFamilyNote } from './animeFamilyNote.js';
 import { customBasePushView } from './customBasePush.js';
-import { dualCaptionsSupport } from './dualCaptions.js';
 import { loadMergeOpen, saveMergeOpen } from './loraMerge.js';
 import { maskedCarryOverAction, clearLegacyMasked } from './maskedMigration.js';
-import ConceptFaceMaskField from './ConceptFaceMaskField';
 import DenseModelsPanel from './DenseModelsPanel';
 import Fp8QuantizeTool from './Fp8QuantizeTool';
 import LoraMergeTool from './LoraMergeTool';
+import TrainingAdvancedGroups from './TrainingAdvancedGroups';
 import {
   checkpointSelectionMatchesTraining,
   checkpointVariantLabel,
@@ -64,8 +63,7 @@ import {
 } from './trainingFamilyScope.js';
 import { failureView } from './trainingFailure';
 import {
-  MEMORY_KEYS, MEMORY_LABELS, memoryAdviceText, memoryIsOverridden, memoryPatchFor,
-  memoryRiskLine, memoryStateLabel,
+  memoryAdviceText, memoryIsOverridden, memoryRiskLine, memoryStateLabel,
 } from './memorySavingAdvice';
 import { stopOutcomeMessage } from '../../utils/runSilence';
 import SettingsLink from '../common/SettingsLink';
@@ -686,13 +684,13 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                                         allowNotReady = false,
                                         // Test-only overrides. `renderToStaticMarkup` never runs
                                         // effects, so neither the local-trainer pick nor the
-                                        // settings-status fetch below can ever happen inside a
+                                        // settings-map fetch below can ever happen inside a
                                         // mount test — both states would otherwise be permanently
                                         // stuck at their production defaults. Unset in the real
                                         // app (App.jsx never passes them), so production behaviour
-                                        // is unchanged: ai-toolkit by default, status fetched live.
+                                        // is unchanged: ai-toolkit by default, map fetched live.
                                         trainerOverride = null,
-                                        otSettingStatusInitial = null,
+                                        settingsMapInitial = null,
                                         // Test-only, same contract as the two above: seeds `adv`
                                         // so a static render can reach a state the panel would
                                         // otherwise only enter through a fetch. Never passed by
@@ -773,27 +771,29 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   // only in this slice; reset to 'ai_toolkit' whenever trainType leaves 'krea'
   // so a stale OneTrainer pick can never silently apply to an unsupported family.
   const [trainer, setTrainer] = useState(trainerOverride || 'ai_toolkit');
-  // Which Advanced options a OneTrainer run actually reads. Served by the module
-  // that WRITES the job config, never kept here: a hand-kept copy would drift the
-  // first time a field moved, which is the bug this whole wave exists to end.
-  const [otSettingStatus, setOtSettingStatus] = useState(otSettingStatusInitial);
+  // Which Advanced options reach which lane, for BOTH lanes at once. Served by
+  // the module the two job builders are checked against, never kept here: a
+  // hand-kept copy would drift the first time a field moved, which is the bug
+  // this whole wave exists to end. `TrainingAdvancedGroups` reads this
+  // directly to group the Expert block by ownership; `inertOnLane` below is
+  // the thin slice of the same map the few controls OUTSIDE that block
+  // (currently just LoRA rank) still need.
+  const [settingsMap, setSettingsMap] = useState(settingsMapInitial);
   useEffect(() => {
     let live = true;
-    fetch('/api/train/onetrainer/settings-status')
+    fetch('/api/train/settings-map')
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (live && d?.settings) setOtSettingStatus(d.settings); })
+      .then((d) => { if (live && d?.lanes && d?.groups) setSettingsMap(d); })
       .catch(() => { /* the panel just stays un-greyed */ });
     return () => { live = false; };
   }, []);
-  // The shared sentence for a control OneTrainer's own shipped preset owns —
-  // repeated nowhere else, so the wording can only drift in one place.
-  const OT_PRESET_SENTENCE = "Decided by OneTrainer's own Krea 2 preset — this app deliberately does not override it.";
   const inertOnLane = useCallback((key) => {
-    if (trainer !== 'onetrainer' || !otSettingStatus) return null;
-    const s = otSettingStatus[key] || { state: 'preset', why: '' };
-    if (s.state === 'applies') return null;
-    return s.why || OT_PRESET_SENTENCE;
-  }, [trainer, otSettingStatus]);
+    const entry = settingsMap?.lanes?.[trainer]?.[key];
+    if (!entry || entry.state === 'applies') return null;
+    if (entry.state === 'pinned') return entry.why || `${trainer === 'onetrainer' ? 'OneTrainer' : 'ai-toolkit'} pins its own value for this setting.`;
+    // 'absent': this lane has no concept of it either — still fails safe to inert.
+    return entry.why || `${trainer === 'onetrainer' ? 'OneTrainer' : 'ai-toolkit'} does not read this setting.`;
+  }, [trainer, settingsMap]);
   const [trainingMode, setTrainingMode] = useState(TRAINING_MODE_LORA);
   const [trainingModeBusy, setTrainingModeBusy] = useState(false);
   const [trainingModeError, setTrainingModeError] = useState('');
@@ -1215,7 +1215,6 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   // Non-null only when a saver THIS family's recipe relies on is switched off.
   // The server decides (one rule, shared with the preflight); the panel renders.
   const advMemRiskLine = memoryRiskLine(adv?.memory_risk, adv?.family_label);
-  const LR_SCHED_LABELS = { constant: 'Constant (default)', constant_with_warmup: 'Warmup → constant', linear: 'Linear decay', cosine: 'Cosine decay', cosine_with_restarts: 'Cosine + restarts' };
   // The resolution the next run will actually train at. Slider mode defaults to
   // 768 only (the slider loss makes several prediction passes per step — much
   // higher VRAM peak; multi-scale 768+1024 OOMs on 24 GB) unless the user picked
@@ -3474,430 +3473,43 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
             </div>
           </div>
 
-          {/* Expert — last-mile levers. Collapsed by default; every control defaults
-              to the current behaviour, so a newcomer who never opens this is unaffected. */}
-          {!fullMode && (<details className="group rounded-lg border border-indigo-200 border-l-[3px] border-l-indigo-400 bg-indigo-500/[0.14] transition-colors hover:bg-indigo-100">
-            <summary className="flex items-center gap-2 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden px-2.5 py-2.5 text-[0.6875rem] font-semibold uppercase tracking-wider text-indigo-100 hover:text-white">
-              <span aria-hidden className="text-indigo-700 transition-transform group-open:rotate-90">▸</span>
-              <span aria-hidden>🔬</span>
-              <span>Expert — last-mile levers</span>
-              <span className="ml-auto hidden sm:inline normal-case font-normal tracking-normal text-indigo-700/50">network · alpha · memory{advTimestepSupported ? ' · timestep' : ''} · optimizer · schedule · EMA</span>
-            </summary>
-            <div className="flex flex-col px-2.5 pb-2.5 divide-y divide-indigo-400/10 [&>div]:py-2.5 [&>div:first-child]:pt-1 [&>div:last-child]:pb-0">
-              {/* Network variant — LoRA (default) or LoKr. LoKr is arch-generic in
-                  ai-toolkit, so it's offered on every family; the *_supported guard
-                  mirrors the timestep pattern for a future family that can't run it. */}
-              <div className="flex flex-col gap-0.5" title={inertOnLane('network_type') || undefined}>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-content text-[0.75rem] w-28 shrink-0">Network</span>
-                  <select value={advNetworkType} onChange={(e) => saveAdv({ network_type: e.target.value })}
-                    aria-label="Network type"
-                    disabled={!!inertOnLane('network_type')}
-                    title={inertOnLane('network_type') || undefined}
-                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
-                    {advNetworkChoices.map((n) => <option key={n} value={n}>{n === 'lora' ? 'LoRA (default)' : 'LoKr'}</option>)}
-                  </select>
-                  {advNetworkType === 'lokr' && !advNetworkSupported && (
-                    <span className="text-amber-700 text-[0.625rem]" title={`LoKr isn't supported for ${trainType} — this run would fall back to LoRA.`}>⚠ not supported for {trainType}</span>
-                  )}
-                </div>
-                {advNetworkType === 'lokr' && (
-                  <div className="flex items-center gap-2 flex-wrap mt-1" title={inertOnLane('lokr_factor') || undefined}>
-                    <span className="text-content text-[0.75rem] w-28 shrink-0 inline-flex items-center gap-1">
-                      LoKr factor<HelpBadge topic="training.lokr_factor" />
-                    </span>
-                    <select value={advLokrFactor == null ? 'auto' : String(advLokrFactor)}
-                      onChange={(e) => saveAdv({ lokr_factor: e.target.value === 'auto' ? 'auto' : Number(e.target.value) })}
-                      aria-label="LoKr decomposition factor"
-                      disabled={!!inertOnLane('lokr_factor')}
-                      title={inertOnLane('lokr_factor') || undefined}
-                      className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
-                      <option value="auto">Auto (ai-toolkit)</option>
-                      {advLokrFactorChoices.map((factor) => <option key={factor} value={String(factor)}>{factor}</option>)}
-                    </select>
-                  </div>
-                )}
-                <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
-                  <b className="text-content-muted font-medium">Why:</b> LoRA is the standard adapter; LoKr factorises
-                  the update differently. <b className="text-content-muted font-medium">How:</b> keep LoRA unless you are
-                  deliberately comparing it. The Krea Raw community starter below pins LoKr factor 16, but a network type
-                  alone cannot make up for the wrong images, captions or total steps.
-                </span>
-              </div>
-              {/* Krea-only fields from the reported Krea Raw LoKr recipe. Kept out of
-                  every other family: this is a transparent, testable starting point,
-                  not an assertion that one anecdote transfers to another architecture. */}
-              {advKreaRecipeSupported && (
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-content text-[0.75rem] w-28 shrink-0 inline-flex items-center gap-1">
-                      Krea community recipe<HelpBadge topic="training.krea_community_recipe" />
-                    </span>
-                    <span className="text-amber-700 text-[0.6875rem] leading-relaxed">
-                      Community starting point, not a likeness promise — compare your own checkpoints.
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 flex-wrap" title={inertOnLane('content_or_style') || undefined}>
-                    <span className="text-content text-[0.75rem] w-28 shrink-0">Content / style</span>
-                    <select value={advContentOrStyle ?? 'auto'}
-                      onChange={(e) => saveAdv({ content_or_style: e.target.value === 'auto' ? 'auto' : e.target.value })}
-                      aria-label="Krea content or style balance"
-                      disabled={!!inertOnLane('content_or_style')}
-                      title={inertOnLane('content_or_style') || undefined}
-                      className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
-                      <option value="auto">Auto ({advContentOrStyleDefault})</option>
-                      {advContentOrStyleChoices.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
-                    </select>
-                  </div>
-                  <div className="flex items-center gap-2 flex-wrap" title={inertOnLane('do_differential_guidance') || undefined}>
-                    <label className="flex items-center gap-2 flex-wrap cursor-pointer">
-                      <span className="text-content text-[0.75rem] w-28 shrink-0 inline-flex items-center gap-1">
-                        Differential guidance<HelpBadge topic="training.krea_community_recipe" />
-                      </span>
-                      <input type="checkbox" checked={advDifferentialGuidance}
-                        onChange={(e) => saveAdv({ do_differential_guidance: e.target.checked })}
-                        aria-label="Enable Krea differential guidance"
-                        disabled={!!inertOnLane('do_differential_guidance')}
-                        title={inertOnLane('do_differential_guidance') || undefined}
-                        className="h-4 w-4 rounded border-border bg-surface accent-indigo-500 disabled:cursor-not-allowed disabled:opacity-50" />
-                      <span className="text-content-muted text-[0.75rem]">enable</span>
-                    </label>
-                    <label className="flex items-center gap-2" title={inertOnLane('differential_guidance_scale') || undefined}>
-                      <span className="text-content-muted text-[0.6875rem]">scale</span>
-                      <input type="number" min="0.1" max="10" step="0.1"
-                        value={differentialGuidanceScaleDraft}
-                        disabled={!advDifferentialGuidance || !!inertOnLane('differential_guidance_scale')}
-                        onChange={(e) => setDifferentialGuidanceScaleDraft(e.target.value)}
-                        onBlur={saveDifferentialGuidanceScale}
-                        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                        aria-label="Krea differential guidance scale"
-                        title={inertOnLane('differential_guidance_scale') || undefined}
-                        className="w-16 px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50" />
-                    </label>
-                  </div>
-                  <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
-                    <b className="text-content-muted font-medium">Reported starter:</b> Balanced plus differential
-                    guidance at scale 3 is what the Krea 2 Raw · LoKr likeness preset applies. Change one variable at a
-                    time and keep the intermediate saves that actually work for your dataset.
-                  </span>
-                </div>
-              )}
-              {/* EMA — exponential moving average of the weights */}
-              <div className="flex flex-col gap-0.5" title={inertOnLane('ema') || undefined}>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-content text-[0.75rem] w-28 shrink-0">EMA</span>
-                  <select value={String(advEma)}
-                    onChange={(e) => saveAdv({ ema: e.target.value === '0' ? 'off' : Number(e.target.value) })}
-                    aria-label="EMA (exponential moving average)"
-                    disabled={!!inertOnLane('ema')}
-                    title={inertOnLane('ema') || undefined}
-                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
-                    <option value="0">Off (default)</option>
-                    {advEmaChoices.map((d) => <option key={d} value={String(d)}>{d}</option>)}
-                  </select>
-                </div>
-                <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
-                  <b className="text-content-muted font-medium">Why:</b> exponential moving average of the weights —
-                  smoother, often better checkpoints. <b className="text-content-muted font-medium">How:</b> Off by
-                  default; 0.99 averages faster, 0.999 is slower and steadier. Test it as a separate variable: it is
-                  not part of the Krea Raw LoKr likeness starter.
-                </span>
-              </div>
-              {/* Dual captions — train each image with a long AND a short caption */}
-              <div className="flex flex-col gap-0.5">
-                <label className="flex items-center gap-2 flex-wrap cursor-pointer">
-                  <span className="text-content text-[0.75rem] w-28 shrink-0 inline-flex items-center gap-1">
-                    Dual captions<HelpBadge topic="training.dual_captions" />
-                  </span>
-                  <input type="checkbox" checked={advDualCaptions}
-                    onChange={(e) => saveAdv({ dual_captions: e.target.checked })}
-                    aria-label="Dual long + short captions"
-                    className="h-4 w-4 rounded border-border bg-surface accent-indigo-500" />
-                  <span className="text-content-muted text-[0.75rem]">long + short (local training only)</span>
-                </label>
-                {/* Issue #22 (1Tomber): Krea 2 / Anima cache their text embeddings, so the
-                    short caption can never be encoded. Say it here rather than let the user
-                    believe two wordings are training. Wraps at 400 px — no fixed width. */}
-                {advDualCaptions && !dualCaptionsSupport(trainType).supported && (
-                  <span className="text-amber-400 text-[0.6875rem] leading-relaxed">
-                    Ignored here: {dualCaptionsSupport(trainType).note}
-                  </span>
-                )}
-                <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
-                  <b className="text-content-muted font-medium">Why:</b> trains each image with both a full and a brief
-                  caption (text-side augmentation) so the LoRA leans less on any single wording.
-                  <b className="text-content-muted font-medium"> How:</b> the short variant is derived from the long one
-                  when you (re-)caption — same rules (no trigger, identity/concept/aesthetic kept out); edit it per image in
-                  the ⛶ caption editor. Cloud runs ignore this and train on the long caption only for now.
-                </span>
-              </div>
-              {/* Concept face masking — teach the act, not the identities (issue #15,
-                  reported by shivdbz2010). Renders nothing outside a concept dataset. */}
-              <ConceptFaceMaskField
-                datasetId={ds.currentId}
-                enabled={advMaskFaces}
-                supported={advMaskFacesSupported}
-                conceptConflict={advMaskFacesConflict}
-                faceCapability={caps.face_scoring}
-                expandDefault={undefined}
-                onToggle={(v) => saveAdv({ mask_faces: v })}
-              />
-              {/* Memory saving — quantisation + low-VRAM streaming (issue #14).
-                  The recipes are calibrated for 24 GB; on a bigger card that is a
-                  tax nobody asked for. Defaults are UNCHANGED — this only makes
-                  them a choice. Sending 'auto' when a box returns to its family
-                  default keeps an untouched-again dataset byte-identical. */}
-              <div className="flex flex-col gap-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-content text-[0.75rem] w-28 shrink-0 inline-flex items-center gap-1">
-                    Memory saving<HelpBadge topic="training.memory_saving" />
-                  </span>
-                  <span className="text-content-subtle text-[0.6875rem]">
-                    {advMemStateLabel}
-                  </span>
-                  {advMemTouched && (
-                    <button type="button"
-                      onClick={() => saveAdv(Object.fromEntries(MEMORY_KEYS.map((k) => [k, 'auto'])))}
-                      className="ml-auto text-[0.625rem] text-content-subtle hover:text-content underline underline-offset-2">
-                      Reset to default
-                    </button>
-                  )}
-                </div>
-                <div className="flex flex-col gap-1 sm:flex-row sm:flex-wrap sm:gap-x-4">
-                  {MEMORY_KEYS.map((k) => {
-                    const memInert = inertOnLane(k);
-                    return (
-                      <label key={k} className="flex items-center gap-2 cursor-pointer min-w-0" title={memInert || undefined}>
-                        <input type="checkbox" checked={Boolean(advMemEff[k])}
-                          onChange={(e) => saveAdv(memoryPatchFor(k, e.target.checked, advMemDefault))}
-                          aria-label={MEMORY_LABELS[k]}
-                          disabled={!!memInert}
-                          title={memInert || undefined}
-                          className="h-4 w-4 shrink-0 rounded border-border bg-surface accent-indigo-500 disabled:cursor-not-allowed disabled:opacity-50" />
-                        <span className="text-content-muted text-[0.75rem] truncate">{MEMORY_LABELS[k]}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-                {/* A saver this family's recipe relies on is off — most often
-                    because it was switched off on a 2B family (Anima/SDXL, where
-                    off IS the default) and the family then changed. Wraps at
-                    400 px: no fixed width, no truncation. */}
-                {advMemRiskLine && (
-                  <span className={`text-[0.6875rem] leading-relaxed ${
-                    adv?.memory_risk?.verdict === 'can_disable' ? 'text-content-muted' : 'text-amber-700'}`}>
-                    {adv?.memory_risk?.verdict === 'can_disable' ? '' : '⚠️ '}{advMemRiskLine}
-                  </span>
-                )}
-                <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
-                  <b className="text-content-muted font-medium">Why:</b> the recipes are tuned so a 12B model fits in
-                  24 GB — quantisation costs precision and low-VRAM streaming costs a lot of speed. If your card is
-                  bigger than the target, you are paying for nothing.
-                  <b className="text-content-muted font-medium"> How:</b> {advMemAdviceText}
-                </span>
-              </div>
-              {/* Decoupled alpha */}
-              <div className="flex flex-col gap-0.5" title={inertOnLane('alpha') || undefined}>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-content text-[0.75rem] w-28 shrink-0">Alpha</span>
-                  <select value={String(advAlphaChoice)}
-                    onChange={(e) => saveAdv({ alpha: e.target.value === 'auto' ? 'auto' : Number(e.target.value) })}
-                    aria-label="LoRA alpha"
-                    disabled={!!inertOnLane('alpha')}
-                    title={inertOnLane('alpha') || undefined}
-                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
-                    <option value="auto">Auto (= {advDefaultAlpha})</option>
-                    {advAlphaChoices.map((a) => <option key={a} value={String(a)}>{a}</option>)}
-                  </select>
-                  <span className="text-content-subtle text-[0.625rem] tabular-nums">→ scale {(advEffAlpha / Math.max(1, advEffRank)).toFixed(2)}×</span>
-                </div>
-                <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
-                  <b className="text-content-muted font-medium">Why:</b> alpha ÷ rank is the LoRA&apos;s effective strength while
-                  training — a soft learning-rate lever that isn&apos;t the LR. <b className="text-content-muted font-medium">How:</b> Auto
-                  ties alpha to rank (scale 1.0); a lower alpha (e.g. ½ rank) softens the fit — a clean way to stop a tiny
-                  (≤20-image) set from memorising without touching LR or rank.
-                </span>
-              </div>
-              {/* Network dropout */}
-              <div className="flex flex-col gap-0.5" title={inertOnLane('dropout') || undefined}>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-content text-[0.75rem] w-28 shrink-0">Network dropout</span>
-                  <select value={String(advDropout)}
-                    onChange={(e) => saveAdv({ dropout: e.target.value === '0' ? 'off' : Number(e.target.value) })}
-                    aria-label="Network dropout"
-                    disabled={!!inertOnLane('dropout')}
-                    title={inertOnLane('dropout') || undefined}
-                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
-                    <option value="0">Off</option>
-                    {advDropoutChoices.map((d) => <option key={d} value={String(d)}>{d}</option>)}
-                  </select>
-                </div>
-                <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
-                  <b className="text-content-muted font-medium">Why:</b> this is <i>network</i> dropout: it randomly drops
-                  adapter updates to reduce memorisation. It is separate from caption dropout. <b className="text-content-muted font-medium">How:</b> follow
-                  the preset; 0.05 is gentle, while larger values can underfit. Krea&apos;s text-embedding cache affects caption
-                  dropout, not this network control.
-                </span>
-              </div>
-              {/* Timestep weighting — flowmatch families only (SDXL disables it) */}
-              {advTimestepSupported && (
-                <div className="flex flex-col gap-0.5" title={inertOnLane('timestep_type') || undefined}>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-content text-[0.75rem] w-28 shrink-0">Timestep weighting</span>
-                    <select value={advTimestep} onChange={(e) => saveAdv({ timestep_type: e.target.value })}
-                      aria-label="Timestep weighting"
-                      disabled={!!inertOnLane('timestep_type')}
-                      title={inertOnLane('timestep_type') || undefined}
-                      className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
-                      <option value="auto">Auto ({advTimestepDefault})</option>
-                      {advTimestepChoices.map((t) => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </div>
-                  <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
-                    <b className="text-content-muted font-medium">Why:</b> which noise levels the loss emphasises — the
-                    detail-versus-global-structure balance for flow-matching models. <b className="text-content-muted font-medium">How:</b> Auto
-                    uses the family recipe ({advTimestepDefault}); use the researched Style preset unless you are deliberately
-                    testing texture/detail versus composition/structure emphasis.
-                  </span>
-                </div>
-              )}
-              {/* Optimizer */}
-              <div className="flex flex-col gap-0.5" title={inertOnLane('optimizer') || undefined}>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-content text-[0.75rem] w-28 shrink-0">Optimizer</span>
-                  <select value={advOptimizer} onChange={(e) => saveAdv({ optimizer: e.target.value })}
-                    aria-label="Optimizer"
-                    disabled={!!inertOnLane('optimizer')}
-                    title={inertOnLane('optimizer') || undefined}
-                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
-                    {advOptimizerChoices.map((o) => <option key={o} value={o}>{o}{o === 'adamw8bit' ? ' (default)' : ''}</option>)}
-                  </select>
-                </div>
-                <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
-                  <b className="text-content-muted font-medium">Why:</b> how the weights are updated — the biggest training
-                  lever after the dataset. <b className="text-content-muted font-medium">How:</b> <i>adamw8bit</i> (default)
-                  is fast and VRAM-light; <i>adafactor</i> uses less memory and auto-scales; <i>automagic</i>/<i>automagic2</i>
-                  use ai-toolkit&apos;s adaptive update rule; the Krea community starter still records its reported initial
-                  LR of 1e-4. <i>prodigy</i> also auto-tunes the LR and is popular for tiny sets — but may need
-                  <code className="text-content-muted">pip install prodigyopt</code> in the ai-toolkit venv. Picking an
-                  adaptive optimiser is the &quot;push further without cranking the LR&quot; move.
-                </span>
-              </div>
-              {/* Learning rate. The one setting that BOTH lanes honour and
-                  neither exposed: without a control here the rate is the
-                  family-fixed 1e-4 unless a preset happens to carry one, so a
-                  dataset trained at 3e-4 by hand could not be reproduced in the
-                  app at all. Blank/auto removes the override and returns to the
-                  default — the same three-way contract update_train_settings
-                  already enforces. Adaptive optimisers drive the rate
-                  themselves, so the field stands down rather than pretending to
-                  matter. */}
-              <div className="flex flex-col gap-0.5"
-                title={inertOnLane('learning_rate') || undefined}>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-content text-[0.75rem] w-28 shrink-0">Learning rate</span>
-                  <input type="text" inputMode="decimal"
-                    value={learningRateDraft}
-                    onChange={(e) => setLearningRateDraft(e.target.value)}
-                    onBlur={saveLearningRate}
-                    placeholder={advAdaptiveLr ? 'set by the optimiser' : 'auto (1e-4)'}
-                    aria-label="Learning rate"
-                    disabled={advAdaptiveLr || !!inertOnLane('learning_rate')}
-                    title={inertOnLane('learning_rate')
-                      || (advAdaptiveLr
-                        ? 'This optimiser tunes the learning rate itself — a fixed rate would be ignored.'
-                        : 'Blank = the family default (1e-4). Example: 3e-4')}
-                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] w-32 focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50" />
-                  <span className="text-content-subtle text-[0.6875rem]" hidden={!learningRateError}>
-                    {learningRateError}
-                  </span>
-                </div>
-                <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
-                  <b className="text-content-muted font-medium">Why:</b> how far each step moves the weights. Too high
-                  bakes the source&apos;s look in; too low never converges.
-                  <b className="text-content-muted font-medium"> How:</b> leave it blank for the family default
-                  (<i>1e-4</i>) unless you have a reason. Adaptive optimisers (<i>prodigy</i>, <i>automagic</i>) set it
-                  themselves and this field is disabled for them.
-                </span>
-              </div>
-              {/* Min-SNR gamma — SHARED, and each lane spells it differently:
-                  ai-toolkit takes `min_snr_gamma`, OneTrainer takes
-                  loss_weight_fn + loss_weight_strength. One number here, two
-                  translations in the services. Empty = off, which is what both
-                  trainers do with a zero anyway. */}
-              <div className="flex flex-col gap-0.5"
-                title={inertOnLane('min_snr_gamma') || undefined}>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-content text-[0.75rem] w-28 shrink-0">Min-SNR gamma</span>
-                  <input type="number" min={0} max={20} step={1}
-                    value={minSnrDraft}
-                    onChange={(e) => setMinSnrDraft(e.target.value)}
-                    onBlur={saveMinSnr}
-                    placeholder="off"
-                    aria-label="Min-SNR gamma"
-                    disabled={!!inertOnLane('min_snr_gamma')}
-                    title={inertOnLane('min_snr_gamma')
-                      || 'Empty = off. 5 is the usual value; both trainers ignore a 0.'}
-                    className="w-24 rounded-lg bg-surface-raised px-2 py-1 text-content tabular-nums text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50" />
-                </div>
-                <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
-                  <b className="text-content-muted font-medium">Why:</b> weights the loss by how much signal each
-                  noise level carries, which mostly helps a high-resolution run converge instead of spending its
-                  early steps on the noisiest timesteps.
-                  <b className="text-content-muted font-medium"> How:</b> leave it empty unless a run is converging
-                  slowly at 1024; <i>5</i> is the value most recipes use.
-                </span>
-              </div>
-              {/* LR schedule (+ warmup, only for the warmup schedule) */}
-              <div className="flex flex-col gap-0.5" title={inertOnLane('lr_scheduler') || undefined}>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-content text-[0.75rem] w-28 shrink-0">LR schedule</span>
-                  <select value={advLrSched} onChange={(e) => saveAdv({ lr_scheduler: e.target.value })}
-                    aria-label="Learning-rate schedule"
-                    disabled={!!inertOnLane('lr_scheduler')}
-                    title={inertOnLane('lr_scheduler') || undefined}
-                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
-                    {advLrSchedChoices.map((s) => <option key={s} value={s}>{LR_SCHED_LABELS[s] || s}</option>)}
-                  </select>
-                  {advLrSched === 'constant_with_warmup' && (
-                    <select value={String(advWarmup || 100)} onChange={(e) => saveAdv({ warmup: Number(e.target.value) })}
-                      aria-label="Warmup steps"
-                      disabled={!!inertOnLane('warmup')}
-                      title={inertOnLane('warmup') || undefined}
-                      className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
-                      {advWarmupChoices.map((w) => <option key={w} value={String(w)}>{w} warmup</option>)}
-                    </select>
-                  )}
-                </div>
-                <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
-                  <b className="text-content-muted font-medium">Why:</b> how the learning rate moves over the run.
-                  <b className="text-content-muted font-medium"> How:</b> <i>Constant</i> (default) holds it flat;
-                  <i> Warmup → constant</i> ramps it up over the first N steps (a gentler start that avoids early
-                  over-commitment on a small set) then holds; <i>Linear</i>/<i>Cosine</i> decay it toward 0 by the end for
-                  cleaner convergence. The warmup-steps box only applies to the warmup schedule.
-                </span>
-              </div>
-              {/* Gradient accumulation (effective batch) */}
-              <div className="flex flex-col gap-0.5" title={inertOnLane('grad_accum') || undefined}>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-content text-[0.75rem] w-28 shrink-0">Effective batch</span>
-                  <select value={String(advGradAccum)} onChange={(e) => saveAdv({ grad_accum: Number(e.target.value) })}
-                    aria-label="Gradient accumulation"
-                    disabled={!!inertOnLane('grad_accum')}
-                    title={inertOnLane('grad_accum') || undefined}
-                    className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
-                    {advGradAccumChoices.map((g) => <option key={g} value={String(g)}>{g === 1 ? '1 (default)' : `${g} × accum`}</option>)}
-                  </select>
-                </div>
-                <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
-                  <b className="text-content-muted font-medium">Why:</b> averages the gradient over N micro-batches before
-                  each update — a larger <i>effective</i> batch with no extra VRAM. <b className="text-content-muted font-medium">How:</b> 1
-                  (default); 2–4 smooths the noisy gradients a tiny dataset produces (steadier training), at the cost of a
-                  bit more time per update. A cheap stabiliser for small sets.
-                </span>
-              </div>
-            </div>
-          </details>)}
+          {/* Expert - last-mile levers, grouped by ownership (shared / this lane /
+              the other lane, collapsed). See TrainingAdvancedGroups.jsx for the
+              markup and the classification against GET /api/train/settings-map. */}
+          {!fullMode && (
+            <TrainingAdvancedGroups
+              lane={trainer} settingsMap={settingsMap} caps={caps} ds={ds}
+              advNetworkType={advNetworkType} saveAdv={saveAdv} advNetworkChoices={advNetworkChoices}
+              advNetworkSupported={advNetworkSupported} trainType={trainType}
+              advLokrFactor={advLokrFactor} advLokrFactorChoices={advLokrFactorChoices}
+              advKreaRecipeSupported={advKreaRecipeSupported} advContentOrStyle={advContentOrStyle}
+              advContentOrStyleChoices={advContentOrStyleChoices} advContentOrStyleDefault={advContentOrStyleDefault}
+              advDifferentialGuidance={advDifferentialGuidance}
+              differentialGuidanceScaleDraft={differentialGuidanceScaleDraft}
+              setDifferentialGuidanceScaleDraft={setDifferentialGuidanceScaleDraft}
+              saveDifferentialGuidanceScale={saveDifferentialGuidanceScale}
+              advEma={advEma} advEmaChoices={advEmaChoices}
+              advDualCaptions={advDualCaptions}
+              advMaskFaces={advMaskFaces} advMaskFacesSupported={advMaskFacesSupported}
+              advMaskFacesConflict={advMaskFacesConflict}
+              advMemEff={advMemEff} advMemStateLabel={advMemStateLabel} advMemTouched={advMemTouched}
+              advMemRiskLine={advMemRiskLine} advMemAdviceText={advMemAdviceText} advMemDefault={advMemDefault}
+              adv={adv}
+              advAlphaChoice={advAlphaChoice} advAlphaChoices={advAlphaChoices} advDefaultAlpha={advDefaultAlpha}
+              advEffAlpha={advEffAlpha} advEffRank={advEffRank}
+              advDropout={advDropout} advDropoutChoices={advDropoutChoices}
+              advTimestepSupported={advTimestepSupported} advTimestep={advTimestep}
+              advTimestepChoices={advTimestepChoices} advTimestepDefault={advTimestepDefault}
+              advOptimizer={advOptimizer} advOptimizerChoices={advOptimizerChoices}
+              advAdaptiveLr={advAdaptiveLr} learningRateDraft={learningRateDraft}
+              setLearningRateDraft={setLearningRateDraft} saveLearningRate={saveLearningRate}
+              learningRateError={learningRateError}
+              minSnrDraft={minSnrDraft} setMinSnrDraft={setMinSnrDraft} saveMinSnr={saveMinSnr}
+              advLrSched={advLrSched} advLrSchedChoices={advLrSchedChoices}
+              advWarmup={advWarmup} advWarmupChoices={advWarmupChoices}
+              advGradAccum={advGradAccum} advGradAccumChoices={advGradAccumChoices}
+            />
+          )}
 
           <label className="flex items-center gap-1.5 text-[0.6875rem] text-content-muted cursor-pointer"
             title={sliderOn

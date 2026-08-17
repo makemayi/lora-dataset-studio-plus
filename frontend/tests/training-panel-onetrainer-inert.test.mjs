@@ -1,18 +1,27 @@
 /**
- * The OneTrainer lane's Advanced options are mostly decorative: only three of
- * the panel's ~40 fields (learning rate, resolution, dual captions) reach a
- * OneTrainer run. `backend/app/services/onetrainer_service.py` (418824c0)
- * declares the truth via GET /api/train/onetrainer/settings-status; this file
- * pins that the panel actually GREYS OUT what the declaration says is inert,
- * on the OneTrainer lane only, and leaves everything alone on ai-toolkit.
+ * The Advanced-options panel groups itself by OWNERSHIP from the two-sided
+ * declaration at `backend/app/services/training_settings_map.py` (served over
+ * GET /api/train/settings-map): shared settings, then the block belonging to
+ * the lane in use, then the other lane's block — kept, collapsed, labelled,
+ * never hidden outright. This file pins that grouping, plus the disabled/
+ * enabled state and the SERVER-provided reason each control carries.
+ *
+ * The one-sided predecessor of this map (`/api/train/onetrainer/settings-status`,
+ * a `{state: 'applies'|'pinned'|'preset'}` shape) still exists server-side and
+ * is untouched — this file no longer exercises it. The three states are now
+ * `applies` / `pinned` / `absent`, declared per lane; `preset` does not exist
+ * in the new module (see `training_settings_map.py`'s own docstring for why
+ * the complement could not simply be taken).
  *
  * `renderToStaticMarkup` never runs effects, so neither the local-trainer pick
- * (a `<select>` the user would otherwise have to click) nor the settings-status
- * fetch can happen inside a mount test. TrainingPanel.jsx therefore grew two
- * test-only optional props — `trainerOverride` and `otSettingStatusInitial` —
- * that seed those two pieces of state before the first render. Both default to
- * null/'ai_toolkit' and are never passed by the real app (App.jsx has no
- * knowledge of them), so production behaviour is unchanged.
+ * (a `<select>` the user would otherwise have to click) nor the settings-map
+ * fetch can happen inside a mount test. TrainingPanel.jsx therefore grows
+ * three test-only optional props — `trainerOverride`, `settingsMapInitial`
+ * (replacing the old `otSettingStatusInitial`) and `advOverride` — that seed
+ * those pieces of state before the first render. All default to null/
+ * 'ai_toolkit' and are never passed by the real app (App.jsx has no knowledge
+ * of them), so production behaviour is unchanged: ai-toolkit by default, the
+ * map fetched live, nothing disabled until it resolves.
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -73,87 +82,179 @@ function renderPanel(props = {}) {
         })))))
 }
 
-/* SERVER declaration exactly as backend/app/services/onetrainer_service.py
-   (418824c0) ships it, trimmed to the keys this file exercises — kept as DATA
-   here, not re-derived, so a client-side copy of the server's wording would
-   still fail the "server text, not a client restate" assertion below. */
-const OT_STATUS = {
-  learning_rate: { state: 'applies', why: '' },
-  resolution: { state: 'applies', why: '' },
-  dual_captions: { state: 'applies', why: '' },
-  rank: { state: 'pinned', why: 'OneTrainer runs at rank 32 on this lane. The rank chosen here is used by ai-toolkit only.' },
-  alpha: { state: 'pinned', why: 'Pinned to equal the rank (scale 1.0).' },
-  network_type: { state: 'pinned', why: 'This lane reads Settings ▸ OneTrainer ▸ PEFT type, not this control.' },
-  optimizer: { state: 'preset', why: '' },
-  dropout: { state: 'preset', why: '' },
-  timestep_type: { state: 'preset', why: '' },
-  ema: { state: 'preset', why: '' },
-  grad_accum: { state: 'preset', why: '' },
+/* --- the fixture -----------------------------------------------------------
+ *
+ * SERVER declaration exactly as backend/app/services/training_settings_map.py
+ * ships it, trimmed to the keys and groups this file exercises — kept as DATA
+ * here, not re-derived, so a client-side copy of the server's wording would
+ * still fail the "server text, not a client restate" assertion below. The
+ * GROUPS order and labels are copied verbatim too, because one of the tests
+ * below exists specifically to pin that the panel follows this array's order
+ * rather than a hardcoded one of its own.
+ */
+const GROUPS = [
+  { key: 'core', label: 'Core' },
+  { key: 'iteration', label: 'Iteration' },
+  { key: 'network', label: 'Network' },
+  { key: 'optimisation', label: 'Optimisation' },
+  { key: 'text_encoders', label: 'Text encoders' },
+  { key: 'memory', label: 'Memory' },
+  { key: 'quality', label: 'Quality' },
+]
+
+const APPLIES = { state: 'applies', why: '' }
+const ABSENT = { state: 'absent', why: '' }
+
+const RANK_PINNED_WHY = 'OneTrainer runs at rank 32 on this lane. The rank chosen here is '
+  + 'used by ai-toolkit only.'
+const ALPHA_PINNED_WHY = 'Pinned to equal the rank (scale 1.0). A LoRA trained at the '
+  + 'preset’s own alpha against this app’s rank came out ~1/32 of its intended strength.'
+const NETWORK_TYPE_PINNED_WHY = 'This lane reads Settings ▸ OneTrainer ▸ PEFT type, not this control.'
+
+const SETTINGS_MAP = {
+  groups: GROUPS,
+  lanes: {
+    ai_toolkit: {
+      learning_rate: { ...APPLIES, group: 'core' },
+      resolution: { ...APPLIES, group: 'core' },
+      dual_captions: { ...APPLIES, group: 'core' },
+      lr_scheduler: { ...APPLIES, group: 'optimisation' },
+      warmup: { ...APPLIES, group: 'optimisation' },
+      min_snr_gamma: { ...APPLIES, group: 'quality' },
+      rank: { ...APPLIES, group: 'network' },
+      alpha: { ...APPLIES, group: 'network' },
+      network_type: { ...APPLIES, group: 'network' },
+      dropout: { ...APPLIES, group: 'network' },
+      optimizer: { ...APPLIES, group: 'optimisation' },
+      grad_accum: { ...APPLIES, group: 'optimisation' },
+      timestep_type: { ...APPLIES, group: 'quality' },
+      ema: { ...APPLIES, group: 'quality' },
+      content_or_style: { ...APPLIES, group: 'quality' },
+      do_differential_guidance: { ...APPLIES, group: 'quality' },
+      differential_guidance_scale: { ...APPLIES, group: 'quality' },
+      quantize: { ...APPLIES, group: 'memory' },
+      quantize_te: { ...APPLIES, group: 'memory' },
+      low_vram: { ...APPLIES, group: 'memory' },
+      lokr_factor: { ...APPLIES, group: 'network' },
+      epochs: { ...ABSENT, group: 'iteration' },
+      batch_size: { ...ABSENT, group: 'iteration' },
+      te1_lr: { ...ABSENT, group: 'text_encoders' },
+      te2_lr: { ...ABSENT, group: 'text_encoders' },
+    },
+    onetrainer: {
+      learning_rate: { ...APPLIES, group: 'core' },
+      resolution: { ...APPLIES, group: 'core' },
+      dual_captions: { ...APPLIES, group: 'core' },
+      lr_scheduler: { ...APPLIES, group: 'optimisation' },
+      warmup: { ...APPLIES, group: 'optimisation' },
+      min_snr_gamma: { ...APPLIES, group: 'quality' },
+      rank: { state: 'pinned', why: RANK_PINNED_WHY, group: 'network' },
+      alpha: { state: 'pinned', why: ALPHA_PINNED_WHY, group: 'network' },
+      network_type: { state: 'pinned', why: NETWORK_TYPE_PINNED_WHY, group: 'network' },
+      dropout: { ...ABSENT, group: 'network' },
+      optimizer: { ...ABSENT, group: 'optimisation' },
+      grad_accum: { ...ABSENT, group: 'optimisation' },
+      timestep_type: { ...ABSENT, group: 'quality' },
+      ema: { ...ABSENT, group: 'quality' },
+      content_or_style: { ...ABSENT, group: 'quality' },
+      do_differential_guidance: { ...ABSENT, group: 'quality' },
+      differential_guidance_scale: { ...ABSENT, group: 'quality' },
+      quantize: { ...ABSENT, group: 'memory' },
+      quantize_te: { ...ABSENT, group: 'memory' },
+      low_vram: { ...ABSENT, group: 'memory' },
+      lokr_factor: { ...ABSENT, group: 'network' },
+      epochs: { ...APPLIES, group: 'iteration' },
+      batch_size: { ...APPLIES, group: 'iteration' },
+      te1_lr: { ...APPLIES, group: 'text_encoders' },
+      te2_lr: { ...APPLIES, group: 'text_encoders' },
+    },
+  },
 }
 
-const PRESET_SENTENCE = "Decided by OneTrainer's own Krea 2 preset — this app deliberately does not override it."
-
-/* React's static-markup renderer HTML-entity-escapes attribute text (the
-   apostrophe in PRESET_SENTENCE becomes `&#x27;`), so every match below reads
-   through this rather than comparing raw strings. */
+/* React's static-markup renderer HTML-entity-escapes attribute text (an
+   apostrophe becomes `&#x27;`, `▸` becomes `&#x25B8;`), so every match below
+   reads through this rather than comparing raw strings. */
 const decode = (s) => s
   .replace(/&#x27;|&#39;/g, "'").replace(/&amp;/g, '&')
   .replace(/&quot;/g, '"').replace(/&mdash;/g, '—')
+  .replace(/&#x25B8;|&#9656;/gi, '▸')
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
+/* Back to the opening tag, forward to its close: the class string carries
+   Tailwind's `disabled:` VARIANTS (`disabled:opacity-50`), so a naive
+   /disabled/ over a window around a field matches whether or not the control
+   is actually disabled. Assert on the attribute, inside the element itself. */
+function fieldAround(html, ariaLabel) {
+  const at = html.indexOf(`aria-label="${ariaLabel}"`)
+  assert.notEqual(at, -1, `${ariaLabel} not found`)
+  const openAt = html.lastIndexOf('<', at)
+  const closeSelf = html.indexOf('/>', at)
+  const closeTag = html.indexOf('>', at)
+  const close = (closeSelf !== -1 && closeSelf < closeTag + 40) ? closeSelf + 2 : closeTag + 1
+  return html.slice(openAt, close)
+}
+
 test('ai-toolkit lane: nothing is greyed', () => {
-  const html = renderPanel({ trainerOverride: 'ai_toolkit', otSettingStatusInitial: OT_STATUS })
-  assert.ok(html.includes('aria-label="Optimizer"'), 'the optimizer control did not render')
-  assert.ok(!/aria-label="Optimizer"[^>]*disabled=""/.test(html), 'optimizer must not be disabled on ai-toolkit')
-  assert.ok(!/aria-label="Network dropout"[^>]*disabled=""/.test(html), 'dropout must not be disabled on ai-toolkit')
-  assert.ok(!/aria-label="LoRA rank"[^>]*disabled=""/.test(html), 'rank must not be disabled on ai-toolkit')
-  assert.ok(!html.includes(PRESET_SENTENCE), 'the preset sentence must not appear on ai-toolkit')
+  const html = decode(renderPanel({ trainerOverride: 'ai_toolkit', settingsMapInitial: SETTINGS_MAP }))
+  assert.doesNotMatch(fieldAround(html, 'Optimizer'), /\sdisabled=""/, 'optimizer must not be disabled on ai-toolkit')
+  assert.doesNotMatch(fieldAround(html, 'Network dropout'), /\sdisabled=""/, 'dropout must not be disabled on ai-toolkit')
+  assert.doesNotMatch(fieldAround(html, 'LoRA rank'), /\sdisabled=""/, 'rank must not be disabled on ai-toolkit')
+  assert.doesNotMatch(fieldAround(html, 'Network type'), /\sdisabled=""/, 'network type must not be disabled on ai-toolkit')
+  assert.ok(!html.includes(RANK_PINNED_WHY), 'the OneTrainer-only pin reason must not appear on ai-toolkit')
 })
 
-test('OneTrainer lane: a preset-owned control is disabled and carries the shared sentence', () => {
-  const html = decode(renderPanel({ trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS }))
-  // Optimizer is 'preset' in the declaration above.
-  const optMatch = html.match(/<select[^>]*aria-label="Optimizer"[^>]*>/)
-  assert.ok(optMatch, 'optimizer select not found')
-  assert.match(optMatch[0], /disabled=""/, 'a preset-owned control must be disabled on the OneTrainer lane')
-  assert.match(optMatch[0], new RegExp(`title="${escapeRe(PRESET_SENTENCE)}"`),
-    'a preset-owned control must show the shared sentence')
+test('OneTrainer lane: a setting absent from this lane sits in the other lane’s collapsed block, disabled', () => {
+  const html = decode(renderPanel({ trainerOverride: 'onetrainer', settingsMapInitial: SETTINGS_MAP }))
+  assert.match(fieldAround(html, 'Optimizer'), /\sdisabled=""/, 'a setting absent on OneTrainer must be disabled there')
+  // The reason is a fact ABOUT the current lane ("OneTrainer does not read
+  // this"), not the other lane's own pin reason — those are different claims.
+  const optField = fieldAround(html, 'Optimizer')
+  assert.match(optField, /OneTrainer does not read this setting/)
+})
+
+test('the other-lane block is a collapsed <details>, and its heading names the lane', () => {
+  const html = decode(renderPanel({ trainerOverride: 'onetrainer', settingsMapInitial: SETTINGS_MAP }))
+  assert.match(html, /ai-toolkit only — this lane does not read these/,
+    'the collapsed block must name the OTHER lane (ai-toolkit) while viewing OneTrainer')
+  const summaryAt = html.indexOf('ai-toolkit only')
+  const detailsAt = html.lastIndexOf('<details', summaryAt)
+  assert.notEqual(detailsAt, -1, 'the other-lane block must be a <details> element')
+  const summaryTagAt = html.lastIndexOf('<summary', summaryAt)
+  assert.ok(summaryTagAt > detailsAt, 'the naming heading must be inside a <summary>, i.e. collapsed by default')
 })
 
 test('OneTrainer lane: a pinned control carries the SERVER reason, not a client-side one', () => {
-  const html = renderPanel({ trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS })
-  const rankMatch = html.match(/<select[^>]*aria-label="LoRA rank"[^>]*>/)
-  assert.ok(rankMatch, 'rank select not found')
-  assert.match(rankMatch[0], /disabled=""/, 'the pinned rank control must be disabled on OneTrainer')
+  const html = decode(renderPanel({ trainerOverride: 'onetrainer', settingsMapInitial: SETTINGS_MAP }))
+  const rankField = fieldAround(html, 'LoRA rank')
+  assert.match(rankField, /\sdisabled=""/, 'the pinned rank control must be disabled on OneTrainer')
   // A distinctive fragment of the SERVER's own sentence — a hand-written
   // client duplicate of this wording would not reproduce it verbatim.
-  assert.match(rankMatch[0], /OneTrainer runs at rank 32 on this lane/,
+  assert.match(rankField, /OneTrainer runs at rank 32 on this lane/,
     'the pinned control must show the server-provided reason, not a client-authored one')
-  assert.ok(!rankMatch[0].includes(PRESET_SENTENCE),
-    'a pinned control must not fall back to the generic preset sentence')
+  assert.ok(!rankField.includes('does not read this setting'),
+    'a pinned control must not fall back to the generic absent-lane sentence')
 })
 
 test('OneTrainer lane: the three "applies" controls are not disabled', () => {
-  const html = renderPanel({ trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS })
-  const resMatch = html.match(/<select[^>]*aria-label="Training resolution"[^>]*>/)
-  assert.ok(resMatch, 'resolution select not found')
-  assert.doesNotMatch(resMatch[0], /disabled=""/, 'resolution applies on OneTrainer and must stay enabled')
-  const dualMatch = html.match(/<input[^>]*aria-label="Dual long \+ short captions"[^>]*>/)
-  assert.ok(dualMatch, 'dual captions checkbox not found')
-  assert.doesNotMatch(dualMatch[0], /disabled=""/, 'dual captions applies on OneTrainer and must stay enabled')
-  // learning_rate is the third 'applies' key, but this panel has no editable
-  // learning-rate control on the LoRA/OneTrainer arm at all (the only "Learning
-  // rate" input in this file belongs to the separate, cloud-only full-transformer
-  // arm) — so there is nothing here to assert enabled. Recorded, not invented.
+  const html = decode(renderPanel({ trainerOverride: 'onetrainer', settingsMapInitial: SETTINGS_MAP }))
+  assert.doesNotMatch(fieldAround(html, 'Training resolution'), /\sdisabled=""/, 'resolution applies on OneTrainer and must stay enabled')
+  assert.doesNotMatch(fieldAround(html, 'Dual long + short captions'), /\sdisabled=""/, 'dual captions applies on OneTrainer and must stay enabled')
+  assert.doesNotMatch(fieldAround(html, 'Learning rate'), /\sdisabled=""/, 'learning_rate applies on OneTrainer and must stay enabled')
 })
 
-test('an unknown key fails safe as preset-owned', () => {
-  const html = decode(renderPanel({ trainerOverride: 'onetrainer', otSettingStatusInitial: {} }))
-  const emaMatch = html.match(/<select[^>]*aria-label="EMA \(exponential moving average\)"[^>]*>/)
-  assert.ok(emaMatch, 'EMA select not found')
-  assert.match(emaMatch[0], /disabled=""/, 'a key the endpoint never mentions must fail safe to preset (disabled)')
-  assert.match(emaMatch[0], new RegExp(escapeRe(PRESET_SENTENCE)))
+test('an unknown key fails safe as inert, with a generic reason', () => {
+  // Empty per-lane maps: this app's own module could not declare the key —
+  // the same "has never heard of it" case `training_settings_map.status()`
+  // documents. Neither lane claims EMA, so it has no honest home in either
+  // lane's own block; it must still render, disabled, rather than vanish.
+  const html = decode(renderPanel({
+    trainerOverride: 'onetrainer',
+    settingsMapInitial: { groups: GROUPS, lanes: { ai_toolkit: {}, onetrainer: {} } },
+  }))
+  const emaField = fieldAround(html, 'EMA (exponential moving average)')
+  assert.match(emaField, /\sdisabled=""/, 'a key neither lane mentions must fail safe to disabled')
+  assert.match(emaField, /OneTrainer does not read this setting/)
 })
 
 /* --- the learning-rate control ------------------------------------------
@@ -162,7 +263,7 @@ test('an unknown key fails safe as preset-owned', () => {
  * rate is the family-fixed 1e-4 unless a preset happens to carry one, so a
  * dataset trained at 3e-4 by hand could not be reproduced in the app at all.
  * These pin that it exists, that it is NOT greyed on the OneTrainer lane (it
- * is one of the three that apply), and that it stands down for the optimisers
+ * is shared — applies on both), and that it stands down for the optimisers
  * that set the rate themselves.
  */
 
@@ -173,28 +274,18 @@ test('the learning rate has a control at all', () => {
 })
 
 test('the learning rate is NOT greyed on the OneTrainer lane', () => {
-  // It is declared 'applies'. Greying it would be the opposite error to the one
-  // this file exists to catch: hiding a control that genuinely works.
-  const html = renderPanel({ trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS })
-  const field = html.slice(html.indexOf('aria-label="Learning rate"') - 400,
-                           html.indexOf('aria-label="Learning rate"') + 200)
-  assert.doesNotMatch(decode(field), new RegExp(PRESET_SENTENCE.slice(0, 30)),
-    'learning_rate applies on this lane and must not carry the preset-owned reason')
+  const html = decode(renderPanel({ trainerOverride: 'onetrainer', settingsMapInitial: SETTINGS_MAP }))
+  assert.doesNotMatch(fieldAround(html, 'Learning rate'), /\sdisabled=""/,
+    'learning_rate is shared (applies on both lanes) and must not be disabled by the lane')
 })
 
-const lrField = (html) => {
-  const at = html.indexOf('aria-label="Learning rate"')
-  assert.notEqual(at, -1, 'the learning-rate field is gone')
-  // Back to the opening `<input`, forward to its close: the class string carries
-  // Tailwind's `disabled:` VARIANTS, so a naive /disabled/ over a window around
-  // the field matches whether or not the control is actually disabled. That is
-  // how the first version of this test passed against a field that was enabled.
-  return html.slice(html.lastIndexOf('<input', at), html.indexOf('/>', at) + 2)
-}
+const lrField = (html) => fieldAround(html, 'Learning rate')
 
 test('an adaptive optimiser disables the field instead of pretending it matters', () => {
   // prodigy drives the LR itself — _lr_from_settings returns the lr≈1.0
-  // convention whatever is stored, so an editable box would be a lie.
+  // convention whatever is stored, so an editable box would be a lie. This is
+  // independent of the lane classification above: the field can be shared
+  // AND still stand down for an optimiser that ignores it.
   const off = lrField(renderPanel({ advOverride: { optimizer: 'prodigy' } }))
   assert.match(off, /\sdisabled=""/, 'prodigy ignores a fixed rate; the control must stand down')
 
@@ -204,17 +295,16 @@ test('an adaptive optimiser disables the field instead of pretending it matters'
     + 'half the assertion above passes against a field that is always disabled')
 })
 
-/* --- epochs and batch, in OneTrainer's own vocabulary --------------------
+/* --- epochs and batch, in OneTrainer's own vocabulary ---------------------
  *
- * OneTrainer counts EPOCHS. The app used to hide that behind
- * `epochs = ceil(steps / images)` with the batch pinned to 1 so the arithmetic
- * held — an approximation, and one that made a hand-set batch inexpressible.
- * These pin that the panel now asks in OneTrainer's words on that lane, and
- * asks in nobody's words on the other one.
+ * OneTrainer counts EPOCHS. These fields live OUTSIDE the Expert block (they
+ * are gated purely on `trainer === 'onetrainer'`, unaffected by this wave's
+ * restructuring), so they are unaffected by the map itself — pinned here
+ * so a future change to either area is caught by the other's tests.
  */
 
 test('the epoch and batch fields exist only on the OneTrainer lane', () => {
-  const ot = renderPanel({ trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS })
+  const ot = renderPanel({ trainerOverride: 'onetrainer', settingsMapInitial: SETTINGS_MAP })
   assert.match(ot, /aria-label="OneTrainer epochs"/)
   assert.match(ot, /aria-label="OneTrainer batch size"/)
 
@@ -230,7 +320,7 @@ test('the derived step count is shown, and counts the batch', () => {
   // old derivation ignored the batch entirely; a label that did the same would
   // be worse than none, because it would look authoritative.
   const html = renderPanel({
-    trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS,
+    trainerOverride: 'onetrainer', settingsMapInitial: SETTINGS_MAP,
     advOverride: { epochs: 10, batch_size: 3 },
   })
   assert.match(html, /≈ 50 optimizer steps/)
@@ -239,13 +329,13 @@ test('the derived step count is shown, and counts the batch', () => {
 test('with no epochs set the panel says the count comes from steps', () => {
   // Showing a step count back while the server is deriving epochs FROM steps
   // would be circular.
-  const html = renderPanel({ trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS })
+  const html = renderPanel({ trainerOverride: 'onetrainer', settingsMapInitial: SETTINGS_MAP })
   assert.match(decode(html), /epochs derived from the step count above/)
 })
 
 test('a batch larger than the dataset is called out', () => {
   const html = renderPanel({
-    trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS,
+    trainerOverride: 'onetrainer', settingsMapInitial: SETTINGS_MAP,
     advOverride: { epochs: 5, batch_size: 40 },
   })
   assert.match(decode(html), /larger than the 15 images/)
@@ -254,7 +344,7 @@ test('a batch larger than the dataset is called out', () => {
 /* --- the text encoders --------------------------------------------------- */
 
 test('the text-encoder rates appear only on the OneTrainer lane', () => {
-  const ot = renderPanel({ trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS })
+  const ot = renderPanel({ trainerOverride: 'onetrainer', settingsMapInitial: SETTINGS_MAP })
   assert.match(ot, /aria-label="OneTrainer text encoder 1 learning rate"/)
   assert.match(ot, /aria-label="OneTrainer text encoder 2 learning rate"/)
   assert.doesNotMatch(renderPanel(), /OneTrainer text encoder/)
@@ -263,7 +353,7 @@ test('the text-encoder rates appear only on the OneTrainer lane', () => {
 test('an empty text-encoder rate reads as frozen, not as zero', () => {
   // "Training at 0" and "not training" would otherwise be two ways to say the
   // same thing, and only one of them would be true.
-  const html = renderPanel({ trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS })
+  const html = renderPanel({ trainerOverride: 'onetrainer', settingsMapInitial: SETTINGS_MAP })
   const te1 = html.slice(html.lastIndexOf('<input', html.indexOf('text encoder 1')),
                          html.indexOf('/>', html.indexOf('text encoder 1')) + 2)
   assert.match(te1, /placeholder="frozen"/)
@@ -273,40 +363,79 @@ test('a text-encoder rate at or above the main rate is called out', () => {
   // The ordinary way a character LoRA ends up welded to the words in its
   // captions. Said at the moment of setting it, not in a doc nobody opens.
   const html = decode(renderPanel({
-    trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS,
+    trainerOverride: 'onetrainer', settingsMapInitial: SETTINGS_MAP,
     advOverride: { learning_rate: 0.0003, te2_lr: 0.0003 },
   }))
   assert.match(html, /at or above the main 0\.0003/)
 
   const quiet = decode(renderPanel({
-    trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS,
+    trainerOverride: 'onetrainer', settingsMapInitial: SETTINGS_MAP,
     advOverride: { learning_rate: 0.0003, te2_lr: 0.00001 },
   }))
   assert.doesNotMatch(quiet, /at or above the main/,
     'a sane fraction must not warn — a warning that always fires teaches nothing')
 })
 
-/* --- the schedule, once the backend started honouring it ------------------
- *
- * lr_scheduler and warmup moved from 'preset' to 'applies' when
- * build_job_config learned to map this app's vocabulary into OneTrainer's enum.
- * The panel must follow the declaration, not a memory of it — that is the whole
- * point of serving the status from the module that writes the config.
- */
+/* --- shared vs. lane-owned vs. the other lane, section by section -------- */
 
-test('a control follows the declaration when a setting stops being preset-owned', () => {
-  const nowApplies = { ...OT_STATUS, lr_scheduler: { state: 'applies', why: '' } }
-  const html = renderPanel({ trainerOverride: 'onetrainer', otSettingStatusInitial: nowApplies })
-  const sched = html.match(/<select[^>]*aria-label="Learning-rate schedule"[^>]*>/)
-  assert.ok(sched, 'the schedule select is gone')
-  assert.doesNotMatch(sched[0], /disabled=""/,
-    'the server now says this applies; a panel that kept greying it would be '
-    + 'the same drift the declaration exists to end, pointing the other way')
+test('a shared setting appears in the Shared section on BOTH lanes', () => {
+  // dual_captions applies on both lanes in the map, so it must sit under the
+  // "Shared" heading (and be enabled) whichever lane is current.
+  for (const lane of ['ai_toolkit', 'onetrainer']) {
+    const html = decode(renderPanel({ trainerOverride: lane, settingsMapInitial: SETTINGS_MAP }))
+    const sharedAt = html.indexOf('>Shared<')
+    assert.notEqual(sharedAt, -1, `Shared heading missing on ${lane}`)
+    const dualAt = html.indexOf('aria-label="Dual long + short captions"')
+    assert.ok(dualAt > sharedAt, `dual captions must render after the Shared heading on ${lane}`)
+    assert.doesNotMatch(fieldAround(html, 'Dual long + short captions'), /\sdisabled=""/)
+  }
+})
 
-  // And the converse, so this is not a test that passes on any input.
-  const stillPreset = renderPanel({ trainerOverride: 'onetrainer', otSettingStatusInitial: OT_STATUS })
-  const greyed = stillPreset.match(/<select[^>]*aria-label="Learning-rate schedule"[^>]*>/)
-  assert.match(greyed[0], /disabled=""/)
+test('switching the lane MOVES a control between sections rather than removing it', () => {
+  // network_type applies on ai-toolkit and is pinned on OneTrainer — never
+  // absent on either — so it must be present, enabled, under "ai-toolkit
+  // settings" on one lane, and present, disabled, under "OneTrainer settings"
+  // on the other. It must never disappear.
+  const ai = decode(renderPanel({ trainerOverride: 'ai_toolkit', settingsMapInitial: SETTINGS_MAP }))
+  assert.match(ai, /aria-label="Network type"/, 'network type must render on ai-toolkit')
+  assert.doesNotMatch(fieldAround(ai, 'Network type'), /\sdisabled=""/)
+  assert.match(ai, /ai-toolkit settings/)
+
+  const ot = decode(renderPanel({ trainerOverride: 'onetrainer', settingsMapInitial: SETTINGS_MAP }))
+  assert.match(ot, /aria-label="Network type"/, 'network type must still render on OneTrainer, not disappear')
+  assert.match(fieldAround(ot, 'Network type'), /\sdisabled=""/)
+  assert.match(ot, /OneTrainer settings/)
+})
+
+test('groups render in the server’s order, and an empty group is not rendered', () => {
+  // Swap Network and Quality relative to the fixture above: both groups are
+  // non-empty in the ai-toolkit "this lane" section (network_type/alpha/
+  // dropout vs. ema/timestep_type), so the panel must follow the array, not a
+  // hardcoded idea of which comes first.
+  const swapped = {
+    ...SETTINGS_MAP,
+    groups: [
+      { key: 'core', label: 'Core' },
+      { key: 'iteration', label: 'Iteration' },
+      { key: 'quality', label: 'Quality' },
+      { key: 'network', label: 'Network' },
+      { key: 'optimisation', label: 'Optimisation' },
+      { key: 'text_encoders', label: 'Text encoders' },
+      { key: 'memory', label: 'Memory' },
+    ],
+  }
+  const html = decode(renderPanel({ trainerOverride: 'ai_toolkit', settingsMapInitial: swapped }))
+  const qualityAt = html.indexOf('>Quality<')
+  const networkAt = html.indexOf('>Network<')
+  assert.notEqual(qualityAt, -1)
+  assert.notEqual(networkAt, -1)
+  assert.ok(qualityAt < networkAt, 'Quality was placed before Network in the map and must render first')
+
+  // "Iteration" and "Text encoders" have nothing to show inside the Expert
+  // block on the ai-toolkit lane (epochs/batch/TE live outside it, gated on
+  // trainer==='onetrainer' alone) — an empty group must not print a heading.
+  assert.ok(!html.includes('>Iteration<'), 'an empty group must not render its heading')
+  assert.ok(!html.includes('>Text encoders<'), 'an empty group must not render its heading')
 })
 
 test('min-SNR gamma is a SHARED control, present on both lanes', () => {
@@ -314,12 +443,41 @@ test('min-SNR gamma is a SHARED control, present on both lanes', () => {
   // cross-lane settings rather than inside either lane's block. A control that
   // appeared on only one lane would misdescribe a setting that reaches both.
   assert.match(renderPanel(), /aria-label="Min-SNR gamma"/)
-  const ot = renderPanel({
-    trainerOverride: 'onetrainer',
-    otSettingStatusInitial: { ...OT_STATUS, min_snr_gamma: { state: 'applies', why: '' } },
+  const ot = decode(renderPanel({ trainerOverride: 'onetrainer', settingsMapInitial: SETTINGS_MAP }))
+  assert.doesNotMatch(fieldAround(ot, 'Min-SNR gamma'), /\sdisabled=""/, 'it applies on OneTrainer too')
+  assert.match(fieldAround(ot, 'Min-SNR gamma'), /placeholder="off"/, 'empty reads as off, not as zero')
+  const sharedAt = ot.indexOf('>Shared<')
+  assert.ok(ot.indexOf('aria-label="Min-SNR gamma"') > sharedAt, 'min-SNR gamma must render under Shared')
+})
+
+/* --- branches that only render under a non-default `adv`, mounted here so a
+   broken one cannot hide behind tests that never reach it (the Settings page
+   white-screen this rule exists for: a source-text test cannot tell a removed
+   branch from a broken one). Neither has its own aria-label test elsewhere in
+   this suite. --- */
+
+test('the LoKr factor field renders when Network is set to LoKr', () => {
+  const html = renderPanel({
+    trainerOverride: 'ai_toolkit', settingsMapInitial: SETTINGS_MAP,
+    advOverride: { network_type: 'lokr' },
   })
-  const field = ot.slice(ot.lastIndexOf('<input', ot.indexOf('aria-label="Min-SNR gamma"')),
-                         ot.indexOf('/>', ot.indexOf('aria-label="Min-SNR gamma"')) + 2)
-  assert.doesNotMatch(field, /\sdisabled=""/, 'it applies on OneTrainer too')
-  assert.match(field, /placeholder="off"/, 'empty reads as off, not as zero')
+  assert.match(html, /aria-label="LoKr decomposition factor"/)
+})
+
+test('the Krea community recipe card renders when the family supports it', () => {
+  const html = renderPanel({
+    trainerOverride: 'ai_toolkit', settingsMapInitial: SETTINGS_MAP,
+    advOverride: { krea_recipe_supported: true },
+  })
+  assert.match(html, /aria-label="Krea content or style balance"/)
+  assert.match(html, /aria-label="Enable Krea differential guidance"/)
+  assert.match(html, /aria-label="Krea differential guidance scale"/)
+
+  // And on OneTrainer, where all three are absent: still present, disabled,
+  // inside the collapsed other-lane block — not gone.
+  const ot = decode(renderPanel({
+    trainerOverride: 'onetrainer', settingsMapInitial: SETTINGS_MAP,
+    advOverride: { krea_recipe_supported: true },
+  }))
+  assert.match(fieldAround(ot, 'Krea content or style balance'), /\sdisabled=""/)
 })
