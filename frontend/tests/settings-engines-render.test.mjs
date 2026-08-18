@@ -468,3 +468,11 @@ test('the step help names the trap at 0 and the value once set', () => {
   assert.match(html, /the swap runs the graph(&#x27;|'|’)s own 8 steps/)
   assert.match(html, /4 steps instead of the graph/)
 })
+
+test('the Topaz card offers the upscale engine choice and the exe path', () => {
+  const html = render({ focusId: 'topaz-engine', engines: { upscale_engine: 'seedvr2' } })
+  assert.match(html, /Upscale engine for the 🔍 button/)
+  assert.match(html, /Topaz Photo AI/)
+  assert.match(html, /Topaz executable/)
+  assert.match(html, /auto-detect/)
+})

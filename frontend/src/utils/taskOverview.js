@@ -14,7 +14,7 @@ export function normalizeOverview(raw) {
   const failedIds = tasks.filter((t) => t.status === 'failed')
     .map((t) => String(t.job_id)).filter(Boolean)
   const runningCount = tasks.filter((t) =>
-    ['pending', 'awaiting_comfyui', 'processing', 'sent_to_comfy', 'running']
+    ['pending', 'queued', 'awaiting_comfyui', 'processing', 'sent_to_comfy', 'running']
       .includes(t.status)).length
   return {
     status: raw.status && typeof raw.status === 'object' ? raw.status : null,
@@ -33,6 +33,7 @@ export function badgeCounts(overview, seenFailureIds) {
 
 export const STATUS_LABEL = {
   pending: 'Queued',
+  queued: 'Queued',
   awaiting_comfyui: 'Paused · waiting for ComfyUI',
   processing: 'Running',
   sent_to_comfy: 'Running',
@@ -47,6 +48,7 @@ export const STATUS_LABEL = {
    amber "running", sky "paused", slate "queued" (CLAUDE.md §UI rules). */
 export const STATUS_CHIP = {
   pending: 'bg-slate-100 text-slate-600',
+  queued: 'bg-slate-100 text-slate-600',
   awaiting_comfyui: 'bg-sky-50 text-sky-700',
   processing: 'bg-amber-50 text-amber-700',
   sent_to_comfy: 'bg-amber-50 text-amber-700',

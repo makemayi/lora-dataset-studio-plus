@@ -1832,6 +1832,74 @@ function KreaCharacterLorasCard({ krea, setField }) {
    is the OTHER way to run ✨ Upscale & improve — the one that resolves detail
    without reinterpreting it — so its settings live next to the engines that feed
    the same pass, not in a section of their own. */
+/* Topaz Photo AI — the second UPSCALE engine, on its own GPU outside ComfyUI.
+
+   Not a generation engine either: it powers the 🔍 in-place upscale button
+   when engines.upscale_engine is 'topaz'. Runs tpai.exe (Autopilot decides the
+   model/scale), queues behind the GPU in the Task Center. */
+function TopazCard({ config, setField, configDefaults }) {
+  const tz = config.topaz || {}
+  const dflt = (key) => defaultValueAt(configDefaults, 'topaz', key)
+  const [probe, setProbe] = useState(null)
+  const probeTopaz = () => {
+    apiFetch('/api/settings/topaz/status')
+      .then((d) => setProbe(d))
+      .catch(() => setProbe({ found: false }))
+  }
+  return (
+    <Card
+      id="topaz-engine"
+      title="Topaz Photo AI upscaling"
+      help="The 🔍 in-place upscale button can run Topaz Photo AI instead of SeedVR2. Topaz is a separate native app on its own GPU, so jobs queue behind training/vision/ComfyUI and show in the Task Center. Pick the engine below; model choice and scale are left to Topaz Autopilot."
+    >
+      <div className="mt-1 sm:max-w-md">
+        <label htmlFor="upscale-engine" className="block text-xs font-medium text-content">
+          Upscale engine for the 🔍 button
+        </label>
+        <select
+          id="upscale-engine"
+          value={config.engines?.upscale_engine ?? defaultValueAt(configDefaults, 'engines', 'upscale_engine')}
+          onChange={(e) => setField('engines', 'upscale_engine', e.target.value)}
+          className={INPUT_CLASS}
+        >
+          <option value="seedvr2">SeedVR2 (ComfyUI — local GPU)</option>
+          <option value="topaz">Topaz Photo AI (separate app — own GPU)</option>
+        </select>
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="topaz-exe" className="block text-xs font-medium text-content">
+          Topaz executable (tpai.exe)
+        </label>
+        <input
+          id="topaz-exe"
+          type="text"
+          value={tz.exe_path ?? ''}
+          onChange={(e) => setField('topaz', 'exe_path', e.target.value)}
+          placeholder="auto-detect"
+          className={INPUT_CLASS}
+        />
+        <HelpText className="mt-1 text-xs text-content-muted">
+          Leave empty to auto-detect the standard install paths
+          (…\Topaz Labs LLC\Topaz Photo AI\tpai.exe).
+        </HelpText>
+        <button type="button" onClick={probeTopaz}
+          className="mt-1 rounded-full bg-surface-raised px-2 py-1 text-xs text-content">
+          Probe
+        </button>
+        <span className="ml-2 text-xs text-content-muted">
+          {probe === null
+            ? ''
+            : probe.found
+              ? `Found: ${probe.path}`
+              : 'Not found — install Topaz or set the path above.'}
+        </span>
+      </div>
+    </Card>
+  )
+}
+
+
 function SeedVr2Card({ config, setField, configDefaults, caps }) {
   const svr = config.seedvr2 || {}
   const improve = config.improve || {}
@@ -2711,6 +2779,7 @@ const ENGINE_RAIL = [
       { id: 'minimax_h3', label: 'MiniMax H3', engine: 'minimax_h3',
         prefix: ['minimax-h3-', 'h3-'] },
       { id: 'seedvr2', label: 'SeedVR2', engine: 'seedvr2', prefix: ['seedvr2-'] },
+      { id: 'topaz', label: 'Topaz Photo AI', engine: 'topaz', prefix: ['topaz-'] },
     ],
   },
   {
@@ -2860,6 +2929,9 @@ export default function EnginesSection(props) {
     ),
     seedvr2: () => (
       <SeedVr2Card config={config} setField={setField} configDefaults={configDefaults} caps={caps} />
+    ),
+    topaz: () => (
+      <TopazCard config={config} setField={setField} configDefaults={configDefaults} caps={caps} />
     ),
     chatgpt: () => (
       <ChatgptSubscriptionCard caps={caps} config={config} setField={setField} refreshCaps={refreshCaps}

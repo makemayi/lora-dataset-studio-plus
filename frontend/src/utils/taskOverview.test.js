@@ -36,3 +36,9 @@ test('badgeCounts hides failures already seen and zeroes when nothing runs', () 
   assert.deepEqual(badgeCounts({ runningCount: 0, failedIds: [] }, new Set()),
                    { running: 0, failed: 0 })
 })
+
+test('topaz queued status gets a label and counts as in-progress', () => {
+  assert.equal(STATUS_LABEL.queued, 'Queued')
+  const o = normalizeOverview({ tasks: [{ job_id: 'topaz-1', status: 'queued' }] })
+  assert.equal(o.runningCount, 1)
+})

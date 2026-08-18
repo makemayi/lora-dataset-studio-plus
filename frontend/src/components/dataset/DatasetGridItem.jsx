@@ -114,7 +114,7 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
                                          busyReason = null,
                                           onScoreFace, scoreFaceBusy = false, faceScoringBusy = false, faceScoringBlocked = null,
                                           onRegenerate, onReimprove, onFaceSwap, onUndoFaceSwap, swapBusy = false, hasRef = false, onView, nonce = 0, faceThresholds,
-                                          onSeedvr2Replace,
+                                          onUpscaleReplace,
                                           selected = false, onToggleSelect, tileSize = 'M',
                                           datasetKind = 'character', dualCaptions = false,
                                           improvementState = undefined }) {
@@ -400,17 +400,18 @@ export default function DatasetGridItem({ img, datasetId, onStatus, onCaption, o
           {/* ↩ Undo a swap that already landed. Offered only while the server
               says the picture it replaced is still in the Trash, so the button
               never promises something emptying the Trash has taken away. */}
-          {url && onSeedvr2Replace && (
-            /* SeedVR2 upscale IN PLACE: the tile's current image goes through
-               the shipped SeedVR2 workflow (2x by default) and the result
-               REPLACES the tile — original kept for undo, same contract as the
-               face swap. Distinct from the ✨ improve lane, which creates a
-               candidate and never touches the source. */
+          {url && onUpscaleReplace && (
+            /* In-place upscale: the tile's current image goes through the
+               configured engine (SeedVR2 in ComfyUI, or Topaz Photo AI on its
+               own GPU) and the result REPLACES the tile — original kept for
+               undo, same contract as the face swap. Distinct from the ✨
+               improve lane, which creates a candidate and never touches the
+               source. */
             <button type="button"
-              onClick={(e) => { e.stopPropagation(); onSeedvr2Replace(img.id); }}
+              onClick={(e) => { e.stopPropagation(); onUpscaleReplace(img.id); }}
               disabled={busy}
-              title={refused || 'SeedVR2 upscale this image in place (2x — replaces the tile, original kept for undo)'}
-              aria-label={refused || 'SeedVR2 upscale this image in place (2x)'}
+              title={refused || 'Upscale this image in place (replaces the tile, original kept for undo)'}
+              aria-label={refused || 'Upscale this image in place'}
               className={`grid min-h-5 min-w-5 place-items-center rounded-full ${ON_PHOTO_HOVER} text-white disabled:cursor-not-allowed disabled:opacity-45`}>
               <UpscaleIcon className="h-3.5 w-3.5" />
             </button>

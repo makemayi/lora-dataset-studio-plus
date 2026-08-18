@@ -1798,7 +1798,36 @@ def dataset_image_topaz_replace(image_id):
         return _map_error(e)
     if result is None:
         return jsonify({'error': 'not found'}), 404
-    return jsonify({'ok': True, 'job_id': result}), 202
+    return jsonify({'ok': True, 'job_id': result, 'engine': 'topaz'}), 202
+
+
+@bp.post('/dataset/image/<int:image_id>/upscale-replace')
+def dataset_image_upscale_replace(image_id):
+    """In-place upscale of one tile, dispatched by the `engines.upscale_engine`
+    setting — the 🔍 button's one endpoint. seedvr2 queues into ComfyUI; topaz
+    queues into the Topaz queue (own GPU, shown in the Task Center). Both keep
+    the same swap-restore contract, so the frontend only learns which one ran
+    from the response."""
+    from .. import config as cfg
+    engine = (cfg.get('engines.upscale_engine') or 'seedvr2')
+    if engine == 'topaz':
+        try:
+            result = svc.topaz_upscale_replace(LOCAL_USER, image_id)
+        except Exception as e:
+            return _map_error(e)
+        if result is None:
+            return jsonify({'error': 'not found'}), 404
+        return jsonify({'ok': True, 'job_id': result, 'engine': 'topaz'}), 202
+    try:
+        result = svc.seedvr2_upscale_replace(LOCAL_USER, image_id)
+    except Exception as e:
+        engine_error = _improve_engine_error(e)
+        if engine_error:
+            return engine_error
+        return _map_error(e)
+    if result is None:
+        return jsonify({'error': 'not found'}), 404
+    return jsonify({'ok': True, 'job_id': result, 'engine': 'seedvr2'}), 202
 
 
 @bp.post('/dataset/image/<int:image_id>/seedvr2-replace')

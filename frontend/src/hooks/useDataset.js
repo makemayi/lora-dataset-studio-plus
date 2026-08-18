@@ -1410,14 +1410,17 @@ export function useDataset() {
      swap replaced is in the Trash and the server moves it back. Shares the
      swapping ref-guard so a double click cannot race the restore against
      itself. */
-  const seedvr2ReplaceImage = useCallback(async (imageId) => {
+  const upscaleReplaceImage = useCallback(async (imageId) => {
     if (swappingRef.current.has(imageId)) return { ok: false, error: 'already running' };
     swappingRef.current.add(imageId);
     setSwappingIds((previous) => new Set(previous).add(imageId));
     try {
-      const d = await postJson(`/api/dataset/image/${imageId}/seedvr2-replace`, {});
+      // The single dispatcher route: `engines.upscale_engine` decides between
+      // SeedVR2 (ComfyUI) and Topaz Photo AI (own GPU, Task Center).
+      const d = await postJson(`/api/dataset/image/${imageId}/upscale-replace`, {});
       if (d.ok) {
-        toast.success('SeedVR2 upscale started — the tile is replaced when it lands');
+        const name = d.engine === 'topaz' ? 'Topaz Photo AI' : 'SeedVR2';
+        toast.success(`${name} upscale started — the tile is replaced when it lands`);
         await refresh();
         return { ok: true };
       }
@@ -1922,7 +1925,7 @@ export function useDataset() {
           discardEditedReference, setDatasetTrainType, setDatasetFidelity, deleteImage,
           lockImage, batchImages, replaceCaptions, writeCaptionFiles, openDatasetFolder,
           cancelPending, cancelCaption, regenerate, faceSwapImage, undoFaceSwap, analyzeFaces, scoreFace,
-          seedvr2ReplaceImage,
+          upscaleReplaceImage,
           trimPreview, trimApply, trimDiscard, trimUndo,
           findWatermarks, cleanWatermarks, cleanWatermarkImages, restoreWatermarkImage,
           dismissWatermarks, saveWatermarkRegions, cancelWatermarkScan,

@@ -6,7 +6,7 @@ import { useTaskOverview } from '../hooks/useTaskOverview'
 import { StatusStrip } from '../components/tasks/StatusStrip'
 import { TaskRow } from '../components/tasks/TaskRow'
 
-const ACTIVE = new Set(['pending', 'awaiting_comfyui', 'processing',
+const ACTIVE = new Set(['pending', 'queued', 'awaiting_comfyui', 'processing',
                         'sent_to_comfy', 'running'])
 
 export default function TasksPage() {
@@ -70,6 +70,7 @@ export default function TasksPage() {
           <option value="image">Images</option>
           <option value="training">Training</option>
           <option value="vision">Vision</option>
+          <option value="topaz">Topaz</option>
         </select>
       </div>
       <div className="mt-4 overflow-hidden rounded-xl bg-surface">

@@ -255,7 +255,7 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
                                       onLockToggle, onMirror, onRegenerate, onScoreFace, scoringFaceIds,
                                       swappingIds,
                                       onFaceSwap, onUndoFaceSwap, hasRef = false, onReimprove, onView, onBatch, busy, nonces,
-                                      onSeedvr2Replace,
+                                      onUpscaleReplace,
                                       mirroringIds, faceThresholds, datasetKind = 'character',
                                       onImproveBatch,
                                       // Subject trim MEASURES first: this opens a review of the
@@ -608,7 +608,7 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
             faceScoringBlocked={faceScoringBlocked}
               onRegenerate={bulkBusy ? undefined : onRegenerate}
               onFaceSwap={onFaceSwap} onUndoFaceSwap={onUndoFaceSwap}
-              onSeedvr2Replace={onSeedvr2Replace}
+              onUpscaleReplace={onUpscaleReplace}
               swapBusy={Boolean(swappingIds?.has(img.id))} hasRef={hasRef}
               /* onView is handed over UNCONDITIONALLY: withholding it made the
                  inspect button a no-op even once its `disabled` was lifted. */
