@@ -49,20 +49,25 @@ test('the ceiling sentence is on screen, with the arithmetic done', () => {
   assert.match(html, /not a promise/);
 });
 
-test('BOTH face-filter explanations are mounted, one of them hidden', () => {
-  const html = mount();   // the filter defaults ON
-  assert.match(html, /Frames whose face is too small/);
-  assert.match(html, /picked on sharpness and exposure alone/);
-  // The OFF copy is the one hidden while the filter is on.
-  assert.match(html,
-    /hidden=""[^>]*>\s*Off: frames are picked on sharpness|Off: frames are picked/);
+test('ALL THREE person-mode labels are mounted, with the presence copy hidden', () => {
+  const html = mount();   // the filter defaults to identity
+  assert.match(html, /No person requirement/);
+  assert.match(html, /Frame must show a person/);
+  assert.match(html, /Must be the reference person/);
+  // The presence-only explanation is mounted but hidden while identity is on.
+  assert.match(html, /hidden=""[^>]*>\s*Presence mode needs no reference photo/);
 });
 
 test('with no reference dataset loaded, the dead end is named, not implied', () => {
-  // The list holds only datasets WITH a reference photo, so empty means "none
-  // of them can answer this", which is a different fix from "make a dataset".
   const html = mount();
   assert.match(html, /None of your datasets has a reference photo yet/);
+});
+
+test('both tolerance sliders are mounted with their explanatory copy', () => {
+  const html = mount();
+  assert.match(html, /Sharpness tolerance/);
+  assert.match(html, /Face sharpness/);
+  assert.match(html, /A moving face blurs while the body stays sharp/);
 });
 
 test('the reference picker is mounted whenever the filter is on', () => {

@@ -18,6 +18,7 @@ import {
   hasMore,
 } from './videoTriage'
 import VideoCapabilityStrip from './VideoCapabilityStrip'
+import FramePromoteSummary from './FramePromoteSummary'
 import VideoThresholdsPanel from './VideoThresholdsPanel'
 import VideoSourceList from './VideoSourceList'
 import VideoClipGrid from './VideoClipGrid'
@@ -53,6 +54,10 @@ export default function VideoBankWorkspace({ bankId, onBack, onGone }) {
   const [selected, setSelected] = useState([])
   const [anchor, setAnchor] = useState(null)
   const [openIndex, setOpenIndex] = useState(null)
+  // The completion report of the last FINISHED frame-promotion, shown once
+  // per result (fingerprinted so a re-poll cannot re-pop it).
+  const [frameSummary, setFrameSummary] = useState(null)
+  const summaryShown = useRef('')
   const [promoting, setPromoting] = useState(false)
   // The SECOND promotion target: the same kept clips, read for still
   // frames instead of encoded as video. Its own flag rather than a mode
@@ -147,6 +152,16 @@ export default function VideoBankWorkspace({ bankId, onBack, onGone }) {
     if (!announce) return
     if (outcome) toast[outcome.tone](outcome.text)
     loadClips(false)
+    // The frame-promotion completion report: surfaced ONCE per result, from
+    // the job snapshot the same poll already carries.
+    if (activity?.kind === 'promote_images' && activity.finished
+        && activity.result && !activity.error) {
+      const fp = `${activity.result.frames || 0}:${(activity.result.per_clip || []).length}`
+      if (summaryShown.current !== fp) {
+        summaryShown.current = fp
+        setFrameSummary(activity.result)
+      }
+    }
   }, [activity])                                          // eslint-disable-line react-hooks/exhaustive-deps
 
   // The grid draws the ranking while a search is on, the filtered page
@@ -596,6 +611,16 @@ export default function VideoBankWorkspace({ bankId, onBack, onGone }) {
           onNext={() => setOpenIndex((i) => Math.min(shownClips.length - 1, i + 1))}
           onKeep={() => triageOpen('keep')}
           onReject={() => triageOpen('reject')} />
+      )}
+
+      {frameSummary && (
+        <FramePromoteSummary result={frameSummary}
+          onClose={() => setFrameSummary(null)}
+          onOpenClip={(clipId) => {
+            const clip = shownClips.find((c) => c.id === clipId) || clips.find((c) => c.id === clipId)
+            if (clip) openAt(clip)
+            setFrameSummary(null)
+          }} />
       )}
 
       {promoting && (
