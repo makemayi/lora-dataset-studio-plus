@@ -26,6 +26,23 @@ import json, sys
 DET_MIN, BBOX_MIN, YAW_MAX = 0.50, 0.02, 70.0
 
 
+def lap_var_bgr(img):
+    """Laplacian variance of a (possibly BGR) image — the SAME metric the bank's
+    per-frame sharpness uses, so 'face is blurry' means the same thing as
+    'frame is blurry' and the adaptive gate in video_frame_select can treat the
+    two scales together. img may be 2D gray or 3D BGR; converted internally.
+    A crop too small for the 3x3 kernel is unmeasurable, not an error."""
+    import numpy as np
+    a = np.asarray(img, dtype=np.float32)
+    if a.ndim == 3:
+        a = a.mean(axis=2)
+    if a.ndim != 2 or a.shape[0] < 3 or a.shape[1] < 3:
+        return 0.0
+    lap = (a[1:-1, :-2] + a[1:-1, 2:] + a[:-2, 1:-1]
+           + a[2:, 1:-1] - 4.0 * a[1:-1, 1:-1])
+    return float(lap.var())
+
+
 def _log(m): print(m, file=sys.stderr, flush=True)
 
 
@@ -129,6 +146,19 @@ def main() -> int:
             pad = int(0.25 * max(h, w)); scale = (w + 2*pad) * (h + 2*pad) / (w * h)
         area = (f.bbox[2]-f.bbox[0]) * (f.bbox[3]-f.bbox[1])
         bbox_frac = float(area / (w * h) / scale)
+        # Face-region sharpness: global sharpness cannot see a face that moved
+        # during the exposure while the body stayed still. Crop the face bbox
+        # (adjusting for the padding rescue) and measure IT.
+        x0 = int(f.bbox[0]); y0 = int(f.bbox[1])
+        x1 = int(f.bbox[2]); y1 = int(f.bbox[3])
+        if getattr(f, "_padded", False):
+            pad = int(0.25 * max(h, w))
+            x0 = max(0, x0 - pad); y0 = max(0, y0 - pad)
+            x1 = min(w, x1 - pad); y1 = min(h, y1 - pad)
+        if x1 > x0 and y1 > y0:
+            face_sharp = lap_var_bgr(img[y0:y1, x0:x1])
+        else:
+            face_sharp = 0.0
         det = float(f.det_score)
         yaw = float(f.pose[1]) if getattr(f, "pose", None) is not None else 0.0
         state = "scorable"
@@ -136,7 +166,8 @@ def main() -> int:
         elif bbox_frac < BBOX_MIN: state = "too_small"
         elif abs(yaw) > YAW_MAX: state = "extreme_pose"
         return {"state": state, "det": round(det, 3), "bbox_frac": round(bbox_frac, 4),
-                "yaw": round(yaw, 1), "_emb": f.normed_embedding}
+                "yaw": round(yaw, 1), "face_sharp": round(face_sharp, 3),
+                "_emb": f.normed_embedding}
 
     ref_embs = []
     for i, r in enumerate(refs, 1):

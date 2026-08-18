@@ -131,7 +131,8 @@ def face_reading(result):
     state = result.get('state')
     return {'ok': state == 'scorable', 'det': result.get('det'),
             'bbox_frac': result.get('bbox_frac'), 'yaw': result.get('yaw'),
-            'sim': result.get('sim'), 'state': state}
+            'sim': result.get('sim'), 'state': state,
+            'face_sharp': result.get('face_sharp')}
 
 
 def extract_from_clip(*, path, start_s, end_s, fps, limit,
