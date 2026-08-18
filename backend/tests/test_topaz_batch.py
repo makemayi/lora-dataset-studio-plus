@@ -180,3 +180,49 @@ def test_worker_batch_partial_failure_restores_missing_outputs(app, monkeypatch)
         results = json.loads(row.image_results or '{}')
         assert results['11']['status'] == 'failed'
         assert 'nothing' in (results['11'].get('error') or '')
+
+
+def test_batch_retry_only_reruns_failed_images(app):
+    """retry(job_id) collects the FAILED image ids into a NEW batch job."""
+    from app.services.topaz_job_queue import topaz_queue
+    from app.models import TopazJob
+    from app.extensions import db
+
+    with app.app_context():
+        jid = topaz_queue.enqueue_batch(
+            user_id='local', dataset_id=1,
+            inputs=[{'image_id': 10, 'input': 'C:/x/a.png'},
+                    {'image_id': 11, 'input': 'C:/x/b.png'}])
+        row = TopazJob.query.filter_by(job_id=jid).one()
+        row.status = 'failed'
+        row.image_results = json.dumps({
+            '10': {'status': 'completed', 'output_filename': 'DS/x'},
+            '11': {'status': 'failed', 'output_filename': None,
+                   'error': 'nothing'}})
+        db.session.commit()
+        assert topaz_queue.retry(jid) is True
+        new = TopazJob.query.filter_by(status='queued').order_by(
+            TopazJob.created_at.desc()).first()
+        assert json.loads(new.image_ids or '[]') == [11]
+        # the old row stays terminal
+        assert TopazJob.query.filter_by(job_id=jid).one().status == 'failed'
+
+
+def test_batch_retry_without_failures_requeues_whole_batch(app):
+    """A batch with NO recorded failures falls back to requeuing the row."""
+    from app.services.topaz_job_queue import topaz_queue
+    from app.models import TopazJob
+    from app.extensions import db
+
+    with app.app_context():
+        jid = topaz_queue.enqueue_batch(
+            user_id='local', dataset_id=1,
+            inputs=[{'image_id': 10, 'input': 'C:/x/a.png'}])
+        row = TopazJob.query.filter_by(job_id=jid).one()
+        row.status = 'failed'
+        row.image_results = json.dumps({'10': {'status': 'completed'}})
+        db.session.commit()
+        assert topaz_queue.retry(jid) is True
+        row = TopazJob.query.filter_by(job_id=jid).one()
+        assert row.status == 'queued'
+        assert row.retry_count == 1

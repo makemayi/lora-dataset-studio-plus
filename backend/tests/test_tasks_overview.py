@@ -223,3 +223,27 @@ def test_topaz_cancel_and_retry_routes(client, app):
     assert client.post(f'/api/tasks/{jid}/retry').get_json()['ok'] is True
     with app.app_context():
         assert TopazJob.query.filter_by(job_id=jid).one().status == 'queued'
+
+
+def test_task_center_batch_row_shows_count_and_progress(client, app):
+    """A batch TopazJob renders as 'Topaz upscale (2)' with progress 1/2."""
+    import json
+    from app.services.topaz_job_queue import topaz_queue
+    from app.models import TopazJob
+    from app.extensions import db
+
+    with app.app_context():
+        jid = topaz_queue.enqueue_batch(
+            user_id='local', dataset_id=5,
+            inputs=[{'image_id': 1, 'input': 'C:/x/a.png'},
+                    {'image_id': 2, 'input': 'C:/x/b.png'}])
+        row = TopazJob.query.filter_by(job_id=jid).one()
+        row.status = 'running'
+        row.done_images = 1
+        db.session.commit()
+
+    d = client.get('/api/tasks/overview').get_json()
+    row = next(t for t in d['tasks'] if t['job_id'] == jid)
+    assert row['title'] == 'Topaz upscale (2)'
+    assert row['progress'] == '1/2'
+    assert 'cancel' in row['actions']

@@ -170,14 +170,39 @@ class TopazJobManager:
             return True
 
     def retry(self, job_id):
-        """Requeue one failed job. True when requeued."""
+        """Requeue a failed job. For a BATCH, only the FAILED images are
+        collected into a NEW batch job — successful ones are never re-run."""
         with self._lock:
             row = TopazJob.query.filter_by(job_id=str(job_id)).first()
             if row is None or row.status != 'failed':
                 return False
+            results = {}
+            try:
+                results = json.loads(row.image_results or '{}')
+            except (TypeError, ValueError):
+                pass
+            failed = [int(i) for i, r in results.items()
+                      if r.get('status') == 'failed']
+            if failed:
+                inputs = []
+                try:
+                    inputs_p = json.loads(row.image_inputs or '{}')
+                except (TypeError, ValueError):
+                    inputs_p = {}
+                for img_id in failed:
+                    p = inputs_p.get(str(img_id))
+                    if p:
+                        inputs.append({'image_id': img_id, 'input': p})
+                if inputs:
+                    self.enqueue_batch(
+                        user_id=row.user_id, dataset_id=row.dataset_id,
+                        inputs=inputs)
+                    self._wake.set()
+                    return True
             row.status = 'queued'
             row.error_message = None
-            row.output_filename = None
+            row.image_results = None
+            row.done_images = 0
             row.retry_count = (row.retry_count or 0) + 1
             row.completed_at = None
             db.session.commit()

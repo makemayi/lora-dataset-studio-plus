@@ -84,18 +84,24 @@ def _flag_row(kind, title) -> dict:
 
 
 def _topaz_row(row) -> dict:
-    """One TopazJob rendered for the Task Center list."""
+    """One TopazJob rendered for the Task Center list. A batch carries its
+    image count in the title and a k/N progress once it starts."""
+    total = row.total_images or 1
+    title = f'Topaz upscale ({total})' if total > 1 else 'Topaz upscale'
+    progress = None
+    if total > 1 and row.status in ('running', 'completed', 'failed', 'cancelled'):
+        progress = f'{row.done_images or 0}/{total}'
     return {
         'job_id': row.job_id,
         'kind': 'topaz',
-        'title': 'Topaz upscale',
+        'title': title,
         'source': _dataset_name(row.dataset_id),
         'status': row.status,
         'created_at': row.created_at.isoformat() if row.created_at else None,
-        'progress': None,
+        'progress': progress,
         'error': row.error_message,
         'resource': {'type': 'image', 'dataset_id': row.dataset_id,
-                     'image_id': row.image_id},
+                     'image_id': row.image_id or 0},
         'actions': (['cancel'] if row.status in ('queued', 'running')
                     else []) + (['retry'] if row.status == 'failed' else []),
     }
