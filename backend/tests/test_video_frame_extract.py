@@ -168,5 +168,5 @@ def test_extract_returns_rejected_counts_and_passes_tolerances():
         read_frames=lambda *a: readings_hard,
         decode=lambda _p, times: [{'t': t, 'bytes': b'x', 'w': 512, 'h': 512}
                                   for t in times])
-    assert [f['t'] for f in out['frames']] == [0.0]
+    assert [f['provenance']['timestamp_s'] for f in out['frames']] == [0.0]
     assert out['rejected']['too_blurry'] == 1
