@@ -86,17 +86,15 @@ def resolve_refs(user_id, ref_dataset_id):
     return out
 
 
-def face_filter_decision(require_face, refs):
-    """Whether the face filter actually runs, given what there is to compare to.
+def face_filter_decision(person_mode, refs):
+    """Whether the face pass actually runs, given the chosen mode.
 
-    Asked for + a reference exists  -> ON.
-    Asked for + nothing to compare  -> OFF, and the caller must SAY so. There is
-        no third answer: refusing would block a perfectly reasonable run (a
-        location or style set, or a fresh dataset whose reference comes later),
-        and pretending it filtered would be a lie about the pictures.
-    Not asked for                   -> OFF.
+    person (presence) needs NO reference — that was the wall that made the face
+    gate unusable on fresh and style sets. identity needs one, and its refusal
+    lives in `_face_pass_or_raise`; here both non-none modes simply say the
+    pass runs. Not asked for -> OFF.
     """
-    return bool(require_face and refs)
+    return person_mode != 'none'
 
 
 def character_gates(kind, face_filter):
@@ -119,26 +117,58 @@ def character_gates(kind, face_filter):
             video_frame_select.MIN_SIM if face_filter else None)
 
 
-def _face_pass_or_raise(refs, require_face):
+def _face_pass_or_raise(refs, person_mode):
     """(python, script, models_root) for the face pass, or None when off.
 
-    Refused LOUDLY rather than degraded when the caller asked for the face gate:
+    Refused LOUDLY rather than degraded when the caller asked for a face gate:
     silently producing an unfiltered dataset from a request that said "only
     frames with a usable face" is the kind of quiet mismatch nobody attributes
-    to the right setting later.
+    to the right setting later. person needs only the interpreter; identity
+    additionally needs a reference to be similar to.
     """
-    if not require_face:
+    if person_mode == 'none':
         return None
     python = (cfg.get('face_scoring.python') or '').strip()
     if not python:
         raise ValueError(
-            'face-aware frame picking needs the face scoring interpreter — set '
-            'face_scoring.python in Settings, or turn the face filter off.')
-    if not refs:
-        raise ValueError('face-aware frame picking needs at least one reference '
-                         'photo of the person to keep.')
+            'person-aware frame picking needs the face scoring interpreter — set '
+            'face_scoring.python in Settings, or turn the person filter off.')
+    if person_mode == 'identity' and not refs:
+        raise ValueError('identity-aware frame picking needs at least one '
+                         'reference photo of the person to keep.')
     script = str(cfg.BACKEND_DIR / 'infer' / 'face_score_infer.py')
     return python, script, (cfg.get('face_scoring.models_root') or '').strip() or None
+
+
+def _score_faces(face_cfg, refs, frames):
+    """Write the candidates to a scratch dir, score them, throw it away.
+
+    `face_score_infer` reads FILES; these frames exist only as bytes. The
+    pictures are candidates — most of them are about to be rejected — so they
+    never touch the dataset folder, and the directory is removed whether the
+    scorer succeeded, refused or crashed.
+
+    A None from the scorer is a BROKEN PASS, not a video with nobody in it: in
+    person/identity modes every frame must be verifiable, so the job fails
+    instead of silently producing an unfiltered dataset.
+    """
+    import tempfile
+    from pathlib import Path as _Path
+    with tempfile.TemporaryDirectory(prefix='lds-frames-') as tmp:
+        paths = []
+        for i, frame in enumerate(frames):
+            p = _Path(tmp) / f'cand_{i:04d}.png'
+            p.write_bytes(frame['bytes'])
+            paths.append(str(p))
+        python, script, models_root = face_cfg
+        results = video_frame_extract.score_faces(
+            python, script, refs, paths, models_root=models_root)
+        if results is None:
+            raise RuntimeError(
+                'the face pass could not run, so no frame can be verified '
+                'to contain a person — nothing was imported.')
+        return [video_frame_extract.face_reading(results.get(p))
+                for p in paths]
 
 
 def start_promote_to_images(app, user_id, bank_id, *, name=None, ids=None,
@@ -147,7 +177,8 @@ def start_promote_to_images(app, user_id, bank_id, *, name=None, ids=None,
                             max_per_source=None,
                             min_gap_s=video_frame_select.MIN_GAP_S,
                             face_bbox_min=video_frame_select.FACE_BBOX_MIN,
-                            require_face=True, ref_dataset_id=None,
+                            person_mode='identity', ref_dataset_id=None,
+                            sharp_tolerance=None, face_tolerance=None,
                             trigger_word=None, kind=None):
     """Validate everything, create the image dataset, start the extraction job.
 
@@ -178,6 +209,20 @@ def start_promote_to_images(app, user_id, bank_id, *, name=None, ids=None,
     if not 1 <= frames_per_clip <= FRAMES_PER_CLIP_MAX:
         raise ValueError(f'frames per clip must be between 1 and '
                          f'{FRAMES_PER_CLIP_MAX}')
+    # The two tolerance dials are bounded fractions, refused outside the range
+    # rather than clamped — a clamped 200% would silently disable a gate.
+    for _name, _val in (('sharp_tolerance', sharp_tolerance),
+                        ('face_tolerance', face_tolerance)):
+        if _val is None:
+            continue
+        try:
+            _val = float(_val)
+        except (TypeError, ValueError):
+            raise ValueError(f'{_name} must be a number between 0.40 and 0.90')
+        if not 0.40 <= _val <= 0.90:
+            raise ValueError(f'{_name} must be between 0.40 and 0.90')
+    sharp_tolerance = float(sharp_tolerance) if sharp_tolerance else 0.6
+    face_tolerance = float(face_tolerance) if face_tolerance else 0.6
     # WHERE THE REFERENCE COMES FROM, in one rule rather than three:
     # `ref_dataset_id` BORROWS from a named dataset; otherwise the target's own
     # references are used. A dataset created for this run with a reference photo
@@ -185,14 +230,17 @@ def start_promote_to_images(app, user_id, bank_id, *, name=None, ids=None,
     # photo IS the target's reference. And a target with none simply has no face
     # filter, which is the honest reading of "nothing to compare against".
     refs = []
-    if require_face:
+    if person_mode != 'none':
         refs = (resolve_refs(user_id, ref_dataset_id) if ref_dataset_id
                 else dataset_refs(target))
-    face_filter = face_filter_decision(require_face, refs)
-    face_cfg = _face_pass_or_raise(refs, face_filter)
+    face_filter = face_filter_decision(person_mode, refs)
+    face_cfg = _face_pass_or_raise(refs, face_filter and person_mode or 'none')
 
     kind_now = (getattr(target, 'kind', None) or kind)
     min_face_px, min_sim = character_gates(kind_now, face_filter)
+    # identity adds the similarity gate; presence alone only needs a face.
+    if person_mode != 'identity':
+        min_sim = None
     is_character = min_face_px is not None
 
     q = VideoClip.query.filter_by(bank_id=bank_id, status='keep')
@@ -225,11 +273,15 @@ def start_promote_to_images(app, user_id, bank_id, *, name=None, ids=None,
         # nothing, and the job never pads to reach a number.
         'total_limit': int(total_limit) if total_limit else None,
         'face_filtered': face_cfg is not None,
-        # Said out loud because it is invisible in the result: the face filter
-        # was ASKED for and there was nothing to compare against.
-        'face_filter_skipped': bool(require_face and not refs),
+        # The old 'asked but nothing to compare -> filter off' case no longer
+        # exists: person runs without a reference, identity without one is
+        # REFUSED earlier. Kept as a constant-false field so consumers of the
+        # payload shape do not have to learn a new vocabulary.
+        'face_filter_skipped': False,
         'character_gates': is_character,
         'into_existing': target is not None,
+        'sharp_tolerance': sharp_tolerance,
+        'face_tolerance': face_tolerance,
     }
 
     dataset = target or create_dataset(user_id, name, trigger_word or '',
@@ -242,7 +294,9 @@ def start_promote_to_images(app, user_id, bank_id, *, name=None, ids=None,
                                  total_limit=total_limit, min_gap_s=min_gap_s,
                                  face_bbox_min=face_bbox_min,
                                  min_face_px=min_face_px, min_sim=min_sim,
-                                 face_cfg=face_cfg, refs=list(refs or [])),
+                                 face_cfg=face_cfg, refs=list(refs or []),
+                                 sharp_tolerance=sharp_tolerance,
+                                 face_tolerance=face_tolerance),
                     total=len(clip_ids))
     return {'id': dataset.id, 'name': dataset.name,
             'clips': len(clip_ids), 'composition': composition}
@@ -250,6 +304,7 @@ def start_promote_to_images(app, user_id, bank_id, *, name=None, ids=None,
 
 def _extract_job(bank_id, dataset_id, user_id, clip_ids, *, frames_per_clip,
                  total_limit, min_gap_s, face_bbox_min, face_cfg, refs,
+                 sharp_tolerance, face_tolerance,
                  min_face_px=None, min_sim=None):
     """Decode clip by clip, import each clip's frames as it finishes.
 
@@ -257,37 +312,9 @@ def _extract_job(bank_id, dataset_id, user_id, clip_ids, *, frames_per_clip,
     hold every extracted frame in memory before writing anything, and a crash at
     clip 300 would throw away 299 clips of decoding. Per-clip import also means
     the dataset fills visibly while the job runs, which is what the progress bar
-    is for.
+    is for. The result carries a per-clip rejection report for the completion
+    summary (spec §3.4).
     """
-    def _score_faces(frames):
-        """Write the candidates to a scratch dir, score them, throw it away.
-
-        `face_score_infer` reads FILES; these frames exist only as bytes. The
-        pictures are candidates — most of them are about to be rejected — so
-        they never touch the dataset folder, and the directory is removed
-        whether the scorer succeeded, refused or crashed.
-        """
-        if face_cfg is None:
-            return None
-        python, script, models_root = face_cfg
-        import tempfile
-        from pathlib import Path as _Path
-        with tempfile.TemporaryDirectory(prefix='lds-frames-') as tmp:
-            paths = []
-            for i, frame in enumerate(frames):
-                p = _Path(tmp) / f'cand_{i:04d}.png'
-                p.write_bytes(frame['bytes'])
-                paths.append(str(p))
-            results = video_frame_extract.score_faces(
-                python, script, refs, paths, models_root=models_root)
-            if results is None:
-                # The pass could not run. Returning None (not a list of "no
-                # face") is what stops the selector from reading a broken
-                # interpreter as a video with nobody in it.
-                return None
-            return [video_frame_extract.face_reading(results.get(p))
-                    for p in paths]
-
     def run(job):
         from .dataset_import_service import import_images
 
@@ -299,6 +326,7 @@ def _extract_job(bank_id, dataset_id, user_id, clip_ids, *, frames_per_clip,
 
         written = 0
         skipped = 0
+        report = {}
         bank_jobs.progress(job, done=0, total=len(clip_ids),
                            detail='extracting frames')
 
@@ -327,22 +355,35 @@ def _extract_job(bank_id, dataset_id, user_id, clip_ids, *, frames_per_clip,
                 path=path, start_s=clip.start_s, end_s=clip.end_s,
                 fps=None, limit=budget, min_gap_s=min_gap_s,
                 face_bbox_min=face_bbox_min, min_face_px=min_face_px,
-                min_sim=min_sim, face_scores=_score_faces,
+                min_sim=min_sim,
+                face_scores=((lambda frames: _score_faces(face_cfg, refs, frames))
+                             if face_cfg is not None else None),
+                sharp_tolerance=sharp_tolerance, face_tolerance=face_tolerance,
                 clip_id=clip.id, source_id=clip.source_id)
-            if not got:
+            frames_out = got.get('frames') or []
+            if not frames_out:
                 skipped += 1
                 bank_jobs.progress(job, done=done, total=len(clip_ids),
                                    detail='extracting frames')
                 continue
+            report[clip.id] = {'picked': len(frames_out),
+                               'rejected': dict(got.get('rejected') or {})}
 
             import_images(user_id, dataset_id,
-                          [g['bytes'] for g in got],
-                          source_metadata=[g['provenance'] for g in got])
-            written += len(got)
+                          [g['bytes'] for g in frames_out],
+                          source_metadata=[g['provenance'] for g in frames_out])
+            written += len(frames_out)
             bank_jobs.progress(job, done=done, total=len(clip_ids),
                                detail=f'{written} frame(s) so far')
 
+        totals = {}
+        for per in report.values():
+            for reason, n in per['rejected'].items():
+                totals[reason] = totals.get(reason, 0) + n
         return {'frames': written, 'clips': len(clip_ids),
-                'clips_without_frames': skipped}
+                'clips_without_frames': skipped,
+                'per_clip': [{'clip_id': cid, **per}
+                             for cid, per in sorted(report.items())],
+                'totals': totals}
 
     return run
