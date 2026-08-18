@@ -1728,9 +1728,12 @@ def topaz_upscale_replace(user_id, image_id):
         img.swap_restore = json.dumps(old_state)
         db.session.commit()
         return jid
-    except Exception:
+    finally:
+        # The claim guards the enqueue window only, exactly like the face-swap
+        # lane: once the row is pending with a job_id, the row itself is the
+        # double-click guard (filename is None), and the claim must not leak
+        # into other images sharing the same numeric id space.
         _release_swap(img.id)
-        raise
 
 
 def link_topaz_completed(row):

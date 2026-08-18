@@ -5,15 +5,11 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _no_real_gpu_window(monkeypatch):
-    """The worker enters a real GPU window; tests stub it out."""
-    class _nullcm:
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-    monkeypatch.setattr('app.gpu_window.gpu_exclusive_vision_window',
-                        lambda *a, **k: _nullcm())
-    # The worker copies the Topaz output into the dataset folder; stub the
-    # collector so tests never touch the real filesystem.
+def _no_real_topaz_subprocess(monkeypatch):
+    """The worker enters the REAL GPU window (conftest already stubs
+    free_comfyui_vram) — stubbing the window itself turned out to leak state
+    into later tests. Only the output collector is faked so tests never touch
+    the real filesystem."""
     monkeypatch.setattr('app.services.topaz_job_queue.collect_output',
                         lambda tmp_dir, dataset_id, job_id: f'DS/{job_id}.png')
 
