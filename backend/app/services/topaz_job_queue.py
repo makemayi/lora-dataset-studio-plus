@@ -107,6 +107,31 @@ class TopazJobManager:
         self._wake.set()
         return job_id
 
+    def enqueue_batch(self, *, user_id, dataset_id, inputs,
+                      enhancements=None, commit=True):
+        """One job row for MANY images. ``inputs`` is [{image_id, input}] where
+        input is the absolute source path (captured before swap-restore clears
+        the row's filename). The worker stages them into ONE folder so tpai
+        loads its models once for the whole batch."""
+        job_id = f'{JOB_ID_PREFIX}{uuid.uuid4().hex}'
+        ids = [int(i['image_id']) for i in inputs]
+        row = TopazJob(
+            job_id=job_id, user_id=str(user_id),
+            dataset_id=int(dataset_id),
+            image_id=ids[0] if ids else None,   # legacy single-image column
+            input_filename=(ids and inputs[0]['input']) or None,
+            status='queued',
+            image_ids=json.dumps(ids),
+            image_inputs=json.dumps({str(i['image_id']): i['input']
+                                     for i in inputs}),
+            total_images=len(ids),
+            enhancements=json.dumps(enhancements or {'upscale': True}))
+        db.session.add(row)
+        if commit:
+            db.session.commit()
+        self._wake.set()
+        return job_id
+
     def cancel(self, job_id):
         """Cancel a queued job (or flag a running one). True when cancelled."""
         with self._lock:

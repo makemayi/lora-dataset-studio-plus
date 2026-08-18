@@ -298,6 +298,12 @@ _SCHEMA_ADDITIONS = (
     # behaving exactly as it did.
     ('lora_test_image', 'parent_image_id', 'INTEGER'),
     ('lora_test_image', 'derivation_kind', 'VARCHAR(32)'),
+    # Topaz batch: one job row = many images (Task Center count/progress).
+    ('topaz_job', 'image_ids', 'TEXT'),
+    ('topaz_job', 'image_inputs', 'TEXT'),
+    ('topaz_job', 'image_results', 'TEXT'),
+    ('topaz_job', 'total_images', 'INTEGER'),
+    ('topaz_job', 'done_images', 'INTEGER'),
     # Bank V2 scoring pass — the image_bank/bank_image tables shipped in the Beta,
     # so these columns need the additive path (db.create_all never ALTERs an
     # existing table).

@@ -1743,18 +1743,103 @@ def link_topaz_completed(row):
     collect_output put it there); attach it and trash the original. Failure or
     cancel: put the snapshot back so the tile shows its own picture again.
     """
-    img = db.session.get(FaceDatasetImage, row.image_id)
+    results = {}
+    try:
+        results = json.loads(row.image_results or '{}')
+    except (TypeError, ValueError):
+        pass
+    if results:
+        # Batch: link each finished tile; the failed ones were restored by the
+        # worker already.
+        for img_id, res in results.items():
+            if res.get('status') == 'completed' and res.get('output_filename'):
+                try:
+                    link_topaz_image(row.dataset_id, int(img_id),
+                                     res['output_filename'], 'completed')
+                except Exception:
+                    logger.exception('topaz: batch link failed for img %s', img_id)
+        return
+    if row.image_id:
+        link_topaz_image(row.dataset_id, row.image_id,
+                         row.output_filename, row.status)
+
+
+def link_topaz_image(dataset_id, image_id, output_filename, status):
+    """Attach one finished Topaz result to its tile (swap-restore semantics)."""
+    img = db.session.get(FaceDatasetImage, image_id)
     if img is None:
         return
-    if row.status == 'completed' and row.output_filename:
-        img.filename = row.output_filename
+    if status == 'completed' and output_filename:
+        img.filename = output_filename
         img.status = 'keep'
         img.job_id = None
         finish_swapped_original(img)     # trashes the original, clears snapshot
     else:
         restore_swapped_original(
-            img, reason=row.error_message or 'Topaz upscale did not complete')
+            img, reason='Topaz upscale did not complete')
     db.session.commit()
+
+
+def topaz_upscale_replace_batch(user_id, dataset_id, image_ids):
+    """Topaz-upscale many tiles IN PLACE in one job: every image is snapshotted
+    (swap-restore) and set pending, and ONE TopazJob carries the batch — the
+    worker stages all inputs into one folder so tpai loads its models once.
+
+    Returns {'queued', 'skipped', 'job_id'}; raises ValueError when nothing is
+    eligible, and TopazUnavailable when the exe is missing."""
+    from . import topaz_helper
+    topaz_helper.preflight()
+    ds = get_dataset(user_id, dataset_id)
+    if ds is None:
+        raise ValueError('dataset not found')
+    from .topaz_job_queue import topaz_queue
+    inputs, skipped = [], 0
+    for raw in image_ids or []:
+        try:
+            image_id = int(raw)
+        except (TypeError, ValueError):
+            continue
+        img = _owned_image(user_id, image_id)
+        if not img or not img.filename:
+            skipped += 1
+            continue
+        if img.status == 'pending' and img.job_id:
+            skipped += 1
+            continue
+        source_path = os.path.join(_dataset_path(ds.id), img.filename)
+        if not os.path.isfile(source_path):
+            skipped += 1
+            continue
+        if not _claim_swap(img.id):
+            skipped += 1
+            continue
+        try:
+            old_state = {field: getattr(img, field) for field in SWAP_RESTORE_FIELDS}
+            inputs.append({'image_id': img.id, 'input': source_path,
+                           'snapshot': old_state, 'img': img})
+        except Exception:
+            _release_swap(img.id)
+            raise
+    if not inputs:
+        raise ValueError('nothing to upscale — select images that have a file')
+    jid = topaz_queue.enqueue_batch(
+        user_id=str(user_id), dataset_id=ds.id,
+        inputs=[{'image_id': it['image_id'], 'input': it['input']}
+                for it in inputs])
+    # Snapshot + pending AFTER the job row exists so the tile and the job
+    # can never disagree about the job id.
+    for it in inputs:
+        img = it['img']
+        _clear_watermark_metadata(img)
+        img.filename = None
+        img.status = 'pending'
+        img.job_id = jid
+        img.fail_reason = None
+        img.fail_kind = None
+        img.swap_restore = json.dumps(it['snapshot'])
+        _release_swap(img.id)
+    db.session.commit()
+    return {'queued': len(inputs), 'skipped': skipped, 'job_id': jid}
 
 
 def _face_swap_image_claimed(user_id, img, ds, engine):

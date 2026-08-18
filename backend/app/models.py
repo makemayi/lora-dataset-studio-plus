@@ -1491,6 +1491,15 @@ class TopazJob(db.Model):
     output_filename = db.Column(String(255), nullable=True)
     error_message = db.Column(Text, nullable=True)
     enhancements = db.Column(Text, nullable=True)   # JSON: which toggles were on
+    # Batch: one job row = many images. image_ids is a JSON list of ids;
+    # image_inputs maps id -> absolute source path captured at enqueue time
+    # (swap-restore clears the row's filename before the worker runs).
+    # image_results is {id: {status, output_filename, error}}.
+    image_ids = db.Column(Text, nullable=True)
+    image_inputs = db.Column(Text, nullable=True)
+    image_results = db.Column(Text, nullable=True)
+    total_images = db.Column(Integer, default=1, nullable=False)
+    done_images = db.Column(Integer, default=0, nullable=False)
     retry_count = db.Column(Integer, default=0, nullable=False)
     created_at = db.Column(DateTime, default=db.func.current_timestamp(),
                            nullable=False)
