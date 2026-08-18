@@ -45,6 +45,15 @@ COMFYUI_STALLED_MESSAGE = (
     'ComfyUI stopped answering. Recover or restart ComfyUI, then cancel and resume '
     'this Test Studio batch.'
 )
+# A prompt accepted, then invisible to a HEALTHY /history for this long, with
+# /queue able to PROVE it gone, means ComfyUI restarted: the remote execution
+# can never arrive. Fail the one job deterministically and keep the queue
+# moving instead of wedging every dataset behind a recovery barrier.
+RESTART_ABSENT_GRACE_SECONDS = 120
+COMFYUI_RESTART_MESSAGE = (
+    'ComfyUI restarted while this job was running; the remote execution is '
+    'lost, so the job was failed. Retry it from the Task Center.'
+)
 POLL_STALLED = object()
 COMFYUI_UNKNOWN_SUBMIT_MESSAGE = (
     'ComfyUI /prompt result was lost. Restart ComfyUI before cancelling or resuming '
@@ -430,6 +439,7 @@ def _poll_outputs(prompt_id, timeout=POLL_TIMEOUT_SECONDS):
 
     deadline = time.monotonic() + timeout
     unhealthy_since = None
+    absent_since = None
     cancel_event = _cancel_event(prompt_id)
     try:
         while True:
@@ -461,6 +471,28 @@ def _poll_outputs(prompt_id, timeout=POLL_TIMEOUT_SECONDS):
             unhealthy_since = None
             history = probe.history or {}
             entry = history.get(prompt_id, history) if isinstance(history, dict) else {}
+            # A prompt accepted but invisible this long, while /queue can PROVE
+            # it gone, means the remote work died with ComfyUI (restart, or the
+            # queue was cleared). Fail this one job deterministically and let the
+            # queue continue. /queue proof is strict: a still-running long job IS
+            # listed in /queue, so this can never false-positive — absent returns
+            # True only after a healthy /queue answer proves the id gone.
+            if not (entry or {}).get('outputs') and not (entry or {}).get('status'):
+                now = time.monotonic()
+                if absent_since is None:
+                    absent_since = now
+                if now - absent_since >= RESTART_ABSENT_GRACE_SECONDS:
+                    from .utils.comfyui import comfyui_prompt_is_absent
+                    if comfyui_prompt_is_absent(prompt_id) is True:
+                        job = (ImageGenerationQueue.query
+                               .filter_by(comfyui_prompt_id=prompt_id).first())
+                        if job is not None:
+                            job.error_message = COMFYUI_RESTART_MESSAGE
+                            db.session.commit()
+                        return None, True
+                    absent_since = None   # still known remotely: it is alive
+            else:
+                absent_since = None
             outputs = (entry or {}).get('outputs') or {}
             for node_output in outputs.values():
                 for img in (node_output or {}).get('images') or []:

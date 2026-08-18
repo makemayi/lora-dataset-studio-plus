@@ -145,18 +145,16 @@ def test_poll_fails_job_when_queue_proves_prompt_absent_after_grace(app, monkeyp
     """ComfyUI restarted: /history empty long enough AND /queue healthily proves
     the prompt gone => the job fails deterministically and the queue moves on."""
     import time
-    from app.job_queue import _poll_outputs, queue_manager
+    from unittest.mock import patch
+    from app.job_queue import queue_manager
     from app.models import ImageGenerationQueue
     from app.utils.comfyui import ComfyHistoryHealth, ComfyHistoryProbe
 
-    jid = queue_manager.add_job(workflow_data={'1': {}})
     with app.app_context():
-        row = ImageGenerationQueue.query.filter_by(job_id=jid).one()
-        row.status = 'sent_to_comfy'
-        row.comfyui_prompt_id = 'p-restart'
-        app.db.session.commit()
+        jid = queue_manager.add_job(workflow_data={'1': {}})
 
         monkeypatch.setattr('app.job_queue.RESTART_ABSENT_GRACE_SECONDS', 2)
+        monkeypatch.setattr('app.job_queue.POLL_INTERVAL_SECONDS', 0.1)
 
         t0 = time.monotonic()
         clock = [t0]
@@ -181,9 +179,10 @@ def test_poll_fails_job_when_queue_proves_prompt_absent_after_grace(app, monkeyp
         monkeypatch.setattr('app.utils.comfyui.get_comfyui_history_probe', history_probe)
         monkeypatch.setattr('app.utils.comfyui.comfyui_prompt_is_absent', absent_probe)
 
-        filename, failed = _poll_outputs('p-restart', timeout=60)
-        assert failed is True
-        assert filename is None
+        # End to end: the real worker claims the pending job, submits (patched),
+        # polls (real loop, patched probes), proves the restart and fails it.
+        with patch('app.job_queue._submit', return_value='p-restart'):
+            assert queue_manager.process_one() is True
 
         row = ImageGenerationQueue.query.filter_by(job_id=jid).one()
         assert row.status == 'failed'
