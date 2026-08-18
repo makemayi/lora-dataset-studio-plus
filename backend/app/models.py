@@ -1467,3 +1467,35 @@ class VideoDatasetClip(db.Model):
 
     def __repr__(self):
         return f'<VideoDatasetClip {self.id} ds={self.dataset_id} {self.filename}>'
+
+
+class TopazJob(db.Model):
+    """One Topaz Photo AI upscale of one dataset image.
+
+    Runs on Topaz's own GPU OUTSIDE ComfyUI, so it cannot live in
+    ImageGenerationQueue (which is ComfyUI-shaped: workflow, /prompt, polling).
+    The Task Center synthesizes these rows into its overview like training and
+    vision. `topaz-<uuid>` job ids keep them out of the ComfyUI job id space so
+    the /api/tasks routes can dispatch on the prefix.
+    """
+    __tablename__ = 'topaz_job'
+
+    id = db.Column(Integer, primary_key=True)
+    job_id = db.Column(String(48), unique=True, nullable=False)   # 'topaz-<uuid>'
+    user_id = db.Column(String(36), nullable=False, default='local')
+    dataset_id = db.Column(Integer, nullable=False, index=True)
+    image_id = db.Column(Integer, nullable=False, index=True)
+    status = db.Column(String(16), nullable=False, default='queued',
+                       index=True)   # queued|running|completed|failed|cancelled
+    input_filename = db.Column(String(255), nullable=True)
+    output_filename = db.Column(String(255), nullable=True)
+    error_message = db.Column(Text, nullable=True)
+    enhancements = db.Column(Text, nullable=True)   # JSON: which toggles were on
+    retry_count = db.Column(Integer, default=0, nullable=False)
+    created_at = db.Column(DateTime, default=db.func.current_timestamp(),
+                           nullable=False)
+    started_at = db.Column(DateTime, nullable=True)
+    completed_at = db.Column(DateTime, nullable=True)
+
+    def __repr__(self):
+        return f'<TopazJob {self.job_id} img={self.image_id} {self.status}>'
