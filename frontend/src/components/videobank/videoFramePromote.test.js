@@ -5,7 +5,7 @@ import {
   frameCeilingHint, frameFaceNote, FRAMES_PER_CLIP_MAX,
 } from './videoFramePromote.js';
 
-const ok = { name: 'faces', framesPerClip: 3, requireFace: false, refDatasetId: null };
+const ok = { name: 'faces', framesPerClip: 3, personMode: 'none', refDatasetId: null };
 
 test('a nameless request is refused before it is sent', () => {
   assert.match(framePromoteProblem({ ...ok, name: '   ' }), /Name the dataset/);
@@ -24,11 +24,13 @@ test('the ceiling is named in the refusal, not just enforced', () => {
   assert.match(why, new RegExp(String(FRAMES_PER_CLIP_MAX)));
 });
 
-test('face filtering without a reference dataset is refused in the dialog', () => {
-  assert.match(framePromoteProblem({ ...ok, requireFace: true, refDatasetId: null }),
+test('identity without a reference dataset is refused; person does not need one', () => {
+  assert.match(framePromoteProblem({ ...ok, personMode: 'identity', refDatasetId: null }),
     /reference photo/);
   assert.equal(
-    framePromoteProblem({ ...ok, requireFace: true, refDatasetId: 4 }), null);
+    framePromoteProblem({ ...ok, personMode: 'identity', refDatasetId: 4 }), null);
+  assert.equal(
+    framePromoteProblem({ ...ok, personMode: 'person', refDatasetId: null }), null);
 });
 
 test('the payload omits caps rather than sending null', () => {
@@ -38,7 +40,8 @@ test('the payload omits caps rather than sending null', () => {
   assert.equal('ids' in body, false);
   assert.equal('ref_dataset_id' in body, false);
   assert.equal(body.frames_per_clip, 2);
-  assert.equal(body.require_face, false);
+  assert.equal(body.person_mode, 'identity');
+  assert.equal(body.sharp_tolerance, 0.6);
 });
 
 test('a zero cap is treated as "no cap", not as a cap of zero', () => {
@@ -50,16 +53,16 @@ test('a zero cap is treated as "no cap", not as a cap of zero', () => {
 
 test('the reference is a dataset ID and only rides along with the filter on', () => {
   const off = framePromotePayload({ name: 'x', framesPerClip: 1,
-    requireFace: false, refDatasetId: 4 });
+    personMode: 'person', refDatasetId: 4 });
   assert.equal('ref_dataset_id' in off, false);
   const on = framePromotePayload({ name: 'x', framesPerClip: 1,
-    requireFace: true, refDatasetId: '4' });
+    personMode: 'identity', refDatasetId: '4' });
   assert.equal(on.ref_dataset_id, 4, 'sent as a number, never a path');
 });
 
 test('no request can carry a file path', () => {
   const body = framePromotePayload({ name: 'x', framesPerClip: 1,
-    requireFace: true, refDatasetId: 4 });
+    personMode: 'identity', refDatasetId: 4 });
   assert.equal('refs' in body, false);
 });
 
@@ -88,4 +91,19 @@ test('no ceiling means no sentence rather than a zero', () => {
 test('a run without the face filter says so; a filtered one stays quiet', () => {
   assert.match(frameFaceNote({ face_filtered: false }), /face filter is OFF/);
   assert.equal(frameFaceNote({ face_filtered: true }), '');
+});
+
+test('the payload carries person_mode and the two tolerance dials', () => {
+  const body = framePromotePayload({ name: 'n', framesPerClip: 3, personMode: 'person',
+    sharpTolerance: 0.65, faceTolerance: 0.6, refDatasetId: '' });
+  assert.equal(body.person_mode, 'person');
+  assert.equal(body.sharp_tolerance, 0.65);
+  assert.equal(body.face_tolerance, 0.6);
+  assert.equal('require_face' in body, false);
+});
+
+test('tolerances default to 0.6 when absent', () => {
+  const body = framePromotePayload({ name: 'n', framesPerClip: 3, personMode: 'none' });
+  assert.equal(body.sharp_tolerance, 0.6);
+  assert.equal(body.face_tolerance, 0.6);
 });

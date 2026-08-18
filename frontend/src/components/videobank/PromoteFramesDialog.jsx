@@ -5,7 +5,7 @@ import { INPUT_CLASS, PRIMARY_BUTTON } from '../common/surfaces'
 import {
   framePromoteProblem, framePromotePayload, frameScopeLabel,
   frameCeilingHint, frameFaceNote,
-  FRAMES_PER_CLIP_MAX, FRAMES_PER_CLIP_DEFAULT,
+  FRAMES_PER_CLIP_MAX, FRAMES_PER_CLIP_DEFAULT, PERSON_MODES,
 } from './videoFramePromote'
 
 /** 🖼 Turn the shots you kept into an IMAGE training set.
@@ -34,7 +34,9 @@ export default function PromoteFramesDialog({
   const [framesPerClip, setFramesPerClip] = useState(FRAMES_PER_CLIP_DEFAULT)
   const [totalLimit, setTotalLimit] = useState('')
   const [maxPerSource, setMaxPerSource] = useState('')
-  const [requireFace, setRequireFace] = useState(true)
+  const [personMode, setPersonMode] = useState('identity')
+  const [sharpTolerance, setSharpTolerance] = useState(0.6)
+  const [faceTolerance, setFaceTolerance] = useState(0.6)
   // Datasets that actually HAVE a reference photo — the others cannot answer
   // "is this the right person", so offering them would be offering a failure.
   const [refDatasets, setRefDatasets] = useState([])
@@ -59,7 +61,7 @@ export default function PromoteFramesDialog({
   // decodes through PyAV, which carries its own libav. Borrowing the 'promote'
   // capability here would refuse a run that works, with a message about cutting
   // clips that this screen does not do.
-  const problem = framePromoteProblem({ name, framesPerClip, requireFace, refDatasetId })
+  const problem = framePromoteProblem({ name, framesPerClip, personMode, refDatasetId })
   const scope = frameScopeLabel((selectedIds || []).length, keepCount)
   const ceiling = frameCeilingHint({
     frames_ceiling: ((selectedIds || []).length || Number(keepCount) || 0)
@@ -74,7 +76,8 @@ export default function PromoteFramesDialog({
     try {
       const d = await postJson(`/api/video-bank/${bankId}/promote-frames`,
         framePromotePayload({ name, framesPerClip, totalLimit,
-          maxPerSource, requireFace, refDatasetId, ids: selectedIds }))
+          maxPerSource, personMode, refDatasetId, ids: selectedIds,
+          sharpTolerance, faceTolerance }))
       toast.success(`Building “${d.name}” — ${d.clips} clip(s) being read for frames.`)
       // Said after the request lands, because "the filter is off" is invisible
       // in a folder of sharp pictures of the wrong person.
@@ -148,47 +151,80 @@ export default function PromoteFramesDialog({
         </div>
 
         <div className="rounded-xl bg-surface p-3">
-          <label className="flex items-start gap-2 text-sm text-content">
-            <input type="checkbox" checked={requireFace} className="mt-0.5"
-              onChange={(e) => setRequireFace(e.target.checked)} />
-            <span>
-              Only keep frames showing a usable face
-              {/* Both halves stay MOUNTED and flip `hidden`: this app is read
-                  through Chrome auto-translate, which rewrites text nodes and
-                  makes a React swap crash the whole section. */}
-              <span hidden={!requireFace} className="mt-1 block text-xs text-content-muted">
-                Frames whose face is too small, turned too far away, or missing
-                are dropped — even when they are the sharpest in the clip.
-              </span>
-              <span hidden={requireFace} className="mt-1 block text-xs text-content-muted">
-                Off: frames are picked on sharpness and exposure alone. Fine for a
-                style set; for a character set it can return sharp pictures of the
-                wrong person, or of nobody.
-              </span>
-            </span>
-          </label>
-          <div hidden={!requireFace} className="mt-2">
-            <label htmlFor="frames-ref-ds" className="block text-xs font-medium text-content">
-              Compare against
-            </label>
-            <select id="frames-ref-ds" value={refDatasetId} className={INPUT_CLASS}
-              onChange={(e) => setRefDatasetId(e.target.value)}>
-              <option value="">Pick a dataset…</option>
-              {refDatasets.map((d) => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </select>
-            {/* The list holds ONLY datasets with a reference photo, so an empty
-                list is not "no datasets" — it is "none of them can answer this
-                question", and saying which is the difference between a fixable
-                message and a dead end. */}
-            <p hidden={refDatasets.length > 0} className="mt-1 text-xs text-amber-700">
-              None of your datasets has a reference photo yet. Set one on the
-              dataset of the person you are collecting, or turn this filter off.
+          <span className="block text-sm font-medium text-content">Person requirement</span>
+          <div className="mt-2 flex flex-col gap-1.5">
+            {PERSON_MODES.map((m) => (
+              <label key={m.id} className="flex items-center gap-2 text-sm text-content">
+                <input type="radio" name="person-mode" checked={personMode === m.id}
+                  onChange={() => setPersonMode(m.id)} className="accent-primary" />
+                {m.label}
+              </label>
+            ))}
+          </div>
+          <div hidden={personMode === 'none'} className="mt-2">
+            <div hidden={personMode !== 'identity'}>
+              <label htmlFor="frames-ref-ds" className="block text-xs font-medium text-content">
+                Compare against
+              </label>
+              <select id="frames-ref-ds" value={refDatasetId} className={INPUT_CLASS}
+                onChange={(e) => setRefDatasetId(e.target.value)}>
+                <option value="">Pick a dataset…</option>
+                {refDatasets.map((d) => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+              {/* The list holds ONLY datasets with a reference photo, so an empty
+                  list is not "no datasets" — it is "none of them can answer this
+                  question", and saying which is the difference between a fixable
+                  message and a dead end. */}
+              <p hidden={refDatasets.length > 0} className="mt-1 text-xs text-amber-700">
+                None of your datasets has a reference photo yet. Set one on the
+                dataset of the person you are collecting, or pick a weaker
+                person requirement.
+              </p>
+              <p hidden={refDatasets.length === 0} className="mt-1 text-xs text-content-muted">
+                Its reference photo (and any extra references) decide whether a
+                frame shows the right person.
+              </p>
+            </div>
+            <p hidden={personMode !== 'person'} className="mt-1 text-xs text-content-muted">
+              Presence mode needs no reference photo — any detectable person counts.
             </p>
-            <p hidden={refDatasets.length === 0} className="mt-1 text-xs text-content-muted">
-              Its reference photo (and any extra references) decide whether a
-              frame shows the right person.
+          </div>
+          <div hidden={personMode === 'none'} className="mt-3">
+            <span className="block text-xs text-content-muted">
+              Frames whose face is missing, too small, or turned too far away are
+              dropped — even when they are the sharpest in the clip.
+            </span>
+          </div>
+        </div>
+
+        <div className="rounded-xl bg-surface p-3">
+          <label className="flex items-center justify-between text-sm text-content">
+            <span>Sharpness tolerance</span>
+            <span className="text-xs text-content-muted">{Math.round(sharpTolerance * 100)}%</span>
+          </label>
+          <input type="range" min="40" max="90" step="5"
+            value={Math.round(sharpTolerance * 100)}
+            onChange={(e) => setSharpTolerance(Number(e.target.value) / 100)}
+            className="w-full accent-primary" />
+          <p className="mt-1 text-xs text-content-muted">
+            Frames less sharp than {Math.round(sharpTolerance * 100)}% of the
+            clip's sharpest are dropped, even if they are the best of a bad lot.
+          </p>
+          <div hidden={personMode === 'none'} className="mt-3">
+            <label className="flex items-center justify-between text-sm text-content">
+              <span>Face sharpness</span>
+              <span className="text-xs text-content-muted">{Math.round(faceTolerance * 100)}%</span>
+            </label>
+            <input type="range" min="40" max="90" step="5"
+              value={Math.round(faceTolerance * 100)}
+              onChange={(e) => setFaceTolerance(Number(e.target.value) / 100)}
+              className="w-full accent-primary" />
+            <p className="mt-1 text-xs text-content-muted">
+              A moving face blurs while the body stays sharp. Frames whose face
+              scores below {Math.round(faceTolerance * 100)}% of the clip's best
+              face are dropped.
             </p>
           </div>
         </div>

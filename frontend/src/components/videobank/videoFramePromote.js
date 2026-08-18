@@ -14,8 +14,17 @@
 export const FRAMES_PER_CLIP_MAX = 20   // mirrors the service's own ceiling
 export const FRAMES_PER_CLIP_DEFAULT = 3
 
+export const PERSON_MODES = [
+  { id: 'none', label: 'No person requirement' },
+  { id: 'person', label: 'Frame must show a person' },
+  { id: 'identity', label: 'Must be the reference person' },
+]
+export const TOLERANCE_MIN = 0.40
+export const TOLERANCE_MAX = 0.90
+export const TOLERANCE_DEFAULT = 0.60
+
 /** Why the request cannot be sent yet, or null. */
-export function framePromoteProblem({ name, framesPerClip, requireFace,
+export function framePromoteProblem({ name, framesPerClip, personMode,
   refDatasetId }) {
   if (!(name || '').trim()) return 'Name the dataset first.'
   const n = Number(framesPerClip)
@@ -32,26 +41,29 @@ export function framePromoteProblem({ name, framesPerClip, requireFace,
   // A dataset ID, never a path: the request names a dataset the user owns and
   // the server builds the paths. A body that could name arbitrary absolute
   // paths would hand the face subprocess a file-read primitive.
-  if (requireFace && !refDatasetId) {
-    return 'Face filtering needs a dataset whose reference photo shows the person.'
+  if (personMode === 'identity' && !refDatasetId) {
+    return 'Identity filtering needs a dataset whose reference photo shows the person.'
   }
   return null
 }
 
 /** The POST body for /video-bank/<id>/promote-frames. */
 export function framePromotePayload({ name, framesPerClip, totalLimit, ids,
-  maxPerSource, requireFace, refDatasetId, triggerWord }) {
+  maxPerSource, personMode, refDatasetId, triggerWord,
+  sharpTolerance, faceTolerance }) {
   const body = {
     name: (name || '').trim(),
     frames_per_clip: Number(framesPerClip) || FRAMES_PER_CLIP_DEFAULT,
-    require_face: !!requireFace,
+    person_mode: personMode || 'identity',
+    sharp_tolerance: Number(sharpTolerance) || TOLERANCE_DEFAULT,
+    face_tolerance: Number(faceTolerance) || TOLERANCE_DEFAULT,
   }
   // Omitted, never sent as null: the server reads absent as "no cap" and a
   // null would have to mean the same thing in a second place.
   if (Number(totalLimit) > 0) body.total_limit = Number(totalLimit)
   if (Number(maxPerSource) > 0) body.max_per_source = Number(maxPerSource)
   if ((ids || []).length) body.ids = ids
-  if (requireFace && refDatasetId) body.ref_dataset_id = Number(refDatasetId)
+  if (personMode === 'identity' && refDatasetId) body.ref_dataset_id = Number(refDatasetId)
   if ((triggerWord || '').trim()) body.trigger_word = triggerWord.trim()
   return body
 }
