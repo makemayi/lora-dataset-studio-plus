@@ -1693,6 +1693,67 @@ def seedvr2_upscale_replace(user_id, image_id):
         _release_swap(img.id)
 
 
+def topaz_upscale_replace(user_id, image_id):
+    """Topaz-upscale this tile IN PLACE, same contract as seedvr2_upscale_replace:
+    the current image is snapshotted, the tile goes pending, a TopazJob is
+    queued (the Task Center shows it), and on completion the result REPLACES
+    the tile with the original kept for undo.
+
+    Topaz runs on its OWN GPU outside ComfyUI, so unlike SeedVR2 there is no
+    stalled-ComfyUI gate here — the TopazJob queue's own gate arbitrates.
+    """
+    img = _owned_image(user_id, image_id)
+    if not img or not img.filename:
+        return None
+    from . import topaz_helper
+    topaz_helper.preflight()          # raises TopazUnavailable (fixable message)
+    source_path = os.path.join(_dataset_path(img.dataset_id), img.filename)
+    if not os.path.isfile(source_path):
+        return None
+    if not _claim_swap(img.id):
+        raise RuntimeError('a replacement is already being prepared for this image')
+    try:
+        from .topaz_job_queue import topaz_queue
+        old_state = {field: getattr(img, field) for field in SWAP_RESTORE_FIELDS}
+        jid = topaz_queue.enqueue(
+            user_id=str(user_id), dataset_id=img.dataset_id,
+            image_id=img.id, input_filename=source_path,
+            enhancements={'upscale': True})
+        _clear_watermark_metadata(img)
+        img.filename = None
+        img.status = 'pending'
+        img.job_id = jid
+        img.fail_reason = None
+        img.fail_kind = None
+        img.swap_restore = json.dumps(old_state)
+        db.session.commit()
+        return jid
+    except Exception:
+        _release_swap(img.id)
+        raise
+
+
+def link_topaz_completed(row):
+    """Attach a finished Topaz result to its tile, swap-restore semantics.
+
+    Success: the output file is already in the dataset folder (the worker's
+    collect_output put it there); attach it and trash the original. Failure or
+    cancel: put the snapshot back so the tile shows its own picture again.
+    """
+    img = db.session.get(FaceDatasetImage, row.image_id)
+    if img is None:
+        return
+    if row.status == 'completed' and row.output_filename:
+        img.filename = row.output_filename
+        img.status = 'keep'
+        img.job_id = None
+        finish_swapped_original(img)     # trashes the original, clears snapshot
+    else:
+        restore_swapped_original(
+            img, reason=row.error_message or 'Topaz upscale did not complete')
+    db.session.commit()
+
+
 def _face_swap_image_claimed(user_id, img, ds, engine):
     """The body of face_swap_image, with this image's swap claim already held."""
     image_id = img.id

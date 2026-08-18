@@ -1786,6 +1786,21 @@ def dataset_klein_model_set(dataset_id):
     return jsonify({'ok': True, **_klein_model_state(svc.get_dataset(LOCAL_USER, dataset_id))})
 
 
+@bp.post('/dataset/image/<int:image_id>/topaz-replace')
+def dataset_image_topaz_replace(image_id):
+    """Topaz Photo AI-upscale this tile IN PLACE — same contract as the SeedVR2
+    replace route: result replaces the tile, original kept for undo. Topaz runs
+    on its own GPU outside ComfyUI, so the ComfyUI stalled-barrier gate does
+    not apply; the TopazJob queue's own gate arbitrates the GPU."""
+    try:
+        result = svc.topaz_upscale_replace(LOCAL_USER, image_id)
+    except Exception as e:
+        return _map_error(e)
+    if result is None:
+        return jsonify({'error': 'not found'}), 404
+    return jsonify({'ok': True, 'job_id': result}), 202
+
+
 @bp.post('/dataset/image/<int:image_id>/seedvr2-replace')
 def dataset_image_seedvr2_replace(image_id):
     """SeedVR2-upscale this tile IN PLACE — the result REPLACES the tile, with

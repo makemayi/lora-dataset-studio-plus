@@ -353,6 +353,16 @@ def comfy_model_files():
     return jsonify({'files': files, 'folder': folder})
 
 
+@bp.get('/settings/topaz/status')
+def topaz_status():
+    """Whether a usable tpai.exe is discoverable (config override first, then
+    the standard install paths). The Settings ▸ Image engines probe button uses
+    this; the engine card can also light itself off it."""
+    from ..services import topaz_helper
+    exe = topaz_helper.resolve_exe()
+    return jsonify({'found': bool(exe), 'path': exe or None})
+
+
 @bp.get('/seedvr2/models')
 def seedvr2_models_list():
     """The DiT and VAE this install will ACTUALLY use, resolved the same way the

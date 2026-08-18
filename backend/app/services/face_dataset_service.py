@@ -3790,7 +3790,7 @@ from .dataset_generation_service import (
     generate_variations, generate_variations_krea, generate_variations_nanobanana,
     generate_variations_minimax_h3,
     regenerate_image, face_swap_image, resolve_improve_engine,
-    seedvr2_upscale_replace,
+    seedvr2_upscale_replace, topaz_upscale_replace, link_topaz_completed,
     FACE_SWAP_ENGINES, resolve_face_swap_engine, SWAP_RESTORE_FIELDS,
     restore_swapped_original, finish_swapped_original, swap_restore_filename,
     undo_face_swap, can_undo_swap, swap_undo_state,
