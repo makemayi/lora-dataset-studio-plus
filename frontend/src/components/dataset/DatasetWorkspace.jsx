@@ -665,22 +665,23 @@ export default function DatasetWorkspace({ ds, onBack }) {
     setTrimState((s) => ({ ...s, preview: null }));
   }, [d?.id, ds]);
 
-  if (!d) return <p className="text-content-subtle text-sm">Loading…</p>;
-
-  const images = d.images || [];
   // Task Center deep link: a task row pointing at one image opens the dataset
-  // and lights that image in the lightbox. Reads d.images directly: `images`
-  // is derived just above and this effect must live after it.
+  // and lights that image in the lightbox. Lives ABOVE the early return on
+  // purpose (dataset-workspace-hook-order.test.mjs enforces hook order).
   useEffect(() => {
     const onOpenImage = (e) => {
       const { dataset_id: dsId, image_id } = e.detail || {}
       if (dsId == null) return
-      const target = (d.images || []).find((i) => i.id === image_id)
+      const target = (d?.images || []).find((i) => i.id === image_id)
       if (target) setViewImg(target)
     }
     window.addEventListener('lds:open-image', onOpenImage)
     return () => window.removeEventListener('lds:open-image', onOpenImage)
   }, [d, setViewImg])
+
+  if (!d) return <p className="text-content-subtle text-sm">Loading…</p>;
+
+  const images = d.images || [];
   const rescuePairs = buildSmallImageRescuePairs(images);
   const unresolvedRescuePairs = rescuePairs.filter((pair) => !pair.resolved);
   // An unresolved pair is intentionally absent from the generic grid/bulk

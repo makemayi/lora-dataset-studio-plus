@@ -3135,3 +3135,22 @@ otherwise be read as a vote for the checkpoint that did not produce it.
   flexibility.
 - The next chapter — **Building a good dataset** — explains *why* behind every
   rule above. Read it once before your first serious run.
+
+## Task Center (every job on one screen)
+
+**One place answers "what is running right now?"** — generation, training and
+vision tasks all land in the Task Center (/tasks, the **Tasks** item in the nav
+bar). The top strip shows ComfyUI's health and paused count, what the GPU is
+doing, and the queue summary; the list below shows every task with its status
+chip, what dataset or image it works on, and Cancel / Retry where they make
+sense.
+
+**Submit anytime, even while ComfyUI is off.** A task you start with ComfyUI
+not running is not lost and does not fail: it waits as **Paused · waiting for
+ComfyUI**, and submits itself in order the moment ComfyUI answers. The nav badge
+shows how many tasks are in progress, and a red dot when one failed — open the
+Task Center to clear it.
+
+**Retry a failed task from the list.** A task that failed (for example because
+ComfyUI restarted mid-job) shows its reason; press **Retry** to put it back on
+the queue. Cancel works for queued, paused and running tasks.

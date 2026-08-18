@@ -50,6 +50,16 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-18-task-center',
+    date: '2026-08-18',
+    title: 'Task Center: every job in one place, and paused while ComfyUI is off',
+    blurb: 'Generation, training and vision tasks are now visible in one list ' +
+      'with live ComfyUI and GPU status. Submit anytime — if ComfyUI is ' +
+      'off, tasks pause and resume automatically in order. Cancel or retry ' +
+      'straight from the list.',
+    to: '/tasks',
+  },
+  {
     id: '2026-08-17-onetrainer-honours-its-own-preset',
     date: '2026-08-17',
     title: 'OneTrainer runs now use the recipe OneTrainer tuned, and you can reach more of it',
@@ -4977,7 +4987,7 @@ export function markAllSeen(storage, entries = WHATS_NEW) {
 
 // Param-less top-level routes (mirror App.jsx <Routes>).
 const TOP_LEVEL_ROUTES = new Set([
-  '/datasets', '/bank', '/video-bank', '/studio', '/cloud', '/canvas', '/guide',
+  '/datasets', '/bank', '/video-bank', '/studio', '/cloud', '/canvas', '/tasks', '/guide',
   '/help', '/setup',
 ]);
 
