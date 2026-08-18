@@ -49,7 +49,7 @@ test('the bar renders in both capability rigs, on every route it styles', () => 
 
 test('every workspace link carries an icon, and no emoji are left in the bar', () => {
   const html = render(CAPS_FULL)
-  for (const icon of ['datasets', 'bank', 'runs', 'canvas', 'studio']) {
+  for (const icon of ['datasets', 'bank', 'runs', 'canvas', 'tasks', 'studio']) {
     assert.match(html, new RegExp(`data-icon="${icon}"`), `${icon} icon missing`)
   }
   // The three the icon set replaced. A mixed bar (some links decorated, some
@@ -58,6 +58,15 @@ test('every workspace link carries an icon, and no emoji are left in the bar', (
     assert.ok(!html.includes(emoji), `${emoji} is back in the header`)
   }
 })
+
+test('the Task Center link is present in both rigs and has a Tasks icon', () => {
+  for (const [label, caps] of [['fresh install', CAPS_EMPTY], ['configured', CAPS_FULL]]) {
+    const html = render(caps)
+    assert.match(html, /href="#?\/tasks"/, `${label}: /tasks link missing`)
+    assert.match(html, /data-icon="tasks"/, `${label}: tasks icon missing`)
+  }
+})
+
 
 test('the current workspace is a primary-filled pill', () => {
   const html = render(CAPS_FULL, '/bank')

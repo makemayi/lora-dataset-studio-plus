@@ -20,11 +20,13 @@ import SetupPage from './pages/SetupPage'
 import GuidePage from './pages/GuidePage'
 import CloudRunsPage from './pages/CloudRunsPage'
 import CanvasPage from './pages/CanvasPage'
+import TasksPage from './pages/TasksPage'
+import TaskNavBadge from './components/tasks/TaskNavBadge'
 import { recommendedMet } from './hooks/useSetupSteps'
 import { HelpModeProvider, useHelpMode, TipHost } from './help/HelpMode'
 import HeaderMenu from './components/common/HeaderMenu'
 import {
-  DatasetsIcon, BankIcon, RunsIcon, CanvasIcon, StudioIcon,
+  DatasetsIcon, BankIcon, RunsIcon, CanvasIcon, TasksIcon, StudioIcon,
   HelpIcon, SettingsIcon, UpdateIcon, SpinnerIcon, MenuIcon, CloseIcon,
   LogoMark, ICON_BUTTON_BASE, ICON_BUTTON_QUIET,
 } from './components/common/icons'
@@ -236,6 +238,13 @@ export function NavBar() {
           <span className="px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[0.5625rem] font-semibold uppercase tracking-wide leading-none md:hidden lg:inline">Beta</span>
         </NavLink>
       )}
+      {/* Task Center — every generation/training/vision job in one live list.
+          Always visible: it is useful the moment ANY job exists, and its badge
+          is how a failed run finds you from any other page. */}
+      <NavLink to="/tasks" className={navItemClass} onClick={() => setOpen(false)}>
+        <TasksIcon /> Tasks
+        <TaskNavBadge />
+      </NavLink>
       {caps.studio_visible && (
         <NavLink to="/studio" className={navItemClass} onClick={() => setOpen(false)}>
           <StudioIcon /> Test Studio
@@ -553,6 +562,7 @@ function AppInner() {
             <Route path="/dataset/studio/:id" element={<StudioPage />} />
             <Route path="/cloud" element={<CloudRunsPage />} />
             <Route path="/canvas" element={<CanvasPage />} />
+            <Route path="/tasks" element={<TasksPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/settings/:section" element={<SettingsPage />} />
             <Route path="/setup" element={<SetupPage />} />

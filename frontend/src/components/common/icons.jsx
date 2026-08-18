@@ -98,6 +98,16 @@ export function CanvasIcon(props) {
   );
 }
 
+export function TasksIcon(props) {
+  return (
+    <Glyph name="tasks" {...props}>
+      <path d="M4 5h16M4 12h10M4 19h7" />
+      <circle cx="17.5" cy="12" r="1.6" />
+      <circle cx="14.5" cy="19" r="1.6" />
+    </Glyph>
+  );
+}
+
 export function StudioIcon(props) {
   return (
     <Glyph name="studio" {...props}>
