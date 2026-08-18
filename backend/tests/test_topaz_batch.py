@@ -226,3 +226,36 @@ def test_batch_retry_without_failures_requeues_whole_batch(app):
         row = TopazJob.query.filter_by(job_id=jid).one()
         assert row.status == 'queued'
         assert row.retry_count == 1
+
+
+def test_upscale_batch_route_dispatches_to_topaz(client, app, monkeypatch):
+    """engines.upscale_engine = topaz => the batch route queues ONE TopazJob."""
+    import pathlib
+    from app.services import dataset_generation_service as dgs
+    from app.models import FaceDataset, FaceDatasetImage
+    from app.extensions import db
+    import app.config as cfg
+
+    with app.app_context():
+        ds = FaceDataset(name='ds', trigger_word='t')
+        db.session.add(ds)
+        db.session.commit()
+        ds_dir = dgs._dataset_path(ds.id)
+        pathlib.Path(ds_dir).mkdir(parents=True, exist_ok=True)
+        (pathlib.Path(ds_dir) / 'a.png').write_bytes(b'x')
+        img = FaceDatasetImage(dataset_id=ds.id, filename='a.png', status='keep')
+        db.session.add(img)
+        db.session.commit()
+        ds_id, img_id = ds.id, img.id
+
+        saved = cfg.load_config()
+        saved.setdefault('engines', {})['upscale_engine'] = 'topaz'
+        cfg.save_config({'engines': saved['engines']})
+        monkeypatch.setattr('app.services.topaz_helper.preflight', lambda: None)
+
+        resp = client.post(f'/api/dataset/{ds_id}/upscale-batch',
+                           json={'image_ids': [img_id]})
+        assert resp.status_code == 200, resp.get_json()
+        body = resp.get_json()
+        assert body['queued'] == 1 and body['engine'] == 'topaz'
+        assert body['job_id'].startswith('topaz-')

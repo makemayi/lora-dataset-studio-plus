@@ -1395,6 +1395,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   onRegenerate={(id, loraStrength, prompt, opts) => ds.regenerate(id, loraStrength, prompt, opts)}
                   onFaceSwap={ds.faceSwapImage} onUndoFaceSwap={ds.undoFaceSwap}
                   onUpscaleReplace={ds.upscaleReplaceImage}
+                  onUpscaleBatch={ds.upscaleBatch}
                   swappingIds={ds.swappingIds}
                   hasRef={!!d.ref_filename}
                   onReimprove={ds.reimproveImage}

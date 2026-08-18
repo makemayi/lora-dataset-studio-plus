@@ -1786,6 +1786,45 @@ def dataset_klein_model_set(dataset_id):
     return jsonify({'ok': True, **_klein_model_state(svc.get_dataset(LOCAL_USER, dataset_id))})
 
 
+@bp.post('/dataset/<int:dataset_id>/upscale-batch')
+def dataset_upscale_batch(dataset_id):
+    """Bulk in-place upscale of the selected images, dispatched by the
+    engines.upscale_engine setting: topaz queues ONE TopazJob (models load
+    once for the whole batch); seedvr2 enqueues the per-image ComfyUI
+    replaces, which the queue serializes."""
+    from .. import config as cfg
+    data = request.get_json(silent=True) or {}
+    image_ids = data.get('image_ids') or []
+    if not image_ids:
+        return jsonify({'error': 'select at least one image'}), 400
+    if (cfg.get('engines.upscale_engine') or 'seedvr2') == 'topaz':
+        try:
+            out = svc.topaz_upscale_replace_batch(LOCAL_USER, dataset_id,
+                                                  image_ids)
+        except Exception as e:
+            return _map_error(e)
+        return jsonify({'ok': True, 'engine': 'topaz', **out}), 200
+    # seedvr2 fallback: one replace per image, ComfyUI queue serializes them.
+    queued = skipped = 0
+    for raw in image_ids:
+        try:
+            image_id = int(raw)
+        except (TypeError, ValueError):
+            skipped += 1
+            continue
+        try:
+            result = svc.seedvr2_upscale_replace(LOCAL_USER, image_id)
+        except Exception:
+            skipped += 1
+            continue
+        if result:
+            queued += 1
+        else:
+            skipped += 1
+    return jsonify({'ok': True, 'engine': 'seedvr2',
+                    'queued': queued, 'skipped': skipped}), 200
+
+
 @bp.post('/dataset/image/<int:image_id>/topaz-replace')
 def dataset_image_topaz_replace(image_id):
     """Topaz Photo AI-upscale this tile IN PLACE — same contract as the SeedVR2

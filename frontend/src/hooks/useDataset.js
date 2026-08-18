@@ -1436,6 +1436,29 @@ export function useDataset() {
     }
   }, [refresh, toast]);
 
+  /* Bulk in-place upscale of a selection. The server dispatches by the
+     engines.upscale_engine setting: topaz = ONE batch job (models load
+     once, Task Center progress); seedvr2 = per-image ComfyUI replaces. */
+  const upscaleBatch = useCallback(async (imageIds) => {
+    const ds = data?.dataset
+    if (!ds || !imageIds?.length) return { ok: false }
+    try {
+      const d = await postJson(`/api/dataset/${ds.id}/upscale-batch`,
+        { image_ids: imageIds })
+      if (d.ok) {
+        toast.success(d.engine === 'topaz'
+          ? `Topaz batch started — ${d.queued} image(s), queued in the Task Center`
+          : `Upscale started — ${d.queued} image(s) through ComfyUI`)
+        await refresh()
+        return { ok: true, queued: d.queued, skipped: d.skipped }
+      }
+      toast.error(d.error || 'Could not start the batch')
+      return { ok: false }
+    } catch {
+      return { ok: false }
+    }
+  }, [data, refresh, toast])
+
   /* Subject trim, two phases. `trimPreview` only MEASURES — it writes no
      pixels, so it needs no confirmation. `trimApply` is the destructive half
      and takes the ids the review screen confirmed; the server holds the
@@ -1926,6 +1949,7 @@ export function useDataset() {
           lockImage, batchImages, replaceCaptions, writeCaptionFiles, openDatasetFolder,
           cancelPending, cancelCaption, regenerate, faceSwapImage, undoFaceSwap, analyzeFaces, scoreFace,
           upscaleReplaceImage,
+          upscaleBatch,
           trimPreview, trimApply, trimDiscard, trimUndo,
           findWatermarks, cleanWatermarks, cleanWatermarkImages, restoreWatermarkImage,
           dismissWatermarks, saveWatermarkRegions, cancelWatermarkScan,

@@ -256,6 +256,7 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
                                       swappingIds,
                                       onFaceSwap, onUndoFaceSwap, hasRef = false, onReimprove, onView, onBatch, busy, nonces,
                                       onUpscaleReplace,
+                                      onUpscaleBatch,
                                       mirroringIds, faceThresholds, datasetKind = 'character',
                                       onImproveBatch,
                                       // Subject trim MEASURES first: this opens a review of the
@@ -448,6 +449,30 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
   // Hand the whole selection to the server in ONE call. The client keeps the
   // eligibility partition (it already holds the rows, and the confirm must state
   // what will be skipped); the server re-checks it and owns the pacing.
+  // The 🔍 bulk button's eligibility: selected images that actually have a
+  // file and are not mid-swap. The server re-checks and owns the final word.
+  const upscaleIds = ids.filter((id) => {
+    const img = (eligibilityImages || images).find((i) => i.id === id)
+    return img && img.filename && img.status !== 'pending'
+  })
+
+  const launchUpscaleBatch = async () => {
+    if (bulkBusy || !upscaleIds.length) return
+    if (!window.confirm(
+      `Upscale ${upscaleIds.length} image(s) in place? Each tile is replaced by ` +
+      'its upscaled version; the original stays recoverable (undo).')) return
+    setLaunchingImprove(true)
+    try {
+      const result = await onUpscaleBatch(upscaleIds)
+      if (result?.ok) setSelected(new Set())
+      // A failed launch surfaced its own error toast; keep the selection.
+    } catch (error) {
+      toast.error(`Could not start the batch: ${error?.message || 'unknown error'}`)
+    } finally {
+      setLaunchingImprove(false)
+    }
+  }
+
   const improveSelected = async (engineId) => {
     const { eligible, excluded } = partitionKleinImproveSelection(improveUniverse, ids);
     if (!onImproveBatch || !eligible.length || bulkBusy) return;
@@ -578,6 +603,17 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
                 <KleinImproveNote subjectType={subjectType} datasetId={datasetId}
                   className="w-full border-t border-indigo-100 pt-1.5" />
               )}
+              {/* 🔍 Bulk in-place upscale of the selection — one TopazJob
+                  (models load once) or N per-image ComfyUI replaces, decided
+                  by the upscale-engine setting. Same swap-restore contract as
+                  the single 🔍: tiles are replaced, originals kept for undo. */}
+              {onUpscaleBatch && upscaleIds.length > 0 && (
+                <button type="button" disabled={bulkBusy}
+                  onClick={() => launchUpscaleBatch()}
+                  className={`${batchBtn} border border-sky-200 bg-sky-50 text-sky-700`}>
+                  🔍 Upscale in place ({upscaleIds.length})
+                </button>
+              )}
               <button type="button" disabled={bulkBusy} onClick={() => act('delete')}
                 className={`${batchBtn} bg-red-50 border border-red-200 text-red-600`}>
                 {bulkAction?.action === 'delete' ? bulkActionMessage(bulkAction) : '🗑 Delete'}
@@ -609,6 +645,7 @@ export default function DatasetGrid({ images, datasetId, onStatus, onCaption, on
               onRegenerate={bulkBusy ? undefined : onRegenerate}
               onFaceSwap={onFaceSwap} onUndoFaceSwap={onUndoFaceSwap}
               onUpscaleReplace={onUpscaleReplace}
+              onUpscaleBatch={onUpscaleBatch}
               swapBusy={Boolean(swappingIds?.has(img.id))} hasRef={hasRef}
               /* onView is handed over UNCONDITIONALLY: withholding it made the
                  inspect button a no-op even once its `disabled` was lifted. */
