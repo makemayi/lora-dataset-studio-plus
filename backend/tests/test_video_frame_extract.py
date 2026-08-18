@@ -97,7 +97,9 @@ def test_an_unreadable_clip_costs_one_clip_not_the_batch():
 
 def test_a_clip_with_nothing_admissible_yields_nothing():
     dark = [{'t': i * 0.5, 'luma': 0.0, 'sharp': 100.0} for i in range(10)]
-    assert run(read_frames=lambda *a: dark) == []
+    out = run(read_frames=lambda *a: dark)
+    assert out['frames'] == []
+    assert out['rejected']['exposure'] == 10
 
 
 def test_a_decode_that_returns_nothing_is_not_a_crash():

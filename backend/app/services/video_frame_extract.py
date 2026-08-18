@@ -48,11 +48,26 @@ SHORTLIST_MIN = 8
 
 
 def _shortlist(readings, limit, min_gap_s, sharp_tolerance=None):
-    """Pass A's pick: exposure + sharpness + spacing, no face gate."""
+    """Pass A's pick: exposure + sharpness + spacing, no face gate.
+
+    Returns the full select result (picked + rejected): the pass-A rejection
+    counts are real frames this clip produced that the quality gates threw
+    away, and the report must count them too — not just the final round over
+    the shortlist.
+    """
     wide = max(SHORTLIST_MIN, int(limit) * SHORTLIST_FACTOR)
     return vfs.select_frames(readings, limit=wide, min_gap_s=min_gap_s,
                              require_face=False,
-                             sharp_tolerance=sharp_tolerance)['picked']
+                             sharp_tolerance=sharp_tolerance)
+
+
+def _merge_rejected(first, second):
+    """Sum two per-reason rejection maps (pass A over every measured frame,
+    pass B over the shortlist — disjoint sets, no double counting)."""
+    merged = dict(first or {})
+    for reason, n in (second or {}).items():
+        merged[reason] = merged.get(reason, 0) + n
+    return merged
 
 
 def decode_at(path, times, *, image_format='PNG'):
@@ -165,9 +180,10 @@ def extract_from_clip(*, path, start_s, end_s, fps, limit,
         logger.warning('clip %s unreadable (%s) — skipped', clip_id, exc)
         return []
 
-    shortlist = _shortlist(readings, limit, min_gap_s, sharp_tolerance)
+    short_sel = _shortlist(readings, limit, min_gap_s, sharp_tolerance)
+    shortlist = short_sel['picked']
     if not shortlist:
-        return []
+        return {'frames': [], 'rejected': dict(short_sel.get('rejected') or {})}
 
     frames = decode(path, [f['t'] for f in shortlist])
     if not frames:
@@ -220,4 +236,5 @@ def extract_from_clip(*, path, start_s, end_s, fps, limit,
                             if vfs.face_pixels(f) else None),
             },
         })
-    return {'frames': out, 'rejected': final['rejected']}
+    return {'frames': out, 'rejected': _merge_rejected(
+        short_sel.get('rejected') or {}, final['rejected'])}
