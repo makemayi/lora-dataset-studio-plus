@@ -2779,7 +2779,8 @@ const ENGINE_RAIL = [
       { id: 'minimax_h3', label: 'MiniMax H3', engine: 'minimax_h3',
         prefix: ['minimax-h3-', 'h3-'] },
       { id: 'seedvr2', label: 'SeedVR2', engine: 'seedvr2', prefix: ['seedvr2-'] },
-      { id: 'topaz', label: 'Topaz Photo AI', engine: 'topaz', prefix: ['topaz-'] },
+      { id: 'topaz', label: 'Topaz Photo AI', engine: 'topaz',
+        prefix: ['topaz-', 'upscale-'] },
     ],
   },
   {

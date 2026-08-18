@@ -50,6 +50,17 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-18-topaz-upscale',
+    date: '2026-08-18',
+    title: 'Upscale with Topaz Photo AI, queued in the Task Center',
+    blurb: 'The 🔍 upscale button can now run Topaz Photo AI instead of '
+      + 'SeedVR2 — pick the engine in Settings ▸ Image engines. Topaz jobs '
+      + 'queue behind the GPU automatically and show in the Task Center with '
+      + 'cancel and retry; results replace the tile with the original kept '
+      + 'for undo.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-18-video-frame-quality',
     date: '2026-08-18',
     title: 'Video frames now demand a usable face and reject blur',

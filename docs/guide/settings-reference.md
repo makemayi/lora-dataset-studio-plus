@@ -1550,3 +1550,12 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `updates.repo` | GitHub repo the update checker reads its release feed from (default `perfectgf/lora-dataset-studio`). |
 
 Additional config-file-only keys (ComfyUI folder overrides, cloud internals, quality-tool interpreters, Klein consistency LoRA) are documented in [Config-file-only settings](#config-file-only-settings) above.
+
+### Topaz Photo AI upscaling
+
+The 🔍 in-place upscale button can run **Topaz Photo AI** instead of SeedVR2. Topaz is a separate native app with its own GPU, so unlike SeedVR2 these jobs do **not** go through ComfyUI: they queue behind training / vision / ComfyUI work automatically and show in the **Task Center** (queued → running → done, with cancel and retry). Results replace the tile with the original kept for undo, exactly like a SeedVR2 in-place replace.
+
+- **Upscale engine** → `engines.upscale_engine`. `seedvr2` (default) keeps the current ComfyUI path; `topaz` routes the 🔍 button to Topaz Photo AI.
+- **Topaz executable** → `topaz.exe_path`. Blank = auto-detect the standard install paths (`…\Topaz Labs LLC\Topaz Photo AI\tpai.exe`). The **Probe** button shows what was found.
+
+Topaz runs in **Autopilot** mode: the app only turns the upscale enhancement on (plus the noise/sharpen/lighting/color toggles), and Topaz decides the model and scale per image. A "Topaz is not logged in" failure means the desktop app has not been opened on this machine to complete the license sign-in once.

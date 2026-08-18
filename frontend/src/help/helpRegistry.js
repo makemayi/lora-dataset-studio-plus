@@ -812,6 +812,10 @@ const TOPICS = [
     '/video-bank', 'using-the-app',
     'video-training-sets-and-the-two-things-to-check-before-you-cut-one'),
   // People arrive here from the SYMPTOM ("I can't find the shot with the car")
+  setting('engines.upscale_engine', 'engines', 'upscale-engine', 'Upscale engine for the 🔍 button',
+    ['upscale engine', 'upscale', 'upscaler', 'topaz', 'seedvr2', 'which upscaler', '🔍']),
+  setting('topaz.exe_path', 'engines', 'topaz-exe', 'Topaz executable (tpai.exe)',
+    ['topaz', 'tpai', 'topaz photo ai', 'exe path', 'executable', 'not found', 'probe']),
   // and from the two failures that look like bugs: a search that returns nothing
   // because the pass never ran, and a "without" that returns exactly what was
   // excluded — which is CLIP ignoring the word, not the app ignoring the user.
