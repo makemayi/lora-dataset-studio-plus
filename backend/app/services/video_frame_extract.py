@@ -47,11 +47,12 @@ SHORTLIST_FACTOR = 4
 SHORTLIST_MIN = 8
 
 
-def _shortlist(readings, limit, min_gap_s):
+def _shortlist(readings, limit, min_gap_s, sharp_tolerance=None):
     """Pass A's pick: exposure + sharpness + spacing, no face gate."""
     wide = max(SHORTLIST_MIN, int(limit) * SHORTLIST_FACTOR)
     return vfs.select_frames(readings, limit=wide, min_gap_s=min_gap_s,
-                             require_face=False)['picked']
+                             require_face=False,
+                             sharp_tolerance=sharp_tolerance)['picked']
 
 
 def decode_at(path, times, *, image_format='PNG'):
@@ -140,9 +141,10 @@ def extract_from_clip(*, path, start_s, end_s, fps, limit,
                       face_bbox_min=vfs.FACE_BBOX_MIN,
                       dedup_max_cosine=vfs.DEDUP_MAX_COSINE,
                       min_face_px=None, min_sim=None,
+                      sharp_tolerance=None, face_tolerance=None,
                       read_frames=None, decode=None, face_scores=None,
                       clip_id=None, source_id=None):
-    """The two passes, wired. Returns [{'bytes', 'provenance'}].
+    """The two passes, wired. Returns {'frames': [...], 'rejected': {...}}.
 
     ``read_frames``/``decode``/``face_scores`` are injectable so the ordering and
     the degradation can be tested without a video file. ``face_scores`` receives
@@ -163,7 +165,7 @@ def extract_from_clip(*, path, start_s, end_s, fps, limit,
         logger.warning('clip %s unreadable (%s) — skipped', clip_id, exc)
         return []
 
-    shortlist = _shortlist(readings, limit, min_gap_s)
+    shortlist = _shortlist(readings, limit, min_gap_s, sharp_tolerance)
     if not shortlist:
         return []
 
@@ -196,7 +198,9 @@ def extract_from_clip(*, path, start_s, end_s, fps, limit,
                               face_bbox_min=face_bbox_min,
                               dedup_max_cosine=dedup_max_cosine,
                               min_face_px=min_face_px, min_sim=min_sim,
-                              require_face=faces is not None)
+                              require_face=faces is not None,
+                              sharp_tolerance=sharp_tolerance,
+                              face_tolerance=face_tolerance)
 
     out = []
     for f in final['picked']:
@@ -216,4 +220,4 @@ def extract_from_clip(*, path, start_s, end_s, fps, limit,
                             if vfs.face_pixels(f) else None),
             },
         })
-    return out
+    return {'frames': out, 'rejected': final['rejected']}

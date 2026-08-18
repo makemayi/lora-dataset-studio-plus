@@ -44,9 +44,9 @@ def test_the_face_pass_sees_pass_b_timestamps_not_the_whole_clip():
                 for _ in frames]
 
     out = run(face_scores=faces)
-    assert out, 'a clip of usable frames must yield frames'
+    assert out['frames'], 'a clip of usable frames must yield frames'
     assert len(seen['times']) < 40, 'the face pass must not score every frame'
-    assert len(seen['times']) >= len(out)
+    assert len(seen['times']) >= len(out['frames'])
 
 
 def test_the_shortlist_is_wider_than_the_budget_so_the_gate_can_reject():
@@ -68,7 +68,7 @@ def test_a_tiny_face_on_the_sharpest_frame_hands_the_slot_to_the_next():
         return [{'ok': True, 'det': 0.9, 'yaw': 2.0,
                  'bbox_frac': 0.005 if f['t'] == worst else 0.3} for f in frames]
 
-    out = run(limit=1, face_scores=faces)
+    out = run(limit=1, face_scores=faces)['frames']
     assert len(out) == 1
     assert out[0]['provenance']['timestamp_s'] != max(
         f['t'] for f in readings())
@@ -78,14 +78,14 @@ def test_a_tiny_face_on_the_sharpest_frame_hands_the_slot_to_the_next():
 
 def test_no_face_pass_still_returns_frames():
     """A missing interpreter must not look like a video with nobody in it."""
-    out = run(face_scores=None)
+    out = run(face_scores=None)['frames']
     assert len(out) == 3
     assert all(p['provenance']['face'] is None for p in out)
 
 
 def test_a_face_pass_that_refuses_everything_returns_nothing_and_says_so():
     out = run(face_scores=lambda frames: [{'ok': False} for _ in frames])
-    assert out == []
+    assert out['frames'] == []
 
 
 def test_an_unreadable_clip_costs_one_clip_not_the_batch():
@@ -107,7 +107,7 @@ def test_a_decode_that_returns_nothing_is_not_a_crash():
 # ── what leaves the module ───────────────────────────────────────────────────
 
 def test_each_frame_carries_bytes_and_traceable_provenance():
-    out = run(face_scores=None)
+    out = run(face_scores=None)['frames']
     for item in out:
         assert isinstance(item['bytes'], (bytes, bytearray))
         p = item['provenance']
@@ -122,20 +122,20 @@ def test_the_timestamp_is_the_frame_that_was_decoded_not_the_one_requested():
     def drifting(_path, times):
         return [{'t': t + 0.017, 'bytes': b'x'} for t in times]
 
-    out = run(decode=drifting, face_scores=None)
+    out = run(decode=drifting, face_scores=None)['frames']
     assert all(abs(p['provenance']['timestamp_s'] % 0.2 - 0.017) < 1e-6
                for p in out)
 
 
 def test_results_are_chronological():
-    out = run(face_scores=None)
+    out = run(face_scores=None)['frames']
     times = [p['provenance']['timestamp_s'] for p in out]
     assert times == sorted(times)
 
 
 @pytest.mark.parametrize('limit', [1, 2, 5])
 def test_the_budget_is_never_exceeded(limit):
-    assert len(run(limit=limit, face_scores=None)) <= limit
+    assert len(run(limit=limit, face_scores=None)['frames']) <= limit
 
 
 # ── the face-reading adapter ─────────────────────────────────────────────────
@@ -153,3 +153,20 @@ def test_a_non_scorable_result_is_not_ok(state):
 
 def test_an_empty_result_is_not_ok():
     assert vfe.face_reading(None)['ok'] is False
+
+
+def test_extract_returns_rejected_counts_and_passes_tolerances():
+    """extract_from_clip now returns (frames, rejected) and forwards both
+    tolerances into the selector."""
+    readings_hard = [
+        {'t': 0.0, 'sharp': 100.0, 'luma': 0.5},
+        {'t': 1.0, 'sharp': 30.0, 'luma': 0.5},
+    ]
+    out = vfe.extract_from_clip(
+        path='v.mp4', start_s=0, end_s=2, fps=30, limit=2,
+        sharp_tolerance=0.5, face_tolerance=0.5,
+        read_frames=lambda *a: readings_hard,
+        decode=lambda _p, times: [{'t': t, 'bytes': b'x', 'w': 512, 'h': 512}
+                                  for t in times])
+    assert [f['t'] for f in out['frames']] == [0.0]
+    assert out['rejected']['too_blurry'] == 1
