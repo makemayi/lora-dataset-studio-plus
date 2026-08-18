@@ -64,7 +64,10 @@ def test_online_gate_resumes_paused_jobs_and_submits_fifo(app, monkeypatch):
              patch('app.job_queue._poll_outputs', return_value=('out.png', False)):
             assert queue_manager.process_one() is True
         assert submitted == [j1]              # strict FIFO: the OLDER job went first
-        assert ImageGenerationQueue.query.filter_by(status=AWAITING_COMFYUI).count() == 1
+        # The resume pass flipped j2 back to pending before the pick; only j1
+        # was claimed and completed. j2 sits resumed, waiting its turn.
+        assert ImageGenerationQueue.query.filter_by(job_id=j1).one().status == 'completed'
+        assert ImageGenerationQueue.query.filter_by(job_id=j2).one().status == 'pending'
 
 
 def test_cancel_paused_job_treats_it_like_pending(app, monkeypatch):
@@ -86,21 +89,27 @@ def test_cancel_paused_job_treats_it_like_pending(app, monkeypatch):
 def test_connection_refused_defers_job_back_to_pending_not_barrier(app, monkeypatch):
     """A refused TCP connect means NOTHING was sent: the job must go back to
     pending (the gate pauses it next tick), never to a stalled barrier."""
-    from app.job_queue import queue_manager
+    from app.job_queue import AWAITING_COMFYUI, queue_manager
     from app.models import ImageGenerationQueue, SystemState
 
-    jid = queue_manager.add_job(workflow_data={'1': {}})
+    jid = None
 
     def refused_submit(workflow, client_id):
         from app.job_queue import _ComfySubmitRefused
         raise _ComfySubmitRefused('COMFYUI_REFUSED: connection refused')
 
     with app.app_context():
+        jid = queue_manager.add_job(workflow_data={'1': {}})
+
         with patch('app.job_queue._submit', side_effect=refused_submit):
             assert queue_manager.process_one() is True
 
         row = ImageGenerationQueue.query.filter_by(job_id=jid).one()
-        assert row.status == 'pending'          # deferred, not failed, not stalled
+        # Refused => deferred AND immediately paused (the handler flips the rest
+        # to awaiting_comfyui so the worker does not retry a dead endpoint every
+        # tick). The gate resumes it FIFO when ComfyUI answers. Never failed,
+        # never stalled, never a barrier.
+        assert row.status == AWAITING_COMFYUI
         assert SystemState.query.filter_by(key='comfyui_stalled_barrier').first() is None
 
 

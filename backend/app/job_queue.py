@@ -65,6 +65,10 @@ class _ComfySubmitRejected(RuntimeError):
     """A deterministic pre-submit refusal (safe to surface as terminal)."""
 
 
+class _ComfySubmitRefused(RuntimeError):
+    """A deterministic pre-POST refusal (nothing was sent — defer, never stall)."""
+
+
 class _ComfySubmitUnknown(RuntimeError):
     """A /prompt outcome that may already own remote GPU work."""
 
@@ -363,6 +367,8 @@ def _submit(workflow, client_id):
         message = str(error)
         if message.startswith('WORKFLOW_INVALIDE'):
             raise _ComfySubmitRejected(message)
+        if message.startswith('COMFYUI_REFUSED'):
+            raise _ComfySubmitRefused(message)
         # A timeout, a reset, malformed JSON, or any non-validation HTTP
         # response can happen after ComfyUI accepted the POST. Do not let a
         # caller collapse that unknown remote ownership into an ordinary fail.
@@ -1293,6 +1299,19 @@ class JobQueueManager:
                                     'leaving job %s active and fail-closed', prompt_id, job.job_id)
                         if not dispatch_cancelled:
                             return True  # never terminal-fail/callback an uncertain prompt
+                    elif isinstance(exc, _ComfySubmitRefused):
+                        # Deterministic: the POST never went out (TCP refused or
+                        # the pre-submit check said no). Give the claim back to
+                        # pending; pause the rest now and let the gate resume
+                        # everything FIFO when ComfyUI answers.
+                        (ImageGenerationQueue.query
+                         .filter_by(job_id=job.job_id, status='processing')
+                         .update({'status': 'pending', 'started_at': None,
+                                  'last_heartbeat': None}))
+                        db.session.commit()
+                        _comfyui_gate_cache.update(at=time.monotonic(), ready=False)
+                        _pause_pending_for_comfyui()
+                        return True
                     elif isinstance(exc, _ComfySubmitRejected):
                         # These failures happen before an HTTP accept (explicit
                         # validation refusal or an unavailable local submit seam).

@@ -490,7 +490,9 @@ def queue_prompt_to_comfyui(prompt_workflow, client_id, worker_url=None, *,
             success, message = result
             if not success:
                 logger.error(f"ComfyUI is not available: {message}")
-                return None, f"ComfyUI service unavailable: {message}"
+                # Deterministic PRE-POST refusal: nothing was sent, so this must
+                # never become an unknown_submit recovery barrier.
+                return None, f"COMFYUI_REFUSED (pre-submit check): {message}"
             logger.info(f"ComfyUI service check: {message}")
 
     # Check for Ollama usage in the workflow (local only)
@@ -609,6 +611,12 @@ def queue_prompt_to_comfyui(prompt_workflow, client_id, worker_url=None, *,
                 err_body = ''
             if err_body:
                 logger.error(f"ComfyUI /prompt {getattr(_resp, 'status_code', '?')} body: {err_body}")
+
+        # Explicit TCP refusal: the POST never left this machine, so the outcome
+        # is deterministic, not ambiguous. Tag it so the worker defers the job
+        # back to pending instead of erecting a recovery barrier.
+        if _is_explicit_connection_refused(e):
+            return None, f'COMFYUI_REFUSED: ComfyUI is not accepting connections ({api_addr})'
 
         # 400 = REJET DE VALIDATION (modèle absent du disque, node inconnu, input
         # invalide…) : déterministe — retenter ou redémarrer ComfyUI n'y changera
