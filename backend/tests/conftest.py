@@ -173,6 +173,14 @@ def _isolate_config_by_default(tmp_path, monkeypatch):
     monkeypatch.setattr(_cfg, '_cache', None)
 
 
+@pytest.fixture(autouse=True)
+def _comfyui_gate_online(monkeypatch):
+    """Default the worker's ComfyUI health gate to ONLINE so existing queue
+    tests exercise the submit path without a real ComfyUI. Gate tests
+    override this locally with monkeypatch."""
+    monkeypatch.setattr('app.job_queue._comfyui_ready_for_submit', lambda: True)
+
+
 @pytest.fixture()
 def app(tmp_path, monkeypatch):
     monkeypatch.setenv('LDS_DATA_DIR', str(tmp_path / 'data'))

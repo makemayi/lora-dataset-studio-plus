@@ -28,6 +28,14 @@ POLL_TIMEOUT_SECONDS = 15 * 60
 STUCK_TIMEOUT_MINUTES = 10
 IDLE_SLEEP_SECONDS = 1
 
+# ComfyUI health gate: a job is never claimed/submitted while ComfyUI is not
+# answering. Offline flips pending jobs to AWAITING_COMFYUI (paused, durable,
+# auto-resumed) instead of the old path that turned an ambiguous submit into a
+# recovery barrier wedging the whole queue.
+AWAITING_COMFYUI = 'awaiting_comfyui'
+COMFYUI_GATE_CACHE_SECONDS = 5
+_comfyui_gate_cache = {'at': 0.0, 'ready': False}
+
 # A ComfyUI history outage is neither a successful empty history nor a normal
 # generation failure.  Keep a durable, no-TTL barrier until the user explicitly
 # reconciles the exact prompt after recovering ComfyUI.
@@ -287,6 +295,40 @@ def _vision_window_blocks_gpu() -> bool:
     except Exception:
         logger.exception('job_queue: could not read the in-process Vision GPU fence')
         return True
+
+
+def _comfyui_ready_for_submit() -> bool:
+    """Health gate: only submit when ComfyUI answers.
+
+    Cached for COMFYUI_GATE_CACHE_SECONDS so an offline ComfyUI is not probed
+    on every 1 s worker tick. A probe failure is a NO (fail closed): never
+    submit into an unknown connection state.
+    """
+    now = time.monotonic()
+    if now - _comfyui_gate_cache['at'] < COMFYUI_GATE_CACHE_SECONDS:
+        return _comfyui_gate_cache['ready']
+    try:
+        from .services.comfyui_service import comfyui_service
+        ready = comfyui_service.check_connection()
+    except Exception:
+        logger.exception('job_queue: ComfyUI health gate probe failed')
+        ready = False
+    _comfyui_gate_cache.update(at=now, ready=ready)
+    return ready
+
+
+def _pause_pending_for_comfyui() -> None:
+    """Flip every still-pending job to awaiting_comfyui (idempotent)."""
+    ImageGenerationQueue.query.filter_by(status='pending').update(
+        {'status': AWAITING_COMFYUI}, synchronize_session=False)
+    db.session.commit()
+
+
+def _resume_paused_for_comfyui() -> None:
+    """Flip paused jobs back to pending so the FIFO pick can see them."""
+    ImageGenerationQueue.query.filter_by(status=AWAITING_COMFYUI).update(
+        {'status': 'pending'}, synchronize_session=False)
+    db.session.commit()
 
 def _claim(job_id) -> bool:
     """Atomically claim a pending job for processing. Returns False if the job
@@ -991,10 +1033,11 @@ class JobQueueManager:
             return True
 
     def has_comfyui_work(self) -> bool:
-        """True while LDS has work queued or an unresolved ComfyUI identity."""
+        """True while LDS has work queued (incl. paused) or an unresolved identity."""
         return (ImageGenerationQueue.query
                 .filter(ImageGenerationQueue.status.in_(
-                    ('pending', 'processing', 'sent_to_comfy', 'cancel_requested', 'stalled')))
+                    ('pending', AWAITING_COMFYUI, 'processing', 'sent_to_comfy',
+                     'cancel_requested', 'stalled')))
                 .first() is not None)
 
     # -- lifecycle ------------------------------------------------------
@@ -1132,7 +1175,8 @@ class JobQueueManager:
             keep = set()
             for row in (ImageGenerationQueue.query
                         .filter(ImageGenerationQueue.status.in_(
-                            ('pending', 'processing', 'sent_to_comfy', 'cancel_requested', 'stalled'))).all()):
+                            ('pending', AWAITING_COMFYUI, 'processing', 'sent_to_comfy',
+                             'cancel_requested', 'stalled'))).all()):
                 try:
                     md = json.loads(row.job_metadata or '{}')
                 except (TypeError, ValueError):
@@ -1175,6 +1219,13 @@ class JobQueueManager:
                             ('processing', 'sent_to_comfy', 'cancel_requested', 'stalled'))
                     ).first() is not None):
                 return False
+
+            # ComfyUI health gate: offline pauses, online resumes. Deterministic
+            # either way — never a claim, never a barrier (spec §4.2).
+            if not _comfyui_ready_for_submit():
+                _pause_pending_for_comfyui()
+                return False
+            _resume_paused_for_comfyui()
 
             job = (ImageGenerationQueue.query.filter_by(status='pending')
                    .order_by(ImageGenerationQueue.priority.desc(),
@@ -1423,12 +1474,12 @@ class JobQueueManager:
                 # A caller holding a larger DB transaction cannot perform an
                 # external proof. Refuse active work instead of silently orphaning
                 # a possibly-running ComfyUI prompt.
-                if job.status != 'pending':
+                if job.status not in ('pending', AWAITING_COMFYUI):
                     return 'retry'
                 job.update_status('cancelled')
                 return 'cancelled'
 
-            if job.status == 'pending':
+            if job.status in ('pending', AWAITING_COMFYUI):
                 job.update_status('cancelled')
                 db.session.commit()
                 return 'cancelled'
