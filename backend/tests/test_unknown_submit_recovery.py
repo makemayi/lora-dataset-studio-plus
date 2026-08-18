@@ -131,7 +131,7 @@ def test_dataset_stop_names_unknown_submit_and_confirm_route_recovers(
     stopped = client.post(f'/api/dataset/{dataset_id}/cancel')
     assert stopped.status_code == 200
     assert stopped.get_json() == {
-        'ok': True, 'cancelled': 0, 'recovery_pending': 1,
+        'ok': True, 'cancelled': 0, 'restored': 0, 'recovery_pending': 1,
         'retry_pending': 0, 'restart_required': 1, 'recovery_error': 0,
     }
     with client.application.app_context():
