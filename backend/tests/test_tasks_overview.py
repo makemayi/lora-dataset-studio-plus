@@ -177,3 +177,49 @@ def test_cancel_queued_and_paused_jobs(client, app):
         assert client.post(f'/api/tasks/{j2}/cancel').get_json()['ok'] is True
         assert ImageGenerationQueue.query.filter_by(job_id=j1).one().status == 'cancelled'
         assert ImageGenerationQueue.query.filter_by(job_id=j2).one().status == 'cancelled'
+
+
+def test_overview_lists_topaz_jobs(client, app):
+    """Topaz jobs appear in the Task Center with image resources and actions."""
+    from app.services.topaz_job_queue import topaz_queue
+    from app.models import TopazJob
+    from app.extensions import db
+
+    with app.app_context():
+        jid = topaz_queue.enqueue(user_id='local', dataset_id=5, image_id=9,
+                                  input_filename='C:/nope/a.png')
+        row = TopazJob.query.filter_by(job_id=jid).one()
+        row.status = 'failed'
+        row.error_message = 'open Topaz once'
+        db.session.commit()
+
+    d = client.get('/api/tasks/overview').get_json()
+    row = next(t for t in d['tasks'] if t['job_id'] == jid)
+    assert row['kind'] == 'topaz'
+    assert row['status'] == 'failed'
+    assert row['resource'] == {'type': 'image', 'dataset_id': 5, 'image_id': 9}
+    assert 'retry' in row['actions']
+
+
+def test_topaz_cancel_and_retry_routes(client, app):
+    """The /api/tasks routes dispatch topaz- prefixed ids to the Topaz queue."""
+    from app.services.topaz_job_queue import topaz_queue
+    from app.models import TopazJob
+    from app.extensions import db
+
+    with app.app_context():
+        jid = topaz_queue.enqueue(user_id='local', dataset_id=1, image_id=2,
+                                  input_filename='C:/nope/a.png')
+
+    assert client.post(f'/api/tasks/{jid}/cancel').get_json()['ok'] is True
+    with app.app_context():
+        assert TopazJob.query.filter_by(job_id=jid).one().status == 'cancelled'
+
+    with app.app_context():
+        row = TopazJob.query.filter_by(job_id=jid).one()
+        row.status = 'failed'
+        row.error_message = 'x'
+        db.session.commit()
+    assert client.post(f'/api/tasks/{jid}/retry').get_json()['ok'] is True
+    with app.app_context():
+        assert TopazJob.query.filter_by(job_id=jid).one().status == 'queued'

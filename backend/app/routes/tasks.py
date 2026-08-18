@@ -83,6 +83,24 @@ def _flag_row(kind, title) -> dict:
     }
 
 
+def _topaz_row(row) -> dict:
+    """One TopazJob rendered for the Task Center list."""
+    return {
+        'job_id': row.job_id,
+        'kind': 'topaz',
+        'title': 'Topaz upscale',
+        'source': _dataset_name(row.dataset_id),
+        'status': row.status,
+        'created_at': row.created_at.isoformat() if row.created_at else None,
+        'progress': None,
+        'error': row.error_message,
+        'resource': {'type': 'image', 'dataset_id': row.dataset_id,
+                     'image_id': row.image_id},
+        'actions': (['cancel'] if row.status in ('queued', 'running')
+                    else []) + (['retry'] if row.status == 'failed' else []),
+    }
+
+
 @bp.get('/overview')
 def tasks_overview():
     rows = (ImageGenerationQueue.query
@@ -94,6 +112,10 @@ def tasks_overview():
         tasks.insert(0, _flag_row('training', 'Training (local)'))
     if queue_manager._get_system_state('vision_in_progress', False):
         tasks.insert(0, _flag_row('vision', 'Vision inference (Ollama)'))
+
+    from ..services.topaz_job_queue import topaz_queue
+    for row in topaz_queue.recent(limit=50):
+        tasks.append(_topaz_row(row))
 
     by = {}
     for r in rows:
@@ -122,7 +144,12 @@ def tasks_overview():
 
 @bp.post('/<job_id>/retry')
 def task_retry(job_id):
-    """Re-enqueue one failed image job. Same arbiter lock as everything else."""
+    """Re-enqueue one failed job (ComfyUI image job, or a topaz- job)."""
+    if str(job_id).startswith('topaz-'):
+        from ..services.topaz_job_queue import topaz_queue
+        if not topaz_queue.retry(job_id):
+            return jsonify({'error': 'job not found or not failed'}), 404
+        return jsonify({'ok': True, 'job_id': job_id})
     job = (ImageGenerationQueue.query
            .filter_by(job_id=str(job_id), user_id=LOCAL_USER).first())
     if job is None:
@@ -141,7 +168,13 @@ def task_retry(job_id):
 
 @bp.post('/<job_id>/cancel')
 def task_cancel(job_id):
-    """Cancel one job (queued, paused, or running)."""
+    """Cancel one job (queued, paused, or running) — ComfyUI image jobs and
+    topaz- jobs both route here, dispatched on the id prefix."""
+    if str(job_id).startswith('topaz-'):
+        from ..services.topaz_job_queue import topaz_queue
+        if not topaz_queue.cancel(job_id):
+            return jsonify({'error': 'job not found or already finished'}), 404
+        return jsonify({'ok': True, 'job_id': job_id})
     outcome = queue_manager.cancel_job_outcome(str(job_id), user_id=LOCAL_USER)
     if outcome == 'missing':
         return jsonify({'error': 'job not found'}), 404
