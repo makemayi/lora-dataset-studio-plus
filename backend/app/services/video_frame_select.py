@@ -141,7 +141,8 @@ def _cosine(a, b):
 def select_frames(frames, *, limit, min_gap_s=MIN_GAP_S,
                   face_bbox_min=FACE_BBOX_MIN,
                   dedup_max_cosine=DEDUP_MAX_COSINE,
-                  require_face=True, min_face_px=None, min_sim=None):
+                  require_face=True, min_face_px=None, min_sim=None,
+                  sharp_tolerance=None, face_tolerance=None):
     """Pick at most ``limit`` frames out of one clip's readings.
 
     ``frames`` is a list of dicts in decode order:
@@ -173,6 +174,20 @@ def select_frames(frames, *, limit, min_gap_s=MIN_GAP_S,
     def drop(reason, n=1):
         rejected[reason] = rejected.get(reason, 0) + n
 
+    # Adaptive sharpness floors: a blur score only means something relative to
+    # the clip it came from (resolution and codec shift the scale), so the floor
+    # is max × tolerance, not an absolute number. A zero max (a degenerate
+    # clip) disables the gate — the exposure filter already owns pure-black
+    # frames. The face floor needs readings to exist at all; absent face_sharp
+    # everywhere is absent evidence, never a rejection.
+    sharps = [f.get('sharp') for f in (frames or []) if f.get('sharp') is not None]
+    max_sharp = max(sharps) if sharps else 0.0
+    face_sharps = [
+        ((f.get('face') or {}).get('face_sharp'))
+        for f in (frames or []) if (f.get('face') or {}).get('face_sharp') is not None
+    ]
+    max_face_sharp = max(face_sharps) if face_sharps else None
+
     pool = []
     for f in (frames or []):
         luma = f.get('luma')
@@ -182,11 +197,22 @@ def select_frames(frames, *, limit, min_gap_s=MIN_GAP_S,
         if f.get('sharp') is None:
             drop('unmeasured')
             continue
+        if sharp_tolerance and max_sharp > 0 and f['sharp'] < max_sharp * sharp_tolerance:
+            drop('too_blurry')
+            continue
         if require_face:
             reason = _face_reason(f, face_bbox_min=face_bbox_min,
                                   min_face_px=min_face_px, min_sim=min_sim)
             if reason:
                 drop(reason)
+                continue
+            # Face-region sharpness gate: the frame can be globally sharp while
+            # the face is blurry (it moved during the exposure). Adaptive like
+            # the global gate; absent face_sharp = no evidence, never a reject.
+            face_sharp = (f.get('face') or {}).get('face_sharp')
+            if (face_tolerance and face_sharp is not None and max_face_sharp
+                    and face_sharp < max_face_sharp * face_tolerance):
+                drop('face_blurry')
                 continue
         pool.append(f)
 

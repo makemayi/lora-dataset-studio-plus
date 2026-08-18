@@ -277,3 +277,51 @@ def test_no_similarity_reading_is_not_read_as_a_mismatch():
 def test_the_character_gates_are_off_unless_asked_for():
     f = frame(0.0, 10, face=good_face(bbox_frac=0.02, sim=0.01), w=640, h=360)
     assert len(vfs.select_frames([f], limit=1)['picked']) == 1
+
+
+def test_sharp_tolerance_drops_blurry_frames_adaptively():
+    """Frames below max_sharp × tolerance are rejected as too_blurry, and the
+    gate is per-clip adaptive (a uniformly soft clip still passes its best)."""
+    frames = [
+        {'t': 0.0, 'sharp': 100.0, 'luma': 0.5},
+        {'t': 1.0, 'sharp': 40.0, 'luma': 0.5},
+        {'t': 2.0, 'sharp': 10.0, 'luma': 0.5},
+    ]
+    out = vfs.select_frames(frames, limit=5, require_face=False,
+                            sharp_tolerance=0.5)
+    assert [f['t'] for f in out['picked']] == [0.0]
+    assert out['rejected']['too_blurry'] == 2
+
+    # adaptive: same absolute values, lower max => 40 still passes at 0.5
+    frames2 = [{'t': 0.0, 'sharp': 80.0, 'luma': 0.5},
+               {'t': 1.0, 'sharp': 40.0, 'luma': 0.5}]
+    out2 = vfs.select_frames(frames2, limit=5, require_face=False,
+                             sharp_tolerance=0.5)
+    assert [f['t'] for f in out2['picked']] == [0.0, 1.0]
+
+
+def test_face_tolerance_drops_moving_face_frames():
+    """A frame whose FACE is blurry is rejected even when the frame is the
+    sharpest in the clip — the whole reason the gate exists."""
+    frames = [
+        {'t': 0.0, 'sharp': 200.0, 'luma': 0.5,
+         'face': {'ok': True, 'det': 0.9, 'bbox_frac': 0.1, 'yaw': 0.0,
+                  'face_sharp': 20.0}},
+        {'t': 1.0, 'sharp': 150.0, 'luma': 0.5,
+         'face': {'ok': True, 'det': 0.9, 'bbox_frac': 0.1, 'yaw': 0.0,
+                  'face_sharp': 100.0}},
+    ]
+    out = vfs.select_frames(frames, limit=5, require_face=True,
+                            face_tolerance=0.5)
+    assert [f['t'] for f in out['picked']] == [1.0]     # 20 < 100*0.5
+    assert out['rejected']['face_blurry'] == 1
+
+
+def test_face_tolerance_skipped_without_face_sharp():
+    """No face_sharp anywhere => the gate is absent evidence, not a rejection."""
+    frames = [{'t': 0.0, 'sharp': 10.0, 'luma': 0.5,
+               'face': {'ok': True, 'det': 0.9, 'bbox_frac': 0.1, 'yaw': 0.0}}]
+    out = vfs.select_frames(frames, limit=5, require_face=True,
+                            face_tolerance=0.5)
+    assert out['rejected'].get('face_blurry', 0) == 0
+    assert len(out['picked']) == 1
