@@ -530,6 +530,11 @@ def _enqueue_improve(engine, *, user_id, source, source_path, prompt, label,
     steps from it)."""
     meta = (dict(extra_metadata) if extra_metadata is not None
             else _improve_extra_metadata(source, label, engine=engine))
+    # Task Center resource link: the source image this improve operates on.
+    # FaceDatasetImage only — a Canvas improve's source is a LoraTestImage in a
+    # separate id space, and stamping that would cross tables.
+    if isinstance(source, FaceDatasetImage) and 'source_image_id' not in meta:
+        meta['source_image_id'] = source.id
     if engine == 'seedvr2':
         from . import seedvr2_helper
         return seedvr2_helper.enqueue_seedvr2_upscale(
@@ -1660,7 +1665,8 @@ def seedvr2_upscale_replace(user_id, image_id):
             source_path=source_path,
             extra_metadata={'is_dataset': True,
                             'dataset_id': img.dataset_id,
-                            'replace_kind': 'seedvr2_upscale'})
+                            'replace_kind': 'seedvr2_upscale',
+                            'source_image_id': img.id})
         # Persist the replacement state, carrying the snapshot that puts it back.
         # The old FILE stays on disk until the result has landed (see
         # finish_swapped_original) — trashing it here destroyed the tile on
@@ -1711,7 +1717,8 @@ def _face_swap_image_claimed(user_id, img, ds, engine):
         extra_metadata={'is_dataset': True, 'dataset_id': img.dataset_id,
                         'variation_label': img.variation_label,
                         'variation_prompt': img.variation_prompt,
-                        'framing': img.framing})
+                        'framing': img.framing,
+                        'source_image_id': img.id})
 
     # Persist the replacement state, carrying the snapshot that puts it back.
     # The old FILE is deliberately left on disk: it is what the snapshot names,
