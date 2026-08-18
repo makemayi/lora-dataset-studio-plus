@@ -504,15 +504,15 @@ def video_bank_promote_frames(bank_id):
     """Extract still FRAMES from the KEPT clips into a new IMAGE dataset.
 
     The second promotion target. Body {name, frames_per_clip?, total_limit?,
-    ids?, max_per_source?, min_gap_s?, face_bbox_min?, require_face?,
-    ref_dataset_id?,
-    trigger_word?, kind?}.
+    ids?, max_per_source?, min_gap_s?, face_bbox_min?, person_mode?,
+    sharp_tolerance?, face_tolerance?, ref_dataset_id?, trigger_word?, kind?}.
 
     `frames_per_clip` is a CEILING, never a promise: a clip whose every frame is
-    over-exposed, or holds no usable face, contributes nothing, and the job does
-    not pad to reach a number. `require_face` (default on) refuses rather than
-    degrades when the face interpreter is unset — a request that asked for
-    "frames with a usable face" must not silently return an unfiltered dataset.
+    over-exposed, too blurry, or holds no usable face contributes nothing, and
+    the job does not pad to reach a number. `person_mode` (default 'identity')
+    refuses rather than degrades when what it needs is missing — a request that
+    asked for "frames with a usable face" must not silently return an
+    unfiltered dataset.
 
     202 {'ok', 'id', 'name', 'clips', 'composition'} — the id rides back so the
     UI can navigate to the dataset while it fills. 400 names what was wrong;
@@ -521,6 +521,27 @@ def video_bank_promote_frames(bank_id):
     if svc.get_bank(LOCAL_USER, bank_id) is None:
         return _missing(bank_id)
     data = request.get_json(silent=True) or {}
+    person_mode = data.get('person_mode', 'identity')
+    if person_mode not in ('none', 'person', 'identity'):
+        return jsonify({'error': 'person_mode must be none, person or identity'}), 400
+
+    def _tol(name, default):
+        v = data.get(name)
+        if v is None:
+            return default
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return None
+        if not 0.40 <= v <= 0.90:
+            return None
+        return v
+
+    sharp_tolerance = _tol('sharp_tolerance', 0.6)
+    face_tolerance = _tol('face_tolerance', 0.6)
+    if sharp_tolerance is None or face_tolerance is None:
+        return jsonify({'error': 'sharp_tolerance and face_tolerance must be '
+                                 'between 0.40 and 0.90'}), 400
     try:
         out = frames_svc.start_promote_to_images(
             _app(), LOCAL_USER, bank_id,
@@ -532,7 +553,8 @@ def video_bank_promote_frames(bank_id):
             **({'min_gap_s': data['min_gap_s']} if data.get('min_gap_s') else {}),
             **({'face_bbox_min': data['face_bbox_min']}
                if data.get('face_bbox_min') else {}),
-            require_face=bool(data.get('require_face', True)),
+            person_mode=person_mode,
+            sharp_tolerance=sharp_tolerance, face_tolerance=face_tolerance,
             ref_dataset_id=data.get('ref_dataset_id'),
             trigger_word=data.get('trigger_word'),
             kind=data.get('kind'))

@@ -263,12 +263,14 @@ def start(app, bank_id, kind, fn, total=0, reserve_ids=None,
     def _run():
         try:
             with app.app_context():
-                fn(job)
+                result = fn(job)
         except Exception as e:  # noqa: BLE001 — a background crash must surface in the UI
             with _lock:
                 job['error'] = f'{type(e).__name__}: {e}'
+                result = None
         finally:
             with _lock:
+                job['result'] = result
                 job['finished'] = True
                 job['_touched'] = time.time()
 
@@ -443,6 +445,10 @@ def get(bank_id):
         snap = {k: job[k] for k in ('kind', 'done', 'total', 'error',
                                     'cancelled', 'finished', 'detail',
                                     'started_at')}
+        # The job's own return value (a promotion's per-clip report, say) rides
+        # out for the completion summary. `.get` on purpose, same upgrade
+        # tolerance as stop_* below.
+        snap['result'] = job.get('result')
         pipeline = job.get('pipeline')
         snap['pipeline'] = dict(pipeline) if pipeline else None
         # `.get` on purpose: a job mapping built before this field existed (an

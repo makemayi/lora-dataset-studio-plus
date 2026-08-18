@@ -198,3 +198,50 @@ def test_a_capped_promotion_reports_the_composition_it_achieved(client, app,
                           'frames': 81, 'max_per_source': 2})
 
     assert r.get_json()['composition']['top_source_share'] == pytest.approx(2 / 5)
+
+
+def test_promote_frames_route_accepts_new_params(client, app, monkeypatch):
+    """person_mode + tolerances flow to the service; bad person_mode 400s."""
+    from app.models import VideoBank
+    from app.extensions import db
+
+    with app.app_context():
+        bank = VideoBank(name='vb_r', source_path='C:/nope')
+        db.session.add(bank)
+        db.session.commit()
+        bank_id = bank.id
+
+    captured = {}
+
+    def fake_start(app_, user_id, bank_id_, *, name=None, ids=None,
+                   dataset_id=None, frames_per_clip=3, total_limit=None,
+                   max_per_source=None, min_gap_s=0.75, face_bbox_min=0.02,
+                   person_mode='identity', ref_dataset_id=None,
+                   trigger_word=None, kind=None,
+                   sharp_tolerance=None, face_tolerance=None):
+        captured.update(person_mode=person_mode,
+                        sharp_tolerance=sharp_tolerance,
+                        face_tolerance=face_tolerance)
+        return {'id': 1, 'name': name or 'x', 'clips': 0,
+                'composition': {'face_filtered': True,
+                                'sharp_tolerance': sharp_tolerance,
+                                'face_tolerance': face_tolerance,
+                                'face_filter_skipped': False}}
+    monkeypatch.setattr(
+        'app.services.video_to_image_dataset.start_promote_to_images',
+        fake_start)
+
+    d = client.post(f'/api/video-bank/{bank_id}/promote-frames',
+                    json={'name': 'x', 'person_mode': 'person',
+                          'sharp_tolerance': 0.7, 'face_tolerance': 0.55,
+                          'ids': []}).get_json()
+    assert captured['person_mode'] == 'person'
+    assert captured['sharp_tolerance'] == 0.7
+    assert captured['face_tolerance'] == 0.55
+
+    r = client.post(f'/api/video-bank/{bank_id}/promote-frames',
+                    json={'name': 'x', 'sharp_tolerance': 0.99})
+    assert r.status_code == 400
+    r2 = client.post(f'/api/video-bank/{bank_id}/promote-frames',
+                     json={'name': 'x', 'person_mode': 'sometimes'})
+    assert r2.status_code == 400

@@ -67,3 +67,18 @@ def test_a_busy_video_bank_still_refuses_its_own_second_pass():
     # The refusal names the pass that HOLDS the bank, which is what the 409 to
     # the UI is built from.
     assert caught.value.kind == 'detect'
+
+
+def test_bank_job_result_survives_snapshot(app):
+    """bank_jobs.start keeps fn's return value; get() exposes it as 'result'."""
+    from app.services import bank_jobs
+    from app.services import video_bank_service as vbs
+
+    with app.app_context():
+        key = vbs.job_key(999)          # 'video:999' — the video lane's slot
+        bank_jobs.start(app, key, 'promote_images',
+                        lambda j: {'frames': 3, 'totals': {'too_blurry': 1}},
+                        total=1)
+        snap = bank_jobs.get(key)
+        assert snap['result'] == {'frames': 3, 'totals': {'too_blurry': 1}}
+        bank_jobs.cancel(key)
