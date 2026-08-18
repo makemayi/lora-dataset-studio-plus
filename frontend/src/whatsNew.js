@@ -50,6 +50,16 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-18-topaz-batch',
+    date: '2026-08-18',
+    title: 'Topaz upscale in bulk — one model load for the whole selection',
+    blurb: 'Select several images and 🔍 Upscale in place runs them as one '
+      + 'batch: Topaz loads its models once instead of per image, the Task '
+      + 'Center shows progress (k/N), and retry only re-runs the images that '
+      + 'failed.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-18-topaz-upscale',
     date: '2026-08-18',
     title: 'Upscale with Topaz Photo AI, queued in the Task Center',
