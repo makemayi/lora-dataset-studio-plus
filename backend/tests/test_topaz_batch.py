@@ -81,3 +81,102 @@ def test_upscale_replace_batch_filters_ineligible(app, monkeypatch):
         out = dgs.topaz_upscale_replace_batch('local', ds_id, img_ids)
         assert out['queued'] == 1
         assert out['skipped'] == 1
+
+
+def test_worker_batch_calls_tpai_once_and_links_each(app, monkeypatch):
+    """N images -> run_tpai called EXACTLY ONCE over a folder; every output is
+    mapped back to its image and linked (swap-restore success per tile)."""
+    import pathlib
+    from app.services.topaz_job_queue import topaz_queue
+    from app.models import TopazJob
+
+    linked = []
+    monkeypatch.setattr(topaz_queue, 'link_completed',
+                        lambda row: linked.append(row.job_id))
+
+    with app.app_context():
+        jid = topaz_queue.enqueue_batch(
+            user_id='local', dataset_id=1,
+            inputs=[{'image_id': 10, 'input': 'C:/x/a.png'},
+                    {'image_id': 11, 'input': 'C:/x/b.png'}])
+
+        calls = {'n': 0}
+
+        def fake_run_tpai(exe, input_dir, output_dir, **kw):
+            calls['n'] += 1
+            # write two outputs so the collector can map them back
+            pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
+            (pathlib.Path(output_dir) / 'img_10.png').write_bytes(b'out-a')
+            (pathlib.Path(output_dir) / 'img_11.png').write_bytes(b'out-b')
+            return 'ok', ''
+
+        monkeypatch.setattr('app.services.topaz_helper.run_tpai', fake_run_tpai)
+        monkeypatch.setattr('app.services.topaz_job_queue.stage_inputs',
+                            lambda inputs, tmp: {
+                                img_id: f'img_{img_id}.png'
+                                for img_id, _ in inputs})
+        monkeypatch.setattr('app.services.topaz_job_queue.collect_output',
+                            lambda tmp_dir, dataset_id, job_id, staged_name=None:
+                                f'DS/{staged_name}')
+
+        assert topaz_queue.process_one() is True
+        assert calls['n'] == 1, 'models must load once per batch'
+        row = TopazJob.query.filter_by(job_id=jid).one()
+        assert row.status == 'completed'
+        assert row.done_images == 2
+        import json
+        results = json.loads(row.image_results or '{}')
+        assert results['10']['status'] == 'completed'
+        assert results['11']['status'] == 'completed'
+
+
+def test_worker_batch_partial_failure_restores_missing_outputs(app, monkeypatch):
+    """An image whose output never appears is restored (swap-restore) and the
+    batch ends failed(partial) with a per-image detail."""
+    import json
+    import pathlib
+    from app.services.topaz_job_queue import topaz_queue
+    from app.models import TopazJob
+
+    with app.app_context():
+        jid = topaz_queue.enqueue_batch(
+            user_id='local', dataset_id=1,
+            inputs=[{'image_id': 10, 'input': 'C:/x/a.png'},
+                    {'image_id': 11, 'input': 'C:/x/b.png'}])
+
+        def fake_run_tpai(exe, input_dir, output_dir, **kw):
+            pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
+            (pathlib.Path(output_dir) / 'img_10.png').write_bytes(b'out-a')
+            return 'ok', ''           # img_11 output missing
+
+        monkeypatch.setattr('app.services.topaz_helper.run_tpai', fake_run_tpai)
+        monkeypatch.setattr('app.services.topaz_job_queue.stage_inputs',
+                            lambda inputs, tmp: {
+                                img_id: f'img_{img_id}.png'
+                                for img_id, _ in inputs})
+        def fake_collect(tmp_dir, dataset_id, job_id, staged_name=None):
+            # mirror the real collector: only a file that tpai actually wrote
+            # comes back as a path (the real one checks the output folder).
+            return (f'DS/{staged_name}'
+                    if (pathlib.Path(tmp_dir) / staged_name).exists()
+                    else None)
+
+        monkeypatch.setattr('app.services.topaz_job_queue.collect_output',
+                            fake_collect)
+
+        restored = {}
+
+        def fake_link(row):
+            results = json.loads(row.image_results or '{}')
+            for img_id, res in results.items():
+                restored[img_id] = res.get('status')
+
+        monkeypatch.setattr(topaz_queue, 'link_completed', fake_link)
+
+        topaz_queue.process_one()
+        row = TopazJob.query.filter_by(job_id=jid).one()
+        assert row.status == 'failed'
+        assert '1 of 2' in (row.error_message or '')
+        results = json.loads(row.image_results or '{}')
+        assert results['11']['status'] == 'failed'
+        assert 'nothing' in (results['11'].get('error') or '')
