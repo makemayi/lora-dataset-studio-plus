@@ -110,7 +110,7 @@ export default function DatasetLightbox({
   onMirror,
   onRotate,
   onImprove,
-  onSeedvr2Replace,
+  onUpscaleReplace,
   busy = false,
   // The sentence a refused write shows (which pass holds this dataset, where it
   // is, what to do). Opening, zooming and comparing never consult it: they read
@@ -316,10 +316,10 @@ export default function DatasetLightbox({
      `improving` stamp so the two never double-fire. */
   const replaceInPlace = async (event) => {
     event.stopPropagation();
-    if (!onSeedvr2Replace || busy) return;
+    if (!onUpscaleReplace || busy) return;
     patchImageState({ improving: true });
     try {
-      await onSeedvr2Replace(img.id);
+      await onUpscaleReplace(img.id);
     } finally {
       patchImageState({ improving: false });
     }
@@ -521,7 +521,7 @@ export default function DatasetLightbox({
             </button>
           </div>
         )}
-        {onSeedvr2Replace && (
+        {onUpscaleReplace && (
           <button type="button" onClick={replaceInPlace} disabled={busy}
             aria-busy={improvementActive}
             title={refused || 'SeedVR2 upscale this image in place — the result replaces the tile (original kept for undo)'}
