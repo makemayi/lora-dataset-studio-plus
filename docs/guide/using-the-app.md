@@ -3154,3 +3154,30 @@ Task Center to clear it.
 **Retry a failed task from the list.** A task that failed (for example because
 ComfyUI restarted mid-job) shows its reason; press **Retry** to put it back on
 the queue. Cancel works for queued, paused and running tasks.
+
+## Turn video shots into an image training set (with quality gates)
+
+The **🖼 Extract frames** button on a video bank reads the shots you kept and
+builds an **image** dataset from stills — the frames become exactly the kind of
+training pictures an image dataset holds. Two dials decide what counts as a good
+frame, and both are hard gates, not preferences:
+
+- **Person requirement** has three settings. *No person requirement* keeps the
+  sharpest well-exposed frames whoever is in them. *Frame must show a person*
+  drops every frame whose face is missing, too small or turned too far away —
+  and needs no reference photo, so it works on a fresh set or a style set.
+  *Must be the reference person* adds identity matching against a dataset's
+  reference photo, which is what a character set wants: a technically perfect
+  frame of somebody else is worse than one frame fewer.
+- **Sharpness tolerance** (40–90 %, default 60 %) drops any frame less sharp
+  than that fraction of the clip's sharpest frame, so a shot that never stays
+  in focus contributes fewer frames instead of its best bad ones.
+- **Face sharpness** (40–90 %, default 60 %) is the gate that catches a
+  moving face: the body can be sharp while the face blurred during the
+  exposure, and global sharpness cannot see that. Frames whose face scores
+  below the clip's best face are dropped.
+
+Whatever the dials reject is reported when the job finishes: the summary lists
+each clip, how many frames it contributed and how many were rejected for which
+reason, and a **View** button opens the clip it came from. A clip that fails
+every gate contributes nothing — the numbers never pad to reach a request.

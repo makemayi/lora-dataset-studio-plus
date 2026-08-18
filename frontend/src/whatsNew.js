@@ -50,6 +50,16 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-18-video-frame-quality',
+    date: '2026-08-18',
+    title: 'Video frames now demand a usable face and reject blur',
+    blurb: 'Extracting a training set from video can now require a person in ' +
+      'every frame (with optional identity matching), drop frames blurrier ' +
+      'than the clip’s best, and catch the moving-face blur global sharpness ' +
+      'misses — with a per-clip report of why frames were rejected.',
+    to: '/video-bank',
+  },
+  {
     id: '2026-08-18-task-center',
     date: '2026-08-18',
     title: 'Task Center: every job in one place, and paused while ComfyUI is off',
