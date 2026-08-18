@@ -57,16 +57,21 @@ def preflight():
     return exe
 
 
-def build_command(exe, input_path, output_dir, *, format=PNG,
-                  upscale=True, denoise=True, sharpen=True,
-                  lighting=False, color=False):
-    """The tpai.exe argv. Enhancements are toggles; model choice and scale are
-    left to Topaz Autopilot (the model API is experimental and undocumented)."""
-    cmd = [exe, '-i', input_path, '-o', output_dir, '--format', format]
-    for flag, enabled in (('--upscale', upscale), ('--noise', denoise),
-                          ('--sharpen', sharpen), ('--lighting', lighting),
-                          ('--color', color)):
-        cmd += [flag, f'enabled={"true" if enabled else "false"}']
+def build_command(exe, input_path, output_dir, *, format=PNG, upscale=True,
+                  denoise=None, sharpen=None, lighting=None, color=None):
+    """The tpai.exe argv. The INPUT IS A POSITIONAL PATH (there is no -i flag
+    — passing one makes tpai exit 127). By default ONLY the upscale toggle is
+    sent and everything else is left to Topaz Autopilot, exactly like the
+    desktop app: forcing denoise/sharpen on adds heavy passes Autopilot would
+    skip, which is how a CLI run ends up slower than the app. The other toggles
+    are an OPTIONAL channel (None = Autopilot decides, True/False = force)."""
+    cmd = [exe, input_path, '-o', output_dir, '--format', format]
+    if upscale is not None:
+        cmd += ['--upscale', 'enabled=true' if upscale else 'enabled=false']
+    for flag, val in (('--noise', denoise), ('--sharpen', sharpen),
+                      ('--lighting', lighting), ('--color', color)):
+        if val is not None:
+            cmd += [flag, f'enabled={"true" if val else "false"}']
     return cmd
 
 

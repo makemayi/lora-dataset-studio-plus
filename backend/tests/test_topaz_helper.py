@@ -22,12 +22,24 @@ def test_resolve_exe_returns_none_when_nothing_exists(monkeypatch):
 
 
 def test_build_command_upscale_only():
+    """The input is a POSITIONAL path (there is no -i flag; it exits 127), and
+    by default only the upscale toggle is sent — Autopilot decides the rest."""
     cmd = th.build_command('tpai.exe', 'in.png', 'out', format='png')
     assert cmd[0] == 'tpai.exe'
-    assert 'in.png' in cmd
+    assert cmd[1] == 'in.png'            # positional input, NOT '-i'
+    assert '-i' not in cmd
     assert cmd[cmd.index('-o') + 1] == 'out'
     assert '--format' in cmd and 'png' in cmd
     assert '--upscale' in cmd and cmd[cmd.index('--upscale') + 1] == 'enabled=true'
+    # Autopilot decides denoise/sharpen/lighting/color unless forced.
+    assert '--noise' not in cmd and '--sharpen' not in cmd
+
+
+def test_build_command_can_force_toggles():
+    cmd = th.build_command('tpai.exe', 'in.png', 'out',
+                           denoise=False, sharpen=True)
+    assert '--noise' in cmd and cmd[cmd.index('--noise') + 1] == 'enabled=false'
+    assert cmd[cmd.index('--sharpen') + 1] == 'enabled=true'
 
 
 def test_run_tpai_maps_return_codes(monkeypatch):
