@@ -21,6 +21,85 @@ def test_onetrainer_defaults_are_blank(onetrainer):
     assert cfg.get('onetrainer.python') == ''
 
 
+def test_deploy_onetrainer_checkpoint_imports_into_the_loras_root(
+        onetrainer, tmp_path, monkeypatch):
+    """A successful OneTrainer run auto-deploys its output into the dataset's
+    ComfyUI loras folder (via the shared import_checkpoint), so the Studio /
+    Canvas picker sees it and the run-tagged name links it back to this run."""
+    ots, _cfg = onetrainer
+    called = {}
+
+    def fake_import(user_id, dataset_id, filename, src_dir, run_id=None,
+                    run_source=None, **kw):
+        called.update(user_id=user_id, dataset_id=dataset_id, filename=filename,
+                      src_dir=src_dir, run_id=run_id, run_source=run_source)
+        return {'ok': True}
+
+    monkeypatch.setattr('app.services.lora_training.import_checkpoint', fake_import)
+    out = tmp_path / 'krea.safetensors'
+    out.write_bytes(b'x')
+    ots.deploy_onetrainer_checkpoint('local', 7, 42, str(out))
+    assert called['user_id'] == 'local'
+    assert called['dataset_id'] == 7
+    assert called['filename'] == 'krea.safetensors'
+    assert called['src_dir'] == str(tmp_path)
+    assert called['run_id'] == 42
+    assert called['run_source'] == 'local'
+
+
+def test_deploy_onetrainer_checkpoint_is_fail_safe(onetrainer, tmp_path, monkeypatch):
+    """A deploy problem (ComfyUI unconfigured, header guard, disk) is logged and
+    swallowed — it must never re-fail the already-finished run."""
+    ots, _cfg = onetrainer
+
+    def boom(**kw):
+        raise RuntimeError('no ComfyUI loras root')
+
+    monkeypatch.setattr('app.services.lora_training.import_checkpoint', boom)
+    out = tmp_path / 'krea.safetensors'
+    out.write_bytes(b'x')
+    ots.deploy_onetrainer_checkpoint('local', 7, 42, str(out))  # must not raise
+
+
+def test_watcher_auto_deploys_on_success_and_skips_on_failure(app, monkeypatch, tmp_path):
+    from app.services import onetrainer_service as ots
+    out_ok = tmp_path / 'ok.safetensors'
+    out_ok.write_bytes(b'x')
+    out_bad = tmp_path / 'bad.safetensors'  # absent file -> not ready
+
+    deployed = []
+    monkeypatch.setattr(ots, 'deploy_onetrainer_checkpoint',
+                        lambda *a, **k: deployed.append((a, k)))
+
+    class OkProc:
+        returncode = 0
+
+        def wait(self):
+            return 0
+
+    class BadProc:
+        returncode = 1
+
+        def wait(self):
+            return 1
+
+    ots._watch_onetrainer(app, {'output_model_destination': str(out_ok),
+                                'log_path': str(tmp_path / 'ok.log'), '_proc': OkProc()},
+                          7, 'local', 42)
+    assert len(deployed) == 1, 'a successful run must auto-deploy'
+    assert deployed[0][0][0] == 'local' and deployed[0][0][1] == 7
+    assert deployed[0][0][2] == 42
+    # positional args = (user_id, dataset_id, record_id, output_model_destination)
+    assert deployed[0][0][3] == str(out_ok)
+
+    # A failed (rc!=0) or incomplete (no file) run must NOT deploy.
+    ots._watch_onetrainer(app, {'output_model_destination': str(out_bad),
+                                'log_path': str(tmp_path / 'bad.log'), '_proc': BadProc()},
+                          7, 'local', 42)
+    assert len(deployed) == 1, 'a failed run must not auto-deploy'
+
+
+
 def test_onetrainer_path_dir_is_none_when_unconfigured(onetrainer):
     ots, cfg = onetrainer
     assert ots.onetrainer_path('dir') is None

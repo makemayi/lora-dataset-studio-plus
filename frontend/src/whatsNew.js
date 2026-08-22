@@ -50,6 +50,16 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-22-onetrainer-canvas-deploy',
+    date: '2026-08-22',
+    title: 'OneTrainer checkpoints appear on the LoRA Canvas automatically',
+    blurb: 'When a OneTrainer run finishes, its checkpoint is now deployed into '
+      + 'the ComfyUI LoRA folder automatically, so it is ready to generate and '
+      + 'pin on the Canvas / LoRA Studio — no manual copy needed. If the deploy '
+      + 'can\'t run (or ComfyUI isn\'t configured) the training still finishes '
+      + 'normally.',
+  },
+  {
     id: '2026-08-22-onetrainer-rank-cadence',
     date: '2026-08-22',
     title: 'OneTrainer takes the rank and the save/sample cadence too',

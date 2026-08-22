@@ -323,6 +323,29 @@ def checkpoint_ready(output_model_destination: str) -> bool:
     return os.path.isfile(output_model_destination)
 
 
+def deploy_onetrainer_checkpoint(user_id, dataset_id, record_id, output_path):
+    """On a successful run, deploy the output into the dataset's ComfyUI loras
+    folder so the Studio / Canvas picker sees it, via the SAME import_checkpoint
+    every other local/cloud checkpoint deploys with (family subfolder + a run
+    tag that links the deployed name back to this TrainingRunRecord).
+
+    ``output_path`` is the app-side model destination (the onetrainer_runs file);
+    its directory is passed as ``src_dir`` so no ai-toolkit install is needed.
+    FAIL-SAFE and deliberately non-blocking: a deploy problem (ComfyUI
+    unconfigured, an arch-guard refusal, a full disk) is logged and swallowed —
+    it must never turn an already-finished run into an error."""
+    from .lora_training import import_checkpoint
+    name = os.path.basename(output_path)
+    run_dir = os.path.dirname(output_path)
+    try:
+        import_checkpoint(
+            user_id, dataset_id, filename=name, src_dir=run_dir,
+            run_id=record_id, run_source='local')
+    except Exception:                                    # noqa: BLE001
+        logger.exception('onetrainer: auto-deploy of %s failed; the run itself '
+                         'is unaffected', name)
+
+
 def launch(trigger: str, dataset_folder: str, training_folder: str,
           steps: int, num_images: int, rank: int,
           peft_type: str = PEFT_TYPE_LORA,
@@ -531,7 +554,7 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
                       sample_every=_s.get('sample_every'))
 
     from . import checkpoint_registry
-    checkpoint_registry.register_launch(
+    rec = checkpoint_registry.register_launch(
         user_id, dataset_id, family='krea', source='local', variant='raw',
         masked=False, steps=steps, trainer='onetrainer')
     queue_manager._set_system_state('training_in_progress', True, ttl_seconds=_TRAIN_STATE_TTL)
@@ -542,7 +565,8 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
     from flask import current_app
     import threading
     threading.Thread(target=_watch_onetrainer,
-                     args=(current_app._get_current_object(), launched, dataset_id),
+                     args=(current_app._get_current_object(), launched, dataset_id,
+                           user_id, rec.id),
                      daemon=True).start()
 
     return {'started': True, 'pid': launched['pid'], 'config_path': launched['config_path'],
@@ -550,11 +574,14 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
            'log_path': launched['log_path']}
 
 
-def _watch_onetrainer(app, launched, dataset_id) -> None:
+def _watch_onetrainer(app, launched, dataset_id, user_id, record_id) -> None:
     """Minimal watcher (see spec's Non-goals: no queue-chaining for
     OneTrainer in this slice, unlike ai-toolkit's _watch_training which
     calls process_training_queue()). Waits for exit, clears the shared
-    in-progress flags, reuses _crash_payload for a consistent failure UX."""
+    in-progress flags, reuses _crash_payload for a consistent failure UX, and
+    on success auto-deploys the checkpoint into the ComfyUI loras root so the
+    Studio / Canvas picker can generate from it (see
+    deploy_onetrainer_checkpoint)."""
     proc = launched['_proc']
     try:
         proc.wait()
@@ -566,7 +593,11 @@ def _watch_onetrainer(app, launched, dataset_id) -> None:
     try:
         with app.app_context():
             ok = rc == 0 and checkpoint_ready(launched['output_model_destination'])
-            if not ok:
+            if ok:
+                deploy_onetrainer_checkpoint(
+                    user_id, dataset_id, record_id,
+                    launched['output_model_destination'])
+            else:
                 payload = _crash_payload(launched['log_path'], dataset_id, rc)
                 queue_manager._set_system_state('training_error', payload, ttl_seconds=3600)
             queue_manager._set_system_state('training_in_progress', False, ttl_seconds=1)
