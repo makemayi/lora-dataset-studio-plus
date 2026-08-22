@@ -50,6 +50,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-22-onetrainer-shared-settings',
+    date: '2026-08-22',
+    title: 'OneTrainer uses the same advanced settings as ai-toolkit',
+    blurb: 'On the OneTrainer lane, Effective batch, Network dropout and EMA '
+      + 'are no longer greyed out — they now reach the run exactly as set. '
+      + 'The other advanced levers still show which lane reads them.',
+  },
+  {
     id: '2026-08-22-topaz-output-collect',
     date: '2026-08-22',
     title: 'Topaz upscales finish instead of failing when saving the result',
