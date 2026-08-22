@@ -771,3 +771,37 @@ def test_min_snr_gamma_is_written_in_onetrainers_MODERN_shape(onetrainer, tmp_pa
         trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
         steps=100, num_images=10, rank=32)
     assert 'loss_weight_fn' not in off and 'loss_weight_strength' not in off
+
+
+def test_build_job_config_translates_grad_accum_dropout_ema(onetrainer, tmp_path):
+    """The three settings reach OneTrainer in ITS own top-level vocabulary.
+
+    All three are TOP-LEVEL TrainConfig fields (gradient_accumulation_steps,
+    dropout_probability = the LoRA/network one, ema+ema_decay). ema is chosen
+    as CPU here — the EMA weights are a rank-32 LoRA, tiny, and this app keeps
+    VRAM off an already-tight 12B run.
+    """
+    ots, _cfg = onetrainer
+    c = ots.build_job_config(
+        trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
+        steps=100, num_images=10, rank=32,
+        grad_accum=4, dropout=0.15, ema=0.99)
+    assert c['gradient_accumulation_steps'] == 4
+    assert c['dropout_probability'] == 0.15
+    assert c['ema'] == 'CPU'
+    assert c['ema_decay'] == 0.99
+    # The LoRA/network dropout must land TOP-LEVEL, never as a text-encoder
+    # caption-dropout field.
+    assert 'caption_dropout' not in c
+
+
+def test_build_job_config_does_not_write_the_defaults(onetrainer, tmp_path):
+    """Ownership rule: a default choice (grad_accum 1, dropout off, ema off) is
+    not written — the preset / OneTrainer default decides."""
+    ots, _cfg = onetrainer
+    c = ots.build_job_config(
+        trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
+        steps=100, num_images=10, rank=32, grad_accum=1, dropout=0, ema='off')
+    assert 'gradient_accumulation_steps' not in c
+    assert 'dropout_probability' not in c
+    assert 'ema' not in c and 'ema_decay' not in c

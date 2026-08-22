@@ -175,7 +175,10 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
                      te2_lr: float | None = None,
                      lr_scheduler: str | None = None,
                      warmup_steps: int | None = None,
-                     min_snr_gamma: float | None = None) -> dict:
+                     min_snr_gamma: float | None = None,
+                     grad_accum: int | None = None,
+                     dropout: float | None = None,
+                     ema: float | None = None) -> dict:
     """The OVERRIDE config this app writes to --config-path, merged by
     OneTrainer OVER its own shipped Krea 2 preset (--preset-path). Contains
     ONLY the fields this app's own UI/dataset state actually owns — never a
@@ -269,6 +272,19 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
         **({'loss_weight_fn': 'MIN_SNR_GAMMA',
             'loss_weight_strength': float(min_snr_gamma)}
            if min_snr_gamma else {}),
+        # grad_accum / dropout / ema, in OneTrainer's OWN top-level fields.
+        # `dropout_probability` here is the TOP-LEVEL field (TrainConfig :447,
+        # "this is LoRA dropout!") — never the text-encoder caption-dropout
+        # field (:266), which the panel does not control. ema is CPU by design:
+        # the EMA weights are a rank-32 LoRA, tiny, and this app keeps VRAM off
+        # an already-tight 12B run. Each is written only when the user chose a
+        # non-default value — 1 (grad accum) / 0 (dropout) / off (ema) means
+        # the preset or OneTrainer's own default decides.
+        **({'gradient_accumulation_steps': max(1, int(grad_accum))}
+           if grad_accum and int(grad_accum) > 1 else {}),
+        **({'dropout_probability': float(dropout)} if dropout else {}),
+        **({'ema': 'CPU', 'ema_decay': float(ema)}
+           if ema in (0.99, 0.999) else {}),
         # The app owns the learning rate: it is a per-dataset setting the UI
         # exposes and the ai-toolkit lane already honours. Left unset, this run
         # silently used the shipped preset's 0.0003 while the SAME dataset
