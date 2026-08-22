@@ -50,6 +50,24 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-22-topaz-output-collect',
+    date: '2026-08-22',
+    title: 'Topaz upscales finish instead of failing when saving the result',
+    blurb: 'Fixed a crash that left a Topaz upscale (single or bulk) as stuck '
+      + 'pending after the upscale itself succeeded: the finished image could '
+      + 'not be moved into the dataset folder. Results now land as usual and '
+      + 'the original stays recoverable (undo).',
+  },
+  {
+    id: '2026-08-19-topaz-worker-boot',
+    date: '2026-08-19',
+    title: 'Topaz upscales actually run now',
+    blurb: 'Fixed an issue where Topaz upscaling (single or bulk) was queued '
+      + 'but never picked up. Queued tasks are now taken up right away — '
+      + 'anything still stuck pending from yesterday will finish after the '
+      + 'restart.',
+  },
+  {
     id: '2026-08-18-topaz-batch',
     date: '2026-08-18',
     title: 'Topaz upscale in bulk — one model load for the whole selection',

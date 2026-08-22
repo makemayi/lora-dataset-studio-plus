@@ -719,6 +719,12 @@ def _start_workers(app):
     from .job_queue import queue_manager
     queue_manager.init_app(app)
     queue_manager.start()
+    # The Topaz lane has its OWN worker (one thread owns every tpai run);
+    # without this it is enqueued into SQLite and parked in `queued` forever,
+    # because no thread ever calls process_one(). Both start() are idempotent.
+    from .services.topaz_job_queue import topaz_queue
+    topaz_queue.init_app(app)
+    topaz_queue.start()
     try:
         from .services.lora_training import start_training_scheduler
         start_training_scheduler(app)

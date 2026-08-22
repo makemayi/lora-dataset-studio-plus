@@ -43,13 +43,13 @@ def collect_output(tmp_dir, dataset_id, job_id, staged_name=None):
     SEPARATE function so the worker's scheduling can be tested without a real
     file, and the import path owns the naming.
     """
-    from .. import config as cfg
     from . import face_dataset_service as fds
+    from .dataset_storage import ensure_dataset_dir
 
     ds = fds.get_dataset('local', dataset_id)
     if ds is None:
         return None
-    out_dir = cfg.dataset_dir(dataset_id)
+    out_dir = ensure_dataset_dir(dataset_id)
     candidates = []
     try:
         for name in sorted(p.name for p in tmp_dir.iterdir()):

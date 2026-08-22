@@ -228,6 +228,32 @@ def test_batch_retry_without_failures_requeues_whole_batch(app):
         assert row.retry_count == 1
 
 
+def test_collect_output_moves_staged_file_into_dataset_dir(app):
+    """The REAL collector (not a monkeypatched seam) must resolve the dataset
+    folder and place the Topaz output there — see the 2026-08-22 regression
+    where collect_output called the long-gone ``cfg.dataset_dir`` and every
+    batch failed with ``AttributeError`` mid-run (only after the worker-boot
+    fix made the lane actually execute)."""
+    import os
+    import tempfile
+    from app.services import dataset_generation_service as dgs
+    from app.services.topaz_job_queue import collect_output
+
+    ds_id, img_ids = _dataset_with_images(app, n=1)
+    with app.app_context():
+        with tempfile.TemporaryDirectory(prefix='lds-topaz-out-') as d:
+            staged = pathlib.Path(d) / f'img_{img_ids[0]}.png'
+            staged.write_bytes(b'X')
+            out_path = collect_output(
+                pathlib.Path(d), ds_id, 'topaz-deadbeef',
+                staged_name=f'img_{img_ids[0]}.png')
+        assert out_path is not None
+        ds_dir = dgs._dataset_path(ds_id)
+        assert os.path.dirname(out_path) == ds_dir
+        assert os.path.isfile(out_path)
+        assert os.path.basename(out_path).startswith('topaz_deadbeef_')
+
+
 def test_upscale_batch_route_dispatches_to_topaz(client, app, monkeypatch):
     """engines.upscale_engine = topaz => the batch route queues ONE TopazJob."""
     import pathlib
