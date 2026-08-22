@@ -774,6 +774,37 @@ def test_min_snr_gamma_is_written_in_onetrainers_MODERN_shape(onetrainer, tmp_pa
     assert 'loss_weight_fn' not in off and 'loss_weight_strength' not in off
 
 
+def test_launch_training_forwards_grad_accum_dropout_ema(onetrainer, tmp_path, monkeypatch, app):
+    import json as _j
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as lt
+    ots, cfg = onetrainer
+    root = tmp_path / 'OneTrainer'
+    (root / 'venv' / 'Scripts').mkdir(parents=True, exist_ok=True)
+    (root / 'venv' / 'Scripts' / 'python.exe').write_text('')
+    cfg.save_config({'onetrainer': {'dir': str(root)}})
+    monkeypatch.setattr(lt, '_effective_resolution', lambda _ds: [1024])
+
+    class FakeProc:
+        pid = 890
+
+        def poll(self):
+            return None
+    monkeypatch.setattr(ots.subprocess, 'Popen', lambda *a, **k: FakeProc())
+
+    with app.app_context():
+        ds = _trainable_krea_dataset(svc, LOCAL_USER, 'OT shared')
+        lt.update_train_settings(LOCAL_USER, ds.id, {
+            'grad_accum': 4, 'dropout': 0.15, 'ema': 0.999})
+        r = ots.launch_training(LOCAL_USER, ds.id, steps=100, check_captions=False)
+        written = _j.loads(open(r['config_path'], encoding='utf-8').read())
+    assert written['gradient_accumulation_steps'] == 4
+    assert written['dropout_probability'] == 0.15
+    assert written['ema'] == 'CPU'
+    assert written['ema_decay'] == 0.999
+
+
 def test_build_job_config_translates_grad_accum_dropout_ema(onetrainer, tmp_path):
     """The three settings reach OneTrainer in ITS own top-level vocabulary.
 

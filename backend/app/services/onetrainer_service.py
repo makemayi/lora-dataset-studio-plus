@@ -322,7 +322,10 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
           te2_lr: float | None = None,
           lr_scheduler: str | None = None,
           warmup_steps: int | None = None,
-          min_snr_gamma: float | None = None) -> dict:
+          min_snr_gamma: float | None = None,
+          grad_accum: int | None = None,
+          dropout: float | None = None,
+          ema: float | None = None) -> dict:
     """Write concepts.json + config.json under `training_folder` and spawn
     `scripts/train.py --preset-path <shipped Krea 2 preset> --config-path
     <our config.json>`. Returns {'pid': int, 'config_path': str,
@@ -344,7 +347,8 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
                               epochs=epochs, batch_size=batch_size,
                               te1_lr=te1_lr, te2_lr=te2_lr,
                               lr_scheduler=lr_scheduler, warmup_steps=warmup_steps,
-                              min_snr_gamma=min_snr_gamma)
+                              min_snr_gamma=min_snr_gamma,
+                              grad_accum=grad_accum, dropout=dropout, ema=ema)
     concepts = build_concepts(trigger=trigger, dataset_folder=dataset_folder)
 
     concepts_path = training_folder_p / 'concepts.json'
@@ -503,7 +507,10 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
                       te1_lr=_s.get('te1_lr'), te2_lr=_s.get('te2_lr'),
                       lr_scheduler=_s.get('lr_scheduler'),
                       warmup_steps=_s.get('warmup'),
-                      min_snr_gamma=_s.get('min_snr_gamma'))
+                      min_snr_gamma=_s.get('min_snr_gamma'),
+                      grad_accum=_s.get('grad_accum'),
+                      dropout=_s.get('dropout'),
+                      ema=_s.get('ema'))
 
     from . import checkpoint_registry
     checkpoint_registry.register_launch(
