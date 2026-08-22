@@ -243,13 +243,13 @@ const TOPICS = [
     app: { route: '/datasets?section=training' } },
   // The Expert block groups itself around the engine in use, because the two
   // trainers do not read the same settings. Its own topic rather than a line
-  // under workspace-training: someone searching "why is rank greyed out" or
+  // under workspace-training: someone searching "why is alpha greyed out" or
   // "where did the optimiser go" is asking about THIS, not about launching.
   { id: 'training-engine-settings', kind: 'setting',
     title: 'Which settings each training engine reads',
     keywords: ['onetrainer', 'ai-toolkit', 'engine', 'greyed', 'disabled',
       'epochs', 'batch size', 'text encoder', 'te1', 'te2', 'min-snr',
-      'scheduler', 'expert', 'advanced options', 'shared', 'rank pinned'],
+      'scheduler', 'expert', 'advanced options', 'shared', 'alpha pinned'],
     guide: { chapter: 'dataset-guide', anchor: '4-settings-cheat-sheet' },
     app: { route: '/datasets?section=training' } },
   { id: 'workspace-checkpoints', kind: 'section', title: 'Checkpoints & LoRAs',

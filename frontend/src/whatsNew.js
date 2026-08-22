@@ -50,6 +50,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-22-onetrainer-rank-cadence',
+    date: '2026-08-22',
+    title: 'OneTrainer takes the rank and the save/sample cadence too',
+    blurb: 'On the OneTrainer lane, Rank is no longer fixed and the Checkpoint '
+      + 'and Preview frequency now reach the run exactly as set (in steps, not '
+      + 'epochs). Alpha still follows the chosen rank for a consistent scale.',
+  },
+  {
     id: '2026-08-22-onetrainer-shared-settings',
     date: '2026-08-22',
     title: 'OneTrainer uses the same advanced settings as ai-toolkit',
