@@ -507,9 +507,10 @@ def test_the_lane_view_names_exactly_what_this_lane_honours(onetrainer):
     ots, _cfg = onetrainer
     view = ots.settings_status()
     applying = sorted(k for k, v in view.items() if v['state'] == ots.SETTING_APPLIES)
-    assert applying == ['batch_size', 'dual_captions', 'epochs',
-                        'learning_rate', 'lr_scheduler', 'min_snr_gamma',
-                        'resolution', 'te1_lr', 'te2_lr', 'warmup']
+    assert applying == ['batch_size', 'dropout', 'dual_captions', 'ema',
+                        'epochs', 'grad_accum', 'learning_rate', 'lr_scheduler',
+                        'min_snr_gamma', 'resolution', 'te1_lr', 'te2_lr',
+                        'warmup']
 
 
 def test_an_unknown_setting_is_reported_as_preset_owned(onetrainer):

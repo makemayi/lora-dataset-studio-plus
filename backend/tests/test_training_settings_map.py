@@ -113,13 +113,16 @@ def test_what_the_onetrainer_lane_claims_to_apply_really_reaches_its_config(app,
             te1_lr=DISTINCTIVE['te1_lr'], te2_lr=DISTINCTIVE['te2_lr'],
             lr_scheduler=DISTINCTIVE['lr_scheduler'],
             warmup_steps=DISTINCTIVE['warmup'],
-            min_snr_gamma=DISTINCTIVE['min_snr_gamma'])
+            min_snr_gamma=DISTINCTIVE['min_snr_gamma'],
+            grad_accum=DISTINCTIVE['grad_accum'],
+            dropout=DISTINCTIVE['dropout'],
+            ema=DISTINCTIVE['ema'])
     blob = json.dumps(cfgd)
     # Only the ones this builder is actually handed — `dual_captions` shapes the
     # exported dataset rather than the job config, and `resolution` is checked
     # by value below because it is stringified.
     for key in ('learning_rate', 'epochs', 'batch_size', 'te1_lr', 'te2_lr',
-                'min_snr_gamma'):
+                'min_snr_gamma', 'grad_accum', 'dropout', 'ema'):
         if tsm.status(key, tsm.LANE_ONETRAINER)[0] != tsm.APPLIES:
             continue
         assert str(DISTINCTIVE[key]) in blob, (
