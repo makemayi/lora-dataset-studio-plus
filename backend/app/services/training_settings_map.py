@@ -103,15 +103,13 @@ SETTINGS: dict[str, dict] = {
     # --- set on the panel, forced by the OneTrainer lane ---
     'rank': {'group': 'network', 'lanes': {
         LANE_AITOOLKIT: _A,
-        LANE_ONETRAINER: _pinned(
-            'OneTrainer runs at rank 32 on this lane. The rank chosen here is '
-            'used by ai-toolkit only.')}},
+        LANE_ONETRAINER: _A}},
     'alpha': {'group': 'network', 'lanes': {
         LANE_AITOOLKIT: _A,
         LANE_ONETRAINER: _pinned(
-            'Pinned to equal the rank (scale 1.0). A LoRA trained at the '
-            'preset’s own alpha against this app’s rank came out ~1/32 of its '
-            'intended strength.')}},
+            'Always equals the chosen rank (scale 1.0). A LoRA trained at any '
+            'other alpha against this app’s rank came out ~1/32 of its intended '
+            'strength.')}},
     'network_type': {'group': 'network', 'lanes': {
         LANE_AITOOLKIT: _A,
         LANE_ONETRAINER: _pinned(

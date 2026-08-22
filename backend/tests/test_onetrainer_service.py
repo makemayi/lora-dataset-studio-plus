@@ -459,26 +459,18 @@ def test_launch_training_forwards_the_datasets_lr_and_resolution(
 # moved — which is the same bug wearing a different hat — so the list is held to
 # the code here.
 
-def test_the_pinned_rank_is_the_rank_the_launch_actually_passes(
+def test_rank_is_no_longer_pinned_and_flows_to_the_config(
         onetrainer, monkeypatch, app, tmp_path):
-    """The 'rank is pinned' claim is checked against the CALL, not a comment.
-
-    `launch_training` hardcodes the rank. If someone later wires the panel's
-    rank through, this test fails and the declaration has to stop saying the
-    control does nothing — which is exactly the direction the drift should
-    travel.
-    """
+    """Rank is now APPLIES: the panel's chosen rank reaches the config, defaulting
+    to the family 32 when unset. alpha stays pinned to equal the rank (the no-op
+    scale 1.0 convention that fixed a real ~1/32-strength bug)."""
     from app.config import LOCAL_USER
     from app.services import face_dataset_service as svc
     from app.services import lora_training as lt
     ots, cfg = onetrainer
     _installed_onetrainer(cfg, tmp_path)
-    monkeypatch.setattr(lt, '_lr_eff', lambda _ds: 0.0001)
     monkeypatch.setattr(lt, '_effective_resolution', lambda _ds: [1024])
 
-    # The real launch path, with only the process faked: a stubbed `launch`
-    # would only prove what the stub was handed, and the claim is about what
-    # ends up in the job OneTrainer reads.
     class FakeProc:
         pid = 889
 
@@ -488,15 +480,20 @@ def test_the_pinned_rank_is_the_rank_the_launch_actually_passes(
     import json as _j
     monkeypatch.setattr(ots.subprocess, 'Popen', lambda *a, **k: FakeProc())
     with app.app_context():
-        ds = _trainable_krea_dataset(svc, LOCAL_USER, 'OT pinned rank')
-        result = ots.launch_training(LOCAL_USER, ds.id, steps=100,
-                                     check_captions=False)
-        written = _j.loads(open(result['config_path'], encoding='utf-8').read())
-
-    assert written['lora_rank'] == ots.PINNED_RANK
-    assert written['lora_alpha'] == float(ots.PINNED_RANK), 'alpha follows the rank'
-    assert ots.setting_status('rank')[0] == ots.SETTING_PINNED
-    assert ots.setting_status('alpha')[0] == ots.SETTING_PINNED
+        ds = _trainable_krea_dataset(svc, LOCAL_USER, 'OT live rank')
+        # Default (no rank stored) -> family default 32.
+        r = ots.launch_training(LOCAL_USER, ds.id, steps=100, check_captions=False)
+        w = _j.loads(open(r['config_path'], encoding='utf-8').read())
+        assert w['lora_rank'] == ots.PINNED_RANK
+        assert w['lora_alpha'] == float(ots.PINNED_RANK)
+        # A chosen rank flows through.
+        lt.update_train_settings(LOCAL_USER, ds.id, {'rank': 16})
+        r2 = ots.launch_training(LOCAL_USER, ds.id, steps=100, check_captions=False)
+        w2 = _j.loads(open(r2['config_path'], encoding='utf-8').read())
+        assert w2['lora_rank'] == 16
+        assert w2['lora_alpha'] == 16.0
+        assert ots.setting_status('rank')[0] == ots.SETTING_APPLIES
+        assert ots.setting_status('alpha')[0] == ots.SETTING_PINNED
 
 
 def test_the_lane_view_names_exactly_what_this_lane_honours(onetrainer):
@@ -509,7 +506,7 @@ def test_the_lane_view_names_exactly_what_this_lane_honours(onetrainer):
     applying = sorted(k for k, v in view.items() if v['state'] == ots.SETTING_APPLIES)
     assert applying == ['batch_size', 'dropout', 'dual_captions', 'ema',
                         'epochs', 'grad_accum', 'learning_rate', 'lr_scheduler',
-                        'min_snr_gamma', 'resolution', 'te1_lr', 'te2_lr',
+                        'min_snr_gamma', 'rank', 'resolution', 'te1_lr', 'te2_lr',
                         'warmup']
 
 
@@ -528,8 +525,9 @@ def test_the_settings_status_route_answers_without_onetrainer_installed(client):
     assert r.status_code == 200
     body = r.get_json()['settings']
     assert body['learning_rate']['state'] == 'applies'
-    assert body['rank']['state'] == 'pinned'
-    assert body['rank']['why'], 'a greyed control with no reason teaches nothing'
+    assert body['rank']['state'] == 'applies'
+    assert body['alpha']['state'] == 'pinned'
+    assert body['alpha']['why'], 'a greyed control with no reason teaches nothing'
     assert body['optimizer']['state'] == 'absent'
 
 
@@ -837,3 +835,58 @@ def test_build_job_config_does_not_write_the_defaults(onetrainer, tmp_path):
     assert 'gradient_accumulation_steps' not in c
     assert 'dropout_probability' not in c
     assert 'ema' not in c and 'ema_decay' not in c
+
+
+def test_build_job_config_maps_save_and_sample_units_to_step(onetrainer, tmp_path):
+    """OneTrainer pairs each frequency with a TimeUnit, and a bare number would be
+    read as epochs/minutes. The unit must be pinned to STEP."""
+    ots, _cfg = onetrainer
+    c = ots.build_job_config(
+        trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
+        steps=100, num_images=10, rank=32, save_every=500, sample_every=250)
+    assert c['save_every'] == 500
+    assert c['save_every_unit'] == 'STEP'
+    # `sample_every` maps to OneTrainer's `sample_after` (renamed only on the
+    # save side: `save_after` cleaned up, `sample_after` kept).
+    assert c['sample_after'] == 250.0
+    assert c['sample_after_unit'] == 'STEP'
+
+
+def test_build_job_config_omits_save_sample_when_unset(onetrainer, tmp_path):
+    ots, _cfg = onetrainer
+    c = ots.build_job_config(
+        trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
+        steps=100, num_images=10, rank=32)
+    assert 'save_every' not in c and 'sample_after' not in c
+
+
+def test_launch_training_forwards_save_sample_and_the_resolved_rank(
+        onetrainer, tmp_path, monkeypatch, app):
+    import json as _j
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as lt
+    ots, cfg = onetrainer
+    root = tmp_path / 'OneTrainer'
+    (root / 'venv' / 'Scripts').mkdir(parents=True, exist_ok=True)
+    (root / 'venv' / 'Scripts' / 'python.exe').write_text('')
+    cfg.save_config({'onetrainer': {'dir': str(root)}})
+    monkeypatch.setattr(lt, '_effective_resolution', lambda _ds: [1024])
+
+    class FakeProc:
+        pid = 891
+
+        def poll(self):
+            return None
+    monkeypatch.setattr(ots.subprocess, 'Popen', lambda *a, **k: FakeProc())
+
+    with app.app_context():
+        ds = _trainable_krea_dataset(svc, LOCAL_USER, 'OT save sample')
+        lt.update_train_settings(LOCAL_USER, ds.id, {
+            'rank': 16, 'save_every': 500, 'sample_every': 100})
+        r = ots.launch_training(LOCAL_USER, ds.id, steps=100, check_captions=False)
+        written = _j.loads(open(r['config_path'], encoding='utf-8').read())
+    assert written['lora_rank'] == 16
+    assert written['lora_alpha'] == 16.0, 'alpha follows the chosen rank'
+    assert written['save_every'] == 500 and written['save_every_unit'] == 'STEP'
+    assert written['sample_after'] == 100.0 and written['sample_after_unit'] == 'STEP'

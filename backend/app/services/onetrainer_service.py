@@ -178,7 +178,9 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
                      min_snr_gamma: float | None = None,
                      grad_accum: int | None = None,
                      dropout: float | None = None,
-                     ema: float | None = None) -> dict:
+                     ema: float | None = None,
+                     save_every: int | None = None,
+                     sample_every: int | None = None) -> dict:
     """The OVERRIDE config this app writes to --config-path, merged by
     OneTrainer OVER its own shipped Krea 2 preset (--preset-path). Contains
     ONLY the fields this app's own UI/dataset state actually owns — never a
@@ -285,6 +287,16 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
         **({'dropout_probability': float(dropout)} if dropout else {}),
         **({'ema': 'CPU', 'ema_decay': float(ema)}
            if ema in (0.99, 0.999) else {}),
+        # Checkpoint / sample frequency. OneTrainer pairs each with a TimeUnit,
+        # and the unit MUST be pinned to STEP: its shipped defaults are minutes
+        # (and NEVER), so a bare number would be read as epochs or as a unit the
+        # user never chose. The `sample_after` key (OneTrainer's name) is what
+        # this app's `sample_every` maps to — `save_after` was renamed to
+        # `save_every` upstream, `sample_after` never was.
+        **({'save_every': int(save_every), 'save_every_unit': 'STEP'}
+           if save_every else {}),
+        **({'sample_after': float(sample_every), 'sample_after_unit': 'STEP'}
+           if sample_every else {}),
         # The app owns the learning rate: it is a per-dataset setting the UI
         # exposes and the ai-toolkit lane already honours. Left unset, this run
         # silently used the shipped preset's 0.0003 while the SAME dataset
@@ -325,7 +337,9 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
           min_snr_gamma: float | None = None,
           grad_accum: int | None = None,
           dropout: float | None = None,
-          ema: float | None = None) -> dict:
+          ema: float | None = None,
+          save_every: int | None = None,
+          sample_every: int | None = None) -> dict:
     """Write concepts.json + config.json under `training_folder` and spawn
     `scripts/train.py --preset-path <shipped Krea 2 preset> --config-path
     <our config.json>`. Returns {'pid': int, 'config_path': str,
@@ -348,7 +362,8 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
                               te1_lr=te1_lr, te2_lr=te2_lr,
                               lr_scheduler=lr_scheduler, warmup_steps=warmup_steps,
                               min_snr_gamma=min_snr_gamma,
-                              grad_accum=grad_accum, dropout=dropout, ema=ema)
+                              grad_accum=grad_accum, dropout=dropout, ema=ema,
+                              save_every=save_every, sample_every=sample_every)
     concepts = build_concepts(trigger=trigger, dataset_folder=dataset_folder)
 
     concepts_path = training_folder_p / 'concepts.json'
@@ -470,7 +485,7 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
     # constant that can drift. Without this, the same dataset trained at
     # lr 0.0003 / 1024 here and lr 0.0001 / 768 there, with nothing on screen
     # saying the two lanes disagreed.
-    from .lora_training import _effective_resolution, _train_settings
+    from .lora_training import _effective_resolution, _train_settings, _lora_rank
     _s = _train_settings(ds) or {}
     # ONLY when the user chose one. `_lr_eff` never returns None — it falls back
     # to the family-fixed 1e-4 — so calling it here wrote `learning_rate` on
@@ -501,7 +516,8 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
     ot_batch = _s.get('batch_size')
     launched = launch(trigger=trigger, dataset_folder=dataset_folder,
                       training_folder=str(training_folder), steps=steps,
-                      num_images=max(1, num_images), rank=32, peft_type=peft_type,
+                      num_images=max(1, num_images),
+                      rank=_lora_rank(ds, 'krea'), peft_type=peft_type,
                       learning_rate=lr, resolution=resolution,
                       epochs=ot_epochs, batch_size=ot_batch,
                       te1_lr=_s.get('te1_lr'), te2_lr=_s.get('te2_lr'),
@@ -510,7 +526,9 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
                       min_snr_gamma=_s.get('min_snr_gamma'),
                       grad_accum=_s.get('grad_accum'),
                       dropout=_s.get('dropout'),
-                      ema=_s.get('ema'))
+                      ema=_s.get('ema'),
+                      save_every=_s.get('save_every'),
+                      sample_every=_s.get('sample_every'))
 
     from . import checkpoint_registry
     checkpoint_registry.register_launch(

@@ -122,7 +122,7 @@ def test_what_the_onetrainer_lane_claims_to_apply_really_reaches_its_config(app,
     # exported dataset rather than the job config, and `resolution` is checked
     # by value below because it is stringified.
     for key in ('learning_rate', 'epochs', 'batch_size', 'te1_lr', 'te2_lr',
-                'min_snr_gamma', 'grad_accum', 'dropout', 'ema'):
+                'min_snr_gamma', 'grad_accum', 'dropout', 'ema', 'rank'):
         if tsm.status(key, tsm.LANE_ONETRAINER)[0] != tsm.APPLIES:
             continue
         assert str(DISTINCTIVE[key]) in blob, (
@@ -154,7 +154,8 @@ def test_what_the_ai_toolkit_lane_claims_to_apply_really_reaches_its_config(app,
 
 def test_for_lane_is_shaped_for_the_panel(app):
     view = tsm.for_lane(tsm.LANE_ONETRAINER)
-    assert view['rank']['state'] == tsm.PINNED and view['rank']['why']
+    assert view['rank']['state'] == tsm.APPLIES
+    assert view['alpha']['state'] == tsm.PINNED and view['alpha']['why']
     assert view['epochs']['state'] == tsm.APPLIES
     assert view['optimizer']['state'] == tsm.ABSENT
     assert view['epochs']['group'] == 'iteration'
@@ -169,8 +170,9 @@ def test_the_route_serves_both_lanes_and_the_group_order(client):
     assert set(body['lanes']) == set(tsm.LANES)
     assert body['lanes']['onetrainer']['epochs']['state'] == 'applies'
     assert body['lanes']['ai_toolkit']['epochs']['state'] == 'absent'
-    assert body['lanes']['onetrainer']['rank']['state'] == 'pinned'
-    assert body['lanes']['onetrainer']['rank']['why']
+    assert body['lanes']['onetrainer']['rank']['state'] == 'applies'
+    assert body['lanes']['onetrainer']['alpha']['state'] == 'pinned'
+    assert body['lanes']['onetrainer']['alpha']['why']
     # Ordered: the panel renders groups in this order and a stable order is the
     # difference between a layout and a shuffle on every reload.
     assert [g['key'] for g in body['groups']] == [k for k, _ in tsm.GROUPS]
