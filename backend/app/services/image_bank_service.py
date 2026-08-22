@@ -5470,8 +5470,11 @@ def start_delete_rejected(app, user_id, bank_id) -> dict:
         out = delete_rejected(
             user_id, bank_id, job=job,
             _bank_lease=_job_bank_capability(job))
-        job['result'] = out
+        # Return, not `job['result'] = ...`: bank_jobs.start stores fn's return
+        # value on the job (see 1e444fe7). Setting it here AND returning None
+        # made the finally clobber the outcome back to None.
         bank_jobs.progress(job, detail=delete_rejected_summary(out))
+        return out
 
     job = bank_jobs.start(app, bank_id, 'delete_rejected', _run, total=total)
     return {'total': total, 'job': job}
@@ -9915,9 +9918,11 @@ def collect_into_bank(app, user_id, collector, url, *, bank_id=None, name=None) 
             done = min(start + len(chunk), len(items))
             bank_jobs.progress(job, done=done, total=len(items),
                                detail=f'{totals["saved"]} of {len(items)} downloaded')
-        job['result'] = totals
         bank_jobs.progress(job, done=len(items), total=len(items),
                            detail=f'{totals["saved"]} downloaded')
+        # Return (not `job['result'] = ...`): bank_jobs.start stores fn's return
+        # value — see 1e444fe7 for the contract.
+        return totals
 
     try:
         job = bank_jobs.start(app, target_id, 'collect', _run)
