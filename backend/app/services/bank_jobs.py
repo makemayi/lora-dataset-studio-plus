@@ -472,6 +472,24 @@ def get(bank_id):
         return snap
 
 
+def list_every():
+    """Every live bank job as ``(bank_id, snapshot)``, newest first — the Task
+    Center's view.
+
+    Goes through :func:`get` per key rather than reading ``_jobs`` directly, so
+    the TTL purge, the finished/stale distinction and the ETA suppression are
+    computed in exactly ONE place. A second implementation here would be a second
+    opinion about when a job is dead, and the two would drift.
+    """
+    out = []
+    for bank_id in list(_jobs.keys()):
+        snap = get(bank_id)
+        if snap:
+            out.append((bank_id, snap))
+    out.sort(key=lambda pair: pair[1].get('started_at') or 0, reverse=True)
+    return out
+
+
 def running(bank_id) -> bool:
     snap = get(bank_id)
     return bool(snap and not snap['finished'])

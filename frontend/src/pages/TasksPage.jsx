@@ -71,6 +71,8 @@ export default function TasksPage() {
           <option value="training">Training</option>
           <option value="vision">Vision</option>
           <option value="topaz">Topaz</option>
+          <option value="batch">Dataset passes</option>
+          <option value="bank">Bank passes</option>
         </select>
       </div>
       <div className="mt-4 overflow-hidden rounded-xl bg-surface">
@@ -78,7 +80,8 @@ export default function TasksPage() {
           <div className="px-4 py-12 text-center">
             <p className="text-sm text-content-muted">No tasks {tab === 'active' ? 'in progress' : ''}.</p>
             <p className="mt-1 text-xs text-content-subtle">
-              Generate from a dataset, Studio or the Canvas — everything lands here.
+              Generate from a dataset, Studio or the Canvas — everything lands here,
+              captioning, watermark and bank passes included.
             </p>
           </div>
         ) : (

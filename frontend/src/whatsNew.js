@@ -50,6 +50,18 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-23-task-center-all-passes',
+    date: '2026-08-23',
+    title: 'Captioning, watermark and bank passes now show in the Task Center',
+    blurb: 'The Task Center listed generation, training and Topaz jobs but not '
+      + 'the long passes: captioning, finding watermarks, face scoring, exports, '
+      + 'backups, subject trim, and the image bank\'s own scans and grouping. '
+      + 'They are all there now with their progress, the dataset or bank they are '
+      + 'working on, and a Stop button on the ones that can actually stop — bank '
+      + 'passes also show how much time is left.',
+    to: '/tasks',
+  },
+  {
     id: '2026-08-23-reference-set-check',
     date: '2026-08-23',
     title: 'Catch a reference photo that is not the same person',

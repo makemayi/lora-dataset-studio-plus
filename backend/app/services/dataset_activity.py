@@ -360,6 +360,52 @@ def list_all(dataset_id):
         return out
 
 
+def list_every():
+    """EVERY live batch on EVERY dataset, newest first, each carrying its own
+    ``dataset_id`` — what the Task Center needs.
+
+    `get`/`list_all` answer "what is running on THIS dataset", because that is
+    what a dataset page asks. The Task Center asks the opposite question, and
+    reaching it by calling `list_all` for every dataset id in the app would be a
+    scan to find the handful that are busy — this registry already knows exactly
+    which ones those are.
+
+    Same TTL purge and the same ordering rule as `list_all`, so the two readers
+    can never disagree about a batch. `_synced` reconstructions are INCLUDED:
+    dropping them here would make an API fan-out — which has no worker-owned
+    handle of its own — vanish from the one screen that claims to list
+    everything running.
+    """
+    now = time.time()
+    out = []
+    with _lock:
+        for dataset_id in list(_active.keys()):
+            bucket = _purge_stale_locked(dataset_id, now)
+            if not bucket:
+                continue
+            armed = _cancel.get(dataset_id) or ()
+            for token, entry in bucket.items():
+                # The token rides out because the Task Center needs a STABLE row
+                # identity and (dataset, kind) is not one: a local batch and an API
+                # batch of the same kind run side by side on purpose, and two rows
+                # sharing a key is a React remount on every poll. Opaque but
+                # harmless — it is `<dataset_id>:<kind>:<counter>`.
+                item = {'token': token,
+                        'dataset_id': dataset_id, 'kind': entry['kind'],
+                        'done': entry['done'], 'total': entry['total'],
+                        'started_at': entry['started_at'],
+                        'synced': bool(entry.get('_synced'))}
+                if entry.get('detail'):
+                    item['detail'] = entry['detail']
+                if entry.get('engine'):
+                    item['engine'] = entry['engine']
+                if entry['kind'] in armed:
+                    item['cancelling'] = True
+                out.append(item)
+    out.sort(key=lambda e: (0 if e['synced'] else 1, e['started_at']), reverse=True)
+    return out
+
+
 def running(dataset_id, kinds):
     """True when a batch of one of ``kinds`` is live on ``dataset_id``. Used to refuse
     a second ✨ improve batch (-> 409) instead of racing two workers on one cap."""

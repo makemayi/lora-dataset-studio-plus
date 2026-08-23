@@ -3168,12 +3168,12 @@ otherwise be read as a vote for the checkpoint that did not produce it.
 
 ## Task Center (every job on one screen)
 
-**One place answers "what is running right now?"** — generation, training and
-vision tasks all land in the Task Center (/tasks, the **Tasks** item in the nav
-bar). The top strip shows ComfyUI's health and paused count, what the GPU is
-doing, and the queue summary; the list below shows every task with its status
-chip, what dataset or image it works on, and Cancel / Retry where they make
-sense.
+**One place answers "what is running right now?"** — generation, training,
+vision, Topaz upscales, **dataset passes** and **bank passes** all land in the
+Task Center (/tasks, the **Tasks** item in the nav bar). The top strip shows
+ComfyUI's health and paused count, what the GPU is doing, and the queue summary;
+the list below shows every task with its status chip, the dataset or bank it is
+working on, its progress, and Cancel / Retry where they make sense.
 
 **Submit anytime, even while ComfyUI is off.** A task you start with ComfyUI
 not running is not lost and does not fail: it waits as **Paused · waiting for
@@ -3184,6 +3184,31 @@ Task Center to clear it.
 **Retry a failed task from the list.** A task that failed (for example because
 ComfyUI restarted mid-job) shows its reason; press **Retry** to put it back on
 the queue. Cancel works for queued, paused and running tasks.
+
+**Long passes show here too, with their progress.** Captioning and
+re-captioning, finding and cleaning watermarks, face scoring, framing
+classification, variation fan-outs, ✨ Improve batches, reference edits, bank
+import/export, training export, backups and subject trim all appear as
+**Dataset passes** with a k/N count and the dataset they are running on. The
+🗃️ image bank's own work — folder scans, group-by-person, semantic embedding,
+promotion, de-duplication — appears as **Bank passes**, with an estimate of the
+time left, because these are the longest-running jobs in the app and a bare
+`120/8000` does not tell you whether to wait.
+
+**Three limits, all deliberate:**
+
+- **Cancel is only offered where a stop actually exists.** The passes that stop
+  cleanly do so at their next image boundary and keep everything already
+  written — captioning, re-captioning, finding watermarks, ✨ Improve, subject
+  trim, and variation fan-outs. A pass without that seam (a backup, a framing
+  classification, a one-shot subprocess) shows **no Cancel button** rather than
+  one that does nothing. After you press it the row reads **Stopping…** and
+  stays *Running*, because it is: the worker finishes the picture it is on.
+- **Dataset and bank passes cannot be retried from here.** They keep no recipe —
+  re-running a caption pass means the engine, the pile and the settings the
+  screen that owns it had. The Task Center says so instead of failing quietly.
+- **They disappear on restart.** These passes live in memory only, so a restart
+  ends both the work and its row. Nothing is left behind claiming to run.
 
 ## Turn video shots into an image training set (with quality gates)
 

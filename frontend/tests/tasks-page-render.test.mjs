@@ -50,3 +50,44 @@ test('StatusStrip shows training card when the GPU is busy training', () => {
     training: true, vision: false })
   assert.ok(html.includes('Training in progress'))
 })
+
+// --- the two in-memory registries the page grew ------------------------------
+
+test('TaskRow names the dataset or bank a source-less pass is running on', () => {
+  // "Captioning" alone does not say which of eleven datasets is busy. The backend
+  // always computed this name; the row used to drop it, which only stopped being
+  // harmless once rows existed that are not tied to one image.
+  const html = render(TaskRow, { task: { job_id: 'activity-1:caption:2',
+    title: 'Captioning', status: 'running', progress: '12/40', actions: ['cancel'],
+    source: 'Ada portraits', resource: { type: 'dataset', dataset_id: 1 } } })
+  assert.ok(html.includes('Ada portraits'), 'the dataset name must be on the row')
+  assert.ok(html.includes('12/40'), 'progress rides beside it')
+})
+
+test('TaskRow renders a pass that has been asked to stop without a dead button', () => {
+  // The worker stops at the next item boundary, so the row is still Running; the
+  // Cancel button is gone because a second click would do nothing.
+  const html = render(TaskRow, { task: { job_id: 'activity-1:caption:2',
+    title: 'Captioning', status: 'running', progress: 'Stopping...', actions: [],
+    source: 'Ada portraits', resource: { type: 'dataset', dataset_id: 1 } } })
+  assert.ok(html.includes('Running'), 'still running, not chipped as cancelled')
+  assert.ok(html.includes('Stopping'))
+  assert.ok(!html.includes('Cancel'), 'no armed button once the stop is requested')
+})
+
+test('TaskRow renders a bank pass with its ETA and no dataset link', () => {
+  const html = render(TaskRow, { task: { job_id: 'bank-3', title: 'Group by person',
+    status: 'running', progress: '120/8000 - ~25 min left', actions: ['cancel'],
+    source: 'Portraits', resource: { type: 'dataset', dataset_id: null } } })
+  assert.ok(html.includes('~25 min left'))
+  assert.ok(html.includes('Unknown source'), 'a bank id is not a dataset link')
+})
+
+test('the kind filter offers every kind the endpoint can emit', async () => {
+  const { readFileSync } = await import('node:fs')
+  const src = readFileSync(new URL('../src/pages/TasksPage.jsx', import.meta.url), 'utf8')
+  // A kind with no filter option is invisible the moment a user narrows the list.
+  for (const kind of ['image', 'training', 'vision', 'topaz', 'batch', 'bank']) {
+    assert.ok(src.includes(`value="${kind}"`), `no filter option for kind ${kind}`)
+  }
+})

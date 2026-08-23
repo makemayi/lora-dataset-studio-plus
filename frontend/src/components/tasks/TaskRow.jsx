@@ -23,6 +23,11 @@ export function TaskRow({ task, onCancel, onRetry, onOpenResource }) {
           ) : (
             <span className="text-content-subtle">Unknown source</span>
           )}
+          {/* The backend has always computed a dataset/bank name here and the row
+              threw it away. It only started to matter when the list grew rows that
+              are not tied to one image: "Captioning" on its own does not say which
+              of eleven datasets is busy. */}
+          {task.source && <span className="truncate">{task.source}</span>}
           {task.progress && <span>{task.progress}</span>}
           {task.error && <span className="truncate text-red-600">{task.error}</span>}
         </div>
