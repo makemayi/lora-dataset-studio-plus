@@ -132,3 +132,119 @@ def score_dataset_faces(ref_path, image_paths, timeout: int | None = None,
         return {}, {'kind': 'ref_unusable',
                     'detail': data.get('error') or 'no usable face in the reference photo'}
     return data.get('results') or {}, None
+
+
+# --- Reference-set self-check ----------------------------------------------
+# Best-match-of-N scoring (`sim` = MAX over refs) has one hole, and it is not a
+# small one: a single photo of the WRONG person is never outvoted. It becomes the
+# ref that wins the max, so it RAISES every candidate's score instead of lowering
+# it. A wrong reference is therefore invisible in the scores it corrupts — the
+# only place it can be seen is against the OTHER references.
+#
+# Below this mean cosine a reference is flagged as "possibly not the same person".
+#
+# THIS NUMBER IS NOT PORTED FROM ANYWHERE, and in particular it is NOT Inline
+# Studio's 25.0: that floor is calibrated on OpenCV SFace (128-d, scores x100),
+# and a cosine threshold carries no meaning across two different encoders.
+# antelopev2 is ArcFace-r100 on 512-d normed embeddings, so the scale here is a
+# raw cosine in [-1, 1]. 0.20 sits deliberately LOW — impostor pairs cluster near
+# 0.0 while genuine pairs run 0.4-0.7, but this scorer accepts refs up to
+# YAW_MAX=70 deg, and a real 3/4 profile against a frontal is exactly the genuine
+# pair that lands lowest. A warning nobody trusts is a warning nobody reads, so
+# this is tuned to miss a marginal impostor rather than to accuse a real profile.
+#
+# It has NOT been calibrated on a labelled set on this machine. That is why the
+# check WARNS and never blocks, and why the UI shows the raw agreement number
+# next to the flag: the number is what lets you judge, and re-tune this if your
+# own sets prove it wrong. Override without editing code:
+# config.json -> "face_scoring": {"reference_agreement_floor": 0.25}
+REFERENCE_AGREEMENT_FLOOR = 0.20
+
+
+def reference_agreement_floor() -> float:
+    """The configured floor, or the module default. Out-of-range values fall back
+    rather than silently flagging every photo (a floor of 1.0) or none (-1.0)."""
+    raw = cfg.get('face_scoring.reference_agreement_floor')
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return REFERENCE_AGREEMENT_FLOOR
+    return value if -1.0 <= value <= 1.0 else REFERENCE_AGREEMENT_FLOOR
+
+
+def check_reference_set(ref_path, extra_ref_paths=None, timeout: int | None = None):
+    """Is every reference photo the SAME person? Returns ``(report, error|None)``.
+
+    ``report`` = ``{'floor': float, 'compared': int, 'refs': {path: {...}}}`` where each
+    ref carries the scorer's own verdict (``state``, ``det``, ``bbox_frac``, ``yaw``)
+    plus ``agreement`` (mean cosine with the other USABLE refs, None when there is
+    nothing to compare against) and ``flagged`` (agreement below the floor).
+
+    Runs the scorer with NO candidate images, so the cost is the model load plus one
+    detection per reference — a handful of seconds on CPU, and it never touches the
+    GPU. ``error`` uses the same ``{'kind', 'detail'}`` vocabulary as
+    ``score_dataset_faces``; 'ref_unusable' here means no reference had a usable face
+    at all, which is a real answer and not a crash.
+
+    Two usable refs give both the same single pairwise number: that says "these two
+    do not look like the same person" WITHOUT saying which one is wrong. The caller
+    is expected to show it that way rather than to pick a culprit.
+    """
+    refs = [ref_path] + [p for p in (extra_ref_paths or []) if p and os.path.isfile(p)]
+    refs = [p for p in refs if p and os.path.isfile(p)]
+    if not refs:
+        return {'floor': reference_agreement_floor(), 'compared': 0, 'refs': {}}, None
+    if not is_available():
+        return {}, {'kind': 'unavailable',
+                    'detail': 'face scoring is not installed (Quality tools step in Setup)'}
+    if timeout is None:
+        # NOT default_timeout(): that one is floored at 900s for the candidate pass,
+        # and this call is synchronous behind an HTTP request. A reference set is a
+        # handful of photos, so the budget is the model load plus a detection each.
+        timeout = 180 + _TIMEOUT_PER_IMAGE_S * len(refs)
+    payload = json.dumps({"refs": refs, "images": [],
+                          "models_root": cfg.get('face_scoring.models_root') or None})
+    try:
+        stdout, stderr_lines, returncode, timed_out = _run_scorer(
+            _scoring_python(), payload, timeout, None)
+    except OSError as e:
+        logger.warning('face_similarity: reference check subprocess failed: %s', e)
+        return {}, {'kind': 'failed', 'detail': str(e)}
+    if timed_out:
+        return {}, {'kind': 'failed',
+                    'detail': f'reference check timed out after {timeout}s '
+                              f'({len(refs)} reference photo(s))'}
+    line = next((ln for ln in reversed((stdout or '').splitlines())
+                 if ln.strip().startswith('{')), '')
+    if not line:
+        tail = _stderr_tail(stderr_lines)
+        return {}, {'kind': 'failed',
+                    'detail': tail or f'scorer produced no output (rc={returncode})'}
+    try:
+        data = json.loads(line)
+    except json.JSONDecodeError as e:
+        return {}, {'kind': 'failed', 'detail': f'unreadable scorer output: {e}'}
+
+    floor = reference_agreement_floor()
+    raw = data.get('refs') or {}
+    report = {}
+    compared = 0
+    for path in refs:
+        row = dict(raw.get(path) or {})
+        agreement = row.get('agreement')
+        if agreement is None:
+            row['agreement'] = None
+            row['flagged'] = False
+        else:
+            compared += 1
+            row['flagged'] = float(agreement) < floor
+        report[path] = row
+    # `compared` counts the refs that actually got a number -- which needs TWO usable
+    # faces, so a lone usable ref scores 0 here. That is the point: the caller must be
+    # able to say "nothing to compare" rather than "all clear", and those are not the
+    # same answer.
+    if not data.get('ref_ok'):
+        return ({'floor': floor, 'compared': compared, 'refs': report},
+                {'kind': 'ref_unusable',
+                 'detail': data.get('error') or 'no usable face in the reference photos'})
+    return {'floor': floor, 'compared': compared, 'refs': report}, None

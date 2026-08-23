@@ -50,6 +50,17 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-23-reference-set-check',
+    date: '2026-08-23',
+    title: 'Catch a reference photo that is not the same person',
+    blurb: 'Face scoring keeps the BEST match across your reference photos, so a '
+      + 'stray photo of someone else does not lower your scores — it raises them, '
+      + 'invisibly. The new ⌖ Check button beside the extra references compares '
+      + 'them with each other and flags the odd one out, with the agreement figure '
+      + 'on hover. It warns, never blocks.',
+    to: '/datasets?section=add',
+  },
+  {
     id: '2026-08-22-onetrainer-canvas-deploy',
     date: '2026-08-22',
     title: 'OneTrainer checkpoints appear on the LoRA Canvas automatically',

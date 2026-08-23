@@ -201,6 +201,16 @@ const TOPICS = [
       'same engine', 'used api', 'used engine', 'which api', 'candidate', 'discard', 'keep'],
     guide: { chapter: 'using-the-app', anchor: 'retry-a-reference-edit' },
     app: { route: '/datasets?section=add' } },
+  // Best-match-of-N scoring cannot report a wrong reference — it takes the MAX,
+  // so a stranger in the set RAISES every candidate score. This is the only pass
+  // that can see it, which is why it gets its own address rather than living
+  // under the extra-references topic.
+  { id: 'reference-set-check', kind: 'action', title: 'Check the reference photos are the same person',
+    keywords: ['check references', 'reference check', 'same person', 'wrong photo',
+      'wrong person', 'stray reference', 'agreement', 'identity check', 'verify references',
+      'extra references', 'flagged reference', 'not the same person', 'face scoring refs'],
+    guide: { chapter: 'using-the-app', anchor: 'check-that-your-reference-photos-are-the-same-person' },
+    app: { route: '/datasets?section=add' } },
   { id: 'shot-catalog-json', kind: 'section', title: 'Shot catalog (JSON import)',
     keywords: ['shot catalog', 'json', 'import shots', 'export shots', 'custom shots',
       'chatgpt', 'llm', 'own shots', 'catalog file', 'imported', 'template'],

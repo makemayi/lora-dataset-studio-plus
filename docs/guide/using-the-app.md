@@ -82,6 +82,36 @@ prompt** only when you want to change the instruction. The candidate also names 
 engine/API that actually returned it, so you can see which service produced the
 image before you Keep or Discard it.
 
+## Check that your reference photos are the same person
+
+The extra reference photos lock the identity, and face scoring compares every
+candidate against **all** of them, keeping the **best** match. That is the right
+rule for a candidate — a photo only has to look like the person from *one*
+angle — but it means a reference of the **wrong person cannot lower a score**.
+It wins the best match and *raises* every score instead, which is why a stray
+photo in this set is invisible in the numbers it corrupts.
+
+**⌖ Check**, next to the extra references, is the one pass that can see it. It
+compares the reference photos with **each other** and flags any photo that
+agrees with the rest too weakly, with a **▲** in its corner. Hover any reference
+to see its agreement figure.
+
+Three answers, and they are not the same:
+
+- **Every reference agrees** — nothing looks out of place.
+- **▲ may not be the same person** — one photo disagrees with the others.
+  Look at it before you generate again; it does not block anything.
+- **Nothing to compare** — a single reference photo has nothing to disagree
+  with. Add a second one and run the check again.
+
+The check needs the face-scoring tools (Setup ▸ Quality tools). It runs on the
+CPU, never touches the GPU, and never blocks a generation. It is a **warning,
+not a gate**: the threshold is deliberately forgiving so that a genuine profile
+shot is not accused, which does mean a borderline stranger can slip through.
+The agreement figure is shown precisely so you can judge it yourself; if your
+own sets prove the threshold wrong, raise it — see
+`face_scoring.reference_agreement_floor` in the settings reference.
+
 ## Test a run straight from Runs
 
 The **🏋️ Runs** hub is also a shortcut back to the right **Test Studio**. Every

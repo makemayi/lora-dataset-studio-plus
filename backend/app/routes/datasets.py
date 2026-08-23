@@ -488,6 +488,59 @@ def dataset_crop_extra_ref(dataset_id):
     return (jsonify({'ok': True}), 200) if ok else (jsonify({'error': 'not found'}), 404)
 
 
+@bp.post('/dataset/<int:dataset_id>/ref/check')
+def dataset_check_reference_set(dataset_id):
+    """Is every reference photo of this dataset the SAME person?
+
+    Exists because best-match-of-N scoring cannot report a wrong reference: `sim`
+    is the MAX over the refs, so a photo of someone else wins that max and RAISES
+    every candidate's score. The corruption is invisible in the scores it causes;
+    the refs only disagree with each other.
+
+    CPU-only (antelopev2 in its own interpreter), so no GPU guard: this never races
+    ComfyUI. Paths never leave the process — the response names extras by the same
+    filename the panel already holds, and the primary by slot alone.
+    """
+    ds = svc.get_dataset(LOCAL_USER, dataset_id)
+    if not ds:
+        return jsonify({'error': 'not found'}), 404
+    from ..services import face_similarity as fsim
+    from ..services import reference_photos_service as refs_svc
+
+    primary = svc._ref_path(ds)
+    extra_paths = refs_svc._extra_ref_paths(ds)
+    report, error = fsim.check_reference_set(primary, extra_ref_paths=extra_paths)
+    if error and error.get('kind') == 'unavailable':
+        return jsonify({'error': error.get('detail'), 'reason': 'face_scoring'}), 409
+
+    # Rebuild the order check_reference_set was handed, so a row lines up with the
+    # thumbnail the panel shows. A ref whose file vanished between the two calls is
+    # simply absent from the report and is reported as missing rather than skipped.
+    rows = []
+    by_path = (report or {}).get('refs') or {}
+    for slot, path, filename in ([('primary', primary, None)]
+                                 + [('extra', p, os.path.basename(p)) for p in extra_paths]):
+        row = dict(by_path.get(path) or {})
+        rows.append({
+            'slot': slot,
+            'filename': filename,
+            'state': row.get('state') or 'missing',
+            'agreement': row.get('agreement'),
+            'flagged': bool(row.get('flagged')),
+            'det': row.get('det'),
+            'yaw': row.get('yaw'),
+        })
+    resp = {
+        'ok': not error,
+        'floor': (report or {}).get('floor'),
+        'compared': (report or {}).get('compared') or 0,
+        'refs': rows,
+    }
+    if error:
+        resp['error'] = error.get('detail')
+    return jsonify(resp)
+
+
 @bp.post('/dataset/<int:dataset_id>/ref/pose/<pose_key>')
 def dataset_set_pose_slot(dataset_id, pose_key):
     if pose_key not in svc.POSE_SLOT_KEYS:

@@ -5,6 +5,7 @@ import PoseSlotPanel from './PoseSlotPanel';
 // this tooltip ended up naming two engines while a third could already edit.
 import { editEngineNames, pendingEditNote } from './referenceEdit';
 import { imageFromClipboard } from './clipboardImage';
+import { verdictFor, verdictTitle, summarise } from './referenceSetCheck';
 
 // Cap identique à MAX_EXTRA_REFS côté backend (face_dataset_service).
 const MAX_EXTRA_REFS = 3;
@@ -27,7 +28,7 @@ const CARD_FRAME =
 export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCropRef, onEditRef, onRecropAuto,
                                          busy, importBusy = busy, visionBusy = false, nonce = 0,
                                          extraRefs = [], onAddExtraRef, onRemoveExtraRef,
-                                         onCropExtraRef, subjectType = 'human',
+                                         onCropExtraRef, onCheckRefs, subjectType = 'human',
                                          poseSlots = {}, onSetPoseSlot, onCropPoseSlot,
                                          onMirrorPoseSlot, onTogglePoseSlotEnabled,
                                          onRemovePoseSlot, referenceEdit = null }) {
@@ -38,6 +39,41 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
   // here, in the one place where the user is thinking about identity locking.
   const [promptModal, setPromptModal] = useState(false);
   const imgUrl = (fn) => `/api/dataset/${datasetId}/img/${encodeURIComponent(fn)}${nonce ? `?v=${nonce}` : ''}`;
+
+  // ── Reference-set self-check ──────────────────────────────────────────────
+  // Candidate scoring is best-match-of-N: `sim` is the MAX over the references, so
+  // a photo of the WRONG person is never outvoted — it wins that max and RAISES
+  // every candidate's score. The damage is invisible in the scores it causes, and
+  // the references only disagree with EACH OTHER. Hence a separate, explicit pass.
+  //
+  // Verdicts are dropped whenever the set changes (add / remove / crop / new
+  // reference), because a verdict about a set that no longer exists is worse than
+  // no verdict: it reads as current. `nonce` bumps on every crop, and the extras
+  // list identifies add/remove, so the two together cover every mutation.
+  const [refCheck, setRefCheck] = useState(null);
+  const [checking, setChecking] = useState(false);
+  const extraKey = extraRefs.join('|');
+  useEffect(() => { setRefCheck(null); }, [extraKey, refFilename, nonce]);
+
+  const verdict = (slot, filename) => verdictFor(refCheck, slot, filename);
+  const titleFor = (slot, filename) => verdictTitle(refCheck, verdict(slot, filename));
+  const { compared, flaggedCount, lowest } = summarise(refCheck);
+
+  const runCheck = async () => {
+    if (!onCheckRefs || checking) return;
+    setChecking(true);
+    try { setRefCheck(await onCheckRefs()); } finally { setChecking(false); }
+  };
+
+  /* The flag sits in the tile's one free corner (✕ takes top-right, ✂ bottom-left).
+     A warning triangle, not a coloured border: the tile's edge is already spoken
+     for, and green is reserved for "kept" everywhere in this app. */
+  const flagBadge = (row) => (
+    <span hidden={!row?.flagged} aria-label="This reference may not be the same person"
+      className="absolute top-0 left-0 flex h-4 w-4 items-center justify-center rounded-br bg-amber-400/90 text-[0.625rem] leading-none text-black">
+      ▲
+    </span>
+  );
 
   // Paste-to-upload: hover the reference tile, Ctrl+V an image instead of
   // always opening the file picker. Hover state lives in a ref (not React
@@ -78,8 +114,10 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
             onMouseEnter={() => { refHover.current = true; }} onMouseLeave={() => { refHover.current = false; }}
             title="Hover and press Ctrl+V to paste an image here">
             {refFilename
-              ? <img src={imgUrl(refFilename)} alt="ref" className="w-full h-full object-cover object-top" />
+              ? <img src={imgUrl(refFilename)} alt="ref" className="w-full h-full object-cover object-top"
+                  title={titleFor('primary')} />
               : <span className="text-content-subtle text-xs">none</span>}
+            {flagBadge(verdict('primary'))}
             {waiting && (
               /* A button, not a label: the whole point is to lead somewhere, and
                  the modal it opens is where Keep and Discard live. */
@@ -137,7 +175,9 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
           <span className="text-content-subtle text-[0.6875rem]">额外</span>
           {extraRefs.map((fn) => (
             <div key={fn} className="relative w-12 h-12 rounded-xl overflow-hidden bg-black shrink-0 shadow-[0_1px_2px_rgba(0,0,0,0.16),0_4px_8px_rgba(0,0,0,0.12)] transition-shadow hover:shadow-[0_2px_4px_rgba(0,0,0,0.22),0_8px_16px_rgba(0,0,0,0.14)]">
-              <img src={imgUrl(fn)} alt="extra reference" className="w-full h-full object-cover object-top" />
+              <img src={imgUrl(fn)} alt="extra reference" className="w-full h-full object-cover object-top"
+                title={titleFor('extra', fn)} />
+              {flagBadge(verdict('extra', fn))}
               <button type="button" onClick={() => onRemoveExtraRef?.(fn)} disabled={busy}
                 aria-label="Remove this extra reference"
                 title="Remove this extra reference"
@@ -162,6 +202,15 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
               +
             </button>
           )}
+          {onCheckRefs && (
+            <button type="button" onClick={runCheck} disabled={checking || busy}
+              aria-label="Check that every reference photo is the same person"
+              title="Compare the reference photos with each ONE another. Scoring cannot catch a wrong photo here — it takes the best match, so a stranger in this set raises every score instead of lowering it."
+              className="rounded-full bg-surface-raised px-2 py-1 text-[0.6875rem] font-medium text-content-muted transition-colors hover:bg-surface hover:text-content disabled:cursor-not-allowed disabled:opacity-40">
+              <span hidden={checking}>⌖ Check</span>
+              <span hidden={!checking}>Checking…</span>
+            </button>
+          )}
           <button type="button" onClick={() => setPromptModal(true)}
             aria-label="Edit the identity instruction used with multiple references"
             title="Edit the identity instruction sent with multiple references — one box per engine family, for this dataset's subject type"
@@ -170,6 +219,25 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
           </button>
           <input ref={inpExtra} type="file" accept="image/*" className="hidden" disabled={importBusy}
             onChange={(e) => { if (e.target.files[0]) onAddExtraRef?.(e.target.files[0]); e.target.value = ''; }} />
+          {/* Every variant stays MOUNTED and flips `hidden`. Swapping them with a
+              ternary is what breaks under Chrome auto-translate: it rewrites text
+              nodes into its own <font> wrappers and React then throws on removeChild. */}
+          {refCheck && (
+            <p role="status" className="w-full text-[0.6875rem] leading-relaxed text-content-muted">
+              <span hidden={compared !== 0}>
+                Nothing to compare — one reference photo has nothing to disagree with. Add a second.
+              </span>
+              <span hidden={compared === 0 || flaggedCount > 0}>
+                Every reference agrees.{' '}
+              </span>
+              <span hidden={flaggedCount === 0} className="font-medium text-amber-600">
+                ▲ A reference may not be the same person — hover the flagged photo.{' '}
+              </span>
+              <span hidden={compared === 0}>
+                Lowest agreement <b>{lowest}</b>, floor {refCheck.floor}.
+              </span>
+            </p>
+          )}
         </div>
       )}
       {/* The modal edits the prompts of THIS dataset's subject — a human lock

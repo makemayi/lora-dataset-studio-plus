@@ -492,6 +492,23 @@ export function useDataset() {
     await refresh();
   }, [currentId, refresh, toast]);
 
+  // Reference-set self-check: is every reference photo the SAME person?
+  //
+  // Candidate scoring cannot answer this and never will: `sim` is the MAX over the
+  // references (best-match-of-N), so a photo of someone else does not get outvoted —
+  // it WINS that max and RAISES every candidate's score. A wrong reference is silent
+  // in the numbers it corrupts, and the only place it shows is against the other
+  // references. So we ask them directly.
+  //
+  // The report is transient panel state, not dataset state: it is RETURNED rather
+  // than folded into `d`, so refresh() never has to carry a verdict that goes stale
+  // the moment a reference is added or cropped.
+  const checkRefs = useCallback(async () => {
+    const d = await postJson(`/api/dataset/${currentId}/ref/check`, {});
+    if (!d.ok) { toast.error(d.error || 'Unexpected error'); return null; }
+    return d;
+  }, [currentId, toast]);
+
   // Angle reference photos (Krea 2 Edit only) — a fixed set of pose_key slots
   // (left45/right45 now; back/left90/right90 reserved). Upload never enables a
   // slot; enabling is the separate togglePoseSlotEnabled call.
@@ -1934,7 +1951,7 @@ export function useDataset() {
            activities: currentActivities,
            nonces, mirroringIds, swappingIds, refNonce, scoringFaceIds, recaptioningIds, create, open,
           deleteDataset, updateSettings, updateSettingsFor, fetchList, setCurrentId,
-          setRef, addExtraRef, removeExtraRef, setPoseSlot, cropPoseSlot, mirrorPoseSlot,
+          setRef, addExtraRef, removeExtraRef, checkRefs, setPoseSlot, cropPoseSlot, mirrorPoseSlot,
           togglePoseSlotEnabled, removePoseSlot, generate, quickGenerateCompose,
           quickGenerateComponents, saveQuickGenerateCustomComponents, importFiles,
           scrapeImport,

@@ -1444,6 +1444,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                       extraRefs={d.ref_extra_filenames || []}
                       onAddExtraRef={ds.addExtraRef} onRemoveExtraRef={ds.removeExtraRef}
                       onCropExtraRef={(fn) => setExtraRefCrop(fn)}
+                      onCheckRefs={ds.checkRefs}
                       subjectType={d.subject_type || 'human'}
                       poseSlots={d.pose_slots || {}}
                       onSetPoseSlot={ds.setPoseSlot} onMirrorPoseSlot={ds.mirrorPoseSlot}

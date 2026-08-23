@@ -2,10 +2,14 @@
 (insightface y est installe, PAS dans le venv Flask). CPU force (provider CPU + ctx_id=-1)
 -> pas de GPU, ne touche pas ComfyUI.
 Protocole stdin: {"refs": [path, ...], "images": [paths], "models_root": path|null} -> stdout
-UNE ligne JSON {"ref_ok": bool, "results": {path: {state, sim?, det, bbox_frac, yaw}}}.
+UNE ligne JSON {"ref_ok": bool, "results": {path: {state, sim?, det, bbox_frac, yaw}},
+"refs": {path: {state, det, bbox_frac, yaw, face_sharp, agreement?}}}.
 `refs` est une liste non-vide (le primaire est refs[0] par convention, mais rien dans
 l'algo ne privilegie sa position) : chaque candidat est compare a CHAQUE ref utilisable,
 `sim` est le MAX — « ressemble a AU MOINS une des photos de confiance ».
+`images` PEUT etre vide : on rend alors le rapport `refs` seul (passe de controle du set
+de references, sans candidat a scorer). `agreement` = cosinus MOYEN d'une ref avec les
+AUTRES refs utilisables ; absent quand il n'y en a qu'une (rien pour la contredire).
 Logs -> stderr.
 Gating 3-etats + padding rescue (valide empiriquement sur test3).
 YAW_MAX porte a 70° (2026-08-15): a 40° un profil 3/4 etait rejete alors qu'antelopev2
@@ -80,8 +84,8 @@ def main() -> int:
     refs = [str(p) for p in (req.get("refs") or [])]
     images = [str(p) for p in (req.get("images") or [])]
     models_root = req.get("models_root") or None
-    if not refs or not images:
-        print(json.dumps({"ref_ok": False, "results": {}, "error": "missing refs/images"})); return 1
+    if not refs:
+        print(json.dumps({"ref_ok": False, "results": {}, "error": "missing refs"})); return 1
 
     import numpy as np, cv2
     from insightface.app import FaceAnalysis
@@ -170,31 +174,49 @@ def main() -> int:
                 "_emb": f.normed_embedding}
 
     ref_embs = []
+    ref_report = {}
     for i, r in enumerate(refs, 1):
         ref_res = analyze(r)
         ref_emb = ref_res.pop("_emb", None)
+        ref_report[r] = ref_res
         if ref_emb is None:
             _log(f"[face] ref {i}/{len(refs)} unusable: {ref_res.get('state')}")
             continue
-        ref_embs.append(ref_emb)
+        ref_embs.append((r, ref_emb))
     if not ref_embs:
-        print(json.dumps({"ref_ok": False, "results": {},
+        print(json.dumps({"ref_ok": False, "results": {}, "refs": ref_report,
                           "error": f"no usable face in any of {len(refs)} reference photo(s)"}))
         return 1
+
+    # AGREEMENT: how well each reference agrees with the REST of the set. Free here
+    # -- every embedding is already computed -- and it closes a hole that best-match
+    # scoring opens: `sim` is the MAX over refs, so ONE photo of the wrong person is
+    # never outvoted, it becomes the match that RAISES every candidate's score. A
+    # wrong ref is therefore silent by construction, and the only place it is visible
+    # is against the other refs. Mean, not max, for the same reason: a max would let
+    # two wrong photos of the same wrong person vouch for each other.
+    # Compared by INDEX, not by path, so a caller that passes one file twice does not
+    # get an empty `others` and a missing score.
+    for i, (path, emb) in enumerate(ref_embs):
+        others = [e for j, (_, e) in enumerate(ref_embs) if j != i]
+        if not others:
+            continue  # one usable ref: nothing to disagree with, and no score is honest
+        ref_report[path]["agreement"] = round(
+            float(sum(float(np.dot(emb, o)) for o in others) / len(others)), 4)
 
     results = {}
     for i, p in enumerate(images, 1):
         try:
             r = analyze(p); emb = r.pop("_emb", None)
             if r["state"] in ("scorable", "extreme_pose") and emb is not None:
-                sims = [float(np.dot(ref_emb, emb)) for ref_emb in ref_embs]
+                sims = [float(np.dot(ref_emb, emb)) for _, ref_emb in ref_embs]
                 r["sim"] = round(max(sims), 4)
             results[p] = r
             _log(f"[face] {i}/{len(images)} {r['state']} sim={r.get('sim')}")
         except Exception as e:
             results[p] = {"state": "error", "error": str(e)}
             _log(f"[face] {i}/{len(images)} ERROR {e}")
-    print(json.dumps({"ref_ok": True, "results": results}))
+    print(json.dumps({"ref_ok": True, "results": results, "refs": ref_report}))
     return 0
 
 

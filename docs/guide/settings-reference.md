@@ -1378,6 +1378,7 @@ re-sorts every bank instantly, without rescanning.
 |---|---|---|
 | `face_scoring.python` | `''` | Interpreter for the InsightFace subprocess (empty = current interpreter). |
 | `face_scoring.models_root` | `''` | Where InsightFace weights are stored/downloaded. |
+| `face_scoring.reference_agreement_floor` | `0.20` | Below this mean cosine, a reference photo is flagged by **⌖ Check** as possibly not the same person. Not a gate — it only warns, and the agreement figure is always shown so you can judge it yourself. The default sits low on purpose: this scorer accepts references up to 70° of yaw, and a genuine 3/4 profile against a frontal is exactly the honest pair that scores lowest, so it is tuned to miss a borderline stranger rather than accuse a real profile. Raise it if your own sets prove that wrong. Values outside `-1.0 … 1.0` fall back to the default. |
 | `face_scoring.device` | `'auto'` | Device for the Image-bank face pass. `auto` uses the GPU when the face interpreter exposes CUDA (needs `onnxruntime-gpu` installed in it) and falls back to CPU otherwise; `cpu` forces CPU (never touches the GPU); `cuda` requests the GPU but still falls back to CPU when unavailable. A GPU run is serialized through the GPU-exclusive window so it never competes with a training/scoring pass. |
 | `masks.python` | `''` | Interpreter for the rembg (person-mask) subprocess. |
 | `bank_scoring.text_search_idle_minutes` | `10` | How long the selected 🔤 **Find by text** encoder stays warm after its last query (capped at `120`). Set `0` to unload after every query. Text caches are separated by engine/model key. |
@@ -1497,6 +1498,7 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `cloud.full_transformer.fp8_export_budget_seconds` | Time budget for that conversion on the pod (default `1800`). Exceeding it abandons the export; the bf16 master is already delivered, so the run stays a success. |
 | `face_scoring.python` | Python interpreter used to run the InsightFace subprocess (empty = current interpreter). |
 | `face_scoring.models_root` | Directory where InsightFace model weights are stored/downloaded. |
+| `face_scoring.reference_agreement_floor` | Agreement below which **⌖ Check** flags a reference photo as possibly a different person (warning only). |
 | `face_scoring.green` | Similarity score threshold (0–1) above which an image is flagged "green" (strong match). |
 | `face_scoring.orange` | Similarity score threshold (0–1) above which an image is flagged "orange" (borderline match). |
 | `masks.python` | Python interpreter used to run the rembg subprocess (empty = current interpreter). |
