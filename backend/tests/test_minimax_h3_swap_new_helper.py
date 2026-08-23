@@ -106,7 +106,10 @@ def _build(sh, **kw):
     # the in-graph branch is always substituted away rather than offered as a
     # second source. Every build therefore arrives with one.
     kw.setdefault('mask_image', 'mask.png')
-    return sh.build_swap_workflow('t.png', 'r.png', **kw)
+    # build_swap_workflow returns (workflow, kept, accelerators). Every test here
+    # is about the first two; the accelerator report has its own tests below.
+    wf, kept, _accel = sh.build_swap_workflow('t.png', 'r.png', **kw)
+    return wf, kept
 
 
 def _classes(wf):

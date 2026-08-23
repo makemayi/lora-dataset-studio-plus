@@ -474,7 +474,15 @@ def missing_nodes(workflow):
 def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None,
                         mask_image=None, pose_hint=None, head_analysis=None):
     """Load the shipped graph, subtract the optional stages, resolve every loader
-    against what is actually installed, and return (workflow, stages_kept).
+    against what is actually installed, and return
+    (workflow, stages_kept, accelerators).
+
+    `accelerators` is `{'speed': bool, 'upscale': bool}` — what this build
+    ACTUALLY wired, config AND /object_info already reconciled. Returned rather
+    than re-derived by the caller, because re-asking can answer differently (a
+    pack installed between the two calls) and the recorded metadata would then
+    describe a graph that was never run. Unlike the old engine, neither of these
+    touches the identity input here: the reference goes through a plain Resize.
 
     Split out of `enqueue_h3_swap_new` so a test can assert the exact wiring
     without a ComfyUI or a queue."""
@@ -661,7 +669,7 @@ def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None
     # UNIQUE prefix per job — a shared one makes ComfyUI's counter re-issue the
     # same name and every tile of a batch ends up displaying the SAME image.
     workflow[NODE_SAVE]['inputs']['filename_prefix'] = filename_prefix
-    return workflow, kept
+    return workflow, kept, {'speed': want_speed, 'upscale': want_upscale}
 
 
 def enqueue_h3_swap_new(user_id, target_path, ref_path, extra_metadata=None):
@@ -713,7 +721,7 @@ def enqueue_h3_swap_new(user_id, target_path, ref_path, extra_metadata=None):
     # bytes, and it keeps the analysis independent of ComfyUI being usable.
     stages = enabled_stages()
     analysis = analyse_head(target_path) if stages.get('ollama') else None
-    workflow, kept = build_swap_workflow(
+    workflow, kept, accel = build_swap_workflow(
         staged_inputs[0], staged_inputs[1],
         filename_prefix=f'{user_id}_H3SwapNew_{uid}', mask_image=staged_mask,
         stages=stages, pose_hint=hint, head_analysis=analysis)
@@ -731,6 +739,26 @@ def enqueue_h3_swap_new(user_id, target_path, ref_path, extra_metadata=None):
     if extra_metadata:
         meta.update(extra_metadata)
     meta['staged_inputs'] = staged_inputs
+    # What this run was actually built from. `kept` used to go to the log and
+    # nowhere else, so two images from the same dataset, prompt and seed could
+    # differ for a reason nothing recorded. The head analysis matters most of
+    # all: when the Ollama stage is on it writes GENERATED TEXT into the prompt,
+    # which makes it the largest run-to-run variable in this graph — and it was
+    # only ever logged, truncated to 300 characters. Comparing runs is the point
+    # of this engine, and a comparison you cannot attribute is not a measurement.
+    meta['swap_build'] = {
+        'engine': 'h3_new',
+        'stages': list(kept),
+        'speed_nodes': bool(accel['speed']),
+        'rtx_upscale': bool(accel['upscale']),
+        'pose_hint': bool(hint and 'ollama' not in kept),
+    }
+    if analysis:
+        # Capped, not truncated to a preview: this is the text the model was
+        # actually given, so it has to be readable back in full for anything
+        # short of a runaway response.
+        meta['swap_build']['head_analysis'] = str(analysis)[:4000]
+        meta['swap_build']['head_analysis_model'] = swap_ollama_model()
     queue_manager.add_job(job_type='image', user_id=str(user_id),
                           workflow_data=workflow,
                           prompt='Head swap (MiniMax H3, reference identity)',

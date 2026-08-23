@@ -60,6 +60,17 @@ WHAT IS RESOLVED, WHAT IS LEFT ALONE
 * The two RTX upscalers and the two speed nodes follow the H3 engine's own
   `use_rtx_upscale` / `use_speed_nodes` settings AND /object_info: an install
   without the NVIDIA pack loses the 2x, not the swap.
+  BUT THE TWO UPSCALERS ARE NOT THE SAME KIND OF THING, and one setting drives
+  both. `NODE_UPSCALE_OUT` sharpens the picture you get — a pure quality
+  degradation when it is off, which is how `use_rtx_upscale` is described in
+  the generation lane. `NODE_UPSCALE_REF` sits on the IDENTITY INPUT, so
+  turning the setting off (or running on an install without the pack) hands H3
+  a different reference than the run before it. That is a silent, invisible
+  change to what the model is being asked to copy, and it is why every swap now
+  records the accelerators it was built with in `meta['swap_build']`: a run you
+  are comparing against another run has to be able to say which pixels it saw.
+  The NEW graph does not have this problem — it feeds the reference through a
+  plain Resize (see minimax_h3_swap_new_helper).
 * The H3 PROMPT comes from the graph unless `minimax_h3.swap_prompt` overrides
   it, which is the key to A/B a wording without editing a file an update
   replaces.
@@ -582,7 +593,14 @@ def _comfy_input_dir() -> str:
 def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None,
                         mask_image=None, pose_hint=None):
     """Load the shipped graph, apply the stage switches, resolve every loader
-    against what is actually installed, and return (workflow, stages_kept).
+    against what is actually installed, and return
+    (workflow, stages_kept, accelerators).
+
+    `accelerators` is `{'speed': bool, 'upscale': bool}` — what this build
+    ACTUALLY wired, config AND /object_info already reconciled. Returned rather
+    than left to the caller to re-derive, because re-asking can answer
+    differently (a pack installed between the two calls) and the metadata would
+    then describe a graph that was never run.
 
     Split out of `enqueue_h3_swap` so a test can assert the exact wiring without
     a ComfyUI or a queue. It still reads config and disk — the resolvers are the
@@ -718,7 +736,7 @@ def build_swap_workflow(target_image, ref_image, *, filename_prefix, stages=None
     # prefix makes ComfyUI's counter re-issue the same name and every tile of a
     # batch ends up displaying the SAME image.
     workflow[NODE_SAVE]['inputs']['filename_prefix'] = filename_prefix
-    return workflow, kept
+    return workflow, kept, {'speed': want_speed, 'upscale': want_upscale}
 
 
 def enqueue_h3_swap(user_id, target_path, ref_path, extra_metadata=None):
@@ -769,7 +787,7 @@ def enqueue_h3_swap(user_id, target_path, ref_path, extra_metadata=None):
         meta = extra_metadata or {}
         hint = _pose_hint(meta.get('variation_prompt'), meta.get('framing'),
                           meta.get('variation_label'))
-    workflow, kept = build_swap_workflow(
+    workflow, kept, accel = build_swap_workflow(
         staged_inputs[0], staged_inputs[1],
         filename_prefix=f'{user_id}_H3Swap_{uid}', mask_image=staged_mask,
         pose_hint=hint)
@@ -784,6 +802,19 @@ def enqueue_h3_swap(user_id, target_path, ref_path, extra_metadata=None):
     if extra_metadata:
         meta.update(extra_metadata)
     meta['staged_inputs'] = staged_inputs
+    # What this run was actually built from. Until now `kept` went to the log and
+    # nowhere else, so two images from the same dataset, prompt and seed could
+    # differ for a reason nothing recorded — a stage toggled, or an accelerator
+    # that quietly took the identity input with it (see the note on the two RTX
+    # upscalers above). Comparing runs is the whole point of this engine, and a
+    # comparison you cannot attribute is not a measurement.
+    meta['swap_build'] = {
+        'engine': 'h3_old',
+        'stages': list(kept),
+        'speed_nodes': bool(accel['speed']),
+        'rtx_upscale': bool(accel['upscale']),
+        'pose_hint': bool(hint),
+    }
     queue_manager.add_job(job_type='image', user_id=str(user_id),
                           workflow_data=workflow,
                           prompt='Head swap (MiniMax H3, reference identity)',

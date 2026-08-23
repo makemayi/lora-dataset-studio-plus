@@ -93,7 +93,10 @@ def _set(config, section, **values):
 
 def _build(sh, **kw):
     kw.setdefault('filename_prefix', 'local_H3Swap_abcd1234')
-    return sh.build_swap_workflow('t.png', 'r.png', **kw)
+    # build_swap_workflow returns (workflow, kept, accelerators). Every test here
+    # is about the first two; the accelerator report has its own tests below.
+    wf, kept, _accel = sh.build_swap_workflow('t.png', 'r.png', **kw)
+    return wf, kept
 
 
 def _classes(wf):
