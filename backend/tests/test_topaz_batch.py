@@ -249,9 +249,36 @@ def test_collect_output_moves_staged_file_into_dataset_dir(app):
                 staged_name=f'img_{img_ids[0]}.png')
         assert out_path is not None
         ds_dir = dgs._dataset_path(ds_id)
-        assert os.path.dirname(out_path) == ds_dir
-        assert os.path.isfile(out_path)
-        assert os.path.basename(out_path).startswith('topaz_deadbeef_')
+        # The returned name is the dataset-RELATIVE basename, resolved back by
+        # _img_path/_dataset_path like every other image row. An absolute return
+        # is the 2026-08-23 "no image back" bug (safe_join rejects machine
+        # paths -> 404) and leaks the machine path into the API/DB.
+        assert not os.path.isabs(out_path)
+        assert os.path.basename(out_path) == out_path
+        assert os.path.isfile(os.path.join(ds_dir, out_path))
+        assert out_path.startswith('topaz_deadbeef_')
+
+
+def test_collect_output_single_returns_relative_filename(app):
+    """The SINGLE-image path (no staged_name) must also return a RELATIVE
+    basename — the 2026-08-23 regression: a single Topaz upscale completed but
+    the tile showed no image because collect_output handed back an absolute
+    machine path that safe_join refused to serve."""
+    import os
+    import tempfile
+    from app.services import dataset_generation_service as dgs
+    from app.services.topaz_job_queue import collect_output
+
+    ds_id, img_ids = _dataset_with_images(app, n=1)
+    with app.app_context():
+        with tempfile.TemporaryDirectory(prefix='lds-topaz-out-') as d:
+            (pathlib.Path(d) / 'orig.png').write_bytes(b'X')
+            out_path = collect_output(pathlib.Path(d), ds_id, 'topaz-12345678')
+        assert out_path is not None
+        ds_dir = dgs._dataset_path(ds_id)
+        assert not os.path.isabs(out_path)
+        assert os.path.isfile(os.path.join(ds_dir, out_path))
+        assert out_path.startswith('topaz_12345678_')
 
 
 def test_upscale_batch_route_dispatches_to_topaz(client, app, monkeypatch):

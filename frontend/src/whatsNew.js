@@ -50,6 +50,17 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-23-topaz-output-relative',
+    date: '2026-08-23',
+    title: 'Topaz upscale results show up again on the tile',
+    blurb: 'A Topaz upscale (single or bulk) that had finished was saving the '
+      + 'result to a machine path instead of the dataset, so the tile came back '
+      + 'blank even though the job said done. The finished image is now stored '
+      + 'by name and the tile shows it, with the original still recoverable '
+      + '(undo).',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-08-23-task-center-all-passes',
     date: '2026-08-23',
     title: 'Captioning, watermark and bank passes now show in the Task Center',

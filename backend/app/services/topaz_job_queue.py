@@ -35,7 +35,16 @@ JOB_ID_PREFIX = 'topaz-'
 
 def collect_output(tmp_dir, dataset_id, job_id, staged_name=None):
     """Move the Topaz output into the dataset folder, returning the app-side
-    path (or None when nothing usable was written).
+    filename (RELATIVE basename, like every other image row) or None when
+    nothing usable was written.
+
+    The file physically lands in the dataset folder; only its basename is
+    returned because ``img.filename`` is resolved against the dataset path
+    everywhere else. Returning an absolute path was the 2026-08-23 "single
+    upscale gives no image" bug: the absolute path went into ``img.filename``,
+    then into ``/api/dataset/<id>/img/<abs>``, where ``safe_join`` rejects a
+    machine path and the tile shows a broken image (and it leaked the machine
+    path into the database/API).
 
     Topaz writes `<input-stem>.<ext>` next to the input's basename into the
     output folder; with ``staged_name`` (batch) the EXACT staged basename is
@@ -70,7 +79,7 @@ def collect_output(tmp_dir, dataset_id, job_id, staged_name=None):
     dst_name = f'topaz_{job_id[-8:]}_{src.name}'
     dst = os.path.join(out_dir, dst_name)
     shutil.copy2(str(src), dst)
-    return dst
+    return dst_name
 
 
 def stage_inputs(inputs, tmp_dir):
