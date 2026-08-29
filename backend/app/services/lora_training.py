@@ -3219,10 +3219,16 @@ def update_train_settings(user_id, dataset_id, patch: dict, *, _settings=None) -
             raise ValueError(f'rank must be one of {_RANK_CHOICES} (or auto)')
     if 'resolution' in patch:
         v = patch['resolution']
-        if v in _RES_CHOICES:
+        # None/'auto' REMOVES the choice, like rank and max_step_saves. Without
+        # this branch a resolution could be picked and never un-picked, and on
+        # the OneTrainer lane "unchosen" is not the same run as any of the
+        # choices: it means the lane's own KREA2_RESOLUTION.
+        if v in (None, 'auto', ''):
+            cur.pop('resolution', None)
+        elif v in _RES_CHOICES:
             cur['resolution'] = v
         else:
-            raise ValueError(f'resolution must be one of {list(_RES_CHOICES)}')
+            raise ValueError(f'resolution must be one of {list(_RES_CHOICES)} (or auto)')
     if 'save_every' in patch:
         v = patch['save_every']
         if v in _SAVE_CHOICES:

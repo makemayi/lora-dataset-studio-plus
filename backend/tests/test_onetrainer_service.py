@@ -1124,3 +1124,25 @@ def test_launch_training_records_the_pid_birth_time_so_stop_can_kill_it(
         birth = queue_manager._get_system_state('training_pid_create_time', None)
         assert birth is not None, 'no birth time -> the Stop button refuses'
         assert lt._pid_alive(pid) is True, 'the stop probe must be conclusive'
+
+
+def test_a_chosen_resolution_can_be_un_chosen(app):
+    """Picking one was one-way: the validator accepted only the four choices, so
+    a dataset could never go back to the lane default. That default is a real
+    run of its own on this lane (KREA2_RESOLUTION), not a synonym for one of the
+    choices, so "auto" has to be reachable."""
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as lt
+
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'Res', 'res')
+        lt.update_train_settings(LOCAL_USER, ds.id, {'resolution': '768'})
+        assert lt._train_settings(ds).get('resolution') == '768'
+        assert lt._resolution_is_explicit(ds) is True
+        lt.update_train_settings(LOCAL_USER, ds.id, {'resolution': 'auto'})
+        assert 'resolution' not in lt._train_settings(ds)
+        assert lt._resolution_is_explicit(ds) is False
+        lt.update_train_settings(LOCAL_USER, ds.id, {'resolution': '1024'})
+        lt.update_train_settings(LOCAL_USER, ds.id, {'resolution': None})
+        assert 'resolution' not in lt._train_settings(ds)
