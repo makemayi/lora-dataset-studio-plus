@@ -180,7 +180,8 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
                      dropout: float | None = None,
                      ema: float | None = None,
                      save_every: int | None = None,
-                     sample_every: int | None = None) -> dict:
+                     sample_every: int | None = None,
+                     base_model_name: str | None = None) -> dict:
     """The OVERRIDE config this app writes to --config-path, merged by
     OneTrainer OVER its own shipped Krea 2 preset (--preset-path). Contains
     ONLY the fields this app's own UI/dataset state actually owns — never a
@@ -225,10 +226,15 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
     training_folder = Path(training_folder)
     if peft_type not in PEFT_TYPES:
         peft_type = PEFT_TYPE_LORA
-    return {
+    out = {
         'workspace_dir': str(training_folder),
         'cache_dir': str(training_folder / 'cache'),
         'output_model_destination': str(training_folder / f'{trigger}.safetensors'),
+        # When the shared cache holds the SAME model as a local diffusers
+        # directory, point OneTrainer at the LOCAL path instead of the gated
+        # repo id (see _local_krea_snapshot for why). Absent -> the preset's
+        # own `krea/Krea-2-Raw` stands.
+        **({'base_model_name': base_model_name} if base_model_name else {}),
         'epochs': epochs_eff,
         'lora_rank': int(rank),
         'lora_alpha': float(rank),
@@ -305,6 +311,7 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
         # still decides for any path that has no opinion.
         **({'learning_rate': float(learning_rate)} if learning_rate else {}),
     }
+    return out
 
 
 def build_concepts(trigger: str, dataset_folder: str) -> list[dict]:
@@ -346,6 +353,36 @@ def deploy_onetrainer_checkpoint(user_id, dataset_id, record_id, output_path):
                          'is unaffected', name)
 
 
+def _local_krea_snapshot() -> str | None:
+    """The shared cache's Krea-2-Raw snapshot as a LOCAL diffusers directory.
+
+    OneTrainer's preset names the model `krea/Krea-2-Raw`, which makes
+    huggingface_hub resolve it — and a gated repo answers the HEAD that
+    resolution performs with 401 EVEN when every component is already on disk
+    (measured repeatedly on this machine). Pointing `base_model_name` at the
+    local snapshot instead makes `from_pretrained(<local dir>, subfolder=...)`
+    purely local: no HEAD, no network, no gated check. Returns None when the
+    snapshot is not present, in which case the preset's name stands (and the
+    run behaves exactly as it always has)."""
+    try:
+        hub = Path(cfg.aitoolkit_path('hf_home')) / 'hub'
+    except Exception:
+        return None
+    repo = hub / 'models--krea--Krea-2-Raw'
+    try:
+        rev = (repo / 'refs' / 'main').read_text(encoding='utf-8').strip()
+    except OSError:
+        return None
+    snap = repo / 'snapshots' / rev if rev else None
+    if not snap or not snap.is_dir():
+        return None
+    # A diffusers layout is present when the familiar subfolders are.
+    for sub in ('tokenizer', 'text_encoder', 'transformer', 'vae'):
+        if not (snap / sub).is_dir():
+            return None
+    return str(snap)
+
+
 def launch(trigger: str, dataset_folder: str, training_folder: str,
           steps: int, num_images: int, rank: int,
           peft_type: str = PEFT_TYPE_LORA,
@@ -377,9 +414,14 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
     training_folder_p = Path(training_folder)
     training_folder_p.mkdir(parents=True, exist_ok=True)
 
+    local_krea = _local_krea_snapshot()
+    if local_krea:
+        logger.info('onetrainer: base model resolved to the local snapshot %s',
+                    local_krea)
     config = build_job_config(trigger=trigger, dataset_folder=dataset_folder,
                               training_folder=training_folder, steps=steps,
                               num_images=num_images, rank=rank, peft_type=peft_type,
+                              base_model_name=local_krea,
                               learning_rate=learning_rate, resolution=resolution,
                               epochs=epochs, batch_size=batch_size,
                               te1_lr=te1_lr, te2_lr=te2_lr,

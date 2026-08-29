@@ -1008,3 +1008,41 @@ def test_launch_injects_the_shared_hf_cache_into_the_child_env(
     # with 401 must not make "everything is local" fail. Offline is the correct
     # mode for a run whose inputs are all on disk.
     assert captured['env']['HF_HUB_OFFLINE'] == '1'
+
+
+def test_launch_points_base_model_at_a_local_krea_snapshot_when_present(
+        onetrainer, tmp_path, monkeypatch):
+    """When the shared HF cache holds the Krea model as a local diffusers
+    directory, base_model_name must point at it — a gated repo answers the
+    HEAD resolution does with 401 even when every component is already local.
+    Purely local from_pretrained is the fix."""
+    import json as _json
+    ots, cfg = onetrainer
+    root = tmp_path / 'OneTrainer'
+    (root / 'venv' / 'Scripts').mkdir(parents=True)
+    (root / 'venv' / 'Scripts' / 'python.exe').write_text('')
+    aitk = tmp_path / 'aitk'
+    repo = (aitk / 'hf-cache' / 'huggingface' / 'hub' / 'models--krea--Krea-2-Raw')
+    (repo / 'refs').mkdir(parents=True)
+    for sub in ('tokenizer', 'text_encoder', 'transformer', 'vae', 'scheduler'):
+        (repo / 'snapshots' / 'rev1' / sub).mkdir(parents=True)
+    (repo / 'refs' / 'main').write_text('rev1')
+    cfg.save_config({'onetrainer': {'dir': str(root)},
+                     'aitoolkit': {'dir': str(aitk)}})
+
+    captured = {}
+
+    class FakeProc:
+        pid = 4242
+    monkeypatch.setattr(ots.subprocess, 'Popen',
+                        lambda cmd, cwd=None, env=None, **kw: (
+                            captured.update(cmd=cmd), FakeProc())[1])
+
+    training_folder = tmp_path / 'run'
+    ots.launch(trigger='lola', dataset_folder=str(tmp_path / 'ds'),
+               training_folder=str(training_folder), steps=100, num_images=20,
+               rank=16)
+    config_path = training_folder / 'config.json'
+    config = _json.loads(config_path.read_text(encoding='utf-8'))
+    assert config['base_model_name'] == \
+        str(repo / 'snapshots' / 'rev1'), 'must point at the local snapshot'
