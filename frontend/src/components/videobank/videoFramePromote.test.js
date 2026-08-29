@@ -107,3 +107,26 @@ test('tolerances default to 0.6 when absent', () => {
   assert.equal(body.sharp_tolerance, 0.6);
   assert.equal(body.face_tolerance, 0.6);
 });
+
+// ── framings (the h3-video-dataset practice: three crops, distinct moments) ──
+
+test('the payload defaults to the full frame when no framing is ticked', () => {
+  const body = framePromotePayload({ name: 'd', framesPerClip: 2 })
+  assert.deepEqual(body.framings, ['full'])
+})
+
+test('ticked framings ride on the payload verbatim', () => {
+  const body = framePromotePayload({ name: 'd', framesPerClip: 2,
+    framings: ['full', 'half', 'face'] })
+  assert.deepEqual(body.framings, ['full', 'half', 'face'])
+})
+
+test('the crops without a person requirement name the fix before the server does', () => {
+  const problem = framePromoteProblem({ name: 'd', framesPerClip: 2,
+    personMode: 'none', framings: ['full', 'face'] })
+  assert.match(problem, /person requirement/)
+  assert.equal(framePromoteProblem({ name: 'd', framesPerClip: 2,
+    personMode: 'none', framings: ['full'] }), null)
+  assert.equal(framePromoteProblem({ name: 'd', framesPerClip: 2,
+    personMode: 'identity', refDatasetId: '3', framings: ['half'] }), null)
+})
