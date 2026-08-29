@@ -66,6 +66,8 @@ def main() -> int:
             kwargs['root'] = models_root
         app = FaceAnalysis(**kwargs)
         app.prepare(ctx_id=0 if used_gpu else -1, det_size=(640, 640))
+        import cv2
+        import numpy as np
         _log(f"[face-box] {len(images)} image(s), used_gpu={used_gpu}")
     except Exception as e:  # noqa: BLE001 — must exit as clean JSON, not a traceback
         print(json.dumps({"ok": False,
