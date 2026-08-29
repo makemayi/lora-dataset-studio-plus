@@ -102,6 +102,7 @@ the target model accepts.
 | Capability | What it provides |
 |---|---|
 | **Folder → video bank** | Point a bank at a folder of videos. It is referenced **in place** and never written to, like the image bank |
+| **Run your own collector** | An account the server cannot see (Douyin, Kuaishou — anything behind a logged-in feed) can be walked by a command on your own machine, launched from the bank itself. **Nothing ships** — you configure the command under `video_collectors`, `{url}` becomes the address you type and `{folder}` the bank's folder, and what the command downloads appears as sources. A collector run is the bank's one job: while it walks (minutes), no pass can start |
 | **Automatic shot detection** | Finds the cuts with TransNetV2, so a long file becomes individually reviewable shots instead of one blob |
 | **Review without waiting** | The grid shows thumbnails; a click plays that shot from the source, so nothing is encoded before you have decided |
 | **Target-aware cutting** | Pick the model you are building for and the clip length offers **only counts that model can actually ingest** — Wan wants 4n+1 frames, LTX 8n+1, MiniMax H3 five modulo seventeen, and none of them will tell you if you get it wrong |

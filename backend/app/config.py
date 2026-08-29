@@ -439,6 +439,18 @@ DEFAULTS = {
     # THIS RUNS WHAT YOU PUT HERE. It is not reachable from a page or an API
     # payload: a request may only NAME a collector already configured here.
     'collectors': {'entries': []},
+    # The VIDEO lane's socket, same shape and same warnings as `collectors`
+    # above, with a smaller contract and one extra token. The command receives
+    # `{url}` (the profile/page to collect from) and `{folder}` (the source
+    # folder of the bank the run was started from); it downloads its OWN files
+    # — typically with something like
+    #   ["node", "local/douyin-video-grab.mjs", "{url}", "--download", "--out", "{folder}"]
+    # — and exit code 0 is the whole verdict. stdout is ignored (progress
+    # belongs on stderr, `@progress {...}` lines drive the job's bar); on
+    # success the app re-inventories the bank's folder itself, so the command
+    # does not have to. Nothing here is reachable from a page or an API
+    # payload: a request may only NAME an entry already configured here.
+    'video_collectors': {'entries': []},
     'masks': {'python': ''},
     # Bank ✨ Score pass interpreter (CLIP aesthetic/NSFW stack). Auto-provisioned
     # by the bank_scoring installer into its own venv — declared here so a

@@ -24,6 +24,7 @@ import VideoSourceList from './VideoSourceList'
 import VideoClipGrid from './VideoClipGrid'
 import VideoClipLightbox from './VideoClipLightbox'
 import VideoClipSearchBox from './VideoClipSearchBox'
+import VideoCollectorRun from './VideoCollectorRun'
 import { matchLine, captionStyleLabel } from './videoClipSearch'
 import { filterByFlag, flagChips, flagFilterNote } from './videoMetricsFilter'
 import PromoteVideoDialog from './PromoteVideoDialog'
@@ -433,6 +434,11 @@ export default function VideoBankWorkspace({ bankId, onBack, onGone }) {
           )}
         </div>
       )}
+
+      {/* 🧲 Intake from outside this machine, ABOVE the cuts panel and the
+          gallery: it is how files ARRIVE, and an empty bank is exactly the
+          state it exists to fill — so unlike the cuts panel it shows always. */}
+      <VideoCollectorRun bankId={bankId} busy={busy} />
 
       {/* The cuts panel sits between the passes and the grid: it only means
           something once Measure has run, and it changes what the grid shows. */}

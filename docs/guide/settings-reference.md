@@ -735,6 +735,13 @@ to the right subset*.
 
 The **✨ Score** pass (aesthetic · NSFW · style) needs the **Bank scoring** extra (Setup ▸ Quality tools). **🚩 Find watermarks** runs one of two ways: the **watermark detector** extra when it is installed (~0.14 s per image, and it does not need Ollama at all), otherwise the vision model from **Captioning** (~1.7 s per image). Installing the extra only ever adds the faster route — with nothing installed the pass behaves exactly as it always has. Both are detection-only: the bank never edits your source files.
 
+### Local collectors (image & video banks)
+
+**Nothing is configured by default** — the shipped state, not a missing step. A collector is a command on YOUR machine that visits a gallery the server cannot enumerate (a page drawn by JavaScript behind a signed API, reachable only inside a browser that is already logged in), and hands the app what it finds. Each one is pinned to a single site's markup and stops working when that site reskins, so the app ships the socket and no plug; with none configured the panels say so and stop there. **This runs what you put here, and nothing else can run anything:** a request may only NAME an entry already configured — the command itself never travels through a page or an API payload.
+
+- **Image lane** → `collectors.entries`. Each entry is `{"name": …, "command": [...]}`; the command is an ARGUMENT LIST (never a string — it runs directly, no shell), `{url}` becomes the account/page URL, and on success the command prints ONE JSON document on stdout: `{"items": [{"url", "title"}], "suggested_name": "optional"}`. Progress goes on stderr — `@progress {"done": …, "total": …}` lines drive the job's bar; anything else there is shown when a run fails. Example entry: `"command": ["node", "local/douyin-to-bank.mjs", "--json", "{url}"]`.
+- **Video lane** → `video_collectors.entries`. Same shape, smaller contract: a video collector DOWNLOADS ITS OWN FILES, so there is nothing to parse — exit code 0 is the whole verdict, stdout is ignored, and on success the app re-inventories the bank's folder itself. Two tokens: `{url}` (the address typed in the panel) and `{folder}` (the source folder of the bank the run was started from). Example entry: `"command": ["node", "local/kuaishou-video-grab.mjs", "{url}", "--download", "--out", "{folder}"]`. The command's destination and the bank's folder must agree — `{folder}` exists so they cannot drift. A collector run is the bank's ONE job: while it walks an account (minutes, not seconds) no pass can start on that bank.
+
 ## Training
 
 Defaults for new runs, plus everything about the optional cloud training lane.

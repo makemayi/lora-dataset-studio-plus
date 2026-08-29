@@ -19,6 +19,7 @@ from flask import Blueprint, current_app, jsonify, request, send_file
 
 from ..config import LOCAL_USER
 from ..services import bank_jobs
+from ..services import local_collector
 from ..services import video_bank_service as svc
 from ..services import video_to_image_dataset as frames_svc
 from ..services import video_metrics
@@ -116,6 +117,36 @@ def video_bank_refresh(bank_id):
     if sync is None:
         return _missing(bank_id)
     return jsonify({'ok': True, **sync})
+
+
+@bp.get('/video-bank/collectors')
+def video_bank_collectors():
+    """🧲 The local VIDEO collectors this install has configured — NAMES ONLY.
+
+    Same shape and the same reason as the image lane's GET /bank/collectors:
+    never the commands, because a command line is the one field here that
+    could carry an absolute path off this machine into a screenshot. An empty
+    list is the shipped state and the UI says so — no collector is a
+    configuration this app has, not an error."""
+    return jsonify({'collectors': [c['name'] for c in
+                                   local_collector.configured_video_collectors()]})
+
+
+@bp.post('/video-bank/<int:bank_id>/collect')
+def video_bank_collect(bank_id):
+    """🧲 Run a configured local collector against `url`, then re-inventory.
+
+    Body: {collector, url}. Answers 202 the moment the job is launched — a
+    collector that drives a browser through a whole account runs for minutes,
+    and the progress rides on the bank's own job, so the page can be closed
+    and reopened. `collector` NAMES an entry in `video_collectors`; it never
+    carries a command, and nothing in this payload decides what is executed.
+    Unlike the image lane there is no create-a-bank-on-the-way: the target is
+    the bank in the path, and its `source_path` is what `{folder}` in the
+    command expands to."""
+    data = request.get_json(silent=True) or {}
+    return _start(bank_id, svc.start_collector, _app(), LOCAL_USER, bank_id,
+                  str(data.get('collector') or ''), str(data.get('url') or ''))
 
 
 @bp.get('/video-bank/<int:bank_id>/sources')

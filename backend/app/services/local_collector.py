@@ -20,6 +20,21 @@ and shipping one would make this repository a maintainer of scrapers for
 platforms it has nothing to do with. With nothing configured the UI says the
 feature is not set up and stops there — which is the honest state, not an error.
 
+TWO SOCKETS, ONE CONTRACT SHAPE
+-------------------------------
+The IMAGE lane (``collectors.entries``) runs a collector and IMPORTS what it
+prints: stdout must be one JSON document of image links. The VIDEO lane
+(``video_collectors.entries``) runs a collector that DOWNLOADS ITS OWN FILES —
+a video bank points at a live folder, so "importing" is the refresh the folder
+already meant, and inventing a second ingestion path would be a second opinion
+about what a bank contains (the same reasoning the local video-grab scripts
+themselves carry). Its contract is therefore smaller: exit code 0 is the whole
+verdict, stdout is drained but ignored, and stderr keeps exactly the same role
+— ``@progress`` lines drive the job's bar, everything else is the failure
+story. Both lanes substitute ``{url}``; the video lane adds ``{folder}``, the
+source folder of the bank the run was started from, so a command can promise
+its files land where the refresh will look.
+
 THE CONTRACT
 ------------
 A collector is `{name, command}`. `command` is a LIST of arguments, and the
@@ -69,18 +84,13 @@ class CollectorError(Exception):
         self.detail = (detail or '')[-2000:]
 
 
-def configured_collectors():
-    """`[{name, command}]` from config, keeping only entries that could run.
+def _configured_entries(path):
+    """`[{name, command}]` from one config path, keeping entries that could run.
 
     A row missing a name or an argument list is dropped rather than reported:
     the settings file is hand-written, and a half-typed entry should not take
     the working ones down with it."""
-    # `collectors.entries`, and both halves of that path were forced by a test.
-    # A top-level LIST fails every full-config save (the settings API requires
-    # sections to be objects, per test_settings_api), and living inside `bank`
-    # breaks the assertion that that section holds exactly the twelve thresholds
-    # the Bank panel exposes — which this is not, and must not become.
-    raw = cfg.get('collectors.entries')
+    raw = cfg.get(path)
     out = []
     for entry in (raw if isinstance(raw, list) else []):
         if not isinstance(entry, dict):
@@ -97,10 +107,36 @@ def configured_collectors():
     return out
 
 
+def configured_collectors():
+    """`[{name, command}]` for the IMAGE lane.
+
+    The config path `collectors.entries`, and both halves of it, were forced by
+    a test. A top-level LIST fails every full-config save (the settings API
+    requires sections to be objects, per test_settings_api), and living inside
+    `bank` breaks the assertion that that section holds exactly the twelve
+    thresholds the Bank panel exposes — which this is not, and must not
+    become."""
+    return _configured_entries('collectors.entries')
+
+
+def configured_video_collectors():
+    """`[{name, command}]` for the VIDEO lane (`video_collectors.entries`)."""
+    return _configured_entries('video_collectors.entries')
+
+
 def find_collector(name):
-    """The configured collector called `name`, or None."""
+    """The configured IMAGE-lane collector called `name`, or None."""
     wanted = (name or '').strip()
     for c in configured_collectors():
+        if c['name'] == wanted:
+            return c
+    return None
+
+
+def find_video_collector(name):
+    """The configured VIDEO-lane collector called `name`, or None."""
+    wanted = (name or '').strip()
+    for c in configured_video_collectors():
         if c['name'] == wanted:
             return c
     return None
@@ -132,28 +168,20 @@ def _normalise(payload):
     return items, (name.strip()[:120] if isinstance(name, str) and name.strip() else '')
 
 
-def run_collector(name, url, *, on_progress=None):
-    """Run the named collector against `url` and return `(items, suggested_name)`.
+def _spawn(argv, *, on_progress=None):
+    """Run argv to completion and return `(returncode, stdout_bytes, stderr_tail)`.
 
-    Raises CollectorError for every failure — missing collector, non-zero exit,
-    timeout, unparseable output — with the collector's stderr attached, because
-    the thing that knows why it failed is the collector, not this."""
-    collector = find_collector(name)
-    if collector is None:
-        raise CollectorError(f'no collector named {name!r} is configured')
-    target = (url or '').strip()
-    if not target.lower().startswith(('http://', 'https://')):
-        raise CollectorError('a http(s) URL is required')
-
-    # The URL is substituted into an ARGUMENT, and the process is started
-    # without a shell. Nothing the URL contains can become a second command.
-    argv = [target if a == '{url}' else a for a in collector['command']]
-    if target not in argv:
-        argv = argv + [target]      # no {url} token: hand it over as the last argument
-
+    The one piece both lanes need IDENTICALLY, and the one that is easy to get
+    wrong: stderr is drained by a THREAD while stdout is read here. Both must
+    be consumed concurrently — a collector that fills one pipe's buffer while
+    the reader waits on the other deadlocks, and a browser-driving collector
+    writes a progress line per post for minutes. ``@progress`` lines are
+    forwarded to `on_progress` and never kept; the human-readable tail is.
+    The URL (and any path) is substituted into an ARGUMENT by the caller, and
+    the process is started without a shell, so nothing in it can become a
+    second command."""
     if on_progress:
-        on_progress(0, 0, f'running “{collector["name"]}” …')
-    started = time.time()
+        on_progress(0, 0, 'running …')
     try:
         proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 shell=False, cwd=str(cfg.BACKEND_DIR.parent))
@@ -162,10 +190,6 @@ def run_collector(name, url, *, on_progress=None):
     except OSError as e:
         raise CollectorError(f'the collector could not be started: {e}') from e
 
-    # stderr is drained by a THREAD while stdout is read here. Both must be
-    # consumed concurrently: a collector that fills one pipe's buffer while the
-    # reader waits on the other deadlocks, and this one writes a progress line
-    # per post for minutes. The tail is kept for the error message.
     tail: list[str] = []
 
     def _drain():
@@ -194,11 +218,46 @@ def run_collector(name, url, *, on_progress=None):
             f'the collector did not finish within {COLLECTOR_TIMEOUT_S // 60} minutes') from e
     finally:
         reader.join(timeout=5)
+    return proc.returncode, raw, '\n'.join(tail)
 
-    stderr = '\n'.join(tail)
-    if proc.returncode != 0:
-        raise CollectorError(
-            f'the collector exited with code {proc.returncode}', stderr)
+
+def _substitute(command, url, folder=None):
+    """The command list with `{url}` (and `{folder}`) swapped for real values.
+
+    A missing `{url}` token hands the URL over as the LAST argument — a command
+    that takes it positionally need not name a token it cannot put last."""
+    argv = []
+    for a in command:
+        if a == '{url}':
+            argv.append(url)
+        elif a == '{folder}' and folder is not None:
+            argv.append(folder)
+        else:
+            argv.append(a)
+    if url not in argv:
+        argv = argv + [url]
+    return argv
+
+
+def run_collector(name, url, *, on_progress=None):
+    """Run the named IMAGE-lane collector against `url` and return
+    `(items, suggested_name)`.
+
+    Raises CollectorError for every failure — missing collector, non-zero exit,
+    timeout, unparseable output — with the collector's stderr attached, because
+    the thing that knows why it failed is the collector, not this."""
+    collector = find_collector(name)
+    if collector is None:
+        raise CollectorError(f'no collector named {name!r} is configured')
+    target = (url or '').strip()
+    if not target.lower().startswith(('http://', 'https://')):
+        raise CollectorError('a http(s) URL is required')
+
+    started = time.time()
+    code, raw, stderr = _spawn(_substitute(collector['command'], target),
+                               on_progress=on_progress)
+    if code != 0:
+        raise CollectorError(f'the collector exited with code {code}', stderr)
     if len(raw) > MAX_OUTPUT_BYTES:
         raise CollectorError('the collector printed more than this can read')
     try:
@@ -212,6 +271,30 @@ def run_collector(name, url, *, on_progress=None):
     logger.info('collector %r produced %d image(s) for %s in %.0fs',
                 collector['name'], len(items), _safe(target), time.time() - started)
     return items, suggested
+
+
+def run_video_collector(name, url, *, folder=None, on_progress=None):
+    """Run the named VIDEO-lane collector; return when it has succeeded.
+
+    The smaller contract, and why it is smaller: a video collector downloads
+    its own files (typically into `folder`, the bank's source folder the
+    command reaches through ``{folder}``), so there is nothing to parse — exit
+    code 0 is the whole verdict, stdout is drained but unread, and the files
+    become visible to the app through the REFRESH THE CALLER OWES, not here.
+    Everything else — missing collector, bad URL, non-zero exit, timeout — is
+    a CollectorError with the collector's own stderr attached, same as the
+    image lane."""
+    collector = find_video_collector(name)
+    if collector is None:
+        raise CollectorError(f'no collector named {name!r} is configured')
+    target = (url or '').strip()
+    if not target.lower().startswith(('http://', 'https://')):
+        raise CollectorError('a http(s) URL is required')
+
+    argv = _substitute(collector['command'], target, folder=folder)
+    code, _raw, stderr = _spawn(argv, on_progress=on_progress)
+    if code != 0:
+        raise CollectorError(f'the collector exited with code {code}', stderr)
 
 
 def _safe(url):

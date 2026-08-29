@@ -38,7 +38,8 @@ from .. import config as cfg
 from ..extensions import db
 from ..models import (VideoBank, VideoClip, VideoDataset, VideoDatasetClip,
                       VideoSource)
-from . import bank_jobs, video_metrics, ffmpeg_tools, path_guard, video_clip_export, video_targets
+from . import (bank_jobs, local_collector, video_metrics, ffmpeg_tools,
+               path_guard, video_clip_export, video_targets)
 
 logger = logging.getLogger(__name__)
 
@@ -810,6 +811,47 @@ def _clip_row_for(bank_id, clip: VideoClip) -> dict:
     relpaths = dict(db.session.query(VideoSource.id, VideoSource.relpath)
                     .filter_by(bank_id=bank_id).all())
     return _clip_row(clip, relpaths, metric_thresholds())
+
+
+# --- local collectors ------------------------------------------------------------
+
+def start_collector(app, user_id, bank_id, collector, url):
+    """🧲 Run a configured LOCAL collector against `url`, then re-inventory.
+
+    The video lane's twin of the image lane's `collect_into_bank`, smaller on
+    purpose: a video collector downloads its own files (the command reaches
+    this bank's source folder through ``{folder}``), so the job is just "run
+    it, then refresh" — the refresh IS the import. The collector's
+    ``@progress`` stderr lines drive the job's bar; exit code 0 is the whole
+    verdict. One job per bank, the SAME registry the passes key into: a
+    collector run and a detect pass cannot own the same bank at once, whichever
+    started second is the one refused.
+    """
+    bank = _require_free_bank(user_id, bank_id)
+    if local_collector.find_video_collector(collector) is None:
+        raise ValueError(f'no collector named {collector!r} is configured')
+    return bank_jobs.start(app, job_key(bank_id), 'collect',
+                           _collector_job(user_id, bank_id, bank.source_path,
+                                          collector, (url or '').strip()))
+
+
+def _collector_job(user_id, bank_id, folder, collector, url):
+    def run(job):
+        def _progress(done, total, detail):
+            bank_jobs.progress(job, done=done or None, total=total or None,
+                               detail=detail or None)
+        local_collector.run_video_collector(collector, url, folder=folder,
+                                            on_progress=_progress)
+        # The refresh IS the import: whatever landed in the folder while the
+        # collector ran becomes sources here, and it runs even after a cancel —
+        # files on disk are real regardless of how the run ended. There is no
+        # interrupting the collector's own process (it is a black box driving a
+        # browser); Stop only marks the job, and a long walk finishes anyway.
+        sync = refresh_bank(user_id, bank_id, force=True) or {}
+        return {'collected': True, 'added': sync.get('added', 0),
+                'missing': sync.get('missing', 0),
+                'unavailable': sync.get('unavailable', 0)}
+    return run
 
 
 # --- passes --------------------------------------------------------------------

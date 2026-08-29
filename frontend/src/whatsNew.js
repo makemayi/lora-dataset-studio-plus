@@ -50,6 +50,18 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-29-video-collectors',
+    date: '2026-08-29',
+    title: 'Run your own download scripts from the Video bank',
+    blurb: 'The Video bank now has the collector panel the image bank has: '
+      + 'configure a local command under video_collectors (a Douyin or '
+      + 'Kuaishou account walker, for example) and run it against an account '
+      + 'URL — it downloads into the bank\'s own folder and the shots appear '
+      + 'as the bank re-inventories. Nothing is configured by default; the '
+      + 'panel says so and shows where the entry goes.',
+    to: '/video-bank',
+  },
+  {
     id: '2026-08-23-topaz-output-relative',
     date: '2026-08-23',
     title: 'Topaz upscale results show up again on the tile',

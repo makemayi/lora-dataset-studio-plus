@@ -55,6 +55,9 @@ export const PASS_LABELS = {
   watermark: '🔖 Watermarks',
   pipeline: 'Run everything',
   promote: 'Build the dataset',
+  // Not a pass — a local collector run owns the bank's one job slot while it
+  // walks an account, and the 409 a refused pass gets back needs a name for it.
+  collect: '🧲 Collect files',
 }
 
 /** Present participle, for "⏳ Finding shots — 3/12". */
@@ -69,6 +72,7 @@ export const PASS_RUNNING_LABELS = {
   watermark: 'Looking for watermarks',
   pipeline: 'Running everything',
   promote: 'Building the dataset',
+  collect: 'Collecting files',
 }
 
 export function passLabel(kind) {
