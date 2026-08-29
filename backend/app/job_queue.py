@@ -859,6 +859,87 @@ class JobQueueManager:
                 return False
             return True
 
+    def reconcile_unknown_submit(self, job_id) -> bool:
+        """Resolve an unknown submit against ComfyUI's own memory of our client id.
+
+        An unknown submit used to be a dead end: the app could not tell "ComfyUI
+        never got it" from "ComfyUI is running it", so it froze the queue and
+        asked the user to restart ComfyUI and confirm. That is a lot to ask for a
+        POST that timed out — and it happened twice in one evening here, each
+        time leaving a Test Studio run that never reached ComfyUI at all.
+
+        The proof was available all along: the client id we send is the JOB id,
+        unique, and ComfyUI echoes it in `/queue` and `/history`. So:
+
+          * an entry carries our id  -> it DID land; adopt its prompt id and let
+            the normal polling own it (never a second submit);
+          * ComfyUI answers and knows nothing about it -> it never landed; the
+            job goes back to pending and the queue moves again;
+          * ComfyUI cannot be asked -> unchanged. Silence is not absence, and
+            the barrier stays exactly as fail-closed as it was.
+        """
+        from .utils.comfyui import find_prompt_by_client_id
+        with GPU_ARBITER_LOCK:
+            _, raw, owner, valid = self._read_comfyui_stalled_barrier()
+            if (not valid or owner is None or owner.get('kind') != 'unknown_submit'
+                    or str(owner.get('job_id')) != str(job_id)
+                    or owner.get('prompt_id') is not None):
+                return False
+            if ImageGenerationQueue.query.filter_by(
+                    job_id=str(job_id), status='stalled').first() is None:
+                return False
+            client_id = owner.get('client_id') or str(job_id)
+
+        # Asked OUTSIDE the arbiter lock: it is two HTTP calls, and holding the
+        # lock across them would stall every other GPU decision for their whole
+        # budget. The state is re-checked under the lock below, and every write
+        # is a compare-and-swap on the barrier's RAW value, so a barrier that
+        # changed while we asked simply loses the race and nothing is written.
+        found = find_prompt_by_client_id(client_id)
+        if found is None:
+            return False                       # ComfyUI unreadable: stay closed
+        state, prompt_id = found
+
+        with GPU_ARBITER_LOCK:
+            if state == 'absent':
+                changed = (ImageGenerationQueue.query
+                           .filter_by(job_id=str(job_id), status='stalled')
+                           .update({'status': 'pending', 'started_at': None,
+                                    'last_heartbeat': None,
+                                    'comfyui_prompt_id': None},
+                                   synchronize_session=False))
+            else:
+                # It landed. Own it again rather than resubmitting: the outcome
+                # is ComfyUI's to report and the poller knows how to read it.
+                changed = (ImageGenerationQueue.query
+                           .filter_by(job_id=str(job_id), status='stalled')
+                           .update({'status': 'sent_to_comfy',
+                                    'comfyui_prompt_id': str(prompt_id)},
+                                   synchronize_session=False))
+            if changed != 1:
+                db.session.rollback()
+                return False
+            deleted = (SystemState.query
+                       .filter_by(key=COMFYUI_STALLED_BARRIER_KEY, value=raw)
+                       .delete(synchronize_session=False))
+            if deleted != 1:
+                db.session.rollback()
+                return False
+            try:
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                logger.exception('job_queue: could not finish unknown-submit '
+                                 'reconciliation for %s', job_id)
+                return False
+            if state == 'absent':
+                logger.warning('job_queue: %s never reached ComfyUI (no queue or history '
+                               'entry carries its client id); returned to the queue', job_id)
+            else:
+                logger.warning('job_queue: %s DID reach ComfyUI as prompt %s (%s); '
+                               'adopted instead of resubmitted', job_id, prompt_id, state)
+            return True
+
     def reconcile_stalled_comfy_job(self, job_id) -> bool:
         """Release only the exact stalled prompt after fresh remote proof."""
         from .utils.comfyui import (ComfyHistoryHealth, ComfyPromptState,
@@ -1244,7 +1325,10 @@ class JobQueueManager:
             # ComfyUI restart (reconcile_stalled_comfy_job refuses those itself).
             if self.has_comfyui_stalled_barrier():
                 owner = self.get_comfyui_stalled_barrier()
-                reconciled = bool(owner) and self.reconcile_stalled_comfy_job(owner.get('job_id'))
+                reconciled = bool(owner) and (
+                    self.reconcile_unknown_submit(owner.get('job_id'))
+                    if owner.get('kind') == 'unknown_submit'
+                    else self.reconcile_stalled_comfy_job(owner.get('job_id')))
                 if not reconciled:
                     return False
             # Any unresolved active row is itself a fail-closed GPU owner after a

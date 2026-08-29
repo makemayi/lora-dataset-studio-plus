@@ -429,3 +429,66 @@ def test_load_workflow_local_caches_by_mtime_but_hands_out_private_copies(app, t
         os.utime(wf, (0, 0))                       # force a different mtime stamp
         assert load_workflow_local(str(wf))['1']['inputs']['seed'] == 42
         assert load_workflow_local(str(tmp_path / 'nope.json')) is None
+
+
+# --- what became of an unknown submit ----------------------------------------
+
+def _queue_entry(client_id, prompt_id):
+    # ComfyUI's own row shape: [number, prompt_id, prompt, extra_data, outputs]
+    return [0, prompt_id, {}, {'client_id': client_id}, []]
+
+
+def test_find_prompt_by_client_id_reads_the_queue_then_the_history(monkeypatch):
+    from app.utils import comfyui as cu
+
+    class _R:
+        def __init__(self, payload):
+            self._p = payload
+
+        def json(self):
+            return self._p
+
+    calls = []
+
+    def _get(url, **kw):
+        calls.append(url)
+        if url.endswith('/queue'):
+            return _R({'queue_running': [_queue_entry('other', 'p-other')],
+                       'queue_pending': [_queue_entry('mine', 'p-mine')]})
+        return _R({})
+
+    monkeypatch.setattr(cu.requests, 'get', _get)
+    assert cu.find_prompt_by_client_id('mine') == ('pending', 'p-mine')
+    assert calls == [cu.urljoin(cu.api_address(), '/queue')], 'history is not needed'
+
+
+def test_find_prompt_by_client_id_finds_a_finished_one_in_history(monkeypatch):
+    from app.utils import comfyui as cu
+
+    class _R:
+        def __init__(self, payload):
+            self._p = payload
+
+        def json(self):
+            return self._p
+
+    def _get(url, **kw):
+        if url.endswith('/queue'):
+            return _R({'queue_running': [], 'queue_pending': []})
+        return _R({'p-done': {'prompt': _queue_entry('mine', 'p-done')}})
+
+    monkeypatch.setattr(cu.requests, 'get', _get)
+    assert cu.find_prompt_by_client_id('mine') == ('done', 'p-done')
+
+
+def test_an_unaskable_comfyui_is_not_an_absence(monkeypatch):
+    """None and ('absent', None) mean opposite things to the caller: one leaves
+    the fail-closed barrier alone, the other releases the job."""
+    from app.utils import comfyui as cu
+
+    def _boom(url, **kw):
+        raise RuntimeError('connection reset')
+
+    monkeypatch.setattr(cu.requests, 'get', _boom)
+    assert cu.find_prompt_by_client_id('mine') is None
+    assert cu.find_prompt_by_client_id('') is None

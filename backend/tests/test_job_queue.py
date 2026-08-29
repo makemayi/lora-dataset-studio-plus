@@ -760,3 +760,72 @@ def test_failed_job_reason_reaches_dataset_tile(app):
         refreshed = db.session.get(FaceDatasetImage, img.id)
         assert refreshed.status == 'failed'
         assert 'mat1 and mat2' in refreshed.fail_reason
+
+
+# --- an unknown submit is answerable: ComfyUI echoes our client id ------------
+#
+# Measured 2026-08-29: two Test Studio runs never reached ComfyUI at all, and
+# each left an unknown-submit barrier that froze the whole image queue until a
+# human restarted ComfyUI and confirmed it. The proof was there the whole time —
+# the client id the app sends IS the job id, and ComfyUI echoes it back.
+
+
+def _stalled_unknown(app, job_id='job-unknown'):
+    from app.models import ImageGenerationQueue, SystemState
+    from app.job_queue import queue_manager, COMFYUI_STALLED_BARRIER_KEY
+    from app import db
+    import json as _j
+    row = ImageGenerationQueue(job_id=job_id, status='stalled', workflow_data='{}')
+    db.session.add(row)
+    db.session.add(SystemState(key=COMFYUI_STALLED_BARRIER_KEY, value=_j.dumps({
+        'v': {'kind': 'unknown_submit', 'job_id': job_id, 'client_id': job_id,
+              'prompt_id': None, 'reason': 'x', 'detail': 'y'}, 'exp': None})))
+    db.session.commit()
+    return queue_manager
+
+
+def test_a_prompt_that_never_landed_goes_back_to_the_queue(app, monkeypatch):
+    from app.models import ImageGenerationQueue, SystemState
+    from app.job_queue import COMFYUI_STALLED_BARRIER_KEY
+    from app import db, job_queue as jq
+    with app.app_context():
+        qm = _stalled_unknown(app)
+        monkeypatch.setattr(jq.queue_manager, '_read_comfyui_stalled_barrier',
+                            qm._read_comfyui_stalled_barrier)
+        from app.utils import comfyui as cu
+        monkeypatch.setattr(cu, 'find_prompt_by_client_id', lambda cid: ('absent', None))
+        assert qm.reconcile_unknown_submit('job-unknown') is True
+        row = ImageGenerationQueue.query.filter_by(job_id='job-unknown').first()
+        assert row.status == 'pending' and row.comfyui_prompt_id is None
+        assert db.session.get(SystemState, COMFYUI_STALLED_BARRIER_KEY) is None
+
+
+def test_a_prompt_that_DID_land_is_adopted_never_resubmitted(app, monkeypatch):
+    from app.models import ImageGenerationQueue, SystemState
+    from app.job_queue import COMFYUI_STALLED_BARRIER_KEY
+    from app import db
+    with app.app_context():
+        qm = _stalled_unknown(app, 'job-landed')
+        from app.utils import comfyui as cu
+        monkeypatch.setattr(cu, 'find_prompt_by_client_id',
+                            lambda cid: ('running', 'prompt-7'))
+        assert qm.reconcile_unknown_submit('job-landed') is True
+        row = ImageGenerationQueue.query.filter_by(job_id='job-landed').first()
+        assert row.status == 'sent_to_comfy' and row.comfyui_prompt_id == 'prompt-7'
+        assert db.session.get(SystemState, COMFYUI_STALLED_BARRIER_KEY) is None
+
+
+def test_an_unreadable_comfyui_leaves_the_barrier_exactly_as_closed(app, monkeypatch):
+    """Silence is not absence. This is the whole fail-closed property: a probe
+    that could not ask must change nothing."""
+    from app.models import ImageGenerationQueue, SystemState
+    from app.job_queue import COMFYUI_STALLED_BARRIER_KEY
+    from app import db
+    with app.app_context():
+        qm = _stalled_unknown(app, 'job-silent')
+        from app.utils import comfyui as cu
+        monkeypatch.setattr(cu, 'find_prompt_by_client_id', lambda cid: None)
+        assert qm.reconcile_unknown_submit('job-silent') is False
+        row = ImageGenerationQueue.query.filter_by(job_id='job-silent').first()
+        assert row.status == 'stalled'
+        assert db.session.get(SystemState, COMFYUI_STALLED_BARRIER_KEY) is not None

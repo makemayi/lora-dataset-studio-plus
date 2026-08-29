@@ -457,6 +457,56 @@ def _ensure_comfyui_before_generation():
         return None
 
 
+def find_prompt_by_client_id(client_id):
+    """What became of the prompt we sent under `client_id`? Proof, not a guess.
+
+    The app sends a client id that is UNIQUE per job (the job id), and ComfyUI
+    echoes it back in both `/queue` and `/history` entries. So an unknown submit
+    — the POST timed out, the answer was lost, the process died between the two —
+    stops being unanswerable: either an entry carries our id (it landed, and we
+    can adopt its prompt id) or none does (it never landed).
+
+    Returns ('running' | 'pending' | 'done', prompt_id), or ('absent', None) when
+    ComfyUI answered and knows nothing about it, or None when ComfyUI could not
+    be asked — which is NOT the same as absent and must never be treated as one.
+    """
+    if not client_id:
+        return None
+    base = api_address()
+
+    def _client_of(entry):
+        # /queue rows are [number, prompt_id, prompt, extra_data, outputs]; a
+        # /history value is {'prompt': <that same row>, ...}.
+        row = entry.get('prompt') if isinstance(entry, dict) else entry
+        if not isinstance(row, (list, tuple)) or len(row) < 4:
+            return None, None
+        extra = row[3] if isinstance(row[3], dict) else {}
+        return extra.get('client_id'), row[1]
+
+    try:
+        q = requests.get(urljoin(base, '/queue'), timeout=15).json()
+    except Exception as exc:                                 # noqa: BLE001
+        logger.warning('find_prompt_by_client_id: /queue unreadable: %s', exc)
+        return None
+    for key, state in (('queue_running', 'running'), ('queue_pending', 'pending')):
+        for entry in (q.get(key) or []):
+            cid, pid = _client_of(entry)
+            if cid == client_id and pid:
+                return state, pid
+
+    try:
+        h = requests.get(urljoin(base, '/history'), params={'max_items': 100},
+                         timeout=30).json()
+    except Exception as exc:                                 # noqa: BLE001
+        logger.warning('find_prompt_by_client_id: /history unreadable: %s', exc)
+        return None
+    for pid, entry in (h or {}).items():
+        cid, _ = _client_of(entry)
+        if cid == client_id:
+            return 'done', pid
+    return 'absent', None
+
+
 def queue_prompt_to_comfyui(prompt_workflow, client_id, worker_url=None, *,
                             extra_data=None):
     """Envoie un workflow à ComfyUI pour exécution.
@@ -588,8 +638,18 @@ def queue_prompt_to_comfyui(prompt_workflow, client_id, worker_url=None, *,
         if extra_data:
             payload["extra_data"] = dict(extra_data)
         headers = {'Content-Type': 'application/json'}
+        # 60 s, not 10. This POST only ENQUEUES — ComfyUI answers it with a
+        # prompt id and renders afterwards — but the answer comes from the same
+        # event loop that is running the current render, so a busy server can
+        # take well past 10 s to reply. Measured on this install: /object_info is
+        # 20.2 MB / 9 s while idle, which is the scale of work that loop is doing
+        # between requests. And a timeout here is the WORST failure this lane
+        # has: the POST may already have been accepted, so it cannot be retried
+        # (double render) nor failed (lost work) — it becomes an unknown-submit
+        # barrier that freezes every later job until someone resolves it by
+        # hand. Waiting a minute for a reply is cheaper than that, every time.
         response = requests.post(
-            urljoin(api_addr, "/prompt"), json=payload, headers=headers, timeout=10,
+            urljoin(api_addr, "/prompt"), json=payload, headers=headers, timeout=60,
             allow_redirects=False)
         response.raise_for_status()
         status = getattr(response, 'status_code', None)

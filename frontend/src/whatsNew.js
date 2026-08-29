@@ -50,6 +50,18 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-29-submit-timeout-and-self-healing-queue',
+    date: '2026-08-29',
+    title: 'A busy ComfyUI no longer freezes the whole queue',
+    blurb: 'Sending a job to a ComfyUI that was mid-render could time out after '
+      + '10 seconds. The app then had to assume the worst — the job might have '
+      + 'been accepted — so it paused everything and asked you to restart '
+      + 'ComfyUI. Two Test Studio runs died that way in one evening. Sending now '
+      + 'waits a minute for the reply, and when the outcome is still unknown the '
+      + 'app asks ComfyUI what it did with that exact job instead of freezing: '
+      + 'it either picks the running job back up or puts it back in the queue.',
+  },
+  {
     id: '2026-08-29-comfyui-liveness-is-its-own-question',
     date: '2026-08-29',
     title: 'A running ComfyUI is recognised in milliseconds',
