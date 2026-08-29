@@ -731,6 +731,8 @@ const TOPICS = [
       'mp4', 'mov', 'mkv', 'webm', 'avi', 'movie', 'film',
       'extract frames', 'promote frames', 'person requirement', 'frame must show a person',
       'reference person', 'sharpness tolerance', 'face sharpness', 'blurry face',
+      'framing', 'framings', 'waist-up', 'half body', 'face close-up', 'face crop',
+      'two people in frame', 'multiple faces', 'bystander', 'head tilt',
       'moving face', 'rejected frames', 'frame summary', 'image training set',
       'my video is ignored', 'mp4 skipped', 'video not imported', 'video in a bank',
       'triage video', 'video triage', 'keep reject shots', 'watch a shot', 'preview',

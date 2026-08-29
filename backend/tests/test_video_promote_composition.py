@@ -218,10 +218,12 @@ def test_promote_frames_route_accepts_new_params(client, app, monkeypatch):
                    max_per_source=None, min_gap_s=0.75, face_bbox_min=0.02,
                    person_mode='identity', ref_dataset_id=None,
                    trigger_word=None, kind=None,
-                   sharp_tolerance=None, face_tolerance=None):
+                   sharp_tolerance=None, face_tolerance=None,
+                   framings=None):
         captured.update(person_mode=person_mode,
                         sharp_tolerance=sharp_tolerance,
-                        face_tolerance=face_tolerance)
+                        face_tolerance=face_tolerance,
+                        framings=tuple(framings or ()))
         return {'id': 1, 'name': name or 'x', 'clips': 0,
                 'composition': {'face_filtered': True,
                                 'sharp_tolerance': sharp_tolerance,

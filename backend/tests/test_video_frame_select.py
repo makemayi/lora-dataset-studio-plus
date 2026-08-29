@@ -325,3 +325,89 @@ def test_face_tolerance_skipped_without_face_sharp():
                             face_tolerance=0.5)
     assert out['rejected'].get('face_blurry', 0) == 0
     assert len(out['picked']) == 1
+
+
+# ── gates the h3-video-dataset practice added ────────────────────────────────
+
+def test_a_deep_nod_or_up_angle_is_refused():
+    """Pitch (looking far up/down) trains badly whatever the embedding says, and
+    unlike yaw there is no measured case for admitting the extremes."""
+    out = vfs.select_frames(
+        [frame(0.0, 100, face=good_face(pitch=75.0)),
+         frame(1.0, 90, face=good_face(pitch=10.0))],
+        limit=2)
+    assert out['rejected']['extreme_tilt'] == 1
+    assert [f['t'] for f in out['picked']] == [1.0]
+
+
+def test_an_absent_pitch_is_absent_evidence_not_a_rejection():
+    out = vfs.select_frames(
+        [frame(0.0, 100, face=good_face())], limit=1)
+    assert out['picked'], 'an older scorer reports no pitch — the gate must not fire'
+
+
+def test_identity_mode_refuses_a_frame_holding_two_people():
+    """A bystander poisons an identity set: the embedding is scored on the
+    biggest face, so the corner stranger trains too. Presence mode does not
+    care — a passer-by is still variety a style set wants."""
+    frames = [frame(0.0, 100, face=good_face(n_faces=2)),
+              frame(1.0, 90, face=good_face(n_faces=1))]
+    single = vfs.select_frames(frames, limit=2, single_face=True)
+    assert single['rejected']['multiple_faces'] == 1
+    both = vfs.select_frames(frames, limit=2, single_face=False)
+    assert 'multiple_faces' not in both['rejected']
+    assert both['picked'], 'presence mode keeps the two-person frame'
+
+
+def test_an_absent_face_count_is_not_read_as_a_crowd():
+    out = vfs.select_frames(
+        [frame(0.0, 100, face=good_face())], limit=1, single_face=True)
+    assert out['picked'], 'an older scorer reports no count — no rejection without it'
+
+
+# ── the crop framings ────────────────────────────────────────────────────────
+
+def test_the_face_box_needs_its_four_corners():
+    w, h = 1080, 1920
+    assert vfs.face_box_px({'nx0': 0.4, 'ny0': 0.1, 'nx1': 0.6, 'ny1': 0.2}, w, h) \
+        == (432.0, 192.0, 648.0, 384.0)
+    assert vfs.face_box_px({}, w, h) is None          # an old scorer: no box
+    assert vfs.face_box_px({'nx0': 0.6, 'ny0': 0.2, 'nx1': 0.4, 'ny1': 0.1},
+                           w, h) is None              # inverted: refuse to crop
+
+
+def test_the_half_body_window_heads_the_upper_third_and_clamps():
+    # A face centred low in a 1080x1920 frame: the window starts half a face
+    # above it, runs ~6 face-heights down, and never leaves the frame.
+    box = vfs.face_box_px({'nx0': 0.45, 'ny0': 0.40, 'nx1': 0.55, 'ny1': 0.50},
+                          1080, 1920)
+    win = vfs.half_window(1080, 1920, box)
+    x0, y0, x1, y1 = win
+    assert 0 <= x0 < x1 <= 1080 and 0 <= y0 < y1 <= 1920
+    assert abs((x0 + x1) / 2 - 540) < 1                  # centred on the face
+    fh = 192.0
+    assert y0 == box[1] - fh * 0.5                       # head-room above the brows
+    assert y1 - y0 <= fh * 6.0 + 1e-9
+
+
+def test_the_half_body_window_at_the_top_of_frame_has_no_negative_headroom():
+    box = (500.0, 10.0, 580.0, 210.0)                    # a face at the very top
+    win = vfs.half_window(1080, 1920, box)
+    assert win[1] == 0.0
+
+
+def test_the_face_closeup_is_a_square_centred_on_the_face():
+    box = vfs.face_box_px({'nx0': 0.45, 'ny0': 0.40, 'nx1': 0.55, 'ny1': 0.50},
+                          1080, 1920)
+    win = vfs.face_window(1080, 1920, box, scale=4.0)
+    x0, y0, x1, y1 = win
+    assert abs((x1 - x0) - (y1 - y0)) < 1e-9             # square
+    assert (x1 - x0) >= (box[2] - box[0]) * 4.0 - 1e-9   # ~4 face widths
+    assert 0 <= x0 and x1 <= 1080 and 0 <= y0 and y1 <= 1920
+
+
+def test_a_closeup_bigger_than_the_frame_is_the_whole_frame():
+    # A close-up that already fills the frame crops nothing — the window says so
+    # by covering everything, not by inventing pixels it cannot reach.
+    win = vfs.face_window(100, 100, (40.0, 40.0, 60.0, 60.0), scale=40.0)
+    assert win == (0.0, 0.0, 100.0, 100.0)

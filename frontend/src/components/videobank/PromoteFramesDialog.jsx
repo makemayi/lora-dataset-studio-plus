@@ -5,7 +5,7 @@ import { INPUT_CLASS, PRIMARY_BUTTON } from '../common/surfaces'
 import {
   framePromoteProblem, framePromotePayload, frameScopeLabel,
   frameCeilingHint, frameFaceNote,
-  FRAMES_PER_CLIP_MAX, FRAMES_PER_CLIP_DEFAULT, PERSON_MODES,
+  FRAMES_PER_CLIP_MAX, FRAMES_PER_CLIP_DEFAULT, PERSON_MODES, FRAMING_OPTIONS,
 } from './videoFramePromote'
 
 /** 🖼 Turn the shots you kept into an IMAGE training set.
@@ -35,6 +35,10 @@ export default function PromoteFramesDialog({
   const [totalLimit, setTotalLimit] = useState('')
   const [maxPerSource, setMaxPerSource] = useState('')
   const [personMode, setPersonMode] = useState('identity')
+  // Which framings the run emits. Full frame is the default and always legal;
+  // the two crops need the face pass, so they go dead when the person
+  // requirement is off — there is no face box to crop to without it.
+  const [framings, setFramings] = useState(['full'])
   const [sharpTolerance, setSharpTolerance] = useState(0.6)
   const [faceTolerance, setFaceTolerance] = useState(0.6)
   // Datasets that actually HAVE a reference photo — the others cannot answer
@@ -61,7 +65,8 @@ export default function PromoteFramesDialog({
   // decodes through PyAV, which carries its own libav. Borrowing the 'promote'
   // capability here would refuse a run that works, with a message about cutting
   // clips that this screen does not do.
-  const problem = framePromoteProblem({ name, framesPerClip, personMode, refDatasetId })
+  const problem = framePromoteProblem({ name, framesPerClip, personMode,
+    refDatasetId, framings })
   const scope = frameScopeLabel((selectedIds || []).length, keepCount)
   const ceiling = frameCeilingHint({
     frames_ceiling: ((selectedIds || []).length || Number(keepCount) || 0)
@@ -77,7 +82,7 @@ export default function PromoteFramesDialog({
       const d = await postJson(`/api/video-bank/${bankId}/promote-frames`,
         framePromotePayload({ name, framesPerClip, totalLimit,
           maxPerSource, personMode, refDatasetId, ids: selectedIds,
-          sharpTolerance, faceTolerance }))
+          sharpTolerance, faceTolerance, framings }))
       toast.success(`Building “${d.name}” — ${d.clips} clip(s) being read for frames.`)
       // Said after the request lands, because "the filter is off" is invisible
       // in a folder of sharp pictures of the wrong person.
@@ -148,6 +153,34 @@ export default function PromoteFramesDialog({
             Without it one long video can supply most of the set — one lighting
             setup, one wardrobe — which is invisible once the images are in a folder.
           </p>
+        </div>
+
+        <div className="rounded-xl bg-surface p-3">
+          <span className="block text-sm font-medium text-content">Framings</span>
+          <p className="mt-1 text-xs text-content-muted">
+            Each framing picks its own moments — the ones the other framings did
+            not take — so a face close-up is never the same instant as a full
+            frame. Frames per clip applies to EACH framing you tick.
+          </p>
+          <div className="mt-2 flex flex-col gap-1.5">
+            {FRAMING_OPTIONS.map((f) => {
+              const needsFace = f.id !== 'full' && personMode === 'none'
+              return (
+                <label key={f.id} className={`flex items-center gap-2 text-sm ${needsFace ? 'text-content-subtle' : 'text-content'}`}>
+                  <input type="checkbox" checked={framings.includes(f.id)}
+                    disabled={needsFace}
+                    onChange={(e) => setFramings((prev) => (
+                      e.target.checked ? [...prev, f.id]
+                        : prev.filter((x) => x !== f.id)))}
+                    className="accent-primary" />
+                  {f.label}
+                  <span className="text-xs text-content-subtle">— {needsFace
+                    ? 'needs a person requirement'
+                    : f.hint}</span>
+                </label>
+              )
+            })}
+          </div>
         </div>
 
         <div className="rounded-xl bg-surface p-3">

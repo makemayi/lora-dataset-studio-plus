@@ -48,6 +48,10 @@ from .video_metrics import _LUMA_SANE_HIGH, _LUMA_SANE_LOW
 # are admissible, and the sharpness ranking decides whether they win a slot.
 DET_MIN = 0.50
 YAW_MAX = 70.0
+# Pitch (nod/tilt up-down) got no such measurement, so it is stricter than yaw:
+# a deep nod or an up-the-nose angle trains badly whatever the embedding says,
+# and unlike yaw there is no measured case for admitting the extremes.
+PITCH_MAX = 60.0
 # The SIZE floor mirrors the scorer too, and a first draft here got it wrong.
 # It shipped at 0.12 on the argument that a small face "carries almost no
 # identity signal once it is resized for training". Measured on dataset 4
@@ -94,7 +98,8 @@ def face_pixels(frame):
     return (float(bbox) * float(w) * float(h)) ** 0.5
 
 
-def _face_reason(frame, *, face_bbox_min=None, min_face_px=None, min_sim=None):
+def _face_reason(frame, *, face_bbox_min=None, min_face_px=None, min_sim=None,
+                 single_face=False):
     """Why this frame's face reading disqualifies it, or None."""
     face = frame.get('face')
     if face is None:
@@ -111,6 +116,18 @@ def _face_reason(frame, *, face_bbox_min=None, min_face_px=None, min_sim=None):
     yaw = face.get('yaw')
     if yaw is not None and abs(yaw) > YAW_MAX:
         return 'extreme_profile'
+    pitch = face.get('pitch')
+    if pitch is not None and abs(pitch) > PITCH_MAX:
+        return 'extreme_tilt'
+    if single_face:
+        # A SECOND face means a bystander or a multi-panel collage, and either
+        # poisons an identity set: the embedding is scored on the biggest face,
+        # so a sharp frame whose biggest face is the right person and whose
+        # corner holds somebody else trains BOTH. Absent n_faces (an older
+        # scorer) is absent evidence, never a rejection.
+        n = face.get('n_faces')
+        if n is not None and int(n) > 1:
+            return 'multiple_faces'
     if min_face_px:
         px = face_pixels(frame)
         # Unknown is NOT a pass: a character set asked for a measured floor, and
@@ -142,7 +159,8 @@ def select_frames(frames, *, limit, min_gap_s=MIN_GAP_S,
                   face_bbox_min=FACE_BBOX_MIN,
                   dedup_max_cosine=DEDUP_MAX_COSINE,
                   require_face=True, min_face_px=None, min_sim=None,
-                  sharp_tolerance=None, face_tolerance=None):
+                  sharp_tolerance=None, face_tolerance=None,
+                  single_face=False):
     """Pick at most ``limit`` frames out of one clip's readings.
 
     ``frames`` is a list of dicts in decode order:
@@ -202,7 +220,8 @@ def select_frames(frames, *, limit, min_gap_s=MIN_GAP_S,
             continue
         if require_face:
             reason = _face_reason(f, face_bbox_min=face_bbox_min,
-                                  min_face_px=min_face_px, min_sim=min_sim)
+                                  min_face_px=min_face_px, min_sim=min_sim,
+                                  single_face=single_face)
             if reason:
                 drop(reason)
                 continue
@@ -285,3 +304,72 @@ def spread_quota(per_source_counts, total_limit):
             quota[k] += take
             remaining -= take
     return quota
+
+
+# ── Crop framings ─────────────────────────────────────────────────────────────
+#
+# WHY A FULL FRAME IS NOT ALWAYS THE PICTURE. On real short-form footage the
+# face runs about 10% of a 9:16 frame's height — at a 0.25-megapixel training
+# target that leaves the face itself roughly 58x58 px, and identity does not
+# survive that alone. So a selection can emit, beside the full frame, two crops
+# that keep the SAME measured moment at a usable face scale:
+#
+#   half  waist-up — the face with headroom, ~6 face-heights (head to waist),
+#         3:4 portrait, centred on the face;
+#   face  a square ~4 face-widths on a side, centred on the face — identity at
+#         a pixel count the full frame cannot give.
+#
+# Both are PURE GEOMETRY over one face box and the frame's own size: no decode,
+# no I/O, so they are testable here where the interesting cases live (a face
+# near an edge, a face bigger than any window, a frame smaller than the window).
+
+def face_box_px(face, w, h):
+    """The scorer's NORMALISED face box as pixel coordinates, or None.
+
+    `nx0..ny1` ride on the face reading since the scorer started reporting
+    them; a reading without them (or a degenerate box) returns None and the
+    caller must not guess a crop — a fabricated box silently crops the wrong
+    part of the picture, which is worse than not cropping at all.
+    """
+    try:
+        x0, y0 = float(face['nx0']) * float(w), float(face['ny0']) * float(h)
+        x1, y1 = float(face['nx1']) * float(w), float(face['ny1']) * float(h)
+    except (KeyError, TypeError, ValueError):
+        return None
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return (x0, y0, x1, y1)
+
+
+def half_window(w, h, box):
+    """The waist-up window for one face box, clamped to the frame, or None.
+
+    Head-room of half a face above the brows, ~6 face-heights down the body
+    (head to waist), 3:4 portrait, centred on the face horizontally."""
+    fx0, fy0, fx1, fy1 = box
+    fw, fh = fx1 - fx0, fy1 - fy0
+    if fw <= 0 or fh <= 0:
+        return None
+    top = max(0.0, fy0 - fh * 0.5)
+    ch = min(h - top, fh * 6.0)
+    cw = min(float(w), ch * 3.0 / 4.0)
+    cx = (fx0 + fx1) / 2.0
+    left = min(max(0.0, cx - cw / 2.0), float(w) - cw)
+    return (left, top, left + cw, top + ch)
+
+
+def face_window(w, h, box, scale=4.0):
+    """The square close-up window for one face box, clamped to the frame.
+
+    `scale` face-widths (the larger box dimension) on a side, centred on the
+    face; never larger than the frame itself — a close-up that already fills
+    the frame crops nothing and should say so by returning the whole frame."""
+    fx0, fy0, fx1, fy1 = box
+    side = max(fx1 - fx0, fy1 - fy0) * float(scale)
+    if side <= 0:
+        return None
+    side = min(side, float(w), float(h))
+    cx, cy = (fx0 + fx1) / 2.0, (fy0 + fy1) / 2.0
+    left = min(max(0.0, cx - side / 2.0), float(w) - side)
+    top = min(max(0.0, cy - side / 2.0), float(h) - side)
+    return (left, top, left + side, top + side)

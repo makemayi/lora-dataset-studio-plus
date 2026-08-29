@@ -555,6 +555,13 @@ def video_bank_promote_frames(bank_id):
     person_mode = data.get('person_mode', 'identity')
     if person_mode not in ('none', 'person', 'identity'):
         return jsonify({'error': 'person_mode must be none, person or identity'}), 400
+    framings = data.get('framings') or ['full']
+    if (not isinstance(framings, list)
+            or not framings
+            or not all(isinstance(f, str) for f in framings)
+            or set(framings) - set(frames_svc.FRAMINGS)):
+        return jsonify({'error': f'framings must be a non-empty list drawn from '
+                                 f'{", ".join(frames_svc.FRAMINGS)}'}), 400
 
     def _tol(name, default):
         v = data.get(name)
@@ -588,7 +595,8 @@ def video_bank_promote_frames(bank_id):
             sharp_tolerance=sharp_tolerance, face_tolerance=face_tolerance,
             ref_dataset_id=data.get('ref_dataset_id'),
             trigger_word=data.get('trigger_word'),
-            kind=data.get('kind'))
+            kind=data.get('kind'),
+            framings=framings)
     except bank_jobs.BankJobBusy as e:
         return _busy(e)
     except ValueError as e:

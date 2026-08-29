@@ -217,3 +217,51 @@ def test_face_pass_failure_fails_the_job_not_the_dataset(monkeypatch, tmp_path):
                return_value=None):
         with pytest.raises(RuntimeError, match='face pass could not run'):
             vtid._score_faces(('py', 'script.py', None), ['/ref.png'], frames)
+
+
+# ── framings ─────────────────────────────────────────────────────────────────
+
+def test_an_unknown_framing_is_refused():
+    with pytest.raises(ValueError, match='framings'):
+        call(framings=['full', 'extreme'])
+
+
+def test_an_empty_framing_list_is_refused():
+    with pytest.raises(ValueError, match='framings'):
+        call(framings=[])
+
+
+def test_the_crop_framings_need_the_face_pass_not_a_silent_downgrade():
+    """They crop around a MEASURED face box; with the person requirement off
+    there is none, and silently falling back to full frames would ship a
+    different dataset than the one asked for."""
+    with pytest.raises(ValueError, match='person requirement'):
+        call(person_mode='none', framings=['full', 'face'])
+
+
+def test_full_only_needs_no_face_pass(monkeypatch):
+    """The good path, stubbed at the edges the refusal tests never reach: the
+    clip query (a fake row, so "nothing to promote" does not fire), the dataset
+    row, and the job launch. What the test holds is that NOTHING raised on the
+    framing validation."""
+    class _FakeCol:
+        def asc(self): return self
+    class _FakeQuery:
+        def filter_by(self, **kw): return self
+        def filter(self, *a, **k): return self
+        def order_by(self, *a): return self
+        def all(self): return [type('C', (), {'id': 11, 'source_id': 5,
+                                              'start_s': 0.0, 'end_s': 2.0})()]
+    monkeypatch.setattr(vtid, 'VideoClip',
+                        type('VC', (), {'query': _FakeQuery(),
+                                        'id': _FakeCol(),
+                                        'source_id': _FakeCol(),
+                                        'start_s': _FakeCol()}))
+    import app.services.face_dataset_service as fds
+    monkeypatch.setattr(fds, 'create_dataset',
+                        lambda *a, **k: type('D', (), {'id': 9, 'name': 'x'})())
+    started = {}
+    monkeypatch.setattr(vtid.bank_jobs, 'start',
+                        lambda app, key, kind, fn, **kw: started.setdefault('kind', kind))
+    call(person_mode='none', framings=['full'])
+    assert started['kind'] == 'promote_images'

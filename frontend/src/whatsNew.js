@@ -50,6 +50,18 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-29-frame-extract-framings',
+    date: '2026-08-29',
+    title: 'Extract frames in three framings, with sharper identity gates',
+    blurb: 'A full-body video frame puts the face at a few dozen pixels — too '
+      + 'few to carry identity. Frame extraction can now also cut a waist-up '
+      + 'and a face close-up (cropped to the measured face box), each taken '
+      + 'from DIFFERENT moments so nothing becomes a triplet of one. Identity '
+      + 'mode also refuses frames holding a second face, plus a head-tilt '
+      + 'gate. The old full-frame behaviour is still the default.',
+    to: '/video-bank',
+  },
+  {
     id: '2026-08-29-empty-video-bank',
     date: '2026-08-29',
     title: 'Create a video bank by name alone — no folder needed',

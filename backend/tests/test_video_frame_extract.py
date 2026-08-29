@@ -172,3 +172,69 @@ def test_extract_returns_rejected_counts_and_passes_tolerances():
                                   for t in times])
     assert [f['provenance']['timestamp_s'] for f in out['frames']] == [0.0]
     assert out['rejected']['too_blurry'] == 1
+
+
+# ── the crop framings ────────────────────────────────────────────────────────
+
+def _face_with_box(t, i):
+    """A pass-B reading with a measurable box, times unique per frame."""
+    return {'ok': True, 'det': 0.9, 'bbox_frac': 0.3, 'yaw': 3.0,
+            'nx0': 0.40, 'ny0': 0.40, 'nx1': 0.60, 'ny1': 0.60, 'n_faces': 1}
+
+
+def _png(w=1080, h=1920):
+    """A REAL image, because the crop stage runs PIL over the bytes."""
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new('RGB', (w, h), (200, 180, 160)).save(buf, format='PNG')
+    return buf.getvalue()
+
+
+def _decode_with_size(_path, times):
+    return [{'t': t, 'bytes': _png(), 'w': 1080, 'h': 1920}
+            for t in times]
+
+
+def test_each_framing_takes_moments_the_others_did_not():
+    """The point of the extra framings is MORE distinct usable instants — so the
+    waist-up and close-up rounds pick from what the full frame did NOT take, and
+    no timestamp ever lands twice."""
+    out = run(limit=2, framings=('full', 'half', 'face'),
+              decode=_decode_with_size,
+              face_scores=lambda frames: [_face_with_box(f['t'], i)
+                                          for i, f in enumerate(frames)])
+    provs = [f['provenance'] for f in out['frames']]
+    framings = [p['framing'] for p in provs]
+    assert framings.count('full') == 2
+    assert framings.count('half') >= 1
+    assert framings.count('face') >= 1
+    # No timestamp under two framings at once.
+    seen = {}
+    for p in provs:
+        key = (round(p['timestamp_s'], 3), p['framing'])
+        assert key not in seen
+        seen[key] = True
+
+
+def test_crop_variants_carry_different_bytes_than_the_full_frame():
+    out = run(limit=1, framings=('full', 'face'),
+              decode=_decode_with_size,
+              face_scores=lambda frames: [_face_with_box(f['t'], i)
+                                          for i, f in enumerate(frames)])
+    full = next(f for f in out['frames'] if f['provenance']['framing'] == 'full')
+    face = next(f for f in out['frames'] if f['provenance']['framing'] == 'face')
+    assert full['bytes'] != face['bytes']
+    assert face['bytes'], 'a crop still produces real image bytes'
+
+
+def test_crop_framings_without_a_face_pass_yield_full_frames_only():
+    """No face pass, no measured box, nothing to crop to — and no crash either."""
+    out = run(limit=2, framings=('full', 'half', 'face'))
+    assert all(f['provenance']['framing'] == 'full' for f in out['frames'])
+
+
+def test_full_is_always_emitted_even_when_it_is_the_only_framing():
+    out = run(limit=2)
+    assert out['frames']
+    assert all(f['provenance']['framing'] == 'full' for f in out['frames'])

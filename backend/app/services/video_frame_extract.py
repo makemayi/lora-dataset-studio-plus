@@ -147,8 +147,23 @@ def face_reading(result):
     state = result.get('state')
     return {'ok': state == 'scorable', 'det': result.get('det'),
             'bbox_frac': result.get('bbox_frac'), 'yaw': result.get('yaw'),
+            'pitch': result.get('pitch'), 'n_faces': result.get('n_faces'),
+            'nx0': result.get('nx0'), 'ny0': result.get('ny0'),
+            'nx1': result.get('nx1'), 'ny1': result.get('ny1'),
             'sim': result.get('sim'), 'state': state,
             'face_sharp': result.get('face_sharp')}
+
+
+def _crop_bytes(image_bytes, box, image_format='PNG'):
+    """Crop one encoded frame to ``box`` pixels, re-encoded in place."""
+    from PIL import Image
+    im = Image.open(io.BytesIO(image_bytes))
+    x0, y0, x1, y1 = box
+    im = im.crop((max(0, int(x0)), max(0, int(y0)),
+                  min(im.width, int(x1)), min(im.height, int(y1))))
+    buf = io.BytesIO()
+    im.save(buf, format=image_format)
+    return buf.getvalue()
 
 
 def extract_from_clip(*, path, start_s, end_s, fps, limit,
@@ -158,7 +173,8 @@ def extract_from_clip(*, path, start_s, end_s, fps, limit,
                       min_face_px=None, min_sim=None,
                       sharp_tolerance=None, face_tolerance=None,
                       read_frames=None, decode=None, face_scores=None,
-                      clip_id=None, source_id=None):
+                      clip_id=None, source_id=None,
+                      framings=('full',), single_face=False):
     """The two passes, wired. Returns {'frames': [...], 'rejected': {...}}.
 
     ``read_frames``/``decode``/``face_scores`` are injectable so the ordering and
@@ -216,12 +232,15 @@ def extract_from_clip(*, path, start_s, end_s, fps, limit,
                               min_face_px=min_face_px, min_sim=min_sim,
                               require_face=faces is not None,
                               sharp_tolerance=sharp_tolerance,
-                              face_tolerance=face_tolerance)
+                              face_tolerance=face_tolerance,
+                              single_face=single_face)
 
-    out = []
-    for f in final['picked']:
-        out.append({
-            'bytes': f['bytes'],
+    rejected = _merge_rejected(short_sel.get('rejected') or {},
+                               final['rejected'])
+
+    def _emit(f, framing, image_bytes):
+        return {
+            'bytes': image_bytes,
             'provenance': {
                 'source': 'video_frame',
                 'source_id': source_id,
@@ -229,12 +248,50 @@ def extract_from_clip(*, path, start_s, end_s, fps, limit,
                 # Seconds into the SOURCE, so the frame can be found again and
                 # re-extracted when a threshold changes. Never a frame index.
                 'timestamp_s': round(float(f['t']), 3),
+                'framing': framing,
                 'sharpness': f.get('sharp'),
                 'luma': f.get('luma'),
                 'face': f.get('face'),
                 'face_px': (round(vfs.face_pixels(f), 1)
                             if vfs.face_pixels(f) else None),
             },
-        })
-    return {'frames': out, 'rejected': _merge_rejected(
-        short_sel.get('rejected') or {}, final['rejected'])}
+        }
+
+    out = [_emit(f, 'full', f['bytes']) for f in final['picked']]
+
+    # THE CROP FRAMINGS take what the full frame did NOT: each runs its own
+    # selection over the candidates still unclaimed after the full round, so a
+    # single moment never lands as full + half + face triplets of one instant —
+    # three look-alike pictures teach one thing, and the whole point of the
+    # extra framings is MORE distinct usable moments. A crop needs a measured
+    # face box to crop to, so candidates without one (or with the pass off)
+    # are simply never offered to these rounds.
+    wanted = set(framings or ('full',)) - {'full'}
+    if wanted:
+        taken = {round(f.get('t', 0.0), 3) for f in final['picked']}
+        remaining = [c for c in candidates
+                     if round(c.get('t', 0.0), 3) not in taken
+                     and vfs.face_box_px(c.get('face') or {}, c.get('w'), c.get('h'))]
+        for framing in ('half', 'face'):
+            if framing not in wanted or not remaining:
+                continue
+            sel = vfs.select_frames(remaining, limit=limit, min_gap_s=min_gap_s,
+                                    face_bbox_min=face_bbox_min,
+                                    dedup_max_cosine=dedup_max_cosine,
+                                    min_face_px=min_face_px, min_sim=min_sim,
+                                    require_face=faces is not None,
+                                    sharp_tolerance=sharp_tolerance,
+                                    face_tolerance=face_tolerance,
+                                    single_face=single_face)
+            taken = {round(f.get('t', 0.0), 3) for f in sel['picked']}
+            remaining = [c for c in remaining
+                         if round(c.get('t', 0.0), 3) not in taken]
+            rejected = _merge_rejected(rejected, sel['rejected'])
+            for f in sel['picked']:
+                box = vfs.face_box_px(f.get('face') or {}, f.get('w'), f.get('h'))
+                window = (vfs.half_window(f['w'], f['h'], box) if framing == 'half'
+                          else vfs.face_window(f['w'], f['h'], box))
+                if window is None:
+                    continue
+                out.append(_emit(f, framing, _crop_bytes(f['bytes'], window)))
+    return {'frames': out, 'rejected': rejected}

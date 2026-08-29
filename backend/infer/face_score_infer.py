@@ -129,21 +129,22 @@ def main() -> int:
         return max(faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1])) if faces else None
 
     def detect(img):
-        f = biggest(app.get(img))
+        faces = app.get(img)
+        f = biggest(faces)
         if f is None:  # padding rescue : SCRFD rate les gros plans plein cadre
             h, w = img.shape[:2]; pad = int(0.25 * max(h, w))
             f2 = biggest(app.get(cv2.copyMakeBorder(img, pad, pad, pad, pad,
                                                     cv2.BORDER_CONSTANT, value=(0, 0, 0))))
             if f2 is not None:
                 f2._padded = True
-                return f2
-        return f
+                return f2, len(faces)
+        return f, len(faces)
 
     def analyze(path):
         img = cv2.imread(path)
         if img is None: return {"state": "unreadable"}
         h, w = img.shape[:2]
-        f = detect(img)
+        f, n_faces = detect(img)
         if f is None: return {"state": "no_face"}
         scale = 1.0
         if getattr(f, "_padded", False):
@@ -164,13 +165,25 @@ def main() -> int:
         else:
             face_sharp = 0.0
         det = float(f.det_score)
-        yaw = float(f.pose[1]) if getattr(f, "pose", None) is not None else 0.0
+        pose = getattr(f, "pose", None)
+        yaw = float(pose[1]) if pose is not None else 0.0
+        pitch = float(pose[0]) if pose is not None else 0.0
+        # NORMALISED BBOX, for crops downstream: the half-body and face-crop
+        # framings need to know WHERE the face is, and an area fraction cannot
+        # say. Padding-adjusted like the sharpness crop above, so the box is
+        # expressed against the picture the caller actually holds.
+        nx0, ny0 = max(0, x0) / w, max(0, y0) / h
+        nx1, ny1 = min(w, x1) / w, min(h, y1) / h
         state = "scorable"
         if det < DET_MIN: state = "low_det"
         elif bbox_frac < BBOX_MIN: state = "too_small"
         elif abs(yaw) > YAW_MAX: state = "extreme_pose"
         return {"state": state, "det": round(det, 3), "bbox_frac": round(bbox_frac, 4),
-                "yaw": round(yaw, 1), "face_sharp": round(face_sharp, 3),
+                "yaw": round(yaw, 1), "pitch": round(pitch, 1),
+                "n_faces": int(n_faces),
+                "nx0": round(nx0, 4), "ny0": round(ny0, 4),
+                "nx1": round(nx1, 4), "ny1": round(ny1, 4),
+                "face_sharp": round(face_sharp, 3),
                 "_emb": f.normed_embedding}
 
     ref_embs = []

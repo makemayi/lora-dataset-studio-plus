@@ -35,6 +35,10 @@ from . import video_bank_service as vbs
 logger = logging.getLogger(__name__)
 
 FRAMES_PER_CLIP_MAX = 20      # past this the clip is a video, not a source of stills
+#: The framings a run may ask for. 'full' is the native frame, always emitted;
+#: 'half' (waist-up) and 'face' (close-up) crop around the MEASURED face box,
+#: so they need the face pass to run — without it there is nothing to crop to.
+FRAMINGS = ('full', 'half', 'face')
 
 
 def job_key(bank_id):
@@ -179,7 +183,8 @@ def start_promote_to_images(app, user_id, bank_id, *, name=None, ids=None,
                             face_bbox_min=video_frame_select.FACE_BBOX_MIN,
                             person_mode='identity', ref_dataset_id=None,
                             sharp_tolerance=None, face_tolerance=None,
-                            trigger_word=None, kind=None):
+                            trigger_word=None, kind=None,
+                            framings=None):
     """Validate everything, create the image dataset, start the extraction job.
 
     Returns the dataset identity plus the same kind of `composition` report the
@@ -190,6 +195,24 @@ def start_promote_to_images(app, user_id, bank_id, *, name=None, ids=None,
     """
     bank = vbs._require_free_bank(user_id, bank_id)
     from .face_dataset_service import create_dataset, get_dataset
+
+    # FRAMINGS: the native frame plus, optionally, the two face-centred crops.
+    # Each framing runs its own selection over the moments the previous one did
+    # not take, so 'half' and 'face' add DISTINCT usable instants, never a
+    # triplet of one. They crop to a MEASURED face box, which is why they need
+    # the face pass: refused here rather than silently downgraded, for the same
+    # reason person_mode refuses. Absent means the default; an EXPLICIT empty
+    # list is a request to produce nothing, and is refused rather than honoured.
+    if framings is None:
+        framings = ('full',)
+    framings = tuple(framings)
+    if not framings or (set(framings) - set(FRAMINGS)):
+        raise ValueError('framings must be a non-empty subset of '
+                         f'{", ".join(FRAMINGS)}')
+    if set(framings) - {'full'} and person_mode == 'none':
+        raise ValueError('the half-body and face framings crop around a detected '
+                         'face — turn on a person requirement, or use the full '
+                         'frame only.')
 
     # EXISTING dataset or a new one — the frames land the same way either way,
     # so the only difference is who owns the row.
@@ -282,6 +305,7 @@ def start_promote_to_images(app, user_id, bank_id, *, name=None, ids=None,
         'into_existing': target is not None,
         'sharp_tolerance': sharp_tolerance,
         'face_tolerance': face_tolerance,
+        'framings': list(framings),
     }
 
     dataset = target or create_dataset(user_id, name, trigger_word or '',
@@ -296,7 +320,9 @@ def start_promote_to_images(app, user_id, bank_id, *, name=None, ids=None,
                                  min_face_px=min_face_px, min_sim=min_sim,
                                  face_cfg=face_cfg, refs=list(refs or []),
                                  sharp_tolerance=sharp_tolerance,
-                                 face_tolerance=face_tolerance),
+                                 face_tolerance=face_tolerance,
+                                 framings=framings,
+                                 single_face=(person_mode == 'identity')),
                     total=len(clip_ids))
     return {'id': dataset.id, 'name': dataset.name,
             'clips': len(clip_ids), 'composition': composition}
@@ -305,7 +331,8 @@ def start_promote_to_images(app, user_id, bank_id, *, name=None, ids=None,
 def _extract_job(bank_id, dataset_id, user_id, clip_ids, *, frames_per_clip,
                  total_limit, min_gap_s, face_bbox_min, face_cfg, refs,
                  sharp_tolerance, face_tolerance,
-                 min_face_px=None, min_sim=None):
+                 min_face_px=None, min_sim=None,
+                 framings=('full',), single_face=False):
     """Decode clip by clip, import each clip's frames as it finishes.
 
     IMPORTED PER CLIP, not once at the end. A four-hour bank would otherwise
@@ -359,7 +386,8 @@ def _extract_job(bank_id, dataset_id, user_id, clip_ids, *, frames_per_clip,
                 face_scores=((lambda frames: _score_faces(face_cfg, refs, frames))
                              if face_cfg is not None else None),
                 sharp_tolerance=sharp_tolerance, face_tolerance=face_tolerance,
-                clip_id=clip.id, source_id=clip.source_id)
+                clip_id=clip.id, source_id=clip.source_id,
+                framings=framings, single_face=single_face)
             frames_out = got.get('frames') or []
             if not frames_out:
                 skipped += 1

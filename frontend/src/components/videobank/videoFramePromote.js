@@ -19,13 +19,24 @@ export const PERSON_MODES = [
   { id: 'person', label: 'Frame must show a person' },
   { id: 'identity', label: 'Must be the reference person' },
 ]
+
+/** The framings a run can emit, beside the native frame. 'half' and 'face'
+ *  crop around the MEASURED face box, so they need a person requirement to be
+ *  on — without it there is no face to crop to and the server refuses. Each
+ *  framing picks its OWN moments (the ones the full frame did not take), so
+ *  they add distinct usable instants rather than triplets of one. */
+export const FRAMING_OPTIONS = [
+  { id: 'full', label: 'Full frame', hint: 'the shot as filmed' },
+  { id: 'half', label: 'Waist-up', hint: 'head to waist, around the face' },
+  { id: 'face', label: 'Face close-up', hint: 'square, ~4 face widths' },
+]
 export const TOLERANCE_MIN = 0.40
 export const TOLERANCE_MAX = 0.90
 export const TOLERANCE_DEFAULT = 0.60
 
 /** Why the request cannot be sent yet, or null. */
 export function framePromoteProblem({ name, framesPerClip, personMode,
-  refDatasetId }) {
+  refDatasetId, framings }) {
   if (!(name || '').trim()) return 'Name the dataset first.'
   const n = Number(framesPerClip)
   if (!Number.isInteger(n) || n <= 0) {
@@ -34,6 +45,11 @@ export function framePromoteProblem({ name, framesPerClip, personMode,
   if (n > FRAMES_PER_CLIP_MAX) {
     return `${FRAMES_PER_CLIP_MAX} frames per clip is the ceiling — past that `
       + 'the clip is a video, not a source of stills.'
+  }
+  const chosen = framings && framings.length ? framings : ['full']
+  if (chosen.some((f) => f !== 'full') && personMode === 'none') {
+    return 'The waist-up and face framings crop around a detected face — turn on '
+      + 'a person requirement, or use the full frame only.'
   }
   // Refused here rather than server-side alone, because the server's refusal
   // arrives after the dialog has already been dismissed on some paths.
@@ -50,11 +66,12 @@ export function framePromoteProblem({ name, framesPerClip, personMode,
 /** The POST body for /video-bank/<id>/promote-frames. */
 export function framePromotePayload({ name, framesPerClip, totalLimit, ids,
   maxPerSource, personMode, refDatasetId, triggerWord,
-  sharpTolerance, faceTolerance }) {
+  sharpTolerance, faceTolerance, framings }) {
   const body = {
     name: (name || '').trim(),
     frames_per_clip: Number(framesPerClip) || FRAMES_PER_CLIP_DEFAULT,
     person_mode: personMode || 'identity',
+    framings: (framings && framings.length ? framings : ['full']),
     sharp_tolerance: Number(sharpTolerance) || TOLERANCE_DEFAULT,
     face_tolerance: Number(faceTolerance) || TOLERANCE_DEFAULT,
   }
