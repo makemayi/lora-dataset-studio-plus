@@ -1218,6 +1218,22 @@ def apply_krea_lora_test_settings(workflow, *, lora_name, strength, prompt, seed
         if elected:
             _set("20", "unet_name", elected)
 
+    # The text encoder and VAE are elected for the SAME reason the base is: the
+    # names frozen into the workflow JSON are Comfy-Org's exact filenames, and an
+    # install that has the same model under any other name was told its ComfyUI
+    # was "missing the assets below" while the file sat right there. Both
+    # resolvers are the ones the Krea Edit / HQ lanes already use — narrow token
+    # matches, never a blind first-file guess — so a wrong file is still not
+    # picked. None means the resolver found nothing it trusts: the node keeps the
+    # canonical name and the preflight names it, which is the honest failure.
+    from . import krea_edit_helper as _keh
+    _te = _keh.resolve_krea_text_encoder()
+    if _te:
+        _set("21", "clip_name", _te)
+    _vae = _keh.resolve_krea_vae()
+    if _vae:
+        _set("22", "vae_name", _vae)
+
     _set("23", "text", prompt)                    # prompt (CLIPTextEncode Krea)
     _set("25", "width", int(width))
     _set("25", "height", int(height))

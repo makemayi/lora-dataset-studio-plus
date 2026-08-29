@@ -2084,3 +2084,49 @@ def test_enhance_test_prompt_raises_when_the_model_answers_nothing(app, monkeypa
     with app.app_context():
         with pytest.raises(RuntimeError, match='empty prompt'):
             lts.enhance_test_prompt('a girl')
+
+
+def test_the_krea_test_graph_elects_its_text_encoder_and_vae(monkeypatch):
+    """The Studio elected the BASE but left the encoder and VAE at the filenames
+    frozen in the workflow JSON — Comfy-Org's exact names. An install with the
+    same models under any other name was told it was "missing the assets below"
+    while the files sat right there (reported 2026-08-29)."""
+    import json
+    from app import config as cfg
+    from app.services import lora_test_studio as lts
+    from app.services import krea_edit_helper as keh
+
+    workflow = json.loads(
+        (cfg.BACKEND_DIR / 'workflows' / 'krea2_turbo.json').read_text(encoding='utf-8'))
+    assert workflow['21']['inputs']['clip_name'] == 'qwen3vl_4b_fp8_scaled.safetensors', \
+        'the shipped literal is what this test is about'
+
+    monkeypatch.setattr(keh, 'resolve_krea_text_encoder',
+                        lambda: 'qwen3vl_4b_bf16.safetensors')
+    monkeypatch.setattr(keh, 'resolve_krea_vae', lambda: 'qwen-image-vae-fp32.safetensors')
+    lts.apply_krea_lora_test_settings(
+        workflow, lora_name='krea/x.safetensors', strength=1.0, prompt='p', seed=1,
+        width=1024, height=1024, batch_size=1, steps=None, cfg=None, allowed_loras=None)
+    assert workflow['21']['inputs']['clip_name'] == 'qwen3vl_4b_bf16.safetensors'
+    assert workflow['22']['inputs']['vae_name'] == 'qwen-image-vae-fp32.safetensors'
+
+
+def test_nothing_resolvable_leaves_the_canonical_name_for_the_preflight_to_name(
+        monkeypatch):
+    """None from the resolver means "found nothing I trust". Writing that into the
+    graph would enqueue a job with an empty loader; keeping the canonical name is
+    what lets the preflight say exactly which file to go and get."""
+    import json
+    from app import config as cfg
+    from app.services import lora_test_studio as lts
+    from app.services import krea_edit_helper as keh
+
+    workflow = json.loads(
+        (cfg.BACKEND_DIR / 'workflows' / 'krea2_turbo.json').read_text(encoding='utf-8'))
+    monkeypatch.setattr(keh, 'resolve_krea_text_encoder', lambda: None)
+    monkeypatch.setattr(keh, 'resolve_krea_vae', lambda: None)
+    lts.apply_krea_lora_test_settings(
+        workflow, lora_name='krea/x.safetensors', strength=1.0, prompt='p', seed=1,
+        width=1024, height=1024, batch_size=1, steps=None, cfg=None, allowed_loras=None)
+    assert workflow['21']['inputs']['clip_name'] == 'qwen3vl_4b_fp8_scaled.safetensors'
+    assert workflow['22']['inputs']['vae_name'] == 'qwen_image_vae.safetensors'

@@ -50,6 +50,18 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-29-studio-finds-your-krea-models',
+    date: '2026-08-29',
+    title: 'Test Studio finds the Krea 2 models you already have',
+    blurb: 'Testing a Krea LoRA could refuse to start with "your ComfyUI is '
+      + 'missing models/text_encoders/qwen3vl_4b_fp8_scaled.safetensors" on a '
+      + 'machine that had that very model under a different filename. The test '
+      + 'graph now elects its text encoder and VAE the way it already elected '
+      + 'the base model, and when several files match it prefers the stock '
+      + 'release over somebody’s fine-tune of the same model.',
+    to: '/studio',
+  },
+  {
     id: '2026-08-29-onetrainer-stop-keeps-the-lora',
     date: '2026-08-29',
     title: 'Stopping a OneTrainer run now keeps what it trained',

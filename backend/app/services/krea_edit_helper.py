@@ -219,16 +219,46 @@ def _listings(comfy_type):
 
 def _find_model_file(comfy_type, canonical, tokens):
     """Bare filename for a ComfyUI folder type: the canonical name if present in
-    ANY search root, else the first (sorted) name containing a NARROW token.
-    None when nothing matches — never a blind first-file guess."""
+    ANY search root, else the best name containing a NARROW token.
+    None when nothing matches — never a blind first-file guess.
+
+    "Best" is not "first alphabetically". A folder can hold both the stock
+    release and someone's fine-tune of the same model — measured here:
+    `qwen3vl_4b_bf16.safetensors` beside `Qwen3-VL-4B-Instruct-Heretic.safetensors`,
+    where plain sorting picks the fine-tune (uppercase sorts first). Two
+    preferences, in order, before falling back to the sorted first:
+
+      1. a name that STARTS with one of the tokens — the publisher's own naming
+         (`qwen3vl_4b_…`) rather than a name that merely contains it;
+      2. among those, one carrying the canonical file's own precision suffix,
+         so an install holding several precisions gets the one this app's graphs
+         were built and measured against.
+    """
     listings = _listings(comfy_type)
     if any(canonical in names for _root, names in listings):
         return canonical
-    for _root, names in listings:
-        for n in names:
-            if any(tok in n.lower() for tok in tokens):
-                return n
-    return None
+    matches = [n for _root, names in listings for n in names
+               if any(tok in n.lower() for tok in tokens)]
+    if not matches:
+        return None
+    # `tokens[0]` is the canonical file's OWN naming form (the publisher's), and
+    # the rest are spelling aliases kept only so a match is not missed. A file
+    # that opens with the canonical form is the stock release; one that merely
+    # contains an alias is typically somebody's fine-tune with a longer name.
+    lead = [n for n in matches if n.lower().startswith(tokens[0])]
+    if not lead:
+        lead = [n for n in matches if any(n.lower().startswith(t) for t in tokens)]
+    pool = lead or matches
+    suffix = canonical.lower().rsplit('.', 1)[0]
+    for tok in tokens:
+        if suffix.startswith(tok):
+            suffix = suffix[len(tok):].strip('_-')
+            break
+    if suffix:
+        same_precision = [n for n in pool if suffix in n.lower()]
+        if same_precision:
+            return same_precision[0]
+    return pool[0]
 
 
 # Checkpoints that carry 'krea' in their name but are NOT a Krea 2 Raw/Turbo

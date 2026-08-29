@@ -1757,3 +1757,57 @@ def test_the_outfit_palette_spreads_over_the_catalog():
     assert max(counts.values()) <= 4, (
         f'garment overload: {counts.most_common(3)} over {len(eligible)} shots')
     assert len(counts) >= 20, f'only {len(counts)} distinct garments used'
+
+
+# --- picking BETWEEN files that all match ------------------------------------
+#
+# Reported 2026-08-29: Test Studio refused to run with "your ComfyUI is missing
+# models/text_encoders/qwen3vl_4b_fp8_scaled.safetensors" on an install that had
+# TWO usable Qwen3-VL-4B encoders — just not under that filename. Two bugs, one
+# symptom: the Studio graph never asked the resolver at all (see
+# test_studio_service), and the resolver's tie-break was alphabetical, which
+# prefers a fine-tune over the stock release because uppercase sorts first.
+
+
+def _encoders(monkeypatch, names):
+    from app.services import krea_edit_helper as keh
+    monkeypatch.setattr(keh, '_listings', lambda _t: [('root', sorted(names))])
+    return keh
+
+
+def test_the_canonical_file_still_wins_outright(monkeypatch):
+    keh = _encoders(monkeypatch, ['qwen3vl_4b_fp8_scaled.safetensors',
+                                  'qwen3vl_4b_bf16.safetensors'])
+    assert keh.resolve_krea_text_encoder() == 'qwen3vl_4b_fp8_scaled.safetensors'
+
+
+def test_the_stock_release_beats_a_fine_tune_of_the_same_model(monkeypatch):
+    """Both match the narrow token. Alphabetically the fine-tune wins (uppercase
+    first), which is how a Heretic build got picked over the stock encoder."""
+    keh = _encoders(monkeypatch, ['Qwen3-VL-4B-Instruct-Heretic.safetensors',
+                                  'qwen3vl_4b_bf16.safetensors'])
+    assert keh.resolve_krea_text_encoder() == 'qwen3vl_4b_bf16.safetensors'
+
+
+def test_the_matching_precision_wins_among_stock_names(monkeypatch):
+    """An install holding several precisions gets the one the app's graphs were
+    built against — the canonical file's own suffix."""
+    keh = _encoders(monkeypatch, ['qwen3vl_4b_bf16.safetensors',
+                                  'qwen3vl_4b_fp8_scaled_v2.safetensors'])
+    assert keh.resolve_krea_text_encoder() == 'qwen3vl_4b_fp8_scaled_v2.safetensors'
+
+
+def test_a_fine_tune_is_still_better_than_nothing(monkeypatch):
+    """Nothing carries the canonical naming: the alias match is all there is, and
+    refusing it would be the old "missing" banner on a machine that can run."""
+    keh = _encoders(monkeypatch, ['Qwen3-VL-4B-Instruct-Heretic.safetensors'])
+    assert keh.resolve_krea_text_encoder() == 'Qwen3-VL-4B-Instruct-Heretic.safetensors'
+
+
+def test_an_unrelated_encoder_is_never_picked(monkeypatch):
+    """The narrow tokens are the whole safety property: qwen_3_8b (Klein) and
+    qwen 2.5-VL (Qwen-Image) live in the same folder and produce incompatible
+    embeddings. None means the preflight names the file, which is honest."""
+    keh = _encoders(monkeypatch, ['qwen_3_8b.safetensors', 'umt5_xxl_fp16.safetensors',
+                                  'qwen_2.5_vl_7b.safetensors'])
+    assert keh.resolve_krea_text_encoder() is None
