@@ -590,12 +590,22 @@ def dataset_train_sample(dataset_id, filename):
     """Serve one training sample image. Filename is whitelist-validated (no
     separators/traversal) and resolved strictly inside the run's samples dir."""
     gate = _require_aitoolkit()
-    if gate:
+    if gate and _require_onetrainer():
         return gate
     if not svc.get_dataset(LOCAL_USER, dataset_id):
         return jsonify({'error': 'not found'}), 404
     if not _SAMPLE_NAME_RE.match(filename) or filename != os.path.basename(filename):
         return jsonify({'error': 'invalid filename'}), 400
+    # The other lane nests one folder per prompt, so it resolves its own file —
+    # after the SAME name validation above, which is what makes a basename safe.
+    if not _require_onetrainer():
+        from ..services import onetrainer_service as ots
+        ot_path = ots.sample_path(LOCAL_USER, dataset_id, filename)
+        if ot_path:
+            from flask import send_file
+            return send_file(ot_path, conditional=True)
+    if gate:
+        return gate
     bm = request.args.get('base_model')
     fam = request.args.get('train_type') or None
     variant = request.args.get('variant') or None

@@ -50,6 +50,18 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-29-onetrainer-preview-samples',
+    date: '2026-08-29',
+    title: 'OneTrainer runs now produce preview images again',
+    blurb: 'The panel said a OneTrainer run was sampling every 250 steps and it '
+      + 'never made a single image: the prompt list it was pointed at was the '
+      + 'one shipped inside OneTrainer, which is empty. Each run now carries '
+      + 'its own prompts — the same ones the panel edits — and the previews '
+      + 'appear under the progress bar as they are written. They render at the '
+      + 'size the run trains at, so a preview cannot cost the run its VRAM.',
+    to: '/cloud',
+  },
+  {
     id: '2026-08-29-onetrainer-live-progress',
     date: '2026-08-29',
     title: 'A OneTrainer run finally shows its progress',

@@ -195,6 +195,7 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
                      ema: float | None = None,
                      save_every: int | None = None,
                      sample_every: int | None = None,
+                     sample_prompts: list | None = None,
                      base_model_name: str | None = None) -> dict:
     """The OVERRIDE config this app writes to --config-path, merged by
     OneTrainer OVER its own shipped Krea 2 preset (--preset-path). Contains
@@ -319,6 +320,16 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
            if save_every else {}),
         **({'sample_after': float(sample_every), 'sample_after_unit': 'STEP'}
            if sample_every else {}),
+        # WHERE the preview prompts live. OneTrainer's own default points at
+        # `training_samples/samples.json` inside its install — a file that ships
+        # containing `[]`. So the cadence above was honoured against an EMPTY
+        # list: the sampler woke up on schedule, found nothing to render, and
+        # every run produced zero previews while the config said it was
+        # sampling. Each run now carries its own definitions next to its
+        # concepts (see launch), which is also what keeps two datasets from
+        # sharing one file.
+        **({'sample_definition_file_name': str(training_folder / 'samples.json')}
+           if sample_prompts else {}),
         # The app owns the learning rate: it is a per-dataset setting the UI
         # exposes and the ai-toolkit lane already honours. Left unset, this run
         # silently used the shipped preset's 0.0003 while the SAME dataset
@@ -327,6 +338,29 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
         # still decides for any path that has no opinion.
         **({'learning_rate': float(learning_rate)} if learning_rate else {}),
     }
+    return out
+
+
+def build_samples(prompts, resolution: int | None = None) -> list[dict]:
+    """OneTrainer's `samples.json`: one entry per preview prompt.
+
+    Only the fields this app has an opinion about are written — the rest
+    (diffusion_steps, cfg_scale, scheduler, seed) come from OneTrainer's own
+    per-model defaults, the same ownership boundary build_job_config keeps.
+
+    The exception is the SIZE. Krea 2's sample default is 1024x1024 while this
+    lane now trains at 512, and a preview is rendered with the training weights
+    resident: sampling two octaves above the training size is the one field
+    where an inherited default can cost the run an OOM three hours in. Previews
+    are therefore rendered at the size the run trains at.
+    """
+    px = int(resolution or KREA2_RESOLUTION)
+    out = []
+    for line in prompts or []:
+        if not isinstance(line, str) or not line.strip():
+            continue
+        out.append({'enabled': True, 'prompt': line.strip(),
+                    'width': px, 'height': px})
     return out
 
 
@@ -415,7 +449,8 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
           dropout: float | None = None,
           ema: float | None = None,
           save_every: int | None = None,
-          sample_every: int | None = None) -> dict:
+          sample_every: int | None = None,
+          sample_prompts: list | None = None) -> dict:
     """Write concepts.json + config.json under `training_folder` and spawn
     `scripts/train.py --preset-path <shipped Krea 2 preset> --config-path
     <our config.json>`. Returns {'pid': int, 'config_path': str,
@@ -444,12 +479,17 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
                               lr_scheduler=lr_scheduler, warmup_steps=warmup_steps,
                               min_snr_gamma=min_snr_gamma,
                               grad_accum=grad_accum, dropout=dropout, ema=ema,
-                              save_every=save_every, sample_every=sample_every)
+                              save_every=save_every, sample_every=sample_every,
+                              sample_prompts=sample_prompts)
     concepts = build_concepts(trigger=trigger, dataset_folder=dataset_folder)
 
     concepts_path = training_folder_p / 'concepts.json'
     config_path = training_folder_p / 'config.json'
     concepts_path.write_text(json.dumps(concepts, indent=2), encoding='utf-8')
+    samples = build_samples(sample_prompts, resolution=resolution)
+    if samples:
+        (training_folder_p / 'samples.json').write_text(
+            json.dumps(samples, indent=2), encoding='utf-8')
     config_with_concepts = {**config, 'concept_file_name': str(concepts_path)}
     config_path.write_text(json.dumps(config_with_concepts, indent=2), encoding='utf-8')
 
@@ -598,7 +638,8 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
     # lr 0.0003 / 1024 here and lr 0.0001 / 768 there, with nothing on screen
     # saying the two lanes disagreed.
     from .lora_training import (_effective_resolution, _resolution_is_explicit,
-                               _train_settings, _lora_rank)
+                               _train_settings, _lora_rank, _sample_every,
+                               _sample_prompts)
     _s = _train_settings(ds) or {}
     # ONLY when the user chose one. `_lr_eff` never returns None — it falls back
     # to the family-fixed 1e-4 — so calling it here wrote `learning_rate` on
@@ -649,7 +690,14 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
                       dropout=_s.get('dropout'),
                       ema=_s.get('ema'),
                       save_every=_s.get('save_every'),
-                      sample_every=_s.get('sample_every'))
+                      # RESOLVED, not raw: `_sample_every` falls back to the same
+                      # 250 steps the ai-toolkit lane uses, and `_sample_prompts`
+                      # to the kind's own defaults with the trigger injected. Read
+                      # raw, both were None on every dataset whose panel had never
+                      # been touched — which is every dataset — so the lane asked
+                      # for no previews at all.
+                      sample_every=_sample_every(ds),
+                      sample_prompts=_sample_prompts(ds, trigger))
 
     from . import checkpoint_registry
     rec = checkpoint_registry.register_launch(
@@ -825,6 +873,67 @@ def parse_progress(text: str, expected_epochs: int | None = None) -> dict:
     return out
 
 
+# `<workspace>/samples/<i> - <safe prompt>/<prefix><timestamp>-training-sample-
+#  <global step>-<epoch>-<epoch step>.jpg` — read from OneTrainer's own
+# GenericTrainer, not guessed. The step is the number the panel labels the
+# thumbnail with; the folder index is which prompt it came from.
+_OT_SAMPLE_FILE_RE = re.compile(r'-training-sample-(\d+)-(\d+)-(\d+)$')
+_OT_SAMPLE_DIR_RE = re.compile(r'^(\d+) - ')
+_OT_SAMPLE_EXTS = ('.jpg', '.jpeg', '.png', '.webp')
+_OT_MAX_SAMPLES = 12
+
+
+def list_samples(training_folder: Path) -> list[dict]:
+    """The preview images this run has written, newest first.
+
+    Flat `filename` on purpose: OneTrainer nests one folder per prompt, but the
+    panel addresses a sample by basename through a route that refuses
+    separators. The basename carries the step and is unique per prompt+step, so
+    flattening loses nothing and keeps ONE sample URL shape for both lanes."""
+    root = training_folder / 'samples'
+    out = []
+    try:
+        for sub in root.iterdir():
+            if not sub.is_dir() or sub.name == 'custom':
+                continue
+            dm = _OT_SAMPLE_DIR_RE.match(sub.name)
+            prompt_idx = int(dm.group(1)) if dm else 0
+            for f in sub.iterdir():
+                if f.suffix.lower() not in _OT_SAMPLE_EXTS or not f.is_file():
+                    continue
+                fm = _OT_SAMPLE_FILE_RE.search(f.stem)
+                if not fm:
+                    continue
+                out.append({'filename': f.name, 'prompt_idx': prompt_idx,
+                            'step': int(fm.group(1))})
+    except OSError:
+        return []
+    out.sort(key=lambda s: (s['step'], s['prompt_idx']), reverse=True)
+    return out[:_OT_MAX_SAMPLES]
+
+
+def sample_path(user_id, dataset_id, filename: str) -> str | None:
+    """Resolve one preview image by BASENAME inside this run's samples tree.
+
+    The caller has already refused separators, so the name cannot escape; this
+    only has to find which prompt folder holds it."""
+    from .face_dataset_service import get_dataset
+    ds = get_dataset(user_id, dataset_id)
+    if not ds or filename != os.path.basename(filename):
+        return None
+    root = _training_folder_for(ds) / 'samples'
+    try:
+        for sub in root.iterdir():
+            if not sub.is_dir():
+                continue
+            cand = sub / filename
+            if cand.is_file():
+                return str(cand)
+    except OSError:
+        return None
+    return None
+
+
 def _configured_epochs(training_folder: Path) -> int | None:
     try:
         with open(training_folder / 'config.json', encoding='utf-8') as fh:
@@ -863,9 +972,9 @@ def progress(user_id, dataset_id) -> dict:
         except OSError:
             log_exists = False
     return {'active': active, 'log_exists': log_exists, 'trainer': 'onetrainer',
-            # This lane writes no sample previews and pulls nothing from Hugging
-            # Face at run time (the base is resolved from the shared cache, see
-            # launch), so these are stated as empty rather than left out - the
-            # panel reads them on every payload.
-            'samples': [], 'download': None, 'cache_pending': None,
+            'samples': list_samples(training_folder),
+            # Nothing is pulled from Hugging Face at run time (the base resolves
+            # from the shared cache, see launch), so these two are stated as
+            # empty rather than left out — the panel reads them on every payload.
+            'download': None, 'cache_pending': None,
             **parsed}

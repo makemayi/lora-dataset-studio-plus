@@ -1250,3 +1250,144 @@ def test_the_progress_payload_carries_the_shape_the_panel_reads(
         via_panel = lt.training_progress(LOCAL_USER, ds.id, family='krea')
         assert via_panel['trainer'] == 'onetrainer'
         assert via_panel['step'] == 116
+
+
+# --- preview samples ---------------------------------------------------------
+#
+# The lane asked for a sample cadence and never produced one image. Two reasons,
+# both silent: `sample_definition_file_name` was left at OneTrainer's own
+# default, which points into the INSTALL at a shipped `samples.json` containing
+# `[]`; and the prompts/cadence were read raw from train_settings, where they
+# are None on any dataset whose panel was never opened.
+
+
+def test_build_samples_renders_at_the_training_size(onetrainer):
+    """Krea 2's sample default is 1024 while this lane trains at 512, and a
+    preview runs with the training weights resident — the one inherited default
+    that can OOM a run hours in."""
+    ots, _cfg = onetrainer
+    out = ots.build_samples(['buqing30 portrait', '  ', None, 'buqing30 full body'],
+                            resolution=512)
+    assert [s['prompt'] for s in out] == ['buqing30 portrait', 'buqing30 full body']
+    assert all(s['width'] == 512 and s['height'] == 512 for s in out)
+    assert all(s['enabled'] is True for s in out)
+    # Everything else is OneTrainer's own per-model default, not this app's.
+    assert all(set(s) == {'enabled', 'prompt', 'width', 'height'} for s in out)
+    assert ots.build_samples([], resolution=512) == []
+    assert ots.build_samples(None) == []
+
+
+def test_launch_writes_its_own_sample_definitions_and_points_at_them(
+        onetrainer, tmp_path, monkeypatch):
+    ots, cfg = onetrainer
+    _installed_onetrainer(cfg, tmp_path)
+
+    class FakeProc:
+        pid = 891
+    monkeypatch.setattr(ots.subprocess, 'Popen', lambda *a, **k: FakeProc())
+
+    import json as _j
+    run = tmp_path / 'run'
+    ots.launch(trigger='lola', dataset_folder=str(tmp_path / 'ds'),
+               training_folder=str(run), steps=100, num_images=20, rank=16,
+               resolution=512, sample_every=250,
+               sample_prompts=['lola portrait'])
+    written = _j.loads((run / 'config.json').read_text(encoding='utf-8'))
+    assert written['sample_after'] == 250.0
+    assert written['sample_after_unit'] == 'STEP'
+    # Its OWN file, inside the run — never the install's shared (empty) one.
+    assert written['sample_definition_file_name'] == str(run / 'samples.json')
+    assert _j.loads((run / 'samples.json').read_text(encoding='utf-8')) == [
+        {'enabled': True, 'prompt': 'lola portrait', 'width': 512, 'height': 512}]
+
+
+def test_no_prompts_means_no_definition_file_rather_than_an_empty_one(
+        onetrainer, tmp_path, monkeypatch):
+    ots, cfg = onetrainer
+    _installed_onetrainer(cfg, tmp_path)
+
+    class FakeProc:
+        pid = 892
+    monkeypatch.setattr(ots.subprocess, 'Popen', lambda *a, **k: FakeProc())
+
+    import json as _j
+    run = tmp_path / 'run2'
+    ots.launch(trigger='lola', dataset_folder=str(tmp_path / 'ds'),
+               training_folder=str(run), steps=100, num_images=20, rank=16)
+    written = _j.loads((run / 'config.json').read_text(encoding='utf-8'))
+    assert 'sample_definition_file_name' not in written
+    assert not (run / 'samples.json').exists()
+
+
+def test_launch_training_resolves_the_prompts_and_cadence(
+        onetrainer, tmp_path, monkeypatch, app):
+    """Read raw, both are None on every untouched dataset — which is why a lane
+    that looked configured for previews produced none."""
+    import json as _j
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+    ots, cfg = onetrainer
+    _installed_onetrainer(cfg, tmp_path)
+
+    class FakeProc:
+        pid = 893
+
+        def poll(self):
+            return None
+    monkeypatch.setattr(ots.subprocess, 'Popen', lambda *a, **k: FakeProc())
+
+    with app.app_context():
+        ds = _trainable_krea_dataset(svc, LOCAL_USER, 'OT samples')
+        result = ots.launch_training(LOCAL_USER, ds.id, steps=100, check_captions=False)
+        written = _j.loads(open(result['config_path'], encoding='utf-8').read())
+        folder = ots._training_folder_for(ds)
+        defs = _j.loads((folder / 'samples.json').read_text(encoding='utf-8'))
+    assert written['sample_after'] == 250.0          # the ai-toolkit lane's own default
+    assert written['sample_definition_file_name'] == str(folder / 'samples.json')
+    assert defs, 'an untouched dataset still gets the kind default prompts'
+    trigger = ds.trigger_word
+    assert any(trigger in d['prompt'] for d in defs), 'the trigger is injected'
+    assert all(d['width'] == 512 for d in defs), 'rendered at the training size'
+
+
+def test_list_samples_reads_onetrainers_own_folder_layout(onetrainer, tmp_path):
+    """Path shape taken from GenericTrainer, not guessed: one folder per prompt,
+    the global step inside the filename."""
+    ots, _cfg = onetrainer
+    root = tmp_path / 'run' / 'samples'
+    (root / '0 - lola portrait').mkdir(parents=True)
+    (root / '1 - lola full body').mkdir(parents=True)
+    (root / 'custom').mkdir()
+    for name in ('2026-08-29_20-00-00-training-sample-250-11-8.jpg',
+                 '2026-08-29_21-00-00-training-sample-500-22-16.jpg'):
+        (root / '0 - lola portrait' / name).write_bytes(b'x')
+    (root / '1 - lola full body'
+     / '2026-08-29_20-00-01-training-sample-250-11-8.jpg').write_bytes(b'x')
+    (root / '0 - lola portrait' / 'notes.txt').write_bytes(b'x')
+    (root / 'custom' / '2026-08-29_20-00-00-training-sample-250-11-8.jpg').write_bytes(b'x')
+
+    out = ots.list_samples(tmp_path / 'run')
+    assert [s['step'] for s in out] == [500, 250, 250], 'newest step first'
+    assert out[0]['prompt_idx'] == 0
+    assert {s['prompt_idx'] for s in out[1:]} == {0, 1}
+    assert all(not s['filename'].endswith('.txt') for s in out)
+    assert all('custom' not in s['filename'] for s in out)
+    assert ots.list_samples(tmp_path / 'nothing-here') == []
+
+
+def test_sample_path_resolves_by_basename_only(onetrainer, tmp_path, app):
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+    ots, _cfg = onetrainer
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'OT sample serve', 'lola')
+        folder = ots._training_folder_for(ds)
+        (folder / 'samples' / '0 - lola portrait').mkdir(parents=True)
+        name = '2026-08-29_20-00-00-training-sample-250-11-8.jpg'
+        (folder / 'samples' / '0 - lola portrait' / name).write_bytes(b'x')
+
+        assert ots.sample_path(LOCAL_USER, ds.id, name) == str(
+            folder / 'samples' / '0 - lola portrait' / name)
+        # A name carrying a separator is refused here too, not only at the route.
+        assert ots.sample_path(LOCAL_USER, ds.id, '../config.json') is None
+        assert ots.sample_path(LOCAL_USER, ds.id, 'absent.jpg') is None
