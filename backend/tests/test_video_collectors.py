@@ -136,12 +136,13 @@ def test_image_lane_still_parses_its_json_contract():
 
 @pytest.fixture()
 def bank_folder(tmp_path):
+    # Deliberately NOT created: the create endpoint makes it, which is the
+    # collector workflow's own first step (an empty bank, then a download).
     return tmp_path / 'bank-src'
 
 
 @pytest.fixture()
 def bank_id(client, bank_folder):
-    bank_folder.mkdir()
     res = client.post('/api/video-bank/create',
                       json={'name': 'Rushes', 'folder': str(bank_folder)})
     assert res.status_code == 200

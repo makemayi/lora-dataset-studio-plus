@@ -172,7 +172,7 @@ export default function VideoBankPage() {
           <FolderPickerField id="video-bank-folder" label="Folder on this computer"
             value={folder} onChange={setFolder} required
             placeholder="path\to\rushes (subfolders included)"
-            hint="Reads .mp4, .mov, .mkv, .webm and .avi. The folder is never modified." />
+            hint="Reads .mp4, .mov, .mkv, .webm and .avi. The folder is never modified. One that does not exist yet is created — an empty bank is fine (a collector can fill it)." />
         </div>
         {/* Both labels mounted, one hidden — a ternary on button text is the
             Chrome-translate removeChild crash. */}

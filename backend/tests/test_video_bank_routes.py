@@ -101,10 +101,23 @@ def test_creating_a_bank_reports_what_it_inventoried(client, tmp_path):
     assert r.get_json()['added'] == 2
 
 
-def test_a_folder_that_does_not_exist_is_a_400_not_a_500(client, tmp_path):
-    """The most common first click in this lane is a pasted path with a typo."""
+def test_a_missing_folder_is_created_and_the_bank_starts_empty(client, tmp_path):
+    """Was "a folder that does not exist is a 400": the most common first click
+    in this lane is a pasted path — but an empty bank is also exactly how a
+    collector run starts (its command downloads into `{folder}`), so a missing
+    folder is now CREATED instead of refused. A typo now costs an empty
+    directory, not a dead end."""
+    folder = tmp_path / 'nope'
     r = client.post('/api/video-bank/create',
-                    json={'name': 'x', 'folder': str(tmp_path / 'nope')})
+                    json={'name': 'x', 'folder': str(folder)})
+
+    assert r.status_code == 200
+    assert r.get_json()['added'] == 0
+    assert folder.is_dir()
+
+
+def test_an_empty_string_folder_is_still_a_400_not_a_500(client):
+    r = client.post('/api/video-bank/create', json={'name': 'x', 'folder': ''})
 
     assert r.status_code == 400
     assert 'error' in r.get_json()

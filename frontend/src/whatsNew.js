@@ -50,6 +50,16 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-29-empty-video-bank',
+    date: '2026-08-29',
+    title: 'Create a video bank for a folder that does not exist yet',
+    blurb: 'Pointing a video bank at a new path used to be refused with '
+      + '"folder not found" — so an empty bank, the natural starting point for '
+      + 'a collector run, could not be created from the app. The folder is now '
+      + 'created for you (recursively), and a bank over zero files is fine.',
+    to: '/video-bank',
+  },
+  {
     id: '2026-08-29-video-collectors',
     date: '2026-08-29',
     title: 'Run your own download scripts from the Video bank',

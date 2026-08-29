@@ -107,6 +107,51 @@ def test_non_video_files_in_the_same_folder_are_ignored(app, tmp_path):
         assert added == 1
 
 
+# --- creating a bank for a folder that does not exist yet ----------------------
+
+def test_a_missing_folder_is_created_and_the_bank_starts_empty(app, tmp_path):
+    """An empty bank is a legitimate starting point, not a mistake: it is how a
+    collector run begins (the bank's folder is what `{folder}` in the command
+    expands to). A missing folder used to be a flat 400, which made that
+    workflow impossible to start from the app."""
+    with app.app_context():
+        folder = tmp_path / 'rushes'
+        bank, added = svc.create_bank(LOCAL_USER, 'fresh', str(folder))
+
+        assert added == 0
+        assert folder.is_dir()
+        assert bank.source_path == os.path.realpath(str(folder))
+
+
+def test_a_missing_folder_is_created_recursively(app, tmp_path):
+    with app.app_context():
+        folder = tmp_path / 'a' / 'b' / 'rushes'
+        bank, added = svc.create_bank(LOCAL_USER, 'deep', str(folder))
+
+        assert added == 0
+        assert folder.is_dir()
+
+
+def test_a_path_that_is_a_file_is_still_refused(app, tmp_path):
+    with app.app_context():
+        f = tmp_path / 'a file'
+        f.write_text('x', encoding='utf-8')
+        with pytest.raises(ValueError, match='not a folder'):
+            svc.create_bank(LOCAL_USER, 'nope', str(f))
+
+
+def test_a_conflicting_missing_folder_is_refused_without_leaving_a_directory(
+        app, tmp_path):
+    """Create comes AFTER the dataset-conflict check: a refused path must not
+    leave an empty directory the user then has to explain."""
+    with app.app_context():
+        from app import config as cfg
+        folder = cfg.video_datasets_root() / '7' / 'sub'
+        with pytest.raises(ValueError):
+            svc.create_bank(LOCAL_USER, 'nope', str(folder))
+        assert not folder.exists()
+
+
 def test_a_rescan_adds_only_what_appeared(app, tmp_path):
     """A bank points at a LIVE folder. The re-walk must be strictly additive: a
     triage worked over days cannot be reset because someone dropped one more file

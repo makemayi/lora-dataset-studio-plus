@@ -282,6 +282,12 @@ def create_bank(user_id, name, folder):
 
     Instant — no decode, no detection. Those are the separate passes, because a
     two-hour file costs minutes and an HTTP request must not.
+    A folder that DOES NOT EXIST YET is created: an empty bank is a legitimate
+    starting point, not a mistake — it is exactly how a collector run begins
+    (the bank's folder is what ``{folder}`` expands to), and the local
+    video-grab scripts' own bank resolver has always mkdir'd recursively. The
+    creation happens AFTER the dataset-conflict check so a refused path never
+    leaves an empty directory behind.
     Returns (bank, added)."""
     name = (name or '').strip()
     # Windows «Copy as path» pastes quoted; unquote so a direct paste works first
@@ -289,17 +295,24 @@ def create_bank(user_id, name, folder):
     folder = (folder or '').strip().strip('"\'')
     if not name:
         raise ValueError('name is required')
-    if not folder or not os.path.isdir(folder):
-        raise ValueError(f'folder not found or not readable: {folder or "(empty)"}')
+    if not folder:
+        raise ValueError('folder is required')
+    if os.path.exists(folder) and not os.path.isdir(folder):
+        raise ValueError(f'not a folder: {folder}')
     # A bank and a dataset must never share bytes. Both roots are checked: the
     # image lane's (a video bank over it would be harmless today but the rule is
     # the rule) and the video lane's own, which is the real trap — promoting into
     # a folder a bank points at would make the bank list its own output as source
-    # material, and re-promote it on the next pass.
+    # material, and re-promote it on the next pass. Pure path arithmetic, so it
+    # is also what guards a folder that does not exist yet.
     for root in (None, cfg.video_datasets_root()):
         conflict = path_guard.dataset_folder_conflict(folder, datasets_root=root)
         if conflict:
             raise ValueError(conflict['message'])
+    try:
+        os.makedirs(folder, exist_ok=True)
+    except OSError as e:
+        raise ValueError(f'could not create the folder: {e}') from e
     folder = os.path.realpath(folder)
     rels = _scan_folder(folder)
     bank = VideoBank(user_id=user_id, name=name, source_path=folder)
