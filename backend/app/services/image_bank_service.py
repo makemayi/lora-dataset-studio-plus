@@ -1854,6 +1854,12 @@ def bank_payload(user_id, bank_id) -> dict | None:
                            'all': _todo_by_status(bank_id, _crop_todo_clause())},
         'watermark_inpaint': {'todo': _todo_by_status(bank_id, _clean_todo_clause()),
                               'all': _todo_by_status(bank_id, _clean_todo_clause())},
+        # ✂ CROP TO PERSON — the third image-writing pass. Its pool is rows with
+        # no working copy yet, no manual turn, and not rejected; cleaned rows
+        # leave it and come back only through ↩ Undo, so 'all' repeats 'todo'
+        # for the same reason the two watermark levels' do.
+        'person_crop': {'todo': _todo_by_status(bank_id, _person_crop_todo_clause()),
+                        'all': _todo_by_status(bank_id, _person_crop_todo_clause())},
         'framing': {'todo': _todo_by_status(bank_id, BankImage.framing.is_(None)),
                     'all': dict(all_by_status)},
         # 🎨 Medium is the one pass whose pool is not its work: it computes NO
@@ -7566,6 +7572,207 @@ def _watermark_inpaint_prereq(method) -> str | None:
     if not watermark_lama.is_available():
         return 'LaMa inpainting is not installed (Setup ▸ Quality tools)'
     return None
+
+
+# --- crop to person ------------------------------------------------------------
+
+def _person_crop_prereq() -> str | None:
+    """Why Crop-to-person can't run, or None. The detector is a transformers
+    zero-shot model, so it runs in the Bank scoring interpreter — the same one
+    ✨ Score uses — and the actionable fix is the one that panel already owns."""
+    if not (cfg.get('bank_scoring.python') or '').strip():
+        return ('Crop to person needs an interpreter that carries transformers — '
+                'set the ✨ Score interpreter in Setup ▸ Quality tools, or use '
+                'the full-bank scan instead.')
+    return None
+
+
+def start_person_crop(app, user_id, bank_id, statuses=None, ids=None):
+    """✂ Crop every image in scope around its largest detected person.
+
+    The operator's own batch crop (`crop_persons.py`, Grounding DINO tiny on
+    "person. human body."), moved into the Bank: one subject per picture,
+    chosen by area, padded 3 %, cut as the tightest window that keeps the
+    SOURCE image's aspect ratio — so the person fills the frame while the
+    dataset keeps one shape. Images where no person is found are skipped, not
+    padded; images that are already cleaned or turned are skipped too, because
+    cropping a crop would stack two working copies under one undo.
+
+    The pass WRITES AN IMAGE — into the bank's own ``clean/`` copy, never the
+    user's folder — and ↩ Undo cleaning throws those copies away like any
+    other. ``statuses``/``ids`` narrow the run; left alone it walks every
+    non-rejected image in the bank, which is what "global" means here. The
+    rejected pile is out even when ASKED for: the scope clause and the window's
+    per-pile counter (_person_crop_todo_clause) agree on that, so a window can
+    never offer a run the pass would refuse to make."""
+    bank = get_bank(user_id, bank_id)
+    if not bank:
+        raise ValueError('bank not found')
+    scoped = (_scoped_pool(bank_id, statuses, ids)
+              .filter(_person_crop_todo_clause()))
+    total = scoped.count()
+    if not total:
+        raise ValueError('nothing to crop in this scope — every image in it has '
+                         'already been cleaned, turned, or rejected')
+    # The prereq comes LAST in the synchronous checks: on an empty bank the
+    # actionable answer is "nothing to crop", not "go install something".
+    prereq = _person_crop_prereq()
+    if prereq:
+        raise RuntimeError(prereq)
+    return bank_jobs.start(app, bank_id, 'person_crop',
+                           _person_crop_job(bank_id, statuses, ids), total=total)
+
+
+def _run_person_detector(python, script, payload_json: str, timeout: int):
+    """One detector batch. A module-level seam so the pass can be tested with
+    the subprocess replaced by a table of answers."""
+    return subprocess.run([python, script], input=payload_json,
+                          capture_output=True, text=True, timeout=timeout)
+
+
+def _person_crop_todo_clause():
+    """"Not yet cropped" — no working copy, no manual turn, not rejected — the
+    pool Crop-to-person walks, split out of start_person_crop's query so the
+    launch window's per-pile counters quote the SAME expression the run filters
+    on (the contract _todo_by_status documents)."""
+    return and_(BankImage.watermark_clean_method.is_(None),
+                BankImage.rotation.is_(None),
+                BankImage.status != 'reject')
+
+
+def _person_crop_job(bank_id, statuses=None, ids=None):
+    def run(job):
+        import json as _json
+        import subprocess as _subprocess
+        from . import person_crop as geometry
+        from ..config import data_dir
+
+        bank = _detach_bank(db.session.get(ImageBank, bank_id))
+        if not bank:
+            return
+        rows = (_scoped_pool(bank_id, statuses, ids)
+                .filter(_person_crop_todo_clause())
+                .order_by(BankImage.id.asc()).all())
+
+        python = (cfg.get('bank_scoring.python') or '').strip()
+        script = str(cfg.BACKEND_DIR / 'infer' / 'person_box_infer.py')
+        models_root = str(data_dir() / 'models' / 'grounding_dino')
+
+        bank_jobs.progress(job, done=0, total=len(rows),
+                           detail='loading the person detector')
+        cropped = no_person = failed = 0
+        try:
+            for start in range(0, len(rows), geometry.BATCH):
+                if bank_jobs.cancelled(job):
+                    break
+                slice_rows = rows[start:start + geometry.BATCH]
+                # [(row, path, w, h)] — the SAME path the detector sees comes
+                # back keyed to the row that owns it, with no lookup by path.
+                # Deliberately NOT `_source_size`: that helper is the watermark
+                # lane's, and it refuses rows whose fingerprint was never
+                # attested — a pool this pass does not require. The size is the
+                # EXIF-oriented one, so the window and the crop share a
+                # coordinate system with the picture the user sees.
+                slice_items = []
+                for r in slice_rows:
+                    src = abs_image_path(bank, r)
+                    if not src or not os.path.isfile(src):
+                        failed += 1
+                        continue
+                    try:
+                        with safe_bank_source(src, label='bank person crop') as im:
+                            w, h = image_encoding.visual_size_from_header(im)
+                    except (OSError, ValueError, MemoryError,
+                            Image.DecompressionBombError,
+                            Image.DecompressionBombWarning):
+                        failed += 1
+                        continue
+                    if not w or not h:
+                        failed += 1
+                        continue
+                    slice_items.append((r, src, w, h))
+                slice_paths = [s[1] for s in slice_items]
+                if slice_paths:
+                    try:
+                        proc = _run_person_detector(
+                            python, script,
+                            _json.dumps({'images': slice_paths,
+                                         'models_root': models_root}),
+                            geometry.batch_timeout(len(slice_paths)))
+                        payload = _json.loads(
+                            (proc.stdout or '').strip().splitlines()[-1])
+                        if not payload.get('ok'):
+                            raise RuntimeError(payload.get('error') or 'detector failed')
+                    except Exception as e:  # noqa: BLE001 — a slice reports, not sinks
+                        logger.warning('person-crop slice failed: %s', e)
+                        failed += len(slice_items)
+                        bank_jobs.progress(
+                            job, done=min(start + len(slice_rows), len(rows)),
+                            total=len(rows),
+                            detail=f'detector failed on a batch ({failed} unreadable so far)')
+                        continue
+                    results = payload.get('results') or {}
+                    for r, src, w, h in slice_items:
+                        try:
+                            entry = results.get(src) or {}
+                            box = geometry.largest_person_box(entry.get('boxes') or [])
+                            if box is None:
+                                no_person += 1
+                                continue
+                            window = geometry.ar_window(box, w, h)
+                        except Exception as e:  # noqa: BLE001 — one bad reading is one skip
+                            logger.warning('person-crop: unusable reading on %s: %s',
+                                           os.path.basename(src), e)
+                            failed += 1
+                            continue
+                        if _apply_person_crop(bank_id, r, src, window):
+                            r.watermark_clean_method = 'person_crop'
+                            _invalidate_effective_analysis(r)
+                            cropped += 1
+                        else:
+                            failed += 1
+                bank_jobs.progress(job, done=min(start + len(slice_rows), len(rows)),
+                                   total=len(rows),
+                                   detail=f'{cropped} cropped, {no_person} without a person')
+        finally:
+            db.session.commit()
+            if cropped:
+                reset_score_memo()
+        if bank_jobs.cancelled(job):
+            bank_jobs.progress(job, detail=f'cancelled — {cropped} cropped so far')
+            return
+        detail = (f'done — {cropped} cropped, {no_person} without a person'
+                  + (f', {failed} failed' if failed else ''))
+        bank_jobs.progress(job, detail=detail)
+    return run
+
+
+def _apply_person_crop(bank_id, row, src_path, window) -> bool:
+    """Cut one image to ``window`` and publish it as the bank's working copy.
+
+    The same atomic staging ``_stage_clean_copy`` uses — the blob appears only
+    once the cropped write has succeeded, so a crash mid-pass can never leave a
+    half-written picture posing as a clean one. The source stays read-only."""
+    import uuid as _uuid
+    dst = clean_image_path(bank_id, row.id)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_name(f'.{dst.name}.part-{_uuid.uuid4().hex[:8]}')
+    try:
+        with safe_bank_source(src_path, label='bank person crop') as source:
+            source.load()
+            oriented = ImageOps.exif_transpose(source).convert('RGB')
+            cropped = oriented.crop(window)
+            image_encoding.save_edit(cropped, str(tmp), 'WEBP',
+                                     image_encoding.LOSSLESS)
+        os.replace(tmp, dst)
+        return True
+    except (OSError, ValueError, MemoryError, Image.DecompressionBombError,
+            Image.DecompressionBombWarning):
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return False
 
 
 def start_watermark_inpaint(app, user_id, bank_id, method='auto',

@@ -729,6 +729,8 @@ const TOPICS = [
     keywords: ['video', 'videos', 'video bank', 'rushes', 'rush', 'footage', 'clip',
       'clips', 'shot', 'shots', 'shot detection', 'scene detection', 'cut', 'cuts',
       'mp4', 'mov', 'mkv', 'webm', 'avi', 'movie', 'film',
+      'crop to person', 'person crop', 'global crop', 'crop every image',
+      'largest person', 'grounding dino', 'person detector',
       'extract frames', 'promote frames', 'person requirement', 'frame must show a person',
       'reference person', 'sharpness tolerance', 'face sharpness', 'blurry face',
       'framing', 'framings', 'waist-up', 'half body', 'face close-up', 'face crop',

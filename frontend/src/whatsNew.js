@@ -50,6 +50,18 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-29-crop-to-person',
+    date: '2026-08-29',
+    title: 'Crop to person — one button, the whole Bank',
+    blurb: 'A new Bank pass finds the largest person in every image (Grounding '
+      + 'DINO) and crops the frame to them — padded 3 %, cut so the image keeps '
+      + 'its own aspect ratio, so the person fills the frame and the dataset '
+      + 'keeps one shape. Your files are never written to: crops land in the '
+      + 'bank\'s working copy and ↩ Undo cleaning throws them away. Pictures '
+      + 'without a person are skipped. Needs the ✨ Score interpreter.',
+    to: '/bank',
+  },
+  {
     id: '2026-08-29-frame-extract-framings',
     date: '2026-08-29',
     title: 'Extract frames in three framings, with sharper identity gates',

@@ -2307,6 +2307,12 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
               : 'Pull the vision model (Settings ▸ Local tools) to classify framing'}>
             📐 Classify framing…{!visionReady && ' (needs setup)'}
           </PassButton>
+          <PassButton onClick={() => setPassOpen('person_crop')} disabled={live || !caps.bank_scoring}
+            title={caps.bank_scoring
+              ? 'Find the largest person in every non-rejected image and crop the frame to them — padded 3 %, keeping the image\'s own aspect ratio, so the person fills the frame and the dataset keeps one shape. Pictures without a person are skipped. The crop lands in the bank\'s own copy; your files are never written to, and ↩ Undo cleaning throws it away. Runs in batches on the ✨ Score interpreter.'
+              : 'Set the ✨ Score interpreter (Setup ▸ Quality tools) — the person detector needs transformers'}>
+            ✂ Crop to person…{!caps.bank_scoring && ' (needs setup)'}
+          </PassButton>
           <PassButton onClick={() => setPassOpen('semantic_dedup')} disabled={live || !semanticReady}
             title={semanticReady
               ? `Group crops and re-compressed variants of the SAME shot the exact-duplicate hash misses from the ${semanticState.label} semantic index. Review them under the ✂ Same shot chip.`

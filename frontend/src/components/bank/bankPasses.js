@@ -250,6 +250,44 @@ export const BANK_PASSES = {
    * can never widen it. The numbers on the scope lines come from that same pool,
    * per pile, measured server-side from the clause the run itself filters on.
    */
+  person_crop: {
+    id: 'person_crop',
+    label: '✂ Crop to person',
+    verb: '✂ Crop to person',
+    endpoint: 'crop-person',
+    what: 'Finds the largest person in every image in scope (Grounding DINO — '
+      + 'GPU if the ✨ Score interpreter has one) and crops the frame to them: '
+      + 'padded 3 %, cut as the tightest window that keeps the image\u2019s own '
+      + 'aspect ratio, so the person fills the frame and the dataset keeps one '
+      + 'shape. Pictures where no person is found are skipped, not padded.',
+    scopes: true,
+    selection: true,
+    redo: null,
+    settings: [
+      { name: '\u2705 Score interpreter \u2014 the detector needs transformers '
+        + '(Setup \u25b8 Quality tools)', note: 'Runs in batches of 24; the model '
+        + '(Grounding DINO tiny) downloads once into the app\u2019s models folder.' },
+    ],
+    notHere: [
+      'Which pixels count as \u201cperson\u201d \u2014 the detector decides per '
+        + 'picture; there is no box to review or nudge here. What you review is '
+        + 'the CROP, and \u21a9 Undo cleaning throws any of them away.',
+      'Images that already carry a working copy (cleaned or turned): the pass '
+        + 'skips them, because cropping a crop would stack two copies under one '
+        + 'undo. \u21a9 Undo cleaning returns them to the pool.',
+    ],
+    caveats: [
+      'Your own files are never written to \u2014 the crop lands in the bank\u2019s '
+        + 'own copy, and \u21a9 Undo cleaning (on the \ud83d\udea9 Watermarks panel) '
+        + 'throws every working copy away, this pass\u2019s included. Undo is '
+        + 'bank-wide, not per run.',
+      'A frame with TWO people keeps only the larger detection\u2019s person; '
+        + 'the other stays in shot at the crop\u2019s edges. The pass is a framing '
+        + 'tool, not a person remover.',
+    ],
+    binCost: 'each cropped image is decoded and re-encoded into the bank\u2019s working copy',
+  },
+
   watermark_crop: {
     id: 'watermark_crop',
     label: '✂ Auto-crop watermarks',
@@ -451,7 +489,7 @@ export const BANK_PASSES = {
 
 /** Every pass id, in the order the panel lists its buttons. */
 export const BANK_PASS_ORDER = ['scan', 'faces', 'score', 'medium', 'framing',
-  'semantic_index', 'semantic_dedup', 'watermark', 'angles', 'caption'];
+  'semantic_index', 'semantic_dedup', 'person_crop', 'watermark', 'angles', 'caption'];
 
 export function bankPass(passId, { semanticEngine = 'clip' } = {}) {
   const spec = BANK_PASSES[passId] || null;

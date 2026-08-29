@@ -626,6 +626,21 @@ def bank_watermark_undo(bank_id):
     return jsonify({'ok': True, 'restored': n})
 
 
+@bp.post('/bank/<int:bank_id>/crop-person')
+def bank_crop_person(bank_id):
+    """✂ Crop every image in scope around its largest detected person.
+
+    The global crop: Grounding DINO finds the people, the geometry keeps the
+    source image's aspect ratio and pads 3 %, and the cut lands in the bank's
+    own working copy — the source folder is never written to, and ↩ Undo
+    cleaning throws the crops away. Left unscoped it walks every non-rejected
+    image that has not already been cleaned or turned. 202/409/400/503 — the
+    503 names the interpreter to set, because the detector needs transformers."""
+    data = request.get_json(silent=True) or {}
+    return _start(banks.start_person_crop, _app(), LOCAL_USER, bank_id,
+                  **_scope(data))
+
+
 @bp.put('/bank/<int:bank_id>/image/<int:image_id>/watermark-regions')
 def bank_image_watermark_regions(bank_id, image_id):
     """Replace one flagged image's hand-drawn watermark mask — the Bank's half of
