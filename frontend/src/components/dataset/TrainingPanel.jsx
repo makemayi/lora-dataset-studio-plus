@@ -1302,7 +1302,12 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   // draft alone would leave the label blank on first paint (the draft is seeded
   // by an effect) and blank again for anyone who never touches the field.
   const otEpochsN = Number(otEpochsDraft !== '' ? otEpochsDraft : (adv?.epochs ?? ''));
-  const otBatchN = Number(otBatchDraft !== '' ? otBatchDraft : (adv?.batch_size ?? '')) || 1;
+  // Unset means the LANE's default, not 1: onetrainer_service writes
+  // KREA2_DEFAULT_BATCH_SIZE (4) into the config and derives `epochs` from it,
+  // so a label computed at 1 would quote a step count four times the real one.
+  const OT_DEFAULT_BATCH = 4;
+  const otBatchN = Number(otBatchDraft !== '' ? otBatchDraft : (adv?.batch_size ?? ''))
+    || OT_DEFAULT_BATCH;
   const otDerivedSteps = (Number.isInteger(otEpochsN) && otEpochsN >= 1 && keptCount > 0)
     ? Math.ceil((otEpochsN * keptCount) / otBatchN)
     : 0;

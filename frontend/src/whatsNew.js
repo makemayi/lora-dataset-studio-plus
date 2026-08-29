@@ -50,6 +50,18 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-29-onetrainer-krea2-512-batch-4',
+    date: '2026-08-29',
+    title: 'OneTrainer trains Krea 2 at 512 and batch 4 by default',
+    blurb: 'A Krea 2 run nobody configured used to train at 1024 — measured on '
+      + 'a 24 GB card that is 98.5% of the VRAM and about 6.5 hours for a '
+      + '90-image set, with no room left for anything else. The default is now '
+      + 'the 512 the shipped OneTrainer recipe itself asks for, and the space '
+      + 'that frees goes into a batch of 4. A resolution you pick in Advanced '
+      + 'options still wins.',
+    to: '/cloud',
+  },
+  {
     id: '2026-08-29-runs-page-crash-on-a-failed-run',
     date: '2026-08-29',
     title: 'The Runs page no longer goes blank after a failed run',

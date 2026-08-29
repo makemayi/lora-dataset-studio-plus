@@ -106,11 +106,24 @@ def is_installed() -> bool:
     return bool(p) and p.is_file()
 
 
-# The shipped preset's own resolution (512) is tuned for its 16GB-VRAM budget,
-# not for this app's own recipe — 1024 is what this app's own launches want,
-# so it moves into the fields we own rather than a one-off edit of the
-# install's shipped preset file (which a reinstall/preset update would lose).
-KREA2_RESOLUTION = 1024
+# The default this lane trains Krea 2 at when the user has not picked one.
+#
+# It was 1024, on the reasoning that the shipped preset's 512 was a 16GB-VRAM
+# budget rather than a recipe. MEASURED on 2026-08-29 on a 24 GB 3090: 1024 at
+# the preset's batch 2 ran ~6.5 s/step with the card at 98.5% full (24208 of
+# 24576 MiB) — ~6.5 h for a 90-image character set, with no headroom for
+# anything else on the machine. The preset's own 512 is the default again, and
+# an explicit resolution from the dataset's settings still wins (see
+# launch_training, which forwards ONLY a chosen one).
+KREA2_RESOLUTION = 512
+
+# The batch this lane defaults to, which is the app's choice and not the
+# preset's (both shipped Krea 2 presets say 2). At 512 the step is ~4x cheaper
+# than the 1024 it replaced, so the card has room for a bigger batch, and a
+# batch of 4 is what turns that room into throughput instead of idle VRAM.
+# `epochs = ceil(steps * batch / images)` reads this too, so a run launched with
+# no opinion on either still gets an epoch count that matches its batch.
+KREA2_DEFAULT_BATCH_SIZE = 4
 
 # What the shipped Krea 2 presets ask for. Read here rather than parsed at run
 # time so the epoch arithmetic has a number even when the preset file is not
@@ -220,7 +233,7 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
     # this function used to do unconditionally, silently halved the throughput
     # the preset was tuned around. Same rule as the learning rate: the preset
     # decides until the user does.
-    batch = max(1, int(batch_size)) if batch_size else KREA2_PRESET_BATCH_SIZE
+    batch = max(1, int(batch_size)) if batch_size else KREA2_DEFAULT_BATCH_SIZE
     epochs_eff = (max(1, int(epochs)) if epochs
                   else max(1, math.ceil(steps * batch / max(1, num_images))))
     training_folder = Path(training_folder)
@@ -238,8 +251,10 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
         'epochs': epochs_eff,
         'lora_rank': int(rank),
         'lora_alpha': float(rank),
-        # Written only when chosen, so the preset's own survives otherwise.
-        **({'batch_size': max(1, int(batch_size))} if batch_size else {}),
+        # Always written now: the app's default (4) is NOT the preset's (2), so
+        # staying silent would train a batch the epoch arithmetic above did not
+        # assume — the two must never disagree.
+        'batch_size': batch,
         # OneTrainer takes resolution as a STRING (its shipped preset says
         # "512"), unlike ai-toolkit's list of ints. Passing an int here is not a
         # type nit — it is how the two lanes end up training the same dataset at
@@ -581,7 +596,8 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
     # constant that can drift. Without this, the same dataset trained at
     # lr 0.0003 / 1024 here and lr 0.0001 / 768 there, with nothing on screen
     # saying the two lanes disagreed.
-    from .lora_training import _effective_resolution, _train_settings, _lora_rank
+    from .lora_training import (_effective_resolution, _resolution_is_explicit,
+                               _train_settings, _lora_rank)
     _s = _train_settings(ds) or {}
     # ONLY when the user chose one. `_lr_eff` never returns None — it falls back
     # to the family-fixed 1e-4 — so calling it here wrote `learning_rate` on
@@ -597,9 +613,17 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
         logger.exception('onetrainer: could not resolve the learning rate; '
                          'leaving it to the shipped preset')
         lr = None
+    # ONLY a resolution the user actually picked. `_effective_resolution` never
+    # returns nothing — it falls back to the ai-toolkit family default
+    # (768+1024), whose LARGEST value used to become this lane's resolution on
+    # every run that had never touched the setting. That is how a Krea 2 run
+    # nobody configured ended up at 1024. Unset now means KREA2_RESOLUTION.
     try:
-        res_list = _effective_resolution(ds) or []
-        resolution = max(int(r) for r in res_list) if res_list else None
+        if _resolution_is_explicit(ds):
+            res_list = _effective_resolution(ds) or []
+            resolution = max(int(r) for r in res_list) if res_list else None
+        else:
+            resolution = None
     except Exception:                                    # noqa: BLE001
         logger.exception('onetrainer: could not resolve the resolution; '
                          'falling back to the module default')

@@ -150,13 +150,14 @@ def test_build_job_config_overrides_only_what_this_app_owns(onetrainer, tmp_path
     assert config['output_model_destination'] == str(Path(training_folder) / 'lola.safetensors')
     assert config['lora_rank'] == 32
     assert config['lora_alpha'] == 32.0     # scale factor 1.0 — MUST track rank
-    # No batch chosen = the preset's own survives, so this app writes nothing.
-    assert 'batch_size' not in config
+    # No batch chosen = the app's own default, WRITTEN (it is not the preset's 2,
+    # and the epoch arithmetic below assumes it).
+    assert config['batch_size'] == ots.KREA2_DEFAULT_BATCH_SIZE == 4
     # A STRING, matching OneTrainer's own schema — its shipped Krea 2 preset
     # writes "512", not 512. This assertion used to demand the int, which was
     # never checked against the preset.
-    assert config['resolution'] == '1024'
-    assert config['epochs'] == 160         # ceil(2000 * 2 / 25) — the preset's batch
+    assert config['resolution'] == '512'
+    assert config['epochs'] == 320         # ceil(2000 * 4 / 25) — the app's batch
     assert config['peft_type'] == 'LORA'   # default when the caller doesn't pass one
     # Ownership boundary: everything else stays whatever OneTrainer's own
     # shipped preset says — this function must NOT invent values for them.
@@ -513,7 +514,6 @@ def test_launch_training_forwards_the_datasets_lr_and_resolution(
     from app.services import lora_training as lt
     ots, cfg = onetrainer
     _installed_onetrainer(cfg, tmp_path)
-    monkeypatch.setattr(lt, '_effective_resolution', lambda _ds: [768, 1024])
 
     class FakeProc:
         pid = 888
@@ -523,11 +523,37 @@ def test_launch_training_forwards_the_datasets_lr_and_resolution(
 
     with app.app_context():
         ds = _trainable_krea_dataset(svc, LOCAL_USER, 'OT cfg')
-        lt.update_train_settings(LOCAL_USER, ds.id, {'learning_rate': 0.00012})
+        lt.update_train_settings(LOCAL_USER, ds.id,
+                                 {'learning_rate': 0.00012, 'resolution': '768,1024'})
         result = ots.launch_training(LOCAL_USER, ds.id, steps=100, check_captions=False)
         written = _json.loads(open(result['config_path'], encoding='utf-8').read())
     assert written['learning_rate'] == 0.00012
-    assert written['resolution'] == '1024', 'the largest of the resolution list'
+    assert written['resolution'] == '1024', 'the largest of the CHOSEN resolution list'
+
+
+def test_an_unchosen_resolution_stays_at_this_lanes_default(
+        onetrainer, tmp_path, monkeypatch, app):
+    """`_effective_resolution` always answers — with the ai-toolkit family
+    default (768+1024) when nobody picked — so forwarding it unconditionally put
+    every unconfigured Krea 2 run at 1024. Only a CHOSEN resolution travels."""
+    import json as _json
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+    ots, cfg = onetrainer
+    _installed_onetrainer(cfg, tmp_path)
+
+    class FakeProc:
+        pid = 889
+        def poll(self):
+            return None
+    monkeypatch.setattr(ots.subprocess, 'Popen', lambda *a, **k: FakeProc())
+
+    with app.app_context():
+        ds = _trainable_krea_dataset(svc, LOCAL_USER, 'OT default res')
+        result = ots.launch_training(LOCAL_USER, ds.id, steps=100, check_captions=False)
+        written = _json.loads(open(result['config_path'], encoding='utf-8').read())
+    assert written['resolution'] == '512'
+    assert written['batch_size'] == 4
 
 
 # --- what the Advanced-options panel is worth on this lane -------------------
@@ -632,10 +658,10 @@ def test_the_derivation_survives_for_callers_with_no_opinion_and_now_counts_batc
     at_default = ots.build_job_config(
         trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
         steps=2000, num_images=25, rank=32)
-    # No batch chosen: the arithmetic assumes the PRESET's batch, because that
-    # is what will actually run once this app stops writing a 1 over it.
-    assert at_default['epochs'] == 160     # ceil(2000 * 2 / 25)
-    assert 'batch_size' not in at_default
+    # No batch chosen: the arithmetic assumes THIS LANE's default batch, which
+    # is also the one it writes into the config — the two cannot disagree.
+    assert at_default['epochs'] == 320     # ceil(2000 * 4 / 25)
+    assert at_default['batch_size'] == ots.KREA2_DEFAULT_BATCH_SIZE
 
     at_three = ots.build_job_config(
         trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
@@ -763,15 +789,19 @@ def test_the_shipped_preset_really_does_ask_for_that_batch(onetrainer):
             assert _j.load(fh).get('batch_size') == ots.KREA2_PRESET_BATCH_SIZE
 
 
-def test_no_batch_chosen_leaves_the_presets_own_alone(onetrainer, tmp_path):
-    """MEASURED: the shipped preset asks for batch 2 and this app wrote 1 over
-    it on every run — silently halving the throughput the preset was tuned
-    around, the same way it silently overrode the learning rate."""
+def test_no_batch_chosen_uses_this_lanes_own_default(onetrainer, tmp_path):
+    """The app writes 1 over the preset -> corrected to leaving the preset's 2
+    alone -> corrected again to writing the lane's own 4, once the default
+    resolution came down to the preset's 512 and left the card room for it. The
+    number is written rather than implied because `epochs` is derived FROM it:
+    an unwritten batch means OneTrainer trains a batch the epoch count did not
+    assume."""
     ots, _cfg = onetrainer
     c = ots.build_job_config(
         trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
         steps=100, num_images=10, rank=32)
-    assert 'batch_size' not in c
+    assert c['batch_size'] == 4
+    assert c['epochs'] == 40               # ceil(100 * 4 / 10), the same batch
     chosen = ots.build_job_config(
         trigger='x', dataset_folder=str(tmp_path), training_folder=str(tmp_path),
         steps=100, num_images=10, rank=32, batch_size=3)
