@@ -400,6 +400,26 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
     logger.info('onetrainer: using shipped preset %s', preset_rel)
     log_path = training_folder_p / 'onetrainer.log'
     logf = open(log_path, 'w', encoding='utf-8')
+    # The Krea 2 base model is a HF GATED repo: downloading it without a
+    # granted token answers 401 (measured on this machine, 2026-08-29). The
+    # copy already on disk lives in the SHARED HF cache the ai-toolkit lane
+    # uses, so the child gets the same HF_HOME — from_pretrained(
+    # 'krea/Krea-2-Raw') then resolves from that cache instead of the network,
+    # granted or not. When ai-toolkit is unconfigured the child inherits the
+    # parent environment, so a OneTrainer-only install behaves exactly as
+    # before. PYTHONUNBUFFERED matters here for the same reason it does on the
+    # ai-toolkit lane: stdout goes to a FILE, and block-buffering would make
+    # "is it moving?" unanswerable for an hour.
+    env = dict(os.environ)
+    hf_home = cfg.aitoolkit_path('hf_home')
+    if hf_home:
+        env['HF_HOME'] = str(hf_home)
+        env['HF_HUB_DOWNLOAD_TIMEOUT'] = os.environ.get('HF_HUB_DOWNLOAD_TIMEOUT', '30')
+    token = (cfg.secret('HF_TOKEN') or '').strip()
+    if token:
+        env['HF_TOKEN'] = token
+    env.setdefault('PYTHONUNBUFFERED', '1')
+    env.setdefault('PYTHONIOENCODING', 'utf-8')
     proc = subprocess.Popen(
         # OneTrainer's actual argparse flags are HYPHENATED (--preset-path,
         # --config-path), confirmed against train.py's own usage output —
@@ -408,6 +428,7 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
         [str(venv_python), 'scripts/train.py',
          '--preset-path', str(preset_path), '--config-path', str(config_path)],
         cwd=str(root), stdout=logf, stderr=subprocess.STDOUT, shell=False,
+        env=env,
         creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     return {'pid': proc.pid, 'config_path': str(config_path),
             'concepts_path': str(concepts_path), 'log_path': str(log_path),

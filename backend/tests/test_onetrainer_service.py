@@ -969,3 +969,38 @@ def test_launch_training_forwards_save_sample_and_the_resolved_rank(
     assert written['lora_alpha'] == 16.0, 'alpha follows the chosen rank'
     assert written['save_every'] == 500 and written['save_every_unit'] == 'STEP'
     assert written['sample_after'] == 100.0 and written['sample_after_unit'] == 'STEP'
+
+
+def test_launch_injects_the_shared_hf_cache_into_the_child_env(
+        onetrainer, tmp_path, monkeypatch):
+    """The Krea 2 base model is a gated HF repo (401 without a granted token),
+    but this machine's copy already sits in the SHARED ai-toolkit HF cache —
+    so the child gets HF_HOME pointed there and from_pretrained resolves from
+    disk. A OneTrainer-only install (no ai-toolkit) inherits instead."""
+    ots, cfg = onetrainer
+    root = tmp_path / 'OneTrainer'
+    (root / 'venv' / 'Scripts').mkdir(parents=True)
+    (root / 'venv' / 'Scripts' / 'python.exe').write_text('')
+    aitk = tmp_path / 'aitk'
+    cfg.save_config({'onetrainer': {'dir': str(root)},
+                     'aitoolkit': {'dir': str(aitk),
+                                   'hf_home': str(aitk / 'hf-cache' / 'huggingface')}})
+
+    captured = {}
+
+    class FakeProc:
+        pid = 4242
+
+    def fake_popen(cmd, cwd=None, env=None, **kw):
+        captured['env'] = env
+        return FakeProc()
+
+    monkeypatch.setattr(ots.subprocess, 'Popen', fake_popen)
+
+    training_folder = tmp_path / 'run'
+    ots.launch(trigger='lola', dataset_folder=str(tmp_path / 'ds'),
+               training_folder=str(training_folder), steps=100, num_images=20,
+               rank=16)
+
+    assert captured['env']['HF_HOME'] == str(aitk / 'hf-cache' / 'huggingface')
+    assert captured['env']['PYTHONUNBUFFERED'] == '1'
