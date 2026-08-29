@@ -11464,7 +11464,8 @@ def _bank_promote_job(user_id, src_bank_id, dest_bank_id, ids):
     return run
 
 
-def start_promote(app, user_id, bank_id, ids, dataset_id, framings=None):
+def start_promote(app, user_id, bank_id, ids, dataset_id, framings=None,
+                  per_framing_limit=None):
     """Copy a selection into a dataset through the normal import path
     (normalize + perceptual dedup vs the dataset). ``ids`` empty = every KEPT
     image not already on THIS dataset. Background job (a big promotion decodes
@@ -11485,6 +11486,13 @@ def start_promote(app, user_id, bank_id, ids, dataset_id, framings=None):
         raise ValueError('framings must be a non-empty subset of '
                          f'{", ".join(sorted(geometry.PROMOTION_FRAMINGS))}')
     crop_framings = tuple(f for f in framings if f != 'full')
+    if per_framing_limit is not None:
+        try:
+            per_framing_limit = int(per_framing_limit)
+        except (TypeError, ValueError):
+            raise ValueError('per_framing_limit must be a whole number')
+        if per_framing_limit < 1:
+            raise ValueError('per_framing_limit must be at least 1')
     if crop_framings and not (cfg.get('face_scoring.python') or '').strip():
         raise ValueError('the waist-up and face framings need a face box, and the '
                          'face boxes come from the face scoring interpreter — set '
@@ -11524,7 +11532,7 @@ def start_promote(app, user_id, bank_id, ids, dataset_id, framings=None):
                 app, bank_id, 'promote',
                 _promote_job(
                     user_id, bank_id, ids, dataset_id, activity_token,
-                    framings=framings),
+                    framings=framings, per_framing_limit=per_framing_limit),
                 total=len(ids), reservation=reservation)
             if not bank_jobs.launched(reservation):
                 # Compatibility for inline test/integration runners that do not
@@ -11540,7 +11548,7 @@ def start_promote(app, user_id, bank_id, ids, dataset_id, framings=None):
 
 
 def _promote_job(user_id, bank_id, ids, dataset_id, activity_token=None,
-                 framings=('full',)):
+                 framings=('full',), per_framing_limit=None):
     def run(job):
         bank = db.session.get(ImageBank, bank_id)
         if not bank:
@@ -11679,17 +11687,58 @@ def _promote_job(user_id, bank_id, ids, dataset_id, activity_token=None,
                             continue      # no box here → full frame only, counted below
                         face_boxes[rid] = entry
 
+            def _choose_framing(row_id):
+                """ONE PICTURE, ONE FRAMING — the operator's rule: the face
+                still, the waist-up and the full frame must come from DIFFERENT
+                pictures, because three crops of one instant teach one moment
+                three times. Each picture lands on the allowed framing with the
+                SMALLEST running count (ties resolve face -> half -> full), so
+                a selection spreads evenly instead of tripling its favourite
+                pictures, and `per_framing_limit` caps each framing."""
+                face = face_boxes.get(row_id)
+                candidates = [f for f in ('face', 'half', 'full') if f in framings]
+                if face is None:
+                    candidates = [f for f in candidates if f == 'full']
+                if per_framing_limit is not None:
+                    candidates = [f for f in candidates
+                                  if local_counts.get(f, 0) < per_framing_limit]
+                if not candidates:
+                    return None
+                order = ('face', 'half', 'full')
+                chosen = min(candidates, key=lambda f: (local_counts.get(f, 0),
+                                                        order.index(f)))
+                local_counts[chosen] = local_counts.get(chosen, 0) + 1
+                return chosen
+
             for c0 in range(0, len(plans), _PROMOTE_CHUNK):
                 if bank_jobs.cancelled(job):
                     abort('Promotion cancelled — imported rows were rolled back.')
                     return
                 chunk_plans = plans[c0:c0 + _PROMOTE_CHUNK]
+                # Split first: full frames travel the exact-bytes transfer path,
+                # crop framings are new bytes cut below.
+                full_plans, variant_jobs = [], []
+                # Running counts LOCAL to this chunk: every picture in the
+                # chunk must see the assignments made above it, or the whole
+                # chunk piles onto the first framing in the order.
+                local_counts = dict(framing_counts)
+                for plan in chunk_plans:
+                    framing = _choose_framing(plan[0])
+                    if framing is None:
+                        framing_skips['no_framing_slot'] = (
+                            framing_skips.get('no_framing_slot', 0) + 1)
+                        continue
+                    if framing == 'full':
+                        full_plans.append(plan)      # the original 3-tuple
+                    else:
+                        variant_jobs.append(
+                            (plan[0], framing, plan[1], plan[2]))
                 blobs, chunk_rows = [], []
                 caps, cap_origins, frms, source_meta, snapshots = [], [], [], [], []
                 watermark_states, watermark_bboxes, watermark_regions = [], [], []
                 watermark_sources, watermark_scores = [], []
                 statuses, transfer_metadatas = [], []
-                for row_id, expected_fingerprint, expected_generation in chunk_plans:
+                for row_id, expected_fingerprint, expected_generation in full_plans:
                     row = (BankImage.query
                            .filter_by(id=row_id, bank_id=bank_id)
                            .populate_existing().one_or_none())
@@ -11792,29 +11841,31 @@ def _promote_job(user_id, bank_id, ids, dataset_id, activity_token=None,
                     created_ids_sink=imported_ids,
                     provenance_changes_sink=provenance_changes,
                     _dataset_activity_token=activity_token)
-                if bad or len(new_ids) != len(chunk_rows):
+                if bad or len(new_ids) != len(full_plans):
                     abort('Could not import every selected image; imported rows '
                           'were rolled back.')
                     return
 
                 # ── the crop framings for THIS chunk ──
-                # The full frame above travelled as exact bank bytes; the crops
-                # are NEW bytes cut from those bytes around a measured face box,
-                # so they re-enter through the dataset's perceptual dedup (a
-                # re-run of the same promotion re-finds its own crops and skips
-                # them) and carry the source row's caption. A crop whose face
-                # box would not sit inside its window is refused rather than
-                # shipped loose — the operator's bar is a face at ≥ 60 % of the
-                # picture, and a crop named "face" that is mostly shoulder
-                # breaks it quietly.
-                if crop_framings:
+                # Each picture here was assigned ONE crop framing (never the
+                # full frame's exact-bytes path). The assigned window is tried
+                # first; if the geometry refuses it (a face hard against a
+                # frame edge cannot satisfy the 60 % bar), later framings in
+                # the run's order take the turn, with the full frame as the
+                # last resort. Every picture still produces exactly ONE image.
+                if variant_jobs:
                     from . import person_crop as geometry
                     from PIL import Image as _PIL
+                    order = [f for f in ('face', 'half', 'full') if f in framings]
                     variant_blobs, variant_caps, variant_origins = [], [], []
-                    variant_framings = []
-                    for (_row_id, _fp, _gen), row in zip(chunk_plans, chunk_rows):
-                        face = face_boxes.get(row.id)
-                        if not face:
+                    variant_framings, variant_bank_ids = [], []
+                    for row_id, framing, _fp, _gen in variant_jobs:
+                        row = (BankImage.query
+                               .filter_by(id=row_id, bank_id=bank_id)
+                               .populate_existing().one_or_none())
+                        if row is None:
+                            framing_skips['vanished'] = (
+                                framing_skips.get('vanished', 0) + 1)
                             continue
                         path = analysis_image_path(bank, row)
                         try:
@@ -11829,27 +11880,65 @@ def _promote_job(user_id, bank_id, ids, dataset_id, activity_token=None,
                             framing_skips['unreadable'] = (
                                 framing_skips.get('unreadable', 0) + 1)
                             continue
-                        for framing in crop_framings:
-                            window = (geometry.half_window(w, h, face)
-                                      if framing == 'half'
-                                      else geometry.face_window(w, h, face))
-                            if window is None:
-                                framing_skips['face_too_close_to_edge'] = (
-                                    framing_skips.get('face_too_close_to_edge', 0) + 1)
+                        face = face_boxes.get(row_id)
+                        candidates = order[order.index(framing):]
+                        chosen = None
+                        for cand in candidates:
+                            # The ASSIGNED framing is exempt from its own cap:
+                            # the slot counted for this very picture above, and
+                            # refusing it here would let the assignment eat
+                            # itself (every framing then looks full, and the
+                            # picture ships nothing).
+                            cap_free = (cand == framing
+                                        or per_framing_limit is None
+                                        or local_counts.get(cand, 0)
+                                        < per_framing_limit)
+                            if not cap_free:
                                 continue
-                            cropped = im.crop(window)
-                            buf = io.BytesIO()
-                            cropped.save(buf, 'PNG')
-                            variant_blobs.append(buf.getvalue())
-                            variant_caps.append(row.caption)
-                            variant_origins.append(row.caption_origin)
-                            variant_framings.append(framing)
+                            if cand == 'full':
+                                chosen = (cand, payload)      # the picture itself
+                                break
+                            window = (geometry.half_window(w, h, face)
+                                      if cand == 'half'
+                                      else geometry.face_window(w, h, face))
+                            if window is not None:
+                                cropped = im.crop(window)
+                                buf = io.BytesIO()
+                                cropped.save(buf, 'PNG')
+                                chosen = (cand, buf.getvalue())
+                                break
+                            framing_skips[f'{cand}_would_not_fit'] = (
+                                framing_skips.get(f'{cand}_would_not_fit', 0) + 1)
+                        if chosen is None:
+                            framing_skips['no_framing_slot'] = (
+                                framing_skips.get('no_framing_slot', 0) + 1)
+                            continue
+                        framing, image_bytes = chosen
+                        variant_blobs.append(image_bytes)
+                        variant_caps.append(row.caption)
+                        variant_origins.append(row.caption_origin)
+                        variant_framings.append(framing)
+                        # The variant CARRIES its source row's bank id: this is
+                        # what makes a re-run idempotent for crops the same way
+                        # the full frames are — the existing-source filter keys
+                        # on exactly this column.
+                        variant_bank_ids.append(row.id)
                     if variant_blobs:
+                        # dedupe stays OFF, and that is not an oversight: the
+                        # idempotency of a re-run comes from the ROWS, not the
+                        # hash — rows already on this dataset are filtered out
+                        # before the detector ever runs. The dataset's
+                        # whole-picture perceptual hash would otherwise swallow
+                        # a legitimate close-up of a low-texture picture (a
+                        # crop of a flat-ish photo hashes like its full frame).
                         new_var_ids, _bad_var = import_images(
                             user_id, dataset_id, variant_blobs, dedupe=False,
                             stats=stats, captions=variant_caps,
                             caption_origins=variant_origins,
+                            bank_image_ids=variant_bank_ids,
                             _dataset_activity_token=activity_token)
+                        print('[DBG] variant import ->', len(new_var_ids), 'bad', _bad_var,
+                              'captions', len(variant_caps), 'blobs', len(variant_blobs))
                         imported_ids.extend(new_var_ids)
                         for fid, framing in zip(new_var_ids, variant_framings):
                             drow = db.session.get(FaceDatasetImage, fid)
@@ -11858,6 +11947,9 @@ def _promote_job(user_id, bank_id, ids, dataset_id, activity_token=None,
                         db.session.commit()
                         for framing in variant_framings:
                             framing_counts[framing] = framing_counts.get(framing, 0) + 1
+                    framing_counts.update(
+                        {k: v for k, v in local_counts.items()
+                         if v > framing_counts.get(k, 0)})
 
                 bank_jobs.bump(job, len(chunk_rows))
                 dataset_activity.bump(activity_token, len(chunk_rows))

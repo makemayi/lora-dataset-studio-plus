@@ -33,6 +33,9 @@ export default function PromoteDialog({ bankId, selectedIds, onClose, onStarted 
   // the two crops are cut around a face box a detector gathers at promotion
   // time, so they are dataset-destination-only and multiply the image count.
   const [framings, setFramings] = useState(['full'])
+  // Cap per framing — this is how "30 faces, 30 half-body, 30 full" is asked
+  // for: tick all three framings, pick 90 pictures, cap each at 30.
+  const [framingCap, setFramingCap] = useState('')
   const useSelection = selectedIds.length > 0
 
   useEffect(() => {
@@ -85,6 +88,7 @@ export default function PromoteDialog({ bankId, selectedIds, onClose, onStarted 
           dataset_id: Number(datasetId),
           image_ids: useSelection ? selectedIds : [],
           framings,
+          ...(Number(framingCap) > 0 ? { per_framing_limit: Number(framingCap) } : {}),
         })
         toast.success('Promotion started — follow the progress bar.')
       }
@@ -143,11 +147,25 @@ export default function PromoteDialog({ bankId, selectedIds, onClose, onStarted 
           <div className="rounded-md bg-surface-raised px-3 py-2">
             <span className="block text-sm font-medium text-content">Framings</span>
             <p className="mt-1 text-xs text-content-muted">
-              Each framing is cut from its own measured face box and imports as
-              its own image — tick three and a 200-image selection can become
-              up to 600. Pictures without a usable face still get their full
-              frame; face boxes come from the face scoring interpreter.
+              Every picture lands on exactly ONE framing — the face still, the
+              waist-up and the full frame always come from different pictures.
+              Each framing is cut from its own measured face box; pictures
+              without a usable face go to the full frame; face boxes come from
+              the face scoring interpreter.
             </p>
+            <div className="mt-2">
+              <label htmlFor="framing-cap" className="block text-xs font-medium text-content">
+                Cap each framing at (optional)
+              </label>
+              <input id="framing-cap" type="number" min="1" step="1"
+                value={framingCap} onChange={(e) => setFramingCap(e.target.value)}
+                placeholder="no cap — one output per picture, spread evenly"
+                className="mt-1 w-full rounded-lg bg-surface-raised px-3 py-1.5 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary" />
+              <p className="mt-1 text-xs text-content-muted">
+                “30” on three framings + a 90-picture selection = exactly 30 face,
+                30 waist-up, 30 full.
+              </p>
+            </div>
             <div className="mt-2 flex flex-col gap-1.5">
               {PROMOTE_FRAMING_OPTIONS.map((f) => (
                 <label key={f.id} className="flex items-center gap-2 text-sm text-content">

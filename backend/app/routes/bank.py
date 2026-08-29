@@ -799,8 +799,17 @@ def bank_promote(bank_id):
             or set(framings) - {'full', 'half', 'face'}):
         return jsonify({'error': 'framings must be a non-empty list drawn from '
                                  'full, half, face'}), 400
+    per_framing_limit = data.get('per_framing_limit')
+    if per_framing_limit is not None:
+        try:
+            per_framing_limit = int(per_framing_limit)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'per_framing_limit must be a whole number'}), 400
+        if per_framing_limit < 1:
+            return jsonify({'error': 'per_framing_limit must be at least 1'}), 400
     return _start(banks.start_promote, _app(), LOCAL_USER, bank_id,
-                  data.get('image_ids'), dataset_id, framings=framings)
+                  data.get('image_ids'), dataset_id, framings=framings,
+                  per_framing_limit=per_framing_limit)
 
 
 @bp.post('/bank/<int:bank_id>/promote-to-bank')
