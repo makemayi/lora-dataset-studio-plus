@@ -415,6 +415,16 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
     if hf_home:
         env['HF_HOME'] = str(hf_home)
         env['HF_HUB_DOWNLOAD_TIMEOUT'] = os.environ.get('HF_HUB_DOWNLOAD_TIMEOUT', '30')
+        # The model is ALREADY in the shared cache (measured: the Krea-2-Raw
+        # snapshot is complete and 57 GB). huggingface_hub still does a HEAD
+        # round-trip per file to verify etags, and a gated repo answers that
+        # HEAD with 401 even when every byte is local — so the run fails
+        # before it ever reads disk. Pin OFFLINE: from_pretrained then
+        # resolves straight from the cache and never touches the network. A
+        # cache that is missing something fails loudly rather than silently
+        # downloading, which is the honest behaviour here.
+        env.setdefault('HF_HUB_OFFLINE', '1')
+        env.setdefault('TRANSFORMERS_OFFLINE', '1')
     token = (cfg.secret('HF_TOKEN') or '').strip()
     if token:
         env['HF_TOKEN'] = token

@@ -1004,3 +1004,7 @@ def test_launch_injects_the_shared_hf_cache_into_the_child_env(
 
     assert captured['env']['HF_HOME'] == str(aitk / 'hf-cache' / 'huggingface')
     assert captured['env']['PYTHONUNBUFFERED'] == '1'
+    # The model is already in the shared cache; a gated repo's answering HEAD
+    # with 401 must not make "everything is local" fail. Offline is the correct
+    # mode for a run whose inputs are all on disk.
+    assert captured['env']['HF_HUB_OFFLINE'] == '1'
