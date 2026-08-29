@@ -3245,7 +3245,12 @@ def update_train_settings(user_id, dataset_id, patch: dict, *, _settings=None) -
             raise ValueError(f'max_step_saves must be one of {_MAX_SAVES_CHOICES}')
     if 'sample_every' in patch:
         v = patch['sample_every']
-        if v in _SAMPLE_EVERY_CHOICES:
+        # 0 / 'off' = no previews at all. Only the OneTrainer lane reads it that
+        # way (it renders previews inside the training process, so at a big
+        # resolution "no previews" is a memory decision, not a preference).
+        if v in (0, 'off'):
+            cur['sample_every'] = 0
+        elif v in _SAMPLE_EVERY_CHOICES:
             cur['sample_every'] = v
         else:
             raise ValueError(f'sample_every must be one of {_SAMPLE_EVERY_CHOICES}')
@@ -3587,7 +3592,11 @@ def update_train_settings(user_id, dataset_id, patch: dict, *, _settings=None) -
             cur['min_snr_gamma'] = float(v)
         else:
             raise ValueError('min_snr_gamma must be a positive number up to 20 (or auto)')
-    for _otk, _othi in (('epochs', 1000), ('batch_size', 64)):
+    # OneTrainer trains by EPOCH, so a save cadence in epochs is what users ask
+    # for on that lane ("save every 20 rounds"). Stored beside `save_every`
+    # (steps, the ai-toolkit vocabulary) rather than overloading it: the two are
+    # different units and the lane that reads each one is different.
+    for _otk, _othi in (('epochs', 1000), ('batch_size', 64), ('save_epochs', 1000)):
         if _otk in patch:
             v = patch[_otk]
             if v in (None, 'auto', ''):
@@ -3717,7 +3726,7 @@ TRAIN_SETTING_KEYS = ('rank', 'resolution', 'save_every', 'max_step_saves',
                       # dataset has ONE settings dict, but read only by the
                       # OneTrainer lane — the ai-toolkit lane thinks in steps
                       # and never looks at them.
-                      'epochs', 'batch_size', 'te1_lr', 'te2_lr',
+                      'epochs', 'batch_size', 'save_epochs', 'te1_lr', 'te2_lr',
                       'min_snr_gamma',
                       'preset_steps_per_image', 'preset_steps_min',
                       'preset_steps_max', 'preset_steps_fixed',

@@ -1306,8 +1306,13 @@ def test_launch_writes_its_own_sample_definitions_and_points_at_them(
         {'enabled': True, 'prompt': 'lola portrait', 'width': 512, 'height': 512}]
 
 
-def test_no_prompts_means_no_definition_file_rather_than_an_empty_one(
-        onetrainer, tmp_path, monkeypatch):
+def test_no_prompts_still_names_a_file_that_EXISTS(onetrainer, tmp_path, monkeypatch):
+    """MEASURED the hard way (2026-08-29): OneTrainer opens
+    `sample_definition_file_name` unconditionally at startup
+    (TrainConfig.to_pack_dict), so a named-but-absent file is a FileNotFoundError
+    before step 1 — and an omitted key falls back to the shared, empty
+    `training_samples/samples.json` inside the install. So the run always writes
+    and always names its OWN file; an empty list is how "no previews" is said."""
     ots, cfg = onetrainer
     _installed_onetrainer(cfg, tmp_path)
 
@@ -1320,8 +1325,8 @@ def test_no_prompts_means_no_definition_file_rather_than_an_empty_one(
     ots.launch(trigger='lola', dataset_folder=str(tmp_path / 'ds'),
                training_folder=str(run), steps=100, num_images=20, rank=16)
     written = _j.loads((run / 'config.json').read_text(encoding='utf-8'))
-    assert 'sample_definition_file_name' not in written
-    assert not (run / 'samples.json').exists()
+    assert written['sample_definition_file_name'] == str(run / 'samples.json')
+    assert _j.loads((run / 'samples.json').read_text(encoding='utf-8')) == []
 
 
 def test_launch_training_resolves_the_prompts_and_cadence(
@@ -1558,3 +1563,70 @@ def test_an_ai_toolkit_run_is_still_killed_outright(onetrainer, monkeypatch, app
                             lambda pid: asked.append(pid) or True)
         assert lt.stop_training() is True
         assert asked == [] and killed
+
+
+def test_previews_can_be_turned_off_explicitly(onetrainer, tmp_path):
+    """NEVER is written, not implied. Leaving the keys out inherits the preset's
+    own 10-MINUTE cadence, and an empty prompt list is a different (and silent)
+    statement — the one this lane accidentally made for months."""
+    ots, _cfg = onetrainer
+    common = dict(trigger='x', dataset_folder=str(tmp_path),
+                  training_folder=str(tmp_path), steps=100, num_images=10, rank=32)
+    off = ots.build_job_config(**common, sample_every=None,
+                               sample_prompts=['x portrait'])
+    assert off['sample_after_unit'] == 'NEVER'
+    assert 'sample_after' not in off
+    on = ots.build_job_config(**common, sample_every=250,
+                              sample_prompts=['x portrait'])
+    assert on['sample_after'] == 250.0 and on['sample_after_unit'] == 'STEP'
+
+
+def test_the_save_cadence_can_be_counted_in_epochs(onetrainer, tmp_path):
+    """This lane trains by epoch, so "save every 20 rounds" is what gets asked
+    for. The unit is written either way — OneTrainer's own default is MINUTE."""
+    ots, _cfg = onetrainer
+    common = dict(trigger='x', dataset_folder=str(tmp_path),
+                  training_folder=str(tmp_path), steps=100, num_images=10, rank=32)
+    by_epoch = ots.build_job_config(**common, save_every=20, save_every_unit='EPOCH')
+    assert by_epoch['save_every'] == 20 and by_epoch['save_every_unit'] == 'EPOCH'
+    by_step = ots.build_job_config(**common, save_every=250)
+    assert by_step['save_every'] == 250 and by_step['save_every_unit'] == 'STEP'
+
+
+def test_previews_off_writes_an_EMPTY_definitions_file(onetrainer, tmp_path, monkeypatch):
+    """Off is said twice, and both are load-bearing: NEVER in the config (the
+    cadence) and an empty list on disk (nothing to render). The file itself must
+    exist — naming one that does not crashes the run before step 1."""
+    import json as _j
+    ots, cfg = onetrainer
+    _installed_onetrainer(cfg, tmp_path)
+
+    class FakeProc:
+        pid = 894
+    monkeypatch.setattr(ots.subprocess, 'Popen', lambda *a, **k: FakeProc())
+
+    run = tmp_path / 'run-nosample'
+    ots.launch(trigger='lola', dataset_folder=str(tmp_path / 'ds'),
+               training_folder=str(run), steps=100, num_images=20, rank=16,
+               sample_every=None, sample_prompts=['lola portrait'])
+    assert _j.loads((run / 'samples.json').read_text(encoding='utf-8')) == []
+    written = _j.loads((run / 'config.json').read_text(encoding='utf-8'))
+    assert written['sample_after_unit'] == 'NEVER'
+    assert written['sample_definition_file_name'] == str(run / 'samples.json')
+
+
+def test_the_settings_accept_off_and_an_epoch_save_cadence(app):
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as lt
+
+    with app.app_context():
+        ds = svc.create_dataset(LOCAL_USER, 'Cadence', 'cad')
+        lt.update_train_settings(LOCAL_USER, ds.id,
+                                 {'sample_every': 'off', 'save_epochs': 20})
+        stored = lt._train_settings(ds)
+        assert stored['sample_every'] == 0
+        assert stored['save_epochs'] == 20
+        # …and the ordinary choices still work.
+        lt.update_train_settings(LOCAL_USER, ds.id, {'sample_every': 250})
+        assert lt._train_settings(ds)['sample_every'] == 250

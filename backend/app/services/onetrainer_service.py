@@ -199,6 +199,7 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
                      dropout: float | None = None,
                      ema: float | None = None,
                      save_every: int | None = None,
+                     save_every_unit: str = 'STEP',
                      sample_every: int | None = None,
                      sample_prompts: list | None = None,
                      base_model_name: str | None = None) -> dict:
@@ -321,10 +322,22 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
         # user never chose. The `sample_after` key (OneTrainer's name) is what
         # this app's `sample_every` maps to — `save_after` was renamed to
         # `save_every` upstream, `sample_after` never was.
-        **({'save_every': int(save_every), 'save_every_unit': 'STEP'}
+        # The unit is pinned rather than inherited: OneTrainer's shipped defaults
+        # are minutes (and NEVER), so a bare number would be read as something
+        # the user never chose. STEP unless the caller asked for EPOCH — which
+        # this lane trains in, so "save every 20 epochs" is a thing users ask
+        # for in exactly those words.
+        **({'save_every': int(save_every),
+            'save_every_unit': ('EPOCH' if str(save_every_unit).upper() == 'EPOCH'
+                                else 'STEP')}
            if save_every else {}),
+        # NEVER is written EXPLICITLY when previews are off. Leaving the keys out
+        # would inherit the preset's own cadence (10 MINUTE), which is how this
+        # lane spent a run sampling on a schedule nobody chose; and an empty
+        # prompt list is not the same statement — that is what it did for months
+        # while claiming to sample.
         **({'sample_after': float(sample_every), 'sample_after_unit': 'STEP'}
-           if sample_every else {}),
+           if sample_every else {'sample_after_unit': 'NEVER'}),
         # WHERE the preview prompts live. OneTrainer's own default points at
         # `training_samples/samples.json` inside its install — a file that ships
         # containing `[]`. So the cadence above was honoured against an EMPTY
@@ -333,8 +346,14 @@ def build_job_config(trigger: str, dataset_folder: str, training_folder: str,
         # sampling. Each run now carries its own definitions next to its
         # concepts (see launch), which is also what keeps two datasets from
         # sharing one file.
-        **({'sample_definition_file_name': str(training_folder / 'samples.json')}
-           if sample_prompts else {}),
+        # ALWAYS this run's own file, even when previews are off — OneTrainer
+        # opens `sample_definition_file_name` unconditionally at startup
+        # (TrainConfig.to_pack_dict), so a path that does not exist is a crash
+        # before step 1, and an omitted key falls back to the shared file inside
+        # the install. `launch` therefore writes it every time, with an empty
+        # list when previews are off; `sample_after_unit: NEVER` above is what
+        # actually turns them off.
+        'sample_definition_file_name': str(training_folder / 'samples.json'),
         # The app owns the learning rate: it is a per-dataset setting the UI
         # exposes and the ai-toolkit lane already honours. Left unset, this run
         # silently used the shipped preset's 0.0003 while the SAME dataset
@@ -454,6 +473,7 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
           dropout: float | None = None,
           ema: float | None = None,
           save_every: int | None = None,
+          save_every_unit: str = 'STEP',
           sample_every: int | None = None,
           sample_prompts: list | None = None) -> dict:
     """Write concepts.json + config.json under `training_folder` and spawn
@@ -484,17 +504,20 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
                               lr_scheduler=lr_scheduler, warmup_steps=warmup_steps,
                               min_snr_gamma=min_snr_gamma,
                               grad_accum=grad_accum, dropout=dropout, ema=ema,
-                              save_every=save_every, sample_every=sample_every,
+                              save_every=save_every, save_every_unit=save_every_unit,
+                              sample_every=sample_every,
                               sample_prompts=sample_prompts)
     concepts = build_concepts(trigger=trigger, dataset_folder=dataset_folder)
 
     concepts_path = training_folder_p / 'concepts.json'
     config_path = training_folder_p / 'config.json'
     concepts_path.write_text(json.dumps(concepts, indent=2), encoding='utf-8')
-    samples = build_samples(sample_prompts, resolution=resolution)
-    if samples:
-        (training_folder_p / 'samples.json').write_text(
-            json.dumps(samples, indent=2), encoding='utf-8')
+    # Written unconditionally: see build_job_config's note on why the config
+    # always names this file. Empty list = previews off, stated in the run's own
+    # folder rather than inherited from whatever the install happens to hold.
+    samples = build_samples(sample_prompts, resolution=resolution) if sample_every else []
+    (training_folder_p / 'samples.json').write_text(
+        json.dumps(samples, indent=2), encoding='utf-8')
     config_with_concepts = {**config, 'concept_file_name': str(concepts_path)}
     config_path.write_text(json.dumps(config_with_concepts, indent=2), encoding='utf-8')
 
@@ -764,14 +787,20 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
                       grad_accum=_s.get('grad_accum'),
                       dropout=_s.get('dropout'),
                       ema=_s.get('ema'),
-                      save_every=_s.get('save_every'),
+                      save_every=(_s.get('save_epochs') or _s.get('save_every')),
+                      save_every_unit=('EPOCH' if _s.get('save_epochs') else 'STEP'),
                       # RESOLVED, not raw: `_sample_every` falls back to the same
                       # 250 steps the ai-toolkit lane uses, and `_sample_prompts`
                       # to the kind's own defaults with the trigger injected. Read
                       # raw, both were None on every dataset whose panel had never
                       # been touched — which is every dataset — so the lane asked
                       # for no previews at all.
-                      sample_every=_sample_every(ds),
+                      # `sample_every` 0 means OFF — an explicit choice this lane
+                      # can express because it is the one that renders previews
+                      # with the training weights resident, and on a 24 GB card a
+                      # run at 1024 does not always have room for one.
+                      sample_every=(None if _s.get('sample_every') == 0
+                                    else _sample_every(ds)),
                       sample_prompts=_sample_prompts(ds, trigger))
 
     from . import checkpoint_registry
