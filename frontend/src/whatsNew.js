@@ -50,6 +50,18 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-29-promote-framings',
+    date: '2026-08-29',
+    title: 'Promote can now cut face, waist-up and full framings',
+    blurb: 'Promoting a Bank selection into a dataset can now emit three '
+      + 'framings per picture: the full frame as before, plus a waist-up and a '
+      + 'face close-up cut around the measured face box — the face fills at '
+      + 'least 60% of its picture, per the rule that makes face stills usable. '
+      + 'Pictures without a usable face still promote their full frame, and '
+      + 're-promoting the same rows never duplicates the crops.',
+    to: '/bank',
+  },
+  {
     id: '2026-08-29-crop-to-person',
     date: '2026-08-29',
     title: 'Crop to person — one button, the whole Bank',

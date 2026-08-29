@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import logging
 import math
 import os
@@ -91,6 +92,17 @@ BANK_MAX_FILES = 200_000
 THUMB_MAX_SIDE = 320
 _COMMIT_EVERY = 25          # scan DB flush cadence
 _PROMOTE_CHUNK = 20         # files per import_images call (bounded memory)
+# ── the crop framings of the promotion ──
+_FACE_BOX_BATCH = 32              # images per detector subprocess
+_FACE_BOX_TIMEOUT_BASE = 180      # + the model load, every slice (CPU can be slow)
+_FACE_BOX_TIMEOUT_PER = 30        # per image, on top of the base
+
+
+def _run_face_box_detector(python, script, payload_json: str, timeout: int):
+    """One face-box batch. A module-level seam so the promotion can be tested
+    with the subprocess replaced by a table of answers."""
+    return subprocess.run([python, script], input=payload_json,
+                          capture_output=True, text=True, timeout=timeout)
 _SQL_IN_CHUNK = 500         # SQLite bound-variable ceiling is 999
 # --- duplicate regrouping budgets (see rebuild_dup_groups) -------------------
 # Rows written between two commits. The whole regrouping used to be ONE
@@ -11452,11 +11464,32 @@ def _bank_promote_job(user_id, src_bank_id, dest_bank_id, ids):
     return run
 
 
-def start_promote(app, user_id, bank_id, ids, dataset_id):
+def start_promote(app, user_id, bank_id, ids, dataset_id, framings=None):
     """Copy a selection into a dataset through the normal import path
     (normalize + perceptual dedup vs the dataset). ``ids`` empty = every KEPT
     image not already on THIS dataset. Background job (a big promotion decodes
-    hundreds of files)."""
+    hundreds of files).
+
+    ``framings`` — the image-writing promotion can also EMIT FRAMINGS: beside
+    the full frame, a waist-up crop and a face close-up cut from the same
+    picture, each measured off a face box a detector pass gathers at promotion
+    time (the Bank stores face verdicts and clusters, never boxes). The crops
+    are new bytes — no Bank row of their own — so they re-import through the
+    dataset's perceptual dedup (a re-run of the same promotion re-finds its own
+    crops and skips them) and carry the source row's caption. The full frame
+    keeps the exact-bank-bytes transfer path untouched; absent framings means
+    exactly the behaviour this endpoint has always had."""
+    from . import person_crop as geometry
+    framings = tuple(framings or ('full',))
+    if not framings or (set(framings) - set(geometry.PROMOTION_FRAMINGS)):
+        raise ValueError('framings must be a non-empty subset of '
+                         f'{", ".join(sorted(geometry.PROMOTION_FRAMINGS))}')
+    crop_framings = tuple(f for f in framings if f != 'full')
+    if crop_framings and not (cfg.get('face_scoring.python') or '').strip():
+        raise ValueError('the waist-up and face framings need a face box, and the '
+                         'face boxes come from the face scoring interpreter — set '
+                         'face_scoring.python in Settings, or promote full frames '
+                         'only.')
     dataset_id = dataset_activity.normalize_dataset_id(dataset_id)
     ids = _normalize_promotion_ids(ids)
     activity_token = None
@@ -11490,7 +11523,8 @@ def start_promote(app, user_id, bank_id, ids, dataset_id):
             result = bank_jobs.start(
                 app, bank_id, 'promote',
                 _promote_job(
-                    user_id, bank_id, ids, dataset_id, activity_token),
+                    user_id, bank_id, ids, dataset_id, activity_token,
+                    framings=framings),
                 total=len(ids), reservation=reservation)
             if not bank_jobs.launched(reservation):
                 # Compatibility for inline test/integration runners that do not
@@ -11505,7 +11539,8 @@ def start_promote(app, user_id, bank_id, ids, dataset_id):
         raise
 
 
-def _promote_job(user_id, bank_id, ids, dataset_id, activity_token=None):
+def _promote_job(user_id, bank_id, ids, dataset_id, activity_token=None,
+                 framings=('full',)):
     def run(job):
         bank = db.session.get(ImageBank, bank_id)
         if not bank:
@@ -11547,6 +11582,8 @@ def _promote_job(user_id, bank_id, ids, dataset_id, activity_token=None):
         stats: dict = {}
         imported_ids = []
         provenance_changes = []
+        framing_counts: dict = {}
+        framing_skips: dict = {}
         cache_index = bank_transfer_metadata.load_runtime_cache_index(
             _score_cache_path(bank_id), _face_cache_path(bank_id),
             semantic_path=_semantic_cache_path(bank_id),
@@ -11599,6 +11636,49 @@ def _promote_job(user_id, bank_id, ids, dataset_id, activity_token=None):
             return
 
         try:
+            # ── the crop framings: locate faces ONCE for the whole selection ──
+            # The Bank stores face verdicts and clusters, never boxes; the boxes
+            # are gathered here, per run, on the exact bytes being promoted.
+            crop_framings = tuple(f for f in framings if f != 'full')
+            face_boxes = {}
+            if crop_framings:
+                from . import person_crop as geometry
+                face_python = (cfg.get('face_scoring.python') or '').strip()
+                face_script = str(cfg.BACKEND_DIR / 'infer' / 'face_box_infer.py')
+                face_models_root = (cfg.get('face_scoring.models_root') or '').strip() or None
+                bank_jobs.progress(job, detail='locating faces for the crop framings')
+                for c0 in range(0, len(rows), _FACE_BOX_BATCH):
+                    if bank_jobs.cancelled(job):
+                        abort('Promotion cancelled before import; nothing was changed.')
+                        return
+                    slice_rows = rows[c0:c0 + _FACE_BOX_BATCH]
+                    slice_paths = []
+                    for row in slice_rows:
+                        p = analysis_image_path(bank, row)
+                        if p:
+                            slice_paths.append((row.id, p))
+                    if not slice_paths:
+                        continue
+                    try:
+                        proc = _run_face_box_detector(
+                            face_python, face_script,
+                            json.dumps({'images': [p for _rid, p in slice_paths],
+                                        'models_root': face_models_root}),
+                            _FACE_BOX_TIMEOUT_BASE + _FACE_BOX_TIMEOUT_PER * len(slice_paths))
+                        payload = json.loads((proc.stdout or '').strip().splitlines()[-1])
+                        if not payload.get('ok'):
+                            raise RuntimeError(payload.get('error') or 'detector failed')
+                    except Exception as e:  # noqa: BLE001 — one refusal, whole abort
+                        abort(f'The face-box detector failed, so the waist-up and '
+                              f'face framings cannot be cut: {e}')
+                        return
+                    results = payload.get('results') or {}
+                    for rid, p in slice_paths:
+                        entry = results.get(p) or {}
+                        if entry.get('error') or not entry.get('n_faces'):
+                            continue      # no box here → full frame only, counted below
+                        face_boxes[rid] = entry
+
             for c0 in range(0, len(plans), _PROMOTE_CHUNK):
                 if bank_jobs.cancelled(job):
                     abort('Promotion cancelled — imported rows were rolled back.')
@@ -11716,6 +11796,69 @@ def _promote_job(user_id, bank_id, ids, dataset_id, activity_token=None):
                     abort('Could not import every selected image; imported rows '
                           'were rolled back.')
                     return
+
+                # ── the crop framings for THIS chunk ──
+                # The full frame above travelled as exact bank bytes; the crops
+                # are NEW bytes cut from those bytes around a measured face box,
+                # so they re-enter through the dataset's perceptual dedup (a
+                # re-run of the same promotion re-finds its own crops and skips
+                # them) and carry the source row's caption. A crop whose face
+                # box would not sit inside its window is refused rather than
+                # shipped loose — the operator's bar is a face at ≥ 60 % of the
+                # picture, and a crop named "face" that is mostly shoulder
+                # breaks it quietly.
+                if crop_framings:
+                    from . import person_crop as geometry
+                    from PIL import Image as _PIL
+                    variant_blobs, variant_caps, variant_origins = [], [], []
+                    variant_framings = []
+                    for (_row_id, _fp, _gen), row in zip(chunk_plans, chunk_rows):
+                        face = face_boxes.get(row.id)
+                        if not face:
+                            continue
+                        path = analysis_image_path(bank, row)
+                        try:
+                            payload = _read_safe_bank_source_bytes(
+                                path, label='bank promotion crop framing')
+                            im = _PIL.open(io.BytesIO(payload))
+                            im.load()
+                            w, h = im.size
+                        except (OSError, ValueError, MemoryError,
+                                Image.DecompressionBombError,
+                                Image.DecompressionBombWarning):
+                            framing_skips['unreadable'] = (
+                                framing_skips.get('unreadable', 0) + 1)
+                            continue
+                        for framing in crop_framings:
+                            window = (geometry.half_window(w, h, face)
+                                      if framing == 'half'
+                                      else geometry.face_window(w, h, face))
+                            if window is None:
+                                framing_skips['face_too_close_to_edge'] = (
+                                    framing_skips.get('face_too_close_to_edge', 0) + 1)
+                                continue
+                            cropped = im.crop(window)
+                            buf = io.BytesIO()
+                            cropped.save(buf, 'PNG')
+                            variant_blobs.append(buf.getvalue())
+                            variant_caps.append(row.caption)
+                            variant_origins.append(row.caption_origin)
+                            variant_framings.append(framing)
+                    if variant_blobs:
+                        new_var_ids, _bad_var = import_images(
+                            user_id, dataset_id, variant_blobs, dedupe=False,
+                            stats=stats, captions=variant_caps,
+                            caption_origins=variant_origins,
+                            _dataset_activity_token=activity_token)
+                        imported_ids.extend(new_var_ids)
+                        for fid, framing in zip(new_var_ids, variant_framings):
+                            drow = db.session.get(FaceDatasetImage, fid)
+                            if drow is not None:
+                                drow.framing = framing
+                        db.session.commit()
+                        for framing in variant_framings:
+                            framing_counts[framing] = framing_counts.get(framing, 0) + 1
+
                 bank_jobs.bump(job, len(chunk_rows))
                 dataset_activity.bump(activity_token, len(chunk_rows))
             # Final source-generation fence. It catches any synchronous Bank
@@ -11756,6 +11899,12 @@ def _promote_job(user_id, bank_id, ids, dataset_id, activity_token=None):
             detail += f', {already_present} already present'
         if small:
             detail += f', {small} under the recommended size'
+        if framing_counts:
+            detail += '; framings: ' + ', '.join(
+                f'{v} {k}' for k, v in sorted(framing_counts.items()))
+        if framing_skips:
+            detail += '; skipped: ' + ', '.join(
+                f'{v} {k}' for k, v in sorted(framing_skips.items()))
         bank_jobs.progress(job, detail=detail)
 
     def run_locked(job):

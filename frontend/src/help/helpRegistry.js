@@ -730,6 +730,8 @@ const TOPICS = [
       'clips', 'shot', 'shots', 'shot detection', 'scene detection', 'cut', 'cuts',
       'mp4', 'mov', 'mkv', 'webm', 'avi', 'movie', 'film',
       'crop to person', 'person crop', 'global crop', 'crop every image',
+      'promote framings', 'face stills', 'face 60%', 'waist-up crop',
+
       'largest person', 'grounding dino', 'person detector',
       'extract frames', 'promote frames', 'person requirement', 'frame must show a person',
       'reference person', 'sharpness tolerance', 'face sharpness', 'blurry face',

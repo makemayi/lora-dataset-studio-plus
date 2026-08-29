@@ -4,6 +4,7 @@ import { apiFetch, postJson } from '../../api/fetchClient'
 import { useToast } from '../common/Toast'
 import {
   canStartPromote, promoteButtonLabel, promoteSummary, weightNotice,
+  PROMOTE_FRAMING_OPTIONS,
 } from './bankPromote.js'
 
 /** ⬆ Promote: copy the selection somewhere it can be worked on. TWO
@@ -28,6 +29,10 @@ export default function PromoteDialog({ bankId, selectedIds, onClose, onStarted 
   const [promotable, setPromotable] = useState(null)
   const [size, setSize] = useState(null)
   const [busy, setBusy] = useState(false)
+  // Which framings the dataset promotion emits. Full frame is the native door;
+  // the two crops are cut around a face box a detector gathers at promotion
+  // time, so they are dataset-destination-only and multiply the image count.
+  const [framings, setFramings] = useState(['full'])
   const useSelection = selectedIds.length > 0
 
   useEffect(() => {
@@ -79,6 +84,7 @@ export default function PromoteDialog({ bankId, selectedIds, onClose, onStarted 
         await postJson(`/api/bank/${bankId}/promote`, {
           dataset_id: Number(datasetId),
           image_ids: useSelection ? selectedIds : [],
+          framings,
         })
         toast.success('Promotion started — follow the progress bar.')
       }
@@ -90,6 +96,8 @@ export default function PromoteDialog({ bankId, selectedIds, onClose, onStarted 
   }
 
   const toBank = destination === 'bank'
+  const toggleFraming = (id) => setFramings((prev) => (
+    prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
   const weight = weightNotice({ destination, size })
   // 400 px is a real viewport here (the app gets consulted on a phone): the
   // destination pair stacks below sm, and the dialog scrolls rather than
@@ -129,6 +137,29 @@ export default function PromoteDialog({ bankId, selectedIds, onClose, onStarted 
           <p className="rounded-md bg-surface-raised px-3 py-2 text-xs text-content-muted">
             💾 {weight}
           </p>
+        )}
+
+        {!toBank && (
+          <div className="rounded-md bg-surface-raised px-3 py-2">
+            <span className="block text-sm font-medium text-content">Framings</span>
+            <p className="mt-1 text-xs text-content-muted">
+              Each framing is cut from its own measured face box and imports as
+              its own image — tick three and a 200-image selection can become
+              up to 600. Pictures without a usable face still get their full
+              frame; face boxes come from the face scoring interpreter.
+            </p>
+            <div className="mt-2 flex flex-col gap-1.5">
+              {PROMOTE_FRAMING_OPTIONS.map((f) => (
+                <label key={f.id} className="flex items-center gap-2 text-sm text-content">
+                  <input type="checkbox" checked={f.id === 'full' || framings.includes(f.id)}
+                    disabled={f.id === 'full'}
+                    onChange={() => toggleFraming(f.id)} className="accent-primary" />
+                  {f.label}
+                  <span className="text-xs text-content-subtle">— {f.hint}</span>
+                </label>
+              ))}
+            </div>
+          </div>
         )}
 
         {toBank ? (

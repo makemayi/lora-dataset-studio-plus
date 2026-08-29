@@ -16,6 +16,23 @@
 
 export const PROMOTE_DESTINATIONS = ['dataset', 'bank']
 
+/** The framings a DATASET promotion can emit beside the full frame. The two
+ *  crops are cut around a face box measured at promotion time, so a picture
+ *  without a usable face still gets its full frame and nothing padded to a
+ *  number. Full frame is always emitted and cannot be unticked — it is the
+ *  picture the bank is keeping, and the only framing every image has. */
+export const PROMOTE_FRAMING_OPTIONS = [
+  { id: 'full', label: 'Full frame', hint: 'the picture as kept' },
+  { id: 'half', label: 'Waist-up', hint: 'head to waist, cut around the face' },
+  { id: 'face', label: 'Face close-up', hint: 'face fills at least 60% of the picture' },
+]
+
+/** Guard for the framings checkboxes: full frame is always emitted, so the
+ *  only way to end up with nothing is to untick it while the crops are off. */
+export function promoteFramingsValid(framings) {
+  return Array.isArray(framings) && framings.length > 0
+}
+
 const UNITS = ['B', 'KB', 'MB', 'GB', 'TB']
 
 /** Human weight for a byte count. null/undefined/negative → null, so callers

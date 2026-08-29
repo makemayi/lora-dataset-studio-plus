@@ -793,8 +793,14 @@ def bank_promote(bank_id):
         dataset_id = dataset_activity.normalize_dataset_id(data.get('dataset_id'))
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
+    framings = data.get('framings') or ['full']
+    if (not isinstance(framings, list) or not framings
+            or not all(isinstance(f, str) for f in framings)
+            or set(framings) - {'full', 'half', 'face'}):
+        return jsonify({'error': 'framings must be a non-empty list drawn from '
+                                 'full, half, face'}), 400
     return _start(banks.start_promote, _app(), LOCAL_USER, bank_id,
-                  data.get('image_ids'), dataset_id)
+                  data.get('image_ids'), dataset_id, framings=framings)
 
 
 @bp.post('/bank/<int:bank_id>/promote-to-bank')
