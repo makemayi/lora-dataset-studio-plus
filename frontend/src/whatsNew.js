@@ -50,6 +50,17 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-29-nav-says-why-a-page-is-unavailable',
+    date: '2026-08-29',
+    title: 'Pages no longer vanish from the menu without saying why',
+    blurb: 'Close ComfyUI to free VRAM for a training run and Runs, Canvas and '
+      + 'Test Studio silently left the menu — nothing said the app had removed '
+      + 'them or how to get them back. They now stay put, greyed, each carrying '
+      + 'the reason and the one setting that fixes it. An install with only '
+      + 'OneTrainer configured also keeps Runs and Canvas now: it can train, and '
+      + 'those are the two pages that show a run.',
+  },
+  {
     id: '2026-08-29-studio-finds-your-krea-models',
     date: '2026-08-29',
     title: 'Test Studio finds the Krea 2 models you already have',

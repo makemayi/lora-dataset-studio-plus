@@ -1638,6 +1638,19 @@ def autodetect() -> dict:
     }
 
 
+def _onetrainer_configured() -> bool:
+    """Is the OTHER local trainer usable? Same shape as the ai-toolkit half of
+    `training_visible`: a folder set and its venv python present, no probing."""
+    try:
+        from .services import onetrainer_service as ots
+        return bool(ots.is_installed())
+    except Exception:                                    # noqa: BLE001 — advisory
+        # Advisory only: this decides whether a NAV ITEM is enabled. An
+        # unreadable install must never take the probe down with it, and this
+        # module keeps no logger of its own.
+        return False
+
+
 def probe(force=False) -> dict:
     global _cache, _cache_ts
     now = time.time()
@@ -2001,7 +2014,13 @@ def probe(force=False) -> dict:
         # could not explain why it was being asked to reinstall. The banner now
         # quotes this string's list instead of keeping its own copy.
         'scrape_deps_detail': scrape_deps['detail'],
-        'training_visible': aitoolkit['ok'] or bool(cfg.secret('VAST_API_KEY')),
+        # ai-toolkit is not the only local trainer any more. An install with
+        # ONLY OneTrainer configured can train, and this flag hid the Runs hub
+        # and the lineage canvas from it — the two pages that exist to show a
+        # run. (It is deliberately a lightweight is-it-configured check, like
+        # the ai-toolkit half: no probing, no import.)
+        'training_visible': (aitoolkit['ok'] or _onetrainer_configured()
+                             or bool(cfg.secret('VAST_API_KEY'))),
         'studio_visible': comfy['ok'],
     }
 

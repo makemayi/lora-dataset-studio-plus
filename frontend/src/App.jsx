@@ -53,6 +53,41 @@ const navItemClass = ({ isActive }) =>
     isActive ? 'bg-primary text-white' : 'text-content-muted hover:text-content hover:bg-surface'
   }`
 
+/* A destination this install cannot use yet is DISABLED, never absent.
+   Hiding it is what produced "LoRA Studio — why can't I see this page any
+   more?": ComfyUI was closed to free VRAM for a training run, and Runs, Canvas
+   and Test Studio all silently left the bar. Nothing on screen said the app had
+   removed them, which of the three had gone, or how to get them back — the only
+   way to find out was to read capabilities.py. A greyed item with the reason on
+   it costs one row and answers all three.
+
+   Both variants stay MOUNTED and are swapped by class, not by a ternary that
+   unmounts one: Chrome auto-translate rewrites text nodes into its own wrappers
+   and React then throws removeChild on the swap (it took out Settings on
+   2026-08-09). `hidden` as an ATTRIBUTE would not work here — these carry
+   `inline-flex`, which wins over it — so the utility class is what hides. */
+export function GatedNavItem({ to, available, hint, onClick, children }) {
+  return (
+    <>
+      <span aria-disabled="true" title={hint}
+        className={available ? 'hidden' : `${NAV_ITEM_BASE} text-content-subtle cursor-not-allowed`}>
+        {children}
+      </span>
+      <NavLink to={to} onClick={onClick}
+        className={available ? navItemClass : () => 'hidden'}>
+        {children}
+      </NavLink>
+    </>
+  )
+}
+
+// Why a workspace is unavailable, and the ONE place that fixes it. Written as
+// the sentence the user needs, not as the flag's name.
+const TRAINER_HINT = 'No trainer configured yet — set the ai-toolkit or OneTrainer '
+  + 'folder in Settings ▸ Local tools, or add a vast.ai key for cloud training.'
+const COMFY_HINT = 'ComfyUI is not reachable — start it, or set its folder in '
+  + 'Settings ▸ ComfyUI. This page needs it to render anything.'
+
 // Full-width variant for links that live inside a HeaderMenu dropdown.
 const MENU_ITEM_BASE =
   'block w-full text-left px-3 py-1.5 rounded-lg text-sm font-medium no-underline transition-colors'
@@ -206,8 +241,9 @@ export function NavBar() {
       </NavLink>
       {/* Unified runs hub (cloud + local history) — useful as soon as ANY
           training path exists, not just the cloud one. */}
-      {(caps.cloud_training || caps.training_visible) && (
-        <NavLink to="/cloud" className={navItemClass} onClick={() => setOpen(false)}>
+      <GatedNavItem to="/cloud" hint={TRAINER_HINT}
+        available={Boolean(caps.cloud_training || caps.training_visible)}
+        onClick={() => setOpen(false)}>
           <RunsIcon /> Runs
           {activity.running && (
             /* Presence IS the message, so it must not be colour-only: the
@@ -218,14 +254,14 @@ export function NavBar() {
               <span aria-hidden className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
             </span>
           )}
-        </NavLink>
-      )}
+      </GatedNavItem>
       {/* Canvas — the whole training history on one board. It lives next to
           Runs because it answers the same question from the other end: Runs
           lists what happened, the canvas shows how the runs descend from each
           other, across every dataset at once. */}
-      {(caps.cloud_training || caps.training_visible) && (
-        <NavLink to="/canvas" className={navItemClass} onClick={() => setOpen(false)}>
+      <GatedNavItem to="/canvas" hint={TRAINER_HINT}
+        available={Boolean(caps.cloud_training || caps.training_visible)}
+        onClick={() => setOpen(false)}>
           <CanvasIcon /> Canvas
           {/* The Beta chip marks the newest surface, not the oldest: the Bank
               has been in daily use for weeks, the canvas ships today.
@@ -236,8 +272,7 @@ export function NavBar() {
               is where this app is actually browsed, and a "beta" warning that
               disappears on the reader's own screen warns nobody. */}
           <span className="px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[0.5625rem] font-semibold uppercase tracking-wide leading-none md:hidden lg:inline">Beta</span>
-        </NavLink>
-      )}
+      </GatedNavItem>
       {/* Task Center — every generation/training/vision job in one live list.
           Always visible: it is useful the moment ANY job exists, and its badge
           is how a failed run finds you from any other page. */}
@@ -245,11 +280,10 @@ export function NavBar() {
         <TasksIcon /> Tasks
         <TaskNavBadge />
       </NavLink>
-      {caps.studio_visible && (
-        <NavLink to="/studio" className={navItemClass} onClick={() => setOpen(false)}>
-          <StudioIcon /> Test Studio
-        </NavLink>
-      )}
+      <GatedNavItem to="/studio" hint={COMFY_HINT}
+        available={Boolean(caps.studio_visible)} onClick={() => setOpen(false)}>
+        <StudioIcon /> Test Studio
+      </GatedNavItem>
     </>
   )
 
