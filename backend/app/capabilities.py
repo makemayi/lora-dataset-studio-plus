@@ -257,6 +257,37 @@ def comfyui_down_message(status, waited) -> str:
             'ComfyUI, or correct the ComfyUI API URL in Settings ▸ Local tools.')
 
 
+# Liveness is asked far more often than the inventory around it, and it must be
+# CHEAP and FRESH: the full `probe()` costs seconds (it lists models and asks
+# /object_info) and is cached for 30 s, so a menu that rode on it could be wrong
+# about a running ComfyUI for half a minute. This answer costs one TCP connect
+# plus a 37-byte GET, and is cached only long enough to absorb a burst of polls.
+_ALIVE_TTL = 3.0
+_alive_cache = {'at': 0.0, 'value': None}
+
+
+def comfyui_alive(force=False) -> bool:
+    """Is ComfyUI answering RIGHT NOW? One shared answer for every surface.
+
+    Delegates to `comfyui_service.check_connection`, which is the version of this
+    check that already learned the lessons: a TCP connect first (so "nothing is
+    listening" is instant and never mistaken for slowness), `/prompt` before
+    `/history`, and one retry — a single slow answer from a busy ComfyUI is not
+    an outage.
+    """
+    now = time.time()
+    cached = _alive_cache['value']
+    if not force and cached is not None and (now - _alive_cache['at']) < _ALIVE_TTL:
+        return cached
+    try:
+        from .services.comfyui_service import comfyui_service
+        alive = bool(comfyui_service.check_connection())
+    except Exception:                                    # noqa: BLE001
+        alive = False
+    _alive_cache['at'], _alive_cache['value'] = now, alive
+    return alive
+
+
 def probe_comfyui() -> dict:
     """{ok, detail, status, hint}. `status` is 'ok' / 'slow' / 'unreachable' /
     'unconfigured' — the two failure modes are published SEPARATELY so every
@@ -285,10 +316,16 @@ def probe_comfyui() -> dict:
                 'hint': 'Set the ComfyUI API URL in Settings ▸ Local tools.'}
     reason = {}
     ok = _http_ok(f'{api_url}/prompt', reason=reason)
+    if not ok:
+        # Before publishing "ComfyUI is not there", spend the retrying check that
+        # tells a busy server from an absent one. `_http_ok` is a single 3 s shot
+        # and it is the seam the test suite patches, so it stays the fast path —
+        # but it must not be the last word on a running ComfyUI.
+        ok = comfyui_alive(force=True)
     if not ok and reason.get('why') != 'timeout':
-        # Not "slow" but "no answer": either ComfyUI is really down, or this
-        # build predates /prompt. The bounded history call settles it — and a
-        # server that is down fails it the same way, so nothing is lost.
+        # Either ComfyUI is really down, or this build predates /prompt. The
+        # BOUNDED history call settles it (unbounded is what made this check
+        # unreliable in the first place).
         reason = {}
         ok = _http_ok(f'{api_url}/history?max_items=1', reason=reason)
     if ok:

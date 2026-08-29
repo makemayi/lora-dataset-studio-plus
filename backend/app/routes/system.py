@@ -192,6 +192,22 @@ def _recovery_snapshot():
     }
 
 
+@bp.get('/comfyui-alive')
+def comfyui_alive_state():
+    """Is ComfyUI up? The CHEAP question, answered on its own.
+
+    The header used to read this off /api/capabilities, which also lists models
+    and asks /object_info — MEASURED at 37 s cold on a real install, and cached
+    for 30 s afterwards. So a workspace could sit greyed out for half a minute
+    on a machine where ComfyUI was running the whole time. This costs a TCP
+    connect plus a 37-byte GET and is cached for seconds, so the menu can be
+    right immediately and stay right.
+    """
+    from .. import capabilities, config as cfg
+    return jsonify({'alive': bool(capabilities.comfyui_alive()),
+                    'url': (cfg.get('comfyui.api_url') or '')})
+
+
 @bp.get('/comfyui-recovery')
 def comfyui_recovery_state():
     """Poll target for the app-wide banner.

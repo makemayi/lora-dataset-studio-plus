@@ -23,6 +23,7 @@ import CanvasPage from './pages/CanvasPage'
 import TasksPage from './pages/TasksPage'
 import TaskNavBadge from './components/tasks/TaskNavBadge'
 import { recommendedMet } from './hooks/useSetupSteps'
+import { useComfyuiAlive } from './hooks/useComfyuiAlive'
 import { HelpModeProvider, useHelpMode, TipHost } from './help/HelpMode'
 import HeaderMenu from './components/common/HeaderMenu'
 import {
@@ -200,6 +201,7 @@ export function NavBar() {
   // the whole time, and lighting the Setup dot as if the app were unconfigured.
   // An unknown is not a no.
   const { caps, loading: capsUnknown } = useCapabilities()
+  const comfyuiAlive = useComfyuiAlive()
   // 🏋️ Live indicator on Runs: a training can hold the GPU for hours (local) or
   // bill by the minute (cloud), and from any other page nothing said so.
   const activity = useTrainingActivity()
@@ -287,8 +289,12 @@ export function NavBar() {
         <TasksIcon /> Tasks
         <TaskNavBadge />
       </NavLink>
+      {/* The one gate that does NOT ride on `caps`: liveness has its own cheap
+          poll, so this item is right within milliseconds of ComfyUI starting or
+          stopping instead of up to 30 s later (the capabilities cache) — and it
+          never greys out on the placeholder. */}
       <GatedNavItem to="/studio" hint={COMFY_HINT}
-        available={capsUnknown || Boolean(caps.studio_visible)}
+        available={comfyuiAlive !== false}
         onClick={() => setOpen(false)}>
         <StudioIcon /> Test Studio
       </GatedNavItem>

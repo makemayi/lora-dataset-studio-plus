@@ -50,6 +50,18 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-29-comfyui-liveness-is-its-own-question',
+    date: '2026-08-29',
+    title: 'A running ComfyUI is recognised in milliseconds',
+    blurb: 'Test Studio could tell you to go and configure ComfyUI while '
+      + 'ComfyUI was busy rendering your test: the page read that answer off '
+      + 'the big capability scan, which lists models, takes tens of seconds on '
+      + 'a first load and is cached for half a minute. Liveness is now its own '
+      + 'question — one tiny call, asked directly, refreshed on its own — so the '
+      + 'page and the menu follow ComfyUI starting or stopping almost at once.',
+    to: '/studio',
+  },
+  {
     id: '2026-08-29-comfyui-liveness-probe-cost',
     date: '2026-08-29',
     title: 'The app stops claiming ComfyUI is missing while it is rendering',

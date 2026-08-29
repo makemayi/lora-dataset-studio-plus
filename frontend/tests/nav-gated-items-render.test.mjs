@@ -67,8 +67,9 @@ test('an unknown capability is not treated as a missing one', async () => {
   const { readFileSync } = await import('node:fs')
   const src = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
   assert.match(src, /const \{ caps, loading: capsUnknown \} = useCapabilities\(\)/)
-  // Every gated item, and the Setup dot, must read the unknown as "not yet".
-  assert.equal((src.match(/available=\{capsUnknown \|\| Boolean\(/g) || []).length, 3)
+  // The two trainer-gated items read the unknown as "not yet". (Test Studio is
+  // gated on the cheap liveness poll instead — see comfyui-alive-gate.test.mjs.)
+  assert.equal((src.match(/available=\{capsUnknown \|\| Boolean\(/g) || []).length, 2)
   assert.match(src, /const setupNeedsAttention = !capsUnknown && !recommendedMet\(caps\)/)
   assert.doesNotMatch(src, /available=\{Boolean\(caps\./,
     'no gated item may read the placeholder as an answer')

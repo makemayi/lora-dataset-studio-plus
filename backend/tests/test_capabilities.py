@@ -1372,3 +1372,41 @@ def test_a_slow_prompt_is_slow_not_a_second_probe(app, monkeypatch):
         out = caps.probe_comfyui()
     assert out['status'] == 'slow' and out['ok'] is False
     assert asked == ['http://127.0.0.1:8188/prompt']
+
+
+def test_comfyui_alive_is_one_cheap_shared_answer(app, monkeypatch):
+    """Liveness is asked far more often than the inventory around it. It must be
+    cheap (a TCP connect + a 37-byte GET), shared, and fresh — the full probe()
+    costs seconds and is cached 30 s, which is how a menu stayed wrong about a
+    running ComfyUI for half a minute."""
+    import time as _t
+    from app import capabilities as caps
+    from app.services import comfyui_service as svc
+    calls = []
+    monkeypatch.setattr(svc.comfyui_service, 'check_connection',
+                        lambda: (calls.append(1), True)[1])
+    caps._alive_cache['at'], caps._alive_cache['value'] = 0.0, None
+    with app.app_context():
+        assert caps.comfyui_alive() is True
+        assert caps.comfyui_alive() is True and len(calls) == 1, 'the burst is cached'
+        assert caps.comfyui_alive(force=True) is True and len(calls) == 2
+        # …and the cache is short, not a 30 s one.
+        assert caps._ALIVE_TTL <= 5
+        caps._alive_cache['at'] = _t.time() - (caps._ALIVE_TTL + 1)
+        assert caps.comfyui_alive() is True and len(calls) == 3
+
+
+def test_a_running_comfyui_is_never_published_as_absent(app, monkeypatch):
+    """The single 3 s `_http_ok` shot is the fast path, not the last word: the
+    retrying check (TCP connect, /prompt, one retry) decides before this probe
+    tells the app that ComfyUI is not there."""
+    from app import capabilities as caps
+    monkeypatch.setattr(caps, '_http_ok',
+                        lambda url, timeout=3, reason=None, **kw: False)
+    monkeypatch.setattr(caps, 'comfyui_alive', lambda force=False: True)
+    monkeypatch.setattr(caps.cfg, 'get',
+                        lambda key, *a: 'http://127.0.0.1:8188'
+                        if key == 'comfyui.api_url' else None)
+    with app.app_context():
+        out = caps.probe_comfyui()
+    assert out['ok'] is True and out['status'] == 'ok'
