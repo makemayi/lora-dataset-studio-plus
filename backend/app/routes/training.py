@@ -560,8 +560,11 @@ def dataset_train_progress(dataset_id):
     """Live run view for the TrainingPanel: parsed log progress (step/total/loss/
     speed/eta + downsampled loss curve) and the sample previews ai-toolkit writes.
     Answers 200 with log_exists=false before the log shows up — pollable early."""
+    # Either lane may own the run being watched, so an install that has only
+    # OneTrainer must not be refused here — it was, which is one of the two
+    # reasons that lane never showed progress.
     gate = _require_aitoolkit()
-    if gate:
+    if gate and _require_onetrainer():
         return gate
     if not svc.get_dataset(LOCAL_USER, dataset_id):
         return jsonify({'error': 'not found'}), 404

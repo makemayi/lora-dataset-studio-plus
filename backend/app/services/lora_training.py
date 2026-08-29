@@ -10067,6 +10067,21 @@ def training_progress(user_id, dataset_id, base_model=_PERSISTED, family=None,
     ds = fds.get_dataset(user_id, dataset_id)
     if not ds:
         raise ValueError('dataset not found')
+    # The OTHER local trainer keeps its own run folder, its own log file and its
+    # own two-bar vocabulary, so it answers for itself. Without this the panel
+    # read ai-toolkit's `training.log` for a OneTrainer run, found no such file
+    # and showed "Starting up..." for the whole run — the lane shipped with no
+    # live progress at all. Which lane a dataset is on is not a stored dataset
+    # setting (it is chosen per launch), so the launch RECORD is what says so.
+    from . import checkpoint_registry as _cr
+    try:
+        _rec = _cr.latest_record(dataset_id, family or (ds.train_type or 'zimage'))
+    except Exception:                                    # noqa: BLE001 — advisory
+        logger.exception('training_progress: could not read the launch record')
+        _rec = None
+    if _rec is not None and (getattr(_rec, 'trainer', None) or 'ai_toolkit') == 'onetrainer':
+        from . import onetrainer_service as _ots
+        return _ots.progress(user_id, dataset_id)
     cur_id = queue_manager._get_system_state('training_dataset_id', None)
     active = (bool(queue_manager._get_system_state('training_in_progress', False))
               and cur_id is not None and int(cur_id) == int(dataset_id)

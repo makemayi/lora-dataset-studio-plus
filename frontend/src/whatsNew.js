@@ -50,6 +50,17 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-29-onetrainer-live-progress',
+    date: '2026-08-29',
+    title: 'A OneTrainer run finally shows its progress',
+    blurb: 'Training on the OneTrainer lane showed "Starting up…" from the '
+      + 'first second to the last — the panel was reading ai-toolkit\u2019s log '
+      + 'file, which a OneTrainer run never writes. It now reads OneTrainer\u2019s '
+      + 'own: steps and percent, the epoch you are on, loss and its curve, '
+      + 'speed, and the estimated time left.',
+    to: '/cloud',
+  },
+  {
     id: '2026-08-29-onetrainer-krea2-512-batch-4',
     date: '2026-08-29',
     title: 'OneTrainer trains Krea 2 at 512 and batch 4 by default',

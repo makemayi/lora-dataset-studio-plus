@@ -19,6 +19,7 @@ import json
 import logging
 import math
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -714,3 +715,157 @@ def _watch_onetrainer(app, launched, dataset_id, user_id, record_id) -> None:
                                             ttl_seconds=1)
     except Exception:
         pass
+
+
+# --- live progress ------------------------------------------------------------
+#
+# WHY THIS LANE NEEDS ITS OWN PARSER, rather than reusing
+# `lora_training._parse_training_log`:
+#
+#   . that parser takes the run's CONFIGURED step count and accepts ONLY a tqdm
+#     bar counting to it - the rule that stopped a quantization bar ("28/28")
+#     being shown as training progress;
+#   . OneTrainer prints TWO bars and neither counts to that number. `epoch:`
+#     counts epochs (0/156) and `step:` restarts every epoch (13/22). Fed to the
+#     step parser they are correctly rejected, which is why this lane showed
+#     "Starting up..." from the first second of a run to the last.
+#
+# So the two bars are read as the pair they are: the global step is
+# `epoch * steps_per_epoch + step`, and the total is `epochs * steps_per_epoch`.
+# `steps_per_epoch` comes from the step bar itself rather than from
+# images/batch - the trainer's own count already accounts for a dropped last
+# batch (90 images at batch 4 prints 22, not 22.5).
+#
+# The log is opened 'w' at every launch, so a tail is always THIS run.
+_OT_EPOCH_RE = re.compile(r'\bepoch:\s*\d+%\|[^|]*\|\s*(\d+)/(\d+)\s*\[([^<\]]*)<([^,\]]*)')
+_OT_STEP_RE = re.compile(r'\bstep:\s*\d+%\|[^|]*\|\s*(\d+)/(\d+)\s*\[([^<\]]*)<([^,\]]*),\s*([^,\]]+)')
+_OT_LOSS_RE = re.compile(r'\bloss=([0-9.eE+-]+)')
+_OT_LOG_MAX_BYTES = 4 * 1024 * 1024
+_OT_CURVE_MAX_POINTS = 200
+
+
+def _ot_hms(seconds: float) -> str:
+    """tqdm's own remaining-time format, so a derived ETA reads like a printed
+    one: H:MM:SS above an hour, MM:SS below it."""
+    seconds = max(0, int(seconds))
+    h, rem = divmod(seconds, 3600)
+    m, sec = divmod(rem, 60)
+    return f'{h}:{m:02d}:{sec:02d}' if h else f'{m:02d}:{sec:02d}'
+
+
+def parse_progress(text: str, expected_epochs: int | None = None) -> dict:
+    """Pure: the two OneTrainer bars -> the same shape the panel already reads
+    from the ai-toolkit lane ({step, total, loss, speed, eta, loss_curve}) plus
+    the epoch pair it can show alongside.
+
+    `expected_epochs` is the config's own `epochs`. Given, an epoch bar counting
+    to anything else is not this run's and is ignored - the same defence the
+    step parser has, expressed in this lane's vocabulary."""
+    out = {'step': None, 'total': None, 'loss': None, 'speed': None, 'eta': None,
+           'loss_curve': [], 'epoch': None, 'epochs': None}
+    epoch = epochs = None
+    epoch_eta = None
+    step = steps_per_epoch = None
+    curve = []
+    for seg in re.split(r'[\r\n]+', text or ''):
+        em = None
+        for em in _OT_EPOCH_RE.finditer(seg):
+            pass
+        if em:
+            cur, tot = int(em.group(1)), int(em.group(2))
+            if tot > 0 and cur <= tot and not (expected_epochs and tot != expected_epochs):
+                epoch, epochs = cur, tot
+                remaining = (em.group(4) or '').strip()
+                # tqdm prints '?' until it has timed one epoch.
+                epoch_eta = remaining if remaining and '?' not in remaining else None
+        sm = None
+        for sm in _OT_STEP_RE.finditer(seg):
+            pass
+        if not sm:
+            continue
+        cur, tot = int(sm.group(1)), int(sm.group(2))
+        if tot <= 0 or cur > tot:
+            continue
+        step, steps_per_epoch = cur, tot
+        out['speed'] = (sm.group(5) or '').strip() or None
+        lm = _OT_LOSS_RE.search(seg)
+        if lm:
+            try:
+                out['loss'] = float(lm.group(1))
+            except ValueError:
+                pass
+            else:
+                pos = (epoch or 0) * tot + cur
+                if not curve or curve[-1][0] != pos:
+                    curve.append([pos, out['loss']])
+    if step is not None and steps_per_epoch:
+        out['step'] = (epoch or 0) * steps_per_epoch + step
+        if epochs:
+            out['total'] = epochs * steps_per_epoch
+    out['epoch'], out['epochs'] = epoch, epochs
+    # The epoch bar's own remaining time is the whole run's, so it is preferred
+    # over anything derived. Early on it is '?' - then the step rate answers the
+    # same question, and saying nothing until tqdm has timed a full epoch would
+    # be a blank ETA for the first several minutes of every run.
+    out['eta'] = epoch_eta
+    if not out['eta'] and out['speed'] and out['step'] and out['total']:
+        m = re.match(r'([0-9.]+)\s*(s/it|it/s)', out['speed'])
+        if m:
+            try:
+                v = float(m.group(1))
+            except ValueError:
+                v = 0.0
+            per_step = v if m.group(2) == 's/it' else (1.0 / v if v else 0.0)
+            if per_step:
+                out['eta'] = _ot_hms((out['total'] - out['step']) * per_step)
+    if len(curve) > _OT_CURVE_MAX_POINTS:
+        stride = len(curve) / _OT_CURVE_MAX_POINTS
+        curve = [curve[int(i * stride)] for i in range(_OT_CURVE_MAX_POINTS - 1)] + [curve[-1]]
+    out['loss_curve'] = curve
+    return out
+
+
+def _configured_epochs(training_folder: Path) -> int | None:
+    try:
+        with open(training_folder / 'config.json', encoding='utf-8') as fh:
+            v = json.load(fh).get('epochs')
+        return int(v) if v else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def progress(user_id, dataset_id) -> dict:
+    """The live view of a OneTrainer run, in the shape the TrainingPanel already
+    renders. Never raises on a missing/unreadable log: a run that has not
+    written yet is the normal first seconds of every launch."""
+    from .face_dataset_service import get_dataset
+    from ..job_queue import queue_manager
+    ds = get_dataset(user_id, dataset_id)
+    if not ds:
+        raise ValueError('dataset not found')
+    cur_id = queue_manager._get_system_state('training_dataset_id', None)
+    active = (bool(queue_manager._get_system_state('training_in_progress', False))
+              and cur_id is not None and int(cur_id) == int(dataset_id))
+    training_folder = _training_folder_for(ds)
+    log_path = training_folder / 'onetrainer.log'
+    parsed = {'step': None, 'total': None, 'loss': None, 'speed': None,
+              'eta': None, 'loss_curve': [], 'epoch': None, 'epochs': None}
+    log_exists = log_path.is_file()
+    if log_exists:
+        try:
+            size = log_path.stat().st_size
+            with open(log_path, encoding='utf-8', errors='replace') as fh:
+                if size > _OT_LOG_MAX_BYTES:
+                    fh.seek(size - _OT_LOG_MAX_BYTES)
+                text = fh.read()
+            parsed = parse_progress(
+                text, expected_epochs=_configured_epochs(training_folder))
+        except OSError:
+            log_exists = False
+    return {'active': active, 'log_exists': log_exists, 'trainer': 'onetrainer',
+            # This lane writes no sample previews and pulls nothing from Hugging
+            # Face at run time (the base is resolved from the shared cache, see
+            # launch), so these are stated as empty rather than left out - the
+            # panel reads them on every payload.
+            'samples': [], 'download': None, 'cache_pending': None,
+            **parsed}

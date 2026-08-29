@@ -145,6 +145,19 @@ export default function TrainingProgress({ datasetId, base, trainType, variant,
     return () => { alive = false; clearTimeout(timer.current); };
   }, [datasetId, base, trainType, variant, cloud]);
 
+  return (
+    <ProgressView prog={prog} cloud={cloud} showLaunch={showLaunch}
+      datasetId={datasetId} base={base} trainType={trainType} variant={variant} />
+  );
+}
+
+
+/* The RENDER, separated from the poll on purpose: `prog` arrives from an effect,
+   and effects do not run in `renderToStaticMarkup` — so while the two lived in
+   one component, no test could mount any state but "nothing fetched yet". Every
+   branch below is now reachable from a test by passing `prog`. */
+export function ProgressView({ prog, cloud = false, showLaunch = true,
+                               datasetId, base, trainType, variant }) {
   // The export downgraded a requested masked run to UNMASKED (rembg missing or the
   // mask pass crashed). Warn loudly — a multi-hour run training the wrong way is
   // exactly the kind of silent failure worth surfacing.
@@ -171,8 +184,18 @@ export default function TrainingProgress({ datasetId, base, trainType, variant,
             ☁ {prog.phase}{prog.phase_detail ? ` — ${prog.phase_detail}` : ''}
           </p>
         ) : (!cloud || prog?.active !== false) ? (
+          /* Both spelt out and flipped with `hidden`: swapping the text with a
+             ternary is what Chrome auto-translate turns into a removeChild
+             crash. The trainer is named because "the log appears once
+             ai-toolkit begins writing" was shown for the WHOLE of every
+             OneTrainer run — a sentence about the wrong program. */
           <p className="m-0 text-content-subtle text-[0.625rem]">
-            Starting up… (the log appears once ai-toolkit begins writing)
+            <span hidden={prog?.trainer === 'onetrainer'}>
+              Starting up… (the log appears once ai-toolkit begins writing)
+            </span>
+            <span hidden={prog?.trainer !== 'onetrainer'}>
+              Starting up… (the log appears once OneTrainer begins writing)
+            </span>
           </p>
         ) : null}
       </div>
@@ -192,6 +215,14 @@ export default function TrainingProgress({ datasetId, base, trainType, variant,
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2 text-[0.6875rem] text-content-muted flex-wrap">
             <span className="text-content font-semibold tabular-nums">{prog.step} / {prog.total} steps ({pct}%)</span>
+            {/* OneTrainer trains by EPOCH and counts from 0 while inside the
+                first one, so its own bar reads 0/156 during epoch one. Shown
+                +1 because "epoch 0 of 156" reads as "not started". */}
+            {prog.epochs != null && (
+              <span className="tabular-nums">
+                epoch {Math.min(prog.epochs, (prog.epoch || 0) + 1)} / {prog.epochs}
+              </span>
+            )}
             {prog.loss != null && <span className="tabular-nums">loss {prog.loss.toExponential(3)}</span>}
             {prog.speed && <span className="tabular-nums">{prog.speed}</span>}
             {prog.eta && <span className="tabular-nums">ETA {prog.eta}</span>}

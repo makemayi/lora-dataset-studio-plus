@@ -1146,3 +1146,107 @@ def test_a_chosen_resolution_can_be_un_chosen(app):
         lt.update_train_settings(LOCAL_USER, ds.id, {'resolution': '1024'})
         lt.update_train_settings(LOCAL_USER, ds.id, {'resolution': None})
         assert 'resolution' not in lt._train_settings(ds)
+
+
+# --- live progress -----------------------------------------------------------
+#
+# Captured from the real run of 2026-08-29 (90 images, batch 4, 156 epochs), \r
+# separators and the stray '[A' cursor-up included, because that is what the
+# parser actually receives.
+_OT_LOG = (
+    'Quantizing model weights:  19%|#9        | 115/595 [00:05<00:21, 22.62it/s]\r'
+    'epoch:   0%|          | 0/156 [00:00<?, ?it/s]\r'
+    'step:  50%|#####     | 11/22 [00:31<00:30,  2.81s/it, loss=0.109, smooth loss=0.109][A\r'
+    'epoch:   3%|3         | 5/156 [04:20<3:32:37, 84.49s/it]\r'
+    'step:  27%|##7       | 6/22 [00:17<00:44,  2.81s/it, loss=0.155, smooth loss=0.118][A\r'
+)
+
+
+def test_progress_reads_both_bars_as_one_global_step(onetrainer):
+    """`epoch:` counts epochs and `step:` restarts every epoch — neither counts
+    to the run's step total, which is why the ai-toolkit parser (correctly)
+    rejected both and this lane showed 'Starting up...' for entire runs."""
+    ots, _cfg = onetrainer
+    out = ots.parse_progress(_OT_LOG, expected_epochs=156)
+    assert (out['epoch'], out['epochs']) == (5, 156)
+    assert out['step'] == 5 * 22 + 6      # epoch x steps_per_epoch + step
+    assert out['total'] == 156 * 22
+    assert out['loss'] == 0.155
+    assert out['speed'] == '2.81s/it'
+    # tqdm's OWN whole-run estimate, preferred over anything derived.
+    assert out['eta'] == '3:32:37'
+    assert out['loss_curve'][-1] == [116, 0.155]
+
+
+def test_progress_ignores_a_bar_that_is_not_this_runs_epochs(onetrainer):
+    """The same defence the step parser has: a setup bar (595 quantized blocks)
+    must never be read as progress, and neither must an epoch count that is not
+    the one this run was configured with."""
+    ots, _cfg = onetrainer
+    out = ots.parse_progress(_OT_LOG, expected_epochs=78)
+    assert out['epoch'] is None and out['epochs'] is None
+    assert out['total'] is None            # no epoch total -> no honest total
+    assert out['step'] == 6                # the step bar alone, epoch 0 assumed
+
+
+def test_progress_derives_an_eta_before_tqdm_has_timed_an_epoch(onetrainer):
+    """The epoch bar prints '?' until a full epoch is done — several minutes of
+    every run. The step rate answers the same question in the meantime."""
+    ots, _cfg = onetrainer
+    text = ('epoch:   0%|          | 0/10 [00:00<?, ?it/s]\r'
+            'step:  50%|#####     | 5/20 [00:14<00:42,  3.00s/it, loss=0.1][A\r')
+    out = ots.parse_progress(text, expected_epochs=10)
+    assert out['step'] == 5 and out['total'] == 200
+    assert out['eta'] == '09:45'           # (200-5) x 3.00s, tqdm's own padding
+    assert out['speed'] == '3.00s/it'
+
+
+def test_progress_says_nothing_rather_than_guessing_on_an_empty_log(onetrainer):
+    ots, _cfg = onetrainer
+    for text in ('', 'nvCOMP: no backend available\nClearing cache directory!\n'):
+        out = ots.parse_progress(text, expected_epochs=156)
+        assert out['step'] is None and out['total'] is None
+        assert out['loss'] is None and out['eta'] is None
+        assert out['loss_curve'] == []
+
+
+def test_the_progress_payload_carries_the_shape_the_panel_reads(
+        onetrainer, tmp_path, monkeypatch, app):
+    """The panel reads one payload shape for both lanes. A missing key is not a
+    smaller card, it is a crash or a blank — so they are stated, empty."""
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as lt
+    ots, cfg = onetrainer
+    _installed_onetrainer(cfg, tmp_path)
+
+    class FakeProc:
+        pid = 890
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(ots.subprocess, 'Popen', lambda *a, **k: FakeProc())
+
+    with app.app_context():
+        ds = _trainable_krea_dataset(svc, LOCAL_USER, 'OT progress')
+        ots.launch_training(LOCAL_USER, ds.id, steps=100, check_captions=False)
+        folder = ots._training_folder_for(ds)
+        (folder / 'onetrainer.log').write_text(_OT_LOG, encoding='utf-8')
+        import json as _j
+        cfg_json = _j.loads((folder / 'config.json').read_text(encoding='utf-8'))
+        cfg_json['epochs'] = 156
+        (folder / 'config.json').write_text(_j.dumps(cfg_json), encoding='utf-8')
+
+        out = ots.progress(LOCAL_USER, ds.id)
+        assert out['log_exists'] is True and out['trainer'] == 'onetrainer'
+        assert out['step'] == 116 and out['total'] == 3432
+        for key in ('samples', 'download', 'cache_pending', 'loss_curve',
+                    'speed', 'eta', 'loss', 'active', 'epoch', 'epochs'):
+            assert key in out
+
+        # …and the panel's own entry point reaches it, rather than reading
+        # ai-toolkit's training.log and reporting a run that is not writing one.
+        via_panel = lt.training_progress(LOCAL_USER, ds.id, family='krea')
+        assert via_panel['trainer'] == 'onetrainer'
+        assert via_panel['step'] == 116
