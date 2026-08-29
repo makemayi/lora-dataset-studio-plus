@@ -54,6 +54,7 @@ import { CARD_SHADOW, CARD_SURFACE } from '../components/common/surfaces';
 import PageHeader from '../components/common/PageHeader';
 import { DownloadIcon, ImageIcon, StudioIcon, RunsIcon } from '../components/common/icons';
 import EmptyState from '../components/common/EmptyState';
+import { failureChip } from '../components/dataset/trainingFailure';
 
 /* An accented secondary action (open the Test Studio, open the lineage). It is
    indigo because those two lead somewhere else in the app; the fill alone says
@@ -1225,8 +1226,14 @@ export default function CloudRunsPage() {
                 train_type: data.local_active.current.train_type,
                 variant: data.local_active.current.variant,
               })} />
-              {data.local_active.error && (
-                <span className="text-rose-700 text-[0.625rem]">{data.local_active.error}</span>
+              {/* `error` is the crash PAYLOAD object, never a string — rendering
+                  it straight was React error #31 and took the whole page to the
+                  error boundary while the run kept training. */}
+              {failureChip(data.local_active.error) && (
+                <span className="text-rose-700 text-[0.625rem]"
+                  title={failureChip(data.local_active.error).title}>
+                  {failureChip(data.local_active.error).label}
+                </span>
               )}
               <span className="ml-auto flex items-center gap-2">
                 {canStopLocalRun(data.local_active) && (

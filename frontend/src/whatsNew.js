@@ -50,6 +50,28 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-29-runs-page-crash-on-a-failed-run',
+    date: '2026-08-29',
+    title: 'The Runs page no longer goes blank after a failed run',
+    blurb: 'When a training run failed and another one started, the Runs page '
+      + 'showed "An unexpected error occurred" and could not be clicked at all '
+      + '— while the new run was training perfectly well underneath. The live '
+      + 'run card now shows a short "previous run failed (exit N)" note, with '
+      + 'the failing line on hover.',
+    to: '/cloud',
+  },
+  {
+    id: '2026-08-29-stop-a-onetrainer-run',
+    date: '2026-08-29',
+    title: 'Stop now works on a OneTrainer run',
+    blurb: 'Stopping a local OneTrainer training was refused every time — the '
+      + 'app could not prove which process it was about to kill, so it fell '
+      + 'back to leaving it alone and the run had to be killed by hand from '
+      + 'Task Manager. It now records the same process identity the ai-toolkit '
+      + 'lane does, and Stop run ends it.',
+    to: '/cloud',
+  },
+  {
     id: '2026-08-29-promote-framings',
     date: '2026-08-29',
     title: 'Promote can now cut face, waist-up and full framings',

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { failureView, GENERIC_CAUSES, MODULE_CAUSES } from './trainingFailure.js';
+import { failureChip, failureView, GENERIC_CAUSES, MODULE_CAUSES } from './trainingFailure.js';
 
 const EXCERPT = { kind: 'traceback', text: 'GatedRepoError: 401', headline: 'GatedRepoError: 401' };
 
@@ -90,4 +90,31 @@ test('an empty interpreter payload is ignored rather than shown blank', () => {
   const view = failureView({ rc: 1, excerpt: EXCERPT, interpreter: { python: 'x' } });
   assert.equal(view.interpreter, null);
   assert.equal(view.causes, GENERIC_CAUSES);
+});
+
+
+test('failureChip turns the crash PAYLOAD into a string — never a React child object', () => {
+  const chip = failureChip({
+    dataset_id: 29, rc: 1, log_tail: 'line one\nline two',
+    excerpt: { kind: 'traceback', headline: 'Exception: could not load model', text: '...' },
+  });
+  assert.equal(typeof chip.label, 'string');
+  assert.equal(typeof chip.title, 'string');
+  assert.equal(chip.label, 'previous run failed (exit 1)');
+  assert.equal(chip.title, 'Exception: could not load model');
+});
+
+test('failureChip says nothing when there is no failure, and passes a string through', () => {
+  assert.equal(failureChip(null), null);
+  assert.equal(failureChip(undefined), null);
+  assert.deepEqual(failureChip('boom'), { label: 'boom', title: 'boom' });
+});
+
+test('failureChip survives a payload with no rc and no excerpt', () => {
+  const chip = failureChip({ log_tail: 'the last line\nand another' });
+  assert.equal(chip.label, 'previous run failed');
+  assert.equal(chip.title, 'the last line');
+  const bare = failureChip({});
+  assert.equal(bare.label, 'previous run failed');
+  assert.equal(bare.title, 'The previous local training run failed.');
 });

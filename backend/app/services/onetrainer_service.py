@@ -631,7 +631,16 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
         user_id, dataset_id, family='krea', source='local', variant='raw',
         masked=False, steps=steps, trainer='onetrainer')
     queue_manager._set_system_state('training_in_progress', True, ttl_seconds=_TRAIN_STATE_TTL)
-    queue_manager._set_system_state('training_pid', launched['pid'], ttl_seconds=_TRAIN_STATE_TTL)
+    # PID **plus birth time**, the same identity the ai-toolkit lane records.
+    # Writing the bare pid was enough to SHOW a run, and not enough to STOP one:
+    # `stop_training` probes `_pid_alive`, which needs `training_pid_create_time`
+    # to tell "still the training child" from "Windows reused that pid". With the
+    # birth time absent the probe answers None, and the fail-closed rule turns
+    # that into a refusal — so the Stop button could never kill a OneTrainer run
+    # (observed 2026-08-29: 'training pid ... lacks a durable birth-time
+    # identity', the run had to be killed with taskkill by hand).
+    from .lora_training import _record_training_process_identity
+    _record_training_process_identity(launched['pid'])
     queue_manager._set_system_state('training_dataset_id', int(dataset_id), ttl_seconds=_TRAIN_STATE_TTL)
     queue_manager._set_system_state('training_train_type', 'krea', ttl_seconds=_TRAIN_STATE_TTL)
 
@@ -675,5 +684,9 @@ def _watch_onetrainer(app, launched, dataset_id, user_id, record_id) -> None:
                 queue_manager._set_system_state('training_error', payload, ttl_seconds=3600)
             queue_manager._set_system_state('training_in_progress', False, ttl_seconds=1)
             queue_manager._set_system_state('training_pid', None, ttl_seconds=1)
+            # The birth time is half of that identity; leaving it behind would
+            # pair a stale creation time with the NEXT run's pid.
+            queue_manager._set_system_state('training_pid_create_time', None,
+                                            ttl_seconds=1)
     except Exception:
         pass

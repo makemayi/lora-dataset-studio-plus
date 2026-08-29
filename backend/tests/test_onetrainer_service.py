@@ -1046,3 +1046,51 @@ def test_launch_points_base_model_at_a_local_krea_snapshot_when_present(
     config = _json.loads(config_path.read_text(encoding='utf-8'))
     assert config['base_model_name'] == \
         str(repo / 'snapshots' / 'rev1'), 'must point at the local snapshot'
+
+
+def test_launch_training_records_the_pid_birth_time_so_stop_can_kill_it(
+        onetrainer, tmp_path, monkeypatch, app):
+    """The Stop button probes `_pid_alive`, which is fail-closed: without a
+    stored `training_pid_create_time` it answers None and `stop_training`
+    REFUSES to kill. This lane wrote the bare pid, so every OneTrainer run was
+    unstoppable from the app and had to be killed by hand."""
+    import os as _os
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as lt
+    from app.config import LOCAL_USER
+    ots, cfg = onetrainer
+    root = tmp_path / 'OneTrainer'
+    (root / 'venv' / 'Scripts').mkdir(parents=True)
+    (root / 'venv' / 'Scripts' / 'python.exe').write_text('')
+    cfg.save_config({'onetrainer': {'dir': str(root)}})
+
+    class FakeProc:
+        # A pid psutil can really inspect — the birth time has to come from the
+        # OS, and this test's own process is the only one guaranteed to be alive.
+        pid = _os.getpid()
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(ots.subprocess, 'Popen', lambda *a, **k: FakeProc())
+
+    with app.app_context():
+        from PIL import Image
+        from app.models import FaceDatasetImage
+        from app.job_queue import queue_manager
+        ds = svc.create_dataset(LOCAL_USER, 'Lola', 'lola')
+        d = svc._dataset_dir(ds.id)
+        _os.makedirs(d, exist_ok=True)
+        Image.new('RGB', (64, 64), (200, 100, 50)).save(_os.path.join(d, 'a.png'))
+        ds.train_type = 'krea'
+        svc.db.session.add(FaceDatasetImage(dataset_id=ds.id, filename='a.png',
+                                            status='keep', caption='a photo'))
+        svc.db.session.commit()
+
+        ots.launch_training(LOCAL_USER, ds.id, steps=100, check_captions=False)
+
+        pid = queue_manager._get_system_state('training_pid', None)
+        assert pid == _os.getpid()
+        birth = queue_manager._get_system_state('training_pid_create_time', None)
+        assert birth is not None, 'no birth time -> the Stop button refuses'
+        assert lt._pid_alive(pid) is True, 'the stop probe must be conclusive'

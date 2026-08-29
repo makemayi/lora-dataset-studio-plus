@@ -47,3 +47,13 @@ test('Runs-to-Studio is discoverable in help, the guide, and What’s New', () =
   assert.equal(news?.to, '/cloud');
   assert.match(news?.blurb || '', /🧪 Test in Studio/);
 });
+
+test('the live local card never renders the crash payload object as a child', () => {
+  // React error #31 took the whole Runs page to the error boundary on
+  // 2026-08-29: `local_active.error` is `training_status().error`, which is the
+  // crash PAYLOAD ({rc, excerpt, log_tail, dataset_id}), not a sentence.
+  assert.doesNotMatch(source, /\{data\.local_active\.error\}/,
+    'render the payload through failureChip(), never straight');
+  assert.match(source, /failureChip\(data\.local_active\.error\)/);
+  assert.match(source, /import \{ failureChip \} from '\.\.\/components\/dataset\/trainingFailure'/);
+});

@@ -110,3 +110,33 @@ export function failureView(error) {
     hfTransfer,
   };
 }
+
+
+/** The one-line label the Runs hub puts on a LIVE local run that still carries
+ *  a `training_error` from an EARLIER run.
+ *
+ *  `training_status().error` is the crash PAYLOAD — an object
+ *  ({rc, excerpt, log_tail, dataset_id, …}) — and the hub card rendered it as a
+ *  React child, which is React error #31 ("Objects are not valid as a React
+ *  child"): the whole Runs page went to the error boundary and could not be
+ *  clicked, while the run itself was training fine (2026-08-29, after a Krea 2
+ *  run failed and the next one started).
+ *
+ *  Returns null when there is nothing to say. `title` is the hover text, so the
+ *  headline stays reachable without re-opening the crash panel. The wording
+ *  says PREVIOUS on purpose: the card it sits on is a run that is still alive,
+ *  and this state outlives the run that produced it. */
+export function failureChip(error) {
+  if (!error) return null;
+  if (typeof error === 'string') return { label: error, title: error };
+  if (typeof error !== 'object') return null;
+  const rc = error.rc;
+  const excerpt = error.excerpt && typeof error.excerpt === 'object' ? error.excerpt : null;
+  const headline = (excerpt && (excerpt.headline || excerpt.text)) || '';
+  const tail = typeof error.log_tail === 'string' ? error.log_tail : '';
+  return {
+    label: `previous run failed${rc != null ? ` (exit ${rc})` : ''}`,
+    title: (headline || tail || '').split('\n')[0].slice(0, 300)
+      || 'The previous local training run failed.',
+  };
+}
