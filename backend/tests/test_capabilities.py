@@ -1299,3 +1299,76 @@ def test_is_comfyui_dir_accepts_desktop_layout(tmp_path):
     not_comfy = tmp_path / 'other'
     (not_comfy / 'custom_nodes').mkdir(parents=True)   # no models/
     assert _is_comfyui_dir(not_comfy) is False
+
+
+def test_the_liveness_probe_asks_the_constant_size_endpoint(app, monkeypatch):
+    """`/history` serialises the WHOLE job history — measured at 1.57 MB on a
+    working install — so it is slowest exactly when ComfyUI is busy, and a slow
+    answer was read as an outage. That misread greyed out Test Studio and asked
+    for Setup while ComfyUI sat there rendering (2026-08-29), the same shape as
+    the 2026-08-09 "ComfyUI not running" generation failures.
+    """
+    from app import capabilities as caps
+    asked = []
+
+    def _fake(url, timeout=3, reason=None, **kw):
+        asked.append(url)
+        return url.endswith('/prompt')
+
+    monkeypatch.setattr(caps, '_http_ok', _fake)
+    monkeypatch.setattr(caps.cfg, 'get',
+                        lambda key, *a: 'http://127.0.0.1:8188'
+                        if key == 'comfyui.api_url' else None)
+    with app.app_context():
+        out = caps.probe_comfyui()
+    assert out['ok'] is True and out['status'] == 'ok'
+    assert asked == ['http://127.0.0.1:8188/prompt'], 'history is not asked at all'
+
+
+def test_a_build_without_prompt_still_falls_back_to_a_bounded_history(app, monkeypatch):
+    """The fallback exists for a build that does not serve /prompt — and it is
+    BOUNDED (`max_items=1`), so it can never reintroduce the unbounded cost."""
+    from app import capabilities as caps
+    asked = []
+
+    def _fake(url, timeout=3, reason=None, **kw):
+        asked.append(url)
+        if url.endswith('/prompt'):
+            if isinstance(reason, dict):
+                reason['why'] = 'unreachable'
+            return False
+        return True
+
+    monkeypatch.setattr(caps, '_http_ok', _fake)
+    monkeypatch.setattr(caps.cfg, 'get',
+                        lambda key, *a: 'http://127.0.0.1:8188'
+                        if key == 'comfyui.api_url' else None)
+    with app.app_context():
+        out = caps.probe_comfyui()
+    assert out['ok'] is True
+    assert asked[-1] == 'http://127.0.0.1:8188/history?max_items=1'
+
+
+def test_a_slow_prompt_is_slow_not_a_second_probe(app, monkeypatch):
+    """A timeout means the server IS there and busy. Asking history next would
+    spend another budget on the endpoint that is heaviest under exactly that
+    condition."""
+    from app import capabilities as caps
+    asked = []
+
+    def _fake(url, timeout=3, reason=None, **kw):
+        asked.append(url)
+        if isinstance(reason, dict):
+            reason['why'] = 'timeout'
+            reason['waited'] = 3
+        return False
+
+    monkeypatch.setattr(caps, '_http_ok', _fake)
+    monkeypatch.setattr(caps.cfg, 'get',
+                        lambda key, *a: 'http://127.0.0.1:8188'
+                        if key == 'comfyui.api_url' else None)
+    monkeypatch.setattr(caps, 'comfyui_down_message', lambda *a, **k: 'hint')
+    with app.app_context():
+        out = caps.probe_comfyui()
+    assert out['status'] == 'slow' and out['ok'] is False
+    assert asked == ['http://127.0.0.1:8188/prompt']

@@ -263,18 +263,34 @@ def probe_comfyui() -> dict:
     surface (Test button, engine cards, the 409 on a blocked generation) can say
     the true one instead of the convenient one.
 
-    The verdict itself still rides on the cheap `/history` probe. When that one
-    can't tell us why (it is the patched seam in tests, and a 3 s budget is short
-    enough to trip on a busy server), the LAST /object_info attempt is consulted:
-    that probe knows the difference first-hand, because it is the one that spends
-    the long budget."""
+    The verdict rides on `/prompt` — a CONSTANT-SIZE
+    `{"exec_info": {"queue_remaining": n}}`. It used to ride on `/history`, which
+    serialises the entire job history and therefore gets slower the longer the
+    install is used, and slowest exactly when ComfyUI is busy. That is a liveness
+    check whose failure mode is a confident lie about a healthy service: reported
+    twice now — once as generations failing with "ComfyUI not running" (fixed in
+    comfyui_service.check_connection on 2026-08-09), and again on 2026-08-29 as
+    the header greying out Test Studio and asking for Setup while ComfyUI sat
+    there rendering. `/history` stays as the fallback for a build that does not
+    serve `/prompt`.
+
+    When the cheap probe can't tell us WHY (it is the patched seam in tests, and
+    a 3 s budget is short enough to trip on a busy server), the LAST /object_info
+    attempt is consulted: that probe knows the difference first-hand, because it
+    is the one that spends the long budget."""
     api_url = (cfg.get('comfyui.api_url') or '').rstrip('/')
     if not api_url:
         return {'ok': False, 'detail': 'comfyui.api_url not configured',
                 'status': 'unconfigured',
                 'hint': 'Set the ComfyUI API URL in Settings ▸ Local tools.'}
     reason = {}
-    ok = _http_ok(f'{api_url}/history', reason=reason)
+    ok = _http_ok(f'{api_url}/prompt', reason=reason)
+    if not ok and reason.get('why') != 'timeout':
+        # Not "slow" but "no answer": either ComfyUI is really down, or this
+        # build predates /prompt. The bounded history call settles it — and a
+        # server that is down fails it the same way, so nothing is lost.
+        reason = {}
+        ok = _http_ok(f'{api_url}/history?max_items=1', reason=reason)
     if ok:
         return {'ok': True, 'detail': api_url, 'status': 'ok', 'hint': ''}
     from .utils import comfyui as _cu

@@ -50,6 +50,18 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-29-comfyui-liveness-probe-cost',
+    date: '2026-08-29',
+    title: 'The app stops claiming ComfyUI is missing while it is rendering',
+    blurb: 'The check that decides whether ComfyUI is up asked an endpoint that '
+      + 'returns the entire job history — 1.5 MB on a working install, and '
+      + 'slowest exactly when ComfyUI is busy. A slow answer was read as "not '
+      + 'running", so the menu greyed out Test Studio and the Setup dot lit up '
+      + 'mid-render. It now asks a 37-byte endpoint instead. Menus also stay '
+      + 'normal while that check is still running, rather than greying out for '
+      + 'the seconds it takes.',
+  },
+  {
     id: '2026-08-29-nav-says-why-a-page-is-unavailable',
     date: '2026-08-29',
     title: 'Pages no longer vanish from the menu without saying why',

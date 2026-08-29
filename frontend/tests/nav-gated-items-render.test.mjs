@@ -57,3 +57,19 @@ test('both states keep the label text mounted', () => {
     assert.equal(copies.length, 2, `both variants render in state ${available}`)
   }
 })
+
+test('an unknown capability is not treated as a missing one', async () => {
+  // `caps` starts as an all-false PLACEHOLDER and the first probe measured 37s
+  // on a real machine (it lists ComfyUI's models and asks /object_info). For
+  // those 37 seconds the header greyed out workspaces on an install where
+  // ComfyUI was running, and lit the Setup dot as if nothing were configured —
+  // reported as "why does the menu go grey and why does it always want setup?".
+  const { readFileSync } = await import('node:fs')
+  const src = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
+  assert.match(src, /const \{ caps, loading: capsUnknown \} = useCapabilities\(\)/)
+  // Every gated item, and the Setup dot, must read the unknown as "not yet".
+  assert.equal((src.match(/available=\{capsUnknown \|\| Boolean\(/g) || []).length, 3)
+  assert.match(src, /const setupNeedsAttention = !capsUnknown && !recommendedMet\(caps\)/)
+  assert.doesNotMatch(src, /available=\{Boolean\(caps\./,
+    'no gated item may read the placeholder as an answer')
+})

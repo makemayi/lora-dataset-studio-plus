@@ -192,7 +192,14 @@ function HelpModeToggle({ onToggle }) {
 /** Exported for `tests/nav-shell-render.test.mjs` — the bar is on every screen
  *  in the app, so a crash in it is a crash in all of them. */
 export function NavBar() {
-  const { caps } = useCapabilities()
+  // `loading` matters as much as the flags: until the first probe answers, every
+  // capability reads FALSE because that is what the placeholder says — not
+  // because anything is missing. The cold probe measured 37s on this machine
+  // (it lists ComfyUI's models and asks /object_info), and for those 37s the
+  // header was greying out workspaces on an install where ComfyUI was running
+  // the whole time, and lighting the Setup dot as if the app were unconfigured.
+  // An unknown is not a no.
+  const { caps, loading: capsUnknown } = useCapabilities()
   // 🏋️ Live indicator on Runs: a training can hold the GPU for hours (local) or
   // bill by the minute (cloud), and from any other page nothing said so.
   const activity = useTrainingActivity()
@@ -225,7 +232,7 @@ export function NavBar() {
   const path = useLocation().pathname
   const helpMenuActive = path === '/guide' || path === '/help'
   const settingsMenuActive = path === '/setup' || path.startsWith('/settings')
-  const setupNeedsAttention = !recommendedMet(caps)
+  const setupNeedsAttention = !capsUnknown && !recommendedMet(caps)
 
   // The four workspaces, left-aligned on desktop AND reused (flat) in the
   // mobile panel. Same caps gates in both places.
@@ -242,7 +249,7 @@ export function NavBar() {
       {/* Unified runs hub (cloud + local history) — useful as soon as ANY
           training path exists, not just the cloud one. */}
       <GatedNavItem to="/cloud" hint={TRAINER_HINT}
-        available={Boolean(caps.cloud_training || caps.training_visible)}
+        available={capsUnknown || Boolean(caps.cloud_training || caps.training_visible)}
         onClick={() => setOpen(false)}>
           <RunsIcon /> Runs
           {activity.running && (
@@ -260,7 +267,7 @@ export function NavBar() {
           lists what happened, the canvas shows how the runs descend from each
           other, across every dataset at once. */}
       <GatedNavItem to="/canvas" hint={TRAINER_HINT}
-        available={Boolean(caps.cloud_training || caps.training_visible)}
+        available={capsUnknown || Boolean(caps.cloud_training || caps.training_visible)}
         onClick={() => setOpen(false)}>
           <CanvasIcon /> Canvas
           {/* The Beta chip marks the newest surface, not the oldest: the Bank
@@ -281,7 +288,8 @@ export function NavBar() {
         <TaskNavBadge />
       </NavLink>
       <GatedNavItem to="/studio" hint={COMFY_HINT}
-        available={Boolean(caps.studio_visible)} onClick={() => setOpen(false)}>
+        available={capsUnknown || Boolean(caps.studio_visible)}
+        onClick={() => setOpen(false)}>
         <StudioIcon /> Test Studio
       </GatedNavItem>
     </>
