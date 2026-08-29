@@ -52,11 +52,12 @@ export const WHATS_NEW = [
   {
     id: '2026-08-29-empty-video-bank',
     date: '2026-08-29',
-    title: 'Create a video bank for a folder that does not exist yet',
-    blurb: 'Pointing a video bank at a new path used to be refused with '
-      + '"folder not found" — so an empty bank, the natural starting point for '
-      + 'a collector run, could not be created from the app. The folder is now '
-      + 'created for you (recursively), and a bank over zero files is fine.',
+    title: 'Create a video bank by name alone — no folder needed',
+    blurb: 'The video bank form no longer demands a folder: give it a name and '
+      + 'you get an empty bank in the app\'s own storage (suffixed -2, -3… on a '
+      + 'name clash), ready for a collector run to fill. A folder you type is '
+      + 'still yours — one that does not exist yet is created — and the '
+      + 'in-app folder browser gained a ＋ New folder button.',
     to: '/video-bank',
   },
   {

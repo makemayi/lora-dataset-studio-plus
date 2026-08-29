@@ -1861,6 +1861,21 @@ def video_banks_root() -> Path:
     root.mkdir(parents=True, exist_ok=True)
     return root
 
+def video_sources_root() -> Path:
+    """Folders the app CREATES for video banks made by name alone.
+
+    A video bank points at a live folder the user usually owns. The empty-bank
+    flow — a NAME, no folder, the starting point of a collector run — still
+    needs a real directory somewhere, and it lands here: app-managed, one
+    subfolder per bank (suffixed -2, -3… on a name clash), and never inside a
+    datasets tree, which the dataset-folder guard would rightly refuse.
+    Relocatable like every other root."""
+    p = get('paths.video_sources_dir') or ''
+    root = Path(p) if p else _data_dir() / 'video_sources'
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def video_datasets_root() -> Path:
     """Built video training sets: one flat ``<dataset id>/`` per set, holding the
     encoded ``clip_0001.mp4`` files and their homonym ``.txt`` captions.

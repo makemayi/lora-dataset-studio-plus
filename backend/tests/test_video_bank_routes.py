@@ -116,11 +116,17 @@ def test_a_missing_folder_is_created_and_the_bank_starts_empty(client, tmp_path)
     assert folder.is_dir()
 
 
-def test_an_empty_string_folder_is_still_a_400_not_a_500(client):
-    r = client.post('/api/video-bank/create', json={'name': 'x', 'folder': ''})
+def test_a_bank_can_be_created_by_name_alone(client):
+    """The form's folder field is optional now: a name is enough, and the app
+    assigns a fresh managed folder. This is the collector workflow's first
+    step, and the one users were previously stuck on — the field used to be
+    required, so "just give it a name" answered 400."""
+    r = client.post('/api/video-bank/create', json={'name': 'by name', 'folder': ''})
 
-    assert r.status_code == 400
-    assert 'error' in r.get_json()
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body['ok'] is True
+    assert body['added'] == 0
 
 
 def test_the_workspace_payload_carries_counters_sources_and_capability(

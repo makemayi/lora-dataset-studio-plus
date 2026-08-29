@@ -50,6 +50,23 @@ def list_folders():
         return jsonify(folder_picker.list_subfolders(path))
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
+
+
+@bp.post('/make-folder')
+def make_folder():
+    """Create ONE subfolder for the in-app folder browser.
+
+    Body {parent, name}; answers {'path', 'name'} or 400. The browser used to
+    be strictly read-only, which meant a folder that does not exist yet could
+    not be reached from it — and on a lane with no native dialog that made an
+    empty video bank (now a legal state) impossible to start. The name is a
+    single segment; all path arithmetic stays on the service side."""
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify(folder_picker.make_folder(data.get('parent'),
+                                                 data.get('name')))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
     except PermissionError:
         return jsonify({'error': 'Permission denied for this folder.'}), 403
 

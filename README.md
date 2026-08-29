@@ -101,7 +101,7 @@ the target model accepts.
 
 | Capability | What it provides |
 |---|---|
-| **Folder → video bank** | Point a bank at a folder of videos. It is referenced **in place** and never written to, like the image bank. A folder that does not exist yet is created — an empty bank is the starting point for a collector run |
+| **Folder → video bank** | Point a bank at a folder of videos. It is referenced **in place** and never written to, like the image bank. The folder is optional: a bank made by name alone gets a fresh, empty, app-managed folder — the starting point for a collector run — and a typed path that does not exist yet is created |
 | **Run your own collector** | An account the server cannot see (Douyin, Kuaishou — anything behind a logged-in feed) can be walked by a command on your own machine, launched from the bank itself. **Nothing ships** — you configure the command under `video_collectors`, `{url}` becomes the address you type and `{folder}` the bank's folder, and what the command downloads appears as sources. A collector run is the bank's one job: while it walks (minutes), no pass can start |
 | **Automatic shot detection** | Finds the cuts with TransNetV2, so a long file becomes individually reviewable shots instead of one blob |
 | **Review without waiting** | The grid shows thumbnails; a click plays that shot from the source, so nothing is encoded before you have decided |

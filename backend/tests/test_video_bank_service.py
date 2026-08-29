@@ -96,6 +96,32 @@ def test_the_extension_match_is_case_insensitive(app, tmp_path):
         assert added == 5
 
 
+def test_a_bank_created_by_name_alone_gets_a_managed_folder(app, tmp_path):
+    """The empty-bank flow end to end: a NAME is enough. The folder is created
+    under the app's own video-sources root (never inside a datasets tree, which
+    the guard would rightly refuse), and it is EMPTY — a collector fills it."""
+    with app.app_context():
+        from app import config as cfg
+        bank, added = svc.create_bank(LOCAL_USER, 'My Bank: 01', '')
+
+        assert added == 0
+        root = str(cfg.video_sources_root())
+        assert os.path.dirname(bank.source_path) == root
+        assert os.path.basename(bank.source_path) == 'My Bank_ 01'
+        assert os.path.isdir(bank.source_path)
+
+
+def test_two_same_name_banks_never_share_a_managed_folder(app):
+    """-2, -3… rather than reuse: two banks of the same name must never end up
+    sharing (and silently merging) one set of files."""
+    with app.app_context():
+        first, _ = svc.create_bank(LOCAL_USER, 'rushes', '')
+        second, _ = svc.create_bank(LOCAL_USER, 'rushes', '')
+
+        assert first.source_path != second.source_path
+        assert os.path.basename(second.source_path) == 'rushes-2'
+
+
 def test_non_video_files_in_the_same_folder_are_ignored(app, tmp_path):
     """Rush folders hold thumbnails, .srt subtitles and stray .txt notes. A bank
     that inventories them would hand unopenable files to the probe and report a

@@ -169,10 +169,10 @@ export default function VideoBankPage() {
             placeholder="City rushes 08/2026" required className={INPUT_CLASS} />
         </div>
         <div className="grow-[3] min-w-64">
-          <FolderPickerField id="video-bank-folder" label="Folder on this computer"
-            value={folder} onChange={setFolder} required
-            placeholder="path\to\rushes (subfolders included)"
-            hint="Reads .mp4, .mov, .mkv, .webm and .avi. The folder is never modified. One that does not exist yet is created — an empty bank is fine (a collector can fill it)." />
+          <FolderPickerField id="video-bank-folder" label="Folder (optional)"
+            value={folder} onChange={setFolder}
+            placeholder="path\to\rushes — or leave empty and one is created for you"
+            hint="Reads .mp4, .mov, .mkv, .webm and .avi, and is never modified. Leave it empty for a fresh empty bank in the app's own storage — the starting point for a collector run. A path you type that does not exist yet is created." />
         </div>
         {/* Both labels mounted, one hidden — a ternary on button text is the
             Chrome-translate removeChild crash. */}

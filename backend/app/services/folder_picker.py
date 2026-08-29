@@ -394,3 +394,44 @@ def list_subfolders(path=None):
     at_root = parent == p
     return {'path': p, 'parent': None if at_root else parent,
             'is_root': False, 'entries': entries}
+
+
+#: Windows forbids these in a directory name outright; '.' and '..' are not
+#: names but navigation, and the whole point is to add ONE leaf.
+_UNSAFE_NAME_CHARS = set('\\/:*?"<>|')
+
+
+def make_folder(parent, name):
+    """Create ONE subfolder under `parent` for the in-app folder browser.
+
+    WHY THE READ-ONLY BROWSER NEEDS A WRITE AFTER ALL. Its whole surface was
+    "pick an existing folder" — but a folder that does not exist yet is now a
+    legal video bank (create_bank makes it), and on the lanes with no native
+    dialog (LAN, tablet, Linux) this browser is the ONLY picker. Without a way
+    to create, an empty bank could not be started from those machines at all:
+    every road to "type a path that does not exist" dead-ends in the amber
+    "That folder does not exist." box.
+
+    The name is one path SEGMENT — no separators, no navigation, no Windows-
+    reserved characters, no trailing dots/spaces (Windows silently strips
+    those, and a folder you can see but not address is worse than a refusal).
+    Creation happens INSIDE the folder the caller is looking at, so this never
+    widens where the browser can reach; it only adds a leaf. Returns
+    {'path', 'name'} so the UI can navigate straight into what it made.
+    """
+    name = (name or '').strip().strip('"\'').rstrip('. ')
+    if not name:
+        raise ValueError('a folder name is required')
+    if name in ('.', '..') or any(ch in _UNSAFE_NAME_CHARS for ch in name):
+        raise ValueError(f'not a usable folder name: {name!r}')
+    base = os.path.abspath(os.path.expanduser(str(parent or '').strip()))
+    if not os.path.isdir(base):
+        raise ValueError('That folder does not exist.')
+    target = os.path.join(base, name)
+    try:
+        os.makedirs(target, exist_ok=False)
+    except FileExistsError as e:
+        raise ValueError(f'There is already a folder named "{name}" here.') from e
+    except OSError as e:
+        raise ValueError(f'could not create the folder: {e}') from e
+    return {'path': target, 'name': name}

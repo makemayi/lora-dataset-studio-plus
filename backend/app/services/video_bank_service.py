@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -282,12 +283,16 @@ def create_bank(user_id, name, folder):
 
     Instant — no decode, no detection. Those are the separate passes, because a
     two-hour file costs minutes and an HTTP request must not.
-    A folder that DOES NOT EXIST YET is created: an empty bank is a legitimate
-    starting point, not a mistake — it is exactly how a collector run begins
-    (the bank's folder is what ``{folder}`` expands to), and the local
-    video-grab scripts' own bank resolver has always mkdir'd recursively. The
+    THE FOLDER IS OPTIONAL. A bank made by NAME ALONE gets a fresh, app-managed
+    folder under `video_sources_root()` — an empty bank is a legitimate
+    starting point, not a mistake: it is exactly how a collector run begins
+    (the bank's folder is what ``{folder}`` in the command expands to), and
+    demanding a pre-existing path made it impossible to start from the app.
+    The local video-grab scripts' own bank resolver has always mkdir'd
+    recursively. When a folder IS given, a missing one is created (the
     creation happens AFTER the dataset-conflict check so a refused path never
-    leaves an empty directory behind.
+    leaves an empty directory behind), and one that exists but is a FILE is
+    still refused.
     Returns (bank, added)."""
     name = (name or '').strip()
     # Windows «Copy as path» pastes quoted; unquote so a direct paste works first
@@ -295,24 +300,27 @@ def create_bank(user_id, name, folder):
     folder = (folder or '').strip().strip('"\'')
     if not name:
         raise ValueError('name is required')
-    if not folder:
-        raise ValueError('folder is required')
-    if os.path.exists(folder) and not os.path.isdir(folder):
-        raise ValueError(f'not a folder: {folder}')
-    # A bank and a dataset must never share bytes. Both roots are checked: the
-    # image lane's (a video bank over it would be harmless today but the rule is
-    # the rule) and the video lane's own, which is the real trap — promoting into
-    # a folder a bank points at would make the bank list its own output as source
-    # material, and re-promote it on the next pass. Pure path arithmetic, so it
-    # is also what guards a folder that does not exist yet.
-    for root in (None, cfg.video_datasets_root()):
-        conflict = path_guard.dataset_folder_conflict(folder, datasets_root=root)
-        if conflict:
-            raise ValueError(conflict['message'])
-    try:
-        os.makedirs(folder, exist_ok=True)
-    except OSError as e:
-        raise ValueError(f'could not create the folder: {e}') from e
+    if folder:
+        if os.path.exists(folder) and not os.path.isdir(folder):
+            raise ValueError(f'not a folder: {folder}')
+        # A bank and a dataset must never share bytes. Both roots are checked:
+        # the image lane's (a video bank over it would be harmless today but the
+        # rule is the rule) and the video lane's own, which is the real trap —
+        # promoting into a folder a bank points at would make the bank list its
+        # own output as source material, and re-promote it on the next pass.
+        # Pure path arithmetic, so it also guards a folder that does not exist
+        # yet. The managed branch below needs no check: its root is not inside
+        # either datasets tree by construction.
+        for root in (None, cfg.video_datasets_root()):
+            conflict = path_guard.dataset_folder_conflict(folder, datasets_root=root)
+            if conflict:
+                raise ValueError(conflict['message'])
+        try:
+            os.makedirs(folder, exist_ok=True)
+        except OSError as e:
+            raise ValueError(f'could not create the folder: {e}') from e
+    else:
+        folder = _managed_folder_for(name)
     folder = os.path.realpath(folder)
     rels = _scan_folder(folder)
     bank = VideoBank(user_id=user_id, name=name, source_path=folder)
@@ -321,6 +329,33 @@ def create_bank(user_id, name, folder):
     _insert_sources(bank.id, folder, rels)
     db.session.commit()
     return bank, len(rels)
+
+
+# Windows forbids these in a directory name; a bank name is otherwise free text
+# that must become ONE path segment under the managed root.
+_SOURCE_FOLDER_SAFE = re.compile(r'[\\/:*?"<>|\r\n\t]')
+
+
+def _managed_folder_for(name: str) -> str:
+    """A fresh, unused folder under `video_sources_root()` for a bank made by
+    NAME ALONE.
+
+    The image lane's `_import_folder_for`, transplanted: suffixes -2, -3…
+    rather than reusing a folder — two banks of the same name must never end up
+    sharing (and silently merging) one set of files. Reservation and creation
+    are the same atomic filesystem action, so two concurrent creates cannot
+    both win the same name."""
+    stem = _SOURCE_FOLDER_SAFE.sub('_', (name or '')).strip().rstrip('. ') or 'bank'
+    root = cfg.video_sources_root()
+    candidate = root / stem
+    i = 2
+    while True:
+        try:
+            os.mkdir(candidate)
+            return str(candidate)
+        except FileExistsError:
+            candidate = root / f'{stem}-{i}'
+            i += 1
 
 
 def _insert_sources(bank_id, folder, rels) -> int:

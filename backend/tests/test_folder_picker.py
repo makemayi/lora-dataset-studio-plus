@@ -232,3 +232,65 @@ def test_list_subfolders_collapses_traversal(client, tmp_path):
     r = client.get('/api/system/list-folders', query_string={'path': weird})
     assert r.status_code == 200
     assert r.get_json()['path'] == os.path.abspath(str(tmp_path))
+
+
+# --- POST /api/system/make-folder ---------------------------------------------
+def test_make_folder_creates_one_leaf_and_returns_its_path(client, tmp_path):
+    root = tmp_path / 'here'
+    root.mkdir()
+    r = client.post('/api/system/make-folder',
+                    json={'parent': str(root), 'name': 'new creator'})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body['name'] == 'new creator'
+    assert os.path.isdir(body['path'])
+    assert body['path'] == os.path.join(os.path.abspath(str(root)), 'new creator')
+
+
+def test_make_folder_refuses_a_duplicate_by_its_real_name(client, tmp_path):
+    root = tmp_path / 'here'
+    (root / 'exists').mkdir(parents=True)
+    r = client.post('/api/system/make-folder',
+                    json={'parent': str(root), 'name': 'exists'})
+    assert r.status_code == 400
+    assert 'already' in r.get_json()['error']
+
+
+def test_make_folder_refuses_names_that_are_not_one_segment(client, tmp_path):
+    root = tmp_path / 'here'
+    root.mkdir()
+    for bad in ('a/b', 'a\b', '..', '.', 'nul:', 'a<b', ''):
+        r = client.post('/api/system/make-folder',
+                        json={'parent': str(root), 'name': bad})
+        assert r.status_code == 400, bad
+        assert 'error' in r.get_json(), bad
+    assert os.listdir(str(root)) == []
+
+
+def test_make_folder_trailing_dots_and_spaces_are_stripped_not_created(client, tmp_path):
+    # Windows silently strips these itself, which would leave a folder you can
+    # see in the list but not address — a refusal names the usable name instead.
+    root = tmp_path / 'here'
+    root.mkdir()
+    r = client.post('/api/system/make-folder',
+                    json={'parent': str(root), 'name': 'rushes. '})
+    assert r.status_code == 200
+    assert os.path.isdir(os.path.join(str(root), 'rushes'))
+
+
+def test_make_folder_refuses_a_missing_parent(client, tmp_path):
+    r = client.post('/api/system/make-folder',
+                    json={'parent': str(tmp_path / 'nope'), 'name': 'x'})
+    assert r.status_code == 400
+    assert 'does not exist' in r.get_json()['error']
+
+
+def test_make_folder_quoted_paste_is_unquoted(client, tmp_path):
+    # Windows «Copy as path» pastes quotes; every other path field in the app
+    # tolerates that, and so does this one.
+    root = tmp_path / 'here'
+    root.mkdir()
+    r = client.post('/api/system/make-folder',
+                    json={'parent': str(root), 'name': '"quoted"'})
+    assert r.status_code == 200
+    assert r.get_json()['name'] == 'quoted'

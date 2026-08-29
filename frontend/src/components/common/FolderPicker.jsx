@@ -44,6 +44,13 @@ export function FolderBrowserModal({ initial, onPick, onClose }) {
   // you exactly where you are so you can pick another one).
   const [browseError, setBrowseError] = useState('')
   const [error, setError] = useState('')
+  // ＋ New folder: the browser used to be strictly read-only, which meant a
+  // folder that does not exist yet could never be reached from it — and on a
+  // lane with no native dialog (LAN, tablet, Linux) this browser is the ONLY
+  // picker. An empty video bank (now a legal state) was impossible to start
+  // from those machines: every road to a new path dead-ended in the amber
+  // "That folder does not exist." box.
+  const [making, setMaking] = useState(false)
 
   /* ONE way out, shut only while the pick is being posted. */
   const dismiss = () => { if (!busy) onClose() }
@@ -52,6 +59,27 @@ export function FolderBrowserModal({ initial, onPick, onClose }) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [busy, onClose])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const createFolder = async () => {
+    if (making || busy || atRoot || loading || !data?.path) return
+    // eslint-disable-next-line no-alert
+    const name = window.prompt(
+      'Name of the new folder — it is created inside the folder you are looking at.')
+    if (!name || !name.trim()) return
+    setMaking(true)
+    setError('')
+    try {
+      const d = await postJson('/api/system/make-folder',
+        { parent: data.path, name: name.trim() })
+      await load(d.path)
+    } catch (e) {
+      // The red box below is the host REFUSING a pick; a refused creation is
+      // the same shape — you stay where you are and can try another name.
+      setError(e?.message || 'Could not create the folder.')
+    } finally {
+      setMaking(false)
+    }
+  }
 
   const use = async () => {
     if (busy || !data?.path) return
@@ -97,7 +125,18 @@ export function FolderBrowserModal({ initial, onPick, onClose }) {
       onMouseDown={(e) => { if (e.target === e.currentTarget) dismiss() }}>
       <div className="flex w-full max-w-lg flex-col rounded-xl bg-surface-overlay/85 backdrop-blur-md p-5 shadow-2xl"
         style={{ maxHeight: '80vh' }}>
-        <h2 className="text-base font-bold text-content">📁 Choose a folder</h2>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-base font-bold text-content">📁 Choose a folder</h2>
+          {/* Both labels stay mounted and flip `hidden` — CLAUDE.md ▸ UI changes.
+              Disabled at the roots view: a drive list has no "inside" to create in. */}
+          <button type="button" onClick={createFolder}
+            disabled={atRoot || loading || busy || making}
+            title={atRoot ? 'Open a drive first — a new folder is created inside the folder you are looking at' : undefined}
+            className={`shrink-0 ${QUIET_BUTTON} text-xs`}>
+            <span hidden={making}>＋ New folder</span>
+            <span hidden={!making}>Creating…</span>
+          </button>
+        </div>
         <p className="mt-1 text-xs text-content-muted">
           Folders on the machine running the app. Nothing is opened or modified —
           you're only picking a location.
