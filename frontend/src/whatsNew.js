@@ -50,6 +50,17 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-29-onetrainer-stop-keeps-the-lora',
+    date: '2026-08-29',
+    title: 'Stopping a OneTrainer run now keeps what it trained',
+    blurb: 'Stop used to kill the trainer outright, and an hour of training went '
+      + 'with it. OneTrainer already saves the LoRA when it is cancelled — it '
+      + 'was never being asked, only killed. Stop now asks: the run writes its '
+      + 'backup, saves the LoRA, and only then lets go of the GPU. It is killed '
+      + 'only if it refuses to go.',
+    to: '/cloud',
+  },
+  {
     id: '2026-08-29-onetrainer-preview-samples',
     date: '2026-08-29',
     title: 'OneTrainer runs now produce preview images again',

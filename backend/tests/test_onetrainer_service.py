@@ -249,7 +249,12 @@ def test_launch_writes_config_and_concepts_and_spawns_the_right_command(
     assert (training_folder / 'config.json').is_file()
     assert captured['cwd'] == str(root)
     assert captured['cmd'][0] == str(venv_py)
-    assert captured['cmd'][1] == 'scripts/train.py'
+    # train.py is reached THROUGH this app's shim, which installs the SIGBREAK
+    # handler that turns a stop request into the KeyboardInterrupt OneTrainer's
+    # own cancel path saves the LoRA on. Running train.py directly is what made
+    # Stop a synonym for "throw the run away".
+    assert captured['cmd'][1] == str(ots._SHIM_PATH)
+    assert ots._SHIM_PATH.is_file(), 'the shim ships with the app'
     # Hyphenated, matching train.py's REAL argparse flags (confirmed against
     # its own usage output — the underscored form fails argparse outright).
     assert '--preset-path' in captured['cmd']
@@ -1391,3 +1396,165 @@ def test_sample_path_resolves_by_basename_only(onetrainer, tmp_path, app):
         # A name carrying a separator is refused here too, not only at the route.
         assert ots.sample_path(LOCAL_USER, ds.id, '../config.json') is None
         assert ots.sample_path(LOCAL_USER, ds.id, 'absent.jpg') is None
+
+
+# --- stopping without throwing the run away ----------------------------------
+
+
+def test_launch_puts_the_child_in_its_own_process_group(
+        onetrainer, tmp_path, monkeypatch):
+    """A console control event can only be addressed to a child spawned with
+    CREATE_NEW_PROCESS_GROUP. Without the flag the event would go to this app's
+    OWN group — i.e. to the server process."""
+    import subprocess as _sp
+    ots, cfg = onetrainer
+    _installed_onetrainer(cfg, tmp_path)
+    captured = {}
+
+    class FakeProc:
+        pid = 4243
+
+    monkeypatch.setattr(ots.subprocess, 'Popen',
+                        lambda cmd, **kw: (captured.update(kw), FakeProc())[1])
+    ots.launch(trigger='lola', dataset_folder=str(tmp_path / 'ds'),
+               training_folder=str(tmp_path / 'run'), steps=100, num_images=20,
+               rank=16)
+    flags = captured['creationflags']
+    for name in ('CREATE_NEW_PROCESS_GROUP', 'CREATE_NO_WINDOW'):
+        bit = getattr(_sp, name, 0)
+        if bit:
+            assert flags & bit, f'{name} is missing from the launch'
+
+
+def test_request_graceful_stop_sends_the_event_and_reports_delivery(
+        onetrainer, monkeypatch):
+    ots, _cfg = onetrainer
+    sent = []
+    monkeypatch.setattr(ots.os, 'kill', lambda pid, sig: sent.append((pid, sig)))
+    assert ots.request_graceful_stop(4243) is True
+    assert sent[0][0] == 4243
+    expected = getattr(ots.signal, 'CTRL_BREAK_EVENT', ots.signal.SIGINT)
+    assert sent[0][1] == expected
+
+    # A pid that is already gone is not a stop that "worked" — the caller has to
+    # fall back rather than assume the run ended.
+    def _boom(_pid, _sig):
+        raise OSError('no such process')
+    monkeypatch.setattr(ots.os, 'kill', _boom)
+    assert ots.request_graceful_stop(4243) is False
+    assert ots.request_graceful_stop(None) is False
+    assert ots.request_graceful_stop(0) is False
+
+
+def test_wait_for_exit_never_calls_an_unreadable_process_dead(
+        onetrainer, monkeypatch):
+    """The GPU fence is released on this answer, so an unreadable state is
+    reported as 'still there', never as death."""
+    import psutil
+    ots, _cfg = onetrainer
+    monkeypatch.setattr(psutil, 'pid_exists', lambda _pid: False)
+    assert ots.wait_for_exit(4243, timeout_seconds=0) is True
+
+    def _raise(_pid):
+        raise RuntimeError('probe unavailable')
+    monkeypatch.setattr(psutil, 'pid_exists', _raise)
+    assert ots.wait_for_exit(4243, timeout_seconds=0) is False
+
+    class _Running:
+        def __init__(self, _pid):
+            pass
+
+        def status(self):
+            return psutil.STATUS_RUNNING
+
+    monkeypatch.setattr(psutil, 'pid_exists', lambda _pid: True)
+    monkeypatch.setattr(psutil, 'Process', _Running)
+    assert ots.wait_for_exit(4243, timeout_seconds=0) is False
+
+
+def test_stop_training_asks_onetrainer_before_it_kills_anything(
+        onetrainer, monkeypatch, app):
+    """The whole point: `taskkill /F` never lets OneTrainer reach the cancel
+    path that writes its backup and saves the LoRA."""
+    from app.services import lora_training as lt
+    from app.job_queue import queue_manager
+    ots, _cfg = onetrainer
+    killed = []
+    asked = []
+
+    with app.app_context():
+        queue_manager._set_system_state('training_in_progress', True)
+        queue_manager._set_system_state('training_pid', 4243)
+        queue_manager._set_system_state('training_trainer', 'onetrainer')
+        monkeypatch.setattr(lt, '_pid_alive', lambda _pid: True)
+        monkeypatch.setattr(lt.subprocess, 'run',
+                            lambda *a, **k: killed.append(a) or None)
+        monkeypatch.setattr(ots, 'request_graceful_stop',
+                            lambda pid: asked.append(pid) or True)
+
+        # It saved and exited inside the wait: a finished stop.
+        monkeypatch.setattr(ots, 'wait_for_exit', lambda pid, **kw: True)
+        assert lt.stop_training() is True
+        assert asked == [4243]
+        assert killed == [], 'nothing may be killed once the ask was accepted'
+        assert queue_manager._get_system_state('training_pid', None) is None
+
+        # Still writing the LoRA when the HTTP call had to answer: a THIRD
+        # outcome, because "still running" and "saving what it trained" are not
+        # the same news, and the fence must stay until it is really gone.
+        queue_manager._set_system_state('training_in_progress', True)
+        queue_manager._set_system_state('training_pid', 4243)
+        queue_manager._set_system_state('training_trainer', 'onetrainer')
+        monkeypatch.setattr(ots, 'wait_for_exit', lambda pid, **kw: False)
+        assert lt.stop_training() == 'stopping'
+        assert killed == []
+        assert queue_manager._get_system_state('training_in_progress', False) is True
+
+
+def test_stop_training_still_kills_when_the_ask_cannot_be_delivered(
+        onetrainer, monkeypatch, app):
+    from app.services import lora_training as lt
+    from app.job_queue import queue_manager
+    ots, _cfg = onetrainer
+    killed = []
+
+    class _Done:
+        returncode = 0
+
+    with app.app_context():
+        queue_manager._set_system_state('training_in_progress', True)
+        queue_manager._set_system_state('training_pid', 4243)
+        queue_manager._set_system_state('training_trainer', 'onetrainer')
+        monkeypatch.setattr(lt, '_pid_alive', lambda _pid: True)
+        monkeypatch.setattr(lt, '_wait_for_training_process_exit', lambda _pid: True)
+        monkeypatch.setattr(lt.subprocess, 'run',
+                            lambda *a, **k: (killed.append(a), _Done())[1])
+        monkeypatch.setattr(ots, 'request_graceful_stop', lambda _pid: False)
+        assert lt.stop_training() is True
+        assert killed, 'an undeliverable ask must not leave the run running'
+
+
+def test_an_ai_toolkit_run_is_still_killed_outright(onetrainer, monkeypatch, app):
+    """Only OneTrainer saves on the way out; asking the other lane nicely would
+    just leave it running."""
+    from app.services import lora_training as lt
+    from app.job_queue import queue_manager
+    ots, _cfg = onetrainer
+    killed = []
+    asked = []
+
+    class _Done:
+        returncode = 0
+
+    with app.app_context():
+        queue_manager._set_system_state('training_in_progress', True)
+        queue_manager._set_system_state('training_pid', 4243)
+        queue_manager._set_system_state('training_trainer', None)
+        monkeypatch.setattr(lt, '_pid_alive', lambda _pid: True)
+        monkeypatch.setattr(lt, '_wait_for_training_process_exit', lambda _pid: True)
+        monkeypatch.setattr(lt.subprocess, 'run',
+                            lambda *a, **k: (killed.append(a), _Done())[1])
+        monkeypatch.setattr(ots, 'request_graceful_stop',
+                            lambda pid: asked.append(pid) or True)
+        assert lt.stop_training() is True
+        assert asked == [] and killed

@@ -20,7 +20,9 @@ import logging
 import math
 import os
 import re
+import signal
 import subprocess
+import time
 from pathlib import Path
 
 from .. import config as cfg
@@ -125,6 +127,9 @@ KREA2_RESOLUTION = 512
 # `epochs = ceil(steps * batch / images)` reads this too, so a run launched with
 # no opinion on either still gets an epoch count that matches its batch.
 KREA2_DEFAULT_BATCH_SIZE = 4
+
+# The launcher runs OneTrainer's train.py through this, so that Stop can save.
+_SHIM_PATH = Path(__file__).resolve().parent / 'onetrainer_train_shim.py'
 
 # What the shipped Krea 2 presets ask for. Read here rather than parsed at run
 # time so the epoch arithmetic has a number even when the preset file is not
@@ -533,15 +538,85 @@ def launch(trigger: str, dataset_folder: str, training_folder: str,
         # --config-path), confirmed against train.py's own usage output —
         # the underscored form silently fails argparse and the process
         # exits before doing anything (issue found running Krea 2 for real).
-        [str(venv_python), 'scripts/train.py',
+        #
+        # train.py is reached THROUGH the shim so that a stop can be graceful:
+        # OneTrainer saves the LoRA on a KeyboardInterrupt and never sees one
+        # from a taskkill. See onetrainer_train_shim for the whole reason.
+        [str(venv_python), str(_SHIM_PATH),
          '--preset-path', str(preset_path), '--config-path', str(config_path)],
         cwd=str(root), stdout=logf, stderr=subprocess.STDOUT, shell=False,
         env=env,
-        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        # CREATE_NEW_PROCESS_GROUP is what makes the child addressable by a
+        # console control event at all; without it CTRL_BREAK would be
+        # broadcast to this app's own process group — i.e. to the server.
+        creationflags=(getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+                       | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)))
     return {'pid': proc.pid, 'config_path': str(config_path),
             'concepts_path': str(concepts_path), 'log_path': str(log_path),
             'output_model_destination': config['output_model_destination'],
             '_proc': proc}
+
+
+# How long the STOP call itself waits for the trainer to finish saving before
+# it answers. The save is a backup (training state) followed by the LoRA, and
+# `end()` also evicts the model from VRAM first — tens of seconds on a 12B base.
+# The caller is an HTTP request, so this is deliberately short: past it the run
+# is still exiting, the watcher still finalises it, and the answer says so
+# rather than pretending the run is gone.
+GRACEFUL_STOP_WAIT_SECONDS = 25.0
+_GRACEFUL_POLL_SECONDS = 0.5
+
+
+def request_graceful_stop(pid) -> bool:
+    """Ask a running OneTrainer child to stop the way its own cancel path
+    expects: a console control event the shim turns into a KeyboardInterrupt.
+
+    Returns whether the event was DELIVERED, not whether the run has ended —
+    the trainer then writes its backup and saves the LoRA, which takes as long
+    as it takes. False means the caller should fall back to killing.
+    """
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    sig = getattr(signal, 'CTRL_BREAK_EVENT', None)
+    if sig is None:                                  # POSIX: SIGINT is the same ask
+        sig = signal.SIGINT
+    try:
+        os.kill(pid, sig)
+        return True
+    except (OSError, ValueError, ProcessLookupError) as exc:
+        logger.warning('onetrainer: could not ask pid %s to stop gracefully: %s',
+                       pid, exc)
+        return False
+
+
+def wait_for_exit(pid, timeout_seconds: float = GRACEFUL_STOP_WAIT_SECONDS) -> bool:
+    """True once the process is gone. Never treats an unreadable state as death:
+    the GPU fence is released on this answer."""
+    deadline = time.monotonic() + max(0.0, timeout_seconds)
+    while True:
+        try:
+            import psutil
+            if not psutil.pid_exists(int(pid)):
+                return True
+            if psutil.Process(int(pid)).status() == psutil.STATUS_ZOMBIE:
+                return True
+        except Exception as exc:                     # noqa: BLE001
+            try:
+                import psutil
+                if isinstance(exc, psutil.NoSuchProcess):
+                    return True
+            except Exception:                        # noqa: BLE001
+                pass
+            logger.warning('onetrainer: could not probe pid %s while stopping: %s',
+                           pid, exc)
+            return False
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(_GRACEFUL_POLL_SECONDS)
 
 
 def _training_folder_for(ds) -> Path:
@@ -716,6 +791,11 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
     _record_training_process_identity(launched['pid'])
     queue_manager._set_system_state('training_dataset_id', int(dataset_id), ttl_seconds=_TRAIN_STATE_TTL)
     queue_manager._set_system_state('training_train_type', 'krea', ttl_seconds=_TRAIN_STATE_TTL)
+    # WHOSE run this is. Stop asks, because the two lanes are stopped
+    # differently: ai-toolkit is killed, OneTrainer is ASKED — it saves the LoRA
+    # on the way out and a kill throws that away.
+    queue_manager._set_system_state('training_trainer', 'onetrainer',
+                                    ttl_seconds=_TRAIN_STATE_TTL)
 
     from flask import current_app
     import threading

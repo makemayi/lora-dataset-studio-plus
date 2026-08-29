@@ -9321,13 +9321,18 @@ def continue_training(user_id, dataset_id, extra_steps: int = 1000,
 
 
 def stop_training(expected_dataset_id=None, expected_run_token=None,
-                  expected_dataset_table=None) -> bool:
+                  expected_dataset_table=None) -> bool | str:
     """Kill the local training process, then release its GPU ownership fence.
 
     The final state transition is deliberately fail-closed: a non-zero
     taskkill result, a missing PID, or an unavailable PID probe leaves the
     training fence in place. Releasing it without proof would let Vision or
     ComfyUI allocate the GPU while ai-toolkit may still be running.
+
+    Returns True when the run is provably over, False when nothing was stopped
+    (fail-closed), and the string 'stopping' for a OneTrainer run that ACCEPTED
+    the stop and is writing its backup and LoRA — a third outcome because
+    "still running" and "saving what it trained" are not the same news.
 
     `expected_dataset_table` completes `expected_dataset_id`, which is an integer
     two tables now share. Omitted, it means `face_dataset` — so the image lane's
@@ -9379,6 +9384,26 @@ def stop_training(expected_dataset_id=None, expected_run_token=None,
                     'keeping the GPU fence', pid)
                 return False
             pid_alive = rechecked_pid_alive
+
+        if pid_alive and queue_manager._get_system_state(
+                'training_trainer', None) == 'onetrainer':
+            # ASK, don't kill. OneTrainer's own cancel path writes the backup and
+            # saves the LoRA on a KeyboardInterrupt; `taskkill /F` never lets it
+            # run, which is how three stops in one afternoon each threw away a
+            # run that had trained for an hour. The kill below stays as the
+            # fallback for a child that will not go.
+            from . import onetrainer_service as _ots
+            if _ots.request_graceful_stop(pid):
+                if _ots.wait_for_exit(pid):
+                    _save_queue([])
+                    _clear_training_identity(ttl_seconds=None)
+                    return True
+                # Still saving. The run is ending and its watcher will finalise
+                # it; the GPU fence stays until the process is really gone, which
+                # is exactly what it is for.
+                logger.info('stop_training: OneTrainer pid %s is saving before it '
+                            'exits; leaving the fence to its watcher', pid)
+                return 'stopping'
 
         if pid_alive:
             try:
@@ -9676,6 +9701,9 @@ def training_status(user_id=None) -> dict:
     return {'in_progress': in_progress,
             'installed': is_installed(),
             'pid': queue_manager._get_system_state('training_pid', None),
+            # Which local trainer owns the run. The Runs card asks because Stop
+            # means two different things: terminated, or asked to save first.
+            'trainer': queue_manager._get_system_state('training_trainer', None),
             'current': current,
             # Dernier crash d'entraînement (rc≠0) remonté par le watcher, pour l'UI.
             'error': queue_manager._get_system_state('training_error', None),
@@ -10139,6 +10167,9 @@ _TRAIN_IDENTITY_KEYS = (
     # name and be killed by that dataset's Stop button.
     'training_dataset_table',
     'training_target_step',
+    # Which local trainer owns the run — read by stop_training, which must ASK
+    # OneTrainer to stop (it saves the LoRA on the way out) rather than kill it.
+    'training_trainer',
     'training_run_token', 'training_train_type', 'training_variant',
     'training_base_model', 'training_effective_base', 'training_slider_mode',
     'training_training_adapter', 'training_recipe_version',

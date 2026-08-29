@@ -458,6 +458,16 @@ def dataset_train_stop():
                else lt.stop_training(
                    expected_dataset_id=expected_dataset_id,
                    expected_run_token=expected_run_token))
+    if stopped == 'stopping':
+        # Accepted, not finished: OneTrainer is saving the LoRA it has trained
+        # so far. The Runs card keeps polling and the watcher closes the run.
+        return jsonify({
+            'ok': True,
+            'stopping': True,
+            'detail': ('OneTrainer is saving this run before it exits — the '
+                       'backup first, then the LoRA. It stays on the GPU until '
+                       'that is written.'),
+        })
     if stopped is False:
         # The Runs hub polls every few seconds. Its card can therefore describe
         # run A just after A ended and queued run B started; never let that stale

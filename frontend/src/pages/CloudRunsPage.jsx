@@ -644,9 +644,18 @@ export default function CloudRunsPage() {
     const local = data?.local_active;
     if (!canStopLocalRun(local) || stoppingLocalRef.current) return;
     const who = local.current.name || `dataset #${local.current.dataset_id}`;
-    if (!window.confirm(`Stop the local run for “${who}”?\n\n`
-      + 'The training process is terminated and the pending local training queue is cleared. '
-      + 'Checkpoints already saved remain available.')) return;
+    // The two lanes end differently and the confirm has to say which one you are
+    // about to do: ai-toolkit is terminated, OneTrainer is ASKED to stop and
+    // saves what it has trained on the way out.
+    const graceful = local.trainer === 'onetrainer';
+    if (!window.confirm(graceful
+      ? `Stop the local run for “${who}”?\n\n`
+        + 'OneTrainer is asked to stop rather than killed: it writes its backup and '
+        + 'then saves the LoRA it has trained so far, which can take a minute. It '
+        + 'keeps the GPU until that is written. The pending local training queue is cleared.'
+      : `Stop the local run for “${who}”?\n\n`
+        + 'The training process is terminated and the pending local training queue is cleared. '
+        + 'Checkpoints already saved remain available.')) return;
 
     stoppingLocalRef.current = true;
     setStoppingLocal(true);
@@ -657,6 +666,13 @@ export default function CloudRunsPage() {
       });
       if (d.ok === false) {
         toast.error(d.error || 'Could not stop the local run — it may have already finished.');
+        return;
+      }
+      if (d.stopping) {
+        // Accepted, not finished. The card STAYS: the run is still on the GPU
+        // writing its LoRA, and clearing it here would say the opposite.
+        toast.success(d.detail
+          || 'Stopping — OneTrainer is saving this run before it exits.', 15000);
         return;
       }
       // The stop endpoint is synchronous: once it answers, the process is gone

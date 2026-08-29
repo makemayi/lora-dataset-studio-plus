@@ -57,3 +57,18 @@ test('the live local card never renders the crash payload object as a child', ()
   assert.match(source, /failureChip\(data\.local_active\.error\)/);
   assert.match(source, /import \{ failureChip \} from '\.\.\/components\/dataset\/trainingFailure'/);
 });
+
+test('the Stop confirm says which of the two endings you are asking for', () => {
+  // OneTrainer saves the LoRA when it is cancelled; ai-toolkit is terminated.
+  // A confirm that promises the same thing for both is wrong for one of them.
+  assert.match(source, /const graceful = local\.trainer === 'onetrainer'/);
+  assert.match(source, /asked to stop rather than killed/);
+  assert.match(source, /The training process is terminated/,
+    'the ai-toolkit wording stays for the lane it is true of');
+  // 'stopping' is accepted-not-finished: the card must survive it, because the
+  // run is still on the GPU writing its LoRA.
+  assert.match(source, /if \(d\.stopping\) \{/);
+  const stopping = source.slice(source.indexOf('if (d.stopping) {'));
+  const clearsCard = stopping.slice(0, stopping.indexOf('}')).includes('local_active: null');
+  assert.equal(clearsCard, false, 'a run that is still saving must keep its card');
+});
