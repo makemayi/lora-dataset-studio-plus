@@ -11464,6 +11464,53 @@ def _bank_promote_job(user_id, src_bank_id, dest_bank_id, ids):
     return run
 
 
+def promotion_plan(user_id, bank_id, dataset_id, quotas, ids=None):
+    """What a build WOULD do. Read-only: no file, no row, no job.
+
+    The dialog shows this before the button commits anything, because reuse is a
+    decision with a cost ("50 of these 90 come from a picture used more than
+    once") and a shortfall is a fact the operator must see BEFORE a run rather
+    than discover in the framing counts afterwards.
+
+    `has_face_box` is approximated by the Bank's own face verdict: the Bank
+    stores whether a face was found, never the box, and the box itself is
+    measured at promotion time. `scorable` is the state that means "a face, big
+    enough"; `no_face`, `too_small` and `extreme_pose` cannot give a crop. A row
+    the Bank never scored (NULL) is counted as CAPABLE and reported separately as
+    `unscored`: the detector runs at promotion time anyway and a picture that
+    turns out to have no face simply falls back to its full frame, so refusing it
+    here would understate a Bank nobody has scored yet — while the count keeps
+    the plan honest about how firm its promise is.
+    """
+    from . import promotion_quota
+    bank = get_bank(user_id, bank_id)
+    if not bank:
+        raise ValueError('bank not found')
+    dataset_id = dataset_activity.normalize_dataset_id(dataset_id)
+    rows = _promotable_query(bank_id, dataset_id)
+    if ids:
+        rows = rows.filter(BankImage.id.in_(_normalize_promotion_ids(ids)))
+    rows = rows.all()
+    # Best first: the Bank's own two scores, then the id so a plan is stable.
+    ranked = sorted(
+        rows,
+        key=lambda r: (-(r.aesthetic_score or 0.0), -(r.blur_score or 0.0), r.id))
+    pictures = [{'id': r.id,
+                 'has_face_box': r.face_state in ('scorable', None)}
+                for r in ranked]
+    out = promotion_quota.allocate(pictures, quotas or {})
+    return {
+        'usable': len(pictures),
+        'with_face_box': sum(1 for p in pictures if p['has_face_box']),
+        'unranked': sum(1 for r in ranked if r.aesthetic_score is None),
+        'unscored': sum(1 for r in ranked if r.face_state is None),
+        'counts': out['counts'],
+        'total': sum(out['counts'].values()),
+        'reused': out['reused'],
+        'shortfall': out['shortfall'],
+    }
+
+
 def start_promote(app, user_id, bank_id, ids, dataset_id, framings=None,
                   per_framing_limit=None, quotas=None):
     """Copy a selection into a dataset through the normal import path

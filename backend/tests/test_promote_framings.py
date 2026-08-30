@@ -328,3 +328,63 @@ def test_quotas_cap_each_framing_independently(client, app, promoted_bank, monke
             key = row.framing or 'full'
             counts[key] = counts.get(key, 0) + 1
     assert counts == {'face': 1, 'half': 1, 'full': 2}
+
+
+def _mark_scorable(app, bank_id):
+    """The plan reads the Bank's own face verdict; the fixture's rows are
+    unscored. `scorable` is the value that means "a face was found and it is big
+    enough" (the others are no_face / too_small / extreme_pose)."""
+    from app.extensions import db
+    from app.models import BankImage
+    with app.app_context():
+        for row in BankImage.query.filter_by(bank_id=bank_id).all():
+            row.face_state = 'scorable'
+        db.session.commit()
+
+
+def test_the_plan_describes_the_run_and_writes_nothing(client, app, promoted_bank):
+    from app.models import FaceDatasetImage
+    from app.services import image_bank_service as banks
+    dataset_id = _dataset(client)
+    _mark_scorable(app, promoted_bank)
+    with app.app_context():
+        before = FaceDatasetImage.query.filter_by(dataset_id=dataset_id).count()
+        plan = banks.promotion_plan('local', promoted_bank, dataset_id,
+                                    quotas={'face': 4, 'half': 4, 'full': 4})
+        assert plan['usable'] == 4
+        assert plan['with_face_box'] == 4
+        assert plan['counts'] == {'face': 4, 'half': 4, 'full': 4}
+        assert plan['total'] == 12
+        assert plan['reused'] == 4, 'four pictures cannot give twelve images once each'
+        assert plan['shortfall'] == {}
+        assert FaceDatasetImage.query.filter_by(
+            dataset_id=dataset_id).count() == before
+
+
+def test_the_plan_names_the_ceiling_when_the_pool_cannot_cover_it(
+        client, app, promoted_bank):
+    from app.services import image_bank_service as banks
+    dataset_id = _dataset(client)
+    _mark_scorable(app, promoted_bank)
+    with app.app_context():
+        plan = banks.promotion_plan('local', promoted_bank, dataset_id,
+                                    quotas={'face': 10, 'half': 10, 'full': 10})
+        assert plan['total'] == 12, 'four pictures give at most twelve images'
+        assert plan['shortfall'] == {'face': 6, 'half': 6, 'full': 6}
+
+
+def test_a_picture_the_bank_calls_faceless_cannot_be_planned_for_a_crop(
+        client, app, promoted_bank):
+    from app.extensions import db
+    from app.models import BankImage
+    from app.services import image_bank_service as banks
+    dataset_id = _dataset(client)
+    with app.app_context():
+        for row in BankImage.query.filter_by(bank_id=promoted_bank).all():
+            row.face_state = 'no_face'
+        db.session.commit()
+        plan = banks.promotion_plan('local', promoted_bank, dataset_id,
+                                    quotas={'face': 4, 'half': 4, 'full': 4})
+    assert plan['with_face_box'] == 0
+    assert plan['counts'] == {'full': 4}
+    assert plan['shortfall'] == {'face': 4, 'half': 4}
