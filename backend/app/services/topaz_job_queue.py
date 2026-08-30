@@ -342,6 +342,35 @@ class TopazJobManager:
         return [(str(i), inputs.get(str(i))) for i in ids
                 if inputs.get(str(i))]
 
+    def _poll_output_progress(self, out_dir, row_id, stop):
+        """Stream the running batch's progress into ``done_images``.
+
+        tpai is ONE process over the whole batch (so it loads its models once),
+        which meant the job's done/total stayed at 0 until the whole batch
+        finished — the operator saw "0/87" for minutes while files were landing
+        on disk. tpai writes one PNG per finished image into ``out_dir`` as it
+        goes, so counting them gives a live figure; each count is written to
+        the row through the manager's own app context, so the UI's Task Center
+        reads a moving number instead of a frozen 0."""
+        import os
+        from sqlalchemy import update
+        from ..models import TopazJob as _TJ
+        app = self._app
+        while not stop.is_set():
+            n = 0
+            try:
+                with os.scandir(out_dir) as it:
+                    n = sum(1 for e in it if e.name.lower().endswith('.png'))
+            except OSError:
+                n = 0
+            if app is not None:
+                with app.app_context():
+                    db.session.execute(
+                        update(_TJ).where(_TJ.id == row_id)
+                        .values(done_images=n))
+                    db.session.commit()
+            time.sleep(POLL_SECONDS)
+
     def _run_batch(self, exe, row, batch, toggles):
         """Stage all inputs into ONE folder, run tpai ONCE, map outputs back,
         and link every finished tile. Returns (status, message, results)."""
@@ -352,9 +381,23 @@ class TopazJobManager:
             with tempfile.TemporaryDirectory(prefix='lds-topaz-') as tmp_in, \
                  tempfile.TemporaryDirectory(prefix='lds-topaz-out-') as tmp_out:
                 staged = stage_inputs(batch, tmp_in)
-                status, message = th.run_tpai(
-                    exe, str(pathlib.Path(tmp_in)), str(pathlib.Path(tmp_out)),
-                    **toggles)
+                # Start the progress poller BEFORE run_tpai blocks: tpai writes
+                # one png per finished image into tmp_out as it goes, so counting
+                # them streams a live done/total while the single tpai process
+                # runs. Stopped (and joined) as soon as run_tpai returns.
+                stop = threading.Event()
+                poller = threading.Thread(
+                    target=self._poll_output_progress,
+                    args=(str(pathlib.Path(tmp_out)), row.id, stop),
+                    daemon=True)
+                poller.start()
+                try:
+                    status, message = th.run_tpai(
+                        exe, str(pathlib.Path(tmp_in)), str(pathlib.Path(tmp_out)),
+                        **toggles)
+                finally:
+                    stop.set()
+                    poller.join(timeout=5)
                 if status != 'ok':
                     for image_id, _ in batch:
                         results[str(image_id)] = {

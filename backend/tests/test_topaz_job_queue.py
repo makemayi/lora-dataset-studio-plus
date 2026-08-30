@@ -107,3 +107,45 @@ def test_retry_requeues_failed(app):
         row = TopazJob.query.filter_by(job_id=jid).one()
         assert row.status == 'queued' and row.retry_count == 1
         assert row.error_message is None
+
+
+def test_a_batch_jobs_done_images_stream_up_as_outputs_land(app, tmp_path):
+    """tpai batches run as ONE process, so done/total was frozen at 0 until the
+    whole batch finished. We now poll the output dir as tpai writes it: once a
+    few pngs land, done_images on the row rises before the process exits."""
+    from app.models import TopazJob
+    from app.extensions import db
+    from app.services.topaz_job_queue import TopazJobManager
+
+    mgr = TopazJobManager()
+    mgr.init_app(app)
+    with app.app_context():
+        row = TopazJob(
+            job_id='topaz-batch-test', user_id='local', dataset_id=1,
+            image_id=7, input_filename='C:/nope/7.png',
+            status='running', image_ids='[7]', total_images=3)
+        db.session.add(row)
+        db.session.commit()
+        row_id = row.id
+    # Simulate tpai writing one png per finished image into the output dir.
+    out = tmp_path / 'out'
+    out.mkdir()
+    (out / 'img_7.png').write_bytes(b'x')
+    (out / 'img_8.png').write_bytes(b'x')
+    stop = __import__('threading').Event()
+    import threading as _t
+    poller = _t.Thread(target=mgr._poll_output_progress,
+                       args=(str(out), row_id, stop), daemon=True)
+    poller.start()
+    try:
+        # The poller runs every POLL_SECONDS (2s); wait a couple of cycles.
+        for _ in range(20):
+            import time as _t2; _t2.sleep(0.5)
+            with app.app_context():
+                done = db.session.get(TopazJob, row_id).done_images
+            if done >= 2:
+                break
+        assert done >= 2, f'done_images should track the output count, got {done}'
+    finally:
+        stop.set()
+        poller.join(timeout=5)
