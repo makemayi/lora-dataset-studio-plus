@@ -394,6 +394,15 @@ class TopazJobManager:
                 try:
                     status, message = th.run_tpai(
                         exe, str(pathlib.Path(tmp_in)), str(pathlib.Path(tmp_out)),
+                        # ONE tpai process for the WHOLE batch: the default 600 s
+                        # timeout is a single-image figure, and a batch of ~87
+                        # images would be killed inside it (measured: a 600 s cut
+                        # stopped a batch at ~31 of 87, and the job came back
+                        # 'failed', done=0/87). Budget a minute per image plus
+                        # the base, so a large batch is never killed mid-run but
+                        # a genuinely wedged tpai still fails instead of hanging.
+                        timeout=max(topaz_helper.DEFAULT_TIMEOUT_S,
+                                    len(batch) * 60),
                         **toggles)
                 finally:
                     stop.set()

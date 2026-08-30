@@ -104,6 +104,10 @@ def test_worker_batch_calls_tpai_once_and_links_each(app, monkeypatch):
 
         def fake_run_tpai(exe, input_dir, output_dir, **kw):
             calls['n'] += 1
+            # A 2-image batch must get a timeout that scales with the batch,
+            # not the 600 s single-image default (which killed a ~87-image
+            # batch at ~31 of 87, seen as status='failed', done=0/87).
+            assert kw.get('timeout', 0) >= 2 * 60
             # write two outputs so the collector can map them back
             pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
             (pathlib.Path(output_dir) / 'img_10.png').write_bytes(b'out-a')
