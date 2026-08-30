@@ -9858,16 +9858,35 @@ def _import_folder_for(name: str) -> str:
             i += 1
 
 
+def _unique_bank_name(user_id, name) -> str:
+    """A Bank name that is not already taken on this install, suffixing -2,
+    -3\u2026 on a clash \u2014 the NAME twin of _import_folder_for's folder
+    uniquing. Without it a repeated crop-to-person or promote-to-bank wrote
+    several Banks with the identical name, which is how an operator ends up
+    with three "X-crop" banks and no way to tell them apart."""
+    stem = (name or '').strip() or 'bank'
+    candidate = stem
+    i = 2
+    while True:
+        taken = (db.session.query(ImageBank.id)
+                 .filter_by(user_id=user_id, name=candidate).first())
+        if taken is None:
+            return candidate
+        candidate = f'{stem}-{i}'
+        i += 1
+
+
 def _stage_import_bank(user_id, name) -> ImageBank:
     """Reserve a private folder and FLUSH its still-uncommitted Bank row.
 
     The generated id can then be reserved in ``bank_jobs`` before the row becomes
-    visible to another request.  Callers either commit it or remove the private
+    visible to another request. Callers either commit it or remove the private
     folder after rolling the transaction back.
     """
-    folder = _import_folder_for(name)
+    uname = _unique_bank_name(user_id, name)
+    folder = _import_folder_for(uname)
     try:
-        bank = ImageBank(user_id=user_id, name=name, source_path=folder)
+        bank = ImageBank(user_id=user_id, name=uname, source_path=folder)
         db.session.add(bank)
         db.session.flush()
         return bank
@@ -9875,7 +9894,6 @@ def _stage_import_bank(user_id, name) -> ImageBank:
         db.session.rollback()
         shutil.rmtree(folder, ignore_errors=True)
         raise
-
 
 def _create_import_bank(user_id, name) -> ImageBank:
     """Reserve a private folder and persist its Bank row as one unit."""

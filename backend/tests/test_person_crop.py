@@ -238,3 +238,34 @@ def test_a_pool_with_nothing_to_crop_is_a_400(client, tmp_path, monkeypatch):
     r = client.post(f'/api/bank/{bank_id}/crop-person', json={})
     assert r.status_code == 400
     assert 'nothing to crop' in r.get_json()['error']
+
+
+def test_repeated_crops_make_uniquely_named_banks(
+        client, app, bank_with_photos, monkeypatch):
+    """Two crops of the same source must produce two DISTINCTLY named banks —
+    `P-crop`, then `P-crop-2` — never a second bank that silently reuses the
+    same name and becomes indistinguishable from the first."""
+    bank_id, _src = bank_with_photos
+    from app.services import image_bank_service as banks
+    monkeypatch.setattr(banks, '_person_crop_prereq', lambda: None)
+    rows = _row_paths(app, bank_id)
+    boxes = {path: [[10, 10, 900, 900]] for _iid, _m, path in rows}
+    _inject_detector(monkeypatch, boxes)
+
+    first = client.post(f'/api/bank/{bank_id}/crop-person', json={})
+    assert first.status_code == 202
+    id1 = first.get_json()['id']
+    # A second run: the source rows now have NO marker (crop writes a new bank,
+    # never a working-copy blob), so the pool is the same and the detector
+    # finds the same people. The destination name must be uniqued.
+    second = client.post(f'/api/bank/{bank_id}/crop-person', json={})
+    assert second.status_code == 202
+    id2 = second.get_json()['id']
+
+    from app.extensions import db as _db
+    from app.models import ImageBank
+    with app.app_context():
+        n1 = _db.session.query(ImageBank).filter_by(id=id1).first().name
+        n2 = _db.session.query(ImageBank).filter_by(id=id2).first().name
+    assert n1 == 'P-crop'
+    assert n2 == 'P-crop-2', f'expected uniquely-named second bank, got {n2!r}'
