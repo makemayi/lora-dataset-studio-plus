@@ -793,6 +793,30 @@ rarely needs a description on every shot). Stop it any time — and when you com
 back, a saved report at the top of the bank tells you exactly what ran, what was
 skipped and why, with the headline counts.
 
+## Build a dataset from a bank in one click
+
+The **⬆ Promote** dialog is also a one-click build: tell it a **total** and how
+to split it between **face**, **waist-up** and **full-body**, and it picks the
+Bank's best pictures, cuts each framing, and queues anything too small for an
+upscale. You see a **plan** before it runs — how many images, how many come from
+a picture used more than once, and any shortfall against what you asked for.
+
+- **Each picture gives one framing while the Bank has enough pictures.** Ask for
+  more images than you have pictures and the best ones give a second and third
+  framing — never the same framing twice. The plan says "N pictures used more
+  than once" before you commit.
+- **"Filtering" is selection, not re-scoring.** The build ranks and picks inside
+  what the Bank already knows. It never silently re-runs the triage pipeline.
+- **Upscale by size, not framing.** Only images whose short edge is below 1536 px
+  are queued for Topaz; a full frame that is already large is not re-rendered.
+  The build ends when those upscales are *queued*, not when they finish — Topaz
+  serialises on its own GPU, and each job is its own Task Center row.
+- **Captions ride along** from the Bank. A dataset that arrives uncaptioned is
+  captioned by the button that already does that.
+
+The build reads what the Bank already measured. If a prerequisite is missing it
+says which one — it never silently re-scores a Bank.
+
 ## Choosing where a bank pass runs
 
 Every pass button in the bank ends in `…` and opens a **launch window** before

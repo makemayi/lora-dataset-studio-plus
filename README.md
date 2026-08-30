@@ -60,6 +60,8 @@ A dataset is the thirty images you train on. A **bank** is the three thousand yo
 
 Point a bank at a folder, or scrape straight into one. It reads what is there **in place**: your files are never modified, moved or renamed, and the single action that does touch the source folder announces itself in capitals before it runs. Then **one pass measures the whole pile**, and every question afterwards is answered against those measurements instead of against your eyes — what is blurry, what is a duplicate of what, who is in it, how it is framed, whether it is a photograph or a render, and what it actually shows. You keep, reject and shortlist; a kept selection graduates into a dataset with its analysis attached, and can come back the other way.
 
+**Or build the dataset in one click:** tell the ⬆ Promote dialog a total and how to split it between face, waist-up and full-body, and it picks the Bank's best pictures, cuts each framing, and queues anything too small for an upscale. It uses what the Bank already knows — it does **not** re-score a Bank — and it stops at "queued for upscale" rather than waiting for Topaz. While the Bank has enough pictures each one is used once; ask for more than you have pictures and the best give a second and third framing, never the same one twice, and a plan says so before you commit.
+
 The cuts are measured rather than guessed: the aesthetic and near-duplicate thresholds were calibrated on a real bank of **7,316 images**, and every measure that cannot answer says "unsure" or "not measured" instead of inventing a verdict. The image lane is out of Beta; the **video** lane still carries the chip, and says why below.
 
 <table>

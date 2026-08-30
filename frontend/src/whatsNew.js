@@ -50,6 +50,18 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-30-bank-build-dataset',
+    date: '2026-08-30',
+    title: 'One button turns a Bank into a finished dataset',
+    blurb: 'Say how many images you want and how they split between face, '
+      + 'waist-up and full-body shots. The Bank picks its best pictures, cuts '
+      + 'each framing, and queues anything too small for an upscale. While your '
+      + 'Bank has enough pictures each one is used once; ask for more images '
+      + 'than you have pictures and the best ones give a second and third '
+      + 'framing — and the plan says so before it runs.',
+    to: '/bank',
+  },
+  {
     id: '2026-08-30-silent-ollama-port-no-longer-blocks-generation',
     date: '2026-08-30',
     title: 'A silent Ollama port no longer blocks every ComfyUI job',
