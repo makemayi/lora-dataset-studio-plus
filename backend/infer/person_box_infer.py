@@ -21,6 +21,20 @@ import json
 import os
 import sys
 
+# The model is ALWAYS local (cache_dir = data/models/grounding_dino, downloaded
+# once at first use), so this MUST run offline. huggingface_hub still sends a
+# HEAD request per file to verify it even when the file is cached, and a machine
+# that cannot reach huggingface.co answers that HEAD with a connection timeout
+# (WinError 10060) — the subprocess retries forever and the pass hangs on
+# "loading the person detector" (measured: 90 s with no output, then 11.6 s when
+# HF_HUB_OFFLINE=1 is set, model loads in 2.1 s). Offline is the correct mode for
+# a model that is provably on disk, and a genuinely missing file fails loudly.
+os.environ.setdefault('HF_HUB_OFFLINE', '1')
+# huggingface_hub may already be imported by a host that ran this before us, so
+# also force the transformers/diffusers flags that read the env at import time.
+os.environ.setdefault('TRANSFORMERS_OFFLINE', '1')
+os.environ.setdefault('HF_DATASETS_OFFLINE', '1')
+
 import torch
 
 torch.set_num_threads(os.cpu_count() or 1)
@@ -34,6 +48,56 @@ DETECT_SIZE = {"shortest_edge": 480, "longest_edge": 800}
 
 def _log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
+
+
+def _load_model(models_root):
+    """Local-first model load for Grounding DINO.
+
+    The policy, asked for directly: load from the LOCAL cache first and NEVER
+    touch the network for a model that is already on disk (a machine that cannot
+    reach huggingface.co answers every HEAD request with a connection timeout —
+    WinError 10060 — and the default from_pretrained retries it forever, hanging
+    the pass on "loading the person detector"). Only a model that is genuinely
+    ABSENT locally falls back to the network, under a short download timeout, and
+    a network failure there is a clear error — never a silent unbounded retry.
+    """
+    from transformers import (AutoModelForZeroShotObjectDetection,
+                              AutoProcessor)
+
+    def _local_first(fn):
+        return _from_pretrained_local_first(
+            fn, MODEL_ID, models_root,
+            name=fn.__module__.split('.')[-1] if hasattr(fn, '__module__') else fn)
+
+    return (_local_first(AutoProcessor.from_pretrained),
+            _local_first(AutoModelForZeroShotObjectDetection.from_pretrained))
+
+
+def _from_pretrained_local_first(from_pretrained, model_id, models_root, *, name):
+    """One `from_pretrained` call, local-first. Returns the loaded object, or a
+    clear RuntimeError when neither the local cache nor the network has it.
+    """
+    # Pass 1 — local only. A cached model NEVER touches the network.
+    try:
+        return from_pretrained(model_id, cache_dir=models_root,
+                               local_files_only=True)
+    except (OSError, EnvironmentError, ValueError, RuntimeError):
+        pass  # not here yet — try the network, bounded
+
+    # Pass 2 — the model is not local; try the network, bounded. Offline flags
+    # off, a short download timeout on, and a failure is reported, not retried.
+    _log(f"[person-crop] {model_id} not in the local cache ({models_root or '(default)'}); "
+         "trying a bounded download")
+    for _flag in ('HF_HUB_OFFLINE', 'TRANSFORMERS_OFFLINE', 'HF_DATASETS_OFFLINE'):
+        os.environ.pop(_flag, None)
+    os.environ.setdefault('HF_HUB_DOWNLOAD_TIMEOUT', '30')
+    try:
+        return from_pretrained(model_id, cache_dir=models_root)
+    except Exception as net_err:  # noqa: BLE001 — reported, never retried below
+        raise RuntimeError(
+            f'model {model_id!r} ({name}) is not in the local cache '
+            f'{models_root or "(default)"} and could not be downloaded: '
+            f'{type(net_err).__name__}: {net_err}') from net_err
 
 
 def main() -> int:
@@ -52,9 +116,8 @@ def main() -> int:
         device = "cuda" if torch.cuda.is_available() else "cpu"
         _log(f"[person-crop] {len(images)} image(s), device={device}")
         t0 = __import__("time").time()
-        processor = AutoProcessor.from_pretrained(MODEL_ID, cache_dir=models_root)
-        model = (AutoModelForZeroShotObjectDetection.from_pretrained(
-            MODEL_ID, cache_dir=models_root).to(device).eval())
+        processor, model = _load_model(models_root)
+        model = model.to(device).eval()
         _log(f"[person-crop] model loaded in {__import__('time').time() - t0:.1f}s")
 
         results = {}
