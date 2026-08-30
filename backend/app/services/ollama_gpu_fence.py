@@ -298,7 +298,7 @@ def mark_before_generate(url, model, keep_alive=None) -> str:
         # have claimed another model, but they never make an external model safe
         # to change or unload.
         owned = set(_owned_models.get(endpoint, set()))
-        if state == 'unknown':
+        if state in ('unknown', 'unreadable'):
             return 'blocked'
         if state != 'empty' and not loaded.issubset(owned):
             # Before calling a resident model a stranger's, ask the claims LDS
@@ -321,7 +321,8 @@ def mark_before_generate(url, model, keep_alive=None) -> str:
 
 
 def _probe(endpoint):
-    """Return (``empty`` | ``down`` | ``models`` | ``unknown``, names, expires_at map).
+    """Return (``empty`` | ``down`` | ``models`` | ``unreadable`` | ``unknown``,
+    names, expires_at map).
 
     ``down`` is "nothing is listening on this port" (the connection was refused),
     as opposed to ``empty`` — "a daemon answered and holds no model". Both mean
@@ -358,7 +359,12 @@ def _probe(endpoint):
     except (requests.RequestException, OSError) as exc:
         if _connection_refused(exc):
             return 'down', set(), {}
-        return 'unknown', set(), {}
+        # NOTHING was read: the socket opened and no answer came. A different
+        # fact from `unknown` below ("a server answered with something we cannot
+        # use"), and the two earn different verdicts — see _release_endpoint. A
+        # daemon that talks HTTP badly may still be an Ollama holding the card;
+        # a port that never speaks may not be Ollama at all.
+        return 'unreadable', set(), {}
     except Exception:
         return 'unknown', set(), {}
 
@@ -375,10 +381,48 @@ def _post_unload(endpoint, model) -> bool:
         return False
 
 
+def _nothing_to_release_here(endpoint) -> bool:
+    """Has LDS ever put a model on this endpoint? Memory AND disk.
+
+    An endpoint we never loaded anything on is one this fence protects nothing
+    at: there is no residency of ours to unload, and no user model we could
+    stomp by unloading it — because we are not going to unload anything.
+    """
+    with _lock:
+        if _owned_models.get(endpoint) or endpoint in _foreign_local_endpoints:
+            return False
+        try:
+            return not _read_claims().get(endpoint)
+        except Exception:                                # noqa: BLE001
+            return False
+
+
 def _release_endpoint(endpoint, expected_models) -> bool:
     """Unload only LDS-owned models and prove the runner is empty afterwards."""
     state, loaded, expiry = _probe(endpoint)
     if state == 'unknown':
+        # A server ANSWERED and the answer was unusable. It talks HTTP, so it may
+        # be an Ollama in a bad moment — and one of those can still be holding
+        # the card. Stay fail-closed.
+        return False
+    if state == 'unreadable':
+        # Nothing was read at all. Fail-closed is still right when LDS has a
+        # model resident there (ours may be what is holding the card); it is NOT
+        # right when we own nothing, because then this fence has nothing to
+        # release and nothing to protect — and refusing blocks every ComfyUI job
+        # for as long as that port stays silent.
+        #
+        # MEASURED 2026-08-30, and it cost an evening: port 11434 was held not by
+        # Ollama but by an `ollama-compat.py` shim in front of llama.cpp, which
+        # accepts the connection and never answers /api/ps. Every Test Studio
+        # submit was deferred, forever, with nothing on screen saying so — the
+        # app looked like it could not reach ComfyUI, which was running fine.
+        # `fence_status()` already calls an unreadable endpoint "not this fence's
+        # story to tell"; this is that same judgement on the path where it
+        # actually mattered.
+        if _nothing_to_release_here(endpoint):
+            _warn_unreadable_once(endpoint)
+            return True
         return False
     if state in _RUNNER_HOLDS_NOTHING:
         # Empty, or not running at all: either way this GPU is free, and any
@@ -494,6 +538,22 @@ def ensure_released_for_comfy() -> bool:
     return True
 
 
+_unreadable_warned = set()
+
+
+def _warn_unreadable_once(endpoint) -> None:
+    """Say it, once per endpoint per process. A fence that lets work through
+    still owes the log a line about WHY it could not check."""
+    if endpoint in _unreadable_warned:
+        return
+    _unreadable_warned.add(endpoint)
+    logger.warning(
+        'ollama GPU fence: %s accepted the connection but did not answer '
+        '/api/ps. LDS has never loaded a model there, so nothing is held back; '
+        'if that port is not Ollama, point Settings > Vision at the right one.',
+        endpoint)
+
+
 FENCE_BLOCKED_MESSAGE = (
     'A local Ollama model is already in use outside LDS. LDS will not change it; '
     'unload it first or configure a dedicated Ollama endpoint for LDS.')
@@ -515,7 +575,7 @@ def fence_status() -> dict:
         return {'applies': False, 'blocked': False, 'scope': scope, 'models': []}
 
     state, loaded, expiry = _probe(endpoint)
-    if state in ('unknown', 'down'):
+    if state in ('unknown', 'unreadable', 'down'):
         # Not reachable / not answering usefully: that is not this fence's
         # story to tell, and reporting "blocked" here would offer an unload
         # button for a daemon nobody can talk to.
@@ -547,7 +607,7 @@ def unload_foreign_models() -> dict:
     if scope != 'local':
         return {'ok': False, 'reason': 'not-local', 'unloaded': [], 'still_loaded': []}
     state, loaded, _ = _probe(endpoint)
-    if state == 'unknown':
+    if state in ('unknown', 'unreadable'):
         return {'ok': False, 'reason': 'unreachable', 'unloaded': [], 'still_loaded': []}
     if state in _RUNNER_HOLDS_NOTHING:
         with _lock:

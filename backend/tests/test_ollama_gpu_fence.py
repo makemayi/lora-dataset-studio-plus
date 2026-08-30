@@ -237,10 +237,15 @@ def test_a_stopped_ollama_is_told_apart_from_an_empty_one():
         assert fence._probe(endpoint)[0] == 'down'
     with patch.object(fence.requests, 'get', return_value=_ps()):
         assert fence._probe(endpoint)[0] == 'empty'
-    # Anything else the network can do stays 'unknown' - it proves nothing.
+    # An answer we cannot use is 'unknown': something IS talking HTTP there.
+    with patch.object(fence.requests, 'get', return_value=_Response({}, status_code=500)):
+        assert fence._probe(endpoint)[0] == 'unknown'
+    # Nothing read at all is 'unreadable' — a third fact, and the one that a
+    # non-Ollama squatting on 11434 produces (measured: an ollama-compat shim in
+    # front of llama.cpp accepts the socket and never answers /api/ps).
     with patch.object(fence.requests, 'get',
                       side_effect=fence.requests.exceptions.ReadTimeout('slow')):
-        assert fence._probe(endpoint)[0] == 'unknown'
+        assert fence._probe(endpoint)[0] == 'unreadable'
 
 
 def test_no_keep_warm_lease_is_written_for_a_model_that_never_loaded(fence_data_dir):
@@ -379,3 +384,46 @@ def test_nothing_short_of_the_consent_route_ever_unloads_a_foreign_model(fence_d
         assert fence.ensure_released_for_comfy() is False
         assert fence.release_owned_models(ollama_url=endpoint) is False
     post.assert_not_called()
+
+
+def test_a_silent_port_does_not_block_comfy_when_we_own_nothing_there(fence_data_dir):
+    """The evening this cost: 11434 was an `ollama-compat.py` shim in front of
+    llama.cpp. It accepts the connection and never answers /api/ps, so the fence
+    could not prove the runner empty — and every ComfyUI submit was deferred,
+    forever, with nothing on screen saying why. LDS had never loaded a model
+    there, so there was nothing to release and nothing to protect."""
+    endpoint = 'http://127.0.0.1:11434'
+    with fence._lock:
+        fence._owned_models.pop(endpoint, None)
+        fence._foreign_local_endpoints.discard(endpoint)
+    fence._unreadable_warned.discard(endpoint)
+    with patch.object(fence.requests, 'get',
+                      side_effect=fence.requests.exceptions.ReadTimeout('silent')),             patch.object(fence.requests, 'post') as post:
+        assert fence.ensure_released_for_comfy() is True
+    post.assert_not_called(), 'a fence that cannot read must never unload anything'
+
+
+def test_a_silent_port_STILL_blocks_when_a_model_of_ours_is_resident(fence_data_dir):
+    """The safety half, unchanged: our own model may be the thing holding the
+    card, and a port that stopped answering cannot say otherwise."""
+    endpoint = 'http://127.0.0.1:11434'
+    with fence._lock:
+        fence._owned_models[endpoint] = {'lds-model'}
+    try:
+        with patch.object(fence.requests, 'get',
+                          side_effect=fence.requests.exceptions.ReadTimeout('silent')):
+            assert fence.ensure_released_for_comfy() is False
+    finally:
+        with fence._lock:
+            fence._owned_models.pop(endpoint, None)
+
+
+def test_an_unusable_ANSWER_still_blocks_even_when_we_own_nothing(fence_data_dir):
+    """A server that answers badly is still a server: it may be an Ollama in a
+    bad moment, and one of those can be holding the card."""
+    endpoint = 'http://127.0.0.1:11434'
+    with fence._lock:
+        fence._owned_models.pop(endpoint, None)
+        fence._foreign_local_endpoints.discard(endpoint)
+    with patch.object(fence.requests, 'get', return_value=_Response({}, status_code=500)):
+        assert fence.ensure_released_for_comfy() is False

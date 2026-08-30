@@ -50,6 +50,19 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-30-silent-ollama-port-no-longer-blocks-generation',
+    date: '2026-08-30',
+    title: 'A silent Ollama port no longer blocks every ComfyUI job',
+    blurb: 'Before handing the GPU to ComfyUI the app proves your local Ollama '
+      + 'is holding nothing. If that port answers nothing at all — because what '
+      + 'is listening there is not Ollama, or is hung — the check could never '
+      + 'finish, and every generation and every Test Studio image waited '
+      + 'forever with nothing on screen explaining it. When the app has never '
+      + 'loaded a model on that port there is nothing to release, so the work '
+      + 'now goes through (and the log says why). A port that answers badly, or '
+      + 'one holding a model of ours, still blocks exactly as before.',
+  },
+  {
     id: '2026-08-29-submit-timeout-and-self-healing-queue',
     date: '2026-08-29',
     title: 'A busy ComfyUI no longer freezes the whole queue',
