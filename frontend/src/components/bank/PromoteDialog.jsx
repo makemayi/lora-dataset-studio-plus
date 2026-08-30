@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { FLOAT_SHADOW } from '../common/surfaces'
+import { FLOAT_SHADOW, INPUT_CLASS } from '../common/surfaces'
 import { apiFetch, postJson } from '../../api/fetchClient'
 import { useToast } from '../common/Toast'
 import {
   canStartPromote, promoteButtonLabel, promoteSummary, weightNotice,
-  PROMOTE_FRAMING_OPTIONS,
+  splitTotal, rebalance, BUILD_FRAMINGS,
 } from './bankPromote.js'
 
 /** ⬆ Promote: copy the selection somewhere it can be worked on. TWO
@@ -29,13 +29,15 @@ export default function PromoteDialog({ bankId, selectedIds, onClose, onStarted 
   const [promotable, setPromotable] = useState(null)
   const [size, setSize] = useState(null)
   const [busy, setBusy] = useState(false)
-  // Which framings the dataset promotion emits. Full frame is the native door;
-  // the two crops are cut around a face box a detector gathers at promotion
-  // time, so they are dataset-destination-only and multiply the image count.
-  const [framings, setFramings] = useState(['full'])
-  // Cap per framing — this is how "30 faces, 30 half-body, 30 full" is asked
-  // for: tick all three framings, pick 90 pictures, cap each at 30.
-  const [framingCap, setFramingCap] = useState('')
+  // The build view of the framing decision: a TOTAL the operator gives, a split
+  // the sliders nudge, and a plan the server computes before anything runs.
+  // Reuse is conditional — while the pool covers the request, one picture one
+  // framing; ask for more images than pictures and the best give a second and
+  // third, never the same framing twice.
+  const [total, setTotal] = useState(90)
+  const [counts, setCounts] = useState(() => splitTotal(90))
+  const [plan, setPlan] = useState(null)
+  const [upscale, setUpscale] = useState(true)
   const useSelection = selectedIds.length > 0
 
   useEffect(() => {
@@ -56,6 +58,23 @@ export default function PromoteDialog({ bankId, selectedIds, onClose, onStarted 
       .catch(() => { if (live) setPromotable(null) })
     return () => { live = false }
   }, [bankId, datasetId, useSelection])
+
+  // The PLAN the server computed, 300 ms after a slider settles. Never
+  // recomputed here — two implementations of the quota rule would drift, and
+  // the number on screen is a promise. The endpoint reads the whole promotable
+  // set, so it is debounced.
+  useEffect(() => {
+    if (destination !== 'dataset' || !datasetId) { setPlan(null); return }
+    let live = true
+    const t = setTimeout(() => {
+      postJson(`/api/bank/${bankId}/promote/plan`, {
+        dataset_id: Number(datasetId), quotas: counts,
+        ...(useSelection ? { image_ids: selectedIds } : {}),
+      }).then((d) => { if (live) setPlan(d) })
+        .catch(() => { if (live) setPlan(null) })
+    }, 300)
+    return () => { live = false; clearTimeout(t) }
+  }, [bankId, datasetId, destination, counts, useSelection, selectedIds])
 
   // What the selection WEIGHS. Asked once, for the exact set the server would
   // copy — never estimated from an average, because the day a bank holds video
@@ -84,13 +103,13 @@ export default function PromoteDialog({ bankId, selectedIds, onClose, onStarted 
         toast.success(`Copying into “${bankName.trim()}” — follow the progress bar. `
           + 'The new bank is in ← Banks once it finishes.', 9000)
       } else {
-        await postJson(`/api/bank/${bankId}/promote`, {
+        await postJson(`/api/bank/${bankId}/build`, {
           dataset_id: Number(datasetId),
-          image_ids: useSelection ? selectedIds : [],
-          framings,
-          ...(Number(framingCap) > 0 ? { per_framing_limit: Number(framingCap) } : {}),
+          quotas: counts,
+          ...(upscale ? { upscale_below: 1536 } : {}),
+          ...(useSelection ? { image_ids: selectedIds } : {}),
         })
-        toast.success('Promotion started — follow the progress bar.')
+        toast.success('Build started — follow the progress bar.')
       }
       onStarted?.()
     } catch (e) {
@@ -100,12 +119,7 @@ export default function PromoteDialog({ bankId, selectedIds, onClose, onStarted 
   }
 
   const toBank = destination === 'bank'
-  const toggleFraming = (id) => setFramings((prev) => (
-    prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
   const weight = weightNotice({ destination, size })
-  // 400 px is a real viewport here (the app gets consulted on a phone): the
-  // destination pair stacks below sm, and the dialog scrolls rather than
-  // pushing its buttons off-screen.
   const tab = (id, label) => (
     <button type="button" key={id} onClick={() => setDestination(id)}
       aria-pressed={destination === id}
@@ -144,39 +158,48 @@ export default function PromoteDialog({ bankId, selectedIds, onClose, onStarted 
         )}
 
         {!toBank && (
-          <div className="rounded-md bg-surface-raised px-3 py-2">
+          <div className="flex flex-col gap-2 rounded-md bg-surface-raised px-3 py-2">
             <span className="block text-sm font-medium text-content">Framings</span>
             <p className="mt-1 text-xs text-content-muted">
-              Every picture lands on exactly ONE framing — the face still, the
-              waist-up and the full frame always come from different pictures.
-              Each framing is cut from its own measured face box; pictures
-              without a usable face go to the full frame; face boxes come from
-              the face scoring interpreter.
+              Tell it the TOTAL and how to split it. Each framing is cut from
+              its own measured face box; pictures without a usable face go to
+              the full frame. While your Bank has enough pictures each one is
+              used once — ask for more images than you have pictures and the
+              best ones give a second and third framing, never the same one
+              twice.
             </p>
-            <div className="mt-2">
-              <label htmlFor="framing-cap" className="block text-xs font-medium text-content">
-                Cap each framing at (optional)
+
+            <label className="mt-1 block text-xs font-medium text-content" htmlFor="build-total">
+              Total images
+            </label>
+            <div className="flex items-center gap-2">
+              <input id="build-total" type="range"
+                min="0" max={(plan?.usable || 0) * 3 || 300} value={total}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  setTotal(n); setCounts(splitTotal(n))
+                }}
+                className="flex-1 accent-primary" />
+              <span className="w-10 text-right tabular-nums">{total}</span>
+            </div>
+
+            {BUILD_FRAMINGS.map((f) => (
+              <label key={f} className="flex items-center gap-2 text-xs text-content-muted">
+                <span className="w-12 capitalize">{f}</span>
+                <input type="range" min="0" max={total} value={counts[f]}
+                  onChange={(e) => setCounts(rebalance(counts, f, Number(e.target.value)))}
+                  className="flex-1 accent-primary" />
+                <span className="w-8 text-right tabular-nums">{counts[f]}</span>
               </label>
-              <input id="framing-cap" type="number" min="1" step="1"
-                value={framingCap} onChange={(e) => setFramingCap(e.target.value)}
-                placeholder="no cap — one output per picture, spread evenly"
-                className="mt-1 w-full rounded-lg bg-surface-raised px-3 py-1.5 text-sm text-content focus:outline-none focus:ring-1 focus:ring-primary" />
-              <p className="mt-1 text-xs text-content-muted">
-                “30” on three framings + a 90-picture selection = exactly 30 face,
-                30 waist-up, 30 full.
-              </p>
-            </div>
-            <div className="mt-2 flex flex-col gap-1.5">
-              {PROMOTE_FRAMING_OPTIONS.map((f) => (
-                <label key={f.id} className="flex items-center gap-2 text-sm text-content">
-                  <input type="checkbox" checked={f.id === 'full' || framings.includes(f.id)}
-                    disabled={f.id === 'full'}
-                    onChange={() => toggleFraming(f.id)} className="accent-primary" />
-                  {f.label}
-                  <span className="text-xs text-content-subtle">— {f.hint}</span>
-                </label>
-              ))}
-            </div>
+            ))}
+
+            <label className="mt-1 flex items-center gap-2 text-xs text-content-muted">
+              <input type="checkbox" checked={upscale}
+                onChange={(e) => setUpscale(e.target.checked)} className="accent-primary" />
+              Upscale what is too small (short edge &lt; 1536 px)
+            </label>
+
+            <BuildPlanPanel plan={plan} />
           </div>
         )}
 
@@ -231,6 +254,34 @@ export default function PromoteDialog({ bankId, selectedIds, onClose, onStarted 
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+
+/* The plan the SERVER computed. Never recomputed here: two implementations of
+   the quota rule would drift, and the number on screen is a promise. Both plan
+   states stay mounted and flip with `hidden` — Chrome auto-translate rewrites
+   text nodes, and a ternary that unmounts one is what becomes a removeChild
+   crash. */
+export function BuildPlanPanel({ plan }) {
+  if (!plan) return null
+  const short = Object.entries(plan.shortfall || {})
+  return (
+    <div className="flex flex-col gap-0.5 rounded-lg bg-surface px-3 py-2 text-[0.6875rem] text-content-muted">
+      <span>{plan.usable} pictures usable ({plan.with_face_box} with a face)</span>
+      <span className="text-content font-semibold tabular-nums">
+        {plan.total} images — face {plan.counts.face || 0} · half {plan.counts.half || 0} · full {plan.counts.full || 0}
+      </span>
+      <span hidden={!plan.reused}>
+        {plan.reused} pictures used more than once
+      </span>
+      <span hidden={!!plan.reused}>
+        every image comes from its own picture
+      </span>
+      <span hidden={!short.length} className="text-amber-700">
+        short: {short.map(([f, n]) => `${f} ${n}`).join(' · ')}
+      </span>
     </div>
   )
 }
