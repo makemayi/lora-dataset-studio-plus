@@ -116,3 +116,39 @@ export function promoteButtonLabel({ destination, busy }) {
   if (busy) return 'Starting…'
   return destination === 'bank' ? 'Create bank' : 'Promote'
 }
+
+/* The three framing counts are a VIEW of one number: the operator gives a total
+   and nudges the split. Kept pure and here (not in the dialog) because the sum
+   invariant is the only thing standing between "90 images" on screen and 88 in
+   the dataset. */
+export const BUILD_FRAMINGS = ['face', 'half', 'full']
+
+export function splitTotal(total) {
+  const n = Math.max(0, Math.floor(Number(total) || 0))
+  const base = Math.floor(n / 3)
+  const out = { face: base, half: base, full: base }
+  // The remainder goes face-first: the face still is the framing a character
+  // LoRA is judged on, so an odd image is worth more there than anywhere else.
+  for (let i = 0; i < n - base * 3; i += 1) out[BUILD_FRAMINGS[i]] += 1
+  return out
+}
+
+export function rebalance(counts, framing, value) {
+  const total = BUILD_FRAMINGS.reduce((sum, f) => sum + (counts[f] || 0), 0)
+  const next = Math.max(0, Math.min(total, Math.floor(Number(value) || 0)))
+  const others = BUILD_FRAMINGS.filter((f) => f !== framing)
+  let slack = total - next
+  const out = { ...counts, [framing]: next }
+  const share = others.reduce((sum, f) => sum + (counts[f] || 0), 0)
+  others.forEach((f, i) => {
+    // Distribute proportionally to what the others already held, so nudging one
+    // slider does not reshuffle the other two's relationship; the last one
+    // absorbs the rounding so the sum is exact.
+    const take = i === others.length - 1
+      ? slack
+      : Math.round(share ? (slack * (counts[f] || 0)) / share : slack / others.length)
+    out[f] = Math.max(0, take)
+    slack -= out[f]
+  })
+  return out
+}

@@ -77,3 +77,30 @@ test('the button names what it makes', () => {
   assert.equal(promoteButtonLabel({ destination: 'dataset' }), 'Promote')
   assert.equal(promoteButtonLabel({ destination: 'bank', busy: true }), 'Starting…')
 })
+
+import { splitTotal, rebalance } from './bankPromote.js'
+
+test('a total splits as evenly as it can, remainder to face then half', () => {
+  assert.deepEqual(splitTotal(90), { face: 30, half: 30, full: 30 })
+  assert.deepEqual(splitTotal(91), { face: 31, half: 30, full: 30 })
+  assert.deepEqual(splitTotal(92), { face: 31, half: 31, full: 30 })
+  assert.deepEqual(splitTotal(0), { face: 0, half: 0, full: 0 })
+})
+
+test('moving one slider takes from the others and keeps the sum', () => {
+  const out = rebalance({ face: 30, half: 30, full: 30 }, 'face', 60)
+  assert.equal(out.face, 60)
+  assert.equal(out.face + out.half + out.full, 90)
+})
+
+test('a slider cannot push the others below zero', () => {
+  const out = rebalance({ face: 30, half: 30, full: 30 }, 'face', 200)
+  assert.deepEqual(out, { face: 90, half: 0, full: 0 })
+  assert.equal(out.face + out.half + out.full, 90)
+})
+
+test('lowering one gives the slack back to the others', () => {
+  const out = rebalance({ face: 60, half: 30, full: 0 }, 'face', 30)
+  assert.equal(out.face, 30)
+  assert.equal(out.face + out.half + out.full, 90)
+})
