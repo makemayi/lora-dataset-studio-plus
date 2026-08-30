@@ -82,3 +82,29 @@ def test_bank_job_result_survives_snapshot(app):
         snap = bank_jobs.get(key)
         assert snap['result'] == {'frames': 3, 'totals': {'too_blurry': 1}}
         bank_jobs.cancel(key)
+
+
+# ── the two-bank display: one job, shown on its owning bank only ─────────────
+
+def test_a_single_bank_job_is_visible_only_on_its_own_bank():
+    bank_jobs.reserve(5, 'score')
+    assert bank_jobs.visible(5) is not None
+    assert bank_jobs.visible(6) is None          # a different bank has no job
+
+
+def test_a_two_bank_reservation_shows_on_the_owner_not_the_destination():
+    """Crop-to-person / promote-to-bank hold ONE job under TWO keys — the source
+    (owner) and the destination it fills. Both banks' readers land on the same
+    job object, which made "one task" read as two running rows. The lock stays
+    on both keys (get(16) still sees it); only the DISPLAY (visible) filters to
+    the owning bank."""
+    bank_jobs.reserve(11, 'person_crop', reserve_ids=(16,))
+    # The owning bank (source) shows the job.
+    job_owner = bank_jobs.visible(11)
+    assert job_owner is not None
+    assert job_owner.get('kind') == 'person_crop'
+    # The destination bank is still LOCKED by it...
+    assert bank_jobs.get(16) is not None
+    assert bank_jobs.running(16) is True
+    # ...but does not DISPLAY it.
+    assert bank_jobs.visible(16) is None

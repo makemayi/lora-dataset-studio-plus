@@ -101,6 +101,7 @@ def _reserve_locked(bank_id, kind, total=0, reserve_ids=None):
            'stop_cost': None, 'stop_wait': None,
            'started_at': now, '_touched': now, '_cancel_hook': None,
            'pipeline': None, '_keys': keys, '_launched': False,
+           '_primary': _key(bank_id),
            '_owner_thread': threading.get_ident(),
            '_eta': job_eta.new_state()}
     # One shared object under every participating Bank id is an atomic
@@ -488,6 +489,27 @@ def list_every():
             out.append((bank_id, snap))
     out.sort(key=lambda pair: pair[1].get('started_at') or 0, reverse=True)
     return out
+
+
+def visible(bank_id):
+    """The job a payload should DISPLAY for (bank_id), or None.
+
+    A two-bank pass — crop-to-person, promote-to-bank — holds ONE job under TWO
+    reservation keys: the source bank (its primary owner) and the destination it
+    fills. Both banks' readers land on the same job object, so "one task" reads
+    as two running rows. The LOCK must stay on both keys (that is the whole point
+    of the multi-bank reservation); only the DISPLAY filters to the owning bank,
+    which is why the lock checks call get() and the payload calls visible().
+
+    Reads the RAW job for _primary — get() returns a payload snapshot that
+    deliberately excludes internal fields, so comparing on it would always
+    misread. The returned value is still the get() snapshot, for the UI.
+    """
+    with _lock:
+        raw = _jobs.get(bank_id)
+        if raw is None or raw.get('_primary') != _key(bank_id):
+            return None
+    return get(bank_id)
 
 
 def running(bank_id) -> bool:
