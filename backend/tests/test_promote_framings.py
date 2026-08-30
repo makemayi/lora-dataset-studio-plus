@@ -293,3 +293,38 @@ def test_a_re_promotion_of_the_same_rows_cannot_duplicate_the_crops(
     from app.models import FaceDatasetImage
     with app.app_context():
         assert (FaceDatasetImage.query.filter_by(dataset_id=dataset_id).count()) == 4
+
+
+def test_quotas_cap_each_framing_independently(client, app, promoted_bank, monkeypatch):
+    """`per_framing_limit` could only say "N of each". A build asks for
+    "2 face, 1 half, 1 full", so the cap becomes a dict."""
+    dataset_id = _dataset(client)
+    _allow_interpreter(monkeypatch)
+    from app.services import image_bank_service as banks
+
+    def fake_boxes(_py, _sc, payload_json, _to):
+        payload = json.loads(payload_json)
+        return type('R', (), {'stdout': json.dumps({
+            'ok': True,
+            'results': {p: dict(_face(), n_faces=1) for p in payload['images']},
+        }) + '\n'})()
+
+    monkeypatch.setattr(banks, '_run_face_box_detector', fake_boxes)
+    ids = _keep_ids(app, promoted_bank)
+    # {face 1, half 1, full 2} is deliberately UNEQUAL to what the natural
+    # round-robin would give four rows without quotas (face 2 / half 1 /
+    # full 1) — a quota mix the no-quotas path answers differently is what
+    # makes this test able to fail.
+    r = client.post(f"/api/bank/{promoted_bank}/promote",
+                    json={'dataset_id': dataset_id, 'image_ids': ids,
+                          'framings': ['full', 'half', 'face'],
+                          'quotas': {'face': 1, 'half': 1, 'full': 2}})
+    assert r.status_code == 202, r.get_json()
+
+    from app.models import FaceDatasetImage
+    with app.app_context():
+        counts = {}
+        for row in FaceDatasetImage.query.filter_by(dataset_id=dataset_id).all():
+            key = row.framing or 'full'
+            counts[key] = counts.get(key, 0) + 1
+    assert counts == {'face': 1, 'half': 1, 'full': 2}

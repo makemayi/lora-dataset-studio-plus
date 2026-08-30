@@ -11465,7 +11465,7 @@ def _bank_promote_job(user_id, src_bank_id, dest_bank_id, ids):
 
 
 def start_promote(app, user_id, bank_id, ids, dataset_id, framings=None,
-                  per_framing_limit=None):
+                  per_framing_limit=None, quotas=None):
     """Copy a selection into a dataset through the normal import path
     (normalize + perceptual dedup vs the dataset). ``ids`` empty = every KEPT
     image not already on THIS dataset. Background job (a big promotion decodes
@@ -11493,6 +11493,16 @@ def start_promote(app, user_id, bank_id, ids, dataset_id, framings=None,
             raise ValueError('per_framing_limit must be a whole number')
         if per_framing_limit < 1:
             raise ValueError('per_framing_limit must be at least 1')
+    # Per-framing quotas — what a build asks for ("30 face, 20 half, 40 full").
+    # `per_framing_limit` stays for the callers that only know one number; the
+    # two are the same mechanism, and quotas win when both arrive.
+    if quotas is not None:
+        if not isinstance(quotas, dict):
+            raise ValueError('quotas must be a mapping of framing to a count')
+        quotas = {f: int(n) for f, n in quotas.items()
+                  if f in ('face', 'half', 'full') and int(n) > 0}
+        if not quotas:
+            raise ValueError('quotas must name at least one framing with a count')
     if crop_framings and not (cfg.get('face_scoring.python') or '').strip():
         raise ValueError('the waist-up and face framings need a face box, and the '
                          'face boxes come from the face scoring interpreter — set '
@@ -11532,7 +11542,8 @@ def start_promote(app, user_id, bank_id, ids, dataset_id, framings=None,
                 app, bank_id, 'promote',
                 _promote_job(
                     user_id, bank_id, ids, dataset_id, activity_token,
-                    framings=framings, per_framing_limit=per_framing_limit),
+                    framings=framings, per_framing_limit=per_framing_limit,
+                    quotas=quotas),
                 total=len(ids), reservation=reservation)
             if not bank_jobs.launched(reservation):
                 # Compatibility for inline test/integration runners that do not
@@ -11548,7 +11559,7 @@ def start_promote(app, user_id, bank_id, ids, dataset_id, framings=None,
 
 
 def _promote_job(user_id, bank_id, ids, dataset_id, activity_token=None,
-                 framings=('full',), per_framing_limit=None):
+                 framings=('full',), per_framing_limit=None, quotas=None):
     def run(job):
         bank = db.session.get(ImageBank, bank_id)
         if not bank:
@@ -11694,12 +11705,17 @@ def _promote_job(user_id, bank_id, ids, dataset_id, activity_token=None,
                 three times. Each picture lands on the allowed framing with the
                 SMALLEST running count (ties resolve face -> half -> full), so
                 a selection spreads evenly instead of tripling its favourite
-                pictures, and `per_framing_limit` caps each framing."""
+                pictures. The cap is per framing when `quotas` are given
+                ("2 face, 1 half, 1 full"); `per_framing_limit` is the
+                one-number form for callers that only know "N of each"."""
                 face = face_boxes.get(row_id)
                 candidates = [f for f in ('face', 'half', 'full') if f in framings]
                 if face is None:
                     candidates = [f for f in candidates if f == 'full']
-                if per_framing_limit is not None:
+                if quotas is not None:
+                    candidates = [f for f in candidates
+                                  if local_counts.get(f, 0) < quotas.get(f, 0)]
+                elif per_framing_limit is not None:
                     candidates = [f for f in candidates
                                   if local_counts.get(f, 0) < per_framing_limit]
                 if not candidates:

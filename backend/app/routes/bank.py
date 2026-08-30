@@ -807,9 +807,13 @@ def bank_promote(bank_id):
             return jsonify({'error': 'per_framing_limit must be a whole number'}), 400
         if per_framing_limit < 1:
             return jsonify({'error': 'per_framing_limit must be at least 1'}), 400
+    quotas = data.get('quotas')
+    if quotas is not None and not isinstance(quotas, dict):
+        return jsonify({'error': 'quotas must be an object mapping framing to '
+                                 'a count'}), 400
     return _start(banks.start_promote, _app(), LOCAL_USER, bank_id,
                   data.get('image_ids'), dataset_id, framings=framings,
-                  per_framing_limit=per_framing_limit)
+                  per_framing_limit=per_framing_limit, quotas=quotas)
 
 
 @bp.post('/bank/<int:bank_id>/promote-to-bank')
