@@ -11511,6 +11511,127 @@ def promotion_plan(user_id, bank_id, dataset_id, quotas, ids=None):
     }
 
 
+def start_build(app, user_id, bank_id, dataset_id, quotas, upscale_below=None,
+                ids=None):
+    """Bank -> finished dataset in one job: plan, promote, queue the upscales.
+
+    It runs `_promote_job` DIRECTLY rather than calling `start_promote`, because
+    that function reserves the bank for itself and this job already holds the
+    reservation — calling it would raise BankJobBusy against itself. Promotion
+    behaviour is therefore unchanged, rollback-on-cancel included.
+
+    `upscale_below` is a SHORT-EDGE threshold in pixels (None = no upscaling).
+    Size, not framing: a waist-up cut from a 4K frame can already be big enough,
+    and a full frame from a small source may not be.
+    """
+    # A bank with no kept rows has nothing to build — refused. But rows that
+    # are ALREADY on the dataset are a different case: the second press of the
+    # button finds the quotas satisfied and is an honest quiet no-op (the
+    # plan/promote phases would only re-detect and re-skip), not an error.
+    if (BankImage.query.filter_by(bank_id=bank_id, status='keep').count() == 0):
+        raise ValueError('nothing to build — keep some images in the Bank first')
+    promotable_ids = (
+        ids if ids else
+        [r.id for r in _promotable_query(bank_id, dataset_id)
+         .order_by(BankImage.id.asc()).all()])
+    if not promotable_ids:
+        return {}
+    plan = promotion_plan(user_id, bank_id, dataset_id, quotas, ids=ids)
+    if plan['total'] <= 0:
+        raise ValueError('nothing to build — keep some images in the Bank first')
+    framings = [f for f in ('face', 'half', 'full') if (quotas or {}).get(f)]
+    reservation = bank_jobs.reserve(bank_id, 'build')
+    activity_token = None
+    try:
+        with _dataset_ingest_lock(user_id, dataset_id):
+            row_ids = ids or [r.id for r in _promotable_query(bank_id, dataset_id)
+                              .order_by(BankImage.id.asc()).all()]
+            activity_token = dataset_activity.begin_exclusive(
+                dataset_id, 'bank_import', total=len(row_ids),
+                detail='building a dataset from a Bank')
+            if activity_token is None:
+                raise dataset_activity.DatasetActivityBusy(
+                    'This dataset already has work in progress. Wait for it to '
+                    'finish before building from a Bank.')
+            # The moment the build starts, in the SAME string format the
+            # created_at column is written with (SQLite CURRENT_TIMESTAMP =
+            # UTC, seconds, space separator) — the upscale phase selects rows
+            # this build created by comparing against it, apples to apples.
+            since = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
+            promote = _promote_job(user_id, bank_id, row_ids, dataset_id,
+                                   activity_token, framings=tuple(framings),
+                                   quotas=quotas)
+
+            def run(job):
+                promote(job)
+                out = _queue_build_upscales(user_id, dataset_id, since,
+                                            upscale_below, job)
+                note = (out or {}).get('upscale_note')
+                if note:
+                    bank_jobs.progress(job, detail=note)
+
+            result = bank_jobs.start(app, bank_id, 'build', run,
+                                     total=len(row_ids), reservation=reservation)
+            if not bank_jobs.launched(reservation):
+                bank_jobs.abort(reservation)
+                dataset_activity.end(activity_token)
+            return result
+    except Exception:
+        bank_jobs.abort(reservation)
+        if activity_token is not None:
+            dataset_activity.end(activity_token)
+        raise
+
+
+def _queue_build_upscales(user_id, dataset_id, since, upscale_below, job):
+    """Queue the too-small rows this build created as ONE Topaz batch.
+
+    Rows are identified by CREATION TIME, not by `bank_image_id`: only the
+    full-frame transfer keeps the bank id, and the crops — the rows that actually
+    need upscaling — carry NULL. A timestamp is safe here precisely because the
+    build holds `dataset_activity.begin_exclusive` for its whole run, so nothing
+    else can be writing to this dataset while it works.
+
+    The dataset row carries no width/height either, so the short edge is read
+    from the file. That is one open per row, on a set no larger than this build.
+    """
+    if not upscale_below:
+        return {'queued': 0, 'upscale_note': ''}
+    from PIL import Image
+    from . import dataset_generation_service as dgs
+    from .face_dataset_service import _dataset_path
+    from .topaz_helper import TopazUnavailable
+    root = _dataset_path(dataset_id)
+    small = []
+    rows = (FaceDatasetImage.query
+            .filter(FaceDatasetImage.dataset_id == dataset_id,
+                    FaceDatasetImage.created_at >= since)
+            .all())
+    for row in rows:
+        if not row.filename:
+            continue
+        path = os.path.join(root, row.filename)
+        try:
+            with Image.open(path) as im:
+                short_edge = min(im.size)
+        except OSError:
+            continue                                   # unreadable: leave it be
+        if short_edge < int(upscale_below):
+            small.append(row.id)
+    if not small:
+        bank_jobs.progress(job, detail='nothing below the upscale threshold')
+        return {'queued': 0, 'upscale_note': ''}
+    try:
+        out = dgs.topaz_upscale_replace_batch(user_id, dataset_id, small)
+    except TopazUnavailable as exc:
+        logger.warning('build: skipping upscale — %s', exc)
+        note = f'not upscaled: Topaz — {exc}'
+        bank_jobs.progress(job, detail=note)
+        return {'queued': 0, 'upscale_note': note}
+    bank_jobs.progress(job, detail=f'queued {len(small)} for upscale')
+    return {'queued': out.get('queued', 0), 'upscale_note': ''}
+
+
 def start_promote(app, user_id, bank_id, ids, dataset_id, framings=None,
                   per_framing_limit=None, quotas=None):
     """Copy a selection into a dataset through the normal import path

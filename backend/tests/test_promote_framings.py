@@ -388,3 +388,105 @@ def test_a_picture_the_bank_calls_faceless_cannot_be_planned_for_a_crop(
     assert plan['with_face_box'] == 0
     assert plan['counts'] == {'full': 4}
     assert plan['shortfall'] == {'face': 4, 'half': 4}
+
+
+def test_a_build_promotes_then_queues_only_the_small_images(
+        client, app, promoted_bank, monkeypatch):
+    """The job ends when the upscales are QUEUED — Topaz serialises on its own
+    GPU, and waiting would hold the Bank and the dataset locked for the whole
+    batch."""
+    dataset_id = _dataset(client)
+    _allow_interpreter(monkeypatch)
+    from app.services import image_bank_service as banks
+    from app.services import dataset_generation_service as dgs
+
+    def fake_boxes(_py, _sc, payload_json, _to):
+        payload = json.loads(payload_json)
+        return type('R', (), {'stdout': json.dumps({
+            'ok': True,
+            'results': {p: dict(_face(), n_faces=1) for p in payload['images']},
+        }) + '\n'})()
+
+    monkeypatch.setattr(banks, '_run_face_box_detector', fake_boxes)
+    queued = {}
+
+    def fake_batch(user_id, dataset_id_, image_ids):
+        queued['ids'] = list(image_ids)
+        return {'queued': len(image_ids), 'skipped': 0, 'job_id': 'topaz-1'}
+
+    monkeypatch.setattr(dgs, 'topaz_upscale_replace_batch', fake_batch)
+
+    with app.app_context():
+        banks.start_build(app, 'local', promoted_bank, dataset_id,
+                          quotas={'face': 2, 'half': 1, 'full': 1},
+                          upscale_below=1536)
+
+    from app.models import FaceDatasetImage
+    with app.app_context():
+        rows = FaceDatasetImage.query.filter_by(dataset_id=dataset_id).all()
+        by_id = {row.id for row in rows}
+    assert len(rows) == 4
+    assert queued.get('ids'), 'the crops are cut from a 1000px picture: too small'
+    # Size, not framing — but on this fixture (1000x1000 sources) every row is
+    # under 1536, so the assertion is that ALL of them were offered.
+    assert set(queued['ids']) == by_id
+
+
+def test_a_build_without_topaz_still_finishes_the_import(
+        client, app, promoted_bank, monkeypatch):
+    dataset_id = _dataset(client)
+    _allow_interpreter(monkeypatch)
+    from app.services import image_bank_service as banks
+    from app.services import dataset_generation_service as dgs
+    from app.services.topaz_helper import TopazUnavailable
+
+    def fake_boxes(_py, _sc, payload_json, _to):
+        payload = json.loads(payload_json)
+        return type('R', (), {'stdout': json.dumps({
+            'ok': True,
+            'results': {p: dict(_face(), n_faces=1) for p in payload['images']},
+        }) + '\n'})()
+
+    monkeypatch.setattr(banks, '_run_face_box_detector', fake_boxes)
+
+    def boom(*_a, **_k):
+        raise TopazUnavailable('Topaz is not configured')
+
+    monkeypatch.setattr(dgs, 'topaz_upscale_replace_batch', boom)
+    with app.app_context():
+        banks.start_build(app, 'local', promoted_bank, dataset_id,
+                          quotas={'face': 2, 'half': 1, 'full': 1},
+                          upscale_below=1536)
+
+    from app.models import FaceDatasetImage
+    with app.app_context():
+        assert FaceDatasetImage.query.filter_by(dataset_id=dataset_id).count() == 4
+
+
+def test_building_twice_fills_the_gap_instead_of_doubling(
+        client, app, promoted_bank, monkeypatch):
+    """Promotion re-finds its own crops and skips them, so the second press is a
+    top-up, not a duplicate import."""
+    dataset_id = _dataset(client)
+    _allow_interpreter(monkeypatch)
+    from app.services import image_bank_service as banks
+    from app.services import dataset_generation_service as dgs
+
+    def fake_boxes(_py, _sc, payload_json, _to):
+        payload = json.loads(payload_json)
+        return type('R', (), {'stdout': json.dumps({
+            'ok': True,
+            'results': {p: dict(_face(), n_faces=1) for p in payload['images']},
+        }) + '\n'})()
+
+    monkeypatch.setattr(banks, '_run_face_box_detector', fake_boxes)
+    monkeypatch.setattr(dgs, 'topaz_upscale_replace_batch',
+                        lambda *a, **k: {'queued': 0, 'skipped': 0, 'job_id': None})
+    quotas = {'face': 2, 'half': 1, 'full': 1}
+    with app.app_context():
+        banks.start_build(app, 'local', promoted_bank, dataset_id, quotas=quotas)
+        banks.start_build(app, 'local', promoted_bank, dataset_id, quotas=quotas)
+
+    from app.models import FaceDatasetImage
+    with app.app_context():
+        assert FaceDatasetImage.query.filter_by(dataset_id=dataset_id).count() == 4
