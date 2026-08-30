@@ -7793,6 +7793,16 @@ def _person_crop_job(bank_id, dest_bank_id, statuses=None, ids=None):
                             cropped += 1
                         else:
                             failed += 1
+                # COMMIT WHILE IT RUNS, not at the very end. The destination
+                # bank's rows were all added to the session and would otherwise
+                # stay there until the FINAL commit in `finally` — so a pass
+                # that had cut 600 pictures showed the destination bank as empty
+                # (its UI reads the DB, and the rows were still uncommitted), and
+                # a crash before `finally` would leave the files on disk with no
+                # rows at all. Committing once per batch makes the crop appear in
+                # the new bank as it runs and keeps an interrupted run from
+                # losing every row it had already written.
+                db.session.commit()
                 bank_jobs.progress(job, done=min(start + len(slice_rows), len(rows)),
                                    total=len(rows),
                                    detail='%d cropped' % cropped)
