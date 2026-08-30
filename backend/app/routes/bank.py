@@ -816,6 +816,67 @@ def bank_promote(bank_id):
                   per_framing_limit=per_framing_limit, quotas=quotas)
 
 
+def _build_quotas(data):
+    """Validate the {framing: count} body shared by the plan and build routes."""
+    quotas = data.get('quotas')
+    if not isinstance(quotas, dict) or not quotas:
+        raise ValueError('quotas must be an object mapping framing to a count')
+    out = {}
+    for key, value in quotas.items():
+        if key not in ('face', 'half', 'full'):
+            raise ValueError('quota keys must be drawn from face, half, full')
+        try:
+            count = int(value)
+        except (TypeError, ValueError):
+            raise ValueError('each quota must be a whole number')
+        if count < 0:
+            raise ValueError('a quota cannot be negative')
+        if count:
+            out[key] = count
+    if not out:
+        raise ValueError('at least one quota must be above zero')
+    return out
+
+
+@bp.post('/bank/<int:bank_id>/promote/plan')
+def bank_promote_plan(bank_id):
+    """What a build WOULD do. Writes nothing — the dialog polls it while the
+    sliders move."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON body must be an object'}), 400
+    try:
+        dataset_id = dataset_activity.normalize_dataset_id(data.get('dataset_id'))
+        quotas = _build_quotas(data)
+        return jsonify(banks.promotion_plan(LOCAL_USER, bank_id, dataset_id,
+                                            quotas, ids=data.get('image_ids')))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@bp.post('/bank/<int:bank_id>/build')
+def bank_build(bank_id):
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON body must be an object'}), 400
+    try:
+        dataset_id = dataset_activity.normalize_dataset_id(data.get('dataset_id'))
+        quotas = _build_quotas(data)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    upscale_below = data.get('upscale_below')
+    if upscale_below is not None:
+        try:
+            upscale_below = int(upscale_below)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'upscale_below must be a whole number'}), 400
+        if upscale_below < 1:
+            upscale_below = None
+    return _start(banks.start_build, _app(), LOCAL_USER, bank_id, dataset_id,
+                  quotas=quotas, upscale_below=upscale_below,
+                  ids=data.get('image_ids'))
+
+
 @bp.post('/bank/<int:bank_id>/promote-to-bank')
 def bank_promote_to_bank(bank_id):
     """⬆ Promote's SECOND destination: copy the selection into a brand-new bank
