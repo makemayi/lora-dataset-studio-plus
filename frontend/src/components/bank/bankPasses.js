@@ -259,7 +259,9 @@ export const BANK_PASSES = {
       + 'GPU if the ✨ Score interpreter has one) and crops the frame to them: '
       + 'padded 3 %, cut as the tightest window that keeps the image\u2019s own '
       + 'aspect ratio, so the person fills the frame and the dataset keeps one '
-      + 'shape. Pictures where no person is found are skipped, not padded.',
+      + 'shape. The crops become a BRAND-NEW bank (named after this one plus '
+      + '`-crop`); a picture with no person is skipped, never padded — the new '
+      + 'bank is crop-only.',
     scopes: true,
     selection: true,
     redo: null,
@@ -271,21 +273,21 @@ export const BANK_PASSES = {
     notHere: [
       'Which pixels count as \u201cperson\u201d \u2014 the detector decides per '
         + 'picture; there is no box to review or nudge here. What you review is '
-        + 'the CROP, and \u21a9 Undo cleaning throws any of them away.',
+        + 'the crop, in the new bank that holds it.',
       'Images that already carry a working copy (cleaned or turned): the pass '
         + 'skips them, because cropping a crop would stack two copies under one '
-        + 'undo. \u21a9 Undo cleaning returns them to the pool.',
+        + 'undo.',
     ],
     caveats: [
-      'Your own files are never written to \u2014 the crop lands in the bank\u2019s '
-        + 'own copy, and \u21a9 Undo cleaning (on the \ud83d\udea9 Watermarks panel) '
-        + 'throws every working copy away, this pass\u2019s included. Undo is '
-        + 'bank-wide, not per run.',
-      'A frame with TWO people keeps only the larger detection\u2019s person; '
-        + 'the other stays in shot at the crop\u2019s edges. The pass is a framing '
-        + 'tool, not a person remover.',
+      'The crops are written as the NEW bank\u2019s own source files \u2014 your '
+        + 'source folder is never written to, and the source bank keeps no '
+        + 'working-copy blob and no marker.',
+      'A picture with no person is skipped: the new bank is crop-only, never '
+        + 'padded with an uncut original.',
+      'The new bank\u2019s images start unmeasured \u2014 run the passes you want '
+        + 'on it (detection, scoring) before you train.',
     ],
-    binCost: 'each cropped image is decoded and re-encoded into the bank\u2019s working copy',
+    binCost: 'each cropped image is decoded, cut and written into the new bank\u2019s folder',
   },
 
   watermark_crop: {

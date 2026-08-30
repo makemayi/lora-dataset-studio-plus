@@ -7600,39 +7600,64 @@ def _person_crop_prereq() -> str | None:
 
 
 def start_person_crop(app, user_id, bank_id, statuses=None, ids=None):
-    """✂ Crop every image in scope around its largest detected person.
+    """Cut every in-scope picture around its largest detected person into a NEW
+    bank named after the source plus a `-crop` suffix.
 
-    The operator's own batch crop (`crop_persons.py`, Grounding DINO tiny on
-    "person. human body."), moved into the Bank: one subject per picture,
-    chosen by area, padded 3 %, cut as the tightest window that keeps the
-    SOURCE image's aspect ratio — so the person fills the frame while the
-    dataset keeps one shape. Images where no person is found are skipped, not
-    padded; images that are already cleaned or turned are skipped too, because
-    cropping a crop would stack two working copies under one undo.
+    This REPLACES the old behaviour that wrote the crops as working-copy blobs
+    beside the source: the operator's ask was a bank that OWNS the cut images.
+    The destination is created first and reserved atomically with the source
+    (the same two-bank reservation `start_bank_promote` uses), so a crash or a
+    cancel can never leave a half-built bank that points at a folder it does not
+    own. On ANY refusal the destination is discarded — the source bank is never
+    touched, no `watermark_clean_method` marker, no blob.
 
-    The pass WRITES AN IMAGE — into the bank's own ``clean/`` copy, never the
-    user's folder — and ↩ Undo cleaning throws those copies away like any
-    other. ``statuses``/``ids`` narrow the run; left alone it walks every
-    non-rejected image in the bank, which is what "global" means here. The
-    rejected pile is out even when ASKED for: the scope clause and the window's
-    per-pile counter (_person_crop_todo_clause) agree on that, so a window can
-    never offer a run the pass would refuse to make."""
+    Returns the new bank's id so the UI can jump to the bank being filled."""
     bank = get_bank(user_id, bank_id)
     if not bank:
         raise ValueError('bank not found')
+    # The prereq comes BEFORE the destination exists: on a missing interpreter
+    # the actionable answer is "go install it", not a discarded folder.
+    prereq = _person_crop_prereq()
+    if prereq:
+        raise RuntimeError(prereq)
     scoped = (_scoped_pool(bank_id, statuses, ids)
               .filter(_person_crop_todo_clause()))
     total = scoped.count()
     if not total:
         raise ValueError('nothing to crop in this scope — every image in it has '
                          'already been cleaned, turned, or rejected')
-    # The prereq comes LAST in the synchronous checks: on an empty bank the
-    # actionable answer is "nothing to crop", not "go install something".
-    prereq = _person_crop_prereq()
-    if prereq:
-        raise RuntimeError(prereq)
-    return bank_jobs.start(app, bank_id, 'person_crop',
-                           _person_crop_job(bank_id, statuses, ids), total=total)
+    name = f'{bank.name}-crop' if bank.name else 'person-crop'
+    dest = None
+    reservation = None
+    dest_id = None
+    dest_folder = None
+    try:
+        # Flush gives the destination an id without making it visible; reserve
+        # source + destination atomically. No request can observe a half-built
+        # destination without its write guard.
+        dest = _stage_import_bank(user_id, name)
+        dest_id, dest_folder = dest.id, dest.source_path
+        if bank_jobs.running(bank_id):
+            snap = bank_jobs.get(bank_id) or {}
+            raise bank_jobs.BankJobBusy(snap.get('kind') or 'background')
+        reservation = bank_jobs.reserve(
+            bank_id, 'person_crop', reserve_ids=(dest_id,))
+        dest.semantic_engine = _selected_semantic_engine(bank)
+        db.session.commit()
+        result = bank_jobs.start(
+            app, bank_id, 'person_crop',
+            _person_crop_job(bank_id, dest_id, statuses, ids),
+            total=total, reserve_ids=(dest_id,), reservation=reservation)
+        if not bank_jobs.launched(reservation):
+            bank_jobs.abort(reservation)
+            _discard_unlaunched_import_bank(user_id, dest_id, dest_folder)
+            return result
+        return dest_id
+    except Exception:
+        bank_jobs.abort(reservation)
+        if dest is not None:
+            _discard_unlaunched_import_bank(user_id, dest_id, dest_folder)
+        raise
 
 
 def _run_person_detector(python, script, payload_json: str, timeout: int):
@@ -7652,19 +7677,45 @@ def _person_crop_todo_clause():
                 BankImage.status != 'reject')
 
 
-def _person_crop_job(bank_id, statuses=None, ids=None):
+def _person_crop_job(bank_id, dest_bank_id, statuses=None, ids=None):
+    """Cut every in-scope picture around its largest detected person and write
+    the crops into the NEW bank as its source files.
+
+    The destination is a brand-new bank whose folder the app owns: it holds ONLY
+    the cut images — a picture the detector found no person in is skipped, not
+    copied as-is, because a crop-only bank is what the operator asked for. Each
+    crop is a new image (new bytes, old caption), so every analysis field on the
+    destination row starts NULL and re-measures on the destination's own passes.
+    The source bank is untouched: no working-copy blob, no `watermark_clean_method`
+    marker — because the crop no longer lives beside the source."""
     def run(job):
         import json as _json
         import subprocess as _subprocess
         from . import person_crop as geometry
         from ..config import data_dir
 
-        bank = _detach_bank(db.session.get(ImageBank, bank_id))
-        if not bank:
+        src = _detach_bank(db.session.get(ImageBank, bank_id))
+        if not src:
+            return
+        dest = db.session.get(ImageBank, dest_bank_id)
+        if not dest:
             return
         rows = (_scoped_pool(bank_id, statuses, ids)
                 .filter(_person_crop_todo_clause())
                 .order_by(BankImage.id.asc()).all())
+        destination_root = os.path.abspath(dest.source_path)
+        # Reuse the promote-to-bank target resolution: one row -> one file under
+        # the destination root, collision-checked before the first write.
+        target_by_id = {}
+        target_keys = set()
+        for row in rows:
+            relpath = _crop_relpath(row)
+            target = os.path.abspath(os.path.join(destination_root, relpath))
+            key = os.path.normpath(relpath).replace('\\', '/').casefold()
+            if key in target_keys:
+                continue
+            target_keys.add(key)
+            target_by_id[row.id] = target
 
         python = (cfg.get('bank_scoring.python') or '').strip()
         script = str(cfg.BACKEND_DIR / 'infer' / 'person_box_infer.py')
@@ -7672,27 +7723,20 @@ def _person_crop_job(bank_id, statuses=None, ids=None):
 
         bank_jobs.progress(job, done=0, total=len(rows),
                            detail='loading the person detector')
-        cropped = no_person = failed = 0
+        cropped = failed = 0
         try:
             for start in range(0, len(rows), geometry.BATCH):
                 if bank_jobs.cancelled(job):
                     break
                 slice_rows = rows[start:start + geometry.BATCH]
-                # [(row, path, w, h)] — the SAME path the detector sees comes
-                # back keyed to the row that owns it, with no lookup by path.
-                # Deliberately NOT `_source_size`: that helper is the watermark
-                # lane's, and it refuses rows whose fingerprint was never
-                # attested — a pool this pass does not require. The size is the
-                # EXIF-oriented one, so the window and the crop share a
-                # coordinate system with the picture the user sees.
                 slice_items = []
                 for r in slice_rows:
-                    src = abs_image_path(bank, r)
-                    if not src or not os.path.isfile(src):
+                    src_path = abs_image_path(src, r)
+                    if not src_path or not os.path.isfile(src_path):
                         failed += 1
                         continue
                     try:
-                        with safe_bank_source(src, label='bank person crop') as im:
+                        with safe_bank_source(src_path, label='bank person crop') as im:
                             w, h = image_encoding.visual_size_from_header(im)
                     except (OSError, ValueError, MemoryError,
                             Image.DecompressionBombError,
@@ -7702,8 +7746,8 @@ def _person_crop_job(bank_id, statuses=None, ids=None):
                     if not w or not h:
                         failed += 1
                         continue
-                    slice_items.append((r, src, w, h))
-                slice_paths = [s[1] for s in slice_items]
+                    slice_items.append((r, src_path, w, h))
+                slice_paths = [s_[1] for s_ in slice_items]
                 if slice_paths:
                     try:
                         proc = _run_person_detector(
@@ -7715,76 +7759,92 @@ def _person_crop_job(bank_id, statuses=None, ids=None):
                             (proc.stdout or '').strip().splitlines()[-1])
                         if not payload.get('ok'):
                             raise RuntimeError(payload.get('error') or 'detector failed')
-                    except Exception as e:  # noqa: BLE001 — a slice reports, not sinks
+                    except Exception as e:  # noqa: BLE001
                         logger.warning('person-crop slice failed: %s', e)
                         failed += len(slice_items)
                         bank_jobs.progress(
                             job, done=min(start + len(slice_rows), len(rows)),
                             total=len(rows),
-                            detail=f'detector failed on a batch ({failed} unreadable so far)')
+                            detail='detector failed on a batch (%d unreadable so far)' % failed)
                         continue
                     results = payload.get('results') or {}
-                    for r, src, w, h in slice_items:
+                    for r, src_path, w, h in slice_items:
                         try:
-                            entry = results.get(src) or {}
+                            entry = results.get(src_path) or {}
                             box = geometry.largest_person_box(entry.get('boxes') or [])
                             if box is None:
-                                no_person += 1
-                                continue
+                                continue        # no person: skip — crop-only bank
                             window = geometry.ar_window(box, w, h)
-                        except Exception as e:  # noqa: BLE001 — one bad reading is one skip
+                        except Exception as e:  # noqa: BLE001
                             logger.warning('person-crop: unusable reading on %s: %s',
-                                           os.path.basename(src), e)
+                                           os.path.basename(src_path), e)
                             failed += 1
                             continue
-                        if _apply_person_crop(bank_id, r, src, window):
-                            r.watermark_clean_method = 'person_crop'
-                            _invalidate_effective_analysis(r)
+                        target = target_by_id.get(r.id)
+                        if not target:
+                            continue
+                        if _write_crop_to_bank(target, src_path, window):
+                            db.session.add(BankImage(
+                                bank_id=dest_bank_id,
+                                relpath=os.path.relpath(target, destination_root),
+                                file_size=os.path.getsize(target),
+                                caption=r.caption, caption_origin=r.caption_origin,
+                                status='keep'))
                             cropped += 1
                         else:
                             failed += 1
                 bank_jobs.progress(job, done=min(start + len(slice_rows), len(rows)),
                                    total=len(rows),
-                                   detail=f'{cropped} cropped, {no_person} without a person')
+                                   detail='%d cropped' % cropped)
         finally:
             db.session.commit()
             if cropped:
                 reset_score_memo()
         if bank_jobs.cancelled(job):
-            bank_jobs.progress(job, detail=f'cancelled — {cropped} cropped so far')
+            _fail_discarding_promoted_bank(
+                job, src.user_id, dest_bank_id,
+                'cancelled — the crops written so far were rolled back with the new bank')
             return
-        detail = (f'done — {cropped} cropped, {no_person} without a person'
-                  + (f', {failed} failed' if failed else ''))
-        bank_jobs.progress(job, detail=detail)
+        if not cropped:
+            _fail_discarding_promoted_bank(
+                job, src.user_id, dest_bank_id,
+                'no detected person — the new bank would be empty and was discarded')
+            return
+        bank_jobs.progress(job, detail='done — %d image(s) in the new bank' % cropped)
     return run
 
 
-def _apply_person_crop(bank_id, row, src_path, window) -> bool:
-    """Cut one image to ``window`` and publish it as the bank's working copy.
+def _crop_relpath(row) -> str:
+    """The destination filename for one cropped source row. Kept per-source and
+    renamed to a fresh extension (the crop is new bytes), so it never collides
+    with another row's file in the destination folder."""
+    stem = os.path.splitext(row.relpath or '') or ['image', '']
+    base = stem[0] if stem[0] else 'image'
+    return f'{base}_{row.id}-crop.jpg'
 
-    The same atomic staging ``_stage_clean_copy`` uses — the blob appears only
-    once the cropped write has succeeded, so a crash mid-pass can never leave a
-    half-written picture posing as a clean one. The source stays read-only."""
+
+def _write_crop_to_bank(target, src_path, window) -> bool:
+    """Cut one image to ``window`` and write it to ``target`` as an atomically
+    published file. The source stays read-only; the crop is new bytes."""
     import uuid as _uuid
-    dst = clean_image_path(bank_id, row.id)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dst.with_name(f'.{dst.name}.part-{_uuid.uuid4().hex[:8]}')
+    tmp = f'{target}.part-{_uuid.uuid4().hex[:8]}'
     try:
         with safe_bank_source(src_path, label='bank person crop') as source:
             source.load()
             oriented = ImageOps.exif_transpose(source).convert('RGB')
             cropped = oriented.crop(window)
-            image_encoding.save_edit(cropped, str(tmp), 'WEBP',
-                                     image_encoding.LOSSLESS)
-        os.replace(tmp, dst)
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            cropped.save(tmp, 'JPEG', quality=95, optimize=True)
+        os.replace(tmp, target)
         return True
     except (OSError, ValueError, MemoryError, Image.DecompressionBombError,
             Image.DecompressionBombWarning):
         try:
-            tmp.unlink()
+            os.unlink(tmp)
         except OSError:
             pass
         return False
+
 
 
 def start_watermark_inpaint(app, user_id, bank_id, method='auto',
@@ -11540,6 +11600,12 @@ def start_build(app, user_id, bank_id, dataset_id, quotas, upscale_below=None,
     if plan['total'] <= 0:
         raise ValueError('nothing to build — keep some images in the Bank first')
     framings = [f for f in ('face', 'half', 'full') if (quotas or {}).get(f)]
+    crop_framings = [f for f in framings if f != 'full']
+    if crop_framings and not (cfg.get('face_scoring.python') or '').strip():
+        raise ValueError('the waist-up and face framings need a face box, and '
+                         'the face boxes come from the face scoring interpreter '
+                         '— set face_scoring.python in Settings, or build '
+                         'full frames only.')
     reservation = bank_jobs.reserve(bank_id, 'build')
     activity_token = None
     try:

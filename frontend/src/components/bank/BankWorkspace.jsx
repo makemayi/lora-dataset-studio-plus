@@ -2309,7 +2309,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
           </PassButton>
           <PassButton onClick={() => setPassOpen('person_crop')} disabled={live || !caps.bank_scoring}
             title={caps.bank_scoring
-              ? 'Find the largest person in every non-rejected image and crop the frame to them — padded 3 %, keeping the image\'s own aspect ratio, so the person fills the frame and the dataset keeps one shape. Pictures without a person are skipped. The crop lands in the bank\'s own copy; your files are never written to, and ↩ Undo cleaning throws it away. Runs in batches on the ✨ Score interpreter.'
+              ? 'Find the largest person in every non-rejected image and crop the frame to them — padded 3 %, keeping the image\'s own aspect ratio, so the person fills the frame and the dataset keeps one shape. Pictures without a person are skipped. The crops become a BRAND-NEW bank (named after this one plus -crop); your source folder is never written to, and the source bank keeps no marker. Runs in batches on the ✨ Score interpreter.'
               : 'Set the ✨ Score interpreter (Setup ▸ Quality tools) — the person detector needs transformers'}>
             ✂ Crop to person…{!caps.bank_scoring && ' (needs setup)'}
           </PassButton>

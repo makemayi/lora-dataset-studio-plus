@@ -7,13 +7,12 @@ interesting cases live (a box on an edge, a box bigger than the picture, two
 people in one frame), so it is tested as pure functions.
 
 The PASS itself is tested through the routes with the detector injected: what
-matters there is that a detected box becomes a working copy under
-`watermark_clean_method='person_crop'`, that a picture without a person is
-skipped rather than padded, that already-cleaned rows are not re-cropped, that
-the SOURCE file is byte-identical afterwards, and that an absent interpreter is
-a 503 that names the fix — never a silently unfiltered run.
+matters now is that a detected box is written into a BRAND-NEW bank named after
+the source plus `-crop`, that a picture with no person is skipped (the new bank
+is crop-only, never padded), that already-cleaned rows are not re-cropped, that
+the SOURCE bank keeps no working-copy blob and no marker, and that an absent
+interpreter is a 503 that names the fix.
 """
-import io
 import json
 import os
 
@@ -35,14 +34,12 @@ def test_iou_of_identical_and_disjoint_boxes():
 
 
 def test_duplicate_detections_merge_and_distinct_people_survive():
-    # The prompt names the class twice, so one person typically arrives as two
-    # overlapping boxes; a genuinely second person must NOT be merged away.
     a = [0, 0, 100, 100]
-    dup = [2, 2, 98, 98]                      # IoU with `a` ~0.92 → merged
+    dup = [2, 2, 98, 98]
     other = [400, 400, 480, 480]
     merged = geo.merge_boxes([a, dup, other])
     assert len(merged) == 2
-    assert merged[0] == [0, 0, 100, 100]      # sorted by area, biggest first
+    assert merged[0] == [0, 0, 100, 100]
     assert merged[1] == [400, 400, 480, 480]
 
 
@@ -51,24 +48,22 @@ def test_largest_person_box_is_none_when_nobody_was_found():
 
 
 def test_the_window_keeps_the_source_aspect_ratio_and_contains_the_box():
-    box = (400, 500, 600, 700)                # 200x200 in a 1000x1000 square
+    box = (400, 500, 600, 700)
     x1, y1, x2, y2 = geo.ar_window(box, 1000, 1000)
-    assert (x2 - x1) == (y2 - y1)             # square image → square window
-    assert x1 <= box[0] and box[2] <= x2      # the padded box fits inside
+    assert (x2 - x1) == (y2 - y1)
+    assert x1 <= box[0] and box[2] <= x2
     assert y1 <= box[1] and box[3] <= y2
 
 
 def test_a_tall_person_in_a_wide_frame_gets_a_wider_window_never_a_shorter_one():
-    # A 1600x900 frame with a tall thin person: keeping the frame's 16:9 shape
-    # means the window must be WIDER than the person, never shorter.
-    box = (700, 100, 900, 850)                # 200 wide, 750 tall
+    box = (700, 100, 900, 850)
     x1, y1, x2, y2 = geo.ar_window(box, 1600, 900)
     assert round((x2 - x1) / (y2 - y1), 2) == round(1600 / 900, 2)
     assert x1 <= 700 and 850 <= y2
 
 
 def test_a_box_touching_an_edge_clamps_without_leaving_the_frame():
-    box = (0, 0, 800, 900)                    # already the whole frame's corner
+    box = (0, 0, 800, 900)
     assert geo.ar_window(box, 1600, 900) == (0, 0, 1600, 900)
 
 
@@ -104,7 +99,7 @@ def _inject_detector(monkeypatch, boxes_by_path):
 
 
 def _row_paths(app, bank_id):
-    """[(id, method, abs_path)] for every image of the bank."""
+    """[(id, watermark_clean_method, abs_path)] for every image of the bank."""
     from app.extensions import db
     from app.models import BankImage, ImageBank
     from app.services.image_bank_service import abs_image_path
@@ -117,7 +112,15 @@ def _row_paths(app, bank_id):
         return out
 
 
-def test_a_detected_person_becomes_a_working_copy_and_the_source_stays_put(
+def _new_bank_by_name(app, name):
+    """The bank created with this name (a crop destination), or None."""
+    from app.extensions import db
+    from app.models import ImageBank
+    with app.app_context():
+        return db.session.query(ImageBank).filter_by(name=name).first()
+
+
+def test_a_detected_person_becomes_a_new_bank_and_the_source_stays_put(
         client, app, bank_with_photos, monkeypatch):
     bank_id, src = bank_with_photos
     from app.services import image_bank_service as banks
@@ -128,19 +131,32 @@ def test_a_detected_person_becomes_a_working_copy_and_the_source_stays_put(
 
     r = client.post(f'/api/bank/{bank_id}/crop-person', json={})
     assert r.status_code == 202, r.get_json()
+    new_id = r.get_json().get('id')
 
+    # A brand-new bank named after the source plus `-crop`, holding the crops.
+    new_bank = _new_bank_by_name(app, 'P-crop')
+    assert new_bank is not None
+    assert new_bank.id == new_id
+    from app.models import BankImage
+    with app.app_context():
+        new_rows = (BankImage.query.filter_by(bank_id=new_bank.id).all())
+        assert len(new_rows) == 2
+        for row in new_rows:
+            assert row.status == 'keep'
+            target = os.path.join(new_bank.source_path, row.relpath)
+            assert os.path.isfile(target)
+    # THE source bank keeps no working-copy blob and no marker.
     methods = {iid: m for iid, m, _p in _row_paths(app, bank_id)}
-    assert all(m == 'person_crop' for m in methods.values())
-    # THE source files are untouched and the bank holds one working copy each.
-    for name in ('one.jpg', 'two.jpg'):
-        assert (src / name).is_file()
+    assert all(m is None for m in methods.values())
     from app.services.image_bank_service import _bank_dir
     with app.app_context():
         clean_dir = _bank_dir(bank_id) / 'clean'
-    assert len(list(clean_dir.iterdir())) == 2
+    assert not clean_dir.exists() or len(list(clean_dir.iterdir())) == 0
+    for name in ('one.jpg', 'two.jpg'):
+        assert (src / name).is_file()
 
 
-def test_an_image_without_a_person_is_skipped_not_padded(
+def test_a_picture_with_no_person_is_skipped_not_copied(
         client, app, bank_with_photos, monkeypatch):
     bank_id, _src = bank_with_photos
     from app.services import image_bank_service as banks
@@ -152,12 +168,18 @@ def test_an_image_without_a_person_is_skipped_not_padded(
 
     r = client.post(f'/api/bank/{bank_id}/crop-person', json={})
     assert r.status_code == 202
+    new_bank = _new_bank_by_name(app, 'P-crop')
+    from app.models import BankImage
+    with app.app_context():
+        new_rows = BankImage.query.filter_by(bank_id=new_bank.id).all()
+        assert len(new_rows) == 1, 'crop-only: no person → not copied'
+    # The source bank is untouched by the crop (its second image had no person,
+    # so nothing was written beside it either).
     methods = {iid: m for iid, m, _p in _row_paths(app, bank_id)}
-    assert methods[rows[0][0]] == 'person_crop'
-    assert methods[rows[1][0]] is None, 'no person → no working copy, nothing padded'
+    assert all(m is None for m in methods.values())
 
 
-def test_an_already_cleaned_image_is_not_cropped_again(
+def test_an_already_cleaned_image_is_not_re_cropped_into_a_bank(
         client, app, bank_with_photos, monkeypatch):
     bank_id, _src = bank_with_photos
     from app.services import image_bank_service as banks
@@ -168,16 +190,24 @@ def test_an_already_cleaned_image_is_not_cropped_again(
         row = (BankImage.query.filter_by(bank_id=bank_id)
                .order_by(BankImage.id.asc()).first())
         row.watermark_clean_method = 'crop'      # some earlier cleaning
-        clean_id = row.id
+        cleaned_id = row.id
         db.session.commit()
-    _inject_detector(monkeypatch, {})
+    # Give the NOT-cleaned row a person box; the cleaned row is excluded by
+    # _person_crop_todo_clause, so the detector never even sees it read.
+    rows = _row_paths(app, bank_id)
+    the_other = [p for mid, m, p in rows if mid != cleaned_id][0]
+    _inject_detector(monkeypatch, {the_other: [[10, 10, 900, 900]]})
 
     r = client.post(f'/api/bank/{bank_id}/crop-person', json={})
     assert r.status_code == 202
+    # The cleaned row stays out of the crop pool; the other row has a box, so
+    # the new bank holds exactly one crop and the cleaned row is untouched.
+    new_bank = _new_bank_by_name(app, 'P-crop')
+    with app.app_context():
+        new_rows = BankImage.query.filter_by(bank_id=new_bank.id).all()
+    assert len(new_rows) == 1
     methods = {iid: m for iid, m, _p in _row_paths(app, bank_id)}
-    assert methods[clean_id] == 'crop', 'the earlier copy must survive untouched'
-    assert methods[ [_i for _i, _m, _p in _row_paths(app, bank_id)
-                     if _i != clean_id][0] ] is None
+    assert any(m == 'crop' for m in methods.values())
 
 
 def test_a_missing_interpreter_is_a_503_that_names_the_fix(
@@ -193,14 +223,12 @@ def test_a_missing_interpreter_is_a_503_that_names_the_fix(
 
 
 def test_an_unknown_bank_follows_the_image_lane_s_400(client):
-    # The image lane has no _missing helper: an unknown bank is a 400 naming
-    # the problem, and every pass on this lane answers the same way.
     r = client.post('/api/bank/999999/crop-person', json={})
     assert r.status_code == 400
     assert 'error' in r.get_json()
 
 
-def test_an_empty_pool_is_a_400(client, tmp_path, monkeypatch):
+def test_a_pool_with_nothing_to_crop_is_a_400(client, tmp_path, monkeypatch):
     from app.services import image_bank_service as banks
     monkeypatch.setattr(banks, '_person_crop_prereq', lambda: None)
     src = tmp_path / 'empty'

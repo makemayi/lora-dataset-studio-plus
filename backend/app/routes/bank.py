@@ -628,17 +628,31 @@ def bank_watermark_undo(bank_id):
 
 @bp.post('/bank/<int:bank_id>/crop-person')
 def bank_crop_person(bank_id):
-    """✂ Crop every image in scope around its largest detected person.
+    """✂ Cut every image in scope around its largest detected person into a
+    NEW bank, named after the source plus `-crop`.
 
     The global crop: Grounding DINO finds the people, the geometry keeps the
-    source image's aspect ratio and pads 3 %, and the cut lands in the bank's
-    own working copy — the source folder is never written to, and ↩ Undo
-    cleaning throws the crops away. Left unscoped it walks every non-rejected
-    image that has not already been cleaned or turned. 202/409/400/503 — the
-    503 names the interpreter to set, because the detector needs transformers."""
+    source image's aspect ratio and pads 3 %. The crops are written as the new
+    bank's own source files — a picture with no person is skipped, not copied
+    as-is — and the source bank is left untouched (no working-copy blob, no
+    marker). Left unscoped it walks every non-rejected image that has not already
+    been cleaned or turned. 202 returns the new bank's id so the UI can jump to
+    it; 409/400/503 follow the usual envelope, the 503 naming the interpreter to
+    set because the detector needs transformers."""
     data = request.get_json(silent=True) or {}
-    return _start(banks.start_person_crop, _app(), LOCAL_USER, bank_id,
-                  **_scope(data))
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON body must be an object'}), 400
+    try:
+        new_id = banks.start_person_crop(_app(), LOCAL_USER, bank_id,
+                                         **_scope(data))
+    except bank_jobs.BankJobBusy as e:
+        return _busy(e)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 503
+    return jsonify({'ok': True, 'id': new_id}), 202
+
 
 
 @bp.put('/bank/<int:bank_id>/image/<int:image_id>/watermark-regions')

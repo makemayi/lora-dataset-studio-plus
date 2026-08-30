@@ -50,6 +50,18 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-08-30-crop-to-person-new-bank',
+    date: '2026-08-30',
+    title: 'Crop to person now makes a separate bank',
+    blurb: 'The Bank’s crop-to-person pass no longer rewrites the images in '
+      + 'place inside the bank: the crops are written as the source files of a '
+      + 'BRAND-NEW bank, named after the source plus “-crop”. A picture '
+      + 'with no person is skipped, so the new bank is crop-only — your '
+      + 'source folder and the source bank are untouched, and the new bank is '
+      + 'ready to run its own passes before training.',
+    to: '/bank',
+  },
+  {
     id: '2026-08-30-bank-build-dataset',
     date: '2026-08-30',
     title: 'One button turns a Bank into a finished dataset',
