@@ -22,9 +22,20 @@ Public repo — everything here is visible; keep it free of personal data.
 
 Run through this before calling a wave done:
 
-1. **Tests green before commit.** Backend: `python -m pytest` (system Python).
-   Frontend: `node --test` from `frontend/` — includes the help-registry and
-   what's-new contract tests, which WILL fail if you skip steps 3-4.
+1. **Tests green before commit — scoped to the change, NOT the whole suite.**
+   The backend suite is ~8000 tests and takes 30+ minutes; running it whole
+   per commit is waste. CI is the full-suite safety net (every PR, and every
+   push ≥5 files or ≥100 lines), so locally run only what covers the diff:
+   - **Backend**: the `backend/tests/test_*.py` files matching each touched
+     module — find them with `grep -rl <module_name> backend/tests/` (system
+     Python). When the diff touches a SHARED seam (`conftest.py`, models,
+     services imported widely, `frontend/src/components/common/surfaces.js`),
+     widen the net to the tests of the main consumers; that judgement is
+     yours, "run everything" is not the fallback.
+   - **Frontend**: `node --test` from `frontend/` — the whole suite runs in
+     seconds, so run it whole; it includes the help-registry and what's-new
+     contract tests, which WILL fail if you skip steps 3-4.
+   New/changed behaviour still gets a mounted test regardless of scope.
 2. **Source-only commits.** Never commit `frontend/dist/**` alongside sources;
    the dist rebuild is a separate consolidated `build(frontend):` commit at the
    end of the wave.
