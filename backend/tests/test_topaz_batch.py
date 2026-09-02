@@ -316,3 +316,91 @@ def test_upscale_batch_route_dispatches_to_topaz(client, app, monkeypatch):
         body = resp.get_json()
         assert body['queued'] == 1 and body['engine'] == 'topaz'
         assert body['job_id'].startswith('topaz-')
+
+
+def _swapped_batch(app, monkeypatch, n=2):
+    """A REAL in-flight upscale batch: dataset + tiles snapshotted and pending
+    under the job, exactly the state topaz_upscale_replace_batch leaves."""
+    from app.services import dataset_generation_service as dgs
+
+    ds_id, img_ids = _dataset_with_images(app, n=n)
+    with app.app_context():
+        monkeypatch.setattr('app.services.topaz_helper.preflight', lambda: None)
+        out = dgs.topaz_upscale_replace_batch('local', ds_id, img_ids)
+        assert out['queued'] == n
+        return ds_id, img_ids, out['job_id']
+
+
+def test_a_failed_batch_restores_every_unfinished_tile(app, monkeypatch):
+    """A batch that ends FAILED must restore the tiles it did not finish,
+    exactly like a cancelled one. Before this only cancel called
+    _restore_unfinished: a failed batch left every untouched tile pending with
+    its filename cleared by the swap, so the set could never be upscaled again
+    (measured: 88 tiles of one real batch sat that way)."""
+    from app.services.topaz_job_queue import topaz_queue
+    from app.models import FaceDatasetImage, TopazJob
+    from app.extensions import db
+
+    ds_id, img_ids, jid = _swapped_batch(app, monkeypatch)
+    with app.app_context():
+        monkeypatch.setattr(topaz_queue, 'link_completed', lambda row: None)
+        monkeypatch.setattr('app.services.topaz_helper.run_tpai',
+                            lambda *a, **kw: ('failed', 'tpai exploded'))
+        assert topaz_queue.process_one() is True
+
+        row = TopazJob.query.filter_by(job_id=jid).one()
+        assert row.status == 'failed'
+        assert 'tpai exploded' in (row.error_message or '')
+        for i, img_id in enumerate(img_ids):
+            img = db.session.get(FaceDatasetImage, img_id)
+            assert img.status == 'keep', f'tile {i} must return to its status'
+            assert img.filename == f'a{i}.png', f'tile {i} must get its file back'
+            assert img.swap_restore is None, f'tile {i} snapshot must clear'
+            assert img.job_id is None, f'tile {i} must be free of the job'
+
+
+def test_a_partial_batch_restores_only_the_failed_tiles(app, monkeypatch):
+    """1 of 2 lands: the finished tile keeps its new picture (swap settled,
+    NOT rolled back), the failed one is restored to its original."""
+    import pathlib
+    from app.services.topaz_job_queue import topaz_queue
+    from app.models import FaceDatasetImage, TopazJob
+    from app.extensions import db
+
+    ds_id, img_ids, jid = _swapped_batch(app, monkeypatch)
+    with app.app_context():
+        ok_id, lost_id = img_ids
+
+        def fake_run_tpai(exe, input_dir, output_dir, **kw):
+            pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
+            (pathlib.Path(output_dir) / f'img_{ok_id}.png').write_bytes(b'out')
+            return 'ok', ''                # the other image's output never lands
+
+        monkeypatch.setattr('app.services.topaz_helper.run_tpai', fake_run_tpai)
+        monkeypatch.setattr('app.services.topaz_job_queue.stage_inputs',
+                            lambda inputs, tmp: {
+                                img_id: f'img_{img_id}.png'
+                                for img_id, _ in inputs})
+        monkeypatch.setattr(
+            'app.services.topaz_job_queue.collect_output',
+            # mirror the real collector: only an output tpai actually wrote
+            # comes back as a path (otherwise "wrote nothing for this image")
+            lambda tmp_dir, dataset_id, job_id, staged_name=None:
+                (f'DS/{staged_name}'
+                 if staged_name and (pathlib.Path(tmp_dir) / staged_name).exists()
+                 else None))
+        monkeypatch.setattr(topaz_queue, 'link_completed', lambda row: None)
+
+        assert topaz_queue.process_one() is True
+
+        row = TopazJob.query.filter_by(job_id=jid).one()
+        assert row.status == 'failed'
+        assert '1 of 2' in (row.error_message or '')
+        ok = db.session.get(FaceDatasetImage, ok_id)
+        assert ok.filename == f'DS/img_{ok_id}.png', 'finished tile keeps the output'
+        assert ok.status == 'keep' and ok.job_id is None
+        assert ok.swap_restore is None, 'settled swap must not be rolled back'
+        lost = db.session.get(FaceDatasetImage, lost_id)
+        assert lost.filename == 'a1.png', 'failed tile gets its file back'
+        assert lost.status == 'keep' and lost.job_id is None
+        assert lost.swap_restore is None

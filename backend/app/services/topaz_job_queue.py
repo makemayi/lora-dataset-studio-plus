@@ -325,6 +325,15 @@ class TopazJobManager:
                 row.error_message = (f'{done} of {total} succeeded; '
                                      f'{total - done} failed — retry reruns '
                                      f'only the failed ones.')
+            # A FAILED batch must restore the images it did not finish, exactly
+            # like a cancelled one. Before this only cancel called
+            # _restore_unfinished; a failed batch left every untouched image
+            # stuck in `pending` with its filename cleared by the swap, so the
+            # set could never be upscaled again (measured: 88 images of a
+            # failed batch all sat pending, filename NULL). Successful ones
+            # stay — their tiles are already linked and the swap is settled.
+            if row.status == 'failed':
+                self._restore_unfinished(row, results)
             row.completed_at = datetime.utcnow()
             db.session.commit()
             self.link_completed(row)

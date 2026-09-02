@@ -50,6 +50,16 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-09-02-failed-upscale-restores-tiles',
+    date: '2026-09-02',
+    title: 'A failed upscale no longer strands your images',
+    blurb: 'When a Topaz batch came back failed, every image it had not got to '
+      + 'stayed stuck in “processing” with no file attached — the set could '
+      + 'not be upscaled again without manual fixing. Failed batches now '
+      + 'hand every untouched picture back exactly like a stop does, and '
+      + 'retry reruns only the ones that never finished.',
+  },
+  {
     id: '2026-08-30-crop-to-person-new-bank',
     date: '2026-08-30',
     title: 'Crop to person now makes a separate bank',
