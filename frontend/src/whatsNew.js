@@ -50,6 +50,16 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-09-07-onetrainer-save-cadence-fallback',
+    date: '2026-09-07',
+    title: 'OneTrainer runs now save a checkpoint every 250 steps by default',
+    blurb: 'A OneTrainer run with no explicit save setting used to leave the '
+      + 'cadence to the trainer\'s own 30-minute rhythm — the preview probes '
+      + 'pointed at a sweet-spot step that had no weights next to it. Local '
+      + 'runs now save at the same 250-step cadence the preview sheet uses '
+      + 'unless you set a different one.',
+  },
+  {
     id: '2026-09-02-failed-upscale-restores-tiles',
     date: '2026-09-02',
     title: 'A failed upscale no longer strands your images',

@@ -1006,6 +1006,37 @@ def test_launch_training_forwards_save_sample_and_the_resolved_rank(
     assert written['sample_after'] == 100.0 and written['sample_after_unit'] == 'STEP'
 
 
+def test_launch_training_save_every_falls_back_to_250_steps(
+        onetrainer, tmp_path, monkeypatch, app):
+    """No user-chosen save cadence → the OVERRIDE still carries one (250 STEP,
+    the same default the ai-toolkit lane saves at). The raw-None shape used to
+    omit the key entirely, leaving OneTrainer's 30-MINUTE backup rhythm to pick
+    the save points — probes every 250 steps, weights ~430 steps apart."""
+    import json as _j
+    from app.config import LOCAL_USER
+    from app.services import face_dataset_service as svc
+    from app.services import lora_training as lt
+    ots, cfg = onetrainer
+    root = tmp_path / 'OneTrainer'
+    (root / 'venv' / 'Scripts').mkdir(parents=True, exist_ok=True)
+    (root / 'venv' / 'Scripts' / 'python.exe').write_text('')
+    cfg.save_config({'onetrainer': {'dir': str(root)}})
+
+    class FakeProc:
+        pid = 892
+
+        def poll(self):
+            return None
+    monkeypatch.setattr(ots.subprocess, 'Popen', lambda *a, **k: FakeProc())
+
+    with app.app_context():
+        ds = _trainable_krea_dataset(svc, LOCAL_USER, 'OT save fallback')
+        lt.update_train_settings(LOCAL_USER, ds.id, {'rank': 16})
+        r = ots.launch_training(LOCAL_USER, ds.id, steps=100, check_captions=False)
+        written = _j.loads(open(r['config_path'], encoding='utf-8').read())
+    assert written['save_every'] == 250 and written['save_every_unit'] == 'STEP'
+
+
 def test_launch_injects_the_shared_hf_cache_into_the_child_env(
         onetrainer, tmp_path, monkeypatch):
     """The Krea 2 base model is a gated HF repo (401 without a granted token),

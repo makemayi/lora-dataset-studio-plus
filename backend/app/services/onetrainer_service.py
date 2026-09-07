@@ -736,8 +736,8 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
     # lr 0.0003 / 1024 here and lr 0.0001 / 768 there, with nothing on screen
     # saying the two lanes disagreed.
     from .lora_training import (_effective_resolution, _resolution_is_explicit,
-                               _train_settings, _lora_rank, _sample_every,
-                               _sample_prompts)
+                               _save_every, _train_settings, _lora_rank,
+                               _sample_every, _sample_prompts)
     _s = _train_settings(ds) or {}
     # ONLY when the user chose one. `_lr_eff` never returns None — it falls back
     # to the family-fixed 1e-4 — so calling it here wrote `learning_rate` on
@@ -787,7 +787,15 @@ def launch_training(user_id, dataset_id, steps: int | None = None,
                       grad_accum=_s.get('grad_accum'),
                       dropout=_s.get('dropout'),
                       ema=_s.get('ema'),
-                      save_every=(_s.get('save_epochs') or _s.get('save_every')),
+                      # Same raw-None-then-fallback shape as sample_every below:
+                      # unset meant the OVERRIDE carried no save cadence at all,
+                      # so OneTrainer's own 30-MINUTE backup rhythm decided where
+                      # the checkpoints landed (measured 2026-09-07: a run asked
+                      # for 250-step probes but saved weights ~430 steps apart,
+                      # and the sweet-spot step the probes pointed at had no
+                      # weights next to it).
+                      save_every=(_s.get('save_epochs') or _s.get('save_every')
+                                  or _save_every(ds)),
                       save_every_unit=('EPOCH' if _s.get('save_epochs') else 'STEP'),
                       # RESOLVED, not raw: `_sample_every` falls back to the same
                       # 250 steps the ai-toolkit lane uses, and `_sample_prompts`
