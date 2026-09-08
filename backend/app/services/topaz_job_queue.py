@@ -32,6 +32,13 @@ logger = logging.getLogger(__name__)
 POLL_SECONDS = 2.0
 JOB_ID_PREFIX = 'topaz-'
 
+# A GpuBusyError raised at the vision-window ENTRY is transient — ComfyUI can
+# need longer than the 10s /free timeout to actually release its models
+# (measured 2026-09-08: an 89-image build batch died wholesale on the first
+# busy). Retry the entry whole; no image has been touched at that point.
+GPU_BUSY_TRIES = 3
+GPU_BUSY_WAIT_S = 60
+
 
 def collect_output(tmp_dir, dataset_id, job_id, staged_name=None):
     """Move the Topaz output into the dataset folder, returning the app-side
@@ -255,7 +262,7 @@ class TopazJobManager:
 
     def process_one(self):
         """Claim and run one queued Topaz job, or False when gated/idle."""
-        from ..gpu_window import gpu_exclusive_vision_window
+        from ..gpu_window import GpuBusyError, gpu_exclusive_vision_window
         from . import topaz_helper as th
 
         with self._lock:
@@ -274,31 +281,49 @@ class TopazJobManager:
             toggles = json.loads(row.enhancements or '{"upscale": true}')
 
         output_path = None
-        try:
-            with gpu_exclusive_vision_window(flag_ttl=300):
-                exe = th.preflight()
-                batch = self._batch_inputs(row)
-                if batch:
-                    status, message, results = self._run_batch(
-                        exe, row, batch, toggles)
+        batch = None
+        status, message, results = 'unknown', None, {}
+        for attempt in range(GPU_BUSY_TRIES):
+            try:
+                with gpu_exclusive_vision_window(flag_ttl=300):
+                    exe = th.preflight()
+                    batch = self._batch_inputs(row)
+                    if batch:
+                        status, message, results = self._run_batch(
+                            exe, row, batch, toggles)
+                    else:
+                        with tempfile.TemporaryDirectory(prefix='lds-topaz-') as tmp:
+                            status, message = th.run_tpai(
+                                exe, input_filename, tmp, **toggles)
+                            if status == 'ok':
+                                output_path = collect_output(
+                                    pathlib.Path(tmp), dataset_id, job_id)
+                                if output_path is None:
+                                    status, message = 'unknown', (
+                                        'Topaz finished but wrote nothing readable')
+                            results = {str(row.image_id):
+                                       {'status': 'completed' if status == 'ok'
+                                        else 'failed',
+                                        'output_filename': output_path,
+                                        'error': None if status == 'ok' else message}}
+                break
+            except GpuBusyError as e:
+                # Raised at window ENTRY only, before any image was touched,
+                # so retrying the entry whole is safe. Anything else — or still
+                # busy after the last try — takes the failure path below.
+                if attempt < GPU_BUSY_TRIES - 1:
+                    logger.warning('topaz: GPU busy (attempt %d/%d), retrying in %ss: %s',
+                                   attempt + 1, GPU_BUSY_TRIES, GPU_BUSY_WAIT_S, e)
+                    time.sleep(GPU_BUSY_WAIT_S)
                 else:
-                    with tempfile.TemporaryDirectory(prefix='lds-topaz-') as tmp:
-                        status, message = th.run_tpai(
-                            exe, input_filename, tmp, **toggles)
-                        if status == 'ok':
-                            output_path = collect_output(
-                                pathlib.Path(tmp), dataset_id, job_id)
-                            if output_path is None:
-                                status, message = 'unknown', (
-                                    'Topaz finished but wrote nothing readable')
-                        results = {str(row.image_id):
-                                   {'status': 'completed' if status == 'ok'
-                                    else 'failed',
-                                    'output_filename': output_path,
-                                    'error': None if status == 'ok' else message}}
-        except Exception as e:
-            status, message = 'unknown', f'{type(e).__name__}: {e}'
-            results = {}
+                    status, message = 'unknown', (
+                        f'{type(e).__name__}: {e} (still busy after '
+                        f'{GPU_BUSY_TRIES} tries)')
+                    results = {}
+            except Exception as e:
+                status, message = 'unknown', f'{type(e).__name__}: {e}'
+                results = {}
+                break
 
         with self._lock:
             row = TopazJob.query.filter_by(job_id=job_id).first()
@@ -314,7 +339,7 @@ class TopazJobManager:
             done = sum(1 for r in (results or {}).values()
                        if r.get('status') == 'completed')
             row.done_images = done
-            total = row.total_images or len(batch) or 1
+            total = row.total_images or (len(batch) if batch else 1)
             if done == total:
                 row.status = 'completed'
             elif done == 0:

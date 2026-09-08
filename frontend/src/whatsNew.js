@@ -50,6 +50,16 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-09-08-topaz-batch-gpu-busy-retry',
+    date: '2026-09-08',
+    title: 'Build\'s auto-upscale no longer dies when ComfyUI is slow to free the GPU',
+    blurb: 'A build that queued its below-threshold images for Topaz upscale '
+      + 'used to lose the WHOLE batch if ComfyUI hadn\'t released its models '
+      + 'within 10 seconds. The queue now waits and retries the entry a '
+      + 'couple of times before failing, so one slow unmount no longer '
+      + 'costs every image its upscale.'
+  },
+  {
     id: '2026-09-07-scrape-import-sharpness-gate',
     date: '2026-09-07',
     title: 'Keep the blur out at the door: scrape-import can now measure sharpness',

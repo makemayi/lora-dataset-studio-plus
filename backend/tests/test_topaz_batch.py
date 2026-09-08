@@ -404,3 +404,91 @@ def test_a_partial_batch_restores_only_the_failed_tiles(app, monkeypatch):
         assert lost.filename == 'a1.png', 'failed tile gets its file back'
         assert lost.status == 'keep' and lost.job_id is None
         assert lost.swap_restore is None
+
+
+def test_worker_retries_gpu_busy_at_entry_and_completes(app, monkeypatch):
+    """A GpuBusyError raised at the vision-window ENTRY must not kill the
+    batch: the entry is retried whole (no image was touched yet), and the job
+    completes once ComfyUI releases. Measured 2026-09-08: an 89-image build
+    batch died wholesale on the first busy."""
+    import contextlib
+    import json
+
+    import app.gpu_window as gw
+    import app.services.topaz_job_queue as tq
+    from app.gpu_window import GpuBusyError
+    from app.models import TopazJob
+    from app.services.topaz_job_queue import topaz_queue
+
+    ds_id, ids = _dataset_with_images(app, n=2, prefix='busy')
+    state = {'entries': 0, 'sleeps': []}
+
+    @contextlib.contextmanager
+    def flaky_window(flag_ttl=300):
+        state['entries'] += 1
+        if state['entries'] <= 2:
+            raise GpuBusyError(
+                'ComfyUI did not confirm that its GPU models were released.')
+        yield
+
+    monkeypatch.setattr(gw, 'gpu_exclusive_vision_window', flaky_window)
+    monkeypatch.setattr(tq, 'GPU_BUSY_WAIT_S', 0)
+    monkeypatch.setattr(tq.time, 'sleep', lambda s: state['sleeps'].append(s))
+    monkeypatch.setattr(topaz_queue, 'link_completed', lambda row: None)
+
+    with app.app_context():
+        jid = topaz_queue.enqueue_batch(
+            user_id='local', dataset_id=ds_id,
+            inputs=[{'image_id': ids[0], 'input': 'C:/x/a.png'},
+                    {'image_id': ids[1], 'input': 'C:/x/b.png'}])
+
+        monkeypatch.setattr('app.services.topaz_helper.preflight', lambda: 'exe')
+        monkeypatch.setattr('app.services.topaz_helper.run_tpai',
+                            lambda exe, inp, out, **kw: ('ok', ''))
+        monkeypatch.setattr('app.services.topaz_job_queue.stage_inputs',
+                            lambda inputs, tmp: {img_id: f'img_{img_id}.png'
+                                                 for img_id, _ in inputs})
+        monkeypatch.setattr('app.services.topaz_job_queue.collect_output',
+                            lambda tmp_dir, dataset_id, job_id, staged_name=None:
+                                f'DS/{staged_name}')
+
+        assert topaz_queue.process_one() is True
+        assert state['entries'] == 3, 'two busy entries, then the successful one'
+        row = TopazJob.query.filter_by(job_id=jid).one()
+        assert row.status == 'completed', row.error_message
+        results = json.loads(row.image_results or '{}')
+        assert all(v['status'] == 'completed' for v in results.values())
+
+
+def test_worker_gpu_busy_forever_fails_after_last_try(app, monkeypatch):
+    """Still busy through the last try -> the job fails WITH the reason, not
+    silently, and the error says how many tries were spent."""
+    import contextlib
+
+    import app.gpu_window as gw
+    import app.services.topaz_job_queue as tq
+    from app.gpu_window import GpuBusyError
+    from app.models import TopazJob
+    from app.services.topaz_job_queue import topaz_queue
+
+    ds_id, ids = _dataset_with_images(app, n=1, prefix='always')
+
+    @contextlib.contextmanager
+    def busy_window(flag_ttl=300):
+        raise GpuBusyError('ComfyUI did not confirm that its GPU models were released.')
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(gw, 'gpu_exclusive_vision_window', busy_window)
+    monkeypatch.setattr(tq, 'GPU_BUSY_WAIT_S', 0)
+    monkeypatch.setattr(tq.time, 'sleep', lambda s: None)
+    monkeypatch.setattr(topaz_queue, 'link_completed', lambda row: None)
+
+    with app.app_context():
+        jid = topaz_queue.enqueue_batch(
+            user_id='local', dataset_id=ds_id,
+            inputs=[{'image_id': ids[0], 'input': 'C:/x/a.png'}])
+
+        assert topaz_queue.process_one() is True
+        row = TopazJob.query.filter_by(job_id=jid).one()
+        assert row.status == 'failed'
+        assert 'still busy after 3 tries' in (row.error_message or '')
