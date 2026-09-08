@@ -10001,7 +10001,25 @@ def _scrape_blob_name(raw: bytes) -> str | None:
     return f'{hashlib.sha256(raw).hexdigest()[:24]}{ext}'
 
 
+def _below_blur_floor(raw, floor):
+    """True when the bytes MEASURE below the sharpness floor — with the SAME
+    quality_metrics the triage pass scores, so the gate and the blur flag can
+    never disagree about one image.
+
+    ANY measurement failure fails OPEN (False): the gate only skips what it
+    could measure, and must never widen the import's failure surface — before
+    it existed those bytes imported fine, and 'unreadable' stays the quality
+    pass's verdict (it auto-rejects such rows at triage anyway)."""
+    from .image_quality import quality_metrics
+    try:
+        with Image.open(io.BytesIO(raw)) as im:
+            return quality_metrics(im)['blur_score'] < floor
+    except Exception:                                # noqa: BLE001 — fail open
+        return False
+
+
 def scrape_import_to_bank(user_id, items, bank_id=None, name=None, *,
+                          min_blur_score=None,
                           _bank_lease=None, _created=False) -> dict:
     """🕸 Scrape → BANK: the scraper's second destination.
 
@@ -10017,7 +10035,14 @@ def scrape_import_to_bank(user_id, items, bank_id=None, name=None, *,
     > 3:1) and what it judges a perceptual duplicate. A bank is the step BEFORE
     that judgement — "too small" and "near-duplicate" are verdicts its own passes
     produce, with thresholds the user moves. Filtering at download time would
-    delete the evidence before the triage tool ever sees it. What IS kept from
+    delete the evidence before the triage tool ever sees it. The ONE exception is
+    an explicitly armed sharpness gate (``min_blur_score``): when the client sends
+    a floor, images MEASURING under it (same quality_metrics the triage pass
+    scores with) are skipped and counted as ``skipped['blurry']`` — the user has
+    decided the evidence is not worth the bandwidth. Default None keeps the
+    raw-pile philosophy.
+
+    What IS kept from
     that path is the download itself (`_download_scrape_item`: SSRF guard,
     content-type allow-list, image-magic check, size cap) and the per-request cap
     — AND, like the dataset intake, each item's provenance (validated the same
@@ -10046,6 +10071,7 @@ def scrape_import_to_bank(user_id, items, bank_id=None, name=None, *,
             with bank_jobs.mutation_lease(bank_id, 'scrape_import') as lease:
                 return scrape_import_to_bank(
                     user_id, items, bank_id=bank_id, name=name,
+                    min_blur_score=min_blur_score,
                     _bank_lease=lease, _created=_created)
         bank_jobs.require_reservation(_bank_lease, bank_id)
         bank = get_bank(user_id, bank_id)
@@ -10078,6 +10104,7 @@ def scrape_import_to_bank(user_id, items, bank_id=None, name=None, *,
             db.session.commit()
             return scrape_import_to_bank(
                 user_id, items, bank_id=bank.id, name=name,
+                min_blur_score=min_blur_score,
                 _bank_lease=reservation, _created=True)
         except Exception:
             if bank is not None and not bank_jobs.launched(reservation):
@@ -10110,6 +10137,12 @@ def scrape_import_to_bank(user_id, items, bank_id=None, name=None, *,
     for item, (reason, raw) in downloaded:
         if reason != 'ok' or not raw:
             skipped[reason] = skipped.get(reason, 0) + 1
+            continue
+        # The sharpness gate, when armed: measured on the bytes ALREADY in
+        # hand, so a skip costs no extra network — and the metric is the
+        # quality pass's own blur_score, never a second definition of blurry.
+        if min_blur_score is not None and _below_blur_floor(raw, min_blur_score):
+            skipped['blurry'] = skipped.get('blurry', 0) + 1
             continue
         blob_name = _scrape_blob_name(raw)
         if blob_name is None:

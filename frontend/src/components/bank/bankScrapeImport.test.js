@@ -85,3 +85,29 @@ test('the summary never calls a byte-identical re-download a duplicate', () => {
   assert.match(msg, /1 could not be downloaded/);
   assert.doesNotMatch(msg, /duplicate/i);
 });
+
+test('a sharpness floor rides in EVERY batch body, and only when armed', async () => {
+  const sent = [];
+  const post = async (_u, body) => {
+    sent.push(body);
+    return { ok: true, bank_id: 3, created: sent.length === 1,
+      saved: body.items.length, added: body.items.length, skipped: {} };
+  };
+  await runBankScrapeImport({ items: items(130), destination: { name: 'Pile' },
+    post, minBlurScore: 55.5 });
+  assert.equal(sent.length, 3);
+  for (const body of sent) assert.equal(body.min_blur_score, 55.5);
+  // Without the gate the key is absent entirely — the server's default IS off.
+  const plain = [];
+  await runBankScrapeImport({ items: items(1), destination: { name: 'Pile' },
+    post: async (_u, body) => { plain.push(body); return { ok: true, skipped: {} }; } });
+  assert.equal('min_blur_score' in plain[0], false);
+});
+
+test('the summary keeps gate skips out of the download-failure count', () => {
+  const msg = summarizeBankScrapeImport({ saved: 3, alreadyThere: 0, added: 3,
+    skipped: { blurry: 5, errors: 2 } });
+  assert.match(msg, /5 too blurry/);
+  assert.match(msg, /2 could not be downloaded/);
+  assert.doesNotMatch(msg, /7 could not be downloaded/);
+});

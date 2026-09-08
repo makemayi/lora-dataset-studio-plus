@@ -170,7 +170,10 @@ def bank_scrape_import():
     """🕸 Scrape → BANK — the scraper's second destination, next to the dataset one.
 
     Body: {items:[{url,title}], bank_id?} to APPEND to an existing bank (resume),
-    or {items, name} to create one. Synchronous like the dataset outlet (the same
+    or {items, name} to create one. Optional min_blur_score: when set, images
+    MEASURING under that blur_score (the quality pass's own metric) are skipped
+    and counted in skipped['blurry'] — omitted, the bank receives the raw pile.
+    Synchronous like the dataset outlet (the same
     per-request cap bounds it), and it stores what it downloaded: the resolution /
     ratio / near-duplicate verdicts belong to the bank's own passes, not to the
     download. 409 when a pass already owns the target bank."""
@@ -182,9 +185,19 @@ def bank_scrape_import():
             bank_id = int(raw_bank_id)
         except (TypeError, ValueError):
             return jsonify({'error': 'bank_id must be a number'}), 400
+    raw_gate = data.get('min_blur_score')
+    min_blur_score = None
+    if raw_gate is not None:
+        try:
+            min_blur_score = float(raw_gate)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'min_blur_score must be a number'}), 400
+        if min_blur_score < 0:
+            return jsonify({'error': 'min_blur_score must be >= 0'}), 400
     try:
         res = banks.scrape_import_to_bank(LOCAL_USER, data.get('items'),
-                                          bank_id=bank_id, name=data.get('name'))
+                                          bank_id=bank_id, name=data.get('name'),
+                                          min_blur_score=min_blur_score)
     except bank_jobs.BankJobBusy as e:
         return _busy(e)
     except ValueError as e:

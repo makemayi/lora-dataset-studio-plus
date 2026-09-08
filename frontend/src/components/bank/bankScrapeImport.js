@@ -34,37 +34,51 @@ export function bankScrapeDestination({ mode, name, bankId }) {
  * One human sentence for a finished (or partly finished) run. `alreadyThere` is
  * NOT called a duplicate on purpose: it means the exact same bytes were already
  * in the folder — file identity, not the bank's duplicate verdict, which only
- * its own passes produce.
+ * its own passes produce. A sharpness-gate skip is ALSO kept out of the
+ * download-failure count on purpose: those images downloaded fine and were
+ * measured, judged and left behind — not lost.
  */
 export function summarizeBankScrapeImport(totals) {
   const { saved = 0, alreadyThere = 0, added = 0, skipped = {} } = totals || {};
   const bits = [`${saved} image(s) downloaded into the bank`];
   if (added && added !== saved) bits.push(`${added} inventoried`);
   if (alreadyThere) bits.push(`${alreadyThere} already in the folder`);
+  const blurry = Number(skipped.blurry) || 0;
   const failed = Object.entries(skipped)
-    .reduce((n, [, v]) => n + (Number(v) || 0), 0);
+    .reduce((n, [k, v]) => n + (k === 'blurry' ? 0 : (Number(v) || 0)), 0);
+  if (blurry) bits.push(`${blurry} too blurry`);
   if (failed) bits.push(`${failed} could not be downloaded`);
   return bits.join(' · ');
 }
 
 /**
  * Run the whole import. `post(url, body)` is the caller's JSON POST (injected so
- * this is testable without a server). Returns
+ * this is testable without a server). `minBlurScore`, when a finite number,
+ * rides in EVERY batch body — the gate is per-import, not per-first-batch.
+ * Returns
  * {ok, bankId, created, saved, alreadyThere, added, skipped, error}.
  */
-export async function runBankScrapeImport({ items, destination, post, onBatch }) {
+export async function runBankScrapeImport({ items, destination, post, onBatch,
+  minBlurScore }) {
   const batches = bankScrapeBatches(items);
   const totals = { saved: 0, alreadyThere: 0, added: 0, skipped: {} };
   let bankId = destination?.bank_id ?? null;
   let created = false;
   if (!batches.length) return { ok: false, error: 'nothing selected', ...totals };
   if (!destination) return { ok: false, error: 'pick a destination first', ...totals };
+  // Absent when the gate is off — the server's default IS off, so no key must
+  // ride along (a 0 floor would skip everything).
+  const gate = Number.isFinite(minBlurScore)
+    ? { min_blur_score: minBlurScore } : {};
 
   for (let i = 0; i < batches.length; i += 1) {
     // First batch obeys the caller's destination; every later one resumes into
     // whatever bank now exists — that is what makes a 200-image scrape ONE bank.
-    const body = bankId ? { items: batches[i], bank_id: bankId }
-      : { items: batches[i], ...destination };
+    const body = {
+      ...(bankId ? { items: batches[i], bank_id: bankId }
+        : { items: batches[i], ...destination }),
+      ...gate,
+    };
     onBatch?.({ index: i, count: batches.length, total: items.length });
     // eslint-disable-next-line no-await-in-loop
     const d = await post('/api/bank/scrape-import', body);

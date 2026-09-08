@@ -50,6 +50,16 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-09-07-scrape-import-sharpness-gate',
+    date: '2026-09-07',
+    title: 'Keep the blur out at the door: scrape-import can now measure sharpness',
+    blurb: 'Importing scraped images into a bank can skip pictures that measure '
+      + 'below a sharpness floor at download time, counted in the run report. '
+      + 'The gate is off by default and prefills from the same threshold the '
+      + 'triage blur flag uses, so the bank never argues with itself about '
+      + 'what blurry means.',
+  },
+  {
     id: '2026-09-07-bank-promote-multi-person-and-gap-defaults',
     date: '2026-09-07',
     title: 'Builds now fill your dataset\u2019s composition gaps — and never import a second person',

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { postJson } from '../../api/fetchClient'
+import { apiFetch, postJson } from '../../api/fetchClient'
 import { useToast } from '../common/Toast'
 import { HelpBadge } from '../../help/HelpMode'
 import ConceptSourcesPanel from '../dataset/ConceptSourcesPanel'
@@ -36,7 +36,25 @@ export default function BankScrapePanel({ banks, onDone }) {
   const [name, setName] = useState('')
   const [bankId, setBankId] = useState('')
   const [busy, setBusy] = useState(false)
+  // The sharpness gate: OFF until armed (the server's default is off too — a
+  // bank is the raw pile and its passes judge). When armed, the floor prefills
+  // from the SAME config value the triage blur flag uses, so the two can never
+  // disagree about what 'blurry' means.
+  const [blurGate, setBlurGate] = useState(false)
+  const [blurMin, setBlurMin] = useState('')
   const known = banks || []
+
+  // Prefill once, when the panel first opens. Failure is silent: an empty floor
+  // just means the user types one — the import refuses to run the gate on a
+  // number it does not understand.
+  const prefillFloor = async () => {
+    if (blurMin !== '') return
+    try {
+      const d = await apiFetch('/api/settings')
+      const v = d?.config?.bank?.sharpness_min
+      if (v !== undefined && v !== null) setBlurMin(String(v))
+    } catch { /* the input stays empty; arming it demands a typed floor */ }
+  }
 
   const handleImport = async (items) => {
     const destination = bankScrapeDestination({ mode, name, bankId })
@@ -46,10 +64,19 @@ export default function BankScrapePanel({ banks, onDone }) {
         : 'Name the bank that will receive the images.')
       return { ok: false }
     }
+    let minBlurScore
+    if (blurGate) {
+      minBlurScore = Number(blurMin)
+      if (!Number.isFinite(minBlurScore) || minBlurScore < 0) {
+        toast.error('Set a sharpness floor — how blurry is too blurry is a number.')
+        return { ok: false }
+      }
+    }
     setBusy(true)
     try {
       const res = await runBankScrapeImport({
         items, destination, post: (url, body) => postJson(url, body),
+        minBlurScore,
         onBatch: ({ index, count, total }) => {
           if (count > 1) toast.info(`Downloading batch ${index + 1} of ${count} (${total} picked)…`)
         },
@@ -71,7 +98,7 @@ export default function BankScrapePanel({ banks, onDone }) {
 
   return (
     <section className={CARD_SURFACE}>
-      <button type="button" onClick={() => setOpen((v) => !v)}
+      <button type="button" onClick={() => { setOpen((v) => !v); if (!open) prefillFloor() }}
         aria-expanded={open}
         className="flex w-full items-center gap-2 px-4 py-3 text-left">
         <span className="text-sm font-semibold text-content">Scrape the web into a bank</span>
@@ -136,7 +163,37 @@ export default function BankScrapePanel({ banks, onDone }) {
             <HelpText className="text-[0.6875rem] leading-relaxed text-content-subtle">
               Images are stored exactly as downloaded. Small shots, near-duplicates and
               framing stay for the bank&rsquo;s own passes to judge — that is the point of
-              triaging here rather than importing straight into a dataset.
+              triaging here rather than importing straight into a dataset. Blur is the
+              one judgement you can move to download time: arm the sharpness gate below
+              and images measuring under the floor never land.
+            </HelpText>
+          </div>
+
+          {/* The sharpness gate. The input stays MOUNTED and merely disables —
+              a conditionally rendered field is a text node Chrome translate can
+              grab mid-swap. Disabled + visible reads the same and cannot break. */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg bg-surface-raised p-3">
+            <label className="flex items-center gap-1.5 text-sm text-content">
+              <input type="checkbox" checked={blurGate}
+                onChange={(e) => setBlurGate(e.target.checked)}
+                data-testid="bank-scrape-gate"
+                className="accent-indigo-500" />
+              Skip blurry images
+            </label>
+            <label className={`flex items-center gap-1.5 text-sm ${blurGate ? 'text-content' : 'opacity-50'}`}>
+              <span>Sharpness floor</span>
+              <input type="number" min="0" step="1"
+                value={blurMin}
+                disabled={!blurGate}
+                onChange={(e) => setBlurMin(e.target.value)}
+                data-testid="bank-scrape-gate-floor"
+                aria-label="Sharpness floor — blur scores below this are skipped"
+                className="w-24 rounded-md border border-border-strong bg-surface px-2 py-1 text-sm text-content disabled:opacity-50 focus:border-primary focus:outline-none" />
+            </label>
+            <HelpText className="text-[0.6875rem] leading-relaxed text-content-subtle">
+              Measured with the same blur score the quality pass flags with — the floor
+              prefills from it, so what lands is never something triage would call blurry.
+              Sharp-but-small images still pass; the small flag owns those.
             </HelpText>
           </div>
 

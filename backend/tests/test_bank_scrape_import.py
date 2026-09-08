@@ -340,6 +340,89 @@ def test_scraped_provenance_survives_promotion_to_a_dataset(app):
         }
 
 
+# --- sharpness gate ----------------------------------------------------------
+def _sharp_bytes(w=640, h=480):
+    """Gaussian noise = high Laplacian variance = MEASURES sharp."""
+    im = Image.effect_noise((w, h), 64).convert('RGB')
+    b = io.BytesIO()
+    im.save(b, 'JPEG', quality=92)
+    return b.getvalue()
+
+
+def _blurry_bytes(w=640, h=480):
+    """Flat colour = ~zero Laplacian variance = MEASURES blurry."""
+    return _img_bytes(w, h, shade=(120, 40, 40))
+
+
+def test_without_a_gate_blurry_still_reaches_the_bank(app):
+    """The default stays the documented philosophy: the bank receives the raw
+    pile and its own passes judge. The gate exists only when explicitly armed."""
+    with app.app_context():
+        with patch.object(banks, '_download_scrape_item',
+                          _fake_downloader({'http://x/b.jpg': _blurry_bytes()})):
+            res = banks.scrape_import_to_bank(
+                LOCAL_USER, [_item('http://x/b.jpg')], name='No gate')
+        assert res['saved'] == 1
+        assert 'blurry' not in res['skipped']
+
+
+def test_an_armed_gate_skips_what_it_measures_blurry(app):
+    """min_blur_score is compared against the SAME blur_score the quality pass
+    stores: images measuring under the floor are skipped at download, counted,
+    never written."""
+    from app.services.image_quality import quality_metrics
+    blurry = quality_metrics(Image.open(io.BytesIO(_blurry_bytes())))['blur_score']
+    sharp = quality_metrics(Image.open(io.BytesIO(_sharp_bytes())))['blur_score']
+    assert blurry < sharp                     # fixture sanity, not an assumption
+    with app.app_context():
+        by_url = {'http://x/flat.jpg': _blurry_bytes(),
+                  'http://x/noise.jpg': _sharp_bytes()}
+        with patch.object(banks, '_download_scrape_item', _fake_downloader(by_url)):
+            res = banks.scrape_import_to_bank(
+                LOCAL_USER,
+                [_item('http://x/flat.jpg'), _item('http://x/noise.jpg')],
+                name='Gated', min_blur_score=(blurry + sharp) / 2)
+        assert res['saved'] == 1
+        assert res['skipped']['blurry'] == 1
+        bank = banks.get_bank(LOCAL_USER, res['bank_id'])
+        assert len(_files(bank)) == 1
+
+
+def test_the_gate_speaks_the_triage_pass_language(app):
+    """Armed at the CONFIG's sharpness_min, the gate and the triage blur flag
+    are one definition: whatever the gate lets through would not be flagged."""
+    from app.services.image_quality import quality_metrics
+    floor = banks.thresholds()['sharpness_min']
+    flat = quality_metrics(Image.open(io.BytesIO(_blurry_bytes())))['blur_score']
+    assert flat < floor                       # fixture sanity
+    with app.app_context():
+        with patch.object(banks, '_download_scrape_item',
+                          _fake_downloader({'http://x/flat.jpg': _blurry_bytes()})):
+            res = banks.scrape_import_to_bank(
+                LOCAL_USER, [_item('http://x/flat.jpg')],
+                name='At config', min_blur_score=floor)
+        assert res['saved'] == 0 and res['skipped']['blurry'] == 1
+
+
+def test_an_undecodable_image_fails_open(app):
+    """The gate only skips what it could MEASURE. Any measurement failure —
+    bytes PIL cannot open, or the metric itself blowing up — keeps the image:
+    before the gate existed it imported fine, and the gate must not widen the
+    import's failure surface. 'Unreadable' stays the quality pass's verdict."""
+    from app.services import image_quality
+    with app.app_context():
+        assert banks._below_blur_floor(b'broken-image-bytes', 0.001) is False
+        with patch.object(banks, '_download_scrape_item',
+                          _fake_downloader({'http://x/x.jpg': _sharp_bytes()})), \
+             patch.object(image_quality, 'quality_metrics',
+                          side_effect=RuntimeError('metric exploded')):
+            res = banks.scrape_import_to_bank(
+                LOCAL_USER, [_item('http://x/x.jpg')], name='Fail open',
+                min_blur_score=0.001)
+        assert res['saved'] == 1
+        assert 'blurry' not in res['skipped']
+
+
 # --- route ------------------------------------------------------------------
 def test_route_creates_then_resumes(app, client):
     by_url = {'http://x/a.jpg': _img_bytes(grad='ltr'),
@@ -371,6 +454,24 @@ def test_route_reports_a_busy_bank_as_409(app, client):
         r2 = client.post('/api/bank/scrape-import',
                          json={'items': [_item('http://x/b.jpg')], 'bank_id': bank_id})
     assert r2.status_code == 409 and r2.get_json().get('busy_kind')
+
+
+def test_route_applies_and_validates_the_sharpness_gate(app, client):
+    """min_blur_score rides through to the service (an impossible floor skips
+    everything, counted as blurry); anything that is not a number >= 0 is 400."""
+    with patch.object(banks, '_download_scrape_item',
+                      _fake_downloader({'http://x/a.jpg': _blurry_bytes()})):
+        r = client.post('/api/bank/scrape-import',
+                        json={'items': [_item('http://x/a.jpg')], 'name': 'Gate HTTP',
+                              'min_blur_score': 10 ** 9})
+        assert r.status_code == 200, r.get_json()
+        body = r.get_json()
+        assert body['saved'] == 0 and body['skipped']['blurry'] == 1
+    for bad in ('high', -1, [], {}):
+        r = client.post('/api/bank/scrape-import',
+                        json={'items': [_item('http://x/a.jpg')], 'name': 'Bad gate',
+                              'min_blur_score': bad})
+        assert r.status_code == 400, bad
 
 
 # --- anti-regression: the dataset outlet is untouched ------------------------
